@@ -2,10 +2,19 @@
 // fail, replay verification is unsound, so this is the project's bedrock test.
 
 import { describe, it, expect } from 'vitest';
-import { Rng } from './rng';
-import { FP_ONE, fpMul, fpDiv, toFixed, toFloat } from './fixed';
-import { createFixedLoop } from './game-loop';
-import { hash32, fnv1a, hashState } from './hash';
+import {
+  Rng,
+  FP_ONE,
+  fpMul,
+  fpDiv,
+  toFixed,
+  toFloat,
+  createFixedLoop,
+  DEFAULT_MS_PER_TICK,
+  hash32,
+  fnv1a,
+  hashState,
+} from './index';
 
 describe('Rng — Mulberry32 repeatability', () => {
   // Normative vectors for seed 12345. A mismatch means the wrong Mulberry32
@@ -89,6 +98,13 @@ describe('createFixedLoop — fixed timestep', () => {
     expect(loop.accumulatorMs).toBe(20);
     expect(loop.advance(30)).toBe(1); // 20 + 30 = 50 -> 1 tick
     expect(ticks).toBe(3);
+  });
+
+  it('defaults to the 20 Hz tick (50 ms) when no options are given', () => {
+    let ticks = 0;
+    const loop = createFixedLoop(() => ticks++);
+    expect(loop.advance(DEFAULT_MS_PER_TICK)).toBe(1);
+    expect(ticks).toBe(1);
   });
 
   it('clamps catch-up after a long stall (spiral-of-death guard)', () => {

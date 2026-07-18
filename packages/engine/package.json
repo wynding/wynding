@@ -14,7 +14,7 @@
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "lint": "eslint src",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo"
   }
 }

@@ -46,7 +46,9 @@ docs/      prd/  adr/  CONTEXT.md
   graph flows one way: `types <- engine <- sim <- {render, replay, content} <- apps`.
 - **Fixed tick.** 20 Hz (`50 ms`) fixed timestep. No variable-dt simulation.
 - **Tests.** Every simulation change ships with Vitest coverage, and the
-  world-hash / replay-determinism tests must stay green.
+  world-hash / replay-determinism tests must stay green. The deterministic core
+  (`engine`, `sim`, `replay`) enforces **>= 90% line+branch coverage** via each
+  package's `vitest.config.ts`; render/apps are held to a lighter, e2e-led bar.
 
 ## Workflow
 

@@ -1,7 +1,14 @@
 // sim.test.ts — smoke + determinism for the headless simulation.
 
 import { describe, it, expect } from 'vitest';
-import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
+import {
+  createInitialState,
+  step,
+  hashSimState,
+  type CreepArrays,
+  type SimInput,
+  type SimState,
+} from './index';
 
 /** Drive a full match from a seed and a fixed input schedule, hashing each tick. */
 function run(seed: number, ticks: number): { state: SimState; trace: string } {
@@ -22,6 +29,33 @@ describe('sim smoke', () => {
     expect(s.tick).toBe(0);
     expect(s.lives).toBe(20);
     expect(s.creeps.id).toHaveLength(0);
+  });
+
+  it('treats noop inputs as no input at all', () => {
+    const s = createInitialState(7);
+    step(s, [{ kind: 'noop' }]);
+    expect(s.tick).toBe(1);
+    expect(s.creeps.id).toHaveLength(0);
+    expect(s.lives).toBe(20);
+  });
+
+  it('defensively drops creep rows whose parallel arrays are out of sync', () => {
+    // Each corruption knocks out one column of the structure-of-arrays store;
+    // step() must skip the ragged row without leaking a life or crashing.
+    const corruptions: ReadonlyArray<(c: CreepArrays) => void> = [
+      (c) => (c.id = new Array<number>(1)), // id[0] is a hole
+      (c) => (c.y = []),
+      (c) => (c.hp = []),
+      (c) => (c.x = []),
+    ];
+    for (const corrupt of corruptions) {
+      const s = createInitialState(1);
+      s.creeps = { id: [1], x: [512], y: [256], hp: [5] };
+      corrupt(s.creeps);
+      const out = step(s, []);
+      expect(out.creeps.id).toHaveLength(0);
+      expect(out.lives).toBe(20);
+    }
   });
 
   it('spawns creeps that advance and eventually leak, costing lives', () => {

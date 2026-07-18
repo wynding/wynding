@@ -18,6 +18,14 @@
     },
     "clean": {
       "cache": false
+    },
+    "@wynding/web#typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "@wynding/server#typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
     }
   }
 }

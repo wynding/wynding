@@ -33,6 +33,12 @@ describe('replay validate()', () => {
     expect(result.reason).toContain('sim version mismatch');
   });
 
+  it('rejects a replay recorded under a different ruleset', () => {
+    const result = validate(makeReplay({ rulesetHash: 'deadbeef' }));
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('ruleset hash mismatch');
+  });
+
   it('derives a lower score when more creeps leak', () => {
     const spawn: SimInput[] = [{ kind: 'spawnCreep', hp: 10, lane: 1 }];
     const heavy = validate(makeReplay({ tickInputs: Array.from({ length: 200 }, () => spawn) }));

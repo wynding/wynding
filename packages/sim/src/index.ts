@@ -53,7 +53,7 @@ export type SimInput =
 export function createInitialState(seed: Seed | number): SimState {
   return {
     tick: 0,
-    rngState: (seed as number) >>> 0,
+    rngState: seed >>> 0,
     lives: STARTING_LIVES,
     bounty: STARTING_BOUNTY,
     nextEntityId: 1,

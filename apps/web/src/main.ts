@@ -6,7 +6,7 @@
 // registration land later; this wires the seam end to end.
 
 import { createFixedLoop } from '@wynding/engine';
-import { createInitialState, step, type SimInput, type SimState } from '@wynding/sim';
+import { createInitialState, step, MS_PER_TICK, type SimInput, type SimState } from '@wynding/sim';
 import { mount } from '@wynding/render';
 import { sampleLevel } from '@wynding/content';
 
@@ -21,13 +21,17 @@ let sim: SimState = createInitialState(Date.now() >>> 0);
 const view = mount(app, sim);
 
 let tickCount = 0;
-const loop = createFixedLoop(() => {
-  // Demo schedule: send a creep every 20 ticks (1s at 20 Hz).
-  const inputs: SimInput[] = tickCount % 20 === 0 ? [{ kind: 'spawnCreep', hp: 12, lane: 3 }] : [];
-  sim = step(sim, inputs);
-  tickCount += 1;
-  view.update(sim);
-});
+const loop = createFixedLoop(
+  () => {
+    // Demo schedule: send a creep every 20 ticks (1s at 20 Hz).
+    const inputs: SimInput[] =
+      tickCount % 20 === 0 ? [{ kind: 'spawnCreep', hp: 12, lane: 3 }] : [];
+    sim = step(sim, inputs);
+    tickCount += 1;
+    view.update(sim);
+  },
+  { msPerTick: MS_PER_TICK },
+);
 
 let last = performance.now();
 function frame(now: number): void {

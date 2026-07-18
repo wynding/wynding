@@ -43,15 +43,21 @@ function deriveScore(lives: number, ticks: number): number {
 
 /**
  * Re-simulate a replay from its seed and input log, deriving a trusted score.
- * This is a validating stub: it enforces the sim-version match and replays every
- * tick, but deeper anti-cheat checks (wall-clock bounds, ruleset verification)
- * are future work.
+ * This is a validating stub: it enforces the sim-version and ruleset-hash match
+ * and replays every tick, but deeper anti-cheat checks (wall-clock bounds,
+ * signature verification) are future work.
  */
 export function validate(replay: Replay): ValidationResult {
   if (replay.simVersion !== SIM_VERSION) {
     return {
       ok: false,
       reason: `sim version mismatch: replay=${replay.simVersion} runtime=${SIM_VERSION}`,
+    };
+  }
+  if (replay.rulesetHash !== currentRulesetHash()) {
+    return {
+      ok: false,
+      reason: `ruleset hash mismatch: replay=${replay.rulesetHash} runtime=${currentRulesetHash()}`,
     };
   }
 
