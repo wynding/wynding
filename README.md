@@ -44,8 +44,10 @@ pnpm run verify        # format:check + typecheck + lint + test, across the work
 
 ## License
 
-[AGPL-3.0-or-later](LICENSE), plus a public
+**Code** is [AGPL-3.0-or-later](LICENSE), plus a public
 [App Store Exception](LICENSE-EXCEPTIONS.md) granted to everyone under AGPL §7 so
-anyone can ship store builds while the project stays fully open source. Inbound
-contributions are under the same terms — no CLA. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+anyone can ship store builds while the project stays fully open source.
+**Art, audio, and content data** (level/wave/balance) are
+[CC-BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) — see
+[ADR 0002](docs/adr/0002-asset-and-content-licensing.md). Inbound contributions are
+under the same terms — no CLA. See [CONTRIBUTING.md](CONTRIBUTING.md).
