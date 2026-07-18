@@ -8,7 +8,7 @@
 // defines its shapes and loads it. See
 // ../../../docs/adr/0002-asset-and-content-licensing.md.
 
-import type { Level } from './index';
+import type { Level } from './schema';
 
 /** A first sample level — enough to exercise the pipeline end to end. */
 export const sampleLevel: Level = {

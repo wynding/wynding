@@ -22,13 +22,18 @@ content task, not a code change.
 - **Format:** one catalog file per locale (`en.json`, …), keyed by **namespaced,
   dotted keys** (e.g. `hud.wave.counter`), values in **ICU MessageFormat**.
 - **Lookup:** a single typed `t(key, params)` accessor at the render/UI layer; keys
-  are typed from the `en` catalog so unknown keys fail at compile time.
+  **and per-key ICU parameter types** are generated from the `en` catalog, so both
+  unknown keys and wrong/missing parameters fail at compile time.
 - **Missing-key fallback:** fall back to the **`en`** value; if that too is missing,
   render the **key itself** and warn (dev) — never a blank or a crash.
-- **Enforcement:** a **lint rule bans string literals in JSX/UI render paths**
-  (user-facing text must go through `t()`), and an **extraction check in CI** fails
-  if a used key is absent from `en` or an `en` key is unused. The exact library
-  (e.g. FormatJS/`intl-messageformat`) is an implementation choice, not fixed here.
+- **Enforcement:** a **lint rule bans user-facing string literals across all render
+  surfaces** — the DOM UI (JSX and non-JSX), canvas/HUD text drawn by the renderer,
+  and accessibility names/labels; non-user-facing strings (IDs, keys, log/dev
+  messages) are out of scope. An **extraction + cross-locale check in CI** fails if a
+  used key is absent from `en`, an `en` key is unused, or **any non-`en` catalog is
+  missing a key or has a mismatched ICU placeholder signature** vs `en`. The exact
+  library (e.g. FormatJS / `intl-messageformat`) is an implementation choice, not
+  fixed here.
 
 ### 3. Ship English-only (`en`) at launch
 

@@ -16,3 +16,9 @@ file so the boundary is clean:
 New authored content data goes in `src/levels.ts` (or sibling data files with the
 CC-BY-SA header), not in `src/index.ts`. The package's `license` field is the
 combined SPDX expression `AGPL-3.0-or-later AND CC-BY-SA-4.0`.
+
+> **Store distribution:** the project's §7 App Store Exception covers the AGPL
+> **code only**. Shipping contributed or third-party **CC-BY-SA content** through a
+> DRM app store is an **unresolved question requiring owner/counsel approval** — see
+> the "Known risk" section of
+> [ADR 0002](../../docs/adr/0002-asset-and-content-licensing.md).

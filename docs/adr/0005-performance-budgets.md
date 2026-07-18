@@ -40,20 +40,30 @@ spike** (the "provisional budgets now + spike early" decision).
   headroom for 2×/4× speed and for server-side re-sim throughput.
 - **Initial load:** the **gzipped JS (+ wasm) delivered before first interaction**,
   **excluding lazy-loaded assets and the service worker's precached payload**,
-  is **< 3 MB** (Phaser is ≈ 1 MB of that). Measured on the production build by a
-  size-budget check in CI (e.g. `size-limit`) against the named initial entry
-  chunk(s); assets lazy-loaded; PWA-cached for instant repeat loads.
+  is **< 3 MB** (Phaser is ≈ 1 MB of that). To be enforced by a size-budget check
+  in CI (e.g. `size-limit`) against the named initial entry chunk(s); assets
+  lazy-loaded; PWA-cached for instant repeat loads.
 - **Memory:** stay under **~256 MB** JS heap on low-end.
 - **Input latency:** tap/click-to-response **< 100 ms**.
+
+**Measurement methodology (exact parameters fixed by the spike):** runtime budgets
+(frame rate, `step()` time, memory, input latency) are measured on the canonical
+reference device under the seeded stress scenario, after a warm-up, over a sustained
+run, and reported as a **percentile** (not a lucky best frame) — e.g. the
+95th-percentile frame time must clear the floor. The reference device profile,
+warm-up, run duration, sampling rule, and thermal/power state are pinned by the
+spike and recorded with it, so spike and CI results are comparable.
 
 ### Validation
 
 An **early spike** runs the seeded stress scenario on a real low-end Android device
 (through the webview) plus Chrome low-end emulation, and fixes the reference device.
-Budgets become CI-checkable incrementally — **bundle size now** (the size-budget
-check above); frame/sim timing once the scripted scenario exists. **If the stack
-cannot hit these numbers, that is an early signal to revisit the Phaser bet** —
-cheap to act on now, catastrophic to discover after the game is built.
+**No perf gate is wired yet** (CI runs `verify` + `build`); the **bundle-size check
+is the first to add** — a `size-limit`-style gate wired as soon as `apps/web`
+produces a meaningful production build — followed by frame/sim timing once the
+scripted scenario exists. **If the stack cannot hit these numbers, that is an early
+signal to revisit the Phaser bet** — cheap to act on now, catastrophic to discover
+after the game is built.
 
 ## Consequences
 

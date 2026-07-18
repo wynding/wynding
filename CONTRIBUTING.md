@@ -22,7 +22,9 @@ above, and you certify that you have the right to license it that way — it's y
 own work, or you have permission, with any required attribution recorded. Don't
 paste in material from another project unless its license is compatible: for
 **code**, compatible **and** carrying an equivalent app-store permission; for
-**assets**, CC-BY-SA-compatible (no `NC`/`ND`).
+**assets**, CC-BY-SA-compatible (no `NC`/`ND`). Bundled **fonts and third-party
+libraries** are exempt from the asset rule — they keep their own licenses (per
+ADR 0002); record the applicable license and any required attribution.
 
 If you can't accept AGPL terms for your employer or other reason, please don't
 submit code changes; issue reports and documentation corrections are still welcome.
