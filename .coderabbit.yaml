@@ -47,7 +47,7 @@ reviews:
     - '!**/coverage/**'
     - '!**/.turbo/**'
     - '!**/*.tsbuildinfo'
-    - '!pnpm-lock.yaml'
+    - '!**/pnpm-lock.yaml'
 
   # Natural-language, per-path review guidance — this is where CodeRabbit becomes
   # boundary-aware and earns its keep as the semantic reviewer for the
