@@ -1,0 +1,10 @@
+{
+  "name": "@wynding/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "description": "Tauri wrapper for the Wynding web build (desktop / Steam).",
+  "scripts": {
+    "//": "Placeholder — Tauri is wired up in a later phase; see README.md."
+  }
+}

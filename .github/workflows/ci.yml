@@ -1,0 +1,40 @@
+name: CI
+
+# Automated gate. Runs the same `verify` contributors run locally: Prettier
+# check, then Turbo-orchestrated typecheck + lint + test across the workspace,
+# then a build smoke gate. Turbo caches per package, so unaffected packages are
+# skipped on re-runs.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Least privilege — CI only reads the repo to install, lint, and test.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify (format, typecheck, lint, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
+      # Build smoke gate — compile every package/app so a build-only breakage is
+      # caught here rather than in a deploy. Artifacts are NOT uploaded; this is a
+      # gate, not a release step.
+      - run: pnpm run build

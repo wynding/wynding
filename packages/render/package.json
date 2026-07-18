@@ -1,0 +1,25 @@
+{
+  "name": "@wynding/render",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "Phaser 3 presentation layer (reads sim state, never mutates it).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@wynding/sim": "workspace:*",
+    "@wynding/types": "workspace:*",
+    "phaser": "^3.90.0"
+  }
+}

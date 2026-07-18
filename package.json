@@ -1,0 +1,34 @@
+{
+  "name": "wynding",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An open-field, maze-building tower defense game — your towers form the maze and creeps take the shortest remaining path to the exit.",
+  "license": "AGPL-3.0-or-later",
+  "author": "Rob Ogilvie",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "pnpm run format:check && turbo run typecheck lint test",
+    "clean": "turbo run clean && rm -rf node_modules .turbo"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "turbo": "^2.3.3",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.19.0",
+    "vitest": "^3.0.0"
+  }
+}

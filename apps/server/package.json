@@ -1,0 +1,19 @@
+{
+  "name": "@wynding/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "AWS Lambda score-validation handler: re-simulates a submitted replay.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@wynding/replay": "workspace:*",
+    "@wynding/sim": "workspace:*"
+  }
+}

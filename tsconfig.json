@@ -1,0 +1,12 @@
+{
+  "//": "Solution-style root config. Holds no files of its own; references every composite package so `tsc -b` type-checks the library graph in dependency order. Apps (apps/*) are non-composite leaf consumers and are type-checked via their own `typecheck` scripts under Turbo.",
+  "files": [],
+  "references": [
+    { "path": "packages/types" },
+    { "path": "packages/engine" },
+    { "path": "packages/sim" },
+    { "path": "packages/content" },
+    { "path": "packages/replay" },
+    { "path": "packages/render" }
+  ]
+}

@@ -1,0 +1,12 @@
+# Build output & caches
+dist/
+**/dist/
+.turbo/
+coverage/
+pnpm-lock.yaml
+
+# Not ours to format
+LICENSE
+
+# Gitignored reference material
+research/

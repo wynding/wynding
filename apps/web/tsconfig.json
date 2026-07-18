@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/render" },
+    { "path": "../../packages/sim" },
+    { "path": "../../packages/content" },
+    { "path": "../../packages/engine" }
+  ]
+}

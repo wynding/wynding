@@ -1,0 +1,10 @@
+{
+  "name": "@wynding/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "description": "Capacitor wrapper for the Wynding web build (iOS / Android / iPad).",
+  "scripts": {
+    "//": "Placeholder — Capacitor is wired up in a later phase; see README.md."
+  }
+}
