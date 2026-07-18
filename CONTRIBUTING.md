@@ -97,6 +97,19 @@ You can scope any task to one package with Turbo's filter, e.g.
 4. **Run `pnpm run verify` before pushing.** CI runs the same gate on every PR.
 5. **Open a PR** against `main` and fill out the template (summary + test plan).
 
+## Working with AI Agents
+
+Wynding is built **AI-first** — most code is written by AI coding agents (Claude Code,
+Codex, Cursor, …) with human direction and review; human-written code is welcome too. The
+full, tool-agnostic playbook — plan (grill-me → PRD) → build (TDD) → verify → review
+(Codex + CodeRabbit + owner) → ship — and how to set up your agent's tooling live in
+**[docs/ai-workflow.md](docs/ai-workflow.md)**.
+
+Agent tooling (`.claude/`, `.cursor/`, …) is **gitignored** — we don't commit skills;
+install them locally per that guide (Pocock's skills are pulled from upstream, not
+vendored). Whatever tool you use, **you own what you submit**, and please disclose heavy AI
+involvement in the PR.
+
 ## Reporting Bugs
 
 Open an issue with what you did (steps, **seed** if relevant), what you expected,

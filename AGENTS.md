@@ -57,6 +57,10 @@ docs/      prd/  adr/  CONTEXT.md
 3. Conventional Commits (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`).
 4. Open a PR against `main` with a summary + test plan.
 
+> **Full methodology + tooling setup:** the plan → build → verify → review → ship loop and
+> how to install your agent's skills (gitignored, not committed) are in
+> [docs/ai-workflow.md](docs/ai-workflow.md).
+
 ## Planning docs
 
 - `docs/prd/` — product requirements, authored via a grill-me → PRD flow.

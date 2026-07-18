@@ -25,3 +25,8 @@ coverage/
 # Reference material from inspiring games — competitive research lives here and
 # stays OUT of the tracked repo (clean-room boundary).
 research/
+
+# AI agent tooling — installed locally, not committed (see docs/ai-workflow.md)
+.claude/
+.cursor/
+.aider*
