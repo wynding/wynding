@@ -17,8 +17,8 @@ A good PRD captures:
 - **Problem & goals** — what player/product need this serves, and how we'll know
   it worked.
 - **Scope** — what's in, what's explicitly out, and why.
-- **Design** — the mechanics/systems, stated as our own numbers and rules (never
-  by reference to another game).
+- **Design** — the mechanics/systems, stated as our own numbers and rules, in
+  Wynding's own terms.
 - **Determinism impact** — whether it touches `packages/sim` / `packages/engine`,
   and how replay/world-hash stability is preserved.
 - **Open questions** — anything still unresolved, so reviewers know the edges.

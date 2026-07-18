@@ -4,14 +4,19 @@ This file orients coding agents (Claude Code, Codex, Cursor, etc.) working in th
 Wynding monorepo. Humans should read [CONTRIBUTING.md](CONTRIBUTING.md) and
 [docs/CONTEXT.md](docs/CONTEXT.md) too.
 
-## Clean-room reminder (read first)
+## Build Wynding on its own terms (read first)
 
-Keep references to any existing game out of tracked files — no existing-game
-titles, abbreviations, or verbatim asset/flavor text in code, comments, docs,
-tests, or commit messages. Describe Wynding on its own terms: an open-field,
-maze-building tower defense game where your towers form the maze and creeps take
-the shortest remaining path to the exit. Competitive research lives in the
-gitignored `research/` directory and must never be copied into tracked files.
+Wynding is its own game — build and describe it as one. In tracked files (code,
+comments, docs, tests, commit messages), use Wynding's own vocabulary for its own
+mechanics: an open-field, maze-building tower defense where towers form the maze and
+creeps take the shortest remaining path to the exit. Keep other games out of those
+files — no other-game titles or abbreviations, and none of their asset or flavor
+text — so the product reads as the original work it is.
+
+Studying how other games in the genre work is welcome and useful; that research just
+stays in the gitignored `research/` directory, so genre insight can inform our design
+without any of it being copied into the product. The aim is simple: a genuinely unique
+game, and a codebase that's unmistakably ours.
 
 ## What Wynding is
 
