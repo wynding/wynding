@@ -93,13 +93,15 @@ community-tuned vision in three moves:
 
 - **The community proposes** — issues, play data, and balance PRs are welcome and
   encouraged.
-- **Automated guardrails screen** — regression sims and balance invariants (no unwinnable
-  wave, no dominant-strategy collapse) give fast signal on every proposal.
+- **Automated guardrails will screen** — the intended design is regression sims and balance
+  invariants (no unwinnable wave, no dominant-strategy collapse) that give fast signal on
+  every proposal. _These don't exist yet: balance review is manual today, and the guardrails
+  are planned, not a check to rely on now._
 - **The owner arbitrates** — the final sign-off is always the owner's.
 
-The guardrails exist to make the owner's review _cheap_, not to bypass it. The deliberate
-tradeoff: balance throughput is bounded by the owner's availability — velocity traded for
-coherence, on the thing that matters most.
+Once built, those guardrails make the owner's review _cheap_ rather than bypassed. The
+deliberate tradeoff: balance throughput is bounded by the owner's availability — velocity
+traded for coherence, on the thing that matters most.
 
 ---
 
