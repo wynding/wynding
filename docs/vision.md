@@ -1,8 +1,8 @@
 # Wynding — Vision
 
-**Wynding is the deep competitive maze game the genre never got — and, because
-it's open source and community-tuned, the one that keeps getting _better_ instead
-of dying.**
+**Wynding is a deep, competitive maze game built to keep getting _better_ — open
+source and community-tuned, so its balance, its meta, and its depth grow with the
+players who master it.**
 
 You build the maze: your towers _are_ the walls, and the creeps take the shortest
 remaining path to the exit. The joy is optimization — replaying a board to find
@@ -15,9 +15,9 @@ can master and re-solve, with the leaderboard as the long game — and for the
 **tinkerers** who value a clean, forkable, moddable open-source game they can help
 shape.
 
-Wynding stays alive the way frozen classics can't: open source is the **engine of
-longevity** — the community tunes the balance, fixes the imbalances, mods in new
-mechanics, and the meta never calcifies.
+Open source is Wynding's **engine of longevity**: the community tunes the balance,
+fixes imbalances, mods in new mechanics, and keeps the meta from ever calcifying —
+so the game keeps growing for as long as people play it.
 
 ## Always
 
