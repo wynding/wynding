@@ -60,6 +60,10 @@ docs/      prd/  adr/  CONTEXT.md
 > **Full methodology + tooling setup:** the plan → build → verify → review → ship loop and
 > how to install your agent's skills (gitignored, not committed) are in
 > [docs/ai-workflow.md](docs/ai-workflow.md).
+>
+> **Who decides what:** the Auto / Notify / Ask decision-rights matrix — when to proceed
+> autonomously vs. stop for the owner's call — is in
+> [docs/working-agreement.md](docs/working-agreement.md).
 
 ## Planning docs
 
