@@ -9,8 +9,9 @@ Wynding monorepo. Humans should read [CONTRIBUTING.md](CONTRIBUTING.md) and
 Wynding is its own game — build and describe it as one. In tracked files (code,
 comments, docs, tests, commit messages), use Wynding's own vocabulary for its own
 mechanics: an open-field, maze-building tower defense where towers form the maze and
-creeps take the shortest remaining path to the exit. Don't name other titles or carry
-over their asset or flavor text — the product should read as the original work it is.
+creeps take the shortest remaining path to the exit. Keep other games out of those
+files — no other-game titles or abbreviations, and none of their asset or flavor
+text — so the product reads as the original work it is.
 
 Studying how other games in the genre work is welcome and useful; that research just
 stays in the gitignored `research/` directory, so genre insight can inform our design
