@@ -1,8 +1,9 @@
 // @wynding/content — level and wave data.
 //
-// Pure data: the shapes here describe a level's geometry, economy, and the
-// ordered waves of creeps it sends. Content is consumed by the sim (to schedule
-// spawns) and the app (to lay out the board); it holds no logic.
+// The type definitions and loaders in this file are AGPL-3.0-or-later *code*.
+// The authored data *values* live in ./levels.ts and are CC-BY-SA 4.0 content
+// (see ../../../docs/adr/0002-asset-and-content-licensing.md). This file holds
+// the shapes and re-exports the data; it holds no game logic.
 
 import type { CreepKind } from '@wynding/types';
 
@@ -34,30 +35,5 @@ export interface Level {
   readonly waves: readonly Wave[];
 }
 
-/** A first sample level — enough to exercise the pipeline end to end. */
-export const sampleLevel: Level = {
-  id: 'field-01',
-  name: 'Open Field',
-  widthTiles: 20,
-  heightTiles: 14,
-  startingLives: 20,
-  startingBounty: 100,
-  waves: [
-    {
-      index: 0,
-      leadInTicks: 40,
-      entries: [{ creep: 'normal', count: 10, hp: 10, spacingTicks: 8 }],
-    },
-    {
-      index: 1,
-      leadInTicks: 120,
-      entries: [
-        { creep: 'normal', count: 12, hp: 14, spacingTicks: 6 },
-        { creep: 'fast', count: 4, hp: 8, spacingTicks: 10 },
-      ],
-    },
-  ],
-};
-
-/** All bundled levels (campaign order). */
-export const levels: readonly Level[] = [sampleLevel];
+// Authored content data (CC-BY-SA 4.0) — see ./levels.ts.
+export { sampleLevel, levels } from './levels';

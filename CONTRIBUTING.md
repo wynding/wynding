@@ -7,15 +7,22 @@ and submit changes.
 
 ## License & Inbound=Outbound
 
-Wynding is licensed under **AGPL-3.0-or-later** plus the **Wynding App Store
-Exception** (v1.0 or, at your option, any later version the project publishes —
-see [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)). By submitting a contribution
-you agree it is licensed under those same terms, and you certify that you have the
-right to license it that way (e.g. it's your own work, or you have permission —
-don't paste in code from another project unless its license is compatible **and**
-carries an equivalent app-store permission). We do not require a CLA — your
-copyright stays yours; we just need the AGPL license, plus the exception so anyone
-can ship store builds.
+Contributions carry the license of what they are, and inbound = outbound (**no
+CLA** — your copyright stays yours):
+
+- **Code** is **AGPL-3.0-or-later** plus the **Wynding App Store Exception** (v1.0
+  or, at your option, any later version the project publishes — see
+  [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)), so anyone can ship store builds.
+- **Art, audio, and content data** (levels, waves, balance numbers) are
+  **CC-BY-SA 4.0** — see
+  [ADR 0002](docs/adr/0002-asset-and-content-licensing.md).
+
+By submitting a contribution you agree it is licensed under the applicable terms
+above, and you certify that you have the right to license it that way — it's your
+own work, or you have permission, with any required attribution recorded. Don't
+paste in material from another project unless its license is compatible: for
+**code**, compatible **and** carrying an equivalent app-store permission; for
+**assets**, CC-BY-SA-compatible (no `NC`/`ND`).
 
 If you can't accept AGPL terms for your employer or other reason, please don't
 submit code changes; issue reports and documentation corrections are still welcome.
