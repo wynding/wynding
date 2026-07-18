@@ -7,8 +7,9 @@ source of truth; any skills/automation just make it faster.
 
 > New here? Read [../AGENTS.md](../AGENTS.md) (the hard rules) and
 > [../CONTRIBUTING.md](../CONTRIBUTING.md) (setup + license) first. For **who decides what**
-> — when an agent proceeds autonomously vs. stops for the owner's call — see
-> [working-agreement.md](working-agreement.md).
+> — when an agent proceeds autonomously, co-owns, or defers to the owner — see
+> [working-agreement.md](working-agreement.md); for the values behind the work, see
+> [engineering-principles.md](engineering-principles.md).
 
 ## The loop: Plan → Build → Verify → Review → Ship
 

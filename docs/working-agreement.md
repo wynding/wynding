@@ -2,9 +2,10 @@
 
 Wynding is built **AI-first**: an owner directing AI coding agents, with human
 contributors welcome. This document defines **who decides what** — so an agent knows when
-to proceed on its own judgment and when to stop and get the owner's call. It's the
-companion to [ai-workflow.md](ai-workflow.md): that doc is _how work flows_; this one is
-_who decides_.
+to proceed on its own judgment, when to decide _together_ with the owner, and when to stop
+and defer. It's the companion to [ai-workflow.md](ai-workflow.md): that doc is _how work
+flows_; this one is _who decides_. The project's engineering values live in
+[engineering-principles.md](engineering-principles.md).
 
 Being explicit about this is itself a feature of an AI-first project — it says out loud how
 much autonomy the agents have, and where the human keeps the wheel.
@@ -13,64 +14,75 @@ much autonomy the agents have, and where the human keeps the wheel.
 
 - **Not the ship mechanism.** Every change — no matter who decided it — ships through the
   PR + review gate: CI `verify`, automated review, and owner approval on protected `main`.
-  "Decide autonomously" never means "bypass review." It means "don't stop to ask before
-  drafting the change."
+  Deciding autonomously never means bypassing review; it means not stopping to ask before
+  drafting the change.
 - **Not fixed forever.** This is a living calibration; we tune it as the working
   relationship and the project mature.
 
-## The three levels
+## The four levels
 
-Every kind of decision sits at one of three levels:
+Every kind of decision sits at one of four levels, from most agent autonomy to least:
 
-- 🟢 **Auto** — the agent acts; the owner sees it in the PR/report. No pre-check.
-- 🟡 **Notify** — the agent acts, but flags it _prominently_ so the owner can reverse it.
-  For two-way doors that are mildly consequential.
-- 🔴 **Ask** — the agent stops and gets the owner's decision _before_ acting. For one-way
-  doors, external actions, and creative rules.
+- 🟢 **Auto — my call.** The agent decides and acts; the owner sees it in the PR/report.
+  **Technical implementation lives here** — the owner never gets asked about it.
+- 🟡 **Notify — my call, reversible.** The agent acts, but flags it _prominently_ so the
+  owner can reverse it. For low-stakes, reversible player-facing choices.
+- 🔵 **Co-own — our call.** The agent and owner decide _together_: the agent brings options
+  and a plain-language recommendation, they weigh the product-level tradeoffs, and agree the
+  path before committing. **Architecture lives here.**
+- 🔴 **Owner — the owner's call.** The owner decides. The agent informs and recommends but
+  doesn't act until the owner calls it.
 
 **Default when uncertain: bias to autonomy.** If a call is reversible and cheap-if-wrong,
 act and report rather than ask — the owner would rather correct occasionally than be pinged
-constantly. Escalate toward Ask as reversibility drops and cost rises.
+constantly. Escalate up the ladder as reversibility drops and cost rises.
 
 ## The matrix
 
-| Decision                                                                                                                           | Level                          |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| Routine implementation — code structure within a package, tests, internal naming, small refactors, formatting                      | 🟢 Auto                        |
-| Documentation drafts                                                                                                               | 🟢 Auto                        |
-| Dev-only / free-tier / local experimentation                                                                                       | 🟢 Auto                        |
-| Player-observable choices that aren't design _rules_ — tower/projectile visuals, UI interactions, sounds, defaults, on-screen copy | 🟡 Notify                      |
-| Two-way-door architecture — reversible structural calls                                                                            | 🟡 Notify                      |
-| Mid-build scope re-planning where the _how_ changes                                                                                | 🟡 Notify                      |
-| One-way-door architecture — save/replay formats, the determinism contract, backend service choices, cross-cutting dependencies     | 🔴 Ask                         |
-| Product / creative _rules_ — economy, win/lose conditions, core mechanics, game modes, what towers and creeps fundamentally do     | 🔴 Ask                         |
-| Balance & numeric tuning — creep HP, tower cost/damage, wave pacing                                                                | 🔴 Ask (owner's standing gate) |
-| External / irreversible actions — publishing, releases, spending real money, licensing changes, public posts in the owner's voice  | 🔴 Ask                         |
+| Decision                                                                                                                                        | Level                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Technical implementation — data structures, patterns, file layout, "singleton or not," refactors, tests, formatting                             | 🟢 Auto                  |
+| Documentation drafts                                                                                                                            | 🟢 Auto                  |
+| Dev-only / free-tier / local experimentation                                                                                                    | 🟢 Auto                  |
+| Low-stakes, reversible player-facing choices — UX micro-decisions, visual defaults, on-screen copy                                              | 🟡 Notify                |
+| Mid-build scope re-planning where only the _how_ changes                                                                                        | 🟡 Notify                |
+| Architecture — system structure, seams, the determinism/replay contract, save/data formats, backend service choices, cross-cutting dependencies | 🔵 Co-own                |
+| Vision & feature prioritization                                                                                                                 | 🔴 Owner                 |
+| Product / creative _rules_ — economy, win/lose conditions, core mechanics, game modes, what towers and creeps fundamentally do                  | 🔴 Owner                 |
+| Balance & numeric tuning — creep HP, tower cost/damage, wave pacing                                                                             | 🔴 Owner (standing gate) |
+| External / irreversible actions — publishing, releases, spending real money, licensing changes, public posts in the owner's voice               | 🔴 Owner                 |
 
 ## The rules that make the matrix work
+
+### Architecture is co-owned, not audited
+
+Co-own doesn't mean the owner reviews pointer arithmetic. It means the agent surfaces
+architecture as **product-legible tradeoffs** — cost, lock-in, longevity, moddability,
+platform reach — with a clear recommendation, and the two agree the path. The owner owns the
+product; the agent owns the technical depth. Routine structural mechanics that _don't_ shape
+those tradeoffs are just implementation (🟢 Auto).
 
 ### One-way doors are time-dependent
 
 Pre-launch — with no live saves, replays, or scores in the wild — almost _everything_ is
-reversible; a format change breaks nobody. So the architecture gate sits **loose now and
+reversible; a format change breaks nobody. So the architecture bar sits **loose now and
 tightens automatically at and after launch**, when formats and the determinism contract
-become load-bearing for real player data. It's the same rule, applied more strictly as we
-ship.
+become load-bearing for real player data. Same rule, applied more strictly as we ship.
 
 ### Scope: stop only if the goal changes
 
 When an agent hits a wall mid-build — a bet is bigger than scoped, or a chosen approach
 fails — it re-plans the _how_ freely and keeps moving, flagging the change. It stops and
-asks only if the bet's **goal or player-facing outcome** would change. No idle waiting on
+defers only if the bet's **goal or player-facing outcome** would change. No idle waiting on
 reversible course corrections.
 
-### The creative seam: player-observable ⇒ Notify
+### The creative seam: player-facing is generally the owner's
 
-Anything a player can see or feel, the agent builds a sensible default and flags it
-prominently for the owner to react to. It only _asks first_ when the choice is a genuine
-design **rule** (economy, win/lose, core mechanics) or is genuinely hard to reverse.
-Internal-only changes stay Auto. The tiebreak when a choice is ambiguous: _would this
-surprise or embarrass the owner if they only saw it after the fact?_ If yes, Notify or Ask.
+Player-facing choices generally belong to the owner (🔴). The exception: **low-stakes,
+reversible** ones (UX micro-decisions, visual defaults, copy) — the agent picks a sensible
+default and follows up after (🟡 Notify), because the owner isn't a UX specialist and would
+rather the agent move. The tiebreak when a choice is ambiguous: _would this surprise or
+embarrass the owner if they only saw it after the fact?_ If yes, raise it.
 
 ### Balance is the owner's standing gate
 
@@ -91,6 +103,7 @@ coherence, on the thing that matters most.
 
 ---
 
-See also [ai-workflow.md](ai-workflow.md) (how work flows) and
-[../CONTRIBUTING.md](../CONTRIBUTING.md) (setup + license). "Owner" here means the project
+See also [ai-workflow.md](ai-workflow.md) (how work flows),
+[engineering-principles.md](engineering-principles.md) (the values behind the work), and the
+per-maintainer operating profiles in [operators/](operators/). "Owner" means the project
 maintainer; contributors inherit the same gates via the PR + review path.
