@@ -61,22 +61,33 @@ reviews:
         production (non-`*.test.ts`) files, flag as blocking: Math.random() (all
         randomness goes through the seeded RNG in packages/engine);
         Date / Date.now() / performance.now() / any wall-clock time;
-        floating-point — float literals, the `/` division operator, and
-        Math.sqrt/sin/cos/atan2 (fixed-point integer math only); and any
-        Phaser / DOM / browser / Node API import. Flag a save/replay-shape change
-        that is missing a sim-version bump. Carve-out: co-located `*.test.ts`
-        files are exempt from the Node/DOM-import and wall-clock bans (fixtures
-        legitimately use them) — but the fixed-point float/division discipline
-        STILL applies to sim test files.
+        floating-point in sim state — float literals, transcendentals
+        (Math.sqrt/sin/cos/atan2), and any non-integer/fractional value stored or
+        used in simulation state (fractional math must go through the fixed-point
+        helpers in packages/engine/src/fixed.ts: fpMul/fpDiv/toFixed, FP_SHIFT=8);
+        and any Phaser / DOM / browser / Node API import. Do NOT flag the `/`
+        operator inside the fixed-point helpers themselves or in render-only
+        conversions (fpDiv legitimately computes Math.trunc((a << FP_SHIFT) / b),
+        and toFloat is render-only) — the ban is on untruncated fractional values
+        leaking into sim state, not on division per se. Flag a save/replay-shape
+        change that is missing a sim-version bump. Carve-out: co-located
+        `*.test.ts` files are exempt from the Node/DOM-import and wall-clock bans
+        (fixtures legitimately use them) — but the no-floats-in-sim-state
+        discipline STILL applies to sim test files.
     - path: 'packages/engine/**'
       instructions: >-
-        Determinism toolkit — seeded RNG, fixed-point math, fixed-timestep loop,
-        world-hash. This is the byte-identity core; hold it to the highest bar.
-        Same rules as packages/sim: no Math.random (the seeded RNG lives HERE),
-        no Date/performance/wall-clock, no floating-point in the fixed-point
-        paths (fixed-point integer math only), no Phaser/DOM/browser imports.
-        Test-file carve-outs as for packages/sim, and the fixed-point discipline
-        still applies to engine tests.
+        Determinism toolkit — seeded RNG, fixed-point math
+        (packages/engine/src/fixed.ts: FP_SHIFT=8, FP_ONE=256,
+        fpMul/fpDiv/toFixed), fixed-timestep loop, world-hash. The byte-identity
+        core; hold it to the highest bar. Same rules as packages/sim: no
+        Math.random (the seeded RNG lives HERE), no Date/performance/wall-clock,
+        no Phaser/DOM/browser imports, and no floats stored or used in simulation
+        state (float literals, transcendentals, or fractional values outside the
+        fixed-point helpers). The `/` operator IS expected inside the fixed-point
+        helpers (fpDiv = Math.trunc((a << FP_SHIFT) / b)) and in the render-only
+        toFloat conversion — do not flag division there; flag only untruncated
+        fractional values that would enter sim state. Test-file carve-outs as for
+        packages/sim.
     - path: 'packages/render/**'
       instructions: >-
         Phaser 3 presentation layer. It READS sim state and must never mutate
