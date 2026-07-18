@@ -4,9 +4,6 @@ An open-field, maze-building tower defense game: your towers _are_ the maze, and
 creeps always take the shortest remaining path to the exit. Web-first (PWA), with
 mobile (Capacitor) and desktop/Steam (Tauri) wrappers planned.
 
-> Name chosen 2026-07-17. Formal trademark clearance (Nice classes 9 & 41) is
-> still pending before any commercial launch.
-
 ## Status
 
 Early scaffold — a pnpm + Turborepo TypeScript monorepo with the deterministic
