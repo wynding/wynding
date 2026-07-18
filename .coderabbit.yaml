@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration for wynding/wynding.
+#
+# CodeRabbit is the second external PR reviewer alongside Codex: two independent
+# AI reviewers with different perspectives catch more of the subtle architectural
+# violations an AI-authored diff can introduce. Tuned for this monorepo's
+# deterministic-core layout (see AGENTS.md).
+
+language: en-US
+
+# <= 250 chars. Sets the reviewer's stance; the determinism/layering specifics
+# live in path_instructions below.
+tone_instructions: >-
+  Terse and technical, with a high bar. This is a long-term foundation: favour
+  tight, well-factored code and flag design and maintainability smells, not just
+  bugs, beyond what eslint/prettier/tsc already gate in CI.
+
+reviews:
+  # assertive = the most thorough profile: adds dead-code, null-safety, type,
+  # and design nitpicks on top of bug-finding. Deliberate while the foundation
+  # is being laid.
+  profile: assertive
+
+  high_level_summary: true
+  poem: false
+
+  # Submit a formal review state (Changes requested / Approved) rather than loose
+  # comments, and auto-approve once threads resolve and checks pass. Two reasons:
+  #   1. It marks findings as things that must be resolved, like Codex does.
+  #   2. The resulting APPROVED state is machine-detectable, so a /ship-style gate
+  #      can poll it as CodeRabbit's clean verdict (symmetric to Codex's 👍).
+  # This does NOT grant merge rights or lower any gate: merging still requires
+  # branch protection (required approvals = 0, no direct pushes to main), which
+  # this setting never touches.
+  request_changes_workflow: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true # re-review on each push
+    drafts: false # skip draft PRs
+
+  # Keep generated / vendored output out of review — saves the file-rate budget
+  # and cuts noise. CodeRabbit ignores common cases by default; these are explicit.
+  path_filters:
+    - '!**/dist/**'
+    - '!**/coverage/**'
+    - '!**/.turbo/**'
+    - '!**/*.tsbuildinfo'
+    - '!pnpm-lock.yaml'
+
+  # Natural-language, per-path review guidance — this is where CodeRabbit becomes
+  # boundary-aware and earns its keep as the semantic reviewer for the
+  # deterministic core (see AGENTS.md "Hard rules").
+  path_instructions:
+    - path: 'packages/sim/**'
+      instructions: >-
+        Deterministic simulation core. The sim is a pure function of
+        (seed, ruleset, inputs): same inputs must produce byte-identical state,
+        and the world-hash / replay-determinism tests must stay green. In
+        production (non-`*.test.ts`) files, flag as blocking: Math.random() (all
+        randomness goes through the seeded RNG in packages/engine);
+        Date / Date.now() / performance.now() / any wall-clock time;
+        floating-point — float literals, the `/` division operator, and
+        Math.sqrt/sin/cos/atan2 (fixed-point integer math only); and any
+        Phaser / DOM / browser / Node API import. Flag a save/replay-shape change
+        that is missing a sim-version bump. Carve-out: co-located `*.test.ts`
+        files are exempt from the Node/DOM-import and wall-clock bans (fixtures
+        legitimately use them) — but the fixed-point float/division discipline
+        STILL applies to sim test files.
+    - path: 'packages/engine/**'
+      instructions: >-
+        Determinism toolkit — seeded RNG, fixed-point math, fixed-timestep loop,
+        world-hash. This is the byte-identity core; hold it to the highest bar.
+        Same rules as packages/sim: no Math.random (the seeded RNG lives HERE),
+        no Date/performance/wall-clock, no floating-point in the fixed-point
+        paths (fixed-point integer math only), no Phaser/DOM/browser imports.
+        Test-file carve-outs as for packages/sim, and the fixed-point discipline
+        still applies to engine tests.
+    - path: 'packages/render/**'
+      instructions: >-
+        Phaser 3 presentation layer. It READS sim state and must never mutate
+        WorldState or any sim store — a direct sim-state write from render is a
+        blocker (AGENTS.md layering: render depends on sim, never the reverse).
+        Flag only direct sim-state mutation from render; reading state and
+        issuing input/commands is fine. Co-located `*.test.ts` files are EXEMPT:
+        render tests legitimately mutate state to build fixtures — never flag
+        fixture setup in a test file.
+    - path: 'packages/replay/**'
+      instructions: >-
+        Replay format + re-simulation validator — determinism-critical. The
+        server re-sims submitted replays to derive trusted scores, so any change
+        that could make replay non-deterministic across runs or JS engines is a
+        blocker. Replay = {seed, ruleset hash, sim version, tick inputs}; flag
+        changes that break that contract or that alter save/replay shape without
+        a sim-version bump.
+    - path: '**/*.test.ts'
+      instructions: >-
+        Vitest unit/integration tests (mostly co-located under packages/). Test
+        files legitimately import node:* and build WorldState/store fixtures — do
+        not flag those. This suite protects deterministic replay, so DO flag
+        tests that assert on wall-clock timing or unseeded randomness, or that
+        would be non-deterministic across runs or JS engines; prefer pinned
+        deterministic outputs. Sim/engine test files still keep the fixed-point
+        float/division ban.
+
+chat:
+  auto_reply: true
