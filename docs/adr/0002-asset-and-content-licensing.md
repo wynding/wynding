@@ -21,7 +21,9 @@ and creative assets under a Creative Commons license designed for such works.
 ### 1. Code stays AGPL-3.0-or-later (+ the §7 App Store Exception)
 
 Unchanged. Program source — including the type definitions and the code that
-_loads and validates_ content data — remains AGPL.
+_loads and validates_ content data — remains AGPL. **Repository documentation**
+(README, `docs/`, ADRs) is AGPL-3.0-or-later too, as the repo default (the §7 store
+exception is only meaningful for the code).
 
 ### 2. Art, audio, and other creative assets → CC-BY-SA 4.0
 
@@ -53,9 +55,9 @@ project assets.
 
 ### 5. Contribution license (inbound = outbound)
 
-Contributions carry the license of what they are: **code contributions** are
-AGPL-3.0-or-later + the §7 exception; **asset and content-data contributions** are
-CC-BY-SA 4.0. Either way, contributors certify they have the right to license the
+Contributions carry the license of what they are: **code and documentation
+contributions** are AGPL-3.0-or-later (code additionally under the §7 exception);
+**asset and content-data contributions** are CC-BY-SA 4.0. Either way, contributors certify they have the right to license the
 work that way (own work, or permission) and provide required attribution. No CLA.
 See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 

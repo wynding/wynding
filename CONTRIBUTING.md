@@ -10,9 +10,11 @@ and submit changes.
 Contributions carry the license of what they are, and inbound = outbound (**no
 CLA** — your copyright stays yours):
 
-- **Code** is **AGPL-3.0-or-later** plus the **Wynding App Store Exception** (v1.0
-  or, at your option, any later version the project publishes — see
-  [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)), so anyone can ship store builds.
+- **Code and documentation** are **AGPL-3.0-or-later** (code is additionally under
+  the **Wynding App Store Exception** — v1.0 or, at your option, any later version
+  the project publishes, see [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) — so
+  anyone can ship store builds). Repo prose (README, docs, ADRs) is the AGPL repo
+  default.
 - **Art, audio, and content data** (levels, waves, balance numbers) are
   **CC-BY-SA 4.0** — see
   [ADR 0002](docs/adr/0002-asset-and-content-licensing.md).

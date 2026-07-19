@@ -15,7 +15,11 @@ not _ship_ translations at launch, but nothing should block adding them later.
 
 Every user-facing string lives in a **message catalog**, referenced by a key.
 **No hardcoded user-facing strings** in code. Adding a supported locale becomes a
-content task, not a code change.
+content task, not a code change. This includes **authored content display strings**
+(e.g. level names): content stores a **localization key/descriptor**, resolved to
+text at the UI layer — never a baked literal. (The exact content representation is
+finalized in the level/content-data-format ADR; today's `Level.name` sample string
+is placeholder scaffold predating the catalog.)
 
 ### 2. Catalog contract (so the above is enforceable)
 

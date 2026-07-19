@@ -26,6 +26,11 @@ export interface Wave {
 /** A playable level: board geometry, starting economy, and its wave schedule. */
 export interface Level {
   readonly id: string;
+  /**
+   * Display name. Placeholder scaffold text today; per ADR 0004 this becomes a
+   * localization key/descriptor (resolved to text at the UI layer) once the i18n
+   * catalog lands — never a baked user-facing literal in shipped content.
+   */
   readonly name: string;
   readonly widthTiles: number;
   readonly heightTiles: number;
