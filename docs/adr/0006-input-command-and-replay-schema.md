@@ -39,9 +39,10 @@ recorded, replayed command, not hidden state.
 ### 3. Match identity — the replay must select the level
 
 The scheduler input is ambiguous unless the replay names its level. The replay's
-**initial conditions** are `{ seed, rulesetHash, simVersion, levelId }` (a `levelId`
-is added to the envelope), and `tickInputs` is the ordered command log. Given those
-four plus the ruleset, re-simulation is fully determined.
+**initial conditions** are `{ seed, rulesetHash, simVersion, levelId }` — this adds
+`levelId` to the envelope defined in ADR 0001 §3 and `docs/CONTEXT.md` (both updated
+to match) — and `tickInputs` is the ordered command log. Given those four plus the
+ruleset, re-simulation is fully determined.
 
 ### 4. Command shape and ordering — determinism-clean
 
