@@ -38,14 +38,22 @@ concentrating ownership. The result is fully open, strong copyleft on everything
 shippable to DRM app stores, and a **single license** with no CC-vs-GPL boundary to
 reason about.
 
-### "Source" for assets = the editable master
+### "Source" for assets = the preferred form for modification
 
 AGPL requires conveying the "source" — the _preferred form for making
-modifications_. For an asset that is the **editable master** (`.psd` / `.kra` /
-`.xcf` / `.blend` / `.svg`, DAW project files / lossless masters), **not** the
-exported `.png` / `.ogg`. Editable masters are committed to the repository — the
-unrestricted AGPL channel the §7 exception's proviso requires — while shipped builds
-carry the exports.
+modifications_. What that is depends on how the asset was made:
+
+- **If a richer editable master exists** — a layered `.psd` / `.kra` / `.xcf`, a
+  vector `.svg`, a `.blend` scene, a DAW project / lossless audio master — then
+  **that master is the source** and must be committed; shipping only a flattened
+  export would be like shipping a binary without source.
+- **If the asset has no richer form** — e.g. an AI-generated flat `.png`, or pixel
+  art drawn directly as a `.png` — then **the file itself is the source**, because
+  nothing more editable exists behind it. Committing it satisfies the requirement;
+  there is no separate master to disclose.
+
+Either way, the source form lives in the repository — the unrestricted AGPL channel
+the §7 exception's proviso requires — and shipped builds may carry optimized exports.
 
 ### Third-party material
 

@@ -12,9 +12,11 @@ Everything — **code, documentation, art, audio, and content data** — is
 option, any later version the project publishes — see
 [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)), so anyone can ship store builds.
 Inbound = outbound and **no CLA** — your copyright stays yours; we just need the
-AGPL license plus the exception. For assets, "source" means the **editable master**
-(`.psd`/`.kra`/`.blend`/`.svg`, DAW project files) — commit that, not just the
-export. See [ADR 0002](docs/adr/0002-asset-and-content-licensing.md).
+AGPL license plus the exception. For assets, "source" is the **preferred form for
+modification**: if you worked in a layered/vector master (`.psd`/`.kra`/`.svg`, DAW
+project), commit that too — not just the export; a flat asset with no richer form
+(e.g. an AI-generated or hand-drawn `.png`) is its own source. See
+[ADR 0002](docs/adr/0002-asset-and-content-licensing.md).
 
 By submitting a contribution you agree it is licensed under those terms, and you
 certify that you have the right to license it that way — it's your own work, or you
