@@ -26,7 +26,7 @@ back. The sim never imports the storage interface.
 
 ### 2. The `StorageDriver` contract
 
-```
+```typescript
 interface StorageDriver {
   get(key: string): Promise<string | undefined>; // missing key -> undefined, not an error
   set(key: string, value: string): Promise<void>;
@@ -46,11 +46,15 @@ under a driver-owned `wynding:` prefix.
 
 - **`saveVersion`** gates schema migration (distinct from `simVersion` / `rulesetHash`).
 - **`deviceId` + `revision`** — `revision` is a **monotonic per-device counter**
-  bumped on every write. **Conflict resolution uses `revision` + `deviceId`, not
-  wall-clock `updatedAt`** (device clocks drift, move backward, or tie on concurrent
-  offline writes). `updatedAt` is carried as informational only. The exact merge
-  policy is fixed when sync is built, but the monotonic primitive is present now so it
-  is _decidable_ — the point of a cloud-ready envelope.
+  bumped on every write; with `deviceId` it gives a per-device write order, preferred
+  over wall-clock `updatedAt` (which drifts, moves backward, or ties on concurrent
+  offline writes — so it's informational only). **This is the local write-ordering
+  primitive, not a complete cross-device conflict resolver:** a per-device counter
+  can't by itself establish causal order _across_ devices. MVP is **local — no sync,
+  no conflicts**; when sync is built, the merge scheme (a version vector / causal
+  metadata, or an explicit last-writer policy) is designed then and the envelope is
+  extended to carry what it needs. "Cloud-ready" means that's cleanly _decidable_
+  later, not that `(revision, deviceId)` already resolves it.
 
 ### 4. What persists at MVP — meta-progress only
 
@@ -58,18 +62,24 @@ Settings (accessibility, audio, controls, locale), campaign progress (levels cle
 best result/stars per level), best scores + seeds per level. **No mid-run resume at
 MVP**, but a **`runInProgress` slot is reserved** (see §5).
 
-### 5. The reserved `runInProgress` slot carries full replay identity, not just a blob
+### 5. The reserved `runInProgress` slot carries replay identity, not just a blob
 
-To resume byte-identically after an app or content update, the slot stores
-`{ seed, rulesetHash, simVersion, levelId, simState, tickInputsSoFar }`:
+A resumable run stores `{ seed, rulesetHash, simVersion, levelId, simState,
+tickInputsSoFar }`:
 
 - the `simState` snapshot **including its `rngState`** (RNG state is part of
   `SimState`), captured **only at a tick boundary** (between whole ticks) so
   continuation is byte-identical;
 - the **replay identity** from ADR 0006 — the original `seed` is _not_ recoverable
-  from the advanced RNG, and `rulesetHash` + `simVersion` + `levelId` are needed to
-  resume under the same behavior. Resume refuses (falls back cleanly) if `simVersion`
-  or `rulesetHash` no longer match.
+  from the advanced RNG, and `levelId` selects the scheduler input.
+
+**Resume is valid only within the same `simVersion` and `rulesetHash`.** A
+determinism-affecting app update (new `simVersion`) or a content/balance change (new
+`rulesetHash`) **invalidates the in-progress run** — it's discarded with a clean
+fallback, not resumed. Byte-identical continuation across a behavior change would
+require pinning the old simulator _and_ old ruleset (out of scope); losing an
+in-progress run across an infrequent determinism-affecting update is an acceptable
+cost for a reserved, post-MVP feature.
 
 ### 6. Migration is forward-only; incompatible saves are preserved, never silently reset
 

@@ -23,11 +23,17 @@ it) manual `startWave`. **Excluded from the log:** playback speed (2×/4×), pau
 camera, UI — cosmetic/presentation actions that don't change sim results; recording
 them would break replay portability and let cosmetic choices affect the world-hash.
 
-### 2. Scheduled creep spawns come from the ruleset, not the input log
+### 2. Wave spawns come from the ruleset schedule (timing may be advanced by a recorded command)
 
-Wave spawns are a deterministic function of `(ruleset, levelId, tick)` computed by
-the sim's wave scheduler (ADR 0007), **not** player input. This corrects the current
-placeholder and keeps `tickInputs` purely player-authored.
+The _content_ of each wave — what spawns, and its default timing — is a deterministic
+function of the ruleset schedule and the tick, **not** free player input. The one
+player lever is **wave timing**: if the mode allows sending a wave early, that
+`startWave` / `sendEarly` is a **recorded command** in `tickInputs` that advances the
+schedule deterministically. So the scheduler is a pure function of
+`(ruleset, levelId, tick, recorded wave-timing commands)` — every input is in the
+replay, so re-simulation is exact. (This resolves the apparent tension: manual
+wave-start is allowed precisely because it's a recorded, replayed command, not hidden
+state.)
 
 ### 3. Match identity — the replay must select the level
 
@@ -44,7 +50,7 @@ fields** (no floats, no display strings); entities are referenced by stable
 array order at the start of tick `t`** (before the tick advances); order is
 significant and duplicates are each re-validated against the then-current state.
 
-### 5. Two validation layers: malformed → reject replay, illegal → deterministic no-op
+### 5. Validation, the match-end condition, and the authoritative score
 
 - **Structural validation** (before re-sim): an unknown command `kind`, an
   out-of-domain enum, or an out-of-bounds integer means the replay is **malformed**
@@ -52,11 +58,17 @@ significant and duplicates are each re-validated against the then-current state.
 - **Game-rule validation** (inside the sim): a well-formed but illegal command —
   unaffordable, illegal placement, or one that would fully block the exit — is a
   **deterministic no-op**, applying the **same rule on client and server**. The sim
-  is total: it always produces a result.
+  is total.
+- **Deterministic match end:** a match ends at a terminal state defined by the
+  ruleset — all waves cleared (win) or lives at zero (loss). **`tickInputs` beyond the
+  terminal tick are rejected**, so a client can't pad the log.
+- **The server derives the authoritative score from the terminal state of the
+  re-sim — it never trusts a client-supplied score.**
 
-This is the anti-cheat spine: the client runs the same rules, so it never records a
-command expecting an effect it won't get; a doctored replay's illegal commands no-op
-identically on the server, so the claimed score isn't reproduced and is rejected.
+This is the anti-cheat spine: illegal commands no-op (they can't inflate the result),
+padded ticks are rejected, and the only score that validates is the true one the
+recorded inputs actually produce. Malformed or version/ruleset-mismatched replays are
+rejected outright.
 
 ### 6. `simVersion` gating (current reality + deferred work)
 
