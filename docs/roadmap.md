@@ -18,11 +18,12 @@ This is a Lean bet: validate the soul of the game — the "aha" re-solve, the
 optimizer's climb — before investing in the heavier systems (server ladder,
 cross-platform, mods).
 
-**A note on the word "MVP."** This roadmap _narrows_ the MVP boundary. Where ADR
-0008 says "MVP" for its persistence scope (settings, campaign progress, best-scores
-and seeds), that scope lands with the **Single-player game** milestone below; M1 is
-deliberately thinner. The ADRs' underlying _decisions_ are unchanged — this only
-sets where each first applies.
+**A note on the word "MVP."** This roadmap _sets_ the MVP cut (its job in the
+hierarchy): **M1 is the MVP.** ADR 0008 predates it and used "MVP" for its
+persistence scope (settings, campaign progress, best-scores and seeds); that scope
+lands with the **Single-player game** milestone below, and ADR 0008 has been
+reconciled to say so. M1 is deliberately thinner; the ADRs' underlying _decisions_
+are unchanged.
 
 ## Milestones
 
@@ -30,8 +31,8 @@ sets where each first applies.
 
 The deterministic core and its CI gate (ADRs 0001–0008 and the design-notes) —
 **done**: the sim is byte-deterministic and gated before any gameplay builds on it.
-**Still open:** the ADR 0005 performance spike — validating the Phaser /
-Android-WebView stack and wiring the performance gate — which rides with M1's first
+**Still open:** the ADR 0005 performance spike — validating the performance bet on
+the low-end target and wiring the performance gate — which rides with M1's first
 real production build.
 
 ### M1 — Playable slice _(the MVP / first release)_
@@ -57,19 +58,18 @@ progress — the settings, campaign-progress, and best-scores-and-seeds scope th
 
 ### Competitive ladder
 
-Submitted replays re-validated server-side for trusted scores (ADR 0006), with
-per-ruleset leaderboards **backed by the official ruleset** — the canonical
-competitive spine, stewarded by the maintainer. The per-ruleset design means
-community rulesets, once the **Community & mods** milestone opens them, get their
-_own_ buckets and never move the official ladder. This is where the determinism
-investment pays off: trusted scores, anti-cheat by construction.
+A competitive leaderboard whose scores can't be faked, **backed by the official
+ruleset** — the canonical competitive spine, stewarded by the maintainer (ADR 0006
+holds the anti-cheat how). Community rulesets, once the **Community & mods**
+milestone opens them, get their _own_ leaderboard buckets and never move the
+official ladder. This is where the determinism investment pays off.
 
 ## Later
 
 ### Reach
 
-Mobile and desktop / Steam builds wrapping the one canonical web core (ADR 0001) —
-no parallel native codebases.
+Mobile and desktop / Steam builds, all from the one web core — no parallel native
+ports (ADR 0001).
 
 ### Community & mods
 
