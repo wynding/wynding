@@ -6,87 +6,61 @@
 ## Context
 
 `rulesetHash` is currently a placeholder over `SIM_VERSION`, disconnected from any
-content (`packages/replay`), and the content schema (`Level` / `Wave` in
-`packages/content`) is minimal. Wynding's vision is a **community-tuned, moddable**
-game, so balance and content must be tunable **without engine code**. We must define
-the data format the sim reads — and what the "ruleset" _is_ — before gameplay code.
-`AGENTS.md` already describes the sim as "a pure function of `(seed, ruleset,
-inputs)`," but no ruleset is threaded into `step()` yet. This ADR makes that real.
+content, and the content schema in `packages/content` is minimal. Wynding's vision is a
+**community-tuned, moddable** game, so balance and content must be tunable **without
+engine code**. We decide what the "ruleset" _is_ and the shape of its format before
+gameplay code; the encoding and hashing mechanics live in
+`docs/design-notes/ruleset-format.md`.
 
 ## Decision
 
-### 1. The "ruleset" is the complete, data-driven content the sim reads
+### 1. The ruleset is the complete, data-driven content the sim reads
 
-A single validated data bundle: the **tower catalog** (cost, damage, range, fire
-rate, upgrade tiers, targeting, per-creep-kind modifiers), the **creep catalog** (hp,
-speed, armor, immunities, bounty), **board/level geometry** (grid size, entrance/exit
-cells, blocked cells), **wave schedules**, and **global balance constants**. The
-**match outcome** is a pure function of `(seed, ruleset, levelId, inputs)`; concretely
-a single tick is **`step(state, ruleset, inputs) → state`** — the ruleset is threaded
-in each tick (it's constant for the match) and the initial `state` derives from the
-`seed` and `levelId`. **No balance magic-numbers live in engine code** — the sim reads
-all tuning from the ruleset.
+A single validated data bundle — the **tower catalog**, the **creep catalog**,
+**board/level geometry**, **wave schedules**, and **global balance constants**. **No
+balance magic-numbers live in engine code**; the sim reads all tuning from the ruleset.
+A match outcome is a pure function of `(seed, ruleset, levelId, inputs)`.
 
-### 2. Format: JSON validated by a schema, with explicit field-level encoding
+### 2. Format: schema-validated JSON, moddable without a build step
 
-Content is authored as **JSON** (data, not code), validated at load against a schema
-(e.g. Zod / JSON Schema) — **moddable without a build step or engine code**. To keep
-two independent loaders from interpreting the same JSON differently, **every numeric
-field declares its encoding in the schema**: whether it's a plain **integer** or
-**fixed-point** (`FP_SHIFT = 8`, per `packages/engine/src/fixed.ts`), its **unit**
-(e.g. tiles/tick, ticks, fixed-tiles), **signedness**, and **min/max bounds**. The
-loader rejects malformed, wrong-type, or out-of-range data. **No floats.**
+Content is authored as **JSON** (data, not code) and validated at load against a schema
+— so it's moddable without engine code or a build step. To keep two independent loaders
+(client and server) from interpreting the same data differently, the schema pins each
+field's encoding; that discipline is specified in the design note. **No floats in
+sim-affecting data.**
 
-### 3. `rulesetHash` = a collision-resistant hash of a precisely canonical form
+### 3. `rulesetHash` is a collision-resistant digest of a canonical form
 
-- **Normalize, then canonicalize.** A defined **normalization** step runs first —
-  part of the spec, identical on client and server, **not** an incidental effect of
-  whichever validator (JSON-Schema validation alone doesn't strip unknown properties
-  or resolve `null`-vs-omitted; a Zod parse might transform differently): parse →
-  apply schema defaults → **strip unknown fields** → **strip presentation-only
-  fields** (below) → resolve `null`-vs-omitted to one canonical form. The normalized
-  object is then serialized via **RFC 8785 JSON Canonicalization Scheme (JCS)** —
-  object keys sorted by **UTF-16 code unit**, ECMAScript **number formatting**
-  (unambiguous for our bounded integers / fixed-point), **UTF-8** output. Explicit
-  normalization + a named canonicalization standard leave no room for two loaders to
-  disagree on key order, number serialization, or string encoding.
-- **Presentation-only data is excluded from the hash.** Localization keys (level
-  names, etc.) and other non-sim fields do **not** participate — they can't affect the
-  sim, so renaming a level must not invalidate replays. Only sim-affecting content is
-  hashed.
-- **Digest:** `rulesetHash` = **SHA-256 over those canonical (JCS) UTF-8 bytes** — a
-  collision-resistant digest, not the engine's 32-bit `fnv1a`. Because the replay carries only this value to identify the
-  exact content and bucket scores, a 32-bit hash is too weak — accidental collisions
-  appear at modest catalog scale and deliberate ones are trivial. (The per-tick
-  world-hash may stay on fast `fnv1a`; that's an internal determinism check, not a
-  security/identity boundary.)
+`rulesetHash` identifies the exact sim-affecting content a replay ran against and buckets
+leaderboard scores, so it must be **collision-resistant** (a cryptographic digest, not
+the engine's 32-bit world-hash) and computed over a **canonical form that excludes
+presentation-only fields** — localization keys and the like, so renaming a level never
+invalidates replays. Client and server must produce byte-identical hashes from
+equivalent content; the canonicalization procedure is fixed in the design note.
+`rulesetHash` is the _content/balance_ version; `simVersion` is the _engine-behavior_
+version — a balance tweak bumps the former, an engine change the latter.
 
-**`rulesetHash` vs `simVersion`:** `simVersion` is the sim _engine_ behavior version
-(code); `rulesetHash` is the _content/balance_ version (data). A balance tweak bumps
-`rulesetHash`; a sim-engine change bumps `simVersion`.
-
-### 4. Versioned and moddable — rulesets are first-class
+### 4. Rulesets are versioned and moddable — mods are first-class
 
 The ruleset carries a `formatVersion` (schema evolution) and a `rulesetId` + version
 (leaderboards bucket by ruleset). Official rulesets ship in `packages/content`;
-**community rulesets / mods are the same kind of thing** — a data bundle loaded,
-validated, and hashed identically. This is the moddability substrate behind the
-working agreement's "community proposes → guardrails screen → owner arbitrates".
+**community rulesets and mods are the same kind of thing** — loaded, validated, and
+hashed identically. This is the moddability substrate behind the working agreement's
+"community proposes, guardrails screen, owner arbitrates."
 
-### 5. Content display strings are localization keys
+### 5. Display strings are localization keys
 
-Level names and any player-facing text are **localization keys** resolved at the UI
-layer (ADR 0004) — never baked literals, never in the sim, and (per §3) never in the
-hash.
+Level names and any player-facing text are **localization keys** resolved at the UI layer
+(ADR 0004) — never baked literals, never in the sim, and never in the hash.
 
 ## Consequences
 
-- **Positive:** the community can retune balance and author content/mods with no
-  engine code; `rulesetHash` becomes meaningful and hard to spoof (per-ruleset
-  leaderboards); balance changes are reviewable **data** PRs.
-- **Negative:** a schema + load-time validator to build and maintain; a precise
-  canonicalization + SHA-256 digest to implement; balance-as-data means the sim reads
-  _all_ tuning from the ruleset.
-- **Neutral:** the exact tower/creep/balance _fields and numbers_ finalize with the
-  Core Gameplay PRD; this ADR fixes the **format, encoding discipline, hash contract,
-  and the ruleset concept**.
+- **Positive:** the community retunes balance and authors content/mods with no engine
+  code; `rulesetHash` becomes meaningful and hard to spoof (per-ruleset leaderboards);
+  balance changes are reviewable **data** PRs.
+- **Negative:** a schema plus a load-time validator to build and maintain, and a precise
+  canonical digest to implement; balance-as-data means the sim reads _all_ tuning from
+  the ruleset.
+- **Neutral:** the exact tower/creep/balance _fields and numbers_ finalize with the Core
+  Gameplay PRD; this ADR fixes the **format, hash contract, and ruleset concept**; the
+  encoding and canonicalization mechanics live in `docs/design-notes/ruleset-format.md`.

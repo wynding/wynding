@@ -7,110 +7,73 @@
 
 The replay envelope `{ seed, rulesetHash, simVersion, tickInputs }` is defined (ADR
 0001 §3, `packages/replay`) and the server re-simulates `tickInputs` to derive a
-trusted score. But the command vocabulary is a placeholder — `packages/sim`'s
-`SimInput` is only `spawnCreep | noop`, and creep-spawning is currently (wrongly) in
-the _input log_ rather than driven by the wave schedule. The command schema is the
-**anti-cheat and determinism contract**, so its _shape and rules_ must be pinned
-before gameplay code (the exact command list finalizes with the Core Gameplay PRD).
+trusted score. But the command vocabulary is a placeholder (`packages/sim`'s `SimInput`
+is only `spawnCreep | noop`), and creep-spawning currently lives in the _input log_
+rather than the wave schedule. The command log is the **anti-cheat and determinism
+contract**, so we decide _what it records and what rules govern it_ before gameplay
+code. The exact command list finalizes with the Core Gameplay PRD; the schema,
+encoding, and bounding mechanics live in `docs/design-notes/replay-and-commands.md`.
 
 ## Decision
 
-### 1. `tickInputs` records only sim-affecting **player** commands
+### 1. The log records only sim-affecting player commands
 
-A command is a discrete player intent that changes simulation state — e.g.
-`placeTower`, `sellTower`, `upgradeTower`, `setTargetPriority`, and (if the mode has
-it) manual `startWave`. **Excluded from the log:** playback speed (2×/4×), pause,
-camera, UI — cosmetic/presentation actions that don't change sim results; recording
-them would break replay portability and let cosmetic choices affect the world-hash.
+`tickInputs` records discrete player intents that change simulation state — placing,
+selling, or upgrading a tower, setting targeting, and (where the mode has it) a manual
+wave-start. Presentation actions — playback speed, pause, camera, UI — are **excluded**:
+they don't change sim results, and recording them would break replay portability and
+let cosmetic choices affect the world-hash.
 
-### 2. Wave spawns come from the ruleset schedule, inside the deterministic sim
+### 2. Wave content comes from the ruleset, not the log
 
-The _content_ of each wave — what spawns — comes from the ruleset schedule, **not**
-free player input. **Timing is computed inside the sim**, not from `(ruleset, tick)`
-alone: `leadInTicks` is relative to when the previous wave _clears_, which depends on
-the evolving sim state (tower commands + combat outcomes); and the player may advance
-timing with a recorded **`startWave`** command (a placeholder name — the exact command
-finalizes with the Core Gameplay PRD). So the scheduler is **part of the deterministic
-sim step**, reading the ruleset schedule + the current sim state (wave-clear) + any
-recorded wave-timing commands — each a deterministic function of `(seed, ruleset,
-inputs)`, so re-simulation is exact. Manual wave-start is allowed because it's a
-recorded, replayed command, not hidden state.
+What each wave spawns comes from the ruleset schedule (ADR 0007), not free player input,
+and the scheduler runs **inside the deterministic sim** — its timing depends on evolving
+sim state (when the previous wave clears) and on any recorded wave-timing command. So
+spawns are a deterministic function of `(seed, ruleset, inputs)` and re-simulation is
+exact, with no creep spawns in the input log.
 
-### 3. Match identity — the replay must select the level
+### 3. Replay identity selects the level
 
-The scheduler input is ambiguous unless the replay names its level. The replay's
-**initial conditions** are `{ seed, rulesetHash, simVersion, levelId }` — this adds
-`levelId` to the envelope defined in ADR 0001 §3 and `docs/CONTEXT.md` (both updated
-to match) — and `tickInputs` is the ordered command log. Given those four plus the
-ruleset, re-simulation is fully determined.
+A replay's initial conditions are `{ seed, rulesetHash, simVersion, levelId }` — this
+adds `levelId` to the ADR 0001 §3 envelope (envelope and `docs/CONTEXT.md` updated to
+match). Those four plus the ruleset fully determine the re-simulation; `tickInputs` is
+the ordered command log.
 
-### 4. Command shape and ordering — determinism-clean
+### 4. The sim is total: malformed rejected, illegal no-ops
 
-Each command is a discriminated union on `kind` carrying only **integer/enum
-fields** (no floats, no display strings); entities are referenced by stable
-`EntityId`, cells by integer `Cell { col, row }`. **`tickInputs[t]` is applied in
-array order at the start of tick `t`** (before the tick advances); order is
-significant and duplicates are each re-validated against the then-current state.
+Structurally malformed input (unknown command, out-of-domain value) makes the replay
+**invalid and rejected** — the sim won't interpret it. A well-formed but illegal command
+(unaffordable, illegal placement, one that would fully block the exit) is a
+**deterministic no-op**, applying the same rule on client and server. The sim always has
+a defined result.
 
-### 5. Validation, the match-end condition, and the authoritative score
+### 5. The server bounds untrusted work and derives the score
 
-- **Structural validation** (before re-sim): an unknown command `kind`, an
-  out-of-domain enum, or an out-of-bounds integer means the replay is **malformed**
-  and is **rejected** — the sim can't safely interpret it.
-- **Bounded dimensions (anti-DoS):** _before_ re-sim, the server rejects a replay
-  whose `tickInputs.length` exceeds the level's **maximum match length** (derived from
-  the ruleset) or whose **per-tick command count** exceeds a fixed cap. And the sim
-  enforces that maximum as a **hard tick ceiling _during_ re-sim** — if the terminal
-  condition isn't reached by the cap (e.g. a stalled board where creeps never clear
-  and lives never hit zero), the run is rejected as a timeout. So server work is
-  bounded up front _and_ at runtime, even when natural termination doesn't occur.
-- **Game-rule validation** (inside the sim): a well-formed but illegal command —
-  unaffordable, illegal placement, or one that would fully block the exit — is a
-  **deterministic no-op**, applying the **same rule on client and server**. The sim
-  is total.
-- **Deterministic match end:** the ruleset guarantees termination — finite waves
-  (win when all clear) or lives reaching zero (loss) — so the sim always reaches a
-  terminal tick. The server **runs the sim to that terminal tick regardless of log
-  length**: `tickInputs[t]` supplies commands for tick `t` (empty if none), and **if
-  the log ends before terminal the sim continues with empty inputs** (the player
-  issued no more commands) until win/loss. **Entries at or beyond the terminal tick
-  are rejected** (padding). The score is derived from the terminal state.
-- **The server derives the authoritative score from the terminal state of the
-  re-sim — it never trusts a client-supplied score.**
+The server treats a submitted replay as hostile input: it **bounds the work** a replay
+can demand (both before and during re-simulation) and runs the sim to its
+**deterministic terminal state** — finite waves won, or lives exhausted — then derives
+the **authoritative score from that terminal state**. It never trusts a client-supplied
+score, and it rejects replays padded past termination. This is the anti-cheat spine:
+illegal commands can't inflate the result, and the only score that validates is the one
+the recorded inputs actually produce. (Replays are **not** tamper-evident — no signature
+proves a log was human-played; signatures, anti-bot, and input-timing checks are
+separate, deferred defenses.)
 
-This is the anti-cheat spine: illegal commands no-op (they can't inflate the result),
-padded ticks are rejected, and the only score that validates is the true one the
-recorded inputs actually produce. Malformed or version/ruleset-mismatched replays are
-rejected outright.
-
-### 6. `simVersion` gating (current reality + deferred work)
+### 6. `simVersion` gates which replays validate
 
 `simVersion` stamps the sim-behavior version a replay was recorded under. **Today the
-validator accepts only the current `simVersion` and rejects any mismatch** — so a
-replay recorded under an older version is not re-validated (it's rejected, or later
-bucketed under a versioned leaderboard). Executing _historical_ versions (a registry
-of pinned historical simulators selected by `simVersion`) is **deferred** — noted so
-the "validates against its recorded version" goal isn't mistaken for current
-behavior. Any determinism-affecting change bumps `simVersion`.
-
-### 7. The client records `tickInputs` as it plays
-
-The web/app input layer maps raw pointer / keyboard / touch events → commands,
-applies them to the running sim, **and appends them (in tick order) to the log**.
-That log plus the initial conditions (§3) _is_ the replay. (Today the web app records
-nothing — greenfield.)
+validator accepts only the current `simVersion`** and rejects any mismatch; executing
+_historical_ simulators (a registry keyed by `simVersion`) is deferred. Any
+determinism-affecting change bumps `simVersion`.
 
 ## Consequences
 
-- **Positive:** small, portable replays; the server re-derives the **true score of
-  the submitted inputs** (illegal commands no-op, padded ticks rejected — you can't
-  inflate beyond what your commands produce); cosmetic choices can't affect the hash.
-  **Not claimed:** replays are _not_ tamper-evident — there's no signature/MAC, so the
-  re-sim doesn't prove the log was human-played or original (an attacker could submit a
-  different legal command sequence). Signatures, anti-bot, and input-timing checks are
-  **separate, deferred defenses** (`validate()` flags them as future work).
-- **Negative:** every player action needs a command **and** a deterministic
-  validator; the input layer must record precisely in tick order; historical-version
-  replay execution is unsolved (deferred).
-- **Neutral:** the exact command list finalizes with the Core Gameplay PRD; today's
-  `spawnCreep` placeholder is replaced by content-driven scheduling (ADR 0007).
+- **Positive:** small, portable replays; the server re-derives the true score of the
+  submitted inputs; cosmetic choices can't affect the hash; the anti-cheat boundary is
+  explicit.
+- **Negative:** every player action needs a command _and_ a deterministic validator; the
+  input layer must record precisely in tick order; historical-version replay is unsolved
+  (deferred).
+- **Neutral:** the exact command list finalizes with the Core Gameplay PRD; the
+  command-shape, ordering, and DoS-bounding mechanics live in
+  `docs/design-notes/replay-and-commands.md`.
