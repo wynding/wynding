@@ -20,9 +20,13 @@ inputs)`," but no ruleset is threaded into `step()` yet. This ADR makes that rea
 A single validated data bundle: the **tower catalog** (cost, damage, range, fire
 rate, upgrade tiers, targeting, per-creep-kind modifiers), the **creep catalog** (hp,
 speed, armor, immunities, bounty), **board/level geometry** (grid size, entrance/exit
-cells, blocked cells), **wave schedules**, and **global balance constants**. `step`
-becomes a pure function of **`(seed, ruleset, inputs)`**; **no balance magic-numbers
-live in engine code** — the sim reads all tuning from the ruleset.
+cells, blocked cells), **wave schedules**, and **global balance constants**. The
+**match outcome** is a pure function of `(seed, ruleset, levelId, inputs)`; concretely
+a single tick is **`step(state, ruleset, inputs) → state`** — the ruleset is threaded
+in each tick (it's constant for the match) and the initial `state` derives from `seed`
+
+- `levelId`. **No balance magic-numbers live in engine code** — the sim reads all
+  tuning from the ruleset.
 
 ### 2. Format: JSON validated by a schema, with explicit field-level encoding
 
