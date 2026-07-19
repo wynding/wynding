@@ -38,3 +38,20 @@ jobs:
       # caught here rather than in a deploy. Artifacts are NOT uploaded; this is a
       # gate, not a release step.
       - run: pnpm run build
+
+  # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
+  # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is
+  # paired with a version bump, so this PR-only job diffs the golden against the
+  # base branch and fails if it changed while SIM_VERSION did not.
+  determinism-version:
+    name: determinism golden ↔ SIM_VERSION
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a SIM_VERSION bump when the determinism golden changes
+        run: node scripts/check-determinism-version.mjs
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}

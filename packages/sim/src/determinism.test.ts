@@ -16,18 +16,13 @@
 //
 // If the GOLDEN values below change, that is BY DEFINITION a determinism-affecting
 // behavior change: update them in the SAME commit that bumps SIM_VERSION, and say
-// why in the message. A golden change with no version bump is a silent break.
+// why in the message. A golden change with no version bump is a silent break — and
+// because a runtime test cannot see "the same commit," that rule is enforced by a
+// CI diff-check (scripts/check-determinism-version.mjs), not by an assertion here.
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
-import {
-  createInitialState,
-  step,
-  hashSimState,
-  SIM_VERSION,
-  type SimInput,
-  type SimState,
-} from './index';
+import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
 
 /** Fixed seed for the canonical determinism scenario. */
 const SCENARIO_SEED = 0x5eed; // 24301
@@ -61,10 +56,9 @@ function runCanonical(
   return { state, trace };
 }
 
-// --- GOLDEN — pinned to SIM_VERSION; changing these is a behavior change --------
+// --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  simVersion: 1,
   finalHash: '3b5bca16',
   traceDigest: 'd47dedf1', // fnv1a(trace.join(':'))
 } as const;
@@ -80,9 +74,6 @@ describe('determinism gate', () => {
 
   it('matches the committed golden world-hash (bump SIM_VERSION if this changes)', () => {
     const { state, trace } = runCanonical();
-    // The golden is pinned to SIM_VERSION: a golden change with no version bump
-    // means a silent determinism break slipped through.
-    expect(SIM_VERSION).toBe(GOLDEN.simVersion);
     expect(hashSimState(state)).toBe(GOLDEN.finalHash);
     expect(fnv1a(trace.join(':'))).toBe(GOLDEN.traceDigest);
   });
@@ -92,14 +83,21 @@ describe('determinism gate', () => {
     const ref = runCanonical();
 
     // Step to the halfway point, JSON round-trip the state (the runInProgress
-    // snapshot / server re-sim boundary, ADR 0008 §5), then continue. The result
-    // must equal the uninterrupted run — rngState survives the round-trip.
+    // snapshot / server re-sim boundary, ADR 0008 §5), then continue.
     let live = createInitialState(SCENARIO_SEED);
     for (let t = 0; t < half; t++) live = step(live, canonicalInputs(t));
     const restored = JSON.parse(JSON.stringify(live)) as SimState;
-    for (let t = half; t < SCENARIO_TICKS; t++) step(restored, canonicalInputs(t));
 
-    expect(hashSimState(restored)).toBe(hashSimState(ref.state));
+    // Compare the WHOLE resumed tail, not just the final hash — a matching final
+    // hash could otherwise mask a diverge-then-reconverge in between. And assert
+    // the full serialized state, not just its digest.
+    const resumedTail: string[] = [];
+    for (let t = half; t < SCENARIO_TICKS; t++) {
+      step(restored, canonicalInputs(t));
+      resumedTail.push(hashSimState(restored));
+    }
+    expect(resumedTail).toEqual(ref.trace.slice(half));
+    expect(JSON.stringify(restored)).toBe(JSON.stringify(ref.state));
   });
 
   it('is frame-rate independent — irregular wall-clock chunks yield the same result', () => {
