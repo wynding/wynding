@@ -103,29 +103,38 @@ describe('determinism gate', () => {
   it('is frame-rate independent — irregular wall-clock chunks yield the same result', () => {
     const ref = runCanonical();
 
-    // Drive the identical tick sequence through the fixed-timestep loop, feeding
-    // wildly irregular dt so tick boundaries never align to frames. The sim
+    // Drive the tick sequence through the fixed-timestep loop, feeding a FIXED
+    // total elapsed time in wildly irregular chunks so tick boundaries never align
+    // to frames. Holding elapsed time fixed (rather than looping until a tick
+    // counter is reached) means the loop must account for EXACTLY SCENARIO_TICKS
+    // ticks — a regression that loses or invents ticks is caught — and the sim
     // advances only in whole ticks (ADR 0005), so the result must be identical.
     const state = createInitialState(SCENARIO_SEED);
     let tick = 0;
     const loop = createFixedLoop(
       () => {
-        if (tick >= SCENARIO_TICKS) return; // ignore any overshoot tick
         step(state, canonicalInputs(tick));
         tick++;
       },
       { msPerTick: DEFAULT_MS_PER_TICK },
     );
 
-    // Each chunk is < the spiral-of-death clamp (250 ms), so no ticks are dropped.
+    // Exactly enough elapsed time for SCENARIO_TICKS ticks. Each chunk stays under
+    // the spiral-of-death clamp (250 ms) so no ticks are dropped, and the last
+    // chunk is trimmed so the total lands exactly on a tick boundary.
+    const totalMs = SCENARIO_TICKS * DEFAULT_MS_PER_TICK;
     const jitter = [7, 3, 51, 99, 1, 44, 120, 6];
+    let fed = 0;
     let ji = 0;
-    while (tick < SCENARIO_TICKS) {
-      loop.advance(jitter[ji % jitter.length] ?? 1);
+    while (fed < totalMs) {
+      const chunk = Math.min(jitter[ji % jitter.length] ?? 1, totalMs - fed);
+      loop.advance(chunk);
+      fed += chunk;
       ji++;
     }
 
-    expect(tick).toBe(SCENARIO_TICKS);
+    expect(tick).toBe(SCENARIO_TICKS); // the loop accounted for every tick
+    expect(loop.accumulatorMs).toBe(0); // exact — no partial tick left over
     expect(hashSimState(state)).toBe(hashSimState(ref.state));
   });
 });

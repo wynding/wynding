@@ -54,4 +54,6 @@ jobs:
       - name: Require a SIM_VERSION bump when the determinism golden changes
         run: node scripts/check-determinism-version.mjs
         env:
+          # The event's exact base commit — immune to main advancing mid-run.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}

@@ -13,6 +13,10 @@
 
 import { execSync } from 'node:child_process';
 
+// Prefer the pull request event's EXACT base commit (immune to `main` advancing
+// after the event but before this job runs); fall back to a branch tip for local
+// runs.
+const BASE_SHA = process.env.BASE_SHA;
 const BASE_REF = process.env.BASE_REF || 'main';
 const TEST_PATH = 'packages/sim/src/determinism.test.ts';
 const INDEX_PATH = 'packages/sim/src/index.ts';
@@ -47,16 +51,30 @@ function fail(message) {
   process.exit(1);
 }
 
-// Ensure the base branch is available as a local ref (CI checkouts are often
-// shallow / single-ref).
-let baseRef = `origin/${BASE_REF}`;
-try {
-  sh(`git rev-parse --verify --quiet ${baseRef}`);
-} catch {
+// Resolve the base commit, ensuring it's available locally (CI checkouts are
+// often shallow / single-ref).
+let baseRef;
+if (BASE_SHA) {
+  baseRef = BASE_SHA;
   try {
-    sh(`git fetch --no-tags --depth=1 origin ${BASE_REF}:refs/remotes/origin/${BASE_REF}`);
+    sh(`git cat-file -e ${BASE_SHA}^{commit}`);
   } catch {
-    baseRef = BASE_REF; // fall back to a local branch of that name
+    try {
+      sh(`git fetch --no-tags --depth=1 origin ${BASE_SHA}`);
+    } catch {
+      // best effort — a subsequent `git show` will fail loudly if unreachable
+    }
+  }
+} else {
+  baseRef = `origin/${BASE_REF}`;
+  try {
+    sh(`git rev-parse --verify --quiet ${baseRef}`);
+  } catch {
+    try {
+      sh(`git fetch --no-tags --depth=1 origin ${BASE_REF}:refs/remotes/origin/${BASE_REF}`);
+    } catch {
+      baseRef = BASE_REF; // fall back to a local branch of that name
+    }
   }
 }
 
@@ -92,6 +110,18 @@ if (!headGolden) {
   fail(
     `Could not parse the golden (finalHash + traceDigest) from ${TEST_PATH} on HEAD.\n` +
       '   The determinism guard cannot verify this PR — check the golden format.',
+  );
+}
+
+// Parsing the literals only proves they exist somewhere. Require the golden fields
+// to be actively ASSERTED, so the runtime check can't be defeated by deleting the
+// assertions while leaving the GOLDEN object (which would make base and HEAD look
+// unchanged here too).
+if (!headTest.includes('GOLDEN.finalHash') || !headTest.includes('GOLDEN.traceDigest')) {
+  fail(
+    `${TEST_PATH} defines the golden but no longer asserts it — GOLDEN.finalHash /\n` +
+      '   GOLDEN.traceDigest are not referenced. The runtime determinism check is\n' +
+      '   disabled; restore the golden assertions.',
   );
 }
 
