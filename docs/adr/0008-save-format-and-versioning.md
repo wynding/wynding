@@ -56,6 +56,14 @@ under a driver-owned `wynding:` prefix.
   extended to carry what it needs. "Cloud-ready" means that's cleanly _decidable_
   later, not that `(revision, deviceId)` already resolves it.
 
+**Atomic revision allocation.** All save writes go through a **single-writer path** (a
+per-key serialized write queue in the app-layer save manager; cross-tab concurrency —
+two web tabs, overlapping autosaves — uses a lock, e.g. the Web Locks API). This makes
+`revision` allocation atomic: two writers can't both read `N` and write `N + 1` (a lost
+update). A **failed write does not advance `revision`.** The bare `StorageDriver`
+`get`/`set` are not assumed atomic on their own — serialization is the save manager's
+job.
+
 ### 4. What persists at MVP — meta-progress only
 
 Settings (accessibility, audio, controls, locale), campaign progress (levels cleared,

@@ -23,17 +23,18 @@ it) manual `startWave`. **Excluded from the log:** playback speed (2×/4×), pau
 camera, UI — cosmetic/presentation actions that don't change sim results; recording
 them would break replay portability and let cosmetic choices affect the world-hash.
 
-### 2. Wave spawns come from the ruleset schedule (timing may be advanced by a recorded command)
+### 2. Wave spawns come from the ruleset schedule, inside the deterministic sim
 
-The _content_ of each wave — what spawns, and its default timing — is a deterministic
-function of the ruleset schedule and the tick, **not** free player input. The one
-player lever is **wave timing**: if the mode allows sending a wave early, that
-`startWave` / `sendEarly` is a **recorded command** in `tickInputs` that advances the
-schedule deterministically. So the scheduler is a pure function of
-`(ruleset, levelId, tick, recorded wave-timing commands)` — every input is in the
-replay, so re-simulation is exact. (This resolves the apparent tension: manual
-wave-start is allowed precisely because it's a recorded, replayed command, not hidden
-state.)
+The _content_ of each wave — what spawns — comes from the ruleset schedule, **not**
+free player input. **Timing is computed inside the sim**, not from `(ruleset, tick)`
+alone: `leadInTicks` is relative to when the previous wave _clears_, which depends on
+the evolving sim state (tower commands + combat outcomes); and the player may advance
+timing with a recorded **`startWave`** command (a placeholder name — the exact command
+finalizes with the Core Gameplay PRD). So the scheduler is **part of the deterministic
+sim step**, reading the ruleset schedule + the current sim state (wave-clear) + any
+recorded wave-timing commands — each a deterministic function of `(seed, ruleset,
+inputs)`, so re-simulation is exact. Manual wave-start is allowed because it's a
+recorded, replayed command, not hidden state.
 
 ### 3. Match identity — the replay must select the level
 
@@ -89,8 +90,13 @@ nothing — greenfield.)
 
 ## Consequences
 
-- **Positive:** small, portable, tamper-evident replays; a clean, total anti-cheat
-  model (malformed → reject, illegal → no-op); cosmetic choices can't affect the hash.
+- **Positive:** small, portable replays; the server re-derives the **true score of
+  the submitted inputs** (illegal commands no-op, padded ticks rejected — you can't
+  inflate beyond what your commands produce); cosmetic choices can't affect the hash.
+  **Not claimed:** replays are _not_ tamper-evident — there's no signature/MAC, so the
+  re-sim doesn't prove the log was human-played or original (an attacker could submit a
+  different legal command sequence). Signatures, anti-bot, and input-timing checks are
+  **separate, deferred defenses** (`validate()` flags them as future work).
 - **Negative:** every player action needs a command **and** a deterministic
   validator; the input layer must record precisely in tick order; historical-version
   replay execution is unsolved (deferred).
