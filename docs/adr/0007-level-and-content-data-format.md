@@ -23,10 +23,9 @@ speed, armor, immunities, bounty), **board/level geometry** (grid size, entrance
 cells, blocked cells), **wave schedules**, and **global balance constants**. The
 **match outcome** is a pure function of `(seed, ruleset, levelId, inputs)`; concretely
 a single tick is **`step(state, ruleset, inputs) → state`** — the ruleset is threaded
-in each tick (it's constant for the match) and the initial `state` derives from `seed`
-
-- `levelId`. **No balance magic-numbers live in engine code** — the sim reads all
-  tuning from the ruleset.
+in each tick (it's constant for the match) and the initial `state` derives from the
+`seed` and `levelId`. **No balance magic-numbers live in engine code** — the sim reads
+all tuning from the ruleset.
 
 ### 2. Format: JSON validated by a schema, with explicit field-level encoding
 
