@@ -49,11 +49,15 @@ carry the exports.
 
 ### Third-party material
 
-Any incorporated third-party asset must be under an **AGPL-compatible license**
-(public domain / CC0, or a GPL-compatible license), attribution recorded, and must
-not re-impose restrictions the §7 exception exists to lift. **No `NC` / `ND`**
-material. **Bundled fonts and third-party libraries** keep their own licenses,
-carved out of this rule and recorded separately.
+The §7 exception **does not extend to third-party components** (see
+[LICENSE-EXCEPTIONS.md](../../LICENSE-EXCEPTIONS.md)), so a bundled third-party asset,
+font, or library must be under a license that is **independently app-store-compatible
+on its own** — a permissive license with no anti-DRM or extra-restriction clause
+(MIT, BSD, Apache-2.0, ISC, CC0, public domain) — **or** one that already carries an
+equivalent store permission. A **plain GPL/AGPL/LGPL or CC-BY(-SA)** third-party
+component (which lacks such a permission) is **not** acceptable: it would reintroduce
+the very app-store restriction this ADR removes. **No `NC` / `ND`.** Record each such
+component's license and attribution.
 
 ### Contribution license (inbound = outbound)
 
@@ -75,6 +79,8 @@ third-party attribution. **No CLA.** See [CONTRIBUTING.md](../../CONTRIBUTING.md
 
 ## Precedent
 
-**Battle for Wesnoth** licenses its game art under the GPL at scale; the **§7
-app-store-exception** wording originates in real copyleft mobile apps (KDE, wger).
-This combines both established practices.
+The FSF confirms the GPL can license any copyrightable work, and long-running
+open-source games have shipped **GPL-licensed game art at scale**; the **§7
+app-store-exception** wording itself originates in real copyleft apps (KDE, wger).
+This combines both established practices. (Named precedents are kept in the
+gitignored `research/` notes, per the tracked-file rule in `AGENTS.md`.)

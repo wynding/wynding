@@ -18,12 +18,14 @@ export. See [ADR 0002](docs/adr/0002-asset-and-content-licensing.md).
 
 By submitting a contribution you agree it is licensed under those terms, and you
 certify that you have the right to license it that way — it's your own work, or you
-have permission, with any required attribution recorded. Don't paste in material
-from another project unless its license is **AGPL-compatible** (for assets, prefer
-public domain / CC0 or a GPL-compatible license; no `NC`/`ND`) and, for code,
-carries an equivalent app-store permission. Bundled **fonts and third-party
-libraries** are exempt — they keep their own licenses (per ADR 0002); record the
-applicable license and any required attribution.
+have permission, with any required attribution recorded. Any **third-party**
+material you bundle (asset, font, or library) must be under a license that is
+**independently app-store-compatible** — a permissive license with no anti-DRM or
+extra-restriction clause (MIT, BSD, Apache-2.0, ISC, CC0, public domain) — **or**
+one that already carries an equivalent store permission. A plain GPL/AGPL/LGPL or
+CC-BY(-SA) third-party component is **not** acceptable: the §7 exception doesn't
+extend to it, so it would reintroduce app-store restrictions (no `NC`/`ND` either).
+Record each such component's license and attribution (per ADR 0002).
 
 If you can't accept AGPL terms for your employer or other reason, please don't
 submit code, documentation, or asset changes (all are AGPL); issue reports are
