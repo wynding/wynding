@@ -52,8 +52,10 @@ references.
 RNG (sim randomness kept separate from cosmetic randomness), **fixed-point**
 integer math (floats banned in the sim), a **fixed 20 Hz timestep** loop, and a
 per-tick **world-hash**. `packages/sim` is a pure `step(state, inputs)` function
-built only on these. A replay is `{ seed, rulesetHash, simVersion, tickInputs }`;
-identical inputs must reproduce an identical world-hash. This is a hard CI gate.
+built only on these. A replay is
+`{ seed, rulesetHash, simVersion, levelId, tickInputs }` (the `levelId` field is
+added by ADR 0006); identical inputs must reproduce an identical world-hash. This is
+a hard CI gate.
 
 ### 4. Cross-platform via a single web core
 
