@@ -47,14 +47,18 @@ _(Addresses Codex PR #6: "Bound untrusted replay dimensions before re-simulation
 
 ## Terminal condition and scoring
 
-- The ruleset guarantees termination: finite waves (win when all clear) or lives reaching
-  zero (loss).
+- A run has three terminal outcomes: **win** (finite waves all cleared), **loss** (lives
+  reach zero), or **timeout** (the hard tick ceiling from the anti-DoS section is hit
+  first). Well-formed play under a valid ruleset reaches win or loss; the ceiling exists
+  because hostile input — or a pathological ruleset — can stall so that neither is ever
+  reached.
 - The server runs the sim to the terminal tick **regardless of log length**: `tickInputs[t]`
   supplies tick `t`'s commands (empty if absent); if the log ends before terminal, the sim
-  continues with **empty inputs** until win/loss.
+  continues with **empty inputs** until win, loss, or the ceiling.
+- A **timeout is not a scorable result** — the replay is rejected, not assigned a score.
 - Entries **at or beyond** the terminal tick are rejected (padding).
-- The **authoritative score is derived from the terminal state**; a client-supplied score
-  is never trusted.
+- The **authoritative score is derived from the terminal state** of a win or loss; a
+  client-supplied score is never trusted.
 
 ## `simVersion` handling
 
