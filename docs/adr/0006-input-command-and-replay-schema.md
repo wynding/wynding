@@ -57,6 +57,11 @@ significant and duplicates are each re-validated against the then-current state.
 - **Structural validation** (before re-sim): an unknown command `kind`, an
   out-of-domain enum, or an out-of-bounds integer means the replay is **malformed**
   and is **rejected** — the sim can't safely interpret it.
+- **Bounded dimensions (anti-DoS), before re-sim:** the server rejects a replay whose
+  `tickInputs.length` exceeds the level's **maximum match length** (derived from the
+  ruleset — matches terminate) or whose **per-tick command count** exceeds a fixed
+  cap. This bounds re-sim cost against a resource-exhaustion attack up front,
+  independent of the terminal-tick check that runs during re-sim.
 - **Game-rule validation** (inside the sim): a well-formed but illegal command —
   unaffordable, illegal placement, or one that would fully block the exit — is a
   **deterministic no-op**, applying the **same rule on client and server**. The sim

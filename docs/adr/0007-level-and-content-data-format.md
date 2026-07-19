@@ -36,13 +36,17 @@ loader rejects malformed, wrong-type, or out-of-range data. **No floats.**
 
 ### 3. `rulesetHash` = a collision-resistant hash of a precisely canonical form
 
-- **Canonical form:** the ruleset (presentation-only fields stripped, per below) is
-  serialized via **RFC 8785 JSON Canonicalization Scheme (JCS)** — which fully fixes
-  the bytes: object keys sorted by **UTF-16 code unit**, ECMAScript **number
-  formatting** (unambiguous for our bounded integers / fixed-point), and **UTF-8**
-  output — after schema validation has removed unknown fields and resolved
-  `null`-vs-omitted. Naming a standard leaves no room for two loaders to disagree on
-  key order, number serialization, or string encoding.
+- **Normalize, then canonicalize.** A defined **normalization** step runs first —
+  part of the spec, identical on client and server, **not** an incidental effect of
+  whichever validator (JSON-Schema validation alone doesn't strip unknown properties
+  or resolve `null`-vs-omitted; a Zod parse might transform differently): parse →
+  apply schema defaults → **strip unknown fields** → **strip presentation-only
+  fields** (below) → resolve `null`-vs-omitted to one canonical form. The normalized
+  object is then serialized via **RFC 8785 JSON Canonicalization Scheme (JCS)** —
+  object keys sorted by **UTF-16 code unit**, ECMAScript **number formatting**
+  (unambiguous for our bounded integers / fixed-point), **UTF-8** output. Explicit
+  normalization + a named canonicalization standard leave no room for two loaders to
+  disagree on key order, number serialization, or string encoding.
 - **Presentation-only data is excluded from the hash.** Localization keys (level
   names, etc.) and other non-sim fields do **not** participate — they can't affect the
   sim, so renaming a level must not invalidate replays. Only sim-affecting content is
