@@ -31,15 +31,28 @@ const SCENARIO_TICKS = 300;
 
 /**
  * The canonical input log: a pure function of the tick index (no external RNG —
- * the sim's own seeded RNG supplies in-sim randomness). Spawns creeps on a fixed
- * cadence with cycling lane and hp, so the scenario exercises spawning, movement,
- * and leaking rather than an idle board.
+ * the sim's own seeded RNG supplies in-sim randomness). It exercises the FULL
+ * command vocabulary that exists today — single spawns, a multi-command tick, and
+ * an explicit `noop` — so the golden reacts to a behavior change in any of those
+ * paths, not just single-spawn handling. (The scenario grows as the vocabulary
+ * does; a single golden can't cover an unbounded input space, so new commands must
+ * be added here when they land.)
  */
 function canonicalInputs(tick: number): SimInput[] {
-  if (tick % 5 !== 0) return [];
-  const lane = tick % 3; // 0, 1, 2 cycling
-  const hp = 8 + (tick % 4) * 2; // 8, 10, 12, 14 cycling
-  return [{ kind: 'spawnCreep', hp, lane }];
+  // Multi-command tick: two spawns applied in array order (id/order sensitivity).
+  if (tick % 15 === 0) {
+    return [
+      { kind: 'spawnCreep', hp: 12, lane: 0 },
+      { kind: 'spawnCreep', hp: 9, lane: 2 },
+    ];
+  }
+  if (tick % 5 === 0) {
+    const lane = tick % 3; // 0, 1, 2 cycling
+    const hp = 8 + (tick % 4) * 2; // 8, 10, 12, 14 cycling
+    return [{ kind: 'spawnCreep', hp, lane }];
+  }
+  if (tick % 7 === 0) return [{ kind: 'noop' }]; // exercise the noop path
+  return [];
 }
 
 /** Run the canonical scenario, returning the final state and the per-tick hash trace. */
@@ -59,8 +72,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '3b5bca16',
-  traceDigest: 'd47dedf1', // fnv1a(trace.join(':'))
+  finalHash: '49846032',
+  traceDigest: '51a72ea4', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 
