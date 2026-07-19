@@ -36,16 +36,19 @@ loader rejects malformed, wrong-type, or out-of-range data. **No floats.**
 
 ### 3. `rulesetHash` = a collision-resistant hash of a precisely canonical form
 
-- **Canonical form:** the ruleset is reduced to a fixed byte representation before
-  hashing — **keys sorted**, integers/fixed-point in their declared encoding, strings
-  **UTF-8 NFC**, `null`-vs-omitted defined by the schema (schema-validated first, so
-  no unknown fields survive), arrays in their defined order.
+- **Canonical form:** the ruleset (presentation-only fields stripped, per below) is
+  serialized via **RFC 8785 JSON Canonicalization Scheme (JCS)** — which fully fixes
+  the bytes: object keys sorted by **UTF-16 code unit**, ECMAScript **number
+  formatting** (unambiguous for our bounded integers / fixed-point), and **UTF-8**
+  output — after schema validation has removed unknown fields and resolved
+  `null`-vs-omitted. Naming a standard leaves no room for two loaders to disagree on
+  key order, number serialization, or string encoding.
 - **Presentation-only data is excluded from the hash.** Localization keys (level
   names, etc.) and other non-sim fields do **not** participate — they can't affect the
   sim, so renaming a level must not invalidate replays. Only sim-affecting content is
   hashed.
-- **Digest:** `rulesetHash` uses a **collision-resistant digest (SHA-256)**, not the
-  engine's 32-bit `fnv1a`. Because the replay carries only this value to identify the
+- **Digest:** `rulesetHash` = **SHA-256 over those canonical (JCS) UTF-8 bytes** — a
+  collision-resistant digest, not the engine's 32-bit `fnv1a`. Because the replay carries only this value to identify the
   exact content and bucket scores, a 32-bit hash is too weak — accidental collisions
   appear at modest catalog scale and deliberate ones are trivial. (The per-tick
   world-hash may stay on fast `fnv1a`; that's an internal determinism check, not a

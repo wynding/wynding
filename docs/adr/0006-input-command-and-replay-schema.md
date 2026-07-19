@@ -61,9 +61,13 @@ significant and duplicates are each re-validated against the then-current state.
   unaffordable, illegal placement, or one that would fully block the exit — is a
   **deterministic no-op**, applying the **same rule on client and server**. The sim
   is total.
-- **Deterministic match end:** a match ends at a terminal state defined by the
-  ruleset — all waves cleared (win) or lives at zero (loss). **`tickInputs` beyond the
-  terminal tick are rejected**, so a client can't pad the log.
+- **Deterministic match end:** the ruleset guarantees termination — finite waves
+  (win when all clear) or lives reaching zero (loss) — so the sim always reaches a
+  terminal tick. The server **runs the sim to that terminal tick regardless of log
+  length**: `tickInputs[t]` supplies commands for tick `t` (empty if none), and **if
+  the log ends before terminal the sim continues with empty inputs** (the player
+  issued no more commands) until win/loss. **Entries at or beyond the terminal tick
+  are rejected** (padding). The score is derived from the terminal state.
 - **The server derives the authoritative score from the terminal state of the
   re-sim — it never trusts a client-supplied score.**
 
