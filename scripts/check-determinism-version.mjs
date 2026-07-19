@@ -64,9 +64,24 @@ const RE_FINAL = /finalHash:\s*'([0-9a-f]+)'/;
 const RE_TRACE = /traceDigest:\s*'([0-9a-f]+)'/;
 const RE_VERSION = /SIM_VERSION\s*=\s*(\d+)/;
 
+// An absent OR incomplete base golden means "no prior value" (see below). Read it
+// first, because a PR that DELETES or renames the test must not be able to slip
+// past the gate.
+const baseGolden = parseGolden(fileAt(baseRef, TEST_PATH));
 const headTest = fileAt('HEAD', TEST_PATH);
+
 if (!headTest) {
-  console.log(`✓ ${TEST_PATH} not present on HEAD — nothing to check.`);
+  // Removing or renaming the gate's own test would silently disable the gate. If
+  // the base branch carried a golden, that removal must be deliberate — fail here
+  // so it can't happen alongside an unbumped behavior change.
+  if (baseGolden) {
+    fail(
+      `${TEST_PATH} carried the determinism golden on ${baseRef} but is missing on HEAD.\n` +
+        '   Removing or renaming it silently disables the determinism gate. If that is\n' +
+        '   intentional, remove the determinism-version CI job too; otherwise restore it.',
+    );
+  }
+  console.log(`✓ ${TEST_PATH} absent on both base and HEAD — nothing to check.`);
   process.exit(0);
 }
 
@@ -80,9 +95,8 @@ if (!headGolden) {
   );
 }
 
-// An absent OR incomplete base golden means "no prior value": the golden is being
-// introduced, which needs no version bump.
-const baseGolden = parseGolden(fileAt(baseRef, TEST_PATH));
+// An absent or incomplete base golden means the golden is being introduced, which
+// needs no version bump.
 if (!baseGolden) {
   console.log('✓ Determinism golden is newly introduced (no prior value) — no bump required.');
   process.exit(0);
