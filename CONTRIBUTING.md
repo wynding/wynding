@@ -29,7 +29,8 @@ libraries** are exempt from the asset rule — they keep their own licenses (per
 ADR 0002); record the applicable license and any required attribution.
 
 If you can't accept AGPL terms for your employer or other reason, please don't
-submit code changes; issue reports and documentation corrections are still welcome.
+submit code or documentation changes (both are AGPL); issue reports are still
+welcome.
 
 ## Code of Conduct
 
