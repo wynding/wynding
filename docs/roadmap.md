@@ -38,11 +38,13 @@ real production build.
 ### M1 — Playable slice _(the MVP / first release)_
 
 One authored board and the maze-building core loop: the player shapes the maze to
-route creeps to the exit, and wins or loses a single board. **Web only.**
-Optionally a **local** best-score per board (no server). Because it is a public
-release, M1 meets the day-one bars the ADRs tie to the first UI: the **accessibility
-standard and its release gate (ADR 0003)**, and **externalized strings for
-localization (ADR 0004)** — translated locales themselves come later.
+route creeps to the exit, and wins or loses a single board. **Web only.** Because it
+is a public release, M1 meets the day-one bars the ADRs tie to the first UI: the
+**accessibility standard and its release gate (ADR 0003)**, and **externalized
+strings for localization (ADR 0004)** — translated locales themselves come later.
+(Whether M1 persists anything at all — e.g. a local best-score — is a Core Gameplay
+PRD call; any real persistence uses the ADR 0008 envelope and lands with
+Single-player.)
 
 - **Goal:** prove the core loop is fun.
 - **Not in M1:** campaign, cloud save, leaderboard, other platforms, mods.
