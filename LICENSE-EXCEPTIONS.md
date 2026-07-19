@@ -1,7 +1,11 @@
 # License Exceptions
 
-Wynding is licensed under the **GNU Affero General Public License, version 3
-or later** (AGPL-3.0-or-later); see [LICENSE](LICENSE) for the full text.
+Wynding — **all of it: code, art, audio, content data, and documentation** — is
+licensed under the **GNU Affero General Public License, version 3 or later**
+(AGPL-3.0-or-later); see [LICENSE](LICENSE) for the full text. For assets, the AGPL
+"source" is the editable master (see
+[ADR 0002](docs/adr/0002-asset-and-content-licensing.md)). The exception below
+therefore covers the whole work — code and assets alike.
 
 In addition, the copyright holders grant the following additional permission
 under section 7 of that license. This permission is granted to **everyone** — not
@@ -57,8 +61,8 @@ retroactively on copies already conveyed.
 
 ---
 
-_Note: `package.json` continues to declare `"license": "AGPL-3.0-or-later"`. That
+_Note: `package.json` files declare `"license": "AGPL-3.0-or-later"`. That
 identifier deliberately understates the permissions granted here (npm's SPDX field
-does not cleanly express a custom exception), which is the safe direction — it
-never claims more permission than is actually granted. This file is the
-authoritative statement of the exception._
+does not cleanly express a custom exception), which is the safe direction — it never
+claims more permission than is actually granted. This file is the authoritative
+statement of the exception._

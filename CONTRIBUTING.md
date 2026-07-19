@@ -7,18 +7,31 @@ and submit changes.
 
 ## License & Inbound=Outbound
 
-Wynding is licensed under **AGPL-3.0-or-later** plus the **Wynding App Store
-Exception** (v1.0 or, at your option, any later version the project publishes —
-see [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)). By submitting a contribution
-you agree it is licensed under those same terms, and you certify that you have the
-right to license it that way (e.g. it's your own work, or you have permission —
-don't paste in code from another project unless its license is compatible **and**
-carries an equivalent app-store permission). We do not require a CLA — your
-copyright stays yours; we just need the AGPL license, plus the exception so anyone
-can ship store builds.
+Everything — **code, documentation, art, audio, and content data** — is
+**AGPL-3.0-or-later** plus the **Wynding App Store Exception** (v1.0 or, at your
+option, any later version the project publishes — see
+[LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)), so anyone can ship store builds.
+Inbound = outbound and **no CLA** — your copyright stays yours; we just need the
+AGPL license plus the exception. For assets, "source" is the **preferred form for
+modification**: if you worked in a layered/vector master (`.psd`/`.kra`/`.svg`, DAW
+project), commit that too — not just the export; a flat asset with no richer form
+(e.g. an AI-generated or hand-drawn `.png`) is its own source. See
+[ADR 0002](docs/adr/0002-asset-and-content-licensing.md).
+
+By submitting a contribution you agree it is licensed under those terms, and you
+certify that you have the right to license it that way — it's your own work, or you
+have permission, with any required attribution recorded. Any **third-party**
+material you bundle (asset, font, or library) must be under a license that is
+**independently app-store-compatible** — a permissive license with no anti-DRM or
+extra-restriction clause (MIT, BSD, Apache-2.0, ISC, CC0, public domain) — **or**
+one that already carries an equivalent store permission. A plain GPL/AGPL/LGPL or
+CC-BY(-SA) third-party component is **not** acceptable: the §7 exception doesn't
+extend to it, so it would reintroduce app-store restrictions (no `NC`/`ND` either).
+Record each such component's license and attribution (per ADR 0002).
 
 If you can't accept AGPL terms for your employer or other reason, please don't
-submit code changes; issue reports and documentation corrections are still welcome.
+submit code, documentation, or asset changes (all are AGPL); issue reports are
+still welcome.
 
 ## Code of Conduct
 
