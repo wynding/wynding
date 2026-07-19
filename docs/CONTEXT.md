@@ -14,7 +14,7 @@ PRs. This is vocabulary only; for _why_ decisions were made see the ADRs.
 The open playfield — a rectangular grid of tiles with one or more creep entrances
 and an exit. Unlike fixed-lane defense, the board starts empty and the player
 shapes the route by building.
-_Avoid_: map, field, level (a level is board + waves + economy).
+_Avoid_: map, field, level.
 
 **Creep**:
 An enemy unit that walks the board from an entrance toward the exit. Creeps have
@@ -39,8 +39,8 @@ fully wall it off; a route must always remain.
 _Avoid_: route (interchangeable in prose, but "path" is canonical in code).
 
 **Wave**:
-A scheduled burst of creeps the player must survive. A level is a finite,
-ordered sequence of waves.
+A scheduled burst of creeps the player must survive. Waves come in a finite,
+ordered sequence — a board's **wave schedule**.
 _Avoid_: round, level, round-number.
 
 **Lives**:
@@ -50,7 +50,7 @@ _Avoid_: health, HP (that's a creep stat), hearts.
 
 **Bounty**:
 In-run currency. Earned by killing creeps and spent building/upgrading towers.
-Purely per-run; it does not persist between levels.
+Purely per-run; it does not persist across runs.
 _Avoid_: gold, money, cash, credits.
 
 ## Simulation
@@ -89,3 +89,29 @@ _Avoid_: checksum, digest (fine in prose; "world-hash" is canonical).
 The behavior version stamped on a replay; bumped on any determinism-affecting
 change so a replay is validated against the version it was recorded under.
 _Avoid_: game version, schema version.
+
+## Delivery
+
+How we break work down and ship it. See [`roadmap.md`](roadmap.md) for the actual
+phase sequence.
+
+**Phase**:
+The largest planning unit — a coherent stage of the product, "what the game _is_"
+at that point. Phases are sequenced; each yields a numbered release line (Phase 1 →
+the R1.x releases).
+_Avoid_: epic, stage.
+
+**Milestone**:
+A feature-sized capability inside a phase; milestones roll up into a phase.
+_Avoid_: deliverable (feature is fine in prose).
+
+**Story**:
+One focused, reviewable unit of work — in practice, one PR (which is one or more
+commits). Stories roll up into a milestone.
+_Avoid_: task, ticket.
+
+**Release**:
+A public build, tagged by maturity — **alpha** (rough, expect breakage) → **beta**
+(stabilizing) → **stable**. The major number is the phase (R1.0, then R1.1 for a
+Phase 1 bugfix); early milestones ship as alphas ahead of the stable release.
+_Avoid_: launch (version is fine in prose).

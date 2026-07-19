@@ -10,9 +10,9 @@ No save format exists; `StorageDriver` is only _named_ in `apps/mobile/README.md
 **replay is an input log**. `SimState` is already serializable (it includes its
 `rngState`), so the primitives exist. We decide the persistence format and seam before
 gameplay code. Co-own decisions: **meta-progress only for MVP**, **cloud-ready
-envelope**, **local for MVP**. _("MVP" here is this persistence scope. This ADR predates
-[`docs/roadmap.md`](../roadmap.md), which sets the MVP cut at the thinner M1 slice; the
-scope below lands at the roadmap's **Single-player game** milestone. The decisions are
+envelope**, **local for MVP**. _(This ADR predates [`docs/roadmap.md`](../roadmap.md) and
+its delivery vocabulary; read "MVP" here as this persistence scope. Per the roadmap it is
+built in **Phase 2**, not the Phase 1 single-player release — the decisions below are
 unchanged.)_ The `StorageDriver` contract and write-serialization mechanics live in
 `docs/design-notes/save-format.md`.
 
