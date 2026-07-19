@@ -1,12 +1,7 @@
 // levels.ts — authored level and wave data (game content).
 //
-// SPDX-License-Identifier: CC-BY-SA-4.0
-//
-// This file holds *content data* — a creative work (level geometry, economy,
-// wave scripts, balance numbers) licensed under Creative Commons
-// Attribution-ShareAlike 4.0, separate from the AGPL code in ./index.ts that
-// defines its shapes and loads it. See
-// ../../../docs/adr/0002-asset-and-content-licensing.md.
+// AGPL-3.0-or-later, like the rest of the project: all material — code and
+// assets/content alike — is AGPL + the §7 App Store Exception (see ADR 0002).
 
 import type { Level } from './schema';
 

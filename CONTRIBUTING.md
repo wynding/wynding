@@ -7,30 +7,27 @@ and submit changes.
 
 ## License & Inbound=Outbound
 
-Contributions carry the license of what they are, and inbound = outbound (**no
-CLA** — your copyright stays yours):
+Everything — **code, documentation, art, audio, and content data** — is
+**AGPL-3.0-or-later** plus the **Wynding App Store Exception** (v1.0 or, at your
+option, any later version the project publishes — see
+[LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)), so anyone can ship store builds.
+Inbound = outbound and **no CLA** — your copyright stays yours; we just need the
+AGPL license plus the exception. For assets, "source" means the **editable master**
+(`.psd`/`.kra`/`.blend`/`.svg`, DAW project files) — commit that, not just the
+export. See [ADR 0002](docs/adr/0002-asset-and-content-licensing.md).
 
-- **Code and documentation** are **AGPL-3.0-or-later** (code is additionally under
-  the **Wynding App Store Exception** — v1.0 or, at your option, any later version
-  the project publishes, see [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md) — so
-  anyone can ship store builds). Repo prose (README, docs, ADRs) is the AGPL repo
-  default.
-- **Art, audio, and content data** (levels, waves, balance numbers) are
-  **CC-BY-SA 4.0** — see
-  [ADR 0002](docs/adr/0002-asset-and-content-licensing.md).
-
-By submitting a contribution you agree it is licensed under the applicable terms
-above, and you certify that you have the right to license it that way — it's your
-own work, or you have permission, with any required attribution recorded. Don't
-paste in material from another project unless its license is compatible: for
-**code**, compatible **and** carrying an equivalent app-store permission; for
-**assets**, CC-BY-SA-compatible (no `NC`/`ND`). Bundled **fonts and third-party
-libraries** are exempt from the asset rule — they keep their own licenses (per
-ADR 0002); record the applicable license and any required attribution.
+By submitting a contribution you agree it is licensed under those terms, and you
+certify that you have the right to license it that way — it's your own work, or you
+have permission, with any required attribution recorded. Don't paste in material
+from another project unless its license is **AGPL-compatible** (for assets, prefer
+public domain / CC0 or a GPL-compatible license; no `NC`/`ND`) and, for code,
+carries an equivalent app-store permission. Bundled **fonts and third-party
+libraries** are exempt — they keep their own licenses (per ADR 0002); record the
+applicable license and any required attribution.
 
 If you can't accept AGPL terms for your employer or other reason, please don't
-submit code or documentation changes (both are AGPL); issue reports are still
-welcome.
+submit code, documentation, or asset changes (all are AGPL); issue reports are
+still welcome.
 
 ## Code of Conduct
 

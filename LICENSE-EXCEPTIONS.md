@@ -1,11 +1,11 @@
 # License Exceptions
 
-Wynding's **code** is licensed under the **GNU Affero General Public License,
-version 3 or later** (AGPL-3.0-or-later); see [LICENSE](LICENSE) for the full text.
-Its **art, audio, and content data** are licensed CC-BY-SA 4.0 — see
-[ADR 0002](docs/adr/0002-asset-and-content-licensing.md). The exception below
-concerns the AGPL-licensed code; it does **not** cover the CC-BY-SA assets/content
-(whose own app-store/DRM considerations are an open item in ADR 0002).
+Wynding — **all of it: code, art, audio, content data, and documentation** — is
+licensed under the **GNU Affero General Public License, version 3 or later**
+(AGPL-3.0-or-later); see [LICENSE](LICENSE) for the full text. For assets, the AGPL
+"source" is the editable master (see
+[ADR 0002](docs/adr/0002-asset-and-content-licensing.md)). The exception below
+therefore covers the whole work — code and assets alike.
 
 In addition, the copyright holders grant the following additional permission
 under section 7 of that license. This permission is granted to **everyone** — not
@@ -61,11 +61,8 @@ retroactively on copies already conveyed.
 
 ---
 
-_Note: code `package.json` files declare `"license": "AGPL-3.0-or-later"`. That
+_Note: `package.json` files declare `"license": "AGPL-3.0-or-later"`. That
 identifier deliberately understates the permissions granted here (npm's SPDX field
-does not cleanly express a custom exception), which is the safe direction — it
-never claims more permission than is actually granted. The one exception is
-`@wynding/content`, which mixes AGPL code with CC-BY-SA content data and so
-declares the combined SPDX expression `AGPL-3.0-or-later AND CC-BY-SA-4.0` (see
-[ADR 0002](docs/adr/0002-asset-and-content-licensing.md)). This file is the
-authoritative statement of the code exception._
+does not cleanly express a custom exception), which is the safe direction — it never
+claims more permission than is actually granted. This file is the authoritative
+statement of the exception._

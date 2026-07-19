@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "license": "AGPL-3.0-or-later AND CC-BY-SA-4.0",
-  "description": "Level and wave data. Code (types/loaders) is AGPL-3.0-or-later; authored content data is CC-BY-SA-4.0 (see README).",
+  "license": "AGPL-3.0-or-later",
+  "description": "Level and wave data.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

@@ -1,8 +1,8 @@
-// schema.ts — content data shapes (types only). AGPL-3.0-or-later code.
+// schema.ts — content data shapes (types only).
 //
 // The type definitions live here so both the public barrel (index.ts) and the
-// authored data (levels.ts, CC-BY-SA content) import them directly, without
-// routing the data module through the public barrel.
+// authored data (levels.ts) import them directly, without routing the data module
+// through the public barrel.
 
 import type { CreepKind } from '@wynding/types';
 
