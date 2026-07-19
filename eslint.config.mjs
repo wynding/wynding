@@ -49,4 +49,12 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Node CI/tooling scripts run under the Node runtime, not the browser — allow
+    // the Node globals they legitimately use.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { process: 'readonly', console: 'readonly' },
+    },
+  },
 );

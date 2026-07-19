@@ -35,6 +35,18 @@ function match(content, re) {
   return m ? m[1] : null;
 }
 
+/** The golden identity as `finalHash:traceDigest`, or null if EITHER field is absent. */
+function parseGolden(content) {
+  const final = match(content, RE_FINAL);
+  const trace = match(content, RE_TRACE);
+  return final && trace ? `${final}:${trace}` : null;
+}
+
+function fail(message) {
+  console.error(`❌ ${message}`);
+  process.exit(1);
+}
+
 // Ensure the base branch is available as a local ref (CI checkouts are often
 // shallow / single-ref).
 let baseRef = `origin/${BASE_REF}`;
@@ -52,17 +64,25 @@ const RE_FINAL = /finalHash:\s*'([0-9a-f]+)'/;
 const RE_TRACE = /traceDigest:\s*'([0-9a-f]+)'/;
 const RE_VERSION = /SIM_VERSION\s*=\s*(\d+)/;
 
-const baseTest = fileAt(baseRef, TEST_PATH);
 const headTest = fileAt('HEAD', TEST_PATH);
-
 if (!headTest) {
   console.log(`✓ ${TEST_PATH} not present on HEAD — nothing to check.`);
   process.exit(0);
 }
 
-const baseGolden = baseTest && `${match(baseTest, RE_FINAL)}:${match(baseTest, RE_TRACE)}`;
-const headGolden = `${match(headTest, RE_FINAL)}:${match(headTest, RE_TRACE)}`;
+// The gate can't do its job if it can't read HEAD's golden — fail loudly rather
+// than silently pass.
+const headGolden = parseGolden(headTest);
+if (!headGolden) {
+  fail(
+    `Could not parse the golden (finalHash + traceDigest) from ${TEST_PATH} on HEAD.\n` +
+      '   The determinism guard cannot verify this PR — check the golden format.',
+  );
+}
 
+// An absent OR incomplete base golden means "no prior value": the golden is being
+// introduced, which needs no version bump.
+const baseGolden = parseGolden(fileAt(baseRef, TEST_PATH));
 if (!baseGolden) {
   console.log('✓ Determinism golden is newly introduced (no prior value) — no bump required.');
   process.exit(0);
@@ -73,21 +93,32 @@ if (baseGolden === headGolden) {
   process.exit(0);
 }
 
-const baseVersion = match(fileAt(baseRef, INDEX_PATH), RE_VERSION);
-const headVersion = match(fileAt('HEAD', INDEX_PATH), RE_VERSION);
+// The golden changed: SIM_VERSION must be readable on both sides and STRICTLY
+// INCREASE (a decrement or reuse is not a bump, and replays key on the version).
+const baseVersionRaw = match(fileAt(baseRef, INDEX_PATH), RE_VERSION);
+const headVersionRaw = match(fileAt('HEAD', INDEX_PATH), RE_VERSION);
 
-if (baseVersion === headVersion) {
-  console.error(
-    '❌ Determinism golden changed but SIM_VERSION did not.\n\n' +
-      `   golden  ${baseGolden}  →  ${headGolden}\n` +
-      `   SIM_VERSION stayed at ${headVersion}\n\n` +
-      'A change to finalHash/traceDigest is a determinism-affecting behavior change.\n' +
-      'Bump SIM_VERSION in packages/sim/src/index.ts in this PR (and note why).',
+if (baseVersionRaw === null || headVersionRaw === null) {
+  fail(
+    'Determinism golden changed but SIM_VERSION could not be read as an integer ' +
+      `(base=${baseVersionRaw}, head=${headVersionRaw}) from ${INDEX_PATH}.`,
   );
-  process.exit(1);
+}
+
+const baseVersion = Number(baseVersionRaw);
+const headVersion = Number(headVersionRaw);
+
+if (headVersion <= baseVersion) {
+  fail(
+    'Determinism golden changed but SIM_VERSION did not increase.\n\n' +
+      `   golden       ${baseGolden}  →  ${headGolden}\n` +
+      `   SIM_VERSION  ${baseVersion}  →  ${headVersion}\n\n` +
+      'A change to finalHash/traceDigest is a determinism-affecting behavior change.\n' +
+      'Increase SIM_VERSION in packages/sim/src/index.ts in this PR (and note why).',
+  );
 }
 
 console.log(
-  `✓ Determinism golden changed and SIM_VERSION was bumped (${baseVersion} → ${headVersion}).`,
+  `✓ Determinism golden changed and SIM_VERSION increased (${baseVersion} → ${headVersion}).`,
 );
 process.exit(0);
