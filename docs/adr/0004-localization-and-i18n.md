@@ -41,8 +41,15 @@ is placeholder scaffold predating the catalog.)
 
 ### 3. Ship English-only (`en`) at launch
 
-One locale to start. The catalog, `t()` accessor, lint rule, and extraction check
-exist from the beginning so a **supported** second locale is drop-in.
+One locale to start, so that a **supported** second locale is later drop-in.
+
+> **Status:** this is the contract the **first real UI implements** — the `en`
+> catalog, typed `t()` accessor, string-literal lint rule, and extraction check do
+> **not** exist yet. The current scaffold predates them and still holds a couple of
+> placeholder hardcoded strings (e.g. `apps/web/src/main.ts`,
+> `packages/render/src/index.ts`); those are migrated when the i18n layer lands with
+> the first UI. Until then, "no hardcoded user-facing strings" is the standard being
+> adopted, not a claim that the mechanism is already wired.
 
 ### 4. Design for i18n from the start
 
