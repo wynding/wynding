@@ -126,7 +126,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   corners, not a straight velocity vector); if the lead would run past the exit (the creep leaks
   before the shot lands), the impact point is **clamped to the exit** at the route's end. Long
   shots are less reliable _by design_: only a
-  state change in flight (re-path, slow, stun, death) makes a lead miss, and that is the
+  state change in flight (re-path, slow, stun, death, leak) makes a lead miss, and that is the
   counterplay, not a bug.
 - **Range is a circular radius** measured in fixed-point from the tower's 2×2 footprint **center**
   to the creep's point (Euclidean). A creep is _in range_ when that distance is within the tower's
@@ -135,7 +135,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   determinism-gated detail fixed with the combat sim.)
 - **Targeting is sticky.** A tower acquires the creep that is **"first"** — the fewest steps
   from the exit (the smallest remaining path-distance, the creep most about to leak; ties break
-  to the lower creep id) — and **holds that target until it dies or leaves range**, then
+  to the lower creep id) — and **holds that target until it dies, leaks, or leaves range**, then
   re-acquires. It never swaps to a
   higher-priority creep mid-life. _(Player-selectable targeting priority — first/last/strong/
   weak — is a depth feature deferred to M4.)_
@@ -205,8 +205,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   It is spent on building and upgrading towers.
 - **Three income sources:**
   - **per-kill bounty** (base income),
-  - a **wave-clear bonus** (paid when the last creep of a wave dies; **forfeited if any creep
-    of that wave leaked**),
+  - a **wave-clear bonus** (paid once, when the wave is fully resolved — its spawn schedule is
+    exhausted _and_ none of its creeps remain alive; **forfeited if any of its creeps leaked**),
   - an **early-call bonus** (the tempo lever from §2).
 - These force real decisions: spend now for safety vs. hold to build bigger, and how
   aggressively to rush waves.

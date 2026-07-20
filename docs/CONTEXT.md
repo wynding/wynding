@@ -24,8 +24,9 @@ rather than as fixed kinds.
 _Avoid_: enemy, mob, monster, minion.
 
 **Tower**:
-A player-built structure that occupies a **2×2 block of cells** and attacks creeps
-in range. Towers are also **walls**: they reshape the maze. Towers upgrade in place
+A player-built structure that occupies a **2×2 block of cells** and either attacks
+creeps in range or aids nearby towers (a support tower). Towers are also **walls**:
+they reshape the maze. Towers upgrade in place
 (per-run only — no permanent meta-progression).
 _Avoid_: turret, unit, building, defense.
 
