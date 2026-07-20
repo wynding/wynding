@@ -86,7 +86,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **A wave's countdown begins on the tick after the previous wave launches** — whether that wave
   launched by its own countdown expiring or by an early call — so **countdowns are sequential** (one wave
   counts down at a time), while the resulting creep **waves may overlap** on the field (the next
-  wave arrives while the current one's creeps are still alive).
+  wave arrives while the current one's creeps are still alive). The **first wave's countdown starts
+  at run start** (tick 0), so it is callable from the opening tick.
 
 ### 3. Building, selling & dynamic re-pathing
 
@@ -126,8 +127,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Area (AoE)** attacks are **point-locked**: the impact is scheduled to a fixed board point,
   and on the impact tick it resolves against **whatever creeps are within the radius then**.
   Creeps can walk out of a blast (dodge) or into it (caught). **Aim leads the target** — the
-  impact point is the target's position extrapolated forward **along its current route** (around
-  corners, not a straight velocity vector); if the lead would run past the exit (the creep leaks
+  impact point is the target's position extrapolated forward **along its current route at its
+  fire-time effective speed** (around corners, not a straight velocity vector; the fire-time speed
+  is held constant over the shot's travel, so a speed change in flight is one of the lead-miss
+  cases below); if the lead would run past the exit (the creep leaks
   before the shot lands), the impact point is **clamped to the exit** at the route's end. Long
   shots are less reliable _by design_: only a
   state change in flight (re-path, slow, stun, death, leak) makes a lead miss, and that is the
