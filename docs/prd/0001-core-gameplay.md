@@ -140,9 +140,11 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   range and _leaves range_ by the same test. An AoE blast radius uses the same Euclidean
   point-distance test, measured from its fixed impact point. (Exact boundary rounding is a
   determinism-gated detail fixed with the combat sim.)
-- **Targeting is sticky.** A tower acquires the creep that is **"first"** — the fewest steps
-  from the exit (the smallest remaining path-distance, the creep most about to leak; ties break
-  to the lower creep id) — and **holds that target until it dies, leaks, or leaves range**, then
+- **Targeting is sticky.** A tower acquires the creep that is **"first"** — the one with the
+  **smallest remaining path-distance to the exit** (the weighted route distance from the
+  Determinism section — _not_ a raw step count, which diverges once diagonal steps cost more; the
+  creep most about to leak; ties break to the lower creep id) — and **holds that target until it
+  dies, leaks, or leaves range**, then
   re-acquires. It never swaps to a
   higher-priority creep mid-life. _(Player-selectable targeting priority — first/last/strong/
   weak — is a depth feature deferred to M4.)_
@@ -164,13 +166,15 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   scheduled impact still resolves via the fire-time snapshot.)_
 
 - **Effect stacking rules** (shape, so combined effects read predictably):
-  - Same effect from multiple sources → the **strongest magnitude wins**, and a new application
+  - Same **non-DoT** effect (slow, stun) from multiple sources → the **strongest magnitude wins**, and a new application
     refreshes the duration only when it is **at least as strong** as the active effect — a weaker
     hit neither extends nor overrides a stronger one, so cheap weak hits can't sustain a strong
     effect indefinitely.
   - **Stun overrides slow** while active.
   - Each **DoT source is independent** (two DoT towers apply two DoTs); a **re-application from
-    the same source refreshes that DoT's duration** rather than stacking a second copy of it.
+    the same source refreshes that DoT's duration and adopts the new application's (fire-time-
+    snapshot) magnitude** rather than stacking a second copy — so an upgraded or re-buffed source
+    strengthens its DoT on its next hit.
 
 ### 5. Creeps
 
@@ -327,9 +331,9 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   determinism-gated detail fixed when the combat sim is built.
 - **Pathfinding** is a flow-field + A* with a deterministic tie-break. Movement is
   8-connected; the **diagonal step cost uses a fixed-point approximation of √2** (no
-  transcendentals). "Fewest steps to exit" and the predictive lead both read remaining
-  path-distance along the creep's current route — flow-field for ground, straight line for air —
-  so both-domain towers compare like with like.
+  transcendentals). The **"first" targeting metric and the predictive lead both read the same
+  weighted remaining path-distance** along the creep's current route — flow-field for ground,
+  straight line for air — so both-domain towers compare like with like.
 - **Re-pathing** recomputes routes on every maze change within the tick it happens; the maze
   invariant is enforced _before_ a build applies, so the sim is never in a no-path state.
 - **Speed and pause are cosmetic on replay:** speed multiplies ticks-per-second, pause runs
