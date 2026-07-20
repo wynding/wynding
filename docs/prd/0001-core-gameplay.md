@@ -224,8 +224,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Scoring — two readouts:**
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
-    upgrade value, and aggressive early wave-sends; these inputs come online as their systems do
-    (kills with combat, early-sends at M2, upgrade value at M4). _(Point weights — and the exact
+    upgrade value, and aggressive early wave-sends; these inputs come online as they become
+    meaningful (kills with combat, early-sends at M2, upgrade value at M4). _(Point weights — and the exact
     sim-state measure behind each input, e.g. what "upgrade value" counts — are pinned with the
     authoritative scorer; the current scorer is a placeholder that grows into this contract.)_
   - A derived **star grade** (from lives remaining — a near-flawless run is the top grade) as
@@ -288,8 +288,10 @@ waiver above).
 
 **Off at M1** (shape decided; activates later): AoE/slow/stun/DoT/support/burst effects · air
 and anti-air · tower leveling · multiple waves. The **economy runs thin** — **starting bounty +
-per-kill only**; the wave-clear and early-call bonuses need a _next_ wave, so they switch on at
-**M2** (when more waves first appear). Difficulty runs on the single **Medium** reference curve.
+per-kill only**. The wave-clear and early-call bonuses are **tuned to zero in M1's ruleset** — the
+mechanics exist (a single wave can be called early and can clear), but one wave makes those bonuses
+uninteresting, so they are given meaningful values from **M2** onward, when multiple waves do.
+Difficulty runs on the single **Medium** reference curve.
 
 ## Milestone activation (Phase 1)
 
