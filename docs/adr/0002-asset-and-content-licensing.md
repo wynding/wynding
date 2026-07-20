@@ -6,7 +6,7 @@
 ## Context
 
 Code is AGPL-3.0-or-later with a public §7 App Store Exception (ADR 0001 §5). We
-must license the non-code material too — art, audio, fonts, and authored level /
+must license the non-code material too — art, audio, fonts, and authored board /
 wave / balance data — and `packages/content` already holds sample data, so this
 can't wait.
 
@@ -28,7 +28,7 @@ _inside_ that license.
 
 ### One license for the whole work: AGPL-3.0-or-later + the §7 App Store Exception
 
-**All original material — code, art, audio, level / wave / balance data, and
+**All original material — code, art, audio, board / wave / balance data, and
 repository documentation — is licensed AGPL-3.0-or-later with the same public §7
 App Store Exception** (see [LICENSE-EXCEPTIONS.md](../../LICENSE-EXCEPTIONS.md)). The
 GPL family can license any copyrightable work, not just code (per the FSF), so

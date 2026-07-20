@@ -106,7 +106,7 @@ _Avoid_: float position, decimal.
 
 **Replay**:
 The minimal record that reproduces a match exactly — `{ seed, rulesetHash,
-simVersion, levelId, tickInputs }` (`levelId` added by ADR 0006 so the scheduler
+simVersion, boardId, tickInputs }` (`boardId` added by ADR 0006 so the scheduler
 input is unambiguous). Re-simulated server-side to derive a trusted score.
 _Avoid_: recording, demo, save (a save is a state snapshot, not an input log).
 

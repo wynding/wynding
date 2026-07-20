@@ -1,4 +1,4 @@
-# ADR 0007 — Level and content data format (the ruleset)
+# ADR 0007 — Board and content data format (the ruleset)
 
 - **Status:** Accepted
 - **Date:** 2026-07-18
@@ -17,9 +17,9 @@ gameplay code; the encoding and hashing mechanics live in
 ### 1. The ruleset is the complete, data-driven content the sim reads
 
 A single validated data bundle — the **tower catalog**, the **creep catalog**,
-**board/level geometry**, **wave schedules**, and **global balance constants**. **No
+**board geometry**, **wave schedules**, and **global balance constants**. **No
 balance magic-numbers live in engine code**; the sim reads all tuning from the ruleset.
-A match outcome is a pure function of `(seed, ruleset, levelId, inputs)`.
+A match outcome is a pure function of `(seed, ruleset, boardId, inputs)`.
 
 ### 2. Format: schema-validated JSON, moddable without a build step
 
@@ -34,7 +34,7 @@ sim-affecting data.**
 `rulesetHash` identifies the exact sim-affecting content a replay ran against and buckets
 leaderboard scores, so it must be **collision-resistant** (a cryptographic digest, not
 the engine's 32-bit world-hash) and computed over a **canonical form that excludes
-presentation-only fields** — localization keys and the like, so renaming a level never
+presentation-only fields** — localization keys and the like, so renaming a board never
 invalidates replays. Client and server must produce byte-identical hashes from
 equivalent content; the canonicalization procedure is fixed in the design note.
 `rulesetHash` is the _content/balance_ version; `simVersion` is the _engine-behavior_
@@ -50,7 +50,7 @@ hashed identically. This is the moddability substrate behind the working agreeme
 
 ### 5. Display strings are localization keys
 
-Level names and any player-facing text are **localization keys** resolved at the UI layer
+Board names and any player-facing text are **localization keys** resolved at the UI layer
 (ADR 0004) — never baked literals, never in the sim, and never in the hash.
 
 ## Consequences

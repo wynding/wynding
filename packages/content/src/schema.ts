@@ -1,7 +1,7 @@
 // schema.ts — content data shapes (types only).
 //
 // The type definitions live here so both the public barrel (index.ts) and the
-// authored data (levels.ts) import them directly, without routing the data module
+// authored data (boards.ts) import them directly, without routing the data module
 // through the public barrel.
 
 import type { CreepKind } from '@wynding/types';
@@ -23,8 +23,8 @@ export interface Wave {
   readonly leadInTicks: number;
 }
 
-/** A playable level: board geometry, starting economy, and its wave schedule. */
-export interface Level {
+/** A playable board: its geometry, starting economy, and wave schedule. */
+export interface Board {
   readonly id: string;
   /**
    * Display name. Placeholder scaffold text today; per ADR 0004 this becomes a

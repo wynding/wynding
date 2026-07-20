@@ -33,7 +33,7 @@ cell no-ops).
 A submitted replay is hostile input. Structural validation bounds individual _values_ but
 must also bound _dimensions_, **before** re-simulation:
 
-- reject if `tickInputs.length` exceeds the level's **maximum match length** (derived
+- reject if `tickInputs.length` exceeds the board's **maximum match length** (derived
   from the ruleset);
 - reject if any tick's command count exceeds a fixed **per-tick cap**.
 
@@ -77,4 +77,4 @@ deferred defenses; `validate()` should flag them as future work.
 
 The web/app input layer maps raw pointer / keyboard / touch events to commands, applies
 them to the running sim, and appends them in tick order to the log. That log plus the
-initial conditions `{ seed, rulesetHash, simVersion, levelId }` _is_ the replay.
+initial conditions `{ seed, rulesetHash, simVersion, boardId }` _is_ the replay.

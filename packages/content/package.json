@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "Level and wave data.",
+  "description": "Board and wave data.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

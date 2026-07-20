@@ -32,10 +32,10 @@ sim state (when the previous wave clears) and on any recorded wave-timing comman
 spawns are a deterministic function of `(seed, ruleset, inputs)` and re-simulation is
 exact, with no creep spawns in the input log.
 
-### 3. Replay identity selects the level
+### 3. Replay identity selects the board
 
-A replay's initial conditions are `{ seed, rulesetHash, simVersion, levelId }` — this
-adds `levelId` to the ADR 0001 §3 envelope (envelope and `docs/CONTEXT.md` updated to
+A replay's initial conditions are `{ seed, rulesetHash, simVersion, boardId }` — this
+adds `boardId` to the ADR 0001 §3 envelope (envelope and `docs/CONTEXT.md` updated to
 match). Those four plus the ruleset fully determine the re-simulation; `tickInputs` is
 the ordered command log.
 

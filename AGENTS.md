@@ -31,7 +31,7 @@ packages/
   engine   determinism toolkit — seeded RNG, fixed-point math, fixed-timestep loop, world-hash
   sim      headless deterministic simulation: step(state, inputs)
   render   Phaser 3 presentation layer (reads sim state, never mutates it)
-  content  level / wave data
+  content  board / wave data
   replay   replay format + re-simulation validator
   types    shared types
 apps/
