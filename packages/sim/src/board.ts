@@ -53,9 +53,9 @@ export interface Grid {
    * *add* blocks — it can never erase permanent terrain.
    */
   readonly baseMask: Uint8Array;
-  /** Class of a cell; throws if the cell is out of bounds. */
+  /** Class of a cell; throws if the cell is not an in-bounds integer cell. */
   classAt(cell: Cell): CellClass;
-  /** Whether a cell lies within the grid. */
+  /** Whether a cell has safe-integer coordinates that lie within the grid. */
   inBounds(cell: Cell): boolean;
 }
 
@@ -196,12 +196,21 @@ export function buildGrid(spec: GridSpec): Grid {
   const frozenEntrance: Cell = Object.freeze({ col: entranceCol, row: entranceRow });
   const frozenExit: Cell = Object.freeze({ col: exitCol, row: exitRow });
 
+  // A valid cell has safe-integer coordinates inside the grid. Requiring integers
+  // here (not just a range check) stops a fractional cell — e.g. from future JSON,
+  // replay, or UI input — from indexing `baseMask` with a non-index and silently
+  // misreporting terrain; `classAt`/`neighbors` reject such cells instead.
   const inBounds = (cell: Cell): boolean =>
-    cell.col >= 0 && cell.row >= 0 && cell.col < width && cell.row < height;
+    Number.isSafeInteger(cell.col) &&
+    Number.isSafeInteger(cell.row) &&
+    cell.col >= 0 &&
+    cell.row >= 0 &&
+    cell.col < width &&
+    cell.row < height;
 
   const classAt = (cell: Cell): CellClass => {
     if (!inBounds(cell)) {
-      throw new GridError(`classAt: (${cell.col},${cell.row}) is out of bounds`);
+      throw new GridError(`classAt: (${cell.col},${cell.row}) is not an in-bounds integer cell`);
     }
     if (isOpening(cell.col, cell.row)) return 'walkable-unbuildable';
     return baseMask[cell.row * width + cell.col] !== 0 ? 'blocked' : 'buildable-open';
@@ -230,6 +239,9 @@ export function buildGrid(spec: GridSpec): Grid {
  */
 export function neighbors(grid: Grid, cell: Cell, extraBlocked?: Uint8Array): Cell[] {
   const { width, height, baseMask } = grid;
+  if (!grid.inBounds(cell)) {
+    throw new GridError(`neighbors: (${cell.col},${cell.row}) is not an in-bounds integer cell`);
+  }
   if (extraBlocked !== undefined && extraBlocked.length !== width * height) {
     throw new GridError(`extraBlocked length ${extraBlocked.length} !== ${width * height}`);
   }

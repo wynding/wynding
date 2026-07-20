@@ -58,6 +58,15 @@ describe('buildGrid — cell classification', () => {
     expect(grid.inBounds({ col: 9, row: 9 })).toBe(false);
     expect(grid.inBounds({ col: 2, row: 2 })).toBe(true);
   });
+
+  it('rejects fractional cells rather than silently misreading terrain', () => {
+    // A fractional col indexes baseMask with a non-index (→ undefined); untreated,
+    // `undefined !== 0` is true, so classAt would silently report 'blocked' for
+    // any fractional cell (wrong for an interior cell). inBounds now requires safe
+    // integers, so classAt/neighbors reject such a cell with a typed error instead.
+    expect(grid.inBounds({ col: 0.5, row: 0 })).toBe(false);
+    expect(() => grid.classAt({ col: 0.5, row: 0 })).toThrow(GridError);
+  });
 });
 
 describe('buildGrid — freezes and clones entrance/exit', () => {
@@ -168,5 +177,10 @@ describe('neighbors — 8-connected, additive blocking, no corner-cutting', () =
 
   it('rejects an extraBlocked mask of the wrong length', () => {
     expect(() => neighbors(grid, { col: 2, row: 2 }, new Uint8Array(3))).toThrow(GridError);
+  });
+
+  it('rejects a fractional or out-of-bounds query cell (never emits fractional neighbours)', () => {
+    expect(() => neighbors(grid, { col: 2.5, row: 2 })).toThrow(GridError);
+    expect(() => neighbors(grid, { col: 99, row: 2 })).toThrow(GridError);
   });
 });
