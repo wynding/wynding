@@ -75,7 +75,11 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   including mid-wave** — there is no separate build phase.
 - Each **wave** arrives on a visible **countdown**. The player may **call the next wave
   early** to press an advantage; calling early pays a bonus (see Economy) and is a
-  risk/reward tempo lever — the reward is real, but the board faces the new wave sooner.
+  risk/reward tempo lever — the reward is real, but the board faces the new wave sooner. Only the
+  **single wave currently counting down** is callable: calling it launches that wave and starts
+  the next wave's countdown **on the following tick**, so a second call on the same tick finds no
+  wave counting down (a no-op) — waves cannot be chain-launched (nor their bonuses stacked) on one
+  tick, and a whole pause (which advances no ticks) admits at most one call.
 - Waves may **overlap** on the field (an early call sends the next wave while the current one
   is still alive).
 
@@ -144,7 +148,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
   So "an AoE tower that also slows," "a single-target slow," and "an AoE DoT" are all just
   data. This composability is the same machinery ADR 0007 opens to mods in Phase 4. _(Support
-  and burst are the most optional of the set — droppable if a leaner roster identity is wanted.)_
+  and burst are the most optional of the set — droppable if a leaner roster identity is wanted. If
+  support ships, its **"adjacent" means a tower whose 2×2 footprint shares at least one full cell
+  edge with the support tower's** — a corner-only touch does not count.)_
 
 - **Effect stacking rules** (shape, so combined effects read predictably):
   - Same effect from multiple sources → the **strongest magnitude wins**, and a new application
