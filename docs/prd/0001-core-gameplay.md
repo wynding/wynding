@@ -115,9 +115,11 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 - The sim never simulates a moving projectile. When a tower fires, it **schedules an impact
   event** at `fire_tick + travel_ticks`; the renderer draws a cosmetic projectile over the
-  delay. The sim runs **no per-tick projectile physics** — cost doesn't scale with projectiles
-  in flight (each shot is one scheduled event, not an integrated moving entity) — and combat is
-  deterministic by construction (see Determinism).
+  delay. The sim runs **no per-tick trajectory integration** — a shot is one lightweight scheduled
+  event (resident until it lands), not a per-tick-integrated entity. The cost is a **bounded
+  queued-event budget** — memory and insert/resolve work scale with _in-flight shots_
+  (fire-rate × travel-time × towers, trivial at the ADR 0005 stress scale), not with per-tick
+  projectile motion. Combat is deterministic by construction (see Determinism).
 - A scheduled impact carries a **fire-time snapshot** of its damage and effects — selling,
   upgrading, or re-buffing the source tower before the shot lands does not alter an impact
   already in flight.
