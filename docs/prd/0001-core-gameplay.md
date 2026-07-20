@@ -122,6 +122,11 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   shots are less reliable _by design_: only a
   state change in flight (re-path, slow, stun, death) makes a lead miss, and that is the
   counterplay, not a bug.
+- **Range is a circular radius** measured in fixed-point from the tower's 2×2 footprint **center**
+  to the creep's point (Euclidean). A creep is _in range_ when that distance is within the tower's
+  range and _leaves range_ by the same test. An AoE blast radius uses the same Euclidean
+  point-distance test, measured from its fixed impact point. (Exact boundary rounding is a
+  determinism-gated detail fixed with the combat sim.)
 - **Targeting is sticky.** A tower acquires the creep that is **"first"** — the fewest steps
   from the exit (the smallest remaining path-distance, the creep most about to leak; ties break
   to the lower creep id) — and **holds that target until it dies or leaves range**, then
