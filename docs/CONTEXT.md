@@ -51,8 +51,9 @@ at least one life — a boss may cost more; the run ends when lives reach zero o
 _Avoid_: health, HP (that's a creep stat), hearts.
 
 **Bounty**:
-In-run currency. Earned by killing creeps and spent building/upgrading towers.
-Purely per-run; it does not persist across runs.
+In-run currency. Earned through play — killing creeps, plus wave-clear and
+early-call bonuses — and spent building/upgrading towers. Purely per-run; it
+does not persist across runs.
 _Avoid_: gold, money, cash, credits.
 
 **Armor**:

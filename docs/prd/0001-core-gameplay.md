@@ -247,10 +247,12 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   play, speed does affect **which tick a command lands on** — the same real-time action taken at
   2× lands later in sim-time than at 1× — which is part of the risk of playing faster and is
   captured in the recorded `tickInputs` (ADR 0006).
-- **Building is allowed while paused.** Pause halts the sim but the player may build, sell, and
-  plan — a significant accessibility affordance. Because scoring rewards speed and aggressive
-  early-sends, pause-planning is an **aid, not a dominant strategy**. _(Whether a competitive
-  ladder run permits pause-building or flags it as an assist is a Phase-3 decision.)_
+- **Building is allowed while paused.** Pause halts the sim and its countdowns with **no
+  sim-visible cost**, so the player may build, sell, and plan with unlimited real-world time. This
+  is an intentional, **unrestricted accessibility assist** — the base experience never requires
+  time-pressure to succeed — and it is deliberately not balance-limited in single-player Phase 1.
+  Because unlimited planning _could_ be advantageous under competition, **whether a ladder run
+  permits pause-building or flags it as an assist is the Phase-3 integrity decision.**
 
 ### 10. Accessibility
 
