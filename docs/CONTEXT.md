@@ -47,7 +47,7 @@ _Avoid_: round, level, round-number.
 
 **Lives**:
 The player's failure budget. Each creep that reaches the exit (a **leak**) costs
-at least one life — a boss may cost more; at zero lives the run ends.
+at least one life — a boss may cost more; the run ends when lives reach zero or below.
 _Avoid_: health, HP (that's a creep stat), hearts.
 
 **Bounty**:

@@ -159,10 +159,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Damage & defense model — armor + immunity flags, no elements:**
   - Damage is a single kind; there are **no damage types / elemental matrix.**
   - **Armor is a flat per-hit reduction** — it favors few-big-hits over many-small-hits, a
-    legible trade-off ("show the math"). A direct hit is reduced to a **floor of zero**: armor
-    **fully negates** a hit whose damage it meets or exceeds — which is precisely why an
-    armor-ignoring answer exists (next). _(Whether a fully-blocked hit still chips a token
-    minimum is a tuning choice.)_
+    legible trade-off ("show the math"). A direct hit is **floored at zero**: armor **fully
+    negates** a hit whose damage it meets or exceeds — which is precisely why an armor-ignoring
+    answer exists (next).
   - **DoT bypasses armor.** Armor reduces **direct hits only**, so DoT is the specialist answer
     to heavily-armored creeps.
   - **Resistances are boolean immunity flags,** consistent with the domain model below.
@@ -283,7 +282,7 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   so ordering-sensitive effects (e.g. chance-based stun drawing from the sim RNG) are reproducible.
   The exact cross-effect ordering (direct damage, debuffs, deaths, RNG draws) is a
   determinism-gated detail fixed when the combat sim is built.
-- **Pathfinding** is the existing flow-field + A* with a deterministic tie-break. Movement is
+- **Pathfinding** is a flow-field + A* with a deterministic tie-break. Movement is
   8-connected; the **diagonal step cost uses a fixed-point approximation of √2** (no
   transcendentals). "Fewest steps to exit" and the predictive lead both read remaining
   path-distance along the creep's current route — flow-field for ground, straight line for air —
