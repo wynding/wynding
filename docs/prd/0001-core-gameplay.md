@@ -159,7 +159,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Damage & defense model — armor + immunity flags, no elements:**
   - Damage is a single kind; there are **no damage types / elemental matrix.**
   - **Armor is a flat per-hit reduction** — it favors few-big-hits over many-small-hits, a
-    legible trade-off ("show the math").
+    legible trade-off ("show the math"). A direct hit is reduced to a **floor of zero**: armor
+    **fully negates** a hit whose damage it meets or exceeds — which is precisely why an
+    armor-ignoring answer exists (next). _(Whether a fully-blocked hit still chips a token
+    minimum is a tuning choice.)_
   - **DoT bypasses armor.** Armor reduces **direct hits only**, so DoT is the specialist answer
     to heavily-armored creeps.
   - **Resistances are boolean immunity flags,** consistent with the domain model below.
@@ -294,9 +297,9 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   because pause advances no ticks a player can sell and rebuild the same cells repeatedly — so a
   legitimate paused burst can exceed board capacity. The anti-DoS per-tick command cap (design
   note [`replay-and-commands.md`](../design-notes/replay-and-commands.md)) must admit a full
-  legitimate paused re-maze rather than cap to "plausible real-time input"; the exact mechanism —
-  a generous per-tick command budget, or a batching / tick-boundary rule — is specified in that
-  note.
+  legitimate paused re-maze rather than cap to "plausible real-time input." The exact mechanism —
+  a generous per-tick command budget, or a batching / tick-boundary rule — is a determinism-gated
+  detail fixed when the command-processing pipeline is built.
 - Any change to the shapes above is a determinism-affecting change and **bumps `simVersion`**;
   content/tuning changes bump `rulesetHash` (ADR 0006/0007).
 
