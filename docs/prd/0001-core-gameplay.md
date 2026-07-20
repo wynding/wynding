@@ -106,6 +106,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   delay. The sim runs **no per-tick projectile physics** — cost doesn't scale with projectiles
   in flight (each shot is one scheduled event, not an integrated moving entity) — and combat is
   deterministic by construction (see Determinism).
+- A scheduled impact carries a **fire-time snapshot** of its damage and effects — selling,
+  upgrading, or re-buffing the source tower before the shot lands does not alter an impact
+  already in flight.
 - **Single-target** attacks are **target-locked**: the scheduled hit lands on that specific
   creep. If the creep dies before impact, the shot is **wasted** — no re-target ("you can't
   re-target a bullet").
@@ -136,8 +139,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   and burst are the most optional of the set — droppable if a leaner roster identity is wanted.)_
 
 - **Effect stacking rules** (shape, so combined effects read predictably):
-  - Same effect from multiple sources → **strongest wins, duration refreshes** (no runaway
-    stacking).
+  - Same effect from multiple sources → the **strongest magnitude wins**, and a new application
+    refreshes the duration only when it is **at least as strong** as the active effect — a weaker
+    hit neither extends nor overrides a stronger one, so cheap weak hits can't sustain a strong
+    effect indefinitely.
   - **Stun overrides slow** while active.
   - Each **DoT source is independent** (two DoT towers apply two DoTs).
 
@@ -193,7 +198,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Lives** are the failure budget. Each creep that reaches the exit (a **leak**) costs **at
   least one life** (a boss may cost more — a content knob). The run **ends in a loss when lives
   reach zero or below** — a multi-life boss leak may overshoot past zero.
-- **Win** = clear the **final scheduled wave with at least one life remaining.**
+- **Win** = **all scheduled waves are exhausted and no creep remains alive on the board**, with
+  at least one life remaining. (Because waves can overlap via an early call, the run is not won
+  while any wave's creeps are still on the field, even if the last wave has spawned out.)
 - **Scoring — two readouts:**
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
@@ -218,8 +225,11 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 ### 9. Speed & pause
 
 - Speed controls are **pause / 1× / 2×** for Phase 1, extensible to 3×/4× later. Speed is a
-  **pure playback multiplier** — the sim always steps at a fixed rate, so speed never affects
-  the result or the replay (ADR 0006).
+  **playback multiplier** — the sim always steps at a fixed rate, so **replaying a fixed input
+  log at any speed yields identical results** (speed is cosmetic to re-simulation). During _live_
+  play, speed does affect **which tick a command lands on** — the same real-time action taken at
+  2× lands later in sim-time than at 1× — which is part of the risk of playing faster and is
+  captured in the recorded `tickInputs` (ADR 0006).
 - **Building is allowed while paused.** Pause halts the sim but the player may build, sell, and
   plan — a significant accessibility affordance. Because scoring rewards speed and aggressive
   early-sends, pause-planning is an **aid, not a dominant strategy**. _(Whether a competitive
@@ -289,9 +299,11 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   so both-domain towers compare like with like.
 - **Re-pathing** recomputes routes on every maze change within the tick it happens; the maze
   invariant is enforced _before_ a build applies, so the sim is never in a no-path state.
-- **Speed and pause are cosmetic** to the sim: speed multiplies ticks-per-second, pause runs
-  zero ticks; the tick sequence — and therefore the world-hash and score — is identical at any
-  speed (ADR 0006).
+- **Speed and pause are cosmetic on replay:** speed multiplies ticks-per-second, pause runs
+  zero ticks; for a **fixed input log**, the tick sequence — and therefore the world-hash and
+  score — is identical at any playback speed (ADR 0006). During live play, speed only changes
+  which tick a live command is stamped with (recorded in `tickInputs`), not how a given log
+  re-simulates.
 - **Command bounds.** Build-while-paused legitimately lands many commands on a single tick, and
   because pause advances no ticks a player can sell and rebuild the same cells repeatedly — so a
   legitimate paused burst can exceed board capacity. The anti-DoS per-tick command cap (design
