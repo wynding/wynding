@@ -57,7 +57,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   **exit**. It starts empty; the player shapes the route by building.
 - Cells fall into three classes: **buildable-open** (a tower may be placed),
   **walkable-unbuildable** (creeps cross, towers cannot go — reserved for entrances/exit
-  aprons and future scenery), and **blocked** (impassable to both).
+  aprons and future scenery), and **blocked** (no tower may be placed and no **ground** creep may
+  cross; flyers, which ignore board geometry, pass over).
 - A **tower occupies a 2×2 block** of cells. A **creep is 1×1** and needs a single open cell
   to pass. Towers are also **walls** — placement and firepower are the same decision.
 - **Movement is 8-connected with no corner-cutting:** creeps may step diagonally, but when
@@ -81,8 +82,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 ### 3. Building, selling & dynamic re-pathing
 
 - **Placement** consumes bounty and drops a 2×2 tower onto buildable-open cells. A placement
-  is legal only if it (a) covers no cell a creep currently occupies — _you may build adjacent
-  to a creep, never on it_ — and (b) satisfies the maze invariant.
+  is legal only if it (a) covers no cell a **ground** creep currently occupies — _you may build
+  adjacent to a ground creep, never on it_ — and (b) satisfies the maze invariant.
 - **Dynamic re-pathing:** the instant the maze changes (a placement or a sell), **every ground
   creep re-routes** toward the exit along the new shortest path. This is the signature skill —
   the player herds and redirects the live wave by building and selling.
@@ -110,13 +111,15 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   upgrading, or re-buffing the source tower before the shot lands does not alter an impact
   already in flight.
 - **Single-target** attacks are **target-locked**: the scheduled hit lands on that specific
-  creep. If the creep dies before impact, the shot is **wasted** — no re-target ("you can't
+  creep. If the creep **dies or leaks** before impact, the shot is **wasted** — no re-target ("you can't
   re-target a bullet").
 - **Area (AoE)** attacks are **point-locked**: the impact is scheduled to a fixed board point,
   and on the impact tick it resolves against **whatever creeps are within the radius then**.
   Creeps can walk out of a blast (dodge) or into it (caught). **Aim leads the target** — the
   impact point is the target's position extrapolated forward **along its current route** (around
-  corners, not a straight velocity vector). Long shots are less reliable _by design_: only a
+  corners, not a straight velocity vector); if the lead would run past the exit (the creep leaks
+  before the shot lands), the impact point is **clamped to the exit** at the route's end. Long
+  shots are less reliable _by design_: only a
   state change in flight (re-path, slow, stun, death) makes a lead miss, and that is the
   counterplay, not a bug.
 - **Targeting is sticky.** A tower acquires the creep that is **"first"** — the fewest steps
@@ -158,9 +161,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   - **domain** — **ground** or **flying**,
   - **effect-immunity flags** (e.g. immune to slow, immune to stun),
   - **role** — e.g. a **boss** (high durability; may cost more than one life on a leak).
-- **Flying creeps ignore the maze:** they travel in a **straight line** from entrance to exit,
-  passing over towers and walls. The maze has zero effect on them — air is the deliberate
-  counter to over-investing in geometry, answered only by air coverage (below).
+- **Flying creeps ignore board geometry:** they travel in a **straight line** from entrance to
+  exit, passing over towers, walls, **and blocked cells alike** — no ground cell class affects
+  them. Air is the deliberate counter to over-investing in geometry, answered only by air
+  coverage (below).
 - **Damage & defense model — armor + immunity flags, no elements:**
   - Damage is a single kind; there are **no damage types / elemental matrix.**
   - **Armor is a flat per-hit reduction** — it favors few-big-hits over many-small-hits, a
@@ -219,7 +223,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   identity's content id (the `levelId` field in ADR 0006). The replay envelope is unchanged, and
   **best-score is tracked per board × tier.**
 - Tiers are an **R1 deliverable, tuned at M5** (three curves cannot be tuned before the content
-  exists). **M1–M4 develop on a single Normal reference curve.**
+  exists). **M1–M4 develop on the Medium tier as the single reference curve** (Easy and Hard are
+  tuned alongside it at M5); there is no separate "Normal" fourth tier.
 - **Difficulty modifiers / mutators** are later-phase replay content, explicitly out of Phase 1.
 
 ### 9. Speed & pause
@@ -243,7 +248,7 @@ build-while-paused**, **speed controls**, and the vision's "strategic, not twitc
 base experience never _requires_ time pressure to succeed).
 
 **One conscious, recorded gate deviation:** ADR 0003 §2 commits "selectable difficulty" day-one,
-but the tiers are not tuned until M5. **M1–M4 ship on Normal only under an explicit ADR 0003 §3
+but the tiers are not tuned until M5. **M1–M4 ship on the Medium tier only under an explicit ADR 0003 §3
 waiver**, mitigated by pause/build-while-paused/speed; **selectable difficulty is a hard R1
 criterion.** The waiver is recorded in the accessibility checklist and each player-facing PR
 once the first UI lands.
@@ -265,7 +270,7 @@ waiver above).
 **Off at M1** (shape decided; activates later): AoE/slow/stun/DoT/support/burst effects · air
 and anti-air · tower leveling · multiple waves. The **economy runs thin** — **starting bounty +
 per-kill only**; the wave-clear and early-call bonuses need a _next_ wave, so they switch on at
-**M2** (when more waves first appear). Difficulty runs on the single **Normal** curve.
+**M2** (when more waves first appear). Difficulty runs on the single **Medium** reference curve.
 
 ## Milestone activation (Phase 1)
 
