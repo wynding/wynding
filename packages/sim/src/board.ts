@@ -144,12 +144,20 @@ function assertBorderCell(
 
 /**
  * Build and validate a grid from a structural spec. Throws {@link GridError} if
+ * the spec is not an object (e.g. a parsed `null` board document), its
  * dimensions are not positive safe integers, the cell count exceeds
  * {@link CELL_CAP}, or the entrance/exit are not distinct safe-integer cells on
  * the border ring. Entrance/exit are cloned and frozen so the returned grid can
  * never desync from the caller mutating its spec.
  */
 export function buildGrid(spec: GridSpec): Grid {
+  // Guard the whole document first: an untyped path (a future JSON/mod loader)
+  // can hand us a parsed `null` or non-object, which would otherwise throw a raw
+  // TypeError on destructure — breaking the typed-GridError validation contract.
+  const doc = spec as unknown;
+  if (doc === null || typeof doc !== 'object') {
+    throw new GridError(`board spec must be an object, got ${String(doc)}`);
+  }
   const { widthTiles: width, heightTiles: height, entrance, exit } = spec;
 
   assertPositiveSafeInt(width, 'widthTiles');

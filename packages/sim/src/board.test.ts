@@ -107,6 +107,14 @@ describe('buildGrid — rejects malformed geometry (runtime validation)', () => 
     expect(bad({ exit: { col: 0, row: 2 } })).toThrow(/coincide/);
   });
 
+  it('rejects a null / non-object board document with a typed GridError', () => {
+    // A parsed `null` (or non-object) JSON board must fail the validation
+    // boundary with GridError, not a raw TypeError on destructure.
+    expect(() => buildGrid(null as unknown as GridSpec)).toThrow(GridError);
+    expect(() => buildGrid(undefined as unknown as GridSpec)).toThrow(GridError);
+    expect(() => buildGrid(42 as unknown as GridSpec)).toThrow(GridError);
+  });
+
   it('rejects a missing or null entrance/exit with a typed GridError (untyped loader path)', () => {
     // What `JSON.parse` of a board missing the `exit` key, or a null cell, yields.
     // TypeScript callers can't reach this, but the validation-boundary contract
