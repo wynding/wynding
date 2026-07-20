@@ -20,8 +20,5 @@
   "dependencies": {
     "@wynding/engine": "workspace:*",
     "@wynding/types": "workspace:*"
-  },
-  "devDependencies": {
-    "@wynding/content": "workspace:*"
   }
 }

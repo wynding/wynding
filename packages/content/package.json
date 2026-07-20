@@ -19,5 +19,8 @@
   },
   "dependencies": {
     "@wynding/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@wynding/sim": "workspace:*"
   }
 }

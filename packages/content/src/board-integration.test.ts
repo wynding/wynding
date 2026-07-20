@@ -1,14 +1,14 @@
-// board-integration.test.ts — the sim's grid/pathfinding built over the REAL M1
-// board authored in @wynding/content. This is the only place the sim reaches for
-// content, and it does so as a test-only devDependency: it proves the structural
-// `GridSpec` seam lets the sim consume `Board` with no runtime content dependency.
+// board-integration.test.ts — proves the authored M1 board (field-01) builds a
+// valid, solvable grid when fed to the sim's grid/pathfinding. It lives on the
+// CONTENT side (content → sim) because the repo's dependency graph flows one way
+// (types ← engine ← sim ← content); @wynding/sim is a test-only devDependency
+// here, so no backwards sim → content edge is introduced.
 
 import { describe, it, expect } from 'vitest';
-import { sampleBoard } from '@wynding/content';
-import { buildGrid } from './board';
-import { computeDistanceField, shortestPath } from './pathfinding';
+import { buildGrid, computeDistanceField, shortestPath, GridError } from '@wynding/sim';
+import { sampleBoard } from './boards';
 
-describe('field-01 (the real M1 board)', () => {
+describe('field-01 (the real M1 board) builds a solvable grid', () => {
   const grid = buildGrid(sampleBoard);
   const field = computeDistanceField(grid);
 
@@ -34,5 +34,11 @@ describe('field-01 (the real M1 board)', () => {
     expect(p[p.length - 1]).toEqual({ col: 27, row: 11 });
     expect(p.every((c) => c.row === 11)).toBe(true); // never leaves row 11
     expect(p.map((c) => c.col)).toEqual(Array.from({ length: 28 }, (_, i) => i));
+  });
+
+  it('surfaces buildGrid validation failures as a GridError through the @wynding/sim barrel', () => {
+    // A downstream consumer can instanceof-catch the advertised typed failure via
+    // the public barrel — not only through a package-internal relative import.
+    expect(() => buildGrid({ ...sampleBoard, widthTiles: 0 })).toThrow(GridError);
   });
 });

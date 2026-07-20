@@ -116,7 +116,7 @@ export function hashSimState(state: SimState): string {
 // Grid + pathfinding foundation (M1 Story 1). Standalone and pure — deliberately
 // NOT wired into `step()` yet, so the determinism golden above is unaffected;
 // Story 2 (creep movement) consumes these and bumps SIM_VERSION once.
-export { buildGrid, neighbors } from './board';
+export { buildGrid, neighbors, GridError } from './board';
 export type { CellClass, GridSpec, Grid } from './board';
 export { computeDistanceField, isReachable, shortestPath } from './pathfinding';
 export type { DistanceField } from './pathfinding';
