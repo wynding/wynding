@@ -103,8 +103,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 - The sim never simulates a moving projectile. When a tower fires, it **schedules an impact
   event** at `fire_tick + travel_ticks`; the renderer draws a cosmetic projectile over the
-  delay. **Sim cost is independent of shot count**, and combat is deterministic by
-  construction (see Determinism).
+  delay. The sim runs **no per-tick projectile physics** — cost doesn't scale with projectiles
+  in flight (each shot is one scheduled event, not an integrated moving entity) — and combat is
+  deterministic by construction (see Determinism).
 - **Single-target** attacks are **target-locked**: the scheduled hit lands on that specific
   creep. If the creep dies before impact, the shot is **wasted** — no re-target ("you can't
   re-target a bullet").
@@ -188,13 +189,15 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 ### 7. Win, loss & scoring
 
 - **Lives** are the failure budget. Each creep that reaches the exit (a **leak**) costs **at
-  least one life** (a boss may cost more — a content knob). At **zero lives the run ends in a
-  loss.**
+  least one life** (a boss may cost more — a content knob). The run **ends in a loss when lives
+  reach zero or below** — a multi-life boss leak may overshoot past zero.
 - **Win** = clear the **final scheduled wave with at least one life remaining.**
 - **Scoring — two readouts:**
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
-    upgrade value, and aggressive early wave-sends. _(Point weights: tuning.)_
+    upgrade value, and aggressive early wave-sends; these inputs come online as their systems do
+    (kills with combat, early-sends at M2, upgrade value at M4). _(Point weights: tuning; the
+    current scorer is a placeholder that grows into this contract.)_
   - A derived **star grade** (from lives remaining — a near-flawless run is the top grade) as
     the casual-legible "how'd I do."
 - **Neither is a currency and neither gates content.** Score and stars are a badge and a
@@ -204,8 +207,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 - Phase 1 ships **Easy / Medium / Hard** difficulty tiers. Tiers are **data in the ruleset**
   (ADR 0007); each **board × tier is a distinct content entry**, selected by the replay
-  identity's content id (the `levelId` field in ADR 0006, being renamed `boardId`). The replay
-  envelope is unchanged, and **best-score is tracked per board × tier.**
+  identity's content id (the `levelId` field in ADR 0006). The replay envelope is unchanged, and
+  **best-score is tracked per board × tier.**
 - Tiers are an **R1 deliverable, tuned at M5** (three curves cannot be tuned before the content
   exists). **M1–M4 develop on a single Normal reference curve.**
 - **Difficulty modifiers / mutators** are later-phase replay content, explicitly out of Phase 1.
@@ -284,10 +287,13 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
 - **Speed and pause are cosmetic** to the sim: speed multiplies ticks-per-second, pause runs
   zero ticks; the tick sequence — and therefore the world-hash and score — is identical at any
   speed (ADR 0006).
-- **Command bounds.** Build-while-paused legitimately lands many commands on a single tick (a
-  full paused re-maze). The anti-DoS per-tick command cap (design note
-  [`replay-and-commands.md`](../design-notes/replay-and-commands.md)) must therefore be sized to
-  **board capacity** (derived from buildable-cell count), not to "plausible real-time input."
+- **Command bounds.** Build-while-paused legitimately lands many commands on a single tick, and
+  because pause advances no ticks a player can sell and rebuild the same cells repeatedly — so a
+  legitimate paused burst can exceed board capacity. The anti-DoS per-tick command cap (design
+  note [`replay-and-commands.md`](../design-notes/replay-and-commands.md)) must admit a full
+  legitimate paused re-maze rather than cap to "plausible real-time input"; the exact mechanism —
+  a generous per-tick command budget, or a batching / tick-boundary rule — is specified in that
+  note.
 - Any change to the shapes above is a determinism-affecting change and **bumps `simVersion`**;
   content/tuning changes bump `rulesetHash` (ADR 0006/0007).
 
