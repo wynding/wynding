@@ -61,9 +61,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   cross; flyers, which ignore board geometry, pass over).
 - A **tower occupies a 2×2 block** of cells. A **creep is 1×1** and needs a single open cell
   to pass. Towers are also **walls** — placement and firepower are the same decision.
-- **Movement is 8-connected with no corner-cutting:** creeps may step diagonally, but when
-  two towers touch at a corner, that diagonal is **closed** — a creep cannot slip through the
-  pinch. (Diagonal steps cost more path-distance than orthogonal ones; see Determinism.)
+- **Movement is 8-connected with no corner-cutting:** a diagonal step is allowed only when
+  **both** orthogonally-adjacent cells are walkable; it is **closed** if either side cell is
+  non-walkable — a tower _or_ a blocked cell, regardless of which — so a creep cannot slip through
+  a corner pinch. (Diagonal steps cost more path-distance than orthogonal ones; see Determinism.)
 - **The maze invariant (hard rule):** the exit must remain reachable **from every entrance
   and from every live ground creep's current cell.** A build action that would violate this —
   sealing the exit, walling off an entrance, or trapping a creep in a pocket — is **rejected**
@@ -88,9 +89,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Placement** consumes bounty and drops a 2×2 tower onto buildable-open cells. A placement
   is legal only if it (a) covers no cell a **ground** creep currently occupies — _you may build
   adjacent to a ground creep, never on it_ — and (b) satisfies the maze invariant.
-- **Dynamic re-pathing:** the instant the maze changes (a placement or a sell), **every ground
-  creep re-routes** toward the exit along the new shortest path. This is the signature skill —
-  the player herds and redirects the live wave by building and selling.
+- **Dynamic re-pathing:** the instant the maze changes — a placement, a sell, or **any other
+  change to tower geometry** (e.g. a burst tower consuming itself) — **every ground creep
+  re-routes** toward the exit along the new shortest path. This is the signature skill — the
+  player herds and redirects the live wave by building and selling.
 - **Selling** is always legal and instant: removing a tower only opens space, so it can never
   violate the maze invariant. The freed bounty is immediately spendable and creeps re-path that
   tick. Selling refunds a **partial haircut of the tower's cumulative investment** (base plus
@@ -150,7 +152,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   data. This composability is the same machinery ADR 0007 opens to mods in Phase 4. _(Support
   and burst are the most optional of the set — droppable if a leaner roster identity is wanted. If
   support ships, its **"adjacent" means a tower whose 2×2 footprint shares at least one full cell
-  edge with the support tower's** — a corner-only touch does not count.)_
+  edge with the support tower's** — a corner-only touch does not count. If burst ships, the tower
+  is **consumed at its fire tick** — the maze opens (and ground creeps re-route) then, while its
+  scheduled impact still resolves via the fire-time snapshot.)_
 
 - **Effect stacking rules** (shape, so combined effects read predictably):
   - Same effect from multiple sources → the **strongest magnitude wins**, and a new application
@@ -221,8 +225,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
     upgrade value, and aggressive early wave-sends; these inputs come online as their systems do
-    (kills with combat, early-sends at M2, upgrade value at M4). _(Point weights: tuning; the
-    current scorer is a placeholder that grows into this contract.)_
+    (kills with combat, early-sends at M2, upgrade value at M4). _(Point weights — and the exact
+    sim-state measure behind each input, e.g. what "upgrade value" counts — are pinned with the
+    authoritative scorer; the current scorer is a placeholder that grows into this contract.)_
   - A derived **star grade** (from lives remaining — a near-flawless run is the top grade) as
     the casual-legible "how'd I do."
 - **Neither is a currency and neither gates content.** Score and stars are a badge and a
