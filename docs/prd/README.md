@@ -25,11 +25,14 @@ A good PRD captures:
 
 ## Conventions
 
-- One file per PRD, named `NNNN-short-title.md` (e.g. `0001-mvp-campaign.md`).
+- One file per PRD, named `NNNN-short-title.md` (e.g. `0001-core-gameplay.md`).
 - Keep terminology consistent with [`../CONTEXT.md`](../CONTEXT.md); if a PRD needs
   a new term, add it to the glossary in the same change.
 - Architecture decisions that are hard to reverse graduate into an
   [ADR](../adr/); PRDs describe _what/why for the product_, ADRs record
   _structural technical decisions_.
 
-_No PRDs are authored yet — this is the scaffold._
+### Index
+
+- [0001 — Core Gameplay](0001-core-gameplay.md) — the Phase-1 core loop (shapes &
+  invariants), with M1 as the first slice.

@@ -17,13 +17,15 @@ shapes the route by building.
 _Avoid_: map, field, level.
 
 **Creep**:
-An enemy unit that walks the board from an entrance toward the exit. Creeps have
-hit points and a kind (`normal`, `fast`, `armored`, `flying`, `boss`).
+An enemy unit that travels the board from an entrance toward the exit. Creeps vary
+along **axes** — speed, durability (hit points + **armor**), **domain**
+(ground/flying), effect-immunities, and role (e.g. a `boss`) — composed freely
+rather than as fixed kinds.
 _Avoid_: enemy, mob, monster, minion.
 
 **Tower**:
-A player-built structure that occupies a tile and attacks creeps in range.
-Towers are also **walls**: they reshape the maze. Towers upgrade in place
+A player-built structure that occupies a **2×2 block of cells** and attacks creeps
+in range. Towers are also **walls**: they reshape the maze. Towers upgrade in place
 (per-run only — no permanent meta-progression).
 _Avoid_: turret, unit, building, defense.
 
@@ -45,13 +47,39 @@ _Avoid_: round, level, round-number.
 
 **Lives**:
 The player's failure budget. Each creep that reaches the exit (a **leak**) costs
-one life; at zero lives the run ends.
+at least one life — a boss may cost more; at zero lives the run ends.
 _Avoid_: health, HP (that's a creep stat), hearts.
 
 **Bounty**:
 In-run currency. Earned by killing creeps and spent building/upgrading towers.
 Purely per-run; it does not persist across runs.
 _Avoid_: gold, money, cash, credits.
+
+**Armor**:
+A creep durability stat: a **flat** reduction applied to each **direct** hit, so
+armor favors few-big-hits over many-small-hits. Damage-over-time bypasses armor.
+_Avoid_: defense, resistance (armor is flat and direct-hit-only).
+
+**Domain**:
+Whether a unit acts on the ground or in the air. Each creep has a domain
+(ground/flying); each tower targets ground, air, or both, and only hits creeps in
+a domain it targets.
+_Avoid_: layer, plane, type.
+
+**Difficulty tier**:
+One of the selectable difficulty settings (Easy/Medium/Hard). Each board × tier is
+a distinct content entry with its own tuning and its own best-score.
+_Avoid_: mode, level.
+
+**Score**:
+The deterministic numeric result of a run, computed from sim state (so the server
+can re-derive it). A leaderboard input and badge — never a spendable currency.
+_Avoid_: points, rating.
+
+**Star grade**:
+The casual-legible performance grade for a run, derived from lives remaining (a
+near-flawless run earns the top grade). A badge, never a currency; never gates content.
+_Avoid_: medal, rank.
 
 ## Simulation
 
