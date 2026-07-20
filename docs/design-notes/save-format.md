@@ -47,12 +47,12 @@ their own — serialization is the save manager's job.
 
 ## The reserved `runInProgress` slot
 
-`{ seed, rulesetHash, simVersion, levelId, simState, tickInputsSoFar }`:
+`{ seed, rulesetHash, simVersion, boardId, simState, tickInputsSoFar }`:
 
 - the `simState` snapshot **including its `rngState`**, captured **only at a tick
   boundary** (between whole ticks) so continuation is byte-identical;
 - the replay identity from ADR 0006 — the original `seed` is **not** recoverable from the
-  advanced RNG, and `levelId` selects the scheduler input.
+  advanced RNG, and `boardId` selects the scheduler input.
 
 Resume is valid only within the same `simVersion` and `rulesetHash` (ADR 0008 §4).
 

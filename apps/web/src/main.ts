@@ -8,13 +8,13 @@
 import { createFixedLoop } from '@wynding/engine';
 import { createInitialState, step, MS_PER_TICK, type SimInput, type SimState } from '@wynding/sim';
 import { mount } from '@wynding/render';
-import { sampleLevel } from '@wynding/content';
+import { sampleBoard } from '@wynding/content';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('missing #app root element');
 
 const title = document.createElement('h1');
-title.textContent = `Wynding — ${sampleLevel.name}`;
+title.textContent = `Wynding — ${sampleBoard.name}`;
 app.appendChild(title);
 
 let sim: SimState = createInitialState(Date.now() >>> 0);

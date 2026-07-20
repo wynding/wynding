@@ -6,7 +6,7 @@ note is the_ how.
 
 ## The step signature carries evolving state
 
-A _match_ is pure over `(seed, ruleset, levelId, inputs)`, but a single **tick** must
+A _match_ is pure over `(seed, ruleset, boardId, inputs)`, but a single **tick** must
 consume the current simulation state:
 
 ```
@@ -15,7 +15,7 @@ step(state, ruleset, inputs) -> state
 
 `state` carries the tick counter, creeps, towers, economy (bounty and lives), and the
 **advanced `rngState`**. The ruleset is constant for the match and threaded in each tick;
-the **initial** `state` derives from `(seed, levelId)`. Writing `step` as
+the **initial** `state` derives from `(seed, boardId)`. Writing `step` as
 `(seed, ruleset, inputs)` would drop the evolving state and is wrong. _(Addresses Codex
 PR #6: "Preserve evolving state in the step contract.")_
 
@@ -52,8 +52,8 @@ _(Addresses Codex PR #6: "Specify normalization before canonicalizing rulesets."
 
 ### Presentation-only fields (excluded from the hash)
 
-Localization keys (level names, tower/creep display names) and any other non-sim field.
-Renaming a level must not invalidate replays, so only sim-affecting content is hashed.
+Localization keys (board names, tower/creep display names) and any other non-sim field.
+Renaming a board must not invalidate replays, so only sim-affecting content is hashed.
 
 ## Versioning
 

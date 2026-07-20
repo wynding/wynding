@@ -24,7 +24,7 @@ All code and planning live in a single public repository, split into `packages/*
 caching.
 
 - `packages/`: `engine` (determinism toolkit), `sim` (headless deterministic
-  simulation), `render` (Phaser presentation), `content` (levels/waves), `replay`
+  simulation), `render` (Phaser presentation), `content` (boards/waves), `replay`
   (format + validator), `types` (shared types).
 - `apps/`: `web` (Vite PWA), `server` (AWS Lambda re-sim validator), `mobile`
   (Capacitor), `desktop` (Tauri).
@@ -53,7 +53,7 @@ RNG (sim randomness kept separate from cosmetic randomness), **fixed-point**
 integer math (floats banned in the sim), a **fixed 20 Hz timestep** loop, and a
 per-tick **world-hash**. `packages/sim` is a pure `step(state, inputs)` function
 built only on these. A replay is
-`{ seed, rulesetHash, simVersion, levelId, tickInputs }` (the `levelId` field is
+`{ seed, rulesetHash, simVersion, boardId, tickInputs }` (the `boardId` field is
 added by ADR 0006); identical inputs must reproduce an identical world-hash. This is
 a hard CI gate.
 

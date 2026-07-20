@@ -38,9 +38,9 @@ primitive and its atomicity requirements are specified in the design note.
 ### 3. MVP persists meta-progress only; a run-resume slot is reserved
 
 What persists at MVP: settings (accessibility, audio, controls, locale), campaign
-progress, and best scores + seeds per level. **No mid-run resume at MVP**, but a
+progress, and best scores + seeds per board. **No mid-run resume at MVP**, but a
 `runInProgress` slot is **reserved** in the format. When built, a resumable run carries
-the full **replay identity** `{ seed, rulesetHash, simVersion, levelId }` plus a
+the full **replay identity** `{ seed, rulesetHash, simVersion, boardId }` plus a
 tick-boundary `simState` snapshot — the original `seed` isn't recoverable from advanced
 RNG state, so it's stored explicitly.
 

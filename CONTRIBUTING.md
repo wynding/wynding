@@ -73,7 +73,7 @@ You can scope any task to one package with Turbo's filter, e.g.
   fixed-timestep loop, world-hash). The byte-identity core.
 - `packages/sim` — the headless, deterministic simulation (`step(state, inputs)`).
 - `packages/render` — the Phaser 3 presentation layer (reads sim state).
-- `packages/content` — level and wave data.
+- `packages/content` — board and wave data.
 - `packages/replay` — the replay format and its re-simulation validator.
 - `packages/types` — shared types.
 - `apps/web` — the PWA (Vite). `apps/server` — the score-validation Lambda.

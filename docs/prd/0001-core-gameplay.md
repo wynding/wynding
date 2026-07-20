@@ -5,7 +5,7 @@
 - **Relates to:** [vision](../vision.md) · [roadmap](../roadmap.md) · [glossary](../CONTEXT.md) ·
   ADRs [0001](../adr/0001-monorepo-and-stack.md), [0003](../adr/0003-accessibility-standard.md),
   [0004](../adr/0004-localization-and-i18n.md), [0006](../adr/0006-input-command-and-replay-schema.md),
-  [0007](../adr/0007-level-and-content-data-format.md), [0008](../adr/0008-save-format-and-versioning.md)
+  [0007](../adr/0007-board-and-content-data-format.md), [0008](../adr/0008-save-format-and-versioning.md)
 
 ## Problem & goals
 
@@ -250,7 +250,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 - Phase 1 ships **Easy / Medium / Hard** difficulty tiers. Tiers are **data in the ruleset**
   (ADR 0007); each **board × tier is a distinct content entry**, selected by the replay
-  identity's content id (the `levelId` field in ADR 0006). The replay envelope is unchanged, and
+  identity's content id (the `boardId` field in ADR 0006). The replay envelope is unchanged, and
   **best-score is tracked per board × tier.**
 - Tiers are an **R1 deliverable, tuned at M5** (three curves cannot be tuned before the content
   exists). **M1–M4 develop on the Medium tier as the single reference curve** (Easy and Hard are
@@ -321,7 +321,7 @@ Difficulty runs on the single **Medium** reference curve.
 This PRD is almost entirely **`packages/sim` / `packages/engine`** surface, and it is written to
 keep the determinism gate intact (ADR 0001, ADR 0006).
 
-- **Purity preserved.** All gameplay is a pure function of `(seed, ruleset, levelId, tick inputs)`.
+- **Purity preserved.** All gameplay is a pure function of `(seed, ruleset, boardId, tick inputs)`.
   Creep spawns come from the ruleset's wave schedule, not the input log (ADR 0006). No I/O, floats,
   `Math.random`, or wall-clock in the sim.
 - **Scheduled combat** is a small deterministic event queue keyed to an `impact_tick` and either a
@@ -369,5 +369,3 @@ Genuinely open (edges for reviewers), plus the small defaults chosen while draft
   coarse 2×2 lattice. Confirm when the build UX is designed.
 - **Creep leveling shape (M4)** — named as wave-indexed stat scaling in the wave schedule;
   its curve is M4 tuning.
-- **Vocabulary sweep** — this PRD uses `board`/`wave`; the queued `level`→`board`/`wave` rename
-  across the ADRs and code (including `levelId`→`boardId`) lands as its own focused change.
