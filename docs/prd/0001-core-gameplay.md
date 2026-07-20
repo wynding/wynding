@@ -275,8 +275,11 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   `Math.random`, or wall-clock in the sim.
 - **Scheduled combat** is a small deterministic event queue keyed to an `impact_tick` and either a
   target-id (single-target) or a fixed impact point (AoE); no per-tick projectile integration.
-  Effect resolution over creeps in a radius iterates in a **deterministic order** (by creep id) so
-  ordering-sensitive effects (e.g. chance-based stun drawing from the sim RNG) are reproducible.
+  Events sharing an `impact_tick` resolve in a **deterministic total order** (a stable scheduling
+  key), and within an AoE, effects apply over creeps in a **deterministic order** (by creep id) —
+  so ordering-sensitive effects (e.g. chance-based stun drawing from the sim RNG) are reproducible.
+  The exact cross-effect ordering (direct damage, debuffs, deaths, RNG draws) is a
+  determinism-gated detail fixed when the combat sim is built.
 - **Pathfinding** is the existing flow-field + A* with a deterministic tie-break. Movement is
   8-connected; the **diagonal step cost uses a fixed-point approximation of √2** (no
   transcendentals). "Fewest steps to exit" and the predictive lead both read remaining
