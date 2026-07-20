@@ -158,7 +158,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
     hit neither extends nor overrides a stronger one, so cheap weak hits can't sustain a strong
     effect indefinitely.
   - **Stun overrides slow** while active.
-  - Each **DoT source is independent** (two DoT towers apply two DoTs).
+  - Each **DoT source is independent** (two DoT towers apply two DoTs); a **re-application from
+    the same source refreshes that DoT's duration** rather than stacking a second copy of it.
 
 ### 5. Creeps
 
