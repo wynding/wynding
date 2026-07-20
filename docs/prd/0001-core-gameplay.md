@@ -54,7 +54,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 ### 1. Board, grid & the maze invariant
 
 - The **board** is a fine grid of cells with one or more creep **entrances** and a single
-  **exit**. It starts empty; the player shapes the route by building.
+  **exit**. It starts empty; the player shapes the route by building. On a multi-entrance board,
+  **each scheduled spawn names the entrance it enters from** — part of the wave schedule in the
+  content ruleset (ADR 0007).
 - Cells fall into three classes: **buildable-open** (a tower may be placed),
   **walkable-unbuildable** (creeps cross, towers cannot go — reserved for entrances/exit
   aprons and future scenery), and **blocked** (no tower may be placed and no **ground** creep may
@@ -81,8 +83,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   the next wave's countdown **on the following tick**, so a second call on the same tick finds no
   wave counting down (a no-op) — waves cannot be chain-launched (nor their bonuses stacked) on one
   tick, and a whole pause (which advances no ticks) admits at most one call.
-- Waves may **overlap** on the field (an early call sends the next wave while the current one
-  is still alive).
+- **A wave's countdown begins on the tick after the previous wave launches** — whether that wave
+  launched by its own countdown expiring or by an early call — so **countdowns are sequential** (one wave
+  counts down at a time), while the resulting creep **waves may overlap** on the field (the next
+  wave arrives while the current one's creeps are still alive).
 
 ### 3. Building, selling & dynamic re-pathing
 
@@ -219,8 +223,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   least one life** (a boss may cost more — a content knob). The run **ends in a loss when lives
   reach zero or below** — a multi-life boss leak may overshoot past zero.
 - **Win** = **all scheduled waves are exhausted and no creep remains alive on the board**, with
-  at least one life remaining. (Because waves can overlap via an early call, the run is not won
-  while any wave's creeps are still on the field, even if the last wave has spawned out.)
+  at least one life remaining. (Because waves can overlap, the run is not won while any wave's
+  creeps are still on the field, even if the last wave has spawned out.)
 - **Scoring — two readouts:**
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
