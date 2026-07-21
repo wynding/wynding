@@ -223,7 +223,7 @@ export function advanceCreep(
     if (next.col !== hCol || next.row !== hRow) progress = 0;
   }
 
-  // (4) MOVE — spend the budget; derive a fresh head at each cell centre.
+  // (6) MOVE — spend the budget; derive a fresh head at each cell centre.
   let remaining = budget;
   while (remaining > 0) {
     if (progress === 0) {

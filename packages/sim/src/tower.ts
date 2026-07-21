@@ -171,7 +171,11 @@ function creepOccupiedCell(
   const cc = ccol as number;
   const cr = crow as number;
   if (!grid.inBounds({ col: cc, row: cr })) return null;
-  return occupiedCell(cc, cr, creeps.headCol[i], creeps.headRow[i], creeps.edgeProgress[i]);
+  const occ = occupiedCell(cc, cr, creeps.headCol[i], creeps.headRow[i], creeps.edgeProgress[i]);
+  // A far-side creep with a forged off-board head would yield an out-of-bounds
+  // occupied cell; movement drops such a row this same tick, so it must not veto a
+  // build (consistent with skipping position-corrupt rows above).
+  return grid.inBounds(occ) ? occ : null;
 }
 
 /**
