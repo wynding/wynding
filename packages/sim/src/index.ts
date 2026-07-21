@@ -9,15 +9,16 @@ import { hashState } from '@wynding/engine';
 import type { Cell, Seed } from '@wynding/types';
 import { advanceCreep } from './movement';
 import { assertConsistent, type BoardContext } from './context';
-import { computeDistanceField } from './pathfinding';
+import type { Grid } from './board';
+import { computeDistanceField, type DistanceField } from './pathfinding';
 import {
   TOWER_COST,
   canPlaceTower,
   findValidTowerIndex,
   forEachValidTower,
   materializeTowerMask,
-  refundFor,
   type TowerArrays,
+  refundFor,
 } from './tower';
 
 /** Simulation cadence: 20 Hz. Must match the render loop's tick duration. */
@@ -72,6 +73,44 @@ export type SimInput =
   | { readonly kind: 'sellTower'; readonly tower: number } // EntityId of the tower
   | { readonly kind: 'spawnCreep'; readonly hp: number }
   | { readonly kind: 'noop' };
+
+// The effective distance field is a pure function of `(grid, tower mask)`, so it
+// can be reused across ticks until the mask changes — a hit is byte-identical to
+// a cold recompute, with NO process-history dependence (a miss and a hit yield the
+// same field), so a cold re-simulation reproduces every field exactly. This is the
+// "correctly-keyed (content-hash, local, validated) field cache" PLAN §Risks flagged
+// for when the per-tick Dijkstra stops being trivial: a hostile replay can place one
+// tower and then submit the full MAX_TICKS of empty ticks, so without reuse every one
+// of those ticks re-ran a grid-wide Dijkstra (~10s per max-length replay on the sample
+// board — a validate() cost-amplification vector). Keyed on the immutable `grid`
+// (WeakMap ⇒ evicted with the match, never module-global process state) and validated
+// by FULL mask equality (the mask is the field's sole determinant), so a stale or
+// colliding entry can never be served — unlike the `mazeVersion` counter PLAN §1
+// rejected, whose keys collided across states.
+const fieldCache = new WeakMap<
+  Grid,
+  { readonly mask: Uint8Array; readonly field: DistanceField }
+>();
+
+function maskEquals(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * The exit-sourced distance field for `grid` under the current tower SoA, reusing
+ * the cached field while the materialized mask is unchanged. Pure in its result:
+ * the returned field depends only on `(grid, towers)`, never on cache state.
+ */
+function effectiveField(grid: Grid, towers: TowerArrays): DistanceField {
+  const mask = materializeTowerMask(grid, towers); // O(towers), never throws
+  const memo = fieldCache.get(grid);
+  if (memo !== undefined && maskEquals(memo.mask, mask)) return memo.field;
+  const field = computeDistanceField(grid, mask);
+  fieldCache.set(grid, { mask, field });
+  return field;
+}
 
 /**
  * Totality guard (ADR 0006 §4): a restored or forged state may be missing whole
@@ -193,16 +232,13 @@ export function step(state: SimState, inputs: readonly SimInput[], board: BoardC
     // 'noop' and any unknown kind: nothing.
   }
 
-  // 2) DERIVE the effective field once, as a pure local of this tick, from the
-  //    final tower SoA — a pure function of (board.grid, state.towers). With no
-  //    towers the effective field IS the immutable base field (PLAN §1), so reuse
-  //    it directly: an empty tower mask reproduces `board.field` byte-for-byte, so
-  //    this skips a redundant Dijkstra on every tower-free tick without any cache
-  //    or ambient state (the towered case still recomputes each tick).
-  const field =
-    state.towers.id.length === 0
-      ? board.field
-      : computeDistanceField(grid, materializeTowerMask(grid, state.towers));
+  // 2) DERIVE the effective field once for this tick from the final tower SoA — a
+  //    pure function of (board.grid, state.towers). With no towers the effective
+  //    field IS the immutable base field (PLAN §1), reproduced byte-for-byte by an
+  //    empty mask, so reuse it directly. With towers, `effectiveField` recomputes
+  //    only when the tower mask actually changed and otherwise reuses the cached
+  //    field — byte-identical to a recompute, so cold re-simulation is unaffected.
+  const field = state.towers.id.length === 0 ? board.field : effectiveField(grid, state.towers);
 
   // 3) MOVEMENT PHASE — advance each creep over the post-input field. A creep that
   //    reaches the exit leaks (costs a life); a corrupt row is dropped (no life

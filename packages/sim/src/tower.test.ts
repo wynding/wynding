@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createInitialState,
   step,
+  hashSimState,
   loadBoard,
   TOWER_COST,
   type BoardContext,
@@ -300,6 +301,34 @@ describe('dynamic re-path (commit-to-next through step)', () => {
     }
     expect(s.lives).toBe(9);
     expect([...rows]).toEqual([2]); // never left the straight lane
+  });
+
+  it('a warm field cache yields a byte-identical trace (build → reuse → sell → reuse)', () => {
+    // The effective field is cached per grid and reused while the tower mask is
+    // unchanged. Re-running the same scenario on the SAME board object (so the
+    // second run hits a warm cache) must reproduce the trace exactly — a stale or
+    // colliding cache entry would diverge here. Exercises a mask-changing build (a
+    // miss), empty towered ticks (hits), a mask-changing sell (a miss), then
+    // no-tower ticks (the board.field path).
+    const runOnce = (): { trace: string[]; hash: string } => {
+      const s = createInitialState(9);
+      const trace: string[] = [];
+      step(s, [spawn(), place(3, 1)], LANE);
+      for (let t = 0; t < 80; t++) {
+        step(s, t % 20 === 0 ? [spawn()] : [], LANE);
+        trace.push(hashSimState(s));
+      }
+      step(s, [sell(1)], LANE);
+      for (let t = 0; t < 80; t++) {
+        step(s, [], LANE);
+        trace.push(hashSimState(s));
+      }
+      return { trace, hash: hashSimState(s) };
+    };
+    const cold = runOnce(); // populates the LANE field cache
+    const warm = runOnce(); // hits it
+    expect(warm.trace).toEqual(cold.trace);
+    expect(warm.hash).toBe(cold.hash);
   });
 
   it('spawn→build and build→spawn on one tick both head off the final geometry', () => {
