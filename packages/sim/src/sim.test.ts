@@ -57,6 +57,20 @@ describe('sim smoke', () => {
     expect(s.creeps.col[0]).toBe(0); // still on the entrance cell...
     expect(s.creeps.row[0]).toBe(2);
     expect(s.creeps.edgeProgress[0]).toBe(26); // ...one budget into the first edge
+    expect(s.creeps.headCol[0]).toBe(1); // committed toward the next cell east
+    expect(s.creeps.headRow[0]).toBe(2);
+  });
+
+  it('ignores a spawn with a malformed hp (non-positive or non-integer) as a no-op', () => {
+    const s = createInitialState(1);
+    const bad = [
+      { kind: 'spawnCreep', hp: 0 },
+      { kind: 'spawnCreep', hp: -3 },
+      { kind: 'spawnCreep', hp: 1.5 },
+    ] as unknown as SimInput[];
+    step(s, bad, BOARD);
+    expect(s.creeps.id).toHaveLength(0);
+    expect(s.nextEntityId).toBe(1);
   });
 
   it('defensively drops creep rows whose parallel arrays are out of sync', () => {
@@ -67,11 +81,21 @@ describe('sim smoke', () => {
       (c) => (c.hp = []),
       (c) => (c.col = []),
       (c) => (c.row = []),
+      (c) => (c.headCol = []),
+      (c) => (c.headRow = []),
       (c) => (c.edgeProgress = []),
     ];
     for (const corrupt of corruptions) {
       const s = createInitialState(1);
-      s.creeps = { id: [1], hp: [5], col: [1], row: [2], edgeProgress: [0] };
+      s.creeps = {
+        id: [1],
+        hp: [5],
+        col: [1],
+        row: [2],
+        headCol: [1],
+        headRow: [2],
+        edgeProgress: [0],
+      };
       corrupt(s.creeps);
       const out = step(s, [], BOARD);
       expect(out.creeps.id).toHaveLength(0);

@@ -51,15 +51,31 @@ const SCENARIO_BOARD: BoardContext = loadBoard({
 });
 
 /**
+ * The entity id the canonical build receives: ids 1 and 2 go to the two creeps
+ * spawned at tick 0, so the tower placed at tick 2 (before any further spawn)
+ * gets id 3 from the shared entity-id space.
+ */
+const SCENARIO_TOWER_ID = 3;
+
+/**
  * The canonical input log: a pure function of the tick index (no external RNG —
  * the sim's own seeded RNG supplies in-sim randomness). It exercises the FULL
- * command vocabulary that exists today — single spawns, a multi-command tick, and
- * an explicit `noop` — so the golden reacts to a behavior change in any of those
- * paths, not just single-spawn handling. (The scenario grows as the vocabulary
- * does; a single golden can't cover an unbounded input space, so new commands must
- * be added here when they land.)
+ * command vocabulary that exists today — single spawns, a multi-command tick, an
+ * explicit `noop`, an accepted build into the creeps' lane (forcing a visible
+ * re-route), a rejected build (the deterministic-no-op path), and a later sell
+ * (re-opening the lane) — so the golden reacts to a behavior change in any of
+ * those paths. (The scenario grows as the vocabulary does; a single golden can't
+ * cover an unbounded input space, so new commands must be added here when they
+ * land.)
  */
 function canonicalInputs(tick: number): SimInput[] {
+  // Build a 2×2 wall across the straight lane (row 11 at cols 5-6): live creeps
+  // must re-route around it.
+  if (tick === 2) return [{ kind: 'placeTower', anchor: { col: 5, row: 10 } }];
+  // A rejected build (border footprint) — pins the validation-no-op path.
+  if (tick === 4) return [{ kind: 'placeTower', anchor: { col: 0, row: 0 } }];
+  // Sell the wall — the lane re-opens and later creeps run straight again.
+  if (tick === 201) return [{ kind: 'sellTower', tower: SCENARIO_TOWER_ID }];
   // Multi-command tick: two spawns applied in array order (id/order sensitivity).
   if (tick % 15 === 0) {
     return [
@@ -92,8 +108,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '32c5da2a',
-  traceDigest: '6b6676f3', // fnv1a(trace.join(':'))
+  finalHash: '99593206',
+  traceDigest: 'faa5d3e4', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 
@@ -116,6 +132,29 @@ describe('determinism gate', () => {
     // least two creeps reach the exit within SCENARIO_TICKS and decrement lives.
     const { state } = runCanonical();
     expect(state.lives).toBeLessThanOrEqual(8); // started at 10 ⇒ ≥2 leaks
+  });
+
+  it('witnesses a build, a sell, and a visible re-route in the canonical scenario', () => {
+    // The golden must actually exercise the Story-3 vocabulary: the tick-2 build
+    // lands (bounty 80→75, one tower), live creeps visibly leave the straight
+    // row-11 lane to route around it, and the tick-201 sell refunds 3 (75→78)
+    // and removes the tower.
+    let state = createInitialState(SCENARIO_SEED);
+    let sawTower = false;
+    let sawDetour = false;
+    for (let t = 0; t < SCENARIO_TICKS; t++) {
+      state = step(state, canonicalInputs(t), SCENARIO_BOARD);
+      if (state.towers.id.length === 1) {
+        sawTower = true;
+        expect(state.towers.id[0]).toBe(SCENARIO_TOWER_ID);
+        expect(state.bounty).toBe(75); // 80 − TOWER_COST, rejected build spent nothing
+      }
+      if (state.creeps.row.some((r) => r !== 11)) sawDetour = true;
+    }
+    expect(sawTower).toBe(true);
+    expect(sawDetour).toBe(true); // the straight-lane board never leaves row 11 unbuilt
+    expect(state.towers.id).toHaveLength(0); // sold
+    expect(state.bounty).toBe(78); // 75 + floor(5·3/4)
   });
 
   it('continues byte-identically after a mid-run serialize/restore (resume path)', () => {

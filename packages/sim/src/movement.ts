@@ -2,19 +2,21 @@
 // integer-only, like the rest of the sim core.
 //
 // A creep occupies a cell `(col,row)` and carries `edgeProgress`: how far, in
-// fixed-point units, it has travelled from that cell toward the next descent cell
-// (the neighbour the distance field routes it to). Each tick it spends a fixed
-// movement budget along the gradient; when progress reaches the edge length it
-// snaps to the next cell and the remainder carries onto the following edge, so
-// speed stays constant regardless of where cell boundaries fall.
+// fixed-point units, it has travelled from that cell toward its committed head
+// cell. Each tick it spends a fixed movement budget along the gradient; when
+// progress reaches the edge length it snaps to the head cell and the remainder
+// carries onto the following edge, so speed stays constant regardless of where
+// cell boundaries fall.
 //
-// The follower re-derives its target from the field every step rather than storing
-// a per-creep path, so a re-path (Story 3 recomputes the field) is picked up for
-// free with no stored-path invalidation. Caveat for Story 3: a creep mid-edge when
-// the field changes carries an `edgeProgress` measured on the OLD edge; if the new
-// descent is a shorter edge (diagonal→orthogonal), `edgeProgress >= edgeLen` would
-// drop it here. Story 3 owns that transition (clamp/complete the current edge before
-// re-pathing); Story 2's static per-match field never hits it.
+// COMMIT-TO-NEXT: the head `(headCol,headRow)` is a *committed* heading only
+// while the creep is mid-edge (`edgeProgress > 0`) — a field change (a build or
+// sell re-paths the maze) never reroutes a creep mid-edge; it finishes the edge
+// it is on, then re-derives its next head from the current field at the cell
+// centre. At rest (`edgeProgress === 0`, including fresh spawns) the head columns
+// hold the canonical sentinel `head == (col,row)`; the stored value is ignored
+// and the head is re-derived from the field the moment the creep leaves the
+// centre. So every creep adopts a new route within one cell of travel — bounded
+// latency, no teleport, no stranding.
 
 import { ORTHO_COST, DIAG_COST, forEachPassableNeighbor } from './board';
 import { FP_ONE } from '@wynding/engine';
@@ -87,6 +89,8 @@ export type AdvanceOutcome =
       readonly kind: 'move';
       readonly col: number;
       readonly row: number;
+      readonly headCol: number;
+      readonly headRow: number;
       readonly edgeProgress: number;
     };
 
@@ -104,13 +108,22 @@ const LEAK: AdvanceOutcome = { kind: 'leak' };
  *   2. LEAK AT ENTRY — a valid creep resting on the exit leaks now (a creep at
  *      rest always has progress 0, so a *positive* progress on the exit is corrupt
  *      ⇒ `drop`, not `leak`, and costs no life).
- *   3. MOVE — walk the gradient until the budget is spent or the exit is reached.
- *      A cell with no exact descent (only possible in a forged field) ⇒ `drop`,
- *      and out-of-range progress for the current edge ⇒ `drop`; both keep the loop
- *      from hanging and preserve the "step() never crashes on corrupt state" contract.
+ *   3. COMMITTED-EDGE VALIDATION — a mid-edge creep (`edgeProgress > 0`) must
+ *      carry a legal committed edge: the head exactly one step away (distinct,
+ *      Chebyshev distance 1), in-bounds and unblocked, both corner cells
+ *      unblocked when diagonal, and `edgeProgress` within the edge length ⇒
+ *      anything else is `drop`. At rest the stored head is the sentinel
+ *      `head == (col,row)`; it is ignored and re-derived from `field`.
+ *   4. MOVE — spend the budget: finish the committed edge (or derive a fresh
+ *      head at a centre via {@link firstDescentNeighbor}), snap to the head at
+ *      the boundary, re-derive at each subsequent centre from the same field. A
+ *      cell with no exact descent (only possible in a forged field, or from an
+ *      unreachable head — the maze invariant keeps both out of genuine states)
+ *      ⇒ `drop`.
  *
- * The loop always terminates: each non-returning iteration has `0 ≤ progress <
- * edgeLen`, so `stepDist ≥ 1` and `budget` strictly decreases.
+ * The loop always terminates: each iteration starts with `0 ≤ progress <
+ * edgeLen`, so `stepDist ≥ 1` and `budget` strictly decreases. A `move` outcome
+ * with `edgeProgress === 0` always reports the sentinel head.
  */
 export function advanceCreep(
   field: DistanceField,
@@ -118,6 +131,8 @@ export function advanceCreep(
   hp: number | undefined,
   col: number | undefined,
   row: number | undefined,
+  headCol: number | undefined,
+  headRow: number | undefined,
   edgeProgress: number | undefined,
   budget: number,
 ): AdvanceOutcome {
@@ -127,6 +142,8 @@ export function advanceCreep(
     !Number.isSafeInteger(hp) ||
     !Number.isSafeInteger(col) ||
     !Number.isSafeInteger(row) ||
+    !Number.isSafeInteger(headCol) ||
+    !Number.isSafeInteger(headRow) ||
     !Number.isSafeInteger(edgeProgress)
   ) {
     return DROP;
@@ -144,25 +161,59 @@ export function advanceCreep(
     return progress === 0 ? LEAK : DROP;
   }
 
-  // (3) MOVE — spend the budget along the gradient, crossing at most one boundary.
+  // (3) COMMITTED-EDGE VALIDATION — only a mid-edge creep carries a binding head.
+  let hCol = headCol as number;
+  let hRow = headRow as number;
+  let diagonal = false;
+  if (progress > 0) {
+    const dCol = hCol - curCol;
+    const dRow = hRow - curRow;
+    if ((dCol === 0 && dRow === 0) || dCol < -1 || dCol > 1 || dRow < -1 || dRow > 1) {
+      return DROP; // head is not exactly one step away
+    }
+    if (blockedAt(field, hCol, hRow)) return DROP; // head out of bounds or blocked
+    diagonal = dCol !== 0 && dRow !== 0;
+    if (diagonal && (blockedAt(field, hCol, curRow) || blockedAt(field, curCol, hRow))) {
+      return DROP; // committed diagonal's corner is closed
+    }
+    if (progress >= (diagonal ? DIAG_LEN : ORTHO_LEN)) return DROP; // out-of-range progress
+  }
+
+  // (4) MOVE — finish the committed edge, then follow the gradient; a creep at a
+  //     centre (including the start, if resting) derives its head from `field`.
   let remaining = budget;
   while (remaining > 0) {
-    const next = firstDescentNeighbor(field, curCol, curRow);
-    if (next === null) return DROP; // forged-field backstop — no exact descent
-    const edgeLen = next.diagonal ? DIAG_LEN : ORTHO_LEN;
-    if (progress >= edgeLen) return DROP; // out-of-range progress for this edge
+    if (progress === 0) {
+      const next = firstDescentNeighbor(field, curCol, curRow);
+      if (next === null) return DROP; // forged-field backstop — no exact descent
+      hCol = next.col;
+      hRow = next.row;
+      diagonal = next.diagonal;
+    }
+    const edgeLen = diagonal ? DIAG_LEN : ORTHO_LEN;
     const stepDist = Math.min(remaining, edgeLen - progress); // ≥ 1 here
     progress += stepDist;
     remaining -= stepDist;
     if (progress === edgeLen) {
-      // Arrived exactly at the next cell centre.
-      curCol = next.col;
-      curRow = next.row;
+      // Arrived exactly at the committed head's centre.
+      curCol = hCol;
+      curRow = hRow;
       progress = 0;
       if (curCol === field.exit.col && curRow === field.exit.row) {
         return LEAK; // remaining budget is discarded
       }
     }
   }
-  return { kind: 'move', col: curCol, row: curRow, edgeProgress: progress };
+  if (progress === 0) {
+    hCol = curCol; // canonical sentinel: at rest, head == current cell
+    hRow = curRow;
+  }
+  return {
+    kind: 'move',
+    col: curCol,
+    row: curRow,
+    headCol: hCol,
+    headRow: hRow,
+    edgeProgress: progress,
+  };
 }

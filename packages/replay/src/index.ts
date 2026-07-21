@@ -61,6 +61,59 @@ const MAX_TICKS = 36_000;
 const MAX_INPUTS_PER_TICK = 64;
 /** Max creeps spawned across the whole match; caps accumulating per-tick movement cost. */
 const MAX_TOTAL_SPAWNS = 10_000;
+/**
+ * Max tower commands (placeTower/sellTower) across the whole match. Each
+ * placeTower that reaches the maze-invariant check runs a full grid-wide
+ * Dijkstra in `canPlaceTower`, and a placement rejected there is a free no-op
+ * (no bounty spent), so the economy cannot rate-limit repeats — without this
+ * cap an attacker could pack MAX_TICKS × MAX_INPUTS_PER_TICK such commands into
+ * one replay and burn minutes of CPU per validate() call. Generous relative to
+ * any legitimate build/sell cadence yet a fixed budget.
+ */
+const MAX_TOTAL_TOWER_COMMANDS = 1_000;
+
+/**
+ * Domain-validate one (already object-shaped) input against the full command
+ * union (ADR 0006 §4: a submitted replay containing a malformed or unknown
+ * command is INVALID — rejected here with a typed reason, not silently no-opped).
+ * Returns an error description, or null when the command is well-formed. `step`
+ * keeps its own no-op guards for direct/corrupt callers; the two layers are
+ * complementary (this validator = anti-cheat totality, the step guard = crash
+ * safety).
+ */
+function inputDomainError(input: object): string | null {
+  const kind = (input as { kind?: unknown }).kind;
+  switch (kind) {
+    case 'noop':
+      return null;
+    case 'spawnCreep': {
+      const hp = (input as { hp?: unknown }).hp;
+      // A zero/negative/fractional-HP creep is malformed, not a no-op.
+      if (!Number.isSafeInteger(hp) || (hp as number) < 1) {
+        return 'spawnCreep.hp must be a positive safe integer';
+      }
+      return null;
+    }
+    case 'sellTower': {
+      const tower = (input as { tower?: unknown }).tower;
+      if (!Number.isSafeInteger(tower)) return 'sellTower.tower must be a safe integer';
+      return null;
+    }
+    case 'placeTower': {
+      const anchor = (input as { anchor?: unknown }).anchor;
+      if (anchor === null || typeof anchor !== 'object') {
+        return 'placeTower.anchor must be a cell';
+      }
+      const { col, row } = anchor as { col?: unknown; row?: unknown };
+      if (!Number.isSafeInteger(col) || !Number.isSafeInteger(row)) {
+        return 'placeTower.anchor must have safe-integer col/row';
+      }
+      return null;
+    }
+    default:
+      return `unknown command kind ${JSON.stringify(kind)}`;
+  }
+}
 
 /**
  * Re-simulate a replay from its seed and input log, deriving a trusted score.
@@ -97,6 +150,7 @@ export function validate(replay: Replay, board: BoardContext): ValidationResult 
     };
   }
   let totalSpawns = 0;
+  let totalTowerCommands = 0;
   for (let t = 0; t < replay.tickInputs.length; t++) {
     const inputs = replay.tickInputs[t];
     if (!Array.isArray(inputs)) {
@@ -116,8 +170,21 @@ export function validate(replay: Replay, board: BoardContext): ValidationResult 
       if (input == null || typeof input !== 'object' || !('kind' in input)) {
         return { ok: false, reason: `tick ${t} input ${i} is malformed` };
       }
+      const domainError = inputDomainError(input);
+      if (domainError !== null) {
+        return { ok: false, reason: `tick ${t} input ${i}: ${domainError}` };
+      }
       if (input.kind === 'spawnCreep' && ++totalSpawns > MAX_TOTAL_SPAWNS) {
         return { ok: false, reason: `too many spawns: exceeds limit ${MAX_TOTAL_SPAWNS}` };
+      }
+      if (
+        (input.kind === 'placeTower' || input.kind === 'sellTower') &&
+        ++totalTowerCommands > MAX_TOTAL_TOWER_COMMANDS
+      ) {
+        return {
+          ok: false,
+          reason: `too many tower commands: exceeds limit ${MAX_TOTAL_TOWER_COMMANDS}`,
+        };
       }
     }
   }

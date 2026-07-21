@@ -44,13 +44,17 @@ const DIAGONAL = loadBoard({
 function ticksToLeak(field: DistanceField, col: number, row: number, budget: number): number {
   let c = col;
   let r = row;
+  let hc = col; // sentinel head — the creep starts at rest
+  let hr = row;
   let ep = 0;
   for (let t = 1; t <= 100000; t++) {
-    const o: AdvanceOutcome = advanceCreep(field, 1, 5, c, r, ep, budget);
+    const o: AdvanceOutcome = advanceCreep(field, 1, 5, c, r, hc, hr, ep, budget);
     if (o.kind === 'leak') return t;
     if (o.kind === 'drop') throw new Error(`unexpected drop at tick ${t}`);
     c = o.col;
     r = o.row;
+    hc = o.headCol;
+    hr = o.headRow;
     ep = o.edgeProgress;
   }
   throw new Error('creep never leaked');
@@ -80,59 +84,73 @@ describe('firstDescentNeighbor', () => {
 });
 
 describe('advanceCreep — normal movement', () => {
-  it('advances exactly one budget along the first edge, staying on the cell', () => {
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 26)).toEqual({
+  it('advances exactly one budget along the first edge, committing to the head', () => {
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 2, 0, 26)).toEqual({
       kind: 'move',
       col: 0,
       row: 2,
+      headCol: 1,
+      headRow: 2,
       edgeProgress: 26,
     });
   });
 
-  it('snaps to the next cell exactly when progress reaches the edge length', () => {
-    // A full orthogonal edge (256) with a matching budget arrives dead on (1,2).
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, ORTHO_LEN)).toEqual({
+  it('snaps to the next cell exactly when progress reaches the edge length (sentinel head)', () => {
+    // A full orthogonal edge (256) with a matching budget arrives dead on (1,2);
+    // at rest the head columns hold the canonical sentinel (== current cell).
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 2, 0, ORTHO_LEN)).toEqual({
       kind: 'move',
       col: 1,
       row: 2,
+      headCol: 1,
+      headRow: 2,
       edgeProgress: 0,
     });
   });
 
   it('carries the remainder onto the next edge after crossing a boundary', () => {
-    // Start 250 into a 256 edge with budget 26: 6 finishes the edge, 20 carry on.
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 250, 26)).toEqual({
+    // Start 250 into the committed 256 edge toward (1,2) with budget 26: 6 finishes
+    // the edge, 20 carry onto the next edge (freshly derived toward (2,2)).
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1, 2, 250, 26)).toEqual({
       kind: 'move',
       col: 1,
       row: 2,
+      headCol: 2,
+      headRow: 2,
       edgeProgress: 20,
     });
   });
 
   it('crosses multiple boundaries in one tick when the budget allows, carrying the remainder', () => {
-    // Budget 600 from (0,2): 256 finishes edge 0→1, 256 finishes edge 1→2, 88 carry
-    // onto edge 2→3 — ends resting on (2,2) with progress 88. (Production budget is
-    // 26 < 256 so this never happens live, but it is the only multi-cross arm.)
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 600)).toEqual({
+    // Budget 600 from rest at (0,2): 256 finishes edge 0→1, 256 finishes edge 1→2,
+    // 88 carry onto edge 2→3 — ends on (2,2) committed toward (3,2). (Production
+    // budget is 26 < 256 so this never happens live, but it is the only multi-cross arm.)
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 2, 0, 600)).toEqual({
       kind: 'move',
       col: 2,
       row: 2,
+      headCol: 3,
+      headRow: 2,
       edgeProgress: 88,
     });
   });
 
   it('crosses a diagonal edge of length 362, not 256', () => {
-    expect(advanceCreep(DIAGONAL, 1, 5, 2, 2, 0, DIAG_LEN)).toEqual({
+    expect(advanceCreep(DIAGONAL, 1, 5, 2, 2, 2, 2, 0, DIAG_LEN)).toEqual({
       kind: 'move',
       col: 3,
       row: 1,
+      headCol: 3,
+      headRow: 1,
       edgeProgress: 0,
     });
     // A budget one short of the diagonal length leaves it mid-edge (still on 2,2).
-    expect(advanceCreep(DIAGONAL, 1, 5, 2, 2, 0, DIAG_LEN - 1)).toEqual({
+    expect(advanceCreep(DIAGONAL, 1, 5, 2, 2, 2, 2, 0, DIAG_LEN - 1)).toEqual({
       kind: 'move',
       col: 2,
       row: 2,
+      headCol: 3,
+      headRow: 1,
       edgeProgress: DIAG_LEN - 1,
     });
   });
@@ -152,35 +170,66 @@ describe('advanceCreep — normal movement', () => {
 
 describe('advanceCreep — leak policy', () => {
   it('leaks a creep that begins the tick resting on the exit', () => {
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 4, 2, 0, 26)).toEqual({ kind: 'leak' });
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 4, 2, 4, 2, 0, 26)).toEqual({ kind: 'leak' });
   });
 
   it('leaks the tick it arrives, discarding any remaining budget', () => {
-    // 230 into the last edge with a huge budget: it finishes the edge and leaks;
-    // the leftover budget is not spent wrapping past the exit.
-    expect(advanceCreep(ADJACENT, 1, 5, 0, 1, 230, 100000)).toEqual({ kind: 'leak' });
+    // 230 into the last committed edge with a huge budget: it finishes the edge and
+    // leaks; the leftover budget is not spent wrapping past the exit.
+    expect(advanceCreep(ADJACENT, 1, 5, 0, 1, 1, 1, 230, 100000)).toEqual({ kind: 'leak' });
   });
 });
 
 describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)', () => {
   const cases: ReadonlyArray<[string, AdvanceOutcome]> = [
-    ['id undefined', advanceCreep(STRAIGHT_FIELD, undefined, 5, 0, 2, 0, 26)],
-    ['hp undefined', advanceCreep(STRAIGHT_FIELD, 1, undefined, 0, 2, 0, 26)],
-    ['col undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, undefined, 2, 0, 26)],
-    ['row undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, undefined, 0, 26)],
-    ['edgeProgress undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, undefined, 26)],
-    ['col non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 0.5, 2, 0, 26)],
-    ['edgeProgress non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1.5, 26)],
-    ['col out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 99, 2, 0, 26)],
-    ['row out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 99, 0, 26)],
-    ['negative progress', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, -1, 26)],
-    ['blocked cell', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 0, 0, 26)], // blocked border corner
+    ['id undefined', advanceCreep(STRAIGHT_FIELD, undefined, 5, 0, 2, 0, 2, 0, 26)],
+    ['hp undefined', advanceCreep(STRAIGHT_FIELD, 1, undefined, 0, 2, 0, 2, 0, 26)],
+    ['col undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, undefined, 2, 0, 2, 0, 26)],
+    ['row undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, undefined, 0, 2, 0, 26)],
+    ['headCol undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, undefined, 2, 0, 26)],
+    ['headRow undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, undefined, 0, 26)],
+    ['edgeProgress undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 2, undefined, 26)],
+    ['col non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 0.5, 2, 0, 2, 0, 26)],
+    ['headCol non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1.5, 2, 10, 26)],
+    ['edgeProgress non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1, 2, 1.5, 26)],
+    ['col out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 99, 2, 99, 2, 0, 26)],
+    ['row out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 99, 0, 99, 0, 26)],
+    ['negative progress', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1, 2, -1, 26)],
+    ['blocked cell', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 0, 0, 0, 0, 26)], // blocked border corner
   ];
   for (const [label, outcome] of cases) {
     it(`drops a row with ${label}`, () => {
       expect(outcome).toEqual({ kind: 'drop' });
     });
   }
+
+  it('drops a mid-edge creep whose committed edge is illegal', () => {
+    // The commit is binding only when legal: one step away, distinct, unblocked,
+    // corner-safe when diagonal, progress within the edge. Anything else is a
+    // deterministic drop, never a crash and never a life lost.
+    const illegal: ReadonlyArray<[string, AdvanceOutcome]> = [
+      // head == current cell (the rest sentinel) with positive progress
+      ['a zero-length committed edge', advanceCreep(STRAIGHT_FIELD, 1, 5, 1, 2, 1, 2, 10, 26)],
+      // head two cells away — not an adjacent commitment
+      ['a non-adjacent head', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 2, 2, 10, 26)],
+      // head on blocked border terrain
+      ['a blocked head', advanceCreep(STRAIGHT_FIELD, 1, 5, 1, 1, 1, 0, 10, 26)],
+      // diagonal into the exit past a blocked corner (4,1) — a corner-cut commit
+      ['a corner-cutting diagonal', advanceCreep(STRAIGHT_FIELD, 1, 5, 3, 1, 4, 2, 10, 26)],
+      // progress at/past the committed orthogonal edge length
+      [
+        'progress past the edge',
+        advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1, 2, ORTHO_LEN + 44, 26),
+      ],
+      [
+        'progress at exactly the edge length',
+        advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1, 2, ORTHO_LEN, 26),
+      ],
+    ];
+    for (const [, outcome] of illegal) {
+      expect(outcome).toEqual({ kind: 'drop' });
+    }
+  });
 
   it('drops a creep on an in-bounds but unreachable (walled-off) open cell', () => {
     // Open (blockedMask 0) yet unreachable (dist -1): passes the blockedAt gate but
@@ -192,17 +241,11 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
       dist: Int32Array.from([-1, 0]), // (0,0) open but stranded, (1,0) exit
       blockedMask: new Uint8Array([0, 0]), // both open
     };
-    expect(advanceCreep(walledOpen, 1, 5, 0, 0, 0, 26)).toEqual({ kind: 'drop' });
-  });
-
-  it('drops (does not hang) when progress exceeds the current edge length', () => {
-    // A restored row with progress past the edge would make stepDist ≤ 0 and loop
-    // forever; the guard drops it instead.
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, ORTHO_LEN + 44, 26)).toEqual({ kind: 'drop' });
+    expect(advanceCreep(walledOpen, 1, 5, 0, 0, 0, 0, 0, 26)).toEqual({ kind: 'drop' });
   });
 
   it('drops a corrupt positive progress on the exit cell without leaking a life', () => {
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 4, 2, 5, 26)).toEqual({ kind: 'drop' });
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 4, 2, 4, 2, 5, 26)).toEqual({ kind: 'drop' });
   });
 
   it('drops (does not crash) on a forged field where a live cell has no exact descent', () => {
@@ -215,7 +258,7 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
       dist: new Int32Array(9), // all zero
       blockedMask: new Uint8Array(9), // all open
     };
-    expect(advanceCreep(forged, 1, 5, 0, 1, 0, 26)).toEqual({ kind: 'drop' });
+    expect(advanceCreep(forged, 1, 5, 0, 1, 0, 1, 0, 26)).toEqual({ kind: 'drop' });
   });
 });
 
