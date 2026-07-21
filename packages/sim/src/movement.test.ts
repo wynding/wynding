@@ -203,20 +203,15 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
     });
   }
 
-  it('drops a mid-edge creep whose committed edge is illegal', () => {
-    // The commit is binding only when legal: one step away, distinct, unblocked,
-    // corner-safe when diagonal, progress within the edge. Anything else is a
-    // deterministic drop, never a crash and never a life lost.
+  it('drops a mid-step creep whose head is structurally impossible', () => {
+    // A head that is not a single legal step away, or progress outside the edge,
+    // cannot be a real step — a deterministic drop, never a crash or a lost life.
     const illegal: ReadonlyArray<[string, AdvanceOutcome]> = [
       // head == current cell (the rest sentinel) with positive progress
-      ['a zero-length committed edge', advanceCreep(STRAIGHT_FIELD, 1, 5, 1, 2, 1, 2, 10, 26)],
-      // head two cells away — not an adjacent commitment
+      ['a zero-length step', advanceCreep(STRAIGHT_FIELD, 1, 5, 1, 2, 1, 2, 10, 26)],
+      // head two cells away — not an adjacent step
       ['a non-adjacent head', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 2, 2, 10, 26)],
-      // head on blocked border terrain
-      ['a blocked head', advanceCreep(STRAIGHT_FIELD, 1, 5, 1, 1, 1, 0, 10, 26)],
-      // diagonal into the exit past a blocked corner (4,1) — a corner-cut commit
-      ['a corner-cutting diagonal', advanceCreep(STRAIGHT_FIELD, 1, 5, 3, 1, 4, 2, 10, 26)],
-      // progress at/past the committed orthogonal edge length
+      // progress at/past the orthogonal edge length
       [
         'progress past the edge',
         advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1, 2, ORTHO_LEN + 44, 26),
@@ -225,10 +220,48 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
         'progress at exactly the edge length',
         advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1, 2, ORTHO_LEN, 26),
       ],
+      // far side of the boundary (progress ≥ half) with a blocked head: the creep
+      // is committed to a cell it cannot enter, so it drops rather than step onto it.
+      ['a far-side blocked head', advanceCreep(STRAIGHT_FIELD, 1, 5, 1, 1, 1, 0, 200, 26)],
     ];
     for (const [, outcome] of illegal) {
       expect(outcome).toEqual({ kind: 'drop' });
     }
+  });
+
+  it('keeps a far-side creep whose FROM cell is walled behind it (it occupies the head)', () => {
+    // Past the boundary the creep occupies its head, so a wall on the FROM cell is
+    // legal and behind it — the creep must finish onto the head, not drop. Here the
+    // FROM cell (2,2) is faked as unreachable/blocked via a forged field while the
+    // head (3,2) stays open and reachable.
+    const walledBehind: DistanceField = {
+      width: 5,
+      height: 5,
+      exit: { col: 4, row: 2 },
+      // Row 2: (0)_ (1)_ (2)blocked (3)dist10 (4)exit0 — FROM (2,2) blocked, head (3,2) open.
+      dist: Int32Array.from([
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 10, 0, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1,
+      ]),
+      blockedMask: Uint8Array.from([
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      ]),
+    };
+    // (2,2) FROM is blocked, head (3,2) far side (progress 200 ≥ 128): must not drop.
+    const out = advanceCreep(walledBehind, 1, 5, 2, 2, 3, 2, 200, 26);
+    expect(out.kind).toBe('move');
+    if (out.kind === 'move') expect([out.col, out.row]).toEqual([2, 2]); // still finishing the step
+  });
+
+  it('re-routes (does not drop) a near-side creep whose head is no longer a valid descent', () => {
+    // On the near side of the boundary the creep still occupies its own cell, so a
+    // stale/blocked head just means the maze changed — it re-derives a legal descent
+    // and turns. It survives as a move and loses no life (verified via ticksToLeak
+    // reaching the exit from such a state).
+    const blockedHead = advanceCreep(STRAIGHT_FIELD, 1, 5, 1, 1, 1, 0, 10, 26); // head (1,0) is border
+    expect(blockedHead.kind).toBe('move');
+    const cornerCut = advanceCreep(STRAIGHT_FIELD, 1, 5, 3, 1, 4, 2, 10, 26); // (4,2) diag past blocked (4,1)
+    expect(cornerCut.kind).toBe('move');
   });
 
   it('drops a creep on an in-bounds but unreachable (walled-off) open cell', () => {

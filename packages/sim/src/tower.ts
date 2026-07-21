@@ -18,7 +18,7 @@
 import type { Cell } from '@wynding/types';
 import type { Grid } from './board';
 import { computeDistanceField, isReachable } from './pathfinding';
-import { blockedAt } from './field-access';
+import { occupiedCell } from './movement';
 
 /**
  * Structure-of-arrays tower storage (mirrors `CreepArrays`). `(col,row)` is the
@@ -152,27 +152,26 @@ export interface CreepPlacementView {
 }
 
 /**
- * Whether a creep row carries a *binding* committed edge — the same structural
- * legality `advanceCreep` requires before honouring a mid-edge head: positive
- * safe-integer progress and a safe-integer head exactly one step (Chebyshev
- * distance 1) from `(col,row)`. A row that fails this is one `advanceCreep` will
- * drop or re-derive this same tick, so placement treats it as resting-at-
- * `(col,row)` rather than letting a corrupt far-away head veto a legal build —
- * keeping the two functions' notion of "committed" in lockstep. (The head's
- * traversability against the candidate field is checked separately in stage 5.)
+ * The cell a creep occupies for placement, or `null` when its position is corrupt
+ * (a non-safe-integer or out-of-bounds `(col,row)` — such a row is dropped or
+ * re-routed by movement this same tick, so it neither occupies a footprint cell
+ * nor constrains the invariant). Otherwise the single cell containing its point
+ * (the never-build-on-a-creep unit, PRD 0001 §3): its `(col,row)` until it crosses
+ * the step boundary, its head after — the same {@link occupiedCell} rule movement
+ * uses, so the two agree on which cell is protected.
  */
-function hasCommittedEdge(
-  col: number,
-  row: number,
-  headCol: number | undefined,
-  headRow: number | undefined,
-  edgeProgress: number | undefined,
-): boolean {
-  if (!Number.isSafeInteger(edgeProgress) || (edgeProgress as number) <= 0) return false;
-  if (!Number.isSafeInteger(headCol) || !Number.isSafeInteger(headRow)) return false;
-  const dCol = (headCol as number) - col;
-  const dRow = (headRow as number) - row;
-  return Math.max(Math.abs(dCol), Math.abs(dRow)) === 1; // adjacent and distinct
+function creepOccupiedCell(
+  grid: Grid,
+  creeps: CreepPlacementView,
+  i: number,
+): { readonly col: number; readonly row: number } | null {
+  const ccol = creeps.col[i];
+  const crow = creeps.row[i];
+  if (!Number.isSafeInteger(ccol) || !Number.isSafeInteger(crow)) return null;
+  const cc = ccol as number;
+  const cr = crow as number;
+  if (!grid.inBounds({ col: cc, row: cr })) return null;
+  return occupiedCell(cc, cr, creeps.headCol[i], creeps.headRow[i], creeps.edgeProgress[i]);
 }
 
 /**
@@ -185,18 +184,16 @@ function hasCommittedEdge(
  *   2. BUILDABLE — the 2×2 footprint is in-bounds, every cell buildable-open base
  *      terrain AND free in the current tower mask (the mask check is what
  *      prevents tower overlap; `classAt` describes base terrain only).
- *   3. UNOCCUPIED — no footprint cell is claimed by a live creep: its current
- *      cell always; while mid-edge (`edgeProgress > 0`) also its committed head
- *      and, for a diagonal edge, the two corner cells — so a build can never
- *      close a corner a creep is currently cutting.
+ *   3. UNOCCUPIED — no footprint cell is the cell a live creep currently occupies
+ *      (PRD 0001 §3: you may build *adjacent* to a creep, only never on the cell
+ *      containing its point — the cell it is heading toward stays buildable until
+ *      it crosses in; a creep on the near side of the boundary then re-routes off
+ *      the new field rather than entering the wall).
  *   4. AFFORDABLE — `bounty` is a nonnegative safe integer ≥ `TOWER_COST`, so a
  *      corrupt restored bounty can never flow through the spend arithmetic.
- *   5. MAZE INVARIANT — in the candidate field (current mask + footprint) the
- *      exit remains reachable from the entrance and from every live creep's
- *      committed position: a resting creep's cell must stay reachable; a
- *      mid-edge creep's committed edge must stay traversable (head reachable
- *      and unblocked, diagonal corners unblocked) so it finishes its edge and
- *      re-routes from the head.
+ *   5. MAZE INVARIANT — in the candidate field (current mask + footprint) the exit
+ *      remains reachable from the entrance and from every live creep's occupied
+ *      cell (PRD 0001 §1), so no build can strand a creep.
  *
  * The candidate field is validation-scoped and discarded; `step` derives the
  * post-input field once, separately, for movement.
@@ -221,40 +218,12 @@ export function canPlaceTower(
     if (towerMask[(r + dr) * grid.width + (c + dc)] !== 0) return false;
   }
 
-  // 3) unoccupied — creep current cells, committed heads, diagonal corners
+  // 3) unoccupied — the footprint may not cover any creep's occupied cell.
   const inFootprint = (cc: number, rr: number): boolean =>
     cc >= c && cc <= c + 1 && rr >= r && rr <= r + 1;
   for (let i = 0; i < creeps.id.length; i++) {
-    const ccol = creeps.col[i];
-    const crow = creeps.row[i];
-    // A row without a safe-integer in-bounds position has no cell to occupy or
-    // check reachability from, so it is skipped here. (A row corrupt only in a
-    // non-positional column — bad hp, out-of-range progress — is dropped by
-    // movement this same tick too, but still has a valid cell, so it is
-    // conservatively treated as occupying it: a fail-safe over-rejection reachable
-    // only from forged state, never under-validation.)
-    if (!Number.isSafeInteger(ccol) || !Number.isSafeInteger(crow)) continue;
-    if (!grid.inBounds({ col: ccol as number, row: crow as number })) continue;
-    if (inFootprint(ccol as number, crow as number)) return false;
-    const hcol = creeps.headCol[i];
-    const hrow = creeps.headRow[i];
-    const committed = hasCommittedEdge(
-      ccol as number,
-      crow as number,
-      hcol,
-      hrow,
-      creeps.edgeProgress[i],
-    );
-    if (committed) {
-      if (inFootprint(hcol as number, hrow as number)) return false;
-      const diagonal = hcol !== ccol && hrow !== crow;
-      if (
-        diagonal &&
-        (inFootprint(hcol as number, crow as number) || inFootprint(ccol as number, hrow as number))
-      ) {
-        return false;
-      }
-    }
+    const occ = creepOccupiedCell(grid, creeps, i);
+    if (occ !== null && inFootprint(occ.col, occ.row)) return false;
   }
 
   // 4) affordable
@@ -268,35 +237,8 @@ export function canPlaceTower(
   const candidate = computeDistanceField(grid, candidateMask);
   if (!isReachable(candidate, grid.entrance)) return false;
   for (let i = 0; i < creeps.id.length; i++) {
-    const ccol = creeps.col[i];
-    const crow = creeps.row[i];
-    if (!Number.isSafeInteger(ccol) || !Number.isSafeInteger(crow)) continue;
-    if (!grid.inBounds({ col: ccol as number, row: crow as number })) continue;
-    const hcol = creeps.headCol[i];
-    const hrow = creeps.headRow[i];
-    const committed = hasCommittedEdge(
-      ccol as number,
-      crow as number,
-      hcol,
-      hrow,
-      creeps.edgeProgress[i],
-    );
-    if (committed) {
-      // The committed edge must stay traversable: the creep finishes it, then
-      // re-routes from the head.
-      if (!isReachable(candidate, { col: hcol as number, row: hrow as number })) return false;
-      if (blockedAt(candidate, hcol as number, hrow as number)) return false;
-      const diagonal = hcol !== ccol && hrow !== crow;
-      if (
-        diagonal &&
-        (blockedAt(candidate, hcol as number, crow as number) ||
-          blockedAt(candidate, ccol as number, hrow as number))
-      ) {
-        return false;
-      }
-    } else if (!isReachable(candidate, { col: ccol as number, row: crow as number })) {
-      return false;
-    }
+    const occ = creepOccupiedCell(grid, creeps, i);
+    if (occ !== null && !isReachable(candidate, occ)) return false;
   }
   return true;
 }

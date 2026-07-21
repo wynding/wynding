@@ -108,8 +108,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '99593206',
-  traceDigest: 'faa5d3e4', // fnv1a(trace.join(':'))
+  finalHash: '72df3da2',
+  traceDigest: '502c3151', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 

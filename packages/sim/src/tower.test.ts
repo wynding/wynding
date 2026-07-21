@@ -185,11 +185,30 @@ describe('placeTower — every rejection is a deterministic no-op (never a throw
     expect(s.towers.id).toHaveLength(1);
   });
 
-  it("no-ops a footprint on a mid-edge creep's committed head", () => {
+  it('accepts a build on the cell a near-side creep is heading toward (it re-routes, never steps on the tower)', () => {
+    // PRD 0001 §3: you may build on the cell a creep is heading toward until it
+    // crosses in. The creep at (1,2) heading to (2,2) is on the near side of the
+    // boundary (progress 4 < half), so it occupies (1,2); a build covering (2,2)
+    // is legal and the creep re-routes off the new field.
     const s = createInitialState(1);
-    committedCreep(s, 9, 1, 2, 2, 2, 4); // committed (1,2) → (2,2)
-    step(s, [place(2, 2)], LANE); // anchor on the head
-    step(s, [place(2, 1)], LANE); // footprint (2,1)-(3,2) contains the head
+    committedCreep(s, 9, 1, 2, 2, 2, 4);
+    step(s, [place(2, 1)], LANE); // footprint (2,1)-(3,2) covers the head (2,2), not (1,2)
+    expect(s.towers.id).toHaveLength(1); // allowed — build-on-the-heading-cell is legal
+    expect(s.creeps.id).toEqual([9]); // creep survived the same-tick build
+    expect(s.lives).toBe(10);
+    const onTower = s.creeps.col.some((cc, k) => {
+      const rr = s.creeps.row[k];
+      return cc >= 2 && cc <= 3 && rr !== undefined && rr >= 1 && rr <= 2;
+    });
+    expect(onTower).toBe(false); // it re-routed rather than entering the wall
+  });
+
+  it('no-ops a build on the cell a far-side creep occupies (its head, past the boundary)', () => {
+    // Past the midpoint the creep's point is in the head cell, so that head is its
+    // occupied cell and a build covering it is rejected.
+    const s = createInitialState(1);
+    committedCreep(s, 9, 1, 2, 2, 2, 200); // progress 200 ≥ half(128) → occupies (2,2)
+    step(s, [place(2, 2)], LANE); // anchor (2,2) is the occupied cell
     expect(s.towers.id).toHaveLength(0);
     expect(s.bounty).toBe(80);
   });
@@ -207,15 +226,13 @@ describe('placeTower — every rejection is a deterministic no-op (never a throw
     expect(s.lives).toBe(10); // dropped, not leaked
   });
 
-  it("no-ops a build closing a committed diagonal's corner cell, accepts one clear of it", () => {
+  it("accepts a build on a diagonal creep's corner cell (corners are not reserved)", () => {
+    // Only the occupied cell is protected; a diagonal step's corner cells are not.
     const s = createInitialState(1);
-    committedCreep(s, 9, 2, 2, 3, 3, 5); // diagonal SE commit; corners (3,2) and (2,3)
-    step(s, [place(3, 1)], LANE); // footprint contains corner (3,2)
-    expect(s.towers.id).toHaveLength(0);
-    expect(s.bounty).toBe(80);
-    step(s, [place(5, 1)], LANE); // clear of cell, head, and corners — accepted
-    expect(s.towers.id).toHaveLength(1);
-    expect(s.creeps.id).toEqual([9]); // the diagonal creep advanced, not dropped
+    committedCreep(s, 9, 2, 2, 3, 3, 5); // diagonal SE (2,2)→(3,3), near side ⇒ occupies (2,2)
+    step(s, [place(3, 1)], LANE); // footprint (3,1)-(4,2) covers corner (3,2), not (2,2)
+    expect(s.towers.id).toHaveLength(1); // corner not reserved → allowed
+    expect(s.creeps.id).toEqual([9]); // survives and re-routes, never on the tower
     expect(s.lives).toBe(10);
   });
 
