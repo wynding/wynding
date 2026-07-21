@@ -5,14 +5,22 @@
 
 import type { Board } from './schema';
 
-/** A first sample board — enough to exercise the pipeline end to end. */
+/**
+ * The M1 board: a 28×24 grid with a 1-cell blocked border, leaving a 26×22
+ * buildable-open field. A single walkable-unbuildable entrance (left border,
+ * row 11) and exit (right border, row 11) are the only openings; the sim derives
+ * every cell class from this geometry. Waves are still the sample set — wave
+ * tuning is Story 5.
+ */
 export const sampleBoard: Board = {
   id: 'field-01',
   name: 'Open Field',
-  widthTiles: 20,
-  heightTiles: 14,
-  startingLives: 20,
-  startingBounty: 100,
+  widthTiles: 28,
+  heightTiles: 24,
+  entrance: { col: 0, row: 11 },
+  exit: { col: 27, row: 11 },
+  startingLives: 10,
+  startingBounty: 80,
   waves: [
     {
       index: 0,
