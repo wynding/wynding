@@ -18,6 +18,7 @@
 
 import { ORTHO_COST, DIAG_COST, forEachPassableNeighbor } from './board';
 import { FP_ONE } from '@wynding/engine';
+import { blockedAt, distAt } from './field-access';
 import type { DistanceField } from './pathfinding';
 
 /**
@@ -52,23 +53,22 @@ export function firstDescentNeighbor(
   col: number,
   row: number,
 ): DescentStep | null {
-  const { width, height } = field;
-  const blocked = (c: number, r: number): boolean => {
-    if (c < 0 || r < 0 || c >= width || r >= height) return true; // OOB is blocked
-    return (field.blockedMask[r * width + c] as number) !== 0;
-  };
-  const distAt = (c: number, r: number): number => field.dist[r * width + c] as number;
-  const curD = distAt(col, row);
+  const curD = distAt(field, col, row);
 
   let result: DescentStep | null = null;
-  forEachPassableNeighbor(col, row, blocked, (nc, nr, diagonal) => {
-    const nd = distAt(nc, nr);
-    if (nd >= 0 && nd + (diagonal ? DIAG_COST : ORTHO_COST) === curD) {
-      result = { col: nc, row: nr, diagonal };
-      return true; // first exact-descent neighbour wins (fixed-order tie-break)
-    }
-    return undefined;
-  });
+  forEachPassableNeighbor(
+    col,
+    row,
+    (c, r) => blockedAt(field, c, r),
+    (nc, nr, diagonal) => {
+      const nd = distAt(field, nc, nr);
+      if (nd >= 0 && nd + (diagonal ? DIAG_COST : ORTHO_COST) === curD) {
+        result = { col: nc, row: nr, diagonal };
+        return true; // first exact-descent neighbour wins (fixed-order tie-break)
+      }
+      return undefined;
+    },
+  );
   return result;
 }
 
@@ -135,7 +135,7 @@ export function advanceCreep(
   let progress = edgeProgress as number;
   const { width, height } = field;
   if (curCol < 0 || curRow < 0 || curCol >= width || curRow >= height) return DROP;
-  if ((field.dist[curRow * width + curCol] as number) < 0) return DROP; // unreachable cell
+  if (distAt(field, curCol, curRow) < 0) return DROP; // unreachable cell
   if (progress < 0) return DROP;
 
   // (2) LEAK AT ENTRY — a creep resting on the exit leaks; a positive progress

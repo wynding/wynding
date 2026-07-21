@@ -22,6 +22,7 @@ import {
   type Grid,
 } from './board';
 import { firstDescentNeighbor } from './movement';
+import { blockedAt, distAt } from './field-access';
 
 /**
  * A distance-to-exit field. `dist` is row-major, in the octile integer metric,
@@ -184,20 +185,13 @@ export function shortestPath(
   ) {
     return null;
   }
-  const { width, height } = grid;
-  const blocked = (c: number, r: number): boolean => {
-    if (c < 0 || r < 0 || c >= width || r >= height) return true;
-    return (field.blockedMask[r * width + c] as number) !== 0;
-  };
-  const distAt = (c: number, r: number): number => field.dist[r * width + c] as number;
-
-  if (blocked(from.col, from.row)) return null; // out of bounds or on a wall
-  if (distAt(from.col, from.row) < 0) return null; // unreachable
+  if (blockedAt(field, from.col, from.row)) return null; // out of bounds or on a wall
+  if (distAt(field, from.col, from.row) < 0) return null; // unreachable
 
   const path: Cell[] = [{ col: from.col, row: from.row }];
   let col = from.col;
   let row = from.row;
-  while (distAt(col, row) !== 0) {
+  while (distAt(field, col, row) !== 0) {
     const next = firstDescentNeighbor(field, col, row);
     if (next === null) return null; // no descent from a supposedly-reachable cell
     col = next.col;
