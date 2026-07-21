@@ -19,7 +19,7 @@ function makeReplay(overrides: Partial<Replay> = {}): Replay {
   return {
     seed: 12345,
     rulesetHash: currentRulesetHash(),
-    simVersion: 2,
+    simVersion: 3,
     tickInputs: Array.from({ length: 200 }, (_v, t) => (t % 4 === 0 ? spawn : [])),
     ...overrides,
   };
@@ -92,6 +92,19 @@ describe('replay validate()', () => {
     expect(result.reason).toContain('too many spawns');
   });
 
+  it('rejects a replay whose total tower commands exceed the budget', () => {
+    // Each placeTower runs a grid-wide Dijkstra in the invariant check and a
+    // rejected build is a free no-op, so — like spawns — tower commands are
+    // capped across the whole match to bound the validate() CPU cost.
+    const build: SimInput[] = [{ kind: 'placeTower', anchor: { col: 1, row: 1 } }];
+    const result = validate(
+      makeReplay({ tickInputs: Array.from({ length: 1_001 }, () => build) }),
+      BOARD,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('too many tower commands');
+  });
+
   it('rejects a malformed input element without throwing', () => {
     // `tickInputs` is untrusted: a null/undefined/non-object element must be
     // rejected as a typed 4xx, not throw a TypeError (which would surface as a 500).
@@ -113,5 +126,70 @@ describe('replay validate()', () => {
     const result = validate(makeReplay({ tickInputs: bad }), BOARD);
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('inputs must be an array');
+  });
+});
+
+describe('replay validate() — complete command-union validation (ADR 0006 §4)', () => {
+  const withInput = (input: unknown): Replay =>
+    makeReplay({ tickInputs: [[input]] as unknown as Replay['tickInputs'] });
+
+  it('rejects an unknown command kind', () => {
+    const result = validate(withInput({ kind: 'teleportCreep' }), BOARD);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('unknown command kind');
+  });
+
+  it('rejects a spawnCreep whose hp is not a positive safe integer', () => {
+    for (const hp of [0, -1, 1.5, '10', null, Infinity, 2 ** 53]) {
+      const result = validate(withInput({ kind: 'spawnCreep', hp }), BOARD);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('spawnCreep.hp');
+    }
+  });
+
+  it('rejects a sellTower whose tower id is not a safe integer', () => {
+    for (const tower of ['x', 1.5, null, undefined, NaN]) {
+      const result = validate(withInput({ kind: 'sellTower', tower }), BOARD);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('sellTower.tower');
+    }
+  });
+
+  it('rejects a placeTower whose anchor is not a safe-integer cell', () => {
+    for (const anchor of [null, undefined, 'cell', 7, { col: 0.5, row: 1 }, { row: 1 }, {}]) {
+      const result = validate(withInput({ kind: 'placeTower', anchor }), BOARD);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('placeTower.anchor');
+    }
+  });
+
+  it('rejects a placeTower whose safe-integer anchor is out of the board (malformed, not a no-op)', () => {
+    // design-notes/replay-and-commands.md classifies an out-of-bounds integer as
+    // malformed — the validator rejects it rather than letting step() no-op it.
+    // BOARD is 3×3, so any coord < 0 or ≥ 3 is off-board.
+    for (const anchor of [
+      { col: -1, row: 1 },
+      { col: 3, row: 1 },
+      { col: 1, row: -1 },
+      { col: 1, row: 3 },
+    ]) {
+      const result = validate(withInput({ kind: 'placeTower', anchor }), BOARD);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('out of bounds');
+    }
+  });
+
+  it('accepts well-formed place/sell commands and re-simulates deterministically', () => {
+    // Domain-valid but unplaceable on the tiny board — the sim no-ops the build
+    // (in-sim legality is the sim's job; the validator gates only wire-format domain).
+    const inputs: Replay['tickInputs'] = [
+      [{ kind: 'placeTower', anchor: { col: 1, row: 1 } }],
+      [{ kind: 'sellTower', tower: 1 }],
+      [{ kind: 'noop' }],
+    ];
+    const first = validate(makeReplay({ tickInputs: inputs }), BOARD);
+    const again = validate(makeReplay({ tickInputs: inputs }), BOARD);
+    expect(first.ok).toBe(true);
+    expect(first.finalHash).toBe(again.finalHash);
   });
 });
