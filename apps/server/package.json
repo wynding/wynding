@@ -13,6 +13,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@wynding/content": "workspace:*",
     "@wynding/replay": "workspace:*",
     "@wynding/sim": "workspace:*"
   }

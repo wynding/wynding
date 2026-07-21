@@ -6,11 +6,11 @@ import type { SimInput } from '@wynding/sim';
 import { handler } from './handler';
 
 function validReplayBody(): string {
-  const spawn: SimInput[] = [{ kind: 'spawnCreep', hp: 10, lane: 2 }];
+  const spawn: SimInput[] = [{ kind: 'spawnCreep', hp: 10 }];
   const replay: Replay = {
     seed: 12345,
     rulesetHash: currentRulesetHash(),
-    simVersion: 1,
+    simVersion: 2,
     tickInputs: Array.from({ length: 100 }, (_v, t) => (t % 4 === 0 ? spawn : [])),
   };
   return JSON.stringify(replay);

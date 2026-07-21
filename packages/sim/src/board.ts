@@ -68,6 +68,18 @@ export class GridError extends Error {
 }
 
 /**
+ * Octile routing weights: an orthogonal step costs 10 and a diagonal ≈ 10·√2 (14),
+ * so the distance field prefers the true-shortest route rather than a hop count.
+ * They live here — beside {@link NEIGHBOR_DELTAS}, the canonical adjacency order —
+ * so the field builder ({@link forEachPassableNeighbor}'s consumers) and the creep
+ * follower share ONE definition and can never disagree on what "exact descent"
+ * means. These are the *routing* metric only; traversal time uses a separate
+ * Euclidean edge length in the movement layer.
+ */
+export const ORTHO_COST = 10;
+export const DIAG_COST = 14;
+
+/**
  * The eight neighbour offsets in the fixed emission order N, NE, E, SE, S, SW,
  * W, NW. This one ordering is the single source of truth for adjacency and for
  * every deterministic tie-break (path reconstruction) in the sim.

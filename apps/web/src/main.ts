@@ -6,7 +6,14 @@
 // registration land later; this wires the seam end to end.
 
 import { createFixedLoop } from '@wynding/engine';
-import { createInitialState, step, MS_PER_TICK, type SimInput, type SimState } from '@wynding/sim';
+import {
+  createInitialState,
+  loadBoard,
+  step,
+  MS_PER_TICK,
+  type SimInput,
+  type SimState,
+} from '@wynding/sim';
 import { mount } from '@wynding/render';
 import { sampleBoard } from '@wynding/content';
 
@@ -17,6 +24,7 @@ const title = document.createElement('h1');
 title.textContent = `Wynding — ${sampleBoard.name}`;
 app.appendChild(title);
 
+const board = loadBoard(sampleBoard);
 let sim: SimState = createInitialState(Date.now() >>> 0);
 const view = mount(app, sim);
 
@@ -24,9 +32,8 @@ let tickCount = 0;
 const loop = createFixedLoop(
   () => {
     // Demo schedule: send a creep every 20 ticks (1s at 20 Hz).
-    const inputs: SimInput[] =
-      tickCount % 20 === 0 ? [{ kind: 'spawnCreep', hp: 12, lane: 3 }] : [];
-    sim = step(sim, inputs);
+    const inputs: SimInput[] = tickCount % 20 === 0 ? [{ kind: 'spawnCreep', hp: 12 }] : [];
+    sim = step(sim, inputs, board);
     tickCount += 1;
     view.update(sim);
   },
