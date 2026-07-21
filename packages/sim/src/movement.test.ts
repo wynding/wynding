@@ -72,6 +72,11 @@ describe('firstDescentNeighbor', () => {
   it('returns null at the exit (nothing descends below distance 0)', () => {
     expect(firstDescentNeighbor(STRAIGHT_FIELD, 4, 2)).toBeNull();
   });
+
+  it('returns null for a blocked or out-of-bounds current cell (bounds-safe read)', () => {
+    expect(firstDescentNeighbor(STRAIGHT_FIELD, 0, 0)).toBeNull(); // blocked border corner
+    expect(firstDescentNeighbor(STRAIGHT_FIELD, 99, 99)).toBeNull(); // out of bounds
+  });
 });
 
 describe('advanceCreep — normal movement', () => {
@@ -169,13 +174,26 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
     ['col out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 99, 2, 0, 26)],
     ['row out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 99, 0, 26)],
     ['negative progress', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, -1, 26)],
-    ['unreachable cell', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 0, 0, 26)], // blocked border corner
+    ['blocked cell', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 0, 0, 26)], // blocked border corner
   ];
   for (const [label, outcome] of cases) {
     it(`drops a row with ${label}`, () => {
       expect(outcome).toEqual({ kind: 'drop' });
     });
   }
+
+  it('drops a creep on an in-bounds but unreachable (walled-off) open cell', () => {
+    // Open (blockedMask 0) yet unreachable (dist -1): passes the blockedAt gate but
+    // is dropped by the distance check — the two guards cover distinct failures.
+    const walledOpen: DistanceField = {
+      width: 2,
+      height: 1,
+      exit: { col: 1, row: 0 },
+      dist: Int32Array.from([-1, 0]), // (0,0) open but stranded, (1,0) exit
+      blockedMask: new Uint8Array([0, 0]), // both open
+    };
+    expect(advanceCreep(walledOpen, 1, 5, 0, 0, 0, 26)).toEqual({ kind: 'drop' });
+  });
 
   it('drops (does not hang) when progress exceeds the current edge length', () => {
     // A restored row with progress past the edge would make stepDist ≤ 0 and loop

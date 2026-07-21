@@ -53,6 +53,7 @@ export function firstDescentNeighbor(
   col: number,
   row: number,
 ): DescentStep | null {
+  if (blockedAt(field, col, row)) return null; // OOB/blocked current cell — bounds-safe read
   const curD = distAt(field, col, row);
 
   let result: DescentStep | null = null;
@@ -133,9 +134,8 @@ export function advanceCreep(
   let curCol = col as number;
   let curRow = row as number;
   let progress = edgeProgress as number;
-  const { width, height } = field;
-  if (curCol < 0 || curRow < 0 || curCol >= width || curRow >= height) return DROP;
-  if (distAt(field, curCol, curRow) < 0) return DROP; // unreachable cell
+  if (blockedAt(field, curCol, curRow)) return DROP; // out of bounds or blocked terrain
+  if (distAt(field, curCol, curRow) < 0) return DROP; // in-bounds but unreachable (walled-off)
   if (progress < 0) return DROP;
 
   // (2) LEAK AT ENTRY — a creep resting on the exit leaks; a positive progress
