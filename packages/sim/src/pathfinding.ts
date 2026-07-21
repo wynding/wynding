@@ -13,12 +13,15 @@
 // and later mutation of the caller's mask can never retroactively alter a field.
 
 import type { Cell } from '@wynding/types';
-import { CELL_CAP, GridError, forEachPassableNeighbor, type Grid } from './board';
-
-/** Orthogonal (N/E/S/W) edge cost. */
-const ORTHO_COST = 10;
-/** Diagonal edge cost — ≈ 10·√2, so a diagonal is ~1.4× an orthogonal step. */
-const DIAG_COST = 14;
+import {
+  CELL_CAP,
+  GridError,
+  ORTHO_COST,
+  DIAG_COST,
+  forEachPassableNeighbor,
+  type Grid,
+} from './board';
+import { firstDescentNeighbor } from './movement';
 
 /**
  * A distance-to-exit field. `dist` is row-major, in the octile integer metric,
@@ -162,11 +165,11 @@ export function isReachable(field: DistanceField, cell: Cell): boolean {
  * typed failure: the field does not match the grid (dimensions or exit differ),
  * or `from` is out of bounds, blocked, or unreachable.
  *
- * Reconstruction is exact-descent: from each cell it steps to the first neighbour
- * (in the fixed order) whose distance plus that edge's cost equals the current
- * distance. Exact-descent strictly decreases a non-negative integer every step,
- * so the walk always terminates at the exit; the fixed order makes the chosen
- * path deterministic without affecting any distance value.
+ * Reconstruction steps cell-by-cell via {@link firstDescentNeighbor} — the single
+ * canonical descent rule the creep follower also uses, so a stored path can never
+ * diverge from a live creep's route. Exact-descent strictly decreases a
+ * non-negative integer every step, so the walk always terminates at the exit; the
+ * fixed neighbour order makes the chosen path deterministic.
  */
 export function shortestPath(
   grid: Grid,
@@ -195,21 +198,10 @@ export function shortestPath(
   let col = from.col;
   let row = from.row;
   while (distAt(col, row) !== 0) {
-    const curD = distAt(col, row);
-    let nextCol = -1;
-    let nextRow = -1;
-    forEachPassableNeighbor(col, row, blocked, (nc, nr, diagonal) => {
-      const nd = distAt(nc, nr);
-      if (nd >= 0 && nd + (diagonal ? DIAG_COST : ORTHO_COST) === curD) {
-        nextCol = nc;
-        nextRow = nr;
-        return true; // first exact-descent neighbour wins (fixed-order tie-break)
-      }
-      return undefined;
-    });
-    if (nextCol === -1) return null; // no descent from a supposedly-reachable cell
-    col = nextCol;
-    row = nextRow;
+    const next = firstDescentNeighbor(field, col, row);
+    if (next === null) return null; // no descent from a supposedly-reachable cell
+    col = next.col;
+    row = next.row;
     path.push({ col, row });
   }
   return path;

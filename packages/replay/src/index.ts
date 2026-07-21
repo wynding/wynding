@@ -7,7 +7,14 @@
 // untrusted client submission.
 
 import { fnv1a } from '@wynding/engine';
-import { createInitialState, step, hashSimState, SIM_VERSION, type SimInput } from '@wynding/sim';
+import {
+  createInitialState,
+  step,
+  hashSimState,
+  SIM_VERSION,
+  type SimInput,
+  type BoardContext,
+} from '@wynding/sim';
 
 /** The wire format for a recorded match. */
 export interface Replay {
@@ -41,13 +48,29 @@ function deriveScore(lives: number, ticks: number): number {
   return Math.max(0, lives) * 1000 + ticks;
 }
 
+// Re-simulation budget caps. `tickInputs` is entirely attacker-controlled and
+// reaches the replay loop after only the public, forgeable simVersion/rulesetHash
+// checks, so without bounds a caller could submit millions of ticks (or inputs per
+// tick, or spawns) to burn CPU until Lambda timeout on every request — an
+// unauthenticated compute-exhaustion / cost-amplification vector. These caps turn
+// that open-ended cost into a fixed budget; an over-limit replay is rejected before
+// any re-simulation. Values are generous relative to a real match yet finite.
+/** Max ticks in a replay: 30 minutes at the 50 ms (20 Hz) tick cadence. */
+const MAX_TICKS = 36_000;
+/** Max inputs applied on a single tick — far above any legitimate command burst. */
+const MAX_INPUTS_PER_TICK = 64;
+/** Max creeps spawned across the whole match; caps accumulating per-tick movement cost. */
+const MAX_TOTAL_SPAWNS = 10_000;
+
 /**
  * Re-simulate a replay from its seed and input log, deriving a trusted score.
  * This is a validating stub: it enforces the sim-version and ruleset-hash match
  * and replays every tick, but deeper anti-cheat checks (wall-clock bounds,
- * signature verification) are future work.
+ * signature verification) are future work. The `board` is supplied by the caller —
+ * a replay carries no board identity yet; Story 5 adds `boardId` to the replay and
+ * binds a content-derived board hash into `currentRulesetHash`.
  */
-export function validate(replay: Replay): ValidationResult {
+export function validate(replay: Replay, board: BoardContext): ValidationResult {
   if (replay.simVersion !== SIM_VERSION) {
     return {
       ok: false,
@@ -61,9 +84,47 @@ export function validate(replay: Replay): ValidationResult {
     };
   }
 
+  // Bound the re-simulation before spending any CPU on it: reject an over-budget
+  // input log (a compute-exhaustion DoS vector, since `tickInputs` is untrusted)
+  // with a 4xx via the caller. See the MAX_* budget caps above.
+  if (!Array.isArray(replay.tickInputs)) {
+    return { ok: false, reason: 'tickInputs must be an array' };
+  }
+  if (replay.tickInputs.length > MAX_TICKS) {
+    return {
+      ok: false,
+      reason: `too many ticks: ${replay.tickInputs.length} exceeds limit ${MAX_TICKS}`,
+    };
+  }
+  let totalSpawns = 0;
+  for (let t = 0; t < replay.tickInputs.length; t++) {
+    const inputs = replay.tickInputs[t];
+    if (!Array.isArray(inputs)) {
+      return { ok: false, reason: `tick ${t} inputs must be an array` };
+    }
+    if (inputs.length > MAX_INPUTS_PER_TICK) {
+      return {
+        ok: false,
+        reason: `too many inputs at tick ${t}: ${inputs.length} exceeds limit ${MAX_INPUTS_PER_TICK}`,
+      };
+    }
+    for (let i = 0; i < inputs.length; i++) {
+      const input = inputs[i];
+      // Each element is untrusted: a non-object or missing-`kind` element would
+      // throw a TypeError on the `.kind` read below (and again in `step`), turning
+      // a malformed submission into a 500 instead of a clean 4xx. Reject it here.
+      if (input == null || typeof input !== 'object' || !('kind' in input)) {
+        return { ok: false, reason: `tick ${t} input ${i} is malformed` };
+      }
+      if (input.kind === 'spawnCreep' && ++totalSpawns > MAX_TOTAL_SPAWNS) {
+        return { ok: false, reason: `too many spawns: exceeds limit ${MAX_TOTAL_SPAWNS}` };
+      }
+    }
+  }
+
   let state = createInitialState(replay.seed);
   for (const inputs of replay.tickInputs) {
-    state = step(state, inputs);
+    state = step(state, inputs, board);
   }
 
   return {

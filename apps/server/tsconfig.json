@@ -9,5 +9,9 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "references": [{ "path": "../../packages/sim" }, { "path": "../../packages/replay" }]
+  "references": [
+    { "path": "../../packages/sim" },
+    { "path": "../../packages/replay" },
+    { "path": "../../packages/content" }
+  ]
 }

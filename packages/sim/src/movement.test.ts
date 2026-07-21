@@ -1,0 +1,277 @@
+// movement.test.ts — the grid path-follower: descent selection, the per-tick
+// advance/leak/drop policy, exact-tick off-by-one behavior, and the complete
+// board-context validator. Small hand-checkable fixtures with derived values.
+
+import { describe, it, expect } from 'vitest';
+import type { DistanceField } from './pathfinding';
+import { GridError, type Grid } from './board';
+import { loadBoard, assertConsistent, type BoardContext } from './context';
+import {
+  advanceCreep,
+  firstDescentNeighbor,
+  ORTHO_LEN,
+  DIAG_LEN,
+  type AdvanceOutcome,
+} from './movement';
+
+// A straight 5×5 board: entrance (0,2) → exit (4,2), four orthogonal edges.
+const STRAIGHT = loadBoard({
+  widthTiles: 5,
+  heightTiles: 5,
+  entrance: { col: 0, row: 2 },
+  exit: { col: 4, row: 2 },
+});
+const STRAIGHT_FIELD = STRAIGHT.field;
+
+// A 2×3 board with entrance (0,1) and exit (1,1) exactly one cell apart.
+const ADJACENT = loadBoard({
+  widthTiles: 2,
+  heightTiles: 3,
+  entrance: { col: 0, row: 1 },
+  exit: { col: 1, row: 1 },
+}).field;
+
+// A 5×5 board whose entrance (0,3) and exit (4,1) sit on different rows, so the
+// true-shortest descent must take no-corner-cut DIAGONAL steps through the field.
+const DIAGONAL = loadBoard({
+  widthTiles: 5,
+  heightTiles: 5,
+  entrance: { col: 0, row: 3 },
+  exit: { col: 4, row: 1 },
+}).field;
+
+/** Advance one creep tick-by-tick from a cell until it leaks; return the tick count. */
+function ticksToLeak(field: DistanceField, col: number, row: number, budget: number): number {
+  let c = col;
+  let r = row;
+  let ep = 0;
+  for (let t = 1; t <= 100000; t++) {
+    const o: AdvanceOutcome = advanceCreep(field, 1, 5, c, r, ep, budget);
+    if (o.kind === 'leak') return t;
+    if (o.kind === 'drop') throw new Error(`unexpected drop at tick ${t}`);
+    c = o.col;
+    r = o.row;
+    ep = o.edgeProgress;
+  }
+  throw new Error('creep never leaked');
+}
+
+describe('firstDescentNeighbor', () => {
+  it('steps orthogonally toward the exit on the straight board', () => {
+    expect(firstDescentNeighbor(STRAIGHT_FIELD, 0, 2)).toEqual({ col: 1, row: 2, diagonal: false });
+    expect(firstDescentNeighbor(STRAIGHT_FIELD, 3, 2)).toEqual({ col: 4, row: 2, diagonal: false });
+  });
+
+  it('selects a no-corner-cut diagonal when it is the true-shortest descent', () => {
+    // (2,2) descends to (3,1) via NE (cost 14) — cheaper than any orthogonal pair,
+    // and its two shared cells (3,2)/(2,1) are open, so the corner-cut rule allows it.
+    expect(firstDescentNeighbor(DIAGONAL, 2, 2)).toEqual({ col: 3, row: 1, diagonal: true });
+    expect(firstDescentNeighbor(DIAGONAL, 1, 3)).toEqual({ col: 2, row: 2, diagonal: true });
+  });
+
+  it('returns null at the exit (nothing descends below distance 0)', () => {
+    expect(firstDescentNeighbor(STRAIGHT_FIELD, 4, 2)).toBeNull();
+  });
+});
+
+describe('advanceCreep — normal movement', () => {
+  it('advances exactly one budget along the first edge, staying on the cell', () => {
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 26)).toEqual({
+      kind: 'move',
+      col: 0,
+      row: 2,
+      edgeProgress: 26,
+    });
+  });
+
+  it('snaps to the next cell exactly when progress reaches the edge length', () => {
+    // A full orthogonal edge (256) with a matching budget arrives dead on (1,2).
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, ORTHO_LEN)).toEqual({
+      kind: 'move',
+      col: 1,
+      row: 2,
+      edgeProgress: 0,
+    });
+  });
+
+  it('carries the remainder onto the next edge after crossing a boundary', () => {
+    // Start 250 into a 256 edge with budget 26: 6 finishes the edge, 20 carry on.
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 250, 26)).toEqual({
+      kind: 'move',
+      col: 1,
+      row: 2,
+      edgeProgress: 20,
+    });
+  });
+
+  it('crosses multiple boundaries in one tick when the budget allows, carrying the remainder', () => {
+    // Budget 600 from (0,2): 256 finishes edge 0→1, 256 finishes edge 1→2, 88 carry
+    // onto edge 2→3 — ends resting on (2,2) with progress 88. (Production budget is
+    // 26 < 256 so this never happens live, but it is the only multi-cross arm.)
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 0, 600)).toEqual({
+      kind: 'move',
+      col: 2,
+      row: 2,
+      edgeProgress: 88,
+    });
+  });
+
+  it('crosses a diagonal edge of length 362, not 256', () => {
+    expect(advanceCreep(DIAGONAL, 1, 5, 2, 2, 0, DIAG_LEN)).toEqual({
+      kind: 'move',
+      col: 3,
+      row: 1,
+      edgeProgress: 0,
+    });
+    // A budget one short of the diagonal length leaves it mid-edge (still on 2,2).
+    expect(advanceCreep(DIAGONAL, 1, 5, 2, 2, 0, DIAG_LEN - 1)).toEqual({
+      kind: 'move',
+      col: 2,
+      row: 2,
+      edgeProgress: DIAG_LEN - 1,
+    });
+  });
+
+  it('leaks after the exact expected number of ticks (orthogonal crossings)', () => {
+    // Four 256-unit edges at 26/tick, and one 256-unit edge one cell apart.
+    expect(ticksToLeak(STRAIGHT_FIELD, 0, 2, 26)).toBe(Math.ceil((4 * ORTHO_LEN) / 26)); // 40
+    expect(ticksToLeak(ADJACENT, 0, 1, 26)).toBe(Math.ceil(ORTHO_LEN / 26)); // 10
+  });
+
+  it('crosses a mixed orthogonal/diagonal route to the exit', () => {
+    // Path (0,3)→(1,3)→(2,2)→(3,1)→(4,1): two orthogonal + two diagonal edges.
+    const total = 2 * ORTHO_LEN + 2 * DIAG_LEN;
+    expect(ticksToLeak(DIAGONAL, 0, 3, 26)).toBe(Math.ceil(total / 26)); // 48
+  });
+});
+
+describe('advanceCreep — leak policy', () => {
+  it('leaks a creep that begins the tick resting on the exit', () => {
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 4, 2, 0, 26)).toEqual({ kind: 'leak' });
+  });
+
+  it('leaks the tick it arrives, discarding any remaining budget', () => {
+    // 230 into the last edge with a huge budget: it finishes the edge and leaks;
+    // the leftover budget is not spent wrapping past the exit.
+    expect(advanceCreep(ADJACENT, 1, 5, 0, 1, 230, 100000)).toEqual({ kind: 'leak' });
+  });
+});
+
+describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)', () => {
+  const cases: ReadonlyArray<[string, AdvanceOutcome]> = [
+    ['id undefined', advanceCreep(STRAIGHT_FIELD, undefined, 5, 0, 2, 0, 26)],
+    ['hp undefined', advanceCreep(STRAIGHT_FIELD, 1, undefined, 0, 2, 0, 26)],
+    ['col undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, undefined, 2, 0, 26)],
+    ['row undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, undefined, 0, 26)],
+    ['edgeProgress undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, undefined, 26)],
+    ['col non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 0.5, 2, 0, 26)],
+    ['edgeProgress non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, 1.5, 26)],
+    ['col out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 99, 2, 0, 26)],
+    ['row out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 99, 0, 26)],
+    ['negative progress', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, -1, 26)],
+    ['unreachable cell', advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 0, 0, 26)], // blocked border corner
+  ];
+  for (const [label, outcome] of cases) {
+    it(`drops a row with ${label}`, () => {
+      expect(outcome).toEqual({ kind: 'drop' });
+    });
+  }
+
+  it('drops (does not hang) when progress exceeds the current edge length', () => {
+    // A restored row with progress past the edge would make stepDist ≤ 0 and loop
+    // forever; the guard drops it instead.
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 0, 2, ORTHO_LEN + 44, 26)).toEqual({ kind: 'drop' });
+  });
+
+  it('drops a corrupt positive progress on the exit cell without leaking a life', () => {
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, 4, 2, 5, 26)).toEqual({ kind: 'drop' });
+  });
+
+  it('drops (does not crash) on a forged field where a live cell has no exact descent', () => {
+    // An all-zero distance field is shape-valid but has no descent anywhere; the
+    // backstop drops the creep rather than throwing.
+    const forged: DistanceField = {
+      width: 3,
+      height: 3,
+      exit: { col: 2, row: 1 },
+      dist: new Int32Array(9), // all zero
+      blockedMask: new Uint8Array(9), // all open
+    };
+    expect(advanceCreep(forged, 1, 5, 0, 1, 0, 26)).toEqual({ kind: 'drop' });
+  });
+});
+
+describe('assertConsistent — board-context validator (loud GridError)', () => {
+  const base = STRAIGHT;
+  const withGrid = (patch: Partial<Grid>): BoardContext => ({
+    grid: { ...base.grid, ...patch } as Grid,
+    field: base.field,
+  });
+  const withField = (patch: Partial<DistanceField>): BoardContext => ({
+    grid: base.grid,
+    field: { ...base.field, ...patch } as DistanceField,
+  });
+
+  it('accepts a loadBoard-built context and memoizes it (idempotent)', () => {
+    expect(() => assertConsistent(base)).not.toThrow();
+    expect(() => assertConsistent(base)).not.toThrow(); // second call hits the memo
+  });
+
+  it('rejects a null-membered forged context with GridError (not a raw TypeError)', () => {
+    // A partially-deserialized context can have null members; the validator must
+    // still fail with its documented typed error, never a raw dereference crash.
+    const forged = [
+      null,
+      { grid: null, field: base.field },
+      { grid: base.grid, field: null },
+      { grid: base.grid, field: { ...base.field, dist: undefined } },
+      { grid: base.grid, field: { ...base.field, blockedMask: undefined } },
+      { grid: base.grid, field: { ...base.field, exit: null } },
+    ] as unknown as BoardContext[];
+    for (const ctx of forged) {
+      expect(() => assertConsistent(ctx)).toThrow(GridError);
+    }
+  });
+
+  it('rejects non-positive dimensions', () => {
+    expect(() => assertConsistent(withGrid({ width: 0 }))).toThrow(GridError);
+  });
+
+  it('rejects a field whose dimensions do not match the grid', () => {
+    expect(() => assertConsistent(withField({ width: 6 }))).toThrow(/do not match/);
+  });
+
+  it('rejects field arrays of the wrong length', () => {
+    expect(() => assertConsistent(withField({ dist: new Int32Array(3) }))).toThrow(GridError);
+    expect(() => assertConsistent(withField({ blockedMask: new Uint8Array(3) }))).toThrow(
+      GridError,
+    );
+  });
+
+  it('rejects an out-of-bounds entrance or exit', () => {
+    expect(() => assertConsistent(withGrid({ entrance: { col: -1, row: 0 } }))).toThrow(/entrance/);
+    expect(() => assertConsistent(withGrid({ exit: { col: 99, row: 0 } }))).toThrow(/exit/);
+  });
+
+  it('rejects a field whose exit disagrees with the grid exit', () => {
+    expect(() => assertConsistent(withField({ exit: { col: 3, row: 2 } }))).toThrow(/field exit/);
+  });
+
+  it('rejects a field where the exit is not the unblocked distance-0 source', () => {
+    const badDist = Int32Array.from(base.field.dist);
+    badDist[2 * 5 + 4] = 5; // exit at (4,2) with nonzero distance
+    expect(() => assertConsistent(withField({ dist: badDist }))).toThrow(/unblocked distance-0/);
+
+    const badMask = Uint8Array.from(base.field.blockedMask);
+    badMask[2 * 5 + 4] = 1; // exit marked blocked
+    expect(() => assertConsistent(withField({ blockedMask: badMask }))).toThrow(
+      /unblocked distance-0/,
+    );
+  });
+
+  it('rejects a context whose entrance cannot reach the exit', () => {
+    const badDist = Int32Array.from(base.field.dist);
+    badDist[2 * 5 + 0] = -1; // entrance at (0,2) marked unreachable
+    expect(() => assertConsistent(withField({ dist: badDist }))).toThrow(/cannot reach/);
+  });
+});

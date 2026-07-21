@@ -45,6 +45,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@wynding/content':
+        specifier: workspace:*
+        version: link:../../packages/content
       '@wynding/replay':
         specifier: workspace:*
         version: link:../../packages/replay

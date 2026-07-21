@@ -22,12 +22,33 @@
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
-import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
+import {
+  createInitialState,
+  step,
+  hashSimState,
+  loadBoard,
+  type BoardContext,
+  type SimInput,
+  type SimState,
+} from './index';
 
 /** Fixed seed for the canonical determinism scenario. */
 const SCENARIO_SEED = 0x5eed; // 24301
-/** Scenario length — long enough for creeps to cross the board and leak lives. */
+/** Scenario length — long enough for ≥2 creeps to cross the board and leak lives
+ *  (a 27-cell crossing takes ≈266 ticks at the movement budget of 26/tick). */
 const SCENARIO_TICKS = 300;
+
+/**
+ * The canonical board — defined inline (NOT imported from @wynding/content, which
+ * would introduce a sim → content runtime edge). Mirrors the M1 board geometry: a
+ * 28×24 grid with entrance and exit on row 11, so creeps run the full 27-cell width.
+ */
+const SCENARIO_BOARD: BoardContext = loadBoard({
+  widthTiles: 28,
+  heightTiles: 24,
+  entrance: { col: 0, row: 11 },
+  exit: { col: 27, row: 11 },
+});
 
 /**
  * The canonical input log: a pure function of the tick index (no external RNG —
@@ -42,14 +63,13 @@ function canonicalInputs(tick: number): SimInput[] {
   // Multi-command tick: two spawns applied in array order (id/order sensitivity).
   if (tick % 15 === 0) {
     return [
-      { kind: 'spawnCreep', hp: 12, lane: 0 },
-      { kind: 'spawnCreep', hp: 9, lane: 2 },
+      { kind: 'spawnCreep', hp: 12 },
+      { kind: 'spawnCreep', hp: 9 },
     ];
   }
   if (tick % 5 === 0) {
-    const lane = tick % 3; // 0, 1, 2 cycling
     const hp = 8 + (tick % 4) * 2; // 8, 10, 12, 14 cycling
-    return [{ kind: 'spawnCreep', hp, lane }];
+    return [{ kind: 'spawnCreep', hp }];
   }
   if (tick % 7 === 0) return [{ kind: 'noop' }]; // exercise the noop path
   return [];
@@ -63,7 +83,7 @@ function runCanonical(
   let state = createInitialState(seed);
   const trace: string[] = [];
   for (let t = 0; t < ticks; t++) {
-    state = step(state, canonicalInputs(t));
+    state = step(state, canonicalInputs(t), SCENARIO_BOARD);
     trace.push(hashSimState(state));
   }
   return { state, trace };
@@ -72,8 +92,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '49846032',
-  traceDigest: '51a72ea4', // fnv1a(trace.join(':'))
+  finalHash: '32c5da2a',
+  traceDigest: '6b6676f3', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 
@@ -91,6 +111,13 @@ describe('determinism gate', () => {
     expect(fnv1a(trace.join(':'))).toBe(GOLDEN.traceDigest);
   });
 
+  it('witnesses creeps crossing and leaking (lives fall below the starting count)', () => {
+    // The golden is only meaningful if the scenario actually exercises a leak; at
+    // least two creeps reach the exit within SCENARIO_TICKS and decrement lives.
+    const { state } = runCanonical();
+    expect(state.lives).toBeLessThanOrEqual(8); // started at 10 ⇒ ≥2 leaks
+  });
+
   it('continues byte-identically after a mid-run serialize/restore (resume path)', () => {
     const half = SCENARIO_TICKS >> 1;
     const ref = runCanonical();
@@ -98,7 +125,7 @@ describe('determinism gate', () => {
     // Step to the halfway point, JSON round-trip the state (the runInProgress
     // snapshot / server re-sim boundary, ADR 0008 §5), then continue.
     let live = createInitialState(SCENARIO_SEED);
-    for (let t = 0; t < half; t++) live = step(live, canonicalInputs(t));
+    for (let t = 0; t < half; t++) live = step(live, canonicalInputs(t), SCENARIO_BOARD);
     const restored = JSON.parse(JSON.stringify(live)) as SimState;
 
     // Compare the WHOLE resumed tail, not just the final hash — a matching final
@@ -106,7 +133,7 @@ describe('determinism gate', () => {
     // the full serialized state, not just its digest.
     const resumedTail: string[] = [];
     for (let t = half; t < SCENARIO_TICKS; t++) {
-      step(restored, canonicalInputs(t));
+      step(restored, canonicalInputs(t), SCENARIO_BOARD);
       resumedTail.push(hashSimState(restored));
     }
     expect(resumedTail).toEqual(ref.trace.slice(half));
@@ -126,7 +153,7 @@ describe('determinism gate', () => {
     let tick = 0;
     const loop = createFixedLoop(
       () => {
-        step(state, canonicalInputs(tick));
+        step(state, canonicalInputs(tick), SCENARIO_BOARD);
         tick++;
       },
       { msPerTick: DEFAULT_MS_PER_TICK },

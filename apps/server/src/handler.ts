@@ -9,6 +9,13 @@
 // wiring the deployment (Function URL / API Gateway proxy integration).
 
 import { validate, currentRulesetHash, type Replay } from '@wynding/replay';
+import { loadBoard } from '@wynding/sim';
+import { sampleBoard } from '@wynding/content';
+
+// The board the submitted replay was played on. Interim: pinned to the single
+// authored board until Story 5 resolves a `boardId` carried on the replay itself.
+// Built once at module load — the geometry is static content.
+const matchBoard = loadBoard(sampleBoard);
 
 interface LambdaEvent {
   readonly body?: string | null;
@@ -39,7 +46,7 @@ export async function handler(event: LambdaEvent): Promise<LambdaResult> {
     return json(400, { ok: false, error: 'missing replay payload' });
   }
 
-  const result = validate(replay);
+  const result = validate(replay, matchBoard);
   if (!result.ok) {
     return json(422, { ok: false, error: result.reason });
   }
