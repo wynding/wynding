@@ -81,7 +81,7 @@ const MAX_TOTAL_TOWER_COMMANDS = 1_000;
  * complementary (this validator = anti-cheat totality, the step guard = crash
  * safety).
  */
-function inputDomainError(input: object): string | null {
+function inputDomainError(input: object, board: BoardContext): string | null {
   const kind = (input as { kind?: unknown }).kind;
   switch (kind) {
     case 'noop':
@@ -107,6 +107,19 @@ function inputDomainError(input: object): string | null {
       const { col, row } = anchor as { col?: unknown; row?: unknown };
       if (!Number.isSafeInteger(col) || !Number.isSafeInteger(row)) {
         return 'placeTower.anchor must have safe-integer col/row';
+      }
+      // An out-of-bounds anchor is malformed, not an illegal in-game placement
+      // (design-notes/replay-and-commands.md §Structural: an out-of-bounds integer
+      // means the replay is rejected). Footprint FIT and buildability remain a
+      // step()-level no-op — this bounds only the anchor coordinate itself.
+      const { width, height } = board.grid;
+      if (
+        (col as number) < 0 ||
+        (col as number) >= width ||
+        (row as number) < 0 ||
+        (row as number) >= height
+      ) {
+        return 'placeTower.anchor is out of bounds';
       }
       return null;
     }
@@ -170,7 +183,7 @@ export function validate(replay: Replay, board: BoardContext): ValidationResult 
       if (input == null || typeof input !== 'object' || !('kind' in input)) {
         return { ok: false, reason: `tick ${t} input ${i} is malformed` };
       }
-      const domainError = inputDomainError(input);
+      const domainError = inputDomainError(input, board);
       if (domainError !== null) {
         return { ok: false, reason: `tick ${t} input ${i}: ${domainError}` };
       }

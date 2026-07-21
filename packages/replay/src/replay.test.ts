@@ -163,6 +163,22 @@ describe('replay validate() — complete command-union validation (ADR 0006 §4)
     }
   });
 
+  it('rejects a placeTower whose safe-integer anchor is out of the board (malformed, not a no-op)', () => {
+    // design-notes/replay-and-commands.md classifies an out-of-bounds integer as
+    // malformed — the validator rejects it rather than letting step() no-op it.
+    // BOARD is 3×3, so any coord < 0 or ≥ 3 is off-board.
+    for (const anchor of [
+      { col: -1, row: 1 },
+      { col: 3, row: 1 },
+      { col: 1, row: -1 },
+      { col: 1, row: 3 },
+    ]) {
+      const result = validate(withInput({ kind: 'placeTower', anchor }), BOARD);
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('out of bounds');
+    }
+  });
+
   it('accepts well-formed place/sell commands and re-simulates deterministically', () => {
     // Domain-valid but unplaceable on the tiny board — the sim no-ops the build
     // (in-sim legality is the sim's job; the validator gates only wire-format domain).
