@@ -150,6 +150,17 @@ describe('compiled ruleset snapshots its tuning (Codex P1)', () => {
     const s = createInitialState(1, ruleset);
     expect(s.lives).toBe(10); // the compiled snapshot, not the post-compile mutation
   });
+
+  it('freezes the compiled tuning so a retained ruleset cannot be mutated', () => {
+    const ruleset = compileRuleset(testBundle(OPEN), 'test');
+    expect(Object.isFrozen(ruleset.balance)).toBe(true);
+    expect(Object.isFrozen(ruleset.scoring)).toBe(true);
+    expect(Object.isFrozen(ruleset.tower)).toBe(true);
+    expect(Object.isFrozen(ruleset.schedule)).toBe(true);
+    expect(() => {
+      (ruleset.balance as { startingLives: number }).startingLives = 999;
+    }).toThrow(); // strict-mode write to a frozen object
+  });
 });
 
 describe('ruleset boundary guard (totality)', () => {

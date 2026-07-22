@@ -66,6 +66,22 @@ export interface CompiledRuleset {
 
 const validated = new WeakSet<CompiledRuleset>();
 
+/** Recursively freeze plain objects/arrays (and a Map's values) so the compiled
+ *  tuning is immutable at runtime — a caller can't mutate a retained ruleset and
+ *  diverge a match from its fixed `digest` (Codex P2). Read-only at runtime already,
+ *  so this only closes the tamper surface; typed-array/grid internals are left alone. */
+function deepFreeze<T>(o: T): T {
+  if (o !== null && typeof o === 'object' && !Object.isFrozen(o) && !ArrayBuffer.isView(o)) {
+    if (o instanceof Map) {
+      for (const v of o.values()) deepFreeze(v);
+    } else {
+      for (const v of Object.values(o as Record<string, unknown>)) deepFreeze(v);
+    }
+    Object.freeze(o);
+  }
+  return o;
+}
+
 /** A safe positive integer within a generous bound (rejects 0, negatives, floats,
  *  NaN, and absurd magnitudes that could exhaust replay work). */
 function isPosInt(v: unknown, max = 1_000_000): v is number {
@@ -355,6 +371,15 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     schedule,
     digest,
   };
+  // Freeze the compiled tuning (balance/scoring/tower/creep defs/schedule) so a
+  // retained ruleset can't be mutated at runtime and diverge from its digest (Codex
+  // P2). The board machinery (grid methods, typed-array fields) is intentionally left
+  // untouched.
+  deepFreeze(compiled.balance);
+  deepFreeze(compiled.scoring);
+  deepFreeze(compiled.tower);
+  deepFreeze(compiled.schedule);
+  deepFreeze(compiled.creepByKind);
   validated.add(compiled);
   return compiled;
 }
