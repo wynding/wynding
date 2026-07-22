@@ -150,7 +150,20 @@ function validateScoring(s: ScoringConfig): void {
   }
 }
 
+/** The known creep kinds (the `CreepKind` union, at runtime) — content declaring any
+ *  other kind is a typo / off-schema and rejected (Codex R7). */
+const KNOWN_CREEP_KINDS: ReadonlySet<CreepKind> = new Set<CreepKind>([
+  'normal',
+  'fast',
+  'armored',
+  'flying',
+  'boss',
+]);
+
 function validateCreep(c: CreepDef): void {
+  if (!KNOWN_CREEP_KINDS.has(c.kind)) {
+    throw new RulesetError(`unknown creep kind '${String(c.kind)}'`);
+  }
   if (!isPosInt(c.hp)) throw new RulesetError(`creep ${String(c.kind)} hp must be positive`);
   if (!isPosInt(c.speedFp))
     throw new RulesetError(`creep ${String(c.kind)} speedFp must be positive`);
@@ -176,6 +189,12 @@ function validateTower(t: TowerDef): void {
   // A projectile always takes ≥1 tick; same-tick resolution is deferred until an
   // instant-hit tower is actually a milestone.
   if (!isPosInt(t.travelTicks)) throw new RulesetError('tower travelTicks must be positive');
+  // travelTicks < cadenceTicks keeps ≤1 impact in flight per tower — the bound combat's
+  // MAX_IN_FLIGHT_IMPACTS backstop assumes (Codex R7). A slower projectile than the fire
+  // cadence would stack in-flight impacts per tower; reject until that's modelled.
+  if (t.travelTicks >= t.cadenceTicks) {
+    throw new RulesetError('tower travelTicks must be less than cadenceTicks');
+  }
 }
 
 /**

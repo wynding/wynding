@@ -91,6 +91,7 @@ describe('compileRuleset — creep + tower catalog domains', () => {
     rejects((b) => (b.creepCatalog[0]!.bounty = -1));
     rejects((b) => ((b.creepCatalog[0] as { domain: unknown }).domain = 'plasma'));
     rejects((b) => (b.creepCatalog[0]!.domain = 'air')); // valid type, unsupported at M1
+    rejects((b) => (b.creepCatalog[0]!.kind = 'gremlin' as never)); // off-schema kind
   });
 
   it('rejects a malformed tower def', () => {
@@ -100,6 +101,7 @@ describe('compileRuleset — creep + tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.cadenceTicks = 0));
     rejects((b) => (b.towerCatalog[0]!.travelTicks = -1));
     rejects((b) => (b.towerCatalog[0]!.travelTicks = 0)); // 0-travel resolves a tick late
+    rejects((b) => (b.towerCatalog[0]!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
   it('rejects a sole tower whose kind is not basic (mis-simulated as basic otherwise)', () => {
