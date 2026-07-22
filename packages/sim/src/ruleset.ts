@@ -70,7 +70,7 @@ const validated = new WeakSet<CompiledRuleset>();
 
 /** Recursively freeze plain objects/arrays (and a Map's values) so the compiled
  *  tuning is immutable at runtime — a caller can't mutate a retained ruleset and
- *  diverge a match from its fixed `digest` (Codex P2). Read-only at runtime already,
+ *  diverge a match from its fixed `digest`. Read-only at runtime already,
  *  so this only closes the tamper surface; typed-array/grid internals are left alone. */
 function deepFreeze<T>(o: T): T {
   if (o !== null && typeof o === 'object' && !Object.isFrozen(o) && !ArrayBuffer.isView(o)) {
@@ -93,6 +93,15 @@ function isPosInt(v: unknown, max = 1_000_000): v is number {
 /** A safe non-negative integer within a bound (for bonuses / refundNum — 0 is legal). */
 function isNonNegInt(v: unknown, max = 1_000_000): v is number {
   return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= max;
+}
+
+/** A non-null, non-array object — the shape every catalog/nested record must have
+ *  before its fields are read. Runtime-loaded content can carry a `null` or bare
+ *  primitive catalog entry (`towerCatalog: [null]`); guarding here rejects it as a
+ *  `RulesetError` rather than throwing a native `TypeError` on the first dereference,
+ *  which would escape compileRuleset's documented error boundary. */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
 /** Hard cap on total scheduled spawns — a bounded, anti-DoS ceiling on wave size. */
@@ -151,7 +160,7 @@ function validateScoring(s: ScoringConfig): void {
 }
 
 /** The known creep kinds (the `CreepKind` union, at runtime) — content declaring any
- *  other kind is a typo / off-schema and rejected (Codex R7). */
+ *  other kind is a typo / off-schema and rejected. */
 const KNOWN_CREEP_KINDS: ReadonlySet<CreepKind> = new Set<CreepKind>([
   'normal',
   'fast',
@@ -161,6 +170,7 @@ const KNOWN_CREEP_KINDS: ReadonlySet<CreepKind> = new Set<CreepKind>([
 ]);
 
 function validateCreep(c: CreepDef): void {
+  if (!isRecord(c)) throw new RulesetError('creep def must be an object');
   if (!KNOWN_CREEP_KINDS.has(c.kind)) {
     throw new RulesetError(`unknown creep kind '${String(c.kind)}'`);
   }
@@ -171,7 +181,7 @@ function validateCreep(c: CreepDef): void {
   // M1 is GROUND-ONLY: movement runs every creep through the ground distance field and
   // combat targets without a domain check, so an `air` creep would (wrongly) obey the
   // maze and be hittable by the ground tower. Reject it until M2 adds domain-aware
-  // movement + anti-air targeting (Codex P2). The type keeps `air` for that milestone.
+  // movement + anti-air targeting. The type keeps `air` for that milestone.
   if (c.domain !== 'ground') {
     throw new RulesetError(
       `creep ${String(c.kind)} domain '${String(c.domain)}' unsupported at M1 (ground only)`,
@@ -180,17 +190,18 @@ function validateCreep(c: CreepDef): void {
 }
 
 function validateTower(t: TowerDef): void {
+  if (!isRecord(t)) throw new RulesetError('tower def must be an object');
   if (!isPosInt(t.cost)) throw new RulesetError('tower cost must be positive');
   if (!isPosInt(t.damage)) throw new RulesetError('tower damage must be positive');
   if (!isPosInt(t.rangeFp)) throw new RulesetError('tower rangeFp must be positive');
   if (!isPosInt(t.cadenceTicks)) throw new RulesetError('tower cadenceTicks must be positive');
   // travelTicks ≥ 1: a scheduled impact resolves at the TOP of a later tick, so a
-  // 0-travel ("instant") shot fired this tick would resolve a tick late (Codex P2).
+  // 0-travel ("instant") shot fired this tick would resolve a tick late.
   // A projectile always takes ≥1 tick; same-tick resolution is deferred until an
   // instant-hit tower is actually a milestone.
   if (!isPosInt(t.travelTicks)) throw new RulesetError('tower travelTicks must be positive');
   // travelTicks < cadenceTicks keeps ≤1 impact in flight per tower — the bound combat's
-  // MAX_IN_FLIGHT_IMPACTS backstop assumes (Codex R7). A slower projectile than the fire
+  // MAX_IN_FLIGHT_IMPACTS backstop assumes. A slower projectile than the fire
   // cadence would stack in-flight impacts per tower; reject until that's modelled.
   if (t.travelTicks >= t.cadenceTicks) {
     throw new RulesetError('tower travelTicks must be less than cadenceTicks');
@@ -280,14 +291,14 @@ export function rulesetDigest(bundle: Ruleset): string {
 export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRuleset {
   if (bundle == null || typeof bundle !== 'object') throw new RulesetError('bundle missing');
   // Reject an unknown schema version rather than silently reading unfamiliar content
-  // with v1 semantics (Codex P2) — `formatVersion` is the schema-evolution field.
+  // with v1 semantics — `formatVersion` is the schema-evolution field.
   if (bundle.formatVersion !== SUPPORTED_FORMAT_VERSION) {
     throw new RulesetError(
       `unsupported formatVersion ${String(bundle.formatVersion)} (supported: ${SUPPORTED_FORMAT_VERSION})`,
     );
   }
   // The identity fields bucket leaderboard scores and enter the digest, so they must be
-  // well-formed (Codex R9): a non-empty string id and a non-negative integer version.
+  // well-formed: a non-empty string id and a non-negative integer version.
   if (typeof bundle.rulesetId !== 'string' || bundle.rulesetId.length === 0) {
     throw new RulesetError('rulesetId must be a non-empty string');
   }
@@ -299,27 +310,33 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     throw new RulesetError('towerCatalog missing');
   }
   // M1 has a SINGLE tower kind: placeTower always builds towerCatalog[0] (no per-tower
-  // kind selection yet), so extra defs would silently collapse to the first (Codex P2).
-  // Reject until multi-tower placement is a milestone.
+  // kind selection yet), so extra defs would silently collapse to the first. Reject
+  // until multi-tower placement is a milestone.
   if (bundle.towerCatalog.length !== 1) {
     throw new RulesetError('M1 supports exactly one tower kind');
   }
+  // Guard the entry shape before dereferencing `.kind`: runtime-loaded content can hold
+  // a `null`/primitive catalog entry, which must surface as a RulesetError (not a native
+  // TypeError) to keep compileRuleset's documented error boundary intact.
+  if (!isRecord(bundle.towerCatalog[0])) {
+    throw new RulesetError('tower def must be an object');
+  }
   // The sole tower must be the plain `basic` direct-damage ground tower: placement and
   // combat simulate only that behaviour, so a `splash`/`slow`/`antiair` def would be
-  // mis-simulated as basic (Codex R6). Reject until kind-specific dispatch exists.
-  if (bundle.towerCatalog[0]!.kind !== 'basic') {
+  // mis-simulated as basic. Reject until kind-specific dispatch exists.
+  if (bundle.towerCatalog[0].kind !== 'basic') {
     throw new RulesetError(
-      `tower kind '${String(bundle.towerCatalog[0]!.kind)}' unsupported at M1 (basic only)`,
+      `tower kind '${String(bundle.towerCatalog[0].kind)}' unsupported at M1 (basic only)`,
     );
   }
   validateBalance(bundle.balance);
   validateScoring(bundle.scoring);
 
-  // Snapshot every compiled tuning value with structuredClone (Codex P1): a caller that
+  // Snapshot every compiled tuning value with structuredClone: a caller that
   // mutates the raw bundle AFTER compileRuleset must not be able to change a running
   // match's behaviour while its `digest` stays fixed (client/validator divergence). The
   // compiled ruleset owns detached copies, so the state it runs matches the hash.
-  // Null-prototype record (Fable QC): a plain `{}` would let a JSON `kind: "__proto__"`
+  // Null-prototype record: a plain `{}` would let a JSON `kind: "__proto__"`
   // set the object's PROTOTYPE (not an own key) — escaping the deep-freeze — and would
   // make inherited names ("toString", "hasOwnProperty") pass the unknown-kind check
   // below. `Object.create(null)` has no `__proto__` accessor and inherits nothing.
@@ -328,13 +345,23 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   >;
   for (const c of bundle.creepCatalog) {
     validateCreep(c);
+    // Reject a duplicate kind rather than letting a later entry silently overwrite an
+    // earlier one — the wave schedule resolves each kind to exactly one stat block, so
+    // two defs sharing a kind is ambiguous authored content, not a valid catalog.
+    if (creepByKind[c.kind as CreepKind] !== undefined) {
+      throw new RulesetError(`duplicate creep kind '${String(c.kind)}'`);
+    }
     creepByKind[c.kind as CreepKind] = structuredClone(c);
   }
   for (const t of bundle.towerCatalog) validateTower(t);
-  const tower = structuredClone(bundle.towerCatalog[0]) as TowerDef; // M1: single tower kind
+  // `as unknown as` because the earlier `isRecord` guard narrowed the element to a bare
+  // record; validateTower has since confirmed it is a well-formed TowerDef.
+  const tower = structuredClone(bundle.towerCatalog[0]) as unknown as TowerDef; // M1: single tower
 
   if (!Array.isArray(bundle.boards)) throw new RulesetError('boards must be an array');
-  const board = bundle.boards.find((b: RulesetBoard) => b.id === boardId);
+  // `isRecord(b)` guards a null/primitive board entry (`boards: [null]` is valid JSON):
+  // reading `b.id` on it would throw a native TypeError, escaping the RulesetError boundary.
+  const board = bundle.boards.find((b: RulesetBoard) => isRecord(b) && b.id === boardId);
   if (board == null) throw new RulesetError(`unknown boardId '${String(boardId)}'`);
   if (!isCell(board.entrance, board.widthTiles, board.heightTiles)) {
     throw new RulesetError('entrance out of bounds');
@@ -346,7 +373,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // Build the grid + exit distance field; loadBoard rejects an unplayable board. Its
   // failure (a GridError — non-border opening, bad dims, over-cap cells) is re-thrown
   // as a RulesetError so ALL malformed content surfaces through one type and the
-  // replay validator can turn it into a clean rejection rather than a 500 (Fable P2).
+  // replay validator can turn it into a clean rejection rather than a 500.
   let boardCtx;
   try {
     boardCtx = loadBoard({
@@ -365,7 +392,11 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   if (!Array.isArray(board.waves) || board.waves.length !== 1) {
     throw new RulesetError('M1 expects exactly one wave');
   }
-  if (!Array.isArray(board.waves[0].entries)) {
+  // Guard a null/primitive wave (`waves: [null]` is valid JSON) before reading `.entries`,
+  // so a malformed wave surfaces as a RulesetError rather than a native TypeError. Checked
+  // through a separate `unknown` local so the typed `board.waves[0]` access below is intact.
+  const wave0: unknown = board.waves[0];
+  if (!isRecord(wave0) || !Array.isArray(wave0.entries)) {
     throw new RulesetError('wave entries must be an array');
   }
   const schedule: ScheduledSpawn[] = [];
@@ -388,13 +419,13 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   if (schedule.length === 0) throw new RulesetError('wave schedule is empty');
 
   // Reject a bundle whose BASELINE run can't reach a terminal state within the replay
-  // validator's absolute tick ceiling (Codex P2) — otherwise it compiles but every
+  // validator's absolute tick ceiling — otherwise it compiles but every
   // replay on it times out. Bound the worst-case baseline: launch deadline + last spawn
   // offset + the slowest creep's full traversal (max route length ÷ min speed). Only the
   // baseline must fit; adversarial build/sell juggling beyond it is caught by the
   // validator's timeout.
   const lastOffset = schedule[schedule.length - 1]!.offsetTicks;
-  // Minimum speed over the kinds THIS board's schedule actually spawns (Codex R6) —
+  // Minimum speed over the kinds THIS board's schedule actually spawns —
   // not the whole catalog, so an unrelated slow creep used only by another board can't
   // wrongly reject this board.
   let minSpeedFp = Number.MAX_SAFE_INTEGER;
@@ -410,7 +441,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
 
   // Digest an un-int-validated field (e.g. a float `wave.index`) can still trip
   // canonicalJson; funnel it through RulesetError so compileRuleset's documented
-  // "throws only RulesetError" contract holds for every caller (Fable P3).
+  // "throws only RulesetError" contract holds for every caller.
   let digest: string;
   try {
     digest = rulesetDigest(bundle);
@@ -422,7 +453,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     __brand: 'CompiledRuleset',
     boardId,
     board: boardCtx,
-    balance: structuredClone(bundle.balance), // detached snapshot (Codex P1)
+    balance: structuredClone(bundle.balance), // detached snapshot
     scoring: structuredClone(bundle.scoring),
     tower,
     creepByKind,
@@ -430,9 +461,8 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     digest,
   };
   // Freeze the compiled tuning (balance/scoring/tower/creep defs/schedule) so a
-  // retained ruleset can't be mutated at runtime and diverge from its digest (Codex
-  // P2). The board machinery (grid methods, typed-array fields) is intentionally left
-  // untouched.
+  // retained ruleset can't be mutated at runtime and diverge from its digest. The board
+  // machinery (grid methods, typed-array fields) is intentionally left untouched.
   deepFreeze(compiled.balance);
   deepFreeze(compiled.scoring);
   deepFreeze(compiled.tower);

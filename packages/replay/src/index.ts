@@ -170,7 +170,7 @@ export function validate(replay: Replay, bundle: Ruleset): ValidationResult {
   // (2) Bind identity: the bundle digest must match, and the board must compile. Any
   // malformed bundle (a float that trips canonicalJson, a non-array boards, an
   // unplayable board) surfaces as a RulesetError → a clean rejection, never an
-  // unhandled throw out of the validator (Fable P2 — validate() is total in its result).
+  // unhandled throw out of the validator (validate() is total in its result).
   let digest: string;
   let ruleset: CompiledRuleset;
   try {

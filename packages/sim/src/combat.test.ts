@@ -248,9 +248,9 @@ describe('runCombat — fire cadence and no warm-up', () => {
   });
 });
 
-describe("sellTower preserves survivors' cooldown and lock (Codex R1 #4)", () => {
+describe("sellTower preserves survivors' cooldown and lock", () => {
   it("preserves a surviving tower's cooldown when another is sold", () => {
-    // The bug R1 #4 fixes: a sell that rebuilt the combat columns as fresh zeros
+    // Regression guard: a sell that rebuilt the combat columns as fresh zeros
     // would reset a survivor's cooldown, letting it fire immediately. `targetId` is
     // re-derived by the combat phase every tick, so the quantity a sell must carry
     // by SOURCE ROW is the survivor's `nextFireTick` (its live cooldown).

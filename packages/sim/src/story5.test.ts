@@ -140,15 +140,18 @@ describe('rulesetHash — content-derived SHA-256 (ADR 0007 §3)', () => {
   });
 });
 
-describe('compiled ruleset snapshots its tuning (Codex P1)', () => {
+describe('compiled ruleset snapshots its tuning', () => {
   it('a match uses the compiled snapshot, not the raw bundle mutated after compile', () => {
-    const bundle = testBundle(OPEN, { startingLives: 10 });
+    const bundle = testBundle(OPEN, { startingLives: 10, creepHp: 17 });
     const ruleset = compileRuleset(bundle, 'test');
     // Mutate the RAW bundle after compiling — a running match must be unaffected.
     (bundle.balance as { startingLives: number }).startingLives = 999;
     (bundle.creepCatalog[0] as { hp: number }).hp = 999;
     const s = createInitialState(1, ruleset);
     expect(s.lives).toBe(10); // the compiled snapshot, not the post-compile mutation
+    // The creep catalog is snapshotted too: the compiled def keeps its authored HP (17)
+    // even though the raw bundle's creep was mutated to 999 after compile.
+    expect(ruleset.creepByKind.normal?.hp).toBe(17);
   });
 
   it('freezes the compiled tuning so a retained ruleset cannot be mutated', () => {

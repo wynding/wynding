@@ -197,7 +197,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
   it('stays total (returns {ok:false}, never throws) on a malformed bundle', () => {
     // An unplayable board (interior, non-border entrance) makes loadBoard throw a
     // GridError inside compileRuleset; validate must surface it as a rejection, not
-    // let it escape as an unhandled 500 (Fable P2).
+    // let it escape as an unhandled 500.
     const badGeometry = JSON.parse(JSON.stringify(m1Ruleset)) as Ruleset;
     (badGeometry.boards[0] as { entrance: { col: number; row: number } }).entrance = {
       col: 5,
@@ -235,7 +235,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
 
   it('rejects a ruleset whose baseline run cannot terminate within the tick budget', () => {
     // A very slow creep (speed 1) on a wide board needs far more than the absolute tick
-    // ceiling merely to cross — such a ruleset is rejected at COMPILE (Codex P2), so no
+    // ceiling merely to cross — such a ruleset is rejected at COMPILE, so no
     // replay on it can be submitted, rather than compiling into replays that only ever
     // time out. validate() surfaces the compile rejection as a clean {ok:false}.
     const slowBundle: Ruleset = {

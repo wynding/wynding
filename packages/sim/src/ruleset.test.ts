@@ -49,6 +49,21 @@ describe('compileRuleset — structural rejections', () => {
     rejects((b) => (b.rulesetId = ''));
     rejects((b) => (b.version = -1));
   });
+
+  it('rejects a null / primitive catalog entry as a RulesetError (no native TypeError)', () => {
+    rejects((b) => (b.creepCatalog[0] = null as never));
+    rejects((b) => (b.towerCatalog[0] = null as never));
+    rejects((b) => (b.towerCatalog[0] = 42 as never));
+  });
+
+  it('rejects a null board / wave entry as a RulesetError (no native TypeError)', () => {
+    rejects((b) => (b.boards[0] = null as never));
+    rejects((b) => (b.boards[0]!.waves[0] = null as never));
+  });
+
+  it('rejects a duplicate creep kind (ambiguous catalog — a kind maps to one stat block)', () => {
+    rejects((b) => b.creepCatalog.push({ ...b.creepCatalog[0]! }));
+  });
 });
 
 describe('compileRuleset — balance domains', () => {
