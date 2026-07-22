@@ -29,14 +29,13 @@ const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
 let sim: SimState = createInitialState(Date.now() >>> 0, ruleset);
 const view = mount(app, sim);
 
-let tickCount = 0;
 const loop = createFixedLoop(
   () => {
     // Demo schedule: call the wave early on the first tick; creeps then spawn from
     // the ruleset schedule (the manual spawn command is gone — spawns are content).
-    const inputs: SimInput[] = tickCount === 0 ? [{ kind: 'callWaveEarly' }] : [];
+    // Drive off the sim's authoritative tick, not a shadow counter.
+    const inputs: SimInput[] = sim.tick === 0 ? [{ kind: 'callWaveEarly' }] : [];
     sim = step(sim, ruleset, inputs);
-    tickCount += 1;
     view.update(sim);
   },
   { msPerTick: MS_PER_TICK },

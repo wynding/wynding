@@ -256,7 +256,7 @@ describe('placeTower — every rejection is a deterministic no-op (never a throw
   it('no-ops a build that would strand a live creep even though the entrance stays connected', () => {
     // On POCKET, towers at (2,4) and (1,2) seal the bottom-left pocket {(1,4),(1,5)}
     // while entrance (0,1) → exit (8,2) remains open along the top rows.
-    const withCreep = createInitialState(1, RULESET_LANE);
+    const withCreep = createInitialState(1, RULESET_POCKET);
     restingCreep(withCreep, 9, 1, 5);
     step(withCreep, RULESET_POCKET, [place(2, 4)]);
     expect(withCreep.towers.id).toHaveLength(1); // creep still routes out via (1,3)
@@ -265,7 +265,7 @@ describe('placeTower — every rejection is a deterministic no-op (never a throw
     expect(withCreep.bounty).toBe(75);
 
     // Control: with no creep in the pocket the same second build is legal.
-    const empty = createInitialState(1, RULESET_LANE);
+    const empty = createInitialState(1, RULESET_POCKET);
     step(empty, RULESET_POCKET, [place(2, 4)]);
     step(empty, RULESET_POCKET, [place(1, 2)]);
     expect(empty.towers.id).toHaveLength(2);
