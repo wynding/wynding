@@ -52,7 +52,7 @@ function restingCreeps(
     fromY: rows.map((r) => cy(r.row)),
     headCol: rows.map((r) => r.col),
     headRow: rows.map((r) => r.row),
-    progress: rows.map((r) => r.row * 0 + r.col * 0), // progress 0 (rest)
+    progress: rows.map(() => 0), // progress 0 (rest)
   };
 }
 

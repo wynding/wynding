@@ -61,14 +61,23 @@ function cellOf(v: number): number {
 
 /**
  * Exact integer floor square root of `n ≥ 0` (`isqrt(n)² ≤ n < (isqrt(n)+1)²`).
- * `Math.sqrt` seeds an approximation; the integer correction loop makes the
- * RESULT exact regardless of the platform's `Math.sqrt` rounding, so it is
- * byte-identical everywhere. Operands here are bounded (adjacency keeps
- * `dx²+dy² ≤ ~8·10⁵`), so the seed is at most one off and the loop runs O(1).
+ * PURE integer math — no `Math.sqrt` (the deterministic core forbids floats and
+ * transcendentals, AGENTS.md "Determinism"). Integer Newton's method with the
+ * sanctioned `Math.floor(a / b)` division idiom (no 32-bit `>>`/`clz32` coercion,
+ * so it is correct across the whole safe-integer domain, not just `< 2³²`). The
+ * constant seed `2²⁷ ≥ √n` for every safe integer (`√(2⁵³−1) < 2²⁷`), so the
+ * iteration descends monotonically to the floor in O(1) bounded steps; the final
+ * ±1 clamp makes the RESULT exact despite any division rounding — byte-identical
+ * on every platform. Operands here are tiny (adjacency keeps `dx²+dy² ≤ ~8·10⁵`).
  */
 export function isqrt(n: number): number {
   if (!Number.isSafeInteger(n) || n <= 0) return 0;
-  let x = Math.floor(Math.sqrt(n));
+  let x = 1 << 27; // 2²⁷ ≥ √n for every safe integer n
+  for (;;) {
+    const y = Math.floor((x + Math.floor(n / x)) / 2);
+    if (y >= x) break;
+    x = y;
+  }
   while (x > 0 && x * x > n) x--;
   while ((x + 1) * (x + 1) <= n) x++;
   return x;
