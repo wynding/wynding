@@ -101,11 +101,16 @@ const MAX_SCHEDULED_SPAWNS = 10_000;
 /** The only ruleset schema version this sim understands (ADR 0007 `formatVersion`). */
 const SUPPORTED_FORMAT_VERSION = 1;
 
-/** Max ticks from match start to the LAST scheduled spawn. Kept below the replay
- *  validator's absolute tick ceiling (36 000) so a compiled bundle's wave always
- *  spawns out within budget — a bundle whose schedule can't fit is rejected here
- *  rather than compiling into replays that can only ever time out. */
-const MAX_MATCH_HORIZON = 30_000;
+/** The absolute tick ceiling a match must terminate within. `compileRuleset` rejects a
+ *  bundle whose baseline run (launch + spawn + slowest full traversal) can't reach a
+ *  terminal state within it, and the replay validator re-simulates to exactly this
+ *  ceiling — so replay imports THIS constant (rather than duplicating the literal) and
+ *  the two can never drift into a compiles-but-times-out gap. */
+export const MAX_MATCH_TICKS = 36_000;
+
+/** Fixed-point diagonal step length (≈ √2 × 256); the generous per-cell route-length
+ *  unit used for the worst-case traversal bound (mirrors replay's tickCeiling). */
+const FP_DIAG_LEN = 362;
 
 function isCell(c: unknown, w: number, h: number): boolean {
   return (
@@ -349,13 +354,21 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   }
   if (schedule.length === 0) throw new RulesetError('wave schedule is empty');
 
-  // Reject a bundle whose launch + spawn schedule can't fit a validatable run
-  // (Codex/code-review): if countdownTicks + the last spawn offset already exceeds the
-  // match horizon, the wave can never spawn out within any replay budget, so every
-  // replay on this board would time out. Fail fast at compile instead.
+  // Reject a bundle whose BASELINE run can't reach a terminal state within the replay
+  // validator's absolute tick ceiling (Codex P2) — otherwise it compiles but every
+  // replay on it times out. Bound the worst-case baseline: launch deadline + last spawn
+  // offset + the slowest creep's full traversal (max route length ÷ min speed). Only the
+  // baseline must fit; adversarial build/sell juggling beyond it is caught by the
+  // validator's timeout.
   const lastOffset = schedule[schedule.length - 1]!.offsetTicks;
-  if (bundle.balance.countdownTicks + lastOffset > MAX_MATCH_HORIZON) {
-    throw new RulesetError('wave launch + spawn schedule exceeds the match horizon');
+  let minSpeedFp = Number.MAX_SAFE_INTEGER;
+  for (const def of Object.values(creepByKind)) {
+    if (def !== undefined && def.speedFp < minSpeedFp) minSpeedFp = def.speedFp;
+  }
+  const cells = boardCtx.grid.width * boardCtx.grid.height;
+  const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minSpeedFp);
+  if (bundle.balance.countdownTicks + lastOffset + maxTraversalTicks > MAX_MATCH_TICKS) {
+    throw new RulesetError('ruleset cannot reach a terminal state within the tick budget');
   }
 
   // Digest an un-int-validated field (e.g. a float `wave.index`) can still trip

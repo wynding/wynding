@@ -455,6 +455,7 @@ export {
   rulesetDigest,
   assertRuleset,
   RulesetError,
+  MAX_MATCH_TICKS,
   type CompiledRuleset,
   type ScheduledSpawn,
 } from './ruleset';

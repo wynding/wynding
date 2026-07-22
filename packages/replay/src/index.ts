@@ -16,6 +16,7 @@ import {
   deriveStars,
   RulesetError,
   SIM_VERSION,
+  MAX_MATCH_TICKS,
   type SimInput,
   type CompiledRuleset,
 } from '@wynding/sim';
@@ -57,10 +58,12 @@ export function currentRulesetHash(bundle: Ruleset): string {
 // the replay loop after only the public, forgeable simVersion/rulesetHash checks, so
 // without bounds a caller could submit millions of ticks (or inputs per tick) to burn
 // CPU until timeout on every request — an unauthenticated compute-exhaustion vector.
-/** Max ticks in a replay log: 30 minutes at the 50 ms (20 Hz) tick cadence. */
-const MAX_TICKS = 36_000;
-/** Absolute hard ceiling on total simulated ticks (log + empty catch-up to terminal). */
-const ABSOLUTE_MAX_CEILING = MAX_TICKS;
+/** Absolute hard ceiling on total simulated ticks (log + empty catch-up to terminal).
+ *  THE SAME constant `compileRuleset` bounds a bundle's baseline run against — imported,
+ *  not duplicated, so the two can never drift into a compiles-but-times-out gap. */
+const ABSOLUTE_MAX_CEILING = MAX_MATCH_TICKS;
+/** Max ticks in a replay log (30 min at 20 Hz) — the log-length cap, same magnitude. */
+const MAX_TICKS = MAX_MATCH_TICKS;
 /** Max inputs applied on a single tick — far above any legitimate command burst. */
 const MAX_INPUTS_PER_TICK = 64;
 /**
@@ -75,31 +78,16 @@ const MAX_TOTAL_TOWER_COMMANDS = 1_000;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 /**
- * Bounded tick ceiling (PLAN §9): the launch deadline + last scheduled spawn + the
- * worst-case creep traversal (route length ÷ minimum speed, in TICKS) + the re-route
- * stall bounded build/sell juggling can add (each of the bounded tower commands can
- * restart at most one full route), all capped by a hard absolute ceiling so a
- * malformed/modded ruleset cannot nominate an enormous bound and restore the DoS.
+ * The hard tick ceiling the re-simulation may run to. `compileRuleset` already
+ * guarantees a bundle's BASELINE run (launch + spawn + slowest full traversal) reaches
+ * a terminal state within this bound, so a legitimate replay always terminates below
+ * it; the absolute cap then bounds any adversarial build/sell juggling (a finite but
+ * pathological extension) and, with it, the validator's CPU per request. A ruleset-
+ * derived formula here would only ever saturate to this cap (the juggling term
+ * dominates), so the constant is the honest bound.
  */
-function tickCeiling(ruleset: CompiledRuleset): number {
-  const { grid } = ruleset.board;
-  const cells = grid.width * grid.height;
-  // A generous upper bound on any route length in fixed-point units (every cell,
-  // diagonal step cost). FP: 256 units/tile, diagonal ≈ 362.
-  const maxRouteLenFp = cells * 362;
-  let minSpeed = Number.MAX_SAFE_INTEGER;
-  for (const def of Object.values(ruleset.creepByKind)) {
-    if (def !== undefined && def.speedFp > 0 && def.speedFp < minSpeed) minSpeed = def.speedFp;
-  }
-  if (!Number.isSafeInteger(minSpeed) || minSpeed < 1) minSpeed = 1;
-  const maxTravelTicks = Math.ceil(maxRouteLenFp / minSpeed);
-  const lastOffset =
-    ruleset.schedule.length > 0
-      ? (ruleset.schedule[ruleset.schedule.length - 1] as { offsetTicks: number }).offsetTicks
-      : 0;
-  const geometryDelayTicks = MAX_TOTAL_TOWER_COMMANDS * maxTravelTicks;
-  const raw = ruleset.balance.countdownTicks + lastOffset + maxTravelTicks + geometryDelayTicks;
-  return Math.min(raw, ABSOLUTE_MAX_CEILING);
+function tickCeiling(_ruleset: CompiledRuleset): number {
+  return ABSOLUTE_MAX_CEILING;
 }
 
 /**

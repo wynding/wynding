@@ -140,8 +140,8 @@ describe('compileRuleset — wave domains', () => {
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.count = 10_001));
   });
 
-  it('rejects a launch+spawn schedule that exceeds the match horizon', () => {
-    rejects((b) => (b.balance.countdownTicks = 40_000)); // > 30k horizon, > replay ceiling
+  it('rejects a baseline run that cannot terminate within the tick budget', () => {
+    rejects((b) => (b.balance.countdownTicks = 40_000)); // launch alone > the 36k ceiling
   });
 
   it('surfaces an un-hashable field (non-integer wave index) as a RulesetError', () => {

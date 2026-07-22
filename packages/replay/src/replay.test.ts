@@ -236,10 +236,11 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     expect(r2.reason).toContain('invalid ruleset');
   });
 
-  it('rejects a replay that never terminates within the tick ceiling (timeout)', () => {
-    // A very slow creep (speed 1) on a wide board cannot reach the exit within the
-    // absolute tick ceiling — the validator rejects it as a timeout rather than
-    // looping unboundedly.
+  it('rejects a ruleset whose baseline run cannot terminate within the tick budget', () => {
+    // A very slow creep (speed 1) on a wide board needs far more than the absolute tick
+    // ceiling merely to cross — such a ruleset is rejected at COMPILE (Codex P2), so no
+    // replay on it can be submitted, rather than compiling into replays that only ever
+    // time out. validate() surfaces the compile rejection as a clean {ok:false}.
     const slowBundle: Ruleset = {
       formatVersion: 1,
       rulesetId: 'timeout-probe',
@@ -280,6 +281,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     };
     const r = validate(replay, slowBundle);
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('timeout');
+    expect(r.reason).toContain('invalid ruleset'); // rejected at compile (terminal budget)
+    expect(r.reason).toContain('terminal state within the tick budget');
   });
 });
