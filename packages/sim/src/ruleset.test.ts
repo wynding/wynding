@@ -99,6 +99,20 @@ describe('compileRuleset — creep + tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.rangeFp = 0));
     rejects((b) => (b.towerCatalog[0]!.cadenceTicks = 0));
     rejects((b) => (b.towerCatalog[0]!.travelTicks = -1));
+    rejects((b) => (b.towerCatalog[0]!.travelTicks = 0)); // 0-travel resolves a tick late
+  });
+
+  it('rejects a multi-entry tower catalog (M1 is single-tower)', () => {
+    rejects((b) =>
+      b.towerCatalog.push({
+        kind: 'rapid',
+        cost: 5,
+        damage: 10,
+        rangeFp: 1024,
+        cadenceTicks: 30,
+        travelTicks: 4,
+      }),
+    );
   });
 });
 

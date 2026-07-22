@@ -148,7 +148,11 @@ function validateTower(t: TowerDef): void {
   if (!isPosInt(t.damage)) throw new RulesetError('tower damage must be positive');
   if (!isPosInt(t.rangeFp)) throw new RulesetError('tower rangeFp must be positive');
   if (!isPosInt(t.cadenceTicks)) throw new RulesetError('tower cadenceTicks must be positive');
-  if (!isNonNegInt(t.travelTicks)) throw new RulesetError('tower travelTicks must be ≥ 0');
+  // travelTicks ≥ 1: a scheduled impact resolves at the TOP of a later tick, so a
+  // 0-travel ("instant") shot fired this tick would resolve a tick late (Codex P2).
+  // A projectile always takes ≥1 tick; same-tick resolution is deferred until an
+  // instant-hit tower is actually a milestone.
+  if (!isPosInt(t.travelTicks)) throw new RulesetError('tower travelTicks must be positive');
 }
 
 /**
@@ -245,6 +249,12 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   }
   if (!Array.isArray(bundle.towerCatalog) || bundle.towerCatalog.length === 0) {
     throw new RulesetError('towerCatalog missing');
+  }
+  // M1 has a SINGLE tower kind: placeTower always builds towerCatalog[0] (no per-tower
+  // kind selection yet), so extra defs would silently collapse to the first (Codex P2).
+  // Reject until multi-tower placement is a milestone.
+  if (bundle.towerCatalog.length !== 1) {
+    throw new RulesetError('M1 supports exactly one tower kind');
   }
   validateBalance(bundle.balance);
   validateScoring(bundle.scoring);
