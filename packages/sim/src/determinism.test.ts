@@ -108,8 +108,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '72df3da2',
-  traceDigest: '502c3151', // fnv1a(trace.join(':'))
+  finalHash: 'b0636da4',
+  traceDigest: '25a976b4', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 
@@ -134,27 +134,39 @@ describe('determinism gate', () => {
     expect(state.lives).toBeLessThanOrEqual(8); // started at 10 ⇒ ≥2 leaks
   });
 
-  it('witnesses a build, a sell, and a visible re-route in the canonical scenario', () => {
-    // The golden must actually exercise the Story-3 vocabulary: the tick-2 build
-    // lands (bounty 80→75, one tower), live creeps visibly leave the straight
-    // row-11 lane to route around it, and the tick-201 sell refunds 3 (75→78)
-    // and removes the tower.
+  it('witnesses a build, a visible re-route, combat kills, and a sell', () => {
+    // The golden must exercise the full Story-3 + Story-4 vocabulary: the tick-2
+    // build lands (bounty 80→75, one tower); live creeps visibly leave the straight
+    // row-11 lane to route around it; the tower fires and KILLS creeps, each credit
+    // raising bounty by KILL_BOUNTY while the tower stands; and the tick-201 sell
+    // refunds 3 and removes the tower. Final bounty = 75 + 4 kills + 3 refund = 82.
     let state = createInitialState(SCENARIO_SEED);
     let sawTower = false;
+    let towerFirstBounty = -1;
     let sawDetour = false;
+    let sawKill = false;
+    let prevBounty = state.bounty;
     for (let t = 0; t < SCENARIO_TICKS; t++) {
       state = step(state, canonicalInputs(t), SCENARIO_BOARD);
       if (state.towers.id.length === 1) {
-        sawTower = true;
-        expect(state.towers.id[0]).toBe(SCENARIO_TOWER_ID);
-        expect(state.bounty).toBe(75); // 80 − TOWER_COST, rejected build spent nothing
+        if (!sawTower) {
+          sawTower = true;
+          towerFirstBounty = state.bounty; // captured before any kill credits
+          expect(state.towers.id[0]).toBe(SCENARIO_TOWER_ID);
+        }
+        // Bounty rises only from a combat kill while the tower stands (the sell's
+        // refund lands the same tick the tower is removed, so towers.length is 0).
+        if (state.bounty > prevBounty) sawKill = true;
       }
-      if (state.creeps.row.some((r) => r !== 11)) sawDetour = true;
+      if (state.creeps.headRow.some((r) => r !== undefined && r !== 11)) sawDetour = true;
+      prevBounty = state.bounty;
     }
     expect(sawTower).toBe(true);
+    expect(towerFirstBounty).toBe(75); // 80 − TOWER_COST, rejected build spent nothing
     expect(sawDetour).toBe(true); // the straight-lane board never leaves row 11 unbuilt
+    expect(sawKill).toBe(true); // the tower actually killed a creep and earned bounty
     expect(state.towers.id).toHaveLength(0); // sold
-    expect(state.bounty).toBe(78); // 75 + floor(5·3/4)
+    expect(state.bounty).toBe(82); // 75 + 4·KILL_BOUNTY + floor(5·3/4)
   });
 
   it('continues byte-identically after a mid-run serialize/restore (resume path)', () => {

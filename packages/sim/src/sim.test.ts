@@ -54,9 +54,9 @@ describe('sim smoke', () => {
     step(s, [{ kind: 'spawnCreep', hp: 7 }], BOARD);
     expect(s.creeps.id).toHaveLength(1);
     expect(s.creeps.hp[0]).toBe(7);
-    expect(s.creeps.col[0]).toBe(0); // still on the entrance cell...
-    expect(s.creeps.row[0]).toBe(2);
-    expect(s.creeps.edgeProgress[0]).toBe(26); // ...one budget into the first edge
+    expect(s.creeps.fromX[0]).toBe(0 * 256 + 128); // from-point still on the entrance centre...
+    expect(s.creeps.fromY[0]).toBe(2 * 256 + 128);
+    expect(s.creeps.progress[0]).toBe(26); // ...one budget into the first edge
     expect(s.creeps.headCol[0]).toBe(1); // committed toward the next cell east
     expect(s.creeps.headRow[0]).toBe(2);
   });
@@ -79,22 +79,22 @@ describe('sim smoke', () => {
     const corruptions: ReadonlyArray<(c: CreepArrays) => void> = [
       (c) => (c.id = new Array<number>(1)), // id[0] is a hole
       (c) => (c.hp = []),
-      (c) => (c.col = []),
-      (c) => (c.row = []),
+      (c) => (c.fromX = []),
+      (c) => (c.fromY = []),
       (c) => (c.headCol = []),
       (c) => (c.headRow = []),
-      (c) => (c.edgeProgress = []),
+      (c) => (c.progress = []),
     ];
     for (const corrupt of corruptions) {
       const s = createInitialState(1);
       s.creeps = {
         id: [1],
         hp: [5],
-        col: [1],
-        row: [2],
+        fromX: [1 * 256 + 128],
+        fromY: [2 * 256 + 128],
         headCol: [1],
         headRow: [2],
-        edgeProgress: [0],
+        progress: [0],
       };
       corrupt(s.creeps);
       const out = step(s, [], BOARD);

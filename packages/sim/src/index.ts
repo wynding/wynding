@@ -7,16 +7,21 @@
 
 import { hashState } from '@wynding/engine';
 import type { Cell, Seed } from '@wynding/types';
-import { advanceCreep } from './movement';
+import { advanceCreep, cellCenterX, cellCenterY } from './movement';
+import { runCombat, emptyCreeps, type Impact } from './combat';
 import { assertConsistent, type BoardContext } from './context';
 import type { Grid } from './board';
 import { computeDistanceField, type DistanceField } from './pathfinding';
 import {
   TOWER_COST,
+  MAX_TOWERS,
   canPlaceTower,
+  countValidTowers,
+  emptyTowers,
   findValidTowerIndex,
   forEachValidTower,
   materializeTowerMask,
+  safeCombatColumn,
   type TowerArrays,
   refundFor,
 } from './tower';
@@ -25,7 +30,7 @@ import {
 export const MS_PER_TICK = 50;
 
 /** Behavior version stamped into replays; bump on any determinism-affecting change. */
-export const SIM_VERSION = 3;
+export const SIM_VERSION = 4;
 
 /** Creep travel budget per tick, in fixed-point units (256 units = 1 tile). */
 const CREEP_SPEED_FP = 26;
@@ -38,22 +43,22 @@ const STARTING_BOUNTY = 80;
 
 /**
  * Structure-of-arrays creep storage — cheap to iterate and serialize. Movement is
- * cell-relative: a creep is at cell `(col,row)` and `edgeProgress` fixed-point units
- * into the edge toward its committed head cell `(headCol,headRow)`. The head is a
- * binding commitment only while mid-edge (`edgeProgress > 0`); at rest the columns
- * hold the canonical sentinel `head == (col,row)` and the real heading is derived
- * from the current field the moment the creep moves (see movement.ts). No Euclidean
- * world position yet — it is trivially derivable and deferred until combat/render
- * need it (Story 4/6).
+ * POINT-AUTHORITATIVE (Story 4, closes #17): a creep carries a fixed-point segment
+ * start point `(fromX,fromY)`, a waypoint cell `(headCol,headRow)` whose centre is
+ * the segment end, and `progress` (arc-length travelled toward that centre). Its
+ * Euclidean point and the cell it occupies are DERIVED, not stored, and its edge
+ * length is derived too (never persisted — see movement.ts). At rest the head
+ * columns hold the canonical sentinel `head == cellContaining(from)` with
+ * `progress === 0`, and the heading is derived fresh the moment the creep moves.
  */
 export interface CreepArrays {
   id: number[];
-  hp: number[]; // carried, inert until combat (Story 4)
-  col: number[]; // current cell column (the cell it is travelling FROM)
-  row: number[]; // current cell row
-  headCol: number[]; // committed next cell (sentinel: == col/row while at rest)
+  hp: number[];
+  fromX: number[]; // fixed-point segment start point (x)
+  fromY: number[]; // fixed-point segment start point (y)
+  headCol: number[]; // waypoint cell (sentinel: == cellContaining(from) at rest)
   headRow: number[];
-  edgeProgress: number[]; // fixed-point units travelled from (col,row), in [0, edgeLen)
+  progress: number[]; // fixed-point arc-length travelled from `from`, in [0, edgeLen)
 }
 
 /** Complete simulation state for one match. Fully serializable. */
@@ -65,6 +70,7 @@ export interface SimState {
   nextEntityId: number; // shared entity-id space: creeps and towers
   creeps: CreepArrays;
   towers: TowerArrays;
+  impacts: Impact[]; // in-flight scheduled combat impacts (Story 4)
 }
 
 /** Per-tick inputs (the replayable command log). */
@@ -123,25 +129,29 @@ function effectiveField(grid: Grid, towers: TowerArrays): DistanceField {
  */
 function coerceSoa(state: SimState): void {
   if (state.creeps == null || typeof state.creeps !== 'object') {
-    state.creeps = { id: [], hp: [], col: [], row: [], headCol: [], headRow: [], edgeProgress: [] };
+    state.creeps = emptyCreeps();
   }
   const c = state.creeps;
   if (!Array.isArray(c.id)) c.id = [];
   if (!Array.isArray(c.hp)) c.hp = [];
-  if (!Array.isArray(c.col)) c.col = [];
-  if (!Array.isArray(c.row)) c.row = [];
+  if (!Array.isArray(c.fromX)) c.fromX = [];
+  if (!Array.isArray(c.fromY)) c.fromY = [];
   if (!Array.isArray(c.headCol)) c.headCol = [];
   if (!Array.isArray(c.headRow)) c.headRow = [];
-  if (!Array.isArray(c.edgeProgress)) c.edgeProgress = [];
+  if (!Array.isArray(c.progress)) c.progress = [];
 
   if (state.towers == null || typeof state.towers !== 'object') {
-    state.towers = { id: [], col: [], row: [], spend: [] };
+    state.towers = emptyTowers();
   }
   const t = state.towers;
   if (!Array.isArray(t.id)) t.id = [];
   if (!Array.isArray(t.col)) t.col = [];
   if (!Array.isArray(t.row)) t.row = [];
   if (!Array.isArray(t.spend)) t.spend = [];
+  if (!Array.isArray(t.targetId)) t.targetId = [];
+  if (!Array.isArray(t.nextFireTick)) t.nextFireTick = [];
+
+  if (!Array.isArray(state.impacts)) state.impacts = [];
 }
 
 /** Build a fresh match state for a given seed. */
@@ -152,8 +162,9 @@ export function createInitialState(seed: Seed | number): SimState {
     lives: STARTING_LIVES,
     bounty: STARTING_BOUNTY,
     nextEntityId: 1,
-    creeps: { id: [], hp: [], col: [], row: [], headCol: [], headRow: [], edgeProgress: [] },
-    towers: { id: [], col: [], row: [], spend: [] },
+    creeps: emptyCreeps(),
+    towers: emptyTowers(),
+    impacts: [],
   };
 }
 
@@ -163,19 +174,34 @@ export function createInitialState(seed: Seed | number): SimState {
  * `board` is a static, caller-supplied input (see {@link BoardContext}); it is
  * validated once per context object, not stored in `state`.
  *
- * Two phases. The INPUT phase applies commands in array order, each re-validated
+ * Phases. The INPUT phase applies commands in array order, each re-validated
  * against the then-current state; anything malformed or illegal is a
  * deterministic no-op (ADR 0006 §4 — `step` is total, it never throws on bad
- * input). The MOVEMENT phase then derives the effective distance field ONCE, as
- * a pure local, from the post-input tower state — so every creep (including one
- * spawned this tick, in either order relative to a build) heads off the final
- * geometry, and a cold re-simulation reproduces the field byte-identically with
- * no cache or ambient state (PLAN §1; the `mazeVersion` module cache Codex R1
- * rejected stays rejected — the per-tick Dijkstra is trivial at 28×24).
+ * input). The tick then derives the effective distance field ONCE, as a pure
+ * local, from the post-input tower state — so every creep (including one spawned
+ * this tick, in either order relative to a build) heads off the final geometry,
+ * and a cold re-simulation reproduces the field byte-identically with no cache or
+ * ambient state (PLAN §1). The MOVEMENT phase advances creeps (leaks cost a life);
+ * the COMBAT phase (Story 4) then resolves impacts, sweeps kills, and fires — all
+ * over the post-move world — before the guarded `tick++`.
  */
 export function step(state: SimState, inputs: readonly SimInput[], board: BoardContext): SimState {
   assertConsistent(board); // memoized; rejects a forged context loudly, once
   coerceSoa(state); // totality: never dereference a missing SoA container/column
+
+  // TICK TOTALITY (Codex R2 #7): validate `state.tick` at entry and guard the final
+  // increment. A forged non-safe/negative tick, or one so large that `tick + 1`
+  // would leave the safe-integer range, makes the whole step a deterministic
+  // terminal no-op (return state unchanged) rather than producing a platform-
+  // sensitive value — a genuine match ends long before ~9e15 ticks.
+  if (
+    !Number.isSafeInteger(state.tick) ||
+    state.tick < 0 ||
+    state.tick + 1 > Number.MAX_SAFE_INTEGER
+  ) {
+    return state;
+  }
+
   const { grid } = board;
   const { entrance } = grid;
 
@@ -192,13 +218,24 @@ export function step(state: SimState, inputs: readonly SimInput[], board: BoardC
       if (!Number.isSafeInteger(hp) || (hp as number) < 1) continue; // malformed hp — no-op
       state.creeps.id.push(state.nextEntityId++);
       state.creeps.hp.push(hp as number);
-      state.creeps.col.push(entrance.col);
-      state.creeps.row.push(entrance.row);
+      state.creeps.fromX.push(cellCenterX(entrance.col)); // rest on the entrance cell centre
+      state.creeps.fromY.push(cellCenterY(entrance.row));
       state.creeps.headCol.push(entrance.col); // sentinel — heading derived at movement
       state.creeps.headRow.push(entrance.row);
-      state.creeps.edgeProgress.push(0);
+      state.creeps.progress.push(0);
     } else if (kind === 'placeTower') {
       const anchor = (input as { anchor?: unknown }).anchor;
+      // Sim-owned cap: a build past MAX_TOWERS is a deterministic no-op, so the
+      // in-flight impact queue is bounded for every step() caller (see tower.ts).
+      // The raw row count is an upper bound on the valid count, so the precise
+      // O(towers) recount only runs in the (forged) case where even the raw array
+      // already meets the cap — never on the genuine placement path.
+      if (
+        state.towers.id.length >= MAX_TOWERS &&
+        countValidTowers(grid, state.towers) >= MAX_TOWERS
+      ) {
+        continue;
+      }
       const towerMask = materializeTowerMask(grid, state.towers);
       if (!canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty)) continue;
       const cell = anchor as Cell; // structurally validated by canPlaceTower
@@ -206,6 +243,8 @@ export function step(state: SimState, inputs: readonly SimInput[], board: BoardC
       state.towers.col.push(cell.col);
       state.towers.row.push(cell.row);
       state.towers.spend.push(TOWER_COST);
+      state.towers.targetId.push(0); // no lock
+      state.towers.nextFireTick.push(0); // no warm-up — may fire this tick
       state.bounty -= TOWER_COST;
     } else if (kind === 'sellTower') {
       const towerId = (input as { tower?: unknown }).tower;
@@ -218,14 +257,21 @@ export function step(state: SimState, inputs: readonly SimInput[], board: BoardC
       state.bounty += refund;
       // Compact via the same canonical rule that materialized the mask, dropping
       // the sold row (invalid rows are dropped with it — they were never visible).
+      // Carry the combat columns BY SOURCE ROW so selling one tower never resets a
+      // survivor's target lock or cooldown (Codex R1 #4).
       const src = state.towers;
-      const compacted: TowerArrays = { id: [], col: [], row: [], spend: [] };
+      const compacted: TowerArrays = emptyTowers();
       forEachValidTower(grid, src, (i, id, col, row) => {
         if (i === index) return;
         compacted.id.push(id);
         compacted.col.push(col);
         compacted.row.push(row);
         compacted.spend.push(src.spend[i] as number);
+        // Coerce the combat columns so a ragged/forged source row (targetId or
+        // nextFireTick shorter than id) can never persist `undefined`/`null` into
+        // the survivor's number[] columns (or the world hash).
+        compacted.targetId.push(safeCombatColumn(src.targetId[i]));
+        compacted.nextFireTick.push(safeCombatColumn(src.nextFireTick[i]));
       });
       state.towers = compacted;
     }
@@ -244,43 +290,58 @@ export function step(state: SimState, inputs: readonly SimInput[], board: BoardC
   //    reaches the exit leaks (costs a life); a corrupt row is dropped (no life
   //    lost). Rebuild the arrays to compact both removals.
   const src = state.creeps;
-  const next: CreepArrays = {
-    id: [],
-    hp: [],
-    col: [],
-    row: [],
-    headCol: [],
-    headRow: [],
-    edgeProgress: [],
-  };
+  const next: CreepArrays = emptyCreeps();
   for (let i = 0; i < src.id.length; i++) {
     const outcome = advanceCreep(
       field,
       src.id[i],
       src.hp[i],
-      src.col[i],
-      src.row[i],
+      src.fromX[i],
+      src.fromY[i],
       src.headCol[i],
       src.headRow[i],
-      src.edgeProgress[i],
+      src.progress[i],
       CREEP_SPEED_FP,
     );
     if (outcome.kind === 'drop') continue;
     if (outcome.kind === 'leak') {
-      state.lives -= 1; // no clamp; win/loss is Story 5
+      // Guarded decrement (Codex R4 #2 / R5 #2): one canonical policy for every
+      // non-genuine value — a non-safe `lives`, or one at MIN_SAFE_INTEGER, removes
+      // the creep but leaves `lives` unchanged; otherwise decrement. No clamp on the
+      // low end; win/loss is Story 5.
+      if (Number.isSafeInteger(state.lives) && state.lives > Number.MIN_SAFE_INTEGER) {
+        state.lives -= 1;
+      }
       continue;
     }
     next.id.push(src.id[i] as number);
     next.hp.push(src.hp[i] as number);
-    next.col.push(outcome.col);
-    next.row.push(outcome.row);
+    next.fromX.push(outcome.fromX);
+    next.fromY.push(outcome.fromY);
     next.headCol.push(outcome.headCol);
     next.headRow.push(outcome.headRow);
-    next.edgeProgress.push(outcome.edgeProgress);
+    next.progress.push(outcome.progress);
   }
   state.creeps = next;
 
-  state.tick += 1;
+  // 4) COMBAT PHASE (Story 4) — over the POST-MOVE world: resolve due impacts,
+  //    sweep dead creeps and credit per-kill bounty, then let each tower hold or
+  //    acquire its sticky "first" target and fire. Impacts resolve before firing so
+  //    a kill can free a tower to re-acquire and fire the same tick.
+  const combat = runCombat(
+    state.creeps,
+    state.towers,
+    state.impacts,
+    state.tick,
+    state.bounty,
+    field,
+    grid,
+  );
+  state.creeps = combat.creeps;
+  state.impacts = combat.impacts;
+  state.bounty = combat.bounty;
+
+  state.tick += 1; // guarded at entry — `tick + 1` is in the safe-integer range here
   return state;
 }
 

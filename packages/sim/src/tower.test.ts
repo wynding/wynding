@@ -15,6 +15,23 @@ import {
   type SimState,
 } from './index';
 import { findValidTowerIndex, materializeTowerMask, refundFor } from './tower';
+import { deriveValidCreepPosition } from './movement';
+
+/** Fixed-point centre of a cell coordinate. */
+const cx = (col: number): number => col * 256 + 128;
+const cy = (row: number): number => row * 256 + 128;
+
+/** The cell a creep row currently occupies (derived), or null if its state is corrupt. */
+function occ(s: SimState, k: number, grid: BoardContext['grid']) {
+  return deriveValidCreepPosition(
+    s.creeps.fromX[k],
+    s.creeps.fromY[k],
+    s.creeps.headCol[k],
+    s.creeps.headRow[k],
+    s.creeps.progress[k],
+    grid,
+  )?.occupancyCell;
+}
 
 // A 9×6 lane board: entrance (0,2) → exit (8,2); interior rows 1-4, cols 1-7. A
 // 2×2 tower at (3,1) walls rows 1-2 at cols 3-4 (creeps detour via rows 3-4);
@@ -44,17 +61,17 @@ const sell = (tower: number): SimInput => ({ kind: 'sellTower', tower });
 const spawn = (hp = 10): SimInput => ({ kind: 'spawnCreep', hp });
 
 /** A creep row at rest (sentinel head) injected straight into the SoA. */
-function restingCreep(state: SimState, id: number, col: number, row: number): void {
+function restingCreep(state: SimState, id: number, col: number, row: number, hp = 5): void {
   state.creeps.id.push(id);
-  state.creeps.hp.push(5);
-  state.creeps.col.push(col);
-  state.creeps.row.push(row);
+  state.creeps.hp.push(hp);
+  state.creeps.fromX.push(cx(col));
+  state.creeps.fromY.push(cy(row));
   state.creeps.headCol.push(col);
   state.creeps.headRow.push(row);
-  state.creeps.edgeProgress.push(0);
+  state.creeps.progress.push(0);
 }
 
-/** A mid-edge creep row committed toward (headCol,headRow). */
+/** A mid-edge creep row: at the (col,row) centre, committed toward (headCol,headRow). */
 function committedCreep(
   state: SimState,
   id: number,
@@ -62,15 +79,16 @@ function committedCreep(
   row: number,
   headCol: number,
   headRow: number,
-  edgeProgress: number,
+  progress: number,
+  hp = 5,
 ): void {
   state.creeps.id.push(id);
-  state.creeps.hp.push(5);
-  state.creeps.col.push(col);
-  state.creeps.row.push(row);
+  state.creeps.hp.push(hp);
+  state.creeps.fromX.push(cx(col));
+  state.creeps.fromY.push(cy(row));
   state.creeps.headCol.push(headCol);
   state.creeps.headRow.push(headRow);
-  state.creeps.edgeProgress.push(edgeProgress);
+  state.creeps.progress.push(progress);
 }
 
 describe('placeTower / sellTower — accept path and economy', () => {
@@ -196,10 +214,8 @@ describe('placeTower — every rejection is a deterministic no-op (never a throw
     expect(s.towers.id).toHaveLength(1); // allowed — build-on-the-heading-cell is legal
     expect(s.creeps.id).toEqual([9]); // creep survived the same-tick build
     expect(s.lives).toBe(10);
-    const onTower = s.creeps.col.some((cc, k) => {
-      const rr = s.creeps.row[k];
-      return cc >= 2 && cc <= 3 && rr !== undefined && rr >= 1 && rr <= 2;
-    });
+    const o = occ(s, 0, LANE.grid);
+    const onTower = o !== undefined && o.col >= 2 && o.col <= 3 && o.row >= 1 && o.row <= 2;
     expect(onTower).toBe(false); // it re-routed rather than entering the wall
   });
 
@@ -234,6 +250,9 @@ describe('placeTower — every rejection is a deterministic no-op (never a throw
     expect(s.towers.id).toHaveLength(1); // corner not reserved → allowed
     expect(s.creeps.id).toEqual([9]); // survives and re-routes, never on the tower
     expect(s.lives).toBe(10);
+    const oc = occ(s, 0, LANE.grid);
+    const onTower = oc !== undefined && oc.col >= 3 && oc.col <= 4 && oc.row >= 1 && oc.row <= 2;
+    expect(onTower).toBe(false);
   });
 
   it('no-ops a build that would strand a live creep even though the entrance stays connected', () => {
@@ -284,12 +303,16 @@ describe('sellTower — validation no-ops', () => {
 describe('dynamic re-path (commit-to-next through step)', () => {
   it('re-routes a live mid-edge creep the tick a wall lands, without dropping it', () => {
     const s = createInitialState(1);
-    step(s, [spawn()], LANE);
+    step(s, [spawn(100)], LANE); // high hp so the new tower cannot kill it mid-detour
     for (let t = 1; t < 10; t++) step(s, [], LANE);
-    // 10 ticks × 26 = 260: one full edge crossed — at (1,2), committed to (2,2).
-    expect([s.creeps.col[0], s.creeps.row[0]]).toEqual([1, 2]);
+    // 10 ticks × 26 = 260: one full edge crossed — from-cell (1,2), committed to (2,2).
+    const fromCell = [
+      Math.floor((s.creeps.fromX[0] as number) / 256),
+      Math.floor((s.creeps.fromY[0] as number) / 256),
+    ];
+    expect(fromCell).toEqual([1, 2]);
     expect([s.creeps.headCol[0], s.creeps.headRow[0]]).toEqual([2, 2]);
-    expect(s.creeps.edgeProgress[0]).toBe(4);
+    expect(s.creeps.progress[0]).toBe(4);
 
     step(s, [place(3, 1)], LANE); // wall the straight lane ahead of it
     expect(s.towers.id).toHaveLength(1);
@@ -298,7 +321,8 @@ describe('dynamic re-path (commit-to-next through step)', () => {
     let dropped = false;
     for (let t = 0; t < 250 && s.lives === 10; t++) {
       if (s.creeps.id.length === 0) dropped = true;
-      for (const r of s.creeps.row) rows.add(r);
+      const o = occ(s, 0, LANE.grid);
+      if (o !== undefined) rows.add(o.row);
       step(s, [], LANE);
     }
     expect(dropped).toBe(false); // never vanished before leaking
@@ -313,7 +337,8 @@ describe('dynamic re-path (commit-to-next through step)', () => {
     step(s, [spawn()], LANE);
     const rows = new Set<number>();
     for (let t = 0; t < 150 && s.lives === 10; t++) {
-      for (const r of s.creeps.row) rows.add(r);
+      const o = occ(s, 0, LANE.grid);
+      if (o !== undefined) rows.add(o.row);
       step(s, [], LANE);
     }
     expect(s.lives).toBe(9);
@@ -357,7 +382,7 @@ describe('dynamic re-path (commit-to-next through step)', () => {
     const a = run([spawn(), place(2, 1)]);
     const b = run([place(2, 1), spawn()]);
     // Entity ids differ by arrival order; everything positional must not.
-    for (const key of ['col', 'row', 'headCol', 'headRow', 'edgeProgress', 'hp'] as const) {
+    for (const key of ['fromX', 'fromY', 'headCol', 'headRow', 'progress', 'hp'] as const) {
       expect(a.creeps[key]).toEqual(b.creeps[key]);
     }
     expect(a.towers.col).toEqual(b.towers.col);
@@ -373,6 +398,8 @@ describe('tower-state totality (canonical row rule; cold-restore consistent)', (
     s.towers.col.push(col);
     s.towers.row.push(row);
     s.towers.spend.push(spend);
+    s.towers.targetId.push(0);
+    s.towers.nextFireTick.push(0);
   };
 
   const invisibleRows: ReadonlyArray<[string, Corruptor]> = [
@@ -435,23 +462,25 @@ describe('tower-state totality (canonical row rule; cold-restore consistent)', (
     expect(s.bounty).toBe(2 ** 53);
   });
 
-  it('stays total on a restored state missing whole SoA containers/columns (e.g. a pre-v3 snapshot)', () => {
-    // A snapshot taken under an older sim shape has no `towers` object and no
-    // creep head columns. step() must coerce the missing pieces to the empty/drop
-    // path rather than dereference `undefined` and throw (ADR 0006 §4 totality).
+  it('stays total on a restored state missing whole SoA containers/columns (e.g. a pre-v4 snapshot)', () => {
+    // A pre-v4 snapshot carries the OLD creep shape (`col/row/edgeProgress`, no
+    // `fromX/fromY/progress`) and no `towers` object. step() must coerce the missing
+    // point columns to the empty/drop path rather than dereference `undefined` and
+    // throw (ADR 0006 §4 totality). A v3→v4 snapshot is rejected upstream by the
+    // replay version check; this is the crash-safety backstop, not a migration.
     const legacy = {
       tick: 3,
       rngState: 7,
       lives: 10,
       bounty: 80,
       nextEntityId: 3,
-      // v2-shaped creeps: no headCol/headRow columns.
+      // pre-v4 creeps: cell-relative columns, no fromX/fromY/progress point columns.
       creeps: { id: [1, 2], hp: [5, 5], col: [1, 2], row: [2, 2], edgeProgress: [4, 0] },
       // no `towers` key at all
     } as unknown as SimState;
     expect(() => step(legacy, [place(4, 3)], LANE)).not.toThrow();
     expect(legacy.towers.id).toHaveLength(1); // the build still lands
-    expect(legacy.creeps.id).toHaveLength(0); // head-less legacy creeps drop (ragged policy)
+    expect(legacy.creeps.id).toHaveLength(0); // point-less legacy creeps drop (ragged policy)
     expect(legacy.lives).toBe(10); // dropped, not leaked
 
     // A null container and a non-array column are coerced the same way.
