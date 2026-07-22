@@ -54,8 +54,9 @@ export function cellCenterY(row: number): number {
   return row * FP_ONE + HALF_CELL;
 }
 
-/** The cell a fixed-point coordinate lies in — `floor(v/256)` for `v ≥ 0`. */
-function cellOf(v: number): number {
+/** The cell a fixed-point coordinate lies in — `floor(v/256)` for `v ≥ 0`. The single
+ *  "which cell contains x" rule, shared by movement and combat targeting. */
+export function cellOf(v: number): number {
   return Math.floor(v / FP_ONE);
 }
 

@@ -27,10 +27,10 @@
 // retries next tick (total and reproducible for every `step()` caller).
 
 import { FP_ONE } from '@wynding/engine';
-import type { Grid } from './board';
+import { ORTHO_COST, DIAG_COST, type Grid } from './board';
 import type { DistanceField } from './pathfinding';
 import { distAt } from './field-access';
-import { deriveValidCreepPosition } from './movement';
+import { deriveValidCreepPosition, cellOf, type CreepGeometry } from './movement';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
 
 /** Fixed-point combat range (4 tiles), measured tower-centre → creep point. */
@@ -127,6 +127,55 @@ interface LiveCreep {
   readonly x: number;
   readonly y: number;
   readonly dist: number;
+}
+
+/**
+ * Fixed-point scale for the "first"-target metric. Field cost units (`ORTHO_COST`/
+ * `DIAG_COST`) are multiplied by `DIST_SCALE` so the still-untraveled fraction of the
+ * current edge — always less than one whole step — refines the ordering *below* a cell
+ * without floats. A safe integer throughout: `maxDist·DIST_SCALE` and the intermediate
+ * `DIAG_COST·DIST_SCALE·edgeLen` both stay far under `2⁵³` for any real board.
+ */
+const DIST_SCALE = 1 << 16;
+
+/**
+ * The creep's **weighted remaining route-distance to the exit** (PRD 0001, "Targeting
+ * is sticky"), scaled by {@link DIST_SCALE}: the flow-field distance from its next
+ * waypoint (`head`) PLUS the cost-weighted fraction of the current edge it has yet to
+ * travel (`edgeCost · remaining / edgeLen`). This is what makes "first" the creep most
+ * about to leak — two creeps sharing a cell at different `progress` order by who is
+ * physically nearer the exit, and the lower-id tie-break applies only to genuinely
+ * equal remaining distance (not to a whole-cell quantum). Mirrors the field's own edge
+ * costing: `distAt(fromCell) = distAt(head) + edgeCost` on a descending edge, so a
+ * creep resting at a cell centre and one just starting that cell's edge agree.
+ *
+ * On a transitional (re-path) segment `edgeLen` can be well below one cell, and the
+ * untraveled fraction is still charged the whole `edgeCost` — an approximation bounded
+ * by one edge cost (≤ `DIAG_COST`), strictly finer than the old whole-cell quantum,
+ * deterministic, and transient (it converges the instant the creep reaches its head).
+ *
+ * Returns `null` when the next waypoint is unreachable (a forged row that can never be
+ * a valid "first" target) — the same total, never-throw contract as the rest of combat.
+ */
+function remainingRouteDist(
+  field: DistanceField,
+  geom: CreepGeometry,
+  fromX: number,
+  fromY: number,
+  headCol: number,
+  headRow: number,
+  progress: number,
+): number | null {
+  const headDist = distAt(field, headCol, headRow);
+  if (headDist < 0) return null; // unreachable waypoint ⇒ not targetable
+  const fromCol = cellOf(fromX);
+  const fromRow = cellOf(fromY);
+  // At rest the head IS the from-cell (movement's rest sentinel): no edge remains, so
+  // the metric is exactly the cell's field distance.
+  if (headCol === fromCol && headRow === fromRow) return headDist * DIST_SCALE;
+  const edgeCost = headCol !== fromCol && headRow !== fromRow ? DIAG_COST : ORTHO_COST;
+  const remaining = geom.edgeLen - progress; // arc-length still to travel to the head centre
+  return headDist * DIST_SCALE + Math.floor((edgeCost * DIST_SCALE * remaining) / geom.edgeLen);
 }
 
 /** A creep is live iff its hp is a positive safe integer. */
@@ -250,9 +299,17 @@ export function runCombat(
       grid,
     );
     if (geom === null) continue;
-    const d = distAt(field, geom.occupancyCell.col, geom.occupancyCell.row);
-    if (d < 0) continue; // unreachable cell can never be the "first" target
-    live.push({ id: survivors.id[i] as number, x: geom.point.x, y: geom.point.y, dist: d });
+    const dist = remainingRouteDist(
+      field,
+      geom,
+      survivors.fromX[i] as number,
+      survivors.fromY[i] as number,
+      survivors.headCol[i] as number,
+      survivors.headRow[i] as number,
+      survivors.progress[i] as number,
+    );
+    if (dist === null) continue; // unreachable next waypoint ⇒ not the "first" target
+    live.push({ id: survivors.id[i] as number, x: geom.point.x, y: geom.point.y, dist });
   }
 
   // (4) Per valid tower: hold-or-acquire the sticky "first" target, then fire.

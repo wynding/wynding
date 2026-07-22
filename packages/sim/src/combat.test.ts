@@ -171,6 +171,49 @@ describe('runCombat — sticky "first" targeting', () => {
   });
 });
 
+describe('runCombat — point-level "first" (PRD: the creep most about to leak)', () => {
+  // Two creeps in the SAME cell (7,6), both heading east to the waypoint (8,6) from
+  // its centre — so they differ only by `progress` along one orthogonal edge. Their
+  // occupied cell is identical, so cell-granularity targeting would tie them and fall
+  // to the lower id; the PRD's weighted remaining route-distance orders them by which
+  // is physically nearer the exit.
+  const from = { x: cx(7), y: cy(6) };
+  const eastPair = (
+    rows: ReadonlyArray<{ id: number; hp: number; progress: number }>,
+  ): CombatCreeps => ({
+    id: rows.map((r) => r.id),
+    hp: rows.map((r) => r.hp),
+    fromX: rows.map(() => from.x),
+    fromY: rows.map(() => from.y),
+    headCol: rows.map(() => 8),
+    headRow: rows.map(() => 6),
+    progress: rows.map((r) => r.progress),
+  });
+
+  it('targets the creep further along a shared cell over a lower-id trailing creep', () => {
+    // Higher-id creep 9 is further along (nearer the exit) than lower-id creep 1, so
+    // "first" is 9 — sub-cell progress beats the id tie-break.
+    const creeps = eastPair([
+      { id: 1, hp: 100, progress: 40 },
+      { id: 9, hp: 100, progress: 100 },
+    ]);
+    const towers = oneTower();
+    runCombat(creeps, towers, [], 0, 0, FIELD, GRID);
+    expect(towers.targetId[0]).toBe(9);
+  });
+
+  it('breaks a TRUE tie (identical progress in one cell) to the lower id', () => {
+    // Same cell, same progress ⇒ genuinely equal remaining distance ⇒ lower id wins.
+    const creeps = eastPair([
+      { id: 9, hp: 100, progress: 70 },
+      { id: 1, hp: 100, progress: 70 },
+    ]);
+    const towers = oneTower();
+    runCombat(creeps, towers, [], 0, 0, FIELD, GRID);
+    expect(towers.targetId[0]).toBe(1);
+  });
+});
+
 describe('runCombat — fire cadence and no warm-up', () => {
   it('fires immediately (no warm-up), then not again until FIRE_INTERVAL elapses', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]); // never dies
