@@ -1,8 +1,8 @@
-// board-integration.test.ts — proves the authored M1 board (field-01) builds a
-// valid, solvable grid when fed to the sim's grid/pathfinding. It lives on the
-// CONTENT side (content → sim) because the repo's dependency graph flows one way
-// (types ← engine ← sim ← content); @wynding/sim is a test-only devDependency
-// here, so no backwards sim → content edge is introduced.
+// board-integration.test.ts — proves the authored M1 ruleset (field-01) builds a
+// valid, solvable grid AND compiles for the sim. It lives on the CONTENT side
+// (content → sim) because the repo's dependency graph flows one way
+// (types ← engine ← sim ← content); @wynding/sim is a test-only devDependency here,
+// so no backwards sim → content edge is introduced.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -10,13 +10,16 @@ import {
   computeDistanceField,
   shortestPath,
   loadBoard,
+  compileRuleset,
   createInitialState,
   GridError,
 } from '@wynding/sim';
-import { sampleBoard } from './boards';
+import { m1Ruleset, M1_BOARD_ID } from './boards';
+
+const m1Board = m1Ruleset.boards[0]!;
 
 describe('field-01 (the real M1 board) builds a solvable grid', () => {
-  const grid = buildGrid(sampleBoard);
+  const grid = buildGrid(m1Board);
   const field = computeDistanceField(grid);
 
   it('builds a valid 28×24 grid with the two openings on row 11', () => {
@@ -44,28 +47,26 @@ describe('field-01 (the real M1 board) builds a solvable grid', () => {
   });
 
   it('surfaces buildGrid validation failures as a GridError through the @wynding/sim barrel', () => {
-    // A downstream consumer can instanceof-catch the advertised typed failure via
-    // the public barrel — not only through a package-internal relative import.
-    expect(() => buildGrid({ ...sampleBoard, widthTiles: 0 })).toThrow(GridError);
+    expect(() => buildGrid({ ...m1Board, widthTiles: 0 })).toThrow(GridError);
   });
 });
 
-describe('field-01 as a loadable sim board', () => {
+describe('field-01 compiles for the sim as the single source of truth', () => {
   it('builds a playable BoardContext through the sanctioned loadBoard constructor', () => {
-    // The authored board passes the sim's full context validator (reachable
-    // entrance, consistent field) — proving the production board is playable.
-    expect(() => loadBoard(sampleBoard)).not.toThrow();
-    const board = loadBoard(sampleBoard);
+    expect(() => loadBoard(m1Board)).not.toThrow();
+    const board = loadBoard(m1Board);
     expect(board.grid.width).toBe(28);
     expect(board.field.dist[11 * 28 + 0]).toBe(270); // entrance is 27 orthogonal steps out
   });
 
-  it('keeps the interim sim economy constants in sync with the board content', () => {
-    // Drift guard: until Story 5 makes the board the single source of truth, the
-    // sim's starting lives/bounty must equal the content values — a divergence
-    // turns this red rather than silently desyncing the economy.
-    const s = createInitialState(1);
-    expect(s.lives).toBe(sampleBoard.startingLives);
-    expect(s.bounty).toBe(sampleBoard.startingBounty);
+  it('compiles the ruleset and seeds the sim economy FROM the content (Story 5)', () => {
+    // Story 5 made the ruleset the single source of truth: createInitialState reads
+    // the starting economy from the compiled bundle, no hardcoded sim constants.
+    const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
+    const s = createInitialState(1, ruleset);
+    expect(s.lives).toBe(m1Ruleset.balance.startingLives);
+    expect(s.bounty).toBe(m1Ruleset.balance.startingBounty);
+    expect(s.phase).toBe('pre-wave');
+    expect(ruleset.schedule).toHaveLength(10); // one wave × 10 creeps
   });
 });

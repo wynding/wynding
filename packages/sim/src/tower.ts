@@ -9,7 +9,7 @@
 // TOTALITY — one canonical iteration rule. Materialization, id lookup (sell), and
 // compaction all classify rows with the SAME `forEachValidTower` walk: a row is
 // valid iff all four columns are present safe integers, `spend` is exactly
-// `TOWER_COST` (M1 has no upgrades), the 2×2 footprint is in-bounds and
+// the ruleset tower `cost` (M1 has no upgrades), the 2×2 footprint is in-bounds and
 // buildable-open, and it does not overlap an earlier valid row; on a duplicate id
 // the first valid row wins. Any invalid row is skipped — invisible in the mask and
 // not sellable — so a corrupt restored tower can never crash `step` or desync a
@@ -23,7 +23,7 @@ import { deriveValidCreepPosition } from './movement';
 /**
  * Structure-of-arrays tower storage (mirrors `CreepArrays`). `(col,row)` is the
  * 2×2 anchor (top-left); the footprint is the anchor plus (1,0), (0,1), (1,1).
- * `spend` is the cumulative bounty invested — always `TOWER_COST` in M1; stored
+ * `spend` is the cumulative bounty invested — always the tower `cost` in M1; stored
  * now so refunds stay forward-compatible when upgrades land. `targetId` is the
  * sticky locked creep (`0` = none) and `nextFireTick` the earliest tick this tower
  * may fire (`0` = no warm-up) — the Story-4 combat columns, carried by source row
@@ -50,10 +50,6 @@ export function safeCombatColumn(value: number | undefined): number {
   return Number.isSafeInteger(value) ? (value as number) : 0;
 }
 
-/** Bounty cost of placing a tower. Sim scaffolding like STARTING_BOUNTY; migrating
- *  balance numbers into ruleset content (ADR 0007) is tracked as follow-up work. */
-export const TOWER_COST = 5;
-
 /**
  * Sim-owned cap on the number of live valid towers, enforced in the `placeTower`
  * path (a build past the cap is a deterministic no-op). Sized far above any M1
@@ -63,9 +59,11 @@ export const TOWER_COST = 5;
  * sim→replay import cycle. Replay's own command cap is a separate, larger budget.
  */
 export const MAX_TOWERS = 1_000;
-/** Sell refund ratio: floor(spend · REFUND_NUM / REFUND_DEN). */
-export const REFUND_NUM = 3;
-export const REFUND_DEN = 4;
+
+// Tower cost and the sell-refund ratio are NO LONGER hardcoded here — Story 5 moved
+// them into the ruleset bundle (ADR 0007). The expected `cost` (a valid row's exact
+// `spend`, since M1 has no upgrades) is threaded into the SoA-classification helpers,
+// and `refundFor` takes the refund ratio; both come from `ruleset` at the call site.
 
 /** The 2×2 footprint offsets relative to the anchor. */
 const FOOTPRINT_DELTAS: ReadonlyArray<readonly [number, number]> = [
@@ -93,6 +91,7 @@ function footprintBuildable(grid: Grid, col: number, row: number): boolean {
 export function forEachValidTower(
   grid: Grid,
   towers: TowerArrays,
+  cost: number,
   visit: (index: number, id: number, col: number, row: number) => void,
 ): void {
   const seenIds = new Set<number>();
@@ -105,7 +104,7 @@ export function forEachValidTower(
       !Number.isSafeInteger(id) ||
       !Number.isSafeInteger(col) ||
       !Number.isSafeInteger(row) ||
-      towers.spend[i] !== TOWER_COST
+      towers.spend[i] !== cost
     ) {
       continue;
     }
@@ -133,9 +132,9 @@ export function forEachValidTower(
  * buildable-open, so the mask can never cover an opening (the exit stays legal
  * for `computeDistanceField`).
  */
-export function materializeTowerMask(grid: Grid, towers: TowerArrays): Uint8Array {
+export function materializeTowerMask(grid: Grid, towers: TowerArrays, cost: number): Uint8Array {
   const mask = new Uint8Array(grid.width * grid.height);
-  forEachValidTower(grid, towers, (_i, _id, col, row) => {
+  forEachValidTower(grid, towers, cost, (_i, _id, col, row) => {
     for (const [dc, dr] of FOOTPRINT_DELTAS) {
       mask[(row + dr) * grid.width + (col + dc)] = 1;
     }
@@ -145,9 +144,14 @@ export function materializeTowerMask(grid: Grid, towers: TowerArrays): Uint8Arra
 
 /** The index of the valid tower row with entity id `id`, or -1. Canonical rule:
  *  an invalid or shadowed-duplicate row is not sellable. */
-export function findValidTowerIndex(grid: Grid, towers: TowerArrays, id: number): number {
+export function findValidTowerIndex(
+  grid: Grid,
+  towers: TowerArrays,
+  id: number,
+  cost: number,
+): number {
   let found = -1;
-  forEachValidTower(grid, towers, (i, rowId) => {
+  forEachValidTower(grid, towers, cost, (i, rowId) => {
     if (found === -1 && rowId === id) found = i;
   });
   return found;
@@ -156,18 +160,18 @@ export function findValidTowerIndex(grid: Grid, towers: TowerArrays, id: number)
 /**
  * Sell refund: floor(spend · 3/4), computed with quotient/remainder integer
  * arithmetic so no intermediate multiply can leave the safe-integer range even
- * for a large `spend`. For the only valid M1 spend (`TOWER_COST` = 5) this is 3.
+ * for a large `spend`. For the M1 tower cost (5) at the 3/4 M1 ratio this is 3.
  */
-export function refundFor(spend: number): number {
-  const q = Math.floor(spend / REFUND_DEN);
-  const rem = spend % REFUND_DEN;
-  return q * REFUND_NUM + Math.floor((rem * REFUND_NUM) / REFUND_DEN);
+export function refundFor(spend: number, refundNum: number, refundDen: number): number {
+  const q = Math.floor(spend / refundDen);
+  const rem = spend % refundDen;
+  return q * refundNum + Math.floor((rem * refundNum) / refundDen);
 }
 
 /** The number of live valid tower rows in `towers` (for the placement cap). */
-export function countValidTowers(grid: Grid, towers: TowerArrays): number {
+export function countValidTowers(grid: Grid, towers: TowerArrays, cost: number): number {
   let count = 0;
-  forEachValidTower(grid, towers, () => {
+  forEachValidTower(grid, towers, cost, () => {
     count++;
   });
   return count;
@@ -226,7 +230,7 @@ function creepOccupiedCell(
  *      containing its point — the cell it is heading toward stays buildable until
  *      it crosses in; a creep on the near side of the boundary then re-routes off
  *      the new field rather than entering the wall).
- *   4. AFFORDABLE — `bounty` is a nonnegative safe integer ≥ `TOWER_COST`, so a
+ *   4. AFFORDABLE — `bounty` is a nonnegative safe integer ≥ the tower `cost`, so a
  *      corrupt restored bounty can never flow through the spend arithmetic.
  *   5. MAZE INVARIANT — in the candidate field (current mask + footprint) the exit
  *      remains reachable from the entrance and from every live creep's occupied
@@ -241,6 +245,7 @@ export function canPlaceTower(
   anchor: unknown,
   creeps: CreepPlacementView,
   bounty: number,
+  cost: number,
 ): boolean {
   // 1) structural
   if (anchor === null || typeof anchor !== 'object') return false;
@@ -264,7 +269,7 @@ export function canPlaceTower(
   }
 
   // 4) affordable
-  if (!Number.isSafeInteger(bounty) || bounty < 0 || bounty < TOWER_COST) return false;
+  if (!Number.isSafeInteger(bounty) || bounty < 0 || bounty < cost) return false;
 
   // 5) maze invariant on the candidate field
   const candidateMask = new Uint8Array(towerMask);

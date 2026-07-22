@@ -27,22 +27,19 @@
 // retries next tick (total and reproducible for every `step()` caller).
 
 import { FP_ONE } from '@wynding/engine';
+import type { TowerDef } from '@wynding/types';
 import { ORTHO_COST, DIAG_COST, type Grid } from './board';
 import type { DistanceField } from './pathfinding';
 import { distAt } from './field-access';
 import { deriveValidCreepPosition, cellOf, type CreepGeometry } from './movement';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
 
-/** Fixed-point combat range (4 tiles), measured tower-centre → creep point. */
-export const RANGE = 1024;
-/** Ticks between a tower firing and its impact resolving. */
-export const TRAVEL_TICKS = 4;
-/** Ticks between consecutive fires of one tower (no placement warm-up). */
-export const FIRE_INTERVAL = 30;
-/** Bounty credited for a creep killed by an impact. Scaffolding like TOWER_COST (#18). */
-export const KILL_BOUNTY = 1;
-/** The single M1 tower's per-hit direct damage. */
-export const DIRECT_DAMAGE = 10;
+// Combat tuning (range, per-hit damage, fire cadence, projectile travel, kill
+// bounty) is NO LONGER a hardcoded constant here — Story 5 migrated it into the
+// ruleset bundle (ADR 0007). Tower stats arrive as the `tower: TowerDef` param of
+// `runCombat`; kill bounty is a per-creep SoA column credited from the killed
+// creep's own value (correct for future mixed-kind waves).
+
 /** Forged-state / DoS backstop on the resident impact queue (never bites real play). */
 export const MAX_IN_FLIGHT_IMPACTS = MAX_TOWERS;
 
@@ -60,6 +57,8 @@ export interface Impact {
 export interface CombatCreeps {
   id: number[];
   hp: number[];
+  bounty: number[]; // kill bounty resolved from the creep's catalog kind at spawn
+  speed: number[]; // travel budget/tick (fixed-point), resolved from kind at spawn
   fromX: number[];
   fromY: number[];
   headCol: number[];
@@ -67,10 +66,12 @@ export interface CombatCreeps {
   progress: number[];
 }
 
-/** The empty 7-column creep SoA — the single factory, reused by the sim barrel. */
+/** The empty 9-column creep SoA — the single factory, reused by the sim barrel. */
 export const emptyCreeps = (): CombatCreeps => ({
   id: [],
   hp: [],
+  bounty: [],
+  speed: [],
   fromX: [],
   fromY: [],
   headCol: [],
@@ -217,20 +218,21 @@ function applyEffect(creeps: CombatCreeps, idx: number, effect: EffectPrimitive)
   }
 }
 
-/** True iff a creep point is within RANGE of a tower centre (inclusive, no sqrt). */
-function inRange(cx: number, cy: number, towerX: number, towerY: number): boolean {
+/** True iff a creep point is within `range` of a tower centre (inclusive, no sqrt). */
+function inRange(cx: number, cy: number, towerX: number, towerY: number, range: number): boolean {
   const dx = cx - towerX;
   const dy = cy - towerY;
-  if (Math.abs(dx) > RANGE || Math.abs(dy) > RANGE) return false; // overflow-proof early-out
-  return dx * dx + dy * dy <= RANGE * RANGE;
+  if (Math.abs(dx) > range || Math.abs(dy) > range) return false; // overflow-proof early-out
+  return dx * dx + dy * dy <= range * range;
 }
 
-/** Add `KILL_BOUNTY`, with the same safe-integer no-op-on-overflow guard as refunds. */
-function creditKill(bounty: number): number {
-  if (Number.isSafeInteger(bounty) && bounty <= Number.MAX_SAFE_INTEGER - KILL_BOUNTY) {
-    return bounty + KILL_BOUNTY;
-  }
-  return bounty;
+/** Guarded non-negative integer add (bounty / score / bonus credits): a non-safe or
+ *  overflowing operand is a deterministic no-op — never a platform-sensitive value.
+ *  The single implementation, shared by the combat and wave/score paths (sim/index.ts). */
+export function safeAdd(base: number, amount: number): number {
+  if (!Number.isSafeInteger(amount) || amount < 0) return base;
+  if (Number.isSafeInteger(base) && base <= Number.MAX_SAFE_INTEGER - amount) return base + amount;
+  return base;
 }
 
 /**
@@ -251,8 +253,10 @@ export function runCombat(
   bounty: number,
   field: DistanceField,
   grid: Grid,
-): { creeps: CombatCreeps; impacts: Impact[]; bounty: number } {
+  tower: TowerDef,
+): { creeps: CombatCreeps; impacts: Impact[]; bounty: number; killBounty: number } {
   const canonical = canonicalImpacts(impacts);
+  const range = tower.rangeFp;
 
   // (1) RESOLVE due impacts; keep the rest. Track creeps an impact kills THIS tick
   //     (positive hp → 0) so only those earn bounty — a forged non-positive-hp row
@@ -270,16 +274,27 @@ export function runCombat(
     if ((creeps.hp[idx] as number) <= 0) killedByImpact.add(idx);
   }
 
-  // (2) SWEEP dead (hp ≤ 0 or non-safe) into a fresh SoA; credit only impact kills.
+  // (2) SWEEP dead (hp ≤ 0 or non-safe) into a fresh SoA; credit only impact kills,
+  //     from each killed creep's own bounty column. `killBounty` is the total kill
+  //     income this tick (the sim adds it to the monotonic score accumulator).
   let nextBounty = bounty;
+  let killBounty = 0;
   const survivors = emptyCreeps();
   for (let i = 0; i < creeps.id.length; i++) {
     if (!isLiveHp(creeps.hp[i])) {
-      if (killedByImpact.has(i)) nextBounty = creditKill(nextBounty);
+      if (killedByImpact.has(i)) {
+        const amount = Number.isSafeInteger(creeps.bounty[i]) ? (creeps.bounty[i] as number) : 0;
+        nextBounty = safeAdd(nextBounty, amount);
+        killBounty += amount >= 0 ? amount : 0;
+      }
       continue;
     }
     survivors.id.push(creeps.id[i] as number);
     survivors.hp.push(creeps.hp[i] as number);
+    survivors.bounty.push(
+      Number.isSafeInteger(creeps.bounty[i]) ? (creeps.bounty[i] as number) : 0,
+    );
+    survivors.speed.push(Number.isSafeInteger(creeps.speed[i]) ? (creeps.speed[i] as number) : 0);
     survivors.fromX.push(creeps.fromX[i] as number);
     survivors.fromY.push(creeps.fromY[i] as number);
     survivors.headCol.push(creeps.headCol[i] as number);
@@ -313,7 +328,7 @@ export function runCombat(
   }
 
   // (4) Per valid tower: hold-or-acquire the sticky "first" target, then fire.
-  forEachValidTower(grid, towers, (i, _id, col, row) => {
+  forEachValidTower(grid, towers, tower.cost, (i, _id, col, row) => {
     // 2×2 footprint centre = the shared corner of its four cells (units-per-tile FP_ONE).
     const towerX = (col + 1) * FP_ONE;
     const towerY = (row + 1) * FP_ONE;
@@ -329,7 +344,7 @@ export function runCombat(
     let heldInRange = false;
     let best: LiveCreep | null = null;
     for (const c of live) {
-      const within = inRange(c.x, c.y, towerX, towerY);
+      const within = inRange(c.x, c.y, towerX, towerY, range);
       if (held !== 0 && !heldSeen && c.id === held) {
         heldSeen = true;
         heldInRange = within;
@@ -351,16 +366,16 @@ export function runCombat(
     const fireable = !Number.isSafeInteger(nft) || tick >= (nft as number);
     if (!fireable) return;
     if (kept.length >= MAX_IN_FLIGHT_IMPACTS) return; // cap full — retry next tick, no advance
-    const impactTick = tick + TRAVEL_TICKS;
-    const nextFire = tick + FIRE_INTERVAL;
+    const impactTick = tick + tower.travelTicks;
+    const nextFire = tick + tower.cadenceTicks;
     if (!Number.isSafeInteger(impactTick) || !Number.isSafeInteger(nextFire)) return; // overflow no-op
     kept.push({
       impactTick,
       targetId: target,
-      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+      effects: [{ kind: 'direct', amount: tower.damage }],
     });
     towers.nextFireTick[i] = nextFire;
   });
 
-  return { creeps: survivors, impacts: kept, bounty: nextBounty };
+  return { creeps: survivors, impacts: kept, bounty: nextBounty, killBounty };
 }

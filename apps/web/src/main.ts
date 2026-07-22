@@ -8,32 +8,34 @@
 import { createFixedLoop } from '@wynding/engine';
 import {
   createInitialState,
-  loadBoard,
+  compileRuleset,
   step,
   MS_PER_TICK,
   type SimInput,
   type SimState,
 } from '@wynding/sim';
 import { mount } from '@wynding/render';
-import { sampleBoard } from '@wynding/content';
+import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('missing #app root element');
 
+const board = m1Ruleset.boards.find((b) => b.id === M1_BOARD_ID);
 const title = document.createElement('h1');
-title.textContent = `Wynding — ${sampleBoard.name}`;
+title.textContent = `Wynding — ${board?.name ?? M1_BOARD_ID}`;
 app.appendChild(title);
 
-const board = loadBoard(sampleBoard);
-let sim: SimState = createInitialState(Date.now() >>> 0);
+const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
+let sim: SimState = createInitialState(Date.now() >>> 0, ruleset);
 const view = mount(app, sim);
 
 let tickCount = 0;
 const loop = createFixedLoop(
   () => {
-    // Demo schedule: send a creep every 20 ticks (1s at 20 Hz).
-    const inputs: SimInput[] = tickCount % 20 === 0 ? [{ kind: 'spawnCreep', hp: 12 }] : [];
-    sim = step(sim, inputs, board);
+    // Demo schedule: call the wave early on the first tick; creeps then spawn from
+    // the ruleset schedule (the manual spawn command is gone — spawns are content).
+    const inputs: SimInput[] = tickCount === 0 ? [{ kind: 'callWaveEarly' }] : [];
+    sim = step(sim, ruleset, inputs);
     tickCount += 1;
     view.update(sim);
   },
