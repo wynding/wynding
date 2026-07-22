@@ -102,6 +102,10 @@ describe('compileRuleset — creep + tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.travelTicks = 0)); // 0-travel resolves a tick late
   });
 
+  it('rejects a sole tower whose kind is not basic (mis-simulated as basic otherwise)', () => {
+    rejects((b) => (b.towerCatalog[0]!.kind = 'splash'));
+  });
+
   it('rejects a multi-entry tower catalog (M1 is single-tower)', () => {
     rejects((b) =>
       b.towerCatalog.push({

@@ -279,6 +279,14 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   if (bundle.towerCatalog.length !== 1) {
     throw new RulesetError('M1 supports exactly one tower kind');
   }
+  // The sole tower must be the plain `basic` direct-damage ground tower: placement and
+  // combat simulate only that behaviour, so a `splash`/`slow`/`antiair` def would be
+  // mis-simulated as basic (Codex R6). Reject until kind-specific dispatch exists.
+  if (bundle.towerCatalog[0]!.kind !== 'basic') {
+    throw new RulesetError(
+      `tower kind '${String(bundle.towerCatalog[0]!.kind)}' unsupported at M1 (basic only)`,
+    );
+  }
   validateBalance(bundle.balance);
   validateScoring(bundle.scoring);
 
@@ -361,8 +369,12 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // baseline must fit; adversarial build/sell juggling beyond it is caught by the
   // validator's timeout.
   const lastOffset = schedule[schedule.length - 1]!.offsetTicks;
+  // Minimum speed over the kinds THIS board's schedule actually spawns (Codex R6) —
+  // not the whole catalog, so an unrelated slow creep used only by another board can't
+  // wrongly reject this board.
   let minSpeedFp = Number.MAX_SAFE_INTEGER;
-  for (const def of Object.values(creepByKind)) {
+  for (const s of schedule) {
+    const def = creepByKind[s.kind];
     if (def !== undefined && def.speedFp < minSpeedFp) minSpeedFp = def.speedFp;
   }
   const cells = boardCtx.grid.width * boardCtx.grid.height;
