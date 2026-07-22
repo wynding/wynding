@@ -10,7 +10,7 @@ function validReplayBody(): string {
   const replay: Replay = {
     seed: 12345,
     rulesetHash: currentRulesetHash(),
-    simVersion: 3,
+    simVersion: 4,
     tickInputs: Array.from({ length: 100 }, (_v, t) => (t % 4 === 0 ? spawn : [])),
   };
   return JSON.stringify(replay);

@@ -18,24 +18,51 @@
 import type { Cell } from '@wynding/types';
 import type { Grid } from './board';
 import { computeDistanceField, isReachable } from './pathfinding';
-import { occupiedCell } from './movement';
+import { deriveValidCreepPosition } from './movement';
 
 /**
  * Structure-of-arrays tower storage (mirrors `CreepArrays`). `(col,row)` is the
  * 2×2 anchor (top-left); the footprint is the anchor plus (1,0), (0,1), (1,1).
  * `spend` is the cumulative bounty invested — always `TOWER_COST` in M1; stored
- * now so refunds stay forward-compatible when upgrades land.
+ * now so refunds stay forward-compatible when upgrades land. `targetId` is the
+ * sticky locked creep (`0` = none) and `nextFireTick` the earliest tick this tower
+ * may fire (`0` = no warm-up) — the Story-4 combat columns, carried by source row
+ * through every construction/compaction path so a sell never resets a survivor.
  */
 export interface TowerArrays {
   id: number[];
   col: number[];
   row: number[];
   spend: number[];
+  targetId: number[];
+  nextFireTick: number[];
+}
+
+/** The empty 6-column tower SoA — the single factory (mirrors `emptyCreeps`), so a
+ *  future column is added in ONE place, never re-hand-rolled across call sites. */
+export function emptyTowers(): TowerArrays {
+  return { id: [], col: [], row: [], spend: [], targetId: [], nextFireTick: [] };
+}
+
+/** Coerce a stored combat column value to a safe integer, defaulting a
+ *  missing/forged (ragged) entry to 0 so `number[]` columns never persist `null`. */
+export function safeCombatColumn(value: number | undefined): number {
+  return Number.isSafeInteger(value) ? (value as number) : 0;
 }
 
 /** Bounty cost of placing a tower. Sim scaffolding like STARTING_BOUNTY; migrating
  *  balance numbers into ruleset content (ADR 0007) is tracked as follow-up work. */
 export const TOWER_COST = 5;
+
+/**
+ * Sim-owned cap on the number of live valid towers, enforced in the `placeTower`
+ * path (a build past the cap is a deterministic no-op). Sized far above any M1
+ * board's physical tower capacity (~143 on the sample board), so it never bites
+ * real play — it exists so "in-flight impacts are bounded" is a SIM invariant
+ * (`in-flight ≤ live towers ≤ MAX_TOWERS`) independent of the replay layer, with NO
+ * sim→replay import cycle. Replay's own command cap is a separate, larger budget.
+ */
+export const MAX_TOWERS = 1_000;
 /** Sell refund ratio: floor(spend · REFUND_NUM / REFUND_DEN). */
 export const REFUND_NUM = 3;
 export const REFUND_DEN = 4;
@@ -137,6 +164,15 @@ export function refundFor(spend: number): number {
   return q * REFUND_NUM + Math.floor((rem * REFUND_NUM) / REFUND_DEN);
 }
 
+/** The number of live valid tower rows in `towers` (for the placement cap). */
+export function countValidTowers(grid: Grid, towers: TowerArrays): number {
+  let count = 0;
+  forEachValidTower(grid, towers, () => {
+    count++;
+  });
+  return count;
+}
+
 /**
  * The creep columns placement validation reads. Structural (not the barrel's
  * `CreepArrays`) so this module needs no import from the barrel — `CreepArrays`
@@ -144,38 +180,35 @@ export function refundFor(spend: number): number {
  */
 export interface CreepPlacementView {
   readonly id: number[];
-  readonly col: number[];
-  readonly row: number[];
+  readonly fromX: number[];
+  readonly fromY: number[];
   readonly headCol: number[];
   readonly headRow: number[];
-  readonly edgeProgress: number[];
+  readonly progress: number[];
 }
 
 /**
  * The cell a creep occupies for placement, or `null` when its position is corrupt
- * (a non-safe-integer or out-of-bounds `(col,row)` — such a row is dropped or
- * re-routed by movement this same tick, so it neither occupies a footprint cell
- * nor constrains the invariant). Otherwise the single cell containing its point
- * (the never-build-on-a-creep unit, PRD 0001 §3): its `(col,row)` until it crosses
- * the step boundary, its head after — the same {@link occupiedCell} rule movement
- * uses, so the two agree on which cell is protected.
+ * (such a row is dropped or re-routed by movement this same tick, so it neither
+ * occupies a footprint cell nor constrains the invariant). Otherwise the single
+ * cell containing its derived point (the never-build-on-a-creep unit, PRD 0001 §3)
+ * — via the same {@link deriveValidCreepPosition} seam movement and targeting use,
+ * so all three agree on which cell is protected.
  */
 function creepOccupiedCell(
   grid: Grid,
   creeps: CreepPlacementView,
   i: number,
 ): { readonly col: number; readonly row: number } | null {
-  const ccol = creeps.col[i];
-  const crow = creeps.row[i];
-  if (!Number.isSafeInteger(ccol) || !Number.isSafeInteger(crow)) return null;
-  const cc = ccol as number;
-  const cr = crow as number;
-  if (!grid.inBounds({ col: cc, row: cr })) return null;
-  const occ = occupiedCell(cc, cr, creeps.headCol[i], creeps.headRow[i], creeps.edgeProgress[i]);
-  // A far-side creep with a forged off-board head would yield an out-of-bounds
-  // occupied cell; movement drops such a row this same tick, so it must not veto a
-  // build (consistent with skipping position-corrupt rows above).
-  return grid.inBounds(occ) ? occ : null;
+  const geom = deriveValidCreepPosition(
+    creeps.fromX[i],
+    creeps.fromY[i],
+    creeps.headCol[i],
+    creeps.headRow[i],
+    creeps.progress[i],
+    grid,
+  );
+  return geom === null ? null : geom.occupancyCell;
 }
 
 /**

@@ -1,25 +1,30 @@
-// movement.ts — grid path-following creep movement. Pure, deterministic,
+// movement.ts — point-authoritative creep movement. Pure, deterministic,
 // integer-only, like the rest of the sim core.
 //
-// A creep steps centre-to-centre between cells. It carries the cell it is stepping
-// FROM `(col,row)`, the cell it is stepping TO `(headCol,headRow)`, and
-// `edgeProgress`: how far, in fixed-point units, it has travelled along that step.
-// Each tick it spends a fixed budget; when progress reaches the edge length it
-// snaps onto the head cell and the remainder carries onto the next step, so speed
-// is constant regardless of where cell boundaries fall.
+// A creep carries a fixed-point segment START POINT `(fromX,fromY)`, a waypoint
+// cell `(headCol,headRow)` whose centre is the segment END `B`, and `progress`:
+// arc-length travelled from `from` toward `B`. Its Euclidean point is DERIVED,
+// `P = from + (B − from)·progress/edgeLen`, and the cell it "occupies" is derived
+// too, `cellContaining(P) = floor(P/256)`. Combat (Story 4) is the first consumer
+// of that point; movement, placement, and targeting all agree on it through the
+// single {@link deriveValidCreepPosition} seam.
 //
-// OCCUPANCY & RE-PATH (PRD 0001 §1/§3): a creep "occupies" the single cell its
-// point is in — the FROM cell until it crosses the boundary (the half-way point of
-// the step), the TO cell after. Placement forbids only that occupied cell, so a
-// player may build on the cell a creep is heading toward right up until it crosses
-// in. When the maze changes, a creep still on the near side of the boundary
-// re-derives its heading from its current cell that tick and turns (re-centring on
-// the cell — a ≤half-step adjustment) so it never advances onto a cell just walled;
-// a creep already past the boundary occupies the head cell (which placement
-// therefore protects) and finishes its step, then re-routes from there. Either way
-// a creep never lands on a tower. At rest (`edgeProgress === 0`, including fresh
-// spawns) the head columns hold the sentinel `head == (col,row)` and the heading is
-// derived fresh from the field.
+// `edgeLen` is NEVER stored — it is derived each tick from `(from, B)`. A persisted
+// length would be a forgeable free variable that could desync interpolation from
+// genuine movement; derived, it is stable across a segment's life and canonical by
+// construction (Codex R2). A normal centre↔centre edge derives a CONSTANT length
+// (256 orthogonal, 362 diagonal) with no sqrt; only a TRANSITIONAL segment — from an
+// arbitrary interior point to an adjacent waypoint centre, created when a creep
+// re-paths mid-step — derives `edgeLen = isqrt(dx²+dy²)`, so `isqrt` runs only while
+// a creep is mid-turn, never on a normal tick.
+//
+// POINT-AUTHORITATIVE RE-PATH (closes #17): when the maze changes a mid-segment
+// creep's next waypoint, it starts a transitional segment FROM ITS ACTUAL POINT `P`
+// (never snapping backward to a cell centre) toward the new adjacent waypoint. At
+// each waypoint arrival `from` snaps exactly to the centre, re-establishing an
+// on-lattice segment so transitional drift cannot accumulate across cells. At rest
+// (`progress === 0`) the head columns hold the canonical sentinel `head == cell` and
+// the heading is derived fresh from the field.
 
 import { ORTHO_COST, DIAG_COST, forEachPassableNeighbor } from './board';
 import { FP_ONE } from '@wynding/engine';
@@ -30,12 +35,72 @@ import type { DistanceField } from './pathfinding';
  * Fixed-point length of one edge as *traversed* by a creep. Distinct from the
  * field's `10/14` routing weights: a diagonal genuinely takes ≈1.41× an
  * orthogonal step to cross (`round(256·√2)`), matching the Euclidean world combat
- * range will use. Routing decides *which* cell is next; these decide *how long*
- * crossing to it takes. Since every edge is ≥ `ORTHO_LEN` (256) and a tick's
- * budget is far smaller, at most one cell boundary is crossed per tick.
+ * range uses. Routing decides *which* cell is next; these decide *how long*
+ * crossing to it takes. `DIAG_LEN` equals `isqrt(256²+256²)` exactly, so the
+ * constant fast-path and the transitional `isqrt` path agree on a diagonal.
  */
 export const ORTHO_LEN = FP_ONE; // 256
-export const DIAG_LEN = 362; // round(256·√2)
+export const DIAG_LEN = 362; // round(256·√2) === isqrt(256²+256²)
+
+/** Half a cell in fixed-point — a cell centre sits this far inside the cell. */
+const HALF_CELL = FP_ONE >> 1; // 128
+
+/** The fixed-point centre of cell `(col,row)` — the single definition of the
+ *  cell-centre convention, shared by movement, spawning, and combat geometry. */
+export function cellCenterX(col: number): number {
+  return col * FP_ONE + HALF_CELL;
+}
+export function cellCenterY(row: number): number {
+  return row * FP_ONE + HALF_CELL;
+}
+
+/** The cell a fixed-point coordinate lies in — `floor(v/256)` for `v ≥ 0`. The single
+ *  "which cell contains x" rule, shared by movement and combat targeting. */
+export function cellOf(v: number): number {
+  return Math.floor(v / FP_ONE);
+}
+
+/**
+ * Exact integer floor square root of `n ≥ 0` (`isqrt(n)² ≤ n < (isqrt(n)+1)²`).
+ * PURE integer math — no `Math.sqrt` (the deterministic core forbids floats and
+ * transcendentals, AGENTS.md "Determinism"). Integer Newton's method with the
+ * sanctioned `Math.floor(a / b)` division idiom (no 32-bit `>>`/`clz32` coercion,
+ * so it is correct across the whole safe-integer domain, not just `< 2³²`). The
+ * constant seed `2²⁷ ≥ √n` for every safe integer (`√(2⁵³−1) < 2²⁷`), so the
+ * iteration descends monotonically to the floor in O(1) bounded steps; the final
+ * ±1 clamp makes the RESULT exact despite any division rounding — byte-identical
+ * on every platform. Operands here are tiny (adjacency keeps `dx²+dy² ≤ ~8·10⁵`).
+ */
+export function isqrt(n: number): number {
+  if (!Number.isSafeInteger(n) || n <= 0) return 0;
+  let x = 1 << 27; // 2²⁷ ≥ √n for every safe integer n
+  for (;;) {
+    const y = Math.floor((x + Math.floor(n / x)) / 2);
+    if (y >= x) break;
+    x = y;
+  }
+  while (x > 0 && x * x > n) x--;
+  while ((x + 1) * (x + 1) <= n) x++;
+  return x;
+}
+
+/**
+ * The traversal length of the segment from point `(fromX,fromY)` to the centre
+ * `(Bx,By)` of an adjacent waypoint. When `from` is itself a cell centre the
+ * offset is a whole number of cells and the length is the CONSTANT 256 (orthogonal
+ * or at rest) or 362 (diagonal) — no sqrt. Otherwise the segment is transitional
+ * and the length is the exact `isqrt(dx²+dy²)`.
+ */
+function segmentLength(fromX: number, fromY: number, Bx: number, By: number): number {
+  const dx = Bx - fromX;
+  const dy = By - fromY;
+  if (fromX % FP_ONE === HALF_CELL && fromY % FP_ONE === HALF_CELL) {
+    // `from` is a cell centre ⇒ dx, dy ∈ {−256, 0, 256}; length is a constant.
+    if (dx === 0 && dy === 0) return ORTHO_LEN; // canonical rest
+    return dx !== 0 && dy !== 0 ? DIAG_LEN : ORTHO_LEN;
+  }
+  return isqrt(dx * dx + dy * dy);
+}
 
 /** The next cell the field routes a creep toward, and whether reaching it is diagonal. */
 export interface DescentStep {
@@ -78,49 +143,122 @@ export function firstDescentNeighbor(
   return result;
 }
 
+/** The derived geometry of a valid creep row: its point, occupied cell, edge length. */
+export interface CreepGeometry {
+  readonly point: { readonly x: number; readonly y: number };
+  readonly occupancyCell: { readonly col: number; readonly row: number };
+  readonly edgeLen: number;
+}
+
+/** The minimum bounds a derivation needs — both `Grid` and `DistanceField` satisfy it. */
+export interface Bounds {
+  readonly width: number;
+  readonly height: number;
+}
+
+function inBounds(col: number, row: number, bounds: Bounds): boolean {
+  return col >= 0 && row >= 0 && col < bounds.width && row < bounds.height;
+}
+
 /**
- * The cell a creep's point currently lies in — the single cell it "occupies" for
- * the never-build-on-a-creep rule (PRD 0001 §3). Its point is in the FROM cell
- * `(col,row)` until it crosses the step's midpoint, and in the head cell after. A
- * resting creep (`edgeProgress <= 0`) or one whose head is not a single legal step
- * away (corrupt/forged — movement will reroute or drop it) occupies its own
- * `(col,row)`.
+ * THE single source of truth (Codex R3) for validating a creep row's position and
+ * deriving its geometry — used identically by movement ({@link advanceCreep}),
+ * placement (`creepOccupiedCell`), and combat targeting, so the three can never
+ * disagree about which cell a creep occupies or whether its state is legal.
+ *
+ * Returns `null` (⇒ the consumer drops / ignores the row) unless ALL hold, in an
+ * order that establishes LOCAL, bounded geometry before any multiply or `isqrt`
+ * (Codex R2 #3): every column is a safe integer; `progress ≥ 0`; the waypoint
+ * `(headCol,headRow)` and the from-cell `cellContaining(from)` are both in bounds;
+ * the waypoint is Chebyshev-adjacent to (or equal to) the from-cell — so every
+ * delta feeding `isqrt`/interpolation is bounded to ~2 cells on ANY board; the
+ * derived `edgeLen ≥ 1`; and `0 ≤ progress < edgeLen` (a persisted `progress ≥
+ * edgeLen` is non-canonical — genuine arrival snaps to the waypoint with
+ * `progress = 0` — so it is corrupt). Otherwise it returns the derived point (floor
+ * interpolation), the in-bounds occupied cell, and the edge length.
  */
-export function occupiedCell(
-  col: number,
-  row: number,
+export function deriveValidCreepPosition(
+  fromX: number | undefined,
+  fromY: number | undefined,
   headCol: number | undefined,
   headRow: number | undefined,
-  edgeProgress: number | undefined,
-): { readonly col: number; readonly row: number } {
-  if (!Number.isSafeInteger(edgeProgress) || (edgeProgress as number) <= 0) return { col, row };
-  if (!Number.isSafeInteger(headCol) || !Number.isSafeInteger(headRow)) return { col, row };
+  progress: number | undefined,
+  bounds: Bounds,
+): CreepGeometry | null {
+  if (
+    !Number.isSafeInteger(fromX) ||
+    !Number.isSafeInteger(fromY) ||
+    !Number.isSafeInteger(headCol) ||
+    !Number.isSafeInteger(headRow) ||
+    !Number.isSafeInteger(progress)
+  ) {
+    return null;
+  }
+  const fx = fromX as number;
+  const fy = fromY as number;
   const hc = headCol as number;
   const hr = headRow as number;
-  const dCol = hc - col;
-  const dRow = hr - row;
-  if (Math.max(Math.abs(dCol), Math.abs(dRow)) !== 1) return { col, row };
-  const edgeLen = dCol !== 0 && dRow !== 0 ? DIAG_LEN : ORTHO_LEN;
-  return (edgeProgress as number) < edgeLen >> 1 ? { col, row } : { col: hc, row: hr };
+  const p = progress as number;
+  if (p < 0) return null;
+  if (!inBounds(hc, hr, bounds)) return null; // waypoint off-board
+
+  const fromCol = cellOf(fx);
+  const fromRow = cellOf(fy);
+  if (!inBounds(fromCol, fromRow, bounds)) return null; // from-point off-board
+  // Waypoint must be a single step (or the resting sentinel) from the from-cell —
+  // this bounds |Bx−fromX|,|By−fromY| ≤ ~2 cells, so every product below is tiny.
+  if (Math.max(Math.abs(hc - fromCol), Math.abs(hr - fromRow)) > 1) return null;
+
+  if (hc === fromCol && hr === fromRow) {
+    // Rest sentinel (head == from-cell) is canonical ONLY at the exact centre with
+    // `progress === 0`; a positive progress on a zero-length "step" is corrupt.
+    if (p !== 0 || fx !== cellCenterX(fromCol) || fy !== cellCenterY(fromRow)) return null;
+    return {
+      point: { x: fx, y: fy },
+      occupancyCell: { col: fromCol, row: fromRow },
+      edgeLen: ORTHO_LEN,
+    };
+  }
+
+  const Bx = cellCenterX(hc);
+  const By = cellCenterY(hr);
+  const edgeLen = segmentLength(fx, fy, Bx, By);
+  if (edgeLen < 1) return null; // degenerate (a non-centre from coincident with B)
+  if (p >= edgeLen) return null; // out-of-range progress for this segment
+
+  // Derive the point by integer floor interpolation. Deltas ≤ ~640 and p < edgeLen
+  // ≤ ~905, so the product stays a small safe integer.
+  const px = fx + Math.floor(((Bx - fx) * p) / edgeLen);
+  const py = fy + Math.floor(((By - fy) * p) / edgeLen);
+  const occCol = cellOf(px);
+  const occRow = cellOf(py);
+  if (!inBounds(occCol, occRow, bounds)) return null; // derived point off-board
+
+  return {
+    point: { x: px, y: py },
+    occupancyCell: { col: occCol, row: occRow },
+    edgeLen,
+  };
 }
 
 /**
  * The outcome of advancing one creep by one tick:
  * - `drop`  — the row is corrupt/impossible; remove it, no life lost (the
  *   "ragged SoA" skip policy, extended to the movement columns).
- * - `leak`  — the creep reached the exit; remove it and the caller decrements a life.
- * - `move`  — the creep is still in play at the returned cell/progress.
+ * - `leak`  — the creep's point reached the exit centre; remove it and the caller
+ *   decrements a life.
+ * - `move`  — the creep is still in play at the returned segment state.
  */
 export type AdvanceOutcome =
   | { readonly kind: 'drop' }
   | { readonly kind: 'leak' }
   | {
       readonly kind: 'move';
-      readonly col: number;
-      readonly row: number;
+      readonly fromX: number;
+      readonly fromY: number;
       readonly headCol: number;
       readonly headRow: number;
-      readonly edgeProgress: number;
+      readonly progress: number;
     };
 
 const DROP: AdvanceOutcome = { kind: 'drop' };
@@ -132,131 +270,127 @@ const LEAK: AdvanceOutcome = { kind: 'leak' };
  * from a restored/ragged SoA) so this function owns the full validate-then-move
  * policy — it never throws on corrupt creep state:
  *
- *   1. ROW VALIDATION — any non-safe-integer column or negative progress ⇒ `drop`.
- *   2. EXIT AT ENTRY — a creep whose FROM cell is the exit has arrived: at rest it
- *      leaks; a *positive* progress there is corrupt ⇒ `drop`, and costs no life.
- *   3. STEP GEOMETRY — for a mid-step creep (`edgeProgress > 0`) the head must be a
- *      single step away (Chebyshev distance 1) with in-range progress, else `drop`;
- *      the midpoint classifies it as near or far side of the boundary.
- *   4. OCCUPIED-CELL VALIDATION — validate ONLY the cell the creep occupies (the
- *      FROM cell on the near side / at rest, the head on the far side). A far-side
- *      creep's FROM cell can be legally walled behind it, so it is not checked — the
- *      move loop never reads it again.
- *   5. NEAR-SIDE RE-ROUTE — on the near side, if the maze changed the descent from
- *      `(col,row)` the creep re-centres (`progress = 0`) and heads the new way; it
- *      never steps onto a walled cell.
- *   6. MOVE — spend the budget, deriving a fresh head at each cell centre via
- *      {@link firstDescentNeighbor}; a cell with no exact descent (a forged field,
- *      or a head made unreachable — the maze invariant keeps both out of genuine
- *      states) ⇒ `drop`.
+ *   1. ROW VALIDATION — non-safe `id`/`hp`, or any invalid position (via the shared
+ *      {@link deriveValidCreepPosition} seam) ⇒ `drop`.
+ *   2. EXIT — the creep's derived point sitting exactly on the exit centre has
+ *      arrived ⇒ `leak`.
+ *   3. RE-PATH — while the creep occupies its from-side cell, re-derive the descent
+ *      from the occupied cell; if the maze changed the next waypoint, turn FROM the
+ *      current point `P` onto a transitional segment (never snapping backward). A
+ *      creep already occupying its head cell is committed and finishes the segment.
+ *   4. MOVE — spend the budget; at each waypoint arrival snap `from` to the centre
+ *      and derive the next head via {@link firstDescentNeighbor} (a cell with no
+ *      exact descent — a forged field — ⇒ `drop`). A transitional segment shorter
+ *      than the budget, then a normal one, may both be crossed in one tick.
  *
  * The loop always terminates: each iteration starts with `0 ≤ progress < edgeLen`,
  * so `stepDist ≥ 1` and `budget` strictly decreases. A `move` outcome with
- * `edgeProgress === 0` always reports the sentinel head.
+ * `progress === 0` reports the canonical rest sentinel (`head == cell`, `from ==
+ * its centre`).
  */
 export function advanceCreep(
   field: DistanceField,
   id: number | undefined,
   hp: number | undefined,
-  col: number | undefined,
-  row: number | undefined,
+  fromX: number | undefined,
+  fromY: number | undefined,
   headCol: number | undefined,
   headRow: number | undefined,
-  edgeProgress: number | undefined,
+  progress: number | undefined,
   budget: number,
 ): AdvanceOutcome {
-  // (1) ROW VALIDATION — deterministic drop of a corrupt/impossible row.
-  if (
-    !Number.isSafeInteger(id) ||
-    !Number.isSafeInteger(hp) ||
-    !Number.isSafeInteger(col) ||
-    !Number.isSafeInteger(row) ||
-    !Number.isSafeInteger(headCol) ||
-    !Number.isSafeInteger(headRow) ||
-    !Number.isSafeInteger(edgeProgress)
-  ) {
-    return DROP;
-  }
-  let curCol = col as number;
-  let curRow = row as number;
-  let progress = edgeProgress as number;
-  if (progress < 0) return DROP;
+  // (1) ROW VALIDATION.
+  if (!Number.isSafeInteger(id) || !Number.isSafeInteger(hp)) return DROP;
 
-  // (2) EXIT AT ENTRY — a creep whose FROM cell is the exit has arrived: at rest it
-  //     leaks; a positive progress there is corrupt (it cannot step out of the exit).
-  if (curCol === field.exit.col && curRow === field.exit.row) {
-    return progress === 0 ? LEAK : DROP;
-  }
+  const exitX = cellCenterX(field.exit.col);
+  const exitY = cellCenterY(field.exit.row);
 
-  // (3) STEP GEOMETRY — a mid-step creep carries a head; classify near/far side.
+  // (2a) ARRIVED — a creep resting exactly on the exit centre has arrived and leaks,
+  //      independent of its head columns (at progress 0 the point IS the from-point,
+  //      so the head is irrelevant). Checked before row validation so a resting-on-
+  //      exit creep leaks even if its (unused) head sentinel is non-canonical.
+  if (progress === 0 && fromX === exitX && fromY === exitY) return LEAK;
+
+  const geom = deriveValidCreepPosition(fromX, fromY, headCol, headRow, progress, field);
+  if (geom === null) return DROP;
+
+  // Working segment state (from-point, head cell, progress, derived edge length).
+  let fx = fromX as number;
+  let fy = fromY as number;
   let hCol = headCol as number;
   let hRow = headRow as number;
-  let diagonal = false;
-  let edgeLen = ORTHO_LEN;
-  let nearSide = true;
-  if (progress > 0) {
-    const dCol = hCol - curCol;
-    const dRow = hRow - curRow;
-    if (Math.max(Math.abs(dCol), Math.abs(dRow)) !== 1) return DROP; // head not one step away
-    diagonal = dCol !== 0 && dRow !== 0;
-    edgeLen = diagonal ? DIAG_LEN : ORTHO_LEN;
-    if (progress >= edgeLen) return DROP; // out-of-range progress for this edge
-    nearSide = progress < edgeLen >> 1;
-  }
+  let prog = progress as number;
+  let edgeLen = geom.edgeLen;
 
-  // (4) OCCUPIED-CELL VALIDATION — the creep occupies (curCol,curRow) on the near
-  //     side (or at rest) and the head on the far side; that occupied cell is the
-  //     one placement protects, so validate exactly it. A far-side creep's FROM
-  //     cell may be legally walled *behind* it — validating it here would drop a
-  //     legal live creep, so it must not be checked.
-  const occCol = nearSide ? curCol : hCol;
-  const occRow = nearSide ? curRow : hRow;
-  if (blockedAt(field, occCol, occRow)) return DROP; // occupied cell out of bounds or blocked
-  if (distAt(field, occCol, occRow) < 0) return DROP; // occupied cell unreachable (walled-off)
+  // (2) EXIT — a creep occupies the exit legitimately only by ARRIVING at its
+  //     centre (⇒ leak). A row whose FROM cell is already the exit but whose point
+  //     is not the exit centre is corrupt — a genuine creep leaks the instant it
+  //     reaches the centre and never departs the exit, so a forged "leaving the
+  //     exit" row is dropped (no life lost), matching the pre-rewrite policy.
+  if (geom.point.x === exitX && geom.point.y === exitY) return LEAK;
+  if (cellOf(fx) === field.exit.col && cellOf(fy) === field.exit.row) return DROP;
 
-  // (5) NEAR-SIDE RE-ROUTE — still on the near side of the boundary, so if the maze
-  //     changed the shortest descent from (curCol,curRow), re-centre (progress 0)
-  //     and let the move loop derive the new head; it never steps onto a walled cell.
-  if (progress > 0 && nearSide) {
-    const next = firstDescentNeighbor(field, curCol, curRow);
+  // OCCUPIED-CELL VALIDATION — the cell placement protects must be on-board, open,
+  // and reachable. Genuine states always satisfy this (the maze invariant keeps
+  // every creep's occupied cell reachable and un-buildable); a forged creep sitting
+  // on a wall or a stranded cell is dropped, never advanced onto it.
+  const occ = geom.occupancyCell;
+  if (blockedAt(field, occ.col, occ.row)) return DROP;
+  if (distAt(field, occ.col, occ.row) < 0) return DROP;
+
+  const atRest = prog === 0 && hCol === occ.col && hRow === occ.row;
+
+  if (atRest) {
+    // Derive a fresh head from the resting cell.
+    const next = firstDescentNeighbor(field, occ.col, occ.row);
     if (next === null) return DROP; // stranded on a forged field
-    if (next.col !== hCol || next.row !== hRow) progress = 0;
-  }
-
-  // (6) MOVE — spend the budget; derive a fresh head at each cell centre.
-  let remaining = budget;
-  while (remaining > 0) {
-    if (progress === 0) {
-      const next = firstDescentNeighbor(field, curCol, curRow);
-      if (next === null) return DROP; // forged-field backstop — no exact descent
+    hCol = next.col;
+    hRow = next.row;
+    edgeLen = next.diagonal ? DIAG_LEN : ORTHO_LEN;
+  } else if (occ.col !== hCol || occ.row !== hRow) {
+    // (3) RE-PATH — still on the from side of the boundary. If the maze changed the
+    //     descent from the occupied cell, turn from the ACTUAL point P (Codex/#17).
+    const next = firstDescentNeighbor(field, occ.col, occ.row);
+    if (next === null) return DROP; // stranded on a forged field
+    if (next.col !== hCol || next.row !== hRow) {
+      fx = geom.point.x;
+      fy = geom.point.y;
       hCol = next.col;
       hRow = next.row;
-      diagonal = next.diagonal;
-      edgeLen = diagonal ? DIAG_LEN : ORTHO_LEN;
+      prog = 0;
+      edgeLen = segmentLength(fx, fy, cellCenterX(hCol), cellCenterY(hRow));
+      if (edgeLen < 1) return DROP; // never coincident with an adjacent waypoint
     }
-    const stepDist = Math.min(remaining, edgeLen - progress); // ≥ 1 here
-    progress += stepDist;
+  }
+  // (else: occupies the head cell already — committed, finish the segment.)
+
+  // (4) MOVE — spend the budget; snap to each waypoint centre on arrival.
+  let Bx = cellCenterX(hCol);
+  let By = cellCenterY(hRow);
+  let remaining = budget;
+  while (remaining > 0) {
+    const stepDist = Math.min(remaining, edgeLen - prog); // ≥ 1 (0 ≤ prog < edgeLen)
+    prog += stepDist;
     remaining -= stepDist;
-    if (progress === edgeLen) {
-      // Arrived exactly at the head's centre.
-      curCol = hCol;
-      curRow = hRow;
-      progress = 0;
-      if (curCol === field.exit.col && curRow === field.exit.row) {
-        return LEAK; // remaining budget is discarded
-      }
-    }
+    if (prog < edgeLen) break; // budget exhausted mid-segment
+    // Arrived exactly at the head centre: snap onto the lattice.
+    fx = Bx;
+    fy = By;
+    prog = 0;
+    if (hCol === field.exit.col && hRow === field.exit.row) return LEAK; // remaining discarded
+    const next = firstDescentNeighbor(field, hCol, hRow);
+    if (next === null) return DROP; // forged-field backstop — no exact descent
+    hCol = next.col;
+    hRow = next.row;
+    edgeLen = next.diagonal ? DIAG_LEN : ORTHO_LEN;
+    Bx = cellCenterX(hCol);
+    By = cellCenterY(hRow);
   }
-  if (progress === 0) {
-    hCol = curCol; // canonical sentinel: at rest, head == current cell
-    hRow = curRow;
+
+  if (prog === 0) {
+    // Canonical rest sentinel: head == current cell, from == its centre.
+    hCol = cellOf(fx);
+    hRow = cellOf(fy);
   }
-  return {
-    kind: 'move',
-    col: curCol,
-    row: curRow,
-    headCol: hCol,
-    headRow: hRow,
-    edgeProgress: progress,
-  };
+  return { kind: 'move', fromX: fx, fromY: fy, headCol: hCol, headRow: hRow, progress: prog };
 }

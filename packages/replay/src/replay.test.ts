@@ -19,7 +19,7 @@ function makeReplay(overrides: Partial<Replay> = {}): Replay {
   return {
     seed: 12345,
     rulesetHash: currentRulesetHash(),
-    simVersion: 3,
+    simVersion: 4,
     tickInputs: Array.from({ length: 200 }, (_v, t) => (t % 4 === 0 ? spawn : [])),
     ...overrides,
   };
