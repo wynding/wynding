@@ -1,0 +1,485 @@
+// ruleset.ts — compile + validate + hash the ADR 0007 ruleset bundle.
+//
+// The sim reads ALL sim-affecting tuning from the bundle (ADR 0007), never from
+// hardcoded constants. This module is the single seam between the raw authored
+// `Ruleset` (pure JSON data from `@wynding/types`, authored in `@wynding/content`)
+// and the running sim — so the sim NEVER imports `@wynding/content`; the caller
+// (replay/client) hands the bundle in and we compile it here.
+//
+// Two responsibilities:
+//   • `rulesetDigest(bundle)` — the collision-resistant content identity
+//     (`rulesetHash`): normalize (strip presentation-only fields) → RFC 8785 JCS →
+//     SHA-256, exactly per `docs/design-notes/ruleset-format.md`. Shared by replay
+//     creation and validation so client and server never drift.
+//   • `compileRuleset(bundle, boardId)` — validate per-field domains and resolve the
+//     bundle into a branded `CompiledRuleset` (grid + distance field + indexed
+//     catalogs + an explicit per-spawn schedule). Compilation happens at MATCH
+//     CREATION, before the sim runs, so it MAY reject invalid content by throwing
+//     `RulesetError`. `step` itself stays total.
+
+import { canonicalJson, sha256Hex } from '@wynding/engine';
+import type {
+  BalanceConstants,
+  CreepDef,
+  CreepKind,
+  Ruleset,
+  RulesetBoard,
+  ScoringConfig,
+  TowerDef,
+} from '@wynding/types';
+import { loadBoard, type BoardContext } from './context';
+
+/** Thrown when a bundle is malformed or out of bounds. Rejected at match creation,
+ *  never inside `step` — the sim's totality guarantee is unaffected. */
+export class RulesetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RulesetError';
+  }
+}
+
+/** One scheduled spawn: `offsetTicks` after launch, a creep of catalog `kind`. */
+export interface ScheduledSpawn {
+  readonly offsetTicks: number;
+  readonly kind: CreepKind;
+}
+
+/**
+ * A validated, resolved ruleset ready for `step`. Opaque/branded: `assertRuleset`
+ * rejects anything that isn't a genuine `compileRuleset` product, mirroring the
+ * `assertConsistent(board)` totality posture at the sim boundary.
+ */
+export interface CompiledRuleset {
+  readonly __brand: 'CompiledRuleset';
+  readonly boardId: string;
+  readonly board: BoardContext;
+  readonly balance: BalanceConstants;
+  readonly scoring: ScoringConfig;
+  /** The single M1 tower stat block (one tower kind at M1). */
+  readonly tower: TowerDef;
+  /** Creep stat lookup by kind — a FROZEN plain record (not a Map, whose `set/delete`
+   *  `Object.freeze` can't block), so a retained ruleset is genuinely immutable. */
+  readonly creepByKind: Readonly<Partial<Record<CreepKind, CreepDef>>>;
+  /** The board's single wave, flattened to an ordered per-spawn timeline. */
+  readonly schedule: readonly ScheduledSpawn[];
+  /** The content identity digest (`rulesetHash`). */
+  readonly digest: string;
+}
+
+const validated = new WeakSet<CompiledRuleset>();
+
+/** Recursively freeze plain objects/arrays (and a Map's values) so the compiled
+ *  tuning is immutable at runtime — a caller can't mutate a retained ruleset and
+ *  diverge a match from its fixed `digest`. Read-only at runtime already,
+ *  so this only closes the tamper surface; typed-array/grid internals are left alone. */
+function deepFreeze<T>(o: T): T {
+  if (o !== null && typeof o === 'object' && !Object.isFrozen(o) && !ArrayBuffer.isView(o)) {
+    if (o instanceof Map) {
+      for (const v of o.values()) deepFreeze(v);
+    } else {
+      for (const v of Object.values(o as Record<string, unknown>)) deepFreeze(v);
+    }
+    Object.freeze(o);
+  }
+  return o;
+}
+
+/** A safe positive integer within a generous bound (rejects 0, negatives, floats,
+ *  NaN, and absurd magnitudes that could exhaust replay work). */
+function isPosInt(v: unknown, max = 1_000_000): v is number {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 && v <= max;
+}
+
+/** A safe non-negative integer within a bound (for bonuses / refundNum — 0 is legal). */
+function isNonNegInt(v: unknown, max = 1_000_000): v is number {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= max;
+}
+
+/** A non-null, non-array object — the shape every catalog/nested record must have
+ *  before its fields are read. Runtime-loaded content can carry a `null` or bare
+ *  primitive catalog entry (`towerCatalog: [null]`); guarding here rejects it as a
+ *  `RulesetError` rather than throwing a native `TypeError` on the first dereference,
+ *  which would escape compileRuleset's documented error boundary. */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Hard cap on total scheduled spawns — a bounded, anti-DoS ceiling on wave size. */
+const MAX_SCHEDULED_SPAWNS = 10_000;
+
+/** The only ruleset schema version this sim understands (ADR 0007 `formatVersion`). */
+const SUPPORTED_FORMAT_VERSION = 1;
+
+/** The absolute tick ceiling a match must terminate within. `compileRuleset` rejects a
+ *  bundle whose baseline run (launch + spawn + slowest full traversal) can't reach a
+ *  terminal state within it, and the replay validator re-simulates to exactly this
+ *  ceiling — so replay imports THIS constant (rather than duplicating the literal) and
+ *  the two can never drift into a compiles-but-times-out gap. */
+export const MAX_MATCH_TICKS = 36_000;
+
+/** Fixed-point diagonal step length (≈ √2 × 256); the generous per-cell route-length
+ *  unit used for the worst-case traversal bound (mirrors replay's tickCeiling). */
+const FP_DIAG_LEN = 362;
+
+function isCell(c: unknown, w: number, h: number): boolean {
+  return (
+    c != null &&
+    typeof c === 'object' &&
+    Number.isSafeInteger((c as { col?: unknown }).col) &&
+    Number.isSafeInteger((c as { row?: unknown }).row) &&
+    (c as { col: number }).col >= 0 &&
+    (c as { col: number }).col < w &&
+    (c as { row: number }).row >= 0 &&
+    (c as { row: number }).row < h
+  );
+}
+
+function validateBalance(b: BalanceConstants): void {
+  if (b == null || typeof b !== 'object') throw new RulesetError('balance missing');
+  if (!isPosInt(b.startingLives)) throw new RulesetError('startingLives must be a positive int');
+  if (!isNonNegInt(b.startingBounty)) throw new RulesetError('startingBounty must be ≥ 0');
+  if (!isNonNegInt(b.refundNum)) throw new RulesetError('refundNum must be ≥ 0');
+  if (!isPosInt(b.refundDen)) throw new RulesetError('refundDen must be a positive int');
+  if (b.refundNum > b.refundDen) throw new RulesetError('refund fraction must be ≤ 1');
+  if (!isPosInt(b.leakCost)) throw new RulesetError('leakCost must be a positive int');
+  if (!isPosInt(b.countdownTicks)) throw new RulesetError('countdownTicks must be a positive int');
+  if (!isNonNegInt(b.waveClearBonus)) throw new RulesetError('waveClearBonus must be ≥ 0');
+  if (!isNonNegInt(b.earlyCallBonus)) throw new RulesetError('earlyCallBonus must be ≥ 0');
+}
+
+function validateScoring(s: ScoringConfig): void {
+  if (s == null || typeof s !== 'object') throw new RulesetError('scoring missing');
+  if (!isNonNegInt(s.survivalMul)) throw new RulesetError('survivalMul must be ≥ 0');
+  const t = s.starThresholds;
+  if (!Array.isArray(t) || t.length !== 3 || !t.every((x) => isPosInt(x))) {
+    throw new RulesetError('starThresholds must be three positive ints');
+  }
+  if (!(t[0] <= t[1] && t[1] <= t[2])) {
+    throw new RulesetError('starThresholds must be ascending');
+  }
+}
+
+/** The known creep kinds (the `CreepKind` union, at runtime) — content declaring any
+ *  other kind is a typo / off-schema and rejected. */
+const KNOWN_CREEP_KINDS: ReadonlySet<CreepKind> = new Set<CreepKind>([
+  'normal',
+  'fast',
+  'armored',
+  'flying',
+  'boss',
+]);
+
+function validateCreep(c: CreepDef): void {
+  if (!isRecord(c)) throw new RulesetError('creep def must be an object');
+  if (!KNOWN_CREEP_KINDS.has(c.kind)) {
+    throw new RulesetError(`unknown creep kind '${String(c.kind)}'`);
+  }
+  if (!isPosInt(c.hp)) throw new RulesetError(`creep ${String(c.kind)} hp must be positive`);
+  if (!isPosInt(c.speedFp))
+    throw new RulesetError(`creep ${String(c.kind)} speedFp must be positive`);
+  if (!isNonNegInt(c.bounty)) throw new RulesetError(`creep ${String(c.kind)} bounty must be ≥ 0`);
+  // M1 is GROUND-ONLY: movement runs every creep through the ground distance field and
+  // combat targets without a domain check, so an `air` creep would (wrongly) obey the
+  // maze and be hittable by the ground tower. Reject it until M2 adds domain-aware
+  // movement + anti-air targeting. The type keeps `air` for that milestone.
+  if (c.domain !== 'ground') {
+    throw new RulesetError(
+      `creep ${String(c.kind)} domain '${String(c.domain)}' unsupported at M1 (ground only)`,
+    );
+  }
+}
+
+function validateTower(t: TowerDef): void {
+  if (!isRecord(t)) throw new RulesetError('tower def must be an object');
+  if (!isPosInt(t.cost)) throw new RulesetError('tower cost must be positive');
+  if (!isPosInt(t.damage)) throw new RulesetError('tower damage must be positive');
+  if (!isPosInt(t.rangeFp)) throw new RulesetError('tower rangeFp must be positive');
+  if (!isPosInt(t.cadenceTicks)) throw new RulesetError('tower cadenceTicks must be positive');
+  // travelTicks ≥ 1: a scheduled impact resolves at the TOP of a later tick, so a
+  // 0-travel ("instant") shot fired this tick would resolve a tick late.
+  // A projectile always takes ≥1 tick; same-tick resolution is deferred until an
+  // instant-hit tower is actually a milestone.
+  if (!isPosInt(t.travelTicks)) throw new RulesetError('tower travelTicks must be positive');
+  // travelTicks < cadenceTicks keeps ≤1 impact in flight per tower — the bound combat's
+  // MAX_IN_FLIGHT_IMPACTS backstop assumes. A slower projectile than the fire
+  // cadence would stack in-flight impacts per tower; reject until that's modelled.
+  if (t.travelTicks >= t.cadenceTicks) {
+    throw new RulesetError('tower travelTicks must be less than cadenceTicks');
+  }
+}
+
+/**
+ * Normalize the bundle for hashing by projecting ONLY the known, sim-affecting schema
+ * fields (ADR 0007 §3 + `ruleset-format.md`: "strip unknown fields, strip
+ * presentation-only fields"). Building the canonical value from an explicit field list
+ * — rather than copy-and-delete — means an unknown metadata property can never leak
+ * into `rulesetHash` (two bundles equal in every supported field MUST share a digest),
+ * and the board display `name` (presentation-only) is excluded so a rename never
+ * invalidates a replay. A NEW sim-affecting field is added here deliberately, in the
+ * same change that bumps `formatVersion`/`simVersion` — never silently, because an
+ * unknown `formatVersion` is rejected at compile (see compileRuleset). Values are read
+ * straight from the bundle, so `canonicalJson`'s non-finite / non-plain-object guards
+ * still fire on a malformed field.
+ */
+function normalizeForHash(bundle: Ruleset): unknown {
+  return {
+    formatVersion: bundle.formatVersion,
+    rulesetId: bundle.rulesetId,
+    version: bundle.version,
+    creepCatalog: bundle.creepCatalog.map((c) => ({
+      kind: c.kind,
+      hp: c.hp,
+      speedFp: c.speedFp,
+      bounty: c.bounty,
+      domain: c.domain,
+    })),
+    towerCatalog: bundle.towerCatalog.map((t) => ({
+      kind: t.kind,
+      cost: t.cost,
+      damage: t.damage,
+      rangeFp: t.rangeFp,
+      cadenceTicks: t.cadenceTicks,
+      travelTicks: t.travelTicks,
+    })),
+    balance: {
+      startingLives: bundle.balance.startingLives,
+      startingBounty: bundle.balance.startingBounty,
+      refundNum: bundle.balance.refundNum,
+      refundDen: bundle.balance.refundDen,
+      leakCost: bundle.balance.leakCost,
+      countdownTicks: bundle.balance.countdownTicks,
+      waveClearBonus: bundle.balance.waveClearBonus,
+      earlyCallBonus: bundle.balance.earlyCallBonus,
+    },
+    scoring: {
+      survivalMul: bundle.scoring.survivalMul,
+      starThresholds: bundle.scoring.starThresholds,
+    },
+    boards: bundle.boards.map((b) => ({
+      id: b.id,
+      widthTiles: b.widthTiles,
+      heightTiles: b.heightTiles,
+      entrance: { col: b.entrance.col, row: b.entrance.row },
+      exit: { col: b.exit.col, row: b.exit.row },
+      // `name` excluded — presentation-only (ADR 0007 §3).
+      waves: b.waves.map((w) => ({
+        index: w.index,
+        entries: w.entries.map((e) => ({
+          kind: e.kind,
+          count: e.count,
+          spacingTicks: e.spacingTicks,
+        })),
+      })),
+    })),
+  };
+}
+
+/**
+ * The ruleset content identity (`rulesetHash`): SHA-256 over the RFC 8785 canonical
+ * form of the normalized bundle. Collision-resistant (ADR 0007 §3) — NOT the 32-bit
+ * world-hash. One implementation shared by replay creation and validation.
+ */
+export function rulesetDigest(bundle: Ruleset): string {
+  return sha256Hex(canonicalJson(normalizeForHash(bundle)));
+}
+
+/**
+ * Compile + validate a bundle for a given board into a branded `CompiledRuleset`.
+ * Throws `RulesetError` on any malformed/out-of-bounds field or unknown creep kind,
+ * so invalid content is rejected before a match ever starts.
+ */
+export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRuleset {
+  if (bundle == null || typeof bundle !== 'object') throw new RulesetError('bundle missing');
+  // Reject an unknown schema version rather than silently reading unfamiliar content
+  // with v1 semantics — `formatVersion` is the schema-evolution field.
+  if (bundle.formatVersion !== SUPPORTED_FORMAT_VERSION) {
+    throw new RulesetError(
+      `unsupported formatVersion ${String(bundle.formatVersion)} (supported: ${SUPPORTED_FORMAT_VERSION})`,
+    );
+  }
+  // The identity fields bucket leaderboard scores and enter the digest, so they must be
+  // well-formed: a non-empty string id and a non-negative integer version.
+  if (typeof bundle.rulesetId !== 'string' || bundle.rulesetId.length === 0) {
+    throw new RulesetError('rulesetId must be a non-empty string');
+  }
+  if (!isNonNegInt(bundle.version)) throw new RulesetError('version must be a non-negative int');
+  if (!Array.isArray(bundle.creepCatalog) || bundle.creepCatalog.length === 0) {
+    throw new RulesetError('creepCatalog missing');
+  }
+  if (!Array.isArray(bundle.towerCatalog) || bundle.towerCatalog.length === 0) {
+    throw new RulesetError('towerCatalog missing');
+  }
+  // M1 has a SINGLE tower kind: placeTower always builds towerCatalog[0] (no per-tower
+  // kind selection yet), so extra defs would silently collapse to the first. Reject
+  // until multi-tower placement is a milestone.
+  if (bundle.towerCatalog.length !== 1) {
+    throw new RulesetError('M1 supports exactly one tower kind');
+  }
+  // Guard the entry shape before dereferencing `.kind`: runtime-loaded content can hold
+  // a `null`/primitive catalog entry, which must surface as a RulesetError (not a native
+  // TypeError) to keep compileRuleset's documented error boundary intact.
+  if (!isRecord(bundle.towerCatalog[0])) {
+    throw new RulesetError('tower def must be an object');
+  }
+  // The sole tower must be the plain `basic` direct-damage ground tower: placement and
+  // combat simulate only that behaviour, so a `splash`/`slow`/`antiair` def would be
+  // mis-simulated as basic. Reject until kind-specific dispatch exists.
+  if (bundle.towerCatalog[0].kind !== 'basic') {
+    throw new RulesetError(
+      `tower kind '${String(bundle.towerCatalog[0].kind)}' unsupported at M1 (basic only)`,
+    );
+  }
+  validateBalance(bundle.balance);
+  validateScoring(bundle.scoring);
+
+  // Snapshot every compiled tuning value with structuredClone: a caller that
+  // mutates the raw bundle AFTER compileRuleset must not be able to change a running
+  // match's behaviour while its `digest` stays fixed (client/validator divergence). The
+  // compiled ruleset owns detached copies, so the state it runs matches the hash.
+  // Null-prototype record: a plain `{}` would let a JSON `kind: "__proto__"`
+  // set the object's PROTOTYPE (not an own key) — escaping the deep-freeze — and would
+  // make inherited names ("toString", "hasOwnProperty") pass the unknown-kind check
+  // below. `Object.create(null)` has no `__proto__` accessor and inherits nothing.
+  const creepByKind: Partial<Record<CreepKind, CreepDef>> = Object.create(null) as Partial<
+    Record<CreepKind, CreepDef>
+  >;
+  for (const c of bundle.creepCatalog) {
+    validateCreep(c);
+    // Reject a duplicate kind rather than letting a later entry silently overwrite an
+    // earlier one — the wave schedule resolves each kind to exactly one stat block, so
+    // two defs sharing a kind is ambiguous authored content, not a valid catalog.
+    if (creepByKind[c.kind as CreepKind] !== undefined) {
+      throw new RulesetError(`duplicate creep kind '${String(c.kind)}'`);
+    }
+    creepByKind[c.kind as CreepKind] = structuredClone(c);
+  }
+  for (const t of bundle.towerCatalog) validateTower(t);
+  // `as unknown as` because the earlier `isRecord` guard narrowed the element to a bare
+  // record; validateTower has since confirmed it is a well-formed TowerDef.
+  const tower = structuredClone(bundle.towerCatalog[0]) as unknown as TowerDef; // M1: single tower
+
+  if (!Array.isArray(bundle.boards)) throw new RulesetError('boards must be an array');
+  // `isRecord(b)` guards a null/primitive board entry (`boards: [null]` is valid JSON):
+  // reading `b.id` on it would throw a native TypeError, escaping the RulesetError boundary.
+  const board = bundle.boards.find((b: RulesetBoard) => isRecord(b) && b.id === boardId);
+  if (board == null) throw new RulesetError(`unknown boardId '${String(boardId)}'`);
+  if (!isCell(board.entrance, board.widthTiles, board.heightTiles)) {
+    throw new RulesetError('entrance out of bounds');
+  }
+  if (!isCell(board.exit, board.widthTiles, board.heightTiles)) {
+    throw new RulesetError('exit out of bounds');
+  }
+
+  // Build the grid + exit distance field; loadBoard rejects an unplayable board. Its
+  // failure (a GridError — non-border opening, bad dims, over-cap cells) is re-thrown
+  // as a RulesetError so ALL malformed content surfaces through one type and the
+  // replay validator can turn it into a clean rejection rather than a 500.
+  let boardCtx;
+  try {
+    boardCtx = loadBoard({
+      widthTiles: board.widthTiles,
+      heightTiles: board.heightTiles,
+      entrance: board.entrance,
+      exit: board.exit,
+    });
+  } catch (err) {
+    throw new RulesetError(`unplayable board '${boardId}': ${(err as Error).message}`);
+  }
+
+  // Compile the board's single M1 wave into an explicit per-spawn timeline. General
+  // over heterogeneous multi-entry waves (M2) — an entry's spacing applies between
+  // its own successive spawns, laid down back-to-back after the prior entry.
+  if (!Array.isArray(board.waves) || board.waves.length !== 1) {
+    throw new RulesetError('M1 expects exactly one wave');
+  }
+  // Guard a null/primitive wave (`waves: [null]` is valid JSON) before reading `.entries`,
+  // so a malformed wave surfaces as a RulesetError rather than a native TypeError. Checked
+  // through a separate `unknown` local so the typed `board.waves[0]` access below is intact.
+  const wave0: unknown = board.waves[0];
+  if (!isRecord(wave0) || !Array.isArray(wave0.entries)) {
+    throw new RulesetError('wave entries must be an array');
+  }
+  const schedule: ScheduledSpawn[] = [];
+  let cursor = 0;
+  for (const entry of board.waves[0].entries) {
+    if (entry == null || creepByKind[entry.kind as CreepKind] === undefined) {
+      throw new RulesetError(`wave references unknown creep kind '${String(entry?.kind)}'`);
+    }
+    if (!isPosInt(entry.count)) throw new RulesetError('wave entry count must be positive');
+    if (!isPosInt(entry.spacingTicks))
+      throw new RulesetError('wave entry spacing must be positive');
+    for (let i = 0; i < entry.count; i++) {
+      schedule.push({ offsetTicks: cursor, kind: entry.kind });
+      cursor += entry.spacingTicks;
+      if (schedule.length > MAX_SCHEDULED_SPAWNS) {
+        throw new RulesetError('wave exceeds the scheduled-spawn cap');
+      }
+    }
+  }
+  if (schedule.length === 0) throw new RulesetError('wave schedule is empty');
+
+  // Reject a bundle whose BASELINE run can't reach a terminal state within the replay
+  // validator's absolute tick ceiling — otherwise it compiles but every
+  // replay on it times out. Bound the worst-case baseline: launch deadline + last spawn
+  // offset + the slowest creep's full traversal (max route length ÷ min speed). Only the
+  // baseline must fit; adversarial build/sell juggling beyond it is caught by the
+  // validator's timeout.
+  const lastOffset = schedule[schedule.length - 1]!.offsetTicks;
+  // Minimum speed over the kinds THIS board's schedule actually spawns —
+  // not the whole catalog, so an unrelated slow creep used only by another board can't
+  // wrongly reject this board.
+  let minSpeedFp = Number.MAX_SAFE_INTEGER;
+  for (const s of schedule) {
+    const def = creepByKind[s.kind];
+    if (def !== undefined && def.speedFp < minSpeedFp) minSpeedFp = def.speedFp;
+  }
+  const cells = boardCtx.grid.width * boardCtx.grid.height;
+  const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minSpeedFp);
+  if (bundle.balance.countdownTicks + lastOffset + maxTraversalTicks > MAX_MATCH_TICKS) {
+    throw new RulesetError('ruleset cannot reach a terminal state within the tick budget');
+  }
+
+  // Digest an un-int-validated field (e.g. a float `wave.index`) can still trip
+  // canonicalJson; funnel it through RulesetError so compileRuleset's documented
+  // "throws only RulesetError" contract holds for every caller.
+  let digest: string;
+  try {
+    digest = rulesetDigest(bundle);
+  } catch (err) {
+    throw new RulesetError(`ruleset is not hashable: ${(err as Error).message}`);
+  }
+
+  const compiled: CompiledRuleset = {
+    __brand: 'CompiledRuleset',
+    boardId,
+    board: boardCtx,
+    balance: structuredClone(bundle.balance), // detached snapshot
+    scoring: structuredClone(bundle.scoring),
+    tower,
+    creepByKind,
+    schedule,
+    digest,
+  };
+  // Freeze the compiled tuning (balance/scoring/tower/creep defs/schedule) so a
+  // retained ruleset can't be mutated at runtime and diverge from its digest. The board
+  // machinery (grid methods, typed-array fields) is intentionally left untouched.
+  deepFreeze(compiled.balance);
+  deepFreeze(compiled.scoring);
+  deepFreeze(compiled.tower);
+  deepFreeze(compiled.schedule);
+  deepFreeze(compiled.creepByKind);
+  Object.freeze(compiled); // freeze the WRAPPER too, so `ruleset.tower = …` can't replace a field
+  validated.add(compiled);
+  return compiled;
+}
+
+/**
+ * Totality boundary guard (mirrors `assertConsistent`): reject a forged/out-of-band
+ * object handed to `step`/`createInitialState`. Only a genuine `compileRuleset`
+ * product carries the brand membership, so a hand-built literal is refused loudly
+ * before any tick reads a field. Memoized by identity.
+ */
+export function assertRuleset(ruleset: CompiledRuleset): void {
+  if (validated.has(ruleset)) return;
+  throw new RulesetError('ruleset was not produced by compileRuleset — refusing to simulate');
+}

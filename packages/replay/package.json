@@ -21,5 +21,8 @@
     "@wynding/engine": "workspace:*",
     "@wynding/sim": "workspace:*",
     "@wynding/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@wynding/content": "workspace:*"
   }
 }

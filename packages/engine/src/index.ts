@@ -14,3 +14,4 @@ export {
   type FixedLoopOptions,
 } from './game-loop';
 export { hash32, fnv1a, hashState } from './hash';
+export { canonicalJson, sha256Hex } from './canonical';

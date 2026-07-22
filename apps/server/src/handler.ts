@@ -9,13 +9,15 @@
 // wiring the deployment (Function URL / API Gateway proxy integration).
 
 import { validate, currentRulesetHash, type Replay } from '@wynding/replay';
-import { loadBoard } from '@wynding/sim';
-import { sampleBoard } from '@wynding/content';
+import { m1Ruleset } from '@wynding/content';
 
-// The board the submitted replay was played on. Interim: pinned to the single
-// authored board until Story 5 resolves a `boardId` carried on the replay itself.
-// Built once at module load — the geometry is static content.
-const matchBoard = loadBoard(sampleBoard);
+// The authored ruleset bundle the server re-validates against. The submitted replay
+// carries its own `boardId` (Story 5); `validate` resolves the board from the bundle
+// and binds the content-derived ruleset digest before re-simulating.
+const rulesetBundle = m1Ruleset;
+// The bundle is a fixed module constant, so its digest is computed ONCE at cold start
+// (not re-hashed per request — code-review).
+const RULESET_HASH = currentRulesetHash(rulesetBundle);
 
 interface LambdaEvent {
   readonly body?: string | null;
@@ -46,7 +48,7 @@ export async function handler(event: LambdaEvent): Promise<LambdaResult> {
     return json(400, { ok: false, error: 'missing replay payload' });
   }
 
-  const result = validate(replay, matchBoard);
+  const result = validate(replay, rulesetBundle);
   if (!result.ok) {
     return json(422, { ok: false, error: result.reason });
   }
@@ -54,8 +56,9 @@ export async function handler(event: LambdaEvent): Promise<LambdaResult> {
   return json(200, {
     ok: true,
     score: result.score,
+    stars: result.stars,
     finalHash: result.finalHash,
     ticks: result.ticks,
-    rulesetHash: currentRulesetHash(),
+    rulesetHash: RULESET_HASH,
   });
 }

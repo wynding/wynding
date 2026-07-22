@@ -16,5 +16,8 @@
     "lint": "eslint src",
     "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.2.0"
   }
 }

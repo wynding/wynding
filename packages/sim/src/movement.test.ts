@@ -8,6 +8,7 @@ import { computeDistanceField, type DistanceField } from './pathfinding';
 import { GridError, type Grid } from './board';
 import { loadBoard, assertConsistent, type BoardContext } from './context';
 import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
+import { testRuleset, pushCreep } from './test-support';
 import {
   advanceCreep,
   deriveValidCreepPosition,
@@ -406,37 +407,37 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
 
 describe('mid-transitional serialize/restore is byte-identical (determinism)', () => {
   // A 9×6 lane: a wall built while a creep is mid-edge forces a transitional segment.
-  const LANE: BoardContext = loadBoard({
+  const RULESET_LANE = testRuleset({
     widthTiles: 9,
     heightTiles: 6,
     entrance: { col: 0, row: 2 },
     exit: { col: 8, row: 2 },
   });
-  const spawn: SimInput = { kind: 'spawnCreep', hp: 50 }; // survives to the exit
+  const wall: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 1 } };
 
   it('resumes identically when snapshotted on a transitional tick', () => {
-    // Reference run: spawn, advance a few ticks, wall the lane (re-path → transitional),
-    // then continue. The build tick puts the live creep on a transitional segment.
-    const ref = createInitialState(7);
+    // Reference run: inject a creep, advance a few ticks, wall the lane (re-path →
+    // transitional), then continue. The build tick puts the creep on a transitional segment.
+    const ref = createInitialState(7, RULESET_LANE);
+    pushCreep(ref, { id: 1, hp: 50, col: 0, row: 2 }); // survives to the exit
     const trace: string[] = [];
-    step(ref, [spawn], LANE);
-    for (let t = 0; t < 6; t++) step(ref, [], LANE); // mid-edge
-    step(ref, [{ kind: 'placeTower', anchor: { col: 3, row: 1 } }], LANE); // re-path here
+    for (let t = 0; t < 7; t++) step(ref, RULESET_LANE, []); // mid-edge
+    step(ref, RULESET_LANE, [wall]); // re-path here
     trace.push(hashSimState(ref));
     for (let t = 0; t < 40; t++) {
-      step(ref, [], LANE);
+      step(ref, RULESET_LANE, []);
       trace.push(hashSimState(ref));
     }
 
     // Restore run: replay to the transitional tick, JSON round-trip, then continue.
-    const live = createInitialState(7);
-    step(live, [spawn], LANE);
-    for (let t = 0; t < 6; t++) step(live, [], LANE);
-    step(live, [{ kind: 'placeTower', anchor: { col: 3, row: 1 } }], LANE);
+    const live = createInitialState(7, RULESET_LANE);
+    pushCreep(live, { id: 1, hp: 50, col: 0, row: 2 });
+    for (let t = 0; t < 7; t++) step(live, RULESET_LANE, []);
+    step(live, RULESET_LANE, [wall]);
     const restored = JSON.parse(JSON.stringify(live)) as SimState;
     const resumed: string[] = [hashSimState(restored)];
     for (let t = 0; t < 40; t++) {
-      step(restored, [], LANE);
+      step(restored, RULESET_LANE, []);
       resumed.push(hashSimState(restored));
     }
 
