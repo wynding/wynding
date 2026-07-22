@@ -80,6 +80,9 @@ function isNonNegInt(v: unknown, max = 1_000_000): v is number {
 /** Hard cap on total scheduled spawns — a bounded, anti-DoS ceiling on wave size. */
 const MAX_SCHEDULED_SPAWNS = 10_000;
 
+/** The only ruleset schema version this sim understands (ADR 0007 `formatVersion`). */
+const SUPPORTED_FORMAT_VERSION = 1;
+
 /** Max ticks from match start to the LAST scheduled spawn. Kept below the replay
  *  validator's absolute tick ceiling (36 000) so a compiled bundle's wave always
  *  spawns out within budget — a bundle whose schedule can't fit is rejected here
@@ -129,8 +132,14 @@ function validateCreep(c: CreepDef): void {
   if (!isPosInt(c.speedFp))
     throw new RulesetError(`creep ${String(c.kind)} speedFp must be positive`);
   if (!isNonNegInt(c.bounty)) throw new RulesetError(`creep ${String(c.kind)} bounty must be ≥ 0`);
-  if (c.domain !== 'ground' && c.domain !== 'air') {
-    throw new RulesetError(`creep ${String(c.kind)} domain invalid`);
+  // M1 is GROUND-ONLY: movement runs every creep through the ground distance field and
+  // combat targets without a domain check, so an `air` creep would (wrongly) obey the
+  // maze and be hittable by the ground tower. Reject it until M2 adds domain-aware
+  // movement + anti-air targeting (Codex P2). The type keeps `air` for that milestone.
+  if (c.domain !== 'ground') {
+    throw new RulesetError(
+      `creep ${String(c.kind)} domain '${String(c.domain)}' unsupported at M1 (ground only)`,
+    );
   }
 }
 
@@ -143,25 +152,69 @@ function validateTower(t: TowerDef): void {
 }
 
 /**
- * Normalize the bundle for hashing: strip presentation-only fields (board display
- * `name`) so a rename never invalidates a replay, and drop nothing sim-affecting.
- * The result is fed to `canonicalJson` (which sorts keys), so we need only remove
- * the excluded fields — key order here is irrelevant.
+ * Normalize the bundle for hashing by projecting ONLY the known, sim-affecting schema
+ * fields (ADR 0007 §3 + `ruleset-format.md`: "strip unknown fields, strip
+ * presentation-only fields"). Building the canonical value from an explicit field list
+ * — rather than copy-and-delete — means an unknown metadata property can never leak
+ * into `rulesetHash` (two bundles equal in every supported field MUST share a digest),
+ * and the board display `name` (presentation-only) is excluded so a rename never
+ * invalidates a replay. A NEW sim-affecting field is added here deliberately, in the
+ * same change that bumps `formatVersion`/`simVersion` — never silently, because an
+ * unknown `formatVersion` is rejected at compile (see compileRuleset). Values are read
+ * straight from the bundle, so `canonicalJson`'s non-finite / non-plain-object guards
+ * still fire on a malformed field.
  */
 function normalizeForHash(bundle: Ruleset): unknown {
-  // FAIL-SAFE (Fable P3): copy the WHOLE bundle and DELETE only the presentation-only
-  // fields, so any future sim-affecting field is hashed by default — never silently
-  // excluded (which would let two behaviourally-different rulesets share a digest, the
-  // exact spoof the hash prevents). Presentation-only = board display `name` (ADR 0007
-  // §3); catalogs/balance/scoring carry no presentation fields. `structuredClone` (NOT
-  // a JSON round-trip, which would coerce NaN/Infinity→null and Date/Map→a plain shape,
-  // silently defeating canonicalJson's non-finite / non-plain-object guards) deep-copies
-  // faithfully, so a malformed value still throws loudly at hash time (Fable P3).
-  const clone = structuredClone(bundle) as Ruleset;
-  if (Array.isArray(clone.boards)) {
-    for (const b of clone.boards) delete (b as { name?: unknown }).name;
-  }
-  return clone;
+  return {
+    formatVersion: bundle.formatVersion,
+    rulesetId: bundle.rulesetId,
+    version: bundle.version,
+    creepCatalog: bundle.creepCatalog.map((c) => ({
+      kind: c.kind,
+      hp: c.hp,
+      speedFp: c.speedFp,
+      bounty: c.bounty,
+      domain: c.domain,
+    })),
+    towerCatalog: bundle.towerCatalog.map((t) => ({
+      kind: t.kind,
+      cost: t.cost,
+      damage: t.damage,
+      rangeFp: t.rangeFp,
+      cadenceTicks: t.cadenceTicks,
+      travelTicks: t.travelTicks,
+    })),
+    balance: {
+      startingLives: bundle.balance.startingLives,
+      startingBounty: bundle.balance.startingBounty,
+      refundNum: bundle.balance.refundNum,
+      refundDen: bundle.balance.refundDen,
+      leakCost: bundle.balance.leakCost,
+      countdownTicks: bundle.balance.countdownTicks,
+      waveClearBonus: bundle.balance.waveClearBonus,
+      earlyCallBonus: bundle.balance.earlyCallBonus,
+    },
+    scoring: {
+      survivalMul: bundle.scoring.survivalMul,
+      starThresholds: bundle.scoring.starThresholds,
+    },
+    boards: bundle.boards.map((b) => ({
+      id: b.id,
+      widthTiles: b.widthTiles,
+      heightTiles: b.heightTiles,
+      entrance: { col: b.entrance.col, row: b.entrance.row },
+      exit: { col: b.exit.col, row: b.exit.row },
+      // `name` excluded — presentation-only (ADR 0007 §3).
+      waves: b.waves.map((w) => ({
+        index: w.index,
+        entries: w.entries.map((e) => ({
+          kind: e.kind,
+          count: e.count,
+          spacingTicks: e.spacingTicks,
+        })),
+      })),
+    })),
+  };
 }
 
 /**
@@ -180,6 +233,13 @@ export function rulesetDigest(bundle: Ruleset): string {
  */
 export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRuleset {
   if (bundle == null || typeof bundle !== 'object') throw new RulesetError('bundle missing');
+  // Reject an unknown schema version rather than silently reading unfamiliar content
+  // with v1 semantics (Codex P2) — `formatVersion` is the schema-evolution field.
+  if (bundle.formatVersion !== SUPPORTED_FORMAT_VERSION) {
+    throw new RulesetError(
+      `unsupported formatVersion ${String(bundle.formatVersion)} (supported: ${SUPPORTED_FORMAT_VERSION})`,
+    );
+  }
   if (!Array.isArray(bundle.creepCatalog) || bundle.creepCatalog.length === 0) {
     throw new RulesetError('creepCatalog missing');
   }
@@ -189,13 +249,17 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   validateBalance(bundle.balance);
   validateScoring(bundle.scoring);
 
+  // Snapshot every compiled tuning value with structuredClone (Codex P1): a caller that
+  // mutates the raw bundle AFTER compileRuleset must not be able to change a running
+  // match's behaviour while its `digest` stays fixed (client/validator divergence). The
+  // compiled ruleset owns detached copies, so the state it runs matches the hash.
   const creepByKind = new Map<CreepKind, CreepDef>();
   for (const c of bundle.creepCatalog) {
     validateCreep(c);
-    creepByKind.set(c.kind, c);
+    creepByKind.set(c.kind, structuredClone(c));
   }
   for (const t of bundle.towerCatalog) validateTower(t);
-  const tower = bundle.towerCatalog[0] as TowerDef; // M1: single tower kind
+  const tower = structuredClone(bundle.towerCatalog[0]) as TowerDef; // M1: single tower kind
 
   if (!Array.isArray(bundle.boards)) throw new RulesetError('boards must be an array');
   const board = bundle.boards.find((b: RulesetBoard) => b.id === boardId);
@@ -274,8 +338,8 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     __brand: 'CompiledRuleset',
     boardId,
     board: boardCtx,
-    balance: bundle.balance,
-    scoring: bundle.scoring,
+    balance: structuredClone(bundle.balance), // detached snapshot (Codex P1)
+    scoring: structuredClone(bundle.scoring),
     tower,
     creepByKind,
     schedule,

@@ -39,6 +39,10 @@ describe('compileRuleset — structural rejections', () => {
   it('rejects an unknown boardId', () => {
     expect(() => compileRuleset(base() as Ruleset, 'no-such-board')).toThrow(RulesetError);
   });
+
+  it('rejects an unsupported formatVersion (schema evolution)', () => {
+    rejects((b) => (b.formatVersion = 2));
+  });
 });
 
 describe('compileRuleset — balance domains', () => {
@@ -86,6 +90,7 @@ describe('compileRuleset — creep + tower catalog domains', () => {
     rejects((b) => (b.creepCatalog[0]!.speedFp = 0));
     rejects((b) => (b.creepCatalog[0]!.bounty = -1));
     rejects((b) => ((b.creepCatalog[0] as { domain: unknown }).domain = 'plasma'));
+    rejects((b) => (b.creepCatalog[0]!.domain = 'air')); // valid type, unsupported at M1
   });
 
   it('rejects a malformed tower def', () => {

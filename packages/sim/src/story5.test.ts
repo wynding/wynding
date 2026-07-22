@@ -14,6 +14,7 @@ import {
   type SimInput,
   type CompiledRuleset,
 } from './index';
+import type { Ruleset } from '@wynding/types';
 import { testBundle, testRuleset } from './test-support';
 
 const OPEN = {
@@ -130,6 +131,24 @@ describe('rulesetHash — content-derived SHA-256 (ADR 0007 §3)', () => {
     const bundle = testBundle(OPEN);
     const compiled = compileRuleset(bundle, 'test');
     expect(compiled.digest).toBe(rulesetDigest(bundle));
+  });
+
+  it('ignores schema-unknown properties (only known fields enter the digest)', () => {
+    const base = rulesetDigest(testBundle(OPEN));
+    const withJunk = { ...testBundle(OPEN), someMetadata: 'irrelevant', extra: 42 } as Ruleset;
+    expect(rulesetDigest(withJunk)).toBe(base); // unknown fields don't change identity
+  });
+});
+
+describe('compiled ruleset snapshots its tuning (Codex P1)', () => {
+  it('a match uses the compiled snapshot, not the raw bundle mutated after compile', () => {
+    const bundle = testBundle(OPEN, { startingLives: 10 });
+    const ruleset = compileRuleset(bundle, 'test');
+    // Mutate the RAW bundle after compiling — a running match must be unaffected.
+    (bundle.balance as { startingLives: number }).startingLives = 999;
+    (bundle.creepCatalog[0] as { hp: number }).hp = 999;
+    const s = createInitialState(1, ruleset);
+    expect(s.lives).toBe(10); // the compiled snapshot, not the post-compile mutation
   });
 });
 
