@@ -176,25 +176,22 @@ describe('replay validate() — command-union validation (ADR 0006 §4)', () => 
 });
 
 describe('replay validate() — terminal contract (ADR 0006)', () => {
-  it('rejects a command applied past the terminal transition (padding)', () => {
-    // The undefended wave leaks out and the match ends (loss) well before tick 800.
-    // A build command at tick 800 is padding past termination — rejected.
-    const inputs: SimInput[][] = Array.from({ length: 900 }, () => []);
-    inputs[0] = [{ kind: 'callWaveEarly' }];
-    inputs[800] = [{ kind: 'placeTower', anchor: { col: 1, row: 1 } }];
-    const r = validate(makeReplay({ tickInputs: inputs }), m1Ruleset);
-    expect(r.ok).toBe(false);
-    expect(r.reason).toContain('past match termination');
-  });
-
-  it('ACCEPTS a benign trailing noop / empty tick past termination (not padding)', () => {
-    // A client that keeps logging after the match ends emits harmless noop/empty ticks;
-    // the frozen sim ignores them, so a legitimately-resolved replay must still validate.
-    const inputs: SimInput[][] = Array.from({ length: 900 }, () => []);
-    inputs[0] = [{ kind: 'callWaveEarly' }];
-    inputs[800] = [{ kind: 'noop' }];
-    const r = validate(makeReplay({ tickInputs: inputs }), m1Ruleset);
-    expect(r.ok).toBe(true);
+  it('rejects a canonical replay that logs ANY tick past the terminal transition', () => {
+    // The undefended wave leaks out and the match ends (loss) well before tick 800. A
+    // canonical replay must END at the terminal tick — ANY logged tick after it (even an
+    // empty or noop-only one) is padding and rejected (strict PLAN/ADR 0006 contract).
+    for (const trailing of [
+      [{ kind: 'placeTower', anchor: { col: 1, row: 1 } }] as SimInput[],
+      [{ kind: 'noop' }] as SimInput[],
+      [] as SimInput[],
+    ]) {
+      const inputs: SimInput[][] = Array.from({ length: 900 }, () => []);
+      inputs[0] = [{ kind: 'callWaveEarly' }];
+      inputs[800] = trailing;
+      const r = validate(makeReplay({ tickInputs: inputs }), m1Ruleset);
+      expect(r.ok).toBe(false);
+      expect(r.reason).toContain('past match termination');
+    }
   });
 
   it('stays total (returns {ok:false}, never throws) on a malformed bundle', () => {

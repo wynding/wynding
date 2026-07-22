@@ -239,13 +239,13 @@ export function validate(replay: Replay, bundle: Ruleset): ValidationResult {
   let terminalReached = false;
   for (let t = 0; t < replay.tickInputs.length; t++) {
     if (terminalReached) {
-      const hasCommand = (replay.tickInputs[t] as readonly SimInput[]).some(
-        (i) => i.kind !== 'noop',
-      );
-      if (hasCommand) {
-        return { ok: false, reason: `command at tick ${t} is past match termination` };
-      }
-      continue; // empty / noop-only trailing tick — harmless (state is frozen)
+      // A canonical replay ENDS at the terminal tick (PLAN §9 / ADR 0006 "rejects
+      // replays padded past termination"). ANY further logged tick — even an empty or
+      // noop-only one — is padding and rejected; the recording client truncates the log
+      // at the win/loss transition. (This is the strict contract the plan specified;
+      // the sim's freeze makes trailing ticks inert, but the replay identity must be
+      // canonical, so padding is not silently accepted.)
+      return { ok: false, reason: `tick ${t} is logged past match termination` };
     }
     state = step(state, ruleset, replay.tickInputs[t]);
     if (state.phase === 'won' || state.phase === 'lost') terminalReached = true;
