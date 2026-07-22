@@ -131,6 +131,9 @@ describe('compileRuleset — wave domains', () => {
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.kind = 'boss'));
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.count = 0));
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.spacingTicks = 0));
+    // Object.prototype names must NOT be treated as known kinds (null-proto record).
+    rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.kind = 'toString' as never));
+    rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.kind = '__proto__' as never));
   });
 
   it('rejects a wave that exceeds the scheduled-spawn cap', () => {

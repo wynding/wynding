@@ -153,13 +153,21 @@ describe('compiled ruleset snapshots its tuning (Codex P1)', () => {
 
   it('freezes the compiled tuning so a retained ruleset cannot be mutated', () => {
     const ruleset = compileRuleset(testBundle(OPEN), 'test');
+    expect(Object.isFrozen(ruleset)).toBe(true); // the wrapper (can't replace a field)
     expect(Object.isFrozen(ruleset.balance)).toBe(true);
     expect(Object.isFrozen(ruleset.scoring)).toBe(true);
     expect(Object.isFrozen(ruleset.tower)).toBe(true);
     expect(Object.isFrozen(ruleset.schedule)).toBe(true);
+    expect(Object.isFrozen(ruleset.creepByKind)).toBe(true); // a frozen record, not a Map
     expect(() => {
       (ruleset.balance as { startingLives: number }).startingLives = 999;
     }).toThrow(); // strict-mode write to a frozen object
+    expect(() => {
+      (ruleset as { tower: unknown }).tower = {}; // can't replace a field on the frozen wrapper
+    }).toThrow();
+    expect(() => {
+      (ruleset.creepByKind as Record<string, unknown>).normal = {}; // frozen record
+    }).toThrow();
   });
 });
 

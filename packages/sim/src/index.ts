@@ -307,7 +307,7 @@ export function step(
       const entry = state.spawnCursor < schedule.length ? schedule[state.spawnCursor] : undefined;
       if (entry === undefined || launch + entry.offsetTicks > state.tick) break;
       const kindOf: CreepKind = entry.kind;
-      const def = creepByKind.get(kindOf);
+      const def = creepByKind[kindOf];
       if (def !== undefined) {
         state.creeps.id.push(state.nextEntityId++);
         state.creeps.hp.push(def.hp);

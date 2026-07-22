@@ -88,8 +88,8 @@ function tickCeiling(ruleset: CompiledRuleset): number {
   // diagonal step cost). FP: 256 units/tile, diagonal ≈ 362.
   const maxRouteLenFp = cells * 362;
   let minSpeed = Number.MAX_SAFE_INTEGER;
-  for (const def of ruleset.creepByKind.values()) {
-    if (def.speedFp > 0 && def.speedFp < minSpeed) minSpeed = def.speedFp;
+  for (const def of Object.values(ruleset.creepByKind)) {
+    if (def !== undefined && def.speedFp > 0 && def.speedFp < minSpeed) minSpeed = def.speedFp;
   }
   if (!Number.isSafeInteger(minSpeed) || minSpeed < 1) minSpeed = 1;
   const maxTravelTicks = Math.ceil(maxRouteLenFp / minSpeed);

@@ -57,7 +57,9 @@ export interface CompiledRuleset {
   readonly scoring: ScoringConfig;
   /** The single M1 tower stat block (one tower kind at M1). */
   readonly tower: TowerDef;
-  readonly creepByKind: ReadonlyMap<CreepKind, CreepDef>;
+  /** Creep stat lookup by kind — a FROZEN plain record (not a Map, whose `set/delete`
+   *  `Object.freeze` can't block), so a retained ruleset is genuinely immutable. */
+  readonly creepByKind: Readonly<Partial<Record<CreepKind, CreepDef>>>;
   /** The board's single wave, flattened to an ordered per-spawn timeline. */
   readonly schedule: readonly ScheduledSpawn[];
   /** The content identity digest (`rulesetHash`). */
@@ -279,10 +281,16 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // mutates the raw bundle AFTER compileRuleset must not be able to change a running
   // match's behaviour while its `digest` stays fixed (client/validator divergence). The
   // compiled ruleset owns detached copies, so the state it runs matches the hash.
-  const creepByKind = new Map<CreepKind, CreepDef>();
+  // Null-prototype record (Fable QC): a plain `{}` would let a JSON `kind: "__proto__"`
+  // set the object's PROTOTYPE (not an own key) — escaping the deep-freeze — and would
+  // make inherited names ("toString", "hasOwnProperty") pass the unknown-kind check
+  // below. `Object.create(null)` has no `__proto__` accessor and inherits nothing.
+  const creepByKind: Partial<Record<CreepKind, CreepDef>> = Object.create(null) as Partial<
+    Record<CreepKind, CreepDef>
+  >;
   for (const c of bundle.creepCatalog) {
     validateCreep(c);
-    creepByKind.set(c.kind, structuredClone(c));
+    creepByKind[c.kind as CreepKind] = structuredClone(c);
   }
   for (const t of bundle.towerCatalog) validateTower(t);
   const tower = structuredClone(bundle.towerCatalog[0]) as TowerDef; // M1: single tower kind
@@ -325,7 +333,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   const schedule: ScheduledSpawn[] = [];
   let cursor = 0;
   for (const entry of board.waves[0].entries) {
-    if (entry == null || !creepByKind.has(entry.kind)) {
+    if (entry == null || creepByKind[entry.kind as CreepKind] === undefined) {
       throw new RulesetError(`wave references unknown creep kind '${String(entry?.kind)}'`);
     }
     if (!isPosInt(entry.count)) throw new RulesetError('wave entry count must be positive');
@@ -380,6 +388,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   deepFreeze(compiled.tower);
   deepFreeze(compiled.schedule);
   deepFreeze(compiled.creepByKind);
+  Object.freeze(compiled); // freeze the WRAPPER too, so `ruleset.tower = …` can't replace a field
   validated.add(compiled);
   return compiled;
 }
