@@ -43,6 +43,12 @@ describe('compileRuleset — structural rejections', () => {
   it('rejects an unsupported formatVersion (schema evolution)', () => {
     rejects((b) => (b.formatVersion = 2));
   });
+
+  it('rejects malformed identity fields (rulesetId / version)', () => {
+    rejects((b) => (b.rulesetId = 7 as never));
+    rejects((b) => (b.rulesetId = ''));
+    rejects((b) => (b.version = -1));
+  });
 });
 
 describe('compileRuleset — balance domains', () => {

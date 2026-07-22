@@ -286,6 +286,12 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       `unsupported formatVersion ${String(bundle.formatVersion)} (supported: ${SUPPORTED_FORMAT_VERSION})`,
     );
   }
+  // The identity fields bucket leaderboard scores and enter the digest, so they must be
+  // well-formed (Codex R9): a non-empty string id and a non-negative integer version.
+  if (typeof bundle.rulesetId !== 'string' || bundle.rulesetId.length === 0) {
+    throw new RulesetError('rulesetId must be a non-empty string');
+  }
+  if (!isNonNegInt(bundle.version)) throw new RulesetError('version must be a non-negative int');
   if (!Array.isArray(bundle.creepCatalog) || bundle.creepCatalog.length === 0) {
     throw new RulesetError('creepCatalog missing');
   }
