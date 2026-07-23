@@ -176,6 +176,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       input.destroy();
       handle.destroy();
       overlay.destroy();
+      // Remove the app-owned siblings too — overlay.destroy() only removes its own root,
+      // so leaving these behind would stack a duplicate title/board (an extra keyboard
+      // focus target, possibly still inert from an open results dialog) on every
+      // createApp() a host runs in the same root.
+      title.remove();
+      board.remove();
     },
   };
 }

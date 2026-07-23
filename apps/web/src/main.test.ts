@@ -67,6 +67,30 @@ describe('main — createApp wiring & frame loop', () => {
     expect(fakeHandle.destroy).toHaveBeenCalledOnce();
   });
 
+  it('destroy() removes every app-owned node so a host can recreate in the same root', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    const app = createApp(document, root, {
+      sceneFactory: vi.fn(() => fakeHandle),
+      schedule: sched.schedule,
+      now: () => 0,
+      seed: 1,
+    });
+    app.destroy();
+    expect(root.childElementCount).toBe(0); // no leaked title/board/overlay (or stale inert)
+    // A recreate must yield exactly one of each — not a stacked duplicate/focus target.
+    const again = createApp(document, root, {
+      sceneFactory: vi.fn(() => fakeHandle),
+      schedule: sched.schedule,
+      now: () => 0,
+      seed: 2,
+    });
+    expect(root.querySelectorAll('.wy-title')).toHaveLength(1);
+    expect(root.querySelectorAll('.wy-board')).toHaveLength(1);
+    again.destroy();
+  });
+
   it('routes control buttons and reaches a results screen, verify, and play-again', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
