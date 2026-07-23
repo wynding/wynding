@@ -160,6 +160,26 @@ export function enqueueVerdict(
   return 'queue';
 }
 
+/**
+ * Deep-freeze an immutable copy of a tick's commands for the recorded log. The commands
+ * are CLONED (the live buffer objects stay untouched for step()) and then frozen at every
+ * level — the array, each command, and a `placeTower`'s nested `anchor` (the only nested
+ * field in the SimInput union). Freezing only the array (the old approach) left the
+ * command objects shared and mutable, so a consumer mutating a `buildReplay()` envelope
+ * could silently corrupt the internal log and later `verifyRun()` results.
+ */
+function freezeRecorded(inputs: readonly SimInput[]): readonly SimInput[] {
+  return Object.freeze(
+    inputs.map((cmd): SimInput => {
+      const copy: SimInput =
+        cmd.kind === 'placeTower'
+          ? { ...cmd, anchor: Object.freeze({ ...cmd.anchor }) }
+          : { ...cmd };
+      return Object.freeze(copy);
+    }),
+  );
+}
+
 /** Create the game controller for `seed`. Content/ruleset are fixed (M1 single board). */
 export function createController(seed: number): Controller {
   const bundle = m1Ruleset;
@@ -172,7 +192,7 @@ export function createController(seed: number): Controller {
   let runSeed: number; // the seed the current run was created from (stamps the replay)
   let loop: FixedLoop;
   let buffer: SimInput[]; // the CURRENT tick's commands, in issued order (fresh per tick)
-  let tickInputs: SimInput[][]; // recorded log
+  let tickInputs: (readonly SimInput[])[]; // recorded log (deep-frozen entries)
   let prevVm: RenderVM | null;
   let curVm: RenderVM;
   let paused: boolean;
@@ -198,7 +218,7 @@ export function createController(seed: number): Controller {
   const onTick = (): void => {
     if (frozen) return; // terminal: freeze, record nothing past the resolving tick
     const inputs = buffer;
-    tickInputs.push(Object.freeze([...inputs]) as SimInput[]); // immutable copy at index = tick
+    tickInputs.push(freezeRecorded(inputs)); // deep-frozen clone at index = tick
     state = step(state, ruleset, inputs);
     buffer = []; // FRESH buffer — the just-recorded copy can never be mutated by reuse
     prevVm = curVm;
@@ -323,8 +343,9 @@ export function createController(seed: number): Controller {
     boardId: M1_BOARD_ID,
     rulesetHash: currentRulesetHash(bundle),
     simVersion: SIM_VERSION,
-    // Frozen snapshot copies: the envelope is a defensive, immutable view of the log —
-    // a consumer cannot mutate it, and it cannot alias the internal recording.
+    // Defensive, immutable envelope: the arrays are fresh frozen copies, and the command
+    // objects they share with the internal log are themselves deep-frozen at record time
+    // (freezeRecorded), so no mutation path into the recording exists at any level.
     tickInputs: Object.freeze(tickInputs.map((t) => Object.freeze([...t]))) as Replay['tickInputs'],
   });
 

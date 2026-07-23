@@ -284,6 +284,26 @@ describe('controller — enqueueVerdict classifier (unit)', () => {
 });
 
 describe('controller — replay recording, terminal truncation & verify', () => {
+  it('the recorded log is deeply immutable — commands and nested anchors are frozen clones', () => {
+    const c = createController(7);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // flush the placeTower into the log
+    const replay = c.buildReplay();
+    const flushed = replay.tickInputs[replay.tickInputs.length - 1] as readonly SimInput[];
+    const place = flushed.find((i) => i.kind === 'placeTower');
+    expect(place).toBeDefined();
+    if (place === undefined || place.kind !== 'placeTower') return; // narrow for TS
+    expect(Object.isFrozen(place)).toBe(true);
+    expect(Object.isFrozen(place.anchor)).toBe(true);
+    // Strict-mode mutation of a frozen object throws — the envelope cannot corrupt the
+    // internal recording (or later verifyRun results) through shared references.
+    expect(() => {
+      (place.anchor as { col: number }).col = 99;
+    }).toThrow(TypeError);
+    expect(c.verifyRun().ok).toBe(true);
+  });
+
   it('records a validating log that stops at the terminal transition and reproduces the score', () => {
     const c = createController(7);
     c.callWaveEarly();
