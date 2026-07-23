@@ -54,7 +54,7 @@ describe('overlay — HUD readout', () => {
     });
     const text = document.querySelector('.wy-hud')!.textContent!;
     expect(text).toContain('Lives: 10');
-    expect(text).toContain('Gold: 80');
+    expect(text).toContain('Bounty: 80');
     expect(text).toContain('Wave in 25s');
 
     overlay.update({
@@ -295,7 +295,7 @@ describe('overlay — results panel', () => {
     const { overlay } = setup();
     overlay.showResults(hud({ won: false }));
     expect(overlay.root.querySelector('.wy-results h2')!.textContent).toBe(
-      'The wynd broke through.',
+      'The creeps broke through.',
     );
     overlay.destroy();
     expect(document.querySelector('.wy-overlay')).toBeNull();

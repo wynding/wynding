@@ -13,9 +13,10 @@ function ptr(
   clientY: number,
   pointerType = 'mouse',
   button = 0,
+  pointerId = 1,
 ): Event {
   const e = new Event(type, { bubbles: true });
-  Object.assign(e, { clientX, clientY, pointerType, button });
+  Object.assign(e, { clientX, clientY, pointerType, button, pointerId });
   return e;
 }
 
@@ -23,9 +24,9 @@ let board: HTMLDivElement;
 
 /** Dispatch a full press+release (pointerdown then pointerup) — the click semantics the
  *  input layer requires to commit a build/select. */
-function tap(x: number, y: number, pointerType = 'mouse', button = 0): void {
-  board.dispatchEvent(ptr('pointerdown', x, y, pointerType, button));
-  board.dispatchEvent(ptr('pointerup', x, y, pointerType, button));
+function tap(x: number, y: number, pointerType = 'mouse', button = 0, pointerId = 1): void {
+  board.dispatchEvent(ptr('pointerdown', x, y, pointerType, button, pointerId));
+  board.dispatchEvent(ptr('pointerup', x, y, pointerType, button, pointerId));
 }
 beforeEach(() => {
   document.body.innerHTML = '';
@@ -70,6 +71,49 @@ describe('input — keyboard (rebindable, drives the cursor & commands)', () => 
     board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC' })); // call wave
     c.advance(50);
     expect(c.hud().phase).toBe('active');
+  });
+
+  it('ignores auto-repeat keydowns for discrete actions — holding pause toggles exactly once', () => {
+    const c = createController(1);
+    attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', repeat: false }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', repeat: true }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', repeat: true }));
+    expect(c.isPaused()).toBe(true); // toggled exactly once, not thrice
+  });
+
+  it('keeps auto-repeat for cursor movement — a held arrow keeps moving', () => {
+    const c = createController(1);
+    attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    const start = c.cursor();
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', repeat: false }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', repeat: true }));
+    expect(c.cursor().col).toBe(start.col + 2); // moved on both the initial and repeat keydown
+  });
+
+  it('a repeated keydown is still consumed (preventDefault) even when its action is ignored', () => {
+    const c = createController(1);
+    attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    const e = new KeyboardEvent('keydown', { code: 'Space', repeat: true, cancelable: true });
+    board.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('classifies repeat-suppression by resolved action, not physical key — pause rebound onto ArrowRight is still edge-triggered', () => {
+    const c = createController(1);
+    const km = createKeymap();
+    km.rebind('pause', 'ArrowRight'); // displaces 'right', which becomes unbound
+    attachInput(document, board, c, km, { getRect: () => RECT });
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', repeat: false }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', repeat: true }));
+    expect(c.isPaused()).toBe(true); // toggled once despite two keydowns
+
+    // Inversely: rebinding a movement action onto a letter key keeps it auto-repeating.
+    km.rebind('up', 'KeyQ');
+    const start = c.cursor();
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', repeat: false }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', repeat: true }));
+    expect(c.cursor().row).toBe(start.row - 2);
   });
 });
 
@@ -153,6 +197,101 @@ describe('input — pointer (mouse hover/click & touch two-tap)', () => {
     tap(55, 55, 'touch'); // now a fresh first tap, not a commit
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(0);
+  });
+
+  it('sell-then-retap does not instant-build — a tower-select tap never arms the two-tap confirm', () => {
+    const c = createController(1);
+    attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    tap(55, 55, 'touch'); // first tap → preview
+    c.advance(50);
+    tap(55, 55, 'touch'); // second tap → builds
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+
+    tap(55, 55, 'touch'); // tap the tower → selects it (kind: 'tower')
+    c.advance(50);
+    expect(c.frame().selection).not.toBeNull();
+    c.sellSelected();
+    c.advance(50); // sell applies
+    expect(c.frame().curVm.towers).toHaveLength(0);
+
+    tap(55, 55, 'touch'); // the tower-select tap must NOT have armed a confirm
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // only a fresh preview, no build
+    tap(55, 55, 'touch'); // second tap now builds normally
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+  });
+
+  it('does not arm two-tap confirm on an invalid-ghost tap', () => {
+    // A minimal fake controller (input.ts's only surface) drives the exact resolution
+    // sequence the bug hinges on: the SAME cell resolves invalid, then valid, within the
+    // confirm window — real-sim setups can't force that transition deterministically.
+    const results = [
+      { kind: 'ghost' as const, col: 5, row: 5, valid: false },
+      { kind: 'ghost' as const, col: 5, row: 5, valid: true },
+    ];
+    let aimCalls = 0;
+    const confirmed: boolean[] = [];
+    const fake = {
+      ruleset: { board: { grid: { width: 28, height: 24 } } },
+      previewAt: () => {},
+      aimAt: () => results[aimCalls++],
+      confirm: () => {
+        confirmed.push(true);
+        return true;
+      },
+      moveCursor: () => ({ kind: 'blocked' as const, col: 0, row: 0, valid: false }),
+      sellSelected: () => false,
+      callWaveEarly: () => {},
+      togglePause: () => {},
+      cycleSpeed: () => {},
+    } as unknown as Parameters<typeof attachInput>[2];
+    attachInput(document, board, fake, createKeymap(), { getRect: () => RECT, now: () => 0 });
+    tap(55, 55, 'touch'); // first tap resolves an invalid ghost — must not arm
+    tap(55, 55, 'touch'); // second tap, same cell, now resolves valid — but the first didn't arm
+    expect(confirmed).toHaveLength(0); // so this is treated as a fresh arm, not a confirm
+  });
+
+  it('an off-board release clears an armed first tap', () => {
+    const c = createController(1);
+    attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    tap(55, 55, 'touch'); // valid-ghost tap → arms
+    c.advance(50);
+    board.dispatchEvent(ptr('pointerdown', 55, 55, 'touch'));
+    board.dispatchEvent(ptr('pointerup', 9999, 9999, 'touch')); // off-board release (cell null)
+    tap(55, 55, 'touch'); // tap back on the armed cell within the window
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // previews, does not build
+    tap(55, 55, 'touch');
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1); // second tap now builds
+  });
+
+  it('a release whose press started off-board does not count — even with another finger down on the board', () => {
+    const c = createController(1);
+    attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    board.dispatchEvent(ptr('pointerdown', 35, 35, 'touch', 0, 1)); // pointerId 1 down on board
+    board.dispatchEvent(ptr('pointerup', 55, 55, 'touch', 0, 2)); // pointerId 2 up, no matching down
+    c.advance(50);
+    expect(c.frame().ghost).toBeNull(); // ignored — no aim, no arm
+    expect(c.frame().curVm.towers).toHaveLength(0);
+  });
+
+  it('two concurrent fingers on the board never preview-then-confirm — the gesture is voided', () => {
+    const c = createController(1);
+    attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    board.dispatchEvent(ptr('pointerdown', 55, 55, 'touch', 0, 1)); // finger 1 down
+    board.dispatchEvent(ptr('pointerdown', 65, 65, 'touch', 0, 2)); // finger 2 down (concurrent)
+    board.dispatchEvent(ptr('pointerup', 55, 55, 'touch', 0, 1)); // release finger 1
+    board.dispatchEvent(ptr('pointerup', 55, 55, 'touch', 0, 2)); // release finger 2, same cell
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // no build, nothing armed
+    tap(55, 55, 'touch'); // a subsequent normal two-tap on that cell
+    c.advance(50);
+    tap(55, 55, 'touch');
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1); // builds normally
   });
 
   it('does nothing for a pointer outside the board, and detaches cleanly', () => {
