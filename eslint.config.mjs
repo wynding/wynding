@@ -3,10 +3,11 @@
 // package's TS program (type-aware linting can be layered in later).
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import wynding from './eslint-rules/no-ui-literals.mjs';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/.turbo/**', '**/coverage/**', '**/node_modules/**'],
+    ignores: ['**/dist/**', '**/.turbo/**', '**/coverage/**', '**/node_modules/**', '**/*.gen.ts'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -50,9 +51,27 @@ export default tseslint.config(
     },
   },
   {
+    // The first real UI (Story 6): every user-facing string must come from the typed
+    // `t()` catalog, never a raw literal in a DOM/aria/text sink (ADR 0004). The Phaser
+    // scene draws no text (HUD is a DOM overlay), so this covers the render surfaces.
+    files: ['apps/web/src/**/*.ts', 'packages/render/src/**/*.ts'],
+    plugins: { wynding },
+    rules: {
+      'wynding/no-ui-literals': 'error',
+    },
+  },
+  {
+    // Test files legitimately assert on literal DOM text — exempt them from the
+    // no-ui-literals rule (they verify what `t()` produced, they don't author copy).
+    files: ['**/*.test.ts'],
+    rules: {
+      'wynding/no-ui-literals': 'off',
+    },
+  },
+  {
     // Node CI/tooling scripts run under the Node runtime, not the browser — allow
     // the Node globals they legitimately use.
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'eslint-rules/**/*.mjs'],
     languageOptions: {
       globals: { process: 'readonly', console: 'readonly' },
     },

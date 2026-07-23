@@ -14,6 +14,7 @@ import {
   rulesetDigest,
   deriveScore,
   deriveStars,
+  isTerminalPhase,
   RulesetError,
   SIM_VERSION,
   MAX_MATCH_TICKS,
@@ -248,16 +249,16 @@ export function validate(replay: Replay, bundle: Ruleset): ValidationResult {
       return { ok: false, reason: `tick ${t} is logged past match termination` };
     }
     state = step(state, ruleset, replay.tickInputs[t]);
-    if (state.phase === 'won' || state.phase === 'lost') terminalReached = true;
+    if (isTerminalPhase(state.phase)) terminalReached = true;
   }
 
   // (3c) If the log ended before terminal, drive empty ticks to terminal or the ceiling.
   if (!terminalReached) {
     const ceiling = tickCeiling(ruleset);
-    while (state.tick < ceiling && state.phase !== 'won' && state.phase !== 'lost') {
+    while (state.tick < ceiling && !isTerminalPhase(state.phase)) {
       state = step(state, ruleset, EMPTY_INPUTS);
     }
-    if (state.phase !== 'won' && state.phase !== 'lost') {
+    if (!isTerminalPhase(state.phase)) {
       return { ok: false, reason: `replay did not terminate within ${ceiling} ticks (timeout)` };
     }
   }
