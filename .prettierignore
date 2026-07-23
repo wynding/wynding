@@ -8,5 +8,9 @@ pnpm-lock.yaml
 # Not ours to format
 LICENSE
 
+# Machine-generated (byte-identical to scripts/i18n-gen.mjs output; the i18n:check
+# gate verifies it, so prettier must not reformat it out of sync)
+**/i18n/catalog.gen.ts
+
 # Gitignored reference material
 research/

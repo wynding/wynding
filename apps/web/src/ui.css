@@ -1,0 +1,162 @@
+/* ui.css — the DOM HUD/controls/settings styling (ADR 0003 §2). Sizing is in rem/em and
+   the layout reflows, so the UI stays usable when text is zoomed to 200%; interactive
+   targets are ≥ 44×44 CSS px; focus is always visible; text holds ≥ 4.5:1 contrast on the
+   dark surface. No colour-only signalling — buttons carry text labels. */
+
+:root {
+  --wy-bg: #0d1b2a;
+  --wy-surface: #16233a;
+  --wy-fg: #f4f7fb; /* ~15:1 on --wy-bg */
+  --wy-accent: #4aa3ff; /* ~4.9:1 on --wy-bg */
+  --wy-focus: #ffd166;
+}
+
+body {
+  margin: 0;
+  background: var(--wy-bg);
+  color: var(--wy-fg);
+  font-family: system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.wy-title {
+  font-size: 1.5rem;
+  margin: 0.5rem 1rem;
+}
+
+.wy-board {
+  position: relative;
+  width: 100%;
+  max-width: 60rem;
+  aspect-ratio: 28 / 24;
+  margin: 0 auto;
+  background: #12141c;
+  outline-offset: 2px;
+}
+
+.wy-board:focus-visible {
+  outline: 3px solid var(--wy-focus);
+}
+
+.wy-overlay {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 0.5rem 1rem;
+}
+
+.wy-hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  font-size: 1.1rem;
+  padding: 0.5rem 0;
+}
+
+.wy-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.wy-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.5rem 0.9rem;
+  font-size: 1rem;
+  color: var(--wy-fg);
+  background: var(--wy-surface);
+  border: 2px solid var(--wy-accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.wy-btn:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: 2px;
+}
+
+.wy-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wy-primary {
+  background: var(--wy-accent);
+  color: #04121f;
+  font-weight: 700;
+}
+
+.wy-settings {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--wy-surface);
+  border-radius: 8px;
+}
+
+.wy-settings fieldset {
+  border: 1px solid #33465f;
+  border-radius: 6px;
+  margin: 0 0 0.75rem;
+}
+
+.wy-settings label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+}
+
+.wy-rebind {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wy-rebind li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0;
+}
+
+.wy-rebind li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wy-rebind-btn.wy-listening {
+  border-color: var(--wy-focus);
+}
+
+.wy-results {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  text-align: center;
+  background: rgba(6, 12, 22, 0.94);
+}
+
+.wy-results[hidden] {
+  display: none;
+}
+
+.wy-verify {
+  max-width: 30rem;
+  font-size: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

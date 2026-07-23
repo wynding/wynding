@@ -17,7 +17,10 @@
     "test": "turbo run test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "pnpm run format:check && turbo run typecheck lint test",
+    "i18n:gen": "node scripts/i18n-gen.mjs",
+    "i18n:check": "node scripts/i18n-check.mjs",
+    "size": "node scripts/size-limit.mjs",
+    "verify": "pnpm run format:check && pnpm run i18n:check && turbo run typecheck lint test",
     "clean": "turbo run clean && rm -rf node_modules .turbo"
   },
   "devDependencies": {

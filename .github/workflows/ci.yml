@@ -38,6 +38,28 @@ jobs:
       # caught here rather than in a deploy. Artifacts are NOT uploaded; this is a
       # gate, not a release step.
       - run: pnpm run build
+      # Initial-load budget gate (ADR 0005): the built app's initial JS must be
+      # ≤ 3 MB gzipped. Runs after the build so the dist output exists.
+      - run: pnpm run size
+
+  # Accessibility gate (ADR 0003 §3): axe-core runs against the real DOM UI via the
+  # Playwright e2e smoke and fails the build on any violation.
+  a11y-e2e:
+    name: a11y e2e (axe-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wynding/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @wynding/web run e2e
 
   # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
   # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is

@@ -11,7 +11,7 @@
 
 import { hashState } from '@wynding/engine';
 import type { CreepKind, Seed } from '@wynding/types';
-import { advanceCreep, cellCenterX, cellCenterY } from './movement';
+import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
 import { runCombat, emptyCreeps, safeAdd, type Impact } from './combat';
 import type { Grid } from './board';
 import { computeDistanceField, type DistanceField } from './pathfinding';
@@ -38,6 +38,13 @@ export const SIM_VERSION = 5;
 
 /** The game lifecycle phase (win/loss resolution + wave launch gating). */
 export type SimPhase = 'pre-wave' | 'active' | 'won' | 'lost';
+
+/** True once a match has resolved (won/lost). The single predicate for "terminal" — the
+ *  sim, replay, controller, and view-model all use it so a future terminal phase is a
+ *  one-line change here rather than a hunt across packages. */
+export function isTerminalPhase(phase: SimPhase): boolean {
+  return phase === 'won' || phase === 'lost';
+}
 
 /**
  * Structure-of-arrays creep storage — cheap to iterate and serialize. Movement is
@@ -190,6 +197,118 @@ export function createInitialState(seed: Seed | number, ruleset: CompiledRuleset
 }
 
 /**
+ * INPUT PHASE (Story 6): apply the per-tick player command log against evolving state,
+ * in array order, each command re-validated. Mutates `state.towers`/`bounty`/
+ * `nextEntityId`/`launchAtTick`. Returns a per-command **acceptance** array — `true`
+ * where a command produced a state change (a build placed, a sell refunded, an early
+ * call launched), `false` for a no-op (illegal, unaffordable, idempotent, malformed).
+ *
+ * This is the single authority for command legality: `step()` calls it (ignoring the
+ * result) and `previewInputs()` calls it on a clone (using the result), so a client's
+ * ghost/placement preview can never disagree with what a real tick will do.
+ */
+function applyInputPhase(
+  state: SimState,
+  ruleset: CompiledRuleset,
+  inputs: readonly SimInput[],
+): boolean[] {
+  const { board, tower, balance } = ruleset;
+  const { grid } = board;
+  const cost = tower.cost;
+  const accepted: boolean[] = [];
+
+  for (const input of inputs as readonly unknown[]) {
+    if (input === null || typeof input !== 'object') {
+      accepted.push(false);
+      continue;
+    }
+    const kind = (input as { kind?: unknown }).kind;
+
+    if (kind === 'placeTower') {
+      const anchor = (input as { anchor?: unknown }).anchor;
+      // Sim-owned cap: a build past MAX_TOWERS is a deterministic no-op, so the
+      // in-flight impact queue stays bounded for every step() caller.
+      if (
+        state.towers.id.length >= MAX_TOWERS &&
+        countValidTowers(grid, state.towers, cost) >= MAX_TOWERS
+      ) {
+        accepted.push(false);
+        continue;
+      }
+      const towerMask = materializeTowerMask(grid, state.towers, cost);
+      if (!canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty, cost)) {
+        accepted.push(false);
+        continue;
+      }
+      const cell = anchor as { col: number; row: number };
+      state.towers.id.push(state.nextEntityId++);
+      state.towers.col.push(cell.col);
+      state.towers.row.push(cell.row);
+      state.towers.spend.push(cost);
+      state.towers.targetId.push(0); // no lock
+      state.towers.nextFireTick.push(0); // no warm-up — may fire this tick
+      state.bounty -= cost;
+      accepted.push(true);
+    } else if (kind === 'sellTower') {
+      const towerId = (input as { tower?: unknown }).tower;
+      if (!Number.isSafeInteger(towerId)) {
+        accepted.push(false);
+        continue;
+      } // malformed id — no-op
+      if (!Number.isSafeInteger(state.bounty) || state.bounty < 0) {
+        accepted.push(false);
+        continue;
+      } // corrupt bounty — no-op
+      const index = findValidTowerIndex(grid, state.towers, towerId as number, cost);
+      if (index === -1) {
+        accepted.push(false);
+        continue;
+      } // unknown, corrupt, or shadowed tower — no-op
+      const refund = refundFor(
+        state.towers.spend[index] as number,
+        balance.refundNum,
+        balance.refundDen,
+      );
+      if (state.bounty > Number.MAX_SAFE_INTEGER - refund) {
+        accepted.push(false);
+        continue;
+      } // refund would overflow — no-op
+      state.bounty += refund;
+      // Compact via the same canonical rule that materialized the mask, dropping the
+      // sold row and carrying combat columns BY SOURCE ROW (a sell never resets a
+      // survivor's target lock or cooldown).
+      const src = state.towers;
+      const compacted: TowerArrays = emptyTowers();
+      forEachValidTower(grid, src, cost, (i, id, col, row) => {
+        if (i === index) return;
+        compacted.id.push(id);
+        compacted.col.push(col);
+        compacted.row.push(row);
+        compacted.spend.push(src.spend[i] as number);
+        compacted.targetId.push(safeCombatColumn(src.targetId[i]));
+        compacted.nextFireTick.push(safeCombatColumn(src.nextFireTick[i]));
+      });
+      state.towers = compacted;
+      accepted.push(true);
+    } else if (kind === 'callWaveEarly') {
+      // Launch now — but only while still pre-wave and not already pulled forward to
+      // this tick (idempotent: repeated calls this tick, or after launch, no-op). The
+      // early-call bonus (0 at M1) is credited once, on the transition.
+      if (state.phase === 'pre-wave' && state.launchAtTick > state.tick) {
+        state.launchAtTick = state.tick;
+        state.bounty = safeAdd(state.bounty, balance.earlyCallBonus);
+        accepted.push(true);
+      } else {
+        accepted.push(false);
+      }
+    } else {
+      accepted.push(false); // 'noop' and any unknown kind: nothing.
+    }
+  }
+  return accepted;
+}
+
+/**
  * Advance the simulation by exactly one tick. Mutates and returns `state`.
  * Deterministic: identical (state, ruleset, inputs) always yield identical output.
  *
@@ -222,7 +341,7 @@ export function step(
 
   // FREEZE ON TERMINAL: a resolved match no longer advances — trailing log/empty
   // ticks cannot change the final world-hash or score (re-derivation is stable).
-  if (state.phase === 'won' || state.phase === 'lost') return state;
+  if (isTerminalPhase(state.phase)) return state;
 
   const { board, tower, balance, scoring: _scoring, schedule, creepByKind } = ruleset;
   const { grid } = board;
@@ -230,69 +349,9 @@ export function step(
   const cost = tower.cost;
 
   // 1) INPUT PHASE — array order; each command re-validated against evolving state.
-  for (const input of inputs as readonly unknown[]) {
-    if (input === null || typeof input !== 'object') continue;
-    const kind = (input as { kind?: unknown }).kind;
-
-    if (kind === 'placeTower') {
-      const anchor = (input as { anchor?: unknown }).anchor;
-      // Sim-owned cap: a build past MAX_TOWERS is a deterministic no-op, so the
-      // in-flight impact queue stays bounded for every step() caller.
-      if (
-        state.towers.id.length >= MAX_TOWERS &&
-        countValidTowers(grid, state.towers, cost) >= MAX_TOWERS
-      ) {
-        continue;
-      }
-      const towerMask = materializeTowerMask(grid, state.towers, cost);
-      if (!canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty, cost)) continue;
-      const cell = anchor as { col: number; row: number };
-      state.towers.id.push(state.nextEntityId++);
-      state.towers.col.push(cell.col);
-      state.towers.row.push(cell.row);
-      state.towers.spend.push(cost);
-      state.towers.targetId.push(0); // no lock
-      state.towers.nextFireTick.push(0); // no warm-up — may fire this tick
-      state.bounty -= cost;
-    } else if (kind === 'sellTower') {
-      const towerId = (input as { tower?: unknown }).tower;
-      if (!Number.isSafeInteger(towerId)) continue; // malformed id — no-op
-      if (!Number.isSafeInteger(state.bounty) || state.bounty < 0) continue; // corrupt bounty — no-op
-      const index = findValidTowerIndex(grid, state.towers, towerId as number, cost);
-      if (index === -1) continue; // unknown, corrupt, or shadowed tower — no-op
-      const refund = refundFor(
-        state.towers.spend[index] as number,
-        balance.refundNum,
-        balance.refundDen,
-      );
-      if (state.bounty > Number.MAX_SAFE_INTEGER - refund) continue; // refund would overflow — no-op
-      state.bounty += refund;
-      // Compact via the same canonical rule that materialized the mask, dropping the
-      // sold row and carrying combat columns BY SOURCE ROW (a sell never resets a
-      // survivor's target lock or cooldown).
-      const src = state.towers;
-      const compacted: TowerArrays = emptyTowers();
-      forEachValidTower(grid, src, cost, (i, id, col, row) => {
-        if (i === index) return;
-        compacted.id.push(id);
-        compacted.col.push(col);
-        compacted.row.push(row);
-        compacted.spend.push(src.spend[i] as number);
-        compacted.targetId.push(safeCombatColumn(src.targetId[i]));
-        compacted.nextFireTick.push(safeCombatColumn(src.nextFireTick[i]));
-      });
-      state.towers = compacted;
-    } else if (kind === 'callWaveEarly') {
-      // Launch now — but only while still pre-wave and not already pulled forward to
-      // this tick (idempotent: repeated calls this tick, or after launch, no-op). The
-      // early-call bonus (0 at M1) is credited once, on the transition.
-      if (state.phase === 'pre-wave' && state.launchAtTick > state.tick) {
-        state.launchAtTick = state.tick;
-        state.bounty = safeAdd(state.bounty, balance.earlyCallBonus);
-      }
-    }
-    // 'noop' and any unknown kind: nothing.
-  }
+  //    Shared with previewInputs() so a client's placement preview cannot diverge from
+  //    the authoritative rule here (Story 6). step() ignores the acceptance result.
+  applyInputPhase(state, ruleset, inputs);
 
   // 2) WAVE PHASE — launch on the deadline (test-before-act: launches at tick ===
   //    launchAtTick, e.g. 500, not 499), then spawn every creep whose scheduled tick
@@ -441,6 +500,66 @@ export function deriveStars(state: SimState, ruleset: CompiledRuleset): number {
 export function hashSimState(state: SimState): string {
   return hashState(state);
 }
+
+/**
+ * Read-only placement/command preview (Story 6). **Deep-clones** `state` and runs ONLY
+ * the input phase (no tick advance, no wave/movement/combat) against the clone,
+ * returning per-command acceptance and the resulting preview state. The source `state`
+ * is **never mutated** — a client can test a pending command queue in issued order and
+ * know exactly which builds/sells `step()` will apply, with the ghost's validity derived
+ * from the same authority (shared `applyInputPhase`). Guaranteed: `hashSimState(state)`
+ * is byte-identical before and after this call.
+ *
+ * Mirrors step()'s FREEZE-ON-TERMINAL guard: on a resolved match (`won`/`lost`) step()
+ * no-ops every command, so the preview reports all commands rejected (and an unchanged
+ * clone) — otherwise a client would show an actionable Sell/refund on a finished game
+ * whose `sellTower` the real frozen `step()` silently drops.
+ */
+export function previewInputs(
+  state: SimState,
+  ruleset: CompiledRuleset,
+  commands: readonly SimInput[],
+): { accepted: boolean[]; preview: SimState } {
+  assertRuleset(ruleset);
+  const preview = structuredClone(state) as SimState;
+  coerceSoa(preview); // the clone gets the same totality guarantees as a real step()
+  // Mirror BOTH of step()'s pre-input guards so preview can never disagree with a real
+  // tick: the tick-totality no-op (a forged/near-overflow tick) and the terminal freeze.
+  const tickBroken =
+    !Number.isSafeInteger(preview.tick) ||
+    preview.tick < 0 ||
+    preview.tick + 1 > Number.MAX_SAFE_INTEGER;
+  if (tickBroken || isTerminalPhase(preview.phase)) {
+    return { accepted: commands.map(() => false), preview };
+  }
+  const accepted = applyInputPhase(preview, ruleset, commands);
+  return { accepted, preview };
+}
+
+/**
+ * The derived fixed-point point `{x,y}` of creep row `i`, or `null` if the row is
+ * non-canonical (a forged/ragged SoA). Presentation reads this for rendering — the sim
+ * stores a segment start + progress, never the point (Story 4) — reusing the movement
+ * derivation so the drawn position matches the simulated one exactly.
+ */
+export function projectCreep(
+  creeps: CreepArrays,
+  i: number,
+  bounds: { readonly width: number; readonly height: number },
+): { x: number; y: number } | null {
+  const geo = deriveValidCreepPosition(
+    creeps.fromX[i],
+    creeps.fromY[i],
+    creeps.headCol[i],
+    creeps.headRow[i],
+    creeps.progress[i],
+    bounds,
+  );
+  return geo === null ? null : { x: geo.point.x, y: geo.point.y };
+}
+
+/** Fixed-point centre of a cell — presentation projects towers/board from these. */
+export { cellCenterX, cellCenterY } from './movement';
 
 // Board model (grid + pathfinding, M1 Story 1).
 export { buildGrid, neighbors, GridError } from './board';
