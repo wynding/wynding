@@ -16,8 +16,11 @@ const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)),
 function parseTokens(source: string): Record<string, number> {
   const tokens: Record<string, number> = {};
   // A `--wy-*` declaration inside a media query or other selector must not keep the gate
-  // green if the root token is removed, so scan only the `:root { ... }` block.
-  const root = /:root\s*\{([^}]*)\}/s.exec(source)?.[1];
+  // green if the root token is removed, so scan only the `:root { ... }` block. Strip block
+  // comments first so a commented-out `--wy-*` declaration inside `:root` can't satisfy the
+  // gate either.
+  const uncommented = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const root = /:root\s*\{([^}]*)\}/s.exec(uncommented)?.[1];
   if (root === undefined) throw new Error('missing :root token block');
   const re = /--wy-([a-z-]+):\s*(#[0-9a-f]{6})/gi;
   let m: RegExpExecArray | null;
