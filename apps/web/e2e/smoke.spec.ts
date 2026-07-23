@@ -101,10 +101,11 @@ test('supports the pause / speed / call-wave controls and reaches a result', asy
   expect(dialogResults.violations, JSON.stringify(dialogResults.violations, null, 2)).toEqual([]);
 
   // Modal semantics: the board, the controls, and the title all carry `inert` while the
-  // dialog is open, and Tab never escapes into them. `body` is the browser-chrome transit
-  // state a bounded Tab walk can land on — identical to native `showModal()` navigation,
-  // which also hands focus to browser chrome rather than wrapping — so it's an allowed
-  // member of the "outside the dialog" set, not a containment failure.
+  // dialog is open, and Tab never escapes into them. `body` is the transit state (identical
+  // to native `showModal()`, which also hands focus to browser chrome between tabbables
+  // rather than wrapping directly) — so it's an allowed member of the "outside the dialog"
+  // set per press, but the count + re-entry assertions below prove focus keeps cycling back
+  // into the dialog rather than escaping permanently.
   await expect(page.locator('.wy-title')).toHaveAttribute('inert', '');
   await expect(page.locator('.wy-board')).toHaveAttribute('inert', '');
   await expect(page.locator('.wy-controls')).toHaveAttribute('inert', '');
@@ -112,6 +113,8 @@ test('supports the pause / speed / call-wave controls and reaches a result', asy
   const dialogTabbableCount = await results
     .locator('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
     .count();
+  let inDialogCount = 0;
+  let lastOnBody = false;
   for (let i = 0; i < 10; i++) {
     await page.keyboard.press('Tab');
     const inDialog = await page.evaluate(() => {
@@ -124,6 +127,23 @@ test('supports the pause / speed / call-wave controls and reaches a result', asy
       inDialog || onBody,
       `Tab press ${i + 1} landed outside the dialog and outside body`,
     ).toBe(true);
+    if (inDialog) inDialogCount++;
+    lastOnBody = onBody;
+  }
+  expect(
+    inDialogCount,
+    `only ${inDialogCount}/10 Tab presses landed in the dialog`,
+  ).toBeGreaterThanOrEqual(6);
+  if (lastOnBody) {
+    // Focus transited to body on the final press — confirm it re-enters the dialog rather
+    // than escaping permanently.
+    await page.keyboard.press('Tab');
+    const backInDialog = await page.evaluate(() => {
+      const el = document.activeElement;
+      const dialog = document.querySelector('[role="dialog"]');
+      return dialog !== null && el !== null && dialog.contains(el);
+    });
+    expect(backInDialog, 'focus did not re-enter the dialog after transiting body').toBe(true);
   }
   expect(dialogTabbableCount).toBeGreaterThan(0);
 

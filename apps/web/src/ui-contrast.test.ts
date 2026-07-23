@@ -15,9 +15,13 @@ const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)),
 
 function parseTokens(source: string): Record<string, number> {
   const tokens: Record<string, number> = {};
+  // A `--wy-*` declaration inside a media query or other selector must not keep the gate
+  // green if the root token is removed, so scan only the `:root { ... }` block.
+  const root = /:root\s*\{([^}]*)\}/s.exec(source)?.[1];
+  if (root === undefined) throw new Error('missing :root token block');
   const re = /--wy-([a-z-]+):\s*(#[0-9a-f]{6})/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) {
+  while ((m = re.exec(root)) !== null) {
     tokens[m[1]!.toLowerCase()] = parseInt(m[2]!.slice(1), 16);
   }
   return tokens;
