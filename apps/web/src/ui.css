@@ -9,6 +9,8 @@
   --wy-fg: #f4f7fb; /* ~15:1 on --wy-bg */
   --wy-accent: #4aa3ff; /* ~4.9:1 on --wy-bg */
   --wy-focus: #ffd166;
+  --wy-on-accent: #04121f;
+  --wy-board-bg: #12141c;
 }
 
 body {
@@ -31,7 +33,7 @@ body {
   max-width: 60rem;
   aspect-ratio: 28 / 24;
   margin: 0 auto;
-  background: #12141c;
+  background: var(--wy-board-bg);
   outline-offset: 2px;
 }
 
@@ -84,7 +86,7 @@ body {
 
 .wy-primary {
   background: var(--wy-accent);
-  color: #04121f;
+  color: var(--wy-on-accent);
   font-weight: 700;
 }
 

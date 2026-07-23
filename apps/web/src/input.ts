@@ -71,13 +71,27 @@ export function attachInput(
   // Click semantics: a commit requires the press to have STARTED on the board. Without
   // this, a drag that begins off-board (or on a HUD button) and releases over a valid cell
   // would build a tower — pointerup targets whatever is under the pointer at release.
-  let pressedOnBoard = false;
+  // Per-pointer (not a single shared flag) — otherwise finger A's press-on-board legitimises
+  // finger B's off-board-started release.
+  const pressOriginIds = new Set<number>();
+  // Touch pointers currently down, and touch ids voided by a concurrent second (or third+)
+  // contact — a fat-finger double contact or pinch must never read as preview-then-confirm.
+  const activeTouchIds = new Set<number>();
+  const voidedTouchIds = new Set<number>();
 
   const onPointerDown = (e: PointerEvent): void => {
-    pressedOnBoard = true;
+    pressOriginIds.add(e.pointerId);
+    if (e.pointerType === 'touch') {
+      if (activeTouchIds.size > 0) {
+        pendingTouch = null;
+        for (const id of activeTouchIds) voidedTouchIds.add(id);
+        voidedTouchIds.add(e.pointerId);
+      }
+      activeTouchIds.add(e.pointerId);
+    }
     // Capture the pointer so its pointerup fires on the board even if released off-board —
-    // otherwise a press that starts on the board and releases outside would leave
-    // `pressedOnBoard` stuck true and mis-classify a later off-board gesture as a click.
+    // otherwise a press that starts on the board and releases outside would leave the
+    // press-origin flag stuck true and mis-classify a later off-board gesture as a click.
     if (typeof boardEl.setPointerCapture === 'function') {
       try {
         boardEl.setPointerCapture(e.pointerId);
@@ -96,15 +110,41 @@ export function attachInput(
   };
 
   const onPointerUp = (e: PointerEvent): void => {
-    const startedOnBoard = pressedOnBoard;
-    pressedOnBoard = false;
-    if (e.button !== 0) return; // primary button / touch only — reject right/middle (>0) and
-    // the "no button changed" sentinel (-1, e.g. a stylus hover lift) so neither builds.
-    if (!startedOnBoard) return; // a drag that began off-board is not a click — ignore it
+    const startedOnBoard = pressOriginIds.has(e.pointerId);
+    pressOriginIds.delete(e.pointerId);
+    const isTouch = e.pointerType === 'touch';
+    let voided = false;
+    if (isTouch) {
+      voided = voidedTouchIds.has(e.pointerId);
+      activeTouchIds.delete(e.pointerId);
+      voidedTouchIds.delete(e.pointerId);
+    }
+    if (e.button !== 0) {
+      // primary button / touch only — reject right/middle (>0) and the "no button changed"
+      // sentinel (-1, e.g. a stylus hover lift); a touch release still clears any arming.
+      if (isTouch) pendingTouch = null;
+      return;
+    }
+    if (!startedOnBoard) {
+      // a press that did not start on the board is not a click — ignore it, but a touch
+      // release still ends any armed preview (uniform touch-tap rule: every release clears
+      // unless it explicitly confirms or arms).
+      if (isTouch) pendingTouch = null;
+      return;
+    }
+    if (isTouch && voided) {
+      // a release from a gesture voided by a concurrent second (or third+) touch contact
+      // neither aims, arms, nor confirms.
+      pendingTouch = null;
+      return;
+    }
     const cell = cellFromEvent(e.clientX, e.clientY);
-    if (cell === null) return;
+    if (cell === null) {
+      if (isTouch) pendingTouch = null; // off-board release clears an armed first tap
+      return;
+    }
     const res = controller.aimAt(cell.col, cell.row);
-    if (e.pointerType === 'touch') {
+    if (isTouch) {
       const t = now();
       const fresh =
         pendingTouch !== null &&
@@ -112,10 +152,12 @@ export function attachInput(
         pendingTouch.row === cell.row &&
         t - pendingTouch.at <= TOUCH_CONFIRM_MS;
       if (res.kind === 'ghost' && res.valid && fresh) {
-        controller.confirm();
+        controller.confirm(); // second tap on the same armed cell within the window
         pendingTouch = null;
+      } else if (res.kind === 'ghost' && res.valid) {
+        pendingTouch = { col: cell.col, row: cell.row, at: t }; // first tap arms the preview
       } else {
-        pendingTouch = { col: cell.col, row: cell.row, at: t }; // first tap previews
+        pendingTouch = null; // tower select, blocked, or invalid ghost — never arms
       }
     } else if (res.kind === 'ghost' && res.valid) {
       controller.confirm();
@@ -123,16 +165,27 @@ export function attachInput(
   };
 
   // A cancelled pointer (scroll, gesture, off-screen) clears the armed first tap and the
-  // press-origin flag so a subsequent stray release can't be treated as a click.
-  const onPointerCancel = (): void => {
+  // press-origin/touch-tracking state so a subsequent stray release can't be treated as a
+  // click or inherit a stale void.
+  const onPointerCancel = (e: PointerEvent): void => {
     pendingTouch = null;
-    pressedOnBoard = false;
+    pressOriginIds.delete(e.pointerId);
+    if (e.pointerType === 'touch') {
+      activeTouchIds.delete(e.pointerId);
+      voidedTouchIds.delete(e.pointerId);
+    }
   };
 
   const onKeyDown = (e: KeyboardEvent): void => {
     const action = keymap.actionFor(e.code);
     if (action === null) return;
     e.preventDefault();
+    // Auto-repeat only drives cursor movement (held arrow keeps moving); discrete actions
+    // (confirm/sell/callWave/pause/speed) are edge-triggered — a held key must not repeat
+    // them. preventDefault() still ran above, so the key stays consumed (no page scroll).
+    const isMovement =
+      action === 'up' || action === 'down' || action === 'left' || action === 'right';
+    if (e.repeat && !isMovement) return;
     switch (action) {
       case 'up':
         controller.moveCursor(0, -1);

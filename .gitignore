@@ -18,6 +18,10 @@ build/
 coverage/
 *.log
 
+# Playwright run artifacts
+test-results/
+**/test-results/
+
 # Env
 .env
 .env.local

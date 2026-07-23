@@ -3,8 +3,11 @@
 // stays a dumb consumer. Every semantic role also has a distinct SHAPE cue in the scene
 // (creep = polygon, tower = rounded square, valid ghost = solid outline, invalid = dashed
 // cross); colour is a redundant channel, never the sole carrier of meaning. Palettes are
-// drawn from Okabe–Ito and Paul Tol colourblind-safe sets and hold ≥ 4.5:1 contrast
-// against the dark board floor.
+// drawn from Okabe–Ito and Paul Tol colourblind-safe sets and hold the WCAG 1.4.11
+// non-text bar (≥ 3:1) against the dark board floor for every opaque-drawn cue, most
+// pairs well above; enforced permanently by `palette.test.ts`. `border` is a deliberate
+// quiet structural fill excluded from the gate (identity carried by geometry); `spark` is
+// exempt (transient fading FX, non-essential — see `palette.test.ts`).
 
 import type { ColourMode } from './types';
 

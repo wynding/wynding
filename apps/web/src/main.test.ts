@@ -122,6 +122,13 @@ describe('main — createApp wiring & frame loop', () => {
     for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
     expect(results.hidden).toBe(false);
 
+    // Both the title and the board are inert while the results dialog is modal — closing
+    // the title-inert gap left the h1 AT-navigable (heading navigation) behind the dialog.
+    const title = root.querySelector<HTMLElement>('.wy-title')!;
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+    expect(title.hasAttribute('inert')).toBe(true);
+    expect(board.hasAttribute('inert')).toBe(true);
+
     const resBtns = [...results.querySelectorAll<HTMLButtonElement>('.wy-btn')];
     const playAgain = resBtns[0]!;
     const verify = resBtns[1]!;
@@ -131,6 +138,8 @@ describe('main — createApp wiring & frame loop', () => {
     playAgain.click();
     expect(results.hidden).toBe(true);
     expect(fakeHandle.reset).toHaveBeenCalled();
+    expect(title.hasAttribute('inert')).toBe(false); // focus-restore: neither stays inert
+    expect(board.hasAttribute('inert')).toBe(false);
     app.destroy();
   });
 });

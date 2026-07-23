@@ -14,3 +14,10 @@ LICENSE
 
 # Gitignored reference material
 research/
+
+# Playwright run artifacts (untracked, machine-generated)
+**/test-results/
+
+# Locally-gitignored planning docs (see .git/info/exclude) — not part of the tracked repo
+PLAN.md
+PLAN-REVIEW-LOG.md

@@ -70,7 +70,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // target: while the results dialog is open the board is inert (can't be Tabbed onto), and
   // closing the dialog (Play again) returns focus to the board rather than dropping to body.
   const overlay = createOverlay(doc, onAction, settings, keymap, {
-    inertWhileModal: [board],
+    inertWhileModal: [title, board],
     restoreFocusOnClose: board,
   });
   root.append(title, board, overlay.root);
