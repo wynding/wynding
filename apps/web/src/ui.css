@@ -116,10 +116,16 @@ body {
 
 .wy-rebind li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.25rem 0;
+}
+
+.wy-rebind li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .wy-rebind-btn.wy-listening {

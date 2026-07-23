@@ -8,6 +8,10 @@ describe('settings — session-scoped a11y store', () => {
     expect(createSettings({ reducedMotion: true }).get().reducedMotion).toBe(true);
   });
 
+  it('seeds a valid colour mode from the initializer', () => {
+    expect(createSettings({ colourMode: 'protan' }).get().colourMode).toBe('protan');
+  });
+
   it('sets a valid colour mode and notifies subscribers, but no-ops an unchanged/invalid one', () => {
     const s = createSettings();
     const seen: string[] = [];

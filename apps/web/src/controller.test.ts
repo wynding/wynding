@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { validate } from '@wynding/replay';
+import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
 import { m1Ruleset } from '@wynding/content';
-import { createController, type Controller } from './controller';
+import type { SimInput } from '@wynding/sim';
+import { createController, enqueueVerdict, type Controller } from './controller';
 
 const TICK = 50; // MS_PER_TICK
 
@@ -202,6 +203,83 @@ describe('controller — same-tick & paused ordering (determinism hazards)', () 
     tick(c); // first live tick flushes the whole buffer, in order
     expect(c.frame().curVm.towers).toHaveLength(2);
     expect(c.hud().phase).toBe('active');
+  });
+});
+
+describe('controller — paused buffer-flood dedup + cap (P1)', () => {
+  it('mashing callWaveEarly while paused records exactly one callWaveEarly and verifies', () => {
+    const c = createController(1);
+    c.pause();
+    for (let i = 0; i < 70; i++) c.callWaveEarly();
+    c.resume();
+    tick(c); // the first live tick flushes the buffer
+    const replay = c.buildReplay();
+    const flushed = replay.tickInputs[replay.tickInputs.length - 1] as readonly SimInput[];
+    expect(flushed.filter((i) => i.kind === 'callWaveEarly')).toHaveLength(1);
+    expect(c.verifyRun().ok).toBe(true);
+  });
+
+  it('mashing sellSelected on one tower dedupes; a second selected tower still queues distinctly', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    c.aimAt(10, 3);
+    c.confirm();
+    tick(c); // both towers exist
+    c.pause();
+    c.aimAt(3, 3); // select the first tower
+    c.sellSelected();
+    c.sellSelected();
+    c.sellSelected(); // ×3 while paused — must dedupe to one
+    c.aimAt(10, 3); // select the second tower
+    c.sellSelected();
+    c.resume();
+    tick(c); // flush
+    const replay = c.buildReplay();
+    const flushed = replay.tickInputs[replay.tickInputs.length - 1] as readonly SimInput[];
+    const sells = flushed.filter((i) => i.kind === 'sellTower');
+    expect(sells).toHaveLength(2);
+    const ids = new Set(sells.map((s) => (s as { tower: number }).tower));
+    expect(ids.size).toBe(2); // distinct tower ids, not deduped away
+  });
+});
+
+describe('controller — enqueueVerdict classifier (unit)', () => {
+  it('a duplicate callWaveEarly is flagged, not queued', () => {
+    const buffer: SimInput[] = [{ kind: 'callWaveEarly' }];
+    expect(enqueueVerdict(buffer, { kind: 'callWaveEarly' })).toBe('duplicate');
+  });
+
+  it('a same-id sellTower is a duplicate; a different-id sellTower still queues', () => {
+    const buffer: SimInput[] = [{ kind: 'sellTower', tower: 1 }];
+    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 1 })).toBe('duplicate');
+    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 2 })).toBe('queue');
+  });
+
+  it('a same-anchor placeTower is a duplicate; a different-anchor placeTower still queues', () => {
+    const buffer: SimInput[] = [{ kind: 'placeTower', anchor: { col: 3, row: 3 } }];
+    expect(enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 3, row: 3 } })).toBe(
+      'duplicate',
+    );
+    expect(enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 4, row: 3 } })).toBe(
+      'queue',
+    );
+  });
+
+  it('a buffer at the cap without an equivalent command is full', () => {
+    const buffer: SimInput[] = Array.from({ length: MAX_INPUTS_PER_TICK }, (_, i): SimInput => ({
+      kind: 'sellTower',
+      tower: i,
+    }));
+    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: MAX_INPUTS_PER_TICK })).toBe('full');
+  });
+
+  it('duplicate wins over full — a full buffer containing the equivalent command is duplicate', () => {
+    const buffer: SimInput[] = Array.from({ length: MAX_INPUTS_PER_TICK }, (_, i): SimInput => ({
+      kind: 'sellTower',
+      tower: i,
+    }));
+    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 0 })).toBe('duplicate');
   });
 });
 

@@ -66,7 +66,7 @@ const ABSOLUTE_MAX_CEILING = MAX_MATCH_TICKS;
 /** Max ticks in a replay log (30 min at 20 Hz) — the log-length cap, same magnitude. */
 const MAX_TICKS = MAX_MATCH_TICKS;
 /** Max inputs applied on a single tick — far above any legitimate command burst. */
-const MAX_INPUTS_PER_TICK = 64;
+export const MAX_INPUTS_PER_TICK = 64;
 /**
  * Max tower commands (placeTower/sellTower) across the whole match. Each placeTower
  * that reaches the maze-invariant check runs a full grid-wide Dijkstra, and a rejected

@@ -36,7 +36,7 @@ import {
   type GhostVM,
   type SelectionVM,
 } from '@wynding/render';
-import { validate, currentRulesetHash, type Replay } from '@wynding/replay';
+import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 
 export type Speed = 1 | 2;
@@ -115,6 +115,50 @@ export interface Controller {
 }
 
 const RANGE_FP = (r: CompiledRuleset): number => r.tower.rangeFp;
+
+/**
+ * Classify a candidate command against the CURRENT tick's buffer, before it is queued.
+ * Evaluation order matters: duplicate detection runs FIRST, the cap SECOND — a duplicate
+ * in an already-full buffer is still `'duplicate'`, because that intent already *is* in
+ * the buffer (idempotent success must survive a full buffer).
+ *  - `'duplicate'`: the buffer already holds an equivalent command — any `callWaveEarly`
+ *    for a `callWaveEarly` cmd; a `sellTower` with the SAME `tower` id (different ids
+ *    still queue — selling several towers in one paused tick is legit gameplay); a
+ *    `placeTower` with the same `anchor.col`/`anchor.row` (defense-in-depth; `confirm()`'s
+ *    post-queue re-aim already prevents this in practice).
+ *  - `'full'`: not a duplicate, and the buffer is already at `MAX_INPUTS_PER_TICK` (the
+ *    replay contract's exact per-tick limit — imported, not duplicated, so the two can
+ *    never drift). This is an intentional product limit, not a bug surface: it exists so
+ *    no recorded tick can ever exceed the replay contract even via many *distinct*
+ *    commands, and it is unreachable through normal M1 play (board geometry + bounty
+ *    bound distinct legal commands well under 64) — refusal is silent by design, no UI
+ *    error state.
+ *  - `'queue'`: otherwise — the command should be pushed.
+ */
+export function enqueueVerdict(
+  buffer: readonly SimInput[],
+  cmd: SimInput,
+): 'queue' | 'duplicate' | 'full' {
+  const duplicate = buffer.some((existing) => {
+    switch (cmd.kind) {
+      case 'callWaveEarly':
+        return existing.kind === 'callWaveEarly';
+      case 'sellTower':
+        return existing.kind === 'sellTower' && existing.tower === cmd.tower;
+      case 'placeTower':
+        return (
+          existing.kind === 'placeTower' &&
+          existing.anchor.col === cmd.anchor.col &&
+          existing.anchor.row === cmd.anchor.row
+        );
+      default:
+        return false;
+    }
+  });
+  if (duplicate) return 'duplicate';
+  if (buffer.length >= MAX_INPUTS_PER_TICK) return 'full';
+  return 'queue';
+}
 
 /** Create the game controller for `seed`. Content/ruleset are fixed (M1 single board). */
 export function createController(seed: number): Controller {
@@ -329,7 +373,10 @@ export function createController(seed: number): Controller {
       // (which may resolve to a build ghost or a tower selection), not a no-op.
       if (ghost === null && selection === null) aimAt(cur.col, cur.row);
       if (ghost === null || !ghost.valid) return false;
-      buffer.push({ kind: 'placeTower', anchor: { col: ghost.col, row: ghost.row } });
+      const cmd: SimInput = { kind: 'placeTower', anchor: { col: ghost.col, row: ghost.row } };
+      const verdict = enqueueVerdict(buffer, cmd);
+      if (verdict === 'full') return false;
+      if (verdict === 'queue') buffer.push(cmd);
       // Re-evaluate the ghost against the now-larger buffer (the just-queued build may
       // make this same cell invalid for a second placement while paused).
       aimAt(ghost.col, ghost.row);
@@ -337,7 +384,10 @@ export function createController(seed: number): Controller {
     },
     sellSelected(): boolean {
       if (selection === null) return false;
-      buffer.push({ kind: 'sellTower', tower: selection.id });
+      const cmd: SimInput = { kind: 'sellTower', tower: selection.id };
+      const verdict = enqueueVerdict(buffer, cmd);
+      if (verdict === 'full') return false;
+      if (verdict === 'queue') buffer.push(cmd);
       return true;
     },
     refundForSelection(): number {
@@ -358,7 +408,10 @@ export function createController(seed: number): Controller {
     },
     callWaveEarly(): boolean {
       if (state.phase !== 'pre-wave') return false;
-      buffer.push({ kind: 'callWaveEarly' });
+      const cmd: SimInput = { kind: 'callWaveEarly' };
+      const verdict = enqueueVerdict(buffer, cmd);
+      if (verdict === 'full') return false;
+      if (verdict === 'queue') buffer.push(cmd);
       return true;
     },
     startRun(nextSeed: number): void {

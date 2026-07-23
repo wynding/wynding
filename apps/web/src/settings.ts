@@ -23,13 +23,16 @@ export interface SettingsStore {
   subscribe(listener: SettingsListener): () => void;
 }
 
-const VALID_MODES: ReadonlySet<string> = new Set(COLOUR_MODES);
+const VALID_MODES: ReadonlySet<ColourMode> = new Set(COLOUR_MODES);
+
+const isColourMode = (value: unknown): value is ColourMode =>
+  typeof value === 'string' && VALID_MODES.has(value as ColourMode);
 
 /** Create a fresh session-scoped settings store. `initial` seeds it (e.g. from a media
  *  query for `prefers-reduced-motion` at boot — a read, not a persisted write). */
 export function createSettings(initial?: Partial<Settings>): SettingsStore {
   const state: Settings = {
-    colourMode: VALID_MODES.has(initial?.colourMode ?? '') ? initial!.colourMode! : 'default',
+    colourMode: isColourMode(initial?.colourMode) ? initial.colourMode : 'default',
     // Coerce to a REAL boolean (not just `?? false`): a future untyped StorageDriver seed
     // could pass a truthy non-boolean, which would take wrong scene branches and break the
     // `on === state.reducedMotion` no-op guard in setReducedMotion.
