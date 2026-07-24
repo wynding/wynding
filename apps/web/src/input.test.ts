@@ -520,6 +520,28 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     expect(c.frame().ghost).toBeNull();
   });
 
+  it('a drag release over the board does NOT arm click-suppression — a genuine Card click within the expiry window is not swallowed', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [card], c, createKeymap(), {
+      getRect: () => RECT,
+      elementFromPoint: () => board, // the release point resolves to the board, not the Card
+    });
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses threshold, armed
+    card.dispatchEvent(ptr('pointerup', 35, 105, 'touch')); // released over the board — no Card-targeted synthetic click is coming
+    expect(c.uiState().armed).toBeNull(); // placed as usual, unrelated to suppression
+
+    // A genuine mouse click on the Card, well within SUPPRESS_CLICK_EXPIRY_MS, must reach
+    // it unsuppressed — `onDocumentClickCapture` only preventDefault()s/stopPropagation()s
+    // a click it's actively suppressing, so an unsuppressed click's `defaultPrevented`
+    // stays false and it's free to arm (via overlay.ts's own click-toggle listener, not
+    // wired in this input-only test harness).
+    const genuineClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    card.dispatchEvent(genuineClick);
+    expect(genuineClick.defaultPrevented).toBe(false);
+  });
+
   it('a second concurrent contact voids a Card gesture regardless of origin (cross-origin multi-touch)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
@@ -532,6 +554,20 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     expect(c.uiState().armed).toBeNull(); // both voided — no arm, no build
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(0);
+  });
+
+  it('a Card drag already past the threshold that gets voided mid-flight (by a concurrent second contact) disarms and clears the ghost on release — the SAME cancellation contract as pointercancel', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch', 0, 1)); // finger A: Card press
+    card.dispatchEvent(ptr('pointermove', 35, 105, 'touch', 0, 1)); // crosses threshold: armed + ghost
+    expect(c.uiState().armed).toBe('basic');
+    expect(c.frame().ghost).not.toBeNull();
+    board.dispatchEvent(ptr('pointerdown', 50, 50, 'touch', 0, 2)); // finger B: concurrent contact voids A
+    card.dispatchEvent(ptr('pointerup', 35, 105, 'touch', 0, 1)); // A releases — voided, was dragging
+    expect(c.uiState().armed).toBeNull(); // disarmed, not left invisibly armed
+    expect(c.frame().ghost).toBeNull(); // cleared
   });
 });
 

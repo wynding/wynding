@@ -533,7 +533,12 @@ export function createOverlay(
       primaryBtn.hidden = view.ui.started;
       card.root.setAttribute('aria-pressed', String(view.ui.armed !== null));
       renderPanel(view.ui, view.refund);
-      live.textContent = outcomeMessage(view.ui.lastOutcome);
+      // The HUD updates every tick, but the outcome message only changes on an actual
+      // placement/arm/sell event — writing `textContent` unconditionally re-announces the
+      // SAME stale message to assistive tech on every tick of a wave. Guard the write so
+      // it only fires when the computed message actually changed.
+      const nextLive = outcomeMessage(view.ui.lastOutcome);
+      if (live.textContent !== nextLive) live.textContent = nextLive;
     },
     showResults(hud: HudVM): void {
       cancelCapture?.(); // a match can end mid-rebind — drop the armed capture so the first

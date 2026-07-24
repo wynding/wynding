@@ -786,6 +786,11 @@ export function createController(seed: number): Controller {
     pause: doPause,
     resume: doResume,
     togglePause(): void {
+      // Pre-start (PLAN.md P4), the Pause control is hidden, but the keyboard 'pause'
+      // action still routes here — a no-op while `!started` (matching the pattern below:
+      // resume()/speed can't un-hold either) so it can't leave `paused` invisibly true
+      // and make the following Start press look dead once the Pause button appears.
+      if (!started) return;
       if (paused) doResume();
       else doPause();
     },

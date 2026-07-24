@@ -276,6 +276,37 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(render({ kind: 'sold', refund: 12 })).toBe('Tower sold. Refunded 12 Bounty.');
   });
 
+  it('the live region is NOT re-written when the outcome message is unchanged (no stale re-announcement every tick)', () => {
+    const { overlay, live } = setup();
+    // Spy on the `textContent` SETTER (own-property override shadows the inherited
+    // Node.prototype accessor for this one element) so the assertion is about whether the
+    // write happened at all, not just about the value it would have written.
+    let writeCount = 0;
+    const native = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent')!;
+    Object.defineProperty(live, 'textContent', {
+      configurable: true,
+      get(): string | null {
+        return native.get!.call(live) as string | null;
+      },
+      set(v: string | null) {
+        writeCount++;
+        native.set!.call(live, v);
+      },
+    });
+    const frame = {
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ lastOutcome: { kind: 'placed' as const } }),
+      refund: 0,
+    };
+    overlay.update(frame); // first render: establishes the message, one write
+    expect(writeCount).toBe(1);
+    writeCount = 0;
+    overlay.update(frame); // the HUD's every-tick update, SAME lastOutcome — no re-write
+    expect(writeCount).toBe(0);
+  });
+
   it('arming via the Card emits armTower', () => {
     const { actions, card } = setup();
     card.root.click();

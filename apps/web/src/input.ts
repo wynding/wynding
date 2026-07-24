@@ -201,6 +201,14 @@ export function attachInput(
     return el !== null && el.closest(CHROME_SELECTOR) !== null;
   };
 
+  /** Is `clientX,clientY` geometrically over `target` (or one of its descendants)? Used to
+   *  gate the Card-drag click-suppression arm (below) to releases that will actually
+   *  produce a Card-targeted synthetic click — a release over the board never does. */
+  const isOverElement = (clientX: number, clientY: number, target: HTMLElement): boolean => {
+    const el = elementFromPoint(clientX, clientY);
+    return el !== null && (el === target || target.contains(el));
+  };
+
   const capture = (el: HTMLElement, pointerId: number): void => {
     if (typeof el.setPointerCapture === 'function') {
       try {
@@ -470,7 +478,15 @@ export function attachInput(
       activeIds.delete(e.pointerId);
       voidedIds.delete(e.pointerId);
       if (press === undefined || press.origin !== 'card') return;
-      if (voided) return;
+      if (voided) {
+        // Voided by a concurrent second contact (PLAN.md P3): route through the SAME
+        // cancellation contract as pointercancel — a pre-threshold press never touched
+        // `armed`, so `cancelPress` is a no-op beyond releasing capture; a press that had
+        // already crossed the drag threshold (armed, maybe showing a ghost) disarms and
+        // clears the ghost, exactly like a genuine pointercancel would.
+        cancelPress(e.pointerId, press);
+        return;
+      }
       if (!press.dragging) {
         // Tap: toggle armed per the P2 table, and suppress the subsequent synthetic click
         // so it doesn't double-toggle.
@@ -482,7 +498,13 @@ export function attachInput(
       // off-board, over Shell chrome, or an invalid cell cancels AND disarms (the drag was
       // one gesture — aborting returns to neutral, unlike the board-native drag, which
       // keeps a rejected placement armed).
-      armClickSuppression();
+      //
+      // Arm the synthetic-click suppression ONLY when the release lands back over the
+      // Card itself — a release over the board (the common case: the drag moved the
+      // pointer off the Card) never produces a Card-targeted synthetic click, so arming
+      // unconditionally left a suppression pending that could swallow the NEXT genuine
+      // Card click within SUPPRESS_CLICK_EXPIRY_MS on hybrid touch+mouse devices.
+      if (isOverElement(e.clientX, e.clientY, cardEl)) armClickSuppression();
       if (isOverChrome(e.clientX, e.clientY) || !isWithinBoardRect(e.clientX, e.clientY)) {
         disarmAndClearGhost();
         return;

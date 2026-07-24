@@ -973,14 +973,24 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     c.resume(); // never paused in the first place — still held
     tick(c, 3);
     expect(c.frame().curVm.tick).toBe(0);
-    c.togglePause(); // → paused
-    c.togglePause(); // → resumed — still held regardless
+    c.togglePause(); // no-op while held (see the dedicated no-invisible-pause test)
+    c.togglePause(); // still a no-op — held regardless
     tick(c, 3);
     expect(c.frame().curVm.tick).toBe(0);
     c.cycleSpeed();
     tick(c, 3);
     expect(c.frame().curVm.tick).toBe(0);
     expect(c.uiState().started).toBe(false);
+  });
+
+  it('togglePause() is a no-op while held — no invisible pause that would make the following start() look dead', () => {
+    const c = createController(1);
+    c.togglePause(); // pre-start: the Pause control is hidden, but the keyboard route
+    // still reaches this — must not set `paused` invisibly
+    expect(c.isPaused()).toBe(false);
+    c.start();
+    tick(c, 3);
+    expect(c.frame().curVm.tick).toBeGreaterThan(0); // ticks advance immediately — not stuck paused
   });
 
   it('start() flips started and begins stepping; Pending pre-start builds commit on the first stepped tick, and wave 1 launches that tick', () => {
