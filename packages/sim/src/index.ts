@@ -12,7 +12,7 @@
 import { hashState } from '@wynding/engine';
 import type { CreepKind, Seed } from '@wynding/types';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
-import { runCombat, emptyCreeps, safeAdd, type Impact } from './combat';
+import { runCombat, emptyCreeps, safeAdd, type Impact, type StepEvents } from './combat';
 import type { Grid } from './board';
 import { computeDistanceField, type DistanceField } from './pathfinding';
 import {
@@ -172,6 +172,40 @@ function coerceSoa(state: SimState): void {
   if (!Number.isSafeInteger(state.spawnCursor) || state.spawnCursor < 0) state.spawnCursor = 0;
   if (!Number.isSafeInteger(state.cumulativeKillBounty)) state.cumulativeKillBounty = 0;
   if (!Number.isSafeInteger(state.leakedCount)) state.leakedCount = 0;
+
+  // nextEntityId totality: a restored/forged state may carry a missing, non-integer,
+  // zero/negative, or stale (colliding) counter. Scan the (already-coerced) id columns
+  // for the highest positive safe-integer id present — a purely numeric conservative
+  // scan, no semantic liveness check, no ruleset needed. Repair whenever the counter is
+  // not a positive safe integer strictly greater than that maximum.
+  let maxId = 0;
+  for (const id of state.creeps.id) {
+    if (Number.isSafeInteger(id) && (id as number) > 0 && (id as number) > maxId)
+      maxId = id as number;
+  }
+  for (const id of state.towers.id) {
+    if (Number.isSafeInteger(id) && (id as number) > 0 && (id as number) > maxId)
+      maxId = id as number;
+  }
+  if (
+    !Number.isSafeInteger(state.nextEntityId) ||
+    state.nextEntityId <= 0 ||
+    state.nextEntityId <= maxId
+  ) {
+    state.nextEntityId = maxId < Number.MAX_SAFE_INTEGER ? maxId + 1 : Number.MAX_SAFE_INTEGER;
+  }
+}
+
+/**
+ * Saturating entity-id allocator (ADR 0006 §4 totality): shared by tower and creep
+ * spawn allocation. Fails (returns `null`, does not increment `nextEntityId`) once the
+ * counter has reached the exhausted sentinel `Number.MAX_SAFE_INTEGER`, so that
+ * sentinel value is itself never handed out as a live id. A failed allocation performs
+ * no partial mutation — callers must not push any column before calling this.
+ */
+function allocEntityId(state: SimState): number | null {
+  if (state.nextEntityId >= Number.MAX_SAFE_INTEGER) return null;
+  return state.nextEntityId++;
 }
 
 /** Build a fresh match state for a given seed against a compiled ruleset. Reads the
@@ -241,7 +275,12 @@ function applyInputPhase(
         continue;
       }
       const cell = anchor as { col: number; row: number };
-      state.towers.id.push(state.nextEntityId++);
+      const newTowerId = allocEntityId(state);
+      if (newTowerId === null) {
+        accepted.push(false); // exhausted entity-id space — no partial mutation
+        continue;
+      }
+      state.towers.id.push(newTowerId);
       state.towers.col.push(cell.col);
       state.towers.row.push(cell.row);
       state.towers.spend.push(cost);
@@ -320,11 +359,16 @@ function applyInputPhase(
  * schedule is exhausted and no creep remains) → guarded `tick++`. Once terminal
  * (`won`/`lost`) `step` is a total NO-OP, so a replay padded past resolution can
  * never change the final hash or score. `step` never throws on forged input.
+ *
+ * `events` (optional, #31): an append-only `StepEvents` collector the caller owns —
+ * NOT part of `SimState`/the world hash. A terminal or no-op early-return path (below)
+ * appends nothing, so a pre-populated collector passed through either is unchanged.
  */
 export function step(
   state: SimState,
   ruleset: CompiledRuleset,
   inputs: readonly SimInput[],
+  events?: StepEvents,
 ): SimState {
   assertRuleset(ruleset); // memoized; rejects a forged/uncompiled ruleset loudly, once
   coerceSoa(state); // totality: never dereference a missing SoA container/column/field
@@ -368,15 +412,21 @@ export function step(
       const kindOf: CreepKind = entry.kind;
       const def = creepByKind[kindOf];
       if (def !== undefined) {
-        state.creeps.id.push(state.nextEntityId++);
-        state.creeps.hp.push(def.hp);
-        state.creeps.bounty.push(def.bounty);
-        state.creeps.speed.push(def.speedFp);
-        state.creeps.fromX.push(cellCenterX(entrance.col)); // rest on the entrance centre
-        state.creeps.fromY.push(cellCenterY(entrance.row));
-        state.creeps.headCol.push(entrance.col); // sentinel — heading derived at movement
-        state.creeps.headRow.push(entrance.row);
-        state.creeps.progress.push(0);
+        const newCreepId = allocEntityId(state);
+        // Exhausted entity-id space: the scheduled spawn is still consumed (cursor
+        // advances below) but no creep columns or economy are mutated — guarantees
+        // loop termination and never retries the same cursor.
+        if (newCreepId !== null) {
+          state.creeps.id.push(newCreepId);
+          state.creeps.hp.push(def.hp);
+          state.creeps.bounty.push(def.bounty);
+          state.creeps.speed.push(def.speedFp);
+          state.creeps.fromX.push(cellCenterX(entrance.col)); // rest on the entrance centre
+          state.creeps.fromY.push(cellCenterY(entrance.row));
+          state.creeps.headCol.push(entrance.col); // sentinel — heading derived at movement
+          state.creeps.headRow.push(entrance.row);
+          state.creeps.progress.push(0);
+        }
       }
       state.spawnCursor++;
     }
@@ -448,6 +498,7 @@ export function step(
     field,
     grid,
     tower,
+    events,
   );
   state.creeps = combat.creeps;
   state.impacts = combat.impacts;
@@ -568,6 +619,9 @@ export { computeDistanceField, isReachable, shortestPath } from './pathfinding';
 export type { DistanceField } from './pathfinding';
 export { loadBoard } from './context';
 export type { BoardContext } from './context';
+// Landed-impact events (M1 Story 8, #31): an optional out-param on `step()` — never
+// part of `SimState`, never hash-relevant.
+export type { StepEvents } from './combat';
 // Ruleset bundle (M1 Story 5): compilation, the content digest, and the boundary guard.
 export {
   compileRuleset,

@@ -10,7 +10,7 @@ import {
   type SimState,
   type CompiledRuleset,
 } from '@wynding/sim';
-import type { RenderVM, HudVM, CreepVM, TowerVM, ImpactVM } from './types';
+import type { RenderVM, HudVM, CreepVM, TowerVM } from './types';
 import { clamp01 } from './num';
 
 // The health-fraction denominator is a pure function of the (immutable) ruleset, but
@@ -36,7 +36,7 @@ function maxCreepHp(ruleset: CompiledRuleset): number {
   return max;
 }
 
-/** Project every live creep/tower/impact of `state` into a render snapshot. */
+/** Project every live creep/tower of `state` into a render snapshot. */
 export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): RenderVM {
   const grid = ruleset.board.grid;
   const denom = maxCreepHp(ruleset);
@@ -59,12 +59,7 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
     });
   }
 
-  const impacts: ImpactVM[] = [];
-  for (const im of state.impacts) {
-    impacts.push({ targetId: im.targetId, impactTick: im.impactTick });
-  }
-
-  return { tick: state.tick, phase: state.phase, creeps, towers, impacts };
+  return { tick: state.tick, phase: state.phase, creeps, towers };
 }
 
 /** Derive the HUD fields (countdown in whole seconds, score, stars) from `state`. */

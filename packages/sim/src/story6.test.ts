@@ -99,15 +99,18 @@ describe('previewInputs — read-only placement preview', () => {
 });
 
 describe('projectCreep — derived render point', () => {
-  it('returns the entrance-centre point for a freshly spawned creep', () => {
+  it("returns the launched creep's point one speed-step past the entrance centre (#47)", () => {
     const ruleset = testRuleset(OPEN, { waveCount: 1 });
     const s = toActive(ruleset);
     expect(s.creeps.id.length).toBeGreaterThan(0);
     const grid = ruleset.board.grid;
     const p = projectCreep(s.creeps, 0, grid);
-    expect(p).not.toBeNull();
-    expect(Number.isSafeInteger(p!.x)).toBe(true);
-    expect(Number.isSafeInteger(p!.y)).toBe(true);
+    // OPEN's entrance (0,2) → centre (128,640); heading east (the OPEN geometry's only
+    // direction from the entrance), one tick's speed budget travelled on x, centre held
+    // on y — the exact point, not merely "some safe-integer point".
+    const speedFp = ruleset.creepByKind.normal?.speedFp;
+    expect(speedFp).toBeDefined();
+    expect(p).toEqual({ x: 0 * 256 + 128 + (speedFp as number), y: 2 * 256 + 128 });
   });
 
   it('returns null for a non-canonical (ragged) creep row', () => {

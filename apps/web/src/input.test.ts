@@ -303,4 +303,27 @@ describe('input — pointer (mouse hover/click & touch two-tap)', () => {
     board.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' })); // detached → ignored
     expect(c.isPaused()).toBe(false);
   });
+
+  it('reset() clears an armed two-tap — a same-cell tap within the window re-arms instead of building (#40)', () => {
+    const c = createController(1);
+    const handle = attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    tap(55, 55, 'touch'); // first tap → arms
+    handle.reset();
+    tap(55, 55, 'touch'); // would have been the confirming second tap — but arming was cleared
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // only re-armed, no build
+    tap(55, 55, 'touch'); // a genuine second tap now confirms normally
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+  });
+
+  it('reset() clears press-origin and concurrent-touch tracking (smoke)', () => {
+    const c = createController(1);
+    const handle = attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    board.dispatchEvent(ptr('pointerdown', 55, 55, 'touch', 0, 1)); // press started on board
+    handle.reset();
+    board.dispatchEvent(ptr('pointerup', 55, 55, 'touch', 0, 1)); // reset cleared the press origin
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // the release is not treated as a click
+  });
 });

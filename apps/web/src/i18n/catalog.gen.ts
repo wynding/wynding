@@ -41,8 +41,8 @@ export const EN = {
   "results.won": "You held the line!",
   "results.lost": "The creeps broke through.",
   "results.summary": "Score {score} — {stars} of 3 stars",
-  "verify.ok": "Verified: replay re-simulated to the same score.",
-  "verify.mismatch": "Verification mismatch: the replay re-simulated to a different score.",
+  "verify.ok": "Verified: replay re-simulated to the same outcome.",
+  "verify.mismatch": "Verification mismatch: the replay re-simulated to a different outcome.",
   "verify.fail": "Verification failed: {reason}",
 } as const;
 

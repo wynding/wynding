@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RenderHandle } from '@wynding/render';
+import type { InputHandle } from './input';
 
 // The Phaser scene is WebGL — mock the subpath so it never loads under jsdom. This is the
 // one module excluded from coverage; here we only need a fake handle. The factory is
@@ -10,7 +11,23 @@ vi.mock('@wynding/render/scene', () => {
   return { mount: vi.fn(() => handle) };
 });
 
+// Wraps the REAL `attachInput` (every other test in this file needs its actual gesture
+// behavior — keyboard routing, etc.) but spies on the returned handle's `reset()`, so the
+// #40 lifecycle test below can assert `main.ts` calls it on Play-again without faking
+// away real behavior for the rest of the suite.
+vi.mock('./input', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./input')>();
+  return {
+    ...actual,
+    attachInput: vi.fn((...args: Parameters<typeof actual.attachInput>): InputHandle => {
+      const handle = actual.attachInput(...args);
+      return { destroy: handle.destroy, reset: vi.fn(handle.reset) };
+    }),
+  };
+});
+
 import { mount as mountMock } from '@wynding/render/scene';
+import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
 
 // The shared fake handle the mocked scene returns (same object every mount call).
@@ -140,6 +157,88 @@ describe('main — createApp wiring & frame loop', () => {
     expect(fakeHandle.reset).toHaveBeenCalled();
     expect(title.hasAttribute('inert')).toBe(false); // focus-restore: neither stays inert
     expect(board.hasAttribute('inert')).toBe(false);
+    app.destroy();
+  });
+});
+
+describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
+  it('two same-tick pending economy changes while paused produce two HUD updates', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+    });
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+    const key = (code: string): void => {
+      board.dispatchEvent(new KeyboardEvent('keydown', { code, cancelable: true }));
+    };
+    const moveTo = (dCol: number, dRow: number): void => {
+      const colKey = dCol < 0 ? 'ArrowLeft' : 'ArrowRight';
+      for (let i = 0; i < Math.abs(dCol); i++) key(colKey);
+      const rowKey = dRow < 0 ? 'ArrowUp' : 'ArrowDown';
+      for (let i = 0; i < Math.abs(dRow); i++) key(rowKey);
+    };
+
+    // Build one tower at (3,3) while running, so there is something to sell later.
+    moveTo(3, 3 - 11); // entrance row 11 → row 3
+    key('Enter'); // confirm the build
+    sched.frame((clock += 16)); // flush the committed tick
+
+    const hudText = (): string => root.querySelector('.wy-hud')!.textContent ?? '';
+    const pauseBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-controls .wy-btn')][0]!;
+    pauseBtn.click(); // pause
+    sched.frame((clock += 16));
+
+    key('Enter'); // select the tower at (3,3)
+    key('KeyX'); // sell it — one pending economy change
+    sched.frame((clock += 16));
+    const afterFirstSell = hudText();
+
+    moveTo(7, 0); // (3,3) → (10,3), the other well-known buildable cell in this fixture
+    key('Enter'); // build again — a second, distinct pending economy change, SAME sim tick
+    sched.frame((clock += 16));
+    const afterSecondBuild = hudText();
+
+    // Both pending changes produced a real HUD refresh (bounty text differs both times) —
+    // proof that `hudKey` changed on each, not just on the first (the sim tick itself never
+    // advanced across any of this — the match is paused throughout).
+    expect(afterSecondBuild).not.toBe(afterFirstSell);
+    app.destroy();
+  });
+});
+
+describe('main — input.reset() across Play-again (#40)', () => {
+  it('playAgain calls input.reset() — no armed gesture from the previous run carries over', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 7,
+    });
+    const calls = (attachInputMock as unknown as { mock: { results: { value: InputHandle }[] } })
+      .mock.results;
+    const inputHandle = calls[calls.length - 1]!.value;
+    const resetSpy = inputHandle.reset as unknown as ReturnType<typeof vi.fn>;
+    expect(resetSpy).not.toHaveBeenCalled();
+
+    const callBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-controls .wy-btn')][2]!;
+    callBtn.click(); // launch the wave
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    expect(results.hidden).toBe(false);
+
+    const playAgain = results.querySelectorAll<HTMLButtonElement>('.wy-btn')[0]!;
+    playAgain.click();
+    expect(resetSpy).toHaveBeenCalledOnce();
     app.destroy();
   });
 });

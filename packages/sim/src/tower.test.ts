@@ -519,3 +519,76 @@ describe('tower-state totality (canonical row rule; cold-restore consistent)', (
     }
   });
 });
+
+describe('nextEntityId totality + the saturating allocator (#42)', () => {
+  it('a forged NaN nextEntityId with live entities does not throw; the new id is safe and > max(existing)', () => {
+    const s = createInitialState(1, RULESET_LANE);
+    pushCreep(s, { id: 5, hp: 10, col: 1, row: 2 });
+    s.towers.id.push(9);
+    s.towers.col.push(2);
+    s.towers.row.push(1);
+    s.towers.spend.push(TOWER_COST);
+    s.towers.targetId.push(0);
+    s.towers.nextFireTick.push(0);
+    s.nextEntityId = NaN;
+    expect(() => step(s, RULESET_LANE, [place(5, 3)])).not.toThrow();
+    expect(s.towers.id).toEqual([9, 10]); // the newly-allocated id (10) is safe and > max(existing) (9)
+  });
+
+  it('a missing nextEntityId repairs to >= 1 with no collision', () => {
+    const s = createInitialState(1, RULESET_LANE);
+    delete (s as unknown as { nextEntityId?: number }).nextEntityId;
+    step(s, RULESET_LANE, [place(5, 3)]);
+    expect(s.towers.id).toEqual([1]);
+  });
+
+  it('a stale counter (<= a present id) is repaired and never reissues an id', () => {
+    const s = createInitialState(1, RULESET_LANE);
+    pushCreep(s, { id: 7, hp: 10, col: 1, row: 2 });
+    s.nextEntityId = 3; // stale — a live id (7) is >= this
+    step(s, RULESET_LANE, [place(5, 3)]);
+    expect(s.towers.id).toEqual([8]); // repaired to maxId(7) + 1, not the stale 3/4
+  });
+
+  it('a zero or negative nextEntityId is repaired', () => {
+    const zero = createInitialState(1, RULESET_LANE);
+    zero.nextEntityId = 0;
+    step(zero, RULESET_LANE, [place(5, 3)]);
+    expect(zero.towers.id).toEqual([1]);
+
+    const negative = createInitialState(1, RULESET_LANE);
+    negative.nextEntityId = -4;
+    step(negative, RULESET_LANE, [place(5, 3)]);
+    expect(negative.towers.id).toEqual([1]);
+  });
+
+  it('an id entry at Number.MAX_SAFE_INTEGER coerces the counter to the sentinel; a build then fails with no partial mutation', () => {
+    const s = createInitialState(1, RULESET_LANE);
+    s.towers.id.push(Number.MAX_SAFE_INTEGER);
+    s.towers.col.push(6);
+    s.towers.row.push(4);
+    s.towers.spend.push(TOWER_COST);
+    s.towers.targetId.push(0);
+    s.towers.nextFireTick.push(0);
+    const bountyBefore = s.bounty;
+    step(s, RULESET_LANE, [place(5, 3)]);
+    expect(s.nextEntityId).toBe(Number.MAX_SAFE_INTEGER); // sentinel — exhausted
+    expect(s.towers.id).toEqual([Number.MAX_SAFE_INTEGER]); // the placeTower did not land
+    expect(s.bounty).toBe(bountyBefore); // no partial mutation
+  });
+
+  it('creep-spawn exhaustion consumes the scheduled spawn (spawnCursor advances) but mutates no creep columns or economy', () => {
+    // Launching early and spawning the first (offsetTicks 0) schedule entry both
+    // happen within this same step — so the exhausted allocator bites on the very
+    // spawn the call-early triggers.
+    const s = createInitialState(1, RULESET_LANE);
+    s.nextEntityId = Number.MAX_SAFE_INTEGER;
+    const bountyBefore = s.bounty;
+    expect(() => step(s, RULESET_LANE, [callEarly])).not.toThrow();
+    expect(s.phase).toBe('active');
+    expect(s.spawnCursor).toBe(1); // the due spawn was consumed
+    expect(s.creeps.id).toHaveLength(0); // but no creep row was appended
+    expect(s.bounty).toBe(bountyBefore); // no economy mutation (earlyCallBonus is 0 in this fixture)
+    expect(s.nextEntityId).toBe(Number.MAX_SAFE_INTEGER); // allocator never incremented past it
+  });
+});

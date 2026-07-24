@@ -6,10 +6,11 @@
 // stronger and so not the binding case) is gated at its weakest composited alpha. `spark`
 // is exempt (transient fading FX, alpha → 0 by design, non-essential — the kill outcome
 // is carried by the creep/HP-pip state, and it is reduced-motion governed). `border` is
-// excluded (a deliberate quiet structural fill whose identity is carried by geometry, not
-// colour). Gate scope: contrast is certified AGAINST THE UNOBSCURED BOARD FLOOR, the
-// defined baseline; where cues overlap other visuals in play, the dual SHAPE encoding
-// (ADR 0003) is the fallback channel.
+// excluded (a quiet structural fill — now an actually-drawn blocked-border ring with a
+// real consumer, `board-cells.ts`'s `boardPaintOps`/`scene.ts`'s `drawBoard` — whose
+// identity is carried by geometry, not colour). Gate scope: contrast is certified AGAINST
+// THE UNOBSCURED BOARD FLOOR, the defined baseline; where cues overlap other visuals in
+// play, the dual SHAPE encoding (ADR 0003) is the fallback channel.
 
 import { describe, it, expect } from 'vitest';
 import { COLOUR_MODES, resolvePalette } from './palette';

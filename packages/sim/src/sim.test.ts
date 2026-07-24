@@ -8,6 +8,7 @@ import {
   type CreepArrays,
   type SimInput,
   type SimState,
+  type StepEvents,
 } from './index';
 import { testRuleset } from './test-support';
 
@@ -131,5 +132,55 @@ describe('sim determinism', () => {
     // Movement is seed-independent in M1, but the seed lives in the hashed state, so
     // two seeds still produce distinct world-hash traces.
     expect(run(12345, 200).trace).not.toBe(run(54321, 200).trace);
+  });
+});
+
+describe('rngState — anchors "inert" (#45)', () => {
+  it('is carried through the tick boundary byte-identical — step() never touches it', () => {
+    const s = createInitialState(12345, RULESET);
+    const before = s.rngState;
+    step(s, RULESET, callEarly);
+    expect(s.rngState).toBe(before);
+    for (let t = 0; t < 50; t++) step(s, RULESET, []);
+    expect(s.rngState).toBe(before); // still untouched after many ticks of real play
+  });
+});
+
+describe('step() StepEvents plumbing (#31)', () => {
+  it('a pre-populated collector passes through the tick-totality early return unchanged', () => {
+    const s = createInitialState(1, RULESET);
+    s.tick = -1; // forges the tick-totality no-op path
+    const events: StepEvents = { impactPoints: [{ x: 1, y: 2 }] };
+    step(s, RULESET, [], events);
+    expect(events.impactPoints).toEqual([{ x: 1, y: 2 }]); // untouched — appended nothing
+  });
+
+  it('a pre-populated collector passes through the terminal freeze early return unchanged', () => {
+    const s = createInitialState(1, RULESET);
+    s.phase = 'won';
+    const events: StepEvents = { impactPoints: [{ x: 3, y: 4 }] };
+    step(s, RULESET, [], events);
+    expect(events.impactPoints).toEqual([{ x: 3, y: 4 }]); // untouched — appended nothing
+  });
+
+  it('a multi-step catch-up accumulates landed-impact events append-only across step() calls', () => {
+    // A 14-wide straight lane with a tower straddling it (mirrors combat.test.ts) — wide
+    // enough that the 2×2 tower detours the lane rather than severing it.
+    const wide = testRuleset({
+      widthTiles: 14,
+      heightTiles: 14,
+      entrance: { col: 0, row: 6 },
+      exit: { col: 13, row: 6 },
+    });
+    let s = createInitialState(1, wide);
+    s = step(s, wide, [
+      { kind: 'placeTower', anchor: { col: 3, row: 5 } },
+      { kind: 'callWaveEarly' },
+    ]);
+    const events: StepEvents = { impactPoints: [] };
+    for (let t = 0; t < 120; t++) {
+      s = step(s, wide, [], events);
+    }
+    expect(events.impactPoints.length).toBeGreaterThan(0); // accumulated across many calls
   });
 });

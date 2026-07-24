@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { createInitialState, step, type SimInput } from './index';
 import type { TowerArrays } from './tower';
-import { runCombat, type CombatCreeps, type Impact } from './combat';
+import { runCombat, type CombatCreeps, type Impact, type StepEvents } from './combat';
 import { testRuleset, TEST_TOWER } from './test-support';
 
 // Tuning now lives in the ruleset; mirror the M1 tower stats as locals for the tests.
@@ -146,6 +146,94 @@ describe('runCombat — inclusive range boundary', () => {
     const beyond = creepAtPoint(1, 1536 + RANGE + 1, 1536, 10);
     const outResult = runCombat(beyond, oneTower(), [], 0, 0, FIELD, GRID, TEST_TOWER);
     expect(outResult.impacts).toHaveLength(0); // one unit past the boundary — no target
+  });
+});
+
+describe('runCombat — landed-impact StepEvents (#31)', () => {
+  it('a leaked (gone) target produces zero events — the wasted shot drains with no point', () => {
+    const withoutTarget: CombatCreeps = {
+      id: [2],
+      hp: [100],
+      bounty: [1],
+      speed: [26],
+      fromX: [cx(7)],
+      fromY: [cy(7)],
+      headCol: [7],
+      headRow: [7],
+      progress: [0],
+    };
+    const impact: Impact = {
+      impactTick: TRAVEL_TICKS,
+      targetId: 1, // no row with this id — the target already left
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const events: StepEvents = { impactPoints: [] };
+    runCombat(
+      withoutTarget,
+      oneTower(),
+      [impact],
+      TRAVEL_TICKS,
+      0,
+      FIELD,
+      GRID,
+      TEST_TOWER,
+      events,
+    );
+    expect(events.impactPoints).toHaveLength(0);
+  });
+
+  it('a survivor hit produces exactly one event at its point', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]); // survives DIRECT_DAMAGE
+    const impact: Impact = {
+      impactTick: 0,
+      targetId: 1,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const events: StepEvents = { impactPoints: [] };
+    const result = runCombat(creeps, oneTower(), [impact], 0, 0, FIELD, GRID, TEST_TOWER, events);
+    expect(result.creeps.hp[0]).toBe(100 - DIRECT_DAMAGE); // damaged, alive
+    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6) }]);
+  });
+
+  it('a kill produces exactly one event, at the point before death', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: DIRECT_DAMAGE }]);
+    const impact: Impact = {
+      impactTick: 0,
+      targetId: 1,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const events: StepEvents = { impactPoints: [] };
+    const result = runCombat(creeps, oneTower(), [impact], 0, 0, FIELD, GRID, TEST_TOWER, events);
+    expect(result.creeps.id).toHaveLength(0); // killed and swept
+    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6) }]);
+  });
+
+  it('same-tick two-impact overkill produces exactly one event (the second is wasted)', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: DIRECT_DAMAGE }]);
+    const impacts: Impact[] = [
+      { impactTick: 0, targetId: 1, effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }] },
+      { impactTick: 0, targetId: 1, effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }] },
+    ];
+    const events: StepEvents = { impactPoints: [] };
+    const result = runCombat(creeps, oneTower(), impacts, 0, 0, FIELD, GRID, TEST_TOWER, events);
+    expect(result.creeps.id).toHaveLength(0); // killed once
+    expect(events.impactPoints).toHaveLength(1); // the second impact resolves against a dead row — wasted
+  });
+
+  it('a multi-step catch-up accumulates events append-only across steps sharing one collector', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const events: StepEvents = { impactPoints: [] };
+    let cur = creeps;
+    let impacts: Impact[] = [];
+    const towers = oneTower();
+    for (let t = 0; t <= FIRE_INTERVAL; t++) {
+      const r = runCombat(cur, towers, impacts, t, 0, FIELD, GRID, TEST_TOWER, events);
+      cur = r.creeps;
+      impacts = r.impacts;
+    }
+    // Exactly one fire+resolve landed within this window (fired at t=0, resolves at
+    // TRAVEL_TICKS, next fire not due until FIRE_INTERVAL) — the collector accumulated it.
+    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6) }]);
   });
 });
 

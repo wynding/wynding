@@ -10,13 +10,12 @@
 export { createProjection } from './projection';
 export type { BoardLayout, Projection } from './projection';
 export { deriveViewModel, deriveHud } from './view-model';
-export { interpolateCreeps, resolvedImpactPoints } from './interpolate';
+export { interpolateCreeps } from './interpolate';
 export { resolvePalette, COLOUR_MODES } from './palette';
 export type { Palette } from './palette';
 export type {
   CreepVM,
   TowerVM,
-  ImpactVM,
   RenderVM,
   HudVM,
   ColourMode,

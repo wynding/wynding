@@ -20,17 +20,18 @@ import {
   previewInputs,
   deriveScore,
   deriveStars,
+  hashSimState,
   isTerminalPhase,
   MS_PER_TICK,
   SIM_VERSION,
   type SimState,
   type SimInput,
   type CompiledRuleset,
+  type StepEvents,
 } from '@wynding/sim';
 import {
   deriveViewModel,
   deriveHud,
-  resolvedImpactPoints,
   type RenderVM,
   type HudVM,
   type GhostVM,
@@ -57,6 +58,18 @@ export interface FrameSnapshot {
   readonly alpha: number;
   readonly ghost: GhostVM | null;
   readonly selection: SelectionVM | null;
+  /** Towers accepted into the tick buffer but not yet committed by a tick (the common
+   *  case: paused planning) — anchor cells only, presentation reads them from the shared
+   *  projection below, never by parsing raw commands. Empty whenever the buffer is empty
+   *  (the hot 60 fps path — no allocation). */
+  readonly pendingAdds: readonly { readonly col: number; readonly row: number }[];
+  /** Committed towers whose sell is accepted into the buffer but not yet committed —
+   *  presented as already-gone (hidden immediately), not merely "about to sell". */
+  readonly pendingSells: readonly { readonly col: number; readonly row: number }[];
+  /** Bumped whenever the tick buffer's pending commands change (queued or committed).
+   *  Lets a consumer (main.ts's `hudKey`) detect a paused-planning economy change even
+   *  though `curVm.tick` is frozen while paused. */
+  readonly pendingRevision: number;
 }
 
 /** Outcome of the dev-only replay self-check. */
@@ -123,9 +136,17 @@ const RANGE_FP = (r: CompiledRuleset): number => r.tower.rangeFp;
  * the buffer (idempotent success must survive a full buffer).
  *  - `'duplicate'`: the buffer already holds an equivalent command — any `callWaveEarly`
  *    for a `callWaveEarly` cmd; a `sellTower` with the SAME `tower` id (different ids
- *    still queue — selling several towers in one paused tick is legit gameplay); a
- *    `placeTower` with the same `anchor.col`/`anchor.row` (defense-in-depth; `confirm()`'s
- *    post-queue re-aim already prevents this in practice).
+ *    still queue — selling several towers in one paused tick is legit gameplay).
+ *    `placeTower` is deliberately NOT anchor-matched here (ship-review, post-#37+#27): a
+ *    raw same-anchor scan cannot tell a still-pending build from one an INTERVENING
+ *    `sellTower` in this same buffer already cancelled — flagging the latter case as
+ *    'duplicate' would silently drop a legitimate sell-then-rebuild-while-still-pending
+ *    (confirm() would report success but queue nothing). True duplicate-build prevention
+ *    is `towerAt`'s job (reads the shared projection, controller.ts): while a placeTower
+ *    is genuinely still live in the buffer, `aimAt` resolves that anchor to a TOWER
+ *    selection, so `confirm()` never even reaches this classifier for it (the ghost is
+ *    null). By the time we're here with a valid ghost, any same-anchor `placeTower`
+ *    already in the buffer is necessarily a dead/cancelled one — never a live duplicate.
  *  - `'full'`: not a duplicate, and the buffer is already at `MAX_INPUTS_PER_TICK` (the
  *    replay contract's exact per-tick limit — imported, not duplicated, so the two can
  *    never drift). This is an intentional product limit, not a bug surface: it exists so
@@ -145,12 +166,6 @@ export function enqueueVerdict(
         return existing.kind === 'callWaveEarly';
       case 'sellTower':
         return existing.kind === 'sellTower' && existing.tower === cmd.tower;
-      case 'placeTower':
-        return (
-          existing.kind === 'placeTower' &&
-          existing.anchor.col === cmd.anchor.col &&
-          existing.anchor.row === cmd.anchor.row
-        );
       default:
         return false;
     }
@@ -159,6 +174,58 @@ export function enqueueVerdict(
   if (buffer.length >= MAX_INPUTS_PER_TICK) return 'full';
   return 'queue';
 }
+
+/**
+ * Whether a completed run's live outcome matches its replay re-simulation (#41): score
+ * AND stars AND the terminal world-hash. A pure, directly-testable helper — score/stars
+ * alone can coincidentally agree while the world itself diverged (e.g. a different tower
+ * layout reaching the same score), so `matchedLive` must also gate on `finalHash`.
+ */
+export function outcomesMatch(
+  result: { readonly score?: number; readonly stars?: number; readonly finalHash?: string },
+  liveScore: number,
+  liveStars: number,
+  liveFinalHash: string,
+): boolean {
+  return (
+    result.score === liveScore && result.stars === liveStars && result.finalHash === liveFinalHash
+  );
+}
+
+/** A tower-anchor cell (col,row) — the presentation unit for pending builds/sells. */
+interface TowerAnchor {
+  readonly col: number;
+  readonly row: number;
+}
+
+/**
+ * Pending additions/sells (#37+#27), derived by DIFFING the projected towers against the
+ * committed towers — never by parsing raw `placeTower`/`sellTower` commands. This stays
+ * correct for accepted sells, sell-then-rebuild, and rejected/no-op queued commands
+ * (which the projection already resolves to "no change", so they diff to nothing).
+ */
+function diffPendingTowers(
+  committed: SimState['towers'],
+  projected: SimState['towers'],
+): { readonly additions: TowerAnchor[]; readonly sells: TowerAnchor[] } {
+  const committedIds = new Set(committed.id);
+  const projectedIds = new Set(projected.id);
+  const additions: TowerAnchor[] = [];
+  for (let i = 0; i < projected.id.length; i++) {
+    if (!committedIds.has(projected.id[i] as number)) {
+      additions.push({ col: projected.col[i] as number, row: projected.row[i] as number });
+    }
+  }
+  const sells: TowerAnchor[] = [];
+  for (let i = 0; i < committed.id.length; i++) {
+    if (!projectedIds.has(committed.id[i] as number)) {
+      sells.push({ col: committed.col[i] as number, row: committed.row[i] as number });
+    }
+  }
+  return { additions, sells };
+}
+
+const NO_PENDING: readonly TowerAnchor[] = [];
 
 /**
  * Deep-freeze an immutable copy of a tick's commands for the recorded log. The commands
@@ -207,25 +274,42 @@ export function createController(seed: number): Controller {
   let selOverlaySrc: (SelectionVM & { id: number }) | null = null;
   let selOverlay: SelectionVM | null = null;
   let pendingSparks: { x: number; y: number }[]; // impact points resolved since the last drain
+  // Bumped on every command actually queued into `buffer` (never on a rejected/duplicate
+  // enqueue) — the paused-planning presentation's second memo key alongside `state.tick`.
+  let bufferRev = 0;
   // previewInputs() deep-clones SimState, so both hot paths memoize: aimAt caches the last
   // placement-validity query (a pointermove that stays in one cell re-uses it), and the
   // refund is cached per selected tower id (refund is tick-invariant) so the per-frame HUD
   // read never re-clones.
   let aimMemoKey = '';
   let aimMemoValid = false;
-  let refundCache = { id: -1, value: 0 };
+  let refundCache = { id: -1, rev: -1, value: 0 };
+  // The ONE shared paused-planning projection (#37+#27): previewInputs() run once per
+  // (tick, bufferRev) pair, memoized, and reused by towerAt/hud/refund/frame — never
+  // recomputed per reader. `null` whenever the buffer is empty (the 60 fps hot path stays
+  // allocation-free: previewInputs() deep-clones the whole SimState).
+  let previewMemo: {
+    tick: number;
+    rev: number;
+    preview: SimState;
+    pendingAdds: TowerAnchor[];
+    pendingSells: TowerAnchor[];
+  } | null = null;
 
   const onTick = (): void => {
     if (frozen) return; // terminal: freeze, record nothing past the resolving tick
     const inputs = buffer;
     tickInputs.push(freezeRecorded(inputs)); // deep-frozen clone at index = tick
-    state = step(state, ruleset, inputs);
+    // Landed-impact events (#31): the sim reports the exact points where a shot hit a
+    // still-live target, BEFORE damage applies — a wasted (leaked-target) shot never
+    // appends. Accumulate across a multi-tick catch-up frame so the scene flashes every
+    // kill (it only sees the latest view-model pair).
+    const events: StepEvents = { impactPoints: [] };
+    state = step(state, ruleset, inputs, events);
     buffer = []; // FRESH buffer — the just-recorded copy can never be mutated by reuse
     prevVm = curVm;
     curVm = deriveViewModel(state, ruleset);
-    // Accumulate this tick's resolved impact points so the scene flashes every kill, even
-    // when several ticks run in one catch-up frame (the scene only sees the latest pair).
-    for (const pt of resolvedImpactPoints(prevVm, curVm)) pendingSparks.push(pt);
+    for (const pt of events.impactPoints) pendingSparks.push(pt);
     // Reconcile the selection with the post-step world: if the selected tower was sold or
     // destroyed this tick, drop the selection so the scene stops drawing a phantom range
     // ring and the Sell control disables (rather than selling a nonexistent id).
@@ -253,21 +337,47 @@ export function createController(seed: number): Controller {
     ghost = null;
     selection = null;
     pendingSparks = [];
+    bufferRev = 0;
+    previewMemo = null;
     // Clear the per-run memo/caches — the next run reuses tick indices from 0, so a stale
     // (col,row,bufferLen,tick) verdict must never carry across a Play-again.
     aimMemoKey = '';
     aimMemoValid = false;
-    refundCache = { id: -1, value: 0 };
+    refundCache = { id: -1, rev: -1, value: 0 };
   };
   reset(seed);
 
-  /** The tower whose 2×2 footprint covers (col,row), or null. */
+  // The shared projection (#37+#27): computed only while the buffer holds pending
+  // commands, memoized on (tick, bufferRev) so a stable pause re-reads the same preview
+  // object across many frames/readers instead of re-cloning SimState each time.
+  const pendingProjection = (): typeof previewMemo => {
+    if (buffer.length === 0) return null;
+    if (previewMemo !== null && previewMemo.tick === state.tick && previewMemo.rev === bufferRev) {
+      return previewMemo;
+    }
+    const { preview } = previewInputs(state, ruleset, buffer);
+    const { additions, sells } = diffPendingTowers(state.towers, preview.towers);
+    previewMemo = {
+      tick: state.tick,
+      rev: bufferRev,
+      preview,
+      pendingAdds: additions,
+      pendingSells: sells,
+    };
+    return previewMemo;
+  };
+
+  /** The tower whose 2×2 footprint covers (col,row), or null. Reads the SHARED projection
+   *  so a pending (not-yet-committed) build/sell is reflected in selection/hit-testing —
+   *  e.g. `confirm()`'s post-queue re-aim selects the just-queued tower rather than
+   *  showing an invalid ghost (#40), and a pending sell's cell stops resolving as a tower. */
   const towerAt = (col: number, row: number): { col: number; row: number; id: number } | null => {
-    for (let i = 0; i < state.towers.id.length; i++) {
-      const tc = state.towers.col[i] as number;
-      const tr = state.towers.row[i] as number;
+    const towers = pendingProjection()?.preview.towers ?? state.towers;
+    for (let i = 0; i < towers.id.length; i++) {
+      const tc = towers.col[i] as number;
+      const tr = towers.row[i] as number;
       if (col >= tc && col <= tc + 1 && row >= tr && row <= tr + 1) {
-        return { col: tc, row: tr, id: state.towers.id[i] as number };
+        return { col: tc, row: tr, id: towers.id[i] as number };
       }
     }
     return null;
@@ -360,7 +470,17 @@ export function createController(seed: number): Controller {
       // holds its current sub-tick value rather than collapsing to 0 (which would rewind
       // every creep to the previous tick boundary). Only a terminal freeze pins alpha to 0.
       const alpha = frozen ? 0 : loop.accumulatorMs / MS_PER_TICK;
-      return { prevVm, curVm, alpha, ghost, selection: selectionOverlay() };
+      const pending = pendingProjection();
+      return {
+        prevVm,
+        curVm,
+        alpha,
+        ghost,
+        selection: selectionOverlay(),
+        pendingAdds: pending?.pendingAdds ?? NO_PENDING,
+        pendingSells: pending?.pendingSells ?? NO_PENDING,
+        pendingRevision: bufferRev,
+      };
     },
     drainSparks(): { x: number; y: number }[] {
       if (pendingSparks.length === 0) return [];
@@ -368,7 +488,10 @@ export function createController(seed: number): Controller {
       pendingSparks = [];
       return out;
     },
-    hud: () => deriveHud(state, ruleset),
+    // Reads the SHARED projection whenever the buffer is non-empty, so bounty (and, while
+    // pre-wave, the countdown) presents the pending world during paused planning — the
+    // committed HUD would otherwise show stale figures until the next tick commits.
+    hud: () => deriveHud(pendingProjection()?.preview ?? state, ruleset),
     isPaused: () => paused,
     speed: () => spd,
     pause: doPause,
@@ -389,26 +512,44 @@ export function createController(seed: number): Controller {
     },
     cursor: () => ({ ...cur }),
     confirm(): boolean {
-      // Keyboard confirm may fire before any hover/move populated the ghost — aim at the
-      // cursor first so the very first Enter on a focused board acts on the cursor cell
-      // (which may resolve to a build ghost or a tower selection), not a no-op.
-      if (ghost === null && selection === null) aimAt(cur.col, cur.row);
+      // Unconditionally re-aim at the cursor before checking the ghost (#40): this
+      // recomputes validity at the CURRENT tick every time (not just on the very first
+      // confirm before anything was aimed) — e.g. a creep's advance can flip a cell's
+      // maze-validity between a hover/tap and the confirm, and a stale-valid ghost must
+      // not be trusted. A pointer/touch confirm has already aimed pre-confirm, so this is
+      // a cheap no-op re-derivation for that path; the tower-cursor case still returns
+      // false via `selection`.
+      aimAt(cur.col, cur.row);
       if (ghost === null || !ghost.valid) return false;
       const cmd: SimInput = { kind: 'placeTower', anchor: { col: ghost.col, row: ghost.row } };
       const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') return false;
-      if (verdict === 'queue') buffer.push(cmd);
+      if (verdict === 'queue') {
+        buffer.push(cmd);
+        bufferRev++;
+      }
       // Re-evaluate the ghost against the now-larger buffer (the just-queued build may
-      // make this same cell invalid for a second placement while paused).
+      // make this same cell invalid for a second placement while paused). `towerAt` now
+      // reads the shared projection, so this resolves to a SELECTION on the just-queued
+      // tower, not an invalid red ghost (#40).
       aimAt(ghost.col, ghost.row);
       return true;
     },
     sellSelected(): boolean {
       if (selection === null) return false;
+      // The sold tower's anchor — captured before re-aiming, which may clear `selection`.
+      const anchor = { col: selection.col, row: selection.row };
       const cmd: SimInput = { kind: 'sellTower', tower: selection.id };
       const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') return false;
-      if (verdict === 'queue') buffer.push(cmd);
+      if (verdict === 'queue') {
+        buffer.push(cmd);
+        bufferRev++;
+      }
+      // Reconcile aim/selection on every buffer mutation: re-aim at the SOLD anchor (not
+      // raw `cur`, which may sit on any of the four footprint cells) so sell-then-rebuild
+      // resolves to a fresh build ghost at that anchor rather than a stale tower selection.
+      aimAt(anchor.col, anchor.row);
       return true;
     },
     refundForSelection(): number {
@@ -417,14 +558,19 @@ export function createController(seed: number): Controller {
       // value once the game ends).
       if (selection === null || isTerminalPhase(state.phase)) return 0;
       // A tower's refund is refundFor(spend, …) — a function of its fixed spend and the
-      // constant balance, so it is INVARIANT for a given tower id (ids are never reused).
-      // Cache by id alone: at most one clone per distinct selection, never per tick/frame.
-      if (refundCache.id === selection.id) return refundCache.value;
-      const { preview } = previewInputs(state, ruleset, [
+      // constant balance, so it is INVARIANT for a given tower id (ids are never reused) —
+      // but cache by (id, bufferRev) since the base to preview against changes with the
+      // pending queue: computed against the SHARED projection, not committed state, so
+      // selecting a pending (not-yet-committed) tower shows its real refund, not zero.
+      if (refundCache.id === selection.id && refundCache.rev === bufferRev) {
+        return refundCache.value;
+      }
+      const base = pendingProjection()?.preview ?? state;
+      const { preview } = previewInputs(base, ruleset, [
         { kind: 'sellTower', tower: selection.id },
       ]);
-      const value = Math.max(0, preview.bounty - state.bounty);
-      refundCache = { id: selection.id, value };
+      const value = Math.max(0, preview.bounty - base.bounty);
+      refundCache = { id: selection.id, rev: bufferRev, value };
       return value;
     },
     callWaveEarly(): boolean {
@@ -432,7 +578,10 @@ export function createController(seed: number): Controller {
       const cmd: SimInput = { kind: 'callWaveEarly' };
       const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') return false;
-      if (verdict === 'queue') buffer.push(cmd);
+      if (verdict === 'queue') {
+        buffer.push(cmd);
+        bufferRev++;
+      }
       return true;
     },
     startRun(nextSeed: number): void {
@@ -441,16 +590,21 @@ export function createController(seed: number): Controller {
     isTerminal: () => isTerminalPhase(state.phase),
     buildReplay: doBuildReplay,
     verifyRun(): VerifyResult {
+      // Terminal guard: validate() completes an unfinished log with empty ticks, so a
+      // mid-run call would otherwise report a misleading hash/score mismatch. A distinct
+      // not-terminal outcome — no mismatch claim, no mismatch message.
+      if (!isTerminalPhase(state.phase)) return { ok: false, reason: 'not-terminal' };
       const replay = doBuildReplay();
       const result = validate(replay, bundle);
       if (!result.ok) return { ok: false, reason: result.reason };
       const liveScore = deriveScore(state, ruleset);
       const liveStars = deriveStars(state, ruleset);
+      const liveFinalHash = hashSimState(state);
       return {
         ok: true,
         score: result.score,
         stars: result.stars,
-        matchedLive: result.score === liveScore && result.stars === liveStars,
+        matchedLive: outcomesMatch(result, liveScore, liveStars, liveFinalHash),
       };
     },
   };

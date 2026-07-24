@@ -8,7 +8,7 @@ import { createInitialState, step, compileRuleset, type SimInput } from '@wyndin
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 import { createProjection } from './projection';
 import { deriveViewModel, deriveHud } from './view-model';
-import { interpolateCreeps, resolvedImpactPoints } from './interpolate';
+import { interpolateCreeps } from './interpolate';
 import { resolvePalette } from './palette';
 import type { ColourMode, RenderVM } from './types';
 import * as barrel from './index';
@@ -101,23 +101,6 @@ describe('view-model + hud derivation', () => {
     expect(deriveHud(s, ruleset).countdownSeconds).toBeNull();
   });
 
-  it('carries in-flight impacts into the view-model', () => {
-    // A tower straddling the lane fires as creeps arrive → impacts get scheduled.
-    let s = createInitialState(1, ruleset);
-    const b = ruleset.board.grid;
-    const onLane: SimInput = {
-      kind: 'placeTower',
-      anchor: { col: b.entrance.col + 2, row: b.entrance.row - 1 },
-    };
-    s = step(s, ruleset, [onLane, { kind: 'callWaveEarly' }]);
-    let sawImpact = false;
-    for (let t = 0; t < 120 && !sawImpact; t++) {
-      s = step(s, ruleset, []);
-      if (deriveViewModel(s, ruleset).impacts.length > 0) sawImpact = true;
-    }
-    expect(sawImpact).toBe(true);
-  });
-
   it('gives a ragged-HP creep a zero health fraction (no crash)', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
@@ -128,16 +111,11 @@ describe('view-model + hud derivation', () => {
 });
 
 describe('interpolation — by entity id', () => {
-  const vm = (
-    tick: number,
-    creeps: RenderVM['creeps'],
-    impacts: RenderVM['impacts'] = [],
-  ): RenderVM => ({
+  const vm = (tick: number, creeps: RenderVM['creeps']): RenderVM => ({
     tick,
     phase: 'active',
     creeps,
     towers: [],
-    impacts,
   });
 
   it('blends a creep present in both snapshots by its id', () => {
@@ -165,51 +143,6 @@ describe('interpolation — by entity id', () => {
     expect(interpolateCreeps(prev, cur, 2).at(0)?.x).toBe(100);
     expect(interpolateCreeps(prev, cur, -1).at(0)?.x).toBe(0);
     expect(interpolateCreeps(null, cur, NaN).at(0)?.x).toBe(100); // null prev → current
-  });
-});
-
-describe('impact-spark diffing (multiset by (targetId, impactTick))', () => {
-  const vm = (creeps: RenderVM['creeps'], impacts: RenderVM['impacts']): RenderVM => ({
-    tick: 0,
-    phase: 'active',
-    creeps,
-    towers: [],
-    impacts,
-  });
-
-  it('sparks at the CURRENT point of a creep that survived the hit (on it, not a tick behind)', () => {
-    const prev = vm([{ id: 5, x: 20, y: 30, hpFrac: 1 }], [{ targetId: 5, impactTick: 10 }]);
-    const cur = vm([{ id: 5, x: 25, y: 30, hpFrac: 1 }], []); // survivor moved on; impact consumed
-    expect(resolvedImpactPoints(prev, cur)).toEqual([{ x: 25, y: 30 }]);
-  });
-
-  it('falls back to the previous point for a creep that died this tick', () => {
-    const prev = vm([{ id: 5, x: 20, y: 30, hpFrac: 0.1 }], [{ targetId: 5, impactTick: 10 }]);
-    const cur = vm([], []); // creep gone from cur → use its last-known point
-    expect(resolvedImpactPoints(prev, cur)).toEqual([{ x: 20, y: 30 }]);
-  });
-
-  it('suppresses the spark when the target had already left', () => {
-    const prev = vm([], [{ targetId: 9, impactTick: 10 }]); // no point for target 9
-    const cur = vm([], []);
-    expect(resolvedImpactPoints(prev, cur)).toEqual([]);
-  });
-
-  it('does not spark for an impact still pending next tick', () => {
-    const prev = vm([{ id: 5, x: 0, y: 0, hpFrac: 1 }], [{ targetId: 5, impactTick: 10 }]);
-    const cur = vm([{ id: 5, x: 0, y: 0, hpFrac: 1 }], [{ targetId: 5, impactTick: 10 }]);
-    expect(resolvedImpactPoints(prev, cur)).toEqual([]);
-  });
-
-  it('returns nothing when there is no previous snapshot', () => {
-    const cur = vm([], [{ targetId: 1, impactTick: 2 }]);
-    expect(resolvedImpactPoints(null, cur)).toEqual([]);
-  });
-
-  it('short-circuits when the previous snapshot had no impacts (no-combat tick)', () => {
-    const prev = vm([{ id: 5, x: 20, y: 30, hpFrac: 1 }], []); // non-null prev, no impacts
-    const cur = vm([{ id: 5, x: 25, y: 30, hpFrac: 1 }], []);
-    expect(resolvedImpactPoints(prev, cur)).toEqual([]);
   });
 });
 
@@ -241,7 +174,6 @@ describe('render barrel', () => {
     expect(barrel.deriveViewModel).toBeTypeOf('function');
     expect(barrel.deriveHud).toBeTypeOf('function');
     expect(barrel.interpolateCreeps).toBeTypeOf('function');
-    expect(barrel.resolvedImpactPoints).toBeTypeOf('function');
     expect(barrel.resolvePalette).toBeTypeOf('function');
   });
 });
