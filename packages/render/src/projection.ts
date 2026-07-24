@@ -1,8 +1,9 @@
 // projection.ts — the pure geometry seam between the sim's fixed-point world (256
 // units = 1 cell) and screen pixels, and its inverse (pointer → board cell). The board
 // is fit-and-centred (letterboxed) inside the canvas at an integer-friendly cell size;
-// all math is in CSS pixels (pointer events report CSS px), with `dpr` exposed only so
-// the scene can size its WebGL backing store. No DOM, no Phaser — fully testable.
+// all math is in CSS pixels (pointer events report CSS px). `dpr` is carried through
+// so the scene can size its WebGL backing store (#28/P5) — every cell/point/pointer
+// calculation here stays entirely in CSS px regardless of `dpr`'s value.
 
 import { FP_ONE } from '@wynding/engine';
 
@@ -14,7 +15,8 @@ export interface BoardLayout {
   /** Canvas size in CSS pixels. */
   readonly cssWidth: number;
   readonly cssHeight: number;
-  /** Device pixel ratio (for the backing store; pointer math stays in CSS px). */
+  /** Effective (already-clamped) device pixel ratio the scene sizes its backing store
+   *  to (#28/P5) — pointer math stays in CSS px regardless. */
   readonly dpr: number;
 }
 
@@ -24,7 +26,8 @@ export interface Projection {
   /** CSS px of the board's top-left corner inside the canvas (letterbox offsets). */
   readonly originX: number;
   readonly originY: number;
-  /** Backing-store scale for the scene (cellPx × dpr worth of device pixels). */
+  /** The effective dpr the scene sizes its backing store to (`cellPx × dpr` worth of
+   *  device pixels per cell) — carried through unchanged from `BoardLayout.dpr`. */
   readonly dpr: number;
   /** Top-left CSS pixel of cell (col,row). */
   cellToPixel(col: number, row: number): { x: number; y: number };

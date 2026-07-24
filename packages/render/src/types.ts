@@ -67,6 +67,20 @@ export interface SelectionVM {
   readonly rangeFp: number;
 }
 
+/** One in-flight shot (Tracer, #32/P6): fp-unit origin (the firing tower's centre) +
+ *  the target locked at fire time, over its real launch→impact tick window. Carried
+ *  from the sim's `StepEvents.fired` (never inferred from `state.impacts`, whose
+ *  `targetId` a retargeting tower can overwrite mid-flight) straight through the
+ *  controller to here — purely decorative, never essential (damage/outcomes are
+ *  always carried by the impact spark + HP pips). */
+export interface TracerVM {
+  readonly originX: number;
+  readonly originY: number;
+  readonly targetId: number;
+  readonly launchTick: number;
+  readonly impactTick: number;
+}
+
 /** Board-space presentation state handed to `draw()` alongside the two view-models.
  *  Everything here is transient UI (not sim state): the aiming ghost, the selection
  *  ring, and the accessibility palette/motion choices the scene draws with. */
@@ -87,6 +101,10 @@ export interface RenderOverlay {
   readonly colourMode: ColourMode;
   /** When true the scene damps the impact-spark FX (WCAG 2.3.3 / GAG §2). */
   readonly reducedMotion: boolean;
+  /** Shots currently in flight (Tracer, #32/P6) — copied from `FrameSnapshot.tracers`
+   *  each frame. Under reduced motion the scene omits them entirely (`tracerPaintOps`
+   *  returns an empty plan), same posture as the impact spark's damping. */
+  readonly tracers: readonly TracerVM[];
 }
 
 /** Live handle to a mounted Phaser view. The controller feeds it the last two render

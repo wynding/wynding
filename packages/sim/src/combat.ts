@@ -65,6 +65,19 @@ export interface StepEvents {
    *  queue-resolution order — captured BEFORE damage applies. A wasted shot (leaked
    *  target, or an earlier same-tick impact already killed it) appends nothing. */
   readonly impactPoints: { x: number; y: number }[];
+  /** Shots FIRED this tick (#32), in fire order — fp-unit origin (firing tower centre)
+   *  + the target locked AT FIRE TIME (never re-derived from `state.impacts`: a tower
+   *  that retargets before the shot resolves would otherwise break the association —
+   *  this carries the ORIGINAL target's identity/timing over the tick regardless of
+   *  later retargeting). Purely presentational: append-only, never hash-relevant,
+   *  never serialized — same contract as `impactPoints` (combat.ts, #31 precedent). */
+  readonly fired: {
+    originX: number;
+    originY: number;
+    targetId: number;
+    launchTick: number;
+    impactTick: number;
+  }[];
 }
 
 /** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it). */
@@ -397,6 +410,13 @@ export function runCombat(
       impactTick,
       targetId: target,
       effects: [{ kind: 'direct', amount: tower.damage }],
+    });
+    events?.fired.push({
+      originX: towerX,
+      originY: towerY,
+      targetId: target,
+      launchTick: tick,
+      impactTick,
     });
     towers.nextFireTick[i] = nextFire;
   });

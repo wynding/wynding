@@ -78,6 +78,11 @@ describe('main — createApp wiring & frame loop', () => {
     sched.frame(32);
     expect(fakeHandle.draw).toHaveBeenCalled();
     expect(root.querySelector('.wy-hud')!.textContent).toContain('Lives:');
+    // The frame loop copies the controller's tracers into the RenderOverlay every
+    // frame (#32/P6) — present (as an array, empty here: no tower ever built) rather
+    // than dropped on the way from FrameSnapshot to RenderOverlay.
+    const lastOverlay = vi.mocked(fakeHandle.draw).mock.calls.at(-1)?.[3];
+    expect(lastOverlay?.tracers).toEqual([]);
 
     app.destroy();
     expect(sched.cancel).toHaveBeenCalledOnce();

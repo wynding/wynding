@@ -594,3 +594,82 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
     expect(c.drainSparks()).toEqual([]); // drained sparks are cleared, not re-reported
   });
 });
+
+describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
+  it('a tower straddling the lane shows a well-formed tracer in flight, then prunes it after impact', () => {
+    const c = createController(1);
+    c.aimAt(2, 10);
+    c.confirm();
+    c.callWaveEarly();
+    let n = 0;
+    while (c.frame().tracers.length === 0 && !c.isTerminal() && n < 300) {
+      c.advance(TICK);
+      n++;
+    }
+    const inFlight = c.frame().tracers;
+    expect(inFlight.length).toBeGreaterThan(0);
+    const t = inFlight[0];
+    expect(t).toBeDefined();
+    expect(Number.isFinite(t?.originX)).toBe(true);
+    expect(Number.isFinite(t?.originY)).toBe(true);
+    expect(t?.launchTick).toBeLessThan(t?.impactTick as number);
+
+    // Advance past the recorded impactTick — the flight has landed and must be pruned.
+    // Drive by the actual pruning outcome (not a hand-derived tick/render-time offset):
+    // renderTime lags `curVm.tick` by up to a full tick when alpha is 0, so re-checking
+    // `frame()` itself is the robust condition, not an assumed tick arithmetic.
+    const impactTick = t?.impactTick as number;
+    let stillInFlight = true;
+    while (stillInFlight && !c.isTerminal() && n < 400) {
+      c.advance(TICK);
+      stillInFlight = c.frame().tracers.some((f) => f.impactTick === impactTick);
+      n++;
+    }
+    expect(stillInFlight).toBe(false);
+  });
+
+  it('startRun clears every in-flight tracer — no tracer crosses run identity', () => {
+    const c = createController(1);
+    c.aimAt(2, 10);
+    c.confirm();
+    c.callWaveEarly();
+    let n = 0;
+    while (c.frame().tracers.length === 0 && !c.isTerminal() && n < 300) {
+      c.advance(TICK);
+      n++;
+    }
+    expect(c.frame().tracers.length).toBeGreaterThan(0);
+    c.startRun(2);
+    expect(c.frame().tracers).toEqual([]);
+  });
+
+  it('a resolved match prunes every tracer (no tracer survives past terminal)', () => {
+    const c = createController(1);
+    c.aimAt(2, 10);
+    c.confirm();
+    c.callWaveEarly();
+    runToTerminal(c);
+    expect(c.isTerminal()).toBe(true);
+    expect(c.frame().tracers).toEqual([]);
+  });
+
+  it('a multi-tick catch-up (advance called several times before frame() is read) accumulates tracers without loss', () => {
+    const c = createController(1);
+    c.aimAt(2, 10);
+    c.confirm();
+    c.callWaveEarly();
+    // The straddling tower's range (4 tiles) already covers the entrance, so it fires
+    // at tick 0 (impactTick = travelTicks = 4). Advance a SHORT burst — well inside that
+    // flight window — WITHOUT reading frame() in between (the #31 catch-up pattern):
+    // the fired event pushed during tick 0's onTick must still be there on the next
+    // frame() read, not lost because no one read it in the meantime.
+    for (let i = 0; i < 3 && !c.isTerminal(); i++) c.advance(TICK);
+    const tracers = c.frame().tracers;
+    expect(tracers.length).toBeGreaterThan(0);
+    for (const t of tracers) {
+      expect(Number.isFinite(t.originX)).toBe(true);
+      expect(Number.isFinite(t.originY)).toBe(true);
+      expect(t.launchTick).toBeLessThan(t.impactTick);
+    }
+  });
+});

@@ -10,6 +10,8 @@ import { createProjection, type Projection } from './projection';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
 import { boardPaintOps, type BoardPaintOp } from './board-cells';
+import { createDprTracker, clampDpr } from './dpr-tracker';
+import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
 import type { RenderVM, RenderOverlay, RenderHandle, ColourMode } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -43,6 +45,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // a per-frame sync.
   let projW = -1;
   let projH = -1;
+  let projDpr = -1;
   let resizeObserver: ResizeObserver | null = null;
   let projection: Projection = createProjection({
     cols: geometry.cols,
@@ -51,18 +54,64 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     cssHeight: 0,
     dpr: 1,
   });
+
+  // HiDPI backing store (#28/P5): size the game's actual pixel buffer to CSS-rect ×
+  // effective-dpr, while pinning the canvas' CSS size to the rect and keeping every
+  // existing draw coordinate in CSS px. Phaser cameras zoom around the viewport
+  // CENTRE, so `setZoom(dpr)` alone would shift the world origin — `centerOn` after
+  // zoom re-centres the CSS-px world midpoint back onto the viewport midpoint,
+  // landing CSS-px world (0,0) back at device-pixel canvas (0,0). Effective dpr is
+  // clamped to ≤2 (ADR 0005: fill cost scales dpr²).
+  const applyBackingStoreSize = (cssWidth: number, cssHeight: number, dpr: number): void => {
+    const scene = game.scene.scenes[0];
+    if (scene === undefined) return;
+    const backingWidth = Math.max(1, Math.round(cssWidth * dpr));
+    const backingHeight = Math.max(1, Math.round(cssHeight * dpr));
+    game.scale.resize(backingWidth, backingHeight);
+    // Take the canvas out of normal flow: `el` (.wy-board) sizes itself from
+    // `aspect-ratio`, which is only a PREFERRED size — a normal-flow canvas whose CSS
+    // height we set can still make the container grow to fit it (any rounding
+    // difference compounds every resize into a runaway feedback loop). Absolute +
+    // inset:0 makes the container's own box authoritative; the canvas fills it exactly
+    // without ever contributing to its size.
+    game.canvas.style.position = 'absolute';
+    game.canvas.style.inset = '0';
+    game.canvas.style.width = `${cssWidth}px`;
+    game.canvas.style.height = `${cssHeight}px`;
+    const cam = scene.cameras.main;
+    cam.setZoom(dpr);
+    cam.centerOn(cssWidth / 2, cssHeight / 2);
+  };
+
+  // Live DPR-change tracking (monitor move / browser zoom, #28/P5): re-arms on every
+  // sync to the CURRENT raw dpr (a resolution query only reports LEAVING its own
+  // value, so a stale query goes silent after a 1→2→3 sequence). Destroyed with the
+  // scene. See dpr-tracker.ts for the pure, independently-tested logic.
+  const dprTracker =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? createDprTracker(
+          () => syncProjection(),
+          (q) => window.matchMedia(q),
+        )
+      : null;
+
   const syncProjection = (): void => {
     const rect = el.getBoundingClientRect();
-    if (rect.width === projW && rect.height === projH) return;
+    const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const dpr = clampDpr(rawDpr);
+    dprTracker?.rearm(rawDpr); // always re-arm to the CURRENT raw value, even if unchanged
+    if (rect.width === projW && rect.height === projH && dpr === projDpr) return;
     projW = rect.width;
     projH = rect.height;
+    projDpr = dpr;
     projection = createProjection({
       cols: geometry.cols,
       rows: geometry.rows,
       cssWidth: rect.width,
       cssHeight: rect.height,
-      dpr: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+      dpr,
     });
+    if (gfx !== null) applyBackingStoreSize(rect.width, rect.height, dpr);
   };
   // The board paint plan (#38) depends only on geometry (static) and the palette (changes
   // only on a colour-mode switch) — precompute once and rebuild ONLY when the mode
@@ -84,11 +133,16 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // make them expire instantly.
   const preReady: { x: number; y: number }[] = [];
 
+  // Scale.NONE (not RESIZE, #28/P5): RESIZE auto-stretches the canvas' CSS AND backing
+  //-store size to the parent on its own internal ResizeObserver, which would fight
+  // `applyBackingStoreSize`'s explicit device-px backing store + pinned-CSS-size
+  // recipe. Under NONE, `game.scale.resize()` and the canvas style are the only things
+  // that ever touch the canvas' size — sizing is fully explicit.
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: el,
     backgroundColor: '#12141c',
-    scale: { mode: Phaser.Scale.RESIZE, width: '100%', height: '100%' },
+    scale: { mode: Phaser.Scale.NONE, width: 1, height: 1 },
     render: { antialias: true },
     scene: { create() {}, update() {} },
   });
@@ -197,11 +251,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   const drawCreeps = (
     g: Phaser.GameObjects.Graphics,
     pal: Palette,
-    prev: RenderVM | null,
-    cur: RenderVM,
-    alpha: number,
+    interpolated: readonly { x: number; y: number; hpFrac: number }[],
   ): void => {
-    for (const c of interpolateCreeps(prev, cur, alpha)) {
+    for (const c of interpolated) {
       const p = projection.fpToPixel(c.x, c.y);
       const r = Math.max(3, projection.cellPx * 0.35);
       const hpColour = c.hpFrac < 0.34 ? pal.creepLowHp : pal.creep;
@@ -211,6 +263,26 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       // health pip: length AND colour encode HP (dual cue) — warning tint only when low.
       // hpFrac is already clamped to [0,1] by deriveViewModel (CreepVM invariant).
       g.fillRect(p.x - r, p.y - r - 4, r * 2 * c.hpFrac, 3);
+    }
+  };
+
+  // A thin executor of `tracerPaintOps`' plan (#32/P6) — the ordering/content gate lives
+  // in `tracers.test.ts` against the plan itself, not here.
+  const drawTracers = (
+    g: Phaser.GameObjects.Graphics,
+    pal: Palette,
+    overlay: RenderOverlay,
+    prevVm: RenderVM | null,
+    curVm: RenderVM,
+    alpha: number,
+    interpolatedById: ReadonlyMap<number, { x: number; y: number }>,
+  ): void => {
+    const renderTime = renderTimeOf(prevVm, curVm, alpha);
+    const positioned = positionTracers(overlay.tracers, interpolatedById, renderTime);
+    for (const op of tracerPaintOps(positioned, overlay.reducedMotion, pal)) {
+      const p = projection.fpToPixel(op.x, op.y); // op.x/y are fp-unit sim coordinates
+      g.fillStyle(op.colour, 1);
+      g.fillCircle(p.x, p.y, Math.max(2, projection.cellPx * 0.15));
     }
   };
 
@@ -271,10 +343,16 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     preReady.length = 0;
     for (const pt of overlay.sparks) sparks.push({ x: pt.x, y: pt.y, bornAt });
     const pal = resolvePalette(overlay.colourMode); // resolve once per frame, pass down
+    // Computed ONCE and shared: the creep pass draws these points; the tracer pass
+    // reuses the SAME interpolated points as its lerp targets (#32/P6) so a tracer
+    // visibly converges on exactly where its target creep is drawn this frame.
+    const interpolated = interpolateCreeps(prevVm, curVm, alpha);
+    const interpolatedById = new Map(interpolated.map((c) => [c.id, { x: c.x, y: c.y }]));
     gfx.clear();
     drawBoard(gfx, overlay.colourMode);
     drawTowers(gfx, pal, curVm, overlay);
-    drawCreeps(gfx, pal, prevVm, curVm, alpha);
+    drawTracers(gfx, pal, overlay, prevVm, curVm, alpha, interpolatedById);
+    drawCreeps(gfx, pal, interpolated);
     drawGhost(gfx, pal, overlay);
     drawSparks(gfx, pal, overlay);
   };
@@ -289,6 +367,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     destroy(): void {
       sparks.length = 0;
       resizeObserver?.disconnect();
+      dprTracker?.destroy();
       game.destroy(true);
     },
   };
