@@ -36,7 +36,9 @@ export class Rng {
   }
 
   /**
-   * Integer in [0, max) via `nextU32() % max`. `max` must be a positive integer. Adds
+   * Integer in [0, max) via `nextU32() % max`. `max` must be a positive integer no
+   * larger than 2^32 — a single `nextU32()` draw supplies only 32 bits, so a wider
+   * `max` cannot be filled (outputs stay inside [0, 2^32)). Adds
    * MODULO BIAS on top of `nextU32`'s own non-equidistribution whenever `max` does not
    * evenly divide 2^32 — low remainders are then very slightly more likely than high
    * ones. Rejection sampling alone would NOT fix this: it can only remove the bias modulo
@@ -49,8 +51,9 @@ export class Rng {
     return this.nextU32() % max;
   }
 
-  /** Integer in [min, max] inclusive via `nextInt`. Requires `max >= min`. Carries the
-   *  same modulo-bias caveat as `nextInt` (above) over the `max - min + 1`-sized range. */
+  /** Integer in [min, max] inclusive via `nextInt`. Requires `max >= min` and an
+   *  inclusive span `max - min + 1` no larger than 2^32 (same single-draw 32-bit ceiling
+   *  as `nextInt`). Carries the same modulo-bias caveat as `nextInt` (above). */
   nextRange(min: number, max: number): number {
     return min + (this.nextU32() % (max - min + 1));
   }

@@ -5,6 +5,10 @@
 //
 // Safety contract (per-operation, not a single blanket bound — see fixed.test.ts for the
 // pinned boundary cases):
+//  - Operands are signed 32-bit integer fixed-point values: `Math.imul` coerces both to
+//    int32 before multiplying, so non-integer or out-of-int32 inputs are silently
+//    truncated first. "Exact" below means no 32-bit wrap — not exact real-number
+//    multiplication.
 //  - `fpMul(a, b)` is exact only while the mathematical product `a·b` fits in a signed
 //    32-bit integer: `-2^31 ≤ a·b ≤ 2^31 − 1` (the interval INCLUDES -2^31; Math.imul's
 //    wraparound is the failure mode outside it).
