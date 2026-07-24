@@ -11,6 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -30,17 +31,6 @@ const EXPECTED = {
   ],
 };
 
-function deepEqual(a, b) {
-  if (a === b) return true;
-  if (typeof a !== typeof b || a === null || b === null) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (typeof a !== 'object') return false;
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
-}
-
 let doc;
 try {
   doc = parse(readFileSync(CONFIG_PATH, 'utf8'));
@@ -50,7 +40,7 @@ try {
   process.exit(1);
 }
 
-if (!deepEqual(doc, EXPECTED)) {
+if (!isDeepStrictEqual(doc, EXPECTED)) {
   console.error('❌ dependabot config check failed: .github/dependabot.yml does not match the');
   console.error('   expected shape exactly (missing, extra, or differing fields).');
   console.error(`   expected: ${JSON.stringify(EXPECTED)}`);

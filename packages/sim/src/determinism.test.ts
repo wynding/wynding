@@ -229,10 +229,34 @@ describe('compiled-board mutation regression (#21/P4)', () => {
     const blockedMaskSnapshot = SCENARIO_RULESET.board.field.blockedMask.slice();
     const baseMaskSnapshot = SCENARIO_RULESET.board.grid.baseMask.slice();
 
+    // toEqual does a deep, element-by-element structural comparison meant for
+    // arbitrary objects — far more than a flat numeric array needs, and slow enough
+    // per-step across two full matches to time out CI (was 20.6s). These arrays are
+    // flat and index-addressable, so a plain indexed loop that returns the first
+    // mismatching index (or -1) gets the same exactness at a fraction of the cost,
+    // and only builds the failure message when there actually is a mismatch.
+    const firstMismatch = (actual: ArrayLike<number>, expected: ArrayLike<number>): number => {
+      if (actual.length !== expected.length) return 0;
+      for (let i = 0; i < actual.length; i++) {
+        if (actual[i] !== expected[i]) return i;
+      }
+      return -1;
+    };
+
     const assertUnmutated = (): void => {
-      expect(SCENARIO_RULESET.board.field.dist).toEqual(distSnapshot);
-      expect(SCENARIO_RULESET.board.field.blockedMask).toEqual(blockedMaskSnapshot);
-      expect(SCENARIO_RULESET.board.grid.baseMask).toEqual(baseMaskSnapshot);
+      const checks: Array<[string, ArrayLike<number>, ArrayLike<number>]> = [
+        ['board.field.dist', SCENARIO_RULESET.board.field.dist, distSnapshot],
+        ['board.field.blockedMask', SCENARIO_RULESET.board.field.blockedMask, blockedMaskSnapshot],
+        ['board.grid.baseMask', SCENARIO_RULESET.board.grid.baseMask, baseMaskSnapshot],
+      ];
+      for (const [name, actual, expected] of checks) {
+        const idx = firstMismatch(actual, expected);
+        const message =
+          idx === -1
+            ? undefined
+            : `${name} mutated at index ${idx} (expected ${expected[idx]}, got ${actual[idx]})`;
+        expect(idx, message).toBe(-1);
+      }
     };
 
     for (let run = 0; run < 2; run++) {
@@ -242,5 +266,5 @@ describe('compiled-board mutation regression (#21/P4)', () => {
         assertUnmutated(); // per-step — catches mutate-then-restore within a match
       }
     }
-  });
+  }, 30_000); // explicit CI headroom; the fast comparator finishes well under this locally
 });

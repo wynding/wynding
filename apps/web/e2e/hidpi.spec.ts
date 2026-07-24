@@ -29,6 +29,20 @@ function closeTo(actual: [number, number, number], expected: [number, number, nu
   return actual.every((c, i) => Math.abs(c - (expected[i] as number)) <= CHANNEL_TOL);
 }
 
+/** Sample a CSS-space point from a `png` decoded from a clip whose origin is (clipX, clipY). */
+function sampleCssPoint(
+  png: PNG,
+  clipX: number,
+  clipY: number,
+  cssX: number,
+  cssY: number,
+): [number, number, number] {
+  const px = Math.min(png.width - 1, Math.max(0, Math.round(cssX - clipX)));
+  const py = Math.min(png.height - 1, Math.max(0, Math.round(cssY - clipY)));
+  const idx = (png.width * py + px) << 2;
+  return [png.data[idx] as number, png.data[idx + 1] as number, png.data[idx + 2] as number];
+}
+
 test.describe('HiDPI backing store + alignment (#28/P5)', () => {
   test('backing store sizes to CSS-rect × clamped dpr; CSS size stays pinned to the rect', async ({
     page,
@@ -97,15 +111,20 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     const buf = await page.screenshot({ clip, scale: 'css' });
     const png = PNG.sync.read(buf);
 
-    const sampleCssPoint = (cssX: number, cssY: number): [number, number, number] => {
-      const px = Math.min(png.width - 1, Math.max(0, Math.round(cssX - clipX)));
-      const py = Math.min(png.height - 1, Math.max(0, Math.round(cssY - clipY)));
-      const idx = (png.width * py + px) << 2;
-      return [png.data[idx] as number, png.data[idx + 1] as number, png.data[idx + 2] as number];
-    };
-
-    const floorSample = sampleCssPoint(floorPx.x + cellPx / 2, floorPx.y + cellPx / 2);
-    const borderSample = sampleCssPoint(borderPx.x + cellPx / 2, borderPx.y + cellPx / 2);
+    const floorSample = sampleCssPoint(
+      png,
+      clipX,
+      clipY,
+      floorPx.x + cellPx / 2,
+      floorPx.y + cellPx / 2,
+    );
+    const borderSample = sampleCssPoint(
+      png,
+      clipX,
+      clipY,
+      borderPx.x + cellPx / 2,
+      borderPx.y + cellPx / 2,
+    );
 
     expect(closeTo(floorSample, toRgb(pal.floor)), `floor sample ${floorSample.join(',')}`).toBe(
       true,
@@ -161,17 +180,16 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     const clipX = clip.x - box.x;
     const clipY = clip.y - box.y;
 
-    const sampleCssPoint = (cssX: number, cssY: number): [number, number, number] => {
-      const px = Math.min(png.width - 1, Math.max(0, Math.round(cssX - clipX)));
-      const py = Math.min(png.height - 1, Math.max(0, Math.round(cssY - clipY)));
-      const idx = (png.width * py + px) << 2;
-      return [png.data[idx] as number, png.data[idx + 1] as number, png.data[idx + 2] as number];
-    };
-
     // Centre of the built tower's 2×2 footprint (the shared corner of the four cells).
-    const towerCentre = sampleCssPoint(targetPx.x + cellPx, targetPx.y + cellPx);
+    const towerCentre = sampleCssPoint(png, clipX, clipY, targetPx.x + cellPx, targetPx.y + cellPx);
     // Same offset applied to the untouched neighbour cell — must still read as floor.
-    const neighbourSample = sampleCssPoint(neighbourPx.x + cellPx / 2, neighbourPx.y + cellPx / 2);
+    const neighbourSample = sampleCssPoint(
+      png,
+      clipX,
+      clipY,
+      neighbourPx.x + cellPx / 2,
+      neighbourPx.y + cellPx / 2,
+    );
 
     expect(closeTo(towerCentre, toRgb(pal.tower)), `tower sample ${towerCentre.join(',')}`).toBe(
       true,
