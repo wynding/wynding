@@ -1,14 +1,22 @@
-// overlay.ts — the DOM HUD + controls + accessibility settings + results panel (ADR
-// 0003 §3: the HUD/controls are a DOM overlay, NOT canvas text, so axe audits real
-// semantic elements, text resizes to 200% and reflows, and focus/keyboard are native).
-// Every user-facing string comes through `t()` (the no-ui-literals rule forbids raw
-// literals in text sinks). Buttons are real <button>s sized ≥ 44×44 CSS px via ui.css.
-// Colour is always paired with text/shape — never the sole signal.
+// overlay.ts — the results + settings dialogs, and the Dock/HUD wiring (ADR 0003 §3: the
+// HUD/controls are a DOM overlay, NOT canvas text, so axe audits real semantic elements,
+// text resizes to 200% and reflows, and focus/keyboard are native). Every user-facing
+// string comes through `t()` (the no-ui-literals rule forbids raw literals in text sinks).
+// Buttons are real <button>s sized ≥ 44×44 CSS px via ui.css. Colour is always paired with
+// text/shape — never the sole signal.
+//
+// The Shell's DOM topology (status bar, Dock, Rail, board) is built by `shell.ts`; this
+// module fills in HUD values, wires the Dock buttons, and owns the results/settings
+// dialogs — both sibling to the Shell (PLAN.md P1) and migrated onto the modal owner
+// (`modal.ts`), which is the single authority over `inert` on `.wy-shell` and focus
+// save/restore.
 
 import { COLOUR_MODES, type HudVM, type ColourMode } from '@wynding/render';
 import { t } from './i18n/t';
 import type { SettingsStore } from './settings';
 import { GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
+import { createModalOwner, type ModalOverlay } from './modal';
+import type { ShellHandle } from './shell';
 
 /** A player intent emitted by the overlay for the app to route to the controller. */
 export type UiAction =
@@ -30,7 +38,9 @@ export interface HudView {
 }
 
 export interface Overlay {
-  readonly root: HTMLElement;
+  /** Sibling elements the caller appends alongside the Shell (results/settings). */
+  readonly resultsEl: HTMLElement;
+  readonly settingsEl: HTMLElement;
   update(view: HudView): void;
   showResults(hud: HudVM): void;
   hideResults(): void;
@@ -69,69 +79,56 @@ function button(doc: Document, className: string, label: string): HTMLButtonElem
   return b;
 }
 
-export interface OverlayOptions {
-  /** Extra elements OUTSIDE the overlay (e.g. the game board, a sibling in the app root)
-   *  to mark `inert` while the results dialog is open, completing the modal focus trap. */
-  readonly inertWhileModal?: readonly HTMLElement[];
-  /** Where to move focus when the results dialog closes (else focus falls to <body>). */
-  readonly restoreFocusOnClose?: HTMLElement | null;
-}
-
 /**
- * Build the overlay into `doc`. `onAction` receives control intents; `settings`/`keymap`
- * are mutated directly by the settings panel (session-scoped). Returns a handle whose
- * `update()` refreshes the HUD each frame and `showResults()` reveals the end screen.
+ * Build the overlay into `doc`, wiring the Shell's HUD/Dock (built by `shell.ts`) and
+ * owning the results + settings dialogs. `onAction` receives control intents;
+ * `settings`/`keymap` are mutated directly by the settings dialog (session-scoped).
  */
 export function createOverlay(
   doc: Document,
   onAction: (action: UiAction) => void,
   settings: SettingsStore,
   keymap: Keymap,
-  options: OverlayOptions = {},
+  shell: ShellHandle,
 ): Overlay {
-  const root = doc.createElement('div');
-  root.className = 'wy-overlay';
+  const { hud: hudEls, dock } = shell;
+  const {
+    pause: pauseBtn,
+    speed: speedBtn,
+    callWave: callBtn,
+    sell: sellBtn,
+    settings: settingsBtn,
+  } = dock;
 
-  // --- HUD readout ---
-  // A labelled group, NOT a live region: these numbers change up to ~20×/s during
-  // combat, so a polite live region would flood the AT announcement queue and drown out
-  // the results dialog. Players read the HUD visually / on demand; only the results
-  // dialog (a role=dialog) announces the outcome.
-  const hudBox = doc.createElement('div');
-  hudBox.className = 'wy-hud';
-  hudBox.setAttribute('role', 'group');
-  hudBox.setAttribute('aria-label', t('hud.label'));
-  const livesEl = doc.createElement('span');
-  const bountyEl = doc.createElement('span');
-  const scoreEl = doc.createElement('span');
-  const waveEl = doc.createElement('span');
-  const starsEl = doc.createElement('span');
-  hudBox.append(livesEl, bountyEl, scoreEl, waveEl, starsEl);
-
-  // --- Controls ---
-  const controls = doc.createElement('div');
-  controls.className = 'wy-controls';
-  const pauseBtn = button(doc, 'wy-btn', t('controls.pause'));
-  const speedBtn = button(doc, 'wy-btn', t('controls.speed', { factor: 1 }));
-  const callBtn = button(doc, 'wy-btn', t('controls.callWave'));
-  const sellBtn = button(doc, 'wy-btn', t('controls.sell', { refund: 0 }));
-  const settingsBtn = button(doc, 'wy-btn', t('controls.settings'));
-  settingsBtn.setAttribute('aria-expanded', 'false');
-  controls.append(pauseBtn, speedBtn, callBtn, sellBtn, settingsBtn);
+  callBtn.textContent = t('controls.callWave');
+  settingsBtn.textContent = t('controls.settings');
 
   pauseBtn.addEventListener('click', () => onAction({ type: 'togglePause' }));
   speedBtn.addEventListener('click', () => onAction({ type: 'cycleSpeed' }));
   callBtn.addEventListener('click', () => onAction({ type: 'callWave' }));
   sellBtn.addEventListener('click', () => onAction({ type: 'sell' }));
 
-  // --- Settings panel (session-scoped a11y) ---
-  const panel = doc.createElement('section');
-  panel.className = 'wy-settings';
-  panel.hidden = true;
-  panel.setAttribute('aria-label', t('settings.title'));
+  // --- Settings dialog (sibling of the Shell — the Shell is inert while it's open) ---
+  const settingsDialog = doc.createElement('div');
+  settingsDialog.className = 'wy-settings';
+  settingsDialog.hidden = true;
+  settingsDialog.setAttribute('role', 'dialog');
+  settingsDialog.setAttribute('aria-modal', 'true');
+  settingsDialog.setAttribute('aria-label', t('settings.title'));
+  settingsDialog.tabIndex = -1;
+
+  const settingsInner = doc.createElement('div');
+  settingsInner.className = 'wy-settings-inner';
+  settingsDialog.appendChild(settingsInner);
+
+  const settingsHeader = doc.createElement('div');
+  settingsHeader.className = 'wy-settings-header';
   const heading = doc.createElement('h2');
   heading.textContent = t('settings.title');
-  panel.appendChild(heading);
+  const closeBtn = button(doc, 'wy-btn wy-settings-close', t('settings.close'));
+  closeBtn.setAttribute('aria-label', t('settings.close'));
+  settingsHeader.append(heading, closeBtn);
+  settingsInner.appendChild(settingsHeader);
 
   // Colour-vision mode
   const cbGroup = doc.createElement('fieldset');
@@ -156,7 +153,7 @@ export function createOverlay(
     label.append(radio, span);
     cbGroup.appendChild(label);
   }
-  panel.appendChild(cbGroup);
+  settingsInner.appendChild(cbGroup);
 
   // Reduced motion
   const motionLabel = doc.createElement('label');
@@ -168,7 +165,7 @@ export function createOverlay(
   const motionText = doc.createElement('span');
   motionText.textContent = t('settings.reducedMotion');
   motionLabel.append(motion, motionText);
-  panel.appendChild(motionLabel);
+  settingsInner.appendChild(motionLabel);
 
   // Rebindable controls. Only ONE rebind can be listening at a time: starting a new
   // rebind (or destroying the overlay) cancels any pending capture, so an abandoned
@@ -227,7 +224,7 @@ export function createOverlay(
     li.append(name, rebindBtn);
     rebindList.appendChild(li);
   }
-  panel.appendChild(rebindList);
+  settingsInner.appendChild(rebindList);
 
   function refreshRebindLabels(): void {
     for (const [action, btn] of rebindButtons) {
@@ -236,15 +233,7 @@ export function createOverlay(
     }
   }
 
-  settingsBtn.addEventListener('click', () => {
-    panel.hidden = !panel.hidden;
-    settingsBtn.setAttribute('aria-expanded', String(!panel.hidden));
-    // Closing the panel abandons any armed rebind — otherwise its capture listener would
-    // survive the panel and hijack the next in-game keypress.
-    if (panel.hidden) cancelCapture?.();
-  });
-
-  // --- Results overlay ---
+  // --- Results dialog (sibling of the Shell) ---
   const results = doc.createElement('div');
   results.className = 'wy-results';
   results.setAttribute('role', 'dialog');
@@ -262,28 +251,53 @@ export function createOverlay(
   verifyBtn.addEventListener('click', () => onAction({ type: 'verify' }));
   results.append(resultTitle, resultSummary, playAgainBtn, verifyBtn, verifyMsg);
 
-  root.append(hudBox, controls, panel, results);
+  // --- Modal owner: single authority over `.wy-shell`'s inert + focus save/restore ---
+  const modal = createModalOwner(doc, shell.root, {
+    // "Existing capture wins" (PLAN.md P2's Focus rules, already load-bearing here since
+    // this is the app's first document-scope Escape handler): while a rebind is armed,
+    // its own Escape-cancels-the-rebind handling must run instead of closing the dialog.
+    isEscapeHeld: () => cancelCapture !== null,
+  });
 
-  // The full set inerted while the results dialog is modal: the overlay's own regions plus
-  // any external siblings (the game board) the app hands in.
-  const modalInertTargets: HTMLElement[] = [
-    hudBox,
-    controls,
-    panel,
-    ...(options.inertWhileModal ?? []),
-  ];
+  const resultsOverlay: ModalOverlay = {
+    show(): void {
+      results.hidden = false;
+      playAgainBtn.focus();
+    },
+    hide(): void {
+      results.hidden = true;
+    },
+  };
+  const settingsOverlay: ModalOverlay = {
+    show(): void {
+      settingsDialog.hidden = false;
+      settingsDialog.focus();
+    },
+    hide(): void {
+      settingsDialog.hidden = true;
+      // Closing the dialog abandons any armed rebind — otherwise its capture listener
+      // would survive the dialog and hijack the next in-game keypress.
+      cancelCapture?.();
+    },
+  };
+
+  settingsBtn.addEventListener('click', () =>
+    modal.open(settingsOverlay, { priority: 'settings' }),
+  );
+  closeBtn.addEventListener('click', () => modal.close(settingsOverlay));
 
   return {
-    root,
+    resultsEl: results,
+    settingsEl: settingsDialog,
     update(view: HudView): void {
       const { hud } = view;
-      livesEl.textContent = t('hud.lives', { count: hud.lives });
-      bountyEl.textContent = t('hud.bounty', { count: hud.bounty });
-      scoreEl.textContent = t('hud.score', { count: hud.score });
-      starsEl.textContent = t('hud.stars', { count: hud.stars });
+      hudEls.lives.textContent = t('hud.lives', { count: hud.lives });
+      hudEls.bounty.textContent = t('hud.bounty', { count: hud.bounty });
+      hudEls.score.textContent = t('hud.score', { count: hud.score });
+      hudEls.stars.textContent = t('hud.stars', { count: hud.stars });
       // countdownSeconds is null for BOTH active and terminal phases — only label a live
       // wave "in progress"; a finished match shows no wave line (its outcome is the dialog).
-      waveEl.textContent =
+      hudEls.wave.textContent =
         hud.countdownSeconds !== null
           ? t('hud.countdown', { seconds: hud.countdownSeconds })
           : hud.phase === 'active'
@@ -304,27 +318,20 @@ export function createOverlay(
       resultSummary.textContent = t('results.summary', { score: hud.score, stars: hud.stars });
       results.setAttribute('aria-label', heading);
       verifyMsg.textContent = '';
-      results.hidden = false;
-      // Modal focus management (the dialog is aria-modal): make everything behind it inert
-      // — the overlay's own children AND the sibling game board (passed via options) — so
-      // Tab/AT can't reach the obscured game, then move focus into the dialog.
-      for (const el of modalInertTargets) el.setAttribute('inert', '');
-      playAgainBtn.focus();
+      modal.open(resultsOverlay, { priority: 'results' });
     },
     hideResults(): void {
-      results.hidden = true;
       verifyMsg.textContent = '';
-      // Un-inert BEFORE restoring focus: focusing a still-inert element is a no-op (focus
-      // would fall to <body>), so the order matters — clear inert, then focus the board.
-      for (const el of modalInertTargets) el.removeAttribute('inert');
-      (options.restoreFocusOnClose ?? null)?.focus();
+      modal.close(resultsOverlay);
     },
     setVerifyMessage(message: string): void {
       verifyMsg.textContent = message;
     },
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI
-      root.remove();
+      modal.destroy();
+      results.remove();
+      settingsDialog.remove();
     },
   };
 }

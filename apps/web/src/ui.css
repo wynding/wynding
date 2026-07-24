@@ -1,7 +1,13 @@
-/* ui.css — the DOM HUD/controls/settings styling (ADR 0003 §2). Sizing is in rem/em and
-   the layout reflows, so the UI stays usable when text is zoomed to 200%; interactive
-   targets are ≥ 44×44 CSS px; focus is always visible; text holds ≥ 4.5:1 contrast on the
-   dark surface. No colour-only signalling — buttons carry text labels. */
+/* ui.css — the app-shell + DOM HUD/controls/settings/results styling (ADR 0003 §2, PLAN.md
+   P1). Sizing is in rem/em and the layout reflows, so the UI stays usable when text is
+   zoomed to 200%; interactive targets are ≥ 44×44 CSS px; focus is always visible; text
+   holds ≥ 4.5:1 contrast on the dark surface. No colour-only signalling — buttons carry
+   text labels.
+
+   Text-resize commitment (ADR 0003): the page itself never scrolls (`body { overflow:
+   hidden }`), but `.wy-status`, `.wy-rail`, and `.wy-settings` get `overflow-y: auto` so
+   200% text zoom reflows/scrolls internally instead of clipping — the board viewport
+   (`.wy-board`) is the only fixed-fit element. */
 
 :root {
   --wy-bg: #0d1b2a;
@@ -13,8 +19,17 @@
   --wy-board-bg: #12141c;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  /* The page never scrolls — chrome regions (status/rail/settings) scroll internally
+     instead (see the text-resize commitment above). */
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--wy-bg);
   color: var(--wy-fg);
   font-family: system-ui, sans-serif;
@@ -22,17 +37,64 @@ body {
   line-height: 1.4;
 }
 
-.wy-title {
-  font-size: 1.5rem;
-  margin: 0.5rem 1rem;
+/* --- Shell: the viewport-filling layout grid --- */
+
+.wy-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  /* 100vh fallback declared FIRST — `100dvh` overrides it in browsers that support small/
+     dynamic viewport units; the fallback keeps older browsers full-height too. */
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.wy-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 1rem;
+  padding-top: calc(0.5rem + env(safe-area-inset-top));
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.wy-wordmark {
+  flex: 0 0 auto;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.wy-hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  font-size: 1.1rem;
+}
+
+.wy-main {
+  display: grid;
+  /* Rail width clamp per PLAN.md P1. minmax(0, …) on the board column so the canvas can
+     never force overflow. */
+  grid-template-columns: minmax(0, 1fr) clamp(9rem, 18vw, 13rem);
+  min-width: 0;
+  min-height: 0;
+}
+
+.wy-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
 .wy-board {
-  position: relative;
-  width: 100%;
-  max-width: 60rem;
-  aspect-ratio: 28 / 24;
-  margin: 0 auto;
+  /* Fills .wy-stage — no max-width/aspect-ratio: the letterbox projection already centers
+     any cssRect, and the existing ResizeObserver + dpr pipeline is reused untouched. */
+  position: absolute;
+  inset: 0;
   background: var(--wy-board-bg);
   outline-offset: 2px;
 }
@@ -41,26 +103,30 @@ body {
   outline: 3px solid var(--wy-focus);
 }
 
-.wy-overlay {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: 0.5rem 1rem;
-}
-
-.wy-hud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.25rem;
-  font-size: 1.1rem;
-  padding: 0.5rem 0;
-}
-
-.wy-controls {
+.wy-dock {
+  /* Bottom-left floating control cluster, overlapping the board border. */
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  padding: 0.5rem 0;
+  max-width: calc(100% - 1rem);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
 }
+
+.wy-rail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.5rem;
+  padding-right: calc(0.5rem + env(safe-area-inset-right));
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  background: var(--wy-surface);
+}
+
+/* --- Buttons (Dock + dialogs) --- */
 
 .wy-btn {
   min-width: 44px;
@@ -90,17 +156,36 @@ body {
   font-weight: 700;
 }
 
+/* --- Settings dialog: bounded + internally scrollable (ADR 0003 text-resize commitment) --- */
+
 .wy-settings {
-  margin-top: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: var(--wy-surface);
-  border-radius: 8px;
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  padding: 1.5rem;
+  background: rgba(6, 12, 22, 0.94);
+}
+
+.wy-settings[hidden] {
+  display: none;
+}
+
+.wy-settings-inner {
+  max-width: 30rem;
+  margin: 0 auto;
+}
+
+.wy-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .wy-settings fieldset {
   border: 1px solid #33465f;
   border-radius: 6px;
-  margin: 0 0 0.75rem;
+  margin: 0.75rem 0;
 }
 
 .wy-settings label {
@@ -134,6 +219,8 @@ body {
   border-color: var(--wy-focus);
 }
 
+/* --- Results dialog --- */
+
 .wy-results {
   position: fixed;
   inset: 0;
@@ -154,6 +241,12 @@ body {
 .wy-verify {
   max-width: 30rem;
   font-size: 1rem;
+}
+
+/* --- Rotate placeholder (P5) --- */
+
+.wy-rotate[hidden] {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

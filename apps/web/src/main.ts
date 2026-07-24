@@ -11,6 +11,7 @@
 import './ui.css';
 import { createController } from './controller';
 import { createOverlay, type UiAction } from './overlay';
+import { createShell } from './shell';
 import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
@@ -51,29 +52,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   let runCounter = 0;
   const nextSeed = (): number => ((seedSource() >>> 0) ^ Math.imul(++runCounter, 0x9e3779b1)) >>> 0;
 
-  const title = doc.createElement('h1');
-  title.className = 'wy-title';
-  // Static "Wynding" (not the board name) — a ratified PLAN §8 decision: RulesetBoard.name
-  // is a runtime content string that cannot be a generated typed catalog key, and shipping
-  // it raw would be untranslatable UI (ADR 0004). Localizing board names + excluding them
-  // from the ruleset hash is deferred ADR 0007 content work. M1 has one board, so no
-  // board-identity is lost in practice.
-  title.textContent = t('app.title');
-
-  const board = doc.createElement('div');
-  board.className = 'wy-board';
-  board.tabIndex = 0; // focusable for the keyboard build cursor
-  board.setAttribute('role', 'application');
-  board.setAttribute('aria-label', t('board.aria'));
-
-  // The board is a sibling of the overlay, so hand it in as a modal-inert + focus-restore
-  // target: while the results dialog is open the board is inert (can't be Tabbed onto), and
-  // closing the dialog (Play again) returns focus to the board rather than dropping to body.
-  const overlay = createOverlay(doc, onAction, settings, keymap, {
-    inertWhileModal: [title, board],
-    restoreFocusOnClose: board,
-  });
-  root.append(title, board, overlay.root);
+  // Pinned DOM topology (PLAN.md P1): #app > .wy-shell (status + main/stage/board+dock +
+  // rail) as siblings of the results/settings/rotate overlays — the Shell is the ONLY node
+  // the modal owner (`modal.ts`, wired inside `createOverlay`) ever toggles `inert` on.
+  const shell = createShell(doc);
+  const board = shell.board;
+  const overlay = createOverlay(doc, onAction, settings, keymap, shell);
+  const rotate = doc.createElement('div');
+  rotate.className = 'wy-rotate';
+  rotate.hidden = true; // P5 fills this in; topology-only placeholder for now
+  root.append(shell.root, overlay.resultsEl, overlay.settingsEl, rotate);
 
   const grid = controller.ruleset.board.grid;
   const geometry: BoardGeometry = {
@@ -115,6 +103,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
         overlay.hideResults();
+        // The modal owner restores focus to whatever was focused before the results
+        // dialog opened (generic pre-modal capture); Play-again always wants the board
+        // specifically — the natural next actionable place for a keyboard user — so this
+        // explicit focus wins regardless of what was focused beforehand.
+        board.focus();
         resultsShown = false;
         lastHudKey = '';
         break;
@@ -183,12 +176,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       input.destroy();
       handle.destroy();
       overlay.destroy();
-      // Remove the app-owned siblings too — overlay.destroy() only removes its own root,
-      // so leaving these behind would stack a duplicate title/board (an extra keyboard
-      // focus target, possibly still inert from an open results dialog) on every
+      shell.destroy();
+      // Remove the rotate placeholder too — overlay.destroy()/shell.destroy() only remove
+      // their own roots, so leaving this behind would stack a duplicate on every
       // createApp() a host runs in the same root.
-      title.remove();
-      board.remove();
+      rotate.remove();
     },
   };
 }

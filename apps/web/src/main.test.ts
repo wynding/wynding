@@ -70,7 +70,7 @@ describe('main — createApp wiring & frame loop', () => {
       seed: 1,
     });
 
-    expect(root.querySelector('.wy-title')!.textContent).toBe('Wynding');
+    expect(root.querySelector('.wy-wordmark')!.textContent).toBe('Wynding');
     expect(root.querySelector('.wy-board')!.getAttribute('role')).toBe('application');
     expect(fakeScene).toHaveBeenCalledOnce();
 
@@ -100,7 +100,7 @@ describe('main — createApp wiring & frame loop', () => {
       seed: 1,
     });
     app.destroy();
-    expect(root.childElementCount).toBe(0); // no leaked title/board/overlay (or stale inert)
+    expect(root.childElementCount).toBe(0); // no leaked shell/results/settings/rotate
     // A recreate must yield exactly one of each — not a stacked duplicate/focus target.
     const again = createApp(document, root, {
       sceneFactory: vi.fn(() => fakeHandle),
@@ -108,7 +108,7 @@ describe('main — createApp wiring & frame loop', () => {
       now: () => 0,
       seed: 2,
     });
-    expect(root.querySelectorAll('.wy-title')).toHaveLength(1);
+    expect(root.querySelectorAll('.wy-wordmark')).toHaveLength(1);
     expect(root.querySelectorAll('.wy-board')).toHaveLength(1);
     again.destroy();
   });
@@ -125,7 +125,7 @@ describe('main — createApp wiring & frame loop', () => {
       seed: 7,
     });
 
-    const controls = [...root.querySelectorAll<HTMLButtonElement>('.wy-controls .wy-btn')];
+    const controls = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')];
     const pauseBtn = controls[0]!;
     const speedBtn = controls[1]!;
     const callBtn = controls[2]!;
@@ -144,12 +144,11 @@ describe('main — createApp wiring & frame loop', () => {
     for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
     expect(results.hidden).toBe(false);
 
-    // Both the title and the board are inert while the results dialog is modal — closing
-    // the title-inert gap left the h1 AT-navigable (heading navigation) behind the dialog.
-    const title = root.querySelector<HTMLElement>('.wy-title')!;
+    // The Shell (status bar + main + board + rail) is the ONLY node the modal owner ever
+    // toggles inert while the results dialog is modal.
+    const shellEl = root.querySelector<HTMLElement>('.wy-shell')!;
     const board = root.querySelector<HTMLElement>('.wy-board')!;
-    expect(title.hasAttribute('inert')).toBe(true);
-    expect(board.hasAttribute('inert')).toBe(true);
+    expect(shellEl.hasAttribute('inert')).toBe(true);
 
     const resBtns = [...results.querySelectorAll<HTMLButtonElement>('.wy-btn')];
     const playAgain = resBtns[0]!;
@@ -160,8 +159,8 @@ describe('main — createApp wiring & frame loop', () => {
     playAgain.click();
     expect(results.hidden).toBe(true);
     expect(fakeHandle.reset).toHaveBeenCalled();
-    expect(title.hasAttribute('inert')).toBe(false); // focus-restore: neither stays inert
-    expect(board.hasAttribute('inert')).toBe(false);
+    expect(shellEl.hasAttribute('inert')).toBe(false); // focus-restore: no longer inert
+    expect(board).toBe(document.activeElement); // Play-again returns focus to the board
     app.destroy();
   });
 });
@@ -195,7 +194,7 @@ describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
     sched.frame((clock += 16)); // flush the committed tick
 
     const hudText = (): string => root.querySelector('.wy-hud')!.textContent ?? '';
-    const pauseBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-controls .wy-btn')][0]!;
+    const pauseBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')][0]!;
     pauseBtn.click(); // pause
     sched.frame((clock += 16));
 
@@ -235,7 +234,7 @@ describe('main — input.reset() across Play-again (#40)', () => {
     const resetSpy = inputHandle.reset as unknown as ReturnType<typeof vi.fn>;
     expect(resetSpy).not.toHaveBeenCalled();
 
-    const callBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-controls .wy-btn')][2]!;
+    const callBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')][2]!;
     callBtn.click(); // launch the wave
     const results = root.querySelector<HTMLElement>('.wy-results')!;
     for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));

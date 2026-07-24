@@ -20,6 +20,7 @@ export const EN = {
   "controls.verify": "Verify this run",
   "controls.settings": "Accessibility settings",
   "settings.title": "Accessibility",
+  "settings.close": "Close",
   "settings.colourMode": "Colour vision mode",
   "settings.colourMode.default": "Default",
   "settings.colourMode.protan": "Protanopia",
@@ -67,6 +68,7 @@ export interface MessageParams {
   "controls.verify": Record<never, never>;
   "controls.settings": Record<never, never>;
   "settings.title": Record<never, never>;
+  "settings.close": Record<never, never>;
   "settings.colourMode": Record<never, never>;
   "settings.colourMode.default": Record<never, never>;
   "settings.colourMode.protan": Record<never, never>;

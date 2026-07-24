@@ -53,20 +53,30 @@ async function assertRenderedContrast(
   ).toBeGreaterThanOrEqual(minRatio);
 }
 
-test('renders the HUD, controls, and settings with no axe violations', async ({ page }) => {
+test('renders the app shell (status/board/dock/rail), and settings with no axe violations', async ({
+  page,
+}) => {
   await page.goto('/');
 
-  // Title + HUD + core controls are present as semantic elements.
-  await expect(page.locator('.wy-title')).toHaveText('Wynding');
-  await expect(page.locator('.wy-hud')).toContainText('Lives:');
+  // Pinned topology (PLAN.md P1): wordmark + HUD in the status bar, board + Dock in the
+  // Stage, an (empty at M1) Rail.
+  await expect(page.locator('.wy-wordmark')).toHaveText('Wynding');
+  await expect(page.locator('.wy-status')).toContainText('Lives:');
+  await expect(page.locator('.wy-board')).toBeVisible();
+  await expect(page.locator('.wy-rail')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
 
-  // Open the accessibility settings and switch colour-vision mode + reduced motion.
+  // Open the accessibility settings (now a bounded, labelled modal dialog — sibling of
+  // the Shell, which goes inert while it's open) and switch colour-vision mode + reduced
+  // motion.
   await page.getByRole('button', { name: 'Accessibility settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  await expect(settingsDialog).toBeVisible();
+  await expect(page.locator('.wy-shell')).toHaveAttribute('inert', '');
   await page.getByLabel('Deuteranopia').check();
   await page.getByLabel('Reduce motion').check();
 
-  // axe audit of the live DOM UI.
+  // axe audit of the live DOM UI (settings dialog open).
   const results = await new AxeBuilder({ page }).include('#app').analyze();
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 
@@ -74,6 +84,25 @@ test('renders the HUD, controls, and settings with no axe violations', async ({ 
   // control button, each against its own background.
   await assertRenderedContrast(page, 'body', 4.5);
   await assertRenderedContrast(page, '.wy-btn', 4.5);
+
+  // Close via the dialog's own Close button (Escape is covered separately below) —
+  // un-inerts the Shell and restores focus to the opener.
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(settingsDialog).toBeHidden();
+  await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
+  await expect(page.getByRole('button', { name: 'Accessibility settings' })).toBeFocused();
+});
+
+test('the settings dialog closes on Escape (the modal owner consumes it first)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Accessibility settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  await expect(settingsDialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(settingsDialog).toBeHidden();
+  await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
 });
 
 test('supports the pause / speed / call-wave controls and reaches a result', async ({ page }) => {
@@ -100,15 +129,14 @@ test('supports the pause / speed / call-wave controls and reaches a result', asy
   const dialogResults = await new AxeBuilder({ page }).include('#app').analyze();
   expect(dialogResults.violations, JSON.stringify(dialogResults.violations, null, 2)).toEqual([]);
 
-  // Modal semantics: the board, the controls, and the title all carry `inert` while the
-  // dialog is open, and Tab never escapes into them. `body` is the transit state (identical
-  // to native `showModal()`, which also hands focus to browser chrome between tabbables
-  // rather than wrapping directly) — so it's an allowed member of the "outside the dialog"
-  // set per press, but the count + re-entry assertions below prove focus keeps cycling back
-  // into the dialog rather than escaping permanently.
-  await expect(page.locator('.wy-title')).toHaveAttribute('inert', '');
-  await expect(page.locator('.wy-board')).toHaveAttribute('inert', '');
-  await expect(page.locator('.wy-controls')).toHaveAttribute('inert', '');
+  // Modal semantics: `.wy-shell` (status bar + board + Dock + Rail — the ONLY node the
+  // modal owner ever toggles `inert` on) carries `inert` while the dialog is open, and Tab
+  // never escapes into it. `body` is the transit state (identical to native `showModal()`,
+  // which also hands focus to browser chrome between tabbables rather than wrapping
+  // directly) — so it's an allowed member of the "outside the dialog" set per press, but
+  // the count + re-entry assertions below prove focus keeps cycling back into the dialog
+  // rather than escaping permanently.
+  await expect(page.locator('.wy-shell')).toHaveAttribute('inert', '');
 
   const dialogTabbableCount = await results
     .locator('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
@@ -156,7 +184,6 @@ test('supports the pause / speed / call-wave controls and reaches a result', asy
 
   // Focus-restore: Play again clears inert and returns focus to the board.
   await page.getByRole('button', { name: 'Play again' }).click();
-  await expect(page.locator('.wy-title')).not.toHaveAttribute('inert', '');
-  await expect(page.locator('.wy-board')).not.toHaveAttribute('inert', '');
+  await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
   await expect(page.locator('.wy-board')).toBeFocused();
 });
