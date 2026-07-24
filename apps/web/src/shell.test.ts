@@ -41,16 +41,15 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     ]);
   });
 
-  it('the Dock holds Pause/Speed/Call-wave/Settings + a hidden empty primary slot (no global Sell — PLAN.md P2 moves Sell into the Panel)', () => {
+  it('the Dock holds Pause/Speed/Settings + a hidden empty primary slot (no global Sell — PLAN.md P2 moves Sell into the Panel; no separate Call-wave button — PLAN.md P4 wires the primary slot as Start)', () => {
     const shell = createShell(document);
     expect([...shell.dock.root.children]).toEqual([
       shell.dock.pause,
       shell.dock.speed,
-      shell.dock.callWave,
       shell.dock.settings,
       shell.dock.primary,
     ]);
-    expect(shell.dock.primary.hidden).toBe(true); // wired in P4
+    expect(shell.dock.primary.hidden).toBe(true); // shown by overlay.ts's first render (P4)
   });
 
   it('the Rail holds the Card then the (hidden) Panel, in that order (PLAN.md P2)', () => {

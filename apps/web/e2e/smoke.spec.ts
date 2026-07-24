@@ -67,7 +67,10 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   // The Rail's Card (PLAN.md P2) — the single M1 `basic` tower, unarmed at load.
   await expect(page.locator('.wy-card')).toBeVisible();
   await expect(page.locator('.wy-card')).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  // Pre-start (PLAN.md P4): Pause is hidden (nothing to pause yet), and the Dock's
+  // primary button reads "Start".
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 
   // Open the accessibility settings (now a bounded, labelled modal dialog — sibling of
   // the Shell, which goes inert while it's open) and switch colour-vision mode + reduced
@@ -159,16 +162,28 @@ test('arms the Card, places a tower via the keyboard cursor, sells it via the Pa
   await expect(board).toBeFocused(); // Sell → focus returns to the board
 });
 
-test('supports the pause / speed / call-wave controls and reaches a result', async ({ page }) => {
+test('supports player-started runs, pause / speed controls, and reaches a result', async ({
+  page,
+}) => {
   test.setTimeout(90_000);
   await page.goto('/');
 
+  // Pre-start (PLAN.md P4): no countdown, just the localized prompt; Pause hidden.
+  await expect(page.locator('.wy-status')).toContainText('Press Start to begin');
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
+
+  // Start launches the run (M1: exactly one wave, launched immediately — Start IS the
+  // early call). The primary Dock button then hides for the rest of the run.
+  const start = page.getByRole('button', { name: 'Start' });
+  await start.click();
+  await expect(start).toBeHidden();
+
   const pause = page.getByRole('button', { name: 'Pause' });
+  await expect(pause).toBeVisible();
   await pause.click();
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume' }).click();
 
-  await page.getByRole('button', { name: 'Call wave now' }).click();
   // Run at 2× so the no-tower loss resolves well within the timeout regardless of CI
   // runner speed (a full M1 wave at 1× can approach ~25 s of wall-clock).
   await page.getByRole('button', { name: /^Speed:/ }).click();
@@ -240,4 +255,10 @@ test('supports the pause / speed / call-wave controls and reaches a result', asy
   await page.getByRole('button', { name: 'Play again' }).click();
   await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
   await expect(page.locator('.wy-board')).toBeFocused();
+
+  // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
+  // again.
+  await expect(page.locator('.wy-status')).toContainText('Press Start to begin');
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });

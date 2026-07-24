@@ -360,7 +360,7 @@ export function attachInput(
     if (action === null) return;
     e.preventDefault();
     // Auto-repeat only drives cursor movement (held arrow keeps moving); discrete actions
-    // (confirm/sell/callWave/pause/speed) are edge-triggered — a held key must not repeat
+    // (confirm/sell/start/pause/speed) are edge-triggered — a held key must not repeat
     // them. preventDefault() still ran above, so the key stays consumed (no page scroll).
     const isMovement =
       action === 'up' || action === 'down' || action === 'left' || action === 'right';
@@ -384,8 +384,8 @@ export function attachInput(
       case 'sell':
         controller.sellSelected();
         break;
-      case 'callWave':
-        controller.callWaveEarly();
+      case 'start':
+        controller.start();
         break;
       case 'pause':
         controller.togglePause();

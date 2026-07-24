@@ -45,7 +45,7 @@ function setup() {
     overlay,
     pauseBtn: shell.dock.pause,
     speedBtn: shell.dock.speed,
-    callBtn: shell.dock.callWave,
+    primaryBtn: shell.dock.primary,
     settingsBtn: shell.dock.settings,
     card: shell.card,
     panel: shell.panel,
@@ -66,7 +66,6 @@ describe('overlay — HUD readout', () => {
       speed: 1,
       ui: uiState(),
       refund: 0,
-      canCallWave: true,
     });
     const text = shell.hud.lives.parentElement!.textContent!;
     expect(text).toContain('Lives: 10');
@@ -79,7 +78,6 @@ describe('overlay — HUD readout', () => {
       speed: 1,
       ui: uiState(),
       refund: 0,
-      canCallWave: false,
     });
     expect(shell.hud.wave.textContent).toBe('Wave in progress');
 
@@ -90,25 +88,22 @@ describe('overlay — HUD readout', () => {
       speed: 1,
       ui: uiState(),
       refund: 0,
-      canCallWave: false,
     });
     expect(shell.hud.wave.textContent).toBe('');
   });
 
-  it('reflects pause/speed/call state on the controls', () => {
-    const { overlay, pauseBtn, speedBtn, callBtn } = setup();
+  it('reflects pause/speed state on the controls', () => {
+    const { overlay, pauseBtn, speedBtn } = setup();
     overlay.update({
       hud: hud(),
       paused: true,
       speed: 2,
       ui: uiState(),
       refund: 0,
-      canCallWave: false,
     });
     expect(pauseBtn.textContent).toBe('Resume');
     expect(pauseBtn.getAttribute('aria-pressed')).toBe('true');
     expect(speedBtn.textContent).toBe('Speed: 2x');
-    expect(callBtn.disabled).toBe(true);
 
     overlay.update({
       hud: hud(),
@@ -116,10 +111,56 @@ describe('overlay — HUD readout', () => {
       speed: 1,
       ui: uiState(),
       refund: 0,
-      canCallWave: true,
     });
     expect(pauseBtn.textContent).toBe('Pause');
-    expect(callBtn.disabled).toBe(false);
+  });
+});
+
+describe('overlay — player-started runs (PLAN.md P4)', () => {
+  it('pre-start: Pause is hidden, the primary Dock button reads Start, and the wave slot prompts to begin', () => {
+    const { overlay, pauseBtn, primaryBtn, shell } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: false }),
+      refund: 0,
+    });
+    expect(pauseBtn.hidden).toBe(true);
+    expect(primaryBtn.hidden).toBe(false);
+    expect(primaryBtn.textContent).toBe('Start');
+    expect(shell.hud.wave.textContent).toBe('Press Start to begin');
+  });
+
+  it('once started: Pause is visible, the primary Dock button hides for the rest of the run', () => {
+    const { overlay, pauseBtn, primaryBtn } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true }),
+      refund: 0,
+    });
+    expect(pauseBtn.hidden).toBe(false);
+    expect(primaryBtn.hidden).toBe(true);
+  });
+
+  it('clicking the primary Dock button emits start', () => {
+    const { actions, primaryBtn } = setup();
+    primaryBtn.click();
+    expect(actions).toEqual([{ type: 'start' }]);
+  });
+
+  it('the live region announces the pre-start pending cap distinctly from a generic rejection', () => {
+    const { overlay, live } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ lastOutcome: { kind: 'rejected', reason: 'pendingCap' } }),
+      refund: 0,
+    });
+    expect(live.textContent).toBe('Too many pending actions.');
   });
 });
 
@@ -137,7 +178,6 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       speed: 1,
       ui: uiState({ armed: 'basic' }),
       refund: 0,
-      canCallWave: true,
     });
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
@@ -163,7 +203,6 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       speed: 1,
       ui: uiState({ armed: 'basic' }),
       refund: 0,
-      canCallWave: true,
     });
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
@@ -187,7 +226,6 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       speed: 1,
       ui: uiState({ selection: { col: 1, row: 1, id: 7 } }),
       refund: 3,
-      canCallWave: true,
     });
     expect(panel.root.hidden).toBe(false);
     const buttons = [...panel.root.querySelectorAll<HTMLButtonElement>('.wy-btn')];
@@ -211,7 +249,6 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       speed: 1,
       ui: uiState(),
       refund: 0,
-      canCallWave: true,
     });
     expect(panel.root.hidden).toBe(true);
   });
@@ -225,7 +262,6 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
         speed: 1,
         ui: uiState({ lastOutcome }),
         refund: 0,
-        canCallWave: true,
       });
       return live.textContent!;
     };
@@ -258,7 +294,6 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
         speed: 1,
         ui: uiState({ armed: 'turret' as unknown as UiState['armed'] }),
         refund: 0,
-        canCallWave: true,
       }),
     ).toThrow(/unknown tower kind/);
   });
@@ -305,11 +340,11 @@ describe('overlay — accessibility semantics', () => {
 
 describe('overlay — control intents', () => {
   it('emits the right UiAction for each control button', () => {
-    const { actions, pauseBtn, speedBtn, callBtn } = setup();
+    const { actions, pauseBtn, speedBtn, primaryBtn } = setup();
     pauseBtn.click();
     speedBtn.click();
-    callBtn.click();
-    expect(actions.map((a) => a.type)).toEqual(['togglePause', 'cycleSpeed', 'callWave']);
+    primaryBtn.click();
+    expect(actions.map((a) => a.type)).toEqual(['togglePause', 'cycleSpeed', 'start']);
   });
 });
 

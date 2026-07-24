@@ -92,8 +92,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       case 'cycleSpeed':
         controller.cycleSpeed();
         break;
-      case 'callWave':
-        controller.callWaveEarly();
+      case 'start':
+        controller.start();
         break;
       case 'armTower':
         controller.armTower(action.tower);
@@ -164,6 +164,18 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       tracers: f.tracers,
     };
     handle.draw(f.prevVm, f.curVm, f.alpha, ov);
+    // Observable sim clock for e2e test hooks (PLAN.md P4) — NOT user-facing, just plain
+    // attributes on the board element so a spec can assert "held"/"frozen" directly
+    // instead of inferring it from a short wait. Cheap dataset writes, so unconditional
+    // every frame (no need to gate behind the hudKey throttle below): `data-sim-tick`/
+    // `data-sim-phase` mirror the real sim (frozen at 0/'pre-wave' while held — the sim
+    // itself has no "held" concept), `data-run-started` is the one place that distinction
+    // becomes visible, and `data-pending-adds` mirrors the Pending-build count shown by
+    // the board's own paused-planning presentation.
+    board.dataset.simTick = String(f.curVm.tick);
+    board.dataset.simPhase = f.curVm.phase;
+    board.dataset.runStarted = String(controller.uiState().started);
+    board.dataset.pendingAdds = String(f.pendingAdds.length);
     // ...but the HUD only changes on a tick/pause/speed/selection boundary, so gate its
     // recompute + DOM writes on that (they're redundant on the ~60 fps render hot path).
     // Key on selection IDENTITY (its cell), not just presence: switching between two towers
@@ -185,7 +197,6 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         speed: controller.speed(),
         ui: controller.uiState(),
         refund: controller.refundForSelection(),
-        canCallWave: hud.phase === 'pre-wave',
       });
       if (controller.isTerminal() && !resultsShown) {
         overlay.showResults(hud);

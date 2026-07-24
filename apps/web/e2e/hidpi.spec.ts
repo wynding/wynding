@@ -214,6 +214,11 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       }, 'first frame painted: neighbour cell reads as pal.floor')
       .toBe(true);
 
+    // Press Start first (PLAN.md P4): a build on a held run is Pending (rendered as an
+    // outline, not the filled `pal.tower` this test samples) — the run must actually be
+    // stepping for the build to commit and paint solid.
+    await page.getByRole('button', { name: 'Start' }).click();
+
     // Desktop input is armed-click-to-place (PLAN.md P2): arm the Card first, then a
     // single click on an empty, in-bounds, affordable cell places directly.
     await page.getByRole('button', { name: /Basic Tower/ }).click();

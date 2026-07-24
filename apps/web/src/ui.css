@@ -255,6 +255,16 @@ body {
   font-weight: 700;
 }
 
+/* The Dock's headline Start action (PLAN.md P4) — the same primary treatment as
+   `.wy-primary`, kept as its own class (not a second `.wy-primary` element) so the
+   results dialog's rendered-contrast spot check (which selects `.wy-primary` by itself)
+   can never land on this button instead of the intended Play-again one. */
+.wy-dock-primary {
+  background: var(--wy-accent);
+  color: var(--wy-on-accent);
+  font-weight: 700;
+}
+
 /* --- Settings dialog: bounded + internally scrollable (ADR 0003 text-resize commitment) --- */
 
 .wy-settings {

@@ -31,9 +31,10 @@ export interface ShellDock {
   readonly root: HTMLElement;
   readonly pause: HTMLButtonElement;
   readonly speed: HTMLButtonElement;
-  readonly callWave: HTMLButtonElement;
   readonly settings: HTMLButtonElement;
-  /** Empty primary-button slot, wired in P4 (Start). Hidden — no content/action yet. */
+  /** The headline Start action (PLAN.md P4) — primary styling, reads "Start" pre-run and
+   *  hides for the rest of the run once pressed. `overlay.ts` owns its text/visibility;
+   *  this is the empty slot P1 reserved. */
   readonly primary: HTMLButtonElement;
 }
 
@@ -124,16 +125,18 @@ export function createShell(doc: Document): ShellHandle {
   dock.className = 'wy-dock';
   const pauseBtn = button(doc, 'wy-btn');
   const speedBtn = button(doc, 'wy-btn');
-  const callWaveBtn = button(doc, 'wy-btn');
   const settingsBtn = button(doc, 'wy-btn');
-  // No `.wy-primary` class yet — that's the visual identity P4 gives it once it has
-  // real content/action; an empty hidden node claiming that class would confuse anything
-  // selecting `.wy-primary` expecting the (visible) primary control.
+  // `.wy-dock-primary` carries the same primary visual treatment as `.wy-primary`
+  // (ui.css) — kept as its own class (rather than reusing `.wy-primary` itself) so e2e's
+  // existing `.wy-primary` contrast spot-check (the results dialog's Play-again button)
+  // can never accidentally sample this hidden-post-start Dock button instead. `overlay.ts`
+  // owns its text ("Start", PLAN.md P4) and hidden state (visible pre-start, hidden for
+  // the rest of the run once pressed — the empty slot P1 reserved).
   const primaryBtn = button(doc, 'wy-btn wy-dock-primary');
-  primaryBtn.hidden = true; // empty slot — content/action land in P4 (Start)
+  primaryBtn.hidden = true; // safe default before overlay.ts's first render
   // The global Sell button is removed (PLAN.md P2) — Sell lives in the Panel now; the `X`
   // hotkey still sells the current selection directly via the controller (input.ts).
-  dock.append(pauseBtn, speedBtn, callWaveBtn, settingsBtn, primaryBtn);
+  dock.append(pauseBtn, speedBtn, settingsBtn, primaryBtn);
 
   stage.append(board, dock);
 
@@ -184,7 +187,6 @@ export function createShell(doc: Document): ShellHandle {
       root: dock,
       pause: pauseBtn,
       speed: speedBtn,
-      callWave: callWaveBtn,
       settings: settingsBtn,
       primary: primaryBtn,
     },

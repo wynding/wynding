@@ -128,7 +128,17 @@ describe('main — createApp wiring & frame loop', () => {
     const controls = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')];
     const pauseBtn = controls[0]!;
     const speedBtn = controls[1]!;
-    const callBtn = controls[2]!;
+    const primaryBtn = controls[3]!;
+    sched.frame((clock += 16)); // one frame so overlay.update() has run at least once
+    // Pre-start (PLAN.md P4): Pause is hidden, the primary Dock button reads Start.
+    expect(pauseBtn.hidden).toBe(true);
+    expect(primaryBtn.textContent).toBe('Start');
+
+    primaryBtn.click(); // launches the run (M1's one wave, immediately)
+    sched.frame((clock += 16));
+    expect(pauseBtn.hidden).toBe(false);
+    expect(primaryBtn.hidden).toBe(true); // hides for the rest of the run
+
     pauseBtn.click();
     sched.frame((clock += 16));
     expect(pauseBtn.textContent).toBe('Resume'); // pause routed
@@ -136,8 +146,6 @@ describe('main — createApp wiring & frame loop', () => {
     speedBtn.click();
     sched.frame((clock += 16));
     expect(speedBtn.textContent).toBe('Speed: 2x');
-
-    callBtn.click(); // launch the wave
 
     // Drive frames until the run terminates (results screen appears).
     const results = root.querySelector<HTMLElement>('.wy-results')!;
@@ -161,6 +169,12 @@ describe('main — createApp wiring & frame loop', () => {
     expect(fakeHandle.reset).toHaveBeenCalled();
     expect(shellEl.hasAttribute('inert')).toBe(false); // focus-restore: no longer inert
     expect(board).toBe(document.activeElement); // Play-again returns focus to the board
+    sched.frame((clock += 16));
+    // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
+    // again.
+    expect(pauseBtn.hidden).toBe(true);
+    expect(primaryBtn.hidden).toBe(false);
+    expect(primaryBtn.textContent).toBe('Start');
     app.destroy();
   });
 });
@@ -188,10 +202,12 @@ describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
       for (let i = 0; i < Math.abs(dRow); i++) key(rowKey);
     };
 
-    // Build one tower at (3,3) while running, so there is something to sell later.
+    // Build one tower at (3,3) — Pending (PLAN.md P4: pre-start planning is fully
+    // available, and the shared pending projection presents it instantly regardless of
+    // whether the run has been started), so there is something to sell later.
     moveTo(3, 3 - 11); // entrance row 11 → row 3
-    key('Enter'); // confirm the build
-    sched.frame((clock += 16)); // flush the committed tick
+    key('Enter'); // confirm the build (Pending)
+    sched.frame((clock += 16));
 
     const hudText = (): string => root.querySelector('.wy-hud')!.textContent ?? '';
     const pauseBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')][0]!;
@@ -234,8 +250,8 @@ describe('main — input.reset() across Play-again (#40)', () => {
     const resetSpy = inputHandle.reset as unknown as ReturnType<typeof vi.fn>;
     expect(resetSpy).not.toHaveBeenCalled();
 
-    const callBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')][2]!;
-    callBtn.click(); // launch the wave
+    const primaryBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')][3]!;
+    primaryBtn.click(); // launches the run (M1's one wave, immediately)
     const results = root.querySelector<HTMLElement>('.wy-results')!;
     for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
     expect(results.hidden).toBe(false);

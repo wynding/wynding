@@ -10,11 +10,12 @@ export const EN = {
   "hud.countdown": "Wave in {seconds}s",
   "hud.label": "Game status",
   "hud.wave.active": "Wave in progress",
+  "hud.wave.pressStart": "Press Start to begin",
   "hud.stars": "Stars: {count} of 3",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
   "controls.speed": "Speed: {factor}x",
-  "controls.callWave": "Call wave now",
+  "controls.start": "Start",
   "controls.playAgain": "Play again",
   "controls.verify": "Verify this run",
   "controls.settings": "Accessibility settings",
@@ -35,7 +36,7 @@ export const EN = {
   "action.right": "Move right",
   "action.confirm": "Build or select",
   "action.sell": "Sell",
-  "action.callWave": "Call wave",
+  "action.start": "Start",
   "action.pause": "Pause",
   "action.speed": "Cycle speed",
   "action.armTower1": "Arm basic tower",
@@ -62,6 +63,7 @@ export const EN = {
   "live.rejected.bounty": "Not enough Bounty.",
   "live.rejected.occupied": "That cell is already occupied.",
   "live.rejected.generic": "Can't build there.",
+  "live.rejected.pendingCap": "Too many pending actions.",
   "live.sold": "Tower sold. Refunded {refund} Bounty.",
 } as const;
 
@@ -76,11 +78,12 @@ export interface MessageParams {
   "hud.countdown": { "seconds": string | number };
   "hud.label": Record<never, never>;
   "hud.wave.active": Record<never, never>;
+  "hud.wave.pressStart": Record<never, never>;
   "hud.stars": { "count": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
   "controls.speed": { "factor": string | number };
-  "controls.callWave": Record<never, never>;
+  "controls.start": Record<never, never>;
   "controls.playAgain": Record<never, never>;
   "controls.verify": Record<never, never>;
   "controls.settings": Record<never, never>;
@@ -101,7 +104,7 @@ export interface MessageParams {
   "action.right": Record<never, never>;
   "action.confirm": Record<never, never>;
   "action.sell": Record<never, never>;
-  "action.callWave": Record<never, never>;
+  "action.start": Record<never, never>;
   "action.pause": Record<never, never>;
   "action.speed": Record<never, never>;
   "action.armTower1": Record<never, never>;
@@ -128,5 +131,6 @@ export interface MessageParams {
   "live.rejected.bounty": Record<never, never>;
   "live.rejected.occupied": Record<never, never>;
   "live.rejected.generic": Record<never, never>;
+  "live.rejected.pendingCap": Record<never, never>;
   "live.sold": { "refund": string | number };
 }

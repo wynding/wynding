@@ -27,7 +27,7 @@ import type { ArmedTower, UiState, PlacementOutcome } from './controller';
 export type UiAction =
   | { readonly type: 'togglePause' }
   | { readonly type: 'cycleSpeed' }
-  | { readonly type: 'callWave' }
+  | { readonly type: 'start' }
   | { readonly type: 'playAgain' }
   | { readonly type: 'verify' }
   | { readonly type: 'armTower'; readonly tower: ArmedTower }
@@ -40,7 +40,6 @@ export interface HudView {
   readonly hud: HudVM;
   readonly paused: boolean;
   readonly speed: number;
-  readonly canCallWave: boolean;
   /** The armed/selection state machine snapshot (PLAN.md P2) driving the Card/Panel/live
    *  region. */
   readonly ui: UiState;
@@ -77,7 +76,7 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
   right: () => t('action.right'),
   confirm: () => t('action.confirm'),
   sell: () => t('action.sell'),
-  callWave: () => t('action.callWave'),
+  start: () => t('action.start'),
   pause: () => t('action.pause'),
   speed: () => t('action.speed'),
   armTower1: () => t('action.armTower1'),
@@ -107,14 +106,22 @@ export function createOverlay(
   ruleset: CompiledRuleset,
 ): Overlay {
   const { hud: hudEls, dock, card, panel, live } = shell;
-  const { pause: pauseBtn, speed: speedBtn, callWave: callBtn, settings: settingsBtn } = dock;
+  const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
 
-  callBtn.textContent = t('controls.callWave');
   settingsBtn.textContent = t('controls.settings');
+  // The Dock's headline Start action (PLAN.md P4) — the old "Call wave now" button is
+  // gone; `primaryBtn` (the empty slot P1 reserved, already carrying `.wy-dock-primary`'s
+  // primary-styled look — ui.css — kept distinct from `.wy-primary` so the results
+  // dialog's own contrast spot-check can't accidentally sample this Dock button instead)
+  // is wired here. Visibility (visible pre-start, hidden for the rest of the run once
+  // pressed) and the Pause button's own hidden-pre-start state are both driven per-frame
+  // by `update()` below, since they depend on live `UiState`, not anything fixed at
+  // construction time.
+  primaryBtn.textContent = t('controls.start');
 
   pauseBtn.addEventListener('click', () => onAction({ type: 'togglePause' }));
   speedBtn.addEventListener('click', () => onAction({ type: 'cycleSpeed' }));
-  callBtn.addEventListener('click', () => onAction({ type: 'callWave' }));
+  primaryBtn.addEventListener('click', () => onAction({ type: 'start' }));
 
   // --- Card: the single M1 `basic` tower (PLAN.md P2) ---
   card.name.textContent = t('tower.basic.name');
@@ -482,6 +489,7 @@ export function createOverlay(
       case 'rejected':
         if (outcome.reason === 'bounty') return t('live.rejected.bounty');
         if (outcome.reason === 'occupied') return t('live.rejected.occupied');
+        if (outcome.reason === 'pendingCap') return t('live.rejected.pendingCap');
         return t('live.rejected.generic');
       case 'sold':
         return t('live.sold', { refund: outcome.refund });
@@ -497,18 +505,27 @@ export function createOverlay(
       hudEls.bounty.textContent = t('hud.bounty', { count: hud.bounty });
       hudEls.score.textContent = t('hud.score', { count: hud.score });
       hudEls.stars.textContent = t('hud.stars', { count: hud.stars });
-      // countdownSeconds is null for BOTH active and terminal phases — only label a live
-      // wave "in progress"; a finished match shows no wave line (its outcome is the dialog).
-      hudEls.wave.textContent =
-        hud.countdownSeconds !== null
+      // Pre-start (PLAN.md P4): no countdown, just the localized prompt — the sim's own
+      // countdown figure is meaningless while held (it never ticks down until Start).
+      // Once started, countdownSeconds is null for BOTH active and terminal phases — only
+      // label a live wave "in progress"; a finished match shows no wave line (its outcome
+      // is the dialog).
+      hudEls.wave.textContent = !view.ui.started
+        ? t('hud.wave.pressStart')
+        : hud.countdownSeconds !== null
           ? t('hud.countdown', { seconds: hud.countdownSeconds })
           : hud.phase === 'active'
             ? t('hud.wave.active')
             : '';
+      // Pause is HIDDEN (not disabled) pre-start (PLAN.md P4) — there's nothing to pause
+      // yet, and a hidden control can't be tabbed to or announced as a false affordance.
+      pauseBtn.hidden = !view.ui.started;
       pauseBtn.textContent = view.paused ? t('controls.resume') : t('controls.pause');
       pauseBtn.setAttribute('aria-pressed', String(view.paused));
       speedBtn.textContent = t('controls.speed', { factor: view.speed });
-      callBtn.disabled = !view.canCallWave;
+      // The primary Start action hides for the rest of the run once pressed (PLAN.md P4:
+      // M1 ships exactly one wave — there's no later-wave affordance to show instead).
+      primaryBtn.hidden = view.ui.started;
       card.root.setAttribute('aria-pressed', String(view.ui.armed !== null));
       renderPanel(view.ui, view.refund);
       live.textContent = outcomeMessage(view.ui.lastOutcome);
