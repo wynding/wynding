@@ -346,6 +346,10 @@ export function createOverlay(
     // auto-repeat (a held key must not toggle arm on/off/on/off) — the discrete-action
     // repeat-gate input.ts applies to its own switch doesn't reach this listener.
     if (!e.repeat && keymap.actionFor(e.code) === 'armTower1') {
+      // Consume the key so a rebind onto Enter/Space can't ALSO activate whatever native
+      // button currently has focus (e.g. the settings opener) — the same keypress would both
+      // arm and synthetically click it.
+      e.preventDefault();
       onAction({ type: 'armTower', tower: 'basic' });
     }
   };

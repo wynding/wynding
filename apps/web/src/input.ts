@@ -304,6 +304,7 @@ export function attachInput(
   // --- Board: mouse keeps P2 hover/click verbatim; touch/pen is press-adjust-release ---
 
   const onBoardPointerDown = (e: PointerEvent): void => {
+    if (e.button !== 0) return; // primary button / touch only — reject right/middle/no-button (e.g. a pen barrel press)
     presses.set(e.pointerId, {
       origin: 'board',
       startX: e.clientX,
@@ -448,6 +449,7 @@ export function attachInput(
   const cardCleanups: (() => void)[] = [];
   for (const cardEl of cardEls) {
     const onCardPointerDown = (e: PointerEvent): void => {
+      if (e.button !== 0) return; // primary button / touch only — reject right/middle/no-button (e.g. a pen barrel press)
       if (e.pointerType === 'mouse') return; // mouse Card interaction is click-toggle only
       presses.set(e.pointerId, {
         origin: 'card',

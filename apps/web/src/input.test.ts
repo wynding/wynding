@@ -400,6 +400,16 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     expect(c.uiState().armed).toBe('basic');
   });
 
+  it('a non-primary pen press (barrel/right button) registers no gesture — its pointerup neither arms nor places (Codex P2)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'pen', 2)); // pen barrel/right button — button !== 0
+    card.dispatchEvent(ptr('pointerup', 10, 10, 'pen', 2));
+    expect(c.uiState().armed).toBeNull(); // never armed
+    expect(c.frame().curVm.towers).toHaveLength(0); // never placed
+  });
+
   it('a second tap-toggle before the first synthetic click arrives still suppresses BOTH clicks (no shared reset-on-press race)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held

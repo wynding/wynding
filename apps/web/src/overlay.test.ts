@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { HudVM } from '@wynding/render';
 import { compileRuleset } from '@wynding/sim';
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
@@ -313,21 +313,10 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('the live region is NOT re-written when the outcome message is unchanged (no stale re-announcement every tick)', () => {
     const { overlay, live } = setup();
-    // Spy on the `textContent` SETTER (own-property override shadows the inherited
-    // Node.prototype accessor for this one element) so the assertion is about whether the
-    // write happened at all, not just about the value it would have written.
-    let writeCount = 0;
-    const native = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent')!;
-    Object.defineProperty(live, 'textContent', {
-      configurable: true,
-      get(): string | null {
-        return native.get!.call(live) as string | null;
-      },
-      set(v: string | null) {
-        writeCount++;
-        native.set!.call(live, v);
-      },
-    });
+    // Spy on the `textContent` SETTER so the assertion is about whether the write happened at
+    // all, not just about the value it would have written. The spy calls through to the real
+    // setter by default, so the element still updates.
+    const setSpy = vi.spyOn(live, 'textContent', 'set');
     const frame = {
       hud: hud(),
       paused: false,
@@ -336,26 +325,15 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       refund: 0,
     };
     overlay.update(frame); // first render: establishes the message, one write
-    expect(writeCount).toBe(1);
-    writeCount = 0;
+    expect(setSpy).toHaveBeenCalledTimes(1);
+    setSpy.mockClear();
     overlay.update(frame); // the HUD's every-tick update, SAME lastOutcome — no re-write
-    expect(writeCount).toBe(0);
+    expect(setSpy).not.toHaveBeenCalled();
   });
 
   it('the SAME outcome recorded twice in a row (e.g. rejecting the same occupied cell twice) is announced BOTH times — a new outcomeSeq forces a real textContent mutation even though the message text is identical (Fix A)', () => {
     const { overlay, live } = setup();
-    let writeCount = 0;
-    const native = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent')!;
-    Object.defineProperty(live, 'textContent', {
-      configurable: true,
-      get(): string | null {
-        return native.get!.call(live) as string | null;
-      },
-      set(v: string | null) {
-        writeCount++;
-        native.set!.call(live, v);
-      },
-    });
+    const setSpy = vi.spyOn(live, 'textContent', 'set'); // calls through to the real setter
     const frameFor = (outcomeSeq: number) => ({
       hud: hud(),
       paused: false,
@@ -367,12 +345,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       refund: 0,
     });
     overlay.update(frameFor(1)); // first rejection
-    expect(writeCount).toBe(1);
+    expect(setSpy).toHaveBeenCalledTimes(1);
     const firstText = live.textContent;
     expect(firstText).toBe('That cell is already occupied.');
 
     overlay.update(frameFor(2)); // SAME message, but a NEW recorded outcome (seq bumped)
-    expect(writeCount).toBe(2); // a real DOM mutation happened...
+    expect(setSpy).toHaveBeenCalledTimes(2); // a real DOM mutation happened...
     expect(live.textContent).not.toBe(firstText); // ...distinguishable from the first write...
     expect(live.textContent!.trim()).toBe('That cell is already occupied.'); // ...but still reads the same to a human
   });
@@ -381,6 +359,16 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     const { actions, card } = setup();
     card.root.click();
     expect(actions).toEqual([{ type: 'armTower', tower: 'basic' }]);
+  });
+
+  it('a global arm hotkey rebound onto Enter arms AND consumes the key (preventDefault), so a focused button is not also activated (Codex P2)', () => {
+    const { actions, keymap, settingsBtn } = setup();
+    keymap.rebind('armTower1', 'Enter'); // the player rebinds arm onto Enter
+    settingsBtn.focus(); // focus sits on a native button (e.g. the settings opener)
+    const evt = new KeyboardEvent('keydown', { code: 'Enter', bubbles: true, cancelable: true });
+    settingsBtn.dispatchEvent(evt);
+    expect(actions).toContainEqual({ type: 'armTower', tower: 'basic' }); // armed
+    expect(evt.defaultPrevented).toBe(true); // ...and the key is consumed, so the button isn't also clicked
   });
 
   it('fails closed (throws) for an unknown tower kind rather than inventing stats', () => {
