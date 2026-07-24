@@ -12,7 +12,14 @@
 import { hashState } from '@wynding/engine';
 import type { CreepKind, Seed } from '@wynding/types';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
-import { runCombat, emptyCreeps, safeAdd, type Impact, type StepEvents } from './combat';
+import {
+  runCombat,
+  emptyCreeps,
+  safeAdd,
+  type Impact,
+  type EffectPrimitive,
+  type StepEvents,
+} from './combat';
 import type { Grid } from './board';
 import { computeDistanceField, type DistanceField } from './pathfinding';
 import {
@@ -578,6 +585,18 @@ export interface ReadonlyTowerArrays {
 }
 
 /**
+ * Deep-readonly view of `Impact` — `Impact.effects` is a mutable `EffectPrimitive[]` in
+ * `SimState` (combat.ts still writes it), but `PreviewState.impacts` shares its impact
+ * objects with the live state (see `partialCloneForPreview`), so a bare `readonly
+ * Impact[]` would leave `preview.impacts[0].effects` mutable and let a "read-only"
+ * preview mutate the live simulation through it. `effects` is re-typed `readonly` here;
+ * every other `Impact` field is already readonly.
+ */
+export interface ReadonlyImpact extends Omit<Impact, 'effects'> {
+  readonly effects: readonly EffectPrimitive[];
+}
+
+/**
  * The read-only result of `previewInputs` (#30/P3). Structurally a deep-readonly view
  * of `SimState` — every array-bearing field is `readonly`, which makes `PreviewState`
  * INCOMPATIBLE with `step()`'s mutable `SimState` parameter: `step(preview)` fails to
@@ -600,7 +619,7 @@ export interface PreviewState {
   readonly leakedCount: number;
   readonly creeps: ReadonlyCreepArrays;
   readonly towers: ReadonlyTowerArrays;
-  readonly impacts: readonly Impact[];
+  readonly impacts: readonly ReadonlyImpact[];
 }
 
 /** Build the mutable working clone `previewInputs` runs `applyInputPhase` against.

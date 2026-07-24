@@ -248,6 +248,10 @@ describe('previewInputs — read-only PreviewState contract (#30/P3)', () => {
       // @ts-expect-error PreviewState's readonly columns are not assignable to step()'s
       // mutable SimState — the read-only contract is a typecheck failure, never a live call.
       step(preview, RULESET, []);
+      // @ts-expect-error preview.impacts is deeply readonly — effects is `readonly
+      // EffectPrimitive[]`, so pushing onto it (which would mutate the shared, live-state
+      // impact object) is a typecheck failure, never a live call.
+      preview.impacts[0].effects.push({ kind: 'direct', amount: 1 });
     }
   });
 });

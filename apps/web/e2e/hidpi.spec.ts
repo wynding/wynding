@@ -56,7 +56,15 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     const rawDpr = (testInfo.project.use.deviceScaleFactor as number | undefined) ?? 1;
     const effectiveDpr = Math.min(2, rawDpr);
 
-    const canvas = await page.locator('.wy-board canvas').evaluate((el: HTMLCanvasElement) => {
+    // Phaser creates the canvas at 1×1 (scale: { width: 1, height: 1 }) and only resizes
+    // it inside the READY handler's syncProjection — on CI (SwiftShader WebGL) READY can
+    // lag well past `load`, so poll past that sync before reading the backing store.
+    const canvasLocator = page.locator('.wy-board canvas');
+    await expect
+      .poll(() => canvasLocator.evaluate((el: HTMLCanvasElement) => el.width))
+      .toBeGreaterThan(1);
+
+    const canvas = await canvasLocator.evaluate((el: HTMLCanvasElement) => {
       const rect = el.getBoundingClientRect();
       return { width: el.width, height: el.height, cssWidth: rect.width, cssHeight: rect.height };
     });
@@ -108,8 +116,20 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       width: Math.max(floorPx.x, borderPx.x) - Math.min(floorPx.x, borderPx.x) + cellPx + 4,
       height: Math.max(floorPx.y, borderPx.y) - Math.min(floorPx.y, borderPx.y) + cellPx + 4,
     };
-    const buf = await page.screenshot({ clip, scale: 'css' });
-    const png = PNG.sync.read(buf);
+    // The first frame can lag Phaser READY on CI (SwiftShader WebGL) — a pre-paint
+    // sample would read the page background, not the palette. Poll until the floor cell
+    // reads as pal.floor, keeping the last decoded screenshot for the assertions below.
+    let png!: PNG;
+    await expect
+      .poll(async () => {
+        const buf = await page.screenshot({ clip, scale: 'css' });
+        png = PNG.sync.read(buf);
+        return closeTo(
+          sampleCssPoint(png, clipX, clipY, floorPx.x + cellPx / 2, floorPx.y + cellPx / 2),
+          toRgb(pal.floor),
+        );
+      }, 'first frame painted: floor cell reads as pal.floor')
+      .toBe(true);
 
     const floorSample = sampleCssPoint(
       png,
@@ -164,21 +184,53 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     const targetPx = projection.cellToPixel(targetCell.col, targetCell.row);
     const neighbourPx = projection.cellToPixel(neighbourCell.col, neighbourCell.row);
 
-    // Desktop input is hover-preview + click-commit (input.ts) — a single click on an
-    // empty, in-bounds, affordable cell builds directly, no separate confirm needed.
-    await page.mouse.click(box.x + targetPx.x + cellPx / 2, box.y + targetPx.y + cellPx / 2);
-    await page.waitForTimeout(150); // let the next animation frame paint the build
-
     const clip = {
       x: box.x + Math.min(targetPx.x, neighbourPx.x) - 2,
       y: box.y + Math.min(targetPx.y, neighbourPx.y) - 2,
       width: Math.abs(neighbourPx.x - targetPx.x) + cellPx * 2 + 4,
       height: cellPx * 2 + 4,
     };
-    const buf = await page.screenshot({ clip, scale: 'css' });
-    const png = PNG.sync.read(buf);
     const clipX = clip.x - box.x;
     const clipY = clip.y - box.y;
+
+    // The first frame can lag Phaser READY on CI (SwiftShader WebGL) — a pre-paint
+    // sample would read the page background, not the palette. Poll until the neighbour
+    // cell reads as pal.floor before clicking (same pattern as the rendered-alignment
+    // test) so the post-click samples measure the build, not a missing first frame.
+    await expect
+      .poll(async () => {
+        const buf = await page.screenshot({ clip, scale: 'css' });
+        const prePng = PNG.sync.read(buf);
+        return closeTo(
+          sampleCssPoint(
+            prePng,
+            clipX,
+            clipY,
+            neighbourPx.x + cellPx / 2,
+            neighbourPx.y + cellPx / 2,
+          ),
+          toRgb(pal.floor),
+        );
+      }, 'first frame painted: neighbour cell reads as pal.floor')
+      .toBe(true);
+
+    // Desktop input is hover-preview + click-commit (input.ts) — a single click on an
+    // empty, in-bounds, affordable cell builds directly, no separate confirm needed.
+    await page.mouse.click(box.x + targetPx.x + cellPx / 2, box.y + targetPx.y + cellPx / 2);
+
+    // The build paints on a later animation frame — poll the tower centre until it
+    // reads as pal.tower, keeping the last decoded screenshot for the assertions below.
+    let png!: PNG;
+    await expect
+      .poll(async () => {
+        const buf = await page.screenshot({ clip, scale: 'css' });
+        png = PNG.sync.read(buf);
+        return closeTo(
+          sampleCssPoint(png, clipX, clipY, targetPx.x + cellPx, targetPx.y + cellPx),
+          toRgb(pal.tower),
+        );
+      }, 'build painted: tower centre reads as pal.tower')
+      .toBe(true);
 
     // Centre of the built tower's 2×2 footprint (the shared corner of the four cells).
     const towerCentre = sampleCssPoint(png, clipX, clipY, targetPx.x + cellPx, targetPx.y + cellPx);
