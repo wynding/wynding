@@ -363,7 +363,15 @@ export function attachInput(
     }
     if (e.button !== 0) return; // primary button / touch only — reject right/middle/no-button
     if (press === undefined || press.origin !== 'board') return; // must have started on the board
-    if (isTouchy && voided) return; // voided by a concurrent second (or third+) contact
+    if (isTouchy && voided) {
+      // Voided by a concurrent second (or third+) contact: route through the SAME
+      // cancellation contract as pointercancel (PLAN.md P3) rather than a bare early-exit —
+      // otherwise the offset ghost from this armed press lingers on screen (phantom ghost)
+      // even though nothing gets placed. Board-origin cancellation clears the ghost but
+      // keeps the tower armed (unlike Card-drag, which disarms).
+      cancelPress(e.pointerId, press);
+      return;
+    }
     if (e.pointerType === 'mouse') {
       // Mouse: the armed/selection state machine (PLAN.md P2) — `clickAt` owns
       // cur/ghost/selection for this path entirely.

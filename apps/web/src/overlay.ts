@@ -446,6 +446,9 @@ export function createOverlay(
   }
 
   let lastPanelKey = '';
+  // The live region's last-announced outcome sequence (Fix A) — `null` so the very first
+  // `update()` call always announces, even when the initial outcome is `null` (message '').
+  let lastAnnouncedSeq: number | null = null;
   function renderPanel(ui: UiState, refund: number): void {
     const key =
       ui.armed !== null
@@ -535,10 +538,24 @@ export function createOverlay(
       renderPanel(view.ui, view.refund);
       // The HUD updates every tick, but the outcome message only changes on an actual
       // placement/arm/sell event — writing `textContent` unconditionally re-announces the
-      // SAME stale message to assistive tech on every tick of a wave. Guard the write so
-      // it only fires when the computed message actually changed.
-      const nextLive = outcomeMessage(view.ui.lastOutcome);
-      if (live.textContent !== nextLive) live.textContent = nextLive;
+      // SAME stale message to assistive tech on every tick of a wave. Guard the write so it
+      // only fires when a NEW outcome was recorded — keyed on `outcomeSeq` (identity), not
+      // text equality: two consecutive occurrences of the SAME outcome (e.g. rejecting the
+      // same occupied cell twice) are two distinct announcements, even though their message
+      // text is identical, so a text-equality guard would wrongly swallow the second one.
+      if (view.ui.outcomeSeq !== lastAnnouncedSeq) {
+        lastAnnouncedSeq = view.ui.outcomeSeq;
+        const nextLive = outcomeMessage(view.ui.lastOutcome);
+        // A new outcome whose message happens to read identically to what's already in the
+        // live region (the repeated-outcome case above) would otherwise be a same-value
+        // `textContent` write, which most AT does NOT re-announce. Force a real mutation by
+        // appending an invisible trailing space whenever the text would collide — reading
+        // `live.textContent` as the toggle means it self-alternates on/off across any run
+        // of repeats (space in → next collision compares against the space-suffixed value
+        // and mismatches → space out → …), with no extra state to track. The accessible
+        // text (after `.trim()`) still reads the same to a human either way.
+        live.textContent = nextLive === live.textContent ? nextLive + ' ' : nextLive;
+      }
     },
     showResults(hud: HudVM): void {
       cancelCapture?.(); // a match can end mid-rebind — drop the armed capture so the first

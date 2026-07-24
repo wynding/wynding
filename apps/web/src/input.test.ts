@@ -367,6 +367,21 @@ describe.each([['touch'], ['pen']])(
       c.advance(50);
       expect(c.frame().curVm.towers).toHaveLength(0); // voided — no build
     });
+
+    it('a voided board release cancels through the SAME contract as pointercancel — ghost cleared, but stays armed (no phantom ghost)', () => {
+      const c = createController(1);
+      c.start(); // PLAN.md P4: advance() no-ops while held
+      attachInput(document, board, [], c, createKeymap(), { getRect: () => RECT });
+      c.armTower('basic');
+      board.dispatchEvent(ptr('pointerdown', 35, 105, pointerType, 0, 1)); // finger 1 down, anchor (3,8)
+      expect(c.frame().ghost).not.toBeNull(); // armed press shows the offset ghost
+      board.dispatchEvent(ptr('pointerdown', 65, 105, pointerType, 0, 2)); // finger 2 down (concurrent) — voids finger 1
+      board.dispatchEvent(ptr('pointerup', 35, 105, pointerType, 0, 1)); // finger 1 releases, voided
+      expect(c.frame().ghost).toBeNull(); // no lingering (phantom) ghost from the voided press
+      expect(c.uiState().armed).toBe('basic'); // board-origin cancellation preserves armed
+      c.advance(50);
+      expect(c.frame().curVm.towers).toHaveLength(0); // nothing placed
+    });
   },
 );
 

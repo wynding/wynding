@@ -90,6 +90,12 @@ export interface UiState {
   readonly armed: ArmedTower | null;
   readonly selection: { readonly col: number; readonly row: number; readonly id: number } | null;
   readonly lastOutcome: PlacementOutcome | null;
+  /** Bumped every time an outcome is RECORDED — even when it's identical in content to the
+   *  previous one (e.g. rejecting the same occupied cell twice in a row). The live region
+   *  (overlay.ts) keys its re-announcement on this identity, not on `lastOutcome` text
+   *  equality, so two consecutive identical outcomes still both get announced. Reset to 0
+   *  on `startRun()`. */
+  readonly outcomeSeq: number;
 }
 
 /** What the renderer needs each frame: the last two view-models + alpha + overlay. */
@@ -387,6 +393,10 @@ export function createController(seed: number): Controller {
   let armed: ArmedTower | null = null;
   let uiRev = 0;
   let lastOutcome: PlacementOutcome | null = null;
+  // Fix A: a separate identity counter for `lastOutcome`, bumped on every RECORDED outcome
+  // (including a repeat of the same one) so the live region can re-announce a repeated
+  // outcome that `uiRev` alone can't distinguish from a no-op re-render.
+  let outcomeSeq = 0;
   // Player-started runs (PLAN.md P4): the real advance gate. `false` from a fresh run/
   // Play-again until `start()`'s enqueue is accepted; `advance()` is a no-op while this is
   // false, regardless of `paused`/speed — held runs never step. Never reset by anything
@@ -397,6 +407,7 @@ export function createController(seed: number): Controller {
   };
   const setOutcome = (outcome: PlacementOutcome): void => {
     lastOutcome = outcome;
+    outcomeSeq++; // identity bump — every recorded outcome, even a content-identical repeat
     bumpUiRev();
   };
   // The per-tick input cap in effect right now (PLAN.md P4): the full replay-contract
@@ -465,6 +476,7 @@ export function createController(seed: number): Controller {
     armed = null;
     uiRev = 0;
     lastOutcome = null;
+    outcomeSeq = 0;
     // Held at tick 0 (PLAN.md P4): every fresh run/Play-again starts unstarted — only
     // `start()` flips this.
     started = false;
@@ -899,6 +911,7 @@ export function createController(seed: number): Controller {
         selection:
           selection === null ? null : { col: selection.col, row: selection.row, id: selection.id },
         lastOutcome,
+        outcomeSeq,
       };
     },
     uiRev: () => uiRev,

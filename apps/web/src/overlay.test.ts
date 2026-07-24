@@ -26,7 +26,7 @@ function hud(over: Partial<HudVM> = {}): HudVM {
 /** A neutral (unarmed, unselected) `UiState`, for tests that don't exercise the
  *  armed/selection state machine. */
 function uiState(over: Partial<UiState> = {}): UiState {
-  return { started: true, armed: null, selection: null, lastOutcome: null, ...over };
+  return { started: true, armed: null, selection: null, lastOutcome: null, outcomeSeq: 0, ...over };
 }
 
 function setup() {
@@ -255,12 +255,16 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('the live region announces armed/disarmed/placed/rejected/sold, restrained + localized', () => {
     const { overlay, live } = setup();
+    let seq = 0;
     const render = (lastOutcome: UiState['lastOutcome']): string => {
+      // Each call models a genuinely NEW recorded outcome (armed → disarmed → placed →
+      // …) — bump `outcomeSeq` like the controller does, so the live-region write actually
+      // fires (Fix A keys the write on seq identity, not on message-text equality).
       overlay.update({
         hud: hud(),
         paused: false,
         speed: 1,
-        ui: uiState({ lastOutcome }),
+        ui: uiState({ lastOutcome, outcomeSeq: ++seq }),
         refund: 0,
       });
       return live.textContent!;
@@ -305,6 +309,41 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     writeCount = 0;
     overlay.update(frame); // the HUD's every-tick update, SAME lastOutcome — no re-write
     expect(writeCount).toBe(0);
+  });
+
+  it('the SAME outcome recorded twice in a row (e.g. rejecting the same occupied cell twice) is announced BOTH times — a new outcomeSeq forces a real textContent mutation even though the message text is identical (Fix A)', () => {
+    const { overlay, live } = setup();
+    let writeCount = 0;
+    const native = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent')!;
+    Object.defineProperty(live, 'textContent', {
+      configurable: true,
+      get(): string | null {
+        return native.get!.call(live) as string | null;
+      },
+      set(v: string | null) {
+        writeCount++;
+        native.set!.call(live, v);
+      },
+    });
+    const frameFor = (outcomeSeq: number) => ({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({
+        lastOutcome: { kind: 'rejected' as const, reason: 'occupied' as const },
+        outcomeSeq,
+      }),
+      refund: 0,
+    });
+    overlay.update(frameFor(1)); // first rejection
+    expect(writeCount).toBe(1);
+    const firstText = live.textContent;
+    expect(firstText).toBe('That cell is already occupied.');
+
+    overlay.update(frameFor(2)); // SAME message, but a NEW recorded outcome (seq bumped)
+    expect(writeCount).toBe(2); // a real DOM mutation happened...
+    expect(live.textContent).not.toBe(firstText); // ...distinguishable from the first write...
+    expect(live.textContent!.trim()).toBe('That cell is already occupied.'); // ...but still reads the same to a human
   });
 
   it('arming via the Card emits armTower', () => {

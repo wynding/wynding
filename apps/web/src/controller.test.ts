@@ -795,6 +795,23 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed
   });
 
+  it('armed: clicking the SAME occupied cell twice in a row records the identical outcome twice, bumping outcomeSeq both times (Fix A)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // a real committed tower at (3,3)
+    c.armTower('basic');
+    c.clickAt(3, 3); // first rejection
+    const first = c.uiState();
+    expect(first.lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
+    c.clickAt(3, 3); // second rejection — SAME outcome content, but a distinct occurrence
+    const second = c.uiState();
+    expect(second.lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' }); // unchanged content
+    expect(second.outcomeSeq).toBeGreaterThan(first.outcomeSeq); // but a NEW identity — overlay.ts
+    // (Fix A) keys re-announcement on this, not on message-text equality.
+  });
+
   it("armed: click a cell whose footprint overlaps an existing tower (but isn't itself occupied) rejects as 'other', not 'occupied'", () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
@@ -941,6 +958,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
       armed: null,
       selection: null,
       lastOutcome: null,
+      outcomeSeq: 0,
     });
   });
 
