@@ -14,7 +14,7 @@
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
