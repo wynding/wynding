@@ -311,6 +311,7 @@ export function attachInput(
    *  armed, ghost untouched). */
   const releaseBoardTouch = (clientX: number, clientY: number): void => {
     if (controller.uiState().armed === null) {
+      if (isOverChrome(clientX, clientY)) return;
       const cell = cellFromEvent(clientX, clientY);
       if (cell !== null) controller.clickAt(cell.col, cell.row);
       return;

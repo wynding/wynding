@@ -537,6 +537,14 @@ export function createController(seed: number): Controller {
     cur = { col, row };
     const existing = towerAt(col, row);
     if (existing !== null) {
+      if (armed !== null) {
+        // Armed: an existing tower is an occupied cell, not a selection target — mirrors
+        // clickAt's occupied-cell rejection so the keyboard cursor can't silently arm
+        // `selection` (enabling a stray Sell) while a Card is still armed for placement.
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
+        return { kind: 'blocked', col, row, valid: false };
+      }
       ghost = null;
       selection = {
         col: existing.col,

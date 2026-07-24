@@ -821,6 +821,20 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.uiState().lastOutcome).toEqual({ kind: 'disarmed' });
   });
 
+  it('armed: keyboard-cursor aim onto an existing tower is blocked (occupied), never silently selects it', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    c.armTower('basic'); // re-arm for a second placement attempt
+    const outcome = c.aimAt(3, 3); // aim the keyboard cursor at the now-occupied cell
+    expect(outcome).toMatchObject({ kind: 'blocked', valid: false });
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
+    expect(c.uiState().selection).toBeNull(); // never silently arms `selection` while armed
+    expect(c.uiState().armed).toBe('basic'); // stays armed
+  });
+
   it('unarmed: clickAt on a placed tower selects it (Panel: stats + actions)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held

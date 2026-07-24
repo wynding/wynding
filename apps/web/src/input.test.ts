@@ -294,6 +294,30 @@ describe.each([['touch'], ['pen']])(
       expect(c.frame().curVm.towers).toHaveLength(0);
     });
 
+    it('an unarmed release over Shell chrome never selects/deselects the board cell underneath', () => {
+      const chrome = document.createElement('div');
+      chrome.className = 'wy-dock';
+      let hitChrome = false; // toggled after the tower is built, so the build itself isn't blocked
+      const c = createController(1);
+      c.start(); // PLAN.md P4: advance() no-ops while held
+      attachInput(document, board, [], c, createKeymap(), {
+        getRect: () => RECT,
+        elementFromPoint: () => (hitChrome ? chrome : null),
+      });
+      c.armTower('basic');
+      tap(35, 105, pointerType); // anchor (3,8) → build → disarm → auto-selects the new tower (PLAN.md P2)
+      c.advance(50);
+      expect(c.frame().curVm.towers).toHaveLength(1);
+      expect(c.uiState().armed).toBeNull();
+      c.escape(); // deselect, so the next tap's selection (if any) is unambiguously new
+      expect(c.uiState().selection).toBeNull();
+
+      hitChrome = true;
+      board.dispatchEvent(ptr('pointerdown', 35, 85, pointerType)); // the tower's footprint, but hit-tests as chrome
+      board.dispatchEvent(ptr('pointerup', 35, 85, pointerType));
+      expect(c.uiState().selection).toBeNull(); // never selected the tower underneath the chrome
+    });
+
     it('a cancelled board gesture clears the ghost but stays armed', () => {
       const c = createController(1);
       c.start(); // PLAN.md P4: advance() no-ops while held
