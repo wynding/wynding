@@ -51,9 +51,10 @@ export class Rng {
     return this.nextU32() % max;
   }
 
-  /** Integer in [min, max] inclusive via `nextInt`. Requires `max >= min` and an
-   *  inclusive span `max - min + 1` no larger than 2^32 (same single-draw 32-bit ceiling
-   *  as `nextInt`). Carries the same modulo-bias caveat as `nextInt` (above). */
+  /** Integer in [min, max] inclusive via `nextInt`. Requires finite safe-integer
+   *  `min`/`max` with `max >= min` and an inclusive span `max - min + 1` no larger than
+   *  2^32 (same single-draw 32-bit ceiling as `nextInt`; fractional endpoints would
+   *  yield non-integer results). Carries the same modulo-bias caveat as `nextInt`. */
   nextRange(min: number, max: number): number {
     return min + (this.nextU32() % (max - min + 1));
   }
