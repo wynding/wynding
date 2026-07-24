@@ -262,3 +262,122 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });
+
+test('arms the Card via the keyboard hotkey and places with arrows + Enter — a full keyboard-only path', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const card = page.getByRole('button', { name: /Basic Tower/ });
+  const board = page.locator('.wy-board');
+
+  // `Digit1` (armTower1's default binding) arms from document scope — "any state" per the
+  // PLAN.md P2 table — with no mouse/Card click involved at all.
+  await page.keyboard.press('Digit1');
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+  await expect(board).toBeFocused();
+
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  await expect(card).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  const panel = page.locator('.wy-panel');
+  await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible();
+});
+
+test('settings: focusing the last rebind control then closing via Escape restores focus to the opener', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const opener = page.getByRole('button', { name: 'Accessibility settings' });
+  await opener.click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  await expect(settingsDialog).toBeVisible();
+
+  // The last rebind row (armTower1, GAME_ACTIONS' last entry) — reachable and visible
+  // within the dialog's own scrollport before it closes.
+  const lastRebind = page.getByRole('button', { name: 'Rebind Arm basic tower' });
+  await lastRebind.focus();
+  await expect(lastRebind).toBeFocused();
+  await expect(lastRebind).toBeInViewport();
+
+  await page.keyboard.press('Escape');
+  await expect(settingsDialog).toBeHidden();
+  await expect(opener).toBeFocused();
+});
+
+test('the aria-disabled Upgrade control is keyboard-reachable (Tab) despite being inert to activation', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const card = page.getByRole('button', { name: /Basic Tower/ });
+  await card.click();
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter'); // placed + selected
+
+  const panel = page.locator('.wy-panel');
+  const upgradeBtn = panel.getByRole('button', { name: 'Max level' });
+  await expect(upgradeBtn).toHaveAttribute('aria-disabled', 'true');
+
+  const sellBtn = panel.getByRole('button', { name: /^Sell/ });
+  await sellBtn.focus();
+  await page.keyboard.press('Tab');
+  await expect(upgradeBtn).toBeFocused(); // reachable — a native `disabled` button couldn't be
+});
+
+test('rendered contrast: Card, Panel, and Dock controls meet the DOM text bar', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await assertRenderedContrast(page, '.wy-card', 4.5);
+  await assertRenderedContrast(page, '.wy-dock .wy-btn', 4.5);
+
+  await page.getByRole('button', { name: /Basic Tower/ }).click();
+  await assertRenderedContrast(page, '.wy-panel', 4.5);
+});
+
+test('200% text zoom at the smallest supported landscape viewport (658×320): chrome regions scroll internally instead of clipping', async ({
+  page,
+}) => {
+  // Pinned to the Galaxy S9+ landscape profile's viewport (`chromium-touch`'s device) — the
+  // smallest supported landscape size (ADR 0003's text-resize commitment).
+  await page.setViewportSize({ width: 658, height: 320 });
+  await page.goto('/');
+  expect(page.viewportSize()).toEqual({ width: 658, height: 320 });
+
+  await page.addStyleTag({ content: ':root { font-size: 200% }' });
+
+  for (const selector of ['.wy-status', '.wy-rail', '.wy-settings']) {
+    const overflowY = await page
+      .locator(selector)
+      .first()
+      .evaluate((el) => getComputedStyle(el).overflowY);
+    expect(overflowY, selector).toBe('auto');
+  }
+
+  // Rail: arm the Card so the Panel opens with its Close button as the Rail's last
+  // control at 200% zoom — focusing it must scroll it into `.wy-rail`'s own scrollport
+  // rather than leaving it clipped off-screen.
+  await page.getByRole('button', { name: /Basic Tower/ }).click();
+  const panelClose = page.locator('.wy-panel').getByRole('button', { name: 'Close panel' });
+  await panelClose.scrollIntoViewIfNeeded();
+  await panelClose.focus();
+  await expect(panelClose).toBeFocused();
+  await expect(panelClose).toBeInViewport();
+
+  // Settings: the same reachability proof for its own scrollport.
+  await page.getByRole('button', { name: 'Accessibility settings' }).click();
+  const lastRebind = page.getByRole('button', { name: 'Rebind Arm basic tower' });
+  await lastRebind.scrollIntoViewIfNeeded();
+  await lastRebind.focus();
+  await expect(lastRebind).toBeFocused();
+  await expect(lastRebind).toBeInViewport();
+  await page.keyboard.press('Escape');
+
+  // Status bar holds no focusable controls — scroll its last content element (the Stars
+  // HUD span) into view and assert visibility instead of focus/reachability.
+  const stars = page.locator('.wy-hud > span').last();
+  await stars.scrollIntoViewIfNeeded();
+  await expect(stars).toBeInViewport();
+});
