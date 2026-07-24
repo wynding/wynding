@@ -198,6 +198,25 @@ describe('modal owner — Escape handling', () => {
     expect(settings.hide).toHaveBeenCalledOnce();
   });
 
+  it('destroy() with an open overlay closes out the stack — un-inerts the shell and restores focus', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const focusSpy = vi.spyOn(trigger, 'focus');
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const settings = fakeOverlay();
+    modal.open(settings, { priority: 'settings' });
+    expect(shell.hasAttribute('inert')).toBe(true);
+
+    modal.destroy();
+    expect(shell.hasAttribute('inert')).toBe(false); // no longer inert/unusable
+    expect(settings.hide).toHaveBeenCalledOnce(); // active overlay hidden
+    expect(focusSpy).toHaveBeenCalledOnce(); // pre-modal focus restored
+  });
+
   it('destroy() detaches the Escape listener', () => {
     const shell = document.createElement('div');
     document.body.appendChild(shell);
@@ -206,6 +225,10 @@ describe('modal owner — Escape handling', () => {
     const settings = fakeOverlay();
     modal.open(settings, { priority: 'settings' });
     modal.destroy();
+    // destroy() closes out the still-open stack (hides once, F7) — clear that so this test
+    // isolates the LISTENER-detached property: an Escape AFTER destroy must trigger no
+    // further close.
+    settings.hide.mockClear();
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
     expect(settings.hide).not.toHaveBeenCalled(); // listener gone — no close happened
   });

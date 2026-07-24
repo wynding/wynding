@@ -386,7 +386,7 @@ describe.each([['touch'], ['pen']])(
 );
 
 describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', () => {
-  it('under DRAG_THRESHOLD_PX (7px) is a tap — toggles armed and suppresses the synthetic click', () => {
+  it('a Card move of 7px (below DRAG_THRESHOLD_PX = 8) is a tap — toggles armed and suppresses the synthetic click', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
@@ -421,7 +421,16 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     expect(c.uiState().armed).toBeNull();
   });
 
-  it('at/over DRAG_THRESHOLD_PX (9px) is a drag — arms and starts press-adjust-release mapped onto the board', () => {
+  it('a Card move of exactly DRAG_THRESHOLD_PX (8px) is a drag — the comparison is strict (`< 8` is a tap), so the boundary itself arms', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card.dispatchEvent(ptr('pointermove', 18, 10, 'touch')); // exactly 8px — NOT `< 8`, so a drag
+    expect(c.uiState().armed).toBe('basic'); // armed by the drag, not a tap-toggle
+  });
+
+  it('a Card move of 9px (above DRAG_THRESHOLD_PX = 8) is a drag — arms and starts press-adjust-release mapped onto the board', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });

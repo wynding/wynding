@@ -126,13 +126,12 @@ export function createShell(doc: Document): ShellHandle {
   const pauseBtn = button(doc, 'wy-btn');
   const speedBtn = button(doc, 'wy-btn');
   const settingsBtn = button(doc, 'wy-btn');
-  // `.wy-dock-primary` carries the same primary visual treatment as `.wy-primary`
-  // (ui.css) — kept as its own class (rather than reusing `.wy-primary` itself) so e2e's
-  // existing `.wy-primary` contrast spot-check (the results dialog's Play-again button)
-  // can never accidentally sample this hidden-post-start Dock button instead. `overlay.ts`
-  // owns its text ("Start", PLAN.md P4) and hidden state (visible pre-start, hidden for
-  // the rest of the run once pressed — the empty slot P1 reserved).
-  const primaryBtn = button(doc, 'wy-btn wy-dock-primary');
+  // The headline Start action shares the single `.wy-primary` styling (ui.css) with the
+  // results dialog's Play-again button — the e2e contrast spot-check scopes its selector
+  // (`.wy-results .wy-primary`) so it never samples this Dock button. `overlay.ts` owns its
+  // text ("Start", PLAN.md P4) and hidden state (visible pre-start, hidden for the rest of
+  // the run once pressed — the empty slot P1 reserved).
+  const primaryBtn = button(doc, 'wy-btn wy-primary');
   primaryBtn.hidden = true; // safe default before overlay.ts's first render
   // The global Sell button is removed (PLAN.md P2) — Sell lives in the Panel now; the `X`
   // hotkey still sells the current selection directly via the controller (input.ts).

@@ -162,7 +162,7 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
         const buf = await page.screenshot({ clip, scale: 'css' });
         png = PNG.sync.read(buf);
         return closeTo(
-          sampleCssPoint(png, clipX, clipY, anchorPx.x + cellPx, anchorPx.y + cellPx),
+          sampleCssPoint(png, clipX, clipY, anchorPx.x + cellPx / 2, anchorPx.y + cellPx / 2),
           toRgb(pal.tower),
         );
       }, 'build painted: anchor cell reads as pal.tower')

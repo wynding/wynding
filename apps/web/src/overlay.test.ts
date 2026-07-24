@@ -241,6 +241,37 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions.map((a) => a.type)).toEqual(['sellSelected']);
   });
 
+  it('a refund change on the SAME selection updates the Sell label in place, preserving the button element (no re-creation)', () => {
+    const { overlay, panel } = setup();
+    const selection = { col: 1, row: 1, id: 7 };
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection }),
+      refund: 3,
+    });
+    const findSell = (): HTMLButtonElement =>
+      [...panel.root.querySelectorAll<HTMLButtonElement>('.wy-btn')].find((b) =>
+        b.textContent?.startsWith('Sell'),
+      )!;
+    const sellBtn1 = findSell();
+    expect(sellBtn1.textContent).toBe('Sell (refund 3)');
+
+    // Same selection identity, refund shifts (the pending queue changed) — the label must
+    // refresh WITHOUT recreating the button, which would drop focus.
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection }),
+      refund: 8,
+    });
+    const sellBtn2 = findSell();
+    expect(sellBtn2.textContent).toBe('Sell (refund 8)');
+    expect(sellBtn2).toBe(sellBtn1); // patched in place — same element, not re-created
+  });
+
   it('the Panel closes (hidden) when neither armed nor a selection is present', () => {
     const { overlay, panel } = setup();
     overlay.update({

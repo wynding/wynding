@@ -112,6 +112,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         break;
       case 'start':
         controller.start();
+        // overlay.update() hides the primary Dock button for the rest of the run once
+        // started (PLAN.md P4), and hiding the focused element drops focus to
+        // document.body. Re-home focus on the board — the natural next actionable place for
+        // a keyboard user (it owns the arrow-cursor + Enter placement path).
+        board.focus();
         break;
       case 'armTower':
         controller.armTower(action.tower);

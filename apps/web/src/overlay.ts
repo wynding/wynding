@@ -114,9 +114,9 @@ export function createOverlay(
 
   settingsBtn.textContent = t('controls.settings');
   // The Dock's headline Start action (PLAN.md P4) — the old "Call wave now" button is
-  // gone; `primaryBtn` (the empty slot P1 reserved, already carrying `.wy-dock-primary`'s
-  // primary-styled look — ui.css — kept distinct from `.wy-primary` so the results
-  // dialog's own contrast spot-check can't accidentally sample this Dock button instead)
+  // gone; `primaryBtn` (the empty slot P1 reserved, carrying the shared `.wy-primary`
+  // primary-styled look — ui.css — with the results dialog's contrast spot-check scoped to
+  // `.wy-results .wy-primary` so it never samples this Dock button)
   // is wired here. Visibility (visible pre-start, hidden for the rest of the run once
   // pressed) and the Pause button's own hidden-pre-start state are both driven per-frame
   // by `update()` below, since they depend on live `UiState`, not anything fixed at
@@ -426,15 +426,14 @@ export function createOverlay(
 
     const sellPanelBtn = button(doc, 'wy-btn', t('panel.sell', { refund }));
     sellPanelBtn.addEventListener('click', () => onAction({ type: 'sellSelected' }));
+    panelSellBtn = sellPanelBtn; // tracked so a live refund change can patch it in place
 
     const upgradeBtn = button(doc, 'wy-btn', t('panel.upgrade'));
     upgradeBtn.setAttribute('aria-disabled', 'true');
     upgradeBtn.setAttribute('aria-describedby', UPGRADE_DESC_ID);
-    // Activation suppressed: a plain `type="button"` already does nothing on its own, but
-    // this explicit no-op listener documents the "Max level" visual's design intent (a
-    // permanently-disabled-but-discoverable control, not a live button that merely lacks a
-    // handler yet) and guards against a future accidental handler being added elsewhere.
-    upgradeBtn.addEventListener('click', (e) => e.preventDefault());
+    // No click handler: a plain `type="button"` has no default action, so the "Max level"
+    // visual is inert on activation by construction (a permanently-disabled-but-discoverable
+    // control, per its `aria-disabled`), with nothing to suppress.
 
     const upgradeDesc = doc.createElement('p');
     upgradeDesc.id = UPGRADE_DESC_ID;
@@ -446,6 +445,10 @@ export function createOverlay(
   }
 
   let lastPanelKey = '';
+  // The Panel's live Sell button, tracked across renders so a refund change on the SAME
+  // selection can be patched in place (recreating the subtree would drop focus). `null`
+  // whenever the Panel isn't showing a selection.
+  let panelSellBtn: HTMLButtonElement | null = null;
   // The live region's last-announced outcome sequence (Fix A) — `null` so the very first
   // `update()` call always announces, even when the initial outcome is `null` (message '').
   let lastAnnouncedSeq: number | null = null;
@@ -456,8 +459,16 @@ export function createOverlay(
         : ui.selection !== null
           ? `sel:${ui.selection.id}`
           : 'closed';
-    if (key === lastPanelKey) return;
+    if (key === lastPanelKey) {
+      // Same Panel identity (same armed kind / selection) — the subtree is preserved to keep
+      // focus, but the Sell refund can still change while the SAME tower stays selected (the
+      // pending queue changed). Patch the existing button's label in place rather than
+      // re-keying/recreating the Panel on `refund`.
+      if (panelSellBtn !== null) panelSellBtn.textContent = t('panel.sell', { refund });
+      return;
+    }
     lastPanelKey = key;
+    panelSellBtn = null;
     clearChildren(panel.root);
     if (ui.armed !== null) {
       const stats = towerStats(ui.armed);

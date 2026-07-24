@@ -1,57 +1,11 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { assertRenderedContrast } from './contrast';
 
 // One end-to-end smoke over the M1 slice, carrying the ADR 0003 axe-core audit. It
 // exercises the real DOM UI (HUD + controls + settings) and the run lifecycle, then
 // asserts zero accessibility violations. The Phaser canvas is out of axe's scope (ADR
 // 0003 §3 — covered by the accessibility checklist + unit tests), so we audit the DOM.
-
-// WCAG relative luminance / contrast ratio — the real-browser counterpart to the unit
-// contrast gates (palette.test.ts, ui-contrast.test.ts): this checks the ACTUAL rendered
-// colours via getComputedStyle, catching a future hardcoded hex or unused token that a
-// static/token test cannot see.
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  const [rl, gl, bl] = [r, g, b].map((c) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  }) as [number, number, number];
-  return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
-}
-
-function parseRgb(css: string): [number, number, number] {
-  const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(css);
-  if (m === null) throw new Error(`unparsable colour: ${css}`);
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
-function contrastRatio(a: [number, number, number], b: [number, number, number]): number {
-  const la = relativeLuminance(a);
-  const lb = relativeLuminance(b);
-  const lighter = Math.max(la, lb);
-  const darker = Math.min(la, lb);
-  return (lighter + 0.05) / (darker + 0.05);
-}
-
-/** Rendered-contrast spot check for one element: its own `color` against its own
- *  `background-color` (each pair has its own background — not the page's). */
-async function assertRenderedContrast(
-  page: Page,
-  selector: string,
-  minRatio: number,
-): Promise<void> {
-  const colours = await page
-    .locator(selector)
-    .first()
-    .evaluate((el) => {
-      const s = getComputedStyle(el);
-      return { color: s.color, background: s.backgroundColor };
-    });
-  const ratio = contrastRatio(parseRgb(colours.color), parseRgb(colours.background));
-  expect(
-    ratio,
-    `${selector}: ${colours.color} on ${colours.background} = ${ratio.toFixed(2)}`,
-  ).toBeGreaterThanOrEqual(minRatio);
-}
 
 test('renders the app shell (status/board/dock/rail), and settings with no axe violations', async ({
   page,
@@ -59,7 +13,7 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await page.goto('/');
 
   // Pinned topology (PLAN.md P1): wordmark + HUD in the status bar, board + Dock in the
-  // Stage, an (empty at M1) Rail.
+  // Stage, and the Rail — which carries the single M1 tower Card (asserted below).
   await expect(page.locator('.wy-wordmark')).toHaveText('Wynding');
   await expect(page.locator('.wy-status')).toContainText('Lives:');
   await expect(page.locator('.wy-board')).toBeVisible();
@@ -244,8 +198,10 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   }
   expect(dialogTabbableCount).toBeGreaterThan(0);
 
-  // Rendered-contrast spot check inside the dialog: the primary Play-again button.
-  await assertRenderedContrast(page, '.wy-primary', 4.5);
+  // Rendered-contrast spot check inside the dialog: the primary Play-again button. The
+  // Dock's Start button shares `.wy-primary` (deduplicated — one primary class), so the
+  // selector is scoped to `.wy-results` to sample Play-again specifically, never the Dock.
+  await assertRenderedContrast(page, '.wy-results .wy-primary', 4.5);
 
   // Dev-verify re-simulates the recorded replay and confirms it matches.
   await page.getByRole('button', { name: 'Verify this run' }).click();
@@ -348,26 +304,52 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): ch
 
   await page.addStyleTag({ content: ':root { font-size: 200% }' });
 
-  for (const selector of ['.wy-status', '.wy-rail', '.wy-settings']) {
-    const overflowY = await page
+  // Reading back the authored `overflow-y` value cannot fail (it is what ui.css declares) —
+  // assert the internal scrolling actually ENGAGES instead: each region's scrollHeight must
+  // exceed its visible clientHeight (i.e. its content overflows and it scrolls), rather than
+  // clipping. `overflowsInternally` is the observable proof the region is scrollable AND has
+  // overflowing content.
+  const overflowsInternally = (selector: string): Promise<boolean> =>
+    page
       .locator(selector)
       .first()
-      .evaluate((el) => getComputedStyle(el).overflowY);
-    expect(overflowY, selector).toBe('auto');
-  }
+      .evaluate((el) => el.scrollHeight > el.clientHeight);
+
+  // The status bar (Lives/Bounty/Score/Stars + wordmark at 200%) overflows its bounded row
+  // — `.wy-shell`'s first row is `minmax(0, auto)` with `.wy-status` capped at a dvh-based
+  // max-height (ui.css), so it scrolls internally rather than growing unbounded and
+  // squeezing the board.
+  expect(await overflowsInternally('.wy-status'), '.wy-status should scroll internally').toBe(true);
+
+  // The board keeps a defensible minimum height because the bounded status row can eat at
+  // most ~40dvh (128px of this 320px-tall viewport), leaving the board's `1fr` row ≥ ~192px.
+  // 150 is a floor with margin below that ~192 — and above what an UNBOUNDED status row would
+  // leave: remove the `.wy-status` max-height and the 200%-zoom status bar grows tall enough
+  // to squeeze the board well under 150, so this assertion bites exactly on the M4 bound.
+  const boardHeight = await page.locator('.wy-board').evaluate((el) => el.clientHeight);
+  expect(
+    boardHeight,
+    `.wy-board height ${boardHeight}px below the 150px floor`,
+  ).toBeGreaterThanOrEqual(150);
 
   // Rail: arm the Card so the Panel opens with its Close button as the Rail's last
-  // control at 200% zoom — focusing it must scroll it into `.wy-rail`'s own scrollport
-  // rather than leaving it clipped off-screen.
+  // control at 200% zoom — the Rail's content now overflows, so it must scroll internally
+  // AND focusing that Close button must scroll it into `.wy-rail`'s own scrollport rather
+  // than leaving it clipped off-screen.
   await page.getByRole('button', { name: /Basic Tower/ }).click();
+  expect(await overflowsInternally('.wy-rail'), '.wy-rail should scroll internally').toBe(true);
   const panelClose = page.locator('.wy-panel').getByRole('button', { name: 'Close panel' });
   await panelClose.scrollIntoViewIfNeeded();
   await panelClose.focus();
   await expect(panelClose).toBeFocused();
   await expect(panelClose).toBeInViewport();
 
-  // Settings: the same reachability proof for its own scrollport.
+  // Settings: the dialog overflows at 200% and scrolls internally; the same reachability
+  // proof for its own scrollport follows.
   await page.getByRole('button', { name: 'Accessibility settings' }).click();
+  expect(await overflowsInternally('.wy-settings'), '.wy-settings should scroll internally').toBe(
+    true,
+  );
   const lastRebind = page.getByRole('button', { name: 'Rebind Arm basic tower' });
   await lastRebind.scrollIntoViewIfNeeded();
   await lastRebind.focus();

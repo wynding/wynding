@@ -17,6 +17,11 @@
   --wy-focus: #ffd166;
   --wy-on-accent: #04121f;
   --wy-board-bg: #12141c;
+  /* Dimmed foreground for aria-disabled controls — ≈ --wy-fg composited at 0.6 over
+     --wy-surface, but an EXPLICIT token (not `opacity`) so the rendered-contrast e2e checks,
+     which sample computed color/backgroundColor rather than composited alpha, actually
+     measure the dimmed state. */
+  --wy-fg-dim: #9ba2ae;
 }
 
 html,
@@ -41,7 +46,10 @@ body {
 
 .wy-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* The status row is `minmax(0, auto)` (not bare `auto`): paired with `.wy-status`'s own
+     max-height, this bounds the status row so its `overflow-y: auto` engages at 200% zoom
+     instead of the status bar growing unbounded and squeezing the board (ADR 0003). */
+  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
   /* 100vh fallback declared FIRST — `100dvh` overrides it in browsers that support small/
      dynamic viewport units; the fallback keeps older browsers full-height too. */
   height: 100vh;
@@ -60,6 +68,11 @@ body {
   padding-right: calc(1rem + env(safe-area-inset-right));
   overflow-y: auto;
   min-height: 0;
+  /* Cap the status bar at ~40% of the (small/dynamic) viewport height so its `overflow-y:
+     auto` actually engages under 200% text zoom — without a bound the row would grow to fit
+     its reflowed content and eat the board's space. 40dvh keeps the board's `1fr` row a
+     usable minimum (≥ ~192px at the 320px-tall smallest supported landscape viewport). */
+  max-height: 40dvh;
   /* Shell chrome never participates in text selection (PLAN.md P3) — a touch drag
      starting near it must not select text instead of driving a gesture. */
   user-select: none;
@@ -207,7 +220,9 @@ body {
    native `disabled` button (that would remove it from the tab order and hide it from AT
    entirely); `aria-disabled` keeps it discoverable while suppressing activation. */
 .wy-btn[aria-disabled='true'] {
-  opacity: 0.6;
+  /* Dimmed via an explicit token, NOT `opacity` — the rendered-contrast e2e checks sample
+     computed color/backgroundColor, which composited alpha is invisible to. */
+  color: var(--wy-fg-dim);
   cursor: not-allowed;
 }
 
@@ -220,7 +235,7 @@ body {
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
@@ -249,17 +264,10 @@ body {
   cursor: not-allowed;
 }
 
+/* Primary action styling, shared by the Dock's headline Start button (PLAN.md P4) and the
+   results dialog's Play-again button. The e2e rendered-contrast spot check scopes its
+   selector (`.wy-results .wy-primary`) so it samples Play-again, never the Dock button. */
 .wy-primary {
-  background: var(--wy-accent);
-  color: var(--wy-on-accent);
-  font-weight: 700;
-}
-
-/* The Dock's headline Start action (PLAN.md P4) — the same primary treatment as
-   `.wy-primary`, kept as its own class (not a second `.wy-primary` element) so the
-   results dialog's rendered-contrast spot check (which selects `.wy-primary` by itself)
-   can never land on this button instead of the intended Play-again one. */
-.wy-dock-primary {
   background: var(--wy-accent);
   color: var(--wy-on-accent);
   font-weight: 700;

@@ -56,6 +56,19 @@ function manualSchedule(): {
   };
 }
 
+/** Select a Dock button by its accessible name (aria-label, else textContent) rather than
+ *  by positional index — resilient to Dock reordering. Requires overlay.update() to have
+ *  run at least once so the labels are populated. */
+function dockButton(root: HTMLElement, name: string | RegExp): HTMLButtonElement {
+  const btns = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')];
+  const match = btns.find((b) => {
+    const label = b.getAttribute('aria-label') ?? b.textContent ?? '';
+    return typeof name === 'string' ? label === name : name.test(label);
+  });
+  if (match === undefined) throw new Error(`no Dock button named ${String(name)}`);
+  return match;
+}
+
 describe('main — createApp wiring & frame loop', () => {
   it('builds the DOM, mounts the scene, and draws/updates each frame', () => {
     const root = document.createElement('div');
@@ -125,16 +138,20 @@ describe('main — createApp wiring & frame loop', () => {
       seed: 7,
     });
 
-    const controls = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')];
-    const pauseBtn = controls[0]!;
-    const speedBtn = controls[1]!;
-    const primaryBtn = controls[3]!;
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
     sched.frame((clock += 16)); // one frame so overlay.update() has run at least once
+    // Select Dock buttons by accessible name (F5) — resilient to Dock reordering.
+    const pauseBtn = dockButton(root, 'Pause');
+    const speedBtn = dockButton(root, /^Speed:/);
+    const primaryBtn = dockButton(root, 'Start');
     // Pre-start (PLAN.md P4): Pause is hidden, the primary Dock button reads Start.
     expect(pauseBtn.hidden).toBe(true);
     expect(primaryBtn.textContent).toBe('Start');
 
     primaryBtn.click(); // launches the run (M1's one wave, immediately)
+    // Start re-homes focus to the board (M3): overlay.update() hides the just-clicked
+    // primary button, which would otherwise drop focus to document.body.
+    expect(document.activeElement).toBe(board);
     sched.frame((clock += 16));
     expect(pauseBtn.hidden).toBe(false);
     expect(primaryBtn.hidden).toBe(true); // hides for the rest of the run
@@ -155,7 +172,6 @@ describe('main — createApp wiring & frame loop', () => {
     // The Shell (status bar + main + board + rail) is the ONLY node the modal owner ever
     // toggles inert while the results dialog is modal.
     const shellEl = root.querySelector<HTMLElement>('.wy-shell')!;
-    const board = root.querySelector<HTMLElement>('.wy-board')!;
     expect(shellEl.hasAttribute('inert')).toBe(true);
 
     const resBtns = [...results.querySelectorAll<HTMLButtonElement>('.wy-btn')];
@@ -210,7 +226,7 @@ describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
     sched.frame((clock += 16));
 
     const hudText = (): string => root.querySelector('.wy-hud')!.textContent ?? '';
-    const pauseBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')][0]!;
+    const pauseBtn = dockButton(root, 'Pause');
     pauseBtn.click(); // pause
     sched.frame((clock += 16));
 
@@ -250,7 +266,8 @@ describe('main — input.reset() across Play-again (#40)', () => {
     const resetSpy = inputHandle.reset as unknown as ReturnType<typeof vi.fn>;
     expect(resetSpy).not.toHaveBeenCalled();
 
-    const primaryBtn = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')][3]!;
+    sched.frame((clock += 16)); // one frame so overlay.update() populates the Dock labels
+    const primaryBtn = dockButton(root, 'Start');
     primaryBtn.click(); // launches the run (M1's one wave, immediately)
     const results = root.querySelector<HTMLElement>('.wy-results')!;
     for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));

@@ -1089,7 +1089,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
 
     it('accepts up to MAX_INPUTS_PER_TICK - 1 Pending build/sell commands, then rejects the next with a distinct pendingCap outcome and an invalid ghost — Start still succeeds', () => {
       const c = createController(1);
-      // 31 build+sell cycles = 62 commands, two short of the (MAX_INPUTS_PER_TICK - 1 =
+      // 31 build+sell cycles = 62 commands, one short of the (MAX_INPUTS_PER_TICK - 1 =
       // 63) cap — leaves room for exactly one more accepted command below.
       fillToCap(c, 31);
       c.aimAt(3, 3);

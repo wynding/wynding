@@ -107,7 +107,9 @@ export function createModalOwner(
   }
 
   const onKeydown = (e: KeyboardEvent): void => {
-    if (e.code !== 'Escape') return;
+    // Prefer `e.key` — `e.code` can be '' on virtual/on-screen keyboards — keeping `code`
+    // as a fallback for the physical keyboards that populate it.
+    if (e.key !== 'Escape' && e.code !== 'Escape') return;
     if (options.isEscapeHeld?.() === true) return; // a local capture (rebind) wins
     const active = activeEntry();
     if (active === null) return; // no modal open — game-level Escape (P2) may handle it
@@ -123,6 +125,16 @@ export function createModalOwner(
     close,
     destroy(): void {
       doc.removeEventListener('keydown', onKeydown, true);
+      // Destroying with a non-empty stack must not strand the app: tear the stack down like
+      // a full close so `.wy-shell` doesn't stay inert (and unusable) and focus is restored.
+      if (stack.length > 0) {
+        activeOverlay?.hide();
+        activeOverlay = null;
+        stack.length = 0;
+        shell.removeAttribute('inert');
+        preModalFocus?.focus();
+        preModalFocus = null;
+      }
     },
   };
 }
