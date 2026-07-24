@@ -13,6 +13,8 @@ export { deriveViewModel, deriveHud } from './view-model';
 export { interpolateCreeps } from './interpolate';
 export { resolvePalette, COLOUR_MODES } from './palette';
 export type { Palette } from './palette';
+export { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
+export type { PositionedTracer, TracerPaintOp } from './tracers';
 export type {
   CreepVM,
   TowerVM,
@@ -23,4 +25,5 @@ export type {
   SelectionVM,
   RenderOverlay,
   RenderHandle,
+  TracerVM,
 } from './types';

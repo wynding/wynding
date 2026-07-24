@@ -12,7 +12,14 @@
 import { hashState } from '@wynding/engine';
 import type { CreepKind, Seed } from '@wynding/types';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
-import { runCombat, emptyCreeps, safeAdd, type Impact, type StepEvents } from './combat';
+import {
+  runCombat,
+  emptyCreeps,
+  safeAdd,
+  type Impact,
+  type EffectPrimitive,
+  type StepEvents,
+} from './combat';
 import type { Grid } from './board';
 import { computeDistanceField, type DistanceField } from './pathfinding';
 import {
@@ -530,14 +537,14 @@ export function step(
  * weights (ADR 0006 — server-re-derivable): Σ kill-bounties + max(0, lives) ×
  * survivalMul. Bonuses credit spendable bounty only, never the score.
  */
-export function deriveScore(state: SimState, ruleset: CompiledRuleset): number {
+export function deriveScore(state: SimState | PreviewState, ruleset: CompiledRuleset): number {
   const kb = Number.isSafeInteger(state.cumulativeKillBounty) ? state.cumulativeKillBounty : 0;
   const lives = Number.isSafeInteger(state.lives) && state.lives > 0 ? state.lives : 0;
   return kb + lives * ruleset.scoring.survivalMul;
 }
 
 /** The casual star grade from lives remaining (a win only; a loss earns 0). */
-export function deriveStars(state: SimState, ruleset: CompiledRuleset): number {
+export function deriveStars(state: SimState | PreviewState, ruleset: CompiledRuleset): number {
   if (state.phase !== 'won') return 0;
   const [t1, t2, t3] = ruleset.scoring.starThresholds;
   const lives = Number.isSafeInteger(state.lives) ? state.lives : 0; // guard, like deriveScore
@@ -548,18 +555,111 @@ export function deriveStars(state: SimState, ruleset: CompiledRuleset): number {
 }
 
 /** Deterministic content-hash of the world — the per-tick determinism checksum. */
-export function hashSimState(state: SimState): string {
+export function hashSimState(state: SimState | PreviewState): string {
   return hashState(state);
 }
 
+/** Deep-readonly view of `CreepArrays` — every column exposed as `readonly number[]`,
+ *  so it is structurally incompatible with the mutable `CreepArrays` a real tick's
+ *  MOVEMENT/COMBAT phases write into. */
+export interface ReadonlyCreepArrays {
+  readonly id: readonly number[];
+  readonly hp: readonly number[];
+  readonly bounty: readonly number[];
+  readonly speed: readonly number[];
+  readonly fromX: readonly number[];
+  readonly fromY: readonly number[];
+  readonly headCol: readonly number[];
+  readonly headRow: readonly number[];
+  readonly progress: readonly number[];
+}
+
+/** Deep-readonly view of `TowerArrays` — see `ReadonlyCreepArrays`. */
+export interface ReadonlyTowerArrays {
+  readonly id: readonly number[];
+  readonly col: readonly number[];
+  readonly row: readonly number[];
+  readonly spend: readonly number[];
+  readonly targetId: readonly number[];
+  readonly nextFireTick: readonly number[];
+}
+
 /**
- * Read-only placement/command preview (Story 6). **Deep-clones** `state` and runs ONLY
- * the input phase (no tick advance, no wave/movement/combat) against the clone,
- * returning per-command acceptance and the resulting preview state. The source `state`
- * is **never mutated** — a client can test a pending command queue in issued order and
- * know exactly which builds/sells `step()` will apply, with the ghost's validity derived
- * from the same authority (shared `applyInputPhase`). Guaranteed: `hashSimState(state)`
- * is byte-identical before and after this call.
+ * Deep-readonly view of `Impact` — `Impact.effects` is a mutable `EffectPrimitive[]` in
+ * `SimState` (combat.ts still writes it), but `PreviewState.impacts` shares its impact
+ * objects with the live state (see `partialCloneForPreview`), so a bare `readonly
+ * Impact[]` would leave `preview.impacts[0].effects` mutable and let a "read-only"
+ * preview mutate the live simulation through it. `effects` is re-typed `readonly` here;
+ * every other `Impact` field is already readonly.
+ */
+export interface ReadonlyImpact extends Omit<Impact, 'effects'> {
+  readonly effects: readonly EffectPrimitive[];
+}
+
+/**
+ * The read-only result of `previewInputs` (#30/P3). Structurally a deep-readonly view
+ * of `SimState` — every array-bearing field is `readonly`, which makes `PreviewState`
+ * INCOMPATIBLE with `step()`'s mutable `SimState` parameter: `step(preview)` fails to
+ * typecheck (`readonly number[]` is not assignable to `number[]`), so the read-only
+ * contract is enforced by the typechecker, not by a runtime `Object.freeze` (which
+ * can't apply to non-empty typed arrays or plain arrays a caller could still reassign
+ * onto without freezing the container).
+ */
+export interface PreviewState {
+  readonly tick: number;
+  readonly rngState: number;
+  readonly lives: number;
+  readonly bounty: number;
+  readonly nextEntityId: number;
+  readonly phase: SimPhase;
+  readonly launchAtTick: number;
+  readonly launchTick: number | null;
+  readonly spawnCursor: number;
+  readonly cumulativeKillBounty: number;
+  readonly leakedCount: number;
+  readonly creeps: ReadonlyCreepArrays;
+  readonly towers: ReadonlyTowerArrays;
+  readonly impacts: readonly ReadonlyImpact[];
+}
+
+/** Build the mutable working clone `previewInputs` runs `applyInputPhase` against.
+ *  Only `towers` is deep-cloned — the sole SoA `applyInputPhase` mutates (writes touch
+ *  only towers columns, `bounty`, `nextEntityId`, `launchAtTick`, all scalars/towers
+ *  copied by the `{...state}` spread or the explicit `structuredClone` below).
+ *  `creeps` gets a shallow CONTAINER copy sharing the column arrays — load-bearing:
+ *  `coerceSoa`'s repair writes (`c.id = []` etc.) assign onto this new container object,
+ *  never onto the source's, while the column arrays themselves are never written to by
+ *  the input phase and so are safely shared, not copied. `impacts` is a shared
+ *  reference for the same reason (the input phase never touches it).
+ *
+ *  Guarantee scope: today a forged state with a non-cloneable value (function/symbol)
+ *  ANYWHERE throws from a blanket `structuredClone`; after this only the towers
+ *  container keeps that rejection — non-cloneable garbage in creeps/impacts now flows
+ *  through untouched (coerceSoa's shape guards still apply to it; the hash invariant
+ *  holds trivially since those arrays are shared, not copied). */
+function partialCloneForPreview(state: SimState | PreviewState): SimState {
+  const s = state as SimState;
+  return {
+    ...s,
+    towers: structuredClone(s.towers) as TowerArrays,
+    creeps: { ...s.creeps } as CreepArrays,
+    impacts: s.impacts as Impact[],
+  };
+}
+
+/**
+ * Read-only placement/command preview (Story 6). Clones only what the input phase can
+ * mutate (see `partialCloneForPreview`) and runs ONLY that phase (no tick advance, no
+ * wave/movement/combat) against the clone, returning per-command acceptance and the
+ * resulting `PreviewState`. The source `state` is **never mutated** — a client can test
+ * a pending command queue in issued order and know exactly which builds/sells `step()`
+ * will apply, with the ghost's validity derived from the same authority (shared
+ * `applyInputPhase`). Guaranteed: `hashSimState(state)` is byte-identical before and
+ * after this call.
+ *
+ * Accepts either a real `SimState` or a previously-returned `PreviewState` — the
+ * controller's refund path legitimately chains a preview back into a second call — and
+ * never mutates whichever it's given.
  *
  * Mirrors step()'s FREEZE-ON-TERMINAL guard: on a resolved match (`won`/`lost`) step()
  * no-ops every command, so the preview reports all commands rejected (and an unchanged
@@ -567,12 +667,12 @@ export function hashSimState(state: SimState): string {
  * whose `sellTower` the real frozen `step()` silently drops.
  */
 export function previewInputs(
-  state: SimState,
+  state: SimState | PreviewState,
   ruleset: CompiledRuleset,
   commands: readonly SimInput[],
-): { accepted: boolean[]; preview: SimState } {
+): { accepted: boolean[]; preview: PreviewState } {
   assertRuleset(ruleset);
-  const preview = structuredClone(state) as SimState;
+  const preview = partialCloneForPreview(state);
   coerceSoa(preview); // the clone gets the same totality guarantees as a real step()
   // Mirror BOTH of step()'s pre-input guards so preview can never disagree with a real
   // tick: the tick-totality no-op (a forged/near-overflow tick) and the terminal freeze.

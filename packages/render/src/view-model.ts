@@ -8,6 +8,7 @@ import {
   deriveStars,
   MS_PER_TICK,
   type SimState,
+  type PreviewState,
   type CompiledRuleset,
 } from '@wynding/sim';
 import type { RenderVM, HudVM, CreepVM, TowerVM } from './types';
@@ -62,8 +63,10 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
   return { tick: state.tick, phase: state.phase, creeps, towers };
 }
 
-/** Derive the HUD fields (countdown in whole seconds, score, stars) from `state`. */
-export function deriveHud(state: SimState, ruleset: CompiledRuleset): HudVM {
+/** Derive the HUD fields (countdown in whole seconds, score, stars) from `state`. Also
+ *  accepts a `PreviewState` — the controller's pending-aware presentation reads the
+ *  HUD off a `previewInputs()` result while the run itself stays uncommitted. */
+export function deriveHud(state: SimState | PreviewState, ruleset: CompiledRuleset): HudVM {
   const preWave = state.phase === 'pre-wave';
   const ticksLeft = preWave ? Math.max(0, state.launchAtTick - state.tick) : 0;
   return {

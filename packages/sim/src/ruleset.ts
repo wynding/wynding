@@ -68,17 +68,13 @@ export interface CompiledRuleset {
 
 const validated = new WeakSet<CompiledRuleset>();
 
-/** Recursively freeze plain objects/arrays (and a Map's values) so the compiled
- *  tuning is immutable at runtime — a caller can't mutate a retained ruleset and
- *  diverge a match from its fixed `digest`. Read-only at runtime already,
- *  so this only closes the tamper surface; typed-array/grid internals are left alone. */
+/** Recursively freeze plain objects/arrays so the compiled tuning is immutable at
+ *  runtime — a caller can't mutate a retained ruleset and diverge a match from its
+ *  fixed `digest`. Read-only at runtime already, so this only closes the tamper
+ *  surface; typed-array/grid internals are left alone. */
 function deepFreeze<T>(o: T): T {
   if (o !== null && typeof o === 'object' && !Object.isFrozen(o) && !ArrayBuffer.isView(o)) {
-    if (o instanceof Map) {
-      for (const v of o.values()) deepFreeze(v);
-    } else {
-      for (const v of Object.values(o as Record<string, unknown>)) deepFreeze(v);
-    }
+    for (const v of Object.values(o as Record<string, unknown>)) deepFreeze(v);
     Object.freeze(o);
   }
   return o;
@@ -118,7 +114,8 @@ const SUPPORTED_FORMAT_VERSION = 1;
 export const MAX_MATCH_TICKS = 36_000;
 
 /** Fixed-point diagonal step length (≈ √2 × 256); the generous per-cell route-length
- *  unit used for the worst-case traversal bound (mirrors replay's tickCeiling). */
+ *  unit used for the worst-case traversal bound (mirrors replay's re-simulation
+ *  ceiling, `MAX_MATCH_TICKS` above). */
 const FP_DIAG_LEN = 362;
 
 function isCell(c: unknown, w: number, h: number): boolean {

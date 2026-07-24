@@ -145,6 +145,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       pendingSells: f.pendingSells,
       colourMode,
       reducedMotion,
+      tracers: f.tracers,
     };
     handle.draw(f.prevVm, f.curVm, f.alpha, ov);
     // ...but the HUD only changes on a tick/pause/speed/selection boundary, so gate its

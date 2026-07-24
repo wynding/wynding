@@ -17,7 +17,50 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', testIgnore: /hidpi\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
+    // HiDPI backing-store gates (#28/P5): the same viewport at 1×/2×/3× device pixel
+    // ratio. dsf 3 exercises the ≤2 effective-dpr CLAMP (ADR 0005) — the backing store
+    // must size to 2×, not 3×, while CSS/pointer geometry stays identical across all
+    // three. A fixed viewport (not the default) keeps the board's letterboxed layout
+    // — and therefore the expected cell positions the specs assert against — stable.
+    {
+      name: 'chromium-dpr1',
+      testMatch: /hidpi\.spec\.ts/,
+      // Cold SwiftShader WebGL boot on CI can hold Phaser READY past the 5s default
+      // expect timeout — only the hidpi polls need the longer window.
+      expect: { timeout: 20_000 },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 900 },
+        deviceScaleFactor: 1,
+      },
+    },
+    {
+      name: 'chromium-dpr2',
+      testMatch: /hidpi\.spec\.ts/,
+      // Cold SwiftShader WebGL boot on CI can hold Phaser READY past the 5s default
+      // expect timeout — only the hidpi polls need the longer window.
+      expect: { timeout: 20_000 },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 900 },
+        deviceScaleFactor: 2,
+      },
+    },
+    {
+      name: 'chromium-dpr3',
+      testMatch: /hidpi\.spec\.ts/,
+      // Cold SwiftShader WebGL boot on CI can hold Phaser READY past the 5s default
+      // expect timeout — only the hidpi polls need the longer window.
+      expect: { timeout: 20_000 },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 900 },
+        deviceScaleFactor: 3,
+      },
+    },
+  ],
   webServer: {
     command: 'pnpm run build && pnpm run preview -- --port 4173 --strictPort',
     url: 'http://localhost:4173',

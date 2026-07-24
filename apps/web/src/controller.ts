@@ -28,14 +28,18 @@ import {
   type SimInput,
   type CompiledRuleset,
   type StepEvents,
+  type PreviewState,
+  type ReadonlyTowerArrays,
 } from '@wynding/sim';
 import {
   deriveViewModel,
   deriveHud,
+  renderTimeOf,
   type RenderVM,
   type HudVM,
   type GhostVM,
   type SelectionVM,
+  type TracerVM,
 } from '@wynding/render';
 import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
@@ -70,6 +74,9 @@ export interface FrameSnapshot {
    *  Lets a consumer (main.ts's `hudKey`) detect a paused-planning economy change even
    *  though `curVm.tick` is frozen while paused. */
   readonly pendingRevision: number;
+  /** Shots currently in flight (Tracer, #32/P6) — the controller's live tracer list,
+   *  pruned as flights land or the run resets. Purely presentational. */
+  readonly tracers: readonly TracerVM[];
 }
 
 /** Outcome of the dev-only replay self-check. */
@@ -206,7 +213,7 @@ interface TowerAnchor {
  */
 function diffPendingTowers(
   committed: SimState['towers'],
-  projected: SimState['towers'],
+  projected: ReadonlyTowerArrays,
 ): { readonly additions: TowerAnchor[]; readonly sells: TowerAnchor[] } {
   const committedIds = new Set(committed.id);
   const projectedIds = new Set(projected.id);
@@ -274,24 +281,28 @@ export function createController(seed: number): Controller {
   let selOverlaySrc: (SelectionVM & { id: number }) | null = null;
   let selOverlay: SelectionVM | null = null;
   let pendingSparks: { x: number; y: number }[]; // impact points resolved since the last drain
+  // Live in-flight-shot list (Tracer, #32/P6): appended from each tick's drained `fired`
+  // events, pruned in `frame()` once render time passes a flight's `impactTick` — no
+  // tracer crosses run identity (cleared on `reset()`) or survives past terminal.
+  let tracers: TracerVM[] = [];
   // Bumped on every command actually queued into `buffer` (never on a rejected/duplicate
   // enqueue) — the paused-planning presentation's second memo key alongside `state.tick`.
   let bufferRev = 0;
-  // previewInputs() deep-clones SimState, so both hot paths memoize: aimAt caches the last
-  // placement-validity query (a pointermove that stays in one cell re-uses it), and the
-  // refund is cached per selected tower id (refund is tick-invariant) so the per-frame HUD
-  // read never re-clones.
+  // previewInputs() clones its towers container on every call (#30/P3), so both hot
+  // paths memoize: aimAt caches the last placement-validity query (a pointermove that
+  // stays in one cell re-uses it), and the refund is cached per selected tower id
+  // (refund is tick-invariant) so the per-frame HUD read never re-clones.
   let aimMemoKey = '';
   let aimMemoValid = false;
   let refundCache = { id: -1, rev: -1, value: 0 };
   // The ONE shared paused-planning projection (#37+#27): previewInputs() run once per
   // (tick, bufferRev) pair, memoized, and reused by towerAt/hud/refund/frame — never
   // recomputed per reader. `null` whenever the buffer is empty (the 60 fps hot path stays
-  // allocation-free: previewInputs() deep-clones the whole SimState).
+  // cheap: previewInputs() only deep-clones the towers container, #30/P3).
   let previewMemo: {
     tick: number;
     rev: number;
-    preview: SimState;
+    preview: PreviewState;
     pendingAdds: TowerAnchor[];
     pendingSells: TowerAnchor[];
   } | null = null;
@@ -300,23 +311,29 @@ export function createController(seed: number): Controller {
     if (frozen) return; // terminal: freeze, record nothing past the resolving tick
     const inputs = buffer;
     tickInputs.push(freezeRecorded(inputs)); // deep-frozen clone at index = tick
-    // Landed-impact events (#31): the sim reports the exact points where a shot hit a
-    // still-live target, BEFORE damage applies — a wasted (leaked-target) shot never
-    // appends. Accumulate across a multi-tick catch-up frame so the scene flashes every
-    // kill (it only sees the latest view-model pair).
-    const events: StepEvents = { impactPoints: [] };
+    // Landed-impact + fired-shot events (#31/#32): the sim reports the exact points
+    // where a shot hit a still-live target (BEFORE damage applies — a wasted/leaked-
+    // target shot never appends) and every shot fired this tick (exact origin + the
+    // target locked at fire time). Accumulate across a multi-tick catch-up frame so the
+    // scene flashes every kill and shows every shot (it only sees the latest view-model
+    // pair each animation frame).
+    const events: StepEvents = { impactPoints: [], fired: [] };
     state = step(state, ruleset, inputs, events);
     buffer = []; // FRESH buffer — the just-recorded copy can never be mutated by reuse
     prevVm = curVm;
     curVm = deriveViewModel(state, ruleset);
     for (const pt of events.impactPoints) pendingSparks.push(pt);
+    for (const f of events.fired) tracers.push(f);
     // Reconcile the selection with the post-step world: if the selected tower was sold or
     // destroyed this tick, drop the selection so the scene stops drawing a phantom range
     // ring and the Sell control disables (rather than selling a nonexistent id).
     if (selection !== null && towerAt(selection.col, selection.row)?.id !== selection.id) {
       selection = null;
     }
-    if (isTerminalPhase(state.phase)) frozen = true;
+    if (isTerminalPhase(state.phase)) {
+      frozen = true;
+      tracers = []; // no tracer survives a resolved match
+    }
   };
 
   const reset = (nextSeed: number): void => {
@@ -337,6 +354,7 @@ export function createController(seed: number): Controller {
     ghost = null;
     selection = null;
     pendingSparks = [];
+    tracers = []; // no tracer crosses run identity
     bufferRev = 0;
     previewMemo = null;
     // Clear the per-run memo/caches — the next run reuses tick indices from 0, so a stale
@@ -471,6 +489,13 @@ export function createController(seed: number): Controller {
       // every creep to the previous tick boundary). Only a terminal freeze pins alpha to 0.
       const alpha = frozen ? 0 : loop.accumulatorMs / MS_PER_TICK;
       const pending = pendingProjection();
+      // Prune landed flights (#32/P6): once render time passes a tracer's `impactTick`
+      // it has visibly arrived, so it's dropped here rather than lingering until the
+      // next real tick (which, while paused, might never come).
+      if (tracers.length > 0) {
+        const renderTime = renderTimeOf(prevVm, curVm, alpha);
+        tracers = tracers.filter((t) => renderTime <= t.impactTick);
+      }
       return {
         prevVm,
         curVm,
@@ -480,6 +505,7 @@ export function createController(seed: number): Controller {
         pendingAdds: pending?.pendingAdds ?? NO_PENDING,
         pendingSells: pending?.pendingSells ?? NO_PENDING,
         pendingRevision: bufferRev,
+        tracers,
       };
     },
     drainSparks(): { x: number; y: number }[] {

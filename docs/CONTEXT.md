@@ -47,6 +47,12 @@ long-lived case. What the player sees — board, aim/selection, and bounty — a
 reflects pending changes; they commit on the next tick that runs.
 _Avoid_: queued, buffered.
 
+**Tracer**:
+The in-flight visual of a tower shot, travelling from tower to target over the
+shot's real flight window. Purely decorative — damage outcomes are always carried
+by the impact spark and HP pips, never by the tracer.
+_Avoid_: projectile, bullet, missile.
+
 **Wave**:
 A scheduled burst of creeps the player must survive. Waves come in a finite,
 ordered sequence — a board's **wave schedule**.

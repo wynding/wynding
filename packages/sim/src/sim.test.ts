@@ -5,6 +5,7 @@ import {
   createInitialState,
   step,
   hashSimState,
+  previewInputs,
   type CreepArrays,
   type SimInput,
   type SimState,
@@ -146,24 +147,36 @@ describe('rngState — anchors "inert" (#45)', () => {
   });
 });
 
-describe('step() StepEvents plumbing (#31)', () => {
+describe('step() StepEvents plumbing (#31/#32)', () => {
   it('a pre-populated collector passes through the tick-totality early return unchanged', () => {
     const s = createInitialState(1, RULESET);
     s.tick = -1; // forges the tick-totality no-op path
-    const events: StepEvents = { impactPoints: [{ x: 1, y: 2 }] };
+    const events: StepEvents = {
+      impactPoints: [{ x: 1, y: 2 }],
+      fired: [{ originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 }],
+    };
     step(s, RULESET, [], events);
     expect(events.impactPoints).toEqual([{ x: 1, y: 2 }]); // untouched — appended nothing
+    expect(events.fired).toEqual([
+      { originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 },
+    ]);
   });
 
   it('a pre-populated collector passes through the terminal freeze early return unchanged', () => {
     const s = createInitialState(1, RULESET);
     s.phase = 'won';
-    const events: StepEvents = { impactPoints: [{ x: 3, y: 4 }] };
+    const events: StepEvents = {
+      impactPoints: [{ x: 3, y: 4 }],
+      fired: [{ originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 }],
+    };
     step(s, RULESET, [], events);
     expect(events.impactPoints).toEqual([{ x: 3, y: 4 }]); // untouched — appended nothing
+    expect(events.fired).toEqual([
+      { originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 },
+    ]);
   });
 
-  it('a multi-step catch-up accumulates landed-impact events append-only across step() calls', () => {
+  it('a multi-step catch-up accumulates landed-impact AND fired events append-only across step() calls', () => {
     // A 14-wide straight lane with a tower straddling it (mirrors combat.test.ts) — wide
     // enough that the 2×2 tower detours the lane rather than severing it.
     const wide = testRuleset({
@@ -177,10 +190,68 @@ describe('step() StepEvents plumbing (#31)', () => {
       { kind: 'placeTower', anchor: { col: 3, row: 5 } },
       { kind: 'callWaveEarly' },
     ]);
-    const events: StepEvents = { impactPoints: [] };
+    const events: StepEvents = { impactPoints: [], fired: [] };
     for (let t = 0; t < 120; t++) {
       s = step(s, wide, [], events);
     }
     expect(events.impactPoints.length).toBeGreaterThan(0); // accumulated across many calls
+    expect(events.fired.length).toBeGreaterThan(0); // at least one shot fired across the window
+    // Every fired event carries a well-formed tick window (launch strictly before impact).
+    for (const f of events.fired) expect(f.launchTick).toBeLessThan(f.impactTick);
+  });
+});
+
+describe('previewInputs — read-only PreviewState contract (#30/P3)', () => {
+  it('never throws with every creeps column array and impacts frozen, across all command kinds', () => {
+    let s = createInitialState(1, RULESET);
+    s = step(s, RULESET, [
+      { kind: 'placeTower', anchor: { col: 2, row: 1 } },
+      { kind: 'callWaveEarly' },
+    ]);
+    // Freeze every creeps column array AND impacts — previewInputs must never attempt to
+    // write into them: only `towers` is deep-cloned, `creeps`/`impacts` are shared/shallow.
+    for (const col of Object.values(s.creeps)) Object.freeze(col);
+    Object.freeze(s.impacts);
+    const before = hashSimState(s);
+    const allKinds: SimInput[] = [
+      { kind: 'placeTower', anchor: { col: 5, row: 1 } },
+      { kind: 'sellTower', tower: 999 },
+      { kind: 'callWaveEarly' },
+      { kind: 'noop' },
+    ];
+    expect(() => previewInputs(s, RULESET, allKinds)).not.toThrow();
+    expect(hashSimState(s)).toBe(before); // source untouched
+  });
+
+  it('identity: preview.creeps column arrays are the SAME reference as source (shallow container copy)', () => {
+    const s = createInitialState(1, RULESET);
+    const { preview } = previewInputs(s, RULESET, []);
+    expect(preview.creeps.id).toBe(s.creeps.id); // shared column array
+    expect(preview.creeps).not.toBe(s.creeps); // fresh container object (coerceSoa-safe)
+    expect(preview.towers).not.toBe(s.towers); // deep-cloned
+    expect(preview.towers.id).not.toBe(s.towers.id);
+  });
+
+  it('an adversarial non-cloneable value stashed on creeps flows through untouched (narrowed guarantee)', () => {
+    const s = createInitialState(1, RULESET);
+    // A function is not structured-cloneable. Previously a blanket `structuredClone(state)`
+    // would throw on this. Now only `towers` is deep-cloned, so garbage anywhere in
+    // `creeps` is never inspected/copied — no throw, per the narrowed guarantee.
+    (s.creeps as unknown as Record<string, unknown>).poison = () => {};
+    expect(() => previewInputs(s, RULESET, [{ kind: 'noop' }])).not.toThrow();
+  });
+
+  it('compile-only: step() rejects a PreviewState (readonly arrays vs. SimState mutable arrays)', () => {
+    if (false as boolean) {
+      const s = createInitialState(1, RULESET);
+      const { preview } = previewInputs(s, RULESET, []);
+      // @ts-expect-error PreviewState's readonly columns are not assignable to step()'s
+      // mutable SimState — the read-only contract is a typecheck failure, never a live call.
+      step(preview, RULESET, []);
+      // @ts-expect-error preview.impacts is deeply readonly — effects is `readonly
+      // EffectPrimitive[]`, so pushing onto it (which would mutate the shared, live-state
+      // impact object) is a typecheck failure, never a live call.
+      preview.impacts[0].effects.push({ kind: 'direct', amount: 1 });
+    }
   });
 });

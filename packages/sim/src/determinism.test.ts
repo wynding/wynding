@@ -211,3 +211,60 @@ describe('determinism gate', () => {
     expect(hashSimState(state)).toBe(hashSimState(ref.state));
   });
 });
+
+describe('compiled-board mutation regression (#21/P4)', () => {
+  // A CI mutation-REGRESSION test — named as what it is, NOT a runtime tamper guard.
+  // `Object.freeze` can't apply to non-empty typed arrays, and accessor indirection
+  // would tax the Dijkstra/movement hot loops (ADR 0005) against a threat entirely
+  // out of the model (hostile in-process code owns the heap regardless). What this
+  // proves: no code path exercised by real matches mutates the compiled board
+  // arrays — an accidental in-repo mutation is caught here in CI. P2 now memoizes
+  // compiled rulesets across requests (LRU keyed by content digest), so an
+  // accidental mutation would poison every later validation sharing that cache
+  // entry — compiling ONCE and running ≥2 full matches on the SAME compiled object
+  // below models that reuse directly (sim tests must not import replay; actual
+  // cache-hit coverage lives in replay's own tests).
+  it('board.field.dist/blockedMask and board.grid.baseMask are never mutated across 2 full matches on ONE compiled ruleset', () => {
+    const distSnapshot = SCENARIO_RULESET.board.field.dist.slice();
+    const blockedMaskSnapshot = SCENARIO_RULESET.board.field.blockedMask.slice();
+    const baseMaskSnapshot = SCENARIO_RULESET.board.grid.baseMask.slice();
+
+    // toEqual does a deep, element-by-element structural comparison meant for
+    // arbitrary objects — far more than a flat numeric array needs, and slow enough
+    // per-step across two full matches to time out CI (was 20.6s). These arrays are
+    // flat and index-addressable, so a plain indexed loop that returns the first
+    // mismatching index (or -1) gets the same exactness at a fraction of the cost,
+    // and only builds the failure message when there actually is a mismatch.
+    const firstMismatch = (actual: ArrayLike<number>, expected: ArrayLike<number>): number => {
+      if (actual.length !== expected.length) return 0;
+      for (let i = 0; i < actual.length; i++) {
+        if (actual[i] !== expected[i]) return i;
+      }
+      return -1;
+    };
+
+    const assertUnmutated = (): void => {
+      const checks: Array<[string, ArrayLike<number>, ArrayLike<number>]> = [
+        ['board.field.dist', SCENARIO_RULESET.board.field.dist, distSnapshot],
+        ['board.field.blockedMask', SCENARIO_RULESET.board.field.blockedMask, blockedMaskSnapshot],
+        ['board.grid.baseMask', SCENARIO_RULESET.board.grid.baseMask, baseMaskSnapshot],
+      ];
+      for (const [name, actual, expected] of checks) {
+        const idx = firstMismatch(actual, expected);
+        const message =
+          idx === -1
+            ? undefined
+            : `${name} mutated at index ${idx} (expected ${expected[idx]}, got ${actual[idx]})`;
+        expect(idx, message).toBe(-1);
+      }
+    };
+
+    for (let run = 0; run < 2; run++) {
+      let state = createInitialState(SCENARIO_SEED + run, SCENARIO_RULESET);
+      for (let t = 0; t < SCENARIO_TICKS; t++) {
+        state = step(state, SCENARIO_RULESET, canonicalInputs(t));
+        assertUnmutated(); // per-step — catches mutate-then-restore within a match
+      }
+    }
+  }, 30_000); // explicit CI headroom; the fast comparator finishes well under this locally
+});

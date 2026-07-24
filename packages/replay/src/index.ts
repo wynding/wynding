@@ -59,11 +59,12 @@ export function currentRulesetHash(bundle: Ruleset): string {
 // the replay loop after only the public, forgeable simVersion/rulesetHash checks, so
 // without bounds a caller could submit millions of ticks (or inputs per tick) to burn
 // CPU until timeout on every request — an unauthenticated compute-exhaustion vector.
-/** Absolute hard ceiling on total simulated ticks (log + empty catch-up to terminal).
- *  THE SAME constant `compileRuleset` bounds a bundle's baseline run against — imported,
- *  not duplicated, so the two can never drift into a compiles-but-times-out gap. */
-const ABSOLUTE_MAX_CEILING = MAX_MATCH_TICKS;
-/** Max ticks in a replay log (30 min at 20 Hz) — the log-length cap, same magnitude. */
+/** Max ticks in a replay log (30 min at 20 Hz), and the hard ceiling the re-simulation
+ *  may run to (log + empty catch-up to terminal) — THE SAME constant `compileRuleset`
+ *  bounds a bundle's baseline run against — imported, not duplicated, so the two can
+ *  never drift into a compiles-but-times-out gap. A ruleset-derived ceiling formula
+ *  would only ever saturate to this cap (adversarial build/sell juggling dominates),
+ *  so the constant is the honest bound. */
 const MAX_TICKS = MAX_MATCH_TICKS;
 /** Max inputs applied on a single tick — far above any legitimate command burst. */
 export const MAX_INPUTS_PER_TICK = 64;
@@ -77,19 +78,6 @@ const MAX_TOTAL_TOWER_COMMANDS = 1_000;
 
 /** A 64-char lowercase-hex SHA-256 digest. */
 const SHA256_HEX = /^[0-9a-f]{64}$/;
-
-/**
- * The hard tick ceiling the re-simulation may run to. `compileRuleset` already
- * guarantees a bundle's BASELINE run (launch + spawn + slowest full traversal) reaches
- * a terminal state within this bound, so a legitimate replay always terminates below
- * it; the absolute cap then bounds any adversarial build/sell juggling (a finite but
- * pathological extension) and, with it, the validator's CPU per request. A ruleset-
- * derived formula here would only ever saturate to this cap (the juggling term
- * dominates), so the constant is the honest bound.
- */
-function tickCeiling(_ruleset: CompiledRuleset): number {
-  return ABSOLUTE_MAX_CEILING;
-}
 
 /**
  * Domain-validate one (already object-shaped) input against the command union (ADR
@@ -135,6 +123,78 @@ function inputDomainError(input: object, ruleset: CompiledRuleset): string | nul
 
 const EMPTY_INPUTS: readonly SimInput[] = [];
 
+/** Cap on the number of distinct (digest, boardId) compiled rulesets a `CompileCache`
+ *  retains — bounds server memory against an adversarial stream of many-distinct-digest
+ *  submissions. */
+export const COMPILE_CACHE_MAX = 8;
+
+/**
+ * Injectable LRU cache over `compileRuleset`, keyed by content digest + boardId (#26).
+ *
+ * The digest itself is NEVER memoized here — it stays a fresh, per-call integrity
+ * check computed by `validate` on every request. `compileRuleset` explicitly supports
+ * a caller mutating a bundle after compiling it (it snapshots for exactly that reason —
+ * ruleset.ts), so an identity-keyed memo would risk returning a stale compile for a
+ * bundle object the caller changed. Keying by content digest instead means a mutated
+ * bundle produces a different digest → a cache miss → a fresh compile: correctness is
+ * carried by the digest, never by object identity or recency alone.
+ *
+ * A cache HIT still leaves one once-per-new-digest cost on a MISS: `compileRuleset`
+ * computes its own internal digest again internally. Eliminating that would mean
+ * changing sim's public `compileRuleset` API to accept a precomputed digest — declined
+ * as added API surface for a once-per-bundle micro-cost; the per-request recompile and
+ * per-request double-digest that #26 actually complains about are both gone on hits.
+ */
+export class CompileCache {
+  private readonly entries = new Map<string, CompiledRuleset>();
+  private readonly max: number;
+  private hitCount = 0;
+  private missCount = 0;
+
+  constructor(max: number = COMPILE_CACHE_MAX) {
+    this.max = max;
+  }
+
+  /** Look up (or compile and store) the ruleset for this exact digest + boardId. */
+  get(bundle: Ruleset, boardId: string, digest: string): CompiledRuleset {
+    const key = `${digest}|${boardId}`;
+    const cached = this.entries.get(key);
+    if (cached !== undefined) {
+      this.hitCount++;
+      // Recency refresh on every hit: re-inserting moves this key to the Map's
+      // most-recently-used end (Map iteration/insertion order), so eviction below
+      // always drops the truly-oldest-untouched entry, not just the oldest-created one.
+      this.entries.delete(key);
+      this.entries.set(key, cached);
+      return cached;
+    }
+    this.missCount++;
+    const compiled = compileRuleset(bundle, boardId);
+    this.entries.set(key, compiled);
+    if (this.entries.size > this.max) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey !== undefined) this.entries.delete(oldestKey);
+    }
+    return compiled;
+  }
+
+  /** Test-visible hit/miss counters — so cache behavior is observed, not inferred. */
+  get hits(): number {
+    return this.hitCount;
+  }
+  get misses(): number {
+    return this.missCount;
+  }
+  get size(): number {
+    return this.entries.size;
+  }
+}
+
+/** Module-default cache `validate` uses when the caller doesn't inject one — shared
+ *  across requests within a process (the actual point of #26: skip recompiling an
+ *  already-seen (digest, boardId) pair). */
+const defaultCompileCache = new CompileCache();
+
 /**
  * Re-simulate a replay against its ruleset bundle, deriving a trusted terminal score.
  *
@@ -146,8 +206,15 @@ const EMPTY_INPUTS: readonly SimInput[] = [];
  * input past the terminal transition (padding); (5) derive the score/stars from the
  * terminal state. The sim's freeze-on-terminal makes the final hash independent of
  * trailing empty ticks.
+ *
+ * `cache` defaults to a shared module-level `CompileCache`; pass an explicit instance
+ * to isolate/observe hit/miss behavior (e.g. in tests) or to scope caching per-request.
  */
-export function validate(replay: Replay, bundle: Ruleset): ValidationResult {
+export function validate(
+  replay: Replay,
+  bundle: Ruleset,
+  cache: CompileCache = defaultCompileCache,
+): ValidationResult {
   // (1) Envelope structural validation — before any lookup or simulation.
   if (replay == null || typeof replay !== 'object') {
     return { ok: false, reason: 'replay must be an object' };
@@ -176,7 +243,7 @@ export function validate(replay: Replay, bundle: Ruleset): ValidationResult {
   let ruleset: CompiledRuleset;
   try {
     digest = rulesetDigest(bundle);
-    ruleset = compileRuleset(bundle, replay.boardId);
+    ruleset = cache.get(bundle, replay.boardId, digest);
   } catch (err) {
     if (err instanceof RulesetError)
       return { ok: false, reason: `invalid ruleset: ${err.message}` };
@@ -253,13 +320,17 @@ export function validate(replay: Replay, bundle: Ruleset): ValidationResult {
   }
 
   // (3c) If the log ended before terminal, drive empty ticks to terminal or the ceiling.
+  // `compileRuleset` already guarantees a bundle's BASELINE run (launch + spawn +
+  // slowest full traversal) reaches a terminal state within MAX_TICKS, so a legitimate
+  // replay always terminates below it; the same constant then bounds any adversarial
+  // build/sell juggling (a finite but pathological extension) and, with it, the
+  // validator's CPU per request.
   if (!terminalReached) {
-    const ceiling = tickCeiling(ruleset);
-    while (state.tick < ceiling && !isTerminalPhase(state.phase)) {
+    while (state.tick < MAX_TICKS && !isTerminalPhase(state.phase)) {
       state = step(state, ruleset, EMPTY_INPUTS);
     }
     if (!isTerminalPhase(state.phase)) {
-      return { ok: false, reason: `replay did not terminate within ${ceiling} ticks (timeout)` };
+      return { ok: false, reason: `replay did not terminate within ${MAX_TICKS} ticks (timeout)` };
     }
   }
 

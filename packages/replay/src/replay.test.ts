@@ -6,7 +6,13 @@ import { describe, it, expect } from 'vitest';
 import { SIM_VERSION, type SimInput } from '@wynding/sim';
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 import type { Ruleset } from '@wynding/types';
-import { validate, currentRulesetHash, type Replay } from './index';
+import {
+  validate,
+  currentRulesetHash,
+  CompileCache,
+  COMPILE_CACHE_MAX,
+  type Replay,
+} from './index';
 
 const HASH = currentRulesetHash(m1Ruleset);
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -280,5 +286,159 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('invalid ruleset'); // rejected at compile (terminal budget)
     expect(r.reason).toContain('terminal state within the tick budget');
+  });
+});
+
+describe('CompileCache — LRU compile memo keyed by content digest (#26)', () => {
+  function twoBoardBundle(): Ruleset {
+    return {
+      formatVersion: 1,
+      rulesetId: 'compile-cache-probe',
+      version: 1,
+      creepCatalog: [{ kind: 'normal', hp: 20, speedFp: 256, bounty: 1, domain: 'ground' }],
+      towerCatalog: [
+        { kind: 'basic', cost: 5, damage: 10, rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
+      ],
+      balance: {
+        startingLives: 10,
+        startingBounty: 80,
+        refundNum: 3,
+        refundDen: 4,
+        leakCost: 1,
+        countdownTicks: 5,
+        waveClearBonus: 0,
+        earlyCallBonus: 0,
+      },
+      scoring: { survivalMul: 25, starThresholds: [1, 6, 9] },
+      boards: [
+        {
+          id: 'board-a',
+          name: 'Board A',
+          widthTiles: 9,
+          heightTiles: 3,
+          entrance: { col: 0, row: 1 },
+          exit: { col: 8, row: 1 },
+          waves: [{ index: 0, entries: [{ kind: 'normal', count: 1, spacingTicks: 20 }] }],
+        },
+        {
+          id: 'board-b',
+          name: 'Board B',
+          widthTiles: 9,
+          heightTiles: 3,
+          entrance: { col: 0, row: 1 },
+          exit: { col: 8, row: 1 },
+          waves: [{ index: 0, entries: [{ kind: 'normal', count: 1, spacingTicks: 20 }] }],
+        },
+      ],
+    };
+  }
+
+  function replayFor(bundle: Ruleset, boardId: string): Replay {
+    return {
+      seed: 1,
+      boardId,
+      rulesetHash: currentRulesetHash(bundle),
+      simVersion: SIM_VERSION,
+      tickInputs: [[{ kind: 'callWaveEarly' }]],
+    };
+  }
+
+  it('defaults its LRU cap to COMPILE_CACHE_MAX', () => {
+    const cache = new CompileCache();
+    const bundles = Array.from({ length: COMPILE_CACHE_MAX + 1 }, (_, i) => {
+      const b = twoBoardBundle();
+      (b.towerCatalog[0] as { cost: number }).cost = 5 + i;
+      return b;
+    });
+    for (const b of bundles) validate(replayFor(b, 'board-a'), b, cache);
+    expect(cache.size).toBe(COMPILE_CACHE_MAX); // capped, not COMPILE_CACHE_MAX + 1
+  });
+
+  it('a second validate() call with the same bundle is a compile-cache HIT with identical results', () => {
+    const cache = new CompileCache();
+    const bundle = twoBoardBundle();
+    const first = validate(replayFor(bundle, 'board-a'), bundle, cache);
+    expect(cache.misses).toBe(1);
+    expect(cache.hits).toBe(0);
+    const second = validate(replayFor(bundle, 'board-a'), bundle, cache);
+    expect(cache.misses).toBe(1); // still one compile — the second call hit
+    expect(cache.hits).toBe(1);
+    expect(second.ok).toBe(true);
+    expect(second.finalHash).toBe(first.finalHash);
+    expect(second.score).toBe(first.score);
+    expect(second.stars).toBe(first.stars);
+  });
+
+  it('a different boardId on the same bundle is a separate cache entry', () => {
+    const cache = new CompileCache();
+    const bundle = twoBoardBundle();
+    validate(replayFor(bundle, 'board-a'), bundle, cache);
+    expect(cache.misses).toBe(1);
+    validate(replayFor(bundle, 'board-b'), bundle, cache);
+    expect(cache.misses).toBe(2); // different boardId → distinct key → a second miss
+    expect(cache.hits).toBe(0);
+    expect(cache.size).toBe(2);
+  });
+
+  it('mutating the bundle between validations changes the digest → cache miss → fresh, correct compile', () => {
+    const cache = new CompileCache();
+    const bundle = twoBoardBundle();
+    validate(replayFor(bundle, 'board-a'), bundle, cache);
+    expect(cache.misses).toBe(1);
+
+    // Mutate a sim-affecting field on the SAME bundle object (identity unchanged).
+    (bundle.towerCatalog[0] as { damage: number }).damage = 999;
+    const mutatedReplay = replayFor(bundle, 'board-a'); // rulesetHash recomputed post-mutation
+    const after = validate(mutatedReplay, bundle, cache);
+
+    expect(cache.misses).toBe(2); // digest changed → miss, not a stale identity-keyed hit
+    expect(cache.size).toBe(2); // both the pre- and post-mutation digest are now cached
+    expect(after.ok).toBe(true);
+
+    // Submitting the STALE (pre-mutation) hash against the now-mutated bundle is still
+    // correctly rejected — proving the digest check itself (never memoized) stays live.
+    const staleHash = currentRulesetHash(twoBoardBundle());
+    const staleAttempt = validate({ ...mutatedReplay, rulesetHash: staleHash }, bundle, cache);
+    expect(staleAttempt.ok).toBe(false);
+    expect(staleAttempt.reason).toContain('ruleset hash mismatch');
+  });
+
+  it('evicts the oldest-untouched entry at exactly COMPILE_CACHE_MAX, with hits refreshing recency', () => {
+    const cache = new CompileCache(3);
+    // Fill the cache with 3 distinct entries via 3 single-field mutations of the same
+    // base bundle (each mutation changes the digest, giving distinct cache keys).
+    const bundle0 = twoBoardBundle();
+    (bundle0.towerCatalog[0] as { cost: number }).cost = 5;
+    const bundle1 = twoBoardBundle();
+    (bundle1.towerCatalog[0] as { cost: number }).cost = 6;
+    const bundle2 = twoBoardBundle();
+    (bundle2.towerCatalog[0] as { cost: number }).cost = 7;
+    for (const b of [bundle0, bundle1, bundle2]) validate(replayFor(b, 'board-a'), b, cache);
+    expect(cache.size).toBe(3);
+    expect(cache.misses).toBe(3);
+
+    // Touch entry 0 (bundle0) so it becomes most-recently-used, not oldest.
+    validate(replayFor(bundle0, 'board-a'), bundle0, cache);
+    expect(cache.hits).toBe(1);
+    expect(cache.size).toBe(3);
+
+    // A 4th distinct entry pushes size over the cap — the oldest UNTOUCHED entry
+    // (bundle1, never re-hit) is evicted, not bundle0 (recency-refreshed).
+    const bundle3 = twoBoardBundle();
+    (bundle3.towerCatalog[0] as { cost: number }).cost = 999;
+    validate(replayFor(bundle3, 'board-a'), bundle3, cache);
+    expect(cache.size).toBe(3);
+    expect(cache.misses).toBe(4);
+
+    // bundle0 survives (recently touched) → still a hit.
+    const missesBefore = cache.misses;
+    validate(replayFor(bundle0, 'board-a'), bundle0, cache);
+    expect(cache.misses).toBe(missesBefore); // hit, no new compile
+    expect(cache.hits).toBe(2);
+
+    // bundle1 was evicted → recompiling it is a fresh miss.
+    const missesBefore2 = cache.misses;
+    validate(replayFor(bundle1, 'board-a'), bundle1, cache);
+    expect(cache.misses).toBe(missesBefore2 + 1);
   });
 });
