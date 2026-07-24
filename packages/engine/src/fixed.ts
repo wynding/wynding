@@ -3,8 +3,17 @@
 // FP_SHIFT = 8 means 1 board tile = 256 fixed-point units. All sim-layer
 // fractional quantities use these helpers; floats are banned in the sim.
 //
-// Safe upper bound: values up to 2^23 FP units (32,768 tiles) are safe before
-// Math.imul overflow.
+// Safety contract (per-operation, not a single blanket bound — see fixed.test.ts for the
+// pinned boundary cases):
+//  - `fpMul(a, b)` is exact only while the mathematical product `a·b` fits in a signed
+//    32-bit integer: `-2^31 ≤ a·b ≤ 2^31 − 1` (the interval INCLUDES -2^31; Math.imul's
+//    wraparound is the failure mode outside it).
+//  - Multiplying by `FP_ONE` specifically is exact only for the signed interval
+//    `-2^23 ≤ a ≤ 2^23 − 1` — NOT "below 2^23", which would wrongly admit arbitrarily
+//    negative operands (the product overflows just as much on the negative side).
+//  - Two EQUAL positive whole-tile operands (the common `fpMul(n*FP_ONE, n*FP_ONE)`
+//    shape) are safe THROUGH 181 tiles inclusive; 182 wraps. Not "below 181" — 181 itself
+//    is verified-safe, 182 is the first unsafe value.
 
 /** Number of fractional bits. 1 tile = 2^FP_SHIFT fixed-point units. */
 export const FP_SHIFT = 8;
