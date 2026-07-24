@@ -232,16 +232,39 @@ export function attachInput(
   // Card — otherwise `overlay.ts`'s own `click` listener would double-toggle armed (tap)
   // or fire a stray toggle after a drag that already placed/cancelled (PLAN.md P3). A
   // document-level CAPTURING listener guarantees this runs before the click reaches the
-  // Card's own bubble-phase listener regardless of registration order. Cleared at the
-  // start of every new Card/board press too, so an unconsumed flag from an aborted
-  // gesture (the browser never fires the synthetic click at all) can't outlive it and
-  // swallow an unrelated later click.
-  let suppressNextClick = false;
+  // Card's own bubble-phase listener regardless of registration order.
+  //
+  // A COUNTER of pending suppressions, not a single flag: a flag reset at the start of
+  // every new press can be cleared by an unrelated gesture that starts before the previous
+  // gesture's still-pending synthetic click has arrived, letting that click through
+  // unsuppressed. Each completed tap/drag arms its own expiring timer (guards against a
+  // synthetic click that never fires at all, e.g. an aborted gesture, permanently
+  // inflating the counter); consuming a suppression cancels the oldest pending timer so it
+  // can't later fire and steal a decrement meant for a different, still-legitimate one.
+  const SUPPRESS_CLICK_EXPIRY_MS = 500;
+  let pendingClickSuppressions = 0;
+  const pendingSuppressionTimers: Array<ReturnType<typeof setTimeout>> = [];
+  const armClickSuppression = (): void => {
+    pendingClickSuppressions++;
+    const timer = setTimeout(() => {
+      const idx = pendingSuppressionTimers.indexOf(timer);
+      if (idx !== -1) pendingSuppressionTimers.splice(idx, 1);
+      pendingClickSuppressions = Math.max(0, pendingClickSuppressions - 1);
+    }, SUPPRESS_CLICK_EXPIRY_MS);
+    pendingSuppressionTimers.push(timer);
+  };
+  const clearPendingSuppressionTimers = (): void => {
+    for (const timer of pendingSuppressionTimers) clearTimeout(timer);
+    pendingSuppressionTimers.length = 0;
+    pendingClickSuppressions = 0;
+  };
   const onDocumentClickCapture = (e: MouseEvent): void => {
-    if (!suppressNextClick) return;
-    suppressNextClick = false;
+    if (pendingClickSuppressions <= 0) return;
     const target = e.target as Element | null;
     if (target !== null && cardEls.some((c) => c === target || c.contains(target))) {
+      pendingClickSuppressions--;
+      const timer = pendingSuppressionTimers.shift(); // the oldest pending suppression
+      if (timer !== undefined) clearTimeout(timer);
       e.preventDefault();
       e.stopPropagation();
     }
@@ -273,7 +296,6 @@ export function attachInput(
   // --- Board: mouse keeps P2 hover/click verbatim; touch/pen is press-adjust-release ---
 
   const onBoardPointerDown = (e: PointerEvent): void => {
-    suppressNextClick = false;
     presses.set(e.pointerId, {
       origin: 'board',
       startX: e.clientX,
@@ -411,7 +433,6 @@ export function attachInput(
   for (const cardEl of cardEls) {
     const onCardPointerDown = (e: PointerEvent): void => {
       if (e.pointerType === 'mouse') return; // mouse Card interaction is click-toggle only
-      suppressNextClick = false;
       presses.set(e.pointerId, {
         origin: 'card',
         cardEl,
@@ -454,14 +475,14 @@ export function attachInput(
         // Tap: toggle armed per the P2 table, and suppress the subsequent synthetic click
         // so it doesn't double-toggle.
         controller.armTower('basic');
-        suppressNextClick = true;
+        armClickSuppression();
         return;
       }
       // Drag-from-rail release: valid cell places (→ disarm → select, via `clickAt`);
       // off-board, over Shell chrome, or an invalid cell cancels AND disarms (the drag was
       // one gesture — aborting returns to neutral, unlike the board-native drag, which
       // keeps a rejected placement armed).
-      suppressNextClick = true;
+      armClickSuppression();
       if (isOverChrome(e.clientX, e.clientY) || !isWithinBoardRect(e.clientX, e.clientY)) {
         disarmAndClearGhost();
         return;
@@ -521,12 +542,13 @@ export function attachInput(
       boardEl.removeEventListener('keydown', onKeyDown as EventListener);
       doc.removeEventListener('click', onDocumentClickCapture, true);
       for (const cleanup of cardCleanups) cleanup();
+      clearPendingSuppressionTimers();
     },
     reset(): void {
       presses.clear();
       activeIds.clear();
       voidedIds.clear();
-      suppressNextClick = false;
+      clearPendingSuppressionTimers();
     },
     abort(): void {
       for (const [pointerId, press] of presses) cancelPress(pointerId, press);

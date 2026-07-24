@@ -385,6 +385,27 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     expect(c.uiState().armed).toBe('basic');
   });
 
+  it('a second tap-toggle before the first synthetic click arrives still suppresses BOTH clicks (no shared reset-on-press race)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    // First tap: arms. Its browser-dispatched synthetic click hasn't arrived yet.
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card.dispatchEvent(ptr('pointerup', 10, 10, 'touch'));
+    expect(c.uiState().armed).toBe('basic');
+    // A second, unrelated tap starts (and completes) before that first click lands — a
+    // single shared "reset suppression on new press" flag would have cleared the first
+    // tap's still-pending suppression here, letting its later synthetic click through
+    // unsuppressed and double-toggling. A per-suppression counter must not.
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card.dispatchEvent(ptr('pointerup', 10, 10, 'touch'));
+    expect(c.uiState().armed).toBeNull(); // second tap toggled it back off
+    // Now both browser synthetic clicks arrive, in order — neither may double-toggle.
+    card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(c.uiState().armed).toBeNull();
+  });
+
   it('at/over DRAG_THRESHOLD_PX (9px) is a drag — arms and starts press-adjust-release mapped onto the board', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held

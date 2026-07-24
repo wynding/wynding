@@ -810,11 +810,23 @@ export function createController(seed: number): Controller {
       // false via `selection`.
       aimAt(cur.col, cur.row);
       if (ghost === null || !ghost.valid) {
-        // A ghost invalidated by the PLAN.md P4 pre-start cap (rather than genuine
-        // sim-invalidity) still deserves the distinct 'pendingCap' announcement — the
-        // keyboard path otherwise stays silent on a rejected confirm (unchanged).
-        if (ghost !== null && buffer.length >= effectiveCap()) {
-          setOutcome({ kind: 'rejected', reason: 'pendingCap' });
+        // A `ghost === null` here means aimAt selected an existing tower instead (unarmed
+        // cursor landing on an occupied cell) — that's a selection, not a placement
+        // attempt, so it stays silent. Any other invalid ghost IS a rejected placement
+        // attempt and must announce to the live region (docs/accessibility-checklist.md),
+        // mirroring clickAt's occupied/pendingCap/bounty/other reasons.
+        if (ghost !== null) {
+          if (armed !== null && towerAt(ghost.col, ghost.row) !== null) {
+            setOutcome({ kind: 'rejected', reason: 'occupied' });
+          } else if (buffer.length >= effectiveCap()) {
+            setOutcome({ kind: 'rejected', reason: 'pendingCap' });
+          } else {
+            const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
+            setOutcome({
+              kind: 'rejected',
+              reason: bounty < ruleset.tower.cost ? 'bounty' : 'other',
+            });
+          }
         }
         return false;
       }
@@ -830,8 +842,12 @@ export function createController(seed: number): Controller {
       // Card is armed must leave the Card unarmed too, not just the mouse/Card path.
       if (armed !== null) {
         armed = null;
-        setOutcome({ kind: 'placed' });
       }
+      // Announce on ANY successful placement, not just the armed/Card path — the pure
+      // keyboard cursor flow (arrow keys + Enter) builds without ever arming a Card, and
+      // the live region must still announce success there too
+      // (docs/accessibility-checklist.md).
+      setOutcome({ kind: 'placed' });
       // Re-evaluate the ghost against the now-larger buffer (the just-queued build may
       // make this same cell invalid for a second placement while paused). `towerAt` now
       // reads the shared projection, so this resolves to a SELECTION on the just-queued

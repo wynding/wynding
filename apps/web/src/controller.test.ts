@@ -83,6 +83,25 @@ describe('controller — input → command mapping', () => {
     expect(c.frame().curVm.towers[0]).toMatchObject({ col: 3, row: 3 });
   });
 
+  it('the pure-keyboard cursor flow (no Card armed) announces both a successful placement and a rejection to the live region', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    expect(c.uiState().armed).toBeNull(); // never armed a Card — the board-cursor path only
+    c.aimAt(3, 3);
+    expect(c.confirm()).toBe(true);
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'placed' }); // success is announced too
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+
+    // (2,2) is a known blocked-terrain cell (see the `armed` clickAt test asserting the
+    // same coordinate resolves to `reason: 'other'`) — empty, in-bounds, but unbuildable, so
+    // this is a genuine rejected placement attempt, not a silent tower-selection.
+    const aim = c.aimAt(2, 2);
+    expect(aim).toMatchObject({ kind: 'ghost', valid: false });
+    expect(c.confirm()).toBe(false);
+    expect(c.uiState().lastOutcome).toMatchObject({ kind: 'rejected' }); // rejection is announced too
+  });
+
   it('selects a placed tower, reports a positive refund, and sells it', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
