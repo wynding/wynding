@@ -9,9 +9,6 @@ export default defineConfig({
   // Above the smoke test's 40s results-dialog wait — a no-tower M1 loss can approach ~25s
   // of wall-clock even at 2×, so a 30s per-test cap could abort it on a slow CI runner.
   timeout: 60_000,
-  // Cold SwiftShader WebGL boot on CI can hold Phaser READY (and first paint) past
-  // Playwright's 5s default expect timeout — the hidpi polls need the longer window.
-  expect: { timeout: 20_000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -30,6 +27,9 @@ export default defineConfig({
     {
       name: 'chromium-dpr1',
       testMatch: /hidpi\.spec\.ts/,
+      // Cold SwiftShader WebGL boot on CI can hold Phaser READY past the 5s default
+      // expect timeout — only the hidpi polls need the longer window.
+      expect: { timeout: 20_000 },
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1280, height: 900 },
@@ -39,6 +39,9 @@ export default defineConfig({
     {
       name: 'chromium-dpr2',
       testMatch: /hidpi\.spec\.ts/,
+      // Cold SwiftShader WebGL boot on CI can hold Phaser READY past the 5s default
+      // expect timeout — only the hidpi polls need the longer window.
+      expect: { timeout: 20_000 },
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1280, height: 900 },
@@ -48,6 +51,9 @@ export default defineConfig({
     {
       name: 'chromium-dpr3',
       testMatch: /hidpi\.spec\.ts/,
+      // Cold SwiftShader WebGL boot on CI can hold Phaser READY past the 5s default
+      // expect timeout — only the hidpi polls need the longer window.
+      expect: { timeout: 20_000 },
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1280, height: 900 },
