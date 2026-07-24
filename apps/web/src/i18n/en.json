@@ -61,5 +61,7 @@
   "live.rejected.occupied": "That cell is already occupied.",
   "live.rejected.generic": "Can't build there.",
   "live.rejected.pendingCap": "Too many pending actions.",
-  "live.sold": "Tower sold. Refunded {refund} Bounty."
+  "live.sold": "Tower sold. Refunded {refund} Bounty.",
+  "rotate.title": "Rotate your device",
+  "rotate.message": "Wynding plays best in landscape. Rotate your device to continue."
 }

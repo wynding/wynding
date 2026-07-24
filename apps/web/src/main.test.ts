@@ -291,8 +291,14 @@ describe('main — boot()', () => {
     document.body.innerHTML = '<div id="app"></div>';
     vi.stubGlobal('requestAnimationFrame', () => 1);
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
-    // jsdom has no matchMedia; provide one that reports reduced motion.
-    (window as unknown as { matchMedia: unknown }).matchMedia = () => ({ matches: true });
+    // jsdom has no matchMedia; provide one that reports reduced motion. Also exercised by
+    // `boot()`'s default rotate matchMedia fallback (main.ts), so it needs the same shape
+    // real MediaQueryLists have — addEventListener/removeEventListener, not just `matches`.
+    (window as unknown as { matchMedia: unknown }).matchMedia = () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
 
     const handle = boot(document);
     expect(handle).not.toBeNull();

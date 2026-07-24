@@ -19,7 +19,7 @@ import { formatNumber } from './i18n/number';
 import type { SettingsStore } from './settings';
 import { GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
-import { createModalOwner, type ModalOverlay } from './modal';
+import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import type { ShellHandle } from './shell';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
 
@@ -51,6 +51,10 @@ export interface Overlay {
   /** Sibling elements the caller appends alongside the Shell (results/settings). */
   readonly resultsEl: HTMLElement;
   readonly settingsEl: HTMLElement;
+  /** The single modal owner (results/rotate/settings share one stack, PLAN.md P1) — exposed
+   *  so `main.ts` can register the P5 rotate overlay on the SAME instance, rather than a
+   *  second, disconnected one. */
+  readonly modal: ModalOwner;
   update(view: HudView): void;
   showResults(hud: HudVM): void;
   hideResults(): void;
@@ -499,6 +503,7 @@ export function createOverlay(
   return {
     resultsEl: results,
     settingsEl: settingsDialog,
+    modal,
     update(view: HudView): void {
       const { hud } = view;
       hudEls.lives.textContent = t('hud.lives', { count: hud.lives });

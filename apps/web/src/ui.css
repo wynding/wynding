@@ -352,10 +352,38 @@ body {
   font-size: 1rem;
 }
 
-/* --- Rotate placeholder (P5) --- */
+/* --- Rotate prompt (P5): phones/tablets in portrait only — gated at runtime on
+   `(orientation: portrait)` AND `(pointer: coarse)`, PLAN.md P5. --- */
+
+.wy-rotate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  text-align: center;
+  background: rgba(6, 12, 22, 0.94);
+  color: var(--wy-fg);
+}
 
 .wy-rotate[hidden] {
   display: none;
+}
+
+.wy-rotate-icon {
+  width: 3rem;
+  height: 3rem;
+  /* CSS rotate, not the sim/board rotate — purely the icon's own tilt to suggest the
+     landscape orientation the player needs to reach. */
+  transform: rotate(90deg);
+}
+
+.wy-rotate p {
+  max-width: 24rem;
+  font-size: 1.1rem;
 }
 
 @media (prefers-reduced-motion: reduce) {

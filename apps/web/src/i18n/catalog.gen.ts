@@ -65,6 +65,8 @@ export const EN = {
   "live.rejected.generic": "Can't build there.",
   "live.rejected.pendingCap": "Too many pending actions.",
   "live.sold": "Tower sold. Refunded {refund} Bounty.",
+  "rotate.title": "Rotate your device",
+  "rotate.message": "Wynding plays best in landscape. Rotate your device to continue.",
 } as const;
 
 export type MessageKey = keyof typeof EN;
@@ -133,4 +135,6 @@ export interface MessageParams {
   "live.rejected.generic": Record<never, never>;
   "live.rejected.pendingCap": Record<never, never>;
   "live.sold": { "refund": string | number };
+  "rotate.title": Record<never, never>;
+  "rotate.message": Record<never, never>;
 }

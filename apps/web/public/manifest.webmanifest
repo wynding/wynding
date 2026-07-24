@@ -4,6 +4,7 @@
   "description": "An open-field, maze-building tower defense game.",
   "start_url": "/",
   "display": "standalone",
+  "orientation": "landscape",
   "background_color": "#0d1b2a",
   "theme_color": "#0d1b2a",
   "icons": []

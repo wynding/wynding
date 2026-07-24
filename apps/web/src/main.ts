@@ -15,6 +15,7 @@ import { createShell } from './shell';
 import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
+import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { t } from './i18n/t';
 import { mount as mountScene, type BoardGeometry } from '@wynding/render/scene';
 import type { RenderHandle, RenderOverlay } from '@wynding/render';
@@ -35,6 +36,10 @@ export interface AppDeps {
    *  separate from `now` (a monotonic frame clock) so a fresh run varies per reload. */
   readonly seedSource?: () => number;
   readonly prefersReducedMotion?: boolean;
+  /** matchMedia lookup for viewport-gated features (the P5 rotate prompt) — injectable
+   *  for tests; defaults to `doc.defaultView.matchMedia` when available, or an
+   *  always-non-matching stub otherwise (e.g. jsdom without a stub). */
+  readonly matchMedia?: MatchMediaFn;
 }
 
 export interface AppHandle {
@@ -60,7 +65,6 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   const overlay = createOverlay(doc, onAction, settings, keymap, shell, controller.ruleset);
   const rotate = doc.createElement('div');
   rotate.className = 'wy-rotate';
-  rotate.hidden = true; // P5 fills this in; topology-only placeholder for now
   root.append(shell.root, overlay.resultsEl, overlay.settingsEl, rotate);
 
   const grid = controller.ruleset.board.grid;
@@ -72,6 +76,20 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   };
   const handle = deps.sceneFactory(board, geometry);
   const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap);
+
+  // The rotate prompt (PLAN.md P5) shares the SAME modal owner `overlay.ts` created (one
+  // stack for results/rotate/settings). `deps.matchMedia` lets tests drive both queries
+  // deterministically; the real default reads `doc.defaultView.matchMedia` (absent under
+  // jsdom unless a test stubs it — same fallback shape as `boot()`'s reduced-motion read
+  // below), degrading to an always-non-matching stub rather than throwing when it's missing.
+  const matchMediaFn: MatchMediaFn =
+    deps.matchMedia ??
+    ((query: string): RotateMediaQueryList => {
+      const mm = doc.defaultView?.matchMedia;
+      if (typeof mm === 'function') return mm.call(doc.defaultView, query);
+      return { matches: false, addEventListener: () => {}, removeEventListener: () => {} };
+    });
+  const rotateHandle = createRotate(doc, rotate, overlay.modal, controller, input, matchMediaFn);
 
   const initialSettings = settings.get(); // one snapshot (get() clones), read both fields
   let colourMode = initialSettings.colourMode;
@@ -209,11 +227,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
+      rotateHandle.destroy();
       input.destroy();
       handle.destroy();
       overlay.destroy();
       shell.destroy();
-      // Remove the rotate placeholder too — overlay.destroy()/shell.destroy() only remove
+      // Remove the rotate element too — overlay.destroy()/shell.destroy() only remove
       // their own roots, so leaving this behind would stack a duplicate on every
       // createApp() a host runs in the same root.
       rotate.remove();
