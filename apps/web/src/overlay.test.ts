@@ -212,6 +212,28 @@ describe('overlay — accessibility settings panel', () => {
     expect(firstRebind.textContent).toBe('KeyW');
   });
 
+  it('a successful bind stops propagation — the same keydown does not also fire the board action (#43)', () => {
+    const { keymap, overlay } = setup();
+    const upBtn = overlay.root.querySelector<HTMLButtonElement>('.wy-rebind-btn')!;
+    upBtn.click(); // arm rebind of 'up'
+
+    // A real board element elsewhere in the document, with its own bubble-phase keydown
+    // listener standing in for `input.ts`'s board action handler — the real event
+    // topology (capture on `document` fires first; propagation must not continue to it).
+    const board = document.createElement('div');
+    document.body.appendChild(board);
+    let boardActionFired = false;
+    board.addEventListener('keydown', () => {
+      boardActionFired = true;
+    });
+
+    const evt = new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true, cancelable: true });
+    board.dispatchEvent(evt);
+
+    expect(keymap.codeFor('up')).toBe('KeyQ'); // the bind happened
+    expect(boardActionFired).toBe(false); // but the board's own action did not execute
+  });
+
   it('does not bind navigation/abort keys: Escape cancels the rebind, Tab is ignored', () => {
     const { keymap, overlay } = setup();
     const upBtn = overlay.root.querySelector<HTMLButtonElement>('.wy-rebind-btn')!;

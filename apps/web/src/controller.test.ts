@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
 import { m1Ruleset } from '@wynding/content';
 import type { SimInput } from '@wynding/sim';
-import { createController, enqueueVerdict, type Controller } from './controller';
+import { createController, enqueueVerdict, outcomesMatch, type Controller } from './controller';
 
 const TICK = 50; // MS_PER_TICK
 
@@ -113,17 +113,37 @@ describe('controller — input → command mapping', () => {
     expect(c.frame().ghost !== null || c.frame().selection !== null).toBe(true);
   });
 
-  it('confirm does nothing over an invalid ghost or empty selection', () => {
+  it('confirm over an invalid ghost is a no-op (#47)', () => {
     const c = createController(1);
     c.aimAt(3, 3);
     c.confirm();
+    tick(c); // the (3,3) tower is committed
+    // (2,2) is itself empty — towerAt(2,2) is null, so this resolves to a GHOST — but its
+    // footprint (cols 2-3, rows 2-3) overlaps the committed tower's cell (3,3), so it must
+    // be invalid.
+    const aim = c.aimAt(2, 2);
+    expect(aim).toEqual({ kind: 'ghost', col: 2, row: 2, valid: false });
+    expect(c.confirm()).toBe(false);
+    tick(c); // pending commands are invisible pre-tick — this is the real proof
+    expect(c.frame().curVm.towers).toHaveLength(1); // still just the one committed tower
+  });
+
+  it('sellSelected() and refundForSelection() are no-ops with no selection', () => {
+    const c = createController(1);
+    expect(c.sellSelected()).toBe(false);
+    expect(c.refundForSelection()).toBe(0);
+  });
+
+  it('confirm() re-queries ghost validity at the CURRENT tick — a stale-valid cell a creep has since occupied is rejected, not built (#40)', () => {
+    const c = createController(1);
+    c.callWaveEarly();
+    tick(c, 14); // the wave-early creep has not yet reached (2,11)
+    const aim = c.aimAt(2, 11);
+    expect(aim).toMatchObject({ kind: 'ghost', valid: true }); // valid one tick before it arrives
+    tick(c); // advance WITHOUT re-aiming — the creep now occupies (2,11); `ghost` is stale
+    expect(c.confirm()).toBe(false); // must re-derive at the current tick, not trust the cache
     tick(c);
-    // aiming the overlapping anchor (4,3) is invalid (overlaps the (3,3) tower footprint)
-    const overlap = c.aimAt(4, 3);
-    expect(overlap.kind === 'ghost' ? overlap.valid : true).toBe(true); // (4,3) is inside the tower → selects it
-    expect(c.sellSelected()).toBe(true); // a tower is under (4,3)
-    tick(c);
-    expect(c.refundForSelection()).toBe(0); // nothing selected now
+    expect(c.frame().curVm.towers).toHaveLength(0); // never actually built
   });
 
   it('memoizes placement-validity and refund queries (no redundant clones)', () => {
@@ -177,6 +197,131 @@ describe('controller — input → command mapping', () => {
   });
 });
 
+describe('controller — pending-aware paused-planning presentation (#37+#27)', () => {
+  it('a build accepted while paused surfaces a pending tower without committing it; presented bounty reflects the spend', () => {
+    const c = createController(1);
+    c.pause();
+    const bountyBefore = c.hud().bounty;
+    c.aimAt(3, 3);
+    expect(c.confirm()).toBe(true);
+    const f = c.frame();
+    expect(f.pendingAdds).toEqual([{ col: 3, row: 3 }]);
+    expect(f.curVm.towers).toHaveLength(0); // not committed — pending only
+    expect(c.hud().bounty).toBeLessThan(bountyBefore); // presented spend, not the stale figure
+  });
+
+  it("confirm()'s post-queue re-aim on the pending-build cell selects, not an invalid ghost", () => {
+    const c = createController(1);
+    c.pause();
+    c.aimAt(3, 3);
+    c.confirm();
+    const aim = c.aimAt(3, 3);
+    expect(aim.kind).toBe('tower');
+    expect(aim.valid).toBe(true);
+  });
+
+  it('a pending build clears (and commits) after resuming for one tick', () => {
+    const c = createController(1);
+    c.pause();
+    c.aimAt(3, 3);
+    c.confirm();
+    expect(c.frame().pendingAdds).toHaveLength(1);
+    c.resume();
+    tick(c);
+    expect(c.frame().pendingAdds).toHaveLength(0);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+    expect(c.frame().curVm.towers[0]).toMatchObject({ col: 3, row: 3 });
+  });
+
+  it('sell-then-rebuild works from EACH of the four footprint cells (sold anchor re-aims buildable)', () => {
+    const footprint: ReadonlyArray<[number, number]> = [
+      [3, 3],
+      [4, 3],
+      [3, 4],
+      [4, 4],
+    ];
+    for (const [col, row] of footprint) {
+      const c = createController(1);
+      c.aimAt(3, 3);
+      c.confirm();
+      tick(c); // commit the build
+      expect(c.frame().curVm.towers).toHaveLength(1);
+
+      c.pause();
+      const aim = c.aimAt(col, row); // select via one of the four footprint cells
+      expect(aim.kind).toBe('tower');
+      expect(c.sellSelected()).toBe(true);
+      expect(c.frame().pendingSells).toEqual([{ col: 3, row: 3 }]);
+      // sellSelected() re-aims at the sold anchor — now resolves as a buildable ghost.
+      expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: true });
+      expect(c.confirm()).toBe(true); // rebuild at the same anchor
+      expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3 }]);
+    }
+  });
+
+  it('a pending sell hides the committed tower immediately (presentation, not just "about to sell")', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+
+    c.pause();
+    c.aimAt(3, 3);
+    c.sellSelected();
+    const f = c.frame();
+    expect(f.pendingSells).toEqual([{ col: 3, row: 3 }]);
+    // curVm.towers (committed) still lists it — the SCENE hides it via pendingSells, not
+    // by the committed view-model itself. The presentation authority is `pendingSells`.
+    expect(f.curVm.towers).toHaveLength(1);
+  });
+
+  it('duplicate/no-op queued commands create no false pending visuals', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // commit one tower
+    c.pause();
+    c.aimAt(3, 3); // select it
+    expect(c.sellSelected()).toBe(true); // queues the sell — a pending sell
+    // Mashing sellSelected again is a no-op (`enqueueVerdict` dedupes; the selection is
+    // already gone by the first call's re-aim) — never a second (false) pending visual.
+    expect(c.sellSelected()).toBe(false);
+    expect(c.frame().pendingSells).toEqual([{ col: 3, row: 3 }]);
+  });
+
+  it('build → select → sell within one pause shows the correct (projected) refund', () => {
+    const c = createController(1);
+    c.pause();
+    c.aimAt(3, 3);
+    c.confirm(); // pending build, not committed
+    const aim = c.aimAt(3, 3); // select the pending tower
+    expect(aim.kind).toBe('tower');
+    // The refund must be computed against the SHARED projection (the pending tower
+    // exists there), not committed state (where it doesn't exist at all — zero refund).
+    expect(c.refundForSelection()).toBeGreaterThan(0);
+  });
+
+  it('sell-then-rebuild works even when the sold tower is STILL PENDING (not yet committed) in this same pause (ship-review fix)', () => {
+    const c = createController(1);
+    c.pause();
+    c.aimAt(3, 3);
+    expect(c.confirm()).toBe(true); // pending build, not committed
+    c.aimAt(3, 3); // select the pending tower
+    expect(c.sellSelected()).toBe(true); // cancels the pending build — nets to empty
+    expect(c.frame().pendingAdds).toEqual([]);
+    expect(c.frame().pendingSells).toEqual([]); // never committed, so nothing to "hide" either
+    const reaim = c.aimAt(3, 3);
+    expect(reaim).toMatchObject({ kind: 'ghost', valid: true }); // buildable again
+    expect(c.confirm()).toBe(true); // the rebuild must actually queue, not silently no-op
+    expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3 }]);
+    c.resume();
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1); // the rebuild actually committed
+    expect(c.frame().curVm.towers[0]).toMatchObject({ col: 3, row: 3 });
+  });
+});
+
 describe('controller — same-tick & paused ordering (determinism hazards)', () => {
   it('applies multiple commands issued within ONE tick in issued order', () => {
     const c = createController(1);
@@ -216,7 +361,7 @@ describe('controller — paused buffer-flood dedup + cap (P1)', () => {
     const replay = c.buildReplay();
     const flushed = replay.tickInputs[replay.tickInputs.length - 1] as readonly SimInput[];
     expect(flushed.filter((i) => i.kind === 'callWaveEarly')).toHaveLength(1);
-    expect(c.verifyRun().ok).toBe(true);
+    expect(validate(replay, m1Ruleset).ok).toBe(true);
   });
 
   it('mashing sellSelected on one tower dedupes; a second selected tower still queues distinctly', () => {
@@ -256,10 +401,15 @@ describe('controller — enqueueVerdict classifier (unit)', () => {
     expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 2 })).toBe('queue');
   });
 
-  it('a same-anchor placeTower is a duplicate; a different-anchor placeTower still queues', () => {
+  it('placeTower is never anchor-deduped here — a same-anchor command still queues (ship-review fix)', () => {
+    // A raw anchor scan can't distinguish a still-live pending build from one an
+    // intervening sellTower in this same buffer already cancelled — deduping would
+    // silently drop a legitimate sell-then-rebuild-while-still-pending. Real duplicate
+    // prevention is `towerAt`'s job (reads the shared projection) — see
+    // controller.test.ts's "sell-then-rebuild ... while still pending" test below.
     const buffer: SimInput[] = [{ kind: 'placeTower', anchor: { col: 3, row: 3 } }];
     expect(enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 3, row: 3 } })).toBe(
-      'duplicate',
+      'queue',
     );
     expect(enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 4, row: 3 } })).toBe(
       'queue',
@@ -283,6 +433,24 @@ describe('controller — enqueueVerdict classifier (unit)', () => {
   });
 });
 
+describe('controller — outcomesMatch classifier (unit, #41)', () => {
+  it('matches when score, stars, AND finalHash all agree', () => {
+    const result = { score: 100, stars: 3, finalHash: 'abc' };
+    expect(outcomesMatch(result, 100, 3, 'abc')).toBe(true);
+  });
+
+  it('does not match when finalHash differs even though score and stars agree', () => {
+    const result = { score: 100, stars: 3, finalHash: 'abc' };
+    expect(outcomesMatch(result, 100, 3, 'different')).toBe(false);
+  });
+
+  it('does not match when score or stars differ', () => {
+    const result = { score: 100, stars: 3, finalHash: 'abc' };
+    expect(outcomesMatch(result, 99, 3, 'abc')).toBe(false);
+    expect(outcomesMatch(result, 100, 2, 'abc')).toBe(false);
+  });
+});
+
 describe('controller — replay recording, terminal truncation & verify', () => {
   it('the recorded log is deeply immutable — commands and nested anchors are frozen clones', () => {
     const c = createController(7);
@@ -301,7 +469,20 @@ describe('controller — replay recording, terminal truncation & verify', () => 
     expect(() => {
       (place.anchor as { col: number }).col = 99;
     }).toThrow(TypeError);
+    c.callWaveEarly();
+    runToTerminal(c);
     expect(c.verifyRun().ok).toBe(true);
+  });
+
+  it('verifyRun() mid-run (non-terminal) reports a distinct not-terminal outcome, never a mismatch (#41)', () => {
+    const c = createController(7);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    const v = c.verifyRun();
+    expect(v.ok).toBe(false);
+    expect(v.reason).toBe('not-terminal');
+    expect(v.matchedLive).toBeUndefined(); // never a mismatch claim for a live match
   });
 
   it('records a validating log that stops at the terminal transition and reproduces the score', () => {
@@ -373,5 +554,43 @@ describe('controller — run lifecycle (startRun cleanup, §7)', () => {
     expect(c.speed()).toBe(1);
     expect(c.isPaused()).toBe(false);
     expect(c.buildReplay().seed).toBe(99);
+  });
+});
+
+describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
+  it('a run with no towers ever leaks creeps without ever producing a spark', () => {
+    const c = createController(1);
+    c.callWaveEarly();
+    let sawSpark = false;
+    let n = 0;
+    while (!c.isTerminal() && n < 4000) {
+      c.advance(TICK);
+      if (c.drainSparks().length > 0) sawSpark = true;
+      n++;
+    }
+    expect(c.isTerminal()).toBe(true);
+    expect(sawSpark).toBe(false); // no tower ever fired — every leak is a non-event for sparks
+  });
+
+  it('a tower straddling the lane produces a well-formed spark once a shot lands, then clears', () => {
+    const c = createController(1);
+    // Mirrors @wynding/render's own combat-carrying fixture: a 2×2 tower straddling the
+    // entrance row so the wave must pass through its range.
+    c.aimAt(2, 10);
+    c.confirm();
+    c.callWaveEarly();
+    let sparks: { x: number; y: number }[] = [];
+    let n = 0;
+    while (sparks.length === 0 && !c.isTerminal() && n < 300) {
+      c.advance(TICK);
+      sparks = c.drainSparks();
+      n++;
+    }
+    expect(sparks.length).toBeGreaterThan(0);
+    for (const pt of sparks) {
+      expect(Number.isFinite(pt.x)).toBe(true);
+      expect(Number.isFinite(pt.y)).toBe(true);
+    }
+    expect(c.drainSparks()).toEqual([]); // drained sparks are cleared, not re-reported
   });
 });

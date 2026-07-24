@@ -22,21 +22,16 @@ export interface TowerVM {
   readonly row: number;
 }
 
-/** A scheduled impact, carried so the renderer can spark on resolution (multiset-diffed). */
-export interface ImpactVM {
-  readonly targetId: number;
-  readonly impactTick: number;
-}
-
 /** The compact per-tick render snapshot (the "view-model"). Two of these + an alpha
  *  drive interpolation; the controller keeps the last two (it can't retain `SimState`,
- *  which `step()` mutates in place). */
+ *  which `step()` mutates in place). Landed-impact spark points are NOT inferred from
+ *  this snapshot — they come from the sim's `StepEvents` collector (ADR-adjacent #31),
+ *  so a wasted (leaked-target) shot never sparks. */
 export interface RenderVM {
   readonly tick: number;
   readonly phase: SimPhase;
   readonly creeps: readonly CreepVM[];
   readonly towers: readonly TowerVM[];
-  readonly impacts: readonly ImpactVM[];
 }
 
 /** HUD display fields — derived, all numbers; the UI layer resolves labels via `t()`. */
@@ -82,6 +77,12 @@ export interface RenderOverlay {
    *  accumulated per sim tick by the controller so kills during a multi-tick catch-up
    *  frame still flash (the scene only sees the latest two view-models). */
   readonly sparks: readonly { readonly x: number; readonly y: number }[];
+  /** Towers accepted into the tick buffer but not yet committed (paused planning, #37+
+   *  #27) — anchor cells only. Drawn with a non-colour cue (dual-encoded per ADR 0003). */
+  readonly pendingAdds: readonly { readonly col: number; readonly row: number }[];
+  /** Committed towers whose sell is accepted but not yet committed — hidden immediately
+   *  rather than drawn as still-present. */
+  readonly pendingSells: readonly { readonly col: number; readonly row: number }[];
   /** Colourblind palette mode currently active. */
   readonly colourMode: ColourMode;
   /** When true the scene damps the impact-spark FX (WCAG 2.3.3 / GAG §2). */

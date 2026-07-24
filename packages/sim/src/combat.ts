@@ -53,6 +53,20 @@ export interface Impact {
   readonly effects: EffectPrimitive[];
 }
 
+/**
+ * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,
+ * never hash-relevant) and NOT a `RenderVM` field — a transient out-param the caller
+ * owns. `step()`/`runCombat()` only ever APPEND to it; the caller owns clearing and
+ * lifetime. A terminal or no-op early-return `step()` path appends nothing, so a
+ * pre-populated collector passed through either early return is left unchanged.
+ */
+export interface StepEvents {
+  /** Resolution points of impacts that LANDED (hit a still-live target) this tick, in
+   *  queue-resolution order — captured BEFORE damage applies. A wasted shot (leaked
+   *  target, or an earlier same-tick impact already killed it) appends nothing. */
+  readonly impactPoints: { x: number; y: number }[];
+}
+
 /** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it). */
 export interface CombatCreeps {
   id: number[];
@@ -184,14 +198,21 @@ function isLiveHp(hp: unknown): boolean {
   return Number.isSafeInteger(hp) && (hp as number) > 0;
 }
 
+/** The result of a live-creep lookup: the SoA row index plus its already-derived
+ *  resolution point (avoids re-deriving `deriveValidCreepPosition` at the call site). */
+interface LiveCreepLookup {
+  readonly index: number;
+  readonly point: { x: number; y: number };
+}
+
 /**
- * The index of the live creep matching `targetId` under the shared
- * first-matching-valid-row rule (mirrors `findValidTowerIndex`): the FIRST SoA row
- * whose id is `targetId`, whose hp is a positive safe integer, and whose position is
- * valid. Duplicate/forged ids resolve to that first row, so target-hold checks and
- * impact application always agree. Returns -1 when absent.
+ * The live creep matching `targetId` under the shared first-matching-valid-row rule
+ * (mirrors `findValidTowerIndex`): the FIRST SoA row whose id is `targetId`, whose hp is
+ * a positive safe integer, and whose position is valid. Duplicate/forged ids resolve to
+ * that first row, so target-hold checks and impact application always agree. Returns
+ * `null` when absent (a wasted/leaked-target shot).
  */
-function findLiveCreep(creeps: CombatCreeps, targetId: number, grid: Grid): number {
+function findLiveCreep(creeps: CombatCreeps, targetId: number, grid: Grid): LiveCreepLookup | null {
   for (let i = 0; i < creeps.id.length; i++) {
     if (creeps.id[i] !== targetId) continue;
     if (!isLiveHp(creeps.hp[i])) continue;
@@ -203,9 +224,9 @@ function findLiveCreep(creeps: CombatCreeps, targetId: number, grid: Grid): numb
       creeps.progress[i],
       grid,
     );
-    if (geom !== null) return i;
+    if (geom !== null) return { index: i, point: geom.point };
   }
-  return -1;
+  return null;
 }
 
 /** Apply one effect to a creep row; direct damage is branch-saturating (no underflow). */
@@ -254,6 +275,7 @@ export function runCombat(
   field: DistanceField,
   grid: Grid,
   tower: TowerDef,
+  events?: StepEvents,
 ): { creeps: CombatCreeps; impacts: Impact[]; bounty: number; killBounty: number } {
   const canonical = canonicalImpacts(impacts);
   const range = tower.rangeFp;
@@ -268,8 +290,10 @@ export function runCombat(
       kept.push(imp);
       continue;
     }
-    const idx = findLiveCreep(creeps, imp.targetId, grid); // -1 ⇒ wasted shot
-    if (idx === -1) continue;
+    const found = findLiveCreep(creeps, imp.targetId, grid); // null ⇒ wasted shot
+    if (found === null) continue;
+    const { index: idx, point } = found;
+    events?.impactPoints.push(point); // captured BEFORE damage applies
     for (const effect of imp.effects) applyEffect(creeps, idx, effect);
     if ((creeps.hp[idx] as number) <= 0) killedByImpact.add(idx);
   }

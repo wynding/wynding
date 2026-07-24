@@ -112,6 +112,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         break;
       case 'playAgain':
         controller.startRun(nextSeed());
+        input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
         overlay.hideResults();
         resultsShown = false;
@@ -140,6 +141,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       ghost: f.ghost,
       selection: f.selection,
       sparks: controller.drainSparks(),
+      pendingAdds: f.pendingAdds,
+      pendingSells: f.pendingSells,
       colourMode,
       reducedMotion,
     };
@@ -150,7 +153,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // Key on selection IDENTITY (its cell), not just presence: switching between two towers
     // while paused (no tick change) must still refresh the Sell refund for the new tower.
     const selId = f.selection === null ? 'none' : `${f.selection.col},${f.selection.row}`;
-    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}`;
+    // Include the pending-buffer revision (#37+#27): while paused, `curVm.tick` never
+    // changes, so a same-tick pending build/sell needs its own key component to force a
+    // HUD refresh (presented bounty reads the shared projection).
+    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}`;
     if (hudKey !== lastHudKey) {
       lastHudKey = hudKey;
       const hud = controller.hud();

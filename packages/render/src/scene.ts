@@ -9,7 +9,8 @@ import Phaser from 'phaser';
 import { createProjection, type Projection } from './projection';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
-import type { RenderVM, RenderOverlay, RenderHandle } from './types';
+import { boardPaintOps, type BoardPaintOp } from './board-cells';
+import type { RenderVM, RenderOverlay, RenderHandle, ColourMode } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
  *  entities, not board dimensions). */
@@ -63,6 +64,19 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       dpr: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
     });
   };
+  // The board paint plan (#38) depends only on geometry (static) and the palette (changes
+  // only on a colour-mode switch) — precompute once and rebuild ONLY when the mode
+  // changes, so the steady-state per-frame draw stays allocation-free (ADR 0005).
+  let paintPlan: readonly BoardPaintOp[] | null = null;
+  let paintPlanMode: ColourMode | null = null;
+  const boardPlanFor = (mode: ColourMode): readonly BoardPaintOp[] => {
+    if (paintPlan === null || paintPlanMode !== mode) {
+      paintPlan = boardPaintOps(geometry, resolvePalette(mode));
+      paintPlanMode = mode;
+    }
+    return paintPlan;
+  };
+
   const sparks: Spark[] = [];
   // Spark points that arrived before Phaser fired READY (game time not yet running).
   // They're held UNstamped and given a real bornAt on the first ready frame, so they
@@ -93,34 +107,57 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
 
   const now = (): number => game.getTime();
 
-  const drawBoard = (g: Phaser.GameObjects.Graphics, pal: Palette): void => {
-    g.fillStyle(pal.floor, 1);
-    const topLeft = projection.cellToPixel(0, 0);
-    g.fillRect(
-      topLeft.x,
-      topLeft.y,
-      geometry.cols * projection.cellPx,
-      geometry.rows * projection.cellPx,
-    );
-    // entrance / exit glyphs (distinct shapes, not colour-only)
-    const ent = projection.cellToPixel(geometry.entrance.col, geometry.entrance.row);
-    const ex = projection.cellToPixel(geometry.exit.col, geometry.exit.row);
-    g.fillStyle(pal.entrance, 1);
-    g.fillTriangle(
-      ent.x,
-      ent.y,
-      ent.x + projection.cellPx,
-      ent.y + projection.cellPx / 2,
-      ent.x,
-      ent.y + projection.cellPx,
-    );
-    g.fillStyle(pal.exit, 1);
-    g.fillRect(
-      ex.x + projection.cellPx * 0.25,
-      ex.y + projection.cellPx * 0.25,
-      projection.cellPx * 0.5,
-      projection.cellPx * 0.5,
-    );
+  // A thin executor of `boardPaintOps`' plan verbatim (#38) — the ordering/content gate
+  // lives in `board-cells.test.ts` against the plan itself, not here (this file is
+  // coverage-excluded). Do not reorder or special-case ops here; change the plan instead.
+  const drawBoard = (g: Phaser.GameObjects.Graphics, mode: ColourMode): void => {
+    for (const op of boardPlanFor(mode)) {
+      switch (op.kind) {
+        case 'floor': {
+          g.fillStyle(op.colour, 1);
+          const topLeft = projection.cellToPixel(0, 0);
+          g.fillRect(
+            topLeft.x,
+            topLeft.y,
+            geometry.cols * projection.cellPx,
+            geometry.rows * projection.cellPx,
+          );
+          break;
+        }
+        case 'border': {
+          g.fillStyle(op.colour, 1);
+          for (const cell of op.cells) {
+            const p = projection.cellToPixel(cell.col, cell.row);
+            g.fillRect(p.x, p.y, projection.cellPx, projection.cellPx);
+          }
+          break;
+        }
+        case 'entrance': {
+          g.fillStyle(op.colour, 1);
+          const p = projection.cellToPixel(op.cell.col, op.cell.row);
+          g.fillTriangle(
+            p.x,
+            p.y,
+            p.x + projection.cellPx,
+            p.y + projection.cellPx / 2,
+            p.x,
+            p.y + projection.cellPx,
+          );
+          break;
+        }
+        case 'exit': {
+          g.fillStyle(op.colour, 1);
+          const p = projection.cellToPixel(op.cell.col, op.cell.row);
+          g.fillRect(
+            p.x + projection.cellPx * 0.25,
+            p.y + projection.cellPx * 0.25,
+            projection.cellPx * 0.5,
+            projection.cellPx * 0.5,
+          );
+          break;
+        }
+      }
+    }
   };
 
   const drawTowers = (
@@ -129,11 +166,24 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     vm: RenderVM,
     o: RenderOverlay,
   ): void => {
+    // A committed tower whose sell is pending (paused planning, #37+#27) is hidden
+    // immediately — presented as already gone, not merely "about to sell".
+    const pendingSellKeys =
+      o.pendingSells.length === 0 ? null : new Set(o.pendingSells.map((p) => `${p.col},${p.row}`));
     for (const t of vm.towers) {
+      if (pendingSellKeys !== null && pendingSellKeys.has(`${t.col},${t.row}`)) continue;
       const p = projection.cellToPixel(t.col, t.row);
       const size = projection.cellPx * 2; // 2×2 footprint
       g.fillStyle(pal.tower, 1);
       g.fillRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
+    }
+    // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
+    // the dual shape+alpha cue distinguishing "pending" from a committed tower.
+    for (const p of o.pendingAdds) {
+      const pt = projection.cellToPixel(p.col, p.row);
+      const size = projection.cellPx * 2;
+      g.lineStyle(3, pal.tower, 0.6);
+      g.strokeRoundedRect(pt.x + 2, pt.y + 2, size - 4, size - 4, 6);
     }
     if (o.selection !== null) {
       const c = projection.cellToPixel(o.selection.col, o.selection.row);
@@ -222,7 +272,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     for (const pt of overlay.sparks) sparks.push({ x: pt.x, y: pt.y, bornAt });
     const pal = resolvePalette(overlay.colourMode); // resolve once per frame, pass down
     gfx.clear();
-    drawBoard(gfx, pal);
+    drawBoard(gfx, overlay.colourMode);
     drawTowers(gfx, pal, curVm, overlay);
     drawCreeps(gfx, pal, prevVm, curVm, alpha);
     drawGhost(gfx, pal, overlay);

@@ -11,6 +11,11 @@ import type { Keymap } from './keymap';
 
 export interface InputHandle {
   destroy(): void;
+  /** Clear all gesture-tracking state (#40): the armed touch two-tap, per-pointer press
+   *  origins, and the concurrent-touch active/voided sets. Call on every new run identity
+   *  (Play-again) — a gesture begun under the previous run must never carry across and be
+   *  misread as a confirm/void against the fresh one. */
+  reset(): void;
 }
 
 export interface InputOptions {
@@ -230,6 +235,12 @@ export function attachInput(
       boardEl.removeEventListener('pointermove', onPointerMove as EventListener);
       boardEl.removeEventListener('pointerup', onPointerUp as EventListener);
       boardEl.removeEventListener('keydown', onKeyDown as EventListener);
+    },
+    reset(): void {
+      pendingTouch = null;
+      pressOriginIds.clear();
+      activeTouchIds.clear();
+      voidedTouchIds.clear();
     },
   };
 }

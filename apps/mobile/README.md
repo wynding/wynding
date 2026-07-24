@@ -18,5 +18,6 @@ shell. Nothing to build yet.
 4. Store distribution is covered by the AGPL §7 App Store Exception (see
    [LICENSE-EXCEPTIONS.md](../../LICENSE-EXCEPTIONS.md)).
 
-The persistence seam (async `StorageDriver`) is provided by the shared packages so
-saves work identically across web, mobile, and desktop.
+The persistence seam (async `StorageDriver`) is DESIGNED (ADR 0008), but no shared
+platform implementation exists yet — saves working identically across web, mobile,
+and desktop is a future consumer of that seam, not something wired up today.
