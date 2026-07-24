@@ -7,6 +7,12 @@ import { attachInput } from './input';
 // [c*10, r*10)..; a client point (x,y) maps to cell (⌊x/10⌋, ⌊y/10⌋).
 const RECT = { left: 0, top: 0, width: 280, height: 240 };
 
+// A LETTERBOXED rect: 300 px wide for a 28-col × 10 px grid (= 280 px), so the projection
+// centres the grid with a 10 px blank margin on each side (originX = 10, originY = 0). A
+// client point with x in [0,10) or [290,300) is INSIDE the board rect but OUTSIDE the grid —
+// the out-of-grid case FIX 2 must treat as "no target" rather than clamping onto an edge cell.
+const LETTERBOX = { left: 0, top: 0, width: 300, height: 240 };
+
 function ptr(
   type: string,
   clientX: number,
@@ -184,6 +190,23 @@ describe('input — mouse (P2 hover/click, unchanged by P3)', () => {
     tap(35, 35, 'mouse', 0); // primary → builds
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(1);
+  });
+
+  it('a mouse release over Shell chrome never places — stays armed (Codex P2: pointer capture routes the pointerup back to the board)', () => {
+    const chrome = document.createElement('div');
+    chrome.className = 'wy-dock';
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [], c, createKeymap(), {
+      getRect: () => RECT,
+      elementFromPoint: () => chrome,
+    });
+    c.armTower('basic');
+    board.dispatchEvent(ptr('pointerdown', 35, 35, 'mouse')); // armed press on the board
+    board.dispatchEvent(ptr('pointerup', 35, 35, 'mouse')); // released over the overlapping Dock
+    expect(c.uiState().armed).not.toBeNull(); // stays armed — the chrome release never committed
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // no placement on the cell underneath the Dock
   });
 
   it('does nothing for a pointer outside the board, and detaches cleanly', () => {
@@ -602,6 +625,58 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     card.dispatchEvent(ptr('pointerup', 35, 105, 'touch', 0, 1)); // A releases — voided, was dragging
     expect(c.uiState().armed).toBeNull(); // disarmed, not left invisibly armed
     expect(c.frame().ghost).toBeNull(); // cleared
+  });
+});
+
+describe('input — letterbox margin: out-of-grid is a no-target, not an edge cell (PLAN.md P3)', () => {
+  it('a board press-and-release in the margin places nothing and stays armed (tap-flow) — the raw margin cell is never clamped onto an edge cell', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [], c, createKeymap(), { getRect: () => LETTERBOX });
+    c.armTower('basic');
+    board.dispatchEvent(ptr('pointerdown', 5, 105, 'touch')); // x=5: inside the board rect, in the left margin
+    expect(c.frame().ghost).toBeNull(); // no target shown — never snapped to edge col 0
+    board.dispatchEvent(ptr('pointerup', 5, 105, 'touch'));
+    expect(c.uiState().armed).not.toBeNull(); // board tap-flow stays armed
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // nothing placed on an edge cell
+  });
+
+  it('adjusting from in-grid into the margin hides the ghost; returning to the grid restores it', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [], c, createKeymap(), { getRect: () => LETTERBOX });
+    c.armTower('basic');
+    board.dispatchEvent(ptr('pointerdown', 45, 105, 'touch')); // finger (3,10) → anchor (3,8), in-grid
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 8 });
+    board.dispatchEvent(ptr('pointermove', 5, 105, 'touch')); // into the left margin
+    expect(c.frame().ghost).toBeNull(); // target cleared — honest "no target" feedback
+    board.dispatchEvent(ptr('pointermove', 45, 105, 'touch')); // back onto the grid
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 8 }); // restored
+  });
+
+  it('a Card drag released in the margin cancels AND disarms (drag-flow, unlike the board tap-flow)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [card], c, createKeymap(), { getRect: () => LETTERBOX });
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card.dispatchEvent(ptr('pointermove', 45, 105, 'touch')); // crosses the threshold onto the grid, armed
+    expect(c.uiState().armed).toBe('basic');
+    card.dispatchEvent(ptr('pointerup', 5, 105, 'touch')); // released in the left margin (inside the board rect)
+    expect(c.uiState().armed).toBeNull(); // drag-flow disarms — no edge-cell placement
+    expect(c.frame().ghost).toBeNull();
+  });
+
+  it('an in-grid finger on a letterboxed layout still places with the origin offset applied — only the margin is a no-target', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [], c, createKeymap(), { getRect: () => LETTERBOX });
+    c.armTower('basic');
+    board.dispatchEvent(ptr('pointerdown', 45, 105, 'touch')); // finger (3,10) → anchor (3,8), inside the grid
+    board.dispatchEvent(ptr('pointerup', 45, 105, 'touch'));
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1); // placed — the origin offset is honored, not clamped away
+    expect(c.uiState().selection).toMatchObject({ col: 3, row: 8 });
   });
 });
 

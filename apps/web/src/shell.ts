@@ -12,9 +12,9 @@
 //                            below the Card; the Card stays visible/clickable while it's
 //                            open)
 //
-// Purely structural: no game logic, no i18n beyond the static wordmark/HUD-group label/
-// board aria text (unchanged strings, just relocated) and the Card/Panel's static
-// scaffolding. `overlay.ts` fills in HUD/Card/Panel content and wires the Dock/Card
+// Purely structural: no game logic, no i18n beyond the static wordmark/HUD-group label and
+// the Card/Panel's static scaffolding. `overlay.ts` fills in HUD/Card/Panel content
+// (including the board's dynamic, keymap-derived aria-label) and wires the Dock/Card
 // buttons' behavior; `main.ts` mounts the Phaser scene into `board`.
 
 import { t } from './i18n/t';
@@ -119,7 +119,9 @@ export function createShell(doc: Document): ShellHandle {
   board.className = 'wy-board';
   board.tabIndex = 0; // focusable for the keyboard build cursor
   board.setAttribute('role', 'application');
-  board.setAttribute('aria-label', t('board.aria'));
+  // The board's `aria-label` is dynamic — it names the ACTUAL bound movement/confirm/sell
+  // keys and is refreshed after a rebind — so `overlay.ts` sets it (like the Card's live
+  // hotkey badge) rather than the Shell baking in the default-key text here.
 
   const dock = doc.createElement('div');
   dock.className = 'wy-dock';

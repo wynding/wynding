@@ -5,7 +5,7 @@ import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell } from './shell';
 import { createSettings } from './settings';
-import { createKeymap } from './keymap';
+import { createKeymap, GAME_ACTIONS } from './keymap';
 import type { UiState } from './controller';
 
 const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
@@ -180,6 +180,24 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       refund: 0,
     });
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('the board aria-label names the actual bound keys and refreshes on rebind (CodeRabbit)', () => {
+    const { keymap, overlay, shell, settingsBtn } = setup();
+    // Initially derived from the default keymap (arrows / Enter / X), not hardcoded.
+    const initial = shell.board.getAttribute('aria-label')!;
+    expect(initial).toContain('ArrowUp / ArrowDown / ArrowLeft / ArrowRight');
+    expect(initial).toContain('press Enter');
+    expect(initial).toContain('Press X to sell');
+
+    // Rebind 'sell' (KeyX → KeyQ) via the settings dialog: the board aria must reflect it.
+    settingsBtn.click();
+    const rebindBtns = overlay.settingsEl.querySelectorAll<HTMLButtonElement>('.wy-rebind-btn');
+    const sellBtn = rebindBtns[GAME_ACTIONS.indexOf('sell')]!;
+    sellBtn.click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }));
+    expect(keymap.codeFor('sell')).toBe('KeyQ');
+    expect(shell.board.getAttribute('aria-label')).toContain('Press Q to sell');
   });
 
   it('the hotkey badge re-renders after a rebind that displaces armTower1', () => {

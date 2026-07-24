@@ -262,6 +262,21 @@ export function createOverlay(
   }
   settingsInner.appendChild(rebindList);
 
+  // The board's `aria-label` names the ACTUAL bound movement/confirm/sell keys, not the
+  // hardcoded defaults (CodeRabbit) — so screen-reader instructions stay truthful after a
+  // rebind. Movement is four separate bindings, joined into the one {move} label; confirm/
+  // sell are single bindings; an unbound action falls back to `settings.unbound` (via
+  // `codeLabel`). Set here — overlay owns the Shell's dynamic content, like the Card hotkey
+  // badge — and refreshed on every rebind below.
+  function refreshBoardAria(): void {
+    const move = (['up', 'down', 'left', 'right'] as const).map(codeLabel).join(' / ');
+    shell.board.setAttribute(
+      'aria-label',
+      t('board.aria', { move, confirm: codeLabel('confirm'), sell: codeLabel('sell') }),
+    );
+  }
+  refreshBoardAria();
+
   function refreshRebindLabels(): void {
     for (const [action, btn] of rebindButtons) {
       btn.textContent = codeLabel(action);
@@ -271,6 +286,9 @@ export function createOverlay(
     // bijection) — refresh the Card's live hotkey badge on every rebind, not just when the
     // player rebinds armTower1 itself.
     refreshCardHotkey();
+    // Same bijection reasoning for the board's aria instructions: any rebind can move the
+    // movement/confirm/sell keys they name, so refresh them here too.
+    refreshBoardAria();
   }
 
   // --- Results dialog (sibling of the Shell) ---

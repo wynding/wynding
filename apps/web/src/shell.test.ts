@@ -20,11 +20,13 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(rail).toBe(shell.rail);
   });
 
-  it('the board is focusable and carries its ARIA role/label', () => {
+  it('the board is focusable and carries its ARIA role (its aria-label is set dynamically by overlay.ts)', () => {
     const shell = createShell(document);
     expect(shell.board.tabIndex).toBe(0);
     expect(shell.board.getAttribute('role')).toBe('application');
-    expect(shell.board.getAttribute('aria-label')).toContain('Game board');
+    // The board's `aria-label` names the live bound keys, so overlay.ts owns it (like the
+    // Card hotkey badge) — the Shell scaffolding no longer bakes in default-key text.
+    expect(shell.board.getAttribute('aria-label')).toBeNull();
   });
 
   it('the HUD group holds Lives/Bounty/Score/wave/Stars spans, in that order', () => {

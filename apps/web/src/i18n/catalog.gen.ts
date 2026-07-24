@@ -3,7 +3,7 @@
 /* eslint-disable */
 export const EN = {
   "app.title": "Wynding",
-  "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with the arrow keys and press Enter. Press X to sell the selected tower.",
+  "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
   "hud.lives": "Lives: {count}",
   "hud.bounty": "Bounty: {count}",
   "hud.score": "Score: {count}",
@@ -73,7 +73,7 @@ export type MessageKey = keyof typeof EN;
 
 export interface MessageParams {
   "app.title": Record<never, never>;
-  "board.aria": Record<never, never>;
+  "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
   "hud.lives": { "count": string | number };
   "hud.bounty": { "count": string | number };
   "hud.score": { "count": string | number };

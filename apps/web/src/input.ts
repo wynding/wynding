@@ -126,30 +126,38 @@ export function attachInput(
     return projectionFor(r).pointerToCell(clientX - r.left, clientY - r.top);
   };
 
-  // The finger's cell, CLAMPED into the grid rather than null outside it — the offset
-  // ghost's anchor must always resolve to something clampable in-bounds (PLAN.md P3: "the
-  // anchor always clamped so the footprint is in-bounds"), unlike `cellFromEvent`'s null-
-  // outside-the-board semantics (used for the mouse click / unarmed-touch-select paths,
-  // which target the ACTUAL cell, never an offset one).
-  const fingerCellFromEvent = (clientX: number, clientY: number): { col: number; row: number } => {
+  // The finger's RAW cell, or null when the pointer sits OUTSIDE the projection's grid
+  // bounds. On a letterboxed layout the board rect carries blank margins around the grid; a
+  // point there has NO cell (mirrors `cellFromEvent`/`pointerToCell`'s null-outside
+  // semantics) and must NOT be clamped onto an edge cell — clamping is what let a press/
+  // release in the margin resolve to (and place on) an edge cell. An in-grid finger's ANCHOR
+  // is still clamped so the 2×2 footprint stays in-bounds near the edges
+  // (`ghostAnchorFromPoint` below, PLAN.md P3): finger-cell in-grid + anchor clamped = valid;
+  // finger-cell out-of-grid = no target.
+  const fingerCellFromEvent = (
+    clientX: number,
+    clientY: number,
+  ): { col: number; row: number } | null => {
     const r = getRect();
     const p = projectionFor(r);
-    const localX = clientX - r.left;
-    const localY = clientY - r.top;
-    const rawCol = Math.floor((localX - p.originX) / p.cellPx);
-    const rawRow = Math.floor((localY - p.originY) / p.cellPx);
-    return {
-      col: clamp(rawCol, 0, grid.width - 1),
-      row: clamp(rawRow, 0, grid.height - 1),
-    };
+    const rawCol = Math.floor((clientX - r.left - p.originX) / p.cellPx);
+    const rawRow = Math.floor((clientY - r.top - p.originY) / p.cellPx);
+    if (rawCol < 0 || rawRow < 0 || rawCol >= grid.width || rawRow >= grid.height) return null;
+    return { col: rawCol, row: rawRow };
   };
 
   // The armed offset-ghost anchor for a raw pointer point (PLAN.md P3): 2 cells above the
   // finger's cell; flips BELOW (never reduces to under-the-finger) when there isn't room
   // above for the offset + the 2×2 footprint; the anchor is then clamped so the footprint
-  // never leaves the grid.
-  const ghostAnchorFromPoint = (clientX: number, clientY: number): { col: number; row: number } => {
+  // never leaves the grid. `null` when the finger is out-of-grid (letterbox margin / off-
+  // board) — there is no placement target, as distinct from an in-grid finger whose anchor
+  // is merely edge-clamped.
+  const ghostAnchorFromPoint = (
+    clientX: number,
+    clientY: number,
+  ): { col: number; row: number } | null => {
     const finger = fingerCellFromEvent(clientX, clientY);
+    if (finger === null) return null;
     const above = finger.row - TOUCH_GHOST_OFFSET_CELLS;
     const row = above >= 0 ? above : finger.row + 1;
     return {
@@ -163,6 +171,14 @@ export function attachInput(
    *  moves AND Card-drag moves (mapped onto the board, PLAN.md P3). */
   const updateGhostFromPoint = (clientX: number, clientY: number): void => {
     const anchor = ghostAnchorFromPoint(clientX, clientY);
+    // Finger in the letterbox margin (out-of-grid): the placement target clears — the ghost
+    // hides rather than snapping to an edge cell (PLAN.md P3, honest "no target" feedback).
+    // `clearGhostOnly` leaves `armed` untouched, so an in-flight gesture simply shows nothing
+    // until the finger returns to the grid (which re-shows the ghost).
+    if (anchor === null) {
+      clearGhostOnly();
+      return;
+    }
     controller.previewAt(anchor.col, anchor.row);
   };
 
@@ -349,6 +365,9 @@ export function attachInput(
     }
     if (isOverChrome(clientX, clientY)) return;
     const anchor = ghostAnchorFromPoint(clientX, clientY);
+    // Released in the letterbox margin (no target): no commit, and — like the chrome-release
+    // rule above — the board-origin tap flow stays armed (PLAN.md P3).
+    if (anchor === null) return;
     controller.clickAt(anchor.col, anchor.row);
   };
 
@@ -375,7 +394,12 @@ export function attachInput(
     }
     if (e.pointerType === 'mouse') {
       // Mouse: the armed/selection state machine (PLAN.md P2) — `clickAt` owns
-      // cur/ghost/selection for this path entirely.
+      // cur/ghost/selection for this path entirely. A release geometrically over Shell chrome
+      // never commits, even when pointer capture routes the pointerup here and it maps to an
+      // in-bounds cell the Dock overlaps (PLAN.md P1/P3) — the SAME hit-test the touch/Card
+      // release paths already apply. Like the touch tap-flow, a chrome release leaves
+      // everything as it was (armed stays armed, ghost untouched).
+      if (isOverChrome(e.clientX, e.clientY)) return;
       const cell = cellFromEvent(e.clientX, e.clientY);
       if (cell !== null) controller.clickAt(cell.col, cell.row);
       return;
@@ -520,6 +544,14 @@ export function attachInput(
         return;
       }
       const anchor = ghostAnchorFromPoint(e.clientX, e.clientY);
+      if (anchor === null) {
+        // Released in the letterbox margin (inside the board rect but off the grid): no
+        // target, so the drag cancels AND disarms — the same drag-flow contract as the off-
+        // board/chrome release above (PLAN.md P3), unlike the board-native tap flow which
+        // stays armed.
+        disarmAndClearGhost();
+        return;
+      }
       controller.clickAt(anchor.col, anchor.row);
       if (controller.uiState().armed !== null) disarmAndClearGhost(); // invalid drop still disarms
     };
