@@ -41,6 +41,12 @@ current towers. **Invariant: the exit is always reachable** — the player can n
 fully wall it off; a route must always remain.
 _Avoid_: route (interchangeable in prose, but "path" is canonical in code).
 
+**Pending**:
+A build or sell accepted but not yet applied by a tick — the pause is the common
+long-lived case. What the player sees — board, aim/selection, and bounty — always
+reflects pending changes; they commit on the next tick that runs.
+_Avoid_: queued, buffered.
+
 **Wave**:
 A scheduled burst of creeps the player must survive. Waves come in a finite,
 ordered sequence — a board's **wave schedule**.

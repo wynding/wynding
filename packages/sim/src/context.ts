@@ -2,22 +2,28 @@
 //
 // PRD 0001 states the sim is a pure function of (seed, ruleset, boardId, tick
 // inputs): the board is an INPUT, not part of the mutable per-tick state. A match
-// builds one `BoardContext` up front with `loadBoard` and threads it through every
+// builds one `BoardContext` up front with `loadBoard`, which folds it into a
+// `CompiledRuleset` (`compileRuleset`, ruleset.ts) that's threaded through every
 // `step`. Keeping it out of `SimState` keeps the hashed/serialized state small and
 // the resume path clean, and the precomputed field is never re-derived per tick.
 //
 // `loadBoard` is the only sanctioned constructor, so a context it returns is
-// consistent by construction. But `step` accepts a structural `BoardContext` a
-// caller could hand-forge (bypassing `loadBoard`), so `assertConsistent` validates
-// the context's SHAPE and ENDPOINT TOPOLOGY at load and defensively — once,
-// memoized — at the top of `step`: a mismatched-dimension, wrong-length,
-// invalid-endpoint, bad-exit-distance, or unreachable-entrance context is rejected
-// with a loud `GridError` before any tick can read a typed array out of bounds.
-// Gradient *integrity* (every reachable non-exit cell has an exact descent) is NOT
-// re-derived here — a shape-valid field with a broken gradient is caught behaviorally
-// by the movement layer's drop backstop, not this validator. (Typed-array *element*
-// immutability is likewise not enforced — the Story-1 "read-only by convention"
-// posture for `baseMask`/`DistanceField` stands; this guards shape and topology.)
+// consistent by construction: `loadBoard` calls `assertConsistent` on it ONCE, at
+// compile time, validating the context's SHAPE and ENDPOINT TOPOLOGY — a
+// mismatched-dimension, wrong-length, invalid-endpoint, bad-exit-distance, or
+// unreachable-entrance context is rejected with a loud `GridError` before any tick
+// can read a typed array out of bounds. `step` itself never accepts a structural
+// `BoardContext` — it takes the branded `CompiledRuleset` `compileRuleset` produces,
+// and `assertRuleset` (ruleset.ts) rejects an out-of-band/forged ruleset object at
+// the tick boundary. Wiring `assertConsistent` into `step` itself was considered and
+// arbitrated OUT (#46) — gold-plating, since `assertRuleset` already guards the tick
+// boundary and a `CompiledRuleset` can only be produced via `compileRuleset` →
+// `loadBoard` → `assertConsistent`. Gradient *integrity* (every reachable non-exit
+// cell has an exact descent) is NOT re-derived here — a shape-valid field with a
+// broken gradient is caught behaviorally by the movement layer's drop backstop, not
+// this validator. (Typed-array *element* immutability is likewise not enforced — the
+// Story-1 "read-only by convention" posture for `baseMask`/`DistanceField` stands;
+// this guards shape and topology.)
 
 import type { Cell } from '@wynding/types';
 import { buildGrid, GridError, type Grid, type GridSpec } from './board';
@@ -33,9 +39,12 @@ export interface BoardContext {
   readonly field: DistanceField;
 }
 
-// Contexts that have passed `assertConsistent`, so the defensive per-tick call in
-// `step` validates each context object exactly once. A WeakSet keys on identity and
-// never retains a context past its last use.
+// Contexts that have passed `assertConsistent`, memoizing a REPEAT call against the
+// SAME context object (identity, via WeakSet) to a no-op. This benefits only a caller
+// that re-validates one already-validated object — NOT repeated `loadBoard()` calls:
+// each `loadBoard()` call builds a fresh `BoardContext` object, so a second call with
+// an equivalent spec validates again from scratch. Never retains a context past its
+// last use.
 const validated = new WeakSet<BoardContext>();
 
 function cellInBounds(cell: Cell | null | undefined, width: number, height: number): boolean {

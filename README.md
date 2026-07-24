@@ -6,8 +6,7 @@ mobile (Capacitor) and desktop/Steam (Tauri) wrappers planned.
 
 ## Status
 
-Early scaffold — a pnpm + Turborepo TypeScript monorepo with the deterministic
-simulation core in place. Not yet playable.
+M1 feature-complete; cleanup complete; playtesting next.
 
 ## Layout
 

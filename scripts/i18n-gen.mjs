@@ -7,7 +7,7 @@
 //   - `MessageParams` per-key ICU placeholder param types (each `string | number`)
 // The generated file is committed; `i18n-check.mjs` fails CI if it drifts from en.json,
 // so a developer cannot hand-edit one without the other. Placeholders are the ICU
-// `{name}` tokens in each message; a key with none gets `Record<string, never>` so
+// `{name}` tokens in each message; a key with none gets `Record<never, never>` so
 // `t()` forbids stray params.
 
 import { readFileSync, writeFileSync } from 'node:fs';
