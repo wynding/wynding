@@ -206,6 +206,12 @@ export function createOverlay(
           return;
         }
         e.preventDefault();
+        // Stop the same key from ALSO reaching the board (e.g. rebinding "sell" onto a
+        // key the board listens for would otherwise both rebind AND fire the board action
+        // on this very keydown — the capture-phase listener runs first, but propagation
+        // continues to the board's own listener unless stopped here). NOT
+        // stopImmediatePropagation() — no other same-node listener needs blocking.
+        e.stopPropagation();
         keymap.rebind(action, e.code);
         cancelCapture?.(); // tears down the listener AND refreshes labels (incl. this button)
       };
