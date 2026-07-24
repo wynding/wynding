@@ -124,6 +124,94 @@ body {
   padding-right: calc(0.5rem + env(safe-area-inset-right));
   padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
   background: var(--wy-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* --- Card: the single M1 tower, in the Rail (PLAN.md P2) --- */
+
+.wy-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  color: var(--wy-fg);
+  background: var(--wy-surface);
+  border: 2px solid var(--wy-accent);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wy-card:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: 2px;
+}
+
+.wy-card[aria-pressed='true'] {
+  border-color: var(--wy-focus);
+  background: var(--wy-accent);
+  color: var(--wy-on-accent);
+}
+
+.wy-card-name {
+  font-weight: 700;
+}
+
+.wy-card-hotkey {
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+/* --- Panel: unified tower details, opens below the Card (PLAN.md P2) --- */
+
+.wy-panel[hidden] {
+  display: none;
+}
+
+.wy-panel {
+  padding: 0.5rem 0.75rem;
+  background: var(--wy-surface);
+  border: 1px solid #33465f;
+  border-radius: 6px;
+}
+
+.wy-panel p {
+  margin: 0.25rem 0;
+}
+
+.wy-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* A focusable-but-disabled control (the permanent "Max level" Upgrade visual) — NOT a
+   native `disabled` button (that would remove it from the tab order and hide it from AT
+   entirely); `aria-disabled` keeps it discoverable while suppressing activation. */
+.wy-btn[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* --- Visually-hidden but AT-visible (the assistive live region, PLAN.md P2) --- */
+
+.wy-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* --- Buttons (Dock + dialogs) --- */

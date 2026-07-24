@@ -148,8 +148,11 @@ export function attachInput(
       if (isTouch) pendingTouch = null; // off-board release clears an armed first tap
       return;
     }
-    const res = controller.aimAt(cell.col, cell.row);
     if (isTouch) {
+      // Touch keeps its pre-P2 two-tap preview-then-confirm behavior verbatim — the
+      // armed/selection state machine's touch story is P3 (press-adjust-release); this
+      // packet is "desktop + keyboard complete" (PLAN.md P2).
+      const res = controller.aimAt(cell.col, cell.row);
       const t = now();
       const fresh =
         pendingTouch !== null &&
@@ -164,8 +167,12 @@ export function attachInput(
       } else {
         pendingTouch = null; // tower select, blocked, or invalid ghost — never arms
       }
-    } else if (res.kind === 'ghost' && res.valid) {
-      controller.confirm();
+    } else {
+      // Mouse: the armed/selection state machine (PLAN.md P2) — armed is placement-only,
+      // unarmed is selection-only. `clickAt` owns cur/ghost/selection for this path
+      // entirely (not `aimAt`, which keeps its pre-P2 build-or-select behavior for the
+      // keyboard cursor).
+      controller.clickAt(cell.col, cell.row);
     }
   };
 
@@ -218,6 +225,13 @@ export function attachInput(
         break;
       case 'speed':
         controller.cycleSpeed();
+        break;
+      case 'armTower1':
+        // Intentionally NOT handled here: arming must work from "any state" (PLAN.md P2
+        // table) regardless of whether the board currently has focus (e.g. focus on the
+        // Card, or nowhere at all), so it's a document-scope listener in overlay.ts. This
+        // case only exists so the switch stays exhaustive over `GameAction` — the
+        // preventDefault() above still consumes the key here when the board IS focused.
         break;
     }
   };

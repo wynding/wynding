@@ -214,8 +214,9 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       }, 'first frame painted: neighbour cell reads as pal.floor')
       .toBe(true);
 
-    // Desktop input is hover-preview + click-commit (input.ts) — a single click on an
-    // empty, in-bounds, affordable cell builds directly, no separate confirm needed.
+    // Desktop input is armed-click-to-place (PLAN.md P2): arm the Card first, then a
+    // single click on an empty, in-bounds, affordable cell places directly.
+    await page.getByRole('button', { name: /Basic Tower/ }).click();
     await page.mouse.click(box.x + targetPx.x + cellPx / 2, box.y + targetPx.y + cellPx / 2);
 
     // The build paints on a later animation frame — poll the tower centre until it

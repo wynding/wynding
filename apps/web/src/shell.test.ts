@@ -41,22 +41,31 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     ]);
   });
 
-  it('the Dock holds Pause/Speed/Call-wave/Sell/Settings + a hidden empty primary slot', () => {
+  it('the Dock holds Pause/Speed/Call-wave/Settings + a hidden empty primary slot (no global Sell — PLAN.md P2 moves Sell into the Panel)', () => {
     const shell = createShell(document);
     expect([...shell.dock.root.children]).toEqual([
       shell.dock.pause,
       shell.dock.speed,
       shell.dock.callWave,
-      shell.dock.sell,
       shell.dock.settings,
       shell.dock.primary,
     ]);
     expect(shell.dock.primary.hidden).toBe(true); // wired in P4
   });
 
-  it('the Rail starts empty (Cards land in P2)', () => {
+  it('the Rail holds the Card then the (hidden) Panel, in that order (PLAN.md P2)', () => {
     const shell = createShell(document);
-    expect(shell.rail.childElementCount).toBe(0);
+    expect([...shell.rail.children]).toEqual([shell.card.root, shell.panel.root]);
+    expect(shell.card.root.tagName).toBe('BUTTON');
+    expect(shell.card.root.getAttribute('aria-pressed')).toBe('false');
+    expect(shell.panel.root.hidden).toBe(true);
+  });
+
+  it('carries a visually-hidden polite live region, always present in the DOM', () => {
+    const shell = createShell(document);
+    expect(shell.live.getAttribute('role')).toBe('status');
+    expect(shell.live.getAttribute('aria-live')).toBe('polite');
+    expect(shell.root.contains(shell.live)).toBe(true);
   });
 
   it('destroy() removes the Shell from its parent', () => {

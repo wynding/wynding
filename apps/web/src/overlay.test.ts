@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { HudVM } from '@wynding/render';
+import { compileRuleset } from '@wynding/sim';
+import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell } from './shell';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
+import type { UiState } from './controller';
+
+const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
 
 function hud(over: Partial<HudVM> = {}): HudVM {
   return {
@@ -18,13 +23,19 @@ function hud(over: Partial<HudVM> = {}): HudVM {
   };
 }
 
+/** A neutral (unarmed, unselected) `UiState`, for tests that don't exercise the
+ *  armed/selection state machine. */
+function uiState(over: Partial<UiState> = {}): UiState {
+  return { started: true, armed: null, selection: null, lastOutcome: null, ...over };
+}
+
 function setup() {
   const actions: UiAction[] = [];
   const settings = createSettings();
   const keymap = createKeymap();
   const shell = createShell(document);
   document.body.appendChild(shell.root);
-  const overlay = createOverlay(document, (a) => actions.push(a), settings, keymap, shell);
+  const overlay = createOverlay(document, (a) => actions.push(a), settings, keymap, shell, ruleset);
   document.body.append(overlay.resultsEl, overlay.settingsEl);
   return {
     actions,
@@ -35,8 +46,10 @@ function setup() {
     pauseBtn: shell.dock.pause,
     speedBtn: shell.dock.speed,
     callBtn: shell.dock.callWave,
-    sellBtn: shell.dock.sell,
     settingsBtn: shell.dock.settings,
+    card: shell.card,
+    panel: shell.panel,
+    live: shell.live,
   };
 }
 
@@ -51,7 +64,7 @@ describe('overlay — HUD readout', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      canSell: false,
+      ui: uiState(),
       refund: 0,
       canCallWave: true,
     });
@@ -64,7 +77,7 @@ describe('overlay — HUD readout', () => {
       hud: hud({ countdownSeconds: null, phase: 'active' }),
       paused: false,
       speed: 1,
-      canSell: false,
+      ui: uiState(),
       refund: 0,
       canCallWave: false,
     });
@@ -75,41 +88,179 @@ describe('overlay — HUD readout', () => {
       hud: hud({ countdownSeconds: null, phase: 'lost', won: false }),
       paused: false,
       speed: 1,
-      canSell: false,
+      ui: uiState(),
       refund: 0,
       canCallWave: false,
     });
     expect(shell.hud.wave.textContent).toBe('');
   });
 
-  it('reflects pause/speed/sell/call state on the controls', () => {
-    const { overlay, pauseBtn, speedBtn, sellBtn, callBtn } = setup();
+  it('reflects pause/speed/call state on the controls', () => {
+    const { overlay, pauseBtn, speedBtn, callBtn } = setup();
     overlay.update({
       hud: hud(),
       paused: true,
       speed: 2,
-      canSell: true,
-      refund: 40,
+      ui: uiState(),
+      refund: 0,
       canCallWave: false,
     });
     expect(pauseBtn.textContent).toBe('Resume');
     expect(pauseBtn.getAttribute('aria-pressed')).toBe('true');
     expect(speedBtn.textContent).toBe('Speed: 2x');
-    expect(sellBtn.disabled).toBe(false);
-    expect(sellBtn.textContent).toBe('Sell tower (refund 40)');
     expect(callBtn.disabled).toBe(true);
 
     overlay.update({
       hud: hud(),
       paused: false,
       speed: 1,
-      canSell: false,
+      ui: uiState(),
       refund: 0,
       canCallWave: true,
     });
     expect(pauseBtn.textContent).toBe('Pause');
-    expect(sellBtn.disabled).toBe(true);
     expect(callBtn.disabled).toBe(false);
+  });
+});
+
+describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
+  it('the Card shows the localized name/cost and a live hotkey badge, mirrored via aria-pressed', () => {
+    const { overlay, card } = setup();
+    expect(card.name.textContent).toBe('Basic Tower');
+    expect(card.cost.textContent).toBe('Cost: 5');
+    expect(card.hotkey.textContent).toBe('1'); // Digit1 default
+    expect(card.root.getAttribute('aria-keyshortcuts')).toBe('1');
+
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+      canCallWave: true,
+    });
+    expect(card.root.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('the hotkey badge re-renders after a rebind that displaces armTower1', () => {
+    const { keymap, overlay, card, settingsBtn } = setup();
+    settingsBtn.click();
+    // armTower1 is the LAST rebind row (GAME_ACTIONS order): steal its key (Digit1) by
+    // rebinding an earlier action onto it.
+    const upBtn = overlay.settingsEl.querySelectorAll<HTMLButtonElement>('.wy-rebind-btn')[0]!;
+    upBtn.click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+    expect(keymap.codeFor('armTower1')).toBeNull();
+    expect(card.hotkey.textContent).toBe('Unbound');
+    expect(card.root.hasAttribute('aria-keyshortcuts')).toBe(false);
+  });
+
+  it('the Panel shows armed type info (cost/damage/range/fire-rate/targets) and closes on Close (disarm)', () => {
+    const { overlay, panel, actions } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+      canCallWave: true,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Basic Tower');
+    expect(text).toContain('Cost: 5');
+    expect(text).toContain('Damage: 10');
+    expect(text).toContain('Range: 4.0 tiles'); // rangeFp 1024 / FP_ONE 256
+    expect(text).toContain('Fire rate: 0.7/s'); // (1000/50) / 30 cadenceTicks
+    expect(text).toContain('Targets: Ground');
+
+    const closeBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
+    closeBtn.click();
+    expect(actions.map((a) => a.type)).toEqual(['closePanel']);
+  });
+
+  it('the Panel shows a selected tower with Sell (live refund) and a permanent Max-level Upgrade', () => {
+    const { overlay, panel, actions } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7 } }),
+      refund: 3,
+      canCallWave: true,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const buttons = [...panel.root.querySelectorAll<HTMLButtonElement>('.wy-btn')];
+    const sellBtn = buttons.find((b) => b.textContent?.startsWith('Sell'))!;
+    expect(sellBtn.textContent).toBe('Sell (refund 3)');
+    const upgradeBtn = buttons.find((b) => b.textContent === 'Max level')!;
+    expect(upgradeBtn.getAttribute('aria-disabled')).toBe('true');
+    expect(upgradeBtn.hasAttribute('aria-describedby')).toBe(true);
+    upgradeBtn.click(); // activation suppressed — no action emitted
+    expect(actions).toEqual([]);
+
+    sellBtn.click();
+    expect(actions.map((a) => a.type)).toEqual(['sellSelected']);
+  });
+
+  it('the Panel closes (hidden) when neither armed nor a selection is present', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+      canCallWave: true,
+    });
+    expect(panel.root.hidden).toBe(true);
+  });
+
+  it('the live region announces armed/disarmed/placed/rejected/sold, restrained + localized', () => {
+    const { overlay, live } = setup();
+    const render = (lastOutcome: UiState['lastOutcome']): string => {
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ lastOutcome }),
+        refund: 0,
+        canCallWave: true,
+      });
+      return live.textContent!;
+    };
+    expect(render({ kind: 'armed' })).toBe(
+      'Basic Tower armed. Click or tap the board to place it.',
+    );
+    expect(render({ kind: 'disarmed' })).toBe('Placement cancelled.');
+    expect(render({ kind: 'placed' })).toBe('Basic Tower placed.');
+    expect(render({ kind: 'rejected', reason: 'bounty' })).toBe('Not enough Bounty.');
+    expect(render({ kind: 'rejected', reason: 'occupied' })).toBe('That cell is already occupied.');
+    expect(render({ kind: 'rejected', reason: 'other' })).toBe("Can't build there.");
+    expect(render({ kind: 'sold', refund: 12 })).toBe('Tower sold. Refunded 12 Bounty.');
+  });
+
+  it('arming via the Card emits armTower', () => {
+    const { actions, card } = setup();
+    card.root.click();
+    expect(actions).toEqual([{ type: 'armTower', tower: 'basic' }]);
+  });
+
+  it('fails closed (throws) for an unknown tower kind rather than inventing stats', () => {
+    const { overlay } = setup();
+    // M1's `ArmedTower` union is the single literal 'basic' — a future kind reaching the
+    // Panel without being taught its stats is a programmer error. Force that path with an
+    // unsafe cast (the only way to construct an invalid `ArmedTower` at the type level).
+    expect(() =>
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ armed: 'turret' as unknown as UiState['armed'] }),
+        refund: 0,
+        canCallWave: true,
+      }),
+    ).toThrow(/unknown tower kind/);
   });
 });
 
@@ -154,12 +305,11 @@ describe('overlay — accessibility semantics', () => {
 
 describe('overlay — control intents', () => {
   it('emits the right UiAction for each control button', () => {
-    const { actions, pauseBtn, speedBtn, callBtn, sellBtn } = setup();
+    const { actions, pauseBtn, speedBtn, callBtn } = setup();
     pauseBtn.click();
     speedBtn.click();
     callBtn.click();
-    sellBtn.click();
-    expect(actions.map((a) => a.type)).toEqual(['togglePause', 'cycleSpeed', 'callWave', 'sell']);
+    expect(actions.map((a) => a.type)).toEqual(['togglePause', 'cycleSpeed', 'callWave']);
   });
 });
 
@@ -219,7 +369,9 @@ describe('overlay — settings dialog (modal)', () => {
     firstRebind.click(); // enters listen mode for the first action ('up')
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
     expect(keymap.codeFor('up')).toBe('KeyW');
-    expect(firstRebind.textContent).toBe('KeyW');
+    // Displayed via the shared key-label formatter (PLAN.md P2), not the raw stored code —
+    // `KeyW` (the code) renders as `W` (the label).
+    expect(firstRebind.textContent).toBe('W');
   });
 
   it('a successful bind stops propagation — the same keydown does not also fire the board action (#43)', () => {

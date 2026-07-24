@@ -8,11 +8,14 @@
 //       ├── div.wy-stage   (position: relative)
 //       │   ├── div.wy-board  (canvas mounts here, as before)
 //       │   └── div.wy-dock   (absolute bottom-left, overlaps the board border)
-//       └── aside.wy-rail  (empty at M1 — Cards land in P2)
+//       └── aside.wy-rail  (button.wy-card + div.wy-panel, PLAN.md P2 — the Panel opens
+//                            below the Card; the Card stays visible/clickable while it's
+//                            open)
 //
 // Purely structural: no game logic, no i18n beyond the static wordmark/HUD-group label/
-// board aria text (unchanged strings, just relocated). `overlay.ts` fills in HUD values
-// and wires the Dock buttons' behavior; `main.ts` mounts the Phaser scene into `board`.
+// board aria text (unchanged strings, just relocated) and the Card/Panel's static
+// scaffolding. `overlay.ts` fills in HUD/Card/Panel content and wires the Dock/Card
+// buttons' behavior; `main.ts` mounts the Phaser scene into `board`.
 
 import { t } from './i18n/t';
 
@@ -29,10 +32,24 @@ export interface ShellDock {
   readonly pause: HTMLButtonElement;
   readonly speed: HTMLButtonElement;
   readonly callWave: HTMLButtonElement;
-  readonly sell: HTMLButtonElement;
   readonly settings: HTMLButtonElement;
   /** Empty primary-button slot, wired in P4 (Start). Hidden — no content/action yet. */
   readonly primary: HTMLButtonElement;
+}
+
+/** The single M1 tower Card (PLAN.md P2) — a whole clickable/focusable button so its
+ *  name/cost/hotkey children never need their own separate hit targets. */
+export interface ShellCard {
+  readonly root: HTMLButtonElement;
+  readonly name: HTMLSpanElement;
+  readonly cost: HTMLSpanElement;
+  readonly hotkey: HTMLSpanElement;
+}
+
+/** The unified tower details Panel container (PLAN.md P2) — empty/hidden scaffolding;
+ *  `overlay.ts` rebuilds its content on every armed/selection change. */
+export interface ShellPanel {
+  readonly root: HTMLElement;
 }
 
 export interface ShellHandle {
@@ -41,6 +58,12 @@ export interface ShellHandle {
   readonly rail: HTMLElement; // aside.wy-rail
   readonly hud: ShellHud;
   readonly dock: ShellDock;
+  readonly card: ShellCard;
+  readonly panel: ShellPanel;
+  /** The assistive `aria-live` announcer (PLAN.md P2) — armed/disarmed, placement
+   *  success/rejection, sell + refund. Visually unobtrusive (`.wy-sr-only`): it exists to
+   *  be heard by assistive tech, not read on-screen alongside the Panel's own text. */
+  readonly live: HTMLElement;
   /** Remove the Shell from its parent. */
   destroy(): void;
 }
@@ -102,23 +125,55 @@ export function createShell(doc: Document): ShellHandle {
   const pauseBtn = button(doc, 'wy-btn');
   const speedBtn = button(doc, 'wy-btn');
   const callWaveBtn = button(doc, 'wy-btn');
-  const sellBtn = button(doc, 'wy-btn');
   const settingsBtn = button(doc, 'wy-btn');
   // No `.wy-primary` class yet — that's the visual identity P4 gives it once it has
   // real content/action; an empty hidden node claiming that class would confuse anything
   // selecting `.wy-primary` expecting the (visible) primary control.
   const primaryBtn = button(doc, 'wy-btn wy-dock-primary');
   primaryBtn.hidden = true; // empty slot — content/action land in P4 (Start)
-  dock.append(pauseBtn, speedBtn, callWaveBtn, sellBtn, settingsBtn, primaryBtn);
+  // The global Sell button is removed (PLAN.md P2) — Sell lives in the Panel now; the `X`
+  // hotkey still sells the current selection directly via the controller (input.ts).
+  dock.append(pauseBtn, speedBtn, callWaveBtn, settingsBtn, primaryBtn);
 
   stage.append(board, dock);
 
   const rail = doc.createElement('aside');
-  rail.className = 'wy-rail'; // empty at M1 — Cards land in P2
+  rail.className = 'wy-rail';
+
+  // --- Card: the single M1 `basic` tower (PLAN.md P2). Name/cost/hotkey content and
+  // aria-pressed/aria-keyshortcuts are filled in by overlay.ts (dynamic: the hotkey badge
+  // is live, re-rendered after rebinding). ---
+  const card = doc.createElement('button');
+  card.type = 'button';
+  card.className = 'wy-card';
+  card.setAttribute('aria-pressed', 'false');
+  const cardName = doc.createElement('span');
+  cardName.className = 'wy-card-name';
+  const cardCost = doc.createElement('span');
+  cardCost.className = 'wy-card-cost';
+  const cardHotkey = doc.createElement('span');
+  cardHotkey.className = 'wy-card-hotkey';
+  card.append(cardName, cardCost, cardHotkey);
+
+  // --- Panel: opens below the Card, inside the Rail (PLAN.md P2). Empty scaffolding —
+  // overlay.ts rebuilds its content per armed/selection change and toggles `hidden`. ---
+  const panel = doc.createElement('div');
+  panel.className = 'wy-panel';
+  panel.hidden = true;
+
+  rail.append(card, panel);
+
+  // --- Assistive live region (PLAN.md P2): visually hidden, always present in the DOM so
+  // a screen reader picks up the very first announcement (a region inserted only when
+  // first needed can miss its own initial text change). ---
+  const live = doc.createElement('div');
+  live.className = 'wy-sr-only';
+  live.setAttribute('role', 'status');
+  live.setAttribute('aria-live', 'polite');
 
   main.append(stage, rail);
 
-  shell.append(status, main);
+  shell.append(status, main, live);
 
   return {
     root: shell,
@@ -130,10 +185,12 @@ export function createShell(doc: Document): ShellHandle {
       pause: pauseBtn,
       speed: speedBtn,
       callWave: callWaveBtn,
-      sell: sellBtn,
       settings: settingsBtn,
       primary: primaryBtn,
     },
+    card: { root: card, name: cardName, cost: cardCost, hotkey: cardHotkey },
+    panel: { root: panel },
+    live,
     destroy(): void {
       shell.remove();
     },

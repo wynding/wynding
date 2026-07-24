@@ -118,9 +118,10 @@ describe('input — keyboard (rebindable, drives the cursor & commands)', () => 
 });
 
 describe('input — pointer (mouse hover/click & touch two-tap)', () => {
-  it('hover aims and click commits on desktop', () => {
+  it('hover previews (armed) and click commits on desktop', () => {
     const c = createController(1);
     attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    c.armTower('basic'); // PLAN.md P2: a desktop click builds only while armed
     board.dispatchEvent(ptr('pointermove', 35, 35)); // → cell (3,3)
     expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: true });
     tap(35, 35); // press+release on the board → build
@@ -131,22 +132,31 @@ describe('input — pointer (mouse hover/click & touch two-tap)', () => {
   it('ignores a release from a drag that began OFF the board (no click semantics)', () => {
     const c = createController(1);
     attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    c.armTower('basic');
     board.dispatchEvent(ptr('pointermove', 35, 35)); // valid ghost under the cursor
     board.dispatchEvent(ptr('pointerup', 35, 35)); // release with NO preceding pointerdown
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(0); // drag-in release must not build
   });
 
-  it('keeps a tower selected as the mouse hovers empty cells toward the Sell button', () => {
+  it('a mouse click while UNARMED never places — it only selects a tower or deselects (PLAN.md P2: armed is placement-only)', () => {
     const c = createController(1);
     attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
-    board.dispatchEvent(ptr('pointermove', 35, 35)); // hover empty (3,3)
-    tap(35, 35); // click → build a tower at (3,3)
+    c.armTower('basic');
+    tap(35, 35); // armed click → build a tower at (3,3), disarms
     c.advance(50);
-    tap(35, 35); // click the tower → select it
+    expect(c.frame().curVm.towers).toHaveLength(1);
+    tap(35, 35); // unarmed click on the tower → selects it
     expect(c.frame().selection).not.toBeNull();
-    board.dispatchEvent(ptr('pointermove', 105, 105)); // hover an empty cell en route to Sell
-    expect(c.frame().selection).not.toBeNull(); // selection NOT lost by hover
+    // Hovering while unarmed is a no-op (the ghost preview is an armed-only affordance) —
+    // it neither builds nor disturbs the selection.
+    board.dispatchEvent(ptr('pointermove', 105, 105));
+    expect(c.frame().selection).not.toBeNull();
+    expect(c.frame().ghost).toBeNull();
+    tap(105, 105); // unarmed click on an empty cell → deselects; never builds
+    expect(c.frame().selection).toBeNull();
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1); // still just the one
   });
 
   it('ignores hover on touch and requires a second tap on the same cell to commit', () => {
@@ -165,6 +175,7 @@ describe('input — pointer (mouse hover/click & touch two-tap)', () => {
   it('builds only on the primary button — not right/middle (>0) or the no-button sentinel (-1)', () => {
     const c = createController(1);
     attachInput(document, board, c, createKeymap(), { getRect: () => RECT });
+    c.armTower('basic');
     board.dispatchEvent(ptr('pointermove', 35, 35)); // aim a valid ghost
     tap(35, 35, 'mouse', 2); // right-click press+release
     tap(35, 35, 'mouse', -1); // stylus hover lift (no button)

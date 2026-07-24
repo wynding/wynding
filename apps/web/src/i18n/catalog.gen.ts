@@ -3,7 +3,7 @@
 /* eslint-disable */
 export const EN = {
   "app.title": "Wynding",
-  "board.aria": "Game board. Use arrow keys to move the build cursor, Enter to build or select a tower.",
+  "board.aria": "Game board. Arm a tower from the tower rail (or its hotkey), then click a cell or press Enter to place it. Arrow keys move the cursor; X sells the selected tower.",
   "hud.lives": "Lives: {count}",
   "hud.bounty": "Bounty: {count}",
   "hud.score": "Score: {count}",
@@ -15,7 +15,6 @@ export const EN = {
   "controls.resume": "Resume",
   "controls.speed": "Speed: {factor}x",
   "controls.callWave": "Call wave now",
-  "controls.sell": "Sell tower (refund {refund})",
   "controls.playAgain": "Play again",
   "controls.verify": "Verify this run",
   "controls.settings": "Accessibility settings",
@@ -39,12 +38,31 @@ export const EN = {
   "action.callWave": "Call wave",
   "action.pause": "Pause",
   "action.speed": "Cycle speed",
+  "action.armTower1": "Arm basic tower",
   "results.won": "You held the line!",
   "results.lost": "The creeps broke through.",
   "results.summary": "Score {score} — {stars} of 3 stars",
   "verify.ok": "Verified: replay re-simulated to the same outcome.",
   "verify.mismatch": "Verification mismatch: the replay re-simulated to a different outcome.",
   "verify.fail": "Verification failed: {reason}",
+  "tower.basic.name": "Basic Tower",
+  "tower.targets.ground": "Ground",
+  "panel.cost": "Cost: {cost}",
+  "panel.damage": "Damage: {damage}",
+  "panel.range": "Range: {tiles} tiles",
+  "panel.fireRate": "Fire rate: {rate}/s",
+  "panel.targets": "Targets: {targets}",
+  "panel.close": "Close panel",
+  "panel.sell": "Sell (refund {refund})",
+  "panel.upgrade": "Max level",
+  "panel.upgrade.desc": "This tower has no further upgrades in this build.",
+  "live.armed": "{name} armed. Click or tap the board to place it.",
+  "live.disarmed": "Placement cancelled.",
+  "live.placed": "{name} placed.",
+  "live.rejected.bounty": "Not enough Bounty.",
+  "live.rejected.occupied": "That cell is already occupied.",
+  "live.rejected.generic": "Can't build there.",
+  "live.sold": "Tower sold. Refunded {refund} Bounty.",
 } as const;
 
 export type MessageKey = keyof typeof EN;
@@ -63,7 +81,6 @@ export interface MessageParams {
   "controls.resume": Record<never, never>;
   "controls.speed": { "factor": string | number };
   "controls.callWave": Record<never, never>;
-  "controls.sell": { "refund": string | number };
   "controls.playAgain": Record<never, never>;
   "controls.verify": Record<never, never>;
   "controls.settings": Record<never, never>;
@@ -87,10 +104,29 @@ export interface MessageParams {
   "action.callWave": Record<never, never>;
   "action.pause": Record<never, never>;
   "action.speed": Record<never, never>;
+  "action.armTower1": Record<never, never>;
   "results.won": Record<never, never>;
   "results.lost": Record<never, never>;
   "results.summary": { "score": string | number; "stars": string | number };
   "verify.ok": Record<never, never>;
   "verify.mismatch": Record<never, never>;
   "verify.fail": { "reason": string | number };
+  "tower.basic.name": Record<never, never>;
+  "tower.targets.ground": Record<never, never>;
+  "panel.cost": { "cost": string | number };
+  "panel.damage": { "damage": string | number };
+  "panel.range": { "tiles": string | number };
+  "panel.fireRate": { "rate": string | number };
+  "panel.targets": { "targets": string | number };
+  "panel.close": Record<never, never>;
+  "panel.sell": { "refund": string | number };
+  "panel.upgrade": Record<never, never>;
+  "panel.upgrade.desc": Record<never, never>;
+  "live.armed": { "name": string | number };
+  "live.disarmed": Record<never, never>;
+  "live.placed": { "name": string | number };
+  "live.rejected.bounty": Record<never, never>;
+  "live.rejected.occupied": Record<never, never>;
+  "live.rejected.generic": Record<never, never>;
+  "live.sold": { "refund": string | number };
 }

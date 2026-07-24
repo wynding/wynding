@@ -57,7 +57,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // the modal owner (`modal.ts`, wired inside `createOverlay`) ever toggles `inert` on.
   const shell = createShell(doc);
   const board = shell.board;
-  const overlay = createOverlay(doc, onAction, settings, keymap, shell);
+  const overlay = createOverlay(doc, onAction, settings, keymap, shell, controller.ruleset);
   const rotate = doc.createElement('div');
   rotate.className = 'wy-rotate';
   rotate.hidden = true; // P5 fills this in; topology-only placeholder for now
@@ -95,9 +95,32 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       case 'callWave':
         controller.callWaveEarly();
         break;
-      case 'sell':
-        controller.sellSelected();
+      case 'armTower':
+        controller.armTower(action.tower);
+        // Focus rules (PLAN.md P2): arming via Card click or keyboard moves focus to the
+        // board — it owns the arrow-cursor + Enter placement path, which must keep
+        // working while armed.
+        board.focus();
         break;
+      case 'escape':
+        controller.escape();
+        break;
+      case 'sellSelected':
+        controller.sellSelected();
+        // Sell → Panel closes + focus returns to the board (never left to drop to
+        // `document.body`).
+        board.focus();
+        break;
+      case 'closePanel': {
+        // Close disarms if armed, else deselects (the same one-layer-at-a-time rule as
+        // Escape) — captured BEFORE the call so focus lands on the Card only when the
+        // Panel was showing armed type info, not a tower selection.
+        const wasArmed = controller.uiState().armed !== null;
+        controller.escape();
+        if (wasArmed) shell.card.root.focus();
+        else board.focus();
+        break;
+      }
       case 'playAgain':
         controller.startRun(nextSeed());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
@@ -143,14 +166,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     handle.draw(f.prevVm, f.curVm, f.alpha, ov);
     // ...but the HUD only changes on a tick/pause/speed/selection boundary, so gate its
     // recompute + DOM writes on that (they're redundant on the ~60 fps render hot path).
-    const selPresent = f.selection !== null;
     // Key on selection IDENTITY (its cell), not just presence: switching between two towers
     // while paused (no tick change) must still refresh the Sell refund for the new tower.
     const selId = f.selection === null ? 'none' : `${f.selection.col},${f.selection.row}`;
     // Include the pending-buffer revision (#37+#27): while paused, `curVm.tick` never
     // changes, so a same-tick pending build/sell needs its own key component to force a
-    // HUD refresh (presented bounty reads the shared projection).
-    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}`;
+    // HUD refresh (presented bounty reads the shared projection). `uiRev` (PLAN.md P2)
+    // covers arm/disarm/selection/outcome changes that don't otherwise move the tick/
+    // pause/speed/selection/pendingRevision key components (e.g. an armed-but-rejected
+    // placement, which changes nothing else here).
+    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}|${controller.uiRev()}`;
     if (hudKey !== lastHudKey) {
       lastHudKey = hudKey;
       const hud = controller.hud();
@@ -158,7 +183,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         hud,
         paused: controller.isPaused(),
         speed: controller.speed(),
-        canSell: selPresent,
+        ui: controller.uiState(),
         refund: controller.refundForSelection(),
         canCallWave: hud.phase === 'pre-wave',
       });

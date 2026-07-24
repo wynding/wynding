@@ -46,6 +46,15 @@ import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 
 export type Speed = 1 | 2;
 
+/**
+ * The M1-local "armed tower type" identifier (PLAN.md P2). This is deliberately NOT
+ * `@wynding/types`' `TowerKind`: that package is not a web dependency, and `placeTower`'s
+ * `SimInput` carries no kind at all (M1 ships exactly one tower, so the sim never needed
+ * to disambiguate). Supporting more than one placeable kind is a future `SimInput` schema
+ * change, not a web-layer concern — this union stays a single literal until that lands.
+ */
+export type ArmedTower = 'basic';
+
 /** A build/select target under the cursor: either an empty anchor with placement
  *  validity, or an existing tower to select. */
 export interface AimResult {
@@ -53,6 +62,32 @@ export interface AimResult {
   readonly col: number;
   readonly row: number;
   readonly valid: boolean;
+}
+
+/** The last thing the armed/selection state machine did, for the `apps/web` assistive
+ *  live region (PLAN.md P2) to announce. Rejection reasons are deliberately limited to
+ *  what this layer can identify WITHOUT re-deriving `canPlaceTower()`'s sim-side logic:
+ *  'bounty' (cost vs current bounty) and 'occupied' (an existing/Pending tower at the
+ *  anchor) are locally checkable; every other rejection (blocked maze path, terrain,
+ *  creep occupancy, a full input buffer) reports as 'other' (one generic localized
+ *  "can't build there" string at the call site). */
+export type PlacementOutcome =
+  | { readonly kind: 'armed' }
+  | { readonly kind: 'disarmed' }
+  | { readonly kind: 'placed' }
+  | { readonly kind: 'rejected'; readonly reason: 'bounty' | 'occupied' | 'other' }
+  | { readonly kind: 'sold'; readonly refund: number };
+
+/** The observation path for the DOM overlay (Card/Panel/Dock, PLAN.md P2): a plain
+ *  snapshot of state that isn't already covered by `frame()`/`hud()`, read once per
+ *  render when `uiRev()` has changed. `started` is initialized `true` and gates nothing
+ *  through P2–P3 — the field exists for shape only; P4 flips its initialization to
+ *  `false` and adds the advance gate. */
+export interface UiState {
+  readonly started: boolean;
+  readonly armed: ArmedTower | null;
+  readonly selection: { readonly col: number; readonly row: number; readonly id: number } | null;
+  readonly lastOutcome: PlacementOutcome | null;
 }
 
 /** What the renderer needs each frame: the last two view-models + alpha + overlay. */
@@ -122,6 +157,27 @@ export interface Controller {
   sellSelected(): boolean;
   /** The refund the selected tower would return right now (0 if none selected). */
   refundForSelection(): number;
+  /** Toggle `kind` armed for placement (PLAN.md P2 table, row 1): arms it and clears any
+   *  selection, or — if already armed — disarms. Mouse/keyboard-Card entry point. */
+  armTower(kind: ArmedTower): void;
+  /** Pointer/mouse click at a board cell — the armed/selection state machine (PLAN.md P2
+   *  table): armed is placement-only (an occupied/unaffordable/blocked cell rejects with
+   *  a persistent invalid ghost and stays armed; a valid cell places, disarms, and selects
+   *  the new tower); unarmed is selection-only (a tower selects, anything else
+   *  deselects). Distinct from `aimAt`, which keeps its pre-P2 build-or-select behavior
+   *  for the keyboard cursor. */
+  clickAt(col: number, row: number): void;
+  /** Document-scope Escape (PLAN.md P2 table): closes one layer at a time — armed
+   *  disarms; otherwise a selection deselects. No-op in neither state. Caller (overlay.ts)
+   *  is responsible for not invoking this while a modal owns Escape. */
+  escape(): void;
+  /** A snapshot of state not already covered by `frame()`/`hud()` — read once per render
+   *  when `uiRev()` changes. */
+  uiState(): UiState;
+  /** Monotonically increasing within a run; bumped on every `uiState()`-visible change
+   *  (armed/disarmed, selection change, placement/sell outcome). Reset to 0 on
+   *  `startRun()`. */
+  uiRev(): number;
   /** Enqueue call-wave-early (pre-wave only; idempotent in the sim). */
   callWaveEarly(): boolean;
   /** Reset everything for a new run (Play-again / boot). */
@@ -306,6 +362,20 @@ export function createController(seed: number): Controller {
     pendingAdds: TowerAnchor[];
     pendingSells: TowerAnchor[];
   } | null = null;
+  // Armed/selection state machine (PLAN.md P2): `armed` is purely `apps/web` presentation
+  // state — it never enters the sim or the replay log. `uiRev` is the DOM overlay's
+  // observation key (bumped on every `uiState()`-visible change) and `lastOutcome` is what
+  // the assistive live region announces next.
+  let armed: ArmedTower | null = null;
+  let uiRev = 0;
+  let lastOutcome: PlacementOutcome | null = null;
+  const bumpUiRev = (): void => {
+    uiRev++;
+  };
+  const setOutcome = (outcome: PlacementOutcome): void => {
+    lastOutcome = outcome;
+    bumpUiRev();
+  };
 
   const onTick = (): void => {
     if (frozen) return; // terminal: freeze, record nothing past the resolving tick
@@ -329,6 +399,7 @@ export function createController(seed: number): Controller {
     // ring and the Sell control disables (rather than selling a nonexistent id).
     if (selection !== null && towerAt(selection.col, selection.row)?.id !== selection.id) {
       selection = null;
+      bumpUiRev(); // the Panel must close if a tick sold/destroyed the selected tower
     }
     if (isTerminalPhase(state.phase)) {
       frozen = true;
@@ -362,6 +433,11 @@ export function createController(seed: number): Controller {
     aimMemoKey = '';
     aimMemoValid = false;
     refundCache = { id: -1, rev: -1, value: 0 };
+    // A fresh run identity: no armed gesture or announcement carries across Play-again,
+    // and the observation counter restarts (mirrors bufferRev's per-run reset above).
+    armed = null;
+    uiRev = 0;
+    lastOutcome = null;
   };
   reset(seed);
 
@@ -430,28 +506,135 @@ export function createController(seed: number): Controller {
         rangeFp: RANGE_FP(ruleset),
         id: existing.id,
       };
+      bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
       return { kind: 'tower', col: existing.col, row: existing.row, valid: true };
     }
     selection = null; // a click/keyboard aim on an empty cell is a build intent — deselect
     const valid = placementValid(col, row);
     ghost = { col, row, valid, rangeFp: RANGE_FP(ruleset) };
+    bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
     return { kind: 'ghost', col, row, valid };
   };
 
-  // Hover-only preview (desktop pointermove): update the build ghost but NEVER change the
-  // current selection — otherwise moving the mouse across empty cells toward the DOM Sell
-  // button would silently deselect the tower before the click lands.
+  // Hover-only preview (desktop pointermove, MOUSE ONLY — input.ts never calls this for
+  // touch/pen): update the build ghost but NEVER change the current selection — otherwise
+  // moving the mouse across empty cells toward the Panel's Sell button would silently
+  // deselect the tower before the click lands. PLAN.md P2's table restricts the ghost
+  // preview to the ARMED state ("armed | pointer moves over board (mouse) | ghost previews
+  // at cell"); unarmed is selection-only, so hovering does nothing at all.
   const previewAt = (col: number, row: number): void => {
+    if (armed === null) return;
     if (!inBounds(col, row)) {
       ghost = null;
       return;
     }
     cur = { col, row };
     if (towerAt(col, row) !== null) {
-      ghost = null; // no build ghost over an existing tower; selection left untouched
+      ghost = null; // no build ghost over an existing tower — a click there rejects as
+      // 'occupied' (clickAt), matching the pre-P2 hover visual ("as today" per the table).
       return;
     }
     ghost = { col, row, valid: placementValid(col, row), rangeFp: RANGE_FP(ruleset) };
+  };
+
+  /** Mouse/pointer click at a board cell — the armed/selection state machine (PLAN.md P2
+   *  table). Armed: placement-only — an occupied/unaffordable/blocked cell rejects
+   *  (persistent invalid ghost, stays armed); a valid cell places, disarms, and selects the
+   *  new tower (never re-arms). Unarmed: selection-only — a tower selects, anything else
+   *  deselects; no ghost is ever shown while unarmed. */
+  const clickAt = (col: number, row: number): void => {
+    if (!inBounds(col, row)) return;
+    cur = { col, row };
+    if (armed !== null) {
+      const existing = towerAt(col, row);
+      if (existing !== null) {
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        setOutcome({ kind: 'rejected', reason: 'occupied' });
+        return;
+      }
+      if (!placementValid(col, row)) {
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
+        setOutcome({ kind: 'rejected', reason: bounty < ruleset.tower.cost ? 'bounty' : 'other' });
+        return;
+      }
+      // Valid placement. `enqueueVerdict` never reports 'duplicate' for `placeTower`
+      // (it isn't anchor-matched — see the doc comment above), so only 'full' remains
+      // besides 'queue'.
+      const cmd: SimInput = { kind: 'placeTower', anchor: { col, row } };
+      const verdict = enqueueVerdict(buffer, cmd);
+      if (verdict === 'full') {
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        setOutcome({ kind: 'rejected', reason: 'other' });
+        return;
+      }
+      buffer.push(cmd);
+      bufferRev++;
+      armed = null; // disarm BEFORE the outcome/re-aim below — never re-arms
+      setOutcome({ kind: 'placed' });
+      aimAt(col, row); // selects the just-placed (now-pending) tower
+      return;
+    }
+    // Unarmed: selection-only. Clicking never places here — armed is placement-only, per
+    // the table.
+    const existing = towerAt(col, row);
+    selection =
+      existing === null
+        ? null
+        : { col: existing.col, row: existing.row, rangeFp: RANGE_FP(ruleset), id: existing.id };
+    ghost = null;
+    bumpUiRev();
+  };
+
+  /** Toggle `kind` armed (PLAN.md P2 table, row 1): arm it (clearing any selection), or —
+   *  if already armed — disarm. */
+  const armTower = (kind: ArmedTower): void => {
+    if (armed === kind) {
+      armed = null;
+      ghost = null;
+      setOutcome({ kind: 'disarmed' });
+      return;
+    }
+    armed = kind;
+    selection = null;
+    ghost = null;
+    setOutcome({ kind: 'armed' });
+  };
+
+  /** Document-scope Escape (PLAN.md P2 table): armed disarms; otherwise a selection
+   *  deselects. No-op in neither state. */
+  const escape = (): void => {
+    if (armed !== null) {
+      armed = null;
+      ghost = null;
+      setOutcome({ kind: 'disarmed' });
+      return;
+    }
+    if (selection !== null) {
+      selection = null;
+      ghost = null;
+      bumpUiRev();
+    }
+  };
+
+  /** The refund the selected tower would return right now (0 if none selected) — a pure
+   *  read against the SHARED projection, cached by (id, bufferRev) since a tower's refund
+   *  is invariant for a given id but the base to preview against changes with the pending
+   *  queue. Standalone (not just the exposed `refundForSelection` method) so `sellSelected`
+   *  can capture the value BEFORE its own re-aim clears `selection`. */
+  const computeRefund = (): number => {
+    // No refund on a resolved match — the frozen step() would drop the sell (mirrors
+    // previewInputs' terminal freeze; also stops the id-cache serving a stale pre-terminal
+    // value once the game ends).
+    if (selection === null || isTerminalPhase(state.phase)) return 0;
+    if (refundCache.id === selection.id && refundCache.rev === bufferRev) {
+      return refundCache.value;
+    }
+    const base = pendingProjection()?.preview ?? state;
+    const { preview } = previewInputs(base, ruleset, [{ kind: 'sellTower', tower: selection.id }]);
+    const value = Math.max(0, preview.bounty - base.bounty);
+    refundCache = { id: selection.id, rev: bufferRev, value };
+    return value;
   };
 
   const doPause = (): void => {
@@ -554,6 +737,13 @@ export function createController(seed: number): Controller {
         buffer.push(cmd);
         bufferRev++;
       }
+      // Disarm on ANY successful placement, regardless of input path (PLAN.md P2 table,
+      // "any | successful placement | never re-arms") — a keyboard-Enter build while a
+      // Card is armed must leave the Card unarmed too, not just the mouse/Card path.
+      if (armed !== null) {
+        armed = null;
+        setOutcome({ kind: 'placed' });
+      }
       // Re-evaluate the ghost against the now-larger buffer (the just-queued build may
       // make this same cell invalid for a second placement while paused). `towerAt` now
       // reads the shared projection, so this resolves to a SELECTION on the just-queued
@@ -563,6 +753,9 @@ export function createController(seed: number): Controller {
     },
     sellSelected(): boolean {
       if (selection === null) return false;
+      // Captured BEFORE re-aiming (which clears `selection`) — the refund the Panel/live
+      // region reports is the value at the moment Sell was pressed.
+      const refund = computeRefund();
       // The sold tower's anchor — captured before re-aiming, which may clear `selection`.
       const anchor = { col: selection.col, row: selection.row };
       const cmd: SimInput = { kind: 'sellTower', tower: selection.id };
@@ -575,30 +768,27 @@ export function createController(seed: number): Controller {
       // Reconcile aim/selection on every buffer mutation: re-aim at the SOLD anchor (not
       // raw `cur`, which may sit on any of the four footprint cells) so sell-then-rebuild
       // resolves to a fresh build ghost at that anchor rather than a stale tower selection.
+      // The shared projection now reflects the queued sell, so this already clears
+      // `selection` (the anchor no longer resolves to a tower) — the Panel closes
+      // immediately, no tick required.
       aimAt(anchor.col, anchor.row);
+      setOutcome({ kind: 'sold', refund });
       return true;
     },
-    refundForSelection(): number {
-      // No refund on a resolved match — the frozen step() would drop the sell (mirrors
-      // previewInputs' terminal freeze; also stops the id-cache serving a stale pre-terminal
-      // value once the game ends).
-      if (selection === null || isTerminalPhase(state.phase)) return 0;
-      // A tower's refund is refundFor(spend, …) — a function of its fixed spend and the
-      // constant balance, so it is INVARIANT for a given tower id (ids are never reused) —
-      // but cache by (id, bufferRev) since the base to preview against changes with the
-      // pending queue: computed against the SHARED projection, not committed state, so
-      // selecting a pending (not-yet-committed) tower shows its real refund, not zero.
-      if (refundCache.id === selection.id && refundCache.rev === bufferRev) {
-        return refundCache.value;
-      }
-      const base = pendingProjection()?.preview ?? state;
-      const { preview } = previewInputs(base, ruleset, [
-        { kind: 'sellTower', tower: selection.id },
-      ]);
-      const value = Math.max(0, preview.bounty - base.bounty);
-      refundCache = { id: selection.id, rev: bufferRev, value };
-      return value;
+    refundForSelection: computeRefund,
+    armTower,
+    clickAt,
+    escape,
+    uiState(): UiState {
+      return {
+        started: true, // shape-only through P2–P3 (PLAN.md P2); P4 flips this to false
+        armed,
+        selection:
+          selection === null ? null : { col: selection.col, row: selection.row, id: selection.id },
+        lastOutcome,
+      };
     },
+    uiRev: () => uiRev,
     callWaveEarly(): boolean {
       if (state.phase !== 'pre-wave') return false;
       const cmd: SimInput = { kind: 'callWaveEarly' };

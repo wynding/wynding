@@ -64,6 +64,9 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.locator('.wy-status')).toContainText('Lives:');
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-rail')).toBeVisible();
+  // The Rail's Card (PLAN.md P2) — the single M1 `basic` tower, unarmed at load.
+  await expect(page.locator('.wy-card')).toBeVisible();
+  await expect(page.locator('.wy-card')).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
 
   // Open the accessibility settings (now a bounded, labelled modal dialog — sibling of
@@ -103,6 +106,57 @@ test('the settings dialog closes on Escape (the modal owner consumes it first)',
   await page.keyboard.press('Escape');
   await expect(settingsDialog).toBeHidden();
   await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
+});
+
+test('arms the Card, places a tower via the keyboard cursor, sells it via the Panel — with live-region announcements and no axe violations while armed and while the Panel is open', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  const card = page.getByRole('button', { name: /Basic Tower/ });
+  const board = page.locator('.wy-board');
+  const live = page.locator('.wy-sr-only[role="status"][aria-live="polite"]');
+  const panel = page.locator('.wy-panel');
+
+  await expect(panel).toBeHidden();
+  await card.click(); // armed (PLAN.md P2 table, row 1)
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+  await expect(board).toBeFocused(); // Focus rules: arming moves focus to the board
+  await expect(live).toContainText('armed');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Basic Tower');
+  await expect(panel).toContainText('Cost:');
+
+  // axe audit while ARMED (Panel showing type info).
+  const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
+
+  // Place via the keyboard cursor (arrow-cursor + Enter must keep working while armed,
+  // per the Focus rules) at (3,3) — a well-known buildable cell used throughout the unit
+  // suite, away from the entrance/exit lane.
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  await expect(card).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  await expect(live).toContainText('placed');
+  await expect(panel).toBeVisible(); // now showing the just-placed tower's selection
+
+  // axe audit with the Panel open in its SELECTION state (Sell + the Max-level Upgrade).
+  const panelAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(panelAudit.violations, JSON.stringify(panelAudit.violations, null, 2)).toEqual([]);
+
+  // No global Sell button (PLAN.md P2 removes it) — Sell lives in the Panel.
+  await expect(page.getByRole('button', { name: /^Sell tower/ })).toHaveCount(0);
+  const sellBtn = panel.getByRole('button', { name: /^Sell/ });
+  await expect(sellBtn).toBeVisible();
+  const upgradeBtn = panel.getByRole('button', { name: 'Max level' });
+  await expect(upgradeBtn).toHaveAttribute('aria-disabled', 'true');
+
+  await sellBtn.click();
+  await expect(panel).toBeHidden(); // Sell closes the Panel immediately
+  await expect(live).toContainText('sold');
+  await expect(board).toBeFocused(); // Sell → focus returns to the board
 });
 
 test('supports the pause / speed / call-wave controls and reaches a result', async ({ page }) => {

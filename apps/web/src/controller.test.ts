@@ -162,19 +162,28 @@ describe('controller — input → command mapping', () => {
     expect(r1).toBeGreaterThan(0);
   });
 
-  it('previewAt updates the build ghost without clearing an existing tower selection', () => {
+  it('previewAt is a no-op while unarmed (PLAN.md P2: the ghost preview is an armed-only affordance)', () => {
     const c = createController(1);
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
     c.aimAt(3, 3); // select the tower (click)
     expect(c.frame().selection).not.toBeNull();
-    c.previewAt(10, 10); // hover an empty cell → ghost preview, selection preserved
+    c.previewAt(10, 10); // hover an empty cell, unarmed → no ghost, selection preserved
     expect(c.frame().selection).not.toBeNull();
-    expect(c.frame().ghost).toMatchObject({ col: 10, row: 10 });
-    c.previewAt(3, 3); // hover over the tower → no build ghost, selection still kept
     expect(c.frame().ghost).toBeNull();
-    expect(c.frame().selection).not.toBeNull();
+  });
+
+  it('previewAt updates the build ghost while ARMED (selection is already null — arming clears it)', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // a real committed tower at (3,3), for the hover-over-tower case below
+    c.armTower('basic');
+    c.previewAt(10, 10); // hover an empty cell → ghost preview
+    expect(c.frame().ghost).toMatchObject({ col: 10, row: 10 });
+    c.previewAt(3, 3); // hover over the tower → no build ghost ("as today" pre-P2 visual)
+    expect(c.frame().ghost).toBeNull();
     c.previewAt(-1, -1); // hover off-board → ghost cleared
     expect(c.frame().ghost).toBeNull();
   });
@@ -671,5 +680,203 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
       expect(Number.isFinite(t.originY)).toBe(true);
       expect(t.launchTick).toBeLessThan(t.impactTick);
     }
+  });
+});
+
+describe('controller — armed/selection state machine (PLAN.md P2 table)', () => {
+  it('any state: click/tap Card (armTower) arms; armed again toggles it off (disarm)', () => {
+    const c = createController(1);
+    expect(c.uiState().armed).toBeNull();
+    c.armTower('basic');
+    expect(c.uiState().armed).toBe('basic');
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'armed' });
+    c.armTower('basic'); // "click Card again" — toggles off
+    expect(c.uiState().armed).toBeNull();
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'disarmed' });
+  });
+
+  it('any state: the armTower1 key (routed to armTower by the caller) arms; arming clears any selection', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    c.aimAt(3, 3); // select the placed tower
+    expect(c.uiState().selection).not.toBeNull();
+    c.armTower('basic');
+    expect(c.uiState().armed).toBe('basic');
+    expect(c.uiState().selection).toBeNull(); // arming clears the selection (Panel: type info)
+  });
+
+  it('armed: pointer moves over board (mouse) — ghost previews at the cell (valid/invalid)', () => {
+    const c = createController(1);
+    c.armTower('basic');
+    c.previewAt(5, 5);
+    expect(c.frame().ghost).toMatchObject({ col: 5, row: 5, valid: true });
+    c.previewAt(2, 2);
+    expect(c.frame().ghost).toMatchObject({ col: 2, row: 2 });
+  });
+
+  it('armed: click a valid cell places, disarms, and selects the placed tower', () => {
+    const c = createController(1);
+    c.armTower('basic');
+    c.clickAt(3, 3);
+    expect(c.uiState().armed).toBeNull(); // disarmed
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'placed' });
+    const sel = c.uiState().selection;
+    expect(sel).toMatchObject({ col: 3, row: 3 }); // selects the just-placed tower
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1); // it actually queued a real build
+  });
+
+  it('armed: click an OCCUPIED cell (an existing tower) rejects, stays armed, ghost persists invalid', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // a real committed tower at (3,3)
+    c.armTower('basic');
+    c.clickAt(3, 3); // click directly on the tower's anchor while armed
+    expect(c.uiState().armed).toBe('basic'); // stays armed
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false }); // persistent invalid ghost
+    expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed
+  });
+
+  it("armed: click a cell whose footprint overlaps an existing tower (but isn't itself occupied) rejects as 'other', not 'occupied'", () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3), footprint cols 3-4/rows 3-4
+    c.armTower('basic');
+    c.clickAt(2, 2); // (2,2) itself is empty, but its footprint (2-3,2-3) overlaps (3,3)'s
+    expect(c.uiState().armed).toBe('basic');
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'other' });
+    expect(c.frame().ghost).toMatchObject({ col: 2, row: 2, valid: false });
+  });
+
+  it("armed: click a cell rejected for INSUFFICIENT BOUNTY reports reason 'bounty'", () => {
+    const c = createController(1);
+    // Drain the starting 80 Bounty exactly: 16 builds × cost 5, all queued into the SAME
+    // tick's buffer (placement validity is evaluated against the cumulative pending
+    // preview, so no tick needs to elapse between them).
+    const cells: Array<[number, number]> = [];
+    for (const row of [2, 5])
+      for (const col of [2, 5, 8, 11, 14, 17, 20, 23]) cells.push([col, row]);
+    expect(cells).toHaveLength(16);
+    for (const [col, row] of cells) {
+      c.aimAt(col, row);
+      expect(c.confirm()).toBe(true);
+    }
+    c.armTower('basic');
+    c.clickAt(2, 8); // a fresh, otherwise-buildable cell — now unaffordable (bounty is 0)
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'bounty' });
+    expect(c.uiState().armed).toBe('basic'); // stays armed
+  });
+
+  it('armed: document-scope Escape disarms; the ghost clears immediately', () => {
+    const c = createController(1);
+    c.armTower('basic');
+    c.previewAt(5, 5);
+    expect(c.frame().ghost).not.toBeNull();
+    c.escape();
+    expect(c.uiState().armed).toBeNull();
+    expect(c.frame().ghost).toBeNull();
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'disarmed' });
+  });
+
+  it('unarmed: clickAt on a placed tower selects it (Panel: stats + actions)', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    expect(c.uiState().armed).toBeNull();
+    c.clickAt(3, 3);
+    expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 });
+  });
+
+  it('unarmed: clickAt on an empty/invalid cell deselects (Panel closes) — never places', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    c.clickAt(3, 3); // select it first
+    expect(c.uiState().selection).not.toBeNull();
+    c.clickAt(10, 10); // unarmed click on an empty cell
+    expect(c.uiState().selection).toBeNull();
+    expect(c.frame().ghost).toBeNull(); // unarmed never shows a ghost
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1); // clicking empty while unarmed never builds
+  });
+
+  it('selected: Escape deselects (Panel closes); ghost clears', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    c.clickAt(3, 3);
+    expect(c.uiState().selection).not.toBeNull();
+    c.escape();
+    expect(c.uiState().selection).toBeNull();
+    expect(c.frame().ghost).toBeNull();
+  });
+
+  it('any: a successful placement never re-arms — a subsequent click is plain (unarmed) selection behavior', () => {
+    const c = createController(1);
+    c.armTower('basic');
+    c.clickAt(3, 3); // placed → disarmed → selected
+    expect(c.uiState().armed).toBeNull();
+    c.clickAt(10, 10); // an unarmed click on an empty cell — must NOT place
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1); // still just the one tower
+  });
+
+  it('uiRev() is monotonically increasing across arm/disarm/select/deselect/placement/sell', () => {
+    const c = createController(1);
+    const seen: number[] = [c.uiRev()];
+    c.armTower('basic');
+    seen.push(c.uiRev());
+    c.clickAt(3, 3); // place + disarm + select
+    seen.push(c.uiRev());
+    c.escape(); // deselect
+    seen.push(c.uiRev());
+    c.aimAt(10, 3); // a distinct, non-overlapping cell (the (3,3) build is still pending)
+    c.confirm();
+    seen.push(c.uiRev());
+    tick(c);
+    c.clickAt(10, 3); // select
+    seen.push(c.uiRev());
+    c.sellSelected();
+    seen.push(c.uiRev());
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]).toBeGreaterThan(seen[i - 1] as number);
+    }
+  });
+
+  it('uiRev() resets to 0 on startRun (Play-again) — no stale observation counter crosses run identity', () => {
+    const c = createController(1);
+    c.armTower('basic');
+    expect(c.uiRev()).toBeGreaterThan(0);
+    c.startRun(2);
+    expect(c.uiRev()).toBe(0);
+    expect(c.uiState()).toEqual({ started: true, armed: null, selection: null, lastOutcome: null });
+  });
+
+  it('sellSelected() reports the outcome with the refund captured at press time, and the Panel closes immediately (no tick needed)', () => {
+    const c = createController(1);
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c);
+    c.clickAt(3, 3);
+    const refund = c.refundForSelection();
+    expect(refund).toBeGreaterThan(0);
+    expect(c.sellSelected()).toBe(true);
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'sold', refund });
+    expect(c.uiState().selection).toBeNull(); // Panel closes immediately, before any tick
+  });
+
+  it('uiState().started is always true through P2 (shape-only field; P4 adds the advance gate)', () => {
+    const c = createController(1);
+    expect(c.uiState().started).toBe(true);
+    tick(c, 5);
+    expect(c.uiState().started).toBe(true);
   });
 });
