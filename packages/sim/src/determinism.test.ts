@@ -211,3 +211,36 @@ describe('determinism gate', () => {
     expect(hashSimState(state)).toBe(hashSimState(ref.state));
   });
 });
+
+describe('compiled-board mutation regression (#21/P4)', () => {
+  // A CI mutation-REGRESSION test — named as what it is, NOT a runtime tamper guard.
+  // `Object.freeze` can't apply to non-empty typed arrays, and accessor indirection
+  // would tax the Dijkstra/movement hot loops (ADR 0005) against a threat entirely
+  // out of the model (hostile in-process code owns the heap regardless). What this
+  // proves: no code path exercised by real matches mutates the compiled board
+  // arrays — an accidental in-repo mutation is caught here in CI. P2 now memoizes
+  // compiled rulesets across requests (LRU keyed by content digest), so an
+  // accidental mutation would poison every later validation sharing that cache
+  // entry — compiling ONCE and running ≥2 full matches on the SAME compiled object
+  // below models that reuse directly (sim tests must not import replay; actual
+  // cache-hit coverage lives in replay's own tests).
+  it('board.field.dist/blockedMask and board.grid.baseMask are never mutated across 2 full matches on ONE compiled ruleset', () => {
+    const distSnapshot = SCENARIO_RULESET.board.field.dist.slice();
+    const blockedMaskSnapshot = SCENARIO_RULESET.board.field.blockedMask.slice();
+    const baseMaskSnapshot = SCENARIO_RULESET.board.grid.baseMask.slice();
+
+    const assertUnmutated = (): void => {
+      expect(SCENARIO_RULESET.board.field.dist).toEqual(distSnapshot);
+      expect(SCENARIO_RULESET.board.field.blockedMask).toEqual(blockedMaskSnapshot);
+      expect(SCENARIO_RULESET.board.grid.baseMask).toEqual(baseMaskSnapshot);
+    };
+
+    for (let run = 0; run < 2; run++) {
+      let state = createInitialState(SCENARIO_SEED + run, SCENARIO_RULESET);
+      for (let t = 0; t < SCENARIO_TICKS; t++) {
+        state = step(state, SCENARIO_RULESET, canonicalInputs(t));
+        assertUnmutated(); // per-step — catches mutate-then-restore within a match
+      }
+    }
+  });
+});
