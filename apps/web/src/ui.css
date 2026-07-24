@@ -60,6 +60,9 @@ body {
   padding-right: calc(1rem + env(safe-area-inset-right));
   overflow-y: auto;
   min-height: 0;
+  /* Shell chrome never participates in text selection (PLAN.md P3) — a touch drag
+     starting near it must not select text instead of driving a gesture. */
+  user-select: none;
 }
 
 .wy-wordmark {
@@ -97,6 +100,9 @@ body {
   inset: 0;
   background: var(--wy-board-bg);
   outline-offset: 2px;
+  /* A touch/pen press-adjust-release drag must not be stolen by browser scroll/gesture
+     handling (PLAN.md P3). */
+  touch-action: none;
 }
 
 .wy-board:focus-visible {
@@ -114,6 +120,7 @@ body {
   max-width: calc(100% - 1rem);
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
+  user-select: none; /* Shell chrome (PLAN.md P3) */
 }
 
 .wy-rail {
@@ -127,6 +134,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  user-select: none; /* Shell chrome (PLAN.md P3) */
 }
 
 /* --- Card: the single M1 tower, in the Rail (PLAN.md P2) --- */
@@ -146,6 +154,9 @@ body {
   border-radius: 6px;
   cursor: pointer;
   text-align: left;
+  /* A Card-origin drag must not be stolen by browser scroll/gesture handling
+     (PLAN.md P3). */
+  touch-action: none;
 }
 
 .wy-card:focus-visible {

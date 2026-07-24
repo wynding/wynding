@@ -21,7 +21,7 @@ vi.mock('./input', async (importOriginal) => {
     ...actual,
     attachInput: vi.fn((...args: Parameters<typeof actual.attachInput>): InputHandle => {
       const handle = actual.attachInput(...args);
-      return { destroy: handle.destroy, reset: vi.fn(handle.reset) };
+      return { destroy: handle.destroy, reset: vi.fn(handle.reset), abort: handle.abort };
     }),
   };
 });
