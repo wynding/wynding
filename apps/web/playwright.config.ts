@@ -18,7 +18,20 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'chromium', testIgnore: /hidpi\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium',
+      testIgnore: /hidpi|touch|rotate/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    // Touch/rotate coverage (#P6): a REAL mobile landscape device profile — `hasTouch`
+    // alone only enables touch events, it does not guarantee `(pointer: coarse)` matches,
+    // which the rotate overlay and the touch gestures both gate on. Every spec here
+    // asserts that media query as its own precondition before testing gated behavior.
+    {
+      name: 'chromium-touch',
+      testMatch: /touch\.spec\.ts|rotate\.spec\.ts/,
+      use: { ...devices['Galaxy S9+ landscape'] },
+    },
     // HiDPI backing-store gates (#28/P5): the same viewport at 1×/2×/3× device pixel
     // ratio. dsf 3 exercises the ≤2 effective-dpr CLAMP (ADR 0005) — the backing store
     // must size to 2×, not 3×, while CSS/pointer geometry stays identical across all

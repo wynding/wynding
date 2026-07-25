@@ -11,9 +11,11 @@
 import './ui.css';
 import { createController } from './controller';
 import { createOverlay, type UiAction } from './overlay';
+import { createShell } from './shell';
 import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
+import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { t } from './i18n/t';
 import { mount as mountScene, type BoardGeometry } from '@wynding/render/scene';
 import type { RenderHandle, RenderOverlay } from '@wynding/render';
@@ -34,6 +36,10 @@ export interface AppDeps {
    *  separate from `now` (a monotonic frame clock) so a fresh run varies per reload. */
   readonly seedSource?: () => number;
   readonly prefersReducedMotion?: boolean;
+  /** matchMedia lookup for viewport-gated features (the P5 rotate prompt) — injectable
+   *  for tests; defaults to `doc.defaultView.matchMedia` when available, or an
+   *  always-non-matching stub otherwise (e.g. jsdom without a stub). */
+  readonly matchMedia?: MatchMediaFn;
 }
 
 export interface AppHandle {
@@ -51,29 +57,28 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   let runCounter = 0;
   const nextSeed = (): number => ((seedSource() >>> 0) ^ Math.imul(++runCounter, 0x9e3779b1)) >>> 0;
 
-  const title = doc.createElement('h1');
-  title.className = 'wy-title';
-  // Static "Wynding" (not the board name) — a ratified PLAN §8 decision: RulesetBoard.name
-  // is a runtime content string that cannot be a generated typed catalog key, and shipping
-  // it raw would be untranslatable UI (ADR 0004). Localizing board names + excluding them
-  // from the ruleset hash is deferred ADR 0007 content work. M1 has one board, so no
-  // board-identity is lost in practice.
-  title.textContent = t('app.title');
-
-  const board = doc.createElement('div');
-  board.className = 'wy-board';
-  board.tabIndex = 0; // focusable for the keyboard build cursor
-  board.setAttribute('role', 'application');
-  board.setAttribute('aria-label', t('board.aria'));
-
-  // The board is a sibling of the overlay, so hand it in as a modal-inert + focus-restore
-  // target: while the results dialog is open the board is inert (can't be Tabbed onto), and
-  // closing the dialog (Play again) returns focus to the board rather than dropping to body.
-  const overlay = createOverlay(doc, onAction, settings, keymap, {
-    inertWhileModal: [title, board],
-    restoreFocusOnClose: board,
-  });
-  root.append(title, board, overlay.root);
+  // Pinned DOM topology (PLAN.md P1): #app > .wy-shell (status + main/stage/board+dock +
+  // rail) as siblings of the results/settings/rotate overlays — the Shell is the ONLY node
+  // the modal owner (`modal.ts`, wired inside `createOverlay`) ever toggles `inert` on.
+  const shell = createShell(doc);
+  const board = shell.board;
+  const overlay = createOverlay(
+    doc,
+    onAction,
+    controller,
+    settings,
+    keymap,
+    shell,
+    controller.ruleset,
+    // Cancel any in-flight placement gesture when settings opens, exactly as the rotate
+    // prompt does. The input manager is created below (it needs `shell.card.root`), so this
+    // is a deferred forward reference — the same wiring as the hoisted `onAction` above; the
+    // closure only runs at click time, long after `input` is initialized.
+    () => input.abort(),
+  );
+  const rotate = doc.createElement('div');
+  rotate.className = 'wy-rotate';
+  root.append(shell.root, overlay.resultsEl, overlay.settingsEl, rotate);
 
   const grid = controller.ruleset.board.grid;
   const geometry: BoardGeometry = {
@@ -83,7 +88,26 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     exit: { col: grid.exit.col, row: grid.exit.row },
   };
   const handle = deps.sceneFactory(board, geometry);
-  const input: InputHandle = attachInput(doc, board, controller, keymap);
+  const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap, {
+    // The class guard (independent of any opener's abort): a placement release must never
+    // COMMIT behind an open modal. `.wy-shell`'s `inert` attribute is the modal owner's own
+    // ground truth (set for exactly the open interval), so read it directly — no new signal.
+    isModalOpen: () => shell.root.hasAttribute('inert'),
+  });
+
+  // The rotate prompt (PLAN.md P5) shares the SAME modal owner `overlay.ts` created (one
+  // stack for results/rotate/settings). `deps.matchMedia` lets tests drive both queries
+  // deterministically; the real default reads `doc.defaultView.matchMedia` (absent under
+  // jsdom unless a test stubs it — same fallback shape as `boot()`'s reduced-motion read
+  // below), degrading to an always-non-matching stub rather than throwing when it's missing.
+  const matchMediaFn: MatchMediaFn =
+    deps.matchMedia ??
+    ((query: string): RotateMediaQueryList => {
+      const mm = doc.defaultView?.matchMedia;
+      if (typeof mm === 'function') return mm.call(doc.defaultView, query);
+      return { matches: false, addEventListener: () => {}, removeEventListener: () => {} };
+    });
+  const rotateHandle = createRotate(doc, rotate, overlay.modal, controller, input, matchMediaFn);
 
   const initialSettings = settings.get(); // one snapshot (get() clones), read both fields
   let colourMode = initialSettings.colourMode;
@@ -104,17 +128,46 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       case 'cycleSpeed':
         controller.cycleSpeed();
         break;
-      case 'callWave':
-        controller.callWaveEarly();
+      case 'start':
+        controller.start();
+        // overlay.update() hides the primary Dock button for the rest of the run once
+        // started (PLAN.md P4), and hiding the focused element drops focus to
+        // document.body. Re-home focus on the board — the natural next actionable place for
+        // a keyboard user (it owns the arrow-cursor + Enter placement path).
+        board.focus();
         break;
-      case 'sell':
+      case 'armTower':
+        controller.armTower(action.tower);
+        // Focus rules (PLAN.md P2): arming via Card click or keyboard moves focus to the
+        // board — it owns the arrow-cursor + Enter placement path, which must keep
+        // working while armed.
+        board.focus();
+        break;
+      case 'escape':
+        controller.escape();
+        break;
+      case 'sellSelected':
+        // Sell → Panel closes; focus re-homes to the board via overlay.ts's renderPanel —
+        // the single Panel-teardown seam that owns focus for EVERY close route (PLAN.md P2),
+        // so no call site here can forget it and drop focus to `document.body`.
         controller.sellSelected();
+        break;
+      case 'closePanel':
+        // Close disarms if armed, else deselects (the same one-layer-at-a-time rule as
+        // Escape). Focus re-homing on teardown (the Card on a disarm-close, the board on a
+        // deselect-close) is unified in renderPanel, so this route no longer re-homes itself.
+        controller.escape();
         break;
       case 'playAgain':
         controller.startRun(nextSeed());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
         overlay.hideResults();
+        // The modal owner restores focus to whatever was focused before the results
+        // dialog opened (generic pre-modal capture); Play-again always wants the board
+        // specifically — the natural next actionable place for a keyboard user — so this
+        // explicit focus wins regardless of what was focused beforehand.
+        board.focus();
         resultsShown = false;
         lastHudKey = '';
         break;
@@ -148,16 +201,30 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       tracers: f.tracers,
     };
     handle.draw(f.prevVm, f.curVm, f.alpha, ov);
+    // Observable sim clock for e2e test hooks (PLAN.md P4) — NOT user-facing, just plain
+    // attributes on the board element so a spec can assert "held"/"frozen" directly
+    // instead of inferring it from a short wait. Cheap dataset writes, so unconditional
+    // every frame (no need to gate behind the hudKey throttle below): `data-sim-tick`/
+    // `data-sim-phase` mirror the real sim (frozen at 0/'pre-wave' while held — the sim
+    // itself has no "held" concept), `data-run-started` is the one place that distinction
+    // becomes visible, and `data-pending-adds` mirrors the Pending-build count shown by
+    // the board's own paused-planning presentation.
+    board.dataset.simTick = String(f.curVm.tick);
+    board.dataset.simPhase = f.curVm.phase;
+    board.dataset.runStarted = String(controller.uiState().started);
+    board.dataset.pendingAdds = String(f.pendingAdds.length);
     // ...but the HUD only changes on a tick/pause/speed/selection boundary, so gate its
     // recompute + DOM writes on that (they're redundant on the ~60 fps render hot path).
-    const selPresent = f.selection !== null;
     // Key on selection IDENTITY (its cell), not just presence: switching between two towers
     // while paused (no tick change) must still refresh the Sell refund for the new tower.
     const selId = f.selection === null ? 'none' : `${f.selection.col},${f.selection.row}`;
     // Include the pending-buffer revision (#37+#27): while paused, `curVm.tick` never
     // changes, so a same-tick pending build/sell needs its own key component to force a
-    // HUD refresh (presented bounty reads the shared projection).
-    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}`;
+    // HUD refresh (presented bounty reads the shared projection). `uiRev` (PLAN.md P2)
+    // covers arm/disarm/selection/outcome changes that don't otherwise move the tick/
+    // pause/speed/selection/pendingRevision key components (e.g. an armed-but-rejected
+    // placement, which changes nothing else here).
+    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}|${controller.uiRev()}`;
     if (hudKey !== lastHudKey) {
       lastHudKey = hudKey;
       const hud = controller.hud();
@@ -165,9 +232,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         hud,
         paused: controller.isPaused(),
         speed: controller.speed(),
-        canSell: selPresent,
+        ui: controller.uiState(),
         refund: controller.refundForSelection(),
-        canCallWave: hud.phase === 'pre-wave',
       });
       if (controller.isTerminal() && !resultsShown) {
         overlay.showResults(hud);
@@ -180,15 +246,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
+      rotateHandle.destroy();
       input.destroy();
       handle.destroy();
       overlay.destroy();
-      // Remove the app-owned siblings too — overlay.destroy() only removes its own root,
-      // so leaving these behind would stack a duplicate title/board (an extra keyboard
-      // focus target, possibly still inert from an open results dialog) on every
+      shell.destroy();
+      // Remove the rotate element too — overlay.destroy()/shell.destroy() only remove
+      // their own roots, so leaving this behind would stack a duplicate on every
       // createApp() a host runs in the same root.
-      title.remove();
-      board.remove();
+      rotate.remove();
     },
   };
 }

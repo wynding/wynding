@@ -6,7 +6,7 @@
 
 /** The bindable game actions (each has a catalog label under `action.*`). */
 export type GameAction =
-  'up' | 'down' | 'left' | 'right' | 'confirm' | 'sell' | 'callWave' | 'pause' | 'speed';
+  'up' | 'down' | 'left' | 'right' | 'confirm' | 'sell' | 'start' | 'pause' | 'speed' | 'armTower1';
 
 const DEFAULTS: Readonly<Record<GameAction, string>> = {
   up: 'ArrowUp',
@@ -15,9 +15,15 @@ const DEFAULTS: Readonly<Record<GameAction, string>> = {
   right: 'ArrowRight',
   confirm: 'Enter',
   sell: 'KeyX',
-  callWave: 'KeyC',
+  // Triggers `start()` (PLAN.md P4): pre-start, launches the run (M1's one wave); a
+  // no-op once already started (no later-wave UI in M1).
+  start: 'KeyC',
   pause: 'Space',
   speed: 'KeyF',
+  // Arms the M1 `basic` Card for placement (PLAN.md P2). Handled at document scope
+  // (overlay.ts), not the board's own keydown switch, so it works regardless of which
+  // element currently has focus (Card, board, or neither) — "any state" per the P2 table.
+  armTower1: 'Digit1',
 };
 
 // Derived from DEFAULTS (insertion order) so the action list, the union, and the default
