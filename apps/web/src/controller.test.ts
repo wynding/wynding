@@ -799,7 +799,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed
   });
 
-  it('armed: hovering the occupied footprint keeps the invalid ghost — a click-then-move never erases the rejection cue (FINDING 2)', () => {
+  it('armed: hovering the occupied footprint keeps the invalid ghost — a click-then-move never erases the rejection cue', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.aimAt(3, 3);
@@ -814,7 +814,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.frame().ghost).toMatchObject({ col: 4, row: 4, valid: false });
   });
 
-  it('armed: clicking the SAME occupied cell twice in a row records the identical outcome twice, bumping outcomeSeq both times (Fix A)', () => {
+  it('armed: clicking the SAME occupied cell twice in a row records the identical outcome twice, bumping outcomeSeq both times', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.aimAt(3, 3);
@@ -828,7 +828,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     const second = c.uiState();
     expect(second.lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' }); // unchanged content
     expect(second.outcomeSeq).toBeGreaterThan(first.outcomeSeq); // but a NEW identity — overlay.ts
-    // (Fix A) keys re-announcement on this, not on message-text equality.
+    // The live region keys re-announcement on this, not on message-text equality.
   });
 
   it("armed: click a cell whose footprint overlaps an existing tower (but isn't itself occupied) rejects as 'other', not 'occupied'", () => {

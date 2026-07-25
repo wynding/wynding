@@ -192,7 +192,8 @@ describe('input — mouse (P2 hover/click, unchanged by P3)', () => {
     expect(c.frame().curVm.towers).toHaveLength(1);
   });
 
-  it('a mouse release over Shell chrome never places — stays armed (Codex P2: pointer capture routes the pointerup back to the board)', () => {
+  // Pointer capture routes the pointerup back to the board even when released over chrome.
+  it('a mouse release over Shell chrome never places — stays armed', () => {
     const chrome = document.createElement('div');
     chrome.className = 'wy-dock';
     const c = createController(1);
@@ -423,7 +424,7 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     expect(c.uiState().armed).toBe('basic');
   });
 
-  it('a non-primary pen press (barrel/right button) registers no gesture — its pointerup neither arms nor places (Codex P2)', () => {
+  it('a non-primary pen press (barrel/right button) registers no gesture — its pointerup neither arms nor places', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });

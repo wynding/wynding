@@ -54,7 +54,7 @@
   "panel.sell": "Sell (refund {refund})",
   "panel.upgrade": "Max level",
   "panel.upgrade.desc": "This tower has no further upgrades in this build.",
-  "live.armed": "{name} armed. Click or tap the board to place it.",
+  "live.armed": "{name} armed. Place it on the board.",
   "live.disarmed": "Placement cancelled.",
   "live.placed": "{name} placed.",
   "live.rejected.bounty": "Not enough Bounty.",

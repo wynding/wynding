@@ -182,7 +182,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('the board aria-label names the actual bound keys and refreshes on rebind (CodeRabbit)', () => {
+  it('the board aria-label names the actual bound keys and refreshes on rebind', () => {
     const { keymap, overlay, shell, settingsBtn } = setup();
     // Initially derived from the default keymap (arrows / Enter / X), not hardcoded.
     const initial = shell.board.getAttribute('aria-label')!;
@@ -384,9 +384,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       });
       return live.textContent!;
     };
-    expect(render({ kind: 'armed' })).toBe(
-      'Basic Tower armed. Click or tap the board to place it.',
-    );
+    expect(render({ kind: 'armed' })).toBe('Basic Tower armed. Place it on the board.');
     expect(render({ kind: 'disarmed' })).toBe('Placement cancelled.');
     expect(render({ kind: 'placed' })).toBe('Basic Tower placed.');
     expect(render({ kind: 'rejected', reason: 'bounty' })).toBe('Not enough Bounty.');
@@ -415,7 +413,10 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(setSpy).not.toHaveBeenCalled();
   });
 
-  it('the SAME outcome recorded twice in a row (e.g. rejecting the same occupied cell twice) is announced BOTH times — a new outcomeSeq forces a real textContent mutation even though the message text is identical (Fix A)', () => {
+  // Announcements are keyed on outcomeSeq (outcome identity), not message-text equality:
+  // rejecting the same occupied cell twice is two distinct outcomes, and the second must
+  // reach assistive tech via a real textContent mutation even though the text reads the same.
+  it('re-announces an identical outcome when outcomeSeq changes', () => {
     const { overlay, live } = setup();
     const setSpy = vi.spyOn(live, 'textContent', 'set'); // calls through to the real setter
     const frameFor = (outcomeSeq: number) => ({
@@ -445,7 +446,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions).toEqual([{ type: 'armTower', tower: 'basic' }]);
   });
 
-  it('a global arm hotkey rebound onto Enter arms AND consumes the key (preventDefault), so a focused button is not also activated (Codex P2)', () => {
+  it('a global arm hotkey rebound onto Enter arms AND consumes the key, so a focused button is not also activated', () => {
     const { actions, keymap, settingsBtn } = setup();
     keymap.rebind('armTower1', 'Enter'); // the player rebinds arm onto Enter
     settingsBtn.focus(); // focus sits on a native button (e.g. the settings opener)
