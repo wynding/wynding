@@ -13,6 +13,7 @@
     "lint": "eslint src",
     "test": "vitest run --coverage",
     "e2e": "playwright test",
+    "gen:icons": "node scripts/gen-icons.mjs",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {

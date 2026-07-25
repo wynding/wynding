@@ -58,6 +58,46 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.getByRole('button', { name: 'Accessibility settings' })).toBeFocused();
 });
 
+test('the SERVED page links a manifest that actually launches the game (PLAN.md P2)', async ({
+  page,
+  request,
+}) => {
+  await page.goto('/');
+
+  // Resolve the link the browser itself would follow — not the source path — so a base-path
+  // rewrite (production builds with `--base=/play/`) is exercised rather than assumed.
+  const href = await page
+    .locator('link[rel="manifest"]')
+    .evaluate((el) => (el as HTMLLinkElement).href);
+  const response = await request.get(href);
+  expect(response.status(), `${href} was not served`).toBe(200);
+  const manifest = JSON.parse(await response.text());
+
+  // Relative members resolve against the MANIFEST URL, so an installed app opens the
+  // deployed base path rather than the origin root.
+  expect(manifest.start_url).toBe('.');
+  expect(manifest.scope).toBe('.');
+  expect(manifest.display).toBe('standalone');
+  expect(manifest.name).toBe('Wynding');
+
+  // ...and every icon it declares is actually SERVED (a committed-but-unpublished icon is a
+  // silently uninstallable app on Chromium, which requires a fetchable ≥192px icon).
+  expect(manifest.icons.length).toBeGreaterThan(0);
+  for (const icon of manifest.icons) {
+    const iconUrl = new URL(icon.src, href).toString();
+    const iconResponse = await request.get(iconUrl);
+    expect(iconResponse.status(), `${iconUrl} was not served`).toBe(200);
+    expect(iconResponse.headers()['content-type']).toContain('image/png');
+  }
+  expect(manifest.icons.some((i: { purpose: string }) => i.purpose === 'maskable')).toBe(true);
+
+  // The iOS home-screen icon is linked from the document (iOS ignores the manifest's icons).
+  const appleHref = await page
+    .locator('link[rel="apple-touch-icon"]')
+    .evaluate((el) => (el as HTMLLinkElement).href);
+  expect((await request.get(appleHref)).status(), `${appleHref} was not served`).toBe(200);
+});
+
 test('the settings dialog closes on Escape (the modal owner consumes it first)', async ({
   page,
 }) => {
