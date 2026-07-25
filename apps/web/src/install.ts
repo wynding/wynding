@@ -11,7 +11,10 @@
 //   promptable — the browser delivered `beforeinstallprompt` this session. That is a
 //                CHROMIUM signal, not an Android identifier: it fires on desktop Chromium
 //                too, which is why the banner (a phone-oriented affordance) additionally
-//                requires a coarse pointer while the settings row does not.
+//                requires a coarse pointer while the settings row does not. Chromium
+//                also gates the event on its own engagement heuristics, so its ABSENCE is
+//                not a bug — PLAN.md records that as accepted (graceful, lower conversion),
+//                and iOS is unaffected because its banner is heuristic-free.
 //   ios        — Safari never fires that event and has no programmatic install, so the only
 //                honest affordance is instructions for Add to Home Screen.
 //   other      — no signal and no known manual flow to describe precisely; the settings row
@@ -185,6 +188,12 @@ export function createInstall(deps: InstallDeps): InstallHandle {
   let dismissed = storage.get(DISMISSED_KEY) === '1';
   let bannerEnded = false;
   let promptDeclined = false;
+  // A `prompt()` is awaiting the player's answer in the browser's own dialog. Re-entrancy is
+  // blocked on THIS rather than on clearing `held` early, so `canPrompt` stays true for the
+  // whole time that dialog is on screen — otherwise a re-render behind it (a display-mode or
+  // pointer change, a HUD refresh) would swap the settings row to "your browser doesn't offer
+  // an install prompt" underneath the prompt the browser is showing.
+  let promptPending = false;
   const listeners = new Set<() => void>();
 
   const emit = (): void => {
@@ -250,14 +259,13 @@ export function createInstall(deps: InstallDeps): InstallHandle {
       emit();
     },
     async prompt(): Promise<PromptResult> {
+      // SINGLE-USE, including concurrently: a second activation while the first is still
+      // awaiting the player's answer must not re-call `prompt()` on an event the browser has
+      // already consumed. This module owns that contract rather than relying on the caller.
+      if (promptPending) return 'unavailable';
       const event = held;
       if (event === null) return 'unavailable';
-      // Consume the event NOW, not in `finally`: the `finally` only runs after both awaits
-      // below, so a second activation while the first is still in flight would otherwise see
-      // a non-null `held` and re-call `prompt()` on an already-consumed event (which Chromium
-      // rejects). This module owns its own single-use contract rather than relying on the
-      // caller's in-flight guard.
-      held = null;
+      promptPending = true;
       try {
         await event.prompt();
         const choice = await event.userChoice;
@@ -272,17 +280,19 @@ export function createInstall(deps: InstallDeps): InstallHandle {
           promptDeclined = true;
         }
         return choice.outcome;
-      } catch (err) {
+      } catch {
         // `prompt()` itself can reject (Chromium throws when user activation has expired, and
-        // an embedder/permissions-policy refusal rejects too). The held event is consumed in
-        // `finally` either way, so without this the row would fall back to "your browser
-        // doesn't offer an install prompt" for a session that just fired one. Same copy as a
-        // decline: the offer is gone for now, and the browser menu is the way in.
+        // an embedder/permissions-policy refusal rejects too). RESOLVE rather than re-throw:
+        // the declared return type is `Promise<PromptResult>`, and a refused offer is exactly
+        // "unavailable", not an app error a caller must remember to catch. `promptDeclined`
+        // keeps the settings row from then claiming this browser never offered a prompt.
         promptDeclined = true;
-        throw err;
+        return 'unavailable';
       } finally {
-        // The event was already consumed above; this just publishes the resulting state (the
-        // action hides until the browser delivers a fresh event).
+        // Single-use, whatever happened: a consumed event cannot be re-prompted, so the
+        // action hides until the browser delivers a fresh one.
+        held = null;
+        promptPending = false;
         emit();
       }
     },

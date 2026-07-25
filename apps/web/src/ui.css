@@ -68,8 +68,9 @@ body {
      it here, rather than floating the strip, is what keeps it from colliding with the
      shell-anchored overlay Dock.
      The status row is `minmax(0, auto)` (not bare `auto`): paired with `.wy-hud`'s own
-     max-height, this bounds the status row so its `overflow-y: auto` engages at 200% zoom
-     instead of the status bar growing unbounded and squeezing the board (ADR 0003). */
+     chrome-discounted max-height, this holds the whole status row to 40dvh so its
+     `overflow-y: auto` engages at 200% zoom instead of the status bar growing unbounded and
+     squeezing the board (ADR 0003). */
   grid-template-rows: minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
   /* 100vh fallback declared FIRST — `100dvh` overrides it in browsers that support small/
      dynamic viewport units; the fallback keeps older browsers full-height too. */
@@ -95,7 +96,9 @@ body {
   /* The overflow box MOVED to `.wy-hud` (contract §1). The Dock is now a `.wy-status`
      child, and an absolutely-positioned descendant IS clipped by an ancestor scroll box —
      so Standard `.wy-status` must stay `overflow: visible` or the Dock would vanish behind
-     the status bar's own scrollport. Bounded scrolling lives entirely on `.wy-hud` below. */
+     the status bar's own scrollport. Bounded scrolling lives entirely on `.wy-hud` below,
+     whose cap is the 40dvh row budget MINUS this row's wordmark, gap and padding — so the
+     row still honours ADR 0003's 40dvh bound without being a scroll box itself. */
   overflow: visible;
   /* Shell chrome never participates in text selection (PLAN.md P3) — a touch drag
      starting near it must not select text instead of driving a gesture. */
@@ -109,10 +112,16 @@ body {
 }
 
 /* The chips list: the bounded, labelled, keyboard-reachable scrollport (contract §1). Cap
-   it at ~40% of the (small/dynamic) viewport height so `overflow-y: auto` actually engages
-   under 200% text zoom — without a bound the row would grow to fit its reflowed content and
-   eat the board's space. 40dvh keeps the board's `1fr` row a usable minimum (≥ ~192px at
-   the 320px-tall smallest supported landscape viewport). */
+   it so `overflow-y: auto` actually engages under 200% text zoom — without a bound the row
+   would grow to fit its reflowed content and eat the board's space. The bound ADR 0003
+   commits to is 40dvh for the WHOLE Standard status row, and this is the only capped box in
+   it, so the row's own chrome has to come out of the same budget: the wordmark line
+   (1.1rem × 1.4 line-height ≈ 1.54rem), the row gap it wraps across (0.75rem) and the
+   vertical padding (2 × 0.5rem + the top safe-area inset) all sit OUTSIDE this box — 3.3rem
+   plus the inset. Subtracting them keeps `.wy-status` itself within 40dvh, which keeps the
+   board's `1fr` row a usable minimum (≥ ~192px at the 320px-tall smallest supported
+   landscape viewport). The `max()` floor keeps a chip row visible rather than collapsing to
+   zero if the subtraction ever exceeds the budget on a very short Standard viewport. */
 .wy-hud {
   display: flex;
   flex-wrap: wrap;
@@ -120,7 +129,7 @@ body {
   font-size: 1.1rem;
   min-width: 0;
   min-height: 0;
-  max-height: 40dvh;
+  max-height: max(2.5rem, calc(40dvh - 3.3rem - env(safe-area-inset-top)));
   overflow-y: auto;
 }
 

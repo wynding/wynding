@@ -135,25 +135,36 @@ export async function assertRegionRelations(
   }
 }
 
-/** Contract §5's undeclared-child detection: every VISIBLE direct layout child of
- *  `.wy-shell` / `.wy-main` must carry a declared region attribute. Structural containers
- *  (`.wy-main`) are exempt from carrying one themselves — the rule then requires each of
- *  their visible children to be declared. The `.wy-sr-only` live region is excluded (it has
- *  no layout box to place). A future element cannot ship undeclared. */
+/** The containers whose VISIBLE children must each declare a region. `.wy-status` is walked
+ *  as well as `.wy-shell`/`.wy-main`: Story 11's topology amendment reparented the Dock into
+ *  it, so `.wy-dock` — and anything a future packet adds beside it — is a Shell layout child
+ *  in all but nesting, and would otherwise escape the gate entirely. */
+const WALKED_CONTAINERS = ['.wy-shell', '.wy-main', '.wy-status'];
+
+/** The ENUMERATED exemptions from carrying a region attribute: `.wy-main` is a structural
+ *  container (it holds regions rather than being one — its children are walked instead), and
+ *  the wordmark/HUD are content painted INSIDE the `status` region rather than regions the
+ *  Shell places. Nothing else may ship undeclared. */
+const EXEMPT_FROM_DECLARATION = '.wy-main, .wy-wordmark, .wy-hud';
+
+/** Contract §5's undeclared-child detection: every VISIBLE layout child of `.wy-shell` /
+ *  `.wy-main` / `.wy-status` must carry a declared region attribute, apart from the
+ *  enumerated exemptions above. The `.wy-sr-only` live region is excluded (it has no layout
+ *  box to place). A future element cannot ship undeclared. */
 export async function assertDeclaredRegions(page: Page): Promise<void> {
   const report = await page.evaluate(
-    ({ attr, known }) => {
+    ({ attr, known, containers, exempt }) => {
       const undeclared: string[] = [];
       const unknown: string[] = [];
       const describe = (el: Element): string => `${el.tagName.toLowerCase()}.${el.className}`;
-      for (const containerSel of ['.wy-shell', '.wy-main']) {
+      for (const containerSel of containers) {
         const container = document.querySelector(containerSel);
         if (container === null) continue;
         for (const child of Array.from(container.children)) {
           if (child.classList.contains('wy-sr-only')) continue;
           const r = child.getBoundingClientRect();
           if (r.width === 0 && r.height === 0) continue; // not rendered in this layout
-          if (child.matches('.wy-main')) continue; // the enumerated structural exemption
+          if (child.matches(exempt)) continue;
           const region = child.getAttribute(attr);
           if (region === null) undeclared.push(describe(child));
           else if (!known.includes(region)) unknown.push(`${describe(child)} → ${region}`);
@@ -161,7 +172,12 @@ export async function assertDeclaredRegions(page: Page): Promise<void> {
       }
       return { undeclared, unknown };
     },
-    { attr: REGION_ATTR, known: [...LAYOUT_REGIONS] as string[] },
+    {
+      attr: REGION_ATTR,
+      known: [...LAYOUT_REGIONS] as string[],
+      containers: WALKED_CONTAINERS,
+      exempt: EXEMPT_FROM_DECLARATION,
+    },
   );
   expect(report.undeclared, 'visible layout children missing a data-wy-region').toEqual([]);
   expect(report.unknown, 'layout children declaring a region outside the registry').toEqual([]);

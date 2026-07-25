@@ -472,24 +472,11 @@ export function createOverlay(
   }
   instructionsClose.addEventListener('click', () => modal.close(instructionsOverlay));
 
-  /** Fire the held prompt. Single-use is enforced inside `install.prompt()`; this only has
-   *  to avoid double-firing while one is in flight (a second activation would hit an already
-   *  consumed event). */
-  let promptInFlight = false;
+  /** Fire the held prompt. `install.prompt()` owns the single-use contract — including the
+   *  concurrent case — and resolves to `'unavailable'` rather than rejecting on a refusal, so
+   *  there is nothing to guard or catch here. */
   function runPrompt(): void {
-    if (promptInFlight) return;
-    promptInFlight = true;
-    // `install.prompt()` deliberately does NOT swallow a rejection from the browser's own
-    // `prompt()` (Chromium throws when the event was already consumed or user activation has
-    // expired), and `.finally()` re-rejects — so the caller must attach the rejection handler
-    // or a single tap can raise an `unhandledrejection`. Same shape as fullscreen.ts's
-    // request path: a failed offer is simply "unavailable", not an app error.
-    void install
-      .prompt()
-      .catch(() => 'unavailable' as const)
-      .finally(() => {
-        promptInFlight = false;
-      });
+    void install.prompt();
   }
 
   const installActivate = (): void => {

@@ -202,12 +202,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // across Play-again, which returns to a pre-start state (PLAN.md P3). Mid-run chrome
       // that re-appears between runs is noise, not a second chance.
       install.endBannerForSession();
+      // overlay.update() hides the primary Dock button for the rest of the run once started
+      // (PLAN.md P4), and hiding the focused element drops focus to document.body. Re-home
+      // focus on the board — the natural next actionable place for a keyboard user (it owns
+      // the arrow-cursor + Enter placement path).
+      //
+      // INSIDE the edge, deliberately: the keymapped start key routes here too, and pressing
+      // it again mid-run is a no-op on the controller. Re-homing unconditionally would yank
+      // focus off the Card or the chips scrollport and lose the player's place for nothing.
+      board.focus();
     }
-    // overlay.update() hides the primary Dock button for the rest of the run once started
-    // (PLAN.md P4), and hiding the focused element drops focus to document.body. Re-home
-    // focus on the board — the natural next actionable place for a keyboard user (it owns
-    // the arrow-cursor + Enter placement path).
-    board.focus();
   }
 
   function onAction(action: UiAction): void {

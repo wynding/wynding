@@ -395,6 +395,25 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     expect(document.activeElement).toBe(board); // the same focus re-home the Dock path does
     app.destroy();
   });
+
+  it('pressing the start key MID-RUN does not steal focus (the re-home is edge-gated too)', () => {
+    // `controller.start()` is a no-op once started, so yanking focus to the board would cost
+    // a keyboard player their place on the Card or the chips scrollport for nothing.
+    stubFullscreen();
+    const { root, app, frame } = appWith(true);
+    frame();
+    dockButton(root, 'Start').click();
+    frame();
+
+    const card = root.querySelector<HTMLElement>('.wy-card')!;
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    root
+      .querySelector<HTMLElement>('.wy-board')!
+      .dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
+    expect(document.activeElement).toBe(card);
+    app.destroy();
+  });
 });
 
 describe('main — boot()', () => {

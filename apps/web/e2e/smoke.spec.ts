@@ -1,13 +1,22 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { assertRenderedContrast } from './contrast';
-import { assertDeclaredRegions, assertRegionRelations, projectedGrid } from './layout-probe';
+import {
+  assertDeclaredRegions,
+  assertRegionRelations,
+  projectedGrid,
+  regionRect,
+} from './layout-probe';
 import { firePrompt, installPromptFactory, promptCallCount, stubIosPlatform } from './install-stub';
 import { fullscreenCallCount, stubFullscreen } from './fullscreen-stub';
 
 /** The smallest supported landscape viewport (the Galaxy S9+ landscape profile) — Compact
  *  after Story 11, and the size every pinned board-floor gate is derived against. */
 const VIEWPORT_658 = { width: 658, height: 320 };
+
+/** A representative small PORTRAIT phone viewport — tall enough to render Standard (the
+ *  Compact trigger is `max-height: 500px`), so it gates the horizontal status header. */
+const VIEWPORT_360 = { width: 360, height: 640 };
 
 // One end-to-end smoke over the M1 slice, carrying the ADR 0003 axe-core audit. It
 // exercises the real DOM UI (HUD + controls + settings) and the run lifecycle, then
@@ -537,4 +546,51 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): th
   await expect(lastRebind).toBeFocused();
   await expect(lastRebind).toBeInViewport();
   await page.keyboard.press('Escape');
+});
+
+test('200% text zoom on the Standard layout (360×640): the status row stays inside its 40dvh bound and the board keeps a playable floor', async ({
+  page,
+}) => {
+  // The Compact gate above pins the short-landscape case; this is its Standard twin — the
+  // layout where the status row is a horizontal header, so the wordmark, the wrapped row
+  // gap and the row's padding sit OUTSIDE `.wy-hud`'s cap and have to be inside the same
+  // 40dvh budget (ADR 0003). Without that, the row grows unbounded at 200% and squeezes
+  // the board even though the chips scrollport itself is capped.
+  await page.setViewportSize(VIEWPORT_360);
+  await page.goto('/');
+  expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(false);
+
+  await page.addStyleTag({ content: ':root { font-size: 200% }' });
+
+  // The bound is on the ROW, not just the scrollport: measure `.wy-status`'s own box.
+  // 1px of tolerance for sub-pixel layout rounding.
+  const statusHeight = await page
+    .locator('.wy-status')
+    .evaluate((el) => el.getBoundingClientRect().height);
+  expect(
+    statusHeight,
+    `.wy-status ${statusHeight}px exceeds the 40dvh bound (${VIEWPORT_360.height * 0.4}px)`,
+  ).toBeLessThanOrEqual(VIEWPORT_360.height * 0.4 + 1);
+
+  // ...and the content that no longer fits scrolls inside the chips list rather than
+  // clipping (the ADR 0003 doctrine — same proof as the Compact gate).
+  expect(
+    await page.locator('.wy-hud').evaluate((el) => el.scrollHeight > el.clientHeight),
+    '.wy-hud should scroll internally',
+  ).toBe(true);
+  const lastChip = page.locator('.wy-hud > .wy-chip:not([hidden])').last();
+  await lastChip.scrollIntoViewIfNeeded();
+  await expect(lastChip).toBeInViewport();
+
+  // What the bound buys: the Stage keeps the VERTICAL space the status row would otherwise
+  // eat. Gated on height alone — at 360px wide the Rail, not the status row, is what limits
+  // the projected grid's cellPx, so a cellPx floor here would measure the wrong thing.
+  const stage = await regionRect(page, 'stage');
+  expect(stage, 'the stage region must be present').not.toBeNull();
+  const stageHeight = (stage as { height: number }).height;
+  expect(
+    stageHeight / VIEWPORT_360.height,
+    `stage height ${stageHeight}px below the 50% floor`,
+  ).toBeGreaterThanOrEqual(0.5);
+  await assertRegionRelations(page, 'standard');
 });

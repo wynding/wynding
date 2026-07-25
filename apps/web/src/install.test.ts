@@ -271,7 +271,7 @@ describe('install — the prompt is SINGLE-USE (PLAN.md P3)', () => {
     handle.destroy();
   });
 
-  it('a rejection from prompt() itself still consumes the held event (cleared in finally)', async () => {
+  it('a rejection from prompt() itself RESOLVES to `unavailable` and still consumes the event', async () => {
     const target = fakeTarget();
     const handle = createInstall(deps({ target: target.target }));
     const event = Object.assign(new Event('beforeinstallprompt'), {
@@ -280,7 +280,9 @@ describe('install — the prompt is SINGLE-USE (PLAN.md P3)', () => {
     }) as unknown as BeforeInstallPromptEvent;
     target.dispatch(event);
 
-    await expect(handle.prompt()).rejects.toThrow('already used');
+    // The declared return type is `Promise<PromptResult>` — a refused offer resolves to
+    // 'unavailable' rather than rejecting, so no caller has to remember to catch it.
+    await expect(handle.prompt()).resolves.toBe('unavailable');
     expect(handle.state().canPrompt).toBe(false);
     // ...and the row must not then claim the browser never offered a prompt.
     expect(handle.state().promptDeclined).toBe(true);
@@ -306,6 +308,10 @@ describe('install — the prompt is SINGLE-USE (PLAN.md P3)', () => {
     const second = handle.prompt(); // concurrent, before the first resolves
     expect(await second).toBe('unavailable');
     expect(prompt).toHaveBeenCalledOnce();
+    // ...and while the browser's own dialog is up, the offer still reads as available, so a
+    // re-render behind it cannot swap in "your browser doesn't offer an install prompt".
+    expect(handle.state().canPrompt).toBe(true);
+    expect(handle.state().promptDeclined).toBe(false);
 
     settle({ outcome: 'accepted' });
     expect(await first).toBe('accepted');
