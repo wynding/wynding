@@ -3,6 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { assertRenderedContrast } from './contrast';
 import { assertDeclaredRegions, assertRegionRelations, projectedGrid } from './layout-probe';
 import { firePrompt, installPromptFactory, promptCallCount, stubIosPlatform } from './install-stub';
+import { fullscreenCallCount, stubFullscreen } from './fullscreen-stub';
 
 /** The smallest supported landscape viewport (the Galaxy S9+ landscape profile) — Compact
  *  after Story 11, and the size every pinned board-floor gate is derived against. */
@@ -344,6 +345,17 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+});
+
+test('a fine-pointer session never requests fullscreen on Start (the gate is capability-based)', async ({
+  page,
+}) => {
+  await stubFullscreen(page);
+  await page.goto('/');
+  expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.getByRole('button', { name: 'Start' })).toBeHidden(); // the run did start
+  expect(await fullscreenCallCount(page)).toBe(0);
 });
 
 test('arms the Card via the keyboard hotkey and places with arrows + Enter — a full keyboard-only path', async ({

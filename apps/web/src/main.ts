@@ -16,6 +16,7 @@ import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
+import { requestFullscreen } from './fullscreen';
 import {
   createInstall,
   createStorageAdapter,
@@ -122,6 +123,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   };
   const handle = deps.sceneFactory(board, geometry);
   const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap, {
+    // The keymapped start key routes through the SAME app-level transition as the Dock's
+    // Start button (PLAN.md Story 11 P4) — otherwise it would call `controller.start()`
+    // directly and skip the fullscreen request, the banner latch and the focus re-home.
+    onStart: () => startRun(),
     // The class guard (independent of any opener's abort): a placement release must never
     // COMMIT behind an open modal. `.wy-shell`'s `inert` attribute is the modal owner's own
     // ground truth (set for exactly the open interval), so read it directly — no new signal.
@@ -169,6 +174,42 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     }
   }
 
+  /** The ONE app-level start path (PLAN.md Story 11 P4). Both the Dock's Start button and
+   *  the keymapped start key route through here, so the run transition, the one-shot
+   *  fullscreen request, the install-banner latch and the focus re-home can never diverge
+   *  between the two.
+   *
+   *  Fullscreen is requested only on the `started` false→true EDGE: repeated Start presses
+   *  mid-run never re-request, while Play-again (which returns the run to a pre-start state)
+   *  makes the next Start eligible again. */
+  function startRun(): void {
+    const wasStarted = controller.uiState().started;
+    controller.start();
+    if (!wasStarted && controller.uiState().started) {
+      requestFullscreen({
+        doc,
+        // Matched at request time, not at construction — a tablet can gain or lose a
+        // pointer between load and Start.
+        matchesCoarsePointer: () => matchMediaFn('(pointer: coarse)').matches,
+        // `installed` is checked alongside `standalone` everywhere (PLAN.md P3): an install
+        // accepted in THIS tab does not flip the display-mode query.
+        isStandalone: () => {
+          const s = install.state();
+          return s.standalone || s.installed;
+        },
+      });
+      // The install banner never resurrects after the session's first Start — including
+      // across Play-again, which returns to a pre-start state (PLAN.md P3). Mid-run chrome
+      // that re-appears between runs is noise, not a second chance.
+      install.endBannerForSession();
+    }
+    // overlay.update() hides the primary Dock button for the rest of the run once started
+    // (PLAN.md P4), and hiding the focused element drops focus to document.body. Re-home
+    // focus on the board — the natural next actionable place for a keyboard user (it owns
+    // the arrow-cursor + Enter placement path).
+    board.focus();
+  }
+
   function onAction(action: UiAction): void {
     switch (action.type) {
       case 'togglePause':
@@ -178,16 +219,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.cycleSpeed();
         break;
       case 'start':
-        controller.start();
-        // The install banner never resurrects after the session's first Start — including
-        // across Play-again, which returns to a pre-start state (PLAN.md P3). Mid-run chrome
-        // that re-appears between runs is noise, not a second chance.
-        install.endBannerForSession();
-        // overlay.update() hides the primary Dock button for the rest of the run once
-        // started (PLAN.md P4), and hiding the focused element drops focus to
-        // document.body. Re-home focus on the board — the natural next actionable place for
-        // a keyboard user (it owns the arrow-cursor + Enter placement path).
-        board.focus();
+        startRun();
         break;
       case 'armTower':
         controller.armTower(action.tower);

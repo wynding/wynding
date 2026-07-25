@@ -289,6 +289,114 @@ describe('main — input.reset() across Play-again (#40)', () => {
   });
 });
 
+describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
+  /** Install a fake Fullscreen API on the jsdom document and report the calls. */
+  function stubFullscreen(): { calls: () => number; setActive: (on: boolean) => void } {
+    let calls = 0;
+    let active: Element | null = null;
+    Object.defineProperty(document.documentElement, 'requestFullscreen', {
+      configurable: true,
+      value: () => {
+        calls++;
+        return Promise.resolve();
+      },
+    });
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      get: () => active,
+    });
+    return {
+      calls: () => calls,
+      setActive: (on) => {
+        active = on ? document.documentElement : null;
+      },
+    };
+  }
+
+  /** A createApp harness with a controllable `(pointer: coarse)`. */
+  function appWith(coarse: boolean) {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 7,
+      matchMedia: (query: string) => ({
+        matches: query === '(pointer: coarse)' ? coarse : false,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    return { root, app, frame: () => sched.frame((clock += 16)), advance: () => (clock += 300) };
+  }
+
+  it('7. requests fullscreen ONCE on the started false→true edge; repeated Start presses mid-run never re-request', () => {
+    const fs = stubFullscreen();
+    const { root, app, frame } = appWith(true);
+    frame();
+    const primaryBtn = dockButton(root, 'Start');
+    primaryBtn.click();
+    expect(fs.calls()).toBe(1);
+
+    // The Dock button hides once started, but the keymapped start key stays live — pressing
+    // it again mid-run must not re-request (and, in a real browser, `fullscreenElement`
+    // would also already be set).
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
+    expect(fs.calls()).toBe(1);
+    app.destroy();
+  });
+
+  it('8. Play-again then a fresh Start requests again (the edge is re-armed, not spent)', () => {
+    const fs = stubFullscreen();
+    const { root, app, frame } = appWith(true);
+    frame();
+    dockButton(root, 'Start').click();
+    expect(fs.calls()).toBe(1);
+
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) frame();
+    expect(results.hidden).toBe(false);
+    results.querySelectorAll<HTMLButtonElement>('.wy-btn')[0]!.click(); // Play again
+    frame();
+
+    dockButton(root, 'Start').click();
+    expect(fs.calls()).toBe(2);
+    app.destroy();
+  });
+
+  it('a fine-pointer session never requests fullscreen, and Start still works', () => {
+    const fs = stubFullscreen();
+    const { root, app, frame } = appWith(false);
+    frame();
+    const primaryBtn = dockButton(root, 'Start');
+    primaryBtn.click();
+    frame();
+    expect(fs.calls()).toBe(0);
+    expect(primaryBtn.hidden).toBe(true); // the run started regardless
+    app.destroy();
+  });
+
+  it('the keymapped start key routes through the SAME app-level path as the Dock button', () => {
+    // Closes the bypass: `input.ts` used to call `controller.start()` directly, so the key
+    // would have skipped fullscreen, the install-banner latch and the focus re-home.
+    const fs = stubFullscreen();
+    const { root, app, frame } = appWith(true);
+    frame();
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
+    frame();
+    expect(fs.calls()).toBe(1);
+    expect(board.dataset.runStarted).toBe('true');
+    expect(document.activeElement).toBe(board); // the same focus re-home the Dock path does
+    app.destroy();
+  });
+});
+
 describe('main — boot()', () => {
   it('returns null when there is no #app root', () => {
     expect(boot(document)).toBeNull();

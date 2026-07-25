@@ -10,6 +10,7 @@ import {
   type Rect,
 } from './layout-probe';
 import { firePrompt, installPromptFactory, stubIosPlatform } from './install-stub';
+import { stubFullscreen } from './fullscreen-stub';
 
 // compact.spec.ts — the standing gate for Story 11's two-layouts contract. It runs under
 // BOTH the default `chromium` project and `chromium-touch` (playwright.config.ts extends
@@ -52,6 +53,10 @@ async function gotoAt(
   size: { width: number; height: number },
 ): Promise<void> {
   await page.setViewportSize(size);
+  // Some of these tests press Start under the touch project, where the fullscreen gate is
+  // live; a real request would resize the viewport every projection floor here is measured
+  // against (PLAN.md P4).
+  await stubFullscreen(page);
   await page.goto('/');
   await expect(page.locator('.wy-board')).toBeVisible();
 }

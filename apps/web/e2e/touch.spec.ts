@@ -2,6 +2,7 @@ import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
+import { fullscreenCallCount, stubFullscreen } from './fullscreen-stub';
 
 // Touch placement (PLAN.md P3/P6): press-adjust-release with the offset ghost, tap-vs-drag
 // on the Card, and the chrome/off-board cancellation rule. Runs ONLY under the
@@ -80,6 +81,10 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
   let session: CDPSession;
 
   test.beforeEach(async ({ page, context }) => {
+    // Every touch-project spec that presses Start stubs the Fullscreen API first (PLAN.md
+    // P4): a real request would resize the viewport out from under this spec's projected-cell
+    // geometry, and headless Chromium may refuse it outright anyway.
+    await stubFullscreen(page);
     await page.goto('/');
     // Precondition: the gated behavior below depends on `(pointer: coarse)` — `hasTouch`
     // alone does not guarantee it, so assert it rather than assume the device profile.
@@ -95,6 +100,21 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     // Press Start first (PLAN.md P6): a touch build on a HELD run stays Pending — the
     // commit assertions below need the sim actually stepping.
     await page.getByRole('button', { name: 'Start' }).click();
+  });
+
+  // The one dedicated gate assertion (PLAN.md P4). Real fullscreen is not CI-exercisable —
+  // see `fullscreen-stub.ts` — so this proves the app REQUESTED it under the gate
+  // (coarse pointer, not standalone, not already fullscreen) on the started false→true edge,
+  // exactly once, and that pressing the start key again mid-run does not re-request.
+  test('Start requests fullscreen once under the coarse-pointer gate, and never again mid-run', async ({
+    page,
+  }) => {
+    // `beforeEach` already pressed Start.
+    expect(await fullscreenCallCount(page)).toBe(1);
+    await page.locator('.wy-board').focus();
+    await page.keyboard.press('KeyC'); // the keymapped start action, mid-run
+    await page.keyboard.press('KeyC');
+    expect(await fullscreenCallCount(page)).toBe(1);
   });
 
   test('press-adjust-release: moving adjusts the ghost, release commits at the offset anchor (not the finger cell)', async ({

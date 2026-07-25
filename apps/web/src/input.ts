@@ -38,6 +38,13 @@ export interface InputOptions {
   /** Hit-test for the Shell-chrome release rule (injectable — jsdom's `elementFromPoint`
    *  is a no-op stub that always returns null). Defaults to `doc.elementFromPoint`. */
   elementFromPoint?: (x: number, y: number) => Element | null;
+  /** The app-level start path (PLAN.md Story 11 P4). The keymapped start key must run the
+   *  SAME transition as the Dock's Start button — the run transition AND its one-shot
+   *  fullscreen request — so the key routes through a threaded callback instead of calling
+   *  `controller.start()` directly, which would silently bypass everything `main.ts` does
+   *  around it. Defaults to the bare `controller.start()` so this module stays usable (and
+   *  unit-testable) on its own; `main.ts` always supplies the real one. */
+  onStart?: () => void;
   /** Is a modal (results/rotate/settings) currently open? The modal owner (`modal.ts`)
    *  inerts `.wy-shell` for exactly the open interval, so `main.ts` wires this to
    *  `shell.root.hasAttribute('inert')` — the ground truth, no new plumbing on the modal
@@ -107,6 +114,7 @@ export function attachInput(
       ? (x: number, y: number) => doc.elementFromPoint(x, y)
       : () => null);
   const isModalOpen = options.isModalOpen ?? (() => false);
+  const onStart = options.onStart ?? ((): void => controller.start());
 
   // Memoize the projection on the board size — it only changes on resize, so a rapid
   // stream of pointermoves reuses one projection instead of allocating per event. Only
@@ -471,7 +479,7 @@ export function attachInput(
         controller.sellSelected();
         break;
       case 'start':
-        controller.start();
+        onStart();
         break;
       case 'pause':
         controller.togglePause();

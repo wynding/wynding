@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { assertRenderedContrast } from './contrast';
+import { stubFullscreen } from './fullscreen-stub';
 
 // The rotate overlay (PLAN.md P5/P6): shown on `(orientation: portrait)` AND
 // `(pointer: coarse)` both matching. Runs under `chromium-touch`
@@ -15,6 +16,10 @@ test('rotating to portrait shows the overlay and auto-pauses; returning to lands
   page,
 }) => {
   test.setTimeout(60_000);
+  // Touch-project spec that presses Start: stub the Fullscreen API first (PLAN.md P4) so a
+  // real request cannot resize the viewport this spec deliberately flips between
+  // landscape and portrait.
+  await stubFullscreen(page);
   await page.goto('/');
 
   // Precondition: the gate is `(pointer: coarse)` — assert it rather than assume the
