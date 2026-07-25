@@ -29,16 +29,48 @@ function uiState(over: Partial<UiState> = {}): UiState {
   return { started: true, armed: null, selection: null, lastOutcome: null, outcomeSeq: 0, ...over };
 }
 
-function setup() {
+/** A minimal fake of the `Controller` slice `createOverlay` reads for the settings
+ *  auto-pause (mirrors `rotate.test.ts`'s fake) — a mutable `started`/`paused` pair plus a
+ *  `pause` spy, avoiding the need to stand up a real Controller. */
+function fakeController(started = true): {
+  uiState: () => { started: boolean };
+  isPaused: () => boolean;
+  pause: ReturnType<typeof vi.fn>;
+  setPaused(v: boolean): void;
+} {
+  let paused = false;
+  const pause = vi.fn(() => {
+    paused = true;
+  });
+  return {
+    uiState: () => ({ started }),
+    isPaused: () => paused,
+    pause,
+    setPaused(v: boolean): void {
+      paused = v;
+    },
+  };
+}
+
+function setup(controller = fakeController()) {
   const actions: UiAction[] = [];
   const settings = createSettings();
   const keymap = createKeymap();
   const shell = createShell(document);
   document.body.appendChild(shell.root);
-  const overlay = createOverlay(document, (a) => actions.push(a), settings, keymap, shell, ruleset);
+  const overlay = createOverlay(
+    document,
+    (a) => actions.push(a),
+    controller,
+    settings,
+    keymap,
+    shell,
+    ruleset,
+  );
   document.body.append(overlay.resultsEl, overlay.settingsEl);
   return {
     actions,
+    controller,
     settings,
     keymap,
     shell,
@@ -657,6 +689,62 @@ describe('overlay — settings dialog (modal)', () => {
     overlay.destroy();
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ' })); // must NOT rebind
     expect(keymap.codeFor('up')).toBe('ArrowUp');
+  });
+});
+
+describe('overlay — settings auto-pause (modal family, mirrors rotate)', () => {
+  function openClose(overlay: ReturnType<typeof setup>['overlay'], settingsBtn: HTMLButtonElement) {
+    settingsBtn.click();
+    return overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!;
+  }
+
+  it('auto-pauses an active, unpaused run when settings opens', () => {
+    const { overlay, controller, settingsBtn } = setup(fakeController(true));
+    expect(controller.pause).not.toHaveBeenCalled();
+    openClose(overlay, settingsBtn);
+    expect(controller.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays paused on close — the player resumes deliberately from the Dock', () => {
+    const { overlay, controller, settingsBtn } = setup(fakeController(true));
+    const closeBtn = openClose(overlay, settingsBtn);
+    expect(controller.isPaused()).toBe(true);
+    closeBtn.click();
+    expect(overlay.settingsEl.hidden).toBe(true);
+    expect(controller.isPaused()).toBe(true); // no auto-resume — closing settings never resumes
+  });
+
+  it('does not auto-pause pre-start (nothing to pause); Start still works after close', () => {
+    const { actions, overlay, controller, settingsBtn, primaryBtn } = setup(fakeController(false));
+    const closeBtn = openClose(overlay, settingsBtn);
+    expect(controller.pause).not.toHaveBeenCalled();
+    closeBtn.click();
+    // The Dock's Start action is unaffected by the settings open/close round-trip.
+    primaryBtn.click();
+    expect(actions.map((a) => a.type)).toContain('start');
+  });
+
+  it('is idempotent when already paused — pauses once, and close does not resume', () => {
+    const controller = fakeController(true);
+    controller.setPaused(true); // already paused (e.g. rotate auto-paused first)
+    const { overlay, settingsBtn } = setup(controller);
+    const closeBtn = openClose(overlay, settingsBtn);
+    expect(controller.pause).not.toHaveBeenCalled(); // guard sees isPaused() — no double-pause
+    expect(controller.isPaused()).toBe(true);
+    closeBtn.click();
+    expect(controller.isPaused()).toBe(true);
+  });
+
+  it('opening settings during a rotate-paused run leaves the pause state uncorrupted', () => {
+    // Rotate auto-paused first (started + paused). Settings opening on top must not pause
+    // again, and closing must not resume — a single, stable pause across both modals.
+    const controller = fakeController(true);
+    controller.setPaused(true);
+    const { overlay, settingsBtn } = setup(controller);
+    const closeBtn = openClose(overlay, settingsBtn);
+    closeBtn.click();
+    expect(controller.pause).not.toHaveBeenCalled();
+    expect(controller.isPaused()).toBe(true);
   });
 });
 

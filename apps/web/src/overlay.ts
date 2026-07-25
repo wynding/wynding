@@ -22,6 +22,7 @@ import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import type { ShellHandle } from './shell';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
+import type { RotateController } from './rotate';
 
 /** A player intent emitted by the overlay for the app to route to the controller. */
 export type UiAction =
@@ -98,12 +99,16 @@ function button(doc: Document, className: string, label: string): HTMLButtonElem
  * Build the overlay into `doc`, wiring the Shell's HUD/Dock/Card (built by `shell.ts`) and
  * owning the results + settings dialogs plus the Panel. `onAction` receives control
  * intents; `settings`/`keymap` are mutated directly by the settings dialog
- * (session-scoped). `ruleset` is read-only (M1's single `basic` tower's stats for the
- * Panel — cost/damage/rangeFp/cadenceTicks never change at runtime).
+ * (session-scoped). `controller` is narrowed to the same slice `rotate.ts` reads — opening
+ * settings inerts the Shell, so it auto-pauses an active run under the identical guard the
+ * rotate prompt uses (the modal family behaves consistently). `ruleset` is read-only (M1's
+ * single `basic` tower's stats for the Panel — cost/damage/rangeFp/cadenceTicks never
+ * change at runtime).
  */
 export function createOverlay(
   doc: Document,
   onAction: (action: UiAction) => void,
+  controller: RotateController,
   settings: SettingsStore,
   keymap: Keymap,
   shell: ShellHandle,
@@ -339,9 +344,19 @@ export function createOverlay(
     },
   };
 
-  settingsBtn.addEventListener('click', () =>
-    modal.open(settingsOverlay, { priority: 'settings' }),
-  );
+  settingsBtn.addEventListener('click', () => {
+    modal.open(settingsOverlay, { priority: 'settings' });
+    // Auto-pause an ACTIVE, unpaused run when settings opens — the Shell goes inert and is
+    // covered while the dialog is up, so an unpaused wave would keep advancing unseen (lives
+    // lost / the run ending inside the dialog). Mirrors rotate.ts's guard exactly (started,
+    // not already paused). Idempotent: if rotate already auto-paused, `isPaused()` makes this
+    // a no-op. On close the run STAYS paused — the player resumes deliberately from the Dock,
+    // like the rotate flow. (Results outranks settings and inerts the Dock, so this handler
+    // can't even fire while results is open — no terminal-state pause interaction here.)
+    if (controller.uiState().started && !controller.isPaused()) {
+      controller.pause();
+    }
+  });
   closeBtn.addEventListener('click', () => modal.close(settingsOverlay));
 
   // --- Game-level Escape + the armTower1 hotkey: document scope, PLAN.md P2 ---

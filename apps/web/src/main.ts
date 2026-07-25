@@ -62,7 +62,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // the modal owner (`modal.ts`, wired inside `createOverlay`) ever toggles `inert` on.
   const shell = createShell(doc);
   const board = shell.board;
-  const overlay = createOverlay(doc, onAction, settings, keymap, shell, controller.ruleset);
+  const overlay = createOverlay(
+    doc,
+    onAction,
+    controller,
+    settings,
+    keymap,
+    shell,
+    controller.ruleset,
+  );
   const rotate = doc.createElement('div');
   rotate.className = 'wy-rotate';
   root.append(shell.root, overlay.resultsEl, overlay.settingsEl, rotate);

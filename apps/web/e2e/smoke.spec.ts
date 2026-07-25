@@ -337,6 +337,9 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): ch
   // AND focusing that Close button must scroll it into `.wy-rail`'s own scrollport rather
   // than leaving it clipped off-screen.
   await page.getByRole('button', { name: /Basic Tower/ }).click();
+  // The Panel renders on the next animation frame after arming — wait for it before
+  // measuring rail overflow, or the assertion races the render under parallel load.
+  await expect(page.locator('.wy-panel')).toBeVisible();
   expect(await overflowsInternally('.wy-rail'), '.wy-rail should scroll internally').toBe(true);
   const panelClose = page.locator('.wy-panel').getByRole('button', { name: 'Close panel' });
   await panelClose.scrollIntoViewIfNeeded();
