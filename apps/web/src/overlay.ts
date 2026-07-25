@@ -101,9 +101,12 @@ function button(doc: Document, className: string, label: string): HTMLButtonElem
  * intents; `settings`/`keymap` are mutated directly by the settings dialog
  * (session-scoped). `controller` is narrowed to the same slice `rotate.ts` reads — opening
  * settings inerts the Shell, so it auto-pauses an active run under the identical guard the
- * rotate prompt uses (the modal family behaves consistently). `ruleset` is read-only (M1's
- * single `basic` tower's stats for the Panel — cost/damage/rangeFp/cadenceTicks never
- * change at runtime).
+ * rotate prompt uses (the modal family behaves consistently). `abortGesture` cancels any
+ * in-flight placement gesture on settings-open, exactly as `rotate.ts` does via the input
+ * manager's `abort()` — threaded as a callback (not the input manager itself) because
+ * `main.ts` creates the input manager AFTER the overlay, the same forward-reference wiring
+ * the hoisted `onAction` uses. `ruleset` is read-only (M1's single `basic` tower's stats
+ * for the Panel — cost/damage/rangeFp/cadenceTicks never change at runtime).
  */
 export function createOverlay(
   doc: Document,
@@ -113,6 +116,7 @@ export function createOverlay(
   keymap: Keymap,
   shell: ShellHandle,
   ruleset: CompiledRuleset,
+  abortGesture: () => void,
 ): Overlay {
   const { hud: hudEls, dock, card, panel, live } = shell;
   const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
@@ -345,6 +349,17 @@ export function createOverlay(
   };
 
   settingsBtn.addEventListener('click', () => {
+    // Run the SAME open lifecycle as rotate.ts's `evaluate()` entry path, in order, so the
+    // modal family behaves identically (PLAN.md P1/P5). rotate-open steps:
+    //   1. input.abort()  — cancel any in-flight placement gesture (P3's cancellation
+    //                       contract: ghost cleared always; board-origin stays armed;
+    //                       Card-drag disarms). Without this, a pointer held on the board
+    //                       when settings opens keeps board pointer-capture, so its later
+    //                       pointerup still reaches the release path and could queue a tower
+    //                       behind the inert Shell while the player is in the dialog.
+    //   2. modal.open(overlay, { priority })  — inert the Shell + show/focus the dialog.
+    //   3. auto-pause guard  — pause an ACTIVE, unpaused run (below).
+    abortGesture();
     modal.open(settingsOverlay, { priority: 'settings' });
     // Auto-pause an ACTIVE, unpaused run when settings opens — the Shell goes inert and is
     // covered while the dialog is up, so an unpaused wave would keep advancing unseen (lives
@@ -625,6 +640,10 @@ export function createOverlay(
       }
     },
     showResults(hud: HudVM): void {
+      // Modal-family open lifecycle (same as settings/rotate): abort any in-flight
+      // placement gesture first — the input manager's inert commit-guard is the net, but
+      // every opener aborts for itself so the ghost never lingers behind the dialog.
+      abortGesture();
       cancelCapture?.(); // a match can end mid-rebind — drop the armed capture so the first
       // Enter activates Play Again instead of being swallowed into a rebind.
       const heading = hud.won ? t('results.won') : t('results.lost');

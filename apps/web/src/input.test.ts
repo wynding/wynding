@@ -732,3 +732,65 @@ describe('input — cleanup: destroy(), reset(), abort() (PLAN.md P3)', () => {
     expect(c.frame().ghost).toBeNull();
   });
 });
+
+describe('input — modal-open commit guard (the class guard)', () => {
+  it('a board release while the Shell is inert commits nothing and stays armed — no abort needed', () => {
+    // The belt-and-suspenders guard, independent of any modal opener remembering to abort():
+    // a pointer captured on the board before a modal opened still routes its pointerup here,
+    // even though the board is now inert. Model the ground truth `main.ts` reads — the
+    // Shell's own `inert` attribute — rather than a bare boolean.
+    const shellHost = document.createElement('div');
+    document.body.appendChild(shellHost);
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [card], c, createKeymap(), {
+      getRect: () => RECT,
+      isModalOpen: () => shellHost.hasAttribute('inert'),
+    });
+    c.armTower('basic');
+    board.dispatchEvent(ptr('pointerdown', 35, 105, 'touch')); // held, anchor (3,8), valid ghost
+    expect(c.frame().ghost).not.toBeNull();
+
+    shellHost.setAttribute('inert', ''); // a modal opens while the gesture is held; NO abort() ran
+
+    board.dispatchEvent(ptr('pointerup', 35, 105, 'touch'));
+    expect(c.uiState().armed).toBe('basic'); // board-origin cancellation semantics: stays armed…
+    expect(c.frame().ghost).toBeNull(); // …ghost cleared
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // nothing queued behind the inert Shell
+  });
+
+  it('a Card-drag release while the Shell is inert commits nothing and disarms — no abort needed', () => {
+    const shellHost = document.createElement('div');
+    document.body.appendChild(shellHost);
+    const c = createController(1);
+    c.start();
+    attachInput(document, board, [card], c, createKeymap(), {
+      getRect: () => RECT,
+      isModalOpen: () => shellHost.hasAttribute('inert'),
+    });
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses the drag threshold → arms
+    expect(c.uiState().armed).toBe('basic');
+
+    shellHost.setAttribute('inert', ''); // modal opens mid-drag, NO abort() ran
+
+    card.dispatchEvent(ptr('pointerup', 35, 105, 'touch')); // over a valid board cell
+    expect(c.uiState().armed).toBeNull(); // Card-drag cancellation semantics: disarms
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // nothing placed
+  });
+
+  it('leaves a normal release untouched when no modal is open (guard is inert-gated)', () => {
+    // Regression guard: with the default (never-open) signal, the commit path is unchanged.
+    const c = createController(1);
+    c.start();
+    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    c.armTower('basic');
+    board.dispatchEvent(ptr('pointerdown', 35, 105, 'touch'));
+    board.dispatchEvent(ptr('pointerup', 35, 105, 'touch')); // valid ghost → commits normally
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+    expect(c.uiState().armed).toBeNull(); // committed → disarmed → selected
+  });
+});

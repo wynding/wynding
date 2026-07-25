@@ -38,6 +38,14 @@ export interface InputOptions {
   /** Hit-test for the Shell-chrome release rule (injectable — jsdom's `elementFromPoint`
    *  is a no-op stub that always returns null). Defaults to `doc.elementFromPoint`. */
   elementFromPoint?: (x: number, y: number) => Element | null;
+  /** Is a modal (results/rotate/settings) currently open? The modal owner (`modal.ts`)
+   *  inerts `.wy-shell` for exactly the open interval, so `main.ts` wires this to
+   *  `shell.root.hasAttribute('inert')` — the ground truth, no new plumbing on the modal
+   *  owner. A gesture whose pointer was captured on the board/Card BEFORE a modal opened
+   *  still delivers its pointerup here (capture bypasses the inert Shell's hit-testing), so
+   *  the release paths consult this and treat a release-while-open as a cancellation rather
+   *  than committing a placement behind the covered Shell. Defaults to "never open". */
+  isModalOpen?: () => boolean;
 }
 
 /** How many cells above the finger's cell the armed touch/pen ghost is offset, so the
@@ -96,6 +104,7 @@ export function attachInput(
     (typeof doc.elementFromPoint === 'function'
       ? (x: number, y: number) => doc.elementFromPoint(x, y)
       : () => null);
+  const isModalOpen = options.isModalOpen ?? (() => false);
 
   // Memoize the projection on the board size — it only changes on resize, so a rapid
   // stream of pointermoves reuses one projection instead of allocating per event. Only
@@ -392,6 +401,17 @@ export function attachInput(
       cancelPress(e.pointerId, press);
       return;
     }
+    // A modal is open (the Shell is inert): never COMMIT a placement behind the covered,
+    // inert Shell. The pointer was captured on the board before the modal opened, so its
+    // pointerup still routes here even though the board itself is now inert — the very case
+    // that let a held gesture queue a tower behind the dialog (settings/rotate/results).
+    // Route through the SAME cancellation contract as pointercancel/abort() (board-origin:
+    // ghost cleared, stays armed). This kills the class for EVERY modal, independent of
+    // whether that modal's opener remembered to abort() (overlay.ts's rotate-parity).
+    if (isModalOpen()) {
+      cancelPress(e.pointerId, press);
+      return;
+    }
     if (e.pointerType === 'mouse') {
       // Mouse: the armed/selection state machine (PLAN.md P2) — `clickAt` owns
       // cur/ghost/selection for this path entirely. A release geometrically over Shell chrome
@@ -518,6 +538,14 @@ export function attachInput(
         // `armed`, so `cancelPress` is a no-op beyond releasing capture; a press that had
         // already crossed the drag threshold (armed, maybe showing a ghost) disarms and
         // clears the ghost, exactly like a genuine pointercancel would.
+        cancelPress(e.pointerId, press);
+        return;
+      }
+      // Same modal guard as the board release (see onBoardPointerUp): a Card captured before
+      // a modal opened still delivers its pointerup here through the inert Shell. Cancel
+      // rather than toggle/commit — Card-drag disarms; a pre-threshold tap never touched
+      // `armed`, so it's a no-op beyond releasing capture.
+      if (isModalOpen()) {
         cancelPress(e.pointerId, press);
         return;
       }

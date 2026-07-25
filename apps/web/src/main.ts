@@ -70,6 +70,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     keymap,
     shell,
     controller.ruleset,
+    // Cancel any in-flight placement gesture when settings opens, exactly as the rotate
+    // prompt does. The input manager is created below (it needs `shell.card.root`), so this
+    // is a deferred forward reference — the same wiring as the hoisted `onAction` above; the
+    // closure only runs at click time, long after `input` is initialized.
+    () => input.abort(),
   );
   const rotate = doc.createElement('div');
   rotate.className = 'wy-rotate';
@@ -83,7 +88,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     exit: { col: grid.exit.col, row: grid.exit.row },
   };
   const handle = deps.sceneFactory(board, geometry);
-  const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap);
+  const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap, {
+    // The class guard (independent of any opener's abort): a placement release must never
+    // COMMIT behind an open modal. `.wy-shell`'s `inert` attribute is the modal owner's own
+    // ground truth (set for exactly the open interval), so read it directly — no new signal.
+    isModalOpen: () => shell.root.hasAttribute('inert'),
+  });
 
   // The rotate prompt (PLAN.md P5) shares the SAME modal owner `overlay.ts` created (one
   // stack for results/rotate/settings). `deps.matchMedia` lets tests drive both queries

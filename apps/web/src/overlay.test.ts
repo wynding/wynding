@@ -6,9 +6,21 @@ import { createOverlay, type UiAction } from './overlay';
 import { createShell } from './shell';
 import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
-import type { UiState } from './controller';
+import { createController, type UiState } from './controller';
+import { attachInput } from './input';
 
 const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
+
+// A fixed 280×240 board rect → 28×24 cells at 10 px each (mirrors input.test.ts) so the
+// settings-open integration tests below can place/hold a real gesture under jsdom (whose
+// own rects are zero-size). A client point (x,y) maps to cell (⌊x/10⌋, ⌊y/10⌋).
+const RECT = { left: 0, top: 0, width: 280, height: 240 };
+
+function ptr(type: string, clientX: number, clientY: number, pointerId = 1): Event {
+  const e = new Event(type, { bubbles: true, cancelable: true });
+  Object.assign(e, { clientX, clientY, pointerType: 'touch', button: 0, pointerId });
+  return e;
+}
 
 function hud(over: Partial<HudVM> = {}): HudVM {
   return {
@@ -52,7 +64,7 @@ function fakeController(started = true): {
   };
 }
 
-function setup(controller = fakeController()) {
+function setup(controller = fakeController(), abortGesture: () => void = () => {}) {
   const actions: UiAction[] = [];
   const settings = createSettings();
   const keymap = createKeymap();
@@ -66,6 +78,7 @@ function setup(controller = fakeController()) {
     keymap,
     shell,
     ruleset,
+    abortGesture,
   );
   document.body.append(overlay.resultsEl, overlay.settingsEl);
   return {
@@ -75,6 +88,7 @@ function setup(controller = fakeController()) {
     keymap,
     shell,
     overlay,
+    abortGesture,
     pauseBtn: shell.dock.pause,
     speedBtn: shell.dock.speed,
     primaryBtn: shell.dock.primary,
@@ -568,6 +582,101 @@ describe('overlay — settings dialog (modal)', () => {
     closeBtn.click();
     expect(overlay.settingsEl.hidden).toBe(true);
     expect(shell.root.hasAttribute('inert')).toBe(false);
+  });
+
+  it('aborts an in-flight placement gesture BEFORE inerting the Shell (rotate-open parity)', () => {
+    // The abort must run FIRST in the open lifecycle (mirroring rotate.ts's evaluate()):
+    // abort → modal.open → auto-pause. Assert the ordering by sampling the Shell's inert
+    // state at abort time — it must still be non-inert, i.e. the abort precedes modal.open.
+    let inertAtAbort: boolean | null = null;
+    let shellRef: { root: HTMLElement } | null = null;
+    const abort = vi.fn(() => {
+      inertAtAbort = shellRef?.root.hasAttribute('inert') ?? null;
+    });
+    const { shell, settingsBtn } = setup(fakeController(), abort);
+    shellRef = shell;
+    settingsBtn.click();
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(inertAtAbort).toBe(false); // Shell not yet inert when abort ran → abort before open
+    expect(shell.root.hasAttribute('inert')).toBe(true); // and the modal did open afterwards
+  });
+
+  it('a held board placement gesture places nothing when settings opens then releases', () => {
+    // Full wiring: real controller + real input + real overlay share ONE shell, so the Dock
+    // click routes through the overlay's abortGesture into the input manager, exactly as
+    // main.ts wires it. Reproduces the P2 finding: a pointer captured on the board before
+    // the modal opens still delivers its pointerup to the release path.
+    const shell = createShell(document);
+    document.body.appendChild(shell.root);
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    const input = attachInput(document, shell.board, [shell.card.root], c, createKeymap(), {
+      getRect: () => RECT,
+      isModalOpen: () => shell.root.hasAttribute('inert'),
+    });
+    const overlay = createOverlay(
+      document,
+      () => {},
+      c,
+      createSettings(),
+      createKeymap(),
+      shell,
+      ruleset,
+      () => input.abort(),
+    );
+    document.body.append(overlay.resultsEl, overlay.settingsEl);
+
+    c.armTower('basic');
+    shell.board.dispatchEvent(ptr('pointerdown', 35, 105, 1)); // held, anchor (3,8)
+    expect(c.frame().ghost).not.toBeNull();
+
+    shell.dock.settings.click(); // open settings → abort the gesture, inert the Shell
+    expect(shell.root.hasAttribute('inert')).toBe(true);
+    expect(c.frame().ghost).toBeNull(); // board-origin abort cleared the ghost…
+    expect(c.uiState().armed).toBe('basic'); // …but stays armed (P3 board-flow cancellation)
+
+    shell.board.dispatchEvent(ptr('pointerup', 35, 105, 1)); // the delayed release
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // nothing queued behind the dialog
+
+    input.destroy();
+    overlay.destroy();
+  });
+
+  it('a held Card drag disarms and places nothing when settings opens then releases', () => {
+    const shell = createShell(document);
+    document.body.appendChild(shell.root);
+    const c = createController(1);
+    c.start();
+    const input = attachInput(document, shell.board, [shell.card.root], c, createKeymap(), {
+      getRect: () => RECT,
+      isModalOpen: () => shell.root.hasAttribute('inert'),
+    });
+    const overlay = createOverlay(
+      document,
+      () => {},
+      c,
+      createSettings(),
+      createKeymap(),
+      shell,
+      ruleset,
+      () => input.abort(),
+    );
+    document.body.append(overlay.resultsEl, overlay.settingsEl);
+
+    shell.card.root.dispatchEvent(ptr('pointerdown', 10, 10, 1));
+    shell.card.root.dispatchEvent(ptr('pointermove', 35, 105, 1)); // crosses the drag threshold → arms
+    expect(c.uiState().armed).toBe('basic');
+
+    shell.dock.settings.click(); // open settings → abort → Card-drag disarms
+    expect(c.uiState().armed).toBeNull();
+
+    shell.card.root.dispatchEvent(ptr('pointerup', 35, 105, 1)); // the delayed release
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // nothing placed
+
+    input.destroy();
+    overlay.destroy();
   });
 
   it('closes on Escape (the modal owner consumes it before any game-level handling)', () => {
