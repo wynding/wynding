@@ -129,21 +129,17 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.escape();
         break;
       case 'sellSelected':
+        // Sell → Panel closes; focus re-homes to the board via overlay.ts's renderPanel —
+        // the single Panel-teardown seam that owns focus for EVERY close route (PLAN.md P2),
+        // so no call site here can forget it and drop focus to `document.body`.
         controller.sellSelected();
-        // Sell → Panel closes + focus returns to the board (never left to drop to
-        // `document.body`).
-        board.focus();
         break;
-      case 'closePanel': {
+      case 'closePanel':
         // Close disarms if armed, else deselects (the same one-layer-at-a-time rule as
-        // Escape) — captured BEFORE the call so focus lands on the Card only when the
-        // Panel was showing armed type info, not a tower selection.
-        const wasArmed = controller.uiState().armed !== null;
+        // Escape). Focus re-homing on teardown (the Card on a disarm-close, the board on a
+        // deselect-close) is unified in renderPanel, so this route no longer re-homes itself.
         controller.escape();
-        if (wasArmed) shell.card.root.focus();
-        else board.focus();
         break;
-      }
       case 'playAgain':
         controller.startRun(nextSeed());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)

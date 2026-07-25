@@ -302,6 +302,72 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(true);
   });
 
+  // FINDING 1: Panel teardown is the ONE focus-re-homing seam (renderPanel). When focus is
+  // inside the Panel as it closes, it must land on a deliberate control — never on
+  // document.body, which would kill every board-scoped shortcut.
+  it('closing the Panel from a DISARM while a Panel control has focus re-homes focus to the Card', () => {
+    const { overlay, card, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    const panelBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
+    panelBtn.focus();
+    expect(panel.root.contains(document.activeElement)).toBe(true);
+    // Disarm → the Panel closes; focus was inside it, so it re-homes to the Card.
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(document.activeElement).toBe(card.root);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('closing the Panel from a DESELECT while a Panel control has focus re-homes focus to the board', () => {
+    const { overlay, shell, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7 } }),
+      refund: 3,
+    });
+    const panelBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
+    panelBtn.focus();
+    expect(panel.root.contains(document.activeElement)).toBe(true);
+    // Deselect → the Panel closes; focus was inside it, so it re-homes to the board.
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(document.activeElement).toBe(shell.board);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('closing the Panel never STEALS focus that is already outside the Panel (no focus steal)', () => {
+    const { overlay, shell, settingsBtn } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    // Focus sits OUTSIDE the Panel (on the board and, as a stronger no-steal proof, on a Dock
+    // button that is neither re-home target) — a Panel close must leave it exactly there.
+    shell.board.focus();
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(document.activeElement).toBe(shell.board); // untouched, not stolen to the Card
+
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    settingsBtn.focus(); // a control that is neither the Card nor the board
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(document.activeElement).toBe(settingsBtn); // not re-homed to the Card
+  });
+
   it('the live region announces armed/disarmed/placed/rejected/sold, restrained + localized', () => {
     const { overlay, live } = setup();
     let seq = 0;

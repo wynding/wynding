@@ -574,8 +574,8 @@ export function createController(seed: number): Controller {
     return { kind: 'ghost', col, row, valid };
   };
 
-  // Hover-only preview (desktop pointermove, MOUSE ONLY — input.ts never calls this for
-  // touch/pen): update the build ghost but NEVER change the current selection — otherwise
+  // Hover/adjust preview (desktop pointermove, and touch/pen via input.ts's
+  // updateGhostFromPoint): update the build ghost but NEVER change the current selection — otherwise
   // moving the mouse across empty cells toward the Panel's Sell button would silently
   // deselect the tower before the click lands. PLAN.md P2's table restricts the ghost
   // preview to the ARMED state ("armed | pointer moves over board (mouse) | ghost previews
@@ -587,9 +587,14 @@ export function createController(seed: number): Controller {
       return;
     }
     cur = { col, row };
+    // Armed interaction is placement-only (PLAN.md P2 table): an in-grid cell ALWAYS yields
+    // a ghost — valid where placeable, INVALID over an occupied/blocked/unaffordable cell —
+    // never null and never a selection preview. An existing tower is an occupied cell
+    // (mirrors clickAt's 'occupied' rejection), so hovering its footprint shows a PERSISTENT
+    // invalid ghost rather than clearing it; previously the null-on-tower branch let the
+    // slightest hover erase the rejection cue over the very footprint a click had rejected.
     if (towerAt(col, row) !== null) {
-      ghost = null; // no build ghost over an existing tower — a click there rejects as
-      // 'occupied' (clickAt), matching the pre-P2 hover visual ("as today" per the table).
+      ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
       return;
     }
     ghost = { col, row, valid: placementValid(col, row), rangeFp: RANGE_FP(ruleset) };

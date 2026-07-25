@@ -203,6 +203,9 @@ describe('controller — input → command mapping', () => {
     c.previewAt(10, 10); // hover an empty cell, unarmed → no ghost, selection preserved
     expect(c.frame().selection).not.toBeNull();
     expect(c.frame().ghost).toBeNull();
+    c.previewAt(3, 3); // hover over the tower, still unarmed → no ghost (unchanged semantics)
+    expect(c.frame().ghost).toBeNull();
+    expect(c.frame().selection).not.toBeNull();
   });
 
   it('previewAt updates the build ghost while ARMED (selection is already null — arming clears it)', () => {
@@ -214,8 +217,9 @@ describe('controller — input → command mapping', () => {
     c.armTower('basic');
     c.previewAt(10, 10); // hover an empty cell → ghost preview
     expect(c.frame().ghost).toMatchObject({ col: 10, row: 10 });
-    c.previewAt(3, 3); // hover over the tower → no build ghost ("as today" pre-P2 visual)
-    expect(c.frame().ghost).toBeNull();
+    c.previewAt(3, 3); // hover over the tower → PERSISTENT invalid ghost (occupied is a
+    // placement rejection, not a null clear — PLAN.md P2: armed is placement-only)
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
     c.previewAt(-1, -1); // hover off-board → ghost cleared
     expect(c.frame().ghost).toBeNull();
   });
@@ -793,6 +797,21 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
     expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false }); // persistent invalid ghost
     expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed
+  });
+
+  it('armed: hovering the occupied footprint keeps the invalid ghost — a click-then-move never erases the rejection cue (FINDING 2)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3), footprint cols 3-4 / rows 3-4
+    c.armTower('basic');
+    c.clickAt(3, 3); // occupied rejection creates the persistent invalid ghost
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
+    c.previewAt(3, 4); // move within the SAME footprint — previously this nulled the ghost
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 4, valid: false });
+    c.previewAt(4, 4); // still over the footprint — remains invalid, never null
+    expect(c.frame().ghost).toMatchObject({ col: 4, row: 4, valid: false });
   });
 
   it('armed: clicking the SAME occupied cell twice in a row records the identical outcome twice, bumping outcomeSeq both times (Fix A)', () => {

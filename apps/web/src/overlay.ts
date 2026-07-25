@@ -431,8 +431,8 @@ export function createOverlay(
 
   const UPGRADE_DESC_ID = 'wy-panel-upgrade-desc';
 
-  /** Close button → disarm/deselect + focus returns to the Card (handled by main.ts's
-   *  `closePanel` action — this only emits the intent). */
+  /** Close button → disarm/deselect; this only emits the intent. Focus re-homing is
+   *  owned by the renderPanel teardown seam (Card on a disarm-close, board otherwise). */
   function appendCloseButton(container: HTMLElement): void {
     const closePanelBtn = button(doc, 'wy-btn', t('panel.close'));
     closePanelBtn.addEventListener('click', () => onAction({ type: 'closePanel' }));
@@ -489,6 +489,17 @@ export function createOverlay(
       if (panelSellBtn !== null) panelSellBtn.textContent = t('panel.sell', { refund });
       return;
     }
+    // Focus re-homing seam (PLAN.md P2 Focus rules): renderPanel is the ONE place the Panel
+    // subtree is torn down, so EVERY close route funnels through here — Close button, Sell,
+    // Escape-disarm/deselect, a placement transition (armed→selected), and a tick that sold
+    // or removed the selected tower. When focus is inside the Panel at teardown, moving it
+    // deliberately here — rather than at each call site, which could forget — keeps board-
+    // scoped shortcuts alive instead of letting the removed subtree drop focus to
+    // document.body. A disarm-close returns focus to the Card that armed it; a deselect/sell/
+    // removal (and the rare placement transition with focus still in the Panel) returns it to
+    // the board. Focus already OUTSIDE the Panel is never stolen.
+    const prevKey = lastPanelKey;
+    const hadPanelFocus = panel.root.contains(doc.activeElement);
     lastPanelKey = key;
     panelSellBtn = null;
     clearChildren(panel.root);
@@ -513,6 +524,14 @@ export function createOverlay(
       panel.root.hidden = false;
     } else {
       panel.root.hidden = true;
+    }
+    // Re-home only when the torn-down subtree actually held focus AND the rebuild didn't
+    // re-establish it inside the Panel (the Panel never auto-focuses, so a previously-held
+    // focus always lands on document.body here). A disarm-close (was armed, now closed) →
+    // the Card; every other close/transition → the board.
+    if (hadPanelFocus && !panel.root.contains(doc.activeElement)) {
+      if (prevKey.startsWith('armed:') && key === 'closed') card.root.focus();
+      else shell.board.focus();
     }
   }
 
