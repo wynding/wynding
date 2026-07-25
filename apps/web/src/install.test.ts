@@ -282,6 +282,34 @@ describe('install — the prompt is SINGLE-USE (PLAN.md P3)', () => {
 
     await expect(handle.prompt()).rejects.toThrow('already used');
     expect(handle.state().canPrompt).toBe(false);
+    // ...and the row must not then claim the browser never offered a prompt.
+    expect(handle.state().promptDeclined).toBe(true);
+    handle.destroy();
+  });
+
+  it('is re-entrancy safe: a second activation WHILE one is in flight cannot re-call it', async () => {
+    // The single-use guarantee has to hold for concurrent calls too, not just sequential
+    // ones — otherwise it depends entirely on the caller's own in-flight guard.
+    const target = fakeTarget();
+    const handle = createInstall(deps({ target: target.target }));
+    let settle: (v: { outcome: 'accepted' | 'dismissed' }) => void = () => {};
+    const prompt = vi.fn(() => Promise.resolve());
+    const event = Object.assign(new Event('beforeinstallprompt'), {
+      prompt,
+      userChoice: new Promise<{ outcome: 'accepted' | 'dismissed' }>((resolve) => {
+        settle = resolve;
+      }),
+    }) as unknown as BeforeInstallPromptEvent;
+    target.dispatch(event);
+
+    const first = handle.prompt();
+    const second = handle.prompt(); // concurrent, before the first resolves
+    expect(await second).toBe('unavailable');
+    expect(prompt).toHaveBeenCalledOnce();
+
+    settle({ outcome: 'accepted' });
+    expect(await first).toBe('accepted');
+    expect(prompt).toHaveBeenCalledOnce();
     handle.destroy();
   });
 

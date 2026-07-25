@@ -479,9 +479,17 @@ export function createOverlay(
   function runPrompt(): void {
     if (promptInFlight) return;
     promptInFlight = true;
-    void install.prompt().finally(() => {
-      promptInFlight = false;
-    });
+    // `install.prompt()` deliberately does NOT swallow a rejection from the browser's own
+    // `prompt()` (Chromium throws when the event was already consumed or user activation has
+    // expired), and `.finally()` re-rejects — so the caller must attach the rejection handler
+    // or a single tap can raise an `unhandledrejection`. Same shape as fullscreen.ts's
+    // request path: a failed offer is simply "unavailable", not an app error.
+    void install
+      .prompt()
+      .catch(() => 'unavailable' as const)
+      .finally(() => {
+        promptInFlight = false;
+      });
   }
 
   const installActivate = (): void => {
@@ -550,6 +558,14 @@ export function createOverlay(
     installAction.textContent =
       state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
     installExplain.hidden = canAct;
+    // After a declined browser prompt the held event is gone, so the row falls back to the
+    // explanation — but "your browser doesn't offer an install prompt" is untrue for a
+    // session that just saw one. Say what actually happened instead.
+    if (!canAct) {
+      installExplain.textContent = state.promptDeclined
+        ? t('install.settings.declined')
+        : t('install.settings.explain');
+    }
   }
 
   settingsBtn.addEventListener('click', () => {

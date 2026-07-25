@@ -77,10 +77,11 @@ describe('fullscreen — the capability gate (PLAN.md P4)', () => {
     await expect(rejection.catch(() => 'handled')).resolves.toBe('handled');
   });
 
-  it('a synchronously-throwing requestFullscreen is NOT swallowed silently at the wrong layer', () => {
-    // Documenting the boundary: the module catches the PROMISE rejection (the real-world
-    // refusal path). A synchronous throw is a programmer/browser-integration error, and is
-    // deliberately not masked here.
+  it('a synchronously-throwing requestFullscreen is swallowed — Start must never break', () => {
+    // Partial/legacy WebKit element-fullscreen implementations (and some permissions-policy
+    // refusals) raise instead of returning a rejected promise. Start runs between
+    // controller.start() and the rest of the transition, so an escaping throw would strand
+    // the run half-started — absorb it and report "no request made".
     const request = vi.fn(() => {
       throw new Error('boom');
     });
@@ -92,7 +93,8 @@ describe('fullscreen — the capability gate (PLAN.md P4)', () => {
       matchesCoarsePointer: () => true,
       isStandalone: () => false,
     };
-    expect(() => requestFullscreen(d)).toThrow('boom');
+    expect(requestFullscreen(d)).toBe(false);
+    expect(request).toHaveBeenCalledOnce();
   });
 
   it('the pointer probe is read at REQUEST time, not captured at construction', () => {

@@ -41,9 +41,10 @@ export interface FullscreenDeps {
  *   - the app is not already standalone (an installed PWA already has the screen);
  *   - the document is not already fullscreen (never re-request mid-run).
  *
- * Returns whether a request was actually made. A rejection is swallowed: the browser
- * refusing (no user activation, a permissions policy, a user preference) must never break
- * or delay Start — the run begins either way.
+ * Returns whether a request was actually made. A failure is swallowed — whether it arrives
+ * as a rejected promise or as a synchronous throw: the browser refusing (no user activation,
+ * a permissions policy, a user preference, a partial implementation) must never break or
+ * delay Start — the run begins either way.
  */
 export function requestFullscreen(deps: FullscreenDeps): boolean {
   const request = deps.doc.documentElement.requestFullscreen;
@@ -53,8 +54,15 @@ export function requestFullscreen(deps: FullscreenDeps): boolean {
   if (deps.doc.fullscreenElement != null) return false;
   // `navigationUI: 'hide'` asks for the maximally immersive form where supported; browsers
   // that do not understand it simply ignore the hint.
-  void Promise.resolve(request.call(deps.doc.documentElement, { navigationUI: 'hide' })).catch(
-    () => {},
-  );
+  // Both failure shapes are absorbed: a rejected promise AND a synchronous throw (partial
+  // WebKit element-fullscreen implementations, and permissions-policy refusals in some
+  // engines, raise instead of rejecting).
+  try {
+    void Promise.resolve(request.call(deps.doc.documentElement, { navigationUI: 'hide' })).catch(
+      () => {},
+    );
+  } catch {
+    return false;
+  }
   return true;
 }

@@ -48,6 +48,21 @@ const CELL_PX_MIN_NARROW = 10;
  *  suit would stop it catching a full-width status row. Both are asserted, separately. */
 const GRID_HEIGHT_FRACTION_MIN_WITH_BANNER = 0.7;
 
+/** Cell floor with the banner VISIBLE. Deliberately one px under `CELL_PX_MIN`, and asserted
+ *  rather than omitted: the banner's ≥44px control row costs ~56px of a 320px-tall viewport,
+ *  so the 24-row grid lands at cellPx 11 there — 12 would need the whole banner to fit in
+ *  32px, which no ≥44px touch target can. The relaxation is bounded to the PRE-START state
+ *  the banner lives in (nothing is being placed or fought yet) and the player can dismiss it
+ *  to get the full 12px board back — which the test below also asserts. */
+const CELL_PX_MIN_WITH_BANNER = 11;
+
+/** Cell floor with the banner visible AND 200% text zoom — the two board-squeezing states
+ *  stacked. `.wy-banner` is capped at `25dvh` with internal scrolling (ui.css), so its cost
+ *  stays 80px of the 320px-tall viewport instead of the ~185px an unbounded rem-sized banner
+ *  would take, which holds the grid at cellPx 10 — the same floor the width-limited narrow
+ *  viewport gets. Drop the cap and this lands at 5. */
+const CELL_PX_MIN_WITH_BANNER_ZOOMED = 10;
+
 async function gotoAt(
   page: import('@playwright/test').Page,
   size: { width: number; height: number },
@@ -144,6 +159,12 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       grid.height / PHONE.height,
       `grid height ${grid.height}px below the 70% banner-present floor`,
     ).toBeGreaterThanOrEqual(GRID_HEIGHT_FRACTION_MIN_WITH_BANNER);
+    // ...and a CELL floor too: a height fraction alone cannot see a cell-size regression
+    // (264/320 passes the 70% gate at cellPx 11 just as it would at a smaller cell).
+    expect(
+      grid.cellPx,
+      `cellPx ${grid.cellPx} below the banner-present floor`,
+    ).toBeGreaterThanOrEqual(CELL_PX_MIN_WITH_BANNER);
 
     // The banner is a declared region, disjoint from the playable grid like every other
     // chrome region — it never overlaps the board it made room beside.
@@ -158,7 +179,60 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await banner.getByRole('button', { name: 'Dismiss install suggestion' }).click();
     await expect(banner).toBeHidden();
     const restored = await projectedGrid(page);
+    expect(restored.cellPx).toBeGreaterThanOrEqual(CELL_PX_MIN);
     expect(restored.height / PHONE.height).toBeGreaterThanOrEqual(GRID_HEIGHT_FRACTION_MIN);
+  });
+
+  // smoke.spec.ts's 200%-zoom gate runs with the banner ABSENT, and the banner test above
+  // runs at 100% zoom — so the worst case (banner up AND 200% text zoom) had no coverage.
+  // The banner is the shell's only other unbounded-by-default chrome region, and every
+  // length inside it is rem-based, so it is exactly where an unbounded row would eat the
+  // board (ADR 0003's text-resize commitment).
+  test('658×320 with the install banner visible at 200% text zoom: the banner scrolls internally instead of eating the board', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'chromium-touch',
+      'the banner audience requires a coarse pointer — only the touch profile has one',
+    );
+    await installPromptFactory(page);
+    await gotoAt(page, PHONE);
+    await firePrompt(page, 'dismissed');
+    const banner = page.locator('.wy-banner');
+    await expect(banner).toBeVisible();
+
+    await page.addStyleTag({ content: ':root { font-size: 200% }' });
+
+    // The banner is bounded, so it cannot grow past its share of the viewport...
+    const bannerBox = (await banner.boundingBox()) as Rect;
+    expect(
+      bannerBox.height,
+      `banner height ${bannerBox.height}px exceeds its 25dvh bound`,
+    ).toBeLessThanOrEqual(PHONE.height * 0.25 + 1);
+    // ...and what no longer fits scrolls INSIDE it rather than clipping.
+    expect(
+      await banner.evaluate((el) => el.scrollHeight > el.clientHeight),
+      '.wy-banner should scroll internally at 200% zoom',
+    ).toBe(true);
+
+    // Its controls stay reachable inside that scrollport.
+    for (const name of ['Install', 'Dismiss install suggestion']) {
+      const btn = banner.getByRole('button', { name, exact: name === 'Install' });
+      await btn.scrollIntoViewIfNeeded();
+      await btn.focus();
+      await expect(btn).toBeFocused();
+      await expect(btn).toBeInViewport();
+    }
+
+    // ...which is what keeps the board above its floor in this doubly-squeezed state.
+    const grid = await projectedGrid(page);
+    expect(
+      grid.cellPx,
+      `cellPx ${grid.cellPx} below the zoomed banner-present floor`,
+    ).toBeGreaterThanOrEqual(CELL_PX_MIN_WITH_BANNER_ZOOMED);
+
+    await assertDeclaredRegions(page);
+    await assertRegionRelations(page, 'compact');
   });
 
   test('658×320 on iOS: the banner offers instructions, and the first Start ends it for the session', async ({
@@ -230,7 +304,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const settings = page.getByRole('button', { name: 'Settings' });
     const settingsBox = (await settings.boundingBox()) as Rect;
     const hitInsideDock = await page.evaluate(
-      ({ x, y }) => document.elementFromPoint(x, y)?.closest('.wy-dock') !== null,
+      // `el?.closest(...) !== null` would be `true` when nothing is hit at all — exactly the
+      // regression this guards. Test the resolved node instead.
+      ({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.wy-dock')),
       { x: settingsBox.x + settingsBox.width / 2, y: settingsBox.y + settingsBox.height / 2 },
     );
     expect(hitInsideDock, 'the Standard Dock must be hit-testable over the Stage').toBe(true);
@@ -248,8 +324,8 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await page.locator('.wy-hud').focus();
     await expect(page.locator('.wy-hud')).toBeFocused();
     await page.keyboard.press('Tab');
-    const nextIsDockControl = await page.evaluate(
-      () => document.activeElement?.closest('.wy-dock') !== null,
+    const nextIsDockControl = await page.evaluate(() =>
+      Boolean(document.activeElement?.closest('.wy-dock')),
     );
     expect(nextIsDockControl, 'Tab from the chips list must reach the Dock controls').toBe(true);
   });

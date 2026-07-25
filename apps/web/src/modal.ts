@@ -84,7 +84,10 @@ export function createModalOwner(
   const activeEntry = (): StackEntry | null => {
     let best: StackEntry | null = null;
     for (const entry of stack) {
-      if (best === null || PRIORITY_RANK[entry.priority] < PRIORITY_RANK[best.priority]) {
+      // `<=` makes EQUAL priorities tie-break last-opened-wins: opening a second overlay at
+      // the same priority (e.g. the iOS instructions dialog over settings) activates the new
+      // one rather than silently no-opping behind the older entry.
+      if (best === null || PRIORITY_RANK[entry.priority] <= PRIORITY_RANK[best.priority]) {
         best = entry;
       }
     }

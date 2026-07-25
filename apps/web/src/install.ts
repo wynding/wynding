@@ -112,6 +112,11 @@ export interface InstallState {
   /** A held `beforeinstallprompt` is available to fire right now (single-use: it is cleared
    *  once used, and the action hides until the browser delivers a fresh one). */
   readonly canPrompt: boolean;
+  /** The browser's own install prompt was fired this session and did not install: the player
+   *  declined it, or the browser refused to show it (a rejected `prompt()`). The held event is
+   *  single-use, so the offer disappears afterwards — this distinguishes "this browser never
+   *  offered one" from "one was just fired", which need different copy. */
+  readonly promptDeclined: boolean;
   /** Is this session in the BANNER's audience? Coarse pointer AND a branch with something
    *  to offer — the banner is phone-oriented, so a promptable DESKTOP session gets the
    *  settings-row Install action only. */
@@ -179,6 +184,7 @@ export function createInstall(deps: InstallDeps): InstallHandle {
   let installed = false;
   let dismissed = storage.get(DISMISSED_KEY) === '1';
   let bannerEnded = false;
+  let promptDeclined = false;
   const listeners = new Set<() => void>();
 
   const emit = (): void => {
@@ -229,6 +235,7 @@ export function createInstall(deps: InstallDeps): InstallHandle {
         installed,
         dismissed,
         canPrompt: held !== null,
+        promptDeclined,
         bannerAudience: coarseQuery.matches && (b === 'promptable' || b === 'ios'),
       };
     },
@@ -245,6 +252,12 @@ export function createInstall(deps: InstallDeps): InstallHandle {
     async prompt(): Promise<PromptResult> {
       const event = held;
       if (event === null) return 'unavailable';
+      // Consume the event NOW, not in `finally`: the `finally` only runs after both awaits
+      // below, so a second activation while the first is still in flight would otherwise see
+      // a non-null `held` and re-call `prompt()` on an already-consumed event (which Chromium
+      // rejects). This module owns its own single-use contract rather than relying on the
+      // caller's in-flight guard.
+      held = null;
       try {
         await event.prompt();
         const choice = await event.userChoice;
@@ -252,13 +265,24 @@ export function createInstall(deps: InstallDeps): InstallHandle {
           installed = true;
           dismissed = true;
           storage.set(DISMISSED_KEY, '1');
+        } else {
+          // Not a `dismiss()`: the suggestion stays available (the settings row remains, and
+          // a fresh `beforeinstallprompt` re-arms the button). It only changes the copy the
+          // row shows while there is no held event to fire.
+          promptDeclined = true;
         }
         return choice.outcome;
+      } catch (err) {
+        // `prompt()` itself can reject (Chromium throws when user activation has expired, and
+        // an embedder/permissions-policy refusal rejects too). The held event is consumed in
+        // `finally` either way, so without this the row would fall back to "your browser
+        // doesn't offer an install prompt" for a session that just fired one. Same copy as a
+        // decline: the offer is gone for now, and the browser menu is the way in.
+        promptDeclined = true;
+        throw err;
       } finally {
-        // Single-use, whatever happened — including a rejection from `prompt()` itself. A
-        // consumed event cannot be re-prompted, so the action hides until the browser
-        // delivers a fresh one.
-        held = null;
+        // The event was already consumed above; this just publishes the resulting state (the
+        // action hides until the browser delivers a fresh event).
         emit();
       }
     },

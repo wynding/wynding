@@ -78,6 +78,7 @@ export const EN = {
   "install.ios.close": "Close",
   "install.settings.row": "Install as app",
   "install.settings.explain": "Installing gives Wynding the whole screen. Your browser doesn't offer an install prompt — look for \"Install\" or \"Add to Home Screen\" in its menu.",
+  "install.settings.declined": "Installing gives Wynding the whole screen. You can install any time from your browser's menu — look for \"Install\" or \"Add to Home Screen\".",
 } as const;
 
 export type MessageKey = keyof typeof EN;
@@ -159,4 +160,5 @@ export interface MessageParams {
   "install.ios.close": Record<never, never>;
   "install.settings.row": Record<never, never>;
   "install.settings.explain": Record<never, never>;
+  "install.settings.declined": Record<never, never>;
 }
