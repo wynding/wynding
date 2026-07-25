@@ -13,8 +13,9 @@
 // query text in exactly ONE documented block, and `layout.test.ts` mechanically asserts
 // both facts (one occurrence, string-equal to this constant) so the stylesheet and the
 // TypeScript view of the layout can never silently drift apart. The one Standard-ONLY block
-// (`@media (min-height: …)`, the banner re-budget) is the hand-written complement of this
-// query; `layout.test.ts` gates that pair too, so the two can never overlap.
+// (`@media not all and (max-height: …)`, the banner re-budget) is the hand-written
+// gap-free complement (negation) of this query; `layout.test.ts` gates that pair too, so
+// the two can never overlap or leave a fractional-height gap.
 
 /** The Compact trigger (contract §3). Viewport HEIGHT alone — a narrow-but-tall window is
  *  still Standard; a short-but-wide one (a phone in landscape) is Compact. */

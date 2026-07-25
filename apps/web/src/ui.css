@@ -188,10 +188,12 @@ body {
    Compact is unaffected — there the banner is a bottom row beside a status COLUMN, and its
    25dvh cost is pinned separately by compact.spec.ts.
 
-   This prelude is the hand-written COMPLEMENT of the Compact trigger (`COMPACT_QUERY`, one
-   pixel above its `max-height`) — `layout.test.ts` mechanically asserts the pair stays
-   complementary, so moving the trigger without moving this line fails CI. */
-@media (min-height: 501px) {
+   This prelude is the hand-written COMPLEMENT of the Compact trigger (`COMPACT_QUERY`),
+   expressed as its gap-free NEGATION rather than `min-height: 501px` — an integer
+   complement leaves fractional viewport heights (e.g. 500.5px under page zoom) matching
+   NEITHER fork. `layout.test.ts` mechanically asserts the pair stays complementary, so
+   moving the trigger without moving this line fails CI. */
+@media not all and (max-height: 500px) {
   .wy-shell:has(.wy-banner:not([hidden])) .wy-hud {
     max-height: max(2.5rem, calc(25dvh - 3.3rem - env(safe-area-inset-top)));
   }
@@ -488,6 +490,29 @@ body {
   align-items: center;
   gap: 0.5rem;
   min-height: 44px;
+}
+
+.wy-install-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+/* The explicit display out-specifies the UA `[hidden]` default — restore it (same
+   pattern as the Dock buttons and the banner). */
+.wy-install-row[hidden] {
+  display: none;
+}
+
+.wy-install-row h3 {
+  margin: 0;
+}
+
+.wy-install-explain {
+  margin: 0;
+  color: var(--wy-fg-dim);
+  font-size: 0.95rem;
 }
 
 .wy-rebind {

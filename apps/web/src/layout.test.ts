@@ -29,24 +29,29 @@ function mediaPreludes(source: string): string[] {
 
 describe('layout — the one published Compact trigger (contract §3)', () => {
   it('ui.css declares the Compact trigger in exactly ONE media block', () => {
-    const matching = mediaPreludes(css).filter((p) => p.includes('max-height'));
+    // The complement block (`not all and …`) also contains the `max-height` substring —
+    // exclude `not`-prefixed preludes so only positive triggers are counted.
+    const matching = mediaPreludes(css).filter(
+      (p) => p.includes('max-height') && !p.startsWith('not'),
+    );
     expect(matching).toHaveLength(1);
   });
 
   it("that block's query is string-equal to COMPACT_QUERY", () => {
-    const matching = mediaPreludes(css).filter((p) => p.includes('max-height'));
+    const matching = mediaPreludes(css).filter(
+      (p) => p.includes('max-height') && !p.startsWith('not'),
+    );
     expect(matching[0]).toBe(COMPACT_QUERY);
   });
 
-  it('the Standard-only re-budget block is the exact COMPLEMENT of COMPACT_QUERY', () => {
+  it('the Standard-only re-budget block is the exact gap-free COMPLEMENT of COMPACT_QUERY', () => {
     // ui.css cannot negate a TypeScript constant, so the Standard-only fork at the banner
-    // re-budget is written as `(min-height: <max-height + 1>px)`. Assert the pair stays
-    // complementary — otherwise moving the trigger would leave a band of viewports matching
-    // BOTH forks, and the higher-specificity re-budget would win inside Compact.
-    const compactPx = Number(/max-height:\s*(\d+)px/.exec(COMPACT_QUERY)?.[1]);
-    expect(Number.isFinite(compactPx)).toBe(true);
-    const matching = mediaPreludes(css).filter((p) => p.includes('min-height'));
-    expect(matching).toEqual([`(min-height: ${compactPx + 1}px)`]);
+    // re-budget is written as the query's NEGATION (`not all and <trigger>`), which is
+    // gap-free for fractional viewport heights — `(min-height: 501px)` would leave e.g.
+    // 500.5px (page zoom) matching NEITHER fork. Assert the pair stays complementary —
+    // otherwise moving the trigger would strand the re-budget on a stale query.
+    const matching = mediaPreludes(css).filter((p) => p.startsWith('not'));
+    expect(matching).toEqual([`not all and ${COMPACT_QUERY}`]);
   });
 
   it('COMPACT_QUERY is height-keyed only (decision 1: viewport height alone, never pointer)', () => {
