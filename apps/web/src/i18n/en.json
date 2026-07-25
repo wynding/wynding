@@ -16,8 +16,9 @@
   "controls.start": "Start",
   "controls.playAgain": "Play again",
   "controls.verify": "Verify this run",
-  "controls.settings": "Accessibility settings",
-  "settings.title": "Accessibility",
+  "controls.settings": "Settings",
+  "settings.title": "Settings",
+  "settings.accessibility": "Accessibility",
   "settings.close": "Close",
   "settings.colourMode": "Colour vision mode",
   "settings.colourMode.default": "Default",
@@ -64,5 +65,14 @@
   "live.rejected.pendingCap": "Too many pending actions.",
   "live.sold": "Tower sold. Refunded {refund} Bounty.",
   "rotate.title": "Rotate your device",
-  "rotate.message": "Wynding plays best in landscape. Rotate your device to continue."
+  "rotate.message": "Wynding plays best in landscape. Rotate your device to continue.",
+  "install.banner.text": "Wynding plays best as an app — full screen, no browser bars.",
+  "install.banner.install": "Install",
+  "install.banner.how": "Show me how",
+  "install.banner.dismiss": "Dismiss install suggestion",
+  "install.ios.title": "Add Wynding to your Home Screen",
+  "install.ios.body": "In Safari: tap the Share button, then choose \"Add to Home Screen\". Wynding will open full-screen, without browser bars.",
+  "install.ios.close": "Close",
+  "install.settings.row": "Install as app",
+  "install.settings.explain": "Installing gives Wynding the whole screen. Your browser doesn't offer an install prompt — look for \"Install\" or \"Add to Home Screen\" in its menu."
 }

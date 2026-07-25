@@ -8,6 +8,14 @@ import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
 import { createController, type UiState } from './controller';
 import { attachInput } from './input';
+import {
+  createInstall,
+  type BeforeInstallPromptEvent,
+  type InstallEventTarget,
+  type InstallHandle,
+  type InstallMediaQueryList,
+  type StorageAdapter,
+} from './install';
 
 const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
 
@@ -64,12 +72,100 @@ function fakeController(started = true): {
   };
 }
 
-function setup(controller = fakeController(), abortGesture: () => void = () => {}) {
+/** A controllable `matchMedia` for the install detection: every listed query matches. */
+function fakeMatchMedia(matching: readonly string[] = []) {
+  const lists = new Map<string, { matches: boolean; listeners: Set<() => void> }>();
+  const fn = (query: string): InstallMediaQueryList => {
+    let entry = lists.get(query);
+    if (entry === undefined) {
+      entry = { matches: matching.includes(query), listeners: new Set() };
+      lists.set(query, entry);
+    }
+    const e = entry;
+    return {
+      get matches() {
+        return e.matches;
+      },
+      addEventListener: (_t: 'change', l: () => void) => e.listeners.add(l),
+      removeEventListener: (_t: 'change', l: () => void) => e.listeners.delete(l),
+    };
+  };
+  return {
+    fn,
+    set(query: string, matches: boolean): void {
+      const entry = lists.get(query);
+      if (entry === undefined) return;
+      entry.matches = matches;
+      for (const l of [...entry.listeners]) l();
+    },
+  };
+}
+
+/** An in-memory storage adapter, so a test can prove dismissal persists across a recreate
+ *  without depending on jsdom's `localStorage`. */
+function fakeStorage(): StorageAdapter {
+  const map = new Map<string, string>();
+  return {
+    get: (k) => map.get(k) ?? null,
+    set: (k, v) => void map.set(k, v),
+  };
+}
+
+/** A synthetic `beforeinstallprompt`, with a controllable `userChoice`. */
+function fakePromptEvent(outcome: 'accepted' | 'dismissed' = 'accepted') {
+  const prompt = vi.fn(() => Promise.resolve());
+  const event = Object.assign(new Event('beforeinstallprompt'), {
+    prompt,
+    userChoice: Promise.resolve({ outcome }),
+  }) as unknown as BeforeInstallPromptEvent;
+  return { event, prompt };
+}
+
+/** A minimal `InstallEventTarget` a test can dispatch into. */
+function fakeTarget() {
+  const listeners = new Map<string, Set<(e: Event) => void>>();
+  return {
+    target: {
+      addEventListener(type: string, l: (e: Event) => void): void {
+        const set = listeners.get(type) ?? new Set();
+        set.add(l);
+        listeners.set(type, set);
+      },
+      removeEventListener(type: string, l: (e: Event) => void): void {
+        listeners.get(type)?.delete(l);
+      },
+    } satisfies InstallEventTarget,
+    dispatch(e: Event): void {
+      for (const l of [...(listeners.get(e.type) ?? [])]) l(e);
+    },
+    count(type: string): number {
+      return listeners.get(type)?.size ?? 0;
+    },
+  };
+}
+
+interface SetupOptions {
+  readonly install?: InstallHandle;
+}
+
+function setup(
+  controller = fakeController(),
+  abortGesture: () => void = () => {},
+  options: SetupOptions = {},
+) {
   const actions: UiAction[] = [];
   const settings = createSettings();
   const keymap = createKeymap();
   const shell = createShell(document);
   document.body.appendChild(shell.root);
+  const install =
+    options.install ??
+    createInstall({
+      storage: fakeStorage(),
+      matchMedia: fakeMatchMedia().fn,
+      target: fakeTarget().target,
+      navigator: { platform: 'Linux x86_64', maxTouchPoints: 0 },
+    });
   const overlay = createOverlay(
     document,
     (a) => actions.push(a),
@@ -79,8 +175,9 @@ function setup(controller = fakeController(), abortGesture: () => void = () => {
     shell,
     ruleset,
     abortGesture,
+    install,
   );
-  document.body.append(overlay.resultsEl, overlay.settingsEl);
+  document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
   return {
     actions,
     controller,
@@ -88,6 +185,7 @@ function setup(controller = fakeController(), abortGesture: () => void = () => {
     keymap,
     shell,
     overlay,
+    install,
     abortGesture,
     pauseBtn: shell.dock.pause,
     speedBtn: shell.dock.speed,
@@ -182,7 +280,7 @@ describe('overlay — HUD readout', () => {
   it('the Settings button carries its glyph and its localized accessible text', () => {
     const { settingsBtn } = setup();
     expect(dockButtonParts(settingsBtn).icon.textContent).toBe('⚙');
-    expect(dockButtonParts(settingsBtn).text.textContent).toBe('Accessibility settings');
+    expect(dockButtonParts(settingsBtn).text.textContent).toBe('Settings');
   });
 });
 
@@ -551,6 +649,297 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
   });
 });
 
+describe('overlay — install banner, settings row, iOS instructions (PLAN.md Story 11 P3)', () => {
+  const COARSE = '(pointer: coarse)';
+  const STANDALONE = '(display-mode: standalone)';
+
+  /** Build an overlay wired to a controllable install handle. */
+  function installSetup(
+    options: {
+      readonly matching?: readonly string[];
+      readonly platform?: string;
+      readonly maxTouchPoints?: number;
+      readonly storage?: StorageAdapter;
+      readonly abortGesture?: () => void;
+    } = {},
+  ) {
+    const mm = fakeMatchMedia(options.matching ?? [COARSE]);
+    const target = fakeTarget();
+    const install = createInstall({
+      storage: options.storage ?? fakeStorage(),
+      matchMedia: mm.fn,
+      target: target.target,
+      navigator: {
+        platform: options.platform ?? 'Linux x86_64',
+        maxTouchPoints: options.maxTouchPoints ?? 0,
+      },
+    });
+    const s = setup(fakeController(), options.abortGesture ?? (() => {}), { install });
+    // The overlay re-renders on `update()`; wire the install handle's own change signal the
+    // way main.ts does, so a captured prompt refreshes immediately.
+    install.onChange(() => render(false));
+    function render(started: boolean): void {
+      s.overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ started }),
+        refund: 0,
+      });
+    }
+    return { ...s, install, mm, target, render };
+  }
+
+  const bannerVisible = (shell: ReturnType<typeof createShell>): boolean =>
+    !shell.banner.root.hidden;
+
+  it('promptable + coarse pointer: the banner offers Install; `other` offers nothing at all', () => {
+    const promptable = installSetup();
+    promptable.render(false);
+    expect(bannerVisible(promptable.shell)).toBe(false); // `other` — no signal, no banner
+    promptable.target.dispatch(fakePromptEvent().event);
+    expect(bannerVisible(promptable.shell)).toBe(true);
+    expect(promptable.shell.banner.action.textContent).toBe('Install');
+    expect(promptable.shell.banner.text.textContent).toBe(
+      'Wynding plays best as an app — full screen, no browser bars.',
+    );
+    promptable.overlay.destroy();
+  });
+
+  it('iOS + coarse pointer: the banner offers instructions, with no prompt event involved', () => {
+    const ios = installSetup({ platform: 'iPhone', maxTouchPoints: 5 });
+    ios.render(false);
+    expect(bannerVisible(ios.shell)).toBe(true);
+    expect(ios.shell.banner.action.textContent).toBe('Show me how');
+    ios.overlay.destroy();
+  });
+
+  it('a promptable DESKTOP session gets the settings row only — never the banner', () => {
+    const desktop = installSetup({ matching: [] }); // fine pointer
+    desktop.target.dispatch(fakePromptEvent().event);
+    desktop.render(false);
+    expect(bannerVisible(desktop.shell)).toBe(false);
+    const action =
+      desktop.overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-install-action')!;
+    expect(action.hidden).toBe(false);
+    expect(action.textContent).toBe('Install');
+    desktop.overlay.destroy();
+  });
+
+  it('`other`: no banner, and the settings row EXPLAINS instead of offering a dead button', () => {
+    const other = installSetup();
+    other.render(false);
+    const dialog = other.overlay.settingsEl;
+    expect(bannerVisible(other.shell)).toBe(false);
+    expect(dialog.querySelector<HTMLButtonElement>('.wy-install-action')!.hidden).toBe(true);
+    const explain = dialog.querySelector<HTMLElement>('.wy-install-explain')!;
+    expect(explain.hidden).toBe(false);
+    expect(explain.textContent).toContain('Add to Home Screen');
+    other.overlay.destroy();
+  });
+
+  it('standalone (already installed) suppresses BOTH surfaces', () => {
+    const app = installSetup({
+      matching: [COARSE, STANDALONE],
+      platform: 'iPhone',
+      maxTouchPoints: 5,
+    });
+    app.render(false);
+    expect(bannerVisible(app.shell)).toBe(false);
+    expect(app.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!.hidden).toBe(true);
+    app.overlay.destroy();
+  });
+
+  it('the banner is pre-start only, is dismissible once, and never resurrects after the first Start', () => {
+    const storage = fakeStorage();
+    const s = installSetup({ storage });
+    s.target.dispatch(fakePromptEvent().event);
+    s.render(false);
+    expect(bannerVisible(s.shell)).toBe(true);
+
+    // Started → hidden.
+    s.render(true);
+    expect(bannerVisible(s.shell)).toBe(false);
+
+    // Play-again returns to pre-start; the session latch keeps the banner gone.
+    s.install.endBannerForSession();
+    s.render(false);
+    expect(bannerVisible(s.shell)).toBe(false);
+    s.overlay.destroy();
+
+    // A fresh overlay over the SAME storage — a destroy()/recreate inside one session — sees
+    // the dismissal only once it has actually been made.
+    const again = installSetup({ storage });
+    again.target.dispatch(fakePromptEvent().event);
+    again.render(false);
+    expect(bannerVisible(again.shell)).toBe(true);
+    again.shell.banner.dismiss.click();
+    expect(bannerVisible(again.shell)).toBe(false);
+    again.overlay.destroy();
+
+    const third = installSetup({ storage });
+    third.target.dispatch(fakePromptEvent().event);
+    third.render(false);
+    expect(bannerVisible(third.shell), 'dismissal must survive a recreate').toBe(false);
+    third.overlay.destroy();
+  });
+
+  it('a beforeinstallprompt arriving MID-GESTURE aborts it — the banner row moves the stage', () => {
+    const abortGesture = vi.fn();
+    const s = installSetup({ abortGesture });
+    s.render(false);
+    abortGesture.mockClear();
+
+    s.target.dispatch(fakePromptEvent().event); // banner appears → geometry changes
+    expect(bannerVisible(s.shell)).toBe(true);
+    expect(
+      abortGesture,
+      'a banner visibility change must cancel an in-flight gesture',
+    ).toHaveBeenCalled();
+
+    // A re-render with NO visibility change must not keep aborting gestures.
+    abortGesture.mockClear();
+    s.render(false);
+    expect(abortGesture).not.toHaveBeenCalled();
+    s.overlay.destroy();
+  });
+
+  it('the prompt is single-use through the UI: a second activation cannot re-call it', async () => {
+    const s = installSetup();
+    const { event, prompt } = fakePromptEvent('accepted');
+    s.target.dispatch(event);
+    s.render(false);
+
+    s.shell.banner.action.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(prompt).toHaveBeenCalledOnce();
+
+    s.shell.banner.action.click(); // no fresh event has arrived
+    await Promise.resolve();
+    expect(prompt).toHaveBeenCalledOnce();
+    // Accepted → installed → every affordance gone.
+    s.render(false);
+    expect(bannerVisible(s.shell)).toBe(false);
+    expect(s.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!.hidden).toBe(true);
+    s.overlay.destroy();
+  });
+
+  it('appinstalled removes the install UI even though the tab is not standalone', () => {
+    const s = installSetup();
+    s.target.dispatch(fakePromptEvent().event);
+    s.render(false);
+    expect(bannerVisible(s.shell)).toBe(true);
+
+    s.target.dispatch(new Event('appinstalled'));
+    s.render(false);
+    expect(s.install.state().standalone).toBe(false);
+    expect(bannerVisible(s.shell)).toBe(false);
+    expect(s.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!.hidden).toBe(true);
+    s.overlay.destroy();
+  });
+
+  it('dismissing the banner while focus is inside it re-homes focus to Start (never document.body)', () => {
+    const s = installSetup();
+    s.target.dispatch(fakePromptEvent().event);
+    s.render(false);
+    s.shell.banner.dismiss.focus();
+    expect(document.activeElement).toBe(s.shell.banner.dismiss);
+
+    s.shell.banner.dismiss.click();
+    expect(bannerVisible(s.shell)).toBe(false);
+    expect(document.activeElement).toBe(s.shell.dock.primary);
+    s.overlay.destroy();
+  });
+
+  it('an accepted install re-homes focus out of the settings row to the dialog close button', async () => {
+    const s = installSetup({ matching: [] });
+    const { event } = fakePromptEvent('accepted');
+    s.target.dispatch(event);
+    s.render(false);
+
+    const action = s.overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-install-action')!;
+    action.focus();
+    expect(document.activeElement).toBe(action);
+    action.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    s.render(false);
+    expect(s.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!.hidden).toBe(true);
+    expect(document.activeElement).toBe(
+      s.overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close'),
+    );
+    s.overlay.destroy();
+  });
+
+  it('appinstalled while the banner holds focus re-homes to Start', () => {
+    const s = installSetup();
+    s.target.dispatch(fakePromptEvent().event);
+    s.render(false);
+    s.shell.banner.action.focus();
+    s.target.dispatch(new Event('appinstalled'));
+    expect(bannerVisible(s.shell)).toBe(false);
+    expect(document.activeElement).toBe(s.shell.dock.primary);
+    s.overlay.destroy();
+  });
+
+  it('iOS: the banner action opens the instructions dialog, which Escape dismisses via the new metadata', () => {
+    const s = installSetup({ platform: 'iPhone', maxTouchPoints: 5 });
+    s.render(false);
+    expect(s.overlay.instructionsEl.hidden).toBe(true);
+
+    s.shell.banner.action.click();
+    expect(s.overlay.instructionsEl.hidden).toBe(false);
+    expect(s.overlay.instructionsEl.getAttribute('aria-label')).toBe(
+      'Add Wynding to your Home Screen',
+    );
+    expect(s.overlay.instructionsEl.textContent).toContain('tap the Share button');
+    expect(s.shell.root.hasAttribute('inert')).toBe(true);
+    // Focus lands on the dialog's own close target.
+    expect(document.activeElement).toBe(
+      s.overlay.instructionsEl.querySelector('.wy-instructions-close'),
+    );
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
+    expect(s.overlay.instructionsEl.hidden).toBe(true);
+    expect(s.shell.root.hasAttribute('inert')).toBe(false);
+    s.overlay.destroy();
+  });
+
+  it('iOS: opening instructions FROM settings closes settings first, and focus returns to the opener', () => {
+    const s = installSetup({ platform: 'iPhone', maxTouchPoints: 5 });
+    s.render(false);
+    s.shell.dock.settings.focus();
+    s.shell.dock.settings.click();
+    expect(s.overlay.settingsEl.hidden).toBe(false);
+
+    const action = s.overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-install-action')!;
+    expect(action.textContent).toBe('Show me how');
+    action.click();
+
+    // The two never sit on the stack together — settings closes, instructions opens.
+    expect(s.overlay.settingsEl.hidden).toBe(true);
+    expect(s.overlay.instructionsEl.hidden).toBe(false);
+
+    s.overlay.instructionsEl.querySelector<HTMLButtonElement>('.wy-instructions-close')!.click();
+    expect(s.overlay.instructionsEl.hidden).toBe(true);
+    // Focus return per the modal owner's stack rules: back to the settings opener.
+    expect(document.activeElement).toBe(s.shell.dock.settings);
+    s.overlay.destroy();
+  });
+
+  it('destroy() leaks no install nodes (the instructions dialog is torn down with the rest)', () => {
+    const s = installSetup();
+    expect(document.body.contains(s.overlay.instructionsEl)).toBe(true);
+    s.overlay.destroy();
+    expect(document.body.contains(s.overlay.instructionsEl)).toBe(false);
+    expect(document.body.contains(s.overlay.settingsEl)).toBe(false);
+    expect(document.body.contains(s.overlay.resultsEl)).toBe(false);
+  });
+});
+
 describe('overlay — accessibility semantics', () => {
   it('the HUD is a labelled group, NOT a chatty live region', () => {
     const { shell } = setup();
@@ -655,8 +1044,14 @@ describe('overlay — settings dialog (modal)', () => {
       shell,
       ruleset,
       () => input.abort(),
+      createInstall({
+        storage: fakeStorage(),
+        matchMedia: fakeMatchMedia().fn,
+        target: fakeTarget().target,
+        navigator: { platform: 'Linux x86_64', maxTouchPoints: 0 },
+      }),
     );
-    document.body.append(overlay.resultsEl, overlay.settingsEl);
+    document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
 
     c.armTower('basic');
     shell.board.dispatchEvent(ptr('pointerdown', 35, 105, 1)); // held, anchor (3,8)
@@ -693,8 +1088,14 @@ describe('overlay — settings dialog (modal)', () => {
       shell,
       ruleset,
       () => input.abort(),
+      createInstall({
+        storage: fakeStorage(),
+        matchMedia: fakeMatchMedia().fn,
+        target: fakeTarget().target,
+        navigator: { platform: 'Linux x86_64', maxTouchPoints: 0 },
+      }),
     );
-    document.body.append(overlay.resultsEl, overlay.settingsEl);
+    document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
 
     shell.card.root.dispatchEvent(ptr('pointerdown', 10, 10, 1));
     shell.card.root.dispatchEvent(ptr('pointermove', 35, 105, 1)); // crosses the drag threshold → arms

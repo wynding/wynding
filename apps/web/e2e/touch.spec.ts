@@ -254,7 +254,7 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     // and the one the `CHROME_SELECTOR` hit-test has to keep covering). Never commits, and
     // unlike a board-native drag (which stays armed on a rejected placement) a Card-drag
     // cancellation ALSO disarms.
-    const settingsBtn = page.getByRole('button', { name: 'Accessibility settings' });
+    const settingsBtn = page.getByRole('button', { name: 'Settings' });
     const settingsBox = (await settingsBtn.boundingBox()) as {
       x: number;
       y: number;

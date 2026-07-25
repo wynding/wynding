@@ -121,6 +121,7 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.status.getAttribute(REGION_ATTR)).toBe('status');
     expect(shell.dock.root.getAttribute(REGION_ATTR)).toBe('dock');
     expect(shell.rail.getAttribute(REGION_ATTR)).toBe('rail');
+    expect(shell.banner.root.getAttribute(REGION_ATTR)).toBe('banner');
     expect(shell.root.querySelector('.wy-stage')!.getAttribute(REGION_ATTR)).toBe('stage');
     // `.wy-main` is the enumerated structural exemption — it holds regions, it isn't one.
     expect(shell.root.querySelector('.wy-main')!.hasAttribute(REGION_ATTR)).toBe(false);

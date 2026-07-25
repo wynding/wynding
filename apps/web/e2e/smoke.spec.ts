@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { assertRenderedContrast } from './contrast';
 import { assertDeclaredRegions, assertRegionRelations, projectedGrid } from './layout-probe';
+import { firePrompt, installPromptFactory, promptCallCount, stubIosPlatform } from './install-stub';
 
 /** The smallest supported landscape viewport (the Galaxy S9+ landscape profile) — Compact
  *  after Story 11, and the size every pinned board-floor gate is derived against. */
@@ -34,8 +35,8 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   // Open the accessibility settings (now a bounded, labelled modal dialog — sibling of
   // the Shell, which goes inert while it's open) and switch colour-vision mode + reduced
   // motion.
-  await page.getByRole('button', { name: 'Accessibility settings' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
   await expect(page.locator('.wy-shell')).toHaveAttribute('inert', '');
   await page.getByLabel('Deuteranopia').check();
@@ -55,7 +56,7 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await page.getByRole('button', { name: 'Close' }).click();
   await expect(settingsDialog).toBeHidden();
   await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
-  await expect(page.getByRole('button', { name: 'Accessibility settings' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
 });
 
 test('the SERVED page links a manifest that actually launches the game (PLAN.md P2)', async ({
@@ -98,12 +99,90 @@ test('the SERVED page links a manifest that actually launches the game (PLAN.md 
   expect((await request.get(appleHref)).status(), `${appleHref} was not served`).toBe(200);
 });
 
+test('a promptable DESKTOP session gets the settings-row Install action and NO banner, and the prompt is single-use', async ({
+  page,
+}) => {
+  // The init script only installs the factory; the dispatch happens after mount (an
+  // init-script dispatch would fire before the app's listener exists and be lost).
+  await installPromptFactory(page);
+  await page.goto('/');
+  await expect(page.locator('.wy-board')).toBeVisible();
+
+  // Desktop = fine pointer. `beforeinstallprompt` is a Chromium signal, not "Android": the
+  // banner is phone-oriented, so this session gets the settings row only.
+  expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
+  await firePrompt(page, 'accepted');
+  await expect(page.locator('.wy-banner')).toBeHidden();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog).toBeVisible();
+  // The renamed dialog keeps an "Accessibility" heading for the a11y controls (decision 5).
+  await expect(dialog.getByRole('heading', { name: 'Accessibility' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Install as app' })).toBeVisible();
+
+  // Axe with the renamed Settings dialog + install row visible.
+  const settingsAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(settingsAudit.violations, JSON.stringify(settingsAudit.violations, null, 2)).toEqual([]);
+
+  const install = dialog.getByRole('button', { name: 'Install', exact: true });
+  await expect(install).toBeVisible();
+  await install.click();
+  await expect.poll(() => promptCallCount(page)).toBe(1);
+
+  // Accepted → installed for this session → every install affordance goes away, and the
+  // held event was consumed so nothing can re-fire it.
+  await expect(page.locator('.wy-install-row')).toBeHidden();
+  expect(await promptCallCount(page)).toBe(1);
+});
+
+test('an `other` browser is told where to look instead of being offered a dead button', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog.getByRole('heading', { name: 'Install as app' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Install', exact: true })).toBeHidden();
+  await expect(page.locator('.wy-install-explain')).toContainText('Add to Home Screen');
+});
+
+test('iOS: the settings row opens the Add-to-Home-Screen dialog, which Escape dismisses', async ({
+  page,
+}) => {
+  await stubIosPlatform(page);
+  await page.goto('/');
+  await expect(page.locator('.wy-board')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
+  await settingsDialog.getByRole('button', { name: 'Show me how' }).click();
+
+  // Settings closes FIRST, then instructions opens — they never share the stack.
+  await expect(settingsDialog).toBeHidden();
+  const instructions = page.getByRole('dialog', { name: 'Add Wynding to your Home Screen' });
+  await expect(instructions).toBeVisible();
+  await expect(instructions).toContainText('tap the Share button');
+  await expect(page.locator('.wy-shell')).toHaveAttribute('inert', '');
+
+  // Axe with the instructions dialog open.
+  const audit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+
+  // Escape dismisses it via the new per-overlay modal metadata, and focus returns to the
+  // settings opener per the modal owner's stack rules.
+  await page.keyboard.press('Escape');
+  await expect(instructions).toBeHidden();
+  await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
+  await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
+});
+
 test('the settings dialog closes on Escape (the modal owner consumes it first)', async ({
   page,
 }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Accessibility settings' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsDialog).toBeHidden();
@@ -293,9 +372,9 @@ test('settings: focusing the last rebind control then closing via Escape restore
   page,
 }) => {
   await page.goto('/');
-  const opener = page.getByRole('button', { name: 'Accessibility settings' });
+  const opener = page.getByRole('button', { name: 'Settings' });
   await opener.click();
-  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
 
   // The last rebind row (armTower1, GAME_ACTIONS' last entry) — reachable and visible
@@ -409,7 +488,7 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): th
 
   // Every Dock control stays reachable at 200% inside the bounded column, and the region
   // relation table still holds (banner row absent in P1).
-  for (const name of ['Speed: 1x', 'Accessibility settings', 'Start']) {
+  for (const name of ['Speed: 1x', 'Settings', 'Start']) {
     const btn = page.getByRole('button', { name });
     await btn.scrollIntoViewIfNeeded();
     await btn.focus();
@@ -436,7 +515,7 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): th
 
   // Settings: the dialog overflows at 200% and scrolls internally; the same reachability
   // proof for its own scrollport follows.
-  await page.getByRole('button', { name: 'Accessibility settings' }).click();
+  await page.getByRole('button', { name: 'Settings' }).click();
   expect(await overflowsInternally('.wy-settings'), '.wy-settings should scroll internally').toBe(
     true,
   );

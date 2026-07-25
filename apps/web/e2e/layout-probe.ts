@@ -161,7 +161,7 @@ export async function assertDeclaredRegions(page: Page): Promise<void> {
       }
       return { undeclared, unknown };
     },
-    { attr: REGION_ATTR, known: [...LAYOUT_REGIONS, 'banner'] as string[] },
+    { attr: REGION_ATTR, known: [...LAYOUT_REGIONS] as string[] },
   );
   expect(report.undeclared, 'visible layout children missing a data-wy-region').toEqual([]);
   expect(report.unknown, 'layout children declaring a region outside the registry').toEqual([]);

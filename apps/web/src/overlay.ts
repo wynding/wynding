@@ -21,6 +21,7 @@ import { GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
+import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
 import type { RotateController } from './rotate';
 
@@ -52,6 +53,9 @@ export interface Overlay {
   /** Sibling elements the caller appends alongside the Shell (results/settings). */
   readonly resultsEl: HTMLElement;
   readonly settingsEl: HTMLElement;
+  /** The iOS Add-to-Home-Screen instructions dialog (Story 11 P3) — a first-class modal,
+   *  its own sibling of the Shell, registered at `settings` priority. */
+  readonly instructionsEl: HTMLElement;
   /** The single modal owner (results/rotate/settings share one stack, PLAN.md P1) — exposed
    *  so `main.ts` can register the P5 rotate overlay on the SAME instance, rather than a
    *  second, disconnected one. */
@@ -106,6 +110,8 @@ const ICONS = {
   resume: '⏵',
   /** Multiplication sign for the speed button's glance form ("1×" / "2×"). */
   speed: '×',
+  /** The install banner's dismiss glyph (a multiplication sign, the conventional "close"). */
+  dismiss: '×',
 } as const;
 
 /** The ONE chip write path (contract §4): both forms are always written together from the
@@ -149,8 +155,9 @@ export function createOverlay(
   shell: ShellHandle,
   ruleset: CompiledRuleset,
   abortGesture: () => void,
+  install: InstallHandle,
 ): Overlay {
-  const { hud: hudEls, dock, card, panel, live } = shell;
+  const { hud: hudEls, dock, card, panel, live, banner } = shell;
   const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
 
   // Dock markup contract (Story 11 P1): every Dock button carries an aria-hidden icon span
@@ -214,6 +221,30 @@ export function createOverlay(
   closeBtn.setAttribute('aria-label', t('settings.close'));
   settingsHeader.append(heading, closeBtn);
   settingsInner.appendChild(settingsHeader);
+
+  // --- Install row (Story 11 P3): PERMANENT, unlike the once-dismissible banner. The
+  // dialog is where a player looks for "how do I get this properly on my phone?" long after
+  // the banner is gone, so the affordance lives here for the whole session. A promptable
+  // DESKTOP session gets this row and no banner — the banner is phone-oriented. ---
+  const installSection = doc.createElement('section');
+  installSection.className = 'wy-install-row';
+  const installHeading = doc.createElement('h3');
+  installHeading.textContent = t('install.settings.row');
+  const installAction = button(doc, 'wy-btn wy-install-action', t('install.banner.install'));
+  // `other`: no captured prompt and no known flow to describe precisely — say where to look
+  // rather than render a button that cannot do anything.
+  const installExplain = doc.createElement('p');
+  installExplain.className = 'wy-install-explain';
+  installExplain.textContent = t('install.settings.explain');
+  installSection.append(installHeading, installAction, installExplain);
+  settingsInner.appendChild(installSection);
+
+  // The dialog is now "Settings" (Story 11 P3, decision 5 — flagged as product-visible), so
+  // the accessibility controls need their own heading to stay a named group rather than
+  // becoming the dialog's unlabelled remainder.
+  const a11yHeading = doc.createElement('h3');
+  a11yHeading.textContent = t('settings.accessibility');
+  settingsInner.appendChild(a11yHeading);
 
   // Colour-vision mode
   const cbGroup = doc.createElement('fieldset');
@@ -344,6 +375,30 @@ export function createOverlay(
     refreshBoardAria();
   }
 
+  // --- iOS Add-to-Home-Screen instructions (Story 11 P3): a first-class modal, its own
+  // sibling of the Shell. Safari has no `beforeinstallprompt` and no programmatic install,
+  // so precise instructions ARE the affordance — not a fallback. ---
+  const instructions = doc.createElement('div');
+  instructions.className = 'wy-settings wy-instructions';
+  instructions.hidden = true;
+  instructions.setAttribute('role', 'dialog');
+  instructions.setAttribute('aria-modal', 'true');
+  instructions.setAttribute('aria-label', t('install.ios.title'));
+  instructions.tabIndex = -1;
+  const instructionsInner = doc.createElement('div');
+  instructionsInner.className = 'wy-settings-inner';
+  const instructionsHeader = doc.createElement('div');
+  instructionsHeader.className = 'wy-settings-header';
+  const instructionsHeading = doc.createElement('h2');
+  instructionsHeading.textContent = t('install.ios.title');
+  const instructionsClose = button(doc, 'wy-btn wy-instructions-close', t('install.ios.close'));
+  instructionsClose.setAttribute('aria-label', t('install.ios.close'));
+  instructionsHeader.append(instructionsHeading, instructionsClose);
+  const instructionsBody = doc.createElement('p');
+  instructionsBody.textContent = t('install.ios.body');
+  instructionsInner.append(instructionsHeader, instructionsBody);
+  instructions.appendChild(instructionsInner);
+
   // --- Results dialog (sibling of the Shell) ---
   const results = doc.createElement('div');
   results.className = 'wy-results';
@@ -391,6 +446,111 @@ export function createOverlay(
       cancelCapture?.();
     },
   };
+  const instructionsOverlay: ModalOverlay = {
+    show(): void {
+      instructions.hidden = false;
+      instructionsClose.focus();
+    },
+    hide(): void {
+      instructions.hidden = true;
+    },
+  };
+
+  // --- Install UI: banner + settings row + the iOS instructions route (Story 11 P3) ---
+
+  banner.text.textContent = t('install.banner.text');
+  banner.dismissGlyph.textContent = ICONS.dismiss;
+  banner.dismiss.setAttribute('aria-label', t('install.banner.dismiss'));
+
+  /** Open the instructions dialog. Registered at `settings` PRIORITY — it only ever opens
+   *  after the settings dialog closes (or straight from the banner, with nothing else open),
+   *  so an equal rank is unambiguous rather than a race. `dismissOnEscape` is per-overlay
+   *  metadata now (modal.ts), so Escape dismisses it exactly like settings. */
+  function openInstructions(): void {
+    abortGesture();
+    modal.open(instructionsOverlay, { priority: 'settings', dismissOnEscape: true });
+  }
+  instructionsClose.addEventListener('click', () => modal.close(instructionsOverlay));
+
+  /** Fire the held prompt. Single-use is enforced inside `install.prompt()`; this only has
+   *  to avoid double-firing while one is in flight (a second activation would hit an already
+   *  consumed event). */
+  let promptInFlight = false;
+  function runPrompt(): void {
+    if (promptInFlight) return;
+    promptInFlight = true;
+    void install.prompt().finally(() => {
+      promptInFlight = false;
+    });
+  }
+
+  const installActivate = (): void => {
+    if (install.state().branch === 'ios') openInstructions();
+    else runPrompt();
+  };
+
+  banner.action.addEventListener('click', installActivate);
+  banner.dismiss.addEventListener('click', () => install.dismiss());
+  installAction.addEventListener('click', () => {
+    if (install.state().branch === 'ios') {
+      // Open-from-settings: close settings FIRST, then open instructions, so the two never
+      // sit on the stack at equal priority. Focus return then follows the modal owner's own
+      // stack rules — closing instructions restores the settings opener.
+      modal.close(settingsOverlay);
+      openInstructions();
+      return;
+    }
+    runPrompt();
+  });
+
+  /** Re-home focus that a just-removed install surface was holding (the Story 10 rule: UI
+   *  teardown never strands focus on `document.body`). Banner-contained focus goes to the
+   *  Dock's Start button — the natural next action pre-start; settings-row-contained focus
+   *  goes to the dialog's own close target, per the modal owner's stack rules. */
+  function reHomeFrom(container: HTMLElement, fallback: HTMLElement): void {
+    if (container.contains(doc.activeElement)) fallback.focus();
+  }
+
+  /** The single install-UI write path: recomputes both surfaces from `install.state()` plus
+   *  the run's `started` flag, and re-homes any focus it strands. */
+  function renderInstall(started: boolean): void {
+    const state: InstallState = install.state();
+    const hidden = state.standalone || state.installed;
+
+    // Banner: browser-tab mode ∧ audience ∧ pre-start ∧ un-dismissed ∧ not ended for this
+    // session (the last survives Play-again, which returns to a pre-start state).
+    const showBanner =
+      !hidden &&
+      state.bannerAudience &&
+      !started &&
+      !state.dismissed &&
+      !install.bannerEndedForSession();
+    if (showBanner !== !banner.root.hidden) {
+      // A banner visibility change RESIZES the stage (it is a reserved grid row), so any
+      // in-flight captured gesture must cancel by the Story 10 contract rather than commit
+      // against geometry that moved underneath it.
+      abortGesture();
+      if (!showBanner) reHomeFrom(banner.root, primaryBtn);
+      banner.root.hidden = !showBanner;
+    }
+    if (showBanner) {
+      banner.action.textContent =
+        state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
+    }
+
+    // Settings row: permanent while the app is not installed, and never offers a button it
+    // cannot honour.
+    if (hidden !== installSection.hidden) {
+      if (hidden) reHomeFrom(installSection, closeBtn);
+      installSection.hidden = hidden;
+    }
+    const canAct = state.branch === 'ios' || state.canPrompt;
+    if (!canAct && installAction.contains(doc.activeElement)) closeBtn.focus();
+    installAction.hidden = !canAct;
+    installAction.textContent =
+      state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
+    installExplain.hidden = canAct;
+  }
 
   settingsBtn.addEventListener('click', () => {
     // Run the SAME open lifecycle as rotate.ts's `evaluate()` entry path, in order, so the
@@ -404,7 +564,7 @@ export function createOverlay(
     //   2. modal.open(overlay, { priority })  — inert the Shell + show/focus the dialog.
     //   3. auto-pause guard  — pause an ACTIVE, unpaused run (below).
     abortGesture();
-    modal.open(settingsOverlay, { priority: 'settings' });
+    modal.open(settingsOverlay, { priority: 'settings', dismissOnEscape: true });
     // Auto-pause an ACTIVE, unpaused run when settings opens — the Shell goes inert and is
     // covered while the dialog is up, so an unpaused wave would keep advancing unseen (lives
     // lost / the run ending inside the dialog). Mirrors rotate.ts's guard exactly (started,
@@ -632,6 +792,7 @@ export function createOverlay(
   return {
     resultsEl: results,
     settingsEl: settingsDialog,
+    instructionsEl: instructions,
     modal,
     update(view: HudView): void {
       const { hud } = view;
@@ -676,6 +837,7 @@ export function createOverlay(
       // M1 ships exactly one wave — there's no later-wave affordance to show instead).
       primaryBtn.hidden = view.ui.started;
       card.root.setAttribute('aria-pressed', String(view.ui.armed !== null));
+      renderInstall(view.ui.started);
       renderPanel(view.ui, view.refund);
       // The HUD updates every tick, but the outcome message only changes on an actual
       // placement/arm/sell event — writing `textContent` unconditionally re-announces the
@@ -710,6 +872,7 @@ export function createOverlay(
       resultSummary.textContent = t('results.summary', { score: hud.score, stars: hud.stars });
       results.setAttribute('aria-label', heading);
       verifyMsg.textContent = '';
+      // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
       modal.open(resultsOverlay, { priority: 'results' });
     },
     hideResults(): void {
@@ -725,6 +888,7 @@ export function createOverlay(
       modal.destroy();
       results.remove();
       settingsDialog.remove();
+      instructions.remove();
     },
   };
 }

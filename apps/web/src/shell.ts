@@ -7,6 +7,7 @@
 //   │   ├── span.wy-wordmark        (Compact-hidden)
 //   │   ├── div.wy-hud              (the five status chips; the labelled scrollport)
 //   │   └── div.wy-dock             (Pause/Speed/Settings/Start)
+//   ├── div.wy-banner  (the install suggestion — a RESERVED grid row, hidden by default)
 //   └── div.wy-main
 //       ├── div.wy-stage   (position: relative)
 //       │   └── div.wy-board  (canvas mounts here, as before)
@@ -21,6 +22,12 @@
 // DOM rather than be conditionally reparented per layout. Standard rendering is unchanged:
 // `ui.css` positions `.wy-dock` absolutely against `.wy-shell` so it still floats over the
 // Stage's bottom-left exactly as before.
+//
+// The banner is the SECOND (and last) deliberate topology amendment (contract §1): a
+// reserved grid row of `.wy-shell` with an exact row order — Standard = status (1), banner
+// (2), main (3); Compact = status column + main on row 1, banner spanning row 2. It has to
+// be a real row rather than a floating strip precisely because the Dock is shell-anchored:
+// an overlay banner and an overlay Dock would fight over the same bottom-left corner.
 //
 // Every layout region carries `data-wy-region` (contract §5) so `compact.spec.ts` can
 // enforce a declared-region registry: a future element added to the Shell without a region
@@ -80,6 +87,20 @@ export interface ShellPanel {
   readonly root: HTMLElement;
 }
 
+/** The install suggestion strip (Story 11 P3) — a reserved `.wy-shell` row, `hidden` unless
+ *  the session is pre-start, un-dismissed and in the banner's audience. `overlay.ts` owns
+ *  its text/visibility; the Shell only reserves the row and the nodes. */
+export interface ShellBanner {
+  readonly root: HTMLElement;
+  readonly text: HTMLElement;
+  /** "Install" (promptable) or "Show me how" (iOS) — `overlay.ts` picks per branch. */
+  readonly action: HTMLButtonElement;
+  readonly dismiss: HTMLButtonElement;
+  /** The dismiss button's aria-hidden glyph slot. Empty here; `overlay.ts` writes it, like
+   *  the Dock buttons' `.wy-btn-icon` — every glance glyph in the app has one home. */
+  readonly dismissGlyph: HTMLSpanElement;
+}
+
 export interface ShellHandle {
   readonly root: HTMLElement; // .wy-shell
   readonly status: HTMLElement; // header.wy-status
@@ -91,6 +112,7 @@ export interface ShellHandle {
   readonly dock: ShellDock;
   readonly card: ShellCard;
   readonly panel: ShellPanel;
+  readonly banner: ShellBanner;
   /** The assistive `aria-live` announcer (PLAN.md P2) — armed/disarmed, placement
    *  success/rejection, sell + refund. Visually unobtrusive (`.wy-sr-only`): it exists to
    *  be heard by assistive tech, not read on-screen alongside the Panel's own text. */
@@ -204,6 +226,28 @@ export function createShell(doc: Document): ShellHandle {
 
   status.append(wordmark, hudBox, dock);
 
+  // --- Banner: the reserved install-suggestion row (Story 11 P3) ---
+  const banner = doc.createElement('div');
+  banner.className = 'wy-banner';
+  banner.setAttribute(REGION_ATTR, 'banner');
+  banner.hidden = true;
+  const bannerText = doc.createElement('p');
+  bannerText.className = 'wy-banner-text';
+  const bannerAction = doc.createElement('button');
+  bannerAction.type = 'button';
+  bannerAction.className = 'wy-btn wy-banner-action';
+  const bannerDismiss = doc.createElement('button');
+  bannerDismiss.type = 'button';
+  bannerDismiss.className = 'wy-btn wy-banner-dismiss';
+  // The visible glyph is presentation, written by `overlay.ts` alongside the other glance
+  // glyphs; the button's accessible name is the localized `install.banner.dismiss`
+  // aria-label it also sets.
+  const bannerDismissGlyph = doc.createElement('span');
+  bannerDismissGlyph.className = 'wy-btn-glyph';
+  bannerDismissGlyph.setAttribute('aria-hidden', 'true');
+  bannerDismiss.appendChild(bannerDismissGlyph);
+  banner.append(bannerText, bannerAction, bannerDismiss);
+
   // --- Main: Stage (board) + Rail ---
   const main = doc.createElement('div');
   main.className = 'wy-main';
@@ -260,7 +304,7 @@ export function createShell(doc: Document): ShellHandle {
 
   main.append(stage, rail);
 
-  shell.append(status, main, live);
+  shell.append(status, banner, main, live);
 
   return {
     root: shell,
@@ -278,6 +322,13 @@ export function createShell(doc: Document): ShellHandle {
     },
     card: { root: card, name: cardName, cost: cardCost, hotkey: cardHotkey },
     panel: { root: panel },
+    banner: {
+      root: banner,
+      text: bannerText,
+      action: bannerAction,
+      dismiss: bannerDismiss,
+      dismissGlyph: bannerDismissGlyph,
+    },
     live,
     destroy(): void {
       shell.remove();

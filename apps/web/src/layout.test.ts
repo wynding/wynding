@@ -43,7 +43,7 @@ describe('layout — the one published Compact trigger (contract §3)', () => {
   });
 
   it('the region registry names the P1 regions and the exempt structural container', () => {
-    expect([...LAYOUT_REGIONS]).toEqual(['status', 'stage', 'dock', 'rail']);
+    expect([...LAYOUT_REGIONS]).toEqual(['status', 'stage', 'dock', 'rail', 'banner']);
     expect(REGION_ATTR).toBe('data-wy-region');
     expect(EXEMPT_CONTAINER_SELECTOR).toBe('.wy-main');
   });

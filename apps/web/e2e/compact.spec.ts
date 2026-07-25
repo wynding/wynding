@@ -9,6 +9,7 @@ import {
   visibleChipAccessibleText,
   type Rect,
 } from './layout-probe';
+import { firePrompt, installPromptFactory, stubIosPlatform } from './install-stub';
 
 // compact.spec.ts — the standing gate for Story 11's two-layouts contract. It runs under
 // BOTH the default `chromium` project and `chromium-touch` (playwright.config.ts extends
@@ -39,6 +40,12 @@ const CELL_PX_MIN = 12;
 /** Narrow devices are WIDTH-limited, not height-limited (PLAN.md risks): vertical chip
  *  scrolling does nothing for width, so 568×320 gets its own, lower floor. */
 const CELL_PX_MIN_NARROW = 10;
+
+/** Board-floor gate with the install banner VISIBLE (PLAN.md P3). The banner is a reserved
+ *  row carrying ≥44px controls, so it costs roughly 52px of a 320px-tall viewport — 85% is
+ *  arithmetically unreachable with it up, and quietly relaxing the banner-absent gate to
+ *  suit would stop it catching a full-width status row. Both are asserted, separately. */
+const GRID_HEIGHT_FRACTION_MIN_WITH_BANNER = 0.7;
 
 async function gotoAt(
   page: import('@playwright/test').Page,
@@ -106,6 +113,73 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
   });
 
+  // The banner is a RESERVED grid row, so showing it genuinely costs board height. PLAN.md
+  // P3 pins a separate, lower floor for that state: a ≥44px control row inside a 320px-tall
+  // viewport cannot also meet the 85% banner-absent gate, so both are asserted rather than
+  // one being quietly relaxed into the other.
+  test('658×320 with the install banner visible: the board keeps its banner-present floor', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'chromium-touch',
+      'the banner audience requires a coarse pointer — only the touch profile has one',
+    );
+    await installPromptFactory(page);
+    await gotoAt(page, PHONE);
+    await expect(page.locator('.wy-banner')).toBeHidden();
+
+    await firePrompt(page, 'dismissed');
+    const banner = page.locator('.wy-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('Wynding plays best as an app');
+    await expect(banner.getByRole('button', { name: 'Install', exact: true })).toBeVisible();
+
+    const grid = await projectedGrid(page);
+    expect(
+      grid.height / PHONE.height,
+      `grid height ${grid.height}px below the 70% banner-present floor`,
+    ).toBeGreaterThanOrEqual(GRID_HEIGHT_FRACTION_MIN_WITH_BANNER);
+
+    // The banner is a declared region, disjoint from the playable grid like every other
+    // chrome region — it never overlaps the board it made room beside.
+    await assertDeclaredRegions(page);
+    await assertRegionRelations(page, 'compact');
+
+    // Axe with the banner visible.
+    const audit = await new AxeBuilder({ page }).include('#app').analyze();
+    expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+
+    // Dismissing it returns the full board — and the banner-absent floor with it.
+    await banner.getByRole('button', { name: 'Dismiss install suggestion' }).click();
+    await expect(banner).toBeHidden();
+    const restored = await projectedGrid(page);
+    expect(restored.height / PHONE.height).toBeGreaterThanOrEqual(GRID_HEIGHT_FRACTION_MIN);
+  });
+
+  test('658×320 on iOS: the banner offers instructions, and the first Start ends it for the session', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'chromium-touch',
+      'the banner audience requires a coarse pointer — only the touch profile has one',
+    );
+    await stubIosPlatform(page);
+    await gotoAt(page, PHONE);
+
+    const banner = page.locator('.wy-banner');
+    await expect(banner).toBeVisible();
+    await banner.getByRole('button', { name: 'Show me how' }).click();
+    const instructions = page.getByRole('dialog', { name: 'Add Wynding to your Home Screen' });
+    await expect(instructions).toBeVisible();
+    await instructions.getByRole('button', { name: 'Close' }).click();
+    await expect(instructions).toBeHidden();
+
+    // The session's first Start ends the banner for good — including across Play-again,
+    // which returns the run to a pre-start state.
+    await page.getByRole('button', { name: 'Start' }).click();
+    await expect(banner).toBeHidden();
+  });
+
   test('568×320 (narrow floor): the width-limited degradation gate still holds', async ({
     page,
   }) => {
@@ -148,7 +222,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const dock = (await regionRect(page, 'dock')) as Rect;
     await expect(page.locator('.wy-dock')).toBeVisible();
     expect(intersect(dock, stage), 'the Standard Dock must render over the Stage').not.toBeNull();
-    const settings = page.getByRole('button', { name: 'Accessibility settings' });
+    const settings = page.getByRole('button', { name: 'Settings' });
     const settingsBox = (await settings.boundingBox()) as Rect;
     const hitInsideDock = await page.evaluate(
       ({ x, y }) => document.elementFromPoint(x, y)?.closest('.wy-dock') !== null,

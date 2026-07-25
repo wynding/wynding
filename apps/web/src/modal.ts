@@ -11,11 +11,14 @@
 // stacked-but-inactive is a harmless no-op.
 //
 // Escape is consumed here FIRST, before any game-level (P2) Escape handling: whenever the
-// stack is non-empty, Escape never reaches the game. Settings is the only dismissable
-// overlay (Escape closes it); results and rotate are state-driven and only consume the
-// key. `isEscapeHeld` lets a caller (the settings rebind-key capture) claim Escape for
-// itself first — "existing capture wins" (PLAN.md P2's Focus rules, which already applies
-// here since this is the first document-scope Escape handler in the app).
+// stack is non-empty, Escape never reaches the game. Whether it also DISMISSES is per-
+// overlay metadata (`dismissOnEscape`, Story 11 P3) rather than a hardcoded check on the
+// `settings` priority — settings and the install instructions dialog both dismiss and both
+// register at `settings` priority, so priority alone can no longer carry that meaning.
+// Results and rotate are state-driven: they consume the key without dismissing.
+// `isEscapeHeld` lets a caller (the settings rebind-key capture) claim Escape for itself
+// first — "existing capture wins" (PLAN.md P2's Focus rules, which already applies here
+// since this is the first document-scope Escape handler in the app).
 
 /** Priority order per PLAN.md P1: results > rotate > settings (lower rank = shown first). */
 export type ModalPriority = 'results' | 'rotate' | 'settings';
@@ -34,13 +37,25 @@ export interface ModalOverlay {
   hide(): void;
 }
 
+/** How an overlay is registered on the stack. */
+export interface ModalOpenOptions {
+  readonly priority: ModalPriority;
+  /** Does Escape DISMISS this overlay, or merely get consumed by it? Per-overlay metadata
+   *  (Story 11 P3) because two overlays now share `settings` priority — the settings dialog
+   *  and the install instructions dialog — while results/rotate remain state-driven and are
+   *  only ever closed by the state that opened them. Defaults to false: an overlay that has
+   *  not thought about it does not get a dismissal path for free. */
+  readonly dismissOnEscape?: boolean;
+}
+
 interface StackEntry {
   readonly overlay: ModalOverlay;
   readonly priority: ModalPriority;
+  readonly dismissOnEscape: boolean;
 }
 
 export interface ModalOwner {
-  open(overlay: ModalOverlay, options: { readonly priority: ModalPriority }): void;
+  open(overlay: ModalOverlay, options: ModalOpenOptions): void;
   close(overlay: ModalOverlay): void;
   /** Detach the document-level Escape listener. */
   destroy(): void;
@@ -84,13 +99,17 @@ export function createModalOwner(
     activeOverlay?.show();
   }
 
-  function open(overlay: ModalOverlay, openOptions: { readonly priority: ModalPriority }): void {
+  function open(overlay: ModalOverlay, openOptions: ModalOpenOptions): void {
     if (stack.some((e) => e.overlay === overlay)) return; // idempotent by identity
     if (stack.length === 0) {
       preModalFocus = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
       shell.setAttribute('inert', '');
     }
-    stack.push({ overlay, priority: openOptions.priority });
+    stack.push({
+      overlay,
+      priority: openOptions.priority,
+      dismissOnEscape: openOptions.dismissOnEscape === true,
+    });
     applyActive();
   }
 
@@ -115,8 +134,8 @@ export function createModalOwner(
     if (active === null) return; // no modal open — game-level Escape (P2) may handle it
     e.preventDefault();
     e.stopPropagation();
-    if (active.priority === 'settings') close(active.overlay);
-    // results/rotate: consumed, not dismissable — no further action.
+    if (active.dismissOnEscape) close(active.overlay);
+    // Otherwise (results/rotate): consumed, not dismissable — no further action.
   };
   doc.addEventListener('keydown', onKeydown, true); // capture: runs before game-level Escape
 

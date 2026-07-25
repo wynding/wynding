@@ -23,8 +23,11 @@ export const REGION_ATTR = 'data-wy-region';
 
 /** Every declared layout region. `compact.spec.ts` asserts (a) every visible direct layout
  *  child of `.wy-shell`/`.wy-main` carries one of these — so a future element cannot ship
- *  undeclared — and (b) the per-region geometric relation to the projected playable grid. */
-export const LAYOUT_REGIONS = ['status', 'stage', 'dock', 'rail'] as const;
+ *  undeclared — and (b) the per-region geometric relation to the projected playable grid.
+ *  `banner` is the install suggestion's reserved row (Story 11 P3); it is declared here
+ *  unconditionally even though the element is usually `hidden`, because the registry
+ *  describes the layout's VOCABULARY, not what happens to be on screen. */
+export const LAYOUT_REGIONS = ['status', 'stage', 'dock', 'rail', 'banner'] as const;
 
 export type LayoutRegion = (typeof LAYOUT_REGIONS)[number];
 

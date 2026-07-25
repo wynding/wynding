@@ -63,10 +63,14 @@ body {
      Stage's bottom-left — because this is its containing block. */
   position: relative;
   grid-template-columns: minmax(0, 1fr);
-  /* The status row is `minmax(0, auto)` (not bare `auto`): paired with `.wy-hud`'s own
+  /* EXACT row order (contract §1): status (1), banner (2), main (3). The banner row is
+     always declared and collapses to zero height while `.wy-banner` is `hidden` — reserving
+     it here, rather than floating the strip, is what keeps it from colliding with the
+     shell-anchored overlay Dock.
+     The status row is `minmax(0, auto)` (not bare `auto`): paired with `.wy-hud`'s own
      max-height, this bounds the status row so its `overflow-y: auto` engages at 200% zoom
      instead of the status bar growing unbounded and squeezing the board (ADR 0003). */
-  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+  grid-template-rows: minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
   /* 100vh fallback declared FIRST — `100dvh` overrides it in browsers that support small/
      dynamic viewport units; the fallback keeps older browsers full-height too. */
   height: 100vh;
@@ -84,6 +88,10 @@ body {
   padding-left: calc(1rem + env(safe-area-inset-left));
   padding-right: calc(1rem + env(safe-area-inset-right));
   min-height: 0;
+  /* EXACT row order (contract §1). Explicit placement, not auto-flow: while `.wy-banner` is
+     `hidden` it is not a grid item at all, so auto-flow would slide `.wy-main` up into the
+     banner's `auto` row and collapse the board to its content height. */
+  grid-row: 1;
   /* The overflow box MOVED to `.wy-hud` (contract §1). The Dock is now a `.wy-status`
      child, and an absolutely-positioned descendant IS clipped by an ancestor scroll box —
      so Standard `.wy-status` must stay `overflow: visible` or the Dock would vanish behind
@@ -127,7 +135,45 @@ body {
   display: none;
 }
 
+/* --- Install banner: the reserved pre-start suggestion row (Story 11 P3) --- */
+
+.wy-banner {
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.25rem 0.75rem;
+  padding-left: calc(0.75rem + env(safe-area-inset-left));
+  padding-right: calc(0.75rem + env(safe-area-inset-right));
+  background: var(--wy-surface);
+  min-width: 0;
+  /* Shell chrome never participates in text selection (PLAN.md P3), and a release over it
+     cancels rather than commits — `input.ts`'s CHROME_SELECTOR covers it. */
+  user-select: none;
+}
+
+.wy-banner[hidden] {
+  display: none;
+}
+
+.wy-banner-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.wy-banner-dismiss {
+  /* Glyph-only: the localized accessible name comes from its aria-label. */
+  min-width: 44px;
+  padding: 0.25rem;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
 .wy-main {
+  grid-row: 3;
   display: grid;
   /* Rail width clamp per PLAN.md P1. minmax(0, …) on the board column so the canvas can
      never force overflow. */
@@ -474,9 +520,18 @@ body {
    `.wy-hud` or the Dock rather than pushing the board smaller.
    =========================================================================== */
 @media (max-height: 500px) {
+  /* EXACT row order (contract §1): a single content row holding the status COLUMN and the
+     main area side by side, with the banner spanning both columns beneath them. DOM order is
+     status → banner → main, so Compact places all three explicitly rather than relying on
+     auto-flow. */
   .wy-shell {
     grid-template-columns: var(--wy-compact-col) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, auto);
+  }
+
+  .wy-banner {
+    grid-row: 2;
+    grid-column: 1 / -1;
   }
 
   /* The column's width belongs to the chips and controls. */
@@ -485,6 +540,8 @@ body {
   }
 
   .wy-status {
+    grid-row: 1;
+    grid-column: 1;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -579,6 +636,8 @@ body {
 
   /* Rail: vw-capped like the column, for the same reason. */
   .wy-main {
+    grid-row: 1;
+    grid-column: 2;
     grid-template-columns: minmax(0, 1fr) min(9rem, 28vw);
   }
 

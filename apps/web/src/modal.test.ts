@@ -145,16 +145,33 @@ describe('modal owner — inert + stack semantics (PLAN.md P1)', () => {
 });
 
 describe('modal owner — Escape handling', () => {
-  it('Escape closes settings (the only dismissable priority)', () => {
+  it('Escape closes an overlay that declares dismissOnEscape (settings, install instructions)', () => {
     const shell = document.createElement('div');
     document.body.appendChild(shell);
     const modal = createModalOwner(document, shell);
     activeModal = modal;
     const settings = fakeOverlay();
-    modal.open(settings, { priority: 'settings' });
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
     expect(settings.hide).toHaveBeenCalledOnce();
     expect(shell.hasAttribute('inert')).toBe(false);
+  });
+
+  // Dismissability is per-overlay METADATA, not a property of the priority (Story 11 P3):
+  // the install instructions dialog shares `settings` priority, so an overlay that does not
+  // declare it must still only CONSUME the key.
+  it('Escape is consumed but does NOT close a settings-priority overlay that omits dismissOnEscape', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const overlay = fakeOverlay();
+    modal.open(overlay, { priority: 'settings' });
+    const evt = new KeyboardEvent('keydown', { code: 'Escape', bubbles: true, cancelable: true });
+    document.dispatchEvent(evt);
+    expect(overlay.hide).not.toHaveBeenCalled();
+    expect(evt.defaultPrevented).toBe(true);
+    expect(shell.hasAttribute('inert')).toBe(true);
   });
 
   it('Escape is consumed but does NOT close results or rotate (state-driven, not dismissable)', () => {
@@ -187,7 +204,7 @@ describe('modal owner — Escape handling', () => {
     const modal = createModalOwner(document, shell, { isEscapeHeld: () => held });
     activeModal = modal;
     const settings = fakeOverlay();
-    modal.open(settings, { priority: 'settings' });
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
 
     held = true;
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
@@ -223,7 +240,7 @@ describe('modal owner — Escape handling', () => {
     const modal = createModalOwner(document, shell);
     activeModal = modal;
     const settings = fakeOverlay();
-    modal.open(settings, { priority: 'settings' });
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
     modal.destroy();
     // destroy() closes out the still-open stack (hides once, F7) — clear that so this test
     // isolates the LISTENER-detached property: an Escape AFTER destroy must trigger no

@@ -61,10 +61,12 @@ const TOWER_FOOTPRINT = 2;
  *  under the threshold the gesture is a tap (PLAN.md P3). */
 const DRAG_THRESHOLD_PX = 8;
 
-/** Shell chrome the release hit-test checks against (Dock/Status bar/Rail) — a release
- *  geometrically over any of these never commits a placement, even if it lands on a cell
- *  the Dock happens to overlap (PLAN.md P1's Dock overlaps the board's bottom-left). */
-const CHROME_SELECTOR = '.wy-dock, .wy-status, .wy-rail';
+/** Shell chrome the release hit-test checks against (Dock/Status bar/Rail/install banner) —
+ *  a release geometrically over any of these never commits a placement, even if it lands on
+ *  a cell the Dock happens to overlap (PLAN.md P1's Dock overlaps the board's bottom-left).
+ *  The install banner (Story 11 P3) joins the list: it is a reserved chrome ROW with its own
+ *  controls, so releasing a drag over it must cancel exactly like releasing over the Dock. */
+const CHROME_SELECTOR = '.wy-dock, .wy-status, .wy-rail, .wy-banner';
 
 const isTouchLike = (pointerType: string): boolean =>
   pointerType === 'touch' || pointerType === 'pen';
