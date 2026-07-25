@@ -8,14 +8,16 @@ import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
 import { createController, type UiState } from './controller';
 import { attachInput } from './input';
+import { createInstall, type InstallHandle, type StorageAdapter } from './install';
 import {
-  createInstall,
-  type BeforeInstallPromptEvent,
-  type InstallEventTarget,
-  type InstallHandle,
-  type InstallMediaQueryList,
-  type StorageAdapter,
-} from './install';
+  COARSE,
+  STANDALONE,
+  defaultInstall,
+  fakeMatchMedia,
+  fakePromptEvent,
+  fakeStorage,
+  fakeTarget,
+} from './install-fakes';
 
 const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
 
@@ -72,78 +74,6 @@ function fakeController(started = true): {
   };
 }
 
-/** A controllable `matchMedia` for the install detection: every listed query matches. */
-function fakeMatchMedia(matching: readonly string[] = []) {
-  const lists = new Map<string, { matches: boolean; listeners: Set<() => void> }>();
-  const fn = (query: string): InstallMediaQueryList => {
-    let entry = lists.get(query);
-    if (entry === undefined) {
-      entry = { matches: matching.includes(query), listeners: new Set() };
-      lists.set(query, entry);
-    }
-    const e = entry;
-    return {
-      get matches() {
-        return e.matches;
-      },
-      addEventListener: (_t: 'change', l: () => void) => e.listeners.add(l),
-      removeEventListener: (_t: 'change', l: () => void) => e.listeners.delete(l),
-    };
-  };
-  return {
-    fn,
-    set(query: string, matches: boolean): void {
-      const entry = lists.get(query);
-      if (entry === undefined) return;
-      entry.matches = matches;
-      for (const l of [...entry.listeners]) l();
-    },
-  };
-}
-
-/** An in-memory storage adapter, so a test can prove dismissal persists across a recreate
- *  without depending on jsdom's `localStorage`. */
-function fakeStorage(): StorageAdapter {
-  const map = new Map<string, string>();
-  return {
-    get: (k) => map.get(k) ?? null,
-    set: (k, v) => void map.set(k, v),
-  };
-}
-
-/** A synthetic `beforeinstallprompt`, with a controllable `userChoice`. */
-function fakePromptEvent(outcome: 'accepted' | 'dismissed' = 'accepted') {
-  const prompt = vi.fn(() => Promise.resolve());
-  const event = Object.assign(new Event('beforeinstallprompt'), {
-    prompt,
-    userChoice: Promise.resolve({ outcome }),
-  }) as unknown as BeforeInstallPromptEvent;
-  return { event, prompt };
-}
-
-/** A minimal `InstallEventTarget` a test can dispatch into. */
-function fakeTarget() {
-  const listeners = new Map<string, Set<(e: Event) => void>>();
-  return {
-    target: {
-      addEventListener(type: string, l: (e: Event) => void): void {
-        const set = listeners.get(type) ?? new Set();
-        set.add(l);
-        listeners.set(type, set);
-      },
-      removeEventListener(type: string, l: (e: Event) => void): void {
-        listeners.get(type)?.delete(l);
-      },
-    } satisfies InstallEventTarget,
-    dispatch(e: Event): void {
-      for (const l of [...(listeners.get(e.type) ?? [])]) l(e);
-    },
-    count(type: string): number {
-      return listeners.get(type)?.size ?? 0;
-    },
-  };
-}
-
 interface SetupOptions {
   readonly install?: InstallHandle;
 }
@@ -158,14 +88,7 @@ function setup(
   const keymap = createKeymap();
   const shell = createShell(document);
   document.body.appendChild(shell.root);
-  const install =
-    options.install ??
-    createInstall({
-      storage: fakeStorage(),
-      matchMedia: fakeMatchMedia().fn,
-      target: fakeTarget().target,
-      navigator: { platform: 'Linux x86_64', maxTouchPoints: 0 },
-    });
+  const install = options.install ?? defaultInstall();
   const overlay = createOverlay(
     document,
     (a) => actions.push(a),
@@ -650,9 +573,6 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 });
 
 describe('overlay — install banner, settings row, iOS instructions (PLAN.md Story 11 P3)', () => {
-  const COARSE = '(pointer: coarse)';
-  const STANDALONE = '(display-mode: standalone)';
-
   /** Build an overlay wired to a controllable install handle. */
   function installSetup(
     options: {
@@ -676,9 +596,13 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
     });
     const s = setup(fakeController(), options.abortGesture ?? (() => {}), { install });
     // The overlay re-renders on `update()`; wire the install handle's own change signal the
-    // way main.ts does, so a captured prompt refreshes immediately.
-    install.onChange(() => render(false));
+    // way main.ts does, so a captured prompt refreshes immediately. Re-render with the LAST
+    // rendered `started`, not a hardcoded pre-start — otherwise any emit after Start (a
+    // pointer/display-mode change) would silently rewind the harness to pre-start.
+    let lastStarted = false;
+    install.onChange(() => render(lastStarted));
     function render(started: boolean): void {
+      lastStarted = started;
       s.overlay.update({
         hud: hud(),
         paused: false,
@@ -811,10 +735,8 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
     s.render(false);
 
     s.shell.banner.action.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(prompt).toHaveBeenCalledOnce();
+    // Settle the `prompt()` chain robustly, not by a pinned microtask count.
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
 
     s.shell.banner.action.click(); // no fresh event has arrived
     await Promise.resolve();
@@ -853,6 +775,23 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
     s.overlay.destroy();
   });
 
+  it('re-homes banner focus to the board (not the hidden Start button) on the Start edge', () => {
+    // On the Start edge `update()` hides `primaryBtn` BEFORE `renderInstall` re-homes banner
+    // focus, so re-homing to Start would `focus()` a hidden element and strand focus on
+    // `document.body`. The fallback must be a guaranteed-focusable target — the board.
+    const s = installSetup();
+    s.target.dispatch(fakePromptEvent().event);
+    s.render(false);
+    s.shell.banner.action.focus();
+    expect(document.activeElement).toBe(s.shell.banner.action);
+
+    s.render(true); // Start: the banner hides AND primaryBtn hides in the same update()
+    expect(bannerVisible(s.shell)).toBe(false);
+    expect(s.shell.dock.primary.hidden).toBe(true);
+    expect(document.activeElement).toBe(s.shell.board);
+    s.overlay.destroy();
+  });
+
   it('an accepted install re-homes focus out of the settings row to the dialog close button', async () => {
     const s = installSetup({ matching: [] });
     const { event } = fakePromptEvent('accepted');
@@ -863,11 +802,11 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
     action.focus();
     expect(document.activeElement).toBe(action);
     action.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    s.render(false);
-    expect(s.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!.hidden).toBe(true);
+    // The accepted `prompt()` chain settles then emits, re-rendering the row — wait for that
+    // robustly (loop-until-settled) instead of a pinned count of microtask drains.
+    await vi.waitFor(() =>
+      expect(s.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!.hidden).toBe(true),
+    );
     expect(document.activeElement).toBe(
       s.overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close'),
     );
@@ -1044,12 +983,7 @@ describe('overlay — settings dialog (modal)', () => {
       shell,
       ruleset,
       () => input.abort(),
-      createInstall({
-        storage: fakeStorage(),
-        matchMedia: fakeMatchMedia().fn,
-        target: fakeTarget().target,
-        navigator: { platform: 'Linux x86_64', maxTouchPoints: 0 },
-      }),
+      defaultInstall(),
     );
     document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
 
@@ -1088,12 +1022,7 @@ describe('overlay — settings dialog (modal)', () => {
       shell,
       ruleset,
       () => input.abort(),
-      createInstall({
-        storage: fakeStorage(),
-        matchMedia: fakeMatchMedia().fn,
-        target: fakeTarget().target,
-        navigator: { platform: 'Linux x86_64', maxTouchPoints: 0 },
-      }),
+      defaultInstall(),
     );
     document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
 

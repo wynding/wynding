@@ -3,11 +3,13 @@ import { defineConfig } from 'vitest/config';
 // Story 6 coverage gate for the app/orchestration layer. jsdom so the DOM overlay +
 // input modules are exercised for real. Every source module is covered at the 90%
 // branch bar — the controller, settings, keymap, i18n, the DOM overlay/input, and the
-// `main` bootstrap (tested with the Phaser scene + rAF mocked). Nothing in apps/web is
-// coverage-excluded: the only excluded file in the whole render/app surface is the
-// Phaser scene (packages/render/src/scene.ts). The generated catalog is data (fully
-// covered on import); the Playwright e2e lives under `e2e/` (not `src`) and runs
-// separately.
+// `main` bootstrap (tested with the Phaser scene + rAF mocked). The only product source
+// excluded in the whole render/app surface is the Phaser scene
+// (packages/render/src/scene.ts). `install-fakes.ts` is a TEST-ONLY helper (the shared
+// install fakes both `*.test.ts` suites import) — like the test files themselves, it is
+// exercised only by tests, so it is excluded rather than held to the branch bar. The
+// generated catalog is data (fully covered on import); the Playwright e2e lives under
+// `e2e/` (not `src`) and runs separately.
 export default defineConfig({
   test: {
     environment: 'jsdom',
@@ -15,7 +17,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts'],
+      exclude: ['src/**/*.test.ts', 'src/install-fakes.ts'],
       thresholds: {
         lines: 90,
         branches: 90,

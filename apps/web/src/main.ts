@@ -345,7 +345,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
  *  in-memory map would resurrect a dismissed banner. Built on first `boot()` rather than at
  *  import, so merely importing this module never probes browser storage. */
 let appStorage: StorageAdapter | null = null;
-function sessionStorage(): StorageAdapter {
+function dismissalStorage(): StorageAdapter {
   appStorage ??= createStorageAdapter(typeof window === 'undefined' ? null : window);
   return appStorage;
 }
@@ -382,7 +382,7 @@ export function boot(doc: Document): AppHandle | null {
     // relative value that clusters across reloads, collapsing the RNG's variety.
     seed: Date.now() >>> 0,
     prefersReducedMotion,
-    storage: sessionStorage(),
+    storage: dismissalStorage(),
   });
 }
 

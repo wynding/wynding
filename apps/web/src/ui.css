@@ -34,6 +34,11 @@
      while the board's floor stays gated numerically by the projection thresholds in
      `compact.spec.ts` / `smoke.spec.ts`. */
   --wy-compact-col: min(4rem, 10vw);
+  /* Standard Rail track width (PLAN.md P1): the clamp's rem floor is vw-capped (like
+     `--wy-compact-col`) so 200% text zoom cannot starve the board on a narrow viewport. Named
+     so the `.wy-main` grid track and the `.wy-dock` max-width subtraction consume ONE
+     expression; the Compact fork overrides this token rather than restating the value. */
+  --wy-rail-w: min(clamp(9rem, 18vw, 13rem), 28vw);
 }
 
 html,
@@ -220,13 +225,21 @@ body {
   line-height: 1;
 }
 
+/* The dismiss glyph shares the app's `.wy-btn-icon` glance-glyph class, but the banner button
+   is icon-ONLY in BOTH layouts — unlike the Dock, which shows text in Standard and so hides
+   its icons there (`.wy-btn-icon { display: none }`). Un-hide it inside the banner so the
+   Standard-layout audience (the coarse-pointer landscape tablet, above the Compact trigger)
+   still sees the ✕. */
+.wy-banner .wy-btn-icon {
+  display: inline;
+}
+
 .wy-main {
   grid-row: 3;
   display: grid;
-  /* Rail width clamp per PLAN.md P1. minmax(0, …) on the board column so the canvas can
-     never force overflow. The outer min() vw-caps the clamp's rem floor (like Compact
-     below) so 200% text zoom cannot starve the board on a narrow viewport. */
-  grid-template-columns: minmax(0, 1fr) min(clamp(9rem, 18vw, 13rem), 28vw);
+  /* Rail width clamp per PLAN.md P1 (`--wy-rail-w`, vw-capped). minmax(0, …) on the board
+     column so the canvas can never force overflow. */
+  grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
   min-width: 0;
   min-height: 0;
 }
@@ -277,7 +290,7 @@ body {
   /* The containing block is the SHELL, so `100%` is the full shell width — subtract the Rail
      track (`.wy-main`'s second column) so the Dock still wraps at the Stage's right edge and
      can never extend over the Rail (which is unpositioned and would lose to `z-index: 1`). */
-  max-width: calc(100% - 1rem - min(clamp(9rem, 18vw, 13rem), 28vw));
+  max-width: calc(100% - 1rem - var(--wy-rail-w));
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   user-select: none; /* Shell chrome (PLAN.md P3) */
@@ -730,11 +743,13 @@ body {
     border: 0;
   }
 
-  /* Rail: vw-capped like the column, for the same reason. */
+  /* Rail: vw-capped like the column, for the same reason. Override the token rather than
+     restating the track, so all three `--wy-rail-w` consumers stay in step. */
   .wy-main {
     grid-row: 1;
     grid-column: 2;
-    grid-template-columns: minmax(0, 1fr) min(9rem, 28vw);
+    --wy-rail-w: min(9rem, 28vw);
+    grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
   }
 
   /* Hotkey badge is COMPACT-gated, not pointer-gated (decision 1): touch laptops keep the

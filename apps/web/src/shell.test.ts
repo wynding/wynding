@@ -118,6 +118,16 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
       el.getAttribute(REGION_ATTR),
     );
     expect(new Set(declared)).toEqual(new Set(LAYOUT_REGIONS));
+    // A Set hides DUPLICATE declarations — two elements claiming one region collapse into a
+    // single member. Pin the exact per-region count (exactly one element each) so a duplicated
+    // region fails here rather than passing the Set check.
+    expect(declared.length).toBe(LAYOUT_REGIONS.length);
+    for (const region of LAYOUT_REGIONS) {
+      expect(
+        shell.root.querySelectorAll(`[${REGION_ATTR}="${region}"]`).length,
+        `exactly one element must declare region "${region}"`,
+      ).toBe(1);
+    }
     expect(shell.status.getAttribute(REGION_ATTR)).toBe('status');
     expect(shell.dock.root.getAttribute(REGION_ATTR)).toBe('dock');
     expect(shell.rail.getAttribute(REGION_ATTR)).toBe('rail');

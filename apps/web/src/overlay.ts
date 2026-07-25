@@ -200,27 +200,54 @@ export function createOverlay(
   }
   refreshCardHotkey();
 
+  // The scaffold both dialog modals share: a hidden `role="dialog"` sibling of the Shell, an
+  // inner box, and a header carrying the `<h2>` title and an aria-labelled close button. Each
+  // caller fills the returned `inner` with its own body.
+  function dialogScaffold(opts: {
+    readonly className: string;
+    readonly title: string;
+    readonly closeClass: string;
+    readonly closeLabel: string;
+  }): {
+    dialog: HTMLDivElement;
+    inner: HTMLDivElement;
+    closeBtn: HTMLButtonElement;
+  } {
+    const dialog = doc.createElement('div');
+    dialog.className = opts.className;
+    dialog.hidden = true;
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', opts.title);
+    dialog.tabIndex = -1;
+
+    const inner = doc.createElement('div');
+    inner.className = 'wy-settings-inner';
+    dialog.appendChild(inner);
+
+    const header = doc.createElement('div');
+    header.className = 'wy-settings-header';
+    const heading = doc.createElement('h2');
+    heading.textContent = opts.title;
+    const closeBtn = button(doc, opts.closeClass, opts.closeLabel);
+    closeBtn.setAttribute('aria-label', opts.closeLabel);
+    header.append(heading, closeBtn);
+    inner.appendChild(header);
+
+    return { dialog, inner, closeBtn };
+  }
+
   // --- Settings dialog (sibling of the Shell — the Shell is inert while it's open) ---
-  const settingsDialog = doc.createElement('div');
-  settingsDialog.className = 'wy-settings';
-  settingsDialog.hidden = true;
-  settingsDialog.setAttribute('role', 'dialog');
-  settingsDialog.setAttribute('aria-modal', 'true');
-  settingsDialog.setAttribute('aria-label', t('settings.title'));
-  settingsDialog.tabIndex = -1;
-
-  const settingsInner = doc.createElement('div');
-  settingsInner.className = 'wy-settings-inner';
-  settingsDialog.appendChild(settingsInner);
-
-  const settingsHeader = doc.createElement('div');
-  settingsHeader.className = 'wy-settings-header';
-  const heading = doc.createElement('h2');
-  heading.textContent = t('settings.title');
-  const closeBtn = button(doc, 'wy-btn wy-settings-close', t('settings.close'));
-  closeBtn.setAttribute('aria-label', t('settings.close'));
-  settingsHeader.append(heading, closeBtn);
-  settingsInner.appendChild(settingsHeader);
+  const {
+    dialog: settingsDialog,
+    inner: settingsInner,
+    closeBtn,
+  } = dialogScaffold({
+    className: 'wy-settings',
+    title: t('settings.title'),
+    closeClass: 'wy-btn wy-settings-close',
+    closeLabel: t('settings.close'),
+  });
 
   // --- Install row (Story 11 P3): PERMANENT, unlike the once-dismissible banner. The
   // dialog is where a player looks for "how do I get this properly on my phone?" long after
@@ -378,26 +405,19 @@ export function createOverlay(
   // --- iOS Add-to-Home-Screen instructions (Story 11 P3): a first-class modal, its own
   // sibling of the Shell. Safari has no `beforeinstallprompt` and no programmatic install,
   // so precise instructions ARE the affordance — not a fallback. ---
-  const instructions = doc.createElement('div');
-  instructions.className = 'wy-settings wy-instructions';
-  instructions.hidden = true;
-  instructions.setAttribute('role', 'dialog');
-  instructions.setAttribute('aria-modal', 'true');
-  instructions.setAttribute('aria-label', t('install.ios.title'));
-  instructions.tabIndex = -1;
-  const instructionsInner = doc.createElement('div');
-  instructionsInner.className = 'wy-settings-inner';
-  const instructionsHeader = doc.createElement('div');
-  instructionsHeader.className = 'wy-settings-header';
-  const instructionsHeading = doc.createElement('h2');
-  instructionsHeading.textContent = t('install.ios.title');
-  const instructionsClose = button(doc, 'wy-btn wy-instructions-close', t('install.ios.close'));
-  instructionsClose.setAttribute('aria-label', t('install.ios.close'));
-  instructionsHeader.append(instructionsHeading, instructionsClose);
+  const {
+    dialog: instructions,
+    inner: instructionsInner,
+    closeBtn: instructionsClose,
+  } = dialogScaffold({
+    className: 'wy-settings wy-instructions',
+    title: t('install.ios.title'),
+    closeClass: 'wy-btn wy-instructions-close',
+    closeLabel: t('install.ios.close'),
+  });
   const instructionsBody = doc.createElement('p');
   instructionsBody.textContent = t('install.ios.body');
-  instructionsInner.append(instructionsHeader, instructionsBody);
-  instructions.appendChild(instructionsInner);
+  instructionsInner.appendChild(instructionsBody);
 
   // --- Results dialog (sibling of the Shell) ---
   const results = doc.createElement('div');
@@ -525,12 +545,20 @@ export function createOverlay(
       // in-flight captured gesture must cancel by the Story 10 contract rather than commit
       // against geometry that moved underneath it.
       abortGesture();
-      if (!showBanner) reHomeFrom(banner.root, primaryBtn);
+      // On the Start edge `update()` has ALREADY hidden `primaryBtn` before calling in here,
+      // and `focus()` on a hidden element no-ops (stranding focus on `document.body`). Re-home
+      // to a GUARANTEED-focusable target locally — the board, which is where focus lands on
+      // Start anyway — instead of depending on `update()`'s call ordering across modules.
+      if (!showBanner) reHomeFrom(banner.root, primaryBtn.hidden ? shell.board : primaryBtn);
       banner.root.hidden = !showBanner;
     }
-    if (showBanner) {
-      banner.action.textContent =
-        state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
+    // `renderInstall` runs on every `update()` tick, so — like the visibility flips above —
+    // each DOM write below is guarded on an ACTUAL change, so a steady state re-announces
+    // nothing to assistive tech and does no needless layout work.
+    const actionLabel =
+      state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
+    if (showBanner && banner.action.textContent !== actionLabel) {
+      banner.action.textContent = actionLabel;
     }
 
     // Settings row: permanent while the app is not installed, and never offers a button it
@@ -541,17 +569,17 @@ export function createOverlay(
     }
     const canAct = state.branch === 'ios' || state.canPrompt;
     if (!canAct && installAction.contains(doc.activeElement)) closeBtn.focus();
-    installAction.hidden = !canAct;
-    installAction.textContent =
-      state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
-    installExplain.hidden = canAct;
+    if (installAction.hidden !== !canAct) installAction.hidden = !canAct;
+    if (installAction.textContent !== actionLabel) installAction.textContent = actionLabel;
+    if (installExplain.hidden !== canAct) installExplain.hidden = canAct;
     // After a declined browser prompt the held event is gone, so the row falls back to the
     // explanation — but "your browser doesn't offer an install prompt" is untrue for a
     // session that just saw one. Say what actually happened instead.
     if (!canAct) {
-      installExplain.textContent = state.promptDeclined
+      const explainLabel = state.promptDeclined
         ? t('install.settings.declined')
         : t('install.settings.explain');
+      if (installExplain.textContent !== explainLabel) installExplain.textContent = explainLabel;
     }
   }
 
@@ -813,17 +841,19 @@ export function createOverlay(
       // — a chip repeating it would just cost a row of the Compact column. Once started,
       // countdownSeconds is null for BOTH active and terminal phases — only label a live
       // wave "in progress"; a finished match shows no wave chip (its outcome is the dialog).
-      const counting = view.ui.started && hud.countdownSeconds !== null;
+      // `countdown` carries the narrowing itself (null unless a started run is counting down),
+      // so `countdown !== null` types it as `number` in the branches below — no `as number`.
+      const countdown = view.ui.started ? hud.countdownSeconds : null;
       const active = view.ui.started && hud.countdownSeconds === null && hud.phase === 'active';
       setChip(
         hudEls.wave,
-        counting
-          ? t('hud.countdown', { seconds: hud.countdownSeconds as number })
+        countdown !== null
+          ? t('hud.countdown', { seconds: countdown })
           : active
             ? t('hud.wave.active')
             : '',
-        counting
-          ? t('hud.wave.compact.countdown', { s: hud.countdownSeconds as number })
+        countdown !== null
+          ? t('hud.wave.compact.countdown', { s: countdown })
           : active
             ? t('hud.wave.compact.active')
             : '',

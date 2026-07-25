@@ -174,6 +174,33 @@ describe('modal owner — Escape handling', () => {
     expect(shell.hasAttribute('inert')).toBe(true);
   });
 
+  // Two overlays share `settings` priority (the settings dialog and the iOS instructions
+  // dialog), so the equal-priority tie-break has to be pinned: last-opened-wins, and closing
+  // the newer one restores the older rather than blanking the still-inert Shell.
+  it('two equal-priority overlays stack last-opened-wins, and closing the newer restores the older', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const settings = fakeOverlay();
+    const instructions = fakeOverlay();
+
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
+    expect(settings.show).toHaveBeenCalledOnce();
+
+    modal.open(instructions, { priority: 'settings', dismissOnEscape: true });
+    expect(settings.hide).toHaveBeenCalledOnce(); // the older yields...
+    expect(instructions.show).toHaveBeenCalledOnce(); // ...to the newer
+
+    modal.close(instructions);
+    expect(instructions.hide).toHaveBeenCalledOnce();
+    expect(settings.show).toHaveBeenCalledTimes(2); // the older is re-shown, not left blank
+    expect(shell.hasAttribute('inert')).toBe(true); // one is still open
+
+    modal.close(settings);
+    expect(shell.hasAttribute('inert')).toBe(false);
+  });
+
   it('Escape is consumed but does NOT close results or rotate (state-driven, not dismissable)', () => {
     const shell = document.createElement('div');
     document.body.appendChild(shell);

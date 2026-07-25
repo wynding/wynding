@@ -55,10 +55,16 @@ export function createStorageAdapter(win?: Window | null): StorageAdapter {
       const ls = win?.localStorage;
       if (ls === undefined || ls === null) return null;
       // Presence is not writability — Safari's private mode exposes `localStorage` and
-      // throws on `setItem`. Probe it once, here, rather than at every write.
-      const probe = '__wy_probe__';
+      // throws on `setItem`. Probe it once, here, rather than at every write. The key is
+      // namespaced (`wy.`-prefixed, like `DISMISSED_KEY`) because this origin is shared with
+      // the wynding.net landing site, and the probe is NON-DESTRUCTIVE: capture any
+      // pre-existing value first and restore it afterwards, removing only when the key was
+      // genuinely ours — otherwise a boot would silently wipe unrelated persistent state.
+      const probe = 'wy.install.__probe__';
+      const prior = ls.getItem(probe);
       ls.setItem(probe, '1');
-      ls.removeItem(probe);
+      if (prior === null) ls.removeItem(probe);
+      else ls.setItem(probe, prior);
       return ls;
     } catch {
       return null;

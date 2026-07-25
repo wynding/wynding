@@ -38,3 +38,19 @@ export type LayoutRegion = (typeof LAYOUT_REGIONS)[number];
  *  regions rather than being one. The undeclared-child rule instead requires every visible
  *  child of an exempt container to be declared itself. */
 export const EXEMPT_CONTAINER_SELECTOR = '.wy-main';
+
+/** Content painted INSIDE the `status` region — the wordmark and the HUD chips — rather than
+ *  regions the Shell places. They sit under a walked container (`.wy-status`) yet are not
+ *  layout regions, so the undeclared-child gate exempts them explicitly. */
+export const EXEMPT_CONTENT_SELECTOR = '.wy-wordmark, .wy-hud';
+
+/** The FULL exemption from contract §5's undeclared-child gate: the structural container plus
+ *  the status content above. Nothing else may ship undeclared. `layout-probe.ts`'s
+ *  `assertDeclaredRegions` consumes this, so the exemption vocabulary lives in ONE place. */
+export const EXEMPT_FROM_DECLARATION = `${EXEMPT_CONTAINER_SELECTOR}, ${EXEMPT_CONTENT_SELECTOR}`;
+
+/** The containers whose VISIBLE children must each declare a region (contract §5). `.wy-status`
+ *  is walked alongside `.wy-shell`/`.wy-main`: Story 11's topology amendment reparented the
+ *  Dock into it, so `.wy-dock` — and anything a future packet adds beside it — is a Shell
+ *  layout child in all but nesting, and would otherwise escape the gate entirely. */
+export const WALKED_CONTAINERS = ['.wy-shell', EXEMPT_CONTAINER_SELECTOR, '.wy-status'] as const;

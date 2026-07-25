@@ -2,7 +2,9 @@ import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
+import { COMPACT_QUERY } from '../src/layout';
 import { fullscreenCallCount, stubFullscreen } from './fullscreen-stub';
+import { GRID } from './layout-probe';
 
 // Touch placement (PLAN.md P3/P6): press-adjust-release with the offset ghost, tap-vs-drag
 // on the Card, and the chrome/off-board cancellation rule. Runs ONLY under the
@@ -72,11 +74,6 @@ function sampleCssPoint(
   return [png.data[idx] as number, png.data[idx + 1] as number, png.data[idx + 2] as number];
 }
 
-// M1's "Open Field" board is 28×24 (entrance/exit on row 11) — duplicated from
-// hidpi.spec.ts/content's boards.ts without importing @wynding/content (e2e stays
-// decoupled from content internals; only the two numbers are duplicated here).
-const GRID = { cols: 28, rows: 24 };
-
 test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P6)', () => {
   let session: CDPSession;
 
@@ -94,7 +91,7 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     // this spec hit-tests against is a full-height status COLUMN on the left with its Dock
     // inside it — there is no top row any more. Asserted as a precondition so a trigger
     // change turns into a clear failure here rather than a confusing gesture mis-classification.
-    const compact = await page.evaluate(() => matchMedia('(max-height: 500px)').matches);
+    const compact = await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY);
     expect(compact).toBe(true);
     session = await context.newCDPSession(page);
     // Press Start first (PLAN.md P6): a touch build on a HELD run stays Pending — the
@@ -111,6 +108,16 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
   }) => {
     // `beforeEach` already pressed Start.
     expect(await fullscreenCallCount(page)).toBe(1);
+
+    // Positive control (defeats vacuity): confirm `KeyC` really is the bound start action, so
+    // the mid-run "count stays 1" assertion below proves EDGE-SUPPRESSION and not merely an
+    // unbound keypress doing nothing. The Settings rebind row renders the live binding — "C"
+    // is `formatKeyLabel('KeyC')`.
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('button', { name: 'Rebind Start' })).toHaveText('C');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toBeHidden();
+
     await page.locator('.wy-board').focus();
     await page.keyboard.press('KeyC'); // the keymapped start action, mid-run
     await page.keyboard.press('KeyC');
@@ -275,17 +282,15 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     // unlike a board-native drag (which stays armed on a rejected placement) a Card-drag
     // cancellation ALSO disarms.
     const settingsBtn = page.getByRole('button', { name: 'Settings' });
-    const settingsBox = (await settingsBtn.boundingBox()) as {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
+    // A non-null assertion that FAILS CLEARLY: `as {…}` would silently cast a null box to the
+    // shape and only blow up later as an opaque `NaN` coordinate.
+    const settingsBox = await settingsBtn.boundingBox();
+    expect(settingsBox, 'Settings button has no layout box').not.toBeNull();
     await touchStart(session, [{ x: cx, y: cy, id: 0 }]);
     await touchMove(session, [
       {
-        x: settingsBox.x + settingsBox.width / 2,
-        y: settingsBox.y + settingsBox.height / 2,
+        x: settingsBox!.x + settingsBox!.width / 2,
+        y: settingsBox!.y + settingsBox!.height / 2,
         id: 0,
       },
     ]);

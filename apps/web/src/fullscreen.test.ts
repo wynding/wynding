@@ -8,15 +8,25 @@
 import { describe, it, expect, vi } from 'vitest';
 import { requestFullscreen, type FullscreenDeps } from './fullscreen';
 
-function deps(overrides: Partial<FullscreenDeps> = {}): {
+function deps(
+  overrides: Partial<FullscreenDeps> = {},
+  { supported = true }: { supported?: boolean } = {},
+): {
   deps: FullscreenDeps;
   request: ReturnType<typeof vi.fn>;
 } {
+  // The `request` spy is the SAME function the doc exposes (when `supported`) — so an
+  // assertion about it is load-bearing. `supported: false` OMITS it from the spy-bearing doc
+  // (rather than the caller replacing `doc` wholesale, which would orphan the returned spy and
+  // make `not.toHaveBeenCalled()` pass vacuously).
   const request = vi.fn(() => Promise.resolve());
   return {
     request,
     deps: {
-      doc: { fullscreenElement: null, documentElement: { requestFullscreen: request } },
+      doc: {
+        fullscreenElement: null,
+        documentElement: supported ? { requestFullscreen: request } : {},
+      },
       matchesCoarsePointer: () => true,
       isStandalone: () => false,
       ...overrides,
@@ -33,7 +43,7 @@ describe('fullscreen — the capability gate (PLAN.md P4)', () => {
   });
 
   it('2. unsupported (no requestFullscreen — e.g. Safari on iPhone): never called', () => {
-    const { deps: d, request } = deps({ doc: { fullscreenElement: null, documentElement: {} } });
+    const { deps: d, request } = deps({}, { supported: false });
     expect(requestFullscreen(d)).toBe(false);
     expect(request).not.toHaveBeenCalled();
   });

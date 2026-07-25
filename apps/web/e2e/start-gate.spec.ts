@@ -17,7 +17,9 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   await expect(board).toHaveAttribute('data-sim-tick', '0');
   // Story 11's wave-slot states: pre-start the wave chip is hidden entirely (the held sim's
   // countdown figure is meaningless), leaving four visible chips — the Dock's "Start" button
-  // is the affordance that says a run has not begun.
+  // is the affordance that says a run has not begun. Pin the count first: `toBeHidden` also
+  // passes on ZERO matches, so a chip that vanished from the DOM would slip past it.
+  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toHaveCount(1);
   await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
 
   // Build pre-start via the keyboard cursor (arm the Card, move, Enter) — the build is
@@ -64,6 +66,7 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   await page.getByRole('button', { name: 'Play again' }).click();
   await expect(board).toHaveAttribute('data-run-started', 'false');
   await expect(board).toHaveAttribute('data-sim-tick', '0');
+  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toHaveCount(1);
   await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });

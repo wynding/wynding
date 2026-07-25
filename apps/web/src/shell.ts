@@ -253,7 +253,7 @@ export function createShell(doc: Document): ShellHandle {
   // glyphs; the button's accessible name is the localized `install.banner.dismiss`
   // aria-label it also sets.
   const bannerDismissGlyph = doc.createElement('span');
-  bannerDismissGlyph.className = 'wy-btn-glyph';
+  bannerDismissGlyph.className = 'wy-btn-icon';
   bannerDismissGlyph.setAttribute('aria-hidden', 'true');
   bannerDismiss.appendChild(bannerDismissGlyph);
   banner.append(bannerText, bannerAction, bannerDismiss);

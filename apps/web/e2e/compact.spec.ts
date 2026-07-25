@@ -11,6 +11,17 @@ import {
 } from './layout-probe';
 import { firePrompt, installPromptFactory, stubIosPlatform } from './install-stub';
 import { stubFullscreen } from './fullscreen-stub';
+import { COMPACT_QUERY } from '../src/layout';
+
+/** The banner audience requires a coarse pointer, which only the `chromium-touch` device
+ *  profile provides — the four banner specs below skip under the fine-pointer project. One
+ *  helper so the four byte-identical guards cannot drift apart. */
+function skipUnlessCoarsePointer(testInfo: import('@playwright/test').TestInfo): void {
+  test.skip(
+    testInfo.project.name !== 'chromium-touch',
+    'the banner audience requires a coarse pointer — only the touch profile has one',
+  );
+}
 
 // compact.spec.ts — the standing gate for Story 11's two-layouts contract. It runs under
 // BOTH the default `chromium` project and `chromium-touch` (playwright.config.ts extends
@@ -94,7 +105,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await gotoAt(page, PHONE);
 
     // The Compact trigger is height-keyed, so it must have engaged regardless of pointer.
-    expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(true);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
 
     // No top row: the status header IS the left column — full height, narrow, flush left,
     // with the Stage starting at the very top of the viewport.
@@ -151,10 +162,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   test('658×320 with the install banner visible: the board keeps its banner-present floor', async ({
     page,
   }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== 'chromium-touch',
-      'the banner audience requires a coarse pointer — only the touch profile has one',
-    );
+    skipUnlessCoarsePointer(testInfo);
     await installPromptFactory(page);
     await gotoAt(page, PHONE);
     await expect(page.locator('.wy-banner')).toBeHidden();
@@ -202,10 +210,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   test('658×320 with the install banner visible at 200% text zoom: the banner scrolls internally instead of eating the board', async ({
     page,
   }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== 'chromium-touch',
-      'the banner audience requires a coarse pointer — only the touch profile has one',
-    );
+    skipUnlessCoarsePointer(testInfo);
     await installPromptFactory(page);
     await gotoAt(page, PHONE);
     await firePrompt(page, 'dismissed');
@@ -253,13 +258,10 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   test('640×560 Standard with the install banner visible at 200% text zoom: status + banner share one re-budgeted chrome bound', async ({
     page,
   }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== 'chromium-touch',
-      'the banner audience requires a coarse pointer — only the touch profile has one',
-    );
+    skipUnlessCoarsePointer(testInfo);
     await installPromptFactory(page);
     await gotoAt(page, TABLET);
-    expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(false);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(false);
 
     await firePrompt(page, 'dismissed');
     const banner = page.locator('.wy-banner');
@@ -305,10 +307,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   test('658×320 on iOS: the banner offers instructions, and the first Start ends it for the session', async ({
     page,
   }, testInfo) => {
-    test.skip(
-      testInfo.project.name !== 'chromium-touch',
-      'the banner audience requires a coarse pointer — only the touch profile has one',
-    );
+    skipUnlessCoarsePointer(testInfo);
     await stubIosPlatform(page);
     await gotoAt(page, PHONE);
 
@@ -330,7 +329,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     page,
   }) => {
     await gotoAt(page, NARROW);
-    expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(true);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
     const grid = await projectedGrid(page);
     expect(
       grid.cellPx,
@@ -344,7 +343,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     page,
   }) => {
     await gotoAt(page, TALL);
-    expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(false);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(false);
 
     // A top ROW, not a column: the status bar spans the viewport and the Stage sits below it.
     const status = (await regionRect(page, 'status')) as Rect;
@@ -413,7 +412,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     );
     await gotoAt(page, SHORT_DESKTOP);
     expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
-    expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(true);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
 
     const status = (await regionRect(page, 'status')) as Rect;
     expect(status.height).toBeGreaterThanOrEqual(SHORT_DESKTOP.height * 0.9);

@@ -15,6 +15,10 @@
 // there): a navy ground, the gold EXIT square, the blue TOWER block, and the path stroke
 // that winds between them — the game's one idea, in three shapes.
 
+/* global console */
+// `console` is a Node runtime global here. The root `scripts/**` get it from eslint.config's
+// globals block; this file sits under `apps/web/scripts/` (outside that block) and is not part
+// of `verify`'s lint scope, so it declares the global locally rather than widening either.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -10,92 +10,16 @@ import {
   createStorageAdapter,
   DISMISSED_KEY,
   type BeforeInstallPromptEvent,
-  type InstallDeps,
-  type InstallEventTarget,
-  type InstallMediaQueryList,
-  type StorageAdapter,
 } from './install';
-
-const COARSE = '(pointer: coarse)';
-const STANDALONE = '(display-mode: standalone)';
-
-function fakeMatchMedia(matching: readonly string[] = []) {
-  const lists = new Map<string, { matches: boolean; listeners: Set<() => void> }>();
-  const fn = (query: string): InstallMediaQueryList => {
-    let entry = lists.get(query);
-    if (entry === undefined) {
-      entry = { matches: matching.includes(query), listeners: new Set() };
-      lists.set(query, entry);
-    }
-    const e = entry;
-    return {
-      get matches() {
-        return e.matches;
-      },
-      addEventListener: (_t: 'change', l: () => void) => e.listeners.add(l),
-      removeEventListener: (_t: 'change', l: () => void) => e.listeners.delete(l),
-    };
-  };
-  return {
-    fn,
-    set(query: string, matches: boolean): void {
-      const entry = lists.get(query);
-      if (entry === undefined) throw new Error(`query never registered: ${query}`);
-      entry.matches = matches;
-      for (const l of [...entry.listeners]) l();
-    },
-    listenerCount(query: string): number {
-      return lists.get(query)?.listeners.size ?? 0;
-    },
-  };
-}
-
-function fakeStorage(): StorageAdapter {
-  const map = new Map<string, string>();
-  return { get: (k) => map.get(k) ?? null, set: (k, v) => void map.set(k, v) };
-}
-
-function fakeTarget() {
-  const listeners = new Map<string, Set<(e: Event) => void>>();
-  const target: InstallEventTarget = {
-    addEventListener(type, l) {
-      const set = listeners.get(type) ?? new Set();
-      set.add(l);
-      listeners.set(type, set);
-    },
-    removeEventListener(type, l) {
-      listeners.get(type)?.delete(l);
-    },
-  };
-  return {
-    target,
-    dispatch(e: Event): void {
-      for (const l of [...(listeners.get(e.type) ?? [])]) l(e);
-    },
-    count(type: string): number {
-      return listeners.get(type)?.size ?? 0;
-    },
-  };
-}
-
-function promptEvent(outcome: 'accepted' | 'dismissed' = 'accepted') {
-  const prompt = vi.fn(() => Promise.resolve());
-  const event = Object.assign(new Event('beforeinstallprompt'), {
-    prompt,
-    userChoice: Promise.resolve({ outcome }),
-  }) as unknown as BeforeInstallPromptEvent;
-  return { event, prompt };
-}
-
-function deps(overrides: Partial<InstallDeps> = {}): InstallDeps {
-  return {
-    storage: fakeStorage(),
-    matchMedia: fakeMatchMedia().fn,
-    target: fakeTarget().target,
-    navigator: { platform: 'Linux x86_64', maxTouchPoints: 0 },
-    ...overrides,
-  };
-}
+import {
+  COARSE,
+  STANDALONE,
+  deps,
+  fakeMatchMedia,
+  fakeStorage,
+  fakeTarget,
+  fakePromptEvent as promptEvent,
+} from './install-fakes';
 
 describe('install — branch detection (PLAN.md P3)', () => {
   it('is `other` with no captured prompt and a non-iOS platform: no banner, no action', () => {
@@ -385,6 +309,34 @@ describe('install — the storage adapter', () => {
     expect(adapter.get('k')).toBe('v');
     // The write probe cleaned up after itself.
     expect([...store.keys()]).toEqual(['k']);
+  });
+
+  it('leaves a pre-existing value at the probe key intact (shared origin)', () => {
+    // The game deploys under /play/ of the same origin as the wynding.net landing site, so a
+    // value another page stored at the probe key must survive the write probe untouched.
+    const store = new Map<string, string>([['wy.install.__probe__', 'landing-owned']]);
+    const win = {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+      },
+    } as unknown as Window;
+    createStorageAdapter(win);
+    expect(store.get('wy.install.__probe__')).toBe('landing-owned');
+  });
+
+  it('removes its own probe value when the key had no prior value', () => {
+    const store = new Map<string, string>();
+    const win = {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+      },
+    } as unknown as Window;
+    createStorageAdapter(win);
+    expect(store.has('wy.install.__probe__')).toBe(false);
   });
 
   it('falls back to memory when localStorage THROWS on write (Safari private mode)', () => {

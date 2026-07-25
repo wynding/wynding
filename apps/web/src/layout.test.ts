@@ -9,7 +9,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { COMPACT_QUERY, LAYOUT_REGIONS, REGION_ATTR, EXEMPT_CONTAINER_SELECTOR } from './layout';
+import {
+  COMPACT_QUERY,
+  LAYOUT_REGIONS,
+  REGION_ATTR,
+  EXEMPT_CONTAINER_SELECTOR,
+  EXEMPT_CONTENT_SELECTOR,
+  EXEMPT_FROM_DECLARATION,
+  WALKED_CONTAINERS,
+} from './layout';
 
 // `new URL('./ui.css', import.meta.url)` would normally suffice, but under the jsdom test
 // environment the global `URL` is jsdom's DOM implementation, not Node's — resolve via
@@ -62,5 +70,11 @@ describe('layout — the one published Compact trigger (contract §3)', () => {
     expect([...LAYOUT_REGIONS]).toEqual(['status', 'stage', 'dock', 'rail', 'banner']);
     expect(REGION_ATTR).toBe('data-wy-region');
     expect(EXEMPT_CONTAINER_SELECTOR).toBe('.wy-main');
+  });
+
+  it('centralizes the probe walk/exemption vocabulary (contract §5, consumed by layout-probe)', () => {
+    expect(EXEMPT_CONTENT_SELECTOR).toBe('.wy-wordmark, .wy-hud');
+    expect(EXEMPT_FROM_DECLARATION).toBe('.wy-main, .wy-wordmark, .wy-hud');
+    expect([...WALKED_CONTAINERS]).toEqual(['.wy-shell', '.wy-main', '.wy-status']);
   });
 });

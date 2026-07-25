@@ -1,6 +1,11 @@
 import { expect, type Page } from '@playwright/test';
 import { createProjection } from '@wynding/render';
-import { LAYOUT_REGIONS, REGION_ATTR } from '../src/layout';
+import {
+  EXEMPT_FROM_DECLARATION,
+  LAYOUT_REGIONS,
+  REGION_ATTR,
+  WALKED_CONTAINERS,
+} from '../src/layout';
 
 // layout-probe.ts — shared measurement helpers for the Story 11 layout gates
 // (`compact.spec.ts` + `smoke.spec.ts`'s 200%-zoom section). Following `contrast.ts`'s
@@ -11,9 +16,9 @@ import { LAYOUT_REGIONS, REGION_ATTR } from '../src/layout';
 // boxes. A stage that grows while the grid inside it stays the same size is not more
 // playable space, and an element-box gate would not notice the difference.
 
-// M1's "Open Field" board is 28×24 — duplicated from content's boards.ts rather than
-// imported (e2e stays decoupled from content internals; the same two numbers touch.spec.ts
-// and hidpi.spec.ts already duplicate).
+// M1's "Open Field" board is 28×24 — mirrored from content's boards.ts rather than imported
+// (e2e stays decoupled from content internals). This is the ONE copy of those two numbers:
+// `touch.spec.ts` and `hidpi.spec.ts` import it rather than each keeping their own.
 export const GRID = { cols: 28, rows: 24 };
 
 export interface Rect {
@@ -139,18 +144,6 @@ export async function assertRegionRelations(
     );
   }
 }
-
-/** The containers whose VISIBLE children must each declare a region. `.wy-status` is walked
- *  as well as `.wy-shell`/`.wy-main`: Story 11's topology amendment reparented the Dock into
- *  it, so `.wy-dock` — and anything a future packet adds beside it — is a Shell layout child
- *  in all but nesting, and would otherwise escape the gate entirely. */
-const WALKED_CONTAINERS = ['.wy-shell', '.wy-main', '.wy-status'];
-
-/** The ENUMERATED exemptions from carrying a region attribute: `.wy-main` is a structural
- *  container (it holds regions rather than being one — its children are walked instead), and
- *  the wordmark/HUD are content painted INSIDE the `status` region rather than regions the
- *  Shell places. Nothing else may ship undeclared. */
-const EXEMPT_FROM_DECLARATION = '.wy-main, .wy-wordmark, .wy-hud';
 
 /** Contract §5's undeclared-child detection: every VISIBLE layout child of `.wy-shell` /
  *  `.wy-main` / `.wy-status` must carry a declared region attribute, apart from the

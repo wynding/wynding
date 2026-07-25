@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RenderHandle } from '@wynding/render';
 import type { InputHandle } from './input';
+import { createKeymap } from './keymap';
 
 // The Phaser scene is WebGL — mock the subpath so it never loads under jsdom. This is the
 // one module excluded from coverage; here we only need a fake handle. The factory is
@@ -313,6 +314,17 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     };
   }
 
+  // The default binding of the start action — bound from the keymap rather than hardcoded, so
+  // a rebind of the default never silently strands these keydowns on a stale 'KeyC'.
+  const START_KEY = createKeymap().codeFor('start')!;
+
+  // Each test creates an app via `appWith`; tear them all down here rather than trailing an
+  // `app.destroy()` on every test.
+  const createdApps: ReturnType<typeof createApp>[] = [];
+  afterEach(() => {
+    for (const app of createdApps.splice(0)) app.destroy();
+  });
+
   /** A createApp harness with a controllable `(pointer: coarse)`. */
   function appWith(coarse: boolean) {
     const root = document.createElement('div');
@@ -330,12 +342,13 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
         removeEventListener: () => {},
       }),
     });
+    createdApps.push(app);
     return { root, app, frame: () => sched.frame((clock += 16)), advance: () => (clock += 300) };
   }
 
-  it('7. requests fullscreen ONCE on the started false→true edge; repeated Start presses mid-run never re-request', () => {
+  it('requests fullscreen ONCE on the started false→true edge; repeated Start presses mid-run never re-request', () => {
     const fs = stubFullscreen();
-    const { root, app, frame } = appWith(true);
+    const { root, frame } = appWith(true);
     frame();
     const primaryBtn = dockButton(root, 'Start');
     primaryBtn.click();
@@ -345,15 +358,14 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     // it again mid-run must not re-request (and, in a real browser, `fullscreenElement`
     // would also already be set).
     const board = root.querySelector<HTMLElement>('.wy-board')!;
-    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
-    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: START_KEY, cancelable: true }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: START_KEY, cancelable: true }));
     expect(fs.calls()).toBe(1);
-    app.destroy();
   });
 
-  it('8. Play-again then a fresh Start requests again (the edge is re-armed, not spent)', () => {
+  it('Play-again then a fresh Start requests again (the edge is re-armed, not spent)', () => {
     const fs = stubFullscreen();
-    const { root, app, frame } = appWith(true);
+    const { root, frame } = appWith(true);
     frame();
     dockButton(root, 'Start').click();
     expect(fs.calls()).toBe(1);
@@ -366,41 +378,38 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
 
     dockButton(root, 'Start').click();
     expect(fs.calls()).toBe(2);
-    app.destroy();
   });
 
   it('a fine-pointer session never requests fullscreen, and Start still works', () => {
     const fs = stubFullscreen();
-    const { root, app, frame } = appWith(false);
+    const { root, frame } = appWith(false);
     frame();
     const primaryBtn = dockButton(root, 'Start');
     primaryBtn.click();
     frame();
     expect(fs.calls()).toBe(0);
     expect(primaryBtn.hidden).toBe(true); // the run started regardless
-    app.destroy();
   });
 
   it('the keymapped start key routes through the SAME app-level path as the Dock button', () => {
     // Closes the bypass: `input.ts` used to call `controller.start()` directly, so the key
     // would have skipped fullscreen, the install-banner latch and the focus re-home.
     const fs = stubFullscreen();
-    const { root, app, frame } = appWith(true);
+    const { root, frame } = appWith(true);
     frame();
     const board = root.querySelector<HTMLElement>('.wy-board')!;
-    board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: START_KEY, cancelable: true }));
     frame();
     expect(fs.calls()).toBe(1);
     expect(board.dataset.runStarted).toBe('true');
     expect(document.activeElement).toBe(board); // the same focus re-home the Dock path does
-    app.destroy();
   });
 
   it('pressing the start key MID-RUN does not steal focus (the re-home is edge-gated too)', () => {
     // `controller.start()` is a no-op once started, so yanking focus to the board would cost
     // a keyboard player their place on the Card or the chips scrollport for nothing.
     stubFullscreen();
-    const { root, app, frame } = appWith(true);
+    const { root, frame } = appWith(true);
     frame();
     dockButton(root, 'Start').click();
     frame();
@@ -410,9 +419,8 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     expect(document.activeElement).toBe(card);
     root
       .querySelector<HTMLElement>('.wy-board')!
-      .dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true }));
+      .dispatchEvent(new KeyboardEvent('keydown', { code: START_KEY, cancelable: true }));
     expect(document.activeElement).toBe(card);
-    app.destroy();
   });
 });
 

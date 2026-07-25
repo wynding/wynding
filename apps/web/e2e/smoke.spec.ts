@@ -364,6 +364,10 @@ test('a fine-pointer session never requests fullscreen on Start (the gate is cap
   expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.getByRole('button', { name: 'Start' })).toBeHidden(); // the run did start
+  // The stub's sentinel must actually be installed — otherwise `fullscreenCallCount` returns
+  // its `?? 0` fallback and a broken/unapplied stub would satisfy the `toBe(0)` below
+  // vacuously, hiding a real regression where fullscreen WAS requested.
+  expect(await page.evaluate(() => typeof window.__wyFullscreenCalls)).toBe('number');
   expect(await fullscreenCallCount(page)).toBe(0);
 });
 
