@@ -38,6 +38,17 @@ describe('layout — the one published Compact trigger (contract §3)', () => {
     expect(matching[0]).toBe(COMPACT_QUERY);
   });
 
+  it('the Standard-only re-budget block is the exact COMPLEMENT of COMPACT_QUERY', () => {
+    // ui.css cannot negate a TypeScript constant, so the Standard-only fork at the banner
+    // re-budget is written as `(min-height: <max-height + 1>px)`. Assert the pair stays
+    // complementary — otherwise moving the trigger would leave a band of viewports matching
+    // BOTH forks, and the higher-specificity re-budget would win inside Compact.
+    const compactPx = Number(/max-height:\s*(\d+)px/.exec(COMPACT_QUERY)?.[1]);
+    expect(Number.isFinite(compactPx)).toBe(true);
+    const matching = mediaPreludes(css).filter((p) => p.includes('min-height'));
+    expect(matching).toEqual([`(min-height: ${compactPx + 1}px)`]);
+  });
+
   it('COMPACT_QUERY is height-keyed only (decision 1: viewport height alone, never pointer)', () => {
     expect(COMPACT_QUERY).not.toMatch(/pointer|width|hover/);
   });

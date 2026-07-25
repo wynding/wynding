@@ -26,6 +26,7 @@ const PHONE = { width: 658, height: 320 }; // Galaxy S9+ landscape — the small
 const NARROW = { width: 568, height: 320 }; // iPhone-SE-class narrow floor
 const TALL = { width: 1280, height: 720 }; // Standard
 const SHORT_DESKTOP = { width: 900, height: 480 }; // Compact by HEIGHT, with a fine pointer
+const TABLET = { width: 640, height: 560 }; // coarse-pointer LANDSCAPE tablet — Standard, banner-eligible
 
 /** Board-floor gate, banner absent (PLAN.md P1): the projected grid keeps ≥ 85% of the
  *  viewport's height. Derivation: at 658×320 the vw-capped column (~64px) and rail (144px)
@@ -62,6 +63,16 @@ const CELL_PX_MIN_WITH_BANNER = 11;
  *  would take, which holds the grid at cellPx 10 — the same floor the width-limited narrow
  *  viewport gets. Drop the cap and this lands at 5. */
 const CELL_PX_MIN_WITH_BANNER_ZOOMED = 10;
+
+/** The STANDARD twin of the bound above. A coarse-pointer LANDSCAPE tablet is taller than
+ *  500px, so it gets Standard WITH the banner — and there the status row and the banner are
+ *  capped INDEPENDENTLY (40dvh + 25dvh), so at 200% zoom they both hit their caps and jointly
+ *  take ~62% of a 560px-tall viewport, leaving the board's zero-minimum `1fr` row at cellPx 8.
+ *  ui.css re-budgets the two capped boxes to 25dvh + 15dvh while the banner shows; the rest of
+ *  the measured total is `.wy-status`'s own chrome OUTSIDE `.wy-hud` (the wordmark line, the
+ *  wrapped row gap and the vertical padding — ~89px at 200% zoom, fixed rather than dvh-scaled),
+ *  which is why the asserted ceiling is 50% and not a flat 40dvh. */
+const STANDARD_CHROME_FRACTION_MAX_WITH_BANNER = 0.5;
 
 async function gotoAt(
   page: import('@playwright/test').Page,
@@ -235,6 +246,62 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await assertRegionRelations(page, 'compact');
   });
 
+  // The Standard equivalent of the gate above. A coarse-pointer LANDSCAPE tablet is taller
+  // than 500px, so it gets Standard WITH the banner — and the rotate overlay does not cover
+  // it (that gates on portrait). smoke.spec.ts's Standard 200%-zoom gate runs under the
+  // fine-pointer project, where the banner never appears, so this state had no coverage.
+  test('640×560 Standard with the install banner visible at 200% text zoom: status + banner share one re-budgeted chrome bound', async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'chromium-touch',
+      'the banner audience requires a coarse pointer — only the touch profile has one',
+    );
+    await installPromptFactory(page);
+    await gotoAt(page, TABLET);
+    expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(false);
+
+    await firePrompt(page, 'dismissed');
+    const banner = page.locator('.wy-banner');
+    await expect(banner).toBeVisible();
+
+    await page.addStyleTag({ content: ':root { font-size: 200% }' });
+
+    // The two chrome rows are budgeted against each other, not independently...
+    const status = (await regionRect(page, 'status')) as Rect;
+    const bannerBox = (await banner.boundingBox()) as Rect;
+    const chrome = status.height + bannerBox.height;
+    expect(
+      chrome,
+      `status + banner ${chrome}px exceeds the shared banner-present chrome bound`,
+    ).toBeLessThanOrEqual(TABLET.height * STANDARD_CHROME_FRACTION_MAX_WITH_BANNER + 1);
+
+    // ...and the banner's controls stay reachable inside the tightened bound.
+    for (const name of ['Install', 'Dismiss install suggestion']) {
+      const btn = banner.getByRole('button', { name, exact: name === 'Install' });
+      await btn.scrollIntoViewIfNeeded();
+      await btn.focus();
+      await expect(btn).toBeFocused();
+      await expect(btn).toBeInViewport();
+    }
+
+    // ...which is what keeps the Standard board above its full 12px floor here.
+    const grid = await projectedGrid(page);
+    expect(
+      grid.cellPx,
+      `cellPx ${grid.cellPx} below the Standard floor with the banner up at 200% zoom`,
+    ).toBeGreaterThanOrEqual(CELL_PX_MIN);
+
+    // The banner is still a reserved row, disjoint from the board it made room above — the
+    // full `assertRegionRelations` is not used here because the Standard Dock's own overlay
+    // overlap grows with the zoom, which is a separate, already-pinned concern.
+    await assertDeclaredRegions(page);
+    expect(
+      intersect((await regionRect(page, 'banner')) as Rect, grid),
+      'the banner must be disjoint from the projected grid',
+    ).toBeNull();
+  });
+
   test('658×320 on iOS: the banner offers instructions, and the first Start ends it for the session', async ({
     page,
   }, testInfo) => {
@@ -317,6 +384,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
 
   // Decision 10: the chips list is a scrollable region, so it carries a tab stop in BOTH
   // layouts — an intentional accessibility improvement, asserted rather than left implicit.
+  // This also pins the recorded Standard focus-order trade-off: the Dock lives in
+  // `header.wy-status` for both layouts, so it is tabbed BEFORE the board it is painted over
+  // in Standard (matching paint order in Compact). See the "Dock focus order" row in
+  // docs/accessibility-checklist.md — the gate exists so that deviation cannot drift or grow
+  // unnoticed, not because the mismatch is desirable.
   test('1280×720: the chips list is a Standard keyboard stop, ahead of the Dock controls', async ({
     page,
   }) => {

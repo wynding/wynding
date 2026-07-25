@@ -224,6 +224,16 @@ export function createShell(doc: Document): ShellHandle {
   // hotkey still sells the current selection directly via the controller (input.ts).
   dock.append(pauseBtn, speedBtn, settingsBtn, primaryBtn);
 
+  // FOCUS-ORDER TRADE-OFF (recorded, not silent — see docs/accessibility-checklist.md, the
+  // Story 11 audit's "Dock focus order" row). `header.wy-status` precedes `.wy-main`, so the
+  // Dock is tabbed BEFORE the board in both layouts. In Compact that matches the paint order
+  // exactly (the Dock is in the left column, under the chips, left of the board). In Standard
+  // the Dock is painted bottom-left over the Stage, so a Standard keyboard user reaches it
+  // one stop earlier than its position suggests — a deliberate WCAG 2.4.3 deviation accepted
+  // because a single DOM topology has to serve both layouts, the Dock is a four-control
+  // labelled cluster reached immediately after the status chips (never a detour past
+  // unrelated content), and it is the same "chrome before content" order the wordmark and
+  // chips already establish. `compact.spec.ts` pins the order so it cannot drift unnoticed.
   status.append(wordmark, hudBox, dock);
 
   // --- Banner: the reserved install-suggestion row (Story 11 P3) ---

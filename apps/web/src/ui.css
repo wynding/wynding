@@ -178,6 +178,29 @@ body {
   display: none;
 }
 
+/* Standard only: the status row (40dvh) and the banner (25dvh) are capped INDEPENDENTLY, and
+   both reach their caps at 200% text zoom — so with the banner up they can jointly claim
+   65dvh of a `minmax(0, auto)` pair whose board sibling has a zero minimum, dropping the
+   grid under its pinned floors on a coarse-pointer LANDSCAPE tablet (the `ios` audience this
+   banner targets, which is Standard, not Compact, above 500px tall). Re-budget the two rows
+   against each other while the banner is showing so their SUM stays at the same 40dvh bound
+   ADR 0003 commits to; both keep their own internal scrollports for what no longer fits.
+   Compact is unaffected — there the banner is a bottom row beside a status COLUMN, and its
+   25dvh cost is pinned separately by compact.spec.ts.
+
+   This prelude is the hand-written COMPLEMENT of the Compact trigger (`COMPACT_QUERY`, one
+   pixel above its `max-height`) — `layout.test.ts` mechanically asserts the pair stays
+   complementary, so moving the trigger without moving this line fails CI. */
+@media (min-height: 501px) {
+  .wy-shell:has(.wy-banner:not([hidden])) .wy-hud {
+    max-height: max(2.5rem, calc(25dvh - 3.3rem - env(safe-area-inset-top)));
+  }
+
+  .wy-shell:has(.wy-banner:not([hidden])) .wy-banner {
+    max-height: 15dvh;
+  }
+}
+
 .wy-banner-text {
   flex: 1 1 12rem;
   min-width: 0;
@@ -185,9 +208,11 @@ body {
   font-size: 0.95rem;
 }
 
-.wy-banner-dismiss {
-  /* Glyph-only: the localized accessible name comes from its aria-label. */
-  min-width: 44px;
+/* Glyph-only: the localized accessible name comes from its aria-label. The descendant
+   selector is load-bearing — the button also carries `.wy-btn`, whose base rule is declared
+   LATER in this file; at equal specificity source order would win and restore the full
+   button padding/font-size. */
+.wy-banner .wy-banner-dismiss {
   padding: 0.25rem;
   font-size: 1.25rem;
   line-height: 1;
@@ -197,8 +222,9 @@ body {
   grid-row: 3;
   display: grid;
   /* Rail width clamp per PLAN.md P1. minmax(0, …) on the board column so the canvas can
-     never force overflow. */
-  grid-template-columns: minmax(0, 1fr) clamp(9rem, 18vw, 13rem);
+     never force overflow. The outer min() vw-caps the clamp's rem floor (like Compact
+     below) so 200% text zoom cannot starve the board on a narrow viewport. */
+  grid-template-columns: minmax(0, 1fr) min(clamp(9rem, 18vw, 13rem), 28vw);
   min-width: 0;
   min-height: 0;
 }
@@ -234,7 +260,11 @@ body {
      `z-index` is load-bearing after the reparent: `header.wy-status` precedes `.wy-main` in
      the DOM, so with `z-index: auto` the positioned `.wy-board` inside the later `.wy-main`
      would paint OVER this positioned Dock and swallow its hit tests. It sat after the board
-     before, and painted on top for free. */
+     before, and painted on top for free.
+
+     The same DOM-vs-paint gap means the Standard Dock is TABBED before the board it floats
+     over — an accepted, recorded focus-order deviation (see the comment at `status.append`
+     in `shell.ts` and the Story 11 accessibility-checklist row), not an oversight. */
   position: absolute;
   z-index: 1;
   left: 0.5rem;
@@ -242,7 +272,10 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  max-width: calc(100% - 1rem);
+  /* The containing block is the SHELL, so `100%` is the full shell width — subtract the Rail
+     track (`.wy-main`'s second column) so the Dock still wraps at the Stage's right edge and
+     can never extend over the Rail (which is unpositioned and would lose to `z-index: 1`). */
+  max-width: calc(100% - 1rem - min(clamp(9rem, 18vw, 13rem), 28vw));
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   user-select: none; /* Shell chrome (PLAN.md P3) */

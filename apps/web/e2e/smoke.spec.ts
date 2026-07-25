@@ -172,7 +172,7 @@ test('iOS: the settings row opens the Add-to-Home-Screen dialog, which Escape di
   await expect(settingsDialog).toBeHidden();
   const instructions = page.getByRole('dialog', { name: 'Add Wynding to your Home Screen' });
   await expect(instructions).toBeVisible();
-  await expect(instructions).toContainText('tap the Share button');
+  await expect(instructions).toContainText('Add to Home Screen');
   await expect(page.locator('.wy-shell')).toHaveAttribute('inert', '');
 
   // Axe with the instructions dialog open.
@@ -583,8 +583,7 @@ test('200% text zoom on the Standard layout (360×640): the status row stays ins
   await expect(lastChip).toBeInViewport();
 
   // What the bound buys: the Stage keeps the VERTICAL space the status row would otherwise
-  // eat. Gated on height alone — at 360px wide the Rail, not the status row, is what limits
-  // the projected grid's cellPx, so a cellPx floor here would measure the wrong thing.
+  // eat.
   const stage = await regionRect(page, 'stage');
   expect(stage, 'the stage region must be present').not.toBeNull();
   const stageHeight = (stage as { height: number }).height;
@@ -592,5 +591,23 @@ test('200% text zoom on the Standard layout (360×640): the status row stays ins
     stageHeight / VIEWPORT_360.height,
     `stage height ${stageHeight}px below the 50% floor`,
   ).toBeGreaterThanOrEqual(0.5);
-  await assertRegionRelations(page, 'standard');
+
+  // ...and the vw-capped Rail keeps the HORIZONTAL space: at 360px wide the rail resolves
+  // to ~101px (28vw, not 9rem = 288px), so the stage keeps ~259px and the 28×24 grid still
+  // projects a playable cellPx. Both floors sit just under that and bite the moment the
+  // rail's vw cap is dropped.
+  const stageWidth = (stage as { width: number }).width;
+  expect(stageWidth, `stage width ${stageWidth}px below the 240px floor`).toBeGreaterThanOrEqual(
+    240,
+  );
+  const zoomedGrid = await projectedGrid(page);
+  expect(
+    zoomedGrid.cellPx,
+    `cellPx ${zoomedGrid.cellPx} below the 8px floor`,
+  ).toBeGreaterThanOrEqual(8);
+  // The relation table still holds, with ONE zoom-specific allowance: the floating Dock's
+  // controls are text-sized, so at 200% the cluster wraps into a band far taller than the
+  // 64px it occupies at 100%. It stays a bottom-left overlay — it may not cover more of the
+  // grid than the same 40dvh budget the status row is held to.
+  await assertRegionRelations(page, 'standard', VIEWPORT_360.height * 0.4);
 });

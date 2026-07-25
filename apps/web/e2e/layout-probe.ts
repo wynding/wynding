@@ -96,6 +96,11 @@ export const STANDARD_DOCK_OVERLAP_MAX_PX = 64;
 export async function assertRegionRelations(
   page: Page,
   layout: 'compact' | 'standard',
+  // The Dock cluster is TEXT-sized: at 200% zoom its controls (and the rows they wrap into)
+  // grow with the root font, so the pinned 64px band only describes the 100%-zoom case. A
+  // zoom gate passes its own, explicitly justified allowance rather than silently relaxing
+  // the default every caller relies on.
+  dockOverlapMaxPx: number = STANDARD_DOCK_OVERLAP_MAX_PX,
 ): Promise<void> {
   const grid = await projectedGrid(page);
 
@@ -120,15 +125,15 @@ export async function assertRegionRelations(
   } else if (overlap !== null) {
     expect(
       overlap.height,
-      `Standard Dock overlaps ${overlap.height}px of the grid (max ${STANDARD_DOCK_OVERLAP_MAX_PX})`,
-    ).toBeLessThanOrEqual(STANDARD_DOCK_OVERLAP_MAX_PX);
+      `Standard Dock overlaps ${overlap.height}px of the grid (max ${dockOverlapMaxPx})`,
+    ).toBeLessThanOrEqual(dockOverlapMaxPx);
     // ...and only at the grid's BOTTOM-LEFT: entirely within the bottom band, in the left
     // half. (The grid can extend a few px BELOW the Dock — the Dock floats 0.5rem off the
     // viewport edge — so the overlap is bounded by where it STARTS, not by a flush edge.)
     expect(
       overlap.y,
       'the Standard Dock may only clip the grid inside its bottom band',
-    ).toBeGreaterThanOrEqual(grid.y + grid.height - STANDARD_DOCK_OVERLAP_MAX_PX - 1);
+    ).toBeGreaterThanOrEqual(grid.y + grid.height - dockOverlapMaxPx - 1);
     expect(overlap.x, 'the Standard Dock may only clip the grid on its LEFT').toBeLessThan(
       grid.x + grid.width / 2,
     );

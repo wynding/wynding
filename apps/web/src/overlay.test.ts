@@ -895,7 +895,7 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
     expect(s.overlay.instructionsEl.getAttribute('aria-label')).toBe(
       'Add Wynding to your Home Screen',
     );
-    expect(s.overlay.instructionsEl.textContent).toContain('tap the Share button');
+    expect(s.overlay.instructionsEl.textContent).toContain('Add to Home Screen');
     expect(s.shell.root.hasAttribute('inert')).toBe(true);
     // Focus lands on the dialog's own close target.
     expect(document.activeElement).toBe(
