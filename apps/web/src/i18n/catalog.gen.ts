@@ -10,7 +10,8 @@ export const EN = {
   "hud.countdown": "Wave in {seconds}s",
   "hud.label": "Game status",
   "hud.wave.active": "Wave in progress",
-  "hud.wave.pressStart": "Press Start to begin",
+  "hud.wave.compact.countdown": "{s}s",
+  "hud.wave.compact.active": "▶",
   "hud.stars": "Stars: {count} of 3",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -80,7 +81,8 @@ export interface MessageParams {
   "hud.countdown": { "seconds": string | number };
   "hud.label": Record<never, never>;
   "hud.wave.active": Record<never, never>;
-  "hud.wave.pressStart": Record<never, never>;
+  "hud.wave.compact.countdown": { "s": string | number };
+  "hud.wave.compact.active": Record<never, never>;
   "hud.stars": { "count": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;

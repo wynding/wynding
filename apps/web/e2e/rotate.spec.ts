@@ -21,6 +21,13 @@ test('rotating to portrait shows the overlay and auto-pauses; returning to lands
   // device profile implies it.
   const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
   expect(coarse).toBe(true);
+  // Story 11: this landscape profile is 320px tall, so the run below is driven from the
+  // COMPACT layout's column Dock (Start/Resume are the same accessible names either way —
+  // Compact only makes the non-headline buttons' text visually hidden). Rotating to portrait
+  // makes the viewport 658px TALL, which is Standard: the rotate overlay covers it either
+  // way, and the layout fork must not disturb the auto-pause lifecycle.
+  const compactInLandscape = await page.evaluate(() => matchMedia('(max-height: 500px)').matches);
+  expect(compactInLandscape).toBe(true);
 
   const board = page.locator('.wy-board');
   await page.getByRole('button', { name: 'Start' }).click();
@@ -34,6 +41,7 @@ test('rotating to portrait shows the overlay and auto-pauses; returning to lands
   await page.setViewportSize(PORTRAIT);
   const rotateDialog = page.getByRole('dialog', { name: 'Rotate your device' });
   await expect(rotateDialog).toBeVisible();
+  expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(false);
 
   // The run auto-pauses: sample the tick twice across a delay — it must not move either time.
   const stoppedTick = await board.getAttribute('data-sim-tick');

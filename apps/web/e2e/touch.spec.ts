@@ -85,6 +85,12 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     // alone does not guarantee it, so assert it rather than assume the device profile.
     const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
     expect(coarse).toBe(true);
+    // ...and this 320px-tall profile renders the COMPACT layout (Story 11): the Shell chrome
+    // this spec hit-tests against is a full-height status COLUMN on the left with its Dock
+    // inside it — there is no top row any more. Asserted as a precondition so a trigger
+    // change turns into a clear failure here rather than a confusing gesture mis-classification.
+    const compact = await page.evaluate(() => matchMedia('(max-height: 500px)').matches);
+    expect(compact).toBe(true);
     session = await context.newCDPSession(page);
     // Press Start first (PLAN.md P6): a touch build on a HELD run stays Pending — the
     // commit assertions below need the sim actually stepping.
@@ -243,11 +249,26 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     const cx = cardBox.x + cardBox.width / 2;
     const cy = cardBox.y + cardBox.height / 2;
 
-    // Release over the Status bar (Shell chrome, top-left corner of the 320px-tall
-    // viewport) — never commits, and unlike a board-native drag (which stays armed on a
-    // rejected placement) a Card-drag cancellation ALSO disarms.
+    // Release over the Compact COLUMN DOCK (Shell chrome — Story 11 moves the controls into
+    // the status column, so this is the surface a real thumb actually strays onto mid-drag,
+    // and the one the `CHROME_SELECTOR` hit-test has to keep covering). Never commits, and
+    // unlike a board-native drag (which stays armed on a rejected placement) a Card-drag
+    // cancellation ALSO disarms.
+    const settingsBtn = page.getByRole('button', { name: 'Accessibility settings' });
+    const settingsBox = (await settingsBtn.boundingBox()) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
     await touchStart(session, [{ x: cx, y: cy, id: 0 }]);
-    await touchMove(session, [{ x: 5, y: 5, id: 0 }]);
+    await touchMove(session, [
+      {
+        x: settingsBox.x + settingsBox.width / 2,
+        y: settingsBox.y + settingsBox.height / 2,
+        id: 0,
+      },
+    ]);
     await touchEnd(session);
 
     await expect(card).toHaveAttribute('aria-pressed', 'false');

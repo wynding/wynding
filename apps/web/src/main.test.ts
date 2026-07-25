@@ -56,17 +56,26 @@ function manualSchedule(): {
   };
 }
 
-/** Select a Dock button by its accessible name (aria-label, else textContent) rather than
- *  by positional index — resilient to Dock reordering. Requires overlay.update() to have
- *  run at least once so the labels are populated. */
+/** Select a Dock button by its accessible name (aria-label, else the `.wy-btn-text` span —
+ *  the Dock markup contract's localized text node; the sibling `.wy-btn-icon` is
+ *  `aria-hidden` glance presentation and contributes nothing to the accessible name) rather
+ *  than by positional index — resilient to Dock reordering. Requires overlay.update() to
+ *  have run at least once so the labels are populated. */
 function dockButton(root: HTMLElement, name: string | RegExp): HTMLButtonElement {
   const btns = [...root.querySelectorAll<HTMLButtonElement>('.wy-dock .wy-btn')];
   const match = btns.find((b) => {
-    const label = b.getAttribute('aria-label') ?? b.textContent ?? '';
+    const label =
+      b.getAttribute('aria-label') ?? b.querySelector('.wy-btn-text')?.textContent ?? '';
     return typeof name === 'string' ? label === name : name.test(label);
   });
   if (match === undefined) throw new Error(`no Dock button named ${String(name)}`);
   return match;
+}
+
+/** A Dock button's visible localized label — the `.wy-btn-text` span from the Dock markup
+ *  contract, not the button's raw textContent (which also contains the aria-hidden glyph). */
+function dockText(btn: HTMLButtonElement): string {
+  return btn.querySelector('.wy-btn-text')?.textContent ?? '';
 }
 
 describe('main — createApp wiring & frame loop', () => {
@@ -146,7 +155,7 @@ describe('main — createApp wiring & frame loop', () => {
     const primaryBtn = dockButton(root, 'Start');
     // Pre-start (PLAN.md P4): Pause is hidden, the primary Dock button reads Start.
     expect(pauseBtn.hidden).toBe(true);
-    expect(primaryBtn.textContent).toBe('Start');
+    expect(dockText(primaryBtn)).toBe('Start');
 
     primaryBtn.click(); // launches the run (M1's one wave, immediately)
     // Start re-homes focus to the board (M3): overlay.update() hides the just-clicked
@@ -158,11 +167,11 @@ describe('main — createApp wiring & frame loop', () => {
 
     pauseBtn.click();
     sched.frame((clock += 16));
-    expect(pauseBtn.textContent).toBe('Resume'); // pause routed
+    expect(dockText(pauseBtn)).toBe('Resume'); // pause routed
     pauseBtn.click(); // resume
     speedBtn.click();
     sched.frame((clock += 16));
-    expect(speedBtn.textContent).toBe('Speed: 2x');
+    expect(dockText(speedBtn)).toBe('Speed: 2x');
 
     // Drive frames until the run terminates (results screen appears).
     const results = root.querySelector<HTMLElement>('.wy-results')!;
@@ -190,7 +199,7 @@ describe('main — createApp wiring & frame loop', () => {
     // again.
     expect(pauseBtn.hidden).toBe(true);
     expect(primaryBtn.hidden).toBe(false);
-    expect(primaryBtn.textContent).toBe('Start');
+    expect(dockText(primaryBtn)).toBe('Start');
     app.destroy();
   });
 });

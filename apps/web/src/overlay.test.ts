@@ -3,7 +3,7 @@ import type { HudVM } from '@wynding/render';
 import { compileRuleset } from '@wynding/sim';
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 import { createOverlay, type UiAction } from './overlay';
-import { createShell } from './shell';
+import { createShell, dockButtonParts } from './shell';
 import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
 import { createController, type UiState } from './controller';
@@ -113,10 +113,16 @@ describe('overlay — HUD readout', () => {
       ui: uiState(),
       refund: 0,
     });
-    const text = shell.hud.lives.parentElement!.textContent!;
+    const text = shell.hudBox.textContent!;
     expect(text).toContain('Lives: 10');
     expect(text).toContain('Bounty: 80');
     expect(text).toContain('Wave in 25s');
+    // Dual-form chips (Story 11 contract §4): the aria-hidden glance form carries the icon
+    // + value; the full ICU message stays the accessible text, never sentence-split.
+    expect(shell.hud.lives.full.textContent).toBe('Lives: 10');
+    expect(shell.hud.lives.glance.textContent).toBe('♥ 10');
+    expect(shell.hud.bounty.glance.textContent).toBe('◈ 80');
+    expect(shell.hud.wave.glance.textContent).toBe('25s');
 
     overlay.update({
       hud: hud({ countdownSeconds: null, phase: 'active' }),
@@ -125,9 +131,13 @@ describe('overlay — HUD readout', () => {
       ui: uiState(),
       refund: 0,
     });
-    expect(shell.hud.wave.textContent).toBe('Wave in progress');
+    expect(shell.hud.wave.full.textContent).toBe('Wave in progress');
+    expect(shell.hud.wave.glance.textContent).toBe('▶');
+    expect(shell.hud.wave.root.hidden).toBe(false);
 
-    // Terminal phase also has countdownSeconds null, but must NOT say "in progress".
+    // Terminal phase also has countdownSeconds null, but must NOT say "in progress" — the
+    // wave slot hides entirely (the outcome is the results dialog), with its full-form node
+    // retained and empty.
     overlay.update({
       hud: hud({ countdownSeconds: null, phase: 'lost', won: false }),
       paused: false,
@@ -135,7 +145,9 @@ describe('overlay — HUD readout', () => {
       ui: uiState(),
       refund: 0,
     });
-    expect(shell.hud.wave.textContent).toBe('');
+    expect(shell.hud.wave.full.textContent).toBe('');
+    expect(shell.hud.wave.root.hidden).toBe(true);
+    expect(shell.hud.wave.root.isConnected).toBe(true);
   });
 
   it('reflects pause/speed state on the controls', () => {
@@ -147,9 +159,13 @@ describe('overlay — HUD readout', () => {
       ui: uiState(),
       refund: 0,
     });
-    expect(pauseBtn.textContent).toBe('Resume');
+    // The Dock markup contract (Story 11 P1) splits every button into an aria-hidden icon
+    // span + the localized text span; the icon swaps in the SAME update as the text.
+    expect(dockButtonParts(pauseBtn).text.textContent).toBe('Resume');
+    expect(dockButtonParts(pauseBtn).icon.textContent).toBe('⏵');
     expect(pauseBtn.getAttribute('aria-pressed')).toBe('true');
-    expect(speedBtn.textContent).toBe('Speed: 2x');
+    expect(dockButtonParts(speedBtn).text.textContent).toBe('Speed: 2x');
+    expect(dockButtonParts(speedBtn).icon.textContent).toBe('2×');
 
     overlay.update({
       hud: hud(),
@@ -158,12 +174,20 @@ describe('overlay — HUD readout', () => {
       ui: uiState(),
       refund: 0,
     });
-    expect(pauseBtn.textContent).toBe('Pause');
+    expect(dockButtonParts(pauseBtn).text.textContent).toBe('Pause');
+    expect(dockButtonParts(pauseBtn).icon.textContent).toBe('⏸');
+    expect(dockButtonParts(speedBtn).icon.textContent).toBe('1×');
+  });
+
+  it('the Settings button carries its glyph and its localized accessible text', () => {
+    const { settingsBtn } = setup();
+    expect(dockButtonParts(settingsBtn).icon.textContent).toBe('⚙');
+    expect(dockButtonParts(settingsBtn).text.textContent).toBe('Accessibility settings');
   });
 });
 
 describe('overlay — player-started runs (PLAN.md P4)', () => {
-  it('pre-start: Pause is hidden, the primary Dock button reads Start, and the wave slot prompts to begin', () => {
+  it('pre-start: Pause is hidden, the primary Dock button reads Start, and the wave slot is hidden (four visible chips)', () => {
     const { overlay, pauseBtn, primaryBtn, shell } = setup();
     overlay.update({
       hud: hud(),
@@ -174,8 +198,16 @@ describe('overlay — player-started runs (PLAN.md P4)', () => {
     });
     expect(pauseBtn.hidden).toBe(true);
     expect(primaryBtn.hidden).toBe(false);
-    expect(primaryBtn.textContent).toBe('Start');
-    expect(shell.hud.wave.textContent).toBe('Press Start to begin');
+    // Start keeps its VISIBLE text label in both layouts (contract §2) — no icon form.
+    expect(dockButtonParts(primaryBtn).text.textContent).toBe('Start');
+    expect(dockButtonParts(primaryBtn).icon.textContent).toBe('');
+    // Story 11 P1's wave-slot states: pre-start the slot is HIDDEN with its full-form node
+    // retained and empty — the sim's countdown never ticks down while held, and the Dock's
+    // "Start" button already carries the prompt. Four of the five chip slots are visible.
+    expect(shell.hud.wave.full.textContent).toBe('');
+    expect(shell.hud.wave.root.hidden).toBe(true);
+    const visible = [...shell.hudBox.children].filter((el) => !(el as HTMLElement).hidden);
+    expect(visible).toHaveLength(4);
   });
 
   it('once started: Pause is visible, the primary Dock button hides for the rest of the run', () => {
@@ -522,7 +554,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 describe('overlay — accessibility semantics', () => {
   it('the HUD is a labelled group, NOT a chatty live region', () => {
     const { shell } = setup();
-    const hudGroup = shell.hud.lives.parentElement!;
+    const hudGroup = shell.hudBox;
     expect(hudGroup.getAttribute('role')).toBe('group');
     expect(hudGroup.getAttribute('aria-live')).toBeNull(); // no ~20×/s announcement flood
     expect(hudGroup.getAttribute('aria-label')).toBe('Game status');

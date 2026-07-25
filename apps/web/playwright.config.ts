@@ -29,7 +29,11 @@ export default defineConfig({
     // asserts that media query as its own precondition before testing gated behavior.
     {
       name: 'chromium-touch',
-      testMatch: /touch\.spec\.ts|rotate\.spec\.ts/,
+      // `compact.spec.ts` runs in BOTH projects (Story 11): the Compact trigger is keyed on
+      // viewport HEIGHT alone, so the layout must hold identically for a coarse-pointer
+      // phone and a short desktop window. `chromium.testIgnore` is deliberately untouched,
+      // so it also runs under the default project.
+      testMatch: /touch\.spec\.ts|rotate\.spec\.ts|compact\.spec\.ts/,
       use: { ...devices['Galaxy S9+ landscape'] },
     },
     // HiDPI backing-store gates (#28/P5): the same viewport at 1×/2×/3× device pixel

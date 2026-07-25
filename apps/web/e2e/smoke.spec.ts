@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { assertRenderedContrast } from './contrast';
+import { assertDeclaredRegions, assertRegionRelations, projectedGrid } from './layout-probe';
+
+/** The smallest supported landscape viewport (the Galaxy S9+ landscape profile) — Compact
+ *  after Story 11, and the size every pinned board-floor gate is derived against. */
+const VIEWPORT_658 = { width: 658, height: 320 };
 
 // One end-to-end smoke over the M1 slice, carrying the ADR 0003 axe-core audit. It
 // exercises the real DOM UI (HUD + controls + settings) and the run lifecycle, then
@@ -122,8 +127,11 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   test.setTimeout(90_000);
   await page.goto('/');
 
-  // Pre-start (PLAN.md P4): no countdown, just the localized prompt; Pause hidden.
-  await expect(page.locator('.wy-status')).toContainText('Press Start to begin');
+  // Pre-start (PLAN.md P4 + Story 11's wave-slot states): no countdown — the wave chip is
+  // hidden entirely until a run begins (the sim's countdown never ticks down while held),
+  // leaving four visible chips; Pause hidden.
+  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
+  await expect(page.locator('.wy-hud > .wy-chip:not([hidden])')).toHaveCount(4);
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
 
   // Start launches the run (M1: exactly one wave, launched immediately — Start IS the
@@ -213,8 +221,8 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   await expect(page.locator('.wy-board')).toBeFocused();
 
   // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
-  // again.
-  await expect(page.locator('.wy-status')).toContainText('Press Start to begin');
+  // again — including the wave chip going back to hidden.
+  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });
@@ -293,14 +301,22 @@ test('rendered contrast: Card, Panel, and Dock controls meet the DOM text bar', 
   await assertRenderedContrast(page, '.wy-panel', 4.5);
 });
 
-test('200% text zoom at the smallest supported landscape viewport (658×320): chrome regions scroll internally instead of clipping', async ({
+test('200% text zoom at the smallest supported landscape viewport (658×320): the Compact layout scrolls internally instead of clipping, and the board keeps its pinned floor', async ({
   page,
 }) => {
   // Pinned to the Galaxy S9+ landscape profile's viewport (`chromium-touch`'s device) — the
-  // smallest supported landscape size (ADR 0003's text-resize commitment).
-  await page.setViewportSize({ width: 658, height: 320 });
+  // smallest supported landscape size (ADR 0003's text-resize commitment). At 320px tall
+  // this renders the COMPACT layout (Story 11): a status column, not a top row.
+  await page.setViewportSize(VIEWPORT_658);
   await page.goto('/');
-  expect(page.viewportSize()).toEqual({ width: 658, height: 320 });
+  expect(page.viewportSize()).toEqual(VIEWPORT_658);
+  expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(true);
+
+  // Banner-absent board floor at 100% zoom, BEFORE the zoom is applied (P1's pinned gates;
+  // P3 adds a separate, lower gate for the banner-present pre-start state).
+  const base = await projectedGrid(page);
+  expect(base.cellPx, `cellPx ${base.cellPx} below the 12px floor`).toBeGreaterThanOrEqual(12);
+  expect(base.height / VIEWPORT_658.height).toBeGreaterThanOrEqual(0.85);
 
   await page.addStyleTag({ content: ':root { font-size: 200% }' });
 
@@ -315,22 +331,53 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): ch
       .first()
       .evaluate((el) => el.scrollHeight > el.clientHeight);
 
-  // The status bar (Lives/Bounty/Score/Stars + wordmark at 200%) overflows its bounded row
-  // — `.wy-shell`'s first row is `minmax(0, auto)` with `.wy-status` capped at a dvh-based
-  // max-height (ui.css), so it scrolls internally rather than growing unbounded and
-  // squeezing the board.
-  expect(await overflowsInternally('.wy-status'), '.wy-status should scroll internally').toBe(true);
+  // The CHIPS LIST is the scrollport now that the Dock shares the status header (Story 11's
+  // contract §1): at 200% the four chips overflow the `flex: 1` column it gets, so it must
+  // scroll internally rather than push the Dock (or the board) out of the layout.
+  expect(await overflowsInternally('.wy-hud'), '.wy-hud should scroll internally').toBe(true);
 
-  // The board keeps a defensible minimum height because the bounded status row can eat at
-  // most ~40dvh (128px of this 320px-tall viewport), leaving the board's `1fr` row ≥ ~192px.
-  // 150 is a floor with margin below that ~192 — and above what an UNBOUNDED status row would
-  // leave: remove the `.wy-status` max-height and the 200%-zoom status bar grows tall enough
-  // to squeeze the board well under 150, so this assertion bites exactly on the M4 bound.
-  const boardHeight = await page.locator('.wy-board').evaluate((el) => el.clientHeight);
+  // ...and it is keyboard-operable, not pointer-only: focus the scrollport itself, press an
+  // arrow key, and assert ITS OWN scrollTop moved (a page-level scroll or an ancestor
+  // scrolling instead would leave this at 0), with the last chip then reachable.
+  const hud = page.locator('.wy-hud');
+  await hud.focus();
+  await expect(hud).toBeFocused();
+  expect(await hud.evaluate((el) => el.scrollTop)).toBe(0);
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(async () => hud.evaluate((el) => el.scrollTop), {
+      message: 'the chips scrollport should scroll on an arrow key',
+    })
+    .toBeGreaterThan(0);
+  const lastChip = page.locator('.wy-hud > .wy-chip:not([hidden])').last();
+  await lastChip.scrollIntoViewIfNeeded();
+  await expect(lastChip).toBeInViewport();
+
+  // The vw-capped column and rail (contract §2) keep the board playable at 200%: the column
+  // resolves to ~66px (10vw, not 4rem = 128px) and the rail to ~184px (28vw, not 9rem =
+  // 288px), leaving a ~408px-wide stage — so the 28×24 grid lands at cellPx 13 → 364×312.
+  // The floors below sit just under those, and bite the moment a cap is dropped.
+  const zoomed = await projectedGrid(page);
+  expect(zoomed.cellPx, `cellPx ${zoomed.cellPx} below the 12px floor`).toBeGreaterThanOrEqual(12);
+  expect(zoomed.width, `grid width ${zoomed.width}px below the 336px floor`).toBeGreaterThanOrEqual(
+    336,
+  );
   expect(
-    boardHeight,
-    `.wy-board height ${boardHeight}px below the 150px floor`,
-  ).toBeGreaterThanOrEqual(150);
+    zoomed.height,
+    `grid height ${zoomed.height}px below the 288px floor`,
+  ).toBeGreaterThanOrEqual(288);
+
+  // Every Dock control stays reachable at 200% inside the bounded column, and the region
+  // relation table still holds (banner row absent in P1).
+  for (const name of ['Speed: 1x', 'Accessibility settings', 'Start']) {
+    const btn = page.getByRole('button', { name });
+    await btn.scrollIntoViewIfNeeded();
+    await btn.focus();
+    await expect(btn).toBeFocused();
+    await expect(btn).toBeInViewport();
+  }
+  await assertDeclaredRegions(page);
+  await assertRegionRelations(page, 'compact');
 
   // Rail: arm the Card so the Panel opens with its Close button as the Rail's last
   // control at 200% zoom — the Rail's content now overflows, so it must scroll internally
@@ -359,10 +406,4 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): ch
   await expect(lastRebind).toBeFocused();
   await expect(lastRebind).toBeInViewport();
   await page.keyboard.press('Escape');
-
-  // Status bar holds no focusable controls — scroll its last content element (the Stars
-  // HUD span) into view and assert visibility instead of focus/reachability.
-  const stars = page.locator('.wy-hud > span').last();
-  await stars.scrollIntoViewIfNeeded();
-  await expect(stars).toBeInViewport();
 });

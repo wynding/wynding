@@ -20,7 +20,7 @@ import type { SettingsStore } from './settings';
 import { GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
-import type { ShellHandle } from './shell';
+import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
 import type { RotateController } from './rotate';
 
@@ -87,6 +87,38 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
   armTower1: () => t('action.armTower1'),
 };
 
+/** Glance-form glyphs for the Compact chips and Dock buttons (Story 11 P1).
+ *
+ *  These are PRESENTATION, not copy: every node they are written into is `aria-hidden`, and
+ *  the full localized message sits alongside it as the element's actual accessible text. A
+ *  glyph has no language, so routing it through the `t()` catalog would create a
+ *  translatable entry with nothing to translate — the same exemption the codebase already
+ *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The two
+ *  genuinely WORDED compact forms (the wave slot's countdown and active markers) do go
+ *  through the catalog, as `hud.wave.compact.*`. */
+const ICONS = {
+  lives: '♥',
+  bounty: '◈',
+  score: '✦',
+  stars: '★',
+  settings: '⚙',
+  pause: '⏸',
+  resume: '⏵',
+  /** Multiplication sign for the speed button's glance form ("1×" / "2×"). */
+  speed: '×',
+} as const;
+
+/** The ONE chip write path (contract §4): both forms are always written together from the
+ *  same call, so the visible glance and the accessible full message can never disagree, and
+ *  no caller can sentence-split a label away from its value. An empty full form means the
+ *  slot has nothing to say and the whole chip hides (the wave slot pre-start and terminal)
+ *  — the node itself is retained either way. */
+function setChip(chip: ShellChip, full: string, glance: string): void {
+  chip.full.textContent = full;
+  chip.glance.textContent = glance;
+  chip.root.hidden = full === '';
+}
+
 function button(doc: Document, className: string, label: string): HTMLButtonElement {
   const b = doc.createElement('button');
   b.type = 'button';
@@ -121,7 +153,17 @@ export function createOverlay(
   const { hud: hudEls, dock, card, panel, live } = shell;
   const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
 
-  settingsBtn.textContent = t('controls.settings');
+  // Dock markup contract (Story 11 P1): every Dock button carries an aria-hidden icon span
+  // plus the localized text span, in both layouts. Resolved once here — the spans are
+  // structural (built by `shell.ts`) and never replaced, so `update()` just rewrites their
+  // text.
+  const pauseParts = dockButtonParts(pauseBtn);
+  const speedParts = dockButtonParts(speedBtn);
+  const settingsParts = dockButtonParts(settingsBtn);
+  const primaryParts = dockButtonParts(primaryBtn);
+
+  settingsParts.icon.textContent = ICONS.settings;
+  settingsParts.text.textContent = t('controls.settings');
   // The Dock's headline Start action (PLAN.md P4) — the old "Call wave now" button is
   // gone; `primaryBtn` (the empty slot P1 reserved, carrying the shared `.wy-primary`
   // primary-styled look — ui.css — with the results dialog's contrast spot-check scoped to
@@ -130,7 +172,9 @@ export function createOverlay(
   // pressed) and the Pause button's own hidden-pre-start state are both driven per-frame
   // by `update()` below, since they depend on live `UiState`, not anything fixed at
   // construction time.
-  primaryBtn.textContent = t('controls.start');
+  // Start keeps its VISIBLE text label in both layouts (contract §2) — no icon form; the
+  // empty icon span collapses (`.wy-btn-icon:empty` has nothing to render).
+  primaryParts.text.textContent = t('controls.start');
 
   pauseBtn.addEventListener('click', () => onAction({ type: 'togglePause' }));
   speedBtn.addEventListener('click', () => onAction({ type: 'cycleSpeed' }));
@@ -591,28 +635,43 @@ export function createOverlay(
     modal,
     update(view: HudView): void {
       const { hud } = view;
-      hudEls.lives.textContent = t('hud.lives', { count: hud.lives });
-      hudEls.bounty.textContent = t('hud.bounty', { count: hud.bounty });
-      hudEls.score.textContent = t('hud.score', { count: hud.score });
-      hudEls.stars.textContent = t('hud.stars', { count: hud.stars });
-      // Pre-start (PLAN.md P4): no countdown, just the localized prompt — the sim's own
-      // countdown figure is meaningless while held (it never ticks down until Start).
-      // Once started, countdownSeconds is null for BOTH active and terminal phases — only
-      // label a live wave "in progress"; a finished match shows no wave line (its outcome
-      // is the dialog).
-      hudEls.wave.textContent = !view.ui.started
-        ? t('hud.wave.pressStart')
-        : hud.countdownSeconds !== null
-          ? t('hud.countdown', { seconds: hud.countdownSeconds })
-          : hud.phase === 'active'
+      setChip(hudEls.lives, t('hud.lives', { count: hud.lives }), `${ICONS.lives} ${hud.lives}`);
+      setChip(
+        hudEls.bounty,
+        t('hud.bounty', { count: hud.bounty }),
+        `${ICONS.bounty} ${hud.bounty}`,
+      );
+      setChip(hudEls.score, t('hud.score', { count: hud.score }), `${ICONS.score} ${hud.score}`);
+      setChip(hudEls.stars, t('hud.stars', { count: hud.stars }), `${ICONS.stars} ${hud.stars}`);
+      // Wave slot states (Story 11 P1). Pre-start the slot is HIDDEN rather than carrying a
+      // prompt: the sim's countdown figure is meaningless while held (it never ticks down
+      // until Start), and the Dock's headline "Start" button is the affordance that says so
+      // — a chip repeating it would just cost a row of the Compact column. Once started,
+      // countdownSeconds is null for BOTH active and terminal phases — only label a live
+      // wave "in progress"; a finished match shows no wave chip (its outcome is the dialog).
+      const counting = view.ui.started && hud.countdownSeconds !== null;
+      const active = view.ui.started && hud.countdownSeconds === null && hud.phase === 'active';
+      setChip(
+        hudEls.wave,
+        counting
+          ? t('hud.countdown', { seconds: hud.countdownSeconds as number })
+          : active
             ? t('hud.wave.active')
-            : '';
+            : '',
+        counting
+          ? t('hud.wave.compact.countdown', { s: hud.countdownSeconds as number })
+          : active
+            ? t('hud.wave.compact.active')
+            : '',
+      );
       // Pause is HIDDEN (not disabled) pre-start (PLAN.md P4) — there's nothing to pause
       // yet, and a hidden control can't be tabbed to or announced as a false affordance.
       pauseBtn.hidden = !view.ui.started;
-      pauseBtn.textContent = view.paused ? t('controls.resume') : t('controls.pause');
+      pauseParts.icon.textContent = view.paused ? ICONS.resume : ICONS.pause;
+      pauseParts.text.textContent = view.paused ? t('controls.resume') : t('controls.pause');
       pauseBtn.setAttribute('aria-pressed', String(view.paused));
-      speedBtn.textContent = t('controls.speed', { factor: view.speed });
+      speedParts.icon.textContent = `${view.speed}${ICONS.speed}`;
+      speedParts.text.textContent = t('controls.speed', { factor: view.speed });
       // The primary Start action hides for the rest of the run once pressed (PLAN.md P4:
       // M1 ships exactly one wave — there's no later-wave affordance to show instead).
       primaryBtn.hidden = view.ui.started;
