@@ -5,9 +5,15 @@
    text labels.
 
    Text-resize commitment (ADR 0003): the page itself never scrolls (`body { overflow:
-   hidden }`), but `.wy-status`, `.wy-rail`, and `.wy-settings` get `overflow-y: auto` so
-   200% text zoom reflows/scrolls internally instead of clipping — the board viewport
-   (`.wy-board`) is the only fixed-fit element. */
+   hidden }`), but `.wy-hud`, `.wy-banner`, `.wy-rail`, and `.wy-settings` get `overflow-y:
+   auto` so 200% text zoom reflows/scrolls internally instead of clipping — the board
+   viewport (`.wy-board`) is the only fixed-fit element.
+
+   TWO LAYOUTS, ONE STYLESHEET FORK (Story 11's two-layouts contract): everything below is
+   the Standard layout; the single `@media (max-height: 500px)` block at the bottom of this
+   file is the Compact fork. That query text appears in EXACTLY ONE place here and is
+   mechanically checked against `COMPACT_QUERY` in `layout.ts` (`layout.test.ts`). Nothing
+   is compact-only or standard-only: both layouts render the same DOM. */
 
 :root {
   --wy-bg: #0d1b2a;
@@ -22,6 +28,26 @@
      which sample computed color/backgroundColor rather than composited alpha, actually
      measure the dimmed state. */
   --wy-fg-dim: #9ba2ae;
+  /* Compact status-column width (contract §2). vw-capped so 200% text zoom cannot starve
+     the board: at 200% `4rem` would be 128px, but `10vw` holds it to ~66px on a 658px-wide
+     phone. Content that no longer fits scrolls inside `.wy-hud` (the ADR 0003 doctrine)
+     while the board's floor stays gated numerically by the projection thresholds in
+     `compact.spec.ts` / `smoke.spec.ts`.
+     The `+ env(safe-area-inset-left, 0px)` term GROWS the track by the left notch/inset that
+     `.wy-status` then spends as internal `padding-left` — so the CONTENT width the Compact
+     Dock buttons (`width: 100%`) see stays the intended `min(4rem, 10vw)` instead of being
+     eaten down to a few px on a notched iPhone in landscape (where the inset is ~44–59px).
+     env() resolves to 0 in headless CI, so the projection thresholds in compact.spec.ts /
+     smoke.spec.ts are UNCHANGED there: at 658×320 with env()=0 the track is exactly
+     `min(4rem, 10vw)` and the 200%-zoom board-floor math above is untouched. On a real
+     notched device the board cedes exactly the unusable notch strip and nothing more —
+     honest accounting. */
+  --wy-compact-col: calc(min(4rem, 10vw) + env(safe-area-inset-left, 0px));
+  /* Standard Rail track width (PLAN.md P1): the clamp's rem floor is vw-capped (like
+     `--wy-compact-col`) so 200% text zoom cannot starve the board on a narrow viewport. Named
+     so the `.wy-main` grid track and the `.wy-dock` max-width subtraction consume ONE
+     expression; the Compact fork overrides this token rather than restating the value. */
+  --wy-rail-w: min(clamp(9rem, 18vw, 13rem), 28vw);
 }
 
 html,
@@ -46,10 +72,20 @@ body {
 
 .wy-shell {
   display: grid;
-  /* The status row is `minmax(0, auto)` (not bare `auto`): paired with `.wy-status`'s own
-     max-height, this bounds the status row so its `overflow-y: auto` engages at 200% zoom
-     instead of the status bar growing unbounded and squeezing the board (ADR 0003). */
-  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+  /* The Standard Dock is absolutely positioned against the SHELL (contract §1): it is a
+     `.wy-status` child in the DOM, but renders exactly as before — floating over the
+     Stage's bottom-left — because this is its containing block. */
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  /* EXACT row order (contract §1): status (1), banner (2), main (3). The banner row is
+     always declared and collapses to zero height while `.wy-banner` is `hidden` — reserving
+     it here, rather than floating the strip, is what keeps it from colliding with the
+     shell-anchored overlay Dock.
+     The status row is `minmax(0, auto)` (not bare `auto`): paired with `.wy-hud`'s own
+     chrome-discounted max-height, this holds the whole status row to 40dvh so its
+     `overflow-y: auto` engages at 200% zoom instead of the status bar growing unbounded and
+     squeezing the board (ADR 0003). */
+  grid-template-rows: minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
   /* 100vh fallback declared FIRST — `100dvh` overrides it in browsers that support small/
      dynamic viewport units; the fallback keeps older browsers full-height too. */
   height: 100vh;
@@ -66,13 +102,18 @@ body {
   padding-top: calc(0.5rem + env(safe-area-inset-top));
   padding-left: calc(1rem + env(safe-area-inset-left));
   padding-right: calc(1rem + env(safe-area-inset-right));
-  overflow-y: auto;
   min-height: 0;
-  /* Cap the status bar at ~40% of the (small/dynamic) viewport height so its `overflow-y:
-     auto` actually engages under 200% text zoom — without a bound the row would grow to fit
-     its reflowed content and eat the board's space. 40dvh keeps the board's `1fr` row a
-     usable minimum (≥ ~192px at the 320px-tall smallest supported landscape viewport). */
-  max-height: 40dvh;
+  /* EXACT row order (contract §1). Explicit placement, not auto-flow: while `.wy-banner` is
+     `hidden` it is not a grid item at all, so auto-flow would slide `.wy-main` up into the
+     banner's `auto` row and collapse the board to its content height. */
+  grid-row: 1;
+  /* The overflow box MOVED to `.wy-hud` (contract §1). The Dock is now a `.wy-status`
+     child, and an absolutely-positioned descendant IS clipped by an ancestor scroll box —
+     so Standard `.wy-status` must stay `overflow: visible` or the Dock would vanish behind
+     the status bar's own scrollport. Bounded scrolling lives entirely on `.wy-hud` below,
+     whose cap is the 40dvh row budget MINUS this row's wordmark, gap and padding — so the
+     row still honours ADR 0003's 40dvh bound without being a scroll box itself. */
+  overflow: visible;
   /* Shell chrome never participates in text selection (PLAN.md P3) — a touch drag
      starting near it must not select text instead of driving a gesture. */
   user-select: none;
@@ -84,18 +125,130 @@ body {
   font-weight: 700;
 }
 
+/* The chips list: the bounded, labelled, keyboard-reachable scrollport (contract §1). Cap
+   it so `overflow-y: auto` actually engages under 200% text zoom — without a bound the row
+   would grow to fit its reflowed content and eat the board's space. The bound ADR 0003
+   commits to is 40dvh for the WHOLE Standard status row, and this is the only capped box in
+   it, so the row's own chrome has to come out of the same budget: the wordmark line
+   (1.1rem × 1.4 line-height ≈ 1.54rem), the row gap it wraps across (0.75rem) and the
+   vertical padding (2 × 0.5rem + the top safe-area inset) all sit OUTSIDE this box — 3.3rem
+   plus the inset. Subtracting them keeps `.wy-status` itself within 40dvh, which keeps the
+   board's `1fr` row a usable minimum (≥ ~192px at the 320px-tall smallest supported
+   landscape viewport). The `max()` floor keeps a chip row visible rather than collapsing to
+   zero if the subtraction ever exceeds the budget on a very short Standard viewport. */
 .wy-hud {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem 1.25rem;
   font-size: 1.1rem;
+  min-width: 0;
+  min-height: 0;
+  max-height: max(2.5rem, calc(40dvh - 3.3rem - env(safe-area-inset-top)));
+  overflow-y: auto;
+}
+
+.wy-hud:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: 2px;
+}
+
+/* Dual-form chips (contract §4): the full ICU message is the accessible text in BOTH
+   layouts; the aria-hidden glance form (icon + value) only ever renders on Compact. */
+.wy-chip-glance {
+  display: none;
+}
+
+/* --- Install banner: the reserved pre-start suggestion row (Story 11 P3) --- */
+
+.wy-banner {
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.25rem 0.75rem;
+  padding-left: calc(0.75rem + env(safe-area-inset-left));
+  padding-right: calc(0.75rem + env(safe-area-inset-right));
+  background: var(--wy-surface);
+  min-width: 0;
+  min-height: 0;
+  /* Bounded like `.wy-hud`, and for the same reason: the banner sits in a `minmax(0, auto)`
+     shell row whose sibling board row has a 0 minimum, and everything inside it is rem-based,
+     so at 200% text zoom an unbounded banner would double to ~185px of a 320px-tall viewport
+     and collapse the board far below its pinned floors. 25dvh keeps its cost to ~80px there;
+     the reflowed content that no longer fits scrolls internally (ADR 0003), and its own
+     buttons remain the keyboard route into that scrollport. */
+  max-height: 25dvh;
+  /* border-box so the cap is the RENDERED height: with the default content-box the row's own
+     padding would ride on top of the 25dvh and the bound would silently overshoot. */
+  box-sizing: border-box;
+  overflow-y: auto;
+  /* Shell chrome never participates in text selection (PLAN.md P3), and a release over it
+     cancels rather than commits — `input.ts`'s CHROME_SELECTOR covers it. */
+  user-select: none;
+}
+
+.wy-banner[hidden] {
+  display: none;
+}
+
+/* Standard only: the status row (40dvh) and the banner (25dvh) are capped INDEPENDENTLY, and
+   both reach their caps at 200% text zoom — so with the banner up they can jointly claim
+   65dvh of a `minmax(0, auto)` pair whose board sibling has a zero minimum, dropping the
+   grid under its pinned floors on a coarse-pointer LANDSCAPE tablet (the `ios` audience this
+   banner targets, which is Standard, not Compact, above 500px tall). Re-budget the two rows
+   against each other while the banner is showing so their SUM stays at the same 40dvh bound
+   ADR 0003 commits to; both keep their own internal scrollports for what no longer fits.
+   Compact is unaffected — there the banner is a bottom row beside a status COLUMN, and its
+   25dvh cost is pinned separately by compact.spec.ts.
+
+   This prelude is the hand-written COMPLEMENT of the Compact trigger (`COMPACT_QUERY`),
+   expressed as its gap-free NEGATION rather than `min-height: 501px` — an integer
+   complement leaves fractional viewport heights (e.g. 500.5px under page zoom) matching
+   NEITHER fork. `layout.test.ts` mechanically asserts the pair stays complementary, so
+   moving the trigger without moving this line fails CI. */
+@media not all and (max-height: 500px) {
+  .wy-shell:has(.wy-banner:not([hidden])) .wy-hud {
+    max-height: max(2.5rem, calc(25dvh - 3.3rem - env(safe-area-inset-top)));
+  }
+
+  .wy-shell:has(.wy-banner:not([hidden])) .wy-banner {
+    max-height: 15dvh;
+  }
+}
+
+.wy-banner-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+/* Glyph-only: the localized accessible name comes from its aria-label. The descendant
+   selector is load-bearing — the button also carries `.wy-btn`, whose base rule is declared
+   LATER in this file; at equal specificity source order would win and restore the full
+   button padding/font-size. */
+.wy-banner .wy-banner-dismiss {
+  padding: 0.25rem;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+/* The dismiss glyph shares the app's `.wy-btn-icon` glance-glyph class, but the banner button
+   is icon-ONLY in BOTH layouts — unlike the Dock, which shows text in Standard and so hides
+   its icons there (`.wy-btn-icon { display: none }`). Un-hide it inside the banner so the
+   Standard-layout audience (the coarse-pointer landscape tablet, above the Compact trigger)
+   still sees the ✕. */
+.wy-banner .wy-btn-icon {
+  display: inline;
 }
 
 .wy-main {
+  grid-row: 3;
   display: grid;
-  /* Rail width clamp per PLAN.md P1. minmax(0, …) on the board column so the canvas can
-     never force overflow. */
-  grid-template-columns: minmax(0, 1fr) clamp(9rem, 18vw, 13rem);
+  /* Rail width clamp per PLAN.md P1 (`--wy-rail-w`, vw-capped). minmax(0, …) on the board
+     column so the canvas can never force overflow. */
+  grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
   min-width: 0;
   min-height: 0;
 }
@@ -123,14 +276,30 @@ body {
 }
 
 .wy-dock {
-  /* Bottom-left floating control cluster, overlapping the board border. */
+  /* Bottom-left floating control cluster, overlapping the board border. Anchored to
+     `.wy-shell` (its containing block) rather than `.wy-stage`, since the node now lives in
+     `header.wy-status` — the rendered result is identical to the pre-Story-11 Standard
+     layout, and `compact.spec.ts` asserts it stays visible and hit-testable over the Stage.
+
+     `z-index` is load-bearing after the reparent: `header.wy-status` precedes `.wy-main` in
+     the DOM, so with `z-index: auto` the positioned `.wy-board` inside the later `.wy-main`
+     would paint OVER this positioned Dock and swallow its hit tests. It sat after the board
+     before, and painted on top for free.
+
+     The same DOM-vs-paint gap means the Standard Dock is TABBED before the board it floats
+     over — an accepted, recorded focus-order deviation (see the comment at `status.append`
+     in `shell.ts` and the Story 11 accessibility-checklist row), not an oversight. */
   position: absolute;
+  z-index: 1;
   left: 0.5rem;
   bottom: 0.5rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  max-width: calc(100% - 1rem);
+  /* The containing block is the SHELL, so `100%` is the full shell width — subtract the Rail
+     track (`.wy-main`'s second column) so the Dock still wraps at the Stage's right edge and
+     can never extend over the Rail (which is unpositioned and would lose to `z-index: 1`). */
+  max-width: calc(100% - 1rem - var(--wy-rail-w));
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   user-select: none; /* Shell chrome (PLAN.md P3) */
@@ -273,10 +442,43 @@ body {
   font-weight: 700;
 }
 
+/* Dock button markup contract (P1): an aria-hidden icon span + the localized text span.
+   The icon is glance presentation only — Standard hides it (the full text label is right
+   there), Compact shows it in place of the visually-hidden label. */
+.wy-dock .wy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+/* An explicit `display` above out-specifies the UA's `[hidden] { display: none }`, so the
+   hidden states the Dock actually relies on (Pause pre-start, Start once the run begins)
+   have to be restored here — otherwise a "hidden" control stays clickable and tabbable. */
+.wy-dock .wy-btn[hidden] {
+  display: none;
+}
+
+.wy-btn-icon {
+  display: none;
+}
+
+/* Start is the one Dock button with no icon form (it keeps its visible text label in both
+   layouts), so its icon span is never written. Collapse it explicitly: as a zero-width flex
+   item it would still contribute the Compact fork's 0.35rem gap and push the centred label
+   off-centre against every other button in the column. */
+.wy-btn-icon:empty {
+  display: none;
+}
+
 /* --- Settings dialog: bounded + internally scrollable (ADR 0003 text-resize commitment) --- */
 
 .wy-settings {
+  /* Modal surfaces sit ABOVE the Dock's `z-index: 1` (see `.wy-dock`) — otherwise the
+     Dock cluster, a positioned child of the root stacking context, would paint over the
+     scrim. `.wy-instructions` reuses this rule. */
   position: fixed;
+  z-index: 2;
   inset: 0;
   overflow-y: auto;
   padding: 1.5rem;
@@ -312,6 +514,29 @@ body {
   min-height: 44px;
 }
 
+.wy-install-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+/* The explicit display out-specifies the UA `[hidden]` default — restore it (same
+   pattern as the Dock buttons and the banner). */
+.wy-install-row[hidden] {
+  display: none;
+}
+
+.wy-install-row h3 {
+  margin: 0;
+}
+
+.wy-install-explain {
+  margin: 0;
+  color: var(--wy-fg-dim);
+  font-size: 0.95rem;
+}
+
 .wy-rebind {
   list-style: none;
   margin: 0;
@@ -340,6 +565,7 @@ body {
 
 .wy-results {
   position: fixed;
+  z-index: 2; /* above the Dock — see `.wy-settings` */
   inset: 0;
   display: flex;
   flex-direction: column;
@@ -365,6 +591,7 @@ body {
 
 .wy-rotate {
   position: fixed;
+  z-index: 2; /* above the Dock — see `.wy-settings` */
   inset: 0;
   display: flex;
   flex-direction: column;
@@ -392,6 +619,160 @@ body {
 .wy-rotate p {
   max-width: 24rem;
   font-size: 1.1rem;
+}
+
+/* ===========================================================================
+   COMPACT LAYOUT — the ONE stylesheet fork (Story 11's two-layouts contract §1–3).
+
+   THE TRIGGER TEXT BELOW APPEARS EXACTLY ONCE IN THIS FILE and must stay string-equal to
+   `COMPACT_QUERY` in `layout.ts`; `layout.test.ts` parses this stylesheet and enforces
+   both. Add Compact rules INSIDE this block — a second `@media` with the same query would
+   fail that gate on purpose (one published trigger, mechanically synchronized).
+
+   Shape: the status header becomes the full-height left COLUMN (chips list on top, its own
+   in-column Dock below), and `.wy-main` takes the remaining width. Widths are vw-capped so
+   200% text zoom cannot starve the board; anything that no longer fits scrolls inside
+   `.wy-hud` or the Dock rather than pushing the board smaller.
+   =========================================================================== */
+@media (max-height: 500px) {
+  /* EXACT row order (contract §1): a single content row holding the status COLUMN and the
+     main area side by side, with the banner spanning both columns beneath them. DOM order is
+     status → banner → main, so Compact places all three explicitly rather than relying on
+     auto-flow. */
+  .wy-shell {
+    grid-template-columns: var(--wy-compact-col) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, auto);
+  }
+
+  .wy-banner {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    /* Compact puts the banner at the BOTTOM edge of the shell, so it — not `.wy-status` —
+       is what has to clear the home indicator / gesture bar. */
+    padding-bottom: calc(0.25rem + env(safe-area-inset-bottom));
+  }
+
+  /* The column's width belongs to the chips and controls. */
+  .wy-wordmark {
+    display: none;
+  }
+
+  .wy-status {
+    grid-row: 1;
+    grid-column: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.25rem;
+    padding-top: calc(0.25rem + env(safe-area-inset-top));
+    padding-left: calc(0.25rem + env(safe-area-inset-left));
+    padding-bottom: calc(0.25rem + env(safe-area-inset-bottom));
+    /* The column is the outer bound; its two children each scroll on their own. */
+    overflow: hidden;
+  }
+
+  /* Chips: the `flex: 1` scrollport. The Dock is a separately bounded block BELOW it, so
+     chips can never scroll behind the controls (chip–Dock disjointness is asserted). */
+  .wy-hud {
+    flex: 1 1 auto;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.35rem;
+    max-height: none;
+    font-size: 0.875rem;
+  }
+
+  /* The full ICU message stays the chip's accessible text — only its PRESENTATION changes
+     (identical rules to `.wy-sr-only`); the glance form takes the visible slot. */
+  .wy-chip-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .wy-chip-glance {
+    display: block;
+  }
+
+  /* Dock: a static, separately bounded block at the bottom of the column. */
+  .wy-dock {
+    position: static;
+    flex: 0 0 auto;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    max-width: none;
+    max-height: 70%;
+    overflow-y: auto;
+    padding-left: 0;
+    padding-bottom: 0;
+  }
+
+  /* Compact Dock fit rules (contract §2), pinned so the column genuinely holds its controls
+     at 200% text zoom: full-column-width buttons that may grow taller but never wider, with
+     the 44px touch target preserved at 100% zoom. Start's `0.875rem` is the ADR 0003 legible
+     floor for the headline action and is PURELY rem-based, so it genuinely doubles at 200%
+     (a vw-clamped middle term would cap scaling at ~156% and break the resize commitment);
+     it wraps under pressure instead of overflowing. */
+  .wy-dock .wy-btn {
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 0.25rem;
+    min-height: 44px;
+    font-size: 0.875rem;
+    overflow-wrap: break-word;
+  }
+
+  .wy-btn-icon {
+    display: inline;
+  }
+
+  /* Icon-only, EXCEPT Start — the headline action keeps its visible text label in both
+     layouts. The accessible name is unchanged either way. */
+  .wy-dock .wy-btn:not(.wy-primary) .wy-btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Rail: vw-capped like the column, for the same reason. Override the token rather than
+     restating the track, so all three `--wy-rail-w` consumers stay in step. */
+  .wy-main {
+    grid-row: 1;
+    grid-column: 2;
+    /* The Compact fork overrides the token (contract §2) rather than restating the track.
+       Same shape as `--wy-compact-col`: `.wy-rail` spends `env(safe-area-inset-right)` as
+       internal `padding-right`, so grow the fixed track by that inset to keep the Card's
+       (`width: 100%`) content width at the intended `min(9rem, 28vw)` on a right-notched
+       landscape iPhone. env()=0 in headless CI leaves the track — and the projection
+       thresholds — exactly `min(9rem, 28vw)`. */
+    --wy-rail-w: calc(min(9rem, 28vw) + env(safe-area-inset-right, 0px));
+
+    grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
+  }
+
+  /* Hotkey badge is COMPACT-gated, not pointer-gated (decision 1): touch laptops keep the
+     keyboard guidance — space, not capability, is the constraint here. */
+  .wy-card-hotkey {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

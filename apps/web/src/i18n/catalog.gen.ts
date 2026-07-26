@@ -10,7 +10,8 @@ export const EN = {
   "hud.countdown": "Wave in {seconds}s",
   "hud.label": "Game status",
   "hud.wave.active": "Wave in progress",
-  "hud.wave.pressStart": "Press Start to begin",
+  "hud.wave.compact.countdown": "{s}s",
+  "hud.wave.compact.active": "▶",
   "hud.stars": "Stars: {count} of 3",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -18,8 +19,9 @@ export const EN = {
   "controls.start": "Start",
   "controls.playAgain": "Play again",
   "controls.verify": "Verify this run",
-  "controls.settings": "Accessibility settings",
-  "settings.title": "Accessibility",
+  "controls.settings": "Settings",
+  "settings.title": "Settings",
+  "settings.accessibility": "Accessibility",
   "settings.close": "Close",
   "settings.colourMode": "Colour vision mode",
   "settings.colourMode.default": "Default",
@@ -67,6 +69,16 @@ export const EN = {
   "live.sold": "Tower sold. Refunded {refund} Bounty.",
   "rotate.title": "Rotate your device",
   "rotate.message": "Wynding plays best in landscape. Rotate your device to continue.",
+  "install.banner.text": "Wynding plays best as an app — full screen, no browser bars.",
+  "install.banner.install": "Install",
+  "install.banner.how": "Show me how",
+  "install.banner.dismiss": "Dismiss install suggestion",
+  "install.ios.title": "Add Wynding to your Home Screen",
+  "install.ios.body": "Tap the Share button, then choose \"Add to Home Screen\". Wynding will open full-screen, without browser bars.",
+  "install.ios.close": "Close",
+  "install.settings.row": "Install as app",
+  "install.settings.explain": "Installing gives Wynding the whole screen. Your browser doesn't offer an install prompt — look for \"Install\" or \"Add to Home Screen\" in its menu.",
+  "install.settings.declined": "Installing gives Wynding the whole screen. You can install any time from your browser's menu — look for \"Install\" or \"Add to Home Screen\".",
 } as const;
 
 export type MessageKey = keyof typeof EN;
@@ -80,7 +92,8 @@ export interface MessageParams {
   "hud.countdown": { "seconds": string | number };
   "hud.label": Record<never, never>;
   "hud.wave.active": Record<never, never>;
-  "hud.wave.pressStart": Record<never, never>;
+  "hud.wave.compact.countdown": { "s": string | number };
+  "hud.wave.compact.active": Record<never, never>;
   "hud.stars": { "count": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
@@ -90,6 +103,7 @@ export interface MessageParams {
   "controls.verify": Record<never, never>;
   "controls.settings": Record<never, never>;
   "settings.title": Record<never, never>;
+  "settings.accessibility": Record<never, never>;
   "settings.close": Record<never, never>;
   "settings.colourMode": Record<never, never>;
   "settings.colourMode.default": Record<never, never>;
@@ -137,4 +151,14 @@ export interface MessageParams {
   "live.sold": { "refund": string | number };
   "rotate.title": Record<never, never>;
   "rotate.message": Record<never, never>;
+  "install.banner.text": Record<never, never>;
+  "install.banner.install": Record<never, never>;
+  "install.banner.how": Record<never, never>;
+  "install.banner.dismiss": Record<never, never>;
+  "install.ios.title": Record<never, never>;
+  "install.ios.body": Record<never, never>;
+  "install.ios.close": Record<never, never>;
+  "install.settings.row": Record<never, never>;
+  "install.settings.explain": Record<never, never>;
+  "install.settings.declined": Record<never, never>;
 }

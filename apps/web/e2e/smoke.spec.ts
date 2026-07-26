@@ -1,6 +1,22 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { assertRenderedContrast } from './contrast';
+import {
+  assertDeclaredRegions,
+  assertRegionRelations,
+  projectedGrid,
+  regionRect,
+} from './layout-probe';
+import { firePrompt, installPromptFactory, promptCallCount, stubIosPlatform } from './install-stub';
+import { fullscreenCallCount, stubFullscreen } from './fullscreen-stub';
+
+/** The smallest supported landscape viewport (the Galaxy S9+ landscape profile) — Compact
+ *  after Story 11, and the size every pinned board-floor gate is derived against. */
+const VIEWPORT_658 = { width: 658, height: 320 };
+
+/** A representative small PORTRAIT phone viewport — tall enough to render Standard (the
+ *  Compact trigger is `max-height: 500px`), so it gates the horizontal status header. */
+const VIEWPORT_360 = { width: 360, height: 640 };
 
 // One end-to-end smoke over the M1 slice, carrying the ADR 0003 axe-core audit. It
 // exercises the real DOM UI (HUD + controls + settings) and the run lifecycle, then
@@ -29,8 +45,8 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   // Open the accessibility settings (now a bounded, labelled modal dialog — sibling of
   // the Shell, which goes inert while it's open) and switch colour-vision mode + reduced
   // motion.
-  await page.getByRole('button', { name: 'Accessibility settings' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
   await expect(page.locator('.wy-shell')).toHaveAttribute('inert', '');
   await page.getByLabel('Deuteranopia').check();
@@ -50,15 +66,133 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await page.getByRole('button', { name: 'Close' }).click();
   await expect(settingsDialog).toBeHidden();
   await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
-  await expect(page.getByRole('button', { name: 'Accessibility settings' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
+});
+
+test('the SERVED page links a manifest that actually launches the game (PLAN.md P2)', async ({
+  page,
+  request,
+}) => {
+  await page.goto('/');
+
+  // Resolve the link the browser itself would follow — not the source path — so a base-path
+  // rewrite (production builds with `--base=/play/`) is exercised rather than assumed.
+  const href = await page
+    .locator('link[rel="manifest"]')
+    .evaluate((el) => (el as HTMLLinkElement).href);
+  const response = await request.get(href);
+  expect(response.status(), `${href} was not served`).toBe(200);
+  const manifest = JSON.parse(await response.text());
+
+  // Relative members resolve against the MANIFEST URL, so an installed app opens the
+  // deployed base path rather than the origin root.
+  expect(manifest.start_url).toBe('.');
+  expect(manifest.scope).toBe('.');
+  expect(manifest.display).toBe('standalone');
+  expect(manifest.name).toBe('Wynding');
+
+  // ...and every icon it declares is actually SERVED (a committed-but-unpublished icon is a
+  // silently uninstallable app on Chromium, which requires a fetchable ≥192px icon).
+  expect(manifest.icons.length).toBeGreaterThan(0);
+  for (const icon of manifest.icons) {
+    const iconUrl = new URL(icon.src, href).toString();
+    const iconResponse = await request.get(iconUrl);
+    expect(iconResponse.status(), `${iconUrl} was not served`).toBe(200);
+    expect(iconResponse.headers()['content-type']).toContain('image/png');
+  }
+  expect(manifest.icons.some((i: { purpose: string }) => i.purpose === 'maskable')).toBe(true);
+
+  // The iOS home-screen icon is linked from the document (iOS ignores the manifest's icons).
+  const appleHref = await page
+    .locator('link[rel="apple-touch-icon"]')
+    .evaluate((el) => (el as HTMLLinkElement).href);
+  expect((await request.get(appleHref)).status(), `${appleHref} was not served`).toBe(200);
+});
+
+test('a promptable DESKTOP session gets the settings-row Install action and NO banner, and the prompt is single-use', async ({
+  page,
+}) => {
+  // The init script only installs the factory; the dispatch happens after mount (an
+  // init-script dispatch would fire before the app's listener exists and be lost).
+  await installPromptFactory(page);
+  await page.goto('/');
+  await expect(page.locator('.wy-board')).toBeVisible();
+
+  // Desktop = fine pointer. `beforeinstallprompt` is a Chromium signal, not "Android": the
+  // banner is phone-oriented, so this session gets the settings row only.
+  expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
+  await firePrompt(page, 'accepted');
+  await expect(page.locator('.wy-banner')).toBeHidden();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog).toBeVisible();
+  // The renamed dialog keeps an "Accessibility" heading for the a11y controls (decision 5).
+  await expect(dialog.getByRole('heading', { name: 'Accessibility' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Install as app' })).toBeVisible();
+
+  // Axe with the renamed Settings dialog + install row visible.
+  const settingsAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(settingsAudit.violations, JSON.stringify(settingsAudit.violations, null, 2)).toEqual([]);
+
+  const install = dialog.getByRole('button', { name: 'Install', exact: true });
+  await expect(install).toBeVisible();
+  await install.click();
+  await expect.poll(() => promptCallCount(page)).toBe(1);
+
+  // Accepted → installed for this session → every install affordance goes away, and the
+  // held event was consumed so nothing can re-fire it.
+  await expect(page.locator('.wy-install-row')).toBeHidden();
+  expect(await promptCallCount(page)).toBe(1);
+});
+
+test('an `other` browser is told where to look instead of being offered a dead button', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog.getByRole('heading', { name: 'Install as app' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Install', exact: true })).toBeHidden();
+  await expect(page.locator('.wy-install-explain')).toContainText('Add to Home Screen');
+});
+
+test('iOS: the settings row opens the Add-to-Home-Screen dialog, which Escape dismisses', async ({
+  page,
+}) => {
+  await stubIosPlatform(page);
+  await page.goto('/');
+  await expect(page.locator('.wy-board')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
+  await settingsDialog.getByRole('button', { name: 'Show me how' }).click();
+
+  // Settings closes FIRST, then instructions opens — they never share the stack.
+  await expect(settingsDialog).toBeHidden();
+  const instructions = page.getByRole('dialog', { name: 'Add Wynding to your Home Screen' });
+  await expect(instructions).toBeVisible();
+  await expect(instructions).toContainText('Add to Home Screen');
+  await expect(page.locator('.wy-shell')).toHaveAttribute('inert', '');
+
+  // Axe with the instructions dialog open.
+  const audit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+
+  // Escape dismisses it via the new per-overlay modal metadata, and focus returns to the
+  // settings opener per the modal owner's stack rules.
+  await page.keyboard.press('Escape');
+  await expect(instructions).toBeHidden();
+  await expect(page.locator('.wy-shell')).not.toHaveAttribute('inert', '');
+  await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
 });
 
 test('the settings dialog closes on Escape (the modal owner consumes it first)', async ({
   page,
 }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Accessibility settings' }).click();
-  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsDialog).toBeHidden();
@@ -122,8 +256,11 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   test.setTimeout(90_000);
   await page.goto('/');
 
-  // Pre-start (PLAN.md P4): no countdown, just the localized prompt; Pause hidden.
-  await expect(page.locator('.wy-status')).toContainText('Press Start to begin');
+  // Pre-start (PLAN.md P4 + Story 11's wave-slot states): no countdown — the wave chip is
+  // hidden entirely until a run begins (the sim's countdown never ticks down while held),
+  // leaving four visible chips; Pause hidden.
+  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
+  await expect(page.locator('.wy-hud > .wy-chip:not([hidden])')).toHaveCount(4);
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
 
   // Start launches the run (M1: exactly one wave, launched immediately — Start IS the
@@ -213,10 +350,25 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   await expect(page.locator('.wy-board')).toBeFocused();
 
   // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
-  // again.
-  await expect(page.locator('.wy-status')).toContainText('Press Start to begin');
+  // again — including the wave chip going back to hidden.
+  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+});
+
+test('a fine-pointer session never requests fullscreen on Start (the gate is capability-based)', async ({
+  page,
+}) => {
+  await stubFullscreen(page);
+  await page.goto('/');
+  expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.getByRole('button', { name: 'Start' })).toBeHidden(); // the run did start
+  // The stub's sentinel must actually be installed — otherwise `fullscreenCallCount` returns
+  // its `?? 0` fallback and a broken/unapplied stub would satisfy the `toBe(0)` below
+  // vacuously, hiding a real regression where fullscreen WAS requested.
+  expect(await page.evaluate(() => typeof window.__wyFullscreenCalls)).toBe('number');
+  expect(await fullscreenCallCount(page)).toBe(0);
 });
 
 test('arms the Card via the keyboard hotkey and places with arrows + Enter — a full keyboard-only path', async ({
@@ -245,9 +397,9 @@ test('settings: focusing the last rebind control then closing via Escape restore
   page,
 }) => {
   await page.goto('/');
-  const opener = page.getByRole('button', { name: 'Accessibility settings' });
+  const opener = page.getByRole('button', { name: 'Settings' });
   await opener.click();
-  const settingsDialog = page.getByRole('dialog', { name: 'Accessibility' });
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
 
   // The last rebind row (armTower1, GAME_ACTIONS' last entry) — reachable and visible
@@ -293,14 +445,22 @@ test('rendered contrast: Card, Panel, and Dock controls meet the DOM text bar', 
   await assertRenderedContrast(page, '.wy-panel', 4.5);
 });
 
-test('200% text zoom at the smallest supported landscape viewport (658×320): chrome regions scroll internally instead of clipping', async ({
+test('200% text zoom at the smallest supported landscape viewport (658×320): the Compact layout scrolls internally instead of clipping, and the board keeps its pinned floor', async ({
   page,
 }) => {
   // Pinned to the Galaxy S9+ landscape profile's viewport (`chromium-touch`'s device) — the
-  // smallest supported landscape size (ADR 0003's text-resize commitment).
-  await page.setViewportSize({ width: 658, height: 320 });
+  // smallest supported landscape size (ADR 0003's text-resize commitment). At 320px tall
+  // this renders the COMPACT layout (Story 11): a status column, not a top row.
+  await page.setViewportSize(VIEWPORT_658);
   await page.goto('/');
-  expect(page.viewportSize()).toEqual({ width: 658, height: 320 });
+  expect(page.viewportSize()).toEqual(VIEWPORT_658);
+  expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(true);
+
+  // Banner-absent board floor at 100% zoom, BEFORE the zoom is applied (P1's pinned gates;
+  // P3 adds a separate, lower gate for the banner-present pre-start state).
+  const base = await projectedGrid(page);
+  expect(base.cellPx, `cellPx ${base.cellPx} below the 12px floor`).toBeGreaterThanOrEqual(12);
+  expect(base.height / VIEWPORT_658.height).toBeGreaterThanOrEqual(0.85);
 
   await page.addStyleTag({ content: ':root { font-size: 200% }' });
 
@@ -315,22 +475,53 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): ch
       .first()
       .evaluate((el) => el.scrollHeight > el.clientHeight);
 
-  // The status bar (Lives/Bounty/Score/Stars + wordmark at 200%) overflows its bounded row
-  // — `.wy-shell`'s first row is `minmax(0, auto)` with `.wy-status` capped at a dvh-based
-  // max-height (ui.css), so it scrolls internally rather than growing unbounded and
-  // squeezing the board.
-  expect(await overflowsInternally('.wy-status'), '.wy-status should scroll internally').toBe(true);
+  // The CHIPS LIST is the scrollport now that the Dock shares the status header (Story 11's
+  // contract §1): at 200% the four chips overflow the `flex: 1` column it gets, so it must
+  // scroll internally rather than push the Dock (or the board) out of the layout.
+  expect(await overflowsInternally('.wy-hud'), '.wy-hud should scroll internally').toBe(true);
 
-  // The board keeps a defensible minimum height because the bounded status row can eat at
-  // most ~40dvh (128px of this 320px-tall viewport), leaving the board's `1fr` row ≥ ~192px.
-  // 150 is a floor with margin below that ~192 — and above what an UNBOUNDED status row would
-  // leave: remove the `.wy-status` max-height and the 200%-zoom status bar grows tall enough
-  // to squeeze the board well under 150, so this assertion bites exactly on the M4 bound.
-  const boardHeight = await page.locator('.wy-board').evaluate((el) => el.clientHeight);
+  // ...and it is keyboard-operable, not pointer-only: focus the scrollport itself, press an
+  // arrow key, and assert ITS OWN scrollTop moved (a page-level scroll or an ancestor
+  // scrolling instead would leave this at 0), with the last chip then reachable.
+  const hud = page.locator('.wy-hud');
+  await hud.focus();
+  await expect(hud).toBeFocused();
+  expect(await hud.evaluate((el) => el.scrollTop)).toBe(0);
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(async () => hud.evaluate((el) => el.scrollTop), {
+      message: 'the chips scrollport should scroll on an arrow key',
+    })
+    .toBeGreaterThan(0);
+  const lastChip = page.locator('.wy-hud > .wy-chip:not([hidden])').last();
+  await lastChip.scrollIntoViewIfNeeded();
+  await expect(lastChip).toBeInViewport();
+
+  // The vw-capped column and rail (contract §2) keep the board playable at 200%: the column
+  // resolves to ~66px (10vw, not 4rem = 128px) and the rail to ~184px (28vw, not 9rem =
+  // 288px), leaving a ~408px-wide stage — so the 28×24 grid lands at cellPx 13 → 364×312.
+  // The floors below sit just under those, and bite the moment a cap is dropped.
+  const zoomed = await projectedGrid(page);
+  expect(zoomed.cellPx, `cellPx ${zoomed.cellPx} below the 12px floor`).toBeGreaterThanOrEqual(12);
+  expect(zoomed.width, `grid width ${zoomed.width}px below the 336px floor`).toBeGreaterThanOrEqual(
+    336,
+  );
   expect(
-    boardHeight,
-    `.wy-board height ${boardHeight}px below the 150px floor`,
-  ).toBeGreaterThanOrEqual(150);
+    zoomed.height,
+    `grid height ${zoomed.height}px below the 288px floor`,
+  ).toBeGreaterThanOrEqual(288);
+
+  // Every Dock control stays reachable at 200% inside the bounded column, and the region
+  // relation table still holds (banner row absent in P1).
+  for (const name of ['Speed: 1x', 'Settings', 'Start']) {
+    const btn = page.getByRole('button', { name });
+    await btn.scrollIntoViewIfNeeded();
+    await btn.focus();
+    await expect(btn).toBeFocused();
+    await expect(btn).toBeInViewport();
+  }
+  await assertDeclaredRegions(page);
+  await assertRegionRelations(page, 'compact');
 
   // Rail: arm the Card so the Panel opens with its Close button as the Rail's last
   // control at 200% zoom — the Rail's content now overflows, so it must scroll internally
@@ -349,7 +540,7 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): ch
 
   // Settings: the dialog overflows at 200% and scrolls internally; the same reachability
   // proof for its own scrollport follows.
-  await page.getByRole('button', { name: 'Accessibility settings' }).click();
+  await page.getByRole('button', { name: 'Settings' }).click();
   expect(await overflowsInternally('.wy-settings'), '.wy-settings should scroll internally').toBe(
     true,
   );
@@ -359,10 +550,68 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): ch
   await expect(lastRebind).toBeFocused();
   await expect(lastRebind).toBeInViewport();
   await page.keyboard.press('Escape');
+});
 
-  // Status bar holds no focusable controls — scroll its last content element (the Stars
-  // HUD span) into view and assert visibility instead of focus/reachability.
-  const stars = page.locator('.wy-hud > span').last();
-  await stars.scrollIntoViewIfNeeded();
-  await expect(stars).toBeInViewport();
+test('200% text zoom on the Standard layout (360×640): the status row stays inside its 40dvh bound and the board keeps a playable floor', async ({
+  page,
+}) => {
+  // The Compact gate above pins the short-landscape case; this is its Standard twin — the
+  // layout where the status row is a horizontal header, so the wordmark, the wrapped row
+  // gap and the row's padding sit OUTSIDE `.wy-hud`'s cap and have to be inside the same
+  // 40dvh budget (ADR 0003). Without that, the row grows unbounded at 200% and squeezes
+  // the board even though the chips scrollport itself is capped.
+  await page.setViewportSize(VIEWPORT_360);
+  await page.goto('/');
+  expect(await page.evaluate(() => matchMedia('(max-height: 500px)').matches)).toBe(false);
+
+  await page.addStyleTag({ content: ':root { font-size: 200% }' });
+
+  // The bound is on the ROW, not just the scrollport: measure `.wy-status`'s own box.
+  // 1px of tolerance for sub-pixel layout rounding.
+  const statusHeight = await page
+    .locator('.wy-status')
+    .evaluate((el) => el.getBoundingClientRect().height);
+  expect(
+    statusHeight,
+    `.wy-status ${statusHeight}px exceeds the 40dvh bound (${VIEWPORT_360.height * 0.4}px)`,
+  ).toBeLessThanOrEqual(VIEWPORT_360.height * 0.4 + 1);
+
+  // ...and the content that no longer fits scrolls inside the chips list rather than
+  // clipping (the ADR 0003 doctrine — same proof as the Compact gate).
+  expect(
+    await page.locator('.wy-hud').evaluate((el) => el.scrollHeight > el.clientHeight),
+    '.wy-hud should scroll internally',
+  ).toBe(true);
+  const lastChip = page.locator('.wy-hud > .wy-chip:not([hidden])').last();
+  await lastChip.scrollIntoViewIfNeeded();
+  await expect(lastChip).toBeInViewport();
+
+  // What the bound buys: the Stage keeps the VERTICAL space the status row would otherwise
+  // eat.
+  const stage = await regionRect(page, 'stage');
+  expect(stage, 'the stage region must be present').not.toBeNull();
+  const stageHeight = (stage as { height: number }).height;
+  expect(
+    stageHeight / VIEWPORT_360.height,
+    `stage height ${stageHeight}px below the 50% floor`,
+  ).toBeGreaterThanOrEqual(0.5);
+
+  // ...and the vw-capped Rail keeps the HORIZONTAL space: at 360px wide the rail resolves
+  // to ~101px (28vw, not 9rem = 288px), so the stage keeps ~259px and the 28×24 grid still
+  // projects a playable cellPx. Both floors sit just under that and bite the moment the
+  // rail's vw cap is dropped.
+  const stageWidth = (stage as { width: number }).width;
+  expect(stageWidth, `stage width ${stageWidth}px below the 240px floor`).toBeGreaterThanOrEqual(
+    240,
+  );
+  const zoomedGrid = await projectedGrid(page);
+  expect(
+    zoomedGrid.cellPx,
+    `cellPx ${zoomedGrid.cellPx} below the 8px floor`,
+  ).toBeGreaterThanOrEqual(8);
+  // The relation table still holds, with ONE zoom-specific allowance: the floating Dock's
+  // controls are text-sized, so at 200% the cluster wraps into a band far taller than the
+  // 64px it occupies at 100%. It stays a bottom-left overlay — it may not cover more of the
+  // grid than the same 40dvh budget the status row is held to.
+  await assertRegionRelations(page, 'standard', VIEWPORT_360.height * 0.4);
 });

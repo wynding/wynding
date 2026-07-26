@@ -20,7 +20,8 @@ import type { SettingsStore } from './settings';
 import { GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
-import type { ShellHandle } from './shell';
+import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
+import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
 import type { RotateController } from './rotate';
 
@@ -52,6 +53,9 @@ export interface Overlay {
   /** Sibling elements the caller appends alongside the Shell (results/settings). */
   readonly resultsEl: HTMLElement;
   readonly settingsEl: HTMLElement;
+  /** The iOS Add-to-Home-Screen instructions dialog (Story 11 P3) — a first-class modal,
+   *  its own sibling of the Shell, registered at `settings` priority. */
+  readonly instructionsEl: HTMLElement;
   /** The single modal owner (results/rotate/settings share one stack, PLAN.md P1) — exposed
    *  so `main.ts` can register the P5 rotate overlay on the SAME instance, rather than a
    *  second, disconnected one. */
@@ -87,6 +91,40 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
   armTower1: () => t('action.armTower1'),
 };
 
+/** Glance-form glyphs for the Compact chips and Dock buttons (Story 11 P1).
+ *
+ *  These are PRESENTATION, not copy: every node they are written into is `aria-hidden`, and
+ *  the full localized message sits alongside it as the element's actual accessible text. A
+ *  glyph has no language, so routing it through the `t()` catalog would create a
+ *  translatable entry with nothing to translate — the same exemption the codebase already
+ *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The two
+ *  genuinely WORDED compact forms (the wave slot's countdown and active markers) do go
+ *  through the catalog, as `hud.wave.compact.*`. */
+const ICONS = {
+  lives: '♥',
+  bounty: '◈',
+  score: '✦',
+  stars: '★',
+  settings: '⚙',
+  pause: '⏸',
+  resume: '⏵',
+  /** Multiplication sign for the speed button's glance form ("1×" / "2×"). */
+  speed: '×',
+  /** The install banner's dismiss glyph (a multiplication sign, the conventional "close"). */
+  dismiss: '×',
+} as const;
+
+/** The ONE chip write path (contract §4): both forms are always written together from the
+ *  same call, so the visible glance and the accessible full message can never disagree, and
+ *  no caller can sentence-split a label away from its value. An empty full form means the
+ *  slot has nothing to say and the whole chip hides (the wave slot pre-start and terminal)
+ *  — the node itself is retained either way. */
+function setChip(chip: ShellChip, full: string, glance: string): void {
+  chip.full.textContent = full;
+  chip.glance.textContent = glance;
+  chip.root.hidden = full === '';
+}
+
 function button(doc: Document, className: string, label: string): HTMLButtonElement {
   const b = doc.createElement('button');
   b.type = 'button';
@@ -117,11 +155,22 @@ export function createOverlay(
   shell: ShellHandle,
   ruleset: CompiledRuleset,
   abortGesture: () => void,
+  install: InstallHandle,
 ): Overlay {
-  const { hud: hudEls, dock, card, panel, live } = shell;
+  const { hud: hudEls, dock, card, panel, live, banner } = shell;
   const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
 
-  settingsBtn.textContent = t('controls.settings');
+  // Dock markup contract (Story 11 P1): every Dock button carries an aria-hidden icon span
+  // plus the localized text span, in both layouts. Resolved once here — the spans are
+  // structural (built by `shell.ts`) and never replaced, so `update()` just rewrites their
+  // text.
+  const pauseParts = dockButtonParts(pauseBtn);
+  const speedParts = dockButtonParts(speedBtn);
+  const settingsParts = dockButtonParts(settingsBtn);
+  const primaryParts = dockButtonParts(primaryBtn);
+
+  settingsParts.icon.textContent = ICONS.settings;
+  settingsParts.text.textContent = t('controls.settings');
   // The Dock's headline Start action (PLAN.md P4) — the old "Call wave now" button is
   // gone; `primaryBtn` (the empty slot P1 reserved, carrying the shared `.wy-primary`
   // primary-styled look — ui.css — with the results dialog's contrast spot-check scoped to
@@ -130,7 +179,9 @@ export function createOverlay(
   // pressed) and the Pause button's own hidden-pre-start state are both driven per-frame
   // by `update()` below, since they depend on live `UiState`, not anything fixed at
   // construction time.
-  primaryBtn.textContent = t('controls.start');
+  // Start keeps its VISIBLE text label in both layouts (contract §2) — no icon form; the
+  // empty icon span collapses (`.wy-btn-icon:empty` has nothing to render).
+  primaryParts.text.textContent = t('controls.start');
 
   pauseBtn.addEventListener('click', () => onAction({ type: 'togglePause' }));
   speedBtn.addEventListener('click', () => onAction({ type: 'cycleSpeed' }));
@@ -149,27 +200,78 @@ export function createOverlay(
   }
   refreshCardHotkey();
 
+  // The scaffold both dialog modals share: a hidden `role="dialog"` sibling of the Shell, an
+  // inner box, and a header carrying the `<h2>` title and an aria-labelled close button. Each
+  // caller fills the returned `inner` with its own body.
+  function dialogScaffold(opts: {
+    readonly className: string;
+    readonly title: string;
+    readonly closeClass: string;
+    readonly closeLabel: string;
+  }): {
+    dialog: HTMLDivElement;
+    inner: HTMLDivElement;
+    closeBtn: HTMLButtonElement;
+  } {
+    const dialog = doc.createElement('div');
+    dialog.className = opts.className;
+    dialog.hidden = true;
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', opts.title);
+    dialog.tabIndex = -1;
+
+    const inner = doc.createElement('div');
+    inner.className = 'wy-settings-inner';
+    dialog.appendChild(inner);
+
+    const header = doc.createElement('div');
+    header.className = 'wy-settings-header';
+    const heading = doc.createElement('h2');
+    heading.textContent = opts.title;
+    const closeBtn = button(doc, opts.closeClass, opts.closeLabel);
+    closeBtn.setAttribute('aria-label', opts.closeLabel);
+    header.append(heading, closeBtn);
+    inner.appendChild(header);
+
+    return { dialog, inner, closeBtn };
+  }
+
   // --- Settings dialog (sibling of the Shell — the Shell is inert while it's open) ---
-  const settingsDialog = doc.createElement('div');
-  settingsDialog.className = 'wy-settings';
-  settingsDialog.hidden = true;
-  settingsDialog.setAttribute('role', 'dialog');
-  settingsDialog.setAttribute('aria-modal', 'true');
-  settingsDialog.setAttribute('aria-label', t('settings.title'));
-  settingsDialog.tabIndex = -1;
+  const {
+    dialog: settingsDialog,
+    inner: settingsInner,
+    closeBtn,
+  } = dialogScaffold({
+    className: 'wy-settings',
+    title: t('settings.title'),
+    closeClass: 'wy-btn wy-settings-close',
+    closeLabel: t('settings.close'),
+  });
 
-  const settingsInner = doc.createElement('div');
-  settingsInner.className = 'wy-settings-inner';
-  settingsDialog.appendChild(settingsInner);
+  // --- Install row (Story 11 P3): PERMANENT, unlike the once-dismissible banner. The
+  // dialog is where a player looks for "how do I get this properly on my phone?" long after
+  // the banner is gone, so the affordance lives here for the whole session. A promptable
+  // DESKTOP session gets this row and no banner — the banner is phone-oriented. ---
+  const installSection = doc.createElement('section');
+  installSection.className = 'wy-install-row';
+  const installHeading = doc.createElement('h3');
+  installHeading.textContent = t('install.settings.row');
+  const installAction = button(doc, 'wy-btn wy-install-action', t('install.banner.install'));
+  // `other`: no captured prompt and no known flow to describe precisely — say where to look
+  // rather than render a button that cannot do anything.
+  const installExplain = doc.createElement('p');
+  installExplain.className = 'wy-install-explain';
+  installExplain.textContent = t('install.settings.explain');
+  installSection.append(installHeading, installAction, installExplain);
+  settingsInner.appendChild(installSection);
 
-  const settingsHeader = doc.createElement('div');
-  settingsHeader.className = 'wy-settings-header';
-  const heading = doc.createElement('h2');
-  heading.textContent = t('settings.title');
-  const closeBtn = button(doc, 'wy-btn wy-settings-close', t('settings.close'));
-  closeBtn.setAttribute('aria-label', t('settings.close'));
-  settingsHeader.append(heading, closeBtn);
-  settingsInner.appendChild(settingsHeader);
+  // The dialog is now "Settings" (Story 11 P3, decision 5 — flagged as product-visible), so
+  // the accessibility controls need their own heading to stay a named group rather than
+  // becoming the dialog's unlabelled remainder.
+  const a11yHeading = doc.createElement('h3');
+  a11yHeading.textContent = t('settings.accessibility');
+  settingsInner.appendChild(a11yHeading);
 
   // Colour-vision mode
   const cbGroup = doc.createElement('fieldset');
@@ -300,6 +402,23 @@ export function createOverlay(
     refreshBoardAria();
   }
 
+  // --- iOS Add-to-Home-Screen instructions (Story 11 P3): a first-class modal, its own
+  // sibling of the Shell. Safari has no `beforeinstallprompt` and no programmatic install,
+  // so precise instructions ARE the affordance — not a fallback. ---
+  const {
+    dialog: instructions,
+    inner: instructionsInner,
+    closeBtn: instructionsClose,
+  } = dialogScaffold({
+    className: 'wy-settings wy-instructions',
+    title: t('install.ios.title'),
+    closeClass: 'wy-btn wy-instructions-close',
+    closeLabel: t('install.ios.close'),
+  });
+  const instructionsBody = doc.createElement('p');
+  instructionsBody.textContent = t('install.ios.body');
+  instructionsInner.appendChild(instructionsBody);
+
   // --- Results dialog (sibling of the Shell) ---
   const results = doc.createElement('div');
   results.className = 'wy-results';
@@ -347,6 +466,122 @@ export function createOverlay(
       cancelCapture?.();
     },
   };
+  const instructionsOverlay: ModalOverlay = {
+    show(): void {
+      instructions.hidden = false;
+      instructionsClose.focus();
+    },
+    hide(): void {
+      instructions.hidden = true;
+    },
+  };
+
+  // --- Install UI: banner + settings row + the iOS instructions route (Story 11 P3) ---
+
+  banner.text.textContent = t('install.banner.text');
+  banner.dismissGlyph.textContent = ICONS.dismiss;
+  banner.dismiss.setAttribute('aria-label', t('install.banner.dismiss'));
+
+  /** Open the instructions dialog. Registered at `settings` PRIORITY — it only ever opens
+   *  after the settings dialog closes (or straight from the banner, with nothing else open),
+   *  so an equal rank is unambiguous rather than a race. `dismissOnEscape` is per-overlay
+   *  metadata now (modal.ts), so Escape dismisses it exactly like settings. */
+  function openInstructions(): void {
+    abortGesture();
+    modal.open(instructionsOverlay, { priority: 'settings', dismissOnEscape: true });
+  }
+  instructionsClose.addEventListener('click', () => modal.close(instructionsOverlay));
+
+  /** Fire the held prompt. `install.prompt()` owns the single-use contract — including the
+   *  concurrent case — and resolves to `'unavailable'` rather than rejecting on a refusal, so
+   *  there is nothing to guard or catch here. */
+  function runPrompt(): void {
+    void install.prompt();
+  }
+
+  const installActivate = (): void => {
+    if (install.state().branch === 'ios') openInstructions();
+    else runPrompt();
+  };
+
+  banner.action.addEventListener('click', installActivate);
+  banner.dismiss.addEventListener('click', () => install.dismiss());
+  installAction.addEventListener('click', () => {
+    if (install.state().branch === 'ios') {
+      // Open-from-settings: close settings FIRST, then open instructions, so the two never
+      // sit on the stack at equal priority. Focus return then follows the modal owner's own
+      // stack rules — closing instructions restores the settings opener.
+      modal.close(settingsOverlay);
+      openInstructions();
+      return;
+    }
+    runPrompt();
+  });
+
+  /** Re-home focus that a just-removed install surface was holding (the Story 10 rule: UI
+   *  teardown never strands focus on `document.body`). Banner-contained focus goes to the
+   *  Dock's Start button — the natural next action pre-start; settings-row-contained focus
+   *  goes to the dialog's own close target, per the modal owner's stack rules. */
+  function reHomeFrom(container: HTMLElement, fallback: HTMLElement): void {
+    if (container.contains(doc.activeElement)) fallback.focus();
+  }
+
+  /** The single install-UI write path: recomputes both surfaces from `install.state()` plus
+   *  the run's `started` flag, and re-homes any focus it strands. */
+  function renderInstall(started: boolean): void {
+    const state: InstallState = install.state();
+    const hidden = state.standalone || state.installed;
+
+    // Banner: browser-tab mode ∧ audience ∧ pre-start ∧ un-dismissed ∧ not ended for this
+    // session (the last survives Play-again, which returns to a pre-start state).
+    const showBanner =
+      !hidden &&
+      state.bannerAudience &&
+      !started &&
+      !state.dismissed &&
+      !install.bannerEndedForSession();
+    if (showBanner !== !banner.root.hidden) {
+      // A banner visibility change RESIZES the stage (it is a reserved grid row), so any
+      // in-flight captured gesture must cancel by the Story 10 contract rather than commit
+      // against geometry that moved underneath it.
+      abortGesture();
+      // On the Start edge `update()` has ALREADY hidden `primaryBtn` before calling in here,
+      // and `focus()` on a hidden element no-ops (stranding focus on `document.body`). Re-home
+      // to a GUARANTEED-focusable target locally — the board, which is where focus lands on
+      // Start anyway — instead of depending on `update()`'s call ordering across modules.
+      if (!showBanner) reHomeFrom(banner.root, primaryBtn.hidden ? shell.board : primaryBtn);
+      banner.root.hidden = !showBanner;
+    }
+    // `renderInstall` runs on every `update()` tick, so — like the visibility flips above —
+    // each DOM write below is guarded on an ACTUAL change, so a steady state re-announces
+    // nothing to assistive tech and does no needless layout work.
+    const actionLabel =
+      state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
+    if (showBanner && banner.action.textContent !== actionLabel) {
+      banner.action.textContent = actionLabel;
+    }
+
+    // Settings row: permanent while the app is not installed, and never offers a button it
+    // cannot honour.
+    if (hidden !== installSection.hidden) {
+      if (hidden) reHomeFrom(installSection, closeBtn);
+      installSection.hidden = hidden;
+    }
+    const canAct = state.branch === 'ios' || state.canPrompt;
+    if (!canAct && installAction.contains(doc.activeElement)) closeBtn.focus();
+    if (installAction.hidden !== !canAct) installAction.hidden = !canAct;
+    if (installAction.textContent !== actionLabel) installAction.textContent = actionLabel;
+    if (installExplain.hidden !== canAct) installExplain.hidden = canAct;
+    // After a declined browser prompt the held event is gone, so the row falls back to the
+    // explanation — but "your browser doesn't offer an install prompt" is untrue for a
+    // session that just saw one. Say what actually happened instead.
+    if (!canAct) {
+      const explainLabel = state.promptDeclined
+        ? t('install.settings.declined')
+        : t('install.settings.explain');
+      if (installExplain.textContent !== explainLabel) installExplain.textContent = explainLabel;
+    }
+  }
 
   settingsBtn.addEventListener('click', () => {
     // Run the SAME open lifecycle as rotate.ts's `evaluate()` entry path, in order, so the
@@ -360,7 +595,7 @@ export function createOverlay(
     //   2. modal.open(overlay, { priority })  — inert the Shell + show/focus the dialog.
     //   3. auto-pause guard  — pause an ACTIVE, unpaused run (below).
     abortGesture();
-    modal.open(settingsOverlay, { priority: 'settings' });
+    modal.open(settingsOverlay, { priority: 'settings', dismissOnEscape: true });
     // Auto-pause an ACTIVE, unpaused run when settings opens — the Shell goes inert and is
     // covered while the dialog is up, so an unpaused wave would keep advancing unseen (lives
     // lost / the run ending inside the dialog). Mirrors rotate.ts's guard exactly (started,
@@ -588,35 +823,54 @@ export function createOverlay(
   return {
     resultsEl: results,
     settingsEl: settingsDialog,
+    instructionsEl: instructions,
     modal,
     update(view: HudView): void {
       const { hud } = view;
-      hudEls.lives.textContent = t('hud.lives', { count: hud.lives });
-      hudEls.bounty.textContent = t('hud.bounty', { count: hud.bounty });
-      hudEls.score.textContent = t('hud.score', { count: hud.score });
-      hudEls.stars.textContent = t('hud.stars', { count: hud.stars });
-      // Pre-start (PLAN.md P4): no countdown, just the localized prompt — the sim's own
-      // countdown figure is meaningless while held (it never ticks down until Start).
-      // Once started, countdownSeconds is null for BOTH active and terminal phases — only
-      // label a live wave "in progress"; a finished match shows no wave line (its outcome
-      // is the dialog).
-      hudEls.wave.textContent = !view.ui.started
-        ? t('hud.wave.pressStart')
-        : hud.countdownSeconds !== null
-          ? t('hud.countdown', { seconds: hud.countdownSeconds })
-          : hud.phase === 'active'
+      setChip(hudEls.lives, t('hud.lives', { count: hud.lives }), `${ICONS.lives} ${hud.lives}`);
+      setChip(
+        hudEls.bounty,
+        t('hud.bounty', { count: hud.bounty }),
+        `${ICONS.bounty} ${hud.bounty}`,
+      );
+      setChip(hudEls.score, t('hud.score', { count: hud.score }), `${ICONS.score} ${hud.score}`);
+      setChip(hudEls.stars, t('hud.stars', { count: hud.stars }), `${ICONS.stars} ${hud.stars}`);
+      // Wave slot states (Story 11 P1). Pre-start the slot is HIDDEN rather than carrying a
+      // prompt: the sim's countdown figure is meaningless while held (it never ticks down
+      // until Start), and the Dock's headline "Start" button is the affordance that says so
+      // — a chip repeating it would just cost a row of the Compact column. Once started,
+      // countdownSeconds is null for BOTH active and terminal phases — only label a live
+      // wave "in progress"; a finished match shows no wave chip (its outcome is the dialog).
+      // `countdown` carries the narrowing itself (null unless a started run is counting down),
+      // so `countdown !== null` types it as `number` in the branches below — no `as number`.
+      const countdown = view.ui.started ? hud.countdownSeconds : null;
+      const active = view.ui.started && hud.countdownSeconds === null && hud.phase === 'active';
+      setChip(
+        hudEls.wave,
+        countdown !== null
+          ? t('hud.countdown', { seconds: countdown })
+          : active
             ? t('hud.wave.active')
-            : '';
+            : '',
+        countdown !== null
+          ? t('hud.wave.compact.countdown', { s: countdown })
+          : active
+            ? t('hud.wave.compact.active')
+            : '',
+      );
       // Pause is HIDDEN (not disabled) pre-start (PLAN.md P4) — there's nothing to pause
       // yet, and a hidden control can't be tabbed to or announced as a false affordance.
       pauseBtn.hidden = !view.ui.started;
-      pauseBtn.textContent = view.paused ? t('controls.resume') : t('controls.pause');
+      pauseParts.icon.textContent = view.paused ? ICONS.resume : ICONS.pause;
+      pauseParts.text.textContent = view.paused ? t('controls.resume') : t('controls.pause');
       pauseBtn.setAttribute('aria-pressed', String(view.paused));
-      speedBtn.textContent = t('controls.speed', { factor: view.speed });
+      speedParts.icon.textContent = `${view.speed}${ICONS.speed}`;
+      speedParts.text.textContent = t('controls.speed', { factor: view.speed });
       // The primary Start action hides for the rest of the run once pressed (PLAN.md P4:
       // M1 ships exactly one wave — there's no later-wave affordance to show instead).
       primaryBtn.hidden = view.ui.started;
       card.root.setAttribute('aria-pressed', String(view.ui.armed !== null));
+      renderInstall(view.ui.started);
       renderPanel(view.ui, view.refund);
       // The HUD updates every tick, but the outcome message only changes on an actual
       // placement/arm/sell event — writing `textContent` unconditionally re-announces the
@@ -651,6 +905,7 @@ export function createOverlay(
       resultSummary.textContent = t('results.summary', { score: hud.score, stars: hud.stars });
       results.setAttribute('aria-label', heading);
       verifyMsg.textContent = '';
+      // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
       modal.open(resultsOverlay, { priority: 'results' });
     },
     hideResults(): void {
@@ -666,6 +921,7 @@ export function createOverlay(
       modal.destroy();
       results.remove();
       settingsDialog.remove();
+      instructions.remove();
     },
   };
 }

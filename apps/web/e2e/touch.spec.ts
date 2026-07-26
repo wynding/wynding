@@ -2,6 +2,9 @@ import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
+import { COMPACT_QUERY } from '../src/layout';
+import { fullscreenCallCount, stubFullscreen } from './fullscreen-stub';
+import { GRID } from './layout-probe';
 
 // Touch placement (PLAN.md P3/P6): press-adjust-release with the offset ghost, tap-vs-drag
 // on the Card, and the chrome/off-board cancellation rule. Runs ONLY under the
@@ -71,24 +74,54 @@ function sampleCssPoint(
   return [png.data[idx] as number, png.data[idx + 1] as number, png.data[idx + 2] as number];
 }
 
-// M1's "Open Field" board is 28×24 (entrance/exit on row 11) — duplicated from
-// hidpi.spec.ts/content's boards.ts without importing @wynding/content (e2e stays
-// decoupled from content internals; only the two numbers are duplicated here).
-const GRID = { cols: 28, rows: 24 };
-
 test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P6)', () => {
   let session: CDPSession;
 
   test.beforeEach(async ({ page, context }) => {
+    // Every touch-project spec that presses Start stubs the Fullscreen API first (PLAN.md
+    // P4): a real request would resize the viewport out from under this spec's projected-cell
+    // geometry, and headless Chromium may refuse it outright anyway.
+    await stubFullscreen(page);
     await page.goto('/');
     // Precondition: the gated behavior below depends on `(pointer: coarse)` — `hasTouch`
     // alone does not guarantee it, so assert it rather than assume the device profile.
     const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
     expect(coarse).toBe(true);
+    // ...and this 320px-tall profile renders the COMPACT layout (Story 11): the Shell chrome
+    // this spec hit-tests against is a full-height status COLUMN on the left with its Dock
+    // inside it — there is no top row any more. Asserted as a precondition so a trigger
+    // change turns into a clear failure here rather than a confusing gesture mis-classification.
+    const compact = await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY);
+    expect(compact).toBe(true);
     session = await context.newCDPSession(page);
     // Press Start first (PLAN.md P6): a touch build on a HELD run stays Pending — the
     // commit assertions below need the sim actually stepping.
     await page.getByRole('button', { name: 'Start' }).click();
+  });
+
+  // The one dedicated gate assertion (PLAN.md P4). Real fullscreen is not CI-exercisable —
+  // see `fullscreen-stub.ts` — so this proves the app REQUESTED it under the gate
+  // (coarse pointer, not standalone, not already fullscreen) on the started false→true edge,
+  // exactly once, and that pressing the start key again mid-run does not re-request.
+  test('Start requests fullscreen once under the coarse-pointer gate, and never again mid-run', async ({
+    page,
+  }) => {
+    // `beforeEach` already pressed Start.
+    expect(await fullscreenCallCount(page)).toBe(1);
+
+    // Positive control (defeats vacuity): confirm `KeyC` really is the bound start action, so
+    // the mid-run "count stays 1" assertion below proves EDGE-SUPPRESSION and not merely an
+    // unbound keypress doing nothing. The Settings rebind row renders the live binding — "C"
+    // is `formatKeyLabel('KeyC')`.
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('button', { name: 'Rebind Start' })).toHaveText('C');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toBeHidden();
+
+    await page.locator('.wy-board').focus();
+    await page.keyboard.press('KeyC'); // the keymapped start action, mid-run
+    await page.keyboard.press('KeyC');
+    expect(await fullscreenCallCount(page)).toBe(1);
   });
 
   test('press-adjust-release: moving adjusts the ghost, release commits at the offset anchor (not the finger cell)', async ({
@@ -243,11 +276,24 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     const cx = cardBox.x + cardBox.width / 2;
     const cy = cardBox.y + cardBox.height / 2;
 
-    // Release over the Status bar (Shell chrome, top-left corner of the 320px-tall
-    // viewport) — never commits, and unlike a board-native drag (which stays armed on a
-    // rejected placement) a Card-drag cancellation ALSO disarms.
+    // Release over the Compact COLUMN DOCK (Shell chrome — Story 11 moves the controls into
+    // the status column, so this is the surface a real thumb actually strays onto mid-drag,
+    // and the one the `CHROME_SELECTOR` hit-test has to keep covering). Never commits, and
+    // unlike a board-native drag (which stays armed on a rejected placement) a Card-drag
+    // cancellation ALSO disarms.
+    const settingsBtn = page.getByRole('button', { name: 'Settings' });
+    // A non-null assertion that FAILS CLEARLY: `as {…}` would silently cast a null box to the
+    // shape and only blow up later as an opaque `NaN` coordinate.
+    const settingsBox = await settingsBtn.boundingBox();
+    expect(settingsBox, 'Settings button has no layout box').not.toBeNull();
     await touchStart(session, [{ x: cx, y: cy, id: 0 }]);
-    await touchMove(session, [{ x: 5, y: 5, id: 0 }]);
+    await touchMove(session, [
+      {
+        x: settingsBox!.x + settingsBox!.width / 2,
+        y: settingsBox!.y + settingsBox!.height / 2,
+        id: 0,
+      },
+    ]);
     await touchEnd(session);
 
     await expect(card).toHaveAttribute('aria-pressed', 'false');

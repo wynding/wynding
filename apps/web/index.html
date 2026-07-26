@@ -3,7 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Root-absolute on purpose: Vite's `--base` rewrite owns this href, so a production
+         build with `--base=/play/` emits `/play/manifest.webmanifest` (directly observed on
+         the live deployment). The manifest's own `start_url`/`scope` are RELATIVE (".") and
+         resolve against the manifest URL, so an installed app opens `/play/` in production
+         and `/` in dev — one file, correct in both. -->
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="theme-color" content="#0d1b2a" />
     <title>Wynding</title>
   </head>

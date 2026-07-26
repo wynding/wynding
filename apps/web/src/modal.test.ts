@@ -145,15 +145,59 @@ describe('modal owner — inert + stack semantics (PLAN.md P1)', () => {
 });
 
 describe('modal owner — Escape handling', () => {
-  it('Escape closes settings (the only dismissable priority)', () => {
+  it('Escape closes an overlay that declares dismissOnEscape (settings, install instructions)', () => {
     const shell = document.createElement('div');
     document.body.appendChild(shell);
     const modal = createModalOwner(document, shell);
     activeModal = modal;
     const settings = fakeOverlay();
-    modal.open(settings, { priority: 'settings' });
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
     expect(settings.hide).toHaveBeenCalledOnce();
+    expect(shell.hasAttribute('inert')).toBe(false);
+  });
+
+  // Dismissability is per-overlay METADATA, not a property of the priority (Story 11 P3):
+  // the install instructions dialog shares `settings` priority, so an overlay that does not
+  // declare it must still only CONSUME the key.
+  it('Escape is consumed but does NOT close a settings-priority overlay that omits dismissOnEscape', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const overlay = fakeOverlay();
+    modal.open(overlay, { priority: 'settings' });
+    const evt = new KeyboardEvent('keydown', { code: 'Escape', bubbles: true, cancelable: true });
+    document.dispatchEvent(evt);
+    expect(overlay.hide).not.toHaveBeenCalled();
+    expect(evt.defaultPrevented).toBe(true);
+    expect(shell.hasAttribute('inert')).toBe(true);
+  });
+
+  // Two overlays share `settings` priority (the settings dialog and the iOS instructions
+  // dialog), so the equal-priority tie-break has to be pinned: last-opened-wins, and closing
+  // the newer one restores the older rather than blanking the still-inert Shell.
+  it('two equal-priority overlays stack last-opened-wins, and closing the newer restores the older', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const settings = fakeOverlay();
+    const instructions = fakeOverlay();
+
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
+    expect(settings.show).toHaveBeenCalledOnce();
+
+    modal.open(instructions, { priority: 'settings', dismissOnEscape: true });
+    expect(settings.hide).toHaveBeenCalledOnce(); // the older yields...
+    expect(instructions.show).toHaveBeenCalledOnce(); // ...to the newer
+
+    modal.close(instructions);
+    expect(instructions.hide).toHaveBeenCalledOnce();
+    expect(settings.show).toHaveBeenCalledTimes(2); // the older is re-shown, not left blank
+    expect(shell.hasAttribute('inert')).toBe(true); // one is still open
+
+    modal.close(settings);
     expect(shell.hasAttribute('inert')).toBe(false);
   });
 
@@ -187,7 +231,7 @@ describe('modal owner — Escape handling', () => {
     const modal = createModalOwner(document, shell, { isEscapeHeld: () => held });
     activeModal = modal;
     const settings = fakeOverlay();
-    modal.open(settings, { priority: 'settings' });
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
 
     held = true;
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
@@ -223,7 +267,7 @@ describe('modal owner — Escape handling', () => {
     const modal = createModalOwner(document, shell);
     activeModal = modal;
     const settings = fakeOverlay();
-    modal.open(settings, { priority: 'settings' });
+    modal.open(settings, { priority: 'settings', dismissOnEscape: true });
     modal.destroy();
     // destroy() closes out the still-open stack (hides once, F7) — clear that so this test
     // isolates the LISTENER-detached property: an Escape AFTER destroy must trigger no

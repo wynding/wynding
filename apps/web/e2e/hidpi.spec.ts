@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
+import { GRID } from './layout-probe';
 
 // HiDPI backing-store gates (#28/P5). Runs ONLY under the chromium-dpr1/2/3 projects
 // (playwright.config.ts pins a fixed 1280×900 viewport there so the board's letterboxed
@@ -89,12 +90,12 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       height: number;
     };
 
-    // M1's "Open Field" board is 28×24 (entrance/exit on row 11) — cols/rows mirrored
-    // from packages/content/src/boards.ts without importing @wynding/content (e2e stays
-    // decoupled from content internals; only the two numbers are duplicated here).
+    // M1's "Open Field" board is 28×24 (entrance/exit on row 11) — the dims come from
+    // `layout-probe.ts`'s shared `GRID`, the single mirror of content's boards.ts (e2e stays
+    // decoupled from content internals).
     const projection = createProjection({
-      cols: 28,
-      rows: 24,
+      cols: GRID.cols,
+      rows: GRID.rows,
       cssWidth: box.width,
       cssHeight: box.height,
       dpr: 1, // CSS-px cell geometry is dpr-independent by design
@@ -169,8 +170,8 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     };
 
     const projection = createProjection({
-      cols: 28,
-      rows: 24,
+      cols: GRID.cols,
+      rows: GRID.rows,
       cssWidth: box.width,
       cssHeight: box.height,
       dpr: 1,

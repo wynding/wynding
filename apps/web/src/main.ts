@@ -16,6 +16,13 @@ import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
+import { requestFullscreen } from './fullscreen';
+import {
+  createInstall,
+  createStorageAdapter,
+  type InstallHandle,
+  type StorageAdapter,
+} from './install';
 import { t } from './i18n/t';
 import { mount as mountScene, type BoardGeometry } from '@wynding/render/scene';
 import type { RenderHandle, RenderOverlay } from '@wynding/render';
@@ -36,10 +43,15 @@ export interface AppDeps {
    *  separate from `now` (a monotonic frame clock) so a fresh run varies per reload. */
   readonly seedSource?: () => number;
   readonly prefersReducedMotion?: boolean;
-  /** matchMedia lookup for viewport-gated features (the P5 rotate prompt) — injectable
-   *  for tests; defaults to `doc.defaultView.matchMedia` when available, or an
-   *  always-non-matching stub otherwise (e.g. jsdom without a stub). */
+  /** matchMedia lookup for viewport-gated features (the P5 rotate prompt, Story 11's
+   *  install detection) — injectable for tests; defaults to `doc.defaultView.matchMedia`
+   *  when available, or an always-non-matching stub otherwise (e.g. jsdom without a stub). */
   readonly matchMedia?: MatchMediaFn;
+  /** Where the install banner's dismissal acknowledgement is persisted (Story 11 P3).
+   *  Created ONCE at module scope by `boot()` and threaded through here, so a
+   *  destroy()/recreate inside one session keeps the same store — with `localStorage`
+   *  unavailable, a per-`createApp` in-memory map would resurrect a dismissed banner. */
+  readonly storage?: StorageAdapter;
 }
 
 export interface AppHandle {
@@ -62,6 +74,27 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // the modal owner (`modal.ts`, wired inside `createOverlay`) ever toggles `inert` on.
   const shell = createShell(doc);
   const board = shell.board;
+
+  // The install path (Story 11 P3). `matchMediaFn` is resolved below for the rotate prompt;
+  // both features want the same injectable lookup, so it is hoisted above the overlay here.
+  const matchMediaFn: MatchMediaFn =
+    deps.matchMedia ??
+    ((query: string): RotateMediaQueryList => {
+      const mm = doc.defaultView?.matchMedia;
+      if (typeof mm === 'function') return mm.call(doc.defaultView, query);
+      return { matches: false, addEventListener: () => {}, removeEventListener: () => {} };
+    });
+  const view = doc.defaultView;
+  const install: InstallHandle = createInstall({
+    storage: deps.storage ?? createStorageAdapter(view),
+    matchMedia: matchMediaFn,
+    // `window` is the spec'd target for both `beforeinstallprompt` and `appinstalled`.
+    // Under jsdom without a window (or a detached document) nothing can fire them, so a
+    // no-op target degrades to the `other` branch rather than throwing at construction.
+    target: view ?? { addEventListener: () => {}, removeEventListener: () => {} },
+    navigator: view?.navigator ?? { platform: '', maxTouchPoints: 0 },
+  });
+
   const overlay = createOverlay(
     doc,
     onAction,
@@ -75,10 +108,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // is a deferred forward reference — the same wiring as the hoisted `onAction` above; the
     // closure only runs at click time, long after `input` is initialized.
     () => input.abort(),
+    install,
   );
   const rotate = doc.createElement('div');
   rotate.className = 'wy-rotate';
-  root.append(shell.root, overlay.resultsEl, overlay.settingsEl, rotate);
+  root.append(shell.root, overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl, rotate);
 
   const grid = controller.ruleset.board.grid;
   const geometry: BoardGeometry = {
@@ -89,6 +123,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   };
   const handle = deps.sceneFactory(board, geometry);
   const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap, {
+    // The keymapped start key routes through the SAME app-level transition as the Dock's
+    // Start button (PLAN.md Story 11 P4) — otherwise it would call `controller.start()`
+    // directly and skip the fullscreen request, the banner latch and the focus re-home.
+    onStart: () => startRun(),
     // The class guard (independent of any opener's abort): a placement release must never
     // COMMIT behind an open modal. `.wy-shell`'s `inert` attribute is the modal owner's own
     // ground truth (set for exactly the open interval), so read it directly — no new signal.
@@ -96,17 +134,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   });
 
   // The rotate prompt (PLAN.md P5) shares the SAME modal owner `overlay.ts` created (one
-  // stack for results/rotate/settings). `deps.matchMedia` lets tests drive both queries
-  // deterministically; the real default reads `doc.defaultView.matchMedia` (absent under
-  // jsdom unless a test stubs it — same fallback shape as `boot()`'s reduced-motion read
-  // below), degrading to an always-non-matching stub rather than throwing when it's missing.
-  const matchMediaFn: MatchMediaFn =
-    deps.matchMedia ??
-    ((query: string): RotateMediaQueryList => {
-      const mm = doc.defaultView?.matchMedia;
-      if (typeof mm === 'function') return mm.call(doc.defaultView, query);
-      return { matches: false, addEventListener: () => {}, removeEventListener: () => {} };
-    });
+  // stack for results/rotate/settings), and the same `matchMediaFn` resolved above.
   const rotateHandle = createRotate(doc, rotate, overlay.modal, controller, input, matchMediaFn);
 
   const initialSettings = settings.get(); // one snapshot (get() clones), read both fields
@@ -119,6 +147,72 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
 
   let resultsShown = false;
   let lastHudKey = '';
+  // Install state changes (a captured `beforeinstallprompt`, a dismissal, an install) arrive
+  // OUTSIDE the HUD memo key's inputs — nothing about the sim moved. Fold a revision counter
+  // into the key AND force an immediate refresh, so a prompt arriving while the run is held
+  // pre-start updates the banner right away rather than waiting for a tick that never comes.
+  let installRev = 0;
+  const unsubscribeInstall = install.onChange(() => {
+    installRev++;
+    refreshHud();
+  });
+
+  /** One HUD/overlay refresh from the controller's current state. Called from the frame
+   *  loop's memo-key gate, and directly (out of band) when install state changes. */
+  function refreshHud(): void {
+    const hud = controller.hud();
+    overlay.update({
+      hud,
+      paused: controller.isPaused(),
+      speed: controller.speed(),
+      ui: controller.uiState(),
+      refund: controller.refundForSelection(),
+    });
+    if (controller.isTerminal() && !resultsShown) {
+      overlay.showResults(hud);
+      resultsShown = true;
+    }
+  }
+
+  /** The ONE app-level start path (PLAN.md Story 11 P4). Both the Dock's Start button and
+   *  the keymapped start key route through here, so the run transition, the one-shot
+   *  fullscreen request, the install-banner latch and the focus re-home can never diverge
+   *  between the two.
+   *
+   *  Fullscreen is requested only on the `started` false→true EDGE: repeated Start presses
+   *  mid-run never re-request, while Play-again (which returns the run to a pre-start state)
+   *  makes the next Start eligible again. */
+  function startRun(): void {
+    const wasStarted = controller.uiState().started;
+    controller.start();
+    if (!wasStarted && controller.uiState().started) {
+      requestFullscreen({
+        doc,
+        // Matched at request time, not at construction — a tablet can gain or lose a
+        // pointer between load and Start.
+        matchesCoarsePointer: () => matchMediaFn('(pointer: coarse)').matches,
+        // `installed` is checked alongside `standalone` everywhere (PLAN.md P3): an install
+        // accepted in THIS tab does not flip the display-mode query.
+        isStandalone: () => {
+          const s = install.state();
+          return s.standalone || s.installed;
+        },
+      });
+      // The install banner never resurrects after the session's first Start — including
+      // across Play-again, which returns to a pre-start state (PLAN.md P3). Mid-run chrome
+      // that re-appears between runs is noise, not a second chance.
+      install.endBannerForSession();
+      // overlay.update() hides the primary Dock button for the rest of the run once started
+      // (PLAN.md P4), and hiding the focused element drops focus to document.body. Re-home
+      // focus on the board — the natural next actionable place for a keyboard user (it owns
+      // the arrow-cursor + Enter placement path).
+      //
+      // INSIDE the edge, deliberately: the keymapped start key routes here too, and pressing
+      // it again mid-run is a no-op on the controller. Re-homing unconditionally would yank
+      // focus off the Card or the chips scrollport and lose the player's place for nothing.
+      board.focus();
+    }
+  }
 
   function onAction(action: UiAction): void {
     switch (action.type) {
@@ -129,12 +223,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.cycleSpeed();
         break;
       case 'start':
-        controller.start();
-        // overlay.update() hides the primary Dock button for the rest of the run once
-        // started (PLAN.md P4), and hiding the focused element drops focus to
-        // document.body. Re-home focus on the board — the natural next actionable place for
-        // a keyboard user (it owns the arrow-cursor + Enter placement path).
-        board.focus();
+        startRun();
         break;
       case 'armTower':
         controller.armTower(action.tower);
@@ -224,21 +313,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // covers arm/disarm/selection/outcome changes that don't otherwise move the tick/
     // pause/speed/selection/pendingRevision key components (e.g. an armed-but-rejected
     // placement, which changes nothing else here).
-    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}|${controller.uiRev()}`;
+    const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}|${controller.uiRev()}|${installRev}`;
     if (hudKey !== lastHudKey) {
       lastHudKey = hudKey;
-      const hud = controller.hud();
-      overlay.update({
-        hud,
-        paused: controller.isPaused(),
-        speed: controller.speed(),
-        ui: controller.uiState(),
-        refund: controller.refundForSelection(),
-      });
-      if (controller.isTerminal() && !resultsShown) {
-        overlay.showResults(hud);
-        resultsShown = true;
-      }
+      refreshHud();
     }
   });
 
@@ -246,6 +324,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
+      unsubscribeInstall();
+      install.destroy();
       rotateHandle.destroy();
       input.destroy();
       handle.destroy();
@@ -257,6 +337,17 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       rotate.remove();
     },
   };
+}
+
+/** The app's ONE storage adapter, module-scoped (Story 11 P3): the install banner's
+ *  dismissal must survive a `createApp` destroy/recreate inside the same session even when
+ *  `localStorage` is unavailable and the adapter falls back to memory — a per-`createApp`
+ *  in-memory map would resurrect a dismissed banner. Built on first `boot()` rather than at
+ *  import, so merely importing this module never probes browser storage. */
+let appStorage: StorageAdapter | null = null;
+function dismissalStorage(): StorageAdapter {
+  appStorage ??= createStorageAdapter(typeof window === 'undefined' ? null : window);
+  return appStorage;
 }
 
 /** requestAnimationFrame-backed scheduler (the real per-frame driver). */
@@ -291,6 +382,7 @@ export function boot(doc: Document): AppHandle | null {
     // relative value that clusters across reloads, collapsing the RNG's variety.
     seed: Date.now() >>> 0,
     prefersReducedMotion,
+    storage: dismissalStorage(),
   });
 }
 
