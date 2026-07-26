@@ -78,3 +78,37 @@ describe('layout — the one published Compact trigger (contract §3)', () => {
     expect([...WALKED_CONTAINERS]).toEqual(['.wy-shell', '.wy-main', '.wy-status']);
   });
 });
+
+// Every custom-property declaration of `prop`, comments stripped first, so a token declared
+// in more than one block (e.g. `--wy-rail-w`'s base + Compact override) yields both values
+// and the caller can pick the one it means to assert on.
+function tokenDecls(source: string, prop: string): string[] {
+  const uncommented = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out: string[] = [];
+  const re = new RegExp(`${prop}\\s*:\\s*([^;]+);`, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(uncommented)) !== null) out.push((m[1] as string).trim());
+  return out;
+}
+
+describe('layout — Compact fixed tracks grow by their safe-area inset (Codex P1)', () => {
+  // A Compact region that spends a safe-area inset as INTERNAL padding while its grid track is
+  // a fixed width starves the content by the inset (≈44–59px on a notched iPhone in
+  // landscape, invisible in CI where env()=0). Pin that each such token grows its track by the
+  // matching inset so the content keeps its intended min() width. Assert on the source text
+  // rather than computed layout because jsdom resolves env() to nothing.
+  it('--wy-compact-col grows its track by the left inset (`.wy-status` pads left)', () => {
+    const decls = tokenDecls(css, '--wy-compact-col');
+    expect(decls).toHaveLength(1);
+    expect(decls[0]).toContain('min(4rem, 10vw)');
+    expect(decls[0]).toContain('env(safe-area-inset-left');
+  });
+
+  it('the Compact --wy-rail-w override grows its track by the right inset (`.wy-rail` pads right)', () => {
+    // `--wy-rail-w` is declared twice — the Standard base clamp and this Compact override;
+    // pick the override by its distinctive `min(9rem, 28vw)` core.
+    const override = tokenDecls(css, '--wy-rail-w').find((d) => d.includes('min(9rem, 28vw)'));
+    expect(override).toBeDefined();
+    expect(override).toContain('env(safe-area-inset-right');
+  });
+});

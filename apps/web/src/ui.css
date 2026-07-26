@@ -32,8 +32,17 @@
      the board: at 200% `4rem` would be 128px, but `10vw` holds it to ~66px on a 658px-wide
      phone. Content that no longer fits scrolls inside `.wy-hud` (the ADR 0003 doctrine)
      while the board's floor stays gated numerically by the projection thresholds in
-     `compact.spec.ts` / `smoke.spec.ts`. */
-  --wy-compact-col: min(4rem, 10vw);
+     `compact.spec.ts` / `smoke.spec.ts`.
+     The `+ env(safe-area-inset-left, 0px)` term GROWS the track by the left notch/inset that
+     `.wy-status` then spends as internal `padding-left` — so the CONTENT width the Compact
+     Dock buttons (`width: 100%`) see stays the intended `min(4rem, 10vw)` instead of being
+     eaten down to a few px on a notched iPhone in landscape (where the inset is ~44–59px).
+     env() resolves to 0 in headless CI, so the projection thresholds in compact.spec.ts /
+     smoke.spec.ts are UNCHANGED there: at 658×320 with env()=0 the track is exactly
+     `min(4rem, 10vw)` and the 200%-zoom board-floor math above is untouched. On a real
+     notched device the board cedes exactly the unusable notch strip and nothing more —
+     honest accounting. */
+  --wy-compact-col: calc(min(4rem, 10vw) + env(safe-area-inset-left, 0px));
   /* Standard Rail track width (PLAN.md P1): the clamp's rem floor is vw-capped (like
      `--wy-compact-col`) so 200% text zoom cannot starve the board on a narrow viewport. Named
      so the `.wy-main` grid track and the `.wy-dock` max-width subtraction consume ONE
@@ -748,8 +757,13 @@ body {
   .wy-main {
     grid-row: 1;
     grid-column: 2;
-    /* The Compact fork overrides the token (contract §2) rather than restating the track. */
-    --wy-rail-w: min(9rem, 28vw);
+    /* The Compact fork overrides the token (contract §2) rather than restating the track.
+       Same shape as `--wy-compact-col`: `.wy-rail` spends `env(safe-area-inset-right)` as
+       internal `padding-right`, so grow the fixed track by that inset to keep the Card's
+       (`width: 100%`) content width at the intended `min(9rem, 28vw)` on a right-notched
+       landscape iPhone. env()=0 in headless CI leaves the track — and the projection
+       thresholds — exactly `min(9rem, 28vw)`. */
+    --wy-rail-w: calc(min(9rem, 28vw) + env(safe-area-inset-right, 0px));
 
     grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
   }
