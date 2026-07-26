@@ -6,6 +6,7 @@ import {
   projectCreep,
   deriveScore,
   deriveStars,
+  isTerminalPhase,
   MS_PER_TICK,
   type SimState,
   type PreviewState,
@@ -65,16 +66,27 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
 
 /** Derive the HUD fields (countdown in whole seconds, score, stars) from `state`. Also
  *  accepts a `PreviewState` — the controller's pending-aware presentation reads the
- *  HUD off a `previewInputs()` result while the run itself stays uncommitted. */
+ *  HUD off a `previewInputs()` result while the run itself stays uncommitted.
+ *
+ *  `score` is phase-dependent (#53): the HUD shows the score components ALREADY EARNED,
+ *  and the survival term (`lives × survivalMul`) is credited only at resolution. Rendering
+ *  the authoritative terminal formula against a live state showed `Score: 250` before a
+ *  wave had even launched. This is deliberately NOT a monotonicity guarantee — the rule is
+ *  "earned so far", and a future score input (e.g. an M2 sell haircut) may legitimately
+ *  lower a live score. Once terminal, `deriveScore` is authoritative and unchanged, so the
+ *  results dialog and the replay-verify comparison still see the server-re-derivable number. */
 export function deriveHud(state: SimState | PreviewState, ruleset: CompiledRuleset): HudVM {
   const preWave = state.phase === 'pre-wave';
   const ticksLeft = preWave ? Math.max(0, state.launchAtTick - state.tick) : 0;
+  // Guarded exactly as `deriveScore` guards the same accumulator, so a forged/ragged
+  // state reads 0 here rather than leaking NaN into the chip.
+  const earned = Number.isSafeInteger(state.cumulativeKillBounty) ? state.cumulativeKillBounty : 0;
   return {
     phase: state.phase,
     lives: state.lives,
     bounty: state.bounty,
     countdownSeconds: preWave ? Math.ceil((ticksLeft * MS_PER_TICK) / 1000) : null,
-    score: deriveScore(state, ruleset),
+    score: isTerminalPhase(state.phase) ? deriveScore(state, ruleset) : earned,
     stars: deriveStars(state, ruleset),
     won: state.phase === 'won',
   };

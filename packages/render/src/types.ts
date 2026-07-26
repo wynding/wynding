@@ -41,6 +41,11 @@ export interface HudVM {
   readonly bounty: number;
   /** Whole seconds until the wave auto-launches; null once launched (not shown). */
   readonly countdownSeconds: number | null;
+  /** Phase-dependent (#53). While the run is live this is the score components EARNED SO
+   *  FAR (the accrued kill bounty); the survival term is not yet earned and is excluded.
+   *  Once the run resolves (won/lost) this is the authoritative `deriveScore` total, which
+   *  is what the results dialog and replay verification compare against. Note this is not
+   *  a monotonicity guarantee — a future score input may lower a live score. */
   readonly score: number;
   readonly stars: number;
   readonly won: boolean;

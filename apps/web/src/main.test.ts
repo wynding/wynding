@@ -205,6 +205,66 @@ describe('main — createApp wiring & frame loop', () => {
   });
 });
 
+describe('main — Score chip across a run and Play-again (#53)', () => {
+  /** The Score chip's displayed number, read off the chip's full ICU message node (the
+   *  accessible text) rather than the chip's raw textContent, which also carries the
+   *  aria-hidden glance glyph. */
+  function scoreChip(root: HTMLElement): number {
+    const text = root.querySelector('[data-wy-chip="score"] .wy-chip-full')?.textContent ?? '';
+    const digits = /-?\d+/.exec(text);
+    if (digits === null) throw new Error(`no number in Score chip text: ${JSON.stringify(text)}`);
+    return Number(digits[0]);
+  }
+
+  it('reads 0 before Start, shows the terminal score at resolution, and is back to 0 the instant Play-again is clicked', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+    });
+
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+    const key = (code: string): void => {
+      board.dispatchEvent(new KeyboardEvent('keydown', { code, cancelable: true }));
+    };
+    sched.frame((clock += 16)); // one frame so the HUD has been painted at least once
+
+    // The defect in the screenshot: on first load, before anything is started, the chip
+    // rendered the terminal formula's survival term (startingLives × survivalMul = 250).
+    expect(scoreChip(root)).toBe(0);
+
+    // Build one tower beside the entrance lane so this run actually SCORES — the plain
+    // undefended fixture used elsewhere in this file ends at 0, which would make the
+    // Play-again assertion below pass with or without the fix.
+    for (let i = 0; i < 3; i++) key('ArrowRight');
+    for (let i = 0; i < 2; i++) key('ArrowUp'); // entrance row 11 → row 9
+    key('Enter'); // confirm the build
+    sched.frame((clock += 16));
+
+    dockButton(root, 'Start').click();
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    expect(results.hidden).toBe(false);
+
+    // At resolution the chip carries the authoritative total, survival term included.
+    const terminalScore = scoreChip(root);
+    expect(terminalScore).toBeGreaterThan(0);
+
+    // The seam this test exists for: the repaint must be synchronous with the click, not
+    // deferred to the next scheduled frame — no frame is driven between these two lines,
+    // and in a throttled background tab there might not be one for a long while.
+    results.querySelectorAll<HTMLButtonElement>('.wy-btn')[0]!.click(); // Play again
+    expect(scoreChip(root)).toBe(0);
+
+    app.destroy();
+  });
+});
+
 describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
   it('two same-tick pending economy changes while paused produce two HUD updates', () => {
     const root = document.createElement('div');
