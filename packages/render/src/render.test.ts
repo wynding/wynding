@@ -4,7 +4,14 @@
 
 import { describe, it, expect } from 'vitest';
 import { FP_ONE } from '@wynding/engine';
-import { createInitialState, step, compileRuleset, type SimInput } from '@wynding/sim';
+import {
+  createInitialState,
+  step,
+  compileRuleset,
+  deriveScore,
+  type SimInput,
+  type SimState,
+} from '@wynding/sim';
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 import { createProjection } from './projection';
 import { deriveViewModel, deriveHud } from './view-model';
@@ -107,6 +114,102 @@ describe('view-model + hud derivation', () => {
     s.creeps.hp[0] = Number.NaN as unknown as number; // corrupt only the HP column
     const c = deriveViewModel(s, ruleset).creeps.find((v) => v.id === s.creeps.id[0]);
     expect(c?.hpFrac).toBe(0);
+  });
+});
+
+// #53 — the HUD score is EARNED-SO-FAR while the run is live, and the authoritative
+// `deriveScore` total once it resolves. Rendering the terminal formula against a live state
+// put `Score: 250` (10 starting lives × survivalMul 25) on screen before a wave had launched,
+// and dropped the displayed score by 25 on every leak. These fixtures play real M1 runs
+// rather than hand-building states, so they break if the sim's scoring inputs move.
+describe('hud score — earned components while live, authoritative once terminal (#53)', () => {
+  /** A 2×2 tower flanking the entrance lane: enough to kill, not enough to hold the wave,
+   *  so one run yields BOTH an accrued kill bounty and later leaks. */
+  const DEFENDER = { col: 3, row: 9 } as const;
+
+  /** A run with a single defender, wave launched. */
+  function startDefendedRun(): SimState {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: DEFENDER }]);
+    return step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+  }
+
+  /** Step until `done`, so the fixtures key on the state they need rather than on tick
+   *  numbers that balance changes would silently invalidate. Throws instead of asserting
+   *  against a state that never arrived. */
+  function stepUntil(from: SimState, done: (s: SimState) => boolean, limit = 5000): SimState {
+    let s = from;
+    for (let i = 0; i < limit && !done(s); i++) s = step(s, ruleset, []);
+    if (!done(s)) throw new Error(`fixture never reached its target state within ${limit} ticks`);
+    return s;
+  }
+
+  it('reads 0 on a fresh pre-wave state — nothing has been earned yet', () => {
+    const s = createInitialState(1, ruleset);
+    expect(s.cumulativeKillBounty).toBe(0);
+    expect(s.lives).toBeGreaterThan(0); // the survival term would be nonzero if it counted
+    expect(deriveHud(s, ruleset).score).toBe(0);
+  });
+
+  it('equals the accrued kill bounty mid-run', () => {
+    const s = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
+    expect(s.phase).toBe('active');
+    expect(deriveHud(s, ruleset).score).toBe(s.cumulativeKillBounty);
+  });
+
+  it('does not change when a creep leaks while the run is active', () => {
+    const killed = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
+    // `step` mutates in place and returns the SAME state object, so every "before" value
+    // must be snapshotted as a primitive here — reading `killed.foo` after the leak below
+    // would read the post-leak value and assert nothing.
+    const scoreBefore = deriveHud(killed, ruleset).score;
+    const bountyBefore = killed.cumulativeKillBounty;
+    const livesBefore = killed.lives;
+    const leaked = stepUntil(killed, (x) => x.lives < livesBefore);
+    expect(leaked.phase).toBe('active'); // still live, not resolved by the leak
+    expect(leaked.cumulativeKillBounty).toBe(bountyBefore); // the leak cost a life, not a kill
+    expect(deriveHud(leaked, ruleset).score).toBe(scoreBefore);
+  });
+
+  it('folds the survival term in at a win, matching deriveScore exactly', () => {
+    let s = createInitialState(1, ruleset);
+    for (const anchor of [
+      { col: 3, row: 9 },
+      { col: 3, row: 12 },
+    ] as const) {
+      s = step(s, ruleset, [{ kind: 'placeTower', anchor }]);
+    }
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    const won = stepUntil(s, (x) => x.phase === 'won');
+    expect(won.cumulativeKillBounty).toBeGreaterThan(0);
+    expect(won.lives).toBeGreaterThan(0);
+    const score = deriveHud(won, ruleset).score;
+    expect(score).toBe(deriveScore(won, ruleset));
+    // The terminal number is strictly more than the earned component — i.e. the survival
+    // term really is credited here and was really excluded before.
+    expect(score).toBeGreaterThan(won.cumulativeKillBounty);
+  });
+
+  it('keeps the kill component at a loss, where the survival term contributes zero', () => {
+    // A played-out M1 loss WITH kills is unreachable: the wave is 10 creeps against 10
+    // lives, so any kill leaves at least one life and the run resolves `won`. Take a real
+    // run that accrued a kill and drive it to the terminal loss state directly (PLAN.md
+    // step 4 sanctions this) — a zero-kill loss would pass vacuously against a hardcoded 0.
+    const run = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
+    // Forge a COPY into the loss state rather than mutating the sim's own object —
+    // render code (tests included) reads sim state, never writes it (AGENTS.md layering).
+    const lost: SimState = { ...run, lives: 0, phase: 'lost' };
+    expect(deriveScore(lost, ruleset)).toBe(lost.cumulativeKillBounty); // survival term is 0
+    expect(deriveHud(lost, ruleset).score).toBe(deriveScore(lost, ruleset));
+    expect(deriveHud(lost, ruleset).score).toBeGreaterThan(0);
+  });
+
+  it('reads 0 rather than NaN if the accumulator is ragged, matching deriveScore’s guard', () => {
+    const ragged: SimState = {
+      ...createInitialState(1, ruleset),
+      cumulativeKillBounty: Number.NaN,
+    };
+    expect(deriveHud(ragged, ruleset).score).toBe(0);
   });
 });
 

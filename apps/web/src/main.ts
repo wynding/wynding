@@ -259,6 +259,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         board.focus();
         resultsShown = false;
         lastHudKey = '';
+        // Repaint the HUD NOW rather than waiting for the next scheduled frame (#53): the
+        // fresh run is pre-wave and un-ticking, so until a frame lands the chips still read
+        // the finished run's terminal values — indefinitely if frames are throttled in a
+        // background tab. Same out-of-band refresh the install-state listener uses.
+        refreshHud();
         break;
       case 'verify': {
         const r = controller.verifyRun();
