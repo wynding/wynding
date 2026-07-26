@@ -159,9 +159,11 @@ Phase 1 bugfix); early milestones ship as alphas ahead of the stable release.
 _Avoid_: launch (version is fine in prose).
 
 **P1–P4**:
-The severity of a review finding, P1 most severe (there is no P0): **P1** data loss,
-a security hole, or a break on a path most users hit; **P2** a genuine functional
-defect a real user hits on a plausible path; **P3** real but minor (cosmetic, dead
-code, inaccurate comments); **P4** a nit. P1/P2 block a story; P3/P4 are advisory and
-may ship open. One scale for every reviewer — human, internal, and external.
-_Avoid_: high/medium/low, blocker, critical, nit (as a severity — P4 is the nit tier).
+The severity of a review finding, P1 most severe: **P1** data loss, a security hole,
+or a break on a path most users hit; **P2** a genuine functional defect a real user
+hits on a plausible path; **P3** real but minor (cosmetic, dead code, inaccurate
+comments); **P4** a minor, non-blocking observation (style, naming, taste). P1/P2
+block a story; P3/P4 are advisory and do not drive further review rounds — the
+[merge gate](ai-workflow.md) is unchanged either way, and still requires every review
+thread resolved. One scale for every reviewer — human, internal, and external.
+_Avoid_: high/medium/low, blocker, critical, nit.
