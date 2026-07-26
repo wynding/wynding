@@ -1,7 +1,7 @@
 name: Feedback / bug report
 description: Report a bug, suggest an idea, or flag balance for the Wynding game.
-title: "[Feedback]: "
-labels: ["feedback"]
+title: '[Feedback]: '
+labels: ['feedback']
 body:
   - type: markdown
     attributes:
