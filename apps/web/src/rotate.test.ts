@@ -32,27 +32,13 @@ function fakeMatchMedia(
   };
 }
 
-/** A minimal fake of the `Controller` slice `createRotate` reads — a mutable `started`/
- *  `paused` pair plus a `pause` spy, avoiding the need to stand up a real Controller. */
-function fakeController(started: boolean): {
-  uiState: () => { started: boolean };
-  isPaused: () => boolean;
-  pause: ReturnType<typeof vi.fn>;
-  setPaused(v: boolean): void;
-} {
-  let paused = false;
-  const pause = vi.fn(() => {
-    paused = true;
-  });
-  return {
-    uiState: () => ({ started }),
-    isPaused: () => paused,
-    pause,
-    setPaused(v: boolean): void {
-      paused = v;
-    },
-  };
-}
+/** A spy for the app-level pause seam this module now calls instead of touching a
+ *  Controller. The started/already-paused guard moved into `main.ts`'s `ensurePaused` (so
+ *  every pause caller shares ONE guard and one synchronous home-link refresh) and is covered
+ *  there — `main.test.ts`'s "the app-level pause seam" block owns the "pre-start is a no-op"
+ *  and "already-paused is a no-op" cases that used to be asserted here against a fake. What
+ *  rotate.ts is responsible for, and all this file can still prove, is WHEN it asks. */
+const fakeEnsurePaused = (): ReturnType<typeof vi.fn> => vi.fn();
 
 let activeModal: { destroy(): void } | null = null;
 
@@ -74,14 +60,14 @@ describe('rotate — the portrait/coarse-pointer prompt (PLAN.md P5)', () => {
     activeModal = modal;
     const portrait = fakeQuery(false);
     const coarse = fakeQuery(false);
-    const controller = fakeController(false);
+    const ensurePaused = fakeEnsurePaused();
     const abort = vi.fn();
 
     const handle = createRotate(
       document,
       rotateEl,
       modal,
-      controller,
+      ensurePaused,
       { abort },
       fakeMatchMedia(portrait, coarse),
     );
@@ -101,7 +87,7 @@ describe('rotate — the portrait/coarse-pointer prompt (PLAN.md P5)', () => {
     handle.destroy();
   });
 
-  it('auto-pauses an active, unpaused run on entering portrait+coarse', () => {
+  it('asks the app-level pause seam to pause on ENTERING portrait+coarse', () => {
     const rotateEl = document.createElement('div');
     const shell = document.createElement('div');
     document.body.append(rotateEl, shell);
@@ -109,32 +95,34 @@ describe('rotate — the portrait/coarse-pointer prompt (PLAN.md P5)', () => {
     activeModal = modal;
     const portrait = fakeQuery(false);
     const coarse = fakeQuery(false);
-    const controller = fakeController(true); // a run is active
+    const ensurePaused = fakeEnsurePaused();
 
     const handle = createRotate(
       document,
       rotateEl,
       modal,
-      controller,
+      ensurePaused,
       { abort: vi.fn() },
       fakeMatchMedia(portrait, coarse),
     );
 
-    expect(controller.pause).not.toHaveBeenCalled();
+    expect(ensurePaused).not.toHaveBeenCalled();
     portrait.set(true);
     coarse.set(true);
-    expect(controller.pause).toHaveBeenCalledTimes(1);
+    expect(ensurePaused).toHaveBeenCalledTimes(1);
 
-    // Redundant re-evaluation (e.g. a further `change` while already shown) must not
-    // pause again once the run is already paused.
+    // Re-ENTERING asks again. That is not a double-pause: the seam owns the
+    // already-paused guard (and the pre-start one), so a second ask on an already-paused run
+    // is a no-op there — asserted in `main.test.ts`'s "the app-level pause seam" block rather
+    // than re-implemented against a fake here, which would only test the fake.
     coarse.set(false);
     coarse.set(true);
-    expect(controller.pause).toHaveBeenCalledTimes(1);
+    expect(ensurePaused).toHaveBeenCalledTimes(2);
 
     handle.destroy();
   });
 
-  it('does not auto-pause pre-start (nothing to pause)', () => {
+  it('never resumes on returning to landscape — the run stays paused', () => {
     const rotateEl = document.createElement('div');
     const shell = document.createElement('div');
     document.body.append(rotateEl, shell);
@@ -142,39 +130,13 @@ describe('rotate — the portrait/coarse-pointer prompt (PLAN.md P5)', () => {
     activeModal = modal;
     const portrait = fakeQuery(false);
     const coarse = fakeQuery(false);
-    const controller = fakeController(false); // not started
+    const ensurePaused = fakeEnsurePaused();
 
     const handle = createRotate(
       document,
       rotateEl,
       modal,
-      controller,
-      { abort: vi.fn() },
-      fakeMatchMedia(portrait, coarse),
-    );
-
-    portrait.set(true);
-    coarse.set(true);
-    expect(controller.pause).not.toHaveBeenCalled();
-
-    handle.destroy();
-  });
-
-  it('stays paused on returning to landscape — nothing here ever resumes', () => {
-    const rotateEl = document.createElement('div');
-    const shell = document.createElement('div');
-    document.body.append(rotateEl, shell);
-    const modal = createModalOwner(document, shell);
-    activeModal = modal;
-    const portrait = fakeQuery(false);
-    const coarse = fakeQuery(false);
-    const controller = fakeController(true);
-
-    const handle = createRotate(
-      document,
-      rotateEl,
-      modal,
-      controller,
+      ensurePaused,
       { abort: vi.fn() },
       fakeMatchMedia(portrait, coarse),
     );
@@ -182,13 +144,15 @@ describe('rotate — the portrait/coarse-pointer prompt (PLAN.md P5)', () => {
     portrait.set(true);
     coarse.set(true);
     expect(rotateEl.hidden).toBe(false);
-    expect(controller.isPaused()).toBe(true);
+    expect(ensurePaused).toHaveBeenCalledTimes(1);
 
     portrait.set(false); // back to landscape
     expect(rotateEl.hidden).toBe(true); // overlay closes
-    expect(controller.isPaused()).toBe(true); // run stays paused — no auto-resume exists
-    // (the fake Controller's Pick surface has no `resume` at all — a resume call would
-    // be a compile error here, so this is enforced structurally, not just by assertion.)
+    // The run stays paused because NOTHING here resumes it: leaving portrait asks for no
+    // further pause state at all. This module's whole controller surface is now a single
+    // `ensurePaused` callback — it has no `resume` to call even by mistake, so the
+    // never-auto-resume property is enforced structurally, not just by this assertion.
+    expect(ensurePaused).toHaveBeenCalledTimes(1);
 
     handle.destroy();
   });
@@ -201,14 +165,14 @@ describe('rotate — the portrait/coarse-pointer prompt (PLAN.md P5)', () => {
     activeModal = modal;
     const portrait = fakeQuery(false);
     const coarse = fakeQuery(false);
-    const controller = fakeController(true);
+    const ensurePaused = fakeEnsurePaused();
     const abort = vi.fn();
 
     const handle = createRotate(
       document,
       rotateEl,
       modal,
-      controller,
+      ensurePaused,
       { abort },
       fakeMatchMedia(portrait, coarse),
     );
@@ -238,13 +202,13 @@ describe('rotate — the portrait/coarse-pointer prompt (PLAN.md P5)', () => {
     document.body.appendChild(rotateEl);
     const portrait = fakeQuery(false);
     const coarse = fakeQuery(false);
-    const controller = fakeController(false);
+    const ensurePaused = fakeEnsurePaused();
 
     const handle = createRotate(
       document,
       rotateEl,
       modal,
-      controller,
+      ensurePaused,
       { abort: vi.fn() },
       fakeMatchMedia(portrait, coarse),
     );

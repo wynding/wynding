@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createShell, dockButtonParts } from './shell';
+import { createShell, dockButtonParts, HOME_HREF } from './shell';
 import { LAYOUT_REGIONS, REGION_ATTR } from './layout';
 
 describe('shell — pinned DOM topology (PLAN.md P1)', () => {
@@ -31,11 +31,75 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.status.contains(shell.dock.root)).toBe(true);
     const stage = shell.root.querySelector('.wy-stage')!;
     expect(stage.contains(shell.dock.root)).toBe(false);
-    expect([...shell.status.children]).toEqual([
-      shell.root.querySelector('.wy-wordmark'),
-      shell.hudBox,
-      shell.dock.root,
-    ]);
+    expect([...shell.status.children]).toEqual([shell.home, shell.hudBox, shell.dock.root]);
+  });
+
+  // The home affordance. STRUCTURAL ONLY: jsdom performs no CSS layout, so nothing here is
+  // "measured" — every size, clipping, hit-test, focus-ring and grid-intersection claim is
+  // Playwright's, in BOTH layouts, and lives in `apps/web/e2e/home.spec.ts`.
+  it('wraps the board-mark and the existing wordmark in a.wy-home[href="/"]', () => {
+    const shell = createShell(document);
+    expect(shell.home.tagName).toBe('A');
+    expect(shell.home.className).toBe('wy-home');
+    // The ATTRIBUTE, not `.href` — the IDL property resolves against the document base URL,
+    // so it would read "http://localhost/" and prove nothing about what was authored. The
+    // link must stay root-absolute so it is correct from `/play/` under any `--base`.
+    expect(shell.home.getAttribute('href')).toBe('/');
+    expect(HOME_HREF).toBe('/');
+    // Mark first, then the wordmark it upgraded — one element, one "Wynding" in the bar.
+    const mark = shell.home.querySelector('svg.wy-mark')!;
+    const wordmark = shell.home.querySelector('.wy-wordmark')!;
+    expect([...shell.home.children]).toEqual([mark, wordmark]);
+    expect(wordmark.textContent).toBe('Wynding'); // unchanged by the move
+  });
+
+  it('names the home link from the catalog, with the mark as aria-hidden decoration', () => {
+    const shell = createShell(document);
+    // ADR 0004: the accessible name is an externalized string on the ANCHOR, not the raw
+    // `aria-label` the source mark shipped with.
+    expect(shell.home.getAttribute('aria-label')).toBe('Wynding — home');
+    const mark = shell.home.querySelector('svg.wy-mark')!;
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(mark.getAttribute('focusable')).toBe('false');
+    // Decoration carries no name of its own — AT must never hear the link twice.
+    expect(mark.getAttribute('aria-label')).toBeNull();
+    expect(mark.getAttribute('role')).toBeNull();
+    // …and no `title` either. A `title` matching the `aria-label` does not add a second NAME
+    // (aria-label wins), but per accname it becomes the accessible DESCRIPTION — so AT would
+    // read the name and then the identical description. The hover affordance is CSS instead.
+    expect(shell.home.getAttribute('title')).toBeNull();
+  });
+
+  it('draws the canonical board-mark with the dark values hardcoded and no <style> block', () => {
+    const shell = createShell(document);
+    const mark = shell.home.querySelector('svg.wy-mark')!;
+    expect(mark.getAttribute('viewBox')).toBe('0 0 32 32');
+    // A scoped `<style>` inside an inline SVG leaks its class names into the whole document,
+    // and the game UI is fixed dark anyway — so the source mark's style block and its
+    // `prefers-color-scheme` query are replaced by presentation attributes.
+    expect(mark.querySelector('style')).toBeNull();
+    // The four canonical shapes: grid edge, two tower-walls, vermilion route.
+    const shapes = [...mark.children].map((el) => el.tagName);
+    expect(shapes).toEqual(['rect', 'rect', 'rect', 'polyline']);
+    const [edge, wallA, wallB, route] = [...mark.children];
+    expect(edge!.getAttribute('stroke')).toBe('#e6e9ee');
+    expect(edge!.getAttribute('fill')).toBe('none');
+    expect(wallA!.getAttribute('fill')).toBe('#e6e9ee');
+    expect(wallB!.getAttribute('fill')).toBe('#e6e9ee');
+    expect(route!.getAttribute('points')).toBe('4,9 16,9 16,19 28,19');
+    expect(route!.getAttribute('stroke')).toBe('#e8552f');
+    // No intrinsic size attributes — `ui.css` sizes the mark per layout (~1.25rem beside the
+    // Standard wordmark, ~2.5rem alone in the Compact column).
+    expect(mark.getAttribute('width')).toBeNull();
+    expect(mark.getAttribute('height')).toBeNull();
+  });
+
+  it('the home link is the Shell first tab stop, and starts visible and interactive', () => {
+    const shell = createShell(document);
+    expect(shell.status.firstElementChild).toBe(shell.home);
+    // The Shell ships it live-clear; `overlay.ts` is the only writer of these two.
+    expect(shell.home.hasAttribute('inert')).toBe(false);
+    expect(shell.home.dataset.live).toBeUndefined();
   });
 
   it('the board is focusable and carries its ARIA role (its aria-label is set dynamically by overlay.ts)', () => {

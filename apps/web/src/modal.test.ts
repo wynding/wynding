@@ -24,6 +24,83 @@ afterEach(() => {
   activeModal?.destroy();
 });
 
+// The OWNER-side mechanics a `settings`-priority registrant depends on — written for the
+// leave-run confirm dialog, but deliberately titled for what these fakes can actually prove.
+// They hardcode the registration options, so they pin the owner's behaviour GIVEN that
+// registration; they cannot detect the real dialog changing how it registers. That claim is
+// tested where the real `showLeave` runs (`overlay.test.ts`: the deposed-by-rotate,
+// outranked-by-results and Escape-dismisses cases all drive the actual dialog).
+//
+// Containment is likewise the owner's inert-plus-hidden-siblings mechanism, NOT a focus trap
+// this module implements — Tab containment is verified end-to-end in Playwright, where a real
+// browser's tab order exists.
+describe('modal owner — mechanics a settings-priority registrant relies on', () => {
+  it('is outranked by rotate: opening leave underneath never shows or hides it', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const rotate = fakeOverlay();
+    const leave = fakeOverlay();
+
+    modal.open(rotate, { priority: 'rotate' });
+    modal.open(leave, { priority: 'settings', dismissOnEscape: true });
+    expect(leave.show).not.toHaveBeenCalled();
+    expect(rotate.hide).not.toHaveBeenCalled();
+
+    // Closing the higher-priority overlay ACTIVATES the stacked leave dialog.
+    modal.close(rotate);
+    expect(leave.show).toHaveBeenCalledOnce();
+    expect(shell.hasAttribute('inert')).toBe(true); // still a modal open — shell stays inert
+  });
+
+  it('is outranked by results: a run that resolves under it keeps the results dialog on top', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const leave = fakeOverlay();
+    const results = fakeOverlay();
+
+    modal.open(leave, { priority: 'settings', dismissOnEscape: true });
+    expect(leave.show).toHaveBeenCalledOnce();
+    modal.open(results, { priority: 'results' });
+    expect(leave.hide).toHaveBeenCalledOnce(); // deposed
+    expect(results.show).toHaveBeenCalledOnce();
+  });
+
+  it('restores the pre-modal focus once it closes, and un-inerts the shell', () => {
+    const shell = document.createElement('div');
+    const opener = document.createElement('a');
+    opener.href = '/';
+    shell.appendChild(opener);
+    document.body.appendChild(shell);
+    opener.focus();
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const leave = fakeOverlay();
+
+    modal.open(leave, { priority: 'settings', dismissOnEscape: true });
+    expect(shell.hasAttribute('inert')).toBe(true);
+    modal.close(leave);
+    expect(shell.hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('dismisses on Escape — for this dialog, Escape MEANS stay', () => {
+    const shell = document.createElement('div');
+    document.body.appendChild(shell);
+    const modal = createModalOwner(document, shell);
+    activeModal = modal;
+    const leave = fakeOverlay();
+    modal.open(leave, { priority: 'settings', dismissOnEscape: true });
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }));
+    expect(leave.hide).toHaveBeenCalledOnce();
+    expect(shell.hasAttribute('inert')).toBe(false);
+  });
+});
+
 describe('modal owner — inert + stack semantics (PLAN.md P1)', () => {
   it('inerts the shell on first open and un-inerts it once the stack empties', () => {
     const shell = document.createElement('div');

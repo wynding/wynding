@@ -39,10 +39,14 @@ export type LayoutRegion = (typeof LAYOUT_REGIONS)[number];
  *  child of an exempt container to be declared itself. */
 export const EXEMPT_CONTAINER_SELECTOR = '.wy-main';
 
-/** Content painted INSIDE the `status` region — the wordmark and the HUD chips — rather than
+/** Content painted INSIDE the `status` region — the home link and the HUD chips — rather than
  *  regions the Shell places. They sit under a walked container (`.wy-status`) yet are not
- *  layout regions, so the undeclared-child gate exempts them explicitly. */
-export const EXEMPT_CONTENT_SELECTOR = '.wy-wordmark, .wy-hud';
+ *  layout regions, so the undeclared-child gate exempts them explicitly.
+ *
+ *  `.wy-home` replaced `.wy-wordmark` here when the wordmark was UPGRADED into the site home
+ *  anchor: the wordmark span is now a child of that anchor, not a direct child of
+ *  `.wy-status`, so it is no longer reached by the walk at all — only its new parent is. */
+export const EXEMPT_CONTENT_SELECTOR = '.wy-home, .wy-hud';
 
 /** The FULL exemption from contract §5's undeclared-child gate: the structural container plus
  *  the status content above. Nothing else may ship undeclared. `layout-probe.ts`'s

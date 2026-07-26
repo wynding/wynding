@@ -73,8 +73,10 @@ describe('layout — the one published Compact trigger (contract §3)', () => {
   });
 
   it('centralizes the probe walk/exemption vocabulary (contract §5, consumed by layout-probe)', () => {
-    expect(EXEMPT_CONTENT_SELECTOR).toBe('.wy-wordmark, .wy-hud');
-    expect(EXEMPT_FROM_DECLARATION).toBe('.wy-main, .wy-wordmark, .wy-hud');
+    // `.wy-home` (not `.wy-wordmark`): the wordmark moved INSIDE the site home anchor, so the
+    // anchor is what the `.wy-status` walk now sees as a direct child.
+    expect(EXEMPT_CONTENT_SELECTOR).toBe('.wy-home, .wy-hud');
+    expect(EXEMPT_FROM_DECLARATION).toBe('.wy-main, .wy-home, .wy-hud');
     expect([...WALKED_CONTAINERS]).toEqual(['.wy-shell', '.wy-main', '.wy-status']);
   });
 });
@@ -90,6 +92,101 @@ function tokenDecls(source: string, prop: string): string[] {
   while ((m = re.exec(uncommented)) !== null) out.push((m[1] as string).trim());
   return out;
 }
+
+/** The declaration block of the FIRST rule whose selector text matches `selector` exactly,
+ *  comments stripped. Asserting on source text rather than computed style because jsdom
+ *  performs no CSS layout at all and resolves neither `calc()` nor `env()`. */
+function ruleBody(source: string, selector: string): string {
+  const uncommented = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const re = new RegExp(
+    `(^|[{}])\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`,
+    'm',
+  );
+  const m = re.exec(uncommented);
+  if (m === null) throw new Error(`no rule for selector ${selector}`);
+  return (m[2] as string).replace(/\s+/g, ' ').trim();
+}
+
+// The home link's Standard box model and its visibility contract are pure CSS, so this is
+// where they are pinned. The e2e specs measure the RESULT in a real browser; these
+// assertions exist so a change to the mechanism fails here first, with a reason attached.
+describe('layout — the home link box model and visibility contract', () => {
+  it('reaches the 44px hit box by spending the row padding, not by growing the row', () => {
+    const home = ruleBody(css, '.wy-home');
+    // The border box is PINNED to 44px, not derived from a padding calculation: a browser's
+    // real line box comes from the font's metrics, not `font-size × line-height`, so the
+    // derived form lands a fraction of a pixel under the floor (Chrome: 43.97px).
+    expect(home).toContain('min-height: 44px');
+    expect(home, 'min-height must bound the BORDER box, or padding would push past it').toContain(
+      'box-sizing: border-box',
+    );
+    // …and negative block margins let that box overlap the row's own padding instead of
+    // adding to the flow. The cap is what keeps it inside `.wy-status`: the margins may never
+    // exceed the row padding, or the 44px box would reach past the header into the board.
+    expect(home).toContain('margin-block: -0.5rem');
+    const status = ruleBody(css, '.wy-status');
+    expect(
+      status,
+      'the negative margins are capped at THIS value — they must stay equal',
+    ).toContain('padding: 0.5rem 1rem');
+  });
+
+  it('removes interactivity in the same rule that starts the fade — never a mid-fade ghost', () => {
+    const live = ruleBody(css, '.wy-home[data-live]');
+    expect(live).toContain('pointer-events: none');
+    expect(live).toContain('opacity: 0');
+    // `visibility` lands at the fade's END (a 0s transition, delayed) purely for AT/paint
+    // cleanliness — the interactivity above is what actually gates activation, and it is
+    // instant. Paired with the `inert` attribute `overlay.ts` sets in the same synchronous
+    // write (asserted in overlay.test.ts).
+    expect(live).toContain('visibility: hidden');
+    expect(live).toMatch(/visibility 0s linear 180ms/);
+  });
+
+  it('drops the transition on BOTH reduced-motion branches', () => {
+    // In-app: the settings toggle, reflected onto the Shell by main.ts.
+    expect(ruleBody(css, '.wy-shell[data-wy-reduced-motion] .wy-home')).toContain(
+      'transition: none',
+    );
+    // OS: the global `prefers-reduced-motion: reduce` block at the foot of the stylesheet
+    // already kills every transition with `!important`, so the link needs no rule of its own
+    // there — assert the block still exists and still does that, since this contract now
+    // depends on it.
+    const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const osBlock = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/.exec(
+      uncommented,
+    );
+    expect(osBlock, 'the OS reduced-motion block must exist').not.toBeNull();
+    expect((osBlock as RegExpExecArray)[1]).toContain('transition: none !important');
+  });
+
+  it('Compact drops the Standard box model entirely — the playfield pays nothing', () => {
+    // The Compact rules live inside the single `@media (max-height: 500px)` block, so scope
+    // the search to it rather than matching the Standard `.wy-home` rule again.
+    const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    const home = ruleBody(compact, '.wy-home');
+    // The 44px floor is INHERITED from the Standard rule (same `min-height`); what Compact
+    // drops is the negative-margin trick, which only makes sense against a row's padding.
+    // Here the anchor is an in-flow column item and simply takes its full 44px.
+    expect(home).toContain('margin-block: 0');
+    expect(home).not.toContain('min-height');
+    // …and replaces it with the HORIZONTAL twin, which is load-bearing rather than cosmetic:
+    // the column track is `min(4rem, 10vw)`, so on a narrow viewport it does not grow with
+    // the root font while the column's own rem padding does — at 568px @ 200% zoom that took
+    // the anchor to 40.8px, under the ADR 0003 floor. Reclaiming the padding pins it to the
+    // full track width at every zoom level. The cap is the column's padding, same rule as
+    // Standard's: exceed it and the anchor would escape the column.
+    expect(home).toContain('margin-inline: -0.25rem');
+    const compactStatus = ruleBody(compact, '.wy-status');
+    expect(
+      compactStatus,
+      'the negative inline margins are capped at THIS padding — they must stay equal',
+    ).toContain('padding: 0.25rem');
+    // The text stays hidden exactly as before; the mark alone carries the branding.
+    expect(ruleBody(compact, '.wy-wordmark')).toContain('display: none');
+  });
+});
 
 describe('layout — Compact fixed tracks grow by their safe-area inset (Codex P1)', () => {
   // A Compact region that spends a safe-area inset as INTERNAL padding while its grid track is

@@ -4,7 +4,7 @@
 //
 //   .wy-shell
 //   ├── header.wy-status
-//   │   ├── span.wy-wordmark        (Compact-hidden)
+//   │   ├── a.wy-home              (board-mark + span.wy-wordmark — the text is Compact-hidden)
 //   │   ├── div.wy-hud              (the five status chips; the labelled scrollport)
 //   │   └── div.wy-dock             (Pause/Speed/Settings/Start)
 //   ├── div.wy-banner  (the install suggestion — a RESERVED grid row, hidden by default)
@@ -104,6 +104,10 @@ export interface ShellBanner {
 export interface ShellHandle {
   readonly root: HTMLElement; // .wy-shell
   readonly status: HTMLElement; // header.wy-status
+  /** The site home link (`a.wy-home[href="/"]`) — the board-mark plus the wordmark. Its
+   *  auto-hide (`data-live` + `inert`) is driven by `overlay.ts`; the live-run exit guard
+   *  that intercepts its activation is owned by `main.ts`. */
+  readonly home: HTMLAnchorElement;
   readonly board: HTMLElement; // .wy-board — the scene mount point
   readonly rail: HTMLElement; // aside.wy-rail
   /** The chips list — the labelled, keyboard-reachable scrollport (contract §1). */
@@ -152,6 +156,95 @@ function dockButton(doc: Document, className: string): HTMLButtonElement {
   return b;
 }
 
+/** Where the home link goes. Root-absolute, so it is correct from `/play/` regardless of the
+ *  build's `--base` rewrite. Exported so `main.ts`'s confirmed-exit navigation and the
+ *  anchor's own `href` are ONE declaration — a guard that navigated somewhere the link itself
+ *  doesn't point would be a silent divergence.
+ *
+ *  KNOWN CONSEQUENCE, flagged rather than overlooked: this is OUTSIDE the installed PWA's
+ *  scope. Production builds with `--base=/play/`, and the manifest's relative `"scope": "."`
+ *  resolves against the manifest URL — so the installed app is scoped to `/play/`, and `/` is
+ *  not in it (see the manifest schema test in `icons.test.ts`). In a `display: standalone`
+ *  window an out-of-scope navigation is not handled in-app: Android/Chrome hands it to a
+ *  Custom Tab, iOS/Safari drops the player out of the standalone window entirely. So for an
+ *  INSTALLED player this link leaves the app, not just the page — and neither the guard nor
+ *  the dialog copy says so.
+ *
+ *  Deliberately not "fixed" here, because every option is a product decision, not a defect
+ *  repair: widening the manifest scope to `/` redefines what "the app" is, and suppressing the
+ *  link when `install.state().standalone || .installed` contradicts the one-home-link design.
+ *  PLAN.md ratified `/` as the destination, and leaving `/play` for the site root inherently
+ *  leaves a `/play`-scoped app. Raise it as a product question. */
+export const HOME_HREF = '/';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** The site's dark-scheme mark values, hardcoded. The game UI is fixed dark (`--wy-bg`, no
+ *  `prefers-color-scheme` anywhere in `ui.css`), so the source mark's `<style>` block and its
+ *  colour-scheme media query are dropped in favour of presentation attributes — a scoped
+ *  `<style>` inside an inline SVG would also leak its class names into the whole document. */
+const MARK_INK = '#e6e9ee';
+const MARK_ROUTE = '#e8552f';
+
+/** The canonical Wynding board-mark (grid edge + two tower-walls + the vermilion route) —
+ *  the same artwork as the site favicon/masthead, which is what ties `/play` visually to the
+ *  rest of wynding.net. Deliberately NOT the blue/gold PWA icon from `scripts/gen-icons.mjs`:
+ *  that is a different mark for a different surface.
+ *
+ *  Purely decorative (`aria-hidden`, `focusable="false"` for legacy IE-era focus behaviour):
+ *  the anchor's own localized `aria-label` carries the whole accessible name, so AT never
+ *  hears the link twice. No `width`/`height` attributes — `ui.css` sizes it per layout. */
+function boardMark(doc: Document): SVGSVGElement {
+  const svg = doc.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'wy-mark');
+  svg.setAttribute('viewBox', '0 0 32 32');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+
+  const edge = doc.createElementNS(SVG_NS, 'rect');
+  for (const [k, v] of [
+    ['x', '4'],
+    ['y', '4'],
+    ['width', '24'],
+    ['height', '24'],
+    ['fill', 'none'],
+    ['stroke', MARK_INK],
+    ['stroke-width', '2.5'],
+    ['stroke-linejoin', 'miter'],
+  ] as const) {
+    edge.setAttribute(k, v);
+  }
+
+  const walls = (['9,14,5,9', '18,4,5,10'] as const).map((spec) => {
+    const [x, y, width, height] = spec.split(',') as [string, string, string, string];
+    const r = doc.createElementNS(SVG_NS, 'rect');
+    for (const [k, v] of [
+      ['x', x],
+      ['y', y],
+      ['width', width],
+      ['height', height],
+      ['fill', MARK_INK],
+    ] as const) {
+      r.setAttribute(k, v);
+    }
+    return r;
+  });
+
+  const route = doc.createElementNS(SVG_NS, 'polyline');
+  for (const [k, v] of [
+    ['points', '4,9 16,9 16,19 28,19'],
+    ['fill', 'none'],
+    ['stroke', MARK_ROUTE],
+    ['stroke-width', '3'],
+    ['stroke-linecap', 'square'],
+    ['stroke-linejoin', 'miter'],
+  ] as const) {
+    route.setAttribute(k, v);
+  }
+
+  svg.append(edge, ...walls, route);
+  return svg;
+}
+
 /** One dual-form chip slot. Both nodes always exist; `overlay.ts` writes both through its
  *  single `setChip` path, and `ui.css` decides which one is visible per layout. */
 function chip(doc: Document, slot: string): ShellChip {
@@ -187,6 +280,25 @@ export function createShell(doc: Document): ShellHandle {
   // is lost in practice. Hidden on Compact (ui.css) — the column's width belongs to the
   // chips and controls, and the browser tab/manifest already name the game.
   wordmark.textContent = t('app.title');
+
+  // --- Home link: the ONE site affordance (`/play` is otherwise a dead end). The existing
+  // wordmark is UPGRADED into this anchor rather than joined by a parallel element — one
+  // element, one "Wynding" brand in the bar, and Compact pays for a single item. `href` is
+  // root-absolute so it is correct from `/play/` regardless of the build's `--base` rewrite.
+  // The accessible name comes from the catalog (ADR 0004) rather than the mark's own
+  // `aria-label`; the artwork itself is `aria-hidden` decoration alongside it. ---
+  const home = doc.createElement('a');
+  home.className = 'wy-home';
+  home.href = HOME_HREF;
+  home.setAttribute('aria-label', t('app.home'));
+  // NO `title` here, deliberately. It was tried as a tooltip for the sighted mouse user in
+  // Compact (where the mark renders alone), on the reasoning that `aria-label` wins for naming
+  // so a matching `title` costs AT nothing. That is wrong: per accname, once the name comes
+  // from `aria-label` the `title` becomes the accessible DESCRIPTION, so NVDA/JAWS announce
+  // "Wynding — home, link" and then the description "Wynding — home" — the same string twice.
+  // The hover affordance is carried by `.wy-home:hover`'s surface tint instead (ui.css), which
+  // costs assistive tech nothing and, unlike a tooltip, is visible to touch users too.
+  home.append(boardMark(doc), wordmark);
 
   // The chips list is the labelled, keyboard-reachable SCROLLPORT (contract §1): now that
   // the Dock shares the status header, bounded scrolling lives here rather than on
@@ -234,7 +346,11 @@ export function createShell(doc: Document): ShellHandle {
   // labelled cluster reached immediately after the status chips (never a detour past
   // unrelated content), and it is the same "chrome before content" order the wordmark and
   // chips already establish. `compact.spec.ts` pins the order so it cannot drift unnoticed.
-  status.append(wordmark, hudBox, dock);
+  //
+  // The home link is the status row's FIRST child in both layouts, so it is also the Shell's
+  // first tab stop — conventional "skip to site" chrome-first ordering, and it leaves the tab
+  // order entirely (`visibility: hidden`) while a run is live.
+  status.append(home, hudBox, dock);
 
   // --- Banner: the reserved install-suggestion row (Story 11 P3) ---
   const banner = doc.createElement('div');
@@ -319,6 +435,7 @@ export function createShell(doc: Document): ShellHandle {
   return {
     root: shell,
     status,
+    home,
     board,
     rail,
     hudBox,
