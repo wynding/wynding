@@ -76,7 +76,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 - The game runs in **real time**. The player may **build, sell, and re-maze at any moment,
   including mid-wave** — there is no separate build phase.
-- Each **wave** arrives on a visible **countdown**. The player may **call the next wave
+- Each **wave** arrives on a visible **countdown**. From M2 the countdown also shows the
+  coming wave's composition — the **wave preview** (one wave of lookahead, derived from the
+  ruleset wave schedule) — so building against it and calling it early are informed choices.
+  The player may **call the next wave
   early** to press an advantage; calling early pays a bonus (see Economy) and is a
   risk/reward tempo lever — the reward is real, but the board faces the new wave sooner. Only the
   **single wave currently counting down** is callable: calling it launches that wave and starts

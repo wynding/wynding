@@ -30,6 +30,12 @@ they reshape the maze. Towers upgrade in place
 (per-run only — no permanent meta-progression).
 _Avoid_: turret, unit, building, defense.
 
+**Effect primitive**:
+One of the composable tower behaviors — direct damage (single-target or AoE),
+slow, stun, DoT, support, burst. A tower is a data-defined bundle of effect
+primitives, not a fixed archetype.
+_Avoid_: ability, power, spell, archetype.
+
 **Maze**:
 The walkable route left over after towers are placed. The player builds the maze
 out of towers to lengthen the creeps' path.
@@ -58,6 +64,18 @@ A scheduled burst of creeps the player must survive. Waves come in a finite,
 ordered sequence — a board's **wave schedule**.
 _Avoid_: round, level, round-number.
 
+**Wave preview**:
+The countdown's readout of the _next_ wave's composition — creep types and
+counts, one wave of lookahead only. What makes anti-air spend and an early call
+informed choices rather than guesses.
+_Avoid_: intel, forecast, wave list (that's a full-run roster, which this is not).
+
+**Early call**:
+Launching the counting-down wave before its countdown expires — the tempo
+lever. Pays a bounty bonus and, from M2, earns **early-call score credit**;
+an auto-launch (countdown expiry) pays and earns nothing.
+_Avoid_: early send, rush, skip.
+
 **Lives**:
 The player's failure budget. Each creep that reaches the exit (a **leak**) costs
 at least one life — a boss may cost more; the run ends when lives reach zero or below.
@@ -76,9 +94,14 @@ _Avoid_: defense, resistance (armor is flat and direct-hit-only).
 
 **Domain**:
 Whether a unit acts on the ground or in the air. Each creep has a domain
-(ground/flying); each tower targets ground, air, or both, and only hits creeps in
-a domain it targets.
+(ground/flying); each **attacking** tower targets ground, air, or both, and only
+hits creeps in a domain it targets. A support-only tower has no target domain.
 _Avoid_: layer, plane, type.
+
+**Boss**:
+A creep _role_: high durability, arrives as a wave's centerpiece, and may cost
+more than one life on a leak (which can overshoot lives below zero).
+_Avoid_: elite, miniboss, champion.
 
 **Difficulty tier**:
 One of the selectable difficulty settings (Easy/Medium/Hard). Each board × tier is
