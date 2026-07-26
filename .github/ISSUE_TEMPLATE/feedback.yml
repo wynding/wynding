@@ -1,0 +1,55 @@
+name: Feedback / bug report
+description: Report a bug, suggest an idea, or flag balance for the Wynding game.
+title: "[Feedback]: "
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape Wynding! If you'd rather not use GitHub — or just want to share how the game felt — the site's feedback form works great too: https://wynding.net/#feedback
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of feedback is this?
+      options:
+        - Bug — something broke or behaved wrong
+        - Idea — a feature or improvement
+        - Balance — tuning / difficulty
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, or what's the idea?
+      description: Describe it. For bugs, what did you expect vs. what actually happened?
+      placeholder: When I placed a tower on the entrance...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce (for bugs)
+      description: How can we make it happen again?
+      placeholder: |
+        1. Start a board
+        2. ...
+    validations:
+      required: false
+  - type: dropdown
+    id: build
+    attributes:
+      label: Which build were you playing?
+      options:
+        - Stable (/play)
+        - Preview (/play/preview)
+        - Not sure
+    validations:
+      required: false
+  - type: input
+    id: env
+    attributes:
+      label: Browser & device
+      description: e.g. Chrome 126 on Windows, Safari on iPhone 15
+    validations:
+      required: false
