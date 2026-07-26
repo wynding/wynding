@@ -195,18 +195,21 @@ describe('hud score — earned components while live, authoritative once termina
     // lives, so any kill leaves at least one life and the run resolves `won`. Take a real
     // run that accrued a kill and drive it to the terminal loss state directly (PLAN.md
     // step 4 sanctions this) — a zero-kill loss would pass vacuously against a hardcoded 0.
-    const s = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
-    s.lives = 0;
-    s.phase = 'lost';
-    expect(deriveScore(s, ruleset)).toBe(s.cumulativeKillBounty); // survival term is 0
-    expect(deriveHud(s, ruleset).score).toBe(deriveScore(s, ruleset));
-    expect(deriveHud(s, ruleset).score).toBeGreaterThan(0);
+    const run = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
+    // Forge a COPY into the loss state rather than mutating the sim's own object —
+    // render code (tests included) reads sim state, never writes it (AGENTS.md layering).
+    const lost: SimState = { ...run, lives: 0, phase: 'lost' };
+    expect(deriveScore(lost, ruleset)).toBe(lost.cumulativeKillBounty); // survival term is 0
+    expect(deriveHud(lost, ruleset).score).toBe(deriveScore(lost, ruleset));
+    expect(deriveHud(lost, ruleset).score).toBeGreaterThan(0);
   });
 
   it('reads 0 rather than NaN if the accumulator is ragged, matching deriveScore’s guard', () => {
-    const s = createInitialState(1, ruleset);
-    s.cumulativeKillBounty = Number.NaN;
-    expect(deriveHud(s, ruleset).score).toBe(0);
+    const ragged: SimState = {
+      ...createInitialState(1, ruleset),
+      cumulativeKillBounty: Number.NaN,
+    };
+    expect(deriveHud(ragged, ruleset).score).toBe(0);
   });
 });
 
