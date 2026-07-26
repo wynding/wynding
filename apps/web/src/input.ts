@@ -45,6 +45,13 @@ export interface InputOptions {
    *  around it. Defaults to the bare `controller.start()` so this module stays usable (and
    *  unit-testable) on its own; `main.ts` always supplies the real one. */
   onStart?: () => void;
+  /** The app-level pause path, for exactly the same reason as `onStart`: the keymapped pause
+   *  key must run the SAME transition as the Dock's Pause button, which now also refreshes
+   *  the home link's visibility synchronously (a pause makes the link reappear). Calling
+   *  `controller.togglePause()` directly here would flip the run's paused state while leaving
+   *  the link hidden until some later frame happened to land. Defaults to the bare
+   *  `controller.togglePause()`; `main.ts` always supplies the real one. */
+  onTogglePause?: () => void;
   /** Is a modal (results/rotate/settings) currently open? The modal owner (`modal.ts`)
    *  inerts `.wy-shell` for exactly the open interval, so `main.ts` wires this to
    *  `shell.root.hasAttribute('inert')` — the ground truth, no new plumbing on the modal
@@ -115,6 +122,7 @@ export function attachInput(
       : () => null);
   const isModalOpen = options.isModalOpen ?? (() => false);
   const onStart = options.onStart ?? ((): void => controller.start());
+  const onTogglePause = options.onTogglePause ?? ((): void => controller.togglePause());
 
   // Memoize the projection on the board size — it only changes on resize, so a rapid
   // stream of pointermoves reuses one projection instead of allocating per event. Only
@@ -482,7 +490,7 @@ export function attachInput(
         onStart();
         break;
       case 'pause':
-        controller.togglePause();
+        onTogglePause();
         break;
       case 'speed':
         controller.cycleSpeed();

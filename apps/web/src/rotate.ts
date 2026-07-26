@@ -9,7 +9,8 @@
 // Lifecycle on entering portrait+coarse (PLAN.md P5): abort any in-flight placement
 // gesture via the input manager's `abort()` (P3's exact cancellation contract — ghost
 // cleared always, a board-origin gesture stays armed, a Card-drag disarms), then open the
-// overlay, then auto-pause an ACTIVE, unpaused run. A settings rebind capture open
+// overlay, then auto-pause an ACTIVE, unpaused run through the app-level `ensurePaused`
+// seam (which owns that guard). A settings rebind capture open
 // underneath is already cancelled for free: the modal owner hides the settings overlay the
 // moment rotate outranks it, and `overlay.ts`'s settingsOverlay.hide() already cancels the
 // capture on hide — no new API needed here. Returning to landscape just closes the
@@ -41,29 +42,22 @@ export interface RotateHandle {
   destroy(): void;
 }
 
-/** The exact `Controller` slice this module reads — a structural subset (NOT `Pick`,
- *  whose function-property signatures would still demand the full `UiState` return
- *  shape) so both the real `Controller` and a minimal test fake satisfy it. */
-export interface RotateController {
-  uiState(): { readonly started: boolean };
-  isPaused(): boolean;
-  pause(): void;
-}
-
 /** The exact `InputHandle` slice this module calls. */
 export interface RotateInput {
   abort(): void;
 }
 
 /** Build the rotate prompt into `rotateEl` (the sibling-of-Shell placeholder `main.ts`
- *  creates) and wire its show/hide + abort/pause lifecycle. `controller`/`input` are
- *  narrowed to exactly what this module reads/calls, so a test fake needs neither the
- *  full `Controller` nor `InputHandle` surface. */
+ *  creates) and wire its show/hide + abort/pause lifecycle. `ensurePaused` is the app-level
+ *  pause seam (`main.ts`) — it owns the started-and-unpaused guard this module used to
+ *  inline, so every pause mutation in the app lands in ONE place that also refreshes the home
+ *  link's visibility synchronously. `input` is narrowed to exactly what this module calls, so
+ *  a test fake needs neither a `Controller` nor the full `InputHandle` surface. */
 export function createRotate(
   doc: Document,
   rotateEl: HTMLElement,
   modal: ModalOwner,
-  controller: RotateController,
+  ensurePaused: () => void,
   input: RotateInput,
   matchMedia: MatchMediaFn,
 ): RotateHandle {
@@ -114,9 +108,7 @@ export function createRotate(
     if (portraitQuery.matches && coarseQuery.matches) {
       input.abort();
       modal.open(overlay, { priority: 'rotate' });
-      if (controller.uiState().started && !controller.isPaused()) {
-        controller.pause();
-      }
+      ensurePaused();
     } else {
       modal.close(overlay);
     }

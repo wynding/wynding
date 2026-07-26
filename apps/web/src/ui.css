@@ -119,6 +119,111 @@ body {
   user-select: none;
 }
 
+/* --- Home link: the site affordance in the status row's first slot --- */
+
+/* STANDARD BOX MODEL, EXACT. ADR 0003 floors interactive targets at 44×44 CSS px, but a
+   naive `min-height: 44px` flex item would push the row to 44 + 16 (its own padding) ≈ 60px
+   and cost the board ~19px it never had to give.
+   Instead the anchor's BORDER box is pinned to 44px, and bounded negative block margins —
+   capped at exactly the row's existing 0.5rem top/bottom padding — let that box overlap the
+   row's PADDING (chrome, never board), so only its margin box joins the flow:
+     border box     = min-height, over a content line of 1.1rem × 1.4 ≈ 24.6px  = 44px
+     margin box     = 44 − 2 × 0.5rem                                           = 28px
+     row height     = margin box + the row's own 2 × 0.5rem padding             = 44px
+   The row was 24.6 + 16 ≈ 40.6px before, so the NET growth is ≈3.4px, and the 44px hit box
+   spans exactly the row — never one pixel past `.wy-status` into the board.
+
+   `min-height` + `border-box` rather than a computed `padding-block` that fills the
+   difference: the latter is short by a fraction of a pixel in practice, because a browser's
+   real line box is its FONT's metrics, not the nominal `font-size × line-height` the
+   arithmetic assumes (Chrome renders 43.97px). The floor has to hold exactly, not almost, so
+   it is declared rather than derived. The relation still degrades correctly under text zoom:
+   past ≈182% the line box alone exceeds 44px, the border box simply grows with it, and the
+   margins — being rem-based, like the row padding they are capped against — stay exactly
+   capped. Compact overrides this wholesale: there the playfield is sacred and the anchor is
+   an in-flow column item that costs the board nothing.
+   `home.spec.ts` hit-tests the resulting rectangle in BOTH layouts. */
+.wy-home {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin-block: -0.5rem;
+  color: inherit;
+  text-decoration: none;
+  border-radius: 4px;
+  /* Only OPACITY animates (see the `[data-live]` rule): interactivity is removed
+     synchronously, so there is never an interactable ghost mid-fade. `visibility` is
+     transitioned at 0s so it can be DELAYED to the fade's end in one direction and land
+     instantly in the other. */
+  transition:
+    opacity 180ms ease,
+    visibility 0s;
+}
+
+/* The underline is the Standard hover cue, but `.wy-wordmark` is `display: none` in Compact,
+   which would leave the mark-only form with no hover affordance at all. Compact is keyed on
+   viewport HEIGHT, not pointer, so a desktop mouse session lands there too (a short window;
+   `compact.spec.ts` pins the 900×480 fine-pointer case) — back the underline with a surface
+   tint on the anchor itself, which works in both layouts and for the mark alone. */
+.wy-home:hover {
+  background: var(--wy-surface);
+}
+
+.wy-home:hover .wy-wordmark {
+  text-decoration: underline;
+}
+
+/* The ring is drawn INSIDE the border box (negative offset), in BOTH layouts, because in both
+   the anchor's border box is flush with the edge of something that will eat an outside ring —
+   and an outline is always painted outside the border edge, so no non-negative offset can
+   help. Standard: the box is pinned to exactly the status row (y 0..44 at 1280×720), so an
+   outside ring puts its top segment off-screen above the viewport and its bottom segment under
+   the board canvas — leaving two lone vertical bars. Compact: the box reclaims the column's
+   inline padding, so it coincides with `.wy-status`'s padding box and `overflow: hidden` clips
+   the vertical segments — leaving two lone horizontal bars. Same cause, mirrored symptoms,
+   one fix. `-3px` matches the outline width, so the ring sits flush inside the box.
+   Both layouts are verified by sampling rendered pixels in `home.spec.ts`: neither the DOM nor
+   axe can see a clipped ring, and an earlier `outline-offset: 0` attempt passed every other
+   gate while rendering the exact defect it claimed to fix (WCAG 2.4.7). */
+.wy-home:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: -3px;
+}
+
+/* The mark is presentation; `currentColor` is not used because the site mark is two-tone and
+   its route colour is part of the brand. Sized here (the SVG carries no width/height). */
+.wy-mark {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* AUTO-HIDE while the run is live (started, unpaused, unresolved). `overlay.ts` sets
+   `data-live` and the `inert` attribute in the SAME synchronous update, so the tab stop and
+   every activation path are gone the instant the flip happens — `pointer-events: none` here
+   is the CSS half of that pair, and neither waits on the transition. Only `opacity` fades;
+   `visibility: hidden` is delayed to the fade's end purely for AT/paint cleanliness. The
+   slot itself is preserved (no `display`/`[hidden]`), so nothing shifts mid-play. */
+.wy-home[data-live] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 180ms ease,
+    visibility 0s linear 180ms;
+}
+
+/* Reduced motion, in-app branch: `main.ts` reflects the settings toggle onto the Shell so
+   CSS can key on it. The OS branch (`prefers-reduced-motion: reduce`) is handled globally at
+   the bottom of this file. Either one drops the fade — the link then appears/disappears at
+   once, which is the point. */
+.wy-shell[data-wy-reduced-motion] .wy-home {
+  transition: none;
+}
+
 .wy-wordmark {
   flex: 0 0 auto;
   font-size: 1.1rem;
@@ -129,10 +234,16 @@ body {
    it so `overflow-y: auto` actually engages under 200% text zoom — without a bound the row
    would grow to fit its reflowed content and eat the board's space. The bound ADR 0003
    commits to is 40dvh for the WHOLE Standard status row, and this is the only capped box in
-   it, so the row's own chrome has to come out of the same budget: the wordmark line
-   (1.1rem × 1.4 line-height ≈ 1.54rem), the row gap it wraps across (0.75rem) and the
-   vertical padding (2 × 0.5rem + the top safe-area inset) all sit OUTSIDE this box — 3.3rem
-   plus the inset. Subtracting them keeps `.wy-status` itself within 40dvh, which keeps the
+   it, so the row's own chrome has to come out of the same budget. RE-DERIVED for the home
+   link (which replaced the bare wordmark in that slot and is the taller item): the anchor's
+   MARGIN box — 44px border box less its 2 × 0.5rem negative block margins, i.e. 28px =
+   1.75rem — plus the row gap it wraps across (0.75rem) and the vertical padding (2 × 0.5rem
+   + the top safe-area inset) all sit OUTSIDE this box: 3.5rem plus the inset, up from the
+   3.3rem the 1.54rem wordmark line cost. 1.75rem is the 100%-zoom value and the WORST case:
+   the 44px term is absolute, so under text zoom the anchor's margin box shrinks in rem terms
+   (at 200% the line alone exceeds 44px, the padding floors at 0 and the margin box falls to
+   ≈0.54rem) — over-subtracting there only leaves the board more room, never less.
+   Subtracting them keeps `.wy-status` itself within 40dvh, which keeps the
    board's `1fr` row a usable minimum (≥ ~192px at the 320px-tall smallest supported
    landscape viewport). The `max()` floor keeps a chip row visible rather than collapsing to
    zero if the subtraction ever exceeds the budget on a very short Standard viewport. */
@@ -143,7 +254,7 @@ body {
   font-size: 1.1rem;
   min-width: 0;
   min-height: 0;
-  max-height: max(2.5rem, calc(40dvh - 3.3rem - env(safe-area-inset-top)));
+  max-height: max(2.5rem, calc(40dvh - 3.5rem - env(safe-area-inset-top)));
   overflow-y: auto;
 }
 
@@ -209,7 +320,7 @@ body {
    moving the trigger without moving this line fails CI. */
 @media not all and (max-height: 500px) {
   .wy-shell:has(.wy-banner:not([hidden])) .wy-hud {
-    max-height: max(2.5rem, calc(25dvh - 3.3rem - env(safe-area-inset-top)));
+    max-height: max(2.5rem, calc(25dvh - 3.5rem - env(safe-area-inset-top)));
   }
 
   .wy-shell:has(.wy-banner:not([hidden])) .wy-banner {
@@ -621,6 +732,30 @@ body {
   font-size: 1.1rem;
 }
 
+/* --- Leave-run confirm dialog: the two choices, paired --- */
+
+.wy-leave-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* Weight the DESTRUCTIVE choice differently from the safe one. Deliberately a border/weight
+   change and not a new colour: leaving a run is irreversible, so it must be distinguishable
+   without relying on colour alone (ADR 0003's no-colour-only rule). The safe option (Stay)
+   keeps the plain `.wy-btn` look and comes first in both reading and tab order, with initial
+   focus — three independent signals, none of them colour.
+   NOT `--wy-focus`: that token is the focus-ring colour everywhere in this file, so borrowing
+   it here would paint an unfocused destructive button in the same yellow as a focused control.
+   With both buttons side by side, tabbing Stay → Leave would then change only whether the
+   yellow has a gap around it — an ambiguous "what does Enter do?" on a one-way action. `--wy-fg`
+   is already the body text colour, so it needs no new contrast coverage. */
+.wy-leave .wy-leave-confirm {
+  border-color: var(--wy-fg);
+  font-weight: 700;
+}
+
 /* ===========================================================================
    COMPACT LAYOUT — the ONE stylesheet fork (Story 11's two-layouts contract §1–3).
 
@@ -652,9 +787,48 @@ body {
     padding-bottom: calc(0.25rem + env(safe-area-inset-bottom));
   }
 
-  /* The column's width belongs to the chips and controls. */
+  /* The column's width belongs to the chips and controls — the text stays hidden exactly as
+     before, and the mark alone carries the branding. */
   .wy-wordmark {
     display: none;
+  }
+
+  /* Mark-only, as an IN-FLOW item at the top of the chrome column — in flow is what makes
+     "Compact loses zero board space" true by construction: the column is a grid track the
+     board never occupies, so nothing here can overlap or eat the playfield.
+     The Standard negative-margin box model is dropped wholesale (there is no row padding to
+     spend here); the anchor simply takes the column's full content width and the ADR 0003
+     44px floor as its height. The artwork stays ~2.5rem and is centred inside it. */
+  .wy-home {
+    justify-content: center;
+    margin-block: 0;
+    /* Reclaim the column's OWN inline padding — the horizontal twin of the Standard box
+       model's negative block margins, and load-bearing for the ADR 0003 floor rather than
+       cosmetic. The column track is `min(4rem, 10vw)`, so on a narrow viewport the vw term
+       wins and the track does NOT grow with the root font, while this column's rem padding
+       DOES: at 568px wide and 200% text zoom the 56.8px track's internal padding doubles
+       from 2 × 4px to 2 × 8px and the content box falls to 40.8px — under the 44px floor.
+       Spending the padding back pins the anchor to the full track width (56.8px) at every
+       zoom level. Capped at the padding, so it still never leaves the column; the left
+       safe-area inset is deliberately NOT reclaimed, since that strip is genuinely unusable
+       screen. `home.spec.ts` measures this exact 568×320 @ 200% case. */
+    margin-inline: -0.25rem;
+  }
+
+  /* The px term is a ZOOM CAP, and it is load-bearing. `.wy-status` is a flex COLUMN whose
+     only shrinkable child is the chips scrollport, so every pixel this decorative mark takes
+     comes straight out of the chips. Without the cap, `100%` wins at 200% text zoom (the
+     column track is vw-capped and does NOT grow with the root font, but 2.5rem does), the
+     mark balloons to the full column width, and the scrollport at 658×320 falls from ~123px
+     to ~49px — degrading the readout for exactly the low-vision users ADR 0003's text-resize
+     commitment exists to protect. Capping DECORATION is the right trade: the mark is
+     `aria-hidden` and carries no information (the link's accessible name is text, which still
+     scales), and the 44px hit target is owned by the anchor's `min-height` and the reclaimed
+     column width, not by the artwork. Identical to today's rendering at 100% zoom, where
+     2.5rem is 40px anyway. */
+  .wy-mark {
+    width: min(2.5rem, 100%, 40px);
+    height: auto;
   }
 
   .wy-status {

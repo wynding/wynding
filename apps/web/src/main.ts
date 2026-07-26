@@ -11,7 +11,7 @@
 import './ui.css';
 import { createController } from './controller';
 import { createOverlay, type UiAction } from './overlay';
-import { createShell } from './shell';
+import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
@@ -52,6 +52,11 @@ export interface AppDeps {
    *  destroy()/recreate inside one session keeps the same store — with `localStorage`
    *  unavailable, a per-`createApp` in-memory map would resurrect a dismissed banner. */
   readonly storage?: StorageAdapter;
+  /** Where the confirmed home-link exit actually goes. Injected because `location.assign`
+   *  is untestable under jsdom (and would navigate the Playwright runner), matching the
+   *  app's existing dependency pattern (`now`, `schedule`, `sceneFactory`). Defaults to a
+   *  real same-document navigation. */
+  readonly navigate?: (href: string) => void;
 }
 
 export interface AppHandle {
@@ -64,6 +69,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   const keymap = createKeymap();
   const controller = createController(deps.seed);
   const seedSource = deps.seedSource ?? (() => Date.now() >>> 0);
+  const navigate =
+    deps.navigate ??
+    ((href: string): void => {
+      doc.defaultView?.location.assign(href);
+    });
   // Distinct Play-again seeds even if two clicks land in the same millisecond (or the
   // source is coarse): mix in a monotonic run counter so consecutive runs never repeat.
   let runCounter = 0;
@@ -95,10 +105,28 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     navigator: view?.navigator ?? { platform: '', maxTouchPoints: 0 },
   });
 
+  // Every `let` that `refreshHud` closes over is declared HERE, above all the wiring below,
+  // and not beside the code that uses it. `refreshHud` is reachable from hoisted callbacks
+  // that run during construction — `createRotate` calls `evaluate()` eagerly, which calls
+  // `ensurePaused()` — so a declaration placed after that wiring would sit in its temporal
+  // dead zone and throw a ReferenceError at boot rather than merely being stale. Today the
+  // only reason it cannot happen is that a freshly-created controller is never `started`, so
+  // `ensurePaused` returns early; that is an accident of controller state, not an ordering
+  // guarantee, and it should not be what keeps a phone held in portrait from failing to boot.
+  let resultsShown = false;
+  let lastHudKey = '';
+  // Install state changes (a captured `beforeinstallprompt`, a dismissal, an install) arrive
+  // OUTSIDE the HUD memo key's inputs — nothing about the sim moved. Fold a revision counter
+  // into the key AND force an immediate refresh, so a prompt arriving while the run is held
+  // pre-start updates the banner right away rather than waiting for a tick that never comes.
+  let installRev = 0;
+
   const overlay = createOverlay(
     doc,
     onAction,
-    controller,
+    // The app-level pause seam (hoisted, like `onAction` — the closure only runs on a
+    // settings-open click, long after everything below is initialized).
+    ensurePaused,
     settings,
     keymap,
     shell,
@@ -112,7 +140,14 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   );
   const rotate = doc.createElement('div');
   rotate.className = 'wy-rotate';
-  root.append(shell.root, overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl, rotate);
+  root.append(
+    shell.root,
+    overlay.resultsEl,
+    overlay.settingsEl,
+    overlay.instructionsEl,
+    overlay.leaveEl,
+    rotate,
+  );
 
   const grid = controller.ruleset.board.grid;
   const geometry: BoardGeometry = {
@@ -127,6 +162,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // Start button (PLAN.md Story 11 P4) — otherwise it would call `controller.start()`
     // directly and skip the fullscreen request, the banner latch and the focus re-home.
     onStart: () => startRun(),
+    // Same reasoning as `onStart`: the keymapped pause key must run the app-level transition
+    // (which refreshes the home link's visibility synchronously), not `controller.togglePause()`.
+    onTogglePause: () => togglePause(),
     // The class guard (independent of any opener's abort): a placement release must never
     // COMMIT behind an open modal. `.wy-shell`'s `inert` attribute is the modal owner's own
     // ground truth (set for exactly the open interval), so read it directly — no new signal.
@@ -135,23 +173,27 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
 
   // The rotate prompt (PLAN.md P5) shares the SAME modal owner `overlay.ts` created (one
   // stack for results/rotate/settings), and the same `matchMediaFn` resolved above.
-  const rotateHandle = createRotate(doc, rotate, overlay.modal, controller, input, matchMediaFn);
+  const rotateHandle = createRotate(doc, rotate, overlay.modal, ensurePaused, input, matchMediaFn);
+
+  /** Reflect the IN-APP reduced-motion setting onto the Shell so `ui.css` can key on it (the
+   *  OS `prefers-reduced-motion` branch is a plain media query and needs nothing here). Owned
+   *  by `main.ts` because this is where the settings subscription already lives — the overlay
+   *  deliberately does not subscribe, so there is exactly one writer. */
+  const REDUCED_MOTION_ATTR = 'data-wy-reduced-motion';
+  function reflectReducedMotion(on: boolean): void {
+    shell.root.toggleAttribute(REDUCED_MOTION_ATTR, on);
+  }
 
   const initialSettings = settings.get(); // one snapshot (get() clones), read both fields
   let colourMode = initialSettings.colourMode;
   let reducedMotion = initialSettings.reducedMotion;
+  reflectReducedMotion(reducedMotion); // initialize from the first snapshot, not just changes
   const unsubscribe = settings.subscribe((s) => {
     colourMode = s.colourMode;
     reducedMotion = s.reducedMotion;
+    reflectReducedMotion(s.reducedMotion);
   });
 
-  let resultsShown = false;
-  let lastHudKey = '';
-  // Install state changes (a captured `beforeinstallprompt`, a dismissal, an install) arrive
-  // OUTSIDE the HUD memo key's inputs — nothing about the sim moved. Fold a revision counter
-  // into the key AND force an immediate refresh, so a prompt arriving while the run is held
-  // pre-start updates the banner right away rather than waiting for a tick that never comes.
-  let installRev = 0;
   const unsubscribeInstall = install.onChange(() => {
     installRev++;
     refreshHud();
@@ -172,6 +214,30 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       overlay.showResults(hud);
       resultsShown = true;
     }
+  }
+
+  /** The ONE app-level pause seam. EVERY pause mutation in the app routes through here or
+   *  `togglePause` below — the keymapped pause key (`input.ts`'s `onTogglePause`), the Dock's
+   *  Pause button (`onAction`), the settings dialog's auto-pause, the rotate prompt's
+   *  auto-pause, and the leave guard's defensive pause — because pausing makes the home link
+   *  reappear, and that flip has to be SYNCHRONOUS with the pause itself. Leaving it to the
+   *  frame loop's memo-key gate would let the link sit hidden (or, worse, interactable in a
+   *  stale state) for a frame — indefinitely if frames are throttled in a background tab.
+   *
+   *  Owns the started-and-unpaused guard, so any caller can invoke it unconditionally: a
+   *  held pre-start run and an already-paused one are both no-ops, and the refresh is skipped
+   *  with them since nothing changed. */
+  function ensurePaused(): void {
+    if (!controller.uiState().started || controller.isPaused()) return;
+    controller.pause();
+    refreshHud();
+  }
+
+  /** The Pause CONTROL's path (Dock button + keymapped pause key) — a toggle either way, so
+   *  unlike `ensurePaused` it always refreshes. */
+  function togglePause(): void {
+    controller.togglePause();
+    refreshHud();
   }
 
   /** The ONE app-level start path (PLAN.md Story 11 P4). Both the Dock's Start button and
@@ -212,12 +278,71 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // focus off the Card or the chips scrollport and lose the player's place for nothing.
       board.focus();
     }
+    // Starting HIDES the home link (started + unpaused = live), so the flip has to land in
+    // this handler rather than waiting for the frame loop — same reasoning as `ensurePaused`
+    // above. Outside the edge deliberately: a repeat Start is a controller no-op, but the
+    // refresh is cheap and keeps this path unconditionally correct.
+    refreshHud();
   }
+
+  /** The live-run exit guard (PLAN.md step 4). `main.ts` owns ALL of it — the modified-
+   *  activation check, the state read and the decision — while `overlay.showLeave` supplies
+   *  nothing but presentation. The state is read at CLICK TIME, never cached: a run can start,
+   *  pause or resolve between any two clicks.
+   *
+   *  A plain left-click is intercepted whenever the run is UNRESOLVED and there is something
+   *  to lose. Modified activations (cmd/ctrl/shift/alt, middle-click) keep real-link semantics
+   *  — open-in-new-tab must keep working — and a resolved run navigates natively, since a
+   *  finished match has nothing left to protect.
+   *
+   *  "Something to lose" is deliberately NOT just `started` (PLAN.md Amendment 1). A held run
+   *  is not necessarily empty: the controller buffers pre-start build/sell commands
+   *  (`effectiveCap()` reserves a slot precisely so pre-start planning works), so a player can
+   *  lay out several towers before pressing Start. Guarding only `started` meant tapping the
+   *  mark discarded that layout silently, while the IDENTICAL loss one keypress later opened a
+   *  dialog. The original decision read "held pre-start … navigates directly, since there is
+   *  nothing in progress to lose" — the behaviour matched the words, but the words were wrong
+   *  about the system. */
+  // Torn down in `destroy()` like every other listener this module installs. The node itself
+  // is removed by `shell.destroy()`, so today the listener dies with it either way — but every
+  // other subscription here has a matching teardown, and a future host that reused a Shell
+  // across a destroy/recreate (the pattern `dismissalStorage` below already anticipates) would
+  // otherwise double-register this guard and open the dialog twice.
+  const guardListener = new AbortController();
+  shell.home.addEventListener(
+    'click',
+    (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (controller.isTerminal()) return; // resolved → nothing to lose, navigate natively
+      // Read at click time like every other term here, never cached: a plan can be queued or
+      // committed between any two clicks. `frame()` already runs every frame, so one more call
+      // on a click costs nothing.
+      const pending = controller.frame();
+      const hasPlan = pending.pendingAdds.length > 0 || pending.pendingSells.length > 0;
+      if (!controller.uiState().started && !hasPlan) return; // held AND empty → native
+      e.preventDefault();
+      // Defensive pause (belt-and-braces, matching the settings dialog's own open lifecycle).
+      // The visibility rule means the link should not be REACHABLE while unpaused — but the
+      // guard must not depend on that being true, so it pauses for itself. `showLeave` aborts
+      // any in-flight placement gesture as part of the shared modal-open lifecycle.
+      ensurePaused();
+      // Focus the link BEFORE opening, so the modal owner's generic pre-modal capture has a
+      // deterministic thing to restore to on Stay. Browsers disagree about whether a click
+      // focuses an anchor at all — Safari on macOS notably does not — so without this the
+      // player would be returned to whatever happened to be focused before (the board, after
+      // Start), varying by browser. Safe here: the run is paused by the line above, so the link
+      // is not `inert` and `focus()` cannot silently no-op.
+      shell.home.focus();
+      overlay.showLeave(() => navigate(HOME_HREF));
+    },
+    { signal: guardListener.signal },
+  );
 
   function onAction(action: UiAction): void {
     switch (action.type) {
       case 'togglePause':
-        controller.togglePause();
+        togglePause();
         break;
       case 'cycleSpeed':
         controller.cycleSpeed();
@@ -329,6 +454,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
+      guardListener.abort(); // the home-link exit guard
+      reflectReducedMotion(false); // the attribute this module owns, cleared by its owner
       unsubscribeInstall();
       install.destroy();
       rotateHandle.destroy();

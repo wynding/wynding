@@ -13,7 +13,7 @@
 
 import { FP_ONE } from '@wynding/engine';
 import { COLOUR_MODES, type HudVM, type ColourMode } from '@wynding/render';
-import { MS_PER_TICK, type CompiledRuleset } from '@wynding/sim';
+import { MS_PER_TICK, isTerminalPhase, type CompiledRuleset } from '@wynding/sim';
 import { t } from './i18n/t';
 import { formatNumber } from './i18n/number';
 import type { SettingsStore } from './settings';
@@ -23,7 +23,6 @@ import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
-import type { RotateController } from './rotate';
 
 /** A player intent emitted by the overlay for the app to route to the controller. */
 export type UiAction =
@@ -56,11 +55,18 @@ export interface Overlay {
   /** The iOS Add-to-Home-Screen instructions dialog (Story 11 P3) — a first-class modal,
    *  its own sibling of the Shell, registered at `settings` priority. */
   readonly instructionsEl: HTMLElement;
+  /** The leave-this-run confirm dialog — another first-class modal sibling of the Shell,
+   *  also registered at `settings` priority (rotate and results both still outrank it). */
+  readonly leaveEl: HTMLElement;
   /** The single modal owner (results/rotate/settings share one stack, PLAN.md P1) — exposed
    *  so `main.ts` can register the P5 rotate overlay on the SAME instance, rather than a
    *  second, disconnected one. */
   readonly modal: ModalOwner;
   update(view: HudView): void;
+  /** Open the leave-this-run confirm dialog. PRESENTATION ONLY — the decision to open it
+   *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
+   *  the guard; this just shows the dialog and calls `onConfirm` if the player commits. */
+  showLeave(onConfirm: () => void): void;
   showResults(hud: HudVM): void;
   hideResults(): void;
   setVerifyMessage(message: string): void;
@@ -137,9 +143,12 @@ function button(doc: Document, className: string, label: string): HTMLButtonElem
  * Build the overlay into `doc`, wiring the Shell's HUD/Dock/Card (built by `shell.ts`) and
  * owning the results + settings dialogs plus the Panel. `onAction` receives control
  * intents; `settings`/`keymap` are mutated directly by the settings dialog
- * (session-scoped). `controller` is narrowed to the same slice `rotate.ts` reads — opening
- * settings inerts the Shell, so it auto-pauses an active run under the identical guard the
- * rotate prompt uses (the modal family behaves consistently). `abortGesture` cancels any
+ * (session-scoped). `ensurePaused` is the ONE app-level pause seam: opening settings inerts
+ * the Shell, so it auto-pauses an active run — but through `main.ts` rather than by touching
+ * the controller here, so every pause mutation in the app (this one, the rotate prompt's, the
+ * Dock's, the keymapped pause key's, the leave guard's defensive one) lands in a single place
+ * that also refreshes the home link's visibility synchronously. It owns the
+ * started-and-unpaused guard itself, so calling it is unconditionally safe. `abortGesture` cancels any
  * in-flight placement gesture on settings-open, exactly as `rotate.ts` does via the input
  * manager's `abort()` — threaded as a callback (not the input manager itself) because
  * `main.ts` creates the input manager AFTER the overlay, the same forward-reference wiring
@@ -149,7 +158,7 @@ function button(doc: Document, className: string, label: string): HTMLButtonElem
 export function createOverlay(
   doc: Document,
   onAction: (action: UiAction) => void,
-  controller: RotateController,
+  ensurePaused: () => void,
   settings: SettingsStore,
   keymap: Keymap,
   shell: ShellHandle,
@@ -419,6 +428,82 @@ export function createOverlay(
   instructionsBody.textContent = t('install.ios.body');
   instructionsInner.appendChild(instructionsBody);
 
+  const LEAVE_DESC_ID = 'wy-leave-desc';
+
+  // --- Leave-this-run confirm dialog: another first-class modal sibling of the Shell.
+  // NOT `window.confirm()` — native confirm is not i18n-able, not stylable, and bypasses the
+  // modal owner's inert-shell + Escape + focus-restore machinery the app already owns.
+  //
+  // The scaffold's close button IS the Stay action: staying is exactly this dialog's "close
+  // without doing anything" route, so it needs no second identity, and Escape reaching it
+  // through `dismissOnEscape` therefore MEANS stay. Confirm is the only other control. ---
+  const {
+    dialog: leaveDialog,
+    inner: leaveInner,
+    closeBtn: leaveStayBtn,
+  } = dialogScaffold({
+    className: 'wy-settings wy-leave',
+    title: t('leave.title'),
+    closeClass: 'wy-btn wy-leave-stay',
+    closeLabel: t('leave.stay'),
+  });
+  const leaveBody = doc.createElement('p');
+  leaveBody.id = LEAVE_DESC_ID;
+  leaveBody.textContent = t('leave.body');
+  // Point the dialog at its own body, or the consequence is never spoken. `show()` moves focus
+  // straight to Stay, and the scaffold gives the dialog only a name — so without this a screen
+  // reader announces "Leave this run?, dialog. Stay, button." and stops. The player would have
+  // to browse the dialog manually to discover that leaving discards the run, which defeats the
+  // entire reason this dialog exists: it is here to make an irreversible cost explicit, and it
+  // was making it explicit only to people who can see it. axe does not flag a missing
+  // description, so the e2e scan passed the whole time.
+  leaveDialog.setAttribute('aria-describedby', LEAVE_DESC_ID);
+  const leaveActions = doc.createElement('div');
+  leaveActions.className = 'wy-leave-actions';
+  const leaveConfirmBtn = button(doc, 'wy-btn wy-leave-confirm', t('leave.confirm'));
+  // The scaffold puts its close button in the HEADER, which is right for a settings dialog
+  // but wrong for a two-choice one: it would split the safe option away from the destructive
+  // one, so a player scanning the dialog would see a lone "Leave the run" in the body and
+  // have to hunt the header for the way out. Move Stay down into the action row beside it —
+  // safe option FIRST, and it keeps its single identity (it is still the scaffold's close
+  // button, so Escape and the close route stay one thing).
+  leaveActions.append(leaveStayBtn, leaveConfirmBtn);
+  leaveInner.append(leaveBody, leaveActions);
+
+  // What to run if the player commits. Deliberately NOT cleared in `hide()`: the modal owner
+  // calls `hide()` whenever this overlay is DEPOSED by a higher-priority one, not only when
+  // it is closed, and the deposed entry stays on the stack to be re-`show()`n later. Rotate
+  // outranks `settings`, so clearing on hide left a real dead button: pause → tap home →
+  // rotate to portrait (rotate deposes the dialog, handler cleared) → rotate back (the
+  // dialog re-appears, fully functional-looking) → "Leave the run" silently did nothing.
+  //
+  // Instead the handler lives until the dialog is GENUINELY dismissed, and the confirm path
+  // below refuses to fire while the dialog isn't showing — which is what actually makes a
+  // stale confirmation impossible, and is true on every close route (Stay, Escape, deposition)
+  // without needing a hook on each.
+  let leaveConfirmHandler: (() => void) | null = null;
+  const leaveOverlay: ModalOverlay = {
+    show(): void {
+      leaveDialog.hidden = false;
+      // Initial focus on the SAFE action (Stay), not the destructive one.
+      leaveStayBtn.focus();
+    },
+    hide(): void {
+      leaveDialog.hidden = true;
+    },
+  };
+  leaveStayBtn.addEventListener('click', () => modal.close(leaveOverlay));
+  leaveConfirmBtn.addEventListener('click', () => {
+    // Leaving a run is destructive and irreversible, so it fires ONLY from a dialog the
+    // player can actually see. A click while hidden is never a player decision.
+    if (leaveDialog.hidden) return;
+    // Consume the handler before closing, so a double-activation cannot navigate twice.
+    const confirmed = leaveConfirmHandler;
+    leaveConfirmHandler = null;
+    modal.close(leaveOverlay);
+    confirmed?.();
+  });
+
   // --- Results dialog (sibling of the Shell) ---
   const results = doc.createElement('div');
   results.className = 'wy-results';
@@ -598,14 +683,13 @@ export function createOverlay(
     modal.open(settingsOverlay, { priority: 'settings', dismissOnEscape: true });
     // Auto-pause an ACTIVE, unpaused run when settings opens — the Shell goes inert and is
     // covered while the dialog is up, so an unpaused wave would keep advancing unseen (lives
-    // lost / the run ending inside the dialog). Mirrors rotate.ts's guard exactly (started,
-    // not already paused). Idempotent: if rotate already auto-paused, `isPaused()` makes this
-    // a no-op. On close the run STAYS paused — the player resumes deliberately from the Dock,
-    // like the rotate flow. (Results outranks settings and inerts the Dock, so this handler
-    // can't even fire while results is open — no terminal-state pause interaction here.)
-    if (controller.uiState().started && !controller.isPaused()) {
-      controller.pause();
-    }
+    // lost / the run ending inside the dialog). Routed through the app-level seam, which owns
+    // the started-and-unpaused guard (identical to the one rotate.ts used to inline) and is
+    // idempotent: if rotate already auto-paused, this is a no-op. On close the run STAYS
+    // paused — the player resumes deliberately from the Dock, like the rotate flow. (Results
+    // outranks settings and inerts the Dock, so this handler can't even fire while results is
+    // open — no terminal-state pause interaction here.)
+    ensurePaused();
   });
   closeBtn.addEventListener('click', () => modal.close(settingsOverlay));
 
@@ -824,6 +908,7 @@ export function createOverlay(
     resultsEl: results,
     settingsEl: settingsDialog,
     instructionsEl: instructions,
+    leaveEl: leaveDialog,
     modal,
     update(view: HudView): void {
       const { hud } = view;
@@ -870,6 +955,23 @@ export function createOverlay(
       // M1 ships exactly one wave — there's no later-wave affordance to show instead).
       primaryBtn.hidden = view.ui.started;
       card.root.setAttribute('aria-pressed', String(view.ui.armed !== null));
+      // Home link auto-hide. VISIBLE while the run is held pre-start, while paused, and once
+      // it resolves; HIDDEN for any started-and-unpaused moment — including the started
+      // pre-wave countdown, which is why this reads `ui.started` rather than the sim phase
+      // (the sim has no "held" concept; it sits in `pre-wave` either way).
+      //
+      // `inert` is set HERE, in the same synchronous write as `data-live`, rather than being
+      // left to the CSS transition: it removes the tab stop and every activation path the
+      // instant the flip happens, so the link can never be an interactable ghost mid-fade.
+      // `ui.css`'s `pointer-events: none` is the other half of the same pair; only `opacity`
+      // is allowed to take time. Every caller that can flip this OUTSIDE a tick — Start, the
+      // five pause paths, Play-again — refreshes the HUD synchronously in its own handler, so
+      // a throttled or missing frame can never strand a stale state. The terminal transition
+      // is the one exception, and it needs no handler: a run can only reach `won`/`lost` ON a
+      // tick, i.e. inside a frame, whose tick change moves the memo key and refreshes anyway.
+      const runLive = view.ui.started && !view.paused && !isTerminalPhase(hud.phase);
+      shell.home.toggleAttribute('data-live', runLive);
+      shell.home.toggleAttribute('inert', runLive);
       renderInstall(view.ui.started);
       renderPanel(view.ui, view.refund);
       // The HUD updates every tick, but the outcome message only changes on an actual
@@ -892,6 +994,14 @@ export function createOverlay(
         // text (after `.trim()`) still reads the same to a human either way.
         live.textContent = nextLive === live.textContent ? nextLive + ' ' : nextLive;
       }
+    },
+    showLeave(onConfirm: () => void): void {
+      // Same modal-family open lifecycle as settings/rotate/results: abort any in-flight
+      // placement gesture first, then register. `settings` PRIORITY (rotate still outranks
+      // it, and results outranks both — a terminal run never reaches this guard anyway).
+      abortGesture();
+      leaveConfirmHandler = onConfirm;
+      modal.open(leaveOverlay, { priority: 'settings', dismissOnEscape: true });
     },
     showResults(hud: HudVM): void {
       // Modal-family open lifecycle (same as settings/rotate): abort any in-flight
@@ -922,6 +1032,7 @@ export function createOverlay(
       results.remove();
       settingsDialog.remove();
       instructions.remove();
+      leaveDialog.remove();
     },
   };
 }

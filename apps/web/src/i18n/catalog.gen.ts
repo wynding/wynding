@@ -3,6 +3,7 @@
 /* eslint-disable */
 export const EN = {
   "app.title": "Wynding",
+  "app.home": "Wynding — home",
   "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
   "hud.lives": "Lives: {count}",
   "hud.bounty": "Bounty: {count}",
@@ -67,6 +68,10 @@ export const EN = {
   "live.rejected.generic": "Can't build there.",
   "live.rejected.pendingCap": "Too many pending actions.",
   "live.sold": "Tower sold. Refunded {refund} Bounty.",
+  "leave.title": "Leave this run?",
+  "leave.body": "Leaving now discards this run — your towers and progress will not be kept.",
+  "leave.confirm": "Leave the run",
+  "leave.stay": "Stay",
   "rotate.title": "Rotate your device",
   "rotate.message": "Wynding plays best in landscape. Rotate your device to continue.",
   "install.banner.text": "Wynding plays best as an app — full screen, no browser bars.",
@@ -85,6 +90,7 @@ export type MessageKey = keyof typeof EN;
 
 export interface MessageParams {
   "app.title": Record<never, never>;
+  "app.home": Record<never, never>;
   "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
   "hud.lives": { "count": string | number };
   "hud.bounty": { "count": string | number };
@@ -149,6 +155,10 @@ export interface MessageParams {
   "live.rejected.generic": Record<never, never>;
   "live.rejected.pendingCap": Record<never, never>;
   "live.sold": { "refund": string | number };
+  "leave.title": Record<never, never>;
+  "leave.body": Record<never, never>;
+  "leave.confirm": Record<never, never>;
+  "leave.stay": Record<never, never>;
   "rotate.title": Record<never, never>;
   "rotate.message": Record<never, never>;
   "install.banner.text": Record<never, never>;

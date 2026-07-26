@@ -3,6 +3,7 @@ import type { HudVM } from '@wynding/render';
 import { compileRuleset } from '@wynding/sim';
 import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
 import { createOverlay, type UiAction } from './overlay';
+import type { ModalOverlay } from './modal';
 import { createShell, dockButtonParts } from './shell';
 import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
@@ -51,35 +52,21 @@ function uiState(over: Partial<UiState> = {}): UiState {
   return { started: true, armed: null, selection: null, lastOutcome: null, outcomeSeq: 0, ...over };
 }
 
-/** A minimal fake of the `Controller` slice `createOverlay` reads for the settings
- *  auto-pause (mirrors `rotate.test.ts`'s fake) — a mutable `started`/`paused` pair plus a
- *  `pause` spy, avoiding the need to stand up a real Controller. */
-function fakeController(started = true): {
-  uiState: () => { started: boolean };
-  isPaused: () => boolean;
-  pause: ReturnType<typeof vi.fn>;
-  setPaused(v: boolean): void;
-} {
-  let paused = false;
-  const pause = vi.fn(() => {
-    paused = true;
-  });
-  return {
-    uiState: () => ({ started }),
-    isPaused: () => paused,
-    pause,
-    setPaused(v: boolean): void {
-      paused = v;
-    },
-  };
-}
+/** A spy for the app-level pause seam the settings dialog asks on open. The
+ *  started/already-paused guard moved into `main.ts`'s `ensurePaused` — one guard shared by
+ *  every pause caller, and one synchronous home-link refresh — so the cases this file used to
+ *  assert against a Controller fake (pre-start is a no-op, already-paused is a no-op, closing
+ *  never resumes the controller) live in `main.test.ts`'s "the app-level pause seam" block
+ *  against the REAL controller. What `overlay.ts` still owns, and what is asserted below, is
+ *  WHEN it asks. */
+const fakeEnsurePaused = (): ReturnType<typeof vi.fn> => vi.fn();
 
 interface SetupOptions {
   readonly install?: InstallHandle;
 }
 
 function setup(
-  controller = fakeController(),
+  ensurePaused: ReturnType<typeof vi.fn> = fakeEnsurePaused(),
   abortGesture: () => void = () => {},
   options: SetupOptions = {},
 ) {
@@ -92,7 +79,7 @@ function setup(
   const overlay = createOverlay(
     document,
     (a) => actions.push(a),
-    controller,
+    ensurePaused,
     settings,
     keymap,
     shell,
@@ -100,10 +87,15 @@ function setup(
     abortGesture,
     install,
   );
-  document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
+  document.body.append(
+    overlay.resultsEl,
+    overlay.settingsEl,
+    overlay.instructionsEl,
+    overlay.leaveEl,
+  );
   return {
     actions,
-    controller,
+    ensurePaused,
     settings,
     keymap,
     shell,
@@ -594,7 +586,7 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
         maxTouchPoints: options.maxTouchPoints ?? 0,
       },
     });
-    const s = setup(fakeController(), options.abortGesture ?? (() => {}), { install });
+    const s = setup(fakeEnsurePaused(), options.abortGesture ?? (() => {}), { install });
     // The overlay re-renders on `update()`; wire the install handle's own change signal the
     // way main.ts does, so a captured prompt refreshes immediately. Re-render with the LAST
     // rendered `started`, not a hardcoded pre-start — otherwise any emit after Start (a
@@ -953,7 +945,7 @@ describe('overlay — settings dialog (modal)', () => {
     const abort = vi.fn(() => {
       inertAtAbort = shellRef?.root.hasAttribute('inert') ?? null;
     });
-    const { shell, settingsBtn } = setup(fakeController(), abort);
+    const { shell, settingsBtn } = setup(fakeEnsurePaused(), abort);
     shellRef = shell;
     settingsBtn.click();
     expect(abort).toHaveBeenCalledTimes(1);
@@ -977,7 +969,7 @@ describe('overlay — settings dialog (modal)', () => {
     const overlay = createOverlay(
       document,
       () => {},
-      c,
+      () => c.pause(),
       createSettings(),
       createKeymap(),
       shell,
@@ -985,7 +977,12 @@ describe('overlay — settings dialog (modal)', () => {
       () => input.abort(),
       defaultInstall(),
     );
-    document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
+    document.body.append(
+      overlay.resultsEl,
+      overlay.settingsEl,
+      overlay.instructionsEl,
+      overlay.leaveEl,
+    );
 
     c.armTower('basic');
     shell.board.dispatchEvent(ptr('pointerdown', 35, 105, 1)); // held, anchor (3,8)
@@ -1016,7 +1013,7 @@ describe('overlay — settings dialog (modal)', () => {
     const overlay = createOverlay(
       document,
       () => {},
-      c,
+      () => c.pause(),
       createSettings(),
       createKeymap(),
       shell,
@@ -1024,7 +1021,12 @@ describe('overlay — settings dialog (modal)', () => {
       () => input.abort(),
       defaultInstall(),
     );
-    document.body.append(overlay.resultsEl, overlay.settingsEl, overlay.instructionsEl);
+    document.body.append(
+      overlay.resultsEl,
+      overlay.settingsEl,
+      overlay.instructionsEl,
+      overlay.leaveEl,
+    );
 
     shell.card.root.dispatchEvent(ptr('pointerdown', 10, 10, 1));
     shell.card.root.dispatchEvent(ptr('pointermove', 35, 105, 1)); // crosses the drag threshold → arms
@@ -1169,53 +1171,260 @@ describe('overlay — settings auto-pause (modal family, mirrors rotate)', () =>
     return overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!;
   }
 
-  it('auto-pauses an active, unpaused run when settings opens', () => {
-    const { overlay, controller, settingsBtn } = setup(fakeController(true));
-    expect(controller.pause).not.toHaveBeenCalled();
+  it('asks the app-level pause seam when settings OPENS', () => {
+    const { overlay, ensurePaused, settingsBtn } = setup();
+    expect(ensurePaused).not.toHaveBeenCalled();
     openClose(overlay, settingsBtn);
-    expect(controller.pause).toHaveBeenCalledTimes(1);
+    expect(ensurePaused).toHaveBeenCalledTimes(1);
   });
 
-  it('stays paused on close — the player resumes deliberately from the Dock', () => {
-    const { overlay, controller, settingsBtn } = setup(fakeController(true));
+  it("asks unconditionally — the started/already-paused guard is the seam's, not the dialog's", () => {
+    // Deliberately NOT re-implementing the guard here against a fake (that would only test
+    // the fake). The dialog's job is to ask on open, every time; whether asking actually
+    // pauses is `ensurePaused`'s, covered in main.test.ts against the real controller.
+    const { overlay, ensurePaused, settingsBtn } = setup();
     const closeBtn = openClose(overlay, settingsBtn);
-    expect(controller.isPaused()).toBe(true);
+    closeBtn.click();
+    settingsBtn.click();
+    expect(ensurePaused).toHaveBeenCalledTimes(2);
+  });
+
+  it('never asks on CLOSE — the player resumes deliberately from the Dock', () => {
+    const { overlay, ensurePaused, settingsBtn } = setup();
+    const closeBtn = openClose(overlay, settingsBtn);
+    expect(ensurePaused).toHaveBeenCalledTimes(1);
     closeBtn.click();
     expect(overlay.settingsEl.hidden).toBe(true);
-    expect(controller.isPaused()).toBe(true); // no auto-resume — closing settings never resumes
+    // No further pause-state request of ANY kind on the way out: the overlay's whole
+    // controller surface is a single `ensurePaused` callback, so there is no `resume` for it
+    // to call even by mistake — the never-auto-resume property is structural here.
+    expect(ensurePaused).toHaveBeenCalledTimes(1);
   });
 
-  it('does not auto-pause pre-start (nothing to pause); Start still works after close', () => {
-    const { actions, overlay, controller, settingsBtn, primaryBtn } = setup(fakeController(false));
+  it('Start still works after a settings open/close round-trip', () => {
+    const { actions, overlay, settingsBtn, primaryBtn } = setup();
     const closeBtn = openClose(overlay, settingsBtn);
-    expect(controller.pause).not.toHaveBeenCalled();
     closeBtn.click();
-    // The Dock's Start action is unaffected by the settings open/close round-trip.
     primaryBtn.click();
     expect(actions.map((a) => a.type)).toContain('start');
   });
+});
 
-  it('is idempotent when already paused — pauses once, and close does not resume', () => {
-    const controller = fakeController(true);
-    controller.setPaused(true); // already paused (e.g. rotate auto-paused first)
-    const { overlay, settingsBtn } = setup(controller);
-    const closeBtn = openClose(overlay, settingsBtn);
-    expect(controller.pause).not.toHaveBeenCalled(); // guard sees isPaused() — no double-pause
-    expect(controller.isPaused()).toBe(true);
-    closeBtn.click();
-    expect(controller.isPaused()).toBe(true);
+describe('overlay — home link visibility driver', () => {
+  /** Drive one `update()` and read back the two attributes the driver writes together. */
+  function drive(
+    s: ReturnType<typeof setup>,
+    over: { started?: boolean; paused?: boolean; phase?: HudVM['phase'] } = {},
+  ): { live: boolean; inert: boolean } {
+    s.overlay.update({
+      hud: hud({ phase: over.phase ?? 'pre-wave' }),
+      paused: over.paused ?? false,
+      speed: 1,
+      ui: uiState({ started: over.started ?? false }),
+      refund: 0,
+    });
+    return {
+      live: s.shell.home.hasAttribute('data-live'),
+      inert: s.shell.home.hasAttribute('inert'),
+    };
+  }
+
+  const VISIBLE = { live: false, inert: false };
+  const HIDDEN = { live: true, inert: true };
+
+  it('sets data-live AND inert together for every started, unpaused, unresolved phase', () => {
+    const s = setup();
+    // Including the started pre-wave COUNTDOWN — the sim has no "held" concept and reports
+    // `pre-wave` either way, which is why the rule keys on `ui.started`, not the phase.
+    expect(drive(s, { started: true, phase: 'pre-wave' })).toEqual(HIDDEN);
+    expect(drive(s, { started: true, phase: 'active' })).toEqual(HIDDEN);
   });
 
-  it('opening settings during a rotate-paused run leaves the pause state uncorrupted', () => {
-    // Rotate auto-paused first (started + paused). Settings opening on top must not pause
-    // again, and closing must not resume — a single, stable pause across both modals.
-    const controller = fakeController(true);
-    controller.setPaused(true);
-    const { overlay, settingsBtn } = setup(controller);
-    const closeBtn = openClose(overlay, settingsBtn);
-    closeBtn.click();
-    expect(controller.pause).not.toHaveBeenCalled();
-    expect(controller.isPaused()).toBe(true);
+  it('clears both while HELD pre-start, while PAUSED, and once TERMINAL', () => {
+    const s = setup();
+    expect(drive(s, { started: false, phase: 'pre-wave' })).toEqual(VISIBLE);
+    expect(drive(s, { started: true, phase: 'active', paused: true })).toEqual(VISIBLE);
+    expect(drive(s, { started: true, phase: 'won' })).toEqual(VISIBLE);
+    expect(drive(s, { started: true, phase: 'lost' })).toEqual(VISIBLE);
+  });
+
+  it('a terminal phase wins even when the run is somehow reported unpaused', () => {
+    // The resolution branch is a phase test, not a pause test: a resolved run must show the
+    // link regardless of the paused flag, so the player can always find their way back out.
+    const s = setup();
+    expect(drive(s, { started: true, phase: 'won', paused: false })).toEqual(VISIBLE);
+  });
+
+  it('flips back and forth cleanly — the attributes are never left stale on either side', () => {
+    const s = setup();
+    expect(drive(s, { started: true, phase: 'active' })).toEqual(HIDDEN);
+    expect(drive(s, { started: true, phase: 'active', paused: true })).toEqual(VISIBLE);
+    expect(drive(s, { started: true, phase: 'active' })).toEqual(HIDDEN);
+  });
+});
+
+describe('overlay — the leave-run confirm dialog (presentation only)', () => {
+  it('is a hidden modal dialog sibling until showLeave opens it', () => {
+    const s = setup();
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+    expect(s.overlay.leaveEl.getAttribute('role')).toBe('dialog');
+    expect(s.overlay.leaveEl.getAttribute('aria-modal')).toBe('true');
+    expect(s.overlay.leaveEl.getAttribute('aria-label')).toBe('Leave this run?');
+    // A sibling of the Shell, never inside it — the Shell is the one node the owner inerts.
+    expect(s.shell.root.contains(s.overlay.leaveEl)).toBe(false);
+  });
+
+  it('opens with focus on Stay (the safe action) and inerts the Shell', () => {
+    const s = setup();
+    s.overlay.showLeave(() => {});
+    expect(s.overlay.leaveEl.hidden).toBe(false);
+    expect(document.activeElement).toBe(s.overlay.leaveEl.querySelector('.wy-leave-stay'));
+    expect(s.shell.root.hasAttribute('inert')).toBe(true);
+    // Its body says what is at stake — the dialog exists to make the cost explicit.
+    expect(s.overlay.leaveEl.textContent).toContain('discards this run');
+  });
+
+  it('ANNOUNCES the consequence — the body is the dialog’s accessible description', () => {
+    // Without `aria-describedby` the dialog is named but not described, and `show()` puts
+    // focus straight on Stay — so a screen reader says "Leave this run?, dialog. Stay, button."
+    // and the player never hears that leaving discards the run. axe does not flag a missing
+    // description, so nothing else in the suite catches this.
+    const s = setup();
+    const describedBy = s.overlay.leaveEl.getAttribute('aria-describedby');
+    expect(describedBy, 'the leave dialog has no accessible description').not.toBeNull();
+    const desc = s.overlay.leaveEl.querySelector(`#${describedBy}`);
+    expect(desc, 'aria-describedby points at no element inside the dialog').not.toBeNull();
+    expect(desc!.textContent).toContain('discards this run');
+  });
+
+  it('SURVIVES being deposed by the rotate prompt and re-shown — Confirm still works', () => {
+    // The modal owner calls `hide()` on DEPOSITION, not just on close, and leaves the deposed
+    // entry on the stack to be re-shown later. Clearing the confirm handler in `hide()` (the
+    // obvious-looking place) therefore produced a genuinely dead button on a real phone path:
+    // pause → tap home → rotate to portrait → rotate back. `showLeave` cannot repair it,
+    // because `modal.open` is idempotent by identity and the entry never left the stack.
+    const s = setup();
+    const onConfirm = vi.fn();
+    s.overlay.showLeave(onConfirm);
+    expect(s.overlay.leaveEl.hidden).toBe(false);
+
+    // Rotate (rank 1) outranks this dialog's `settings` (rank 2) → deposed, not closed.
+    const rotate: ModalOverlay = { show: vi.fn(), hide: vi.fn() };
+    s.overlay.modal.open(rotate, { priority: 'rotate' });
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+
+    // Back to landscape: the owner re-activates the stacked dialog.
+    s.overlay.modal.close(rotate);
+    expect(s.overlay.leaveEl.hidden).toBe(false);
+
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-confirm')!.click();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  // The REAL registration `showLeave` performs, not a hand-written copy of it. `modal.test.ts`
+  // pins the owner's mechanics given a registration; these two pin the registration itself, so
+  // changing the priority or dropping `dismissOnEscape` cannot pass unnoticed.
+  it('registers BELOW results — a resolving run keeps the results dialog on top', () => {
+    const s = setup();
+    s.overlay.showLeave(() => {});
+    expect(s.overlay.leaveEl.hidden).toBe(false);
+
+    s.overlay.showResults({
+      phase: 'won',
+      lives: 3,
+      bounty: 0,
+      countdownSeconds: null,
+      score: 10,
+      stars: 2,
+      won: true,
+    });
+    expect(s.overlay.resultsEl.hidden).toBe(false);
+    expect(s.overlay.leaveEl.hidden).toBe(true); // deposed by the higher-priority dialog
+  });
+
+  it('Escape dismisses it, and dismissing MEANS stay — no confirm handler runs', () => {
+    const s = setup();
+    const onConfirm = vi.fn();
+    s.overlay.showLeave(onConfirm);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }));
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(s.shell.root.hasAttribute('inert')).toBe(false);
+  });
+
+  it('a Confirm click while the dialog is not showing never fires — the real staleness guard', () => {
+    // What actually makes a stale confirmation impossible, on EVERY close route (Stay,
+    // Escape, deposition) without a hook on each: leaving a run is destructive, so it only
+    // ever fires from a dialog the player can see.
+    const s = setup();
+    const onConfirm = vi.fn();
+    s.overlay.showLeave(onConfirm);
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-stay')!.click();
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-confirm')!.click();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('a double Confirm activation navigates ONCE', () => {
+    const s = setup();
+    const onConfirm = vi.fn();
+    s.overlay.showLeave(onConfirm);
+    const confirmBtn = s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-confirm')!;
+    confirmBtn.click();
+    confirmBtn.click();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts an in-flight placement gesture on open, like every other modal in the family', () => {
+    const abort = vi.fn();
+    const s = setup(fakeEnsurePaused(), abort);
+    s.overlay.showLeave(() => {});
+    expect(abort).toHaveBeenCalledTimes(1);
+  });
+
+  it('Stay closes without calling the confirm handler', () => {
+    const s = setup();
+    const onConfirm = vi.fn();
+    s.overlay.showLeave(onConfirm);
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-stay')!.click();
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(s.shell.root.hasAttribute('inert')).toBe(false);
+  });
+
+  it('Confirm closes and calls the handler exactly once', () => {
+    const s = setup();
+    const onConfirm = vi.fn();
+    s.overlay.showLeave(onConfirm);
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-confirm')!.click();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+  });
+
+  it('a STALE handler can never fire against a later open', () => {
+    // Guarded by the showing check (see above), NOT by clearing on `hide()` — clearing there
+    // is what broke the rotate-deposition path. A dialog opened, dismissed, and re-opened with
+    // a different handler runs only the newest one, and a Confirm after a Stay runs none.
+    const s = setup();
+    const first = vi.fn();
+    const second = vi.fn();
+    s.overlay.showLeave(first);
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-stay')!.click();
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-confirm')!.click();
+    expect(first).not.toHaveBeenCalled();
+
+    s.overlay.showLeave(second);
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-confirm')!.click();
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+  });
+
+  it('destroy() removes it — no orphan dialog left behind for a recreate to stack on', () => {
+    const s = setup();
+    expect(document.body.contains(s.overlay.leaveEl)).toBe(true);
+    s.overlay.destroy();
+    expect(document.body.contains(s.overlay.leaveEl)).toBe(false);
   });
 });
 
