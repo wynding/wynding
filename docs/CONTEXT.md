@@ -157,3 +157,12 @@ A public build, tagged by maturity — **alpha** (rough, expect breakage) → **
 (stabilizing) → **stable**. The major number is the phase (R1.0, then R1.1 for a
 Phase 1 bugfix); early milestones ship as alphas ahead of the stable release.
 _Avoid_: launch (version is fine in prose).
+
+**P0–P3**:
+The severity of a review finding, graded by impact rather than by category, P0 most
+severe (there is no P4): **P0** a universal, release-blocking failure; **P1** systemic
+(determinism, saves, replay compatibility) **or** urgent enough to fix this cycle even
+if narrow; **P2** a genuine functional defect that is neither; **P3** minor — polish,
+docs, micro-optimization. One scale for every reviewer; how each tier gates is in
+[`ai-workflow.md`](ai-workflow.md).
+_Avoid_: high/medium/low, blocker, critical, nit, P4.

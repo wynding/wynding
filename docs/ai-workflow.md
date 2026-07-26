@@ -46,6 +46,17 @@ reproducer; a failing `sim` test beats a console log.
 Every PR is reviewed independently by **Codex** and **CodeRabbit**, plus the owner.
 Reviewers see the diff, not the task description. Address findings; resolve threads.
 
+Findings are graded [**P0–P3**](CONTEXT.md) by impact. **P0–P2 must be fixed, or the
+thread resolved with a stated reason** — declining is a legitimate outcome, silence is
+not. **P3 is advisory.**
+
+An **automated** review loop gates differently from a human: it blocks on **P0/P1 only**
+and reports P2/P3 for a person to triage. Not because P2s are unimportant — they are real
+bugs, and the tier most findings land in — but because a loop cannot resolve a thread with
+a reason, so gating it on P2 gates it on nearly everything and it never converges. A loop may
+**decline** a P1/P2/P3 it judges out of bounds, but only with a reason code and a
+citation; a **P0 always escalates to the owner** and is never auto-declined.
+
 ### 5. Ship — gated + staged
 
 **Merge gate:** merge is blocked until **green CI AND Codex clean AND CodeRabbit approved
