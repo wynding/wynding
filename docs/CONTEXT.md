@@ -159,12 +159,9 @@ Phase 1 bugfix); early milestones ship as alphas ahead of the stable release.
 _Avoid_: launch (version is fine in prose).
 
 **P0–P3**:
-The severity of a review finding, P0 most severe (there is no P4): **P0** data loss, a
-security hole, or a crash on a path most users hit; **P1** a correctness defect with
-systemic reach — determinism, saves, replay compatibility; **P2** a genuine functional
-defect in behaviour; **P3** minor — polish, docs, micro-optimization. P0–P2 must be
-fixed or explicitly declined before merge; P3 is advisory. An AUTOMATED review loop
-blocks on P0/P1 only and reports the rest, because it cannot decline a finding with a
-reason — that judgement, and the [merge gate](ai-workflow.md)'s "all threads resolved",
-belong to a human. One scale for every reviewer.
+The severity of a review finding, graded by REACH, P0 most severe (there is no P4):
+**P0** a universal, release-blocking failure; **P1** a correctness defect with systemic
+reach (determinism, saves, replay compatibility); **P2** a genuine functional defect
+with a local blast radius; **P3** minor — polish, docs, micro-optimization. One scale
+for every reviewer; how each tier gates is in [`ai-workflow.md`](ai-workflow.md).
 _Avoid_: high/medium/low, blocker, critical, nit, P4.
