@@ -209,7 +209,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   - _(An elemental damage-type system remains a possible future **additive** extension — existing
     content stays untyped, creeps default to no resistance — so the door is open without a
     redesign. It is not built.)_
-- **Domain engagement:** each **tower targets ground, air, or both**; each creep is ground or
+- **Domain engagement:** each **attacking tower targets ground, air, or both** (a support-only
+  tower attacks nothing and has no target domain); each creep is ground or
   flying. A tower can only hit creeps in a domain it targets — so some creeps are simply ignored
   by some towers. Debuffs obey the same rule (an air-targeting slow can slow flyers). Which
   towers and creeps sit where is content/tuning; a **dedicated anti-air** tower is just the
