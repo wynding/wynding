@@ -1,0 +1,149 @@
+{
+  "note": "Exceptions for scripts/check-glossary-terms.mjs. `include` is the doc set that carries Wynding's game vocabulary; ADRs and design-notes are deliberately out of scope — they are engineering prose, where these words (save, layer, field, digest) carry their ordinary technical senses and would cost far more exceptions than the drift they would catch. `ignoredTerms` are avoided words whose other sense cannot be told apart mechanically. `allowedSenses` are case-insensitive regexes over a line of prose: a hit inside a match is a different sense, not drift; keep them narrow, since a loose pattern exempts the next real violation on the same line. Every entry states why; an entry that matches nothing fails the check. See docs/ai-workflow.md.",
+  "include": [
+    "docs/CONTEXT.md",
+    "docs/vision.md",
+    "docs/roadmap.md",
+    "docs/prd",
+    "docs/milestones"
+  ],
+  "ignoredTerms": [
+    {
+      "term": "route",
+      "why": "The glossary itself allows it: \"interchangeable in prose, but 'path' is canonical in code\" — so linting it in docs would contradict the entry it comes from."
+    },
+    {
+      "term": "unit",
+      "why": "Unavoidable generic English in these docs — grid unit, fixed-point units, unit of work, unit-tested. Telling those from 'unit' meaning a tower needs grammar, not grep."
+    },
+    {
+      "term": "building",
+      "why": "Every use here is the verb (\"shapes the route by building\", \"Building is allowed while paused\"). Only the noun is drift, and a grep cannot tell them apart."
+    },
+    {
+      "term": "engine",
+      "why": "Engine is itself a canonical term (the determinism toolkit), so flagging the word would tell an author to rename the thing it is named after. Only \"engine\" meaning the sim is drift."
+    },
+    {
+      "term": "save",
+      "why": "A save is its own concept per the Replay entry's aside and ADR 0008 — a state snapshot. Only calling a replay a save is drift, and that reads identically to a grep."
+    },
+    {
+      "term": "update",
+      "why": "The ordinary verb (\"update the HUD\", \"an app update\") is everywhere; only \"update\" meaning one tick is drift."
+    }
+  ],
+  "allowedSenses": [
+    {
+      "term": "core",
+      "pattern": "core[- ](loop|gameplay)",
+      "why": "\"Core Gameplay\" is PRD 0001's title and \"core loop\" is the game's central loop — neither names the engine package."
+    },
+    {
+      "term": "core",
+      "pattern": "(byte-identity|deterministic|web) core",
+      "why": "The deterministic/byte-identity/web core is the codebase's centre in the ordinary sense, not the Engine package being renamed."
+    },
+    {
+      "term": "model",
+      "pattern": "(damage|grid|domain|defense) model",
+      "why": "Modelling prose — the damage/grid/domain model is a set of rules, not the sim package."
+    },
+    {
+      "term": "defense",
+      "pattern": "(tower|fixed-lane|working) defense",
+      "why": "The genre name (\"tower defense\", \"fixed-lane defense\") and the player's defenses as a whole — not armor, the stat."
+    },
+    {
+      "term": "defense",
+      "pattern": "damage & defense model",
+      "why": "Names the whole damage system in PRD 0001 §5; the stat inside it is still called armor."
+    },
+    {
+      "term": "level",
+      "pattern": "(single|base|max|upgrade|tower) level|level \\d",
+      "why": "A tower's upgrade level, which is real vocabulary — not a board, wave, or difficulty tier."
+    },
+    {
+      "term": "field",
+      "pattern": "flow-field",
+      "why": "The pathfinding algorithm (flow-field + A*), not the board."
+    },
+    {
+      "term": "field",
+      "pattern": "field in ADR",
+      "why": "A schema field — \"the `boardId` field in ADR 0006\" — the data-record sense."
+    },
+    {
+      "term": "points",
+      "pattern": "hit points",
+      "why": "A creep durability stat, per the Creep entry's own wording. Score is the thing that must not be called points."
+    },
+    {
+      "term": "points",
+      "pattern": "fine-grid points",
+      "why": "Geometry: creeps are points on the fine grid."
+    },
+    {
+      "term": "hp",
+      "pattern": "hp pips|creep hp|\\(hp, damage",
+      "why": "The glossary's own note — HP is a creep stat; only the player's lives must not be called HP. Deliberately narrow: \"the player's HP\" has to keep failing."
+    },
+    {
+      "term": "launch",
+      "pattern": "wave\\s+(auto-)?launch(es|ed|ing)?|launch(es|ed|ing)?\\s+(the\\s+next|the|that|a|an|its)\\s+wave",
+      "why": "A wave launches, auto-launches, or is launched by an early call — the wave-start sense, not a release. Deliberately requires the wave to be launching or be launched: \"we launch after the last wave\" is still drift."
+    },
+    {
+      "term": "launch",
+      "pattern": "launch\\s*(&|\\+)|launch tick",
+      "why": "The launch tick, and \"launch + N ticks\" — the tick a wave starts on."
+    },
+    {
+      "term": "stage",
+      "pattern": "coherent stage",
+      "why": "The Phase entry's own definition — \"a coherent stage of the product\" — defining the canonical term in plain English."
+    },
+    {
+      "term": "deliverable",
+      "pattern": "(phase-\\d|r\\d) deliverable",
+      "why": "Something delivered in a phase or release line, not a milestone renamed."
+    },
+    {
+      "term": "type",
+      "pattern": "damage[- ]types?",
+      "why": "The elemental damage-type system PRD 0001 rules out — not a creep's domain."
+    },
+    {
+      "term": "type",
+      "pattern": "(tower|creep)[\\s/]*types?",
+      "files": ["docs/roadmap.md", "docs/prd/0001-core-gameplay.md"],
+      "why": "A tower or creep variant, the roadmap's and PRD's slice vocabulary — not a creep's ground-vs-air domain. Scoped to those two docs so a milestone spec cannot use it to call a domain a type."
+    },
+    {
+      "term": "frame",
+      "pattern": "has a frame",
+      "why": "Structural metaphor for the product taking shape, not a rendered frame."
+    },
+    {
+      "term": "layer",
+      "pattern": "fresh layer",
+      "why": "A newly added layer of tuning, not a creep's domain."
+    },
+    {
+      "term": "queued",
+      "pattern": "queued-event",
+      "why": "The sim's scheduled-impact event queue, not a player command awaiting a tick."
+    },
+    {
+      "term": "p4",
+      "pattern": "no p4",
+      "why": "The severity entry says there is no P4 — it has to name it to rule it out."
+    },
+    {
+      "term": "enemy",
+      "pattern": "an enemy unit",
+      "why": "The Creep entry defines the canonical term in plain English."
+    }
+  ]
+}

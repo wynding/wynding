@@ -1,0 +1,5 @@
+#!/bin/sh
+# Wynding pre-push hook — repo-tracked, wired by `pnpm install` (core.hooksPath = .githooks).
+# Gates the push on a QC record for the state being pushed; see docs/ai-workflow.md §3.5.
+# Git passes the ref updates on stdin, which the checker reads.
+exec node "$(dirname "$0")/../scripts/check-qc-record.mjs"

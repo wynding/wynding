@@ -58,9 +58,14 @@ docs/      prd/  adr/  CONTEXT.md
 ## Workflow
 
 1. Make the change in the smallest package that owns the concern.
-2. `pnpm run verify` (format:check + typecheck + lint + test) before committing.
+2. `pnpm run verify` (format:check + typecheck + lint + test, plus the repo guards) before
+   committing.
 3. Conventional Commits (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`).
-4. Open a PR against `main` with a summary + test plan.
+4. QC the staged diff before every push, and record it: a `pre-push` hook refuses a branch whose
+   tip commit has no `QC:` trailer for its own tree
+   (`git commit -m "$(printf 'docs: subject\n\nQC: %s\n' "$(git write-tree)")"`). The rule is in
+   [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
+5. Open a PR against `main` with a summary + test plan.
 
 > **Full methodology + tooling setup:** the plan → build → verify → review → ship loop and
 > how to install your agent's skills (gitignored, not committed) are in

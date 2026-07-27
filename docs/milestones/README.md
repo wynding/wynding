@@ -22,3 +22,17 @@ and keep terminology consistent with [../CONTEXT.md](../CONTEXT.md).
 - [M2 — Breadth](m2.md) — the combat vocabulary completes: 9 towers / 8 creeps / a 10-wave
   showcase arc with live wave-clear + early-call bonuses, wave preview, and air + anti-air,
   on M1's board.
+
+## Required: the completeness boundary
+
+A spec that pins per-tick or ordering semantics can always be asked for one more rule, so any
+milestone spec that pins them ships a **completeness boundary** section — in its first draft, not
+after review asks for it. The boundary states three things: (a) what the spec deliberately does
+**not** pin, named as a class rather than case by case; (b) who fixes the residual — normally the
+implementing story, which decides it in code; and (c) which deterministic artifact **arbitrates**
+it thereafter, so the answer is checkable rather than argued (the determinism golden and its
+`simVersion` pin, a schema, a test). This is not a license to leave things vague: "nothing to
+guess during implementation" still holds, because every question is either pinned here or handed,
+by name, to the story and the artifact that settles it. A finding below the boundary is answered
+by citing it. Specs written before this rule (M1) are not retrofitted — their residual semantics
+were settled in implementation and are pinned by the determinism golden.

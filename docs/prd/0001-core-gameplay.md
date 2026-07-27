@@ -88,7 +88,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   tick, and a whole pause (which advances no ticks) admits at most one call.
 - **A wave's countdown begins on the tick after the previous wave launches** — whether that wave
   launched by its own countdown expiring or by an early call — so **countdowns are sequential** (one wave
-  counts down at a time), while the resulting creep **waves may overlap** on the field (the next
+  counts down at a time), while the resulting creep **waves may overlap** on the board (the next
   wave arrives while the current one's creeps are still alive). The **first wave's countdown starts
   at run start** (tick 0), so it is callable from the opening tick.
 
@@ -116,19 +116,19 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 ### 4. Combat — scheduled impact events
 
-- The sim never simulates a moving projectile. When a tower fires, it **schedules an impact
-  event** at `fire_tick + travel_ticks`; the renderer draws a cosmetic projectile over the
+- The sim never simulates a moving shot. When a tower fires, it **schedules an impact
+  event** at `fire_tick + travel_ticks`; the renderer draws a cosmetic tracer over the
   delay. The sim runs **no per-tick trajectory integration** — a shot is one lightweight scheduled
   event (resident until it lands), not a per-tick-integrated entity. The cost is a **bounded
   queued-event budget** — memory and insert/resolve work scale with _in-flight shots_
   (fire-rate × travel-time × towers, trivial at the ADR 0005 stress scale), not with per-tick
-  projectile motion. Combat is deterministic by construction (see Determinism).
+  shot motion. Combat is deterministic by construction (see Determinism).
 - A scheduled impact carries a **fire-time snapshot** of its damage and effects — selling,
   upgrading, or re-buffing the source tower before the shot lands does not alter an impact
   already in flight.
 - **Single-target** attacks are **target-locked**: the scheduled hit lands on that specific
   creep. If the creep **dies or leaks** before impact, the shot is **wasted** — no re-target ("you can't
-  re-target a bullet").
+  re-target a shot in flight").
 - **Area (AoE)** attacks are **point-locked**: the impact is scheduled to a fixed board point,
   and on the impact tick it resolves against **whatever creeps are within the radius then**.
   Creeps can walk out of a blast (dodge) or into it (caught). **Aim leads the target** — the
@@ -209,9 +209,9 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
     answer exists (next).
   - **DoT bypasses armor.** Armor reduces **direct hits only**, so DoT is the specialist answer
     to heavily-armored creeps.
-  - **Resistances are boolean immunity flags,** consistent with the domain model below.
+  - **Immunities are boolean flags,** consistent with the domain model below.
   - _(An elemental damage-type system remains a possible future **additive** extension — existing
-    content stays untyped, creeps default to no resistance — so the door is open without a
+    content stays untyped, creeps default to no immunities — so the door is open without a
     redesign. It is not built.)_
 - **Domain engagement:** each **attacking tower targets ground, air, or both** (a support-only
   tower attacks nothing and has no target domain); each creep is ground or
@@ -241,7 +241,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   reach zero or below** — a multi-life boss leak may overshoot past zero.
 - **Win** = **all scheduled waves are exhausted and no creep remains alive on the board**, with
   at least one life remaining. (Because waves can overlap, the run is not won while any wave's
-  creeps are still on the field, even if the last wave has spawned out.)
+  creeps are still on the board, even if the last wave has spawned out.)
 - **Scoring — two readouts:**
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
@@ -299,7 +299,7 @@ M1 is the whole loop above, instantiated at its thinnest — playable end to end
 **two-path board** named by the roadmap is the R1 target that M2–M5 build toward; M1 starts on a
 simpler single-path board to keep the first slice minimal.
 
-**On at M1:** a **minimal single-path board** (one entrance, one exit, open buildable field) ·
+**On at M1:** a **minimal single-path board** (one entrance, one exit, open buildable area) ·
 **one single-target ground tower** (single level, no upgrades) · **one ground creep** (plain
 hit points, no armor/immunities) · **one wave** · dynamic re-pathing, the maze invariant, the
 place-adjacent-not-on rule, sell-at-haircut (no move, juggling possible) · win = survive the
@@ -333,7 +333,7 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   Creep spawns come from the ruleset's wave schedule, not the input log (ADR 0006). No I/O, floats,
   `Math.random`, or wall-clock in the sim.
 - **Scheduled combat** is a small deterministic event queue keyed to an `impact_tick` and either a
-  target-id (single-target) or a fixed impact point (AoE); no per-tick projectile integration.
+  target-id (single-target) or a fixed impact point (AoE); no per-tick trajectory integration.
   Events sharing an `impact_tick` resolve in a **deterministic total order** (a stable scheduling
   key), and within an AoE, effects apply over creeps in a **deterministic order** (by creep id) —
   so ordering-sensitive effects (e.g. chance-based stun drawing from the sim RNG) are reproducible.
