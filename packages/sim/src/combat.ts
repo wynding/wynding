@@ -27,18 +27,21 @@
 // retries next tick (total and reproducible for every `step()` caller).
 
 import { FP_ONE } from '@wynding/engine';
-import type { TowerDef } from '@wynding/types';
 import { ORTHO_COST, DIAG_COST, type Grid } from './board';
 import type { DistanceField } from './pathfinding';
 import { distAt } from './field-access';
 import { deriveValidCreepPosition, cellOf, type CreepGeometry } from './movement';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
+import type { CompiledTower } from './ruleset';
 
 // Combat tuning (range, per-hit damage, fire cadence, projectile travel, kill
 // bounty) is NO LONGER a hardcoded constant here — Story 5 migrated it into the
-// ruleset bundle (ADR 0007). Tower stats arrive as the `tower: TowerDef` param of
-// `runCombat`; kill bounty is a per-creep SoA column credited from the killed
-// creep's own value (correct for future mixed-kind waves).
+// ruleset bundle (ADR 0007). Tower stats arrive as the `tower: CompiledTower` param
+// of `runCombat` — the sim-owned compiled projection (v2's raw `TowerDef` carries a
+// discriminated `effects` array instead of a flat `damage`; `compileRuleset`
+// resolves that down to the single value this module reads); kill bounty is a
+// per-creep SoA column credited from the killed creep's own value (correct for
+// future mixed-kind waves).
 
 /** Forged-state / DoS backstop on the resident impact queue (never bites real play). */
 export const MAX_IN_FLIGHT_IMPACTS = MAX_TOWERS;
@@ -287,7 +290,7 @@ export function runCombat(
   bounty: number,
   field: DistanceField,
   grid: Grid,
-  tower: TowerDef,
+  tower: CompiledTower,
   events?: StepEvents,
 ): { creeps: CombatCreeps; impacts: Impact[]; bounty: number; killBounty: number } {
   const canonical = canonicalImpacts(impacts);

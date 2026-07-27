@@ -12,6 +12,7 @@ import {
   hashSimState,
   compileRuleset,
   rulesetDigest,
+  validateRulesetShape,
   deriveScore,
   deriveStars,
   isTerminalPhase,
@@ -132,18 +133,24 @@ export const COMPILE_CACHE_MAX = 8;
  * Injectable LRU cache over `compileRuleset`, keyed by content digest + boardId (#26).
  *
  * The digest itself is NEVER memoized here — it stays a fresh, per-call integrity
- * check computed by `validate` on every request. `compileRuleset` explicitly supports
- * a caller mutating a bundle after compiling it (it snapshots for exactly that reason —
- * ruleset.ts), so an identity-keyed memo would risk returning a stale compile for a
- * bundle object the caller changed. Keying by content digest instead means a mutated
- * bundle produces a different digest → a cache miss → a fresh compile: correctness is
- * carried by the digest, never by object identity or recency alone.
+ * check `validate` recomputes on every request, over the freshly-`validateRulesetShape`-
+ * normalized bundle (never the caller's raw object — a cache hit can no longer ride a
+ * stale digest past a corrupted bundle, since the structural wall runs before the
+ * digest is even taken). `compileRuleset` explicitly supports a caller mutating a
+ * bundle after compiling it (it snapshots for exactly that reason — ruleset.ts), so an
+ * identity-keyed memo would risk returning a stale compile for a bundle object the
+ * caller changed. Keying by content digest instead means a mutated bundle produces a
+ * different digest → a cache miss → a fresh compile: correctness is carried by the
+ * digest, never by object identity or recency alone.
  *
  * A cache HIT still leaves one once-per-new-digest cost on a MISS: `compileRuleset`
- * computes its own internal digest again internally. Eliminating that would mean
- * changing sim's public `compileRuleset` API to accept a precomputed digest — declined
- * as added API surface for a once-per-bundle micro-cost; the per-request recompile and
- * per-request double-digest that #26 actually complains about are both gone on hits.
+ * runs `validateRulesetShape` and computes its own internal digest again internally.
+ * Eliminating that would mean changing sim's public `compileRuleset` API to accept a
+ * precomputed normalized bundle/digest — declined as added API surface for a
+ * once-per-bundle micro-cost; the per-request recompile and per-request double-digest
+ * that #26 actually complains about are both gone on hits, and the expensive
+ * board/schedule compile is still skipped entirely on a hit — only the (microseconds)
+ * structural validation now runs unconditionally.
  */
 export class CompileCache {
   private readonly entries = new Map<string, CompiledRuleset>();
@@ -235,15 +242,17 @@ export function validate(
     return { ok: false, reason: 'rulesetHash must be a 64-char hex SHA-256 digest' };
   }
 
-  // (2) Bind identity: the bundle digest must match, and the board must compile. Any
+  // (2) Bind identity: validate the bundle's SHAPE first (never skippable, even on a
+  // cache hit — Codex R2-1), digest the NORMALIZED value, then look up/compile. Any
   // malformed bundle (a float that trips canonicalJson, a non-array boards, an
   // unplayable board) surfaces as a RulesetError → a clean rejection, never an
   // unhandled throw out of the validator (validate() is total in its result).
   let digest: string;
   let ruleset: CompiledRuleset;
   try {
-    digest = rulesetDigest(bundle);
-    ruleset = cache.get(bundle, replay.boardId, digest);
+    const normalized = validateRulesetShape(bundle);
+    digest = rulesetDigest(normalized);
+    ruleset = cache.get(normalized, replay.boardId, digest);
   } catch (err) {
     if (err instanceof RulesetError)
       return { ok: false, reason: `invalid ruleset: ${err.message}` };

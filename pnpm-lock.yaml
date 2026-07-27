@@ -97,13 +97,12 @@ importers:
 
   packages/content:
     dependencies:
-      '@wynding/types':
-        specifier: workspace:*
-        version: link:../types
-    devDependencies:
       '@wynding/sim':
         specifier: workspace:*
         version: link:../sim
+      '@wynding/types':
+        specifier: workspace:*
+        version: link:../types
 
   packages/engine:
     dependencies:

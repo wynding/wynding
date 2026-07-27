@@ -53,13 +53,19 @@ describe('wave launch + countdown', () => {
     expect(s.creeps.id).toHaveLength(1); // first creep spawned on the launch tick
   });
 
-  it('call-early launches immediately and credits the early-call bonus', () => {
-    const ruleset = testRuleset(OPEN, { waveCount: 1, earlyCallBonus: 7, startingBounty: 80 });
+  it('call-early launches immediately; the early-call bonus is pinned to 0 at simVersion 5', () => {
+    // DEVIATION (M2-S1 plan step 7): the flat `earlyCallBonus` compiled field is
+    // derived from the capability profile's `maxEarlyCallBountyDivisor: 0` — always
+    // 0 at this sim's behavior version, regardless of any authored
+    // `balance.earlyCallBountyDivisor` (which itself can only be 0, or compileRuleset
+    // rejects the bundle). S2 replaces this flat field with the real divisor formula
+    // and reintroduces a nonzero-credit assertion here.
+    const ruleset = testRuleset(OPEN, { waveCount: 1, startingBounty: 80 });
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, callEarly);
     expect(s.phase).toBe('active');
     expect(s.launchTick).toBe(0);
-    expect(s.bounty).toBe(87); // 80 + 7 early-call bonus
+    expect(s.bounty).toBe(80); // no early-call bonus — divisor pinned off at simVersion 5
   });
 });
 
@@ -118,14 +124,11 @@ describe('rulesetHash — content-derived SHA-256 (ADR 0007 §3)', () => {
     expect(rulesetDigest(testBundle(OPEN, { startingBounty: 81 }))).not.toBe(base);
   });
 
-  it('does NOT change when a presentation-only field (board name) changes', () => {
-    const base = testBundle(OPEN);
-    const renamed = {
-      ...base,
-      boards: base.boards.map((b) => ({ ...b, name: 'A Totally Different Display Name' })),
-    };
-    expect(rulesetDigest(renamed)).toBe(rulesetDigest(base));
-  });
+  // DEVIATION (M2-S1 decision 5): v1's board `name` was presentation-only and
+  // excluded from the hash so a rename never invalidated a replay. v2 carries ZERO
+  // presentation fields — `name` is deleted from the schema entirely, not merely
+  // stripped from the digest — so there is no longer a presentation-only field to
+  // test the exclusion of. This case is retired, not replaced.
 
   it('is compiled onto the CompiledRuleset and matches the raw-bundle digest', () => {
     const bundle = testBundle(OPEN);
@@ -137,6 +140,199 @@ describe('rulesetHash — content-derived SHA-256 (ADR 0007 §3)', () => {
     const base = rulesetDigest(testBundle(OPEN));
     const withJunk = { ...testBundle(OPEN), someMetadata: 'irrelevant', extra: 42 } as Ruleset;
     expect(rulesetDigest(withJunk)).toBe(base); // unknown fields don't change identity
+  });
+
+  it('ignores unknown properties nested inside an effect (allowlist, not spread)', () => {
+    // A hand-built bundle can reach rulesetDigest without parseRulesetJson's strict
+    // rejection; the per-kind effect projection must still keep an unknown effect
+    // property out of the digest ("equal in every supported field ⇒ equal digest").
+    const base = rulesetDigest(testBundle(OPEN));
+    const bundle = structuredClone(testBundle(OPEN)) as unknown as {
+      towerCatalog: { effects: Record<string, unknown>[] }[];
+    };
+    bundle.towerCatalog[0]!.effects[0]!.someJunk = 999;
+    expect(rulesetDigest(bundle as unknown as Ruleset)).toBe(base);
+  });
+});
+
+/**
+ * Generic mutation-walk machinery (M2-S1 P3 step 8): recursively visit every
+ * primitive leaf of a bundle, mutate it in isolation on a deep clone, and assert
+ * the digest changes — proving every field the schema carries actually enters
+ * `rulesetHash`, including the parity-invisible zero-valued fields (`clearBonus`,
+ * the two early-call divisors) that no M1 scenario's world-hash would ever
+ * distinguish. Generic over the tree shape rather than hand-enumerating fields, so
+ * it stays correct as the schema grows.
+ */
+type PathSegment = string | number;
+
+function walkLeaves(
+  node: unknown,
+  path: readonly PathSegment[],
+  visit: (path: readonly PathSegment[], leaf: string | number | boolean) => void,
+): void {
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => walkLeaves(item, [...path, i], visit));
+    return;
+  }
+  if (node !== null && typeof node === 'object') {
+    for (const key of Object.keys(node)) {
+      walkLeaves((node as Record<string, unknown>)[key], [...path, key], visit);
+    }
+    return;
+  }
+  if (typeof node === 'number' || typeof node === 'string' || typeof node === 'boolean') {
+    visit(path, node);
+  }
+}
+
+function setAtPath(root: unknown, path: readonly PathSegment[], value: unknown): void {
+  let cur = root as Record<PathSegment, unknown>;
+  for (let i = 0; i < path.length - 1; i++) cur = cur[path[i]!] as Record<PathSegment, unknown>;
+  cur[path[path.length - 1]!] = value;
+}
+
+/** Asserts every projected leaf of `bundle` changes `rulesetDigest` when mutated in
+ *  isolation. Skips nothing — a schema field this test doesn't reach is a field the
+ *  digest doesn't yet cover. */
+function assertEveryLeafHashes(bundle: Ruleset): void {
+  const baseDigest = rulesetDigest(bundle);
+  let leafCount = 0;
+  walkLeaves(bundle, [], (path, leaf) => {
+    leafCount++;
+    const mutated =
+      typeof leaf === 'number' ? leaf + 1 : typeof leaf === 'string' ? `${leaf}x` : !leaf;
+    const clone = structuredClone(bundle);
+    setAtPath(clone, path, mutated);
+    let mutatedDigest: string;
+    try {
+      mutatedDigest = rulesetDigest(clone);
+    } catch {
+      // A mutation that makes the bundle loudly UNHASHABLE (e.g. a mutated
+      // effect-kind discriminator matches no projection branch) proves the field
+      // is load-bearing exactly as strongly as a changed digest — the identity
+      // cannot silently survive the mutation either way.
+      return;
+    }
+    expect(mutatedDigest, `mutating .${path.join('.')} should change rulesetDigest`).not.toBe(
+      baseDigest,
+    );
+  });
+  expect(leafCount).toBeGreaterThan(0); // the walk actually visited something
+}
+
+describe('rulesetHash — every schema field enters the digest (P3 step 8 mutation walk)', () => {
+  it('walks the shipped-artifact-shaped fixture (test-support values mirror wynding-core-m1)', () => {
+    assertEveryLeafHashes(testBundle(OPEN));
+  });
+
+  it('walks a full-schema fixture exercising every union member and optional field', () => {
+    // All eight EffectDef variants (six kinds; direct/burst each single+aoe), spread
+    // across three towers because `support` must be a bundle's sole effect with no
+    // `attack`, and at most one `burst` may appear per bundle:
+    //   • 'multi' — non-support, attacking, WITH a burst → cadenceTicks omitted
+    //     (cross-field rule) — carries direct/single, direct/aoe, slow, stun, dot,
+    //     and burst/single (6 of the 8 variants).
+    //   • 'supporter' — the exclusive support-only bundle (no attack).
+    //   • 'burst-aoe' — an attack-with-burst bundle carrying burst/aoe (the 8th
+    //     variant), also covering a second cadenceTicks-omitted attack shape.
+    const fullSchema: Ruleset = {
+      formatVersion: 2,
+      rulesetId: 'full-schema-fixture',
+      version: 3,
+      creepCatalog: [
+        {
+          id: 'normal',
+          hp: 20,
+          speedFp: 26,
+          armor: 2, // nonzero armor — capability-gated in compileRuleset, not here
+          domain: 'ground',
+          immunities: [],
+          leakCost: 1,
+          bounty: 1,
+        },
+        {
+          id: 'brute',
+          hp: 200,
+          speedFp: 10,
+          armor: 5,
+          domain: 'air',
+          // Authored out of canonical order — rulesetDigest re-canonicalizes
+          // defensively for a hand-built bundle bypassing parseRulesetJson.
+          immunities: ['stun', 'slow'],
+          role: 'boss',
+          leakCost: 1,
+          bounty: 50,
+        },
+      ],
+      towerCatalog: [
+        {
+          id: 'multi',
+          cost: 12,
+          attack: { domain: 'both', rangeFp: 2048, travelTicks: 4 }, // no cadenceTicks (has burst)
+          effects: [
+            { kind: 'direct', form: 'single', damage: 10 },
+            { kind: 'direct', form: 'aoe', damage: 15, radiusFp: 300 },
+            { kind: 'slow', mulFp: 64, durationTicks: 40 },
+            { kind: 'stun', chanceNum: 32, durationTicks: 20 },
+            { kind: 'dot', damagePerTick: 3, cadenceTicks: 10, durationTicks: 30 },
+            { kind: 'burst', form: 'single', damage: 500 },
+          ],
+        },
+        {
+          id: 'supporter',
+          cost: 8,
+          effects: [{ kind: 'support', damageMulFp: 300 }],
+        },
+        {
+          id: 'burst-aoe',
+          cost: 20,
+          attack: { domain: 'air', rangeFp: 4096, travelTicks: 2 }, // no cadenceTicks (has burst)
+          effects: [{ kind: 'burst', form: 'aoe', damage: 800, radiusFp: 512 }],
+        },
+      ],
+      balance: {
+        startingLives: 10,
+        startingBounty: 80,
+        refundNum: 3,
+        refundDen: 4,
+        slowFloorNum: 1,
+        slowFloorDen: 4,
+        earlyCallBountyDivisor: 7, // nonzero — capability-gated in compileRuleset, not here
+      },
+      scoring: {
+        survivalMul: 25,
+        starThresholds: [1, 6, 9],
+        earlyCallScoreDivisor: 11, // nonzero — capability-gated in compileRuleset, not here
+      },
+      boards: [
+        {
+          id: 'full-board',
+          widthTiles: 20,
+          heightTiles: 20,
+          entrance: { col: 0, row: 10 },
+          exit: { col: 19, row: 10 },
+          waves: [
+            {
+              index: 0,
+              countdownTicks: 100,
+              clearBonus: 5, // nonzero — a parity-invisible field at M1
+              entries: [
+                { creepId: 'normal', count: 10, spacingTicks: 20 },
+                { creepId: 'brute', count: 2, spacingTicks: 50, offsetTicks: 15 },
+              ],
+            },
+            {
+              index: 1,
+              countdownTicks: 200,
+              clearBonus: 0,
+              entries: [{ creepId: 'normal', count: 5, spacingTicks: 10, offsetTicks: 3 }],
+            },
+          ],
+        },
+      ],
+    };
+    assertEveryLeafHashes(fullSchema);
   });
 });
 
@@ -151,7 +347,7 @@ describe('compiled ruleset snapshots its tuning', () => {
     expect(s.lives).toBe(10); // the compiled snapshot, not the post-compile mutation
     // The creep catalog is snapshotted too: the compiled def keeps its authored HP (17)
     // even though the raw bundle's creep was mutated to 999 after compile.
-    expect(ruleset.creepByKind.normal?.hp).toBe(17);
+    expect(ruleset.creepById.normal?.hp).toBe(17);
   });
 
   it('freezes the compiled tuning so a retained ruleset cannot be mutated', () => {
@@ -161,7 +357,7 @@ describe('compiled ruleset snapshots its tuning', () => {
     expect(Object.isFrozen(ruleset.scoring)).toBe(true);
     expect(Object.isFrozen(ruleset.tower)).toBe(true);
     expect(Object.isFrozen(ruleset.schedule)).toBe(true);
-    expect(Object.isFrozen(ruleset.creepByKind)).toBe(true); // a frozen record, not a Map
+    expect(Object.isFrozen(ruleset.creepById)).toBe(true); // a frozen record, not a Map
     expect(() => {
       (ruleset.balance as { startingLives: number }).startingLives = 999;
     }).toThrow(); // strict-mode write to a frozen object
@@ -169,7 +365,7 @@ describe('compiled ruleset snapshots its tuning', () => {
       (ruleset as { tower: unknown }).tower = {}; // can't replace a field on the frozen wrapper
     }).toThrow();
     expect(() => {
-      (ruleset.creepByKind as Record<string, unknown>).normal = {}; // frozen record
+      (ruleset.creepById as Record<string, unknown>).normal = {}; // frozen record
     }).toThrow();
   });
 });

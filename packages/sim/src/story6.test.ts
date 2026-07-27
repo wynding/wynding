@@ -108,7 +108,7 @@ describe('projectCreep — derived render point', () => {
     // OPEN's entrance (0,2) → centre (128,640); heading east (the OPEN geometry's only
     // direction from the entrance), one tick's speed budget travelled on x, centre held
     // on y — the exact point, not merely "some safe-integer point".
-    const speedFp = ruleset.creepByKind.normal?.speedFp;
+    const speedFp = ruleset.creepById.normal?.speedFp;
     expect(speedFp).toBeDefined();
     expect(p).toEqual({ x: 0 * 256 + 128 + (speedFp as number), y: 2 * 256 + 128 });
   });

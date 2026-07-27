@@ -12,7 +12,7 @@ import {
   type SimInput,
   type SimState,
 } from '@wynding/sim';
-import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
+import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { createProjection } from './projection';
 import { deriveViewModel, deriveHud } from './view-model';
 import { interpolateCreeps } from './interpolate';
@@ -20,7 +20,8 @@ import { resolvePalette } from './palette';
 import type { ColourMode, RenderVM } from './types';
 import * as barrel from './index';
 
-const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
+const bundle = getBundledRuleset();
+const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
 
 describe('projection — fit/letterbox + pointer inverse', () => {
   it('letterboxes a wide canvas: whole-pixel cells, centred board', () => {

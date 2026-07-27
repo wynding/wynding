@@ -22,7 +22,12 @@ export default tseslint.config(
   {
     // Determinism boundary guard — the replay-verified core must never read
     // wall-clock time or ambient randomness. Same inputs, byte-identical state.
-    files: ['packages/engine/src/**', 'packages/sim/src/**', 'packages/replay/src/**'],
+    files: [
+      'packages/engine/src/**',
+      'packages/sim/src/**',
+      'packages/replay/src/**',
+      'packages/content/src/**',
+    ],
     rules: {
       'no-restricted-properties': [
         'error',

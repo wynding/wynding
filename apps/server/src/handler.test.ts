@@ -3,8 +3,11 @@
 import { describe, it, expect } from 'vitest';
 import { currentRulesetHash, type Replay } from '@wynding/replay';
 import { SIM_VERSION } from '@wynding/sim';
-import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
+import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { handler } from './handler';
+
+const m1Ruleset = getBundledRuleset();
+const M1_BOARD_ID = defaultBoardId(m1Ruleset);
 
 function validReplayBody(): string {
   const replay: Replay = {

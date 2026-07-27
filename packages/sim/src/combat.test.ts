@@ -6,14 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { createInitialState, step, type SimInput } from './index';
 import type { TowerArrays } from './tower';
 import { runCombat, type CombatCreeps, type Impact, type StepEvents } from './combat';
-import { testRuleset, TEST_TOWER } from './test-support';
-
-// Tuning now lives in the ruleset; mirror the M1 tower stats as locals for the tests.
-const RANGE = TEST_TOWER.rangeFp;
-const TRAVEL_TICKS = TEST_TOWER.travelTicks;
-const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
-const DIRECT_DAMAGE = TEST_TOWER.damage;
-const KILL_BOUNTY = 1;
+import { testRuleset } from './test-support';
 
 // A large open board so targeting geometry is clean; exit on the right at row 6.
 const RULESET = testRuleset({
@@ -24,6 +17,17 @@ const RULESET = testRuleset({
 });
 const FIELD = RULESET.board.field;
 const GRID = RULESET.board.grid;
+
+// Tuning now lives in the ruleset; mirror the compiled M1 tower stats as locals for
+// the tests. `runCombat` takes the sim-owned `CompiledTower` (the raw v2 `TowerDef`
+// carries a discriminated `effects` array instead of a flat `damage`), so `TEST_TOWER`
+// here is `RULESET.tower` — the compiled projection — not `test-support`'s raw def.
+const TEST_TOWER = RULESET.tower;
+const RANGE = TEST_TOWER.rangeFp;
+const TRAVEL_TICKS = TEST_TOWER.travelTicks;
+const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
+const DIRECT_DAMAGE = TEST_TOWER.damage;
+const KILL_BOUNTY = 1;
 
 /** One tower at (5,5); footprint centre = ((5+1)·256, (5+1)·256) = (1536,1536). */
 function oneTower(targetId = 0, nextFireTick = 0): TowerArrays {

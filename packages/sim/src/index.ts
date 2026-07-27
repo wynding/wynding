@@ -10,7 +10,7 @@
 // bundle with `compileRuleset` and threads the branded `CompiledRuleset` into `step`.
 
 import { hashState } from '@wynding/engine';
-import type { CreepKind, Seed } from '@wynding/types';
+import type { Seed } from '@wynding/types';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
 import {
   runCombat,
@@ -394,7 +394,7 @@ export function step(
   // ticks cannot change the final world-hash or score (re-derivation is stable).
   if (isTerminalPhase(state.phase)) return state;
 
-  const { board, tower, balance, scoring: _scoring, schedule, creepByKind } = ruleset;
+  const { board, tower, balance, scoring: _scoring, schedule, creepById } = ruleset;
   const { grid } = board;
   const { entrance } = grid;
   const cost = tower.cost;
@@ -416,8 +416,8 @@ export function step(
     for (;;) {
       const entry = state.spawnCursor < schedule.length ? schedule[state.spawnCursor] : undefined;
       if (entry === undefined || launch + entry.offsetTicks > state.tick) break;
-      const kindOf: CreepKind = entry.kind;
-      const def = creepByKind[kindOf];
+      const creepIdOf: string = entry.creepId;
+      const def = creepById[creepIdOf];
       if (def !== undefined) {
         const newCreepId = allocEntityId(state);
         // Exhausted entity-id space: the scheduled spawn is still consumed (cursor
@@ -722,7 +722,8 @@ export type { BoardContext } from './context';
 // Landed-impact events (M1 Story 8, #31): an optional out-param on `step()` — never
 // part of `SimState`, never hash-relevant.
 export type { StepEvents } from './combat';
-// Ruleset bundle (M1 Story 5): compilation, the content digest, and the boundary guard.
+// Ruleset bundle (M1 Story 5, re-encoded to v2 in M2-S1): compilation, the content
+// digest, and the boundary guard.
 export {
   compileRuleset,
   rulesetDigest,
@@ -730,5 +731,14 @@ export {
   RulesetError,
   MAX_MATCH_TICKS,
   type CompiledRuleset,
+  type CompiledBalance,
+  type CompiledScoring,
+  type CompiledTower,
+  type CompiledCreep,
   type ScheduledSpawn,
 } from './ruleset';
+// The v2 structural validator + JSON parser (M2-S1) — `@wynding/content`'s registry
+// needs `parseRulesetJson` directly (the sanctioned `content → sim` edge).
+export { validateRulesetShape, parseRulesetJson, MAX_RULESET_TEXT_UNITS } from './ruleset-schema';
+// The per-`simVersion` capability profile (M2-S1).
+export { capabilityProfile, type CapabilityProfile } from './capability';
