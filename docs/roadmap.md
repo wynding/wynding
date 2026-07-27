@@ -31,8 +31,8 @@ Milestones, in rough build order (each a public **alpha**):
 - **M1 — first vertical slice:** one board, one tower, one wave, one creep type —
   playable end to end. The first thing we show people.
 - **M2 — breadth:** more tower types, more creep types, more waves.
-- **M3 — a full wave progression:** multiple waves of basic creeps — a complete run
-  you can win or lose.
+- **M3 — the full tuned campaign:** the complete, tuned wave progression on the
+  two-path board — the run you can win or lose, superseding M2's showcase arc.
 - **M4 — depth:** tower leveling and creep leveling.
 - **M5 — economy:** tuned to the content. (A minimal economy exists from M1 — you
   need bounty to place a tower — and is _tuned_ across the phase, not bolted on at

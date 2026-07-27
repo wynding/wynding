@@ -28,9 +28,14 @@ let cosmetic choices affect the world-hash.
 
 What each wave spawns comes from the ruleset schedule (ADR 0007), not free player input,
 and the scheduler runs **inside the deterministic sim** — its timing depends on evolving
-sim state (when the previous wave clears) and on any recorded wave-timing command. So
+sim state and on any recorded wave-timing command. So
 spawns are a deterministic function of `(seed, ruleset, inputs)` and re-simulation is
 exact, with no creep spawns in the input log.
+
+> **Correction (2026-07-26, M2 spec):** an earlier revision illustrated the sim-state
+> dependence as "when the previous wave clears." That example was stale — wave timing
+> chains off the previous wave's **launch** (the next countdown starts one tick after it;
+> PRD 0001 §2's sequential-countdown rules). The decision above is unchanged.
 
 ### 3. Replay identity selects the board
 

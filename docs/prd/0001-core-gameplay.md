@@ -76,7 +76,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 - The game runs in **real time**. The player may **build, sell, and re-maze at any moment,
   including mid-wave** — there is no separate build phase.
-- Each **wave** arrives on a visible **countdown**. The player may **call the next wave
+- Each **wave** arrives on a visible **countdown**. From M2 the countdown also shows the
+  coming wave's composition — the **wave preview** (one wave of lookahead, derived from the
+  ruleset wave schedule) — so building against it and calling it early are informed choices.
+  The player may **call the next wave
   early** to press an advantage; calling early pays a bonus (see Economy) and is a
   risk/reward tempo lever — the reward is real, but the board faces the new wave sooner. Only the
   **single wave currently counting down** is callable: calling it launches that wave and starts
@@ -166,6 +169,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   edge with the support tower's** — a corner-only touch does not count. If burst ships, the tower
   is **consumed at its fire tick** — the maze opens (and ground creeps re-route) then, while its
   scheduled impact still resolves via the fire-time snapshot.)_
+  _(Clarified 2026-07-26, M2 spec: routes are per-tick derived state, so "re-route then" means no
+  creep ever takes a movement step on the old maze after the consumption; within the consumption
+  tick itself, targeting and AoE lead read that tick's routing snapshot — the cross-effect
+  ordering detail this PRD delegates to the combat build, pinned in the M2 spec.)_
 
 - **Effect stacking rules** (shape, so combined effects read predictably):
   - Same **non-DoT** effect (slow, stun) from multiple sources → the **strongest magnitude wins**, and a new application
@@ -206,7 +213,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   - _(An elemental damage-type system remains a possible future **additive** extension — existing
     content stays untyped, creeps default to no resistance — so the door is open without a
     redesign. It is not built.)_
-- **Domain engagement:** each **tower targets ground, air, or both**; each creep is ground or
+- **Domain engagement:** each **attacking tower targets ground, air, or both** (a support-only
+  tower attacks nothing and has no target domain); each creep is ground or
   flying. A tower can only hit creeps in a domain it targets — so some creeps are simply ignored
   by some towers. Debuffs obey the same rule (an air-targeting slow can slow flyers). Which
   towers and creeps sit where is content/tuning; a **dedicated anti-air** tower is just the
@@ -222,7 +230,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
     exhausted _and_ none of its creeps remain alive; **forfeited if any of its creeps leaked**),
   - an **early-call bonus** (the tempo lever from §2).
 - These force real decisions: spend now for safety vs. hold to build bigger, and how
-  aggressively to rush waves.
+  aggressively to call waves early.
 - **Interest on unspent bounty** is an income source the ruleset is **architected to support
   but ships off**; it may be switched on during M5 economy tuning if the decisions feel shallow.
 
@@ -237,8 +245,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Scoring — two readouts:**
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
-    upgrade value, and aggressive early wave-sends; these inputs come online as they become
-    meaningful (kills with combat, early-sends at M2, upgrade value at M4). _(Point weights — and the exact
+    upgrade value, and aggressive early calls; these inputs come online as they become
+    meaningful (kills with combat, early calls at M2, upgrade value at M4). _(Score weights — and the exact
     sim-state measure behind each input, e.g. what "upgrade value" counts — are pinned with the
     authoritative scorer; the current scorer is a placeholder that grows into this contract.)_
   - A derived **star grade** (from lives remaining — a near-flawless run is the top grade) as

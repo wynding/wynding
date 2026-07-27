@@ -19,3 +19,6 @@ and keep terminology consistent with [../CONTEXT.md](../CONTEXT.md).
 
 - [M1 — First Vertical Slice](m1.md) — one board / one tower / one creep / one wave, the whole
   [Core Gameplay](../prd/0001-core-gameplay.md) loop at its thinnest, playable end to end.
+- [M2 — Breadth](m2.md) — the combat vocabulary completes: 9 towers / 8 creeps / a 10-wave
+  showcase arc with live wave-clear + early-call bonuses, wave preview, and air + anti-air,
+  on M1's board.
