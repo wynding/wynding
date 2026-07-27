@@ -34,12 +34,58 @@ reproducer; a failing `sim` test beats a console log.
 ### 3. Verify — the local gate (identical to CI)
 
 `pnpm run verify` must be green before you push (`format:check` + `typecheck` + `lint` +
-`test` with coverage). Two gates are hard:
+`test` with coverage, plus the repo guards). Two gates are hard:
 
 - **Determinism** — same `(seed, ruleset, inputs)` → byte-identical state; the
   world-hash / replay tests must pass. Lint bans `Math.random`/`Date`/`performance` in the
   core.
 - **Coverage** — `engine`/`sim`/`replay` ≥ 90% lines+branches.
+
+Only deterministic artifacts certify anything — CI, goldens, schema validation, linters. A
+quiet review bot is a sample, not a certificate. So a finding class that a script can settle
+becomes a script: `check:glossary` greps the docs that carry the game's vocabulary (the glossary,
+vision, roadmap, PRDs, milestone specs) for the `_Avoid_:` terms in [CONTEXT.md](CONTEXT.md), so
+terminology drift is caught in one local run instead of round-tripping through code review. ADRs
+and design-notes are deliberately outside it — engineering prose uses those same words in their
+ordinary technical senses. Different senses are real inside the scope too ("hit points",
+"flow-field", "core loop"); each is allowed by an entry — with a stated reason — in
+`scripts/glossary-lint.config.json`, never by loosening the script.
+
+### 3.5. QC before every push
+
+Verify proves the code runs; it cannot tell you the change is coherent with the documents it
+touches. That is the **QC pass**: before every push, re-read the staged diff with fresh eyes and
+adversarially — each patched paragraph checked **upward** against the PRD/ADRs it touches (the
+higher document wins), and **sideways** against its sibling patches in the same section. Review-fix
+pushes need it most, because patching one finding at a time is what authors contradictions.
+
+A `pre-push` hook enforces that the pass happened. It refuses to push any branch but `main`
+unless its tip commit carries a **QC record** — a `QC:` trailer holding that commit's own tree
+hash:
+
+```bash
+git add -A
+# ... run the QC pass over the staged diff ...
+git commit -m "$(printf 'docs(prd): fix the thing\n\nQC: %s\n' "$(git write-tree)")"
+```
+
+`git write-tree` prints the hash of the staged tree, which is the tree the commit gets — so an
+honest record costs one substitution, and it cannot be recycled: edit anything afterwards and the
+hashes stop matching, which is exactly when the pass is stale. Already committed? Amend it with
+`git commit --amend --no-edit --trailer "QC=$(git write-tree)"` (git 2.32+). `pnpm install` wires
+the hook by pointing `core.hooksPath` at the tracked `.githooks/` directory — if another tool
+already owns that setting, the install says so and leaves it alone, and you wire it yourself with
+`git config core.hooksPath .githooks`.
+
+The record is a claim, not a proof — it says someone ran the pass, and its absence is visible in
+the PR's commit list. **Emergencies only**, and never as a habit (the rationale is required, and
+must be at least 15 characters — long enough to be a reason rather than a keystroke):
+
+```bash
+QC_OVERRIDE="hotfix for the broken deploy; QC follows in the next push" git push
+```
+
+It is printed, and worth repeating in the PR thread — the commits will not carry it.
 
 ### 4. Review — two models + owner
 

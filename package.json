@@ -20,8 +20,10 @@
     "i18n:gen": "node scripts/i18n-gen.mjs",
     "i18n:check": "node scripts/i18n-check.mjs",
     "check:dependabot-config": "node scripts/check-dependabot-config.mjs",
+    "check:glossary": "node scripts/check-glossary-terms.mjs",
     "size": "node scripts/size-limit.mjs",
-    "verify": "pnpm run format:check && pnpm run i18n:check && pnpm run check:dependabot-config && turbo run typecheck lint test",
+    "prepare": "node scripts/install-git-hooks.mjs",
+    "verify": "pnpm run format:check && pnpm run i18n:check && pnpm run check:dependabot-config && pnpm run check:glossary && turbo run typecheck lint test",
     "clean": "turbo run clean && rm -rf node_modules .turbo"
   },
   "devDependencies": {
