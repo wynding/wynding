@@ -1,8 +1,11 @@
-// board-integration.test.ts — proves the authored M1 ruleset (field-01) builds a
-// valid, solvable grid AND compiles for the sim. It lives on the CONTENT side
-// (content → sim) because the repo's dependency graph flows one way
-// (types ← engine ← sim ← content); @wynding/sim is a test-only devDependency here,
-// so no backwards sim → content edge is introduced.
+// board-integration.test.ts — proves the shipped M1 ruleset (field-01) builds a
+// valid, solvable grid AND compiles for the sim, loaded the same way a real
+// consumer does: through the registry. It lives on the CONTENT side (content →
+// sim) because the repo's dependency graph flows one way
+// (types ← engine ← sim ← content); @wynding/sim is now a RUNTIME dependency of
+// this package (M2-S1: the registry itself calls `parseRulesetJson`), not merely a
+// test-only devDependency, so this test exercises a real production edge rather
+// than a test-only shortcut.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -14,9 +17,11 @@ import {
   createInitialState,
   GridError,
 } from '@wynding/sim';
-import { m1Ruleset, M1_BOARD_ID } from './boards';
+import { getBundledRuleset, defaultBoardId } from './registry';
 
-const m1Board = m1Ruleset.boards[0]!;
+const ruleset = getBundledRuleset();
+const m1Board = ruleset.boards[0]!;
+const boardId = defaultBoardId(ruleset);
 
 describe('field-01 (the real M1 board) builds a solvable grid', () => {
   const grid = buildGrid(m1Board);
@@ -62,11 +67,11 @@ describe('field-01 compiles for the sim as the single source of truth', () => {
   it('compiles the ruleset and seeds the sim economy FROM the content (Story 5)', () => {
     // Story 5 made the ruleset the single source of truth: createInitialState reads
     // the starting economy from the compiled bundle, no hardcoded sim constants.
-    const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
-    const s = createInitialState(1, ruleset);
-    expect(s.lives).toBe(m1Ruleset.balance.startingLives);
-    expect(s.bounty).toBe(m1Ruleset.balance.startingBounty);
+    const compiled = compileRuleset(ruleset, boardId);
+    const s = createInitialState(1, compiled);
+    expect(s.lives).toBe(ruleset.balance.startingLives);
+    expect(s.bounty).toBe(ruleset.balance.startingBounty);
     expect(s.phase).toBe('pre-wave');
-    expect(ruleset.schedule).toHaveLength(10); // one wave × 10 creeps
+    expect(compiled.schedule).toHaveLength(10); // one wave × 10 creeps
   });
 });

@@ -8,16 +8,28 @@
 // stub free of an @types/aws-lambda dependency; swap them for the real types when
 // wiring the deployment (Function URL / API Gateway proxy integration).
 
-import { validate, currentRulesetHash, type Replay } from '@wynding/replay';
-import { m1Ruleset } from '@wynding/content';
+import { readFileSync } from 'node:fs';
+import { validate, type Replay } from '@wynding/replay';
+import { parseRulesetJson, compileRuleset } from '@wynding/sim';
+import { BUNDLED_ARTIFACT_URL } from '@wynding/content/artifact';
 
-// The authored ruleset bundle the server re-validates against. The submitted replay
-// carries its own `boardId` (Story 5); `validate` resolves the board from the bundle
-// and binds the content-derived ruleset digest before re-simulating.
-const rulesetBundle = m1Ruleset;
-// The bundle is a fixed module constant, so its digest is computed ONCE at cold start
-// (not re-hashed per request — code-review).
-const RULESET_HASH = currentRulesetHash(rulesetBundle);
+// Cold-start disk path (M2-S1 Validation architecture): read the shipped artifact's
+// TEXT from disk and parse+validate it through the SAME `parseRulesetJson` the
+// client's registry runs over its bundler-embedded copy of the identical bytes — the
+// two independent loaders (ADR 0007 §2) can never accept/reject different bundles on
+// the same file. Importing `@wynding/content/artifact` (never the main `.` registry
+// entry) means this module never drags the bundler-embedded raw text into the
+// server's module graph.
+const rulesetBundle = parseRulesetJson(readFileSync(BUNDLED_ARTIFACT_URL, 'utf8'));
+// The default board id, computed LOCALLY — never imported from the content registry's
+// `defaultBoardId` (that would pull the bundled text in too, Codex R3-1). The
+// validator guarantees `boards` has at least one entry.
+const DEFAULT_BOARD_ID = rulesetBundle.boards[0]!.id;
+// Compile the default board at module init (not just at first request) so a bad
+// deploy fails fast at COLD START, never as a per-request 422. The bundle is a fixed
+// module constant, so this (and the digest it carries) happens ONCE per cold start.
+const compiledDefault = compileRuleset(rulesetBundle, DEFAULT_BOARD_ID);
+const RULESET_HASH = compiledDefault.digest;
 
 interface LambdaEvent {
   readonly body?: string | null;

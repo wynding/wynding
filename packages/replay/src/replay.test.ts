@@ -4,8 +4,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { SIM_VERSION, type SimInput } from '@wynding/sim';
-import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
-import type { Ruleset } from '@wynding/types';
+import { getBundledRuleset, defaultBoardId } from '@wynding/content';
+import type { Ruleset, RulesetBoard } from '@wynding/types';
 import {
   validate,
   currentRulesetHash,
@@ -14,6 +14,8 @@ import {
   type Replay,
 } from './index';
 
+const m1Ruleset = getBundledRuleset();
+const M1_BOARD_ID = defaultBoardId(m1Ruleset);
 const HASH = currentRulesetHash(m1Ruleset);
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -222,9 +224,12 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     expect(r1.ok).toBe(false);
     expect(r1.reason).toContain('invalid ruleset');
 
-    // A float in a sim-affecting field trips canonicalJson inside rulesetDigest.
+    // A float in a per-creep v2 field (`leakCost` must be a safe integer 1..1000) trips
+    // `validateRulesetShape` — the NEW validate-first stage (Codex R2-1) — before the
+    // digest is even taken, re-targeting the v1-era "a float trips canonicalJson" case
+    // to the v2 field that now carries per-creep tuning (decision 6).
     const badFloat = JSON.parse(JSON.stringify(m1Ruleset)) as Ruleset;
-    (badFloat.creepCatalog[0] as { speedFp: number }).speedFp = 26.5;
+    (badFloat.creepCatalog[0] as { leakCost: number }).leakCost = 1.5;
     const r2 = validate(
       {
         seed: 1,
@@ -244,37 +249,18 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     // ceiling merely to cross — such a ruleset is rejected at COMPILE, so no
     // replay on it can be submitted, rather than compiling into replays that only ever
     // time out. validate() surfaces the compile rejection as a clean {ok:false}.
-    const slowBundle: Ruleset = {
-      formatVersion: 1,
-      rulesetId: 'timeout-probe',
-      version: 1,
-      creepCatalog: [{ kind: 'normal', hp: 20, speedFp: 1, bounty: 1, domain: 'ground' }],
-      towerCatalog: [
-        { kind: 'basic', cost: 5, damage: 10, rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
-      ],
-      balance: {
-        startingLives: 10,
-        startingBounty: 80,
-        refundNum: 3,
-        refundDen: 4,
-        leakCost: 1,
-        countdownTicks: 5,
-        waveClearBonus: 0,
-        earlyCallBonus: 0,
-      },
-      scoring: { survivalMul: 25, starThresholds: [1, 6, 9] },
-      boards: [
-        {
-          id: 'wide',
-          name: 'Wide',
+    const slowBundle: Ruleset = makeRuleset(
+      [
+        makeBoard('wide', {
           widthTiles: 200,
           heightTiles: 3,
           entrance: { col: 0, row: 1 },
           exit: { col: 199, row: 1 },
-          waves: [{ index: 0, entries: [{ kind: 'normal', count: 1, spacingTicks: 20 }] }],
-        },
+          countdownTicks: 5,
+        }),
       ],
-    };
+      { speedFp: 1, rulesetId: 'timeout-probe' },
+    );
     const replay: Replay = {
       seed: 1,
       boardId: 'wide',
@@ -289,48 +275,85 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
   });
 });
 
+/** A minimal v2 board — one wave, one entry, capability-profile-legal at SIM_VERSION 5. */
+function makeBoard(
+  id: string,
+  opts: {
+    readonly widthTiles?: number;
+    readonly heightTiles?: number;
+    readonly entrance?: { readonly col: number; readonly row: number };
+    readonly exit?: { readonly col: number; readonly row: number };
+    readonly countdownTicks?: number;
+  } = {},
+): RulesetBoard {
+  return {
+    id,
+    widthTiles: opts.widthTiles ?? 9,
+    heightTiles: opts.heightTiles ?? 3,
+    entrance: opts.entrance ?? { col: 0, row: 1 },
+    exit: opts.exit ?? { col: 8, row: 1 },
+    waves: [
+      {
+        index: 0,
+        countdownTicks: opts.countdownTicks ?? 5,
+        clearBonus: 0,
+        entries: [{ creepId: 'normal', count: 1, spacingTicks: 20 }],
+      },
+    ],
+  };
+}
+
+/** A minimal v2 bundle over the given boards, capability-profile-legal at SIM_VERSION 5. */
+function makeRuleset(
+  boards: RulesetBoard[],
+  opts: {
+    readonly speedFp?: number;
+    readonly cost?: number;
+    readonly damage?: number;
+    readonly rulesetId?: string;
+  } = {},
+): Ruleset {
+  return {
+    formatVersion: 2,
+    rulesetId: opts.rulesetId ?? 'compile-cache-probe',
+    version: 1,
+    creepCatalog: [
+      {
+        id: 'normal',
+        hp: 20,
+        speedFp: opts.speedFp ?? 256,
+        armor: 0,
+        domain: 'ground',
+        immunities: [],
+        leakCost: 1,
+        bounty: 1,
+      },
+    ],
+    towerCatalog: [
+      {
+        id: 'basic',
+        cost: opts.cost ?? 5,
+        attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
+        effects: [{ kind: 'direct', form: 'single', damage: opts.damage ?? 10 }],
+      },
+    ],
+    balance: {
+      startingLives: 10,
+      startingBounty: 80,
+      refundNum: 3,
+      refundDen: 4,
+      slowFloorNum: 1,
+      slowFloorDen: 4,
+      earlyCallBountyDivisor: 0,
+    },
+    scoring: { survivalMul: 25, starThresholds: [1, 6, 9], earlyCallScoreDivisor: 0 },
+    boards,
+  };
+}
+
 describe('CompileCache — LRU compile memo keyed by content digest (#26)', () => {
   function twoBoardBundle(): Ruleset {
-    return {
-      formatVersion: 1,
-      rulesetId: 'compile-cache-probe',
-      version: 1,
-      creepCatalog: [{ kind: 'normal', hp: 20, speedFp: 256, bounty: 1, domain: 'ground' }],
-      towerCatalog: [
-        { kind: 'basic', cost: 5, damage: 10, rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
-      ],
-      balance: {
-        startingLives: 10,
-        startingBounty: 80,
-        refundNum: 3,
-        refundDen: 4,
-        leakCost: 1,
-        countdownTicks: 5,
-        waveClearBonus: 0,
-        earlyCallBonus: 0,
-      },
-      scoring: { survivalMul: 25, starThresholds: [1, 6, 9] },
-      boards: [
-        {
-          id: 'board-a',
-          name: 'Board A',
-          widthTiles: 9,
-          heightTiles: 3,
-          entrance: { col: 0, row: 1 },
-          exit: { col: 8, row: 1 },
-          waves: [{ index: 0, entries: [{ kind: 'normal', count: 1, spacingTicks: 20 }] }],
-        },
-        {
-          id: 'board-b',
-          name: 'Board B',
-          widthTiles: 9,
-          heightTiles: 3,
-          entrance: { col: 0, row: 1 },
-          exit: { col: 8, row: 1 },
-          waves: [{ index: 0, entries: [{ kind: 'normal', count: 1, spacingTicks: 20 }] }],
-        },
-      ],
-    };
+    return makeRuleset([makeBoard('board-a'), makeBoard('board-b')]);
   }
 
   function replayFor(bundle: Ruleset, boardId: string): Replay {
@@ -386,8 +409,9 @@ describe('CompileCache — LRU compile memo keyed by content digest (#26)', () =
     validate(replayFor(bundle, 'board-a'), bundle, cache);
     expect(cache.misses).toBe(1);
 
-    // Mutate a sim-affecting field on the SAME bundle object (identity unchanged).
-    (bundle.towerCatalog[0] as { damage: number }).damage = 999;
+    // Mutate a sim-affecting field on the SAME bundle object (identity unchanged) — the
+    // v2 `damage` value lives on the tower's single direct/single effect bundle.
+    (bundle.towerCatalog[0]!.effects[0] as { damage: number }).damage = 999;
     const mutatedReplay = replayFor(bundle, 'board-a'); // rulesetHash recomputed post-mutation
     const after = validate(mutatedReplay, bundle, cache);
 

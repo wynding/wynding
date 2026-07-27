@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
-import { m1Ruleset } from '@wynding/content';
+import { getBundledRuleset } from '@wynding/content';
 import type { SimInput } from '@wynding/sim';
 import { createController, enqueueVerdict, outcomesMatch, type Controller } from './controller';
 
@@ -421,7 +421,7 @@ describe('controller — paused buffer-flood dedup + cap (P1)', () => {
     const replay = c.buildReplay();
     const flushed = replay.tickInputs[replay.tickInputs.length - 1] as readonly SimInput[];
     expect(flushed.filter((i) => i.kind === 'callWaveEarly')).toHaveLength(1);
-    expect(validate(replay, m1Ruleset).ok).toBe(true);
+    expect(validate(replay, getBundledRuleset()).ok).toBe(true);
   });
 
   it('mashing sellSelected on one tower dedupes; a second selected tower still queues distinctly', () => {
@@ -561,7 +561,7 @@ describe('controller — replay recording, terminal truncation & verify', () => 
     expect(c.buildReplay().tickInputs.length).toBe(lenBefore);
 
     // The produced log validates via @wynding/replay (rejects any tick past terminal).
-    const result = validate(c.buildReplay(), m1Ruleset);
+    const result = validate(c.buildReplay(), getBundledRuleset());
     expect(result.ok).toBe(true);
 
     // The dev-verify self-check re-simulates to the same score/stars the HUD showed.
@@ -1070,7 +1070,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     runToTerminal(c);
     expect(c.isTerminal()).toBe(true);
     const replay = c.buildReplay();
-    expect(validate(replay, m1Ruleset).ok).toBe(true);
+    expect(validate(replay, getBundledRuleset()).ok).toBe(true);
   });
 
   it('Play-again returns to the pre-start state — held again, Start required again', () => {

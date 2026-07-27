@@ -12,15 +12,17 @@ import type { SimState } from './index';
 
 /** The standard M1 single-target tower stat block. */
 export const TEST_TOWER: TowerDef = {
-  kind: 'basic',
+  id: 'basic',
   cost: 5,
-  damage: 10,
-  rangeFp: 1024,
-  cadenceTicks: 30,
-  travelTicks: 4,
+  attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
+  effects: [{ kind: 'direct', form: 'single', damage: 10 }],
 };
 
-/** Overrides for a test bundle (all optional). */
+/** Overrides for a test bundle (all optional). Note: `earlyCallBonus` is gone — the
+ *  M1/M2-S1 capability profile pins `maxEarlyCallBountyDivisor: 0`, so the compiled
+ *  `earlyCallBonus` is always 0 regardless of any authored `balance.earlyCallBountyDivisor`
+ *  (a nonzero divisor would be rejected at compile, not silently honored). S2
+ *  reintroduces a threadable option once the divisor formula is implemented. */
 export interface TestBundleOpts {
   readonly creepHp?: number;
   readonly creepSpeedFp?: number;
@@ -31,22 +33,24 @@ export interface TestBundleOpts {
   readonly startingBounty?: number;
   readonly startingLives?: number;
   readonly waveClearBonus?: number;
-  readonly earlyCallBonus?: number;
 }
 
 /** Build a raw ruleset bundle for a board geometry, with M1-ish defaults. */
 export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     rulesetId: 'test-ruleset',
     version: 1,
     creepCatalog: [
       {
-        kind: 'normal',
+        id: 'normal',
         hp: opts.creepHp ?? 20,
         speedFp: opts.creepSpeedFp ?? 26,
-        bounty: opts.creepBounty ?? 1,
+        armor: 0,
         domain: 'ground',
+        immunities: [],
+        leakCost: 1,
+        bounty: opts.creepBounty ?? 1,
       },
     ],
     towerCatalog: [TEST_TOWER],
@@ -55,16 +59,14 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
       startingBounty: opts.startingBounty ?? 80,
       refundNum: 3,
       refundDen: 4,
-      leakCost: 1,
-      countdownTicks: opts.countdownTicks ?? 500,
-      waveClearBonus: opts.waveClearBonus ?? 0,
-      earlyCallBonus: opts.earlyCallBonus ?? 0,
+      slowFloorNum: 1,
+      slowFloorDen: 4,
+      earlyCallBountyDivisor: 0,
     },
-    scoring: { survivalMul: 25, starThresholds: [1, 6, 9] },
+    scoring: { survivalMul: 25, starThresholds: [1, 6, 9], earlyCallScoreDivisor: 0 },
     boards: [
       {
         id: 'test',
-        name: 'Test Board',
         widthTiles: spec.widthTiles,
         heightTiles: spec.heightTiles,
         entrance: spec.entrance,
@@ -72,8 +74,14 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
         waves: [
           {
             index: 0,
+            countdownTicks: opts.countdownTicks ?? 500,
+            clearBonus: opts.waveClearBonus ?? 0,
             entries: [
-              { kind: 'normal', count: opts.waveCount ?? 10, spacingTicks: opts.waveSpacing ?? 20 },
+              {
+                creepId: 'normal',
+                count: opts.waveCount ?? 10,
+                spacingTicks: opts.waveSpacing ?? 20,
+              },
             ],
           },
         ],

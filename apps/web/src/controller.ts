@@ -42,7 +42,7 @@ import {
   type TracerVM,
 } from '@wynding/render';
 import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
-import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
+import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 
 export type Speed = 1 | 2;
 
@@ -336,8 +336,9 @@ function freezeRecorded(inputs: readonly SimInput[]): readonly SimInput[] {
 
 /** Create the game controller for `seed`. Content/ruleset are fixed (M1 single board). */
 export function createController(seed: number): Controller {
-  const bundle = m1Ruleset;
-  const ruleset = compileRuleset(bundle, M1_BOARD_ID);
+  const bundle = getBundledRuleset();
+  const boardId = defaultBoardId(bundle);
+  const ruleset = compileRuleset(bundle, boardId);
   const grid = ruleset.board.grid;
   const cols = grid.width;
   const rows = grid.height;
@@ -744,7 +745,7 @@ export function createController(seed: number): Controller {
 
   const doBuildReplay = (): Replay => ({
     seed: runSeed,
-    boardId: M1_BOARD_ID,
+    boardId,
     rulesetHash: currentRulesetHash(bundle),
     simVersion: SIM_VERSION,
     // Defensive, immutable envelope: the arrays are fresh frozen copies, and the command

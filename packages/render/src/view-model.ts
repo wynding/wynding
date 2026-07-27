@@ -30,8 +30,8 @@ function maxCreepHp(ruleset: CompiledRuleset): number {
   const memo = maxHpCache.get(ruleset);
   if (memo !== undefined) return memo;
   let max = 1;
-  for (const kind of Object.keys(ruleset.creepByKind) as (keyof typeof ruleset.creepByKind)[]) {
-    const def = ruleset.creepByKind[kind];
+  for (const id of Object.keys(ruleset.creepById) as (keyof typeof ruleset.creepById)[]) {
+    const def = ruleset.creepById[id];
     if (def !== undefined && def.hp > max) max = def.hp;
   }
   maxHpCache.set(ruleset, max);

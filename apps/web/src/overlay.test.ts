@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { HudVM } from '@wynding/render';
 import { compileRuleset } from '@wynding/sim';
-import { m1Ruleset, M1_BOARD_ID } from '@wynding/content';
+import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { createOverlay, type UiAction } from './overlay';
 import type { ModalOverlay } from './modal';
 import { createShell, dockButtonParts } from './shell';
@@ -20,7 +20,8 @@ import {
   fakeTarget,
 } from './install-fakes';
 
-const ruleset = compileRuleset(m1Ruleset, M1_BOARD_ID);
+const bundle = getBundledRuleset();
+const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
 
 // A fixed 280×240 board rect → 28×24 cells at 10 px each (mirrors input.test.ts) so the
 // settings-open integration tests below can place/hold a real gesture under jsdom (whose
