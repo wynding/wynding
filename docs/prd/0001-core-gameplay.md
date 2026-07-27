@@ -226,7 +226,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
     exhausted _and_ none of its creeps remain alive; **forfeited if any of its creeps leaked**),
   - an **early-call bonus** (the tempo lever from §2).
 - These force real decisions: spend now for safety vs. hold to build bigger, and how
-  aggressively to rush waves.
+  aggressively to call waves early.
 - **Interest on unspent bounty** is an income source the ruleset is **architected to support
   but ships off**; it may be switched on during M5 economy tuning if the decisions feel shallow.
 
