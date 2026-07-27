@@ -24,10 +24,12 @@ import rawWyndingCoreM1 from './rulesets/wynding-core-m1.json?raw';
 export const DEFAULT_RULESET_ID = 'wynding-core-m1';
 
 /** Bundled raw ruleset text, keyed by `rulesetId` — the registry's one source of
- *  truth for "which rulesets ship in this client build". */
-const BUNDLED_TEXT: Readonly<Record<string, string>> = {
-  [DEFAULT_RULESET_ID]: rawWyndingCoreM1,
-};
+ *  truth for "which rulesets ship in this client build". A `Map`, not a plain
+ *  record: object lookup resolves inherited `Object.prototype` names, so an unknown
+ *  id like `'toString'` would dodge the unknown-id rejection below and fail later
+ *  as malformed JSON — the same prototype hygiene `ruleset.ts` applies to
+ *  `creepById`. */
+const BUNDLED_TEXT: ReadonlyMap<string, string> = new Map([[DEFAULT_RULESET_ID, rawWyndingCoreM1]]);
 
 /** Parsed + validated + frozen rulesets, cached by id on first access. */
 const cache = new Map<string, Ruleset>();
@@ -42,7 +44,7 @@ const cache = new Map<string, Ruleset>();
 export function getBundledRuleset(id: string = DEFAULT_RULESET_ID): Ruleset {
   const cached = cache.get(id);
   if (cached !== undefined) return cached;
-  const text = BUNDLED_TEXT[id];
+  const text = BUNDLED_TEXT.get(id);
   if (text === undefined) {
     // RulesetError for an unknown id too, so every registry failure surfaces
     // through the one error type sim callers expect.
@@ -55,7 +57,7 @@ export function getBundledRuleset(id: string = DEFAULT_RULESET_ID): Ruleset {
 
 /** Every bundled ruleset id, in registry order. */
 export function bundledRulesetIds(): readonly string[] {
-  return Object.keys(BUNDLED_TEXT);
+  return [...BUNDLED_TEXT.keys()];
 }
 
 /** The default board of a ruleset — the first entry of `boards` (the validator

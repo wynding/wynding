@@ -27,7 +27,9 @@ const RANGE = TEST_TOWER.rangeFp;
 const TRAVEL_TICKS = TEST_TOWER.travelTicks;
 const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
 const DIRECT_DAMAGE = TEST_TOWER.damage;
-const KILL_BOUNTY = 1;
+// Bounty follows the compiled creep catalog for the same reason the tower stats do
+// above — a testBundle bounty edit must move these economy assertions with it.
+const KILL_BOUNTY = RULESET.creepById[RULESET.schedule[0]!.creepId]!.bounty;
 
 /** One tower at (5,5); footprint centre = ((5+1)·256, (5+1)·256) = (1536,1536). */
 function oneTower(targetId = 0, nextFireTick = 0): TowerArrays {

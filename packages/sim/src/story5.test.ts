@@ -207,11 +207,13 @@ function assertEveryLeafHashes(bundle: Ruleset): void {
     let mutatedDigest: string;
     try {
       mutatedDigest = rulesetDigest(clone);
-    } catch {
-      // A mutation that makes the bundle loudly UNHASHABLE (e.g. a mutated
-      // effect-kind discriminator matches no projection branch) proves the field
-      // is load-bearing exactly as strongly as a changed digest — the identity
-      // cannot silently survive the mutation either way.
+    } catch (err) {
+      // A mutation that makes the bundle loudly UNHASHABLE (a mutated effect-kind
+      // discriminator matches no projection branch — a TypeError, same family as
+      // canonicalJson's malformed-field guards) proves the field is load-bearing
+      // exactly as strongly as a changed digest. Anything else escaping here would
+      // be a bug in this walk itself, so only that family is absorbed.
+      if (!(err instanceof TypeError)) throw err;
       return;
     }
     expect(mutatedDigest, `mutating .${path.join('.')} should change rulesetDigest`).not.toBe(

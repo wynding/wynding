@@ -41,6 +41,17 @@ const CATALOG_ID_RE = /^[a-z][a-z0-9-]{0,31}$/;
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;
 
+/** Canonicalize an immunity list: dedupe (set semantics) then sort into enum order —
+ *  ONE hash form regardless of authored order/repetition. Exported as the single
+ *  implementation shared with `ruleset.ts`'s `normalizeForHash` (which re-applies it
+ *  defensively for hand-built bundles): the canonical order is a `rulesetHash` input,
+ *  so two copies drifting apart would silently re-bucket every two-immunity bundle. */
+export function canonicalImmunities(immunities: readonly ('slow' | 'stun')[]): ('slow' | 'stun')[] {
+  return [...new Set(immunities)].sort(
+    (a, b) => IMMUNITY_ORDER.indexOf(a) - IMMUNITY_ORDER.indexOf(b),
+  );
+}
+
 function isPosInt(v: unknown, max = GENERIC_MAX): v is number {
   return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 && v <= max;
 }
@@ -128,11 +139,7 @@ function validateCreepDef(raw: unknown, index: number): CreepDef {
       throw new RulesetError(`creepCatalog[${index}].immunities entries must be 'slow' or 'stun'`);
     }
   }
-  // Canonicalize: dedupe (set semantics) then sort into enum order, one hash form
-  // regardless of authored order/repetition.
-  const immunities = [...new Set(immunitiesArr as ('slow' | 'stun')[])].sort(
-    (a, b) => IMMUNITY_ORDER.indexOf(a) - IMMUNITY_ORDER.indexOf(b),
-  );
+  const immunities = canonicalImmunities(immunitiesArr as ('slow' | 'stun')[]);
   let role: 'boss' | undefined;
   if (rec.role !== undefined) {
     if (rec.role !== 'boss') throw new RulesetError(`creepCatalog[${index}].role must be 'boss'`);
@@ -156,10 +163,10 @@ function validateCreepDef(raw: unknown, index: number): CreepDef {
   return role === undefined ? def : { ...def, role };
 }
 
-function validateEffectDef(raw: unknown, effIndex: number): EffectDef {
-  const rec = requireRecord(raw, `tower effect[${effIndex}]`);
+function validateEffectDef(raw: unknown, effIndex: number, parent: string): EffectDef {
+  const where = `${parent}.effects[${effIndex}]`;
+  const rec = requireRecord(raw, where);
   const kind = rec.kind;
-  const where = `tower effect[${effIndex}]`;
 
   if (kind === 'direct' || kind === 'burst') {
     const form = rec.form;
@@ -277,7 +284,7 @@ function validateTowerDef(raw: unknown, index: number): TowerDef {
   if (effectsArr.length < 1 || effectsArr.length > 8) {
     throw new RulesetError(`${where}.effects must have 1..8 entries`);
   }
-  const effects = effectsArr.map((e, i) => validateEffectDef(e, i));
+  const effects = effectsArr.map((e, i) => validateEffectDef(e, i, where));
   const supportCount = effects.filter((e) => e.kind === 'support').length;
   const burstCount = effects.filter((e) => e.kind === 'burst').length;
 
@@ -352,7 +359,7 @@ function validateScoring(raw: unknown): ScoringConfig {
     throw new RulesetError('scoring.starThresholds must be three positive ints');
   }
   if (!(t[0]! <= t[1]! && t[1]! <= t[2]!)) {
-    throw new RulesetError('scoring.starThresholds must be ascending');
+    throw new RulesetError('scoring.starThresholds must be non-decreasing');
   }
   if (!isNonNegInt(rec.earlyCallScoreDivisor)) {
     throw new RulesetError('scoring.earlyCallScoreDivisor must be ≥ 0');
@@ -368,9 +375,9 @@ function validateWaveEntry(
   raw: unknown,
   index: number,
   creepIds: ReadonlySet<string>,
-  waveIndex: number,
+  parent: string,
 ): WaveEntry {
-  const where = `boards[].waves[${waveIndex}].entries[${index}]`;
+  const where = `${parent}.entries[${index}]`;
   const rec = requireRecord(raw, where);
   assertNoUnknownKeys(rec, ['creepId', 'count', 'spacingTicks', 'offsetTicks'], where);
   if (typeof rec.creepId !== 'string' || !creepIds.has(rec.creepId)) {
@@ -391,8 +398,9 @@ function validateWaveSchedule(
   raw: unknown,
   index: number,
   creepIds: ReadonlySet<string>,
+  parent: string,
 ): WaveSchedule {
-  const where = `boards[].waves[${index}]`;
+  const where = `${parent}.waves[${index}]`;
   const rec = requireRecord(raw, where);
   assertNoUnknownKeys(rec, ['index', 'countdownTicks', 'clearBonus', 'entries'], where);
   if (!isNonNegInt(rec.index) || rec.index !== index) {
@@ -405,7 +413,7 @@ function validateWaveSchedule(
   if (entriesArr.length < 1 || entriesArr.length > 16) {
     throw new RulesetError(`${where}.entries must have 1..16 entries`);
   }
-  const entries = entriesArr.map((e, i) => validateWaveEntry(e, i, creepIds, index));
+  const entries = entriesArr.map((e, i) => validateWaveEntry(e, i, creepIds, where));
   return { index, countdownTicks: rec.countdownTicks, clearBonus: rec.clearBonus, entries };
 }
 
@@ -424,7 +432,7 @@ function validateBoard(raw: unknown, index: number, creepIds: ReadonlySet<string
   if (wavesArr.length < 1 || wavesArr.length > 64) {
     throw new RulesetError(`${where}.waves must have 1..64 entries`);
   }
-  const waves = wavesArr.map((w, i) => validateWaveSchedule(w, i, creepIds));
+  const waves = wavesArr.map((w, i) => validateWaveSchedule(w, i, creepIds, where));
   return {
     id: rec.id,
     widthTiles: rec.widthTiles,

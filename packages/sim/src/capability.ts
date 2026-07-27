@@ -31,8 +31,8 @@ export interface CapabilityProfile {
   readonly maxArmor: number;
   /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 5 —
    *  m2.md: "leakCost = 1 until S10"); the compiled surface exposes that single
-   *  value as `CompiledBalance.leakCost`. Pins the VALUE, not merely uniformity. */
-  readonly requireUniformLeakCost: number;
+   *  value as `CompiledBalance.leakCost`. */
+  readonly requiredLeakCost: number;
   readonly maxClearBonus: number;
   readonly maxEarlyCallBountyDivisor: number;
   readonly maxEarlyCallScoreDivisor: number;
@@ -58,12 +58,25 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     allowedImmunities: [],
     allowedRoles: [],
     maxArmor: 0,
-    requireUniformLeakCost: 1,
+    requiredLeakCost: 1,
     maxClearBonus: 0,
     maxEarlyCallBountyDivisor: 0,
     maxEarlyCallScoreDivisor: 0,
   },
 };
+
+// Deep-freeze every profile at module init: `Readonly<…>` is erased at compile time,
+// and the returned profile is the live object every later `compileRuleset` gate
+// reads — a caller mutating it (or an allow-list array inside it) could silently
+// widen or narrow the gate for the whole process, diverging the two loaders. Same
+// discipline as the compiled-surface deep-freeze in `ruleset.ts`.
+for (const profile of Object.values(PROFILES)) {
+  for (const value of Object.values(profile)) {
+    if (Array.isArray(value)) Object.freeze(value);
+  }
+  Object.freeze(profile);
+}
+Object.freeze(PROFILES);
 
 /** Look up the capability profile for a sim behavior version. Throws `RulesetError`
  *  on an unknown `simVersion` — there is no "default" profile, since a wider one

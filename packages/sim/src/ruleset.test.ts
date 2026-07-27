@@ -149,7 +149,7 @@ describe('compileRuleset — creep catalog domains', () => {
     rejects((b) => (b.creepCatalog[0]!.role = 'boss'));
   });
 
-  it('rejects a non-uniform leakCost across the catalog (capability: requireUniformLeakCost)', () => {
+  it('rejects a non-uniform leakCost across the catalog (capability: requiredLeakCost)', () => {
     rejects((b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 }));
   });
 });
@@ -231,7 +231,11 @@ describe('compileRuleset — wave domains', () => {
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.creepId = 'boss'));
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.count = 0));
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.spacingTicks = 0));
-    // Object.prototype names must NOT be treated as known ids (null-proto record).
+    // Object.prototype names are ordinary UNKNOWN ids here: the schema's Set-based
+    // reference check rejects them first (and the id pattern bars them from ever
+    // being DEFINED as catalog ids), so compileRuleset's null-proto `creepById`
+    // record sits behind two walls as belt-and-braces — these cases pin the outer
+    // wall, not the record itself.
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.creepId = 'toString'));
     rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.creepId = '__proto__'));
   });

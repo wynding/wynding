@@ -594,14 +594,15 @@ describe('parseRulesetJson', () => {
   it('counts a surrogate pair as 2 UTF-16 code units, not 1 codepoint', () => {
     // A multibyte (astral) character embedded in a JSON string is 2 UTF-16 code
     // units — the cap must be counted via `.length` (code units), not codepoints.
-    const bundle = validBundle();
-    const withEmoji = { ...bundle, rulesetId: bundle.rulesetId }; // id stays pattern-legal
-    const text = JSON.stringify(withEmoji);
+    const text = JSON.stringify(validBundle());
     const emoji = '\u{1F600}'; // 😀 — a single codepoint, 2 UTF-16 code units
     expect(emoji.length).toBe(2);
-    // Pad with the surrogate pair so the total lands exactly on the boundary from
-    // BOTH directions, proving the cap counts code units, not codepoints or bytes.
-    const atCap = text + emoji.repeat((MAX_RULESET_TEXT_UNITS - text.length) / 2);
+    // Pad to EXACTLY the cap regardless of the fixture's serialized parity (a space
+    // absorbs an odd gap; `repeat` truncates fractions, so parity must be handled
+    // explicitly or an unrelated fixture edit silently shifts the boundary), with
+    // surrogate pairs proving the cap counts code units, not codepoints or bytes.
+    const gap = MAX_RULESET_TEXT_UNITS - text.length;
+    const atCap = text + ' '.repeat(gap % 2) + emoji.repeat(Math.floor(gap / 2));
     // The trailing emoji repeats make the JSON invalid, but the LENGTH check runs
     // BEFORE JSON.parse — so exactly-at-cap still reaches (and fails at) parse,
     // while one-past-cap is rejected by the length guard before parse ever runs.

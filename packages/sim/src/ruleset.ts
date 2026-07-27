@@ -41,7 +41,7 @@
 import { canonicalJson, sha256Hex } from '@wynding/engine';
 import type { EffectDef, Ruleset, RulesetBoard, TowerDef } from '@wynding/types';
 import { loadBoard, type BoardContext } from './context';
-import { validateRulesetShape } from './ruleset-schema';
+import { canonicalImmunities, validateRulesetShape } from './ruleset-schema';
 import { capabilityProfile, type CapabilityProfile } from './capability';
 
 /** Thrown when a bundle is malformed, out of bounds, or describes something this
@@ -166,18 +166,11 @@ const FP_DIAG_LEN = 362;
  *  tripwire if these two literals were ever to drift. */
 const COMPILED_SIM_VERSION = 5;
 
-/** Canonical immunity order — mirrors `ruleset-schema.ts`'s `IMMUNITY_ORDER`,
- *  duplicated (not imported) to keep this module's hash-normalization defensive
- *  re-canonicalization independent of that module's internals. Re-applied here
- *  because `rulesetDigest`/`compileRuleset` must not assume every caller went
- *  through `parseRulesetJson` first (a hand-built test fixture can bypass it). */
-const IMMUNITY_ORDER = ['slow', 'stun'] as const;
-
-function canonicalImmunities(immunities: readonly ('slow' | 'stun')[]): ('slow' | 'stun')[] {
-  return [...new Set(immunities)].sort(
-    (a, b) => IMMUNITY_ORDER.indexOf(a) - IMMUNITY_ORDER.indexOf(b),
-  );
-}
+// `canonicalImmunities` is imported from `ruleset-schema.ts` (one shared
+// implementation — the canonical order is a `rulesetHash` input, so a second copy
+// drifting would silently re-bucket content identity). It is re-applied in
+// `normalizeForHash` because `rulesetDigest`/`compileRuleset` must not assume every
+// caller went through `parseRulesetJson` first (a hand-built fixture can bypass it).
 
 /** Explicit per-kind projection of an effect for hashing — the allowlist pattern all
  *  the way down. A spread (`{ ...e }`) would let a hand-built bundle's unknown effect
@@ -345,9 +338,9 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
   // S10") — a uniform-but-nonzero catalog is still content this sim build cannot
   // correctly simulate (multi-life leak is S10's sim rule).
   for (const creep of bundle.creepCatalog) {
-    if (creep.leakCost !== profile.requireUniformLeakCost) {
+    if (creep.leakCost !== profile.requiredLeakCost) {
       throw new RulesetError(
-        `creep '${creep.id}' leakCost ${creep.leakCost} unsupported at simVersion ${v} (must be ${profile.requireUniformLeakCost})`,
+        `creep '${creep.id}' leakCost ${creep.leakCost} unsupported at simVersion ${v} (must be ${profile.requiredLeakCost})`,
       );
     }
   }
@@ -470,8 +463,8 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // Per-creep leakCost REPLACES v1's global `balance.leakCost` in the schema; the
   // compiled surface still exposes one flat value (ADR 0007 no-balance-magic: read
   // from content, never a code literal), safe because the capability profile's
-  // `requireUniformLeakCost` gate (checkCapabilityGlobal, above) already proved every
-  // catalog entry agrees.
+  // `requiredLeakCost` gate (checkCapabilityGlobal, above) already proved every
+  // catalog entry carries exactly that value.
   const leakCost = normalized.creepCatalog[0]!.leakCost;
 
   const towerDef: TowerDef = normalized.towerCatalog[0]!; // profile: exactly one tower
@@ -508,8 +501,12 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // Compile the board's single wave (profile: maxWavesPerBoard 1) into an explicit
   // per-spawn timeline; the single-entry wave (profile: maxEntriesPerWave 1) compiles
   // through the same cursor logic v1 used for back-to-back multi-entry waves —
-  // identical to today's stream semantics at exactly one entry (S2 implements
-  // concurrent streams under its own SIM_VERSION bump).
+  // identical to today's stream semantics at exactly one entry. DELIBERATE OMISSION:
+  // `entry.offsetTicks` is schema-validated, hashed, and capability-gated
+  // (`maxOffsetTicks: 0`) but NOT consumed here — concurrent streams (every entry's
+  // first spawn at launch + its own offset) are S2's semantics, implemented when S2
+  // rewrites this loop under its own SIM_VERSION bump; consuming the field early
+  // would ship a slice of S2's behavior without its version gate.
   const wave0 = board.waves[0]!;
   const schedule: ScheduledSpawn[] = [];
   let cursor = 0;

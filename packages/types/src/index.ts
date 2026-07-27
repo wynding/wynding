@@ -85,7 +85,7 @@ export interface CreepDef {
   readonly role?: 'boss';
   /** Lives lost per leak of THIS creep — replaces v1's global `balance.leakCost`.
    *  The M1/M2-S1 capability profile requires a uniform value across the whole
-   *  catalog (`requireUniformLeakCost`), so the compiled surface can still expose
+   *  catalog (`requiredLeakCost`), so the compiled surface can still expose
    *  one flat `CompiledBalance.leakCost` until a later story rewires `step` to
    *  read per-creep. */
   readonly leakCost: number; // int 1..1000
@@ -201,7 +201,7 @@ export interface RulesetBoard {
   readonly heightTiles: number; // int 1..1e6
   readonly entrance: Cell; // in-bounds
   readonly exit: Cell; // in-bounds
-  /** 1..16; `index` = position, contiguous from 0. */
+  /** 1..64; `index` = position, contiguous from 0. */
   readonly waves: readonly WaveSchedule[];
 }
 
@@ -231,7 +231,7 @@ export interface ScoringConfig {
   /** score = Σ kill-bounties + max(0, lives) × survivalMul. */
   readonly survivalMul: number; // int 0..1e6
   /** Ascending lives cutoffs for [1★, 2★, 3★]; a loss earns 0 stars. */
-  readonly starThresholds: readonly [number, number, number]; // positive ints ≤ 1e6, ascending
+  readonly starThresholds: readonly [number, number, number]; // positive ints ≤ 1e6, non-decreasing
   /** 0 = off; else credit = ⌊ticksRemaining / earlyCallScoreDivisor⌋. Pinned to 0
    *  by the M1/M2-S1 capability profile. */
   readonly earlyCallScoreDivisor: number; // int 0..1e6
