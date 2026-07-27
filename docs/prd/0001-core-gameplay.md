@@ -169,6 +169,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   edge with the support tower's** — a corner-only touch does not count. If burst ships, the tower
   is **consumed at its fire tick** — the maze opens (and ground creeps re-route) then, while its
   scheduled impact still resolves via the fire-time snapshot.)_
+  _(Clarified 2026-07-26, M2 spec: routes are per-tick derived state, so "re-route then" means no
+  creep ever takes a movement step on the old maze after the consumption; within the consumption
+  tick itself, targeting and AoE lead read that tick's routing snapshot — the cross-effect
+  ordering detail this PRD delegates to the combat build, pinned in the M2 spec.)_
 
 - **Effect stacking rules** (shape, so combined effects read predictably):
   - Same **non-DoT** effect (slow, stun) from multiple sources → the **strongest magnitude wins**, and a new application
