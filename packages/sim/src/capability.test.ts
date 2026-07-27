@@ -11,7 +11,8 @@
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { capabilityProfile } from './capability';
-import { compileRuleset, RulesetError } from './ruleset';
+import { compileRuleset, COMPILED_SIM_VERSION, RulesetError } from './ruleset';
+import { SIM_VERSION } from './index';
 import { testBundle } from './test-support';
 
 const OPEN = {
@@ -44,6 +45,14 @@ function rejects(mutate: (b: MutableRuleset) => void, expected: string): void {
 }
 
 describe('capabilityProfile', () => {
+  it('COMPILED_SIM_VERSION is locked to SIM_VERSION (the duplicated literals cannot drift)', () => {
+    // ruleset.ts pins its gating version as a literal (import-cycle + CI-guard
+    // constraints, documented there); this is the lock that turns any drift
+    // between the two into a red test instead of stale compile gating.
+    expect(COMPILED_SIM_VERSION).toBe(SIM_VERSION);
+    expect(() => capabilityProfile(SIM_VERSION)).not.toThrow();
+  });
+
   it('throws on an unknown simVersion', () => {
     expect(() => capabilityProfile(0)).toThrow(RulesetError);
     expect(() => capabilityProfile(999)).toThrow(RulesetError);

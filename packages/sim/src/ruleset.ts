@@ -153,10 +153,13 @@ const FP_DIAG_LEN = 362;
 /** This sim build's behavior version — MUST equal `index.ts`'s exported
  *  `SIM_VERSION` (5). Duplicated as a literal rather than imported to avoid the
  *  `ruleset.ts` ↔ `index.ts` import cycle `index.ts`'s existing
- *  `import { assertRuleset, type CompiledRuleset } from './ruleset'` would create;
- *  `scripts/check-determinism-version.mjs` + the determinism golden are the
- *  tripwire if these two literals were ever to drift. */
-const COMPILED_SIM_VERSION = 5;
+ *  `import { assertRuleset, type CompiledRuleset } from './ruleset'` would create
+ *  (and `scripts/check-determinism-version.mjs` regex-reads the constant from
+ *  `index.ts` specifically, so it cannot move to a leaf without moving the CI
+ *  guard's read path — deferred to S2, which owns the first bump). Exported ONLY
+ *  so the test suite can lock the two literals together (capability.test.ts);
+ *  nothing outside this module reads it for behavior. */
+export const COMPILED_SIM_VERSION = 5;
 
 // `canonicalImmunities` is imported from `ruleset-schema.ts` (one shared
 // implementation — the canonical order is a `rulesetHash` input, so a second copy
