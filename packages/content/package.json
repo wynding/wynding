@@ -12,7 +12,7 @@
     "./artifact": "./src/artifact.ts"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && mkdir -p dist/rulesets && cp src/rulesets/*.json dist/rulesets/",
     "typecheck": "tsc -b",
     "lint": "eslint src",
     "test": "vitest run --coverage",
