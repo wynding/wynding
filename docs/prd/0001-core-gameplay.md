@@ -242,7 +242,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
     — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
     upgrade value, and aggressive early calls; these inputs come online as they become
-    meaningful (kills with combat, early calls at M2, upgrade value at M4). _(Point weights — and the exact
+    meaningful (kills with combat, early calls at M2, upgrade value at M4). _(Score weights — and the exact
     sim-state measure behind each input, e.g. what "upgrade value" counts — are pinned with the
     authoritative scorer; the current scorer is a placeholder that grows into this contract.)_
   - A derived **star grade** (from lives remaining — a near-flawless run is the top grade) as
