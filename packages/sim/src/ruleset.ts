@@ -27,32 +27,24 @@
 //     `creepByKind` → `creepById`, and the compiled tower/schedule `kind` → `id`/
 //     `creepId` (a catalog id is now an open string, not a closed union member).
 //
-// `ruleset.ts` ↔ `ruleset-schema.ts` ↔ `capability.ts` form a small import cycle
-// (this module imports `validateRulesetShape`/`capabilityProfile`; those modules
-// import `RulesetError` from here) — safe because every cross-module reference is
-// used only inside function bodies, never at module-evaluation time, so by the
-// time any of these functions actually run, every module has finished initializing
-// and the live bindings are populated. `index.ts` cannot supply `SIM_VERSION` here
-// instead (see the capability-profile call below) without the reverse cycle
-// `ruleset.ts` → `index.ts` → `ruleset.ts` (`index.ts` already imports
-// `CompiledRuleset`/`assertRuleset` from this module), so the sim's behavior
-// version is duplicated as a comment-pinned literal here rather than imported.
+// The module graph is one-way: `ruleset-shared.ts` (the leaf: `RulesetError`,
+// `canonicalImmunities`) ← {`ruleset-schema.ts`, `capability.ts`} ← this module —
+// no two-way cycles. `RulesetError` is re-exported below so every existing
+// `import { RulesetError } from './ruleset'` site (and the barrel) stays valid.
+// `index.ts` cannot supply `SIM_VERSION` here (see the capability-profile call
+// below) without the reverse cycle `ruleset.ts` → `index.ts` → `ruleset.ts`
+// (`index.ts` already imports `CompiledRuleset`/`assertRuleset` from this module),
+// so the sim's behavior version is duplicated as a comment-pinned literal here
+// rather than imported.
 
 import { canonicalJson, sha256Hex } from '@wynding/engine';
 import type { EffectDef, Ruleset, RulesetBoard, TowerDef } from '@wynding/types';
 import { loadBoard, type BoardContext } from './context';
-import { canonicalImmunities, validateRulesetShape } from './ruleset-schema';
+import { RulesetError, canonicalImmunities } from './ruleset-shared';
+import { validateRulesetShape } from './ruleset-schema';
 import { capabilityProfile, type CapabilityProfile } from './capability';
 
-/** Thrown when a bundle is malformed, out of bounds, or describes something this
- *  sim build's capability profile does not (yet) simulate. Rejected at match
- *  creation, never inside `step` — the sim's totality guarantee is unaffected. */
-export class RulesetError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RulesetError';
-  }
-}
+export { RulesetError } from './ruleset-shared';
 
 /** One scheduled spawn: `offsetTicks` after launch, a creep of catalog `creepId`.
  *  (Renamed from v1's `kind` — catalog ids are open strings now, decision 4.) */

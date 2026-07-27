@@ -230,7 +230,7 @@ export interface BalanceConstants {
 export interface ScoringConfig {
   /** score = Σ kill-bounties + max(0, lives) × survivalMul. */
   readonly survivalMul: number; // int 0..1e6
-  /** Ascending lives cutoffs for [1★, 2★, 3★]; a loss earns 0 stars. */
+  /** Non-decreasing lives cutoffs for [1★, 2★, 3★]; a loss earns 0 stars. */
   readonly starThresholds: readonly [number, number, number]; // positive ints ≤ 1e6, non-decreasing
   /** 0 = off; else credit = ⌊ticksRemaining / earlyCallScoreDivisor⌋. Pinned to 0
    *  by the M1/M2-S1 capability profile. */

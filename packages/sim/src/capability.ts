@@ -11,7 +11,7 @@
 // `simVersion` does, and each story that adds behavior widens its own dimension(s)
 // here alongside its `SIM_VERSION` bump.
 
-import { RulesetError } from './ruleset';
+import { RulesetError } from './ruleset-shared';
 
 /** The gated dimensions a `compileRuleset` call enforces against a bundle, keyed by
  *  the sim's behavior version. Every field here is a CEILING (or, for the allow-

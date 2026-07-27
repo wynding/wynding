@@ -27,7 +27,7 @@ import type {
   WaveEntry,
   WaveSchedule,
 } from '@wynding/types';
-import { RulesetError } from './ruleset';
+import { RulesetError, canonicalImmunities } from './ruleset-shared';
 
 /** Parse-input text cap — 1,048,576 UTF-16 code units (`text.length`), counted
  *  identically in every JS runtime and checkable BEFORE `JSON.parse` at zero
@@ -38,20 +38,6 @@ export const MAX_RULESET_TEXT_UNITS = 1_048_576;
 const GENERIC_MAX = 1_000_000;
 /** Shared by `rulesetId`, every catalog entry `id`, and `RulesetBoard.id`. */
 const CATALOG_ID_RE = /^[a-z][a-z0-9-]{0,31}$/;
-/** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
-const IMMUNITY_ORDER = ['slow', 'stun'] as const;
-
-/** Canonicalize an immunity list: dedupe (set semantics) then sort into enum order —
- *  ONE hash form regardless of authored order/repetition. Exported as the single
- *  implementation shared with `ruleset.ts`'s `normalizeForHash` (which re-applies it
- *  defensively for hand-built bundles): the canonical order is a `rulesetHash` input,
- *  so two copies drifting apart would silently re-bucket every two-immunity bundle. */
-export function canonicalImmunities(immunities: readonly ('slow' | 'stun')[]): ('slow' | 'stun')[] {
-  return [...new Set(immunities)].sort(
-    (a, b) => IMMUNITY_ORDER.indexOf(a) - IMMUNITY_ORDER.indexOf(b),
-  );
-}
-
 function isPosInt(v: unknown, max = GENERIC_MAX): v is number {
   return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 && v <= max;
 }
