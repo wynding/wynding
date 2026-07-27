@@ -34,7 +34,7 @@ _Avoid_: turret, unit, building, defense.
 One of the composable tower behaviors — direct damage (single-target or AoE),
 slow, stun, DoT, support, burst. A tower is a data-defined bundle of effect
 primitives, not a fixed archetype.
-_Avoid_: ability, power, spell, archetype.
+_Avoid_: ability, power, spell.
 
 **Maze**:
 The walkable route left over after towers are placed. The player builds the maze
