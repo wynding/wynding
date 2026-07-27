@@ -72,12 +72,14 @@ git commit -m "$(printf 'docs(prd): fix the thing\n\nQC: %s\n' "$(git write-tree
 `git write-tree` prints the hash of the staged tree, which is the tree the commit gets — so an
 honest record costs one substitution, and it cannot be recycled: edit anything afterwards and the
 hashes stop matching, which is exactly when the pass is stale. Already committed? Amend it with
-`git commit --amend --no-edit --trailer "QC=$(git write-tree)"`. `pnpm install` wires the hook by
-pointing `core.hooksPath` at the tracked `.githooks/` directory.
+`git commit --amend --no-edit --trailer "QC=$(git write-tree)"` (git 2.32+). `pnpm install` wires
+the hook by pointing `core.hooksPath` at the tracked `.githooks/` directory — if another tool
+already owns that setting, the install says so and leaves it alone, and you wire it yourself with
+`git config core.hooksPath .githooks`.
 
 The record is a claim, not a proof — it says someone ran the pass, and its absence is visible in
 the PR's commit list. **Emergencies only**, and never as a habit (the rationale is required, and
-must be a real sentence):
+must be at least 15 characters — long enough to be a reason rather than a keystroke):
 
 ```bash
 QC_OVERRIDE="hotfix for the broken deploy; QC follows in the next push" git push

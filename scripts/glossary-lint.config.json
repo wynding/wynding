@@ -31,6 +31,14 @@
     {
       "term": "update",
       "why": "The ordinary verb (\"update the HUD\", \"an app update\") is everywhere; only \"update\" meaning one tick is drift."
+    },
+    {
+      "term": "high",
+      "why": "Ordinary adjective — \"high durability\", \"one high-impact discharge\". The severity-label sense the P0–P3 entry rejects is caught by the distinctive words in the same entry: blocker, critical, nit, P4."
+    },
+    {
+      "term": "low",
+      "why": "Ordinary adjective, same as \"high\" — the severity sense is caught by blocker/critical/nit/P4."
     }
   ],
   "allowedSenses": [
@@ -98,6 +106,11 @@
       "term": "launch",
       "pattern": "launch\\s*(&|\\+)|launch tick",
       "why": "The launch tick, and \"launch + N ticks\" — the tick a wave starts on."
+    },
+    {
+      "term": "medium",
+      "pattern": "easy\\s*/\\s*medium\\s*/\\s*hard|medium tier|single\\s+medium|medium-only",
+      "why": "Medium is a difficulty-tier name (Easy/Medium/Hard), not a severity label. Kept linted rather than ignored so \"medium severity\" still fails."
     },
     {
       "term": "stage",

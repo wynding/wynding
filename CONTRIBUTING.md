@@ -108,12 +108,12 @@ You can scope any task to one package with Turbo's filter, e.g.
 3. **Keep commits small and focused.** One logical change per commit. We use
    Conventional Commits: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`.
 4. **Run `pnpm run verify` before pushing.** CI runs the same gate on every PR.
-5. **Record a QC pass on the commit you push.** A tracked `pre-push` hook (wired by
-   `pnpm install`, which points `core.hooksPath` at `.githooks/`) refuses a branch whose tip
-   commit has no `QC:` trailer for its own tree — re-read the staged diff adversarially, then
-   `git commit -m "$(printf 'fix: subject\n\nQC: %s\n' "$(git write-tree)")"`. The full rule,
-   including the emergency override, is in
-   [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
+5. **Record a QC pass on the commit you push.** A tracked `pre-push` hook refuses a branch whose
+   tip commit has no `QC:` trailer for its own tree. Re-read the staged diff adversarially, then
+   `git commit -m "$(printf 'fix: subject\n\nQC: %s\n' "$(git write-tree)")"`. `pnpm install`
+   wires the hook; if another hook manager already owns `core.hooksPath`, run
+   `git config core.hooksPath .githooks` yourself. The full rule, including the emergency
+   override, is in [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
 6. **Open a PR** against `main` and fill out the template (summary + test plan).
 
 ## Working with AI Agents

@@ -92,7 +92,9 @@ for (const line of readFileSync(join(ROOT, GLOSSARY), 'utf8').split('\n')) {
     continue;
   }
   const listed = avoid[1].replace(/\([^)]*\)/g, '').replace(/\.\s*$/, '');
-  for (const raw of listed.split(',')) {
+  // Commas separate terms; a slash separates alternatives inside one ("high/medium/low" is
+  // three words the entry rejects, not one literal string nobody would ever type).
+  for (const raw of listed.split(/[,/]/)) {
     const term = raw.trim().toLowerCase();
     // Several entries claim the same word — "level" belongs to Board, Wave and Difficulty
     // tier — so the report has to offer every canonical rather than the last one parsed.
@@ -142,13 +144,20 @@ files.sort();
 // sense pattern can span them ("the wave **launches**"). Replacements preserve column offsets.
 const blank = (m) => ' '.repeat(m.length);
 function maskProse(text, isGlossary, rel) {
-  let fenced = false;
+  let fence = null; // the open fence's marker character and length
   const lines = text.split('\n').map((line) => {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fenced = !fenced;
+    const marker = line.match(/^\s*(`{3,}|~{3,})/);
+    if (marker && fence === null) {
+      fence = { char: marker[1][0], length: marker[1].length };
       return '';
     }
-    if (fenced) return '';
+    // A shorter or different fence inside a block is content — a ```` block quoting a ``` one
+    // must not close on the inner example.
+    if (marker && marker[1][0] === fence?.char && marker[1].length >= fence.length) {
+      fence = null;
+      return '';
+    }
+    if (fence !== null) return '';
     // The glossary necessarily writes the words it warns against: its `_Avoid_` lines list them,
     // and its entry headings name terms that other entries avoid (**Engine** vs the Sim entry).
     if (/^_Avoid_:/.test(line)) return '';
@@ -159,7 +168,7 @@ function maskProse(text, isGlossary, rel) {
       .replace(/[*_]/g, ' ');
   });
   // An unclosed fence would mask the rest of the file — silently switching the check off.
-  if (fenced) fail(`${rel}: unclosed code fence — everything after it went unchecked`);
+  if (fence !== null) fail(`${rel}: unclosed code fence — everything after it went unchecked`);
   return lines;
 }
 

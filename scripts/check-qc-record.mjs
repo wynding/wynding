@@ -63,8 +63,19 @@ if (pushes.length > 0 && override.length > 0) {
 
 const failures = [];
 for (const { localRef, localOid } of pushes) {
-  const tree = git('rev-parse', `${localOid}^{tree}`);
-  const message = git('show', '-s', '--format=%B', localOid);
+  // A gate whose own failure mode is a stack trace is worse than no gate: whatever git cannot
+  // answer here (shallow clone, missing object), say so as a QC failure with the way out.
+  const branch = localRef.replace(/^refs\/heads\//, '');
+  let tree, message;
+  try {
+    tree = git('rev-parse', `${localOid}^{tree}`);
+    message = git('show', '-s', '--format=%B', localOid);
+  } catch (err) {
+    failures.push(
+      `${branch}: could not read ${localOid.slice(0, 8)} — ${err.message.split('\n')[0]}`,
+    );
+    continue;
+  }
   // Any `QC: <tree-sha> [note]` line in the message counts — deliberately more forgiving than
   // git's own trailer-block rules, since the point is the record, not its placement.
   const recorded = message
@@ -73,12 +84,12 @@ for (const { localRef, localOid } of pushes) {
     .filter(Boolean)
     .map((m) => m[1].toLowerCase());
 
-  const branch = localRef.replace(/^refs\/heads\//, '');
   if (recorded.length === 0) {
     failures.push(`${branch}: tip commit ${localOid.slice(0, 8)} has no \`${TRAILER}:\` trailer`);
   } else if (!recorded.some((hash) => tree.startsWith(hash))) {
+    const records = recorded.map((hash) => hash.slice(0, 8)).join(', ');
     failures.push(
-      `${branch}: the \`${TRAILER}:\` trailer on ${localOid.slice(0, 8)} records ${recorded[0].slice(0, 8)}, ` +
+      `${branch}: the \`${TRAILER}:\` trailer on ${localOid.slice(0, 8)} records ${records}, ` +
         `but that commit's tree is ${tree.slice(0, 8)} — the change moved after the QC pass`,
     );
   }
@@ -98,7 +109,8 @@ if (failures.length > 0) {
   );
   console.error('');
   console.error(
-    '   Already committed? Amend it: git commit --amend --no-edit --trailer "QC=$(git write-tree)"',
+    '   Already committed? Amend it (git 2.32+):' +
+      ' git commit --amend --no-edit --trailer "QC=$(git write-tree)"',
   );
   console.error(`   Emergency only: QC_OVERRIDE="why this push cannot wait" git push`);
   process.exit(1);
