@@ -46,8 +46,8 @@
     },
     {
       "term": "model",
-      "pattern": "(damage|grid|domain|defense) model",
-      "why": "Modelling prose — the damage/grid/domain model is a set of rules, not the sim package."
+      "pattern": "(damage|grid|domain|defense|state|pinned) model",
+      "why": "Modelling prose — the damage, grid, domain, or multi-wave state model is a set of rules, not the sim package."
     },
     {
       "term": "defense",
@@ -61,18 +61,18 @@
     },
     {
       "term": "level",
-      "pattern": "(single|base|max|upgrade|tower) level|level \\d",
-      "why": "A tower's upgrade level, which is real vocabulary — not a board, wave, or difficulty tier."
+      "pattern": "(single|base|max|upgrade|tower) level|level \\d|(tick|milestone)-level",
+      "why": "A tower's upgrade level, and the two granularity suffixes the specs use (tick-level, milestone-level) — not a board, wave, or difficulty tier."
     },
     {
       "term": "field",
-      "pattern": "flow-field",
-      "why": "The pathfinding algorithm (flow-field + A*), not the board."
+      "pattern": "flow-field|field-derivation",
+      "why": "The pathfinding algorithm (flow-field + A*) and its per-tick derivation phase, not the board."
     },
     {
       "term": "field",
-      "pattern": "field in ADR",
-      "why": "A schema field — \"the `boardId` field in ADR 0006\" — the data-record sense."
+      "pattern": "field in ADR|buffed field|axis fields",
+      "why": "The data-record sense — a schema field, the field a buff modifies, the five axis fields of a creep."
     },
     {
       "term": "points",
@@ -86,8 +86,8 @@
     },
     {
       "term": "hp",
-      "pattern": "hp pips|creep hp|\\(hp, damage",
-      "why": "The glossary's own note — HP is a creep stat; only the player's lives must not be called HP. Deliberately narrow: \"the player's HP\" has to keep failing."
+      "pattern": "hp pips|creep hp|\\(hp, damage|durability = hp|\\| hp\\b|max hp|hp-fraction",
+      "why": "The glossary's own note — HP is a creep stat: its table column, its durability axis, its render fraction. Deliberately narrow, so \"the player's HP\" and \"0 HP left\" keep failing."
     },
     {
       "term": "launch",
@@ -96,8 +96,8 @@
     },
     {
       "term": "launch",
-      "pattern": "launch\\s*(&|\\+)|launch tick",
-      "why": "The launch tick, and \"launch + N ticks\" — the tick a wave starts on."
+      "pattern": "launch\\s*(&|\\+)|launch tick|auto-launch(es|ed|ing)?|countdown before launch|previous\\s+launch|launch itself|start at launch|on the launch$",
+      "why": "The wave-start sense, named construction by construction: the launch tick, an auto-launch on countdown expiry, the countdown before launch, timing that chains off the previous launch. \"Ships at launch\" is still drift."
     },
     {
       "term": "high",
@@ -126,19 +126,18 @@
     },
     {
       "term": "type",
-      "pattern": "(tower|creep)[\\s/]*types?",
-      "files": ["docs/roadmap.md", "docs/prd/0001-core-gameplay.md"],
-      "why": "A tower or creep variant, the roadmap's and PRD's slice vocabulary — not a creep's ground-vs-air domain. Scoped to those two docs so a milestone spec cannot use it to call a domain a type."
+      "pattern": "more (tower|creep)([\\s/]*(tower|creep))?[\\s/]*types?|creep types(,| and)|one creep type",
+      "why": "The catalog sense — more tower/creep types, the wave preview's \"creep types and counts\", one creep type in the M1 slice. Deliberately narrow: \"each creep type is ground or air\" is domain drift and still fails."
     },
     {
       "term": "frame",
-      "pattern": "has a frame",
-      "why": "Structural metaphor for the product taking shape, not a rendered frame."
+      "pattern": "has a frame|outer frame",
+      "why": "Structural senses — the product has a frame, a tick has an outer frame of phases — not a rendered frame."
     },
     {
       "term": "layer",
-      "pattern": "fresh layer",
-      "why": "A newly added layer of tuning, not a creep's domain."
+      "pattern": "fresh layer|presentation-layer",
+      "why": "A fresh layer of tuning, and the presentation layer of the app — not a creep's domain."
     },
     {
       "term": "queued",
@@ -154,6 +153,36 @@
       "term": "enemy",
       "pattern": "an enemy unit",
       "why": "The Creep entry defines the canonical term in plain English."
+    },
+    {
+      "term": "credits",
+      "pattern": "(score|early-call|Σ) credits|credits its kill|^\\s*credits — it",
+      "why": "Early-call score credit, the scoring component the glossary's Early call entry names. \"80 credits\" for currency is still drift — that is what the Bounty entry rejects."
+    },
+    {
+      "term": "low",
+      "pattern": "\\blows?\\b(?![\\s-]*(severity|priority))",
+      "why": "The adjective — \"low-end device\". Written as a negative, so the grading sense (\"low severity\", \"low-priority\") still fails."
+    },
+    {
+      "term": "layout",
+      "pattern": "two-layouts|both layouts under",
+      "why": "The app's two responsive layouts (Standard and Compact, ADR 0003 / M1 story 11), not a maze."
+    },
+    {
+      "term": "runtime",
+      "pattern": "runtime load path",
+      "why": "The ruleset's runtime load path — when loading happens, not the Engine package."
+    },
+    {
+      "term": "framework",
+      "pattern": "status-effect framework",
+      "why": "The status-effect framework — a named subsystem of the sim, not the Engine package."
+    },
+    {
+      "term": "digest",
+      "pattern": "digest parity|digest-unchanged",
+      "why": "The ruleset digest of ADR 0007, a different hash from the world-hash; the glossary's own aside allows the word in prose."
     }
   ]
 }
