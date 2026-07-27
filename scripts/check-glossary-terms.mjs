@@ -143,17 +143,58 @@ files.sort();
 // (`packages/engine`, flow-field.md) that are not prose usage. Emphasis markers are blanked so a
 // sense pattern can span them ("the wave **launches**"). Replacements preserve column offsets.
 const blank = (m) => ' '.repeat(m.length);
+
+// Inline code hides identifiers and literals from the scan, and a span may be delimited by any
+// run of backticks (``a `literal` inside``), so the closing run has to match the opening one.
+function maskCodeSpans(line) {
+  const runAt = (i) => {
+    let n = 0;
+    while (line[i + n] === '`') n += 1;
+    return n;
+  };
+  let out = '';
+  for (let i = 0; i < line.length;) {
+    const open = runAt(i);
+    if (open === 0) {
+      out += line[i];
+      i += 1;
+      continue;
+    }
+    let close = -1;
+    for (let j = i + open; j < line.length;) {
+      const run = runAt(j);
+      if (run === open) {
+        close = j;
+        break;
+      }
+      j += run === 0 ? 1 : run;
+    }
+    // An unmatched run is a stray backtick in prose, not a span: leave the text after it visible.
+    if (close === -1) {
+      out += line.slice(i, i + open);
+      i += open;
+      continue;
+    }
+    out += ' '.repeat(close + open - i);
+    i = close + open;
+  }
+  return out;
+}
+
 function maskProse(text, isGlossary, rel) {
   let fence = null; // the open fence's marker character and length
   const lines = text.split('\n').map((line) => {
-    const marker = line.match(/^\s*(`{3,}|~{3,})/);
-    if (marker && fence === null) {
-      fence = { char: marker[1][0], length: marker[1].length };
+    // An opening fence may carry an info string (```js); a closing one may not, so a ```js line
+    // inside a block is content rather than the end of it.
+    const opener = line.match(/^\s*(`{3,}|~{3,})/);
+    const closer = line.match(/^\s*(`{3,}|~{3,})[ \t]*$/);
+    if (opener && fence === null) {
+      fence = { char: opener[1][0], length: opener[1].length };
       return '';
     }
     // A shorter or different fence inside a block is content — a ```` block quoting a ``` one
     // must not close on the inner example.
-    if (marker && marker[1][0] === fence?.char && marker[1].length >= fence.length) {
+    if (closer && closer[1][0] === fence?.char && closer[1].length >= fence.length) {
       fence = null;
       return '';
     }
@@ -162,8 +203,7 @@ function maskProse(text, isGlossary, rel) {
     // and its entry headings name terms that other entries avoid (**Engine** vs the Sim entry).
     if (/^_Avoid_:/.test(line)) return '';
     if (isGlossary && /^\*\*.+\*\*.*:\s*$/.test(line)) return '';
-    return line
-      .replace(/`[^`]*`/g, blank)
+    return maskCodeSpans(line)
       .replace(/\]\([^)]*\)/g, blank)
       .replace(/[*_]/g, ' ');
   });
