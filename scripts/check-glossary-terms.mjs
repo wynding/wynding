@@ -11,6 +11,20 @@
 // every different-sense allowance lives in scripts/glossary-lint.config.json — data, with a
 // stated reason per entry. Config, never a code edit, and never a silent skip: an exception
 // that stops matching anything is reported as dead and must be deleted.
+//
+// COMPLETENESS BOUNDARY. This is a grep with a prose mask, not a Markdown parser, and it
+// deliberately stays one. It handles the constructs these docs use: fenced blocks (including
+// inside a blockquote), inline code spans — of any backtick run, and carried across a line break
+// for the one- and two-backtick forms the docs actually use — link and reference-definition
+// destinations, bare URLs, emphasis. It does NOT model the rest of Markdown: an indented
+// (four-space) code block is scanned as prose, an unmatched run of three or more backticks is
+// scanned as prose, and a bare relative reference destination that reads like a sentence is
+// scanned rather than masked. Deeper corners of the spec will mis-mask a line, and the honest
+// statement is that this is bounded rather than impossible: a span is never carried past a blank
+// line, a fence, or the end of a file without being reported, so a mis-mask costs one line or one
+// paragraph, never a file. What it buys is the mechanical class — "projectile" for "tracer" —
+// which is the whole job. If the docs ever grow Markdown this cannot read, take a real parser
+// deliberately rather than teaching this one more corners.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,11 +45,11 @@ const CONFIG_KEYS = new Set(['note', 'include', 'ignoredTerms', 'allowedSenses']
 const IGNORED_KEYS = new Set(['term', 'why']);
 const ALLOWED_KEYS = new Set(['term', 'pattern', 'files', 'why']);
 
-// Editing the config is the one interaction this tool asks of an author, so every way of
-// getting it wrong reports as a check failure rather than as a stack trace.
+// The one way this check reports failure — including config mistakes, which are the one
+// interaction it asks of an author, so they read as findings rather than as a stack trace.
 const die = (msg) => {
   console.error('❌ glossary terminology check failed:');
-  for (const e of [...errors, msg]) console.error(`   - ${e}`);
+  for (const e of msg === undefined ? errors : [...errors, msg]) console.error(`   - ${e}`);
   process.exit(1);
 };
 
@@ -144,16 +158,42 @@ files.sort();
 // sense pattern can span them ("the wave **launches**"). Replacements preserve column offsets.
 const blank = (m) => ' '.repeat(m.length);
 
-// Inline code hides identifiers and literals from the scan, and a span may be delimited by any
-// run of backticks (``a `literal` inside``), so the closing run has to match the opening one.
-function maskCodeSpans(line) {
-  const runAt = (i) => {
+// Inline code hides identifiers and literals from the scan. A span may be delimited by any run of
+// backticks (``a `literal` inside``), so the closing run has to match the opening one — and it may
+// close on a later line, as the glossary's own `{ seed, … }` span does. `span` carries that state:
+// null outside a span, otherwise the open run's length. An opener that never closes is reported,
+// so a stray backtick cannot quietly swallow the rest of a file.
+function maskCodeSpans(line, span) {
+  // A backslash-escaped backtick is literal text — but only outside a span. Inside one, Markdown
+  // takes backslashes literally, so `` `foo\` `` really does end there.
+  const escaped = (i) => {
+    let slashes = 0;
+    while (line[i - 1 - slashes] === '\\') slashes += 1;
+    return slashes % 2 === 1;
+  };
+  const runAt = (i, insideSpan = false) => {
+    if (line[i] !== '`' || (!insideSpan && escaped(i))) return 0;
     let n = 0;
     while (line[i + n] === '`') n += 1;
     return n;
   };
   let out = '';
-  for (let i = 0; i < line.length;) {
+  let i = 0;
+  if (span.open !== null) {
+    // Inside a span from an earlier line: everything up to a run of the same length is code.
+    for (; i < line.length;) {
+      const run = runAt(i, true);
+      if (run === span.open) {
+        i += run;
+        span.open = null;
+        break;
+      }
+      i += run === 0 ? 1 : run;
+    }
+    out += ' '.repeat(i);
+    if (span.open !== null) return out; // the span runs past this line too
+  }
+  for (; i < line.length;) {
     const open = runAt(i);
     if (open === 0) {
       out += line[i];
@@ -162,18 +202,25 @@ function maskCodeSpans(line) {
     }
     let close = -1;
     for (let j = i + open; j < line.length;) {
-      const run = runAt(j);
+      const run = runAt(j, true);
       if (run === open) {
         close = j;
         break;
       }
       j += run === 0 ? 1 : run;
     }
-    // An unmatched run is a stray backtick in prose, not a span: leave the text after it visible.
+    // No closing run on this line. One or two backticks is a span continuing onto the next line
+    // (the glossary has one). A longer run is a fence marker that landed in prose — indented past
+    // a fence's three columns, say — and must not open a span that swallows the rest of the file.
     if (close === -1) {
-      out += line.slice(i, i + open);
-      i += open;
-      continue;
+      if (open > 2) {
+        out += line.slice(i, i + open);
+        i += open;
+        continue;
+      }
+      span.open = open;
+      out += ' '.repeat(line.length - i);
+      return out;
     }
     out += ' '.repeat(close + open - i);
     i = close + open;
@@ -183,6 +230,7 @@ function maskCodeSpans(line) {
 
 function maskProse(text, isGlossary, rel) {
   let fence = null; // the open fence's marker character and length
+  const span = { open: null }; // an inline code span's run length, while one is open
   const lines = text.split('\n').map((line) => {
     // Fences count inside a blockquote too, so match against the line with its `>` markers
     // stripped. Only fence detection uses this — the masked line keeps its original columns.
@@ -193,10 +241,16 @@ function maskProse(text, isGlossary, rel) {
     // it is prose to be scanned — never skipped silently.
     if (fence?.quoted && !inQuote && line.trim() !== '') fence = null;
     // An opening fence may carry an info string (```js); a closing one may not, so a ```js line
-    // inside a block is content rather than the end of it.
-    const opener = stripped.match(/^\s*(`{3,}|~{3,})/);
-    const closer = stripped.match(/^\s*(`{3,}|~{3,})[ \t]*$/);
+    // inside a block is content rather than the end of it. Four spaces of indent is an indented
+    // code block, not a fence — treating it as one would open a block that never closes.
+    const opener = stripped.match(/^ {0,3}(`{3,}|~{3,})/);
+    const closer = stripped.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
     if (opener && fence === null) {
+      // A span cannot reach across a fenced block to pair with a backtick on the far side.
+      if (span.open !== null) {
+        fail(`${rel}: unclosed \`code span\` — the prose after it went unchecked`);
+        span.open = null;
+      }
       fence = { char: opener[1][0], length: opener[1].length, quoted: inQuote };
       return '';
     }
@@ -212,25 +266,34 @@ function maskProse(text, isGlossary, rel) {
       return '';
     }
     if (fence !== null) return '';
+    // A code span cannot cross a blank line. Ending one here stops two stray backticks in
+    // different paragraphs from pairing up and masking everything between them.
+    if (span.open !== null && line.trim() === '') {
+      fail(`${rel}: unclosed \`code span\` — the prose after it went unchecked`);
+      span.open = null;
+    }
     // The glossary necessarily writes the words it warns against: its `_Avoid_` lines list them,
     // and its entry headings name terms that other entries avoid (**Engine** vs the Sim entry).
     if (/^_Avoid_:/.test(line)) return '';
     if (isGlossary && /^\*\*.+\*\*.*:\s*$/.test(line)) return '';
     return (
-      maskCodeSpans(line)
+      maskCodeSpans(line, span)
         .replace(/\]\([^)]*\)/g, blank)
-        // A reference-style definition's destination is a path or URL, not prose. It has to look
-        // like one: "[note]: monster tactics matter" is a sentence, and stays scanned.
+        // A reference-style definition's destination is a path, URL, or fragment — not prose. It
+        // has to look like one: "[note]: monster tactics matter" is a sentence, and stays scanned.
         .replace(
-          /^(\s*\[[^\]]+\]:\s*)(<[^>]*>|\S*[/.]\S*)/,
+          /^(\s*\[[^\]]+\]:\s*)(<[^>]*>|#\S+|\S*[/.]\S*)/,
           (_, label, dest) => label + blank(dest),
         )
         .replace(/\bhttps?:\/\/\S+/g, blank)
         .replace(/[*_]/g, ' ')
     );
   });
-  // An unclosed fence would mask the rest of the file — silently switching the check off.
+  // An unclosed fence or span would mask the rest of the file — silently switching the check off.
   if (fence !== null) fail(`${rel}: unclosed code fence — everything after it went unchecked`);
+  if (span.open !== null) {
+    fail(`${rel}: unclosed \`code span\` — everything after it went unchecked`);
+  }
   return lines;
 }
 
@@ -302,11 +365,7 @@ for (const exception of exceptions) {
   }
 }
 
-if (errors.length > 0) {
-  console.error('❌ glossary terminology check failed:');
-  for (const e of errors) console.error(`   - ${e}`);
-  process.exit(1);
-}
+if (errors.length > 0) die();
 console.log(
   `✓ glossary terminology check passed (${linted.length} avoided terms across ${files.length} docs, ` +
     `${exceptions.length} sense exceptions)`,
