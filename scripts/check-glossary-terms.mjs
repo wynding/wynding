@@ -184,17 +184,30 @@ function maskCodeSpans(line) {
 function maskProse(text, isGlossary, rel) {
   let fence = null; // the open fence's marker character and length
   const lines = text.split('\n').map((line) => {
+    // Fences count inside a blockquote too, so match against the line with its `>` markers
+    // stripped. Only fence detection uses this — the masked line keeps its original columns.
+    const stripped = line.replace(/^\s*(?:>\s?)+/, '');
+    const inQuote = stripped !== line;
+    // A fenced block cannot outlive the blockquote that opened it, and a fence opened outside one
+    // is not closed by a quoted marker: leaving the quote ends the block, and the line that ended
+    // it is prose to be scanned — never skipped silently.
+    if (fence?.quoted && !inQuote && line.trim() !== '') fence = null;
     // An opening fence may carry an info string (```js); a closing one may not, so a ```js line
     // inside a block is content rather than the end of it.
-    const opener = line.match(/^\s*(`{3,}|~{3,})/);
-    const closer = line.match(/^\s*(`{3,}|~{3,})[ \t]*$/);
+    const opener = stripped.match(/^\s*(`{3,}|~{3,})/);
+    const closer = stripped.match(/^\s*(`{3,}|~{3,})[ \t]*$/);
     if (opener && fence === null) {
-      fence = { char: opener[1][0], length: opener[1].length };
+      fence = { char: opener[1][0], length: opener[1].length, quoted: inQuote };
       return '';
     }
     // A shorter or different fence inside a block is content — a ```` block quoting a ``` one
     // must not close on the inner example.
-    if (closer && closer[1][0] === fence?.char && closer[1].length >= fence.length) {
+    if (
+      closer &&
+      closer[1][0] === fence?.char &&
+      closer[1].length >= fence.length &&
+      inQuote === fence.quoted
+    ) {
       fence = null;
       return '';
     }
@@ -203,9 +216,18 @@ function maskProse(text, isGlossary, rel) {
     // and its entry headings name terms that other entries avoid (**Engine** vs the Sim entry).
     if (/^_Avoid_:/.test(line)) return '';
     if (isGlossary && /^\*\*.+\*\*.*:\s*$/.test(line)) return '';
-    return maskCodeSpans(line)
-      .replace(/\]\([^)]*\)/g, blank)
-      .replace(/[*_]/g, ' ');
+    return (
+      maskCodeSpans(line)
+        .replace(/\]\([^)]*\)/g, blank)
+        // A reference-style definition's destination is a path or URL, not prose. It has to look
+        // like one: "[note]: monster tactics matter" is a sentence, and stays scanned.
+        .replace(
+          /^(\s*\[[^\]]+\]:\s*)(<[^>]*>|\S*[/.]\S*)/,
+          (_, label, dest) => label + blank(dest),
+        )
+        .replace(/\bhttps?:\/\/\S+/g, blank)
+        .replace(/[*_]/g, ' ')
+    );
   });
   // An unclosed fence would mask the rest of the file — silently switching the check off.
   if (fence !== null) fail(`${rel}: unclosed code fence — everything after it went unchecked`);
