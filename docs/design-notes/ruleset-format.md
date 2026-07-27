@@ -1,8 +1,9 @@
 # Design note — Ruleset data format and hashing
 
-_Implements ADR 0007. Living implementation guidance for `packages/content` (schema) and
-`packages/engine` / `packages/sim` (hash and step). ADR 0007 owns the decisions; this
-note is the_ how.
+_Implements ADR 0007. Living implementation guidance for schema validation, parsing, and
+hashing in `packages/sim` (`ruleset-schema.ts` / `ruleset.ts`), `packages/content` as the
+artifact + registry seam, and `packages/engine` / `packages/sim` (hash and step). ADR 0007
+owns the decisions; this note is the_ how.
 
 ## The step signature carries evolving state
 
@@ -60,3 +61,19 @@ Renaming a board must not invalidate replays, so only sim-affecting content is h
 The ruleset carries `formatVersion` (schema evolution) and `rulesetId` + version
 (leaderboard bucketing). Community rulesets and mods are the same bundle, loaded,
 validated, and hashed identically.
+
+## v2 load policy (M2 S1, 2026-07-27)
+
+- The structural validator REJECTS unknown properties at load (strict) —
+  normalization's strip-unknowns step is retained as defense in depth for
+  the hash path, so the two never disagree.
+- `immunities` is a set: parsing dedupes and sorts entries into enum order
+  (`slow` before `stun`) — one canonical form, one hash.
+- Parse input is capped at `MAX_RULESET_TEXT_UNITS` (1,048,576 UTF-16 code
+  units — allocation-free and runtime-identical; an anti-absurd bound, not
+  a wire protocol).
+- Two independent loaders, one path: the server reads the artifact text
+  from disk at cold start, the client carries the same file
+  bundler-embedded as raw text; both feed `parseRulesetJson` →
+  `validateRulesetShape` → `compileRuleset`, so their accepted domains
+  cannot diverge.

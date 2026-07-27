@@ -139,6 +139,13 @@ Integer encoding of fractional quantities (1 tile = 256 units, `FP_SHIFT = 8`).
 Sim math is integer-only for determinism.
 _Avoid_: float position, decimal.
 
+**Ruleset**:
+The complete, schema-validated data bundle the sim reads — tower catalog,
+creep catalog, board geometry, wave schedules, and balance constants
+(ADR 0007). Authored as JSON, moddable without engine code; identified by
+`rulesetHash`.
+_Avoid_: config, game data, balance file.
+
 **Replay**:
 The minimal record that reproduces a match exactly — `{ seed, rulesetHash,
 simVersion, boardId, tickInputs }` (`boardId` added by ADR 0006 so the scheduler
