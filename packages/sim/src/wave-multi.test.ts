@@ -90,7 +90,7 @@ describe('cross-wave same-tick spawn ordering', () => {
 });
 
 describe('per-wave clear-bonus forfeit isolation', () => {
-  it('a leak in wave 2 forfeits ONLY wave 2\'s clear bonus, not wave 1\'s', () => {
+  it("a leak in wave 2 forfeits ONLY wave 2's clear bonus, not wave 1's", () => {
     // Wave 1: a single 1-hp creep, killed by a tower before it can leak — clear
     // bonus paid. Wave 2: launched early with no defense — its creep leaks —
     // clear bonus forfeited. Both wave-clear bonuses are nonzero and DISTINCT so a
@@ -149,7 +149,13 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
       creepHp: 10_000, // effectively unkillable within this window — guarantees a leak
       startingBounty: 80,
       waves: [
-        { waveCount: 1, waveSpacing: 5, countdownTicks: 10, waveClearBonus: 4, offsetTicks: undefined },
+        {
+          waveCount: 1,
+          waveSpacing: 5,
+          countdownTicks: 10,
+          waveClearBonus: 4,
+          offsetTicks: undefined,
+        },
       ],
     });
     const ruleset = compileRuleset(bundle, 'test');

@@ -263,7 +263,10 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   }
   if (!Number.isSafeInteger(state.cumulativeKillBounty)) state.cumulativeKillBounty = 0;
   if (!Number.isSafeInteger(state.leakedCount)) state.leakedCount = 0;
-  if (!Number.isSafeInteger(state.cumulativeEarlyCallCredit) || state.cumulativeEarlyCallCredit < 0) {
+  if (
+    !Number.isSafeInteger(state.cumulativeEarlyCallCredit) ||
+    state.cumulativeEarlyCallCredit < 0
+  ) {
     state.cumulativeEarlyCallCredit = 0;
   }
 
@@ -353,7 +356,10 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       // resolve a wave that spawned nothing, so the cursor resets to 0 and
       // `resolved` to false alongside it.
       const rawTick = (waveLaunchTick as (number | null)[])[k];
-      const tickValid = Number.isSafeInteger(rawTick) && (rawTick as number) >= 0 && (rawTick as number) <= state.tick;
+      const tickValid =
+        Number.isSafeInteger(rawTick) &&
+        (rawTick as number) >= 0 &&
+        (rawTick as number) <= state.tick;
       let launchTickRepaired = false;
       if (!tickValid) {
         if ((waveLaunchTick as (number | null)[])[k] !== state.tick) {
@@ -365,7 +371,9 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       const spawnCap = ruleset.waves[k]!.spawns.length;
       const rawCursor = (waveSpawnCursor as number[])[k];
       const cursorValid =
-        Number.isSafeInteger(rawCursor) && (rawCursor as number) >= 0 && (rawCursor as number) <= spawnCap;
+        Number.isSafeInteger(rawCursor) &&
+        (rawCursor as number) >= 0 &&
+        (rawCursor as number) <= spawnCap;
       let effectiveCursor: number;
       if (launchTickRepaired) {
         if ((waveSpawnCursor as number[])[k] !== 0) ownWaveSpawnCursor()[k] = 0;
@@ -397,7 +405,8 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   }
   // Truncate a forged/legacy array longer than `waveCount` — a stray trailing
   // element would otherwise survive into the hash untouched.
-  if ((waveLaunchTick as (number | null)[]).length !== waveCount) ownWaveLaunchTick().length = waveCount;
+  if ((waveLaunchTick as (number | null)[]).length !== waveCount)
+    ownWaveLaunchTick().length = waveCount;
   if ((waveSpawnCursor as number[]).length !== waveCount) ownWaveSpawnCursor().length = waveCount;
   if ((waveLeaked as boolean[]).length !== waveCount) ownWaveLeaked().length = waveCount;
   if ((waveResolved as boolean[]).length !== waveCount) ownWaveResolved().length = waveCount;

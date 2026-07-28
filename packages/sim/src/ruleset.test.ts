@@ -277,11 +277,20 @@ describe('compileRuleset — success', () => {
   it('interleaves a multi-entry stream by (offsetTicks, entryRow), aggregating entriesSummary in first-appearance order', () => {
     const bundle = testBundle(OPEN, { waveCount: 2, waveSpacing: 100, countdownTicks: 50 });
     const mutable = JSON.parse(JSON.stringify(bundle)) as {
-      boards: { waves: { entries: { creepId: string; count: number; spacingTicks: number; offsetTicks?: number }[] }[] }[];
+      boards: {
+        waves: {
+          entries: { creepId: string; count: number; spacingTicks: number; offsetTicks?: number }[];
+        }[];
+      }[];
     };
     // Entry 0: 2 × 'normal' spacing 100, offset 0 → ticks [0, 100].
     // Entry 1: 2 × 'normal' spacing 30, offset 5 → ticks [5, 35] — interleaves.
-    mutable.boards[0]!.waves[0]!.entries.push({ creepId: 'normal', count: 2, spacingTicks: 30, offsetTicks: 5 });
+    mutable.boards[0]!.waves[0]!.entries.push({
+      creepId: 'normal',
+      count: 2,
+      spacingTicks: 30,
+      offsetTicks: 5,
+    });
     const compiled = compileRuleset(mutable as unknown as Ruleset, 'test');
     expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 35, 100]);
     expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);

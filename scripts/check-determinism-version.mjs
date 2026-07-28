@@ -28,10 +28,7 @@ const TEST_PATH = 'packages/sim/src/determinism.test.ts';
 // revision, the first candidate whose content matches RE_VERSION wins, so the base
 // commit (pre-move) still reads 5 from `index.ts` while HEAD (post-move) reads 6
 // from `ruleset-shared.ts`, with no special-casing of the migration commit itself.
-const VERSION_PATH_CANDIDATES = [
-  'packages/sim/src/ruleset-shared.ts',
-  'packages/sim/src/index.ts',
-];
+const VERSION_PATH_CANDIDATES = ['packages/sim/src/ruleset-shared.ts', 'packages/sim/src/index.ts'];
 
 const RE_FINAL = /finalHash:\s*'([0-9a-f]+)'/;
 const RE_TRACE = /traceDigest:\s*'([0-9a-f]+)'/;
