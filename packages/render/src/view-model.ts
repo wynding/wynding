@@ -131,19 +131,26 @@ function derivePreview(
  *  replay-verify comparison compare against — one call now covers every phase. */
 export function deriveHud(state: SimState | PreviewState, ruleset: CompiledRuleset): HudVM {
   const waveCount = ruleset.waves.length;
-  const counting = state.phase === 'running' && state.waveCursor < waveCount;
+  // One guarded value, shared by `countdownSeconds` and `callable` — matches
+  // `derivePreview`'s own `Number.isSafeInteger` guard on `waveCursor` so every HUD field
+  // agrees with the preview even if that invariant (clamped by `coerceSoa`) were ever
+  // violated, rather than two independently-recomputed copies drifting apart.
+  const cursor = Number.isSafeInteger(state.waveCursor) ? state.waveCursor : waveCount;
+  const waveAvailable = state.phase === 'running' && cursor >= 0 && cursor < waveCount;
   return {
     phase: state.phase,
     lives: state.lives,
     bounty: state.bounty,
-    countdownSeconds: counting ? Math.ceil((state.countdownRemaining * MS_PER_TICK) / 1000) : null,
+    countdownSeconds: waveAvailable
+      ? Math.ceil((state.countdownRemaining * MS_PER_TICK) / 1000)
+      : null,
     score: deriveScore(state, ruleset),
     stars: deriveStars(state, ruleset),
     won: state.phase === 'won',
     waveCount,
     waveCursor: state.waveCursor,
     launchPending: state.launchPending,
-    callable: state.phase === 'running' && state.waveCursor < waveCount && !state.launchPending,
+    callable: waveAvailable && !state.launchPending,
     preview: derivePreview(state, ruleset),
   };
 }

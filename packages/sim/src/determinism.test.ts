@@ -186,7 +186,13 @@ describe('determinism gate', () => {
     expect(sawDetour).toBe(true); // the straight-lane board never leaves row 11 unbuilt
     expect(sawKill).toBe(true); // the tower actually killed a creep and earned bounty
     expect(state.towers.id).toHaveLength(0); // sold
-    expect(state.cumulativeEarlyCallCredit).toBe(11); // ⌊500/50⌋ + ⌊300/50⌋ across both calls
+    // ⌊500/50⌋ = 10 (the tick-0 call at full countdown) + ⌊51/50⌋ = 1 (the tick-250
+    // call: wave 1's 300-tick countdown began decrementing at tick 1, so 249
+    // decrements leave rem = 51) — NOT ⌊300/50⌋: the second call is mid-countdown.
+    expect(state.cumulativeEarlyCallCredit).toBe(11);
+    // The terminal the header documents, pinned (tick freezes at the terminal):
+    expect(state.phase).toBe('lost');
+    expect(state.tick).toBe(536);
   });
 
   it('continues byte-identically after a mid-run serialize/restore (resume path)', () => {

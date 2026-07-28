@@ -159,8 +159,8 @@ describe('main — createApp wiring & frame loop', () => {
     expect(dockText(primaryBtn)).toBe('Start');
 
     primaryBtn.click(); // unholds the run — Start no longer claims wave 1 (PLAN.md P3 step 15)
-    // Start re-homes focus to the board (M3): overlay.update() hides the just-clicked
-    // primary button, which would otherwise drop focus to document.body.
+    // Start re-homes focus to the board (M3), independent of the primary control's own
+    // fate — which stays visible and morphs rather than being removed from the DOM.
     expect(document.activeElement).toBe(board);
     sched.frame((clock += 16));
     expect(pauseBtn.hidden).toBe(false);

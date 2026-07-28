@@ -14,14 +14,26 @@ function tick(c: Controller, n = 1): void {
 /** Advance until terminal or a safety cap; returns ticks elapsed. M2-S2's 3-wave bundle
  *  (countdowns 500/300/300, chained off the prior wave's LAUNCH) runs longer than M1's
  *  single wave did, so the default cap is well above the shipped bundle's worst-case
- *  natural-countdown completion. */
+ *  natural-countdown completion. Fails loudly if the cap is exhausted first — a silent
+ *  non-terminal return would otherwise surface as a bewildering downstream failure at
+ *  whichever assertion reads the never-terminal controller next. */
 function runToTerminal(c: Controller, cap = 6000): number {
   let n = 0;
   while (!c.isTerminal() && n < cap) {
     c.advance(TICK);
     n++;
   }
+  expect(c.isTerminal(), `did not resolve within ${cap} ticks — has the wave bundle grown?`).toBe(
+    true,
+  );
   return n;
+}
+
+/** Unhold the run AND claim wave 1 — `start()` no longer does the latter (PLAN.md P3
+ *  step 15's decouple), so every test that needs a live wave does both. */
+function startAndCall(c: Controller): void {
+  c.start();
+  c.callWaveEarly();
 }
 
 describe('controller — fixed loop, speed & pause', () => {
@@ -168,8 +180,7 @@ describe('controller — input → command mapping', () => {
 
   it('confirm() re-queries ghost validity at the CURRENT tick — a stale-valid cell a creep has since occupied is rejected, not built (#40)', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    c.callWaveEarly(); // P3 step 15: Start no longer claims wave 1 — do it explicitly
+    startAndCall(c);
     tick(c, 14); // the wave-early creep has not yet reached (2,11)
     const aim = c.aimAt(2, 11);
     expect(aim).toMatchObject({ kind: 'ghost', valid: true }); // valid one tick before it arrives
@@ -604,8 +615,7 @@ describe('controller — replay recording, terminal truncation & verify', () => 
 
   it('the recorded callWaveEarly appears in the log (fresh per-tick buffer, immutable copy)', () => {
     const c = createController(3);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    c.callWaveEarly(); // P3 step 15: Start no longer claims wave 1 — do it explicitly
+    startAndCall(c);
     tick(c);
     const replay = c.buildReplay();
     const flat = replay.tickInputs.flat();
@@ -655,8 +665,7 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
 
   it('a tower straddling the lane produces a well-formed spark once a shot lands, then clears', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    c.callWaveEarly(); // P3 step 15: Start no longer claims wave 1 — do it explicitly
+    startAndCall(c);
     // Mirrors @wynding/render's own combat-carrying fixture: a 2×2 tower straddling the
     // entrance row so the wave must pass through its range.
     c.aimAt(2, 10);
@@ -680,8 +689,7 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
 describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
   it('a tower straddling the lane shows a well-formed tracer in flight, then prunes it after impact', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    c.callWaveEarly(); // P3 step 15: Start no longer claims wave 1 — do it explicitly
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     let n = 0;
@@ -713,8 +721,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
 
   it('startRun clears every in-flight tracer — no tracer crosses run identity', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    c.callWaveEarly(); // P3 step 15: Start no longer claims wave 1 — do it explicitly
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     let n = 0;
@@ -729,8 +736,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
 
   it('a resolved match prunes every tracer (no tracer survives past terminal)', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    c.callWaveEarly(); // P3 step 15: Start no longer claims wave 1 — do it explicitly
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     runToTerminal(c);
@@ -740,8 +746,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
 
   it('a multi-tick catch-up (advance called several times before frame() is read) accumulates tracers without loss', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    c.callWaveEarly(); // P3 step 15: Start no longer claims wave 1 — do it explicitly
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     // The straddling tower's range (4 tiles) already covers the entrance, so it fires

@@ -20,11 +20,11 @@ import {
 import { getBundledRuleset, defaultBoardId } from './registry';
 
 const ruleset = getBundledRuleset();
-const m1Board = ruleset.boards[0]!;
+const shippedBoard = ruleset.boards[0]!;
 const boardId = defaultBoardId(ruleset);
 
 describe('field-01 (the real M1 board) builds a solvable grid', () => {
-  const grid = buildGrid(m1Board);
+  const grid = buildGrid(shippedBoard);
   const field = computeDistanceField(grid);
 
   it('builds a valid 28×24 grid with the two openings on row 11', () => {
@@ -52,14 +52,14 @@ describe('field-01 (the real M1 board) builds a solvable grid', () => {
   });
 
   it('surfaces buildGrid validation failures as a GridError through the @wynding/sim barrel', () => {
-    expect(() => buildGrid({ ...m1Board, widthTiles: 0 })).toThrow(GridError);
+    expect(() => buildGrid({ ...shippedBoard, widthTiles: 0 })).toThrow(GridError);
   });
 });
 
 describe('field-01 compiles for the sim as the single source of truth', () => {
   it('builds a playable BoardContext through the sanctioned loadBoard constructor', () => {
-    expect(() => loadBoard(m1Board)).not.toThrow();
-    const board = loadBoard(m1Board);
+    expect(() => loadBoard(shippedBoard)).not.toThrow();
+    const board = loadBoard(shippedBoard);
     expect(board.grid.width).toBe(28);
     expect(board.field.dist[11 * 28 + 0]).toBe(270); // entrance is 27 orthogonal steps out
   });

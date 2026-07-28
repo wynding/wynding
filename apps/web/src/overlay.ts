@@ -933,18 +933,27 @@ export function createOverlay(
     return t('creep.unknown.name', { id });
   }
 
+  // `domain`/`immunities` are CLOSED unions (`PreviewEntryVM`), fully enumerable today —
+  // unlike `creepId`, there's no "future content this build hasn't catalogued" case to
+  // fall back for, so both get exhaustive literal-key maps and the compiler catches the
+  // next variant instead of a raw sv6 token leaking into accessible text.
+  const DOMAIN_NAME: Readonly<Record<PreviewEntryVM['domain'], () => string>> = {
+    ground: () => t('hud.preview.domain.ground'),
+    air: () => t('hud.preview.domain.air'),
+  };
+  const IMMUNITY_NAME: Readonly<Record<PreviewEntryVM['immunities'][number], () => string>> = {
+    slow: () => t('hud.preview.immunity.slow'),
+    stun: () => t('hud.preview.immunity.stun'),
+  };
+
   /** "{count} × {name} — {domain}, armor {n}, {immunities}" (PLAN.md P3 step 17), never
-   *  colour/icon-only. `domain`/`immunities` fall back to the raw sv6 value outside
-   *  'ground'/empty — both are capability-closed at this milestone (Out of scope: "armor,
-   *  domains, immunities … capability stays closed on all of them"), so those branches are
-   *  unreached by the shipped bundle; kept so a future story that opens the capability
-   *  doesn't silently render nothing for a value it hasn't allocated a catalog key for yet. */
+   *  colour/icon-only. */
   function previewEntryText(entry: PreviewEntryVM): string {
-    const domain = entry.domain === 'ground' ? t('hud.preview.domain.ground') : entry.domain;
+    const domain = DOMAIN_NAME[entry.domain]();
     const immunities =
       entry.immunities.length === 0
         ? t('hud.preview.immunities.none')
-        : entry.immunities.join(', ');
+        : entry.immunities.map((i) => IMMUNITY_NAME[i]()).join(', ');
     return t('hud.preview.entry', {
       count: entry.count,
       name: creepName(entry.creepId),
@@ -954,12 +963,27 @@ export function createOverlay(
     });
   }
 
+  // The preview's content only changes when `waveCursor` moves — a handful of times per
+  // run — while `update()` runs on every HUD memo-key change (~20×/s). Guarded like every
+  // other write path in this module (`setChip`, `renderInstall`, `renderPanel`'s
+  // `lastPanelKey`): a screen-reader virtual cursor or braille display parked on a preview
+  // row must not have its node torn down and rebuilt underneath it every tick.
+  let lastPreviewKey = '';
   function renderPreview(preview: HudPreview | null): void {
     if (preview === null) {
       previewEl.root.hidden = true;
+      lastPreviewKey = '';
       return;
     }
     previewEl.root.hidden = false;
+    const key =
+      preview.kind === 'lastWave'
+        ? 'last'
+        : `${preview.waveNumber}/${preview.waveCount}:${preview.entries
+            .map((e) => `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.immunities.join('+')}`)
+            .join('|')}`;
+    if (key === lastPreviewKey) return;
+    lastPreviewKey = key;
     if (preview.kind === 'lastWave') {
       previewEl.title.textContent = t('hud.preview.lastWave');
       clearChildren(previewEl.list);

@@ -80,10 +80,12 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   const callWave = page.getByRole('button', { name: 'Call wave' });
   for (let i = 0; i < 3; i++) {
     await expect(callWave).toBeVisible();
+    const tickBeforeCall = await board.getAttribute('data-sim-tick');
     await callWave.click();
-    // Let the buffered call actually land before the next press — a same-tick double
-    // press would just dedupe, not advance the wave cursor.
-    await page.waitForTimeout(100);
+    // Wait for the buffered call to actually land before the next press — a same-tick
+    // double press would just dedupe, not advance the wave cursor — by polling the tick
+    // itself rather than guessing at a duration.
+    await expect(board).not.toHaveAttribute('data-sim-tick', tickBeforeCall ?? '');
   }
 
   // The run resolves — results dialog appears.

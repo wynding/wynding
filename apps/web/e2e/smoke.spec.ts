@@ -279,9 +279,12 @@ test('supports player-started runs, pause / speed controls, early-calls all thre
 
   // Start no longer claims wave 1 (M2-S2's decouple) — it unholds the run, and the primary
   // Dock control MORPHS to "Call wave" rather than hiding.
+  const primary = page.locator('.wy-dock .wy-primary');
   const start = page.getByRole('button', { name: 'Start' });
   await start.click();
-  await expect(start).toBeHidden();
+  // The SAME element stays visible and re-labels — it does not hide (M2-S2's morph).
+  await expect(primary).toHaveCount(1);
+  await expect(primary).toBeVisible();
   const callWave = page.getByRole('button', { name: 'Call wave' });
   await expect(callWave).toBeVisible();
 
@@ -301,9 +304,6 @@ test('supports player-started runs, pause / speed controls, early-calls all thre
   for (let waveNumber = 1; waveNumber <= 3; waveNumber++) {
     await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 3`);
     await callWave.click();
-    // Let the buffered call land before the next iteration's preview check — a same-tick
-    // double press would just dedupe, not advance the wave cursor.
-    await page.waitForTimeout(150);
   }
   // Every wave has launched: the preview's explicit last-wave marker, and the control is
   // visible-disabled (never hidden — it hides only at terminal).

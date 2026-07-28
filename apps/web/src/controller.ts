@@ -397,6 +397,10 @@ export function createController(seed: number): Controller {
     pendingAdds: TowerAnchor[];
     pendingSells: TowerAnchor[];
   } | null = null;
+  // One HudVM per (tick, bufferRev) — `hud()` and `uiState().callWaveReady` are the two
+  // readers and must never derive it separately (deriveHud runs deriveScore/deriveStars/
+  // derivePreview, and main.ts's refreshHud() calls both back-to-back on every refresh).
+  let hudMemo: { tick: number; rev: number; vm: HudVM } | null = null;
   // Armed/selection state machine (PLAN.md P2): `armed` is purely `apps/web` presentation
   // state — it never enters the sim or the replay log. `uiRev` is the DOM overlay's
   // observation key (bumped on every `uiState()`-visible change) and `lastOutcome` is what
@@ -473,6 +477,7 @@ export function createController(seed: number): Controller {
     tracers = []; // no tracer crosses run identity
     bufferRev = 0;
     previewMemo = null;
+    hudMemo = null;
     // Clear the per-run memo/caches — the next run reuses tick indices from 0, so a stale
     // (col,row,bufferLen,tick) verdict must never carry across a Play-again.
     aimMemoKey = '';
@@ -508,6 +513,18 @@ export function createController(seed: number): Controller {
       pendingSells: sells,
     };
     return previewMemo;
+  };
+
+  // The shared HudVM (above `hudMemo`'s declaration): computed once per (tick, bufferRev)
+  // and reused by both `hud()` and `uiState().callWaveReady` rather than each re-running
+  // `deriveHud` (and everything it derives) independently.
+  const currentHud = (): HudVM => {
+    if (hudMemo !== null && hudMemo.tick === state.tick && hudMemo.rev === bufferRev) {
+      return hudMemo.vm;
+    }
+    const vm = deriveHud(pendingProjection()?.preview ?? state, ruleset);
+    hudMemo = { tick: state.tick, rev: bufferRev, vm };
+    return vm;
   };
 
   /** The tower whose 2×2 footprint covers (col,row), or null. Reads the SHARED projection
@@ -816,7 +833,7 @@ export function createController(seed: number): Controller {
     // still counting down, the countdown) presents the pending world during paused
     // planning — the committed HUD would otherwise show stale figures until the next tick
     // commits.
-    hud: () => deriveHud(pendingProjection()?.preview ?? state, ruleset),
+    hud: currentHud,
     isPaused: () => paused,
     speed: () => spd,
     pause: doPause,
@@ -939,9 +956,9 @@ export function createController(seed: number): Controller {
         // `deriveHud`'s `callable` already reads the shared preview projection (so a
         // paused, buffered call surfaces as `launchPending` — PLAN.md P3 step 16); the
         // buffer-capacity half is web-only and folded in here, not in `@wynding/render`.
-        callWaveReady:
-          deriveHud(pendingProjection()?.preview ?? state, ruleset).callable &&
-          buffer.length < MAX_INPUTS_PER_TICK,
+        // Shares `currentHud()` with `hud()` above — one derivation per (tick, bufferRev),
+        // not two.
+        callWaveReady: currentHud().callable && buffer.length < MAX_INPUTS_PER_TICK,
       };
     },
     uiRev: () => uiRev,

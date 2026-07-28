@@ -63,7 +63,8 @@ export interface ScheduledSpawn {
  *  runtime-interleaves streams itself (G7).
  *
  *  `entriesSummary` aggregates `spawns` back down to one row per creep id, in
- *  first-appearance order — the authoritative source for the wave preview (a
+ *  first-ARRIVAL order over the sorted spawn timeline (an offset can make a later
+ *  table row arrive first) — the authoritative source for the wave preview (a
  *  duplicate-creepId entry, or several entries sharing a creepId, still shows one
  *  summed count). */
 export interface CompiledWave {
@@ -528,7 +529,6 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       readonly entryRow: number;
     }
     const rawSpawns: RawSpawn[] = [];
-    const summaryOrder: string[] = [];
     const summaryCount = new Map<string, number>();
     wave.entries.forEach((entry, entryRow) => {
       if (creepById[entry.creepId] === undefined) {
@@ -546,7 +546,6 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
           throw new RulesetError('wave schedule exceeds the scheduled-spawn cap');
         }
       }
-      if (!summaryCount.has(entry.creepId)) summaryOrder.push(entry.creepId);
       summaryCount.set(entry.creepId, (summaryCount.get(entry.creepId) ?? 0) + entry.count);
     });
     // Stable sort by (offsetTicks, entryRow): `Array.prototype.sort` is spec-stable,
@@ -564,6 +563,18 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       const def = creepById[s.creepId]!; // resolved above
       if (def.speedFp < minSpeedFp) minSpeedFp = def.speedFp;
     }
+    // Preview order = FIRST-ARRIVAL order over the SORTED spawn timeline, not the
+    // authored entry order: with per-entry offsets the first creeps a player sees can
+    // come from a later table row, and the wave-preview contract (m2.md §Waves) wants
+    // the composition in schedule order as it will actually arrive (Codex PR #68).
+    const summaryOrder: string[] = [];
+    const summarySeen = new Set<string>();
+    for (const s of rawSpawns) {
+      if (!summarySeen.has(s.creepId)) {
+        summarySeen.add(s.creepId);
+        summaryOrder.push(s.creepId);
+      }
+    }
     const entriesSummary = summaryOrder.map((creepId) => ({
       creepId,
       count: summaryCount.get(creepId)!,
@@ -578,18 +589,25 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
 
   // Reject a bundle whose BASELINE run can't reach a terminal state within the replay
   // validator's absolute tick ceiling — otherwise it compiles but every replay on it
-  // times out. Bound the worst-case baseline over the WHOLE multi-wave schedule:
-  // Σ every wave's countdown (every wave launches on its own deadline, back to back,
-  // in the worst case) + the latest tail offset across all waves (the final spawn
-  // could belong to any wave once countdowns are summed) + the slowest creep's full
-  // traversal (max route length ÷ min speed, over every creep any wave spawns).
-  // Only the baseline must fit; adversarial build/sell juggling beyond it is caught
-  // by the validator's timeout.
-  const sumCountdownTicks = waves.reduce((sum, w) => sum + w.countdownTicks, 0);
-  const maxTail = Math.max(...tails);
+  // times out. Hands-off, wave k launches at the PREFIX SUM of countdowns 1..k (each
+  // countdown starts the tick after the previous launch), so its last spawn lands at
+  // prefix_k + tail_k, and the run's latest spawn is the MAX of that over k — NOT
+  // Σ countdowns + max tail, which double-counts time an early long tail overlaps
+  // with later countdowns and would falsely reject feasible bundles (Codex PR #68:
+  // countdowns [10k, 10k] + tails [20k, 0] peak at 30k, not 40k). Add the slowest
+  // creep's full traversal (max route length ÷ min speed, over every creep any wave
+  // spawns). Only the baseline must fit; adversarial build/sell juggling beyond it
+  // is caught by the validator's timeout.
+  let prefixCountdown = 0;
+  let latestSpawnTick = 0;
+  waves.forEach((w, k) => {
+    prefixCountdown += w.countdownTicks;
+    const last = prefixCountdown + tails[k]!;
+    if (last > latestSpawnTick) latestSpawnTick = last;
+  });
   const cells = boardCtx.grid.width * boardCtx.grid.height;
   const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minSpeedFp);
-  if (sumCountdownTicks + maxTail + maxTraversalTicks > MAX_MATCH_TICKS) {
+  if (latestSpawnTick + maxTraversalTicks > MAX_MATCH_TICKS) {
     throw new RulesetError('ruleset cannot reach a terminal state within the tick budget');
   }
 

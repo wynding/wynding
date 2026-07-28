@@ -15,8 +15,11 @@ export const EN = {
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
   "hud.preview.entry": "{count} × {name} — {domain}, {armor}, {immunities}",
   "hud.preview.domain.ground": "ground",
+  "hud.preview.domain.air": "air",
   "hud.preview.armor": "armor {armor}",
   "hud.preview.immunities.none": "no immunities",
+  "hud.preview.immunity.slow": "slow",
+  "hud.preview.immunity.stun": "stun",
   "hud.preview.lastWave": "Final wave launched — no more waves to call",
   "creep.normal.name": "Creep",
   "creep.unknown.name": "Unknown creep ({id})",
@@ -111,8 +114,11 @@ export interface MessageParams {
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
   "hud.preview.entry": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "immunities": string | number };
   "hud.preview.domain.ground": Record<never, never>;
+  "hud.preview.domain.air": Record<never, never>;
   "hud.preview.armor": { "armor": string | number };
   "hud.preview.immunities.none": Record<never, never>;
+  "hud.preview.immunity.slow": Record<never, never>;
+  "hud.preview.immunity.stun": Record<never, never>;
   "hud.preview.lastWave": Record<never, never>;
   "creep.normal.name": Record<never, never>;
   "creep.unknown.name": { "id": string | number };

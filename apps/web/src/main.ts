@@ -314,8 +314,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  finished match has nothing left to protect.
    *
    *  "Something to lose" is deliberately NOT just `started` (PLAN.md Amendment 1). A held run
-   *  is not necessarily empty: the controller buffers pre-start build/sell commands
-   *  (`effectiveCap()` reserves a slot precisely so pre-start planning works), so a player can
+   *  is not necessarily empty: the controller buffers pre-start build/sell commands up to the
+   *  full per-tick cap (P3 step 15 dropped the reserved slot), so a player can
    *  lay out several towers before pressing Start. Guarding only `started` meant tapping the
    *  mark discarded that layout silently, while the IDENTICAL loss one keypress later opened a
    *  dialog. The original decision read "held pre-start … navigates directly, since there is

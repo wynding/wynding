@@ -292,8 +292,9 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const text = shell.preview.list.querySelector('li')!.textContent;
     expect(text).toBe('4 × Unknown creep (future-kind) — ground, armor 2, no immunities');
-    expect(text).not.toContain('future-kind — '); // never a bare raw id standing in for a name
-    expect(warnSpy).toHaveBeenCalled();
+    // The dev-only warn is asserted conditionally — Vitest defaults DEV to true, but a
+    // production-mode run must not fail on a behaviour (the warn) that build mode elides.
+    if (import.meta.env.DEV) expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
@@ -414,6 +415,19 @@ describe('overlay — the morphing primary control’s aria-disabled states (M2-
     expect(primaryBtn.hidden).toBe(false);
     expect(dockButtonParts(primaryBtn).text.textContent).toBe('Call wave');
     expect(primaryBtn.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('Start is never aria-disabled pre-start, even with a full buffer (callWaveReady false)', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ callable: true }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: false, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(dockButtonParts(primaryBtn).text.textContent).toBe('Start');
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('false');
   });
 
   it('is aria-disabled when the buffer is momentarily full (UiState.callWaveReady), even though HudVM.callable is true', () => {

@@ -107,7 +107,10 @@ describe('wave launch + countdown', () => {
     expect(preview.launchPending).toBe(true); // buffered — pays at the real launch, not here
   });
 
-  it('launch-pending is uncallable a second time even across ticks until it resolves', () => {
+  it('a call after the final wave has launched is a no-op (nothing callable)', () => {
+    // (Renamed per CodeRabbit PR #68: `launchPending` never survives its own tick,
+    // so "pending across ticks" is not a state this — or any — test can witness;
+    // the same-tick double-call no-op is covered in wave-multi.test.ts.)
     const ruleset = testRuleset(OPEN, { waveCount: 1, countdownTicks: 50 });
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, callEarly); // consumed + launched within this same tick
@@ -115,6 +118,7 @@ describe('wave launch + countdown', () => {
     // wave to call in a single-wave bundle) — waveLaunchTick stays pinned at 0.
     s = step(s, ruleset, callEarly);
     expect(s.waveLaunchTick[0]).toBe(0);
+    expect(s.launchPending).toBe(false);
   });
 
   it('a final-wave early call zeroes the countdown (boundary invariant)', () => {

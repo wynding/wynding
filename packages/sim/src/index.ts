@@ -172,6 +172,15 @@ function effectiveField(grid: Grid, towers: TowerArrays, cost: number): Distance
   return field;
 }
 
+/** Per-wave alive counts derived from a (wave-column-clean) creep SoA `wave` column —
+ *  the SINGLE implementation `coerceSoa` and the resolution phase share (CodeRabbit
+ *  PR #68: both feed `waveResolved`; two hand-rolled copies must never drift). */
+function deriveAliveByWave(creepWave: readonly number[], waveCount: number): number[] {
+  const counts = new Array<number>(waveCount).fill(0);
+  for (const w of creepWave) counts[w]!++;
+  return counts;
+}
+
 /** `coerceSoa`'s two call sites need different `launchPending` handling (see the
  *  field's own doc on `SimState`): the real `step()` entry is AUTHORITATIVE (a
  *  buffered call is consumed within its own tick, so a `true` surviving to the next
@@ -216,13 +225,17 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   // wave id, and so a forged/ragged column can never itself desync the count.
   // Any row whose OTHER columns are ragged (a length mismatch elsewhere) is left
   // for the per-phase ragged-row policy downstream (movement's existing guard);
-  // this pass only ever narrows by `wave` validity.
-  let sawInvalidWave = false;
-  for (let i = 0; i < c.id.length; i++) {
+  // this pass only ever narrows by `wave` validity. A `wave` column LONGER than
+  // `id` also trips the rebuild (CodeRabbit PR #68): `id` is the row authority,
+  // and a trailing tail beyond it would otherwise ride into the hash untouched —
+  // the rebuild below iterates `id`'s length, so the tail simply doesn't survive
+  // (and the rebuild allocates fresh arrays, so the shared-column preview
+  // contract is preserved).
+  let sawInvalidWave = c.wave.length > c.id.length;
+  for (let i = 0; i < c.id.length && !sawInvalidWave; i++) {
     const w = c.wave[i];
     if (!Number.isSafeInteger(w) || (w as number) < 0 || (w as number) >= waveCount) {
       sawInvalidWave = true;
-      break;
     }
   }
   if (sawInvalidWave) {
@@ -284,69 +297,40 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   waveCursor = Math.max(0, Math.min(waveCursor, waveCount));
   state.waveCursor = waveCursor;
 
-  let waveLaunchTick = state.waveLaunchTick;
-  let waveLaunchTickOwned = false;
-  if (!Array.isArray(waveLaunchTick)) {
-    waveLaunchTick = [];
-    waveLaunchTickOwned = true;
-  }
-  const ownWaveLaunchTick = (): (number | null)[] => {
-    if (!waveLaunchTickOwned) {
-      waveLaunchTick = (waveLaunchTick as (number | null)[]).slice();
-      waveLaunchTickOwned = true;
-    }
-    return waveLaunchTick as (number | null)[];
+  // One generic copy-on-write cell per lifecycle array (CodeRabbit PR #68: four
+  // hand-rolled copies of this block must never drift): `.arr` is the current
+  // (possibly still shared) array; `own()` clones it on the first WRITE only, so
+  // the well-formed hot path never allocates. A non-array input is replaced with a
+  // fresh (already-owned) empty array up front.
+  const cow = <T>(raw: unknown): { arr: T[]; own: () => T[] } => {
+    let arr: T[] = Array.isArray(raw) ? (raw as T[]) : [];
+    let owned = !Array.isArray(raw);
+    return {
+      get arr() {
+        return arr;
+      },
+      own: () => {
+        if (!owned) {
+          arr = arr.slice();
+          owned = true;
+        }
+        return arr;
+      },
+    };
   };
-
-  let waveSpawnCursor = state.waveSpawnCursor;
-  let waveSpawnCursorOwned = false;
-  if (!Array.isArray(waveSpawnCursor)) {
-    waveSpawnCursor = [];
-    waveSpawnCursorOwned = true;
-  }
-  const ownWaveSpawnCursor = (): number[] => {
-    if (!waveSpawnCursorOwned) {
-      waveSpawnCursor = (waveSpawnCursor as number[]).slice();
-      waveSpawnCursorOwned = true;
-    }
-    return waveSpawnCursor as number[];
-  };
-
-  let waveLeaked = state.waveLeaked;
-  let waveLeakedOwned = false;
-  if (!Array.isArray(waveLeaked)) {
-    waveLeaked = [];
-    waveLeakedOwned = true;
-  }
-  const ownWaveLeaked = (): boolean[] => {
-    if (!waveLeakedOwned) {
-      waveLeaked = (waveLeaked as boolean[]).slice();
-      waveLeakedOwned = true;
-    }
-    return waveLeaked as boolean[];
-  };
-
-  let waveResolved = state.waveResolved;
-  let waveResolvedOwned = false;
-  if (!Array.isArray(waveResolved)) {
-    waveResolved = [];
-    waveResolvedOwned = true;
-  }
-  const ownWaveResolved = (): boolean[] => {
-    if (!waveResolvedOwned) {
-      waveResolved = (waveResolved as boolean[]).slice();
-      waveResolvedOwned = true;
-    }
-    return waveResolved as boolean[];
-  };
+  const launchTickCow = cow<number | null>(state.waveLaunchTick);
+  const spawnCursorCow = cow<number>(state.waveSpawnCursor);
+  const leakedCow = cow<boolean>(state.waveLeaked);
+  const resolvedCow = cow<boolean>(state.waveResolved);
+  const ownWaveLaunchTick = launchTickCow.own;
+  const ownWaveSpawnCursor = spawnCursorCow.own;
+  const ownWaveLeaked = leakedCow.own;
+  const ownWaveResolved = resolvedCow.own;
 
   // Per-wave alive count, derived from the (already wave-column-clean) surviving
   // creep SoA — O(creeps), the same derivation the resolution phase uses (step 9),
   // computed here too since a repaired `waveResolved` needs it.
-  const aliveByWave = new Array<number>(waveCount).fill(0);
-  for (let i = 0; i < state.creeps.wave.length; i++) {
-    aliveByWave[state.creeps.wave[i] as number]!++;
-  }
+  const aliveByWave = deriveAliveByWave(state.creeps.wave, waveCount);
 
   for (let k = 0; k < waveCount; k++) {
     if (k < waveCursor) {
@@ -355,31 +339,31 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       // a repaired launch tick beside an exhausted spawn cursor would otherwise
       // resolve a wave that spawned nothing, so the cursor resets to 0 and
       // `resolved` to false alongside it.
-      const rawTick = (waveLaunchTick as (number | null)[])[k];
+      const rawTick = launchTickCow.arr[k];
       const tickValid =
         Number.isSafeInteger(rawTick) &&
         (rawTick as number) >= 0 &&
         (rawTick as number) <= state.tick;
       let launchTickRepaired = false;
       if (!tickValid) {
-        if ((waveLaunchTick as (number | null)[])[k] !== state.tick) {
+        if (launchTickCow.arr[k] !== state.tick) {
           ownWaveLaunchTick()[k] = state.tick;
         }
         launchTickRepaired = true;
       }
 
       const spawnCap = ruleset.waves[k]!.spawns.length;
-      const rawCursor = (waveSpawnCursor as number[])[k];
+      const rawCursor = spawnCursorCow.arr[k];
       const cursorValid =
         Number.isSafeInteger(rawCursor) &&
         (rawCursor as number) >= 0 &&
         (rawCursor as number) <= spawnCap;
       let effectiveCursor: number;
       if (launchTickRepaired) {
-        if ((waveSpawnCursor as number[])[k] !== 0) ownWaveSpawnCursor()[k] = 0;
+        if (spawnCursorCow.arr[k] !== 0) ownWaveSpawnCursor()[k] = 0;
         effectiveCursor = 0;
       } else if (!cursorValid) {
-        if ((waveSpawnCursor as number[])[k] !== 0) ownWaveSpawnCursor()[k] = 0;
+        if (spawnCursorCow.arr[k] !== 0) ownWaveSpawnCursor()[k] = 0;
         effectiveCursor = 0;
       } else {
         effectiveCursor = rawCursor as number;
@@ -388,33 +372,32 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       const exhausted = effectiveCursor === spawnCap;
       const zeroAlive = (aliveByWave[k] ?? 0) === 0;
       const desiredResolved = !launchTickRepaired && exhausted && zeroAlive;
-      const rawResolved = (waveResolved as boolean[])[k];
+      const rawResolved = resolvedCow.arr[k];
       if (typeof rawResolved !== 'boolean' || rawResolved !== desiredResolved) {
         ownWaveResolved()[k] = desiredResolved;
       }
 
-      const rawLeaked = (waveLeaked as boolean[])[k];
+      const rawLeaked = leakedCow.arr[k];
       if (typeof rawLeaked !== 'boolean') ownWaveLeaked()[k] = false;
     } else {
       // UNLAUNCHED wave: pinned to its exact defaults.
-      if ((waveLaunchTick as (number | null)[])[k] !== null) ownWaveLaunchTick()[k] = null;
-      if ((waveSpawnCursor as number[])[k] !== 0) ownWaveSpawnCursor()[k] = 0;
-      if ((waveResolved as boolean[])[k] !== false) ownWaveResolved()[k] = false;
-      if ((waveLeaked as boolean[])[k] !== false) ownWaveLeaked()[k] = false;
+      if (launchTickCow.arr[k] !== null) ownWaveLaunchTick()[k] = null;
+      if (spawnCursorCow.arr[k] !== 0) ownWaveSpawnCursor()[k] = 0;
+      if (resolvedCow.arr[k] !== false) ownWaveResolved()[k] = false;
+      if (leakedCow.arr[k] !== false) ownWaveLeaked()[k] = false;
     }
   }
   // Truncate a forged/legacy array longer than `waveCount` — a stray trailing
   // element would otherwise survive into the hash untouched.
-  if ((waveLaunchTick as (number | null)[]).length !== waveCount)
-    ownWaveLaunchTick().length = waveCount;
-  if ((waveSpawnCursor as number[]).length !== waveCount) ownWaveSpawnCursor().length = waveCount;
-  if ((waveLeaked as boolean[]).length !== waveCount) ownWaveLeaked().length = waveCount;
-  if ((waveResolved as boolean[]).length !== waveCount) ownWaveResolved().length = waveCount;
+  if (launchTickCow.arr.length !== waveCount) ownWaveLaunchTick().length = waveCount;
+  if (spawnCursorCow.arr.length !== waveCount) ownWaveSpawnCursor().length = waveCount;
+  if (leakedCow.arr.length !== waveCount) ownWaveLeaked().length = waveCount;
+  if (resolvedCow.arr.length !== waveCount) ownWaveResolved().length = waveCount;
 
-  state.waveLaunchTick = waveLaunchTick as (number | null)[];
-  state.waveSpawnCursor = waveSpawnCursor as number[];
-  state.waveLeaked = waveLeaked as boolean[];
-  state.waveResolved = waveResolved as boolean[];
+  state.waveLaunchTick = launchTickCow.arr;
+  state.waveSpawnCursor = spawnCursorCow.arr;
+  state.waveLeaked = leakedCow.arr;
+  state.waveResolved = resolvedCow.arr;
 
   // countdownRemaining: while a wave is still pending, a safe int clamped into
   // [1, waves[waveCursor].countdownTicks] (a forged oversized value must not mint
@@ -825,10 +808,7 @@ export function step(
   //    on the final tick pays, win or loss. Per-wave alive counts are DERIVED from
   //    the surviving creep SoA's `wave` column — O(creeps), immune by construction
   //    to every removal path (no counter to desynchronize).
-  const aliveByWave = new Array<number>(waveCount).fill(0);
-  for (let i = 0; i < state.creeps.wave.length; i++) {
-    aliveByWave[state.creeps.wave[i] as number]!++;
-  }
+  const aliveByWave = deriveAliveByWave(state.creeps.wave, waveCount);
   for (let k = 0; k < waveCount; k++) {
     if (
       state.waveLaunchTick[k] !== null &&

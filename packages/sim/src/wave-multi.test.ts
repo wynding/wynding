@@ -62,30 +62,29 @@ describe('wave handoff timing (G1) — a wave never decrements on its own flip t
 
 describe('cross-wave same-tick spawn ordering', () => {
   it('when two launched waves both have a spawn due the same tick, the earlier-launched wave spawns first (lower entity id)', () => {
-    // Launch wave 0 and (via a second early call the same tick) wave 1 together —
-    // both waves' first spawn is then due on the SAME tick; wave 0 (index order)
-    // must drain first, so its creep receives the lower id.
+    // A GENUINE same-tick collision (CodeRabbit PR #68 — the previous construction
+    // never produced one): wave 0 launches at tick 0 (early call), entries spaced 5
+    // ⇒ spawns at ticks 0 and 5. Wave 1 launches at tick 1 (early call) with entry
+    // offset 4 ⇒ its first spawn is due at tick 1 + 4 = 5 — the SAME tick as wave
+    // 0's second spawn. Index-order draining must append wave 0's creep first.
     const ruleset = testRuleset(OPEN, {
       waves: [
         { waveCount: 2, waveSpacing: 5, countdownTicks: 5 },
-        { waveCount: 2, waveSpacing: 5, countdownTicks: 1 },
+        { waveCount: 2, waveSpacing: 5, countdownTicks: 1, offsetTicks: 4 },
       ],
     });
     let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, callEarly); // launches wave 0 at tick 0
-    s = step(s, ruleset, callEarly); // tick 1: launches wave 1 early too
-    // Both waves have now launched, each with a spawn due immediately.
+    s = step(s, ruleset, callEarly); // tick 0: launches wave 0 (spawn @ 0)
+    s = step(s, ruleset, callEarly); // tick 1: launches wave 1 (first spawn due @ 5)
     expect(s.waveLaunchTick[0]).toBe(0);
     expect(s.waveLaunchTick[1]).toBe(1);
-    // Wave 0's second spawn (offset 5) and wave 1's first spawn (offset 0, due at
-    // launch tick 1) both land on tick 5 and tick 1 respectively — check the tick
-    // where wave 1's own first spawn lands (tick 1, same tick it launched):
-    // wave 0 was already draining before wave 1 existed, so on tick 1 wave 0's
-    // cursor is not due (next due at tick 5) — assert wave 1's creep id instead,
-    // and separately assert index-order draining via the wave column: the FIRST
-    // creep (lowest id) belongs to wave 0.
-    expect(s.creeps.wave[0]).toBe(0);
-    expect(s.creeps.id[0]).toBeLessThan(s.creeps.id[s.creeps.id.length - 1] as number);
+    for (let t = 2; t <= 5; t++) s = step(s, ruleset, []);
+    // Through tick 5: wave 0 spawned @0 and @5, wave 1 spawned @5 — three creeps,
+    // and the two same-tick spawns landed wave-0-then-wave-1 with ascending ids.
+    expect(s.creeps.wave).toEqual([0, 0, 1]);
+    const ids = s.creeps.id as number[];
+    expect(ids[1]!).toBeGreaterThan(ids[0]!);
+    expect(ids[2]!).toBeGreaterThan(ids[1]!); // the tick-5 pair: wave 0 first
   });
 });
 
@@ -110,6 +109,8 @@ describe('per-wave clear-bonus forfeit isolation', () => {
       ],
     });
     const ruleset = compileRuleset(bundle, 'test');
+    const towerCost = bundle.towerCatalog[0]!.cost;
+    const killBounty = bundle.creepCatalog[0]!.bounty;
     let s = createInitialState(1, ruleset);
     // Build a tower dead-center in the lane before wave 1 launches.
     s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 } }]);
@@ -117,7 +118,11 @@ describe('per-wave clear-bonus forfeit isolation', () => {
     for (let t = 0; t < 200 && !s.waveResolved[0]; t++) s = step(s, ruleset, []);
     expect(s.waveResolved[0]).toBe(true);
     expect(s.waveLeaked[0]).toBe(false); // the tower killed it before it reached the exit
+    // EXACT credited amount (CodeRabbit PR #68 — flags alone don't witness payment):
+    // starting 80 − tower cost + the kill's bounty + wave 1's clear bonus (40),
+    // nothing else (both early-call divisors are 0 in this fixture).
     const bountyAfterWave1 = s.bounty;
+    expect(bountyAfterWave1).toBe(80 - towerCost + killBounty + 40);
 
     s = step(s, ruleset, callEarly); // launch wave 2 early — no defense left in its path
     // Sell the tower so wave 2's creep is guaranteed to leak (isolating the forfeit).
@@ -126,59 +131,107 @@ describe('per-wave clear-bonus forfeit isolation', () => {
     for (let t = 0; t < 500 && s.phase === 'running'; t++) s = step(s, ruleset, []);
     expect(s.waveLeaked[1]).toBe(true);
     expect(s.waveResolved[1]).toBe(true);
-    // Wave 1's bonus (40) landed in bountyAfterWave1; wave 2's bonus (90) must NOT
-    // land on top of it (forfeited) — final bounty grew only by the sell refund and
-    // any late kill bounty, never by 90.
-    expect(s.bounty).toBeLessThan(bountyAfterWave1 + 90);
+    // Wave 2's creep leaked: its 90 bonus is forfeited and no kill bounty accrues —
+    // the ONLY income after wave 1 settled is the sell refund. Exact, not an
+    // inequality: a cross-forfeit bug in either direction changes this sum.
+    const sellRefund = Math.floor((towerCost * 3) / 4);
+    expect(s.bounty).toBe(bountyAfterWave1 + sellRefund);
   });
 });
 
 describe('settlement precedes terminal, uniformly, on the final tick (G8)', () => {
   it('a wave clearing on the SAME tick lives reach 0 still pays its bonus before the loss terminal', () => {
-    // Two waves: wave 1's sole creep is killed by a tower on the exact tick a
-    // wave-2 creep (already loose, undefended) leaks the last life — settlement
-    // (wave 1's bonus) must land even though the match ends 'lost' this tick.
+    // The REAL construction (CodeRabbit PR #68 — the previous body never built the
+    // collision it named). Wave 0's sole creep is unkillable and leaks the last
+    // life at a fixed tick L; wave 1's sole creep is one-shottable. The board is
+    // wide enough that the leaker exits the tower's range long before it leaks, so
+    // the tower is free to fire at the mark — whose impact (fire + travel ticks)
+    // can land on any tick as wave 1's call tick shifts its arrival. We sweep that
+    // call tick until the kill genuinely lands ON the leak tick: movement (the
+    // leak, lives → 0) → combat (the in-flight impact lands, the mark dies) →
+    // resolution (wave 1 settles and PAYS, then the loss terminal is marked). The
+    // sweep FAILS the test if no collision exists — it cannot pass vacuously.
     const wideOpen = {
-      widthTiles: 9,
+      widthTiles: 16,
       heightTiles: 5,
       entrance: { col: 0, row: 2 },
-      exit: { col: 8, row: 2 },
+      exit: { col: 15, row: 2 },
     } as const;
-    const bundle = testBundle(wideOpen, {
-      startingLives: 1,
-      creepHp: 10_000, // effectively unkillable within this window — guarantees a leak
-      startingBounty: 80,
-      waves: [
+    const base = testBundle(wideOpen, { startingLives: 1, startingBounty: 80 });
+    const bundle = {
+      ...base,
+      creepCatalog: [
+        { ...base.creepCatalog[0]!, id: 'leaker', hp: 1_000_000 },
+        { ...base.creepCatalog[0]!, id: 'mark', hp: 10 },
+      ],
+      boards: [
         {
-          waveCount: 1,
-          waveSpacing: 5,
-          countdownTicks: 10,
-          waveClearBonus: 4,
-          offsetTicks: undefined,
+          ...base.boards[0]!,
+          waves: [
+            {
+              index: 0,
+              countdownTicks: 10,
+              clearBonus: 3,
+              entries: [{ creepId: 'leaker', count: 1, spacingTicks: 5 }],
+            },
+            {
+              index: 1,
+              countdownTicks: 500,
+              clearBonus: 7,
+              entries: [{ creepId: 'mark', count: 1, spacingTicks: 5 }],
+            },
+          ],
         },
       ],
-    });
+    };
     const ruleset = compileRuleset(bundle, 'test');
-    let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, callEarly);
-    for (let t = 0; t < 500 && s.phase === 'running'; t++) s = step(s, ruleset, []);
-    expect(s.phase).toBe('lost');
-    expect(s.lives).toBeLessThanOrEqual(0);
-    // Loss priority: deriveScore in the lost branch is kill-bounty ONLY.
-    expect(deriveScore(s, ruleset)).toBe(s.cumulativeKillBounty);
+    const killBounty = base.creepCatalog[0]!.bounty;
+    let witnessed = false;
+    for (let t1 = 1; t1 <= 200 && !witnessed; t1++) {
+      let s = createInitialState(1, ruleset);
+      s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 } }, ...callEarly]);
+      let leakTick = -1;
+      let killTick = -1;
+      for (let t = 1; t <= 600 && s.phase === 'running'; t++) {
+        const kbBefore = s.cumulativeKillBounty;
+        const livesBefore = s.lives;
+        const bountyBefore = s.bounty;
+        s = step(s, ruleset, t === t1 ? callEarly : []);
+        if (livesBefore > 0 && s.lives <= 0) leakTick = t;
+        if (s.cumulativeKillBounty > kbBefore) killTick = t;
+        if (leakTick === t && killTick === t) {
+          // The collision tick: wave 1 killed clean AND the last life leaked.
+          witnessed = true;
+          expect(s.phase).toBe('lost');
+          expect(s.waveResolved[1]).toBe(true);
+          expect(s.waveLeaked[1]).toBe(false);
+          // Settlement PAID before the terminal was marked: this tick credited
+          // the mark's kill bounty AND wave 1's clear bonus (7) — wave 0's bonus
+          // is forfeited (it leaked). Exact delta, no inequality.
+          expect(s.bounty).toBe(bountyBefore + killBounty + 7);
+          // Loss priority: deriveScore in the lost branch is kill-bounty ONLY.
+          expect(deriveScore(s, ruleset)).toBe(s.cumulativeKillBounty);
+        }
+      }
+    }
+    expect(witnessed).toBe(true);
   });
 
   it('the final wave resolving on the very tick the match becomes total (all waves cleared) pays its bonus in a WIN', () => {
-    const ruleset = testRuleset(OPEN, {
+    const bundle = testBundle(OPEN, {
       creepHp: 10,
       waves: [{ waveCount: 1, waveSpacing: 5, countdownTicks: 5, waveClearBonus: 7 }],
     });
+    const ruleset = compileRuleset(bundle, 'test');
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 } }, ...callEarly]);
     for (let t = 0; t < 200 && s.phase === 'running'; t++) s = step(s, ruleset, []);
     expect(s.phase).toBe('won');
     expect(s.waveResolved[0]).toBe(true);
     expect(s.waveLeaked[0]).toBe(false);
+    // The credited AMOUNT, not just the flags (CodeRabbit PR #68): starting 80 −
+    // tower cost + the one kill's bounty + the clear bonus (7); divisors are 0.
+    expect(s.bounty).toBe(80 - bundle.towerCatalog[0]!.cost + bundle.creepCatalog[0]!.bounty + 7);
   });
 });
 
@@ -267,17 +320,95 @@ describe('ragged wave-state termination (coerceSoa creep-wave-column totality)',
   });
 });
 
-describe('bound gate — accept exactly at the boundary', () => {
-  it('a multi-wave schedule landing exactly at MAX_MATCH_TICKS compiles', () => {
-    // Σcountdown + maxTail + maxTraversal must be <= 36_000. Build a 2-wave bundle
-    // tuned to land under the ceiling with room for the (nonzero) traversal term,
-    // proving the SUMMED bound — not a per-wave-only check — is what gates.
-    const ruleset = testRuleset(OPEN, {
-      waves: [
-        { waveCount: 2, waveSpacing: 5, countdownTicks: 17_000 },
-        { waveCount: 2, waveSpacing: 5, countdownTicks: 17_000 },
-      ],
-    });
+describe('bound gate — the terminal-tick budget', () => {
+  const compileAtCountdown = (countdownTicks: number) =>
+    compileRuleset(testBundle(OPEN, { waveCount: 1, countdownTicks }), 'test');
+
+  it('accepts exactly at the boundary and rejects one past it (a SHARP gate, not a vibe)', () => {
+    // With one single-spawn wave (tail 0), the gate is countdown + maxTraversal ≤
+    // MAX_MATCH_TICKS — binary-search the maximal accepted countdown, then prove
+    // the boundary is sharp: C* compiles, C*+1 throws. (CodeRabbit PR #68: the
+    // previous test neither landed on the boundary nor exercised the rejection.)
+    let lo = 1;
+    let hi = 36_000;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi + 1) / 2);
+      let ok = true;
+      try {
+        compileAtCountdown(mid);
+      } catch {
+        ok = false;
+      }
+      if (ok) lo = mid;
+      else hi = mid - 1;
+    }
+    const maxAccepted = lo;
+    // The OPEN test board's traversal term is small but nonzero — the boundary
+    // must sit strictly inside (30_000, 36_000).
+    expect(maxAccepted).toBeGreaterThan(30_000);
+    expect(maxAccepted).toBeLessThan(36_000);
+    expect(() => compileAtCountdown(maxAccepted)).not.toThrow();
+    expect(() => compileAtCountdown(maxAccepted + 1)).toThrow(
+      /cannot reach a terminal state within the tick budget/,
+    );
+  });
+
+  it("overlapping tails don't double-count: an early wave's long tail under later countdowns compiles (Codex PR #68)", () => {
+    // countdowns [10k, 10k] with wave 0 carrying a 20k spawn offset: the latest
+    // spawn is max(10k+20k, 20k+0) = 30k — feasible. The superseded
+    // Σcountdowns + maxTail formula would have read 40k and falsely rejected.
+    const ruleset = compileRuleset(
+      testBundle(OPEN, {
+        waves: [
+          { waveCount: 1, waveSpacing: 5, countdownTicks: 10_000, offsetTicks: 20_000 },
+          { waveCount: 1, waveSpacing: 5, countdownTicks: 10_000 },
+        ],
+      }),
+      'test',
+    );
     expect(ruleset.waves).toHaveLength(2);
+  });
+
+  it('a `wave` column longer than `id` is truncated by the totality pass, not hashed', () => {
+    const ruleset = testRuleset(OPEN, { waveCount: 2, waveSpacing: 1, countdownTicks: 20 });
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, callEarly);
+    s = step(s, ruleset, []); // two creeps on board
+    expect(s.creeps.id.length).toBe(2);
+    const survivors = [...s.creeps.id];
+    s.creeps.wave.push(0); // forged trailing element beyond the row authority (`id`)
+    s = step(s, ruleset, []);
+    expect(s.creeps.wave.length).toBe(s.creeps.id.length); // tail gone
+    expect(s.creeps.id).toEqual(survivors); // valid rows untouched
+  });
+
+  it('entriesSummary orders by FIRST ARRIVAL over the sorted timeline, not authored row order (Codex PR #68)', () => {
+    const base = testBundle(OPEN);
+    const bundle = {
+      ...base,
+      creepCatalog: [base.creepCatalog[0]!, { ...base.creepCatalog[0]!, id: 'swift' }],
+      boards: [
+        {
+          ...base.boards[0]!,
+          waves: [
+            {
+              index: 0,
+              countdownTicks: 10,
+              clearBonus: 0,
+              entries: [
+                // Authored first, but its offset makes it arrive LAST.
+                { creepId: 'normal', count: 2, spacingTicks: 5, offsetTicks: 100 },
+                { creepId: 'swift', count: 3, spacingTicks: 5 },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const ruleset = compileRuleset(bundle, 'test');
+    expect(ruleset.waves[0]!.entriesSummary).toEqual([
+      { creepId: 'swift', count: 3 },
+      { creepId: 'normal', count: 2 },
+    ]);
   });
 });
