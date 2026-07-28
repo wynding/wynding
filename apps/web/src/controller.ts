@@ -96,6 +96,14 @@ export interface UiState {
    *  equality, so two consecutive identical outcomes still both get announced. Reset to 0
    *  on `startRun()`. */
   readonly outcomeSeq: number;
+  /** Whether pressing the morphed primary control right now (once `started`) would
+   *  actually queue a `callWaveEarly` (PLAN.md P3 step 15) — folds `HudVM.callable`
+   *  (sim semantics: running, a wave left to call, no call already pending) together
+   *  with tick-buffer capacity, which is presentation-only and out of `@wynding/render`'s
+   *  scope. With the pre-start reservation gone, a full 64-command buffer would otherwise
+   *  make an "enabled" control silently no-op — this is what lets the overlay disable it
+   *  proactively instead. */
+  readonly callWaveReady: boolean;
 }
 
 /** What the renderer needs each frame: the last two view-models + alpha + overlay. */
@@ -186,17 +194,19 @@ export interface Controller {
    *  (armed/disarmed, selection change, placement/sell outcome). Reset to 0 on
    *  `startRun()`. */
   uiRev(): number;
-  /** Enqueue call-wave-early (pre-wave only; idempotent in the sim). Not wired to any UI
-   *  control (PLAN.md P4: the pre-wave call-wave path is reachable only via `start()`) —
-   *  kept as the shared primitive `start()` builds on, and exercised directly by tests. */
+  /** Enqueue call-wave-early: accepted while a wave is left to call (idempotent in the
+   *  sim — a duplicate already in the buffer is a no-op success, not a second command).
+   *  Wired to the morphed primary control (PLAN.md P3 step 15) once `started` — the
+   *  Start→Call-wave decouple means this is now a genuine UI-reachable action, not just
+   *  the shared primitive `start()` builds on. */
   callWaveEarly(): boolean;
-  /** Player-started runs (PLAN.md P4): while `!started`, `advance()` never steps. Enqueues
-   *  `callWaveEarly` and flips `started` to `true` ONLY once that enqueue is accepted —
-   *  atomic, so a held run can never observe `started === true` without its launch
-   *  command actually queued. A reserved buffer slot (see `enqueueVerdict`'s `cap`)
-   *  guarantees the enqueue always succeeds while held, so `start()` can never deadlock.
-   *  Idempotent: once `state.phase` has left `pre-wave` (this run is already under way —
-   *  M1 ships exactly one wave, so that's for the rest of the run), this is a no-op. */
+  /** Player-started runs (PLAN.md P4, decoupled further at P3 step 15): while `!started`,
+   *  `advance()` never steps. `start()` now ONLY flips `started` to `true` — it no longer
+   *  enqueues `callWaveEarly` (Start ≠ claiming the first wave early, PLAN.md's `S2`
+   *  headline decouple): once started, the sim's own wave-1 countdown begins ticking, and
+   *  an early launch is a deliberate `callWaveEarly()` press like any other wave's. A
+   *  trivial flag flip, so it's unconditionally idempotent — a repeat press mid-run is a
+   *  harmless no-op. */
   start(): void;
   /** Reset everything for a new run (Play-again / boot). */
   startRun(seed: number): void;
@@ -387,6 +397,10 @@ export function createController(seed: number): Controller {
     pendingAdds: TowerAnchor[];
     pendingSells: TowerAnchor[];
   } | null = null;
+  // One HudVM per (tick, bufferRev) — `hud()` and `uiState().callWaveReady` are the two
+  // readers and must never derive it separately (deriveHud runs deriveScore/deriveStars/
+  // derivePreview, and main.ts's refreshHud() calls both back-to-back on every refresh).
+  let hudMemo: { tick: number; rev: number; vm: HudVM } | null = null;
   // Armed/selection state machine (PLAN.md P2): `armed` is purely `apps/web` presentation
   // state — it never enters the sim or the replay log. `uiRev` is the DOM overlay's
   // observation key (bumped on every `uiState()`-visible change) and `lastOutcome` is what
@@ -411,10 +425,6 @@ export function createController(seed: number): Controller {
     outcomeSeq++; // identity bump — every recorded outcome, even a content-identical repeat
     bumpUiRev();
   };
-  // The per-tick input cap in effect right now (PLAN.md P4): the full replay-contract
-  // limit once running, or one slot short of it while held — the reserved slot Start's own
-  // `callWaveEarly` always lands in, so a held run's buffer can never deadlock Start.
-  const effectiveCap = (): number => (started ? MAX_INPUTS_PER_TICK : MAX_INPUTS_PER_TICK - 1);
 
   const onTick = (): void => {
     if (frozen) return; // terminal: freeze, record nothing past the resolving tick
@@ -467,6 +477,7 @@ export function createController(seed: number): Controller {
     tracers = []; // no tracer crosses run identity
     bufferRev = 0;
     previewMemo = null;
+    hudMemo = null;
     // Clear the per-run memo/caches — the next run reuses tick indices from 0, so a stale
     // (col,row,bufferLen,tick) verdict must never carry across a Play-again.
     aimMemoKey = '';
@@ -504,6 +515,18 @@ export function createController(seed: number): Controller {
     return previewMemo;
   };
 
+  // The shared HudVM (above `hudMemo`'s declaration): computed once per (tick, bufferRev)
+  // and reused by both `hud()` and `uiState().callWaveReady` rather than each re-running
+  // `deriveHud` (and everything it derives) independently.
+  const currentHud = (): HudVM => {
+    if (hudMemo !== null && hudMemo.tick === state.tick && hudMemo.rev === bufferRev) {
+      return hudMemo.vm;
+    }
+    const vm = deriveHud(pendingProjection()?.preview ?? state, ruleset);
+    hudMemo = { tick: state.tick, rev: bufferRev, vm };
+    return vm;
+  };
+
   /** The tower whose 2×2 footprint covers (col,row), or null. Reads the SHARED projection
    *  so a pending (not-yet-committed) build/sell is reflected in selection/hit-testing —
    *  e.g. `confirm()`'s post-queue re-aim selects the just-queued tower rather than
@@ -524,15 +547,16 @@ export function createController(seed: number): Controller {
     col >= 0 && row >= 0 && col < cols && row < rows;
 
   // Placement validity of a build at (col,row) given the current buffer. Memoized on
-  // (cell, buffer length, tick, started): a hover that stays in one cell (or repeated
-  // frames) re-uses the last clone instead of deep-cloning SimState each event. Reflects
-  // the PLAN.md P4 pre-start cap too — a cell that would otherwise build fine still shows
-  // an invalid ghost once the buffer is at `effectiveCap()`, so the preview never promises
-  // a placement that a subsequent confirm/click would then reject.
+  // (cell, buffer length, tick): a hover that stays in one cell (or repeated frames)
+  // re-uses the last clone instead of deep-cloning SimState each event. A cell that would
+  // otherwise build fine still shows an invalid ghost once the buffer is at
+  // `MAX_INPUTS_PER_TICK` (the replay contract's per-tick limit — PLAN.md P3 step 15
+  // drops the P4-era pre-start reservation, so this is the one cap now, held or not), so
+  // the preview never promises a placement that a subsequent confirm/click would reject.
   const placementValid = (col: number, row: number): boolean => {
-    const key = `${col},${row},${buffer.length},${state.tick},${started}`;
+    const key = `${col},${row},${buffer.length},${state.tick}`;
     if (key === aimMemoKey) return aimMemoValid;
-    if (buffer.length >= effectiveCap()) {
+    if (buffer.length >= MAX_INPUTS_PER_TICK) {
       aimMemoKey = key;
       aimMemoValid = false;
       return false;
@@ -616,12 +640,12 @@ export function createController(seed: number): Controller {
         setOutcome({ kind: 'rejected', reason: 'occupied' });
         return;
       }
-      // The PLAN.md P4 pre-start cap takes priority over bounty/other — a cell that's
+      // The per-tick buffer cap takes priority over bounty/other — a cell that's
       // otherwise perfectly buildable but arrives when the buffer is already at
-      // `effectiveCap()` must report the CAP as the reason, not a misleading 'bounty'/
-      // 'other'. Checked before `placementValid` (which itself folds the cap into its
-      // memoized result) so this exact branch can attach the distinct outcome.
-      if (buffer.length >= effectiveCap()) {
+      // `MAX_INPUTS_PER_TICK` must report the CAP as the reason, not a misleading
+      // 'bounty'/'other'. Checked before `placementValid` (which itself folds the cap
+      // into its memoized result) so this exact branch can attach the distinct outcome.
+      if (buffer.length >= MAX_INPUTS_PER_TICK) {
         ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
         setOutcome({ kind: 'rejected', reason: 'pendingCap' });
         return;
@@ -635,10 +659,10 @@ export function createController(seed: number): Controller {
       // Valid placement. `enqueueVerdict` never reports 'duplicate' for `placeTower`
       // (it isn't anchor-matched — see the doc comment above); the cap check above
       // already ruled out 'full' at the CURRENT cap, so only 'queue' remains in the
-      // common case — 'full' stays as a defensive fallback (silent, matching the
-      // pre-P4 default-cap contract) in case the effective cap changed underneath us.
+      // common case — 'full' stays as a defensive fallback in case the buffer changed
+      // underneath us between the check and here.
       const cmd: SimInput = { kind: 'placeTower', anchor: { col, row } };
-      const verdict = enqueueVerdict(buffer, cmd, effectiveCap());
+      const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') {
         ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
         setOutcome({ kind: 'rejected', reason: 'other' });
@@ -725,17 +749,27 @@ export function createController(seed: number): Controller {
     // drop. Resuming continues from that exact sub-tick position, so creeps neither snap
     // backward on pause nor jump on resume.
   };
-  /** Enqueue call-wave-early (pre-wave only; idempotent in the sim — a duplicate already
-   *  in the buffer is 'duplicate', not a second command). Uses the DEFAULT (full)
-   *  `enqueueVerdict` cap, never `effectiveCap()`: this is the one command the PLAN.md P4
-   *  pre-start build/sell cap reserves a slot FOR, so it must never itself be subject to
-   *  the reduced cap. Shared by the public `callWaveEarly()` (kept for direct tests/
-   *  internal reuse — PLAN.md P4 wires no UI control to it directly) and `start()`. */
+  /** Enqueue call-wave-early — accepted while a wave is left to call and the run isn't
+   *  terminal (idempotent in the sim: a duplicate already in the buffer is a no-op
+   *  success, not a second command). Wired to the morphed primary control once `started`
+   *  (PLAN.md P3 step 15) — the fast-path guard mirrors `HudVM.callable`'s sim half
+   *  (`running && waveCursor < waveCount`) so a doomed call never even reaches
+   *  `enqueueVerdict`; `launchPending` needs no separate check here — it only ever
+   *  observably persists within `previewInputs`' projection (the real `step()` consumes
+   *  it the same tick it's set), so a same-tick duplicate is already what
+   *  `enqueueVerdict`'s buffer scan catches. On a full buffer, announces the SAME
+   *  'pendingCap' outcome build/sell rejections use — the buffer-capacity fold the
+   *  primary control's enabled state (`UiState.callWaveReady`) already applies makes
+   *  this the rare edge-case path, not the common one. */
   const doCallWaveEarly = (): boolean => {
-    if (state.phase !== 'pre-wave') return false;
+    if (isTerminalPhase(state.phase)) return false;
+    if (state.waveCursor >= ruleset.waves.length) return false; // no more waves to call
     const cmd: SimInput = { kind: 'callWaveEarly' };
     const verdict = enqueueVerdict(buffer, cmd);
-    if (verdict === 'full') return false;
+    if (verdict === 'full') {
+      setOutcome({ kind: 'rejected', reason: 'pendingCap' });
+      return false;
+    }
     if (verdict === 'queue') {
       buffer.push(cmd);
       bufferRev++;
@@ -796,9 +830,10 @@ export function createController(seed: number): Controller {
       return out;
     },
     // Reads the SHARED projection whenever the buffer is non-empty, so bounty (and, while
-    // pre-wave, the countdown) presents the pending world during paused planning — the
-    // committed HUD would otherwise show stale figures until the next tick commits.
-    hud: () => deriveHud(pendingProjection()?.preview ?? state, ruleset),
+    // still counting down, the countdown) presents the pending world during paused
+    // planning — the committed HUD would otherwise show stale figures until the next tick
+    // commits.
+    hud: currentHud,
     isPaused: () => paused,
     speed: () => spd,
     pause: doPause,
@@ -841,7 +876,7 @@ export function createController(seed: number): Controller {
         if (ghost !== null) {
           if (armed !== null && towerAt(ghost.col, ghost.row) !== null) {
             setOutcome({ kind: 'rejected', reason: 'occupied' });
-          } else if (buffer.length >= effectiveCap()) {
+          } else if (buffer.length >= MAX_INPUTS_PER_TICK) {
             setOutcome({ kind: 'rejected', reason: 'pendingCap' });
           } else {
             const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
@@ -854,7 +889,7 @@ export function createController(seed: number): Controller {
         return false;
       }
       const cmd: SimInput = { kind: 'placeTower', anchor: { col: ghost.col, row: ghost.row } };
-      const verdict = enqueueVerdict(buffer, cmd, effectiveCap());
+      const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') return false;
       if (verdict === 'queue') {
         buffer.push(cmd);
@@ -886,10 +921,10 @@ export function createController(seed: number): Controller {
       // The sold tower's anchor — captured before re-aiming, which may clear `selection`.
       const anchor = { col: selection.col, row: selection.row };
       const cmd: SimInput = { kind: 'sellTower', tower: selection.id };
-      const verdict = enqueueVerdict(buffer, cmd, effectiveCap());
+      const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') {
-        // Sells count against the same PLAN.md P4 pre-start cap as builds.
-        if (!started) setOutcome({ kind: 'rejected', reason: 'pendingCap' });
+        // Sells count against the same per-tick buffer cap as builds and calls.
+        setOutcome({ kind: 'rejected', reason: 'pendingCap' });
         return false;
       }
       if (verdict === 'queue') {
@@ -918,19 +953,21 @@ export function createController(seed: number): Controller {
           selection === null ? null : { col: selection.col, row: selection.row, id: selection.id },
         lastOutcome,
         outcomeSeq,
+        // `deriveHud`'s `callable` already reads the shared preview projection (so a
+        // paused, buffered call surfaces as `launchPending` — PLAN.md P3 step 16); the
+        // buffer-capacity half is web-only and folded in here, not in `@wynding/render`.
+        // Shares `currentHud()` with `hud()` above — one derivation per (tick, bufferRev),
+        // not two.
+        callWaveReady: currentHud().callable && buffer.length < MAX_INPUTS_PER_TICK,
       };
     },
     uiRev: () => uiRev,
     callWaveEarly: doCallWaveEarly,
     start(): void {
-      // Atomic (PLAN.md P4): `started` flips ONLY once the enqueue is actually accepted.
-      // `doCallWaveEarly` uses the DEFAULT (full) cap, not `effectiveCap()` — build/sell
-      // commands are the ones capped one slot short pre-start specifically so THIS enqueue
-      // always has room, so `start()` can never deadlock. Idempotent: once `state.phase`
-      // has left 'pre-wave' (already started, or this run's one wave already launched),
-      // `doCallWaveEarly` returns false and this is a no-op — matches "no-op after" for
-      // the `start` keymap action/Dock button.
-      if (doCallWaveEarly()) started = true;
+      // Decoupled (PLAN.md P3 step 15 — the S2 headline decouple): Start no longer
+      // enqueues `callWaveEarly`. A trivial flag flip is unconditionally idempotent, so a
+      // repeat press mid-run is a harmless no-op — no acceptance to gate on.
+      started = true;
     },
     startRun(nextSeed: number): void {
       reset(nextSeed);

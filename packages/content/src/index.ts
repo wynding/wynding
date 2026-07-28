@@ -1,7 +1,7 @@
 // @wynding/content — the ruleset bundle registry (ADR 0007, M2-S1).
 //
 // Type shapes are re-exported from ./schema.ts (they live in @wynding/types); the
-// shipped M1 artifact is authored JSON under ./rulesets, loaded and validated at
+// shipped artifact is authored JSON under ./rulesets, loaded and validated at
 // runtime by ./registry.ts (the client-side loader half of ADR 0007 §2's "two
 // independent loaders" — the server loads the same bytes via the separate
 // `@wynding/content/artifact` subpath, see ./artifact.ts). This barrel re-exports

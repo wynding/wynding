@@ -2,14 +2,14 @@
 //
 // The v2 schema is pinned STRUCTURALLY once (formatVersion 2, fixed for all of M2) —
 // but a given sim BEHAVIOR version only implements a subset of what the shape can
-// express (e.g. `SIM_VERSION` 5 simulates only direct/single-target damage against
-// ground creeps, one tower, one wave). The capability profile is that subset,
-// gating kinds, cardinalities, AND values in `compileRuleset` — so a schema-valid
-// bundle that describes something this sim build cannot yet simulate (a `slow`
-// effect, a second wave, nonzero armor, ...) is rejected loudly at compile time
-// rather than silently mis-simulated. `formatVersion` never bumps for this; only
-// `simVersion` does, and each story that adds behavior widens its own dimension(s)
-// here alongside its `SIM_VERSION` bump.
+// express (e.g. `SIM_VERSION` 6 simulates only direct/single-target damage against
+// ground creeps and one tower, though now across a full multi-wave schedule). The
+// capability profile is that subset, gating kinds, cardinalities, AND values in
+// `compileRuleset` — so a schema-valid bundle that describes something this sim
+// build cannot yet simulate (a `slow` effect, nonzero armor, ...) is rejected
+// loudly at compile time rather than silently mis-simulated. `formatVersion` never
+// bumps for this; only `simVersion` does, and each story that adds behavior widens
+// its own dimension(s) here alongside its `SIM_VERSION` bump.
 
 import { RulesetError } from './ruleset-shared';
 
@@ -29,7 +29,7 @@ export interface CapabilityProfile {
   readonly allowedImmunities: readonly string[];
   readonly allowedRoles: readonly string[];
   readonly maxArmor: number;
-  /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 5 —
+  /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 6 —
    *  m2.md: "leakCost = 1 until S10"); the compiled surface exposes that single
    *  value as `CompiledBalance.leakCost`. */
   readonly requiredLeakCost: number;
@@ -38,18 +38,35 @@ export interface CapabilityProfile {
   readonly maxEarlyCallScoreDivisor: number;
 }
 
-/** `SIM_VERSION` 5 (imported from `./index` would create a circular import — see
- *  `ruleset.ts`'s header comment — so this is keyed by the plain numeric literal,
- *  which the caller passes as `SIM_VERSION`): exactly M1 semantics — one tower, one
- *  board wave, one wave entry, no stream offset, a single direct/single-target
- *  effect, ground-only, no immunities/roles/armor, one uniform leak cost, and both
- *  early-call divisors and the wave clear bonus pinned off. */
+/** `SIM_VERSION` 6 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  the multi-wave engine — still one tower, a single direct/single-target effect,
+ *  ground-only, no immunities/roles/armor, one uniform leak cost, but now up to
+ *  64 board waves of up to 16 concurrent entries each, with a real stream offset
+ *  and both economy divisors (and the per-wave clear bonus) live at full value.
+ *
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv5 profile is deleted with this bump —
+ *  a live sv5 entry would misdescribe v6 tick code, and replay's strict version
+ *  equality already owns cross-version rejection, so there is nothing for a stale
+ *  profile to serve.
+ *
+ *  sv6 CEILINGS DEFER TO THE SCHEMA (G11 as corrected in Codex R2): a capability
+ *  ceiling narrows only what THIS SIM BUILD cannot correctly simulate — not a
+ *  product/balance opinion (that is the ruleset schema's job). v6 simulates any
+ *  magnitude the v2 schema can express on the wave/economy axes (waves, entries,
+ *  offsets, clear bonus, both early-call divisors): the schema's own structural
+ *  caps (64 waves, 16 entries/wave) and its `GENERIC_MAX` (1_000_000) are already
+ *  the widest values `validateRulesetShape` lets through, saturating arithmetic
+ *  (`satAdd`/`satMul`) makes an over-large divisor floor to 0 rather than
+ *  misbehave, and the real constraint on a match's tick budget is the compile-time
+ *  bound gate (`ruleset.ts`), not this profile. So these dimensions carry the
+ *  schema's own ceiling verbatim rather than inventing a narrower product cap
+ *  without spec authority. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  5: {
+  6: {
     maxTowerCatalogSize: 1,
-    maxWavesPerBoard: 1,
-    maxEntriesPerWave: 1,
-    maxOffsetTicks: 0,
+    maxWavesPerBoard: 64,
+    maxEntriesPerWave: 16,
+    maxOffsetTicks: 1_000_000,
     maxEffectsPerBundle: 1,
     allowedEffectKinds: ['direct'],
     allowedDirectForms: ['single'],
@@ -59,9 +76,9 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     allowedRoles: [],
     maxArmor: 0,
     requiredLeakCost: 1,
-    maxClearBonus: 0,
-    maxEarlyCallBountyDivisor: 0,
-    maxEarlyCallScoreDivisor: 0,
+    maxClearBonus: 1_000_000,
+    maxEarlyCallBountyDivisor: 1_000_000,
+    maxEarlyCallScoreDivisor: 1_000_000,
   },
 };
 

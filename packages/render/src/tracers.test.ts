@@ -7,7 +7,7 @@ import type { RenderVM, TracerVM } from './types';
 import { resolvePalette } from './palette';
 
 function vm(tick: number): RenderVM {
-  return { tick, phase: 'active', creeps: [], towers: [] };
+  return { tick, phase: 'running', creeps: [], towers: [] };
 }
 
 function flight(overrides: Partial<TracerVM> = {}): TracerVM {

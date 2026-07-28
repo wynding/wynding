@@ -35,11 +35,13 @@ function run(seed: number, ticks: number): { state: SimState; trace: string } {
 }
 
 describe('sim smoke', () => {
-  it('starts with lives, no creeps, pre-wave', () => {
+  it('starts with lives, no creeps, running, wave 0 counting down', () => {
     const s = createInitialState(1, RULESET);
     expect(s.tick).toBe(0);
     expect(s.lives).toBe(10);
-    expect(s.phase).toBe('pre-wave');
+    expect(s.phase).toBe('running');
+    expect(s.waveCursor).toBe(0);
+    expect(s.countdownRemaining).toBe(500); // testRuleset default countdownTicks
     expect(s.creeps.id).toHaveLength(0);
   });
 
@@ -54,8 +56,8 @@ describe('sim smoke', () => {
   it('launches on an early call: spawns the first creep at the entrance and moves it the same tick', () => {
     const s = createInitialState(1, RULESET);
     step(s, RULESET, callEarly);
-    expect(s.phase).toBe('active');
-    expect(s.launchTick).toBe(0);
+    expect(s.phase).toBe('running');
+    expect(s.waveLaunchTick[0]).toBe(0);
     expect(s.creeps.id).toHaveLength(1);
     expect(s.creeps.hp[0]).toBe(20); // catalog hp
     expect(s.creeps.bounty[0]).toBe(1); // resolved from kind
@@ -65,6 +67,7 @@ describe('sim smoke', () => {
     expect(s.creeps.progress[0]).toBe(26); // ...one budget into the first edge
     expect(s.creeps.headCol[0]).toBe(1); // committed toward the next cell east
     expect(s.creeps.headRow[0]).toBe(2);
+    expect(s.creeps.wave[0]).toBe(0);
   });
 
   it('ignores an unknown/malformed command as a deterministic no-op', () => {
@@ -92,6 +95,7 @@ describe('sim smoke', () => {
       (c) => (c.headCol = []),
       (c) => (c.headRow = []),
       (c) => (c.progress = []),
+      (c) => (c.wave = []),
     ];
     for (const corrupt of corruptions) {
       const s = createInitialState(1, RULESET);
@@ -105,6 +109,7 @@ describe('sim smoke', () => {
         headCol: [1],
         headRow: [2],
         progress: [0],
+        wave: [0],
       };
       corrupt(s.creeps);
       const out = step(s, RULESET, []);

@@ -1,4 +1,4 @@
-// board-integration.test.ts — proves the shipped M1 ruleset (field-01) builds a
+// board-integration.test.ts — proves the shipped ruleset (field-01) builds a
 // valid, solvable grid AND compiles for the sim, loaded the same way a real
 // consumer does: through the registry. It lives on the CONTENT side (content →
 // sim) because the repo's dependency graph flows one way
@@ -20,11 +20,11 @@ import {
 import { getBundledRuleset, defaultBoardId } from './registry';
 
 const ruleset = getBundledRuleset();
-const m1Board = ruleset.boards[0]!;
+const shippedBoard = ruleset.boards[0]!;
 const boardId = defaultBoardId(ruleset);
 
 describe('field-01 (the real M1 board) builds a solvable grid', () => {
-  const grid = buildGrid(m1Board);
+  const grid = buildGrid(shippedBoard);
   const field = computeDistanceField(grid);
 
   it('builds a valid 28×24 grid with the two openings on row 11', () => {
@@ -52,14 +52,14 @@ describe('field-01 (the real M1 board) builds a solvable grid', () => {
   });
 
   it('surfaces buildGrid validation failures as a GridError through the @wynding/sim barrel', () => {
-    expect(() => buildGrid({ ...m1Board, widthTiles: 0 })).toThrow(GridError);
+    expect(() => buildGrid({ ...shippedBoard, widthTiles: 0 })).toThrow(GridError);
   });
 });
 
 describe('field-01 compiles for the sim as the single source of truth', () => {
   it('builds a playable BoardContext through the sanctioned loadBoard constructor', () => {
-    expect(() => loadBoard(m1Board)).not.toThrow();
-    const board = loadBoard(m1Board);
+    expect(() => loadBoard(shippedBoard)).not.toThrow();
+    const board = loadBoard(shippedBoard);
     expect(board.grid.width).toBe(28);
     expect(board.field.dist[11 * 28 + 0]).toBe(270); // entrance is 27 orthogonal steps out
   });
@@ -71,7 +71,8 @@ describe('field-01 compiles for the sim as the single source of truth', () => {
     const s = createInitialState(1, compiled);
     expect(s.lives).toBe(ruleset.balance.startingLives);
     expect(s.bounty).toBe(ruleset.balance.startingBounty);
-    expect(s.phase).toBe('pre-wave');
-    expect(compiled.schedule).toHaveLength(10); // one wave × 10 creeps
+    expect(s.phase).toBe('running');
+    expect(compiled.waves).toHaveLength(3); // three waves
+    expect(compiled.waves[0]!.spawns).toHaveLength(10); // 10 creeps per wave
   });
 });

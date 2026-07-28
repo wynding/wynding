@@ -10,6 +10,7 @@ import {
   deriveStars,
   compileRuleset,
   rulesetDigest,
+  previewInputs,
   RulesetError,
   type SimInput,
   type CompiledRuleset,
@@ -44,28 +45,97 @@ describe('wave launch + countdown', () => {
     const ruleset = testRuleset(OPEN, { countdownTicks: 10, waveCount: 1 });
     let s = createInitialState(1, ruleset);
     for (let t = 0; t < 10; t++) s = step(s, ruleset, []);
-    // After stepping ticks 0..9, tick is now 10 and still pre-wave (no creep yet).
+    // After stepping ticks 0..9, tick is now 10 and no wave has launched yet.
     expect(s.tick).toBe(10);
-    expect(s.phase).toBe('pre-wave');
+    expect(s.waveLaunchTick[0]).toBeNull();
     expect(s.creeps.id).toHaveLength(0);
-    s = step(s, ruleset, []); // the tick where tick === launchAtTick (10)
-    expect(s.phase).toBe('active');
+    s = step(s, ruleset, []); // the tick where tick === countdownTicks (10)
+    expect(s.waveLaunchTick[0]).toBe(10);
     expect(s.creeps.id).toHaveLength(1); // first creep spawned on the launch tick
   });
 
-  it('call-early launches immediately; the early-call bonus is pinned to 0 at simVersion 5', () => {
-    // DEVIATION (M2-S1 plan step 7): the flat `earlyCallBonus` compiled field is
-    // derived from the capability profile's `maxEarlyCallBountyDivisor: 0` — always
-    // 0 at this sim's behavior version, regardless of any authored
-    // `balance.earlyCallBountyDivisor` (which itself can only be 0, or compileRuleset
-    // rejects the bundle). S2 replaces this flat field with the real divisor formula
-    // and reintroduces a nonzero-credit assertion here.
+  it('call-early launches immediately, paying the early-call bounty/credit from the undecremented countdown', () => {
+    const ruleset = testRuleset(OPEN, {
+      waveCount: 1,
+      startingBounty: 80,
+      countdownTicks: 100,
+      earlyCallBountyDivisor: 50,
+      earlyCallScoreDivisor: 25,
+    });
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, callEarly);
+    expect(s.waveLaunchTick[0]).toBe(0);
+    expect(s.bounty).toBe(80 + Math.floor(100 / 50)); // 80 + 2
+    expect(s.cumulativeEarlyCallCredit).toBe(Math.floor(100 / 25)); // 4
+  });
+
+  it('an early call with both divisors off (M1 default) pays/credits nothing', () => {
     const ruleset = testRuleset(OPEN, { waveCount: 1, startingBounty: 80 });
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, callEarly);
-    expect(s.phase).toBe('active');
-    expect(s.launchTick).toBe(0);
-    expect(s.bounty).toBe(80); // no early-call bonus — divisor pinned off at simVersion 5
+    expect(s.waveLaunchTick[0]).toBe(0);
+    expect(s.bounty).toBe(80);
+    expect(s.cumulativeEarlyCallCredit).toBe(0);
+  });
+
+  it('an auto-launch (no early call) pays/credits 0 with no special case', () => {
+    const ruleset = testRuleset(OPEN, {
+      waveCount: 1,
+      countdownTicks: 5,
+      earlyCallBountyDivisor: 2,
+      earlyCallScoreDivisor: 2,
+      startingBounty: 80,
+    });
+    let s = createInitialState(1, ruleset);
+    for (let t = 0; t < 6; t++) s = step(s, ruleset, []); // tick === countdownTicks (5) launches
+    expect(s.waveLaunchTick[0]).toBe(5);
+    expect(s.bounty).toBe(80); // countdownRemaining is 0 at auto-launch — floor(0/2) = 0
+    expect(s.cumulativeEarlyCallCredit).toBe(0);
+  });
+
+  it('a same-tick double call is idempotent — only the first pays, both accepted/rejected correctly', () => {
+    const ruleset = testRuleset(OPEN, {
+      waveCount: 1,
+      countdownTicks: 100,
+      earlyCallBountyDivisor: 10,
+    });
+    const { accepted, preview } = previewInputs(createInitialState(1, ruleset), ruleset, [
+      { kind: 'callWaveEarly' },
+      { kind: 'callWaveEarly' },
+    ]);
+    expect(accepted).toEqual([true, false]); // idempotent: second same-tick call no-ops
+    expect(preview.launchPending).toBe(true); // buffered — pays at the real launch, not here
+  });
+
+  it('a call after the final wave has launched is a no-op (nothing callable)', () => {
+    // (Renamed per CodeRabbit PR #68: `launchPending` never survives its own tick,
+    // so "pending across ticks" is not a state this — or any — test can witness;
+    // the same-tick double-call no-op is pinned 17 lines up in THIS file — the
+    // `accepted [true, false]` idempotence test. Local QC round 3 caught this
+    // comment previously pointing at wave-multi.test.ts, which has no such test.)
+    const ruleset = testRuleset(OPEN, { waveCount: 1, countdownTicks: 50 });
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, callEarly); // consumed + launched within this same tick
+    // The wave already launched, so a further call this run is a no-op (no second
+    // wave to call in a single-wave bundle) — waveLaunchTick stays pinned at 0.
+    s = step(s, ruleset, callEarly);
+    expect(s.waveLaunchTick[0]).toBe(0);
+    expect(s.launchPending).toBe(false);
+  });
+
+  it('a final-wave early call zeroes the countdown (boundary invariant)', () => {
+    const ruleset = testRuleset(OPEN, {
+      waves: [
+        { waveCount: 1, waveSpacing: 5, countdownTicks: 200 },
+        { waveCount: 1, waveSpacing: 5, countdownTicks: 300 },
+      ],
+    });
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, callEarly); // launches wave 0
+    expect(s.waveCursor).toBe(1);
+    s = step(s, ruleset, callEarly); // launches the FINAL wave early
+    expect(s.waveCursor).toBe(2);
+    expect(s.countdownRemaining).toBe(0); // never a stale positive countdown
   });
 });
 
@@ -358,7 +428,8 @@ describe('compiled ruleset snapshots its tuning', () => {
     expect(Object.isFrozen(ruleset.balance)).toBe(true);
     expect(Object.isFrozen(ruleset.scoring)).toBe(true);
     expect(Object.isFrozen(ruleset.tower)).toBe(true);
-    expect(Object.isFrozen(ruleset.schedule)).toBe(true);
+    expect(Object.isFrozen(ruleset.waves)).toBe(true);
+    expect(Object.isFrozen(ruleset.waves[0]!.spawns)).toBe(true);
     expect(Object.isFrozen(ruleset.creepById)).toBe(true); // a frozen record, not a Map
     expect(() => {
       (ruleset.balance as { startingLives: number }).startingLives = 999;

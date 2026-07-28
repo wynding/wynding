@@ -15,7 +15,8 @@ import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from
 import {
   runCombat,
   emptyCreeps,
-  safeAdd,
+  satAdd,
+  satMul,
   type Impact,
   type EffectPrimitive,
   type StepEvents,
@@ -35,16 +36,24 @@ import {
   refundFor,
 } from './tower';
 import { assertRuleset, type CompiledRuleset } from './ruleset';
+import { SIM_VERSION } from './ruleset-shared';
 
 /** Simulation cadence: 20 Hz. Must match the render loop's tick duration. */
 export const MS_PER_TICK = 50;
 
-/** Behavior version stamped into replays; bump on any determinism-affecting change.
- *  Story 5 (wave lifecycle, win/loss, score, per-creep columns) bumped 4 → 5. */
-export const SIM_VERSION = 5;
+/** Behavior version stamped into replays — single-sourced on `ruleset-shared.ts`
+ *  (the dependency-free leaf, M2-S2) and re-exported here so the public API
+ *  (`import { SIM_VERSION } from '@wynding/sim'`) is unchanged. See that module for
+ *  the bump history. */
+export { SIM_VERSION };
 
-/** The game lifecycle phase (win/loss resolution + wave launch gating). */
-export type SimPhase = 'pre-wave' | 'active' | 'won' | 'lost';
+/** The game lifecycle phase: `'running'` covers the whole multi-wave run (waiting
+ *  on the first countdown through the last wave's clear) — the pre-S2 `'pre-wave'`/
+ *  `'active'` split doesn't generalize past wave 1 (there is no single "the wave
+ *  hasn't launched yet" phase once earlier waves may already be resolved while a
+ *  later one still counts down), so per-wave lifecycle now lives entirely in the
+ *  per-wave state arrays (`waveLaunchTick`/`waveResolved`/...) instead of `phase`. */
+export type SimPhase = 'running' | 'won' | 'lost';
 
 /** True once a match has resolved (won/lost). The single predicate for "terminal" — the
  *  sim, replay, controller, and view-model all use it so a future terminal phase is a
@@ -62,6 +71,13 @@ export function isTerminalPhase(phase: SimPhase): boolean {
  * `speed` are resolved from the creep's catalog kind AT SPAWN (Story 5) and carried
  * through movement/combat by source row — the catalog is the single stat authority,
  * so mixed-kind waves score and move correctly with no global constant.
+ *
+ * `wave` (M2-S2) carries the creep's owning wave index (its position in
+ * `ruleset.waves`) — set at spawn, threaded by source row through every
+ * movement/combat rebuild like any other column. There is deliberately NO
+ * alive-counter state anywhere in `SimState`: the resolution phase derives each
+ * wave's alive count from this column every tick (step 9), so no removal path
+ * (leak, sweep, a future drop) can desynchronize a counter from reality.
  */
 export interface CreepArrays {
   id: number[];
@@ -73,9 +89,18 @@ export interface CreepArrays {
   headCol: number[]; // waypoint cell (sentinel: == cellContaining(from) at rest)
   headRow: number[];
   progress: number[]; // fixed-point arc-length travelled from `from`, in [0, edgeLen)
+  wave: number[]; // owning wave index, resolved at spawn (M2-S2)
 }
 
-/** Complete simulation state for one match. Fully serializable. */
+/**
+ * Complete simulation state for one match. Fully serializable.
+ *
+ * The wave-lifecycle block (`waveCursor` … `cumulativeEarlyCallCredit`) replaces
+ * Story 5's single-wave `launchAtTick`/`launchTick`/`spawnCursor` — every array in
+ * it is sized `ruleset.waves.length`, index-parallel to `ruleset.waves`. Key order
+ * here is LOAD-BEARING (the world-hash is `fnv1a(JSON.stringify(state))`) and is
+ * mirrored exactly in `PreviewState` and `partialCloneForPreview`.
+ */
 export interface SimState {
   tick: number;
   rngState: number;
@@ -83,11 +108,31 @@ export interface SimState {
   bounty: number;
   nextEntityId: number; // shared entity-id space: creeps and towers
   phase: SimPhase;
-  launchAtTick: number; // the tick the wave auto-launches (init: countdownTicks)
-  launchTick: number | null; // the tick the wave actually launched (null pre-launch)
-  spawnCursor: number; // index of the next scheduled spawn
+  /** Index of the next wave to launch — `waves.length` once every wave has
+   *  launched. Waves `[0, waveCursor)` are launched; `[waveCursor, waves.length)`
+   *  are not yet. */
+  waveCursor: number;
+  /** Ticks left on `waves[waveCursor]`'s countdown (undefined once `waveCursor ===
+   *  waves.length`, held at 0). Sampled at launch for the early-call reward. */
+  countdownRemaining: number;
+  /** A buffered `callWaveEarly` this tick, consumed (→ launch) by the wave phase.
+   *  Mode-split in `coerceSoa`: forced `false` on every real `step()` (consumed
+   *  within its own tick), but preserved by the PREVIEW normalization path so a
+   *  paused, queued call still reads as pending across a chained preview. */
+  launchPending: boolean;
+  /** Per wave: the tick it actually launched, or `null` before launch. */
+  waveLaunchTick: (number | null)[];
+  /** Per wave: index of the next spawn in `waves[k].spawns` to drain. */
+  waveSpawnCursor: number[];
+  /** Per wave: whether any of its creeps leaked (forfeits its clear bonus). */
+  waveLeaked: boolean[];
+  /** Per wave: whether it has been settled (launched, spawns exhausted, 0 alive). */
+  waveResolved: boolean[];
+  /** Monotonic Σ early-call SCORE credit (forfeited entirely on a loss — `deriveScore`
+   *  reads it only in the `running`/`won` branches). */
+  cumulativeEarlyCallCredit: number;
   cumulativeKillBounty: number; // monotonic Σ kill-bounties — the score accumulator
-  leakedCount: number; // monotonic leak count — the wave-clear forfeit authority
+  leakedCount: number; // monotonic leak count (every wave) — presentation/telemetry
   creeps: CreepArrays;
   towers: TowerArrays;
   impacts: Impact[]; // in-flight scheduled combat impacts (Story 4)
@@ -98,7 +143,7 @@ export interface SimState {
 export type SimInput =
   | { readonly kind: 'placeTower'; readonly anchor: { readonly col: number; readonly row: number } }
   | { readonly kind: 'sellTower'; readonly tower: number } // EntityId of the tower
-  | { readonly kind: 'callWaveEarly' } // launch the wave now (pre-wave only)
+  | { readonly kind: 'callWaveEarly' } // buffer an early launch of the current wave
   | { readonly kind: 'noop' };
 
 // The effective distance field is a pure function of `(grid, tower mask)`, so it
@@ -127,14 +172,35 @@ function effectiveField(grid: Grid, towers: TowerArrays, cost: number): Distance
   return field;
 }
 
+/** Per-wave alive counts derived from a (wave-column-clean) creep SoA `wave` column —
+ *  the SINGLE implementation `coerceSoa` and the resolution phase share (CodeRabbit
+ *  PR #68: both feed `waveResolved`; two hand-rolled copies must never drift). */
+function deriveAliveByWave(creepWave: readonly number[], waveCount: number): number[] {
+  const counts = new Array<number>(waveCount).fill(0);
+  for (const w of creepWave) counts[w]!++;
+  return counts;
+}
+
+/** `coerceSoa`'s two call sites need different `launchPending` handling (see the
+ *  field's own doc on `SimState`): the real `step()` entry is AUTHORITATIVE (a
+ *  buffered call is consumed within its own tick, so a `true` surviving to the next
+ *  boundary is a forgery and is forced `false`); `previewInputs`'s clone is a
+ *  PREVIEW (a real buffered call legitimately needs to read back as pending across
+ *  a chained preview, so the value — once coerced to an exact boolean — survives). */
+type CoerceMode = 'authoritative' | 'preview';
+
 /**
  * Totality guard (ADR 0006 §4): a restored or forged state may be missing whole SoA
- * containers, individual columns, or the Story-5 lifecycle fields. Coerce any absent
- * container/column to an empty array and any missing/forged lifecycle field to a safe
- * default so every downstream read is well-defined instead of dereferencing
- * `undefined`. For a well-formed state this is a no-op.
+ * containers, individual columns, or lifecycle fields — and, since M2-S2 grew the
+ * lifecycle from one flat wave to an N-wave RELATIONAL structure, independent
+ * per-field clamps alone would still admit impossible cross-field states (a forged
+ * `resolved` before launch, a future launch tick suppressing spawns forever,
+ * `waveCursor === N` with null launch ticks). This repairs the wave-lifecycle block
+ * as a coherent whole, in the fixed order below, every `step()`/`previewInputs`
+ * entry. For a well-formed state this reads every field, repairs nothing, and
+ * copies nothing (see the COPY-ON-WRITE note above the wave-lifecycle block).
  */
-function coerceSoa(state: SimState): void {
+function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode): void {
   if (state.creeps == null || typeof state.creeps !== 'object') {
     state.creeps = emptyCreeps();
   }
@@ -148,6 +214,48 @@ function coerceSoa(state: SimState): void {
   if (!Array.isArray(c.headCol)) c.headCol = [];
   if (!Array.isArray(c.headRow)) c.headRow = [];
   if (!Array.isArray(c.progress)) c.progress = [];
+  if (!Array.isArray(c.wave)) c.wave = [];
+
+  const waveCount = ruleset.waves.length;
+
+  // Creep `wave` column totality: a row whose wave id isn't a safe int in
+  // [0, waveCount) can never be attributed to a real wave — dropped here (the
+  // existing invalid-row policy) so the resolution phase's per-wave alive
+  // histogram (derived from this very column) is never polluted by a forged
+  // wave id, and so a forged/ragged column can never itself desync the count.
+  // Any row whose OTHER columns are ragged (a length mismatch elsewhere) is left
+  // for the per-phase ragged-row policy downstream (movement's existing guard);
+  // this pass only ever narrows by `wave` validity. A `wave` column LONGER than
+  // `id` also trips the rebuild (CodeRabbit PR #68): `id` is the row authority,
+  // and a trailing tail beyond it would otherwise ride into the hash untouched —
+  // the rebuild below iterates `id`'s length, so the tail simply doesn't survive
+  // (and the rebuild allocates fresh arrays, so the shared-column preview
+  // contract is preserved).
+  let sawInvalidWave = c.wave.length > c.id.length;
+  for (let i = 0; i < c.id.length && !sawInvalidWave; i++) {
+    const w = c.wave[i];
+    if (!Number.isSafeInteger(w) || (w as number) < 0 || (w as number) >= waveCount) {
+      sawInvalidWave = true;
+    }
+  }
+  if (sawInvalidWave) {
+    const filtered: CreepArrays = emptyCreeps();
+    for (let i = 0; i < c.id.length; i++) {
+      const w = c.wave[i];
+      if (!Number.isSafeInteger(w) || (w as number) < 0 || (w as number) >= waveCount) continue;
+      filtered.id.push(c.id[i] as number);
+      filtered.hp.push(c.hp[i] as number);
+      filtered.bounty.push(c.bounty[i] as number);
+      filtered.speed.push(c.speed[i] as number);
+      filtered.fromX.push(c.fromX[i] as number);
+      filtered.fromY.push(c.fromY[i] as number);
+      filtered.headCol.push(c.headCol[i] as number);
+      filtered.headRow.push(c.headRow[i] as number);
+      filtered.progress.push(c.progress[i] as number);
+      filtered.wave.push(w as number);
+    }
+    state.creeps = filtered;
+  }
 
   if (state.towers == null || typeof state.towers !== 'object') {
     state.towers = emptyTowers();
@@ -162,23 +270,166 @@ function coerceSoa(state: SimState): void {
 
   if (!Array.isArray(state.impacts)) state.impacts = [];
 
-  // Lifecycle fields (Story 5): coerce a pre-v5 / forged snapshot to safe defaults.
-  if (
-    state.phase !== 'pre-wave' &&
-    state.phase !== 'active' &&
-    state.phase !== 'won' &&
-    state.phase !== 'lost'
-  ) {
-    state.phase = 'pre-wave';
+  // Lifecycle fields — coerce a pre-v6 / forged snapshot to safe defaults.
+  if (state.phase !== 'running' && state.phase !== 'won' && state.phase !== 'lost') {
+    state.phase = 'running';
   }
-  // A forged/legacy state missing its deadline stays inert (never auto-launches) —
-  // a genuine state always carries a real safe-integer launchAtTick, so this only
-  // affects forged input and avoids a spurious wave launch from a restored snapshot.
-  if (!Number.isSafeInteger(state.launchAtTick)) state.launchAtTick = Number.MAX_SAFE_INTEGER;
-  if (state.launchTick !== null && !Number.isSafeInteger(state.launchTick)) state.launchTick = null;
-  if (!Number.isSafeInteger(state.spawnCursor) || state.spawnCursor < 0) state.spawnCursor = 0;
   if (!Number.isSafeInteger(state.cumulativeKillBounty)) state.cumulativeKillBounty = 0;
   if (!Number.isSafeInteger(state.leakedCount)) state.leakedCount = 0;
+  if (
+    !Number.isSafeInteger(state.cumulativeEarlyCallCredit) ||
+    state.cumulativeEarlyCallCredit < 0
+  ) {
+    state.cumulativeEarlyCallCredit = 0;
+  }
+
+  // --- The wave-lifecycle block: RELATIONALLY COHERENT repair, in this order. ---
+  //
+  // COPY-ON-WRITE (#30's optimization, extended here): `partialCloneForPreview`
+  // shares these four arrays with the source state via a plain `{...state}`
+  // spread (only `towers` is deep-cloned there; `creeps`'s CONTAINER is fresh but
+  // its column arrays are shared too). So a repair WRITE below must clone its
+  // target array before mutating it — otherwise a preview's repair would mutate
+  // the live state's array in place through the shared reference. The clone is
+  // lazy (only on an actual write), so the well-formed hot path (every real
+  // frame) never allocates here.
+  let waveCursor = Number.isSafeInteger(state.waveCursor) ? state.waveCursor : 0;
+  waveCursor = Math.max(0, Math.min(waveCursor, waveCount));
+  state.waveCursor = waveCursor;
+
+  // One generic copy-on-write cell per lifecycle array (CodeRabbit PR #68: four
+  // hand-rolled copies of this block must never drift): `.arr` is the current
+  // (possibly still shared) array; `own()` clones it on the first WRITE only, so
+  // the well-formed hot path never allocates. A non-array input is replaced with a
+  // fresh (already-owned) empty array up front.
+  const cow = <T>(raw: unknown): { arr: T[]; own: () => T[] } => {
+    let arr: T[] = Array.isArray(raw) ? (raw as T[]) : [];
+    let owned = !Array.isArray(raw);
+    return {
+      get arr() {
+        return arr;
+      },
+      own: () => {
+        if (!owned) {
+          arr = arr.slice();
+          owned = true;
+        }
+        return arr;
+      },
+    };
+  };
+  const launchTickCow = cow<number | null>(state.waveLaunchTick);
+  const spawnCursorCow = cow<number>(state.waveSpawnCursor);
+  const leakedCow = cow<boolean>(state.waveLeaked);
+  const resolvedCow = cow<boolean>(state.waveResolved);
+  const ownWaveLaunchTick = launchTickCow.own;
+  const ownWaveSpawnCursor = spawnCursorCow.own;
+  const ownWaveLeaked = leakedCow.own;
+  const ownWaveResolved = resolvedCow.own;
+
+  // Per-wave alive count, derived from the (already wave-column-clean) surviving
+  // creep SoA — O(creeps), the same derivation the resolution phase uses (step 9),
+  // computed here too since a repaired `waveResolved` needs it.
+  const aliveByWave = deriveAliveByWave(state.creeps.wave, waveCount);
+
+  // The repair SOURCE itself must be clean (CodeRabbit PR #68): `coerceSoa` runs
+  // BEFORE step()'s tick-totality guard, so an unclamped forged `state.tick`
+  // (NaN/negative) would flow INTO every "repaired" launch tick — poisoned arrays
+  // that survive the subsequent no-op early-return into the hash/serializer. (An
+  // unclamped NaN would also make the write unrecognizable to the identity checks
+  // below — `NaN !== NaN` — re-triggering copy-on-write clones on every pass of a
+  // poisoned state: the hash would NOT move, but the repairs-nothing/copies-
+  // nothing hot-path property would be gone. Local QC round 2 pinned the precise
+  // property.) A poisoned tick clamps to 0 here; the totality guard still no-ops
+  // the step itself right after. With the clamp in place, `repairTick` is always
+  // a non-negative safe integer, so the `!== repairTick` write-avoidance guards
+  // below can only be false for a value that was already valid — they are kept
+  // for symmetry with the sibling branches, not because a NaN can reach them.
+  const repairTick = Number.isSafeInteger(state.tick) && state.tick >= 0 ? state.tick : 0;
+
+  for (let k = 0; k < waveCount; k++) {
+    if (k < waveCursor) {
+      // LAUNCHED wave: its launch tick, if present, must be a safe int in
+      // [0, repairTick]; otherwise it is repaired to `repairTick` AND CASCADES —
+      // a repaired launch tick beside an exhausted spawn cursor would otherwise
+      // resolve a wave that spawned nothing, so the cursor resets to 0 and
+      // `resolved` to false alongside it.
+      const rawTick = launchTickCow.arr[k];
+      const tickValid =
+        Number.isSafeInteger(rawTick) &&
+        (rawTick as number) >= 0 &&
+        (rawTick as number) <= repairTick;
+      let launchTickRepaired = false;
+      if (!tickValid) {
+        if (launchTickCow.arr[k] !== repairTick) {
+          ownWaveLaunchTick()[k] = repairTick;
+        }
+        launchTickRepaired = true;
+      }
+
+      const spawnCap = ruleset.waves[k]!.spawns.length;
+      const rawCursor = spawnCursorCow.arr[k];
+      const cursorValid =
+        Number.isSafeInteger(rawCursor) &&
+        (rawCursor as number) >= 0 &&
+        (rawCursor as number) <= spawnCap;
+      let effectiveCursor: number;
+      if (launchTickRepaired) {
+        if (spawnCursorCow.arr[k] !== 0) ownWaveSpawnCursor()[k] = 0;
+        effectiveCursor = 0;
+      } else if (!cursorValid) {
+        if (spawnCursorCow.arr[k] !== 0) ownWaveSpawnCursor()[k] = 0;
+        effectiveCursor = 0;
+      } else {
+        effectiveCursor = rawCursor as number;
+      }
+
+      const exhausted = effectiveCursor === spawnCap;
+      const zeroAlive = (aliveByWave[k] ?? 0) === 0;
+      const desiredResolved = !launchTickRepaired && exhausted && zeroAlive;
+      const rawResolved = resolvedCow.arr[k];
+      if (typeof rawResolved !== 'boolean' || rawResolved !== desiredResolved) {
+        ownWaveResolved()[k] = desiredResolved;
+      }
+
+      const rawLeaked = leakedCow.arr[k];
+      if (typeof rawLeaked !== 'boolean') ownWaveLeaked()[k] = false;
+    } else {
+      // UNLAUNCHED wave: pinned to its exact defaults.
+      if (launchTickCow.arr[k] !== null) ownWaveLaunchTick()[k] = null;
+      if (spawnCursorCow.arr[k] !== 0) ownWaveSpawnCursor()[k] = 0;
+      if (resolvedCow.arr[k] !== false) ownWaveResolved()[k] = false;
+      if (leakedCow.arr[k] !== false) ownWaveLeaked()[k] = false;
+    }
+  }
+  // Truncate a forged/legacy array longer than `waveCount` — a stray trailing
+  // element would otherwise survive into the hash untouched.
+  if (launchTickCow.arr.length !== waveCount) ownWaveLaunchTick().length = waveCount;
+  if (spawnCursorCow.arr.length !== waveCount) ownWaveSpawnCursor().length = waveCount;
+  if (leakedCow.arr.length !== waveCount) ownWaveLeaked().length = waveCount;
+  if (resolvedCow.arr.length !== waveCount) ownWaveResolved().length = waveCount;
+
+  state.waveLaunchTick = launchTickCow.arr;
+  state.waveSpawnCursor = spawnCursorCow.arr;
+  state.waveLeaked = leakedCow.arr;
+  state.waveResolved = resolvedCow.arr;
+
+  // countdownRemaining: while a wave is still pending, a safe int clamped into
+  // [1, waves[waveCursor].countdownTicks] (a forged oversized value must not mint
+  // outsized early-call rewards; a forged 0 violates "never 0 before launch");
+  // pinned to 0 once every wave has launched.
+  if (waveCursor < waveCount) {
+    const ceiling = ruleset.waves[waveCursor]!.countdownTicks;
+    const raw = state.countdownRemaining;
+    const clamped = Number.isSafeInteger(raw) ? Math.max(1, Math.min(raw, ceiling)) : ceiling;
+    state.countdownRemaining = clamped;
+  } else {
+    state.countdownRemaining = 0;
+  }
+
+  // launchPending: MODE-SPLIT (see `CoerceMode`'s doc above).
+  const pendingBool = state.launchPending === true;
+  state.launchPending = mode === 'authoritative' ? false : pendingBool;
 
   // nextEntityId totality: a restored/forged state may carry a missing, non-integer,
   // zero/negative, or stale (colliding) counter. Scan the (already-coerced) id columns
@@ -215,20 +466,27 @@ function allocEntityId(state: SimState): number | null {
   return state.nextEntityId++;
 }
 
-/** Build a fresh match state for a given seed against a compiled ruleset. Reads the
- *  starting economy and the countdown deadline from the ruleset's balance block. */
+/** Build a fresh match state for a given seed against a compiled ruleset. Sizes
+ *  every per-wave lifecycle array to `ruleset.waves.length` and starts the first
+ *  wave's countdown; the starting economy comes from the ruleset's balance block. */
 export function createInitialState(seed: Seed | number, ruleset: CompiledRuleset): SimState {
   assertRuleset(ruleset);
+  const waveCount = ruleset.waves.length;
   return {
     tick: 0,
     rngState: seed >>> 0,
     lives: ruleset.balance.startingLives,
     bounty: ruleset.balance.startingBounty,
     nextEntityId: 1,
-    phase: 'pre-wave',
-    launchAtTick: ruleset.balance.countdownTicks, // start tick is 0
-    launchTick: null,
-    spawnCursor: 0,
+    phase: 'running',
+    waveCursor: 0,
+    countdownRemaining: ruleset.waves[0]!.countdownTicks, // start tick is 0
+    launchPending: false,
+    waveLaunchTick: new Array<number | null>(waveCount).fill(null),
+    waveSpawnCursor: new Array<number>(waveCount).fill(0),
+    waveLeaked: new Array<boolean>(waveCount).fill(false),
+    waveResolved: new Array<boolean>(waveCount).fill(false),
+    cumulativeEarlyCallCredit: 0,
     cumulativeKillBounty: 0,
     leakedCount: 0,
     creeps: emptyCreeps(),
@@ -240,9 +498,10 @@ export function createInitialState(seed: Seed | number, ruleset: CompiledRuleset
 /**
  * INPUT PHASE (Story 6): apply the per-tick player command log against evolving state,
  * in array order, each command re-validated. Mutates `state.towers`/`bounty`/
- * `nextEntityId`/`launchAtTick`. Returns a per-command **acceptance** array — `true`
+ * `nextEntityId`/`launchPending`. Returns a per-command **acceptance** array — `true`
  * where a command produced a state change (a build placed, a sell refunded, an early
- * call launched), `false` for a no-op (illegal, unaffordable, idempotent, malformed).
+ * call BUFFERED — not yet launched, see step 7's wave phase), `false` for a no-op
+ * (illegal, unaffordable, idempotent, malformed).
  *
  * This is the single authority for command legality: `step()` calls it (ignoring the
  * result) and `previewInputs()` calls it on a clone (using the result), so a client's
@@ -337,12 +596,18 @@ function applyInputPhase(
       state.towers = compacted;
       accepted.push(true);
     } else if (kind === 'callWaveEarly') {
-      // Launch now — but only while still pre-wave and not already pulled forward to
-      // this tick (idempotent: repeated calls this tick, or after launch, no-op). The
-      // early-call bonus (0 at M1) is credited once, on the transition.
-      if (state.phase === 'pre-wave' && state.launchAtTick > state.tick) {
-        state.launchAtTick = state.tick;
-        state.bounty = safeAdd(state.bounty, balance.earlyCallBonus);
+      // BUFFER an early launch of the current wave — no economy mutation here
+      // (preview-safe): the reward is sampled from the undecremented countdown
+      // at the ACTUAL launch, in the wave phase (step 7), so a queued-but-not-yet-
+      // launched call previews identically to what step() will do. Accepted iff
+      // still running, a wave remains to launch, and none is already buffered
+      // (idempotent: a same-tick or already-pending second call is a no-op).
+      if (
+        state.phase === 'running' &&
+        state.waveCursor < ruleset.waves.length &&
+        !state.launchPending
+      ) {
+        state.launchPending = true;
         accepted.push(true);
       } else {
         accepted.push(false);
@@ -359,13 +624,16 @@ function applyInputPhase(
  * Deterministic: identical (state, ruleset, inputs) always yield identical output.
  *
  * Phases: INPUT (build/sell/call-early, array order, each re-validated) → WAVE
- * (launch on the deadline or an early call; spawn due creeps from the schedule) →
- * derive the effective field once → MOVEMENT (leaks cost `leakCost` lives and bump
- * `leakedCount`) → COMBAT (resolve impacts, sweep kills → per-creep bounty +
- * `cumulativeKillBounty`, fire) → RESOLUTION (loss if lives ≤ 0; win when the
- * schedule is exhausted and no creep remains) → guarded `tick++`. Once terminal
- * (`won`/`lost`) `step` is a total NO-OP, so a replay padded past resolution can
- * never change the final hash or score. `step` never throws on forged input.
+ * (launch the current wave on its countdown or a buffered early call; drain every
+ * launched wave's due spawns) → derive the effective field once → MOVEMENT (leaks
+ * cost `leakCost` lives, bump `leakedCount`/`waveLeaked[wave]`) → COMBAT (resolve
+ * impacts, sweep kills → per-creep bounty + `cumulativeKillBounty`, fire) →
+ * RESOLUTION (settle every launched-exhausted-empty wave — pay its clear bonus
+ * unless leaked — THEN terminal: loss if lives ≤ 0, else win once every wave is
+ * resolved; settlement always precedes terminal, uniformly, so a wave completing
+ * on the final tick pays either way) → guarded `tick++`. Once terminal (`won`/
+ * `lost`) `step` is a total NO-OP, so a replay padded past resolution can never
+ * change the final hash or score. `step` never throws on forged input.
  *
  * `events` (optional, #31): an append-only `StepEvents` collector the caller owns —
  * NOT part of `SimState`/the world hash. A terminal or no-op early-return path (below)
@@ -378,7 +646,7 @@ export function step(
   events?: StepEvents,
 ): SimState {
   assertRuleset(ruleset); // memoized; rejects a forged/uncompiled ruleset loudly, once
-  coerceSoa(state); // totality: never dereference a missing SoA container/column/field
+  coerceSoa(state, ruleset, 'authoritative'); // totality + relational lifecycle repair
 
   // TICK TOTALITY: a forged non-safe/negative tick, or one so large `tick + 1` leaves
   // the safe-integer range, makes the whole step a deterministic terminal no-op.
@@ -394,30 +662,61 @@ export function step(
   // ticks cannot change the final world-hash or score (re-derivation is stable).
   if (isTerminalPhase(state.phase)) return state;
 
-  const { board, tower, balance, scoring: _scoring, schedule, creepById } = ruleset;
+  const { board, tower, balance, scoring, waves, creepById } = ruleset;
   const { grid } = board;
   const { entrance } = grid;
   const cost = tower.cost;
+  const waveCount = waves.length;
 
   // 1) INPUT PHASE — array order; each command re-validated against evolving state.
   //    Shared with previewInputs() so a client's placement preview cannot diverge from
   //    the authoritative rule here (Story 6). step() ignores the acceptance result.
   applyInputPhase(state, ruleset, inputs);
 
-  // 2) WAVE PHASE — launch on the deadline (test-before-act: launches at tick ===
-  //    launchAtTick, e.g. 500, not 499), then spawn every creep whose scheduled tick
-  //    has arrived. Spawns read stats from the creep catalog (single authority).
-  if (state.phase === 'pre-wave' && state.tick >= state.launchAtTick) {
-    state.phase = 'active';
-    state.launchTick = state.tick;
+  // 2) WAVE PHASE (G1/G2/G4). If a wave remains to launch: a buffered early call, OR
+  //    (once past this wave's flip tick) the countdown reaching 0, launches it NOW.
+  //    A wave never decrements on its own flip tick — wave 1's flip tick is run
+  //    start (`tick > 0` below), so a genuine `countdownTicks`-tick countdown still
+  //    launches at tick === countdownTicks (M1 continuity); later waves need no
+  //    guard, since their flip tick already ran the launch branch that set them up.
+  if (state.waveCursor < waveCount) {
+    let launchNow = state.launchPending;
+    if (!launchNow && state.tick > 0) {
+      state.countdownRemaining -= 1;
+      if (state.countdownRemaining <= 0) launchNow = true;
+    }
+    if (launchNow) {
+      const k = state.waveCursor;
+      const rem = state.countdownRemaining; // sampled BEFORE any reset below
+      if (balance.earlyCallBountyDivisor > 0) {
+        state.bounty = satAdd(state.bounty, Math.floor(rem / balance.earlyCallBountyDivisor));
+      }
+      if (scoring.earlyCallScoreDivisor > 0) {
+        state.cumulativeEarlyCallCredit = satAdd(
+          state.cumulativeEarlyCallCredit,
+          Math.floor(rem / scoring.earlyCallScoreDivisor),
+        );
+      }
+      state.waveLaunchTick[k] = state.tick;
+      state.launchPending = false;
+      state.waveCursor += 1;
+      // An early-called FINAL wave must not strand a stale positive countdown (the
+      // boundary invariant: countdownRemaining is 0 once every wave has launched).
+      state.countdownRemaining =
+        state.waveCursor < waveCount ? waves[state.waveCursor]!.countdownTicks : 0;
+    }
   }
-  if (state.phase === 'active' && state.launchTick !== null) {
-    const launch = state.launchTick;
+  // Spawn drain: every launched wave, in index order (earlier-launched wave first;
+  // within a wave, its pre-sorted spawn list) — creeps carry `wave = k`.
+  for (let k = 0; k < waveCount; k++) {
+    const launchTick = state.waveLaunchTick[k]!; // coerceSoa sized this array to waveCount
+    if (launchTick === null) continue;
+    const spawns = waves[k]!.spawns;
     for (;;) {
-      const entry = state.spawnCursor < schedule.length ? schedule[state.spawnCursor] : undefined;
-      if (entry === undefined || launch + entry.offsetTicks > state.tick) break;
-      const creepIdOf: string = entry.creepId;
-      const def = creepById[creepIdOf];
+      const cursor = state.waveSpawnCursor[k]!;
+      const entry = cursor < spawns.length ? spawns[cursor] : undefined;
+      if (entry === undefined || launchTick + entry.offsetTicks > state.tick) break;
+      const def = creepById[entry.creepId];
       if (def !== undefined) {
         const newCreepId = allocEntityId(state);
         // Exhausted entity-id space: the scheduled spawn is still consumed (cursor
@@ -433,9 +732,10 @@ export function step(
           state.creeps.headCol.push(entrance.col); // sentinel — heading derived at movement
           state.creeps.headRow.push(entrance.row);
           state.creeps.progress.push(0);
+          state.creeps.wave.push(k);
         }
       }
-      state.spawnCursor++;
+      state.waveSpawnCursor[k] = cursor + 1;
     }
   }
 
@@ -444,8 +744,10 @@ export function step(
     state.towers.id.length === 0 ? board.field : effectiveField(grid, state.towers, cost);
 
   // 4) MOVEMENT PHASE — advance each creep at its own speed over the post-input field.
-  //    A creep reaching the exit leaks (costs `leakCost` lives, bumps `leakedCount`);
-  //    a corrupt row is dropped (no life lost). Rebuild to compact both removals.
+  //    A creep reaching the exit leaks (costs `leakCost` lives, bumps `leakedCount`
+  //    and its owning wave's `waveLeaked`); a corrupt row is dropped (no life lost).
+  //    Rebuild to compact both removals — `wave` threads through by source row like
+  //    any other column.
   const src = state.creeps;
   const next: CreepArrays = emptyCreeps();
   for (let i = 0; i < src.id.length; i++) {
@@ -454,6 +756,7 @@ export function step(
     // lost, never a crash. A genuine row always carries safe-integer bounty and speed.
     if (!Number.isSafeInteger(src.bounty[i]) || !Number.isSafeInteger(src.speed[i])) continue;
     const speed = src.speed[i] as number;
+    const wave = src.wave[i] as number; // coerceSoa already dropped any invalid-wave row
     const outcome = advanceCreep(
       field,
       src.id[i],
@@ -469,10 +772,12 @@ export function step(
     if (outcome.kind === 'leak') {
       // Guarded: a non-safe `lives` or one at MIN_SAFE_INTEGER removes the creep but
       // leaves `lives` unchanged; otherwise subtract `leakCost`. No low clamp — win/
-      // loss resolution reads `lives <= 0`. `leakedCount` is the forfeit authority.
+      // loss resolution reads `lives <= 0`. `leakedCount` is presentation/telemetry;
+      // `waveLeaked[wave]` is the per-wave clear-bonus forfeit authority.
       if (Number.isSafeInteger(state.leakedCount) && state.leakedCount < Number.MAX_SAFE_INTEGER) {
         state.leakedCount += 1;
       }
+      state.waveLeaked[wave] = true;
       if (
         Number.isSafeInteger(state.lives) &&
         state.lives - balance.leakCost > Number.MIN_SAFE_INTEGER
@@ -490,12 +795,14 @@ export function step(
     next.headCol.push(outcome.headCol);
     next.headRow.push(outcome.headRow);
     next.progress.push(outcome.progress);
+    next.wave.push(wave);
   }
   state.creeps = next;
 
   // 5) COMBAT PHASE (Story 4) — over the POST-MOVE world: resolve due impacts, sweep
   //    dead creeps and credit per-creep bounty, then hold/acquire + fire. The kill
-  //    bounty this tick also feeds the monotonic score accumulator.
+  //    bounty this tick also feeds the monotonic score accumulator. `wave` threads
+  //    through the combat survivor compaction like any other column (combat.ts).
   const combat = runCombat(
     state.creeps,
     state.towers,
@@ -510,22 +817,32 @@ export function step(
   state.creeps = combat.creeps;
   state.impacts = combat.impacts;
   state.bounty = combat.bounty;
-  state.cumulativeKillBounty = safeAdd(state.cumulativeKillBounty, combat.killBounty);
+  state.cumulativeKillBounty = satAdd(state.cumulativeKillBounty, combat.killBounty);
 
-  // 6) RESOLUTION — loss takes priority (lives ≤ 0 is terminal regardless of phase);
-  //    otherwise a win when the schedule is exhausted and no creep remains alive.
+  // 6) RESOLUTION (G8) — settlement precedes terminal, UNIFORMLY: a wave completing
+  //    on the final tick pays, win or loss. Per-wave alive counts are DERIVED from
+  //    the surviving creep SoA's `wave` column — O(creeps), immune by construction
+  //    to every removal path (no counter to desynchronize).
+  const aliveByWave = deriveAliveByWave(state.creeps.wave, waveCount);
+  for (let k = 0; k < waveCount; k++) {
+    if (
+      state.waveLaunchTick[k] !== null &&
+      !state.waveResolved[k] &&
+      state.waveSpawnCursor[k] === waves[k]!.spawns.length &&
+      aliveByWave[k] === 0
+    ) {
+      state.waveResolved[k] = true;
+      if (!state.waveLeaked[k]) {
+        state.bounty = satAdd(state.bounty, waves[k]!.clearBonus);
+      }
+    }
+  }
+  // Terminal: loss takes priority (lives ≤ 0 is terminal regardless of wave state);
+  // otherwise a win once every wave has resolved.
   if (state.lives <= 0) {
     state.phase = 'lost';
-  } else if (
-    state.phase === 'active' &&
-    state.spawnCursor >= schedule.length &&
-    state.creeps.id.length === 0
-  ) {
+  } else if (state.waveResolved.every((resolved) => resolved)) {
     state.phase = 'won';
-    // Wave-clear bonus (0 at M1): paid once, forfeited if any creep leaked.
-    if (state.leakedCount === 0) {
-      state.bounty = safeAdd(state.bounty, balance.waveClearBonus);
-    }
   }
 
   state.tick += 1; // guarded at entry — `tick + 1` is in the safe-integer range here
@@ -533,14 +850,26 @@ export function step(
 }
 
 /**
- * The authoritative numeric score, a pure function of terminal state + ruleset
- * weights (ADR 0006 — server-re-derivable): Σ kill-bounties + max(0, lives) ×
- * survivalMul. Bonuses credit spendable bounty only, never the score.
+ * The authoritative numeric score, a pure function of state + ruleset weights
+ * (ADR 0006 — server-re-derivable), OUTCOME-DEPENDENT (G9 — the scorer is the
+ * single grading function for both the live HUD and either terminal contract):
+ *   - `running` — Σ kill-bounties + Σ early-call credit (the live readout).
+ *   - `won`     — Σ kill-bounties + Σ early-call credit + max(0, lives) × survivalMul.
+ *   - `lost`    — Σ kill-bounties ONLY: the early-call credit (and any live-readout
+ *     value it contributed) is forfeited entirely on a loss, by design — a loss can
+ *     land below the last live readout.
+ * Every term saturates (`satAdd`/`satMul`) rather than wraps.
  */
 export function deriveScore(state: SimState | PreviewState, ruleset: CompiledRuleset): number {
   const kb = Number.isSafeInteger(state.cumulativeKillBounty) ? state.cumulativeKillBounty : 0;
+  if (state.phase === 'lost') return kb;
+  const credit = Number.isSafeInteger(state.cumulativeEarlyCallCredit)
+    ? state.cumulativeEarlyCallCredit
+    : 0;
+  const running = satAdd(kb, credit);
+  if (state.phase !== 'won') return running;
   const lives = Number.isSafeInteger(state.lives) && state.lives > 0 ? state.lives : 0;
-  return kb + lives * ruleset.scoring.survivalMul;
+  return satAdd(running, satMul(lives, ruleset.scoring.survivalMul));
 }
 
 /** The casual star grade from lives remaining (a win only; a loss earns 0). */
@@ -572,6 +901,7 @@ export interface ReadonlyCreepArrays {
   readonly headCol: readonly number[];
   readonly headRow: readonly number[];
   readonly progress: readonly number[];
+  readonly wave: readonly number[];
 }
 
 /** Deep-readonly view of `TowerArrays` — see `ReadonlyCreepArrays`. */
@@ -612,9 +942,14 @@ export interface PreviewState {
   readonly bounty: number;
   readonly nextEntityId: number;
   readonly phase: SimPhase;
-  readonly launchAtTick: number;
-  readonly launchTick: number | null;
-  readonly spawnCursor: number;
+  readonly waveCursor: number;
+  readonly countdownRemaining: number;
+  readonly launchPending: boolean;
+  readonly waveLaunchTick: readonly (number | null)[];
+  readonly waveSpawnCursor: readonly number[];
+  readonly waveLeaked: readonly boolean[];
+  readonly waveResolved: readonly boolean[];
+  readonly cumulativeEarlyCallCredit: number;
   readonly cumulativeKillBounty: number;
   readonly leakedCount: number;
   readonly creeps: ReadonlyCreepArrays;
@@ -624,13 +959,18 @@ export interface PreviewState {
 
 /** Build the mutable working clone `previewInputs` runs `applyInputPhase` against.
  *  Only `towers` is deep-cloned — the sole SoA `applyInputPhase` mutates (writes touch
- *  only towers columns, `bounty`, `nextEntityId`, `launchAtTick`, all scalars/towers
- *  copied by the `{...state}` spread or the explicit `structuredClone` below).
- *  `creeps` gets a shallow CONTAINER copy sharing the column arrays — load-bearing:
- *  `coerceSoa`'s repair writes (`c.id = []` etc.) assign onto this new container object,
- *  never onto the source's, while the column arrays themselves are never written to by
- *  the input phase and so are safely shared, not copied. `impacts` is a shared
- *  reference for the same reason (the input phase never touches it).
+ *  only towers columns, `bounty`, `nextEntityId`, and now `launchPending`, all
+ *  scalars/towers copied by the `{...state}` spread or the explicit `structuredClone`
+ *  below). `creeps` gets a shallow CONTAINER copy sharing the column arrays —
+ *  load-bearing: `coerceSoa`'s repair writes (`c.id = []` etc.) assign onto this new
+ *  container object, never onto the source's, while the column arrays themselves are
+ *  never written to by the input phase and so are safely shared, not copied.
+ *  `impacts` is a shared reference for the same reason (the input phase never touches
+ *  it). The four wave-lifecycle arrays (`waveLaunchTick`/`waveSpawnCursor`/
+ *  `waveLeaked`/`waveResolved`) are likewise SHARED by this `{...state}` spread
+ *  (a scalar-level copy of the array REFERENCE, not its contents) — `coerceSoa`'s
+ *  own copy-on-write discipline is what keeps a preview repair from mutating the
+ *  live state's array through that shared reference (see its doc comment).
  *
  *  Guarantee scope: today a forged state with a non-cloneable value (function/symbol)
  *  ANYWHERE throws from a blanket `structuredClone`; after this only the towers
@@ -673,7 +1013,10 @@ export function previewInputs(
 ): { accepted: boolean[]; preview: PreviewState } {
   assertRuleset(ruleset);
   const preview = partialCloneForPreview(state);
-  coerceSoa(preview); // the clone gets the same totality guarantees as a real step()
+  // The clone gets the same totality guarantees as a real step() — but in PREVIEW
+  // mode, so a genuinely buffered `launchPending` survives a chained preview call
+  // instead of being force-cleared (see `CoerceMode`'s doc).
+  coerceSoa(preview, ruleset, 'preview');
   // Mirror BOTH of step()'s pre-input guards so preview can never disagree with a real
   // tick: the tick-totality no-op (a forged/near-overflow tick) and the terminal freeze.
   const tickBroken =
@@ -735,6 +1078,7 @@ export {
   type CompiledScoring,
   type CompiledTower,
   type CompiledCreep,
+  type CompiledWave,
   type ScheduledSpawn,
 } from './ruleset';
 // The v2 structural validator + JSON parser (M2-S1) — `@wynding/content`'s registry

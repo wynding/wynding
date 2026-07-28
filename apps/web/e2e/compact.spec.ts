@@ -122,15 +122,18 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(page.locator('.wy-wordmark')).toBeHidden();
     await expect(page.locator('.wy-card-hotkey')).toBeHidden();
 
-    // Four of the five chip slots are visible pre-start (the wave slot is hidden until a
-    // run begins), and each one reads to assistive tech as its COMPLETE localized ICU
-    // message — the aria-hidden glance form ("♥ 10") is invisible to AT.
-    await expect.poll(async () => (await visibleChipAccessibleText(page)).length).toBe(4);
+    // All FIVE chip slots are visible pre-start now (M2-S2, PLAN.md P3 step 15's Start
+    // decouple): the wave chip is countdown-only and the sim's real `countdownRemaining`
+    // is meaningful before Start is ever pressed, not just after. Each chip reads to
+    // assistive tech as its COMPLETE localized ICU message — the aria-hidden glance form
+    // ("♥ 10") is invisible to AT.
+    await expect.poll(async () => (await visibleChipAccessibleText(page)).length).toBe(5);
     const chips = await visibleChipAccessibleText(page);
     expect(chips[0]).toMatch(/^Lives: \d+$/);
     expect(chips[1]).toMatch(/^Bounty: \d+$/);
     expect(chips[2]).toMatch(/^Score: \d+$/);
-    expect(chips[3]).toMatch(/^Stars: \d+ of 3$/);
+    expect(chips[3]).toMatch(/^Wave in \d+s$/);
+    expect(chips[4]).toMatch(/^Stars: \d+ of 3$/);
     // ...and the glance forms ARE what is painted on screen.
     await expect(page.locator('.wy-chip[data-wy-chip="lives"] .wy-chip-glance')).toHaveText(/^♥/);
 
@@ -142,11 +145,50 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await assertDeclaredRegions(page);
     await assertRegionRelations(page, 'compact');
 
-    // Starting the run reveals the fifth slot (countdown, then the active marker).
+    // The chip count stays five across Start (M2-S2) — only the wave chip's own value
+    // (and the wave preview surface below it) changes as waves launch.
     await page.getByRole('button', { name: 'Start' }).click();
     await expect.poll(async () => (await visibleChipAccessibleText(page)).length).toBe(5);
-    const started = await visibleChipAccessibleText(page);
-    expect(started.some((c) => /^Wave/.test(c))).toBe(true);
+  });
+
+  // PLAN.md P3 step 19: the wave preview is its OWN visible surface in BOTH layouts (never
+  // chip-hosted — the Compact chip's full text is screen-reader-only, so entries stuffed
+  // into it would be invisible to sighted Compact users) — and if it scrolls, it is
+  // KEYBOARD-reachable, not a mouse-only overflow container. It is hosted inside the same
+  // `.wy-hud` scrollport the chips already use (contract §1), so it inherits that
+  // scrollport's keyboard reachability by construction; this test proves that end to end.
+  test('658×320: the wave preview is its own visible, sighted-readable surface, and stays keyboard-reachable when the chips scrollport overflows at 200% zoom', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    const preview = page.locator('.wy-wave-preview');
+    await expect(preview).toBeVisible(); // visible pre-start too (M2-S2 decouple)
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 3');
+    const entries = preview.locator('li');
+    await expect(entries).toHaveCount(1); // the shipped bundle's single creep kind
+    await expect(entries.first()).toHaveText('10 × Creep — ground, armor 0, no immunities');
+
+    // Force the SAME overflow smoke.spec's 200%-zoom gate proves for the chips, and confirm
+    // the preview is still present and KEYBOARD-OPERABLE inside that same scrollport — never
+    // a mouse-only overflow container. Same two-part proof smoke.spec's chips-scrollport gate
+    // uses: an arrow key actually moves `scrollTop` (keyboard-operable, not merely present in
+    // the DOM — `isVisible()`/axe cannot distinguish an off-screen row from a reachable one),
+    // and the target CAN be scrolled fully into view within that same scrollport.
+    await page.addStyleTag({ content: ':root { font-size: 200% }' });
+    const hud = page.locator('.wy-hud');
+    expect(await hud.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    await expect(preview).toBeVisible();
+    await hud.focus();
+    await expect(hud).toBeFocused();
+    expect(await hud.evaluate((el) => el.scrollTop)).toBe(0);
+    await page.keyboard.press('ArrowDown');
+    await expect
+      .poll(async () => hud.evaluate((el) => el.scrollTop), {
+        message: 'the chips scrollport should scroll on an arrow key',
+      })
+      .toBeGreaterThan(0);
+    await entries.first().scrollIntoViewIfNeeded();
+    await expect(entries.first()).toBeInViewport();
   });
 
   test('658×320: no axe violations in the Compact layout', async ({ page }) => {

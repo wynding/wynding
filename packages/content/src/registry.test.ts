@@ -1,4 +1,4 @@
-// registry.test.ts — the bundled ruleset registry (M2-S1). Pins every authored M1
+// registry.test.ts — the bundled ruleset registry. Pins every authored
 // value (carrying forward the intent of the deleted `boards.test.ts`, now over the
 // registry-loaded artifact) and proves the registry's own contract: happy path,
 // caching, unknown-id rejection, deep-frozen results, and — the two-loaders
@@ -23,24 +23,24 @@ import { BUNDLED_ARTIFACT_URL } from './artifact';
 // The registry module holds its bundled `?raw` text in a private map; import the
 // same specifier here so the fidelity test below compares the literal string the
 // registry embeds (not just its parsed/validated shape) to the on-disk bytes.
-import rawWyndingCoreM1 from './rulesets/wynding-core-m1.json?raw';
+import rawWyndingCore from './rulesets/wynding-core.json?raw';
 
-describe('getBundledRuleset (happy path + authored M1 values)', () => {
+describe('getBundledRuleset (happy path + authored values)', () => {
   const ruleset = getBundledRuleset();
   const board = ruleset.boards[0]!;
 
-  it('defaults to DEFAULT_RULESET_ID = wynding-core-m1, version 1', () => {
-    expect(DEFAULT_RULESET_ID).toBe('wynding-core-m1');
+  it('defaults to DEFAULT_RULESET_ID = wynding-core, version 1', () => {
+    expect(DEFAULT_RULESET_ID).toBe('wynding-core');
     expect(ruleset.formatVersion).toBe(2);
-    expect(ruleset.rulesetId).toBe('wynding-core-m1');
+    expect(ruleset.rulesetId).toBe('wynding-core');
     expect(ruleset.version).toBe(1);
   });
 
   it('is also reachable by explicit id', () => {
-    expect(getBundledRuleset('wynding-core-m1')).toBe(ruleset);
+    expect(getBundledRuleset('wynding-core')).toBe(ruleset);
   });
 
-  it('carries the M1 creep catalog: one ground creep, `normal`', () => {
+  it('carries the creep catalog: one ground creep, `normal`', () => {
     expect(ruleset.creepCatalog).toEqual([
       {
         id: 'normal',
@@ -55,7 +55,7 @@ describe('getBundledRuleset (happy path + authored M1 values)', () => {
     ]);
   });
 
-  it('carries the M1 tower catalog: one single-target tower, `basic`', () => {
+  it('carries the tower catalog: one single-target tower, `basic`', () => {
     expect(ruleset.towerCatalog).toEqual([
       {
         id: 'basic',
@@ -66,7 +66,7 @@ describe('getBundledRuleset (happy path + authored M1 values)', () => {
     ]);
   });
 
-  it('carries the M1 starting economy and refund/slow-floor fractions', () => {
+  it('carries the starting economy, refund/slow-floor fractions and early-call bounty divisor', () => {
     expect(ruleset.balance).toEqual({
       startingLives: 10,
       startingBounty: 80,
@@ -74,19 +74,19 @@ describe('getBundledRuleset (happy path + authored M1 values)', () => {
       refundDen: 4,
       slowFloorNum: 1,
       slowFloorDen: 4,
-      earlyCallBountyDivisor: 0,
+      earlyCallBountyDivisor: 50,
     });
   });
 
-  it('carries the M1 scoring weights', () => {
+  it('carries the scoring weights and early-call score divisor', () => {
     expect(ruleset.scoring).toEqual({
-      survivalMul: 25,
+      survivalMul: 35,
       starThresholds: [1, 6, 9],
-      earlyCallScoreDivisor: 0,
+      earlyCallScoreDivisor: 50,
     });
   });
 
-  it('carries the M1 board geometry: field-01, a 28×24 grid', () => {
+  it('carries the board geometry: field-01, a 28×24 grid', () => {
     expect(board.id).toBe('field-01');
     expect(defaultBoardId(ruleset)).toBe('field-01');
     expect(board.widthTiles).toBe(28);
@@ -95,26 +95,24 @@ describe('getBundledRuleset (happy path + authored M1 values)', () => {
     expect(board.exit).toEqual({ col: 27, row: 11 });
   });
 
-  it('carries the M1 wave: one wave of 10, countdown 500, no clear bonus, offsetTicks defaulted to 0', () => {
+  it('carries the three waves: 10 × normal @ spacing 20, clear bonus 4 each, countdown 500/300/300', () => {
+    const entries = [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }];
     expect(board.waves).toEqual([
-      {
-        index: 0,
-        countdownTicks: 500,
-        clearBonus: 0,
-        entries: [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }],
-      },
+      { index: 0, countdownTicks: 500, clearBonus: 4, entries },
+      { index: 1, countdownTicks: 300, clearBonus: 4, entries },
+      { index: 2, countdownTicks: 300, clearBonus: 4, entries },
     ]);
   });
 
   it('is the only bundled ruleset', () => {
-    expect(bundledRulesetIds()).toEqual(['wynding-core-m1']);
+    expect(bundledRulesetIds()).toEqual(['wynding-core']);
   });
 });
 
 describe('getBundledRuleset (caching + freezing)', () => {
   it('caches: repeated calls for the same id return the SAME frozen instance', () => {
-    const first = getBundledRuleset('wynding-core-m1');
-    const second = getBundledRuleset('wynding-core-m1');
+    const first = getBundledRuleset('wynding-core');
+    const second = getBundledRuleset('wynding-core');
     expect(second).toBe(first);
     const byDefault = getBundledRuleset();
     expect(byDefault).toBe(first);
@@ -140,7 +138,7 @@ describe('getBundledRuleset (caching + freezing)', () => {
 describe('artifact fidelity (the two-loaders invariant, ADR 0007 §2)', () => {
   it('the on-disk text is string-identical to the registry-bundled text', () => {
     const diskText = readFileSync(BUNDLED_ARTIFACT_URL, 'utf8');
-    expect(diskText).toBe(rawWyndingCoreM1);
+    expect(diskText).toBe(rawWyndingCore);
     expect(diskText.length).toBeLessThanOrEqual(MAX_RULESET_TEXT_UNITS);
     // Both loaders run the SAME text through the SAME parseRulesetJson, so their
     // normalized output — and thus their digest — must agree exactly.

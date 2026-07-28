@@ -36,13 +36,21 @@ function ptr(type: string, clientX: number, clientY: number, pointerId = 1): Eve
 
 function hud(over: Partial<HudVM> = {}): HudVM {
   return {
-    phase: 'pre-wave',
+    phase: 'running',
     lives: 10,
     bounty: 80,
     countdownSeconds: 25,
     score: 0,
     stars: 0,
     won: false,
+    waveCount: 3,
+    waveCursor: 0,
+    launchPending: false,
+    callable: true,
+    // Defaults to `null` (no preview surface) so the many pre-existing HUD-readout tests
+    // that never touch the wave preview aren't affected by it — the dedicated "wave
+    // preview" describe block below overrides this explicitly.
+    preview: null,
     ...over,
   };
 }
@@ -50,7 +58,15 @@ function hud(over: Partial<HudVM> = {}): HudVM {
 /** A neutral (unarmed, unselected) `UiState`, for tests that don't exercise the
  *  armed/selection state machine. */
 function uiState(over: Partial<UiState> = {}): UiState {
-  return { started: true, armed: null, selection: null, lastOutcome: null, outcomeSeq: 0, ...over };
+  return {
+    started: true,
+    armed: null,
+    selection: null,
+    lastOutcome: null,
+    outcomeSeq: 0,
+    callWaveReady: true,
+    ...over,
+  };
 }
 
 /** A spy for the app-level pause seam the settings dialog asks on open. The
@@ -118,7 +134,7 @@ beforeEach(() => {
 });
 
 describe('overlay — HUD readout', () => {
-  it('renders lives/gold/score/stars and the pre-wave countdown, then the active label', () => {
+  it('renders lives/gold/score/stars and the wave countdown; hides the wave chip once every wave has launched or the run is terminal (M2-S2: countdown-only, no "in progress" fallback)', () => {
     const { overlay, shell } = setup();
     overlay.update({
       hud: hud(),
@@ -138,20 +154,22 @@ describe('overlay — HUD readout', () => {
     expect(shell.hud.bounty.glance.textContent).toBe('◈ 80');
     expect(shell.hud.wave.glance.textContent).toBe('25s');
 
+    // Once every wave has launched, `countdownSeconds` is null — the chip hides entirely
+    // (its own preview surface carries the last-wave marker instead — see the dedicated
+    // "wave preview" describe block).
     overlay.update({
-      hud: hud({ countdownSeconds: null, phase: 'active' }),
+      hud: hud({ countdownSeconds: null, waveCursor: 3, callable: false }),
       paused: false,
       speed: 1,
       ui: uiState(),
       refund: 0,
     });
-    expect(shell.hud.wave.full.textContent).toBe('Wave in progress');
-    expect(shell.hud.wave.glance.textContent).toBe('▶');
-    expect(shell.hud.wave.root.hidden).toBe(false);
+    expect(shell.hud.wave.full.textContent).toBe('');
+    expect(shell.hud.wave.root.hidden).toBe(true);
+    expect(shell.hud.wave.root.isConnected).toBe(true);
 
-    // Terminal phase also has countdownSeconds null, but must NOT say "in progress" — the
-    // wave slot hides entirely (the outcome is the results dialog), with its full-form node
-    // retained and empty.
+    // Terminal phase also has countdownSeconds null — the wave slot hides entirely (the
+    // outcome is the results dialog), with its full-form node retained and empty.
     overlay.update({
       hud: hud({ countdownSeconds: null, phase: 'lost', won: false }),
       paused: false,
@@ -200,8 +218,150 @@ describe('overlay — HUD readout', () => {
   });
 });
 
+describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19)', () => {
+  it('renders the title + one accessible-text row per entry: "{count} × {name} — {domain}, armor {n}, {immunities}", with explicit none-states', () => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 2,
+          waveCount: 3,
+          entries: [{ creepId: 'normal', count: 10, domain: 'ground', armor: 0, immunities: [] }],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(shell.preview.root.hidden).toBe(false);
+    expect(shell.preview.title.textContent).toBe('Wave 2 of 3');
+    const items = [...shell.preview.list.querySelectorAll('li')];
+    expect(items).toHaveLength(1);
+    expect(items[0]!.textContent).toBe('10 × Creep — ground, armor 0, no immunities');
+  });
+
+  it('an unchanged preview never rebuilds its rows — node identity survives repeated updates (the SR-stability memo)', () => {
+    // The memo guard is an a11y contract (a screen-reader virtual cursor or
+    // braille display parked on a row must not have its node torn down every
+    // tick) and, post-locale-sentinel, it is drift-prone by construction: its
+    // three conjuncts must reproduce what the render writes byte-for-byte.
+    // Local QC round 3: disabling the guard left all web tests green — this
+    // test is the pin (it fails under a disabled or drifted guard).
+    const { overlay, shell } = setup();
+    const view = {
+      hud: hud({
+        preview: {
+          kind: 'upcoming' as const,
+          waveNumber: 2,
+          waveCount: 3,
+          entries: [{ creepId: 'normal', count: 10, domain: 'ground', armor: 0, immunities: [] }],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    };
+    overlay.update(view);
+    const firstRow = shell.preview.list.firstElementChild;
+    expect(firstRow).not.toBeNull();
+    for (let i = 0; i < 20; i++) overlay.update(view);
+    expect(shell.preview.list.firstElementChild).toBe(firstRow); // same NODE, not equal text
+  });
+
+  it('shows the last-wave marker (no entry list) once every wave has launched', () => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({ preview: { kind: 'lastWave' } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(shell.preview.root.hidden).toBe(false);
+    expect(shell.preview.title.textContent).toBe('Final wave launched — no more waves to call');
+    expect(shell.preview.list.children).toHaveLength(0);
+  });
+
+  it('hides once terminal (preview null) — the results dialog takes over', () => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({ preview: null }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(shell.preview.root.hidden).toBe(true);
+  });
+
+  it('falls back to the localized generic name for a valid-but-unmapped catalog id — NEVER a raw id (Round 2 finding #9 / ADR 0004) — and warns in dev mode', () => {
+    const { overlay, shell } = setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    overlay.update({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 1,
+          waveCount: 1,
+          // A creepId sv6's catalog CAN carry (it's schema-valid) but this build's overlay
+          // hasn't been taught a localized name for — the exact "future content, current
+          // client" gap the fallback exists for.
+          entries: [
+            { creepId: 'future-kind', count: 4, domain: 'ground', armor: 2, immunities: [] },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    const text = shell.preview.list.querySelector('li')!.textContent;
+    expect(text).toBe('4 × Unknown creep (future-kind) — ground, armor 2, no immunities');
+    // The dev-only warn is asserted conditionally — Vitest defaults DEV to true, but a
+    // production-mode run must not fail on a behaviour (the warn) that build mode elides.
+    if (import.meta.env.DEV) expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('rebuilds the entry list on every render (no stale rows left behind from a shorter previous wave)', () => {
+    const { overlay, shell } = setup();
+    const two = {
+      kind: 'upcoming' as const,
+      waveNumber: 1,
+      waveCount: 2,
+      entries: [
+        { creepId: 'normal', count: 1, domain: 'ground' as const, armor: 0, immunities: [] },
+        { creepId: 'normal', count: 2, domain: 'ground' as const, armor: 0, immunities: [] },
+      ],
+    };
+    overlay.update({
+      hud: hud({ preview: two }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(shell.preview.list.children).toHaveLength(2);
+
+    overlay.update({
+      hud: hud({
+        preview: { kind: 'upcoming', waveNumber: 2, waveCount: 2, entries: [two.entries[0]!] },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(shell.preview.list.children).toHaveLength(1);
+  });
+});
+
 describe('overlay — player-started runs (PLAN.md P4)', () => {
-  it('pre-start: Pause is hidden, the primary Dock button reads Start, and the wave slot is hidden (four visible chips)', () => {
+  it('pre-start: Pause is hidden, the primary Dock button reads Start, and the wave countdown is ALREADY visible (M2-S2: Start decoupled — countdownRemaining is meaningful before Start)', () => {
     const { overlay, pauseBtn, primaryBtn, shell } = setup();
     overlay.update({
       hud: hud(),
@@ -215,16 +375,15 @@ describe('overlay — player-started runs (PLAN.md P4)', () => {
     // Start keeps its VISIBLE text label in both layouts (contract §2) — no icon form.
     expect(dockButtonParts(primaryBtn).text.textContent).toBe('Start');
     expect(dockButtonParts(primaryBtn).icon.textContent).toBe('');
-    // Story 11 P1's wave-slot states: pre-start the slot is HIDDEN with its full-form node
-    // retained and empty — the sim's countdown never ticks down while held, and the Dock's
-    // "Start" button already carries the prompt. Four of the five chip slots are visible.
-    expect(shell.hud.wave.full.textContent).toBe('');
-    expect(shell.hud.wave.root.hidden).toBe(true);
+    // The wave chip is countdown-only (M2-S2) and now visible PRE-START too — `hud()`'s
+    // countdown default (25) is a real, meaningful figure before Start is ever pressed.
+    expect(shell.hud.wave.full.textContent).toBe('Wave in 25s');
+    expect(shell.hud.wave.root.hidden).toBe(false);
     const visible = [...shell.hudBox.children].filter((el) => !(el as HTMLElement).hidden);
-    expect(visible).toHaveLength(4);
+    expect(visible).toHaveLength(5); // lives, bounty, score, wave, stars (preview is separate)
   });
 
-  it('once started: Pause is visible, the primary Dock button hides for the rest of the run', () => {
+  it('once started: Pause is visible, and the primary Dock button MORPHS to Call wave rather than hiding (M2-S2, PLAN.md P3 step 17)', () => {
     const { overlay, pauseBtn, primaryBtn } = setup();
     overlay.update({
       hud: hud(),
@@ -234,7 +393,9 @@ describe('overlay — player-started runs (PLAN.md P4)', () => {
       refund: 0,
     });
     expect(pauseBtn.hidden).toBe(false);
-    expect(primaryBtn.hidden).toBe(true);
+    expect(primaryBtn.hidden).toBe(false);
+    expect(dockButtonParts(primaryBtn).text.textContent).toBe('Call wave');
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('false'); // callable: true by default
   });
 
   it('clicking the primary Dock button emits start', () => {
@@ -253,6 +414,205 @@ describe('overlay — player-started runs (PLAN.md P4)', () => {
       refund: 0,
     });
     expect(live.textContent).toBe('Too many pending actions.');
+  });
+});
+
+describe('overlay — the morphing primary control’s aria-disabled states (M2-S2, PLAN.md P3 step 17, Round 2 finding #4)', () => {
+  it('is aria-disabled (never native disabled) and shows the pending-launch label while a call is queued', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ launchPending: true, callable: false }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(dockButtonParts(primaryBtn).text.textContent).toBe('Launching…');
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('true');
+    expect(primaryBtn.hasAttribute('disabled')).toBe(false); // native disabled would drop it from the tab order
+  });
+
+  it('is aria-disabled with the Call-wave label (not pending) once every wave has launched — visible-disabled, never hidden', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ waveCursor: 3, callable: false, preview: { kind: 'lastWave' } }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(primaryBtn.hidden).toBe(false);
+    expect(dockButtonParts(primaryBtn).text.textContent).toBe('Call wave');
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('Start is never aria-disabled pre-start, even with a full buffer (callWaveReady false)', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ callable: true }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: false, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(dockButtonParts(primaryBtn).text.textContent).toBe('Start');
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('false');
+  });
+
+  it('is aria-disabled when the buffer is momentarily full (UiState.callWaveReady), even though HudVM.callable is true', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ callable: true }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('hides only at TERMINAL, regardless of callable/launchPending', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ phase: 'won', won: true, callable: false, preview: null }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(primaryBtn.hidden).toBe(true);
+  });
+
+  it('activation is suppressed while aria-disabled — a click on the pending-launch button emits nothing', () => {
+    const { overlay, actions, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ launchPending: true, callable: false }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: false }),
+      refund: 0,
+    });
+    primaryBtn.click();
+    expect(actions).toEqual([]);
+  });
+
+  // Round 2 finding #4: dynamically disabling the FOCUSED primary control must not strand
+  // focus — a paused early call disables the just-clicked button, and native `disabled`
+  // would drop focus to the document. `aria-disabled` keeps it in the tab order.
+  it('retains focus across the callable→pending transition (a click that lands the control disabled)', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ callable: true }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: true }),
+      refund: 0,
+    });
+    primaryBtn.focus();
+    expect(document.activeElement).toBe(primaryBtn);
+    overlay.update({
+      hud: hud({ launchPending: true, callable: false }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(primaryBtn); // never stranded on document.body
+  });
+
+  it('retains focus across the callable→after-final-launch transition', () => {
+    const { overlay, primaryBtn } = setup();
+    overlay.update({
+      hud: hud({ callable: true }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: true }),
+      refund: 0,
+    });
+    primaryBtn.focus();
+    overlay.update({
+      hud: hud({ waveCursor: 3, callable: false, preview: { kind: 'lastWave' } }),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true, callWaveReady: false }),
+      refund: 0,
+    });
+    expect(primaryBtn.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(primaryBtn);
+  });
+});
+
+describe('overlay — the Start→Call-wave morph announcement (M2-S2, Round 1 finding #8: Start moves focus to the board and the HUD is not live, so without this the morph is undiscoverable to AT users)', () => {
+  it('announces exactly once on a genuine started false→true edge, through the existing polite live region', () => {
+    const { overlay, live } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: false }),
+      refund: 0,
+    });
+    // Not yet announced — still held. (The very first `update()` call also runs the
+    // unrelated outcome-announcement path with a null outcome, which — per its own
+    // same-value collision guard — may write a lone space rather than '': `.trim()`
+    // normalizes that quirk away here, since it's not what this test is about.)
+    expect(live.textContent!.trim()).toBe('');
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true }),
+      refund: 0,
+    });
+    expect(live.textContent).toBe(
+      'Run started. The primary button now calls the current wave early.',
+    );
+    // A further tick with `started` still true must NOT re-announce (no per-tick spam).
+    const setSpy = vi.spyOn(live, 'textContent', 'set');
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true }),
+      refund: 0,
+    });
+    expect(setSpy).not.toHaveBeenCalled();
+  });
+
+  it('re-arms after Play-again — a second run’s Start is announced too', () => {
+    const { overlay, live } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: false }),
+      refund: 0,
+    });
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true }),
+      refund: 0,
+    });
+    expect(live.textContent).toContain('Run started');
+    // Play-again: back to held.
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: false }),
+      refund: 0,
+    });
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ started: true }),
+      refund: 0,
+    });
+    expect(live.textContent).toContain('Run started');
   });
 });
 
@@ -768,20 +1128,20 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
     s.overlay.destroy();
   });
 
-  it('re-homes banner focus to the board (not the hidden Start button) on the Start edge', () => {
-    // On the Start edge `update()` hides `primaryBtn` BEFORE `renderInstall` re-homes banner
-    // focus, so re-homing to Start would `focus()` a hidden element and strand focus on
-    // `document.body`. The fallback must be a guaranteed-focusable target — the board.
+  it('re-homes banner focus to the (still-visible) primary control on the Start edge — it morphs rather than hiding (M2-S2)', () => {
+    // The primary control stays visible through Start now (M2-S2's morph, PLAN.md P3 step
+    // 17 — it hides only once terminal), so it's a guaranteed-focusable fallback itself; the
+    // board is only the fallback for the terminal case (see the dedicated test below).
     const s = installSetup();
     s.target.dispatch(fakePromptEvent().event);
     s.render(false);
     s.shell.banner.action.focus();
     expect(document.activeElement).toBe(s.shell.banner.action);
 
-    s.render(true); // Start: the banner hides AND primaryBtn hides in the same update()
+    s.render(true); // Start: the banner hides; primaryBtn stays visible, morphed
     expect(bannerVisible(s.shell)).toBe(false);
-    expect(s.shell.dock.primary.hidden).toBe(true);
-    expect(document.activeElement).toBe(s.shell.board);
+    expect(s.shell.dock.primary.hidden).toBe(false);
+    expect(document.activeElement).toBe(s.shell.dock.primary);
     s.overlay.destroy();
   });
 
@@ -1218,7 +1578,7 @@ describe('overlay — home link visibility driver', () => {
     over: { started?: boolean; paused?: boolean; phase?: HudVM['phase'] } = {},
   ): { live: boolean; inert: boolean } {
     s.overlay.update({
-      hud: hud({ phase: over.phase ?? 'pre-wave' }),
+      hud: hud({ phase: over.phase ?? 'running' }),
       paused: over.paused ?? false,
       speed: 1,
       ui: uiState({ started: over.started ?? false }),
@@ -1235,16 +1595,15 @@ describe('overlay — home link visibility driver', () => {
 
   it('sets data-live AND inert together for every started, unpaused, unresolved phase', () => {
     const s = setup();
-    // Including the started pre-wave COUNTDOWN — the sim has no "held" concept and reports
-    // `pre-wave` either way, which is why the rule keys on `ui.started`, not the phase.
-    expect(drive(s, { started: true, phase: 'pre-wave' })).toEqual(HIDDEN);
-    expect(drive(s, { started: true, phase: 'active' })).toEqual(HIDDEN);
+    // Including the started wave-1 COUNTDOWN — the sim has no "held" concept and reports
+    // `running` either way, which is why the rule keys on `ui.started`, not the phase.
+    expect(drive(s, { started: true, phase: 'running' })).toEqual(HIDDEN);
   });
 
   it('clears both while HELD pre-start, while PAUSED, and once TERMINAL', () => {
     const s = setup();
-    expect(drive(s, { started: false, phase: 'pre-wave' })).toEqual(VISIBLE);
-    expect(drive(s, { started: true, phase: 'active', paused: true })).toEqual(VISIBLE);
+    expect(drive(s, { started: false, phase: 'running' })).toEqual(VISIBLE);
+    expect(drive(s, { started: true, phase: 'running', paused: true })).toEqual(VISIBLE);
     expect(drive(s, { started: true, phase: 'won' })).toEqual(VISIBLE);
     expect(drive(s, { started: true, phase: 'lost' })).toEqual(VISIBLE);
   });
@@ -1258,9 +1617,9 @@ describe('overlay — home link visibility driver', () => {
 
   it('flips back and forth cleanly — the attributes are never left stale on either side', () => {
     const s = setup();
-    expect(drive(s, { started: true, phase: 'active' })).toEqual(HIDDEN);
-    expect(drive(s, { started: true, phase: 'active', paused: true })).toEqual(VISIBLE);
-    expect(drive(s, { started: true, phase: 'active' })).toEqual(HIDDEN);
+    expect(drive(s, { started: true, phase: 'running' })).toEqual(HIDDEN);
+    expect(drive(s, { started: true, phase: 'running', paused: true })).toEqual(VISIBLE);
+    expect(drive(s, { started: true, phase: 'running' })).toEqual(HIDDEN);
   });
 });
 
@@ -1330,15 +1689,17 @@ describe('overlay — the leave-run confirm dialog (presentation only)', () => {
     s.overlay.showLeave(() => {});
     expect(s.overlay.leaveEl.hidden).toBe(false);
 
-    s.overlay.showResults({
-      phase: 'won',
-      lives: 3,
-      bounty: 0,
-      countdownSeconds: null,
-      score: 10,
-      stars: 2,
-      won: true,
-    });
+    s.overlay.showResults(
+      hud({
+        phase: 'won',
+        lives: 3,
+        bounty: 0,
+        countdownSeconds: null,
+        score: 10,
+        stars: 2,
+        won: true,
+      }),
+    );
     expect(s.overlay.resultsEl.hidden).toBe(false);
     expect(s.overlay.leaveEl.hidden).toBe(true); // deposed by the higher-priority dialog
   });

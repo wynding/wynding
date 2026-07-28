@@ -65,6 +65,7 @@ function restingCreep(state: SimState, id: number, col: number, row: number, hp 
   state.creeps.headCol.push(col);
   state.creeps.headRow.push(row);
   state.creeps.progress.push(0);
+  state.creeps.wave.push(0);
 }
 
 /** A mid-edge creep row: at the (col,row) centre, committed toward (headCol,headRow). */
@@ -87,6 +88,7 @@ function committedCreep(
   state.creeps.headCol.push(headCol);
   state.creeps.headRow.push(headRow);
   state.creeps.progress.push(progress);
+  state.creeps.wave.push(0);
 }
 
 describe('placeTower / sellTower — accept path and economy', () => {
@@ -585,10 +587,10 @@ describe('nextEntityId totality + the saturating allocator (#42)', () => {
     s.nextEntityId = Number.MAX_SAFE_INTEGER;
     const bountyBefore = s.bounty;
     expect(() => step(s, RULESET_LANE, [callEarly])).not.toThrow();
-    expect(s.phase).toBe('active');
-    expect(s.spawnCursor).toBe(1); // the due spawn was consumed
+    expect(s.waveLaunchTick[0]).toBe(0);
+    expect(s.waveSpawnCursor[0]).toBe(1); // the due spawn was consumed
     expect(s.creeps.id).toHaveLength(0); // but no creep row was appended
-    expect(s.bounty).toBe(bountyBefore); // no economy mutation (earlyCallBonus is 0 in this fixture)
+    expect(s.bounty).toBe(bountyBefore); // no economy mutation (both divisors are 0 in this fixture)
     expect(s.nextEntityId).toBe(Number.MAX_SAFE_INTEGER); // allocator never incremented past it
   });
 });

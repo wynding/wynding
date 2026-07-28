@@ -7,7 +7,7 @@
 // ONLY export here, and this module imports nothing else, so evaluating it never
 // evaluates any bundled artifact content.
 
-/** The on-disk URL of the shipped M1 artifact — the server reads this via
+/** The on-disk URL of the shipped artifact — the server reads this via
  *  `readFileSync` at cold start; `parseRulesetJson` (from `@wynding/sim`) then
  *  parses + validates the same bytes the client's registry carries bundled.
  *  Resolves beside THIS module in either tree: workspace consumers run the TS
@@ -16,4 +16,4 @@
  *  `build` script copies the JSON into `dist/rulesets/` after `tsc -b` (tsc
  *  emits no assets; without the copy, a dist-deployed server would ENOENT at
  *  cold start — Codex PR #66 P1). */
-export const BUNDLED_ARTIFACT_URL = new URL('./rulesets/wynding-core-m1.json', import.meta.url);
+export const BUNDLED_ARTIFACT_URL = new URL('./rulesets/wynding-core.json', import.meta.url);

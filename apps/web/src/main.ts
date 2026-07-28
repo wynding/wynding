@@ -9,7 +9,7 @@
 // covered, and only `packages/render/src/scene.ts` (Phaser/WebGL) is coverage-excluded.
 
 import './ui.css';
-import { createController } from './controller';
+import { createController, type Controller } from './controller';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
@@ -39,6 +39,10 @@ export interface AppDeps {
   readonly schedule: Scheduler;
   readonly now: () => number;
   readonly seed: number;
+  /** Test seam (same pattern as `sceneFactory`/`matchMedia`): lets a test wrap the
+   *  real controller to force UI states that are expensive to construct through the
+   *  DOM (e.g. `callWaveReady: false`). Defaults to `createController`. */
+  readonly controllerFactory?: (seed: number) => Controller;
   /** Wide-entropy seed source for Play-again (defaults to wall-clock `Date.now`). Kept
    *  separate from `now` (a monotonic frame clock) so a fresh run varies per reload. */
   readonly seedSource?: () => number;
@@ -67,7 +71,7 @@ export interface AppHandle {
 export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppHandle {
   const settings = createSettings({ reducedMotion: deps.prefersReducedMotion ?? false });
   const keymap = createKeymap();
-  const controller = createController(deps.seed);
+  const controller = (deps.controllerFactory ?? createController)(deps.seed);
   const seedSource = deps.seedSource ?? (() => Date.now() >>> 0);
   const navigate =
     deps.navigate ??
@@ -158,10 +162,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   };
   const handle = deps.sceneFactory(board, geometry);
   const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap, {
-    // The keymapped start key routes through the SAME app-level transition as the Dock's
-    // Start button (PLAN.md Story 11 P4) — otherwise it would call `controller.start()`
-    // directly and skip the fullscreen request, the banner latch and the focus re-home.
-    onStart: () => startRun(),
+    // The keymapped `start` action routes through the SAME morphed app-level primary
+    // action as the Dock's primary button (PLAN.md P3 step 15) — otherwise it would call
+    // `controller.start()`/`controller.callWaveEarly()` directly and skip the fullscreen
+    // request, the banner latch and the focus re-home `startRun()` owns.
+    onStart: () => primaryAction(),
     // Same reasoning as `onStart`: the keymapped pause key must run the app-level transition
     // (which refreshes the home link's visibility synchronously), not `controller.togglePause()`.
     onTogglePause: () => togglePause(),
@@ -247,7 +252,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *
    *  Fullscreen is requested only on the `started` false→true EDGE: repeated Start presses
    *  mid-run never re-request, while Play-again (which returns the run to a pre-start state)
-   *  makes the next Start eligible again. */
+   *  makes the next Start eligible again. `startRun` itself no longer enqueues
+   *  `callWaveEarly` (`controller.start()` is now a trivial flag flip, PLAN.md P3 step 15 —
+   *  the Start decouple) — `primaryAction` below is what routes between this and the
+   *  Call-wave path once `started`. */
   function startRun(): void {
     const wasStarted = controller.uiState().started;
     controller.start();
@@ -285,6 +293,26 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     refreshHud();
   }
 
+  /** The morphed primary action (PLAN.md P3 step 15, M2-S2): the SAME control routes to
+   *  `startRun()` (with its fullscreen/install/focus edge handling) while `!started`, and
+   *  to `callWaveEarly()` once the run is under way. One function so the Dock button's
+   *  click and the keymapped `start` action (which now triggers the SAME morphed control,
+   *  not a fixed "Start") can never diverge on which path they take. The
+   *  `callWaveReady` gate mirrors the overlay's `aria-disabled` click suppression:
+   *  the keyboard shortcut and the button must share activation semantics — a
+   *  disabled control must not announce a rejection (or dispatch at all) just
+   *  because the press arrived through the keymap. */
+  function primaryAction(): void {
+    const ui = controller.uiState();
+    if (!ui.started) {
+      startRun();
+      return;
+    }
+    if (!ui.callWaveReady) return; // exposed as disabled — the key press is inert too
+    controller.callWaveEarly();
+    refreshHud();
+  }
+
   /** The live-run exit guard (PLAN.md step 4). `main.ts` owns ALL of it — the modified-
    *  activation check, the state read and the decision — while `overlay.showLeave` supplies
    *  nothing but presentation. The state is read at CLICK TIME, never cached: a run can start,
@@ -296,8 +324,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  finished match has nothing left to protect.
    *
    *  "Something to lose" is deliberately NOT just `started` (PLAN.md Amendment 1). A held run
-   *  is not necessarily empty: the controller buffers pre-start build/sell commands
-   *  (`effectiveCap()` reserves a slot precisely so pre-start planning works), so a player can
+   *  is not necessarily empty: the controller buffers pre-start build/sell commands up to the
+   *  full per-tick cap (P3 step 15 dropped the reserved slot), so a player can
    *  lay out several towers before pressing Start. Guarding only `started` meant tapping the
    *  mark discarded that layout silently, while the IDENTICAL loss one keypress later opened a
    *  dialog. The original decision read "held pre-start … navigates directly, since there is
@@ -348,7 +376,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.cycleSpeed();
         break;
       case 'start':
-        startRun();
+        primaryAction();
         break;
       case 'armTower':
         controller.armTower(action.tower);
@@ -385,9 +413,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         resultsShown = false;
         lastHudKey = '';
         // Repaint the HUD NOW rather than waiting for the next scheduled frame (#53): the
-        // fresh run is pre-wave and un-ticking, so until a frame lands the chips still read
-        // the finished run's terminal values — indefinitely if frames are throttled in a
-        // background tab. Same out-of-band refresh the install-state listener uses.
+        // fresh run is held (un-ticking) at wave 1's initial countdown, so until a frame
+        // lands the chips still read the finished run's terminal values — indefinitely if
+        // frames are throttled in a background tab. Same out-of-band refresh the
+        // install-state listener uses.
         refreshHud();
         break;
       case 'verify': {
@@ -424,13 +453,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // attributes on the board element so a spec can assert "held"/"frozen" directly
     // instead of inferring it from a short wait. Cheap dataset writes, so unconditional
     // every frame (no need to gate behind the hudKey throttle below): `data-sim-tick`/
-    // `data-sim-phase` mirror the real sim (frozen at 0/'pre-wave' while held — the sim
-    // itself has no "held" concept), `data-run-started` is the one place that distinction
-    // becomes visible, and `data-pending-adds` mirrors the Pending-build count shown by
-    // the board's own paused-planning presentation.
+    // `data-sim-phase` mirror the real sim (frozen at tick 0, `phase: 'running'`, while
+    // held — the sim itself has no "held" concept: `started` gates `advance()`, not the
+    // sim's own state machine), `data-started` (M2-S2: renamed from `data-run-started`, no
+    // behavior change) is the one place that distinction becomes visible, and
+    // `data-pending-adds` mirrors the Pending-build count shown by the board's own
+    // paused-planning presentation.
     board.dataset.simTick = String(f.curVm.tick);
     board.dataset.simPhase = f.curVm.phase;
-    board.dataset.runStarted = String(controller.uiState().started);
+    board.dataset.started = String(controller.uiState().started);
     board.dataset.pendingAdds = String(f.pendingAdds.length);
     // ...but the HUD only changes on a tick/pause/speed/selection boundary, so gate its
     // recompute + DOM writes on that (they're redundant on the ~60 fps render hot path).

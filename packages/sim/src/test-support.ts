@@ -18,11 +18,20 @@ export const TEST_TOWER: TowerDef = {
   effects: [{ kind: 'direct', form: 'single', damage: 10 }],
 };
 
-/** Overrides for a test bundle (all optional). Note: `earlyCallBonus` is gone — the
- *  M1/M2-S1 capability profile pins `maxEarlyCallBountyDivisor: 0`, so the compiled
- *  `earlyCallBonus` is always 0 regardless of any authored `balance.earlyCallBountyDivisor`
- *  (a nonzero divisor would be rejected at compile, not silently honored). S2
- *  reintroduces a threadable option once the divisor formula is implemented. */
+/** Overrides for a test bundle (all optional). `waveCount`/`waveSpacing` name the
+ *  ENTRY inside each wave (kept from M1 for call-site continuity — an unfortunate
+ *  but pre-existing name collision with the new multi-wave `waves` option below);
+ *  `waves`, when given, REPLACES the single generated wave with a caller-built
+ *  multi-wave schedule (each item optionally overriding count/spacing/countdown/
+ *  clearBonus/offset per wave; everything else in this bundle — catalog, balance,
+ *  scoring — still applies uniformly). */
+export interface TestWaveOpts {
+  readonly waveCount?: number;
+  readonly waveSpacing?: number;
+  readonly countdownTicks?: number;
+  readonly waveClearBonus?: number;
+  readonly offsetTicks?: number;
+}
 export interface TestBundleOpts {
   readonly creepHp?: number;
   readonly creepSpeedFp?: number;
@@ -33,10 +42,26 @@ export interface TestBundleOpts {
   readonly startingBounty?: number;
   readonly startingLives?: number;
   readonly waveClearBonus?: number;
+  /** Overrides the single-wave default with an explicit N-wave schedule. */
+  readonly waves?: readonly TestWaveOpts[];
+  /** `0` = off (M1 default); `⌊ticksRemaining / earlyCallBountyDivisor⌋` bounty at
+   *  an early call. */
+  readonly earlyCallBountyDivisor?: number;
+  /** `0` = off (M1 default); `⌊ticksRemaining / earlyCallScoreDivisor⌋` score credit
+   *  at an early call. */
+  readonly earlyCallScoreDivisor?: number;
 }
 
 /** Build a raw ruleset bundle for a board geometry, with M1-ish defaults. */
 export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
+  const waveOpts: readonly TestWaveOpts[] = opts.waves ?? [
+    {
+      waveCount: opts.waveCount,
+      waveSpacing: opts.waveSpacing,
+      countdownTicks: opts.countdownTicks,
+      waveClearBonus: opts.waveClearBonus,
+    },
+  ];
   return {
     formatVersion: 2,
     rulesetId: 'test-ruleset',
@@ -61,9 +86,13 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
       refundDen: 4,
       slowFloorNum: 1,
       slowFloorDen: 4,
-      earlyCallBountyDivisor: 0,
+      earlyCallBountyDivisor: opts.earlyCallBountyDivisor ?? 0,
     },
-    scoring: { survivalMul: 25, starThresholds: [1, 6, 9], earlyCallScoreDivisor: 0 },
+    scoring: {
+      survivalMul: 25,
+      starThresholds: [1, 6, 9],
+      earlyCallScoreDivisor: opts.earlyCallScoreDivisor ?? 0,
+    },
     boards: [
       {
         id: 'test',
@@ -71,20 +100,19 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
         heightTiles: spec.heightTiles,
         entrance: spec.entrance,
         exit: spec.exit,
-        waves: [
-          {
-            index: 0,
-            countdownTicks: opts.countdownTicks ?? 500,
-            clearBonus: opts.waveClearBonus ?? 0,
-            entries: [
-              {
-                creepId: 'normal',
-                count: opts.waveCount ?? 10,
-                spacingTicks: opts.waveSpacing ?? 20,
-              },
-            ],
-          },
-        ],
+        waves: waveOpts.map((w, index) => ({
+          index,
+          countdownTicks: w.countdownTicks ?? 500,
+          clearBonus: w.waveClearBonus ?? 0,
+          entries: [
+            {
+              creepId: 'normal',
+              count: w.waveCount ?? 10,
+              spacingTicks: w.waveSpacing ?? 20,
+              ...(w.offsetTicks !== undefined ? { offsetTicks: w.offsetTicks } : {}),
+            },
+          ],
+        })),
       },
     ],
   };
@@ -107,6 +135,7 @@ export function pushCreep(
     readonly row: number;
     readonly bounty?: number;
     readonly speed?: number;
+    readonly wave?: number;
   },
 ): void {
   state.creeps.id.push(args.id);
@@ -118,4 +147,5 @@ export function pushCreep(
   state.creeps.headCol.push(args.col);
   state.creeps.headRow.push(args.row);
   state.creeps.progress.push(0);
+  state.creeps.wave.push(args.wave ?? 0);
 }

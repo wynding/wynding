@@ -11,14 +11,31 @@ function tick(c: Controller, n = 1): void {
   for (let i = 0; i < n; i++) c.advance(TICK);
 }
 
-/** Advance until terminal or a safety cap; returns ticks elapsed. */
-function runToTerminal(c: Controller, cap = 4000): number {
+/** Advance until terminal or a safety cap; returns ticks elapsed. M2-S2's 3-wave bundle
+ *  (countdowns 500/300/300, chained off the prior wave's LAUNCH) runs longer than M1's
+ *  single wave did, so the default cap is well above the shipped bundle's worst-case
+ *  natural-countdown completion. Fails loudly if the cap is exhausted first — a silent
+ *  non-terminal return would otherwise surface as a bewildering downstream failure at
+ *  whichever assertion reads the never-terminal controller next. */
+function runToTerminal(c: Controller, cap = 6000): number {
   let n = 0;
   while (!c.isTerminal() && n < cap) {
     c.advance(TICK);
     n++;
   }
+  expect(c.isTerminal(), `did not resolve within ${cap} ticks — has the wave bundle grown?`).toBe(
+    true,
+  );
   return n;
+}
+
+/** Unhold the run AND claim wave 1 — `start()` no longer does the latter (PLAN.md P3
+ *  step 15's decouple), so every test that needs a live wave does both. Asserts the
+ *  claim was ACCEPTED: a silently-rejected setup call would leave the test running
+ *  waveless and fail somewhere misleading downstream (CodeRabbit PR #68). */
+function startAndCall(c: Controller): void {
+  c.start();
+  expect(c.callWaveEarly(), 'startAndCall: the wave-1 claim was rejected').toBe(true);
 }
 
 describe('controller — fixed loop, speed & pause', () => {
@@ -165,7 +182,7 @@ describe('controller — input → command mapping', () => {
 
   it('confirm() re-queries ghost validity at the CURRENT tick — a stale-valid cell a creep has since occupied is rejected, not built (#40)', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: launches the wave immediately (M1 = start-is-early-call)
+    startAndCall(c);
     tick(c, 14); // the wave-early creep has not yet reached (2,11)
     const aim = c.aimAt(2, 11);
     expect(aim).toMatchObject({ kind: 'ghost', valid: true }); // valid one tick before it arrives
@@ -234,13 +251,24 @@ describe('controller — input → command mapping', () => {
     expect(c.cursor()).toEqual({ col: 2, row: 3 });
   });
 
-  it('call-wave-early only fires pre-wave', () => {
+  it('call-wave-early fires each wave in turn, and is a no-op once every wave has launched — travel time means no creep has had a chance to leak yet, so the run is still running, not terminal', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
-    expect(c.callWaveEarly()).toBe(true);
-    tick(c);
-    expect(c.hud().phase).toBe('active');
-    expect(c.callWaveEarly()).toBe(false); // already launched
+    c.start(); // PLAN.md P4: advance() no-ops while held; P3 step 15: no longer claims wave 1
+    for (let i = 0; i < c.ruleset.waves.length; i++) {
+      expect(c.callWaveEarly()).toBe(true);
+      tick(c);
+    }
+    expect(c.hud().waveCursor).toBe(c.ruleset.waves.length);
+    expect(c.isTerminal()).toBe(false);
+    expect(c.callWaveEarly()).toBe(false); // nothing left to call
+  });
+
+  it('call-wave-early is a no-op once the run is terminal', () => {
+    const c = createController(1);
+    c.start();
+    runToTerminal(c); // undefended — the run eventually leaks out to a loss
+    expect(c.isTerminal()).toBe(true);
+    expect(c.callWaveEarly()).toBe(false);
   });
 });
 
@@ -380,33 +408,36 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
 describe('controller — same-tick & paused ordering (determinism hazards)', () => {
   it('applies multiple commands issued within ONE tick in issued order', () => {
     const c = createController(1);
-    // `start()` itself enqueues `callWaveEarly` (PLAN.md P4) — buffer: [callWaveEarly];
-    // the build below appends to it: [callWaveEarly, placeTower(3,3)].
+    // `start()` no longer enqueues `callWaveEarly` (PLAN.md P3 step 15 — the decouple), so
+    // this queues it explicitly to keep the multi-command ordering under test: buffer:
+    // [callWaveEarly]; the build below appends to it: [callWaveEarly, placeTower(3,3)].
     c.start();
+    c.callWaveEarly();
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // single step consumes both, in order
     expect(c.frame().curVm.towers).toHaveLength(1);
-    expect(c.hud().phase).toBe('active');
+    expect(c.hud().phase).toBe('running');
+    expect(c.hud().waveCursor).toBe(1); // the explicit callWaveEarly landed too
   });
 
   it('buffers commands while paused and flushes them in issued order on resume', () => {
     const c = createController(1);
-    // `start()` (PLAN.md P4) enqueues `callWaveEarly` and flips the advance gate — still
-    // held by `pause()` below until `resume()`.
-    c.start();
+    c.start(); // PLAN.md P4: flips the advance gate — still held by pause() below
     c.pause();
+    c.callWaveEarly(); // queued while paused, alongside the builds below
     c.aimAt(3, 3);
     c.confirm(); // queued while paused
     c.aimAt(10, 3);
     c.confirm(); // second, non-overlapping build queued
     tick(c, 3); // paused → nothing flushes
     expect(c.frame().curVm.towers).toHaveLength(0);
-    expect(c.hud().phase).toBe('pre-wave');
+    expect(c.hud().waveCursor).toBe(0); // the buffered callWaveEarly hasn't been consumed yet
     c.resume();
     tick(c); // first live tick flushes the whole buffer, in order
     expect(c.frame().curVm.towers).toHaveLength(2);
-    expect(c.hud().phase).toBe('active');
+    expect(c.hud().phase).toBe('running');
+    expect(c.hud().waveCursor).toBe(1);
   });
 });
 
@@ -586,7 +617,7 @@ describe('controller — replay recording, terminal truncation & verify', () => 
 
   it('the recorded callWaveEarly appears in the log (fresh per-tick buffer, immutable copy)', () => {
     const c = createController(3);
-    c.start(); // PLAN.md P4: advance() no-ops while held
+    startAndCall(c);
     tick(c);
     const replay = c.buildReplay();
     const flat = replay.tickInputs.flat();
@@ -636,7 +667,7 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
 
   it('a tower straddling the lane produces a well-formed spark once a shot lands, then clears', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
+    startAndCall(c);
     // Mirrors @wynding/render's own combat-carrying fixture: a 2×2 tower straddling the
     // entrance row so the wave must pass through its range.
     c.aimAt(2, 10);
@@ -660,7 +691,7 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
 describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
   it('a tower straddling the lane shows a well-formed tracer in flight, then prunes it after impact', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     let n = 0;
@@ -692,7 +723,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
 
   it('startRun clears every in-flight tracer — no tracer crosses run identity', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     let n = 0;
@@ -707,7 +738,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
 
   it('a resolved match prunes every tracer (no tracer survives past terminal)', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     runToTerminal(c);
@@ -717,7 +748,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
 
   it('a multi-tick catch-up (advance called several times before frame() is read) accumulates tracers without loss', () => {
     const c = createController(1);
-    c.start(); // PLAN.md P4: advance() no-ops while held
+    startAndCall(c);
     c.aimAt(2, 10);
     c.confirm();
     // The straddling tower's range (4 tiles) already covers the entrance, so it fires
@@ -978,6 +1009,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
       selection: null,
       lastOutcome: null,
       outcomeSeq: 0,
+      callWaveReady: true, // fresh run: running, wave 1 left to call, buffer empty
     });
   });
 
@@ -1030,34 +1062,36 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     expect(c.frame().curVm.tick).toBeGreaterThan(0); // ticks advance immediately — not stuck paused
   });
 
-  it('start() flips started and begins stepping; Pending pre-start builds commit on the first stepped tick, and wave 1 launches that tick', () => {
+  it('start() flips started and begins stepping; Pending pre-start builds commit on the first stepped tick — wave 1 does NOT auto-launch (Start ≠ claiming, PLAN.md P3 step 15 decouple)', () => {
     const c = createController(1);
     c.aimAt(3, 3);
     expect(c.confirm()).toBe(true); // Pending — building is fully available pre-start
     expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3 }]);
     expect(c.frame().curVm.towers).toHaveLength(0); // not yet committed — still held
-    expect(c.hud().phase).toBe('pre-wave');
+    expect(c.hud().phase).toBe('running');
+    expect(c.hud().waveCursor).toBe(0);
 
     c.start();
     expect(c.uiState().started).toBe(true);
     tick(c); // the first stepped tick
     expect(c.frame().curVm.towers).toHaveLength(1); // the Pending build committed
     expect(c.frame().pendingAdds).toEqual([]);
-    expect(c.hud().phase).toBe('active'); // wave 1 launched on that same tick
+    expect(c.hud().phase).toBe('running');
+    expect(c.hud().waveCursor).toBe(0); // wave 1 has NOT launched — Start claims nothing
   });
 
-  it('start() is idempotent: a double press queues exactly one callWaveEarly and started flips once', () => {
+  it('start() is a trivial, unconditionally idempotent flag flip: repeat presses queue nothing and never toggle started off', () => {
     const c = createController(1);
     c.start();
-    c.start(); // second press — must not double-queue or toggle started off
+    c.start(); // second press — must not toggle started off
     expect(c.uiState().started).toBe(true);
     tick(c);
     const replay = c.buildReplay();
     const flushed = replay.tickInputs[0] as readonly SimInput[];
-    expect(flushed.filter((i) => i.kind === 'callWaveEarly')).toHaveLength(1);
-    expect(c.hud().phase).toBe('active');
-    // A THIRD press, now that the wave has already launched for real, is also a no-op
-    // (PLAN.md P4: "no-op after").
+    expect(flushed.filter((i) => i.kind === 'callWaveEarly')).toHaveLength(0); // Start enqueues nothing
+    expect(c.hud().phase).toBe('running');
+    expect(c.hud().waveCursor).toBe(0); // still nothing launched
+    // A THIRD press mid-run is also a no-op (a plain flag flip has no failure mode).
     c.start();
     expect(c.uiState().started).toBe(true);
   });
@@ -1086,17 +1120,13 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     expect(c.frame().curVm.tick).toBe(0); // held again — Play-again is a fresh hold
   });
 
-  it('earlyCallBonus is 0 at M1 (content/boards.ts) — a nonzero value would make Start (which enqueues callWaveEarly) grant Bounty for free; that requires the sim-side start fallback (PLAN.md P4) first, not a silent balance change', () => {
-    const c = createController(1);
-    expect(c.ruleset.balance.earlyCallBonus).toBe(0);
-  });
-
-  describe('the pre-start Pending cap (PLAN.md P4: MAX_INPUTS_PER_TICK - 1, one slot reserved for start()) ', () => {
-    // A held run's buffer can never drain (no tick steps while `!started`), so build/sell
-    // is capped one slot short of the replay contract's hard limit — the reserved slot is
-    // exactly what lets `start()` always succeed. Reach the boundary the same way the
-    // PLAN's own "watch item" describes: a cheap build-then-sell cycle at one cell (each
-    // cycle costs 2 commands + a net 2 Bounty, well within the starting 80).
+  describe('the per-tick buffer cap, no pre-start reservation (PLAN.md P3 step 15)', () => {
+    // Pre-start planning used to be capped one slot short of `MAX_INPUTS_PER_TICK`,
+    // reserved for `start()`'s own `callWaveEarly` enqueue. `start()` no longer enqueues
+    // anything, so that reservation is gone — build/sell now caps at the FULL replay
+    // contract limit, held or not. Reach the boundary with a cheap build-then-sell cycle
+    // at one cell (each cycle costs 2 commands + a net 2 Bounty, well within the starting
+    // 80).
     function fillToCap(c: Controller, cycles: number): void {
       for (let i = 0; i < cycles; i++) {
         c.aimAt(3, 3);
@@ -1106,26 +1136,84 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
       }
     }
 
-    it('accepts up to MAX_INPUTS_PER_TICK - 1 Pending build/sell commands, then rejects the next with a distinct pendingCap outcome and an invalid ghost — Start still succeeds', () => {
+    it('accepts up to MAX_INPUTS_PER_TICK Pending build/sell commands pre-start, then rejects the next with a distinct pendingCap outcome and an invalid ghost — Start still succeeds (no reservation needed)', () => {
       const c = createController(1);
-      // 31 build+sell cycles = 62 commands, one short of the (MAX_INPUTS_PER_TICK - 1 =
-      // 63) cap — leaves room for exactly one more accepted command below.
-      fillToCap(c, 31);
-      c.aimAt(3, 3);
-      expect(c.confirm()).toBe(true); // the 63rd command — exactly at the reduced cap, still accepted
+      // 32 build+sell cycles = 64 commands = MAX_INPUTS_PER_TICK exactly.
+      fillToCap(c, MAX_INPUTS_PER_TICK / 2);
 
-      // The 64th (MAX_INPUTS_PER_TICK-th) planning action is rejected: invalid ghost +
-      // the distinct 'pendingCap' announcement (not the generic 'other').
+      // The 65th planning action is rejected: invalid ghost + the distinct 'pendingCap'
+      // announcement (not the generic 'other').
       c.aimAt(10, 3); // a fresh, otherwise-perfectly-buildable cell
       expect(c.frame().ghost).toMatchObject({ col: 10, row: 3, valid: false });
       expect(c.confirm()).toBe(false);
       expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
 
-      // The reserved slot guarantees Start always still succeeds.
+      // Start is a trivial flag flip now — no reserved slot to guarantee, it just works.
       c.start();
       expect(c.uiState().started).toBe(true);
       tick(c);
-      expect(c.hud().phase).toBe('active');
+      expect(c.hud().phase).toBe('running');
     });
+  });
+});
+
+describe('controller — call-wave readiness (UiState.callWaveReady, PLAN.md P3 step 15)', () => {
+  it('is true once started, with a wave left to call and an open buffer', () => {
+    const c = createController(1);
+    expect(c.uiState().callWaveReady).toBe(true); // sim semantics don't require `started`
+    c.start();
+    expect(c.uiState().callWaveReady).toBe(true);
+  });
+
+  it('is false while a call is already buffered (paused — the projection surfaces it as launchPending)', () => {
+    const c = createController(1);
+    c.pause();
+    expect(c.callWaveEarly()).toBe(true); // buffered, not yet consumed (no tick to consume it)
+    expect(c.uiState().callWaveReady).toBe(false);
+  });
+
+  it(
+    'is false once the per-tick buffer is full — a full 64-command buffer must not leave an "enabled" control that silently no-ops (Round 2 finding #3)',
+    // Filling all 64 slots through the PUBLIC api is deliberately expensive:
+    // every enqueue re-projects the whole pending buffer, and each buffered
+    // placement re-runs the maze-invariant check — O(n²) with n = 64. Fast
+    // locally (~0.3 s) but past vitest's 5 s default on CI runners (it timed
+    // out there on 3e9b8eb), so the budget is explicit. A cheaper synthetic
+    // fill would bypass the exact projection path this test exists to cover.
+    { timeout: 20_000 },
+    () => {
+      const c = createController(1);
+      c.pause();
+      for (let i = 0; i < MAX_INPUTS_PER_TICK / 2; i++) {
+        const col = i % 2 === 0 ? 3 : 10; // two cells, alternating — never a stale duplicate
+        c.aimAt(col, 3);
+        expect(c.confirm()).toBe(true);
+        c.aimAt(col, 3);
+        expect(c.sellSelected()).toBe(true);
+      }
+      expect(c.uiState().callWaveReady).toBe(false); // buffer full, even though nothing else blocks it
+      // The rare edge case the plan calls out: pressing anyway announces the SAME
+      // 'pendingCap' rejection build/sell commands use, via the existing live-region path.
+      expect(c.callWaveEarly()).toBe(false);
+      expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
+    },
+  );
+
+  it('is false once every wave has already launched (nothing left to call)', () => {
+    const c = createController(1);
+    c.start();
+    for (let i = 0; i < c.ruleset.waves.length; i++) {
+      expect(c.callWaveEarly()).toBe(true);
+      tick(c);
+    }
+    expect(c.uiState().callWaveReady).toBe(false);
+  });
+
+  it('is false once the run is terminal', () => {
+    const c = createController(1);
+    c.start();
+    runToTerminal(c);
+    expect(c.isTerminal()).toBe(true);
+    expect(c.uiState().callWaveReady).toBe(false);
   });
 });

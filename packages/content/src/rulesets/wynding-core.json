@@ -1,6 +1,6 @@
 {
   "formatVersion": 2,
-  "rulesetId": "wynding-core-m1",
+  "rulesetId": "wynding-core",
   "version": 1,
   "creepCatalog": [
     {
@@ -34,12 +34,12 @@
     "refundDen": 4,
     "slowFloorNum": 1,
     "slowFloorDen": 4,
-    "earlyCallBountyDivisor": 0
+    "earlyCallBountyDivisor": 50
   },
   "scoring": {
-    "survivalMul": 25,
+    "survivalMul": 35,
     "starThresholds": [1, 6, 9],
-    "earlyCallScoreDivisor": 0
+    "earlyCallScoreDivisor": 50
   },
   "boards": [
     {
@@ -52,7 +52,19 @@
         {
           "index": 0,
           "countdownTicks": 500,
-          "clearBonus": 0,
+          "clearBonus": 4,
+          "entries": [{ "creepId": "normal", "count": 10, "spacingTicks": 20 }]
+        },
+        {
+          "index": 1,
+          "countdownTicks": 300,
+          "clearBonus": 4,
+          "entries": [{ "creepId": "normal", "count": 10, "spacingTicks": 20 }]
+        },
+        {
+          "index": 2,
+          "countdownTicks": 300,
+          "clearBonus": 4,
           "entries": [{ "creepId": "normal", "count": 10, "spacingTicks": 20 }]
         }
       ]

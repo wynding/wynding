@@ -250,24 +250,43 @@ test('arms the Card, places a tower via the keyboard cursor, sells it via the Pa
   await expect(board).toBeFocused(); // Sell → focus returns to the board
 });
 
-test('supports player-started runs, pause / speed controls, and reaches a result', async ({
+test('supports player-started runs, pause / speed controls, early-calls all three waves with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
   test.setTimeout(90_000);
   await page.goto('/');
 
-  // Pre-start (PLAN.md P4 + Story 11's wave-slot states): no countdown — the wave chip is
-  // hidden entirely until a run begins (the sim's countdown never ticks down while held),
-  // leaving four visible chips; Pause hidden.
-  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
-  await expect(page.locator('.wy-hud > .wy-chip:not([hidden])')).toHaveCount(4);
+  // Pre-start (PLAN.md P4 + Story 11's wave-slot states, decoupled further at M2-S2): the
+  // wave chip is countdown-only and now VISIBLE pre-start too (the sim's real
+  // `countdownRemaining` is meaningful before Start — five visible chips; Pause hidden.
+  const waveChip = page.locator('.wy-chip[data-wy-chip="wave"]');
+  await expect(waveChip).toBeVisible();
+  await expect(page.locator('.wy-hud > .wy-chip:not([hidden])')).toHaveCount(5);
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
 
-  // Start launches the run (M1: exactly one wave, launched immediately — Start IS the
-  // early call). The primary Dock button then hides for the rest of the run.
+  // The wave preview is its OWN visible surface (never chip-hosted) and already shows wave
+  // 1's composition pre-start — the shipped bundle's single creep kind.
+  const preview = page.locator('.wy-wave-preview');
+  await expect(preview).toBeVisible();
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 3');
+  await expect(preview.locator('li')).toHaveText(['10 × Creep — ground, armor 0, no immunities']);
+
+  // axe audit with the wave preview visible (PLAN.md P3 step 19) — the preview is a real
+  // DOM surface (never chip-hosted), so it's in scope for the standard audit like every
+  // other HUD content.
+  const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(previewAudit.violations, JSON.stringify(previewAudit.violations, null, 2)).toEqual([]);
+
+  // Start no longer claims wave 1 (M2-S2's decouple) — it unholds the run, and the primary
+  // Dock control MORPHS to "Call wave" rather than hiding.
+  const primary = page.locator('.wy-dock .wy-primary');
   const start = page.getByRole('button', { name: 'Start' });
   await start.click();
-  await expect(start).toBeHidden();
+  // The SAME element stays visible and re-labels — it does not hide (M2-S2's morph).
+  await expect(primary).toHaveCount(1);
+  await expect(primary).toBeVisible();
+  const callWave = page.getByRole('button', { name: 'Call wave' });
+  await expect(callWave).toBeVisible();
 
   const pause = page.getByRole('button', { name: 'Pause' });
   await expect(pause).toBeVisible();
@@ -275,9 +294,25 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume' }).click();
 
-  // Run at 2× so the no-tower loss resolves well within the timeout regardless of CI
-  // runner speed (a full M1 wave at 1× can approach ~25 s of wall-clock).
+  // Run at 2× so a 3-wave undefended loss resolves well within the timeout regardless of
+  // CI runner speed.
   await page.getByRole('button', { name: /^Speed:/ }).click();
+
+  // Early-call every wave via the morphed primary control, checking the preview shows the
+  // CORRECT upcoming wave before each call (PLAN.md P3 step 19). All three waves ship the
+  // same single-creep-kind composition, so the check is on the wave NUMBER, not content.
+  for (let waveNumber = 1; waveNumber <= 3; waveNumber++) {
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 3`);
+    await callWave.click();
+  }
+  // Every wave has launched: the preview's explicit last-wave marker, and the control is
+  // visible-disabled (never hidden — it hides only at terminal).
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText(
+    'Final wave launched — no more waves to call',
+  );
+  await expect(preview.locator('li')).toHaveCount(0);
+  await expect(callWave).toBeVisible();
+  await expect(callWave).toHaveAttribute('aria-disabled', 'true');
 
   // The run resolves; the results dialog appears with a Play-again + Verify affordance.
   const results = page.getByRole('dialog');
@@ -285,7 +320,8 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   await expect(page.getByRole('button', { name: 'Verify this run' })).toBeVisible();
 
   // axe audit of the results-dialog state — the settings-panel state is covered by the
-  // other test; this closes the gap where the dialog was never scanned.
+  // other test; this closes the gap where the dialog was never scanned. The wave preview
+  // is gone once terminal (its own axe coverage is the pre-terminal audit below).
   const dialogResults = await new AxeBuilder({ page }).include('#app').analyze();
   expect(dialogResults.violations, JSON.stringify(dialogResults.violations, null, 2)).toEqual([]);
 
@@ -350,8 +386,9 @@ test('supports player-started runs, pause / speed controls, and reaches a result
   await expect(page.locator('.wy-board')).toBeFocused();
 
   // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
-  // again — including the wave chip going back to hidden.
-  await expect(page.locator('.wy-chip[data-wy-chip="wave"]')).toBeHidden();
+  // again — including the wave preview going back to wave 1 of 3.
+  await expect(waveChip).toBeVisible();
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 3');
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });
@@ -363,7 +400,8 @@ test('a fine-pointer session never requests fullscreen on Start (the gate is cap
   await page.goto('/');
   expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
   await page.getByRole('button', { name: 'Start' }).click();
-  await expect(page.getByRole('button', { name: 'Start' })).toBeHidden(); // the run did start
+  // The run did start — the primary control morphs to "Call wave" rather than hiding.
+  await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
   // The stub's sentinel must actually be installed — otherwise `fullscreenCallCount` returns
   // its `?? 0` fallback and a broken/unapplied stub would satisfy the `toBe(0)` below
   // vacuously, hiding a real regression where fullscreen WAS requested.

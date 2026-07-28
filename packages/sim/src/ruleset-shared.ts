@@ -18,6 +18,15 @@ export class RulesetError extends Error {
   }
 }
 
+/** This sim build's behavior version — stamped into replays; bump on any
+ *  determinism-affecting change. Single-sourced HERE (the dependency-free leaf), so
+ *  `ruleset.ts`'s capability/compile gating and `index.ts`'s public re-export can
+ *  never drift apart the way the pre-S2 duplicated-literal scheme could (S1 deferred
+ *  this single-sourcing to S2, which owns the first version bump).
+ *  History: Story 5 (wave lifecycle, win/loss, score, per-creep columns) bumped
+ *  4 → 5; M2 Story 2 (the multi-wave engine) bumps 5 → 6. */
+export const SIM_VERSION = 6;
+
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;
 

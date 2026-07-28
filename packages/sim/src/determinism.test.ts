@@ -19,33 +19,64 @@
 // why in the message. A golden change with no version bump is a silent break — and
 // because a runtime test cannot see "the same commit," that rule is enforced by a
 // CI diff-check (scripts/check-determinism-version.mjs), not by an assertion here.
+//
+// M2-S2 regenerates the golden over a 3-WAVE test bundle (PLAN.md step 11 /
+// PLAN-REVIEW-LOG G14): SIM_VERSION's bump to 6 already satisfies the CI guard's
+// strict-increase requirement, and a 3-wave scenario is the only one that can
+// exercise the new multi-wave lifecycle (wave handoff, a SECOND early call on a
+// later wave, per-wave clear bonus, the early-call credit accumulator) at all.
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
-import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
-import { testRuleset } from './test-support';
+import {
+  createInitialState,
+  step,
+  hashSimState,
+  deriveScore,
+  deriveStars,
+  type SimInput,
+  type SimState,
+} from './index';
+import { testBundle, testRuleset } from './test-support';
+import { compileRuleset, type CompiledRuleset } from './ruleset';
 
 /** Fixed seed for the canonical determinism scenario. */
 const SCENARIO_SEED = 0x5eed; // 24301
-/** Scenario length — long enough for the launched wave to spawn out and early creeps
- *  to cross the board and leak (a 27-cell crossing takes ≈266 ticks at 26/tick). */
-const SCENARIO_TICKS = 500;
+/** Scenario length — reaches the scenario's terminal (a loss at tick 536, once the
+ *  sold tower leaves waves 0/1 undefended) with trailing frozen ticks, so the
+ *  golden also exercises the freeze-on-terminal path within the same run. */
+const SCENARIO_TICKS = 600;
 
-/**
- * The canonical ruleset — built INLINE from a board geometry (NOT imported from
- * @wynding/content, which would introduce a sim → content runtime edge). Mirrors the
- * M1 board: a 28×24 grid with entrance and exit on row 11, so creeps run the full
- * 27-cell width, plus the default M1 wave (10 `normal` creeps, spacing 20).
- */
-const SCENARIO_RULESET = testRuleset({
+const OPEN_28x24 = {
   widthTiles: 28,
   heightTiles: 24,
   entrance: { col: 0, row: 11 },
   exit: { col: 27, row: 11 },
-});
+} as const;
 
 /**
- * The entity id the canonical build receives: the wave (launched by the tick-0
+ * The canonical ruleset — built INLINE from a board geometry (NOT imported from
+ * @wynding/content, which would introduce a sim → content runtime edge). Mirrors the
+ * M1 board (28×24, entrance/exit on row 11, so creeps run the full 27-cell width)
+ * but grows to THREE waves (10 `normal` creeps each, spacing 20, clearBonus 4) with
+ * both early-call divisors live (50/50) — the multi-wave engine's own vocabulary,
+ * not just M1's single wave carried over.
+ */
+const SCENARIO_RULESET: CompiledRuleset = compileRuleset(
+  testBundle(OPEN_28x24, {
+    waves: [
+      { waveCount: 10, waveSpacing: 20, countdownTicks: 500, waveClearBonus: 4 },
+      { waveCount: 10, waveSpacing: 20, countdownTicks: 300, waveClearBonus: 4 },
+      { waveCount: 10, waveSpacing: 20, countdownTicks: 300, waveClearBonus: 4 },
+    ],
+    earlyCallBountyDivisor: 50,
+    earlyCallScoreDivisor: 50,
+  }),
+  'test',
+);
+
+/**
+ * The entity id the canonical build receives: wave 0 (launched by the tick-0
  * call-early) spawns creep id 1 at tick 0; the tower placed at tick 2 (before the
  * next spawn at tick 20) gets id 2 from the shared entity-id space.
  */
@@ -53,20 +84,24 @@ const SCENARIO_TOWER_ID = 2;
 
 /**
  * The canonical input log: a pure function of the tick index. It exercises the FULL
- * command vocabulary — a `callWaveEarly` that launches the wave (creeps then spawn
- * from the ruleset schedule), an accepted build into the creeps' lane (forcing a
+ * command vocabulary — TWO `callWaveEarly` calls (tick 0 launches wave 0; tick 250,
+ * mid-run, launches wave 1 early — both pay the early-call bounty/credit from the
+ * undecremented countdown), an accepted build into the creeps' lane (forcing a
  * visible re-route AND combat kills), a rejected build (the deterministic-no-op
- * path), an explicit `noop`, and a later sell (re-opening the lane) — so the golden
- * reacts to a behavior change in any of those paths.
+ * path), an explicit `noop`, and a later sell (re-opening the lane, and — with no
+ * defense left — the scenario ends in a loss once wave 1's creeps run undefended).
  */
 function canonicalInputs(tick: number): SimInput[] {
-  if (tick === 0) return [{ kind: 'callWaveEarly' }]; // launch the wave now
+  if (tick === 0) return [{ kind: 'callWaveEarly' }]; // launch wave 0 now
   // Build a 2×2 wall across the straight lane (row 11 at cols 5-6): creeps re-route.
   if (tick === 2) return [{ kind: 'placeTower', anchor: { col: 5, row: 10 } }];
   // A rejected build (border footprint) — pins the validation-no-op path.
   if (tick === 4) return [{ kind: 'placeTower', anchor: { col: 0, row: 0 } }];
   // Sell the wall — the lane re-opens and later creeps run straight again.
   if (tick === 201) return [{ kind: 'sellTower', tower: SCENARIO_TOWER_ID }];
+  // A SECOND early call, well into the run and on a LATER wave — the multi-wave
+  // handoff + a second early-call bounty/credit payment.
+  if (tick === 250) return [{ kind: 'callWaveEarly' }];
   if (tick % 7 === 0) return [{ kind: 'noop' }]; // exercise the noop path
   return [];
 }
@@ -88,8 +123,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: 'd85297b0',
-  traceDigest: 'e540a55a', // fnv1a(trace.join(':'))
+  finalHash: '0ec526ce',
+  traceDigest: '3431d8b2', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 
@@ -107,21 +142,24 @@ describe('determinism gate', () => {
     expect(fnv1a(trace.join(':'))).toBe(GOLDEN.traceDigest);
   });
 
-  it('witnesses creeps crossing and leaking (lives fall below the starting count)', () => {
-    // The golden is only meaningful if the scenario actually exercises leaks; several
-    // creeps reach the exit within SCENARIO_TICKS and decrement lives (the run still
-    // ends in a win — the wave clears with lives remaining).
+  it('witnesses creeps crossing and leaking to a LOSS (wave 1 runs undefended after the sell)', () => {
+    // The golden is only meaningful if the scenario actually exercises leaks;
+    // selling the only tower at tick 201 leaves waves 0/1's remaining creeps
+    // undefended, so lives fall all the way to 0 (a loss) before wave 2 ever
+    // launches — the loss-priority resolution path (settlement before terminal).
     const { state } = runCanonical();
-    expect(state.lives).toBeLessThan(10); // started at 10 ⇒ creeps leaked
-    expect(state.lives).toBeGreaterThan(0); // ...but the wave was cleared (a win)
+    expect(state.phase).toBe('lost');
+    expect(state.lives).toBe(0);
+    expect(state.waveCursor).toBe(2); // wave 2 never got the chance to launch
   });
 
-  it('witnesses a build, a visible re-route, combat kills, and a sell', () => {
-    // The golden must exercise the full Story-3 + Story-4 vocabulary: the tick-2
-    // build lands (bounty 80→75, one tower); live creeps visibly leave the straight
-    // row-11 lane to route around it; the tower fires and KILLS creeps, each credit
-    // raising bounty by KILL_BOUNTY while the tower stands; and the tick-201 sell
-    // refunds 3 and removes the tower.
+  it('witnesses a build, a visible re-route, combat kills, a sell, and the multi-wave early-call economy', () => {
+    // The golden must exercise the full Story-3 + Story-4 + M2-S2 vocabulary: the
+    // tick-2 build lands (bounty 80 + wave-0's early-call bounty 10 − TOWER_COST 5
+    // = 85); live creeps visibly leave the straight row-11 lane to route around it;
+    // the tower fires and KILLS creeps, each credit raising bounty while it stands;
+    // the tick-201 sell refunds 3 and removes the tower; and BOTH early calls
+    // (tick 0 + tick 250) pay into the cumulative early-call credit.
     let state = createInitialState(SCENARIO_SEED, SCENARIO_RULESET);
     let sawTower = false;
     let towerFirstBounty = -1;
@@ -144,11 +182,17 @@ describe('determinism gate', () => {
       prevBounty = state.bounty;
     }
     expect(sawTower).toBe(true);
-    expect(towerFirstBounty).toBe(75); // 80 − TOWER_COST, rejected build spent nothing
+    expect(towerFirstBounty).toBe(85); // 80 + ⌊500/50⌋ early-call bounty − TOWER_COST 5
     expect(sawDetour).toBe(true); // the straight-lane board never leaves row 11 unbuilt
     expect(sawKill).toBe(true); // the tower actually killed a creep and earned bounty
     expect(state.towers.id).toHaveLength(0); // sold
-    expect(state.bounty).toBeGreaterThan(75); // kills earned bounty; sell refunded 3
+    // ⌊500/50⌋ = 10 (the tick-0 call at full countdown) + ⌊51/50⌋ = 1 (the tick-250
+    // call: wave 1's 300-tick countdown began decrementing at tick 1, so 249
+    // decrements leave rem = 51) — NOT ⌊300/50⌋: the second call is mid-countdown.
+    expect(state.cumulativeEarlyCallCredit).toBe(11);
+    // The terminal the header documents, pinned (tick freezes at the terminal):
+    expect(state.phase).toBe('lost');
+    expect(state.tick).toBe(536);
   });
 
   it('continues byte-identically after a mid-run serialize/restore (resume path)', () => {
@@ -209,6 +253,59 @@ describe('determinism gate', () => {
     expect(tick).toBe(SCENARIO_TICKS); // the loop accounted for every tick
     expect(loop.accumulatorMs).toBe(0); // exact — no partial tick left over
     expect(hashSimState(state)).toBe(hashSimState(ref.state));
+  });
+});
+
+/**
+ * v5-CONTINUITY WITNESSES (PLAN.md step 11 / PLAN-REVIEW-LOG G14): a SINGLE-wave
+ * bundle carrying M1's exact numbers (both early-call divisors 0, survivalMul 25 —
+ * `test-support`'s defaults) — built INLINE, mirroring `packages/content`'s shipped
+ * M1 artifact (`parity.test.ts`'s pre-verified scenario A/B, whose literals this
+ * file duplicates by provenance, not by import — sim must not depend on content).
+ * At these numbers wave-1's launch tick, spawn ticks, movement, and combat are
+ * BYTE-IDENTICAL to v5 (no second wave, no early-call credit): v6 reproduces the
+ * exact same lives/terminal-tick/score outcomes — only the world-hash's SHAPE
+ * changes (new state fields), which is why this witness pins the OBSERVABLE
+ * outcomes, not a hash.
+ */
+describe('v5-continuity witnesses (single-wave M1-numbers bundle)', () => {
+  const M1_RULESET = testRuleset(OPEN_28x24);
+
+  it('scenario A (canonical inputs, 500 ticks): lives 2, terminal tick 446, score 52 (a win, 1 star)', () => {
+    let state = createInitialState(SCENARIO_SEED, M1_RULESET);
+    for (let t = 0; t < 500; t++) {
+      // The single-wave M1 canonical input log (provenance: this file's OWN
+      // pre-S2 canonicalInputs, and packages/content/src/parity.test.ts's
+      // duplicate of it) — no second early call, since there is no second wave.
+      const inputs: SimInput[] =
+        t === 0
+          ? [{ kind: 'callWaveEarly' }]
+          : t === 2
+            ? [{ kind: 'placeTower', anchor: { col: 5, row: 10 } }]
+            : t === 4
+              ? [{ kind: 'placeTower', anchor: { col: 0, row: 0 } }]
+              : t === 201
+                ? [{ kind: 'sellTower', tower: 2 }]
+                : t % 7 === 0
+                  ? [{ kind: 'noop' }]
+                  : [];
+      state = step(state, M1_RULESET, inputs);
+    }
+    expect(state.phase).toBe('won');
+    expect(state.lives).toBe(2);
+    expect(state.tick).toBe(446);
+    expect(deriveScore(state, M1_RULESET)).toBe(52);
+    expect(deriveStars(state, M1_RULESET)).toBe(1);
+  });
+
+  it('scenario B (hands-off, 1200 ticks): lives 0, tick 946, score 0 (a total loss)', () => {
+    let state = createInitialState(SCENARIO_SEED, M1_RULESET);
+    for (let t = 0; t < 1200; t++) state = step(state, M1_RULESET, []);
+    expect(state.phase).toBe('lost');
+    expect(state.lives).toBe(0);
+    expect(state.tick).toBe(946);
+    expect(deriveScore(state, M1_RULESET)).toBe(0);
+    expect(deriveStars(state, M1_RULESET)).toBe(0);
   });
 });
 

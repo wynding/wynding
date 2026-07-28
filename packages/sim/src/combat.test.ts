@@ -29,7 +29,7 @@ const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
 const DIRECT_DAMAGE = TEST_TOWER.damage;
 // Bounty follows the compiled creep catalog for the same reason the tower stats do
 // above — a testBundle bounty edit must move these economy assertions with it.
-const KILL_BOUNTY = RULESET.creepById[RULESET.schedule[0]!.creepId]!.bounty;
+const KILL_BOUNTY = RULESET.creepById[RULESET.waves[0]!.spawns[0]!.creepId]!.bounty;
 
 /** One tower at (5,5); footprint centre = ((5+1)·256, (5+1)·256) = (1536,1536). */
 function oneTower(targetId = 0, nextFireTick = 0): TowerArrays {
@@ -60,6 +60,7 @@ function restingCreeps(
     headCol: rows.map((r) => r.col),
     headRow: rows.map((r) => r.row),
     progress: rows.map(() => 0), // progress 0 (rest)
+    wave: rows.map(() => 0),
   };
 }
 
@@ -79,6 +80,7 @@ function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCre
     headCol: [headCol],
     headRow: [row],
     progress: [0],
+    wave: [0],
   };
 }
 
@@ -123,6 +125,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       headCol: [7],
       headRow: [7],
       progress: [0],
+      wave: [0],
     };
     const t4 = runCombat(
       withoutTarget,
@@ -167,6 +170,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       headCol: [7],
       headRow: [7],
       progress: [0],
+      wave: [0],
     };
     const impact: Impact = {
       impactTick: TRAVEL_TICKS,
@@ -344,6 +348,7 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
     headCol: rows.map(() => 8),
     headRow: rows.map(() => 6),
     progress: rows.map((r) => r.progress),
+    wave: rows.map(() => 0),
   });
 
   it('targets the creep further along a shared cell over a lower-id trailing creep', () => {

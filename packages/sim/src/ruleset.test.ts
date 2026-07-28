@@ -108,8 +108,12 @@ describe('compileRuleset — balance domains', () => {
     rejects((b) => (b.balance.startingLives = 1.5));
   });
 
-  it('rejects a nonzero earlyCallBountyDivisor — pinned off at simVersion 5', () => {
-    rejects((b) => (b.balance.earlyCallBountyDivisor = 1));
+  it('accepts a nonzero earlyCallBountyDivisor — sv6 defers this axis to the schema ceiling', () => {
+    const compiled = compileRuleset(
+      { ...base(), balance: { ...base().balance, earlyCallBountyDivisor: 1 } } as Ruleset,
+      'test',
+    );
+    expect(compiled.balance.earlyCallBountyDivisor).toBe(1);
   });
 });
 
@@ -124,8 +128,12 @@ describe('compileRuleset — scoring domains', () => {
     rejects((b) => (b.scoring.starThresholds = [9, 6, 1]));
   });
 
-  it('rejects a nonzero earlyCallScoreDivisor — pinned off at simVersion 5', () => {
-    rejects((b) => (b.scoring.earlyCallScoreDivisor = 1));
+  it('accepts a nonzero earlyCallScoreDivisor — sv6 defers this axis to the schema ceiling', () => {
+    const compiled = compileRuleset(
+      { ...base(), scoring: { ...base().scoring, earlyCallScoreDivisor: 1 } } as Ruleset,
+      'test',
+    );
+    expect(compiled.scoring.earlyCallScoreDivisor).toBe(1);
   });
 });
 
@@ -188,7 +196,7 @@ describe('compileRuleset — tower catalog domains', () => {
     );
   });
 
-  it('rejects a tower attack domain unsupported at simVersion 5', () => {
+  it('rejects a tower attack domain unsupported at simVersion 6', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.domain = 'both'));
   });
 });
@@ -202,29 +210,22 @@ describe('compileRuleset — wave domains', () => {
     rejects((b) => (b.boards[0]!.waves[0]!.countdownTicks = 40_000)); // launch alone > the 36k ceiling
   });
 
-  it('rejects a second wave on the board (capability: maxWavesPerBoard 1)', () => {
-    rejects((b) =>
-      b.boards[0]!.waves.push({
-        index: 1,
-        countdownTicks: 10,
-        clearBonus: 0,
-        entries: [{ creepId: 'normal', count: 1, spacingTicks: 5 }],
-      }),
-    );
-  });
+  // A second wave, a second entry, a nonzero clearBonus, and a nonzero entry
+  // offsetTicks are all sv6-LEGAL now (capability defers to the schema on these
+  // axes — capability.test.ts's boundary coverage) — moved to the success
+  // describe block below rather than pinned here as rejections.
 
-  it('rejects a second entry on the wave (capability: maxEntriesPerWave 1)', () => {
-    rejects((b) =>
-      b.boards[0]!.waves[0]!.entries.push({ creepId: 'normal', count: 1, spacingTicks: 5 }),
-    );
-  });
-
-  it('rejects a nonzero wave clearBonus (capability: maxClearBonus 0)', () => {
-    rejects((b) => (b.boards[0]!.waves[0]!.clearBonus = 1));
-  });
-
-  it('rejects a nonzero entry offsetTicks (capability: maxOffsetTicks 0)', () => {
-    rejects((b) => (b.boards[0]!.waves[0]!.entries[0]!.offsetTicks = 1));
+  it('rejects a wave whose index skips past the tick budget when SUMMED across waves', () => {
+    // Bound-gate regression (step 4): each individual wave stays under the 36k
+    // ceiling on its own, but the SUM across all waves must still fit — a
+    // per-wave-only check would wrongly accept this.
+    rejects((b) => {
+      const w0 = b.boards[0]!.waves[0]!;
+      b.boards[0]!.waves = [
+        { ...w0, index: 0, countdownTicks: 20_000 },
+        { ...w0, index: 1, countdownTicks: 20_000 },
+      ];
+    });
   });
 
   it('rejects an entry referencing an unknown creepId, or a bad count/spacing', () => {
@@ -247,11 +248,51 @@ describe('compileRuleset — wave domains', () => {
 });
 
 describe('compileRuleset — success', () => {
-  it('compiles a valid bundle into a branded ruleset with a per-spawn schedule', () => {
+  it('compiles a valid bundle into a branded ruleset with a per-wave spawn schedule', () => {
     const compiled = compileRuleset(testBundle(OPEN, { waveCount: 4, waveSpacing: 5 }), 'test');
-    expect(compiled.schedule).toHaveLength(4);
-    expect(compiled.schedule.map((s) => s.offsetTicks)).toEqual([0, 5, 10, 15]);
+    expect(compiled.waves).toHaveLength(1);
+    expect(compiled.waves[0]!.spawns).toHaveLength(4);
+    expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 10, 15]);
+    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);
     expect(compiled.tower.cost).toBe(5);
     expect(compiled.digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('compiles a multi-wave board (sv6): a second wave, a second entry, a nonzero clearBonus, and a stream offset all accepted', () => {
+    const compiled = compileRuleset(
+      testBundle(OPEN, {
+        waves: [
+          { waveCount: 3, waveSpacing: 20, countdownTicks: 100, waveClearBonus: 4 },
+          { waveCount: 2, waveSpacing: 20, countdownTicks: 80, waveClearBonus: 4 },
+        ],
+      }),
+      'test',
+    );
+    expect(compiled.waves).toHaveLength(2);
+    expect(compiled.waves[0]!.clearBonus).toBe(4);
+    expect(compiled.waves[0]!.spawns).toHaveLength(3);
+    expect(compiled.waves[1]!.spawns).toHaveLength(2);
+  });
+
+  it('interleaves a multi-entry stream by (offsetTicks, entryRow), aggregating entriesSummary in first-appearance order', () => {
+    const bundle = testBundle(OPEN, { waveCount: 2, waveSpacing: 100, countdownTicks: 50 });
+    const mutable = JSON.parse(JSON.stringify(bundle)) as {
+      boards: {
+        waves: {
+          entries: { creepId: string; count: number; spacingTicks: number; offsetTicks?: number }[];
+        }[];
+      }[];
+    };
+    // Entry 0: 2 × 'normal' spacing 100, offset 0 → ticks [0, 100].
+    // Entry 1: 2 × 'normal' spacing 30, offset 5 → ticks [5, 35] — interleaves.
+    mutable.boards[0]!.waves[0]!.entries.push({
+      creepId: 'normal',
+      count: 2,
+      spacingTicks: 30,
+      offsetTicks: 5,
+    });
+    const compiled = compileRuleset(mutable as unknown as Ruleset, 'test');
+    expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 35, 100]);
+    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);
   });
 });
