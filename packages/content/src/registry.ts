@@ -18,10 +18,10 @@
 
 import type { Ruleset } from '@wynding/types';
 import { parseRulesetJson, RulesetError } from '@wynding/sim';
-import rawWyndingCoreM1 from './rulesets/wynding-core-m1.json?raw';
+import rawWyndingCore from './rulesets/wynding-core.json?raw';
 
 /** The ruleset id every match runs against unless a story specifies otherwise. */
-export const DEFAULT_RULESET_ID = 'wynding-core-m1';
+export const DEFAULT_RULESET_ID = 'wynding-core';
 
 /** Bundled raw ruleset text, keyed by `rulesetId` — the registry's one source of
  *  truth for "which rulesets ship in this client build". A `Map`, not a plain
@@ -29,7 +29,7 @@ export const DEFAULT_RULESET_ID = 'wynding-core-m1';
  *  id like `'toString'` would dodge the unknown-id rejection below and fail later
  *  as malformed JSON — the same prototype hygiene `ruleset.ts` applies to
  *  `creepById`. */
-const BUNDLED_TEXT: ReadonlyMap<string, string> = new Map([[DEFAULT_RULESET_ID, rawWyndingCoreM1]]);
+const BUNDLED_TEXT: ReadonlyMap<string, string> = new Map([[DEFAULT_RULESET_ID, rawWyndingCore]]);
 
 /** Parsed + validated + frozen rulesets, cached by id on first access. */
 const cache = new Map<string, Ruleset>();

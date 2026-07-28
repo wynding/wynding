@@ -1,4 +1,4 @@
-// board-integration.test.ts — proves the shipped M1 ruleset (field-01) builds a
+// board-integration.test.ts — proves the shipped ruleset (field-01) builds a
 // valid, solvable grid AND compiles for the sim, loaded the same way a real
 // consumer does: through the registry. It lives on the CONTENT side (content →
 // sim) because the repo's dependency graph flows one way
@@ -71,7 +71,8 @@ describe('field-01 compiles for the sim as the single source of truth', () => {
     const s = createInitialState(1, compiled);
     expect(s.lives).toBe(ruleset.balance.startingLives);
     expect(s.bounty).toBe(ruleset.balance.startingBounty);
-    expect(s.phase).toBe('pre-wave');
-    expect(compiled.schedule).toHaveLength(10); // one wave × 10 creeps
+    expect(s.phase).toBe('running');
+    expect(compiled.waves).toHaveLength(3); // three waves
+    expect(compiled.waves[0]!.spawns).toHaveLength(10); // 10 creeps per wave
   });
 });
