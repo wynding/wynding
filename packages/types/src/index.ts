@@ -180,7 +180,7 @@ export interface WaveEntry {
 export interface WaveSchedule {
   /** Must equal the wave's array position (contiguous from 0). */
   readonly index: number; // int ≥ 0
-  /** Ticks from match start (or the prior wave's clear, in a later story) to
+  /** Ticks from match start (or the prior wave's LAUNCH, for wave index > 0) to
    *  auto-launch; callable early from tick 0. */
   readonly countdownTicks: number; // int 1..1e6
   /** Paid once on a leak-free wave clear (0 at M1; mechanic present, valued off). */

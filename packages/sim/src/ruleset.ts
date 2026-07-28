@@ -20,59 +20,80 @@
 //     Compilation happens at MATCH CREATION, before the sim runs, so it MAY reject
 //     invalid/unsupported content by throwing `RulesetError`. `step` itself stays
 //     total.
-//   • The COMPILED SURFACE is frozen to keep its value roles, meanings, and
-//     behavior identical to the v1 shipped sim: `CompiledBalance`/`CompiledScoring`/
-//     `CompiledTower`/`CompiledCreep` carry the v1 field set verbatim (module
-//     header of PLAN.md M2-S1 invariant 1), with exactly two authorized renames —
-//     `creepByKind` → `creepById`, and the compiled tower/schedule `kind` → `id`/
-//     `creepId` (a catalog id is now an open string, not a closed union member).
+//   • The COMPILED SURFACE is frozen so a retained ruleset can't diverge from its
+//     digest at runtime. M2-S2 moves `countdownTicks`/`waveClearBonus` from
+//     `CompiledBalance` onto each `CompiledWave` (v2's per-wave home) and replaces
+//     the flat M1 `earlyCallBonus`/`schedule` with real divisors and a per-wave
+//     `waves[]` schedule; `CompiledCreep` gains the preview-facing `armor`/
+//     `immunities` axes. `creepByKind` → `creepById`, and the compiled tower/
+//     schedule `kind` → `id`/`creepId` (a catalog id is an open string, not a
+//     closed union member) are M2-S1's renames, unchanged here.
 //
 // The module graph is one-way: `ruleset-shared.ts` (the leaf: `RulesetError`,
-// `canonicalImmunities`) ← {`ruleset-schema.ts`, `capability.ts`} ← this module —
-// no two-way cycles. `RulesetError` is re-exported below so every existing
-// `import { RulesetError } from './ruleset'` site (and the barrel) stays valid.
-// `index.ts` cannot supply `SIM_VERSION` here (see the capability-profile call
-// below) without the reverse cycle `ruleset.ts` → `index.ts` → `ruleset.ts`
-// (`index.ts` already imports `CompiledRuleset`/`assertRuleset` from this module),
-// so the sim's behavior version is duplicated as a comment-pinned literal here
-// rather than imported.
+// `canonicalImmunities`, `SIM_VERSION`) ← {`ruleset-schema.ts`, `capability.ts`} ←
+// this module — no two-way cycles. `RulesetError` is re-exported below so every
+// existing `import { RulesetError } from './ruleset'` site (and the barrel) stays
+// valid. `SIM_VERSION` is single-sourced on the leaf (M2-S2; S1 deferred this) so
+// this module and `index.ts`'s public re-export can never drift apart.
 
 import { canonicalJson, sha256Hex } from '@wynding/engine';
 import type { EffectDef, Ruleset, RulesetBoard, TowerDef } from '@wynding/types';
 import { loadBoard, type BoardContext } from './context';
-import { RulesetError, canonicalImmunities } from './ruleset-shared';
+import { RulesetError, canonicalImmunities, SIM_VERSION } from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
 import { capabilityProfile, type CapabilityProfile } from './capability';
 
 export { RulesetError } from './ruleset-shared';
 
-/** One scheduled spawn: `offsetTicks` after launch, a creep of catalog `creepId`.
- *  (Renamed from v1's `kind` — catalog ids are open strings now, decision 4.) */
+/** One scheduled spawn: `offsetTicks` TICKS AFTER ITS WAVE'S LAUNCH, a creep of
+ *  catalog `creepId`. (Renamed from v1's `kind` — catalog ids are open strings
+ *  now, decision 4.) */
 export interface ScheduledSpawn {
   readonly offsetTicks: number;
   readonly creepId: string;
 }
 
-/** Sim-owned compile-time projection of `BalanceConstants` — the v1 field set
- *  VERBATIM, so `step`'s reads are unchanged. `leakCost`/`countdownTicks`/
- *  `waveClearBonus` are now DERIVED (read from the per-creep/per-wave v2 schema
- *  under the capability profile's uniformity/single-wave guarantees) rather than
- *  raw bundle fields; `earlyCallBonus` is hardcoded 0 (see `compileRuleset`). */
+/** One compiled board wave: the countdown/clear-bonus pair plus its fully
+ *  pre-expanded, stable-sorted spawn timeline and the preview-facing aggregate.
+ *
+ *  `spawns` pre-expands every entry's stream (first spawn at `offsetTicks`, then
+ *  every `spacingTicks`, `count` times) and stable-sorts the whole wave's spawns by
+ *  `(offsetTicks, entryRow)` — the concurrent-stream interleave runs ONCE at
+ *  compile time, so the sim only ever drains a cursor over pinned data, never
+ *  runtime-interleaves streams itself (G7).
+ *
+ *  `entriesSummary` aggregates `spawns` back down to one row per creep id, in
+ *  first-appearance order — the authoritative source for the wave preview (a
+ *  duplicate-creepId entry, or several entries sharing a creepId, still shows one
+ *  summed count). */
+export interface CompiledWave {
+  readonly countdownTicks: number;
+  readonly clearBonus: number;
+  readonly spawns: readonly ScheduledSpawn[];
+  readonly entriesSummary: readonly { readonly creepId: string; readonly count: number }[];
+}
+
+/** Sim-owned compile-time projection of `BalanceConstants` — the v1 field set,
+ *  with `countdownTicks`/`waveClearBonus` now PER-WAVE (`CompiledWave`, not flat
+ *  here — v2 moved them to the wave schedule) and the flat `earlyCallBonus`
+ *  replaced by the real divisor the wave phase reads at launch time.
+ *  `leakCost` stays DERIVED (read from the per-creep v2 schema under the
+ *  capability profile's uniformity guarantee) rather than a raw bundle field. */
 export interface CompiledBalance {
   readonly startingLives: number;
   readonly startingBounty: number;
   readonly refundNum: number;
   readonly refundDen: number;
   readonly leakCost: number;
-  readonly countdownTicks: number;
-  readonly waveClearBonus: number;
-  readonly earlyCallBonus: number;
+  readonly earlyCallBountyDivisor: number;
 }
 
-/** Sim-owned compile-time projection of `ScoringConfig` — v1 field set verbatim. */
+/** Sim-owned compile-time projection of `ScoringConfig` — v1 field set plus the
+ *  early-call SCORE credit divisor the wave phase reads at launch time. */
 export interface CompiledScoring {
   readonly survivalMul: number;
   readonly starThresholds: readonly [number, number, number];
+  readonly earlyCallScoreDivisor: number;
 }
 
 /** Sim-owned compile-time projection of `TowerDef` — v1 field set, `kind` renamed
@@ -89,13 +110,18 @@ export interface CompiledTower {
 }
 
 /** Sim-owned compile-time projection of `CreepDef` — v1 field set, `kind`
- *  renamed `id`. */
+ *  renamed `id`, plus the preview-facing axes the render VM joins on: `armor` and
+ *  frozen `immunities` (both capability-gated to `0`/`[]` at sv6 — present on the
+ *  compiled surface now so the preview text can read them without a schema import,
+ *  ahead of the story that lets them vary). */
 export interface CompiledCreep {
   readonly id: string;
   readonly hp: number;
   readonly speedFp: number;
   readonly bounty: number;
   readonly domain: 'ground' | 'air';
+  readonly armor: number;
+  readonly immunities: readonly ('slow' | 'stun')[];
 }
 
 /**
@@ -115,8 +141,8 @@ export interface CompiledRuleset {
    *  `Object.freeze` can't block), so a retained ruleset is genuinely immutable.
    *  Renamed from v1's `creepByKind` (decision 4/M2-S1 invariant 1). */
   readonly creepById: Readonly<Partial<Record<string, CompiledCreep>>>;
-  /** The board's single wave, flattened to an ordered per-spawn timeline. */
-  readonly schedule: readonly ScheduledSpawn[];
+  /** The board's wave schedule, index order, each pre-compiled per `CompiledWave`. */
+  readonly waves: readonly CompiledWave[];
   /** The content identity digest (`rulesetHash`). */
   readonly digest: string;
 }
@@ -149,17 +175,6 @@ export const MAX_MATCH_TICKS = 36_000;
  *  unit used for the worst-case traversal bound (mirrors replay's re-simulation
  *  ceiling, `MAX_MATCH_TICKS` above). */
 const FP_DIAG_LEN = 362;
-
-/** This sim build's behavior version — MUST equal `index.ts`'s exported
- *  `SIM_VERSION` (5). Duplicated as a literal rather than imported to avoid the
- *  `ruleset.ts` ↔ `index.ts` import cycle `index.ts`'s existing
- *  `import { assertRuleset, type CompiledRuleset } from './ruleset'` would create
- *  (and `scripts/check-determinism-version.mjs` regex-reads the constant from
- *  `index.ts` specifically, so it cannot move to a leaf without moving the CI
- *  guard's read path — deferred to S2, which owns the first bump). Exported ONLY
- *  so the test suite can lock the two literals together (capability.test.ts);
- *  nothing outside this module reads it for behavior. */
-export const COMPILED_SIM_VERSION = 5;
 
 // `canonicalImmunities` is imported from `ruleset-schema.ts` (one shared
 // implementation — the canonical order is a `rulesetHash` input, so a second copy
@@ -305,7 +320,7 @@ export function rulesetDigest(bundle: Ruleset): string {
  *  `maxClearBonus`) are checked separately, only against the board actually being
  *  compiled — mirroring v1's board-scoped wave validation. */
 function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): void {
-  const v = COMPILED_SIM_VERSION;
+  const v = SIM_VERSION;
   if (bundle.towerCatalog.length > profile.maxTowerCatalogSize) {
     throw new RulesetError(
       `towerCatalog size ${bundle.towerCatalog.length} exceeds ${profile.maxTowerCatalogSize} at simVersion ${v}`,
@@ -378,7 +393,7 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
  *  being compiled (v1 only ever validated the chosen board's wave, not every
  *  board in the catalog). */
 function checkCapabilityBoard(board: RulesetBoard, profile: CapabilityProfile): void {
-  const v = COMPILED_SIM_VERSION;
+  const v = SIM_VERSION;
   if (board.waves.length > profile.maxWavesPerBoard) {
     throw new RulesetError(
       `board '${board.id}' has ${board.waves.length} waves, exceeds ${profile.maxWavesPerBoard} at simVersion ${v}`,
@@ -416,7 +431,7 @@ function checkCapabilityBoard(board: RulesetBoard, profile: CapabilityProfile): 
  */
 export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRuleset {
   const normalized = validateRulesetShape(bundle);
-  const profile = capabilityProfile(COMPILED_SIM_VERSION);
+  const profile = capabilityProfile(SIM_VERSION);
   checkCapabilityGlobal(normalized, profile);
 
   const board = normalized.boards.find((b) => b.id === boardId);
@@ -453,6 +468,8 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       speedFp: c.speedFp,
       bounty: c.bounty,
       domain: c.domain,
+      armor: c.armor,
+      immunities: c.immunities,
     };
   }
   // Per-creep leakCost REPLACES v1's global `balance.leakCost` in the schema; the
@@ -471,17 +488,17 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   );
   if (directEffect === undefined) {
     throw new RulesetError(
-      `tower '${towerDef.id}' must have a direct/single effect at simVersion ${COMPILED_SIM_VERSION}`,
+      `tower '${towerDef.id}' must have a direct/single effect at simVersion ${SIM_VERSION}`,
     );
   }
   if (towerDef.attack === undefined) {
     throw new RulesetError(
-      `tower '${towerDef.id}' must have an attack at simVersion ${COMPILED_SIM_VERSION}`,
+      `tower '${towerDef.id}' must have an attack at simVersion ${SIM_VERSION}`,
     );
   }
   if (towerDef.attack.cadenceTicks === undefined) {
     throw new RulesetError(
-      `tower '${towerDef.id}' attack.cadenceTicks is required at simVersion ${COMPILED_SIM_VERSION}`,
+      `tower '${towerDef.id}' attack.cadenceTicks is required at simVersion ${SIM_VERSION}`,
     );
   }
   const tower: CompiledTower = {
@@ -493,51 +510,86 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     travelTicks: towerDef.attack.travelTicks,
   };
 
-  // Compile the board's single wave (profile: maxWavesPerBoard 1) into an explicit
-  // per-spawn timeline; the single-entry wave (profile: maxEntriesPerWave 1) compiles
-  // through the same cursor logic v1 used for back-to-back multi-entry waves —
-  // identical to today's stream semantics at exactly one entry. DELIBERATE OMISSION:
-  // `entry.offsetTicks` is schema-validated, hashed, and capability-gated
-  // (`maxOffsetTicks: 0`) but NOT consumed here — concurrent streams (every entry's
-  // first spawn at launch + its own offset) are S2's semantics, implemented when S2
-  // rewrites this loop under its own SIM_VERSION bump; consuming the field early
-  // would ship a slice of S2's behavior without its version gate.
-  const wave0 = board.waves[0]!;
-  const schedule: ScheduledSpawn[] = [];
-  let cursor = 0;
-  for (const entry of wave0.entries) {
-    if (creepById[entry.creepId] === undefined) {
-      throw new RulesetError(`wave references unknown creep id '${entry.creepId}'`);
+  // Compile EVERY board wave into an explicit per-spawn timeline (G7): each entry's
+  // stream (first spawn at `offsetTicks`, then every `spacingTicks`, `count` times)
+  // is expanded, then the whole wave's spawns are stable-sorted by
+  // `(offsetTicks, entryRow)` — the concurrent-stream interleave runs ONCE here, so
+  // the sim only ever drains a pre-sorted cursor, never runtime-interleaves. Also
+  // aggregates the wave's `entriesSummary` (one row per creep id, first-appearance
+  // order) — the wave-preview's authoritative source.
+  let totalSpawns = 0; // MAX_SCHEDULED_SPAWNS caps the aggregate across ALL waves.
+  let minSpeedFp = Number.MAX_SAFE_INTEGER; // over every creep id ANY wave spawns.
+  const tails: number[] = []; // per-wave max spawn offset — the bound gate's tail_k.
+  const waves: CompiledWave[] = [];
+  for (const wave of board.waves) {
+    interface RawSpawn {
+      readonly offsetTicks: number;
+      readonly creepId: string;
+      readonly entryRow: number;
     }
-    for (let i = 0; i < entry.count; i++) {
-      schedule.push({ offsetTicks: cursor, creepId: entry.creepId });
-      cursor += entry.spacingTicks;
-      if (schedule.length > MAX_SCHEDULED_SPAWNS) {
-        throw new RulesetError('wave exceeds the scheduled-spawn cap');
+    const rawSpawns: RawSpawn[] = [];
+    const summaryOrder: string[] = [];
+    const summaryCount = new Map<string, number>();
+    wave.entries.forEach((entry, entryRow) => {
+      if (creepById[entry.creepId] === undefined) {
+        throw new RulesetError(`wave references unknown creep id '${entry.creepId}'`);
       }
+      // `offsetTicks` is optional on the raw type but always canonicalized to a
+      // definite number by `validateRulesetShape` (omitted ⇒ 0) before `normalized`
+      // reaches here — `?? 0` only satisfies the wider type, never masks a real gap.
+      let offset = entry.offsetTicks ?? 0;
+      for (let i = 0; i < entry.count; i++) {
+        rawSpawns.push({ offsetTicks: offset, creepId: entry.creepId, entryRow });
+        offset += entry.spacingTicks;
+        totalSpawns++;
+        if (totalSpawns > MAX_SCHEDULED_SPAWNS) {
+          throw new RulesetError('wave schedule exceeds the scheduled-spawn cap');
+        }
+      }
+      if (!summaryCount.has(entry.creepId)) summaryOrder.push(entry.creepId);
+      summaryCount.set(entry.creepId, (summaryCount.get(entry.creepId) ?? 0) + entry.count);
+    });
+    // Stable sort by (offsetTicks, entryRow): `Array.prototype.sort` is spec-stable,
+    // but the explicit entryRow tie-break also totally orders same-offset spawns
+    // FROM DIFFERENT entries deterministically regardless of engine, matching the
+    // pinned cross-wave/same-tick ordering contract.
+    rawSpawns.sort((a, b) => a.offsetTicks - b.offsetTicks || a.entryRow - b.entryRow);
+    if (rawSpawns.length === 0) throw new RulesetError('wave schedule is empty');
+    const spawns: ScheduledSpawn[] = rawSpawns.map((s) => ({
+      offsetTicks: s.offsetTicks,
+      creepId: s.creepId,
+    }));
+    tails.push(spawns[spawns.length - 1]!.offsetTicks); // sorted ascending ⇒ last is max
+    for (const s of spawns) {
+      const def = creepById[s.creepId]!; // resolved above
+      if (def.speedFp < minSpeedFp) minSpeedFp = def.speedFp;
     }
+    const entriesSummary = summaryOrder.map((creepId) => ({
+      creepId,
+      count: summaryCount.get(creepId)!,
+    }));
+    waves.push({
+      countdownTicks: wave.countdownTicks,
+      clearBonus: wave.clearBonus,
+      spawns,
+      entriesSummary,
+    });
   }
-  if (schedule.length === 0) throw new RulesetError('wave schedule is empty');
 
   // Reject a bundle whose BASELINE run can't reach a terminal state within the replay
   // validator's absolute tick ceiling — otherwise it compiles but every replay on it
-  // times out. Bound the worst-case baseline: launch deadline + last spawn offset +
-  // the slowest creep's full traversal (max route length ÷ min speed). Only the
-  // baseline must fit; adversarial build/sell juggling beyond it is caught by the
-  // validator's timeout.
-  const lastOffset = schedule[schedule.length - 1]!.offsetTicks;
-  // Minimum speed over the ids THIS board's schedule actually spawns — not the whole
-  // catalog, so an unrelated slow creep used only by another board can't wrongly
-  // reject this board.
-  let minSpeedFp = Number.MAX_SAFE_INTEGER;
-  for (const s of schedule) {
-    const def = creepById[s.creepId];
-    if (def !== undefined && def.speedFp < minSpeedFp) minSpeedFp = def.speedFp;
-  }
+  // times out. Bound the worst-case baseline over the WHOLE multi-wave schedule:
+  // Σ every wave's countdown (every wave launches on its own deadline, back to back,
+  // in the worst case) + the latest tail offset across all waves (the final spawn
+  // could belong to any wave once countdowns are summed) + the slowest creep's full
+  // traversal (max route length ÷ min speed, over every creep any wave spawns).
+  // Only the baseline must fit; adversarial build/sell juggling beyond it is caught
+  // by the validator's timeout.
+  const sumCountdownTicks = waves.reduce((sum, w) => sum + w.countdownTicks, 0);
+  const maxTail = Math.max(...tails);
   const cells = boardCtx.grid.width * boardCtx.grid.height;
   const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minSpeedFp);
-  const countdownTicks = wave0.countdownTicks;
-  if (countdownTicks + lastOffset + maxTraversalTicks > MAX_MATCH_TICKS) {
+  if (sumCountdownTicks + maxTail + maxTraversalTicks > MAX_MATCH_TICKS) {
     throw new RulesetError('ruleset cannot reach a terminal state within the tick budget');
   }
 
@@ -558,16 +610,12 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     refundNum: normalized.balance.refundNum,
     refundDen: normalized.balance.refundDen,
     leakCost,
-    countdownTicks,
-    waveClearBonus: wave0.clearBonus,
-    // Derived from the profile-pinned divisor-off state (maxEarlyCallBountyDivisor:
-    // 0, enforced by checkCapabilityGlobal above) — not a raw bundle field. S2
-    // replaces this flat compiled field with the real divisor formula.
-    earlyCallBonus: 0,
+    earlyCallBountyDivisor: normalized.balance.earlyCallBountyDivisor,
   };
   const scoring: CompiledScoring = {
     survivalMul: normalized.scoring.survivalMul,
     starThresholds: normalized.scoring.starThresholds,
+    earlyCallScoreDivisor: normalized.scoring.earlyCallScoreDivisor,
   };
 
   const compiled: CompiledRuleset = {
@@ -578,17 +626,17 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     scoring,
     tower,
     creepById,
-    schedule,
+    waves,
     digest,
   };
-  // Freeze the compiled tuning (balance/scoring/tower/creep defs/schedule) so a
+  // Freeze the compiled tuning (balance/scoring/tower/creep defs/waves) so a
   // retained ruleset can't be mutated at runtime and diverge from its digest. The
   // board machinery (grid methods, typed-array fields) is intentionally left
   // untouched.
   deepFreeze(compiled.balance);
   deepFreeze(compiled.scoring);
   deepFreeze(compiled.tower);
-  deepFreeze(compiled.schedule);
+  deepFreeze(compiled.waves);
   deepFreeze(compiled.creepById);
   Object.freeze(compiled); // freeze the WRAPPER too, so `ruleset.tower = …` can't replace a field
   validated.add(compiled);

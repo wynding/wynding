@@ -83,7 +83,10 @@ export interface StepEvents {
   }[];
 }
 
-/** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it). */
+/** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it).
+ *  `wave` (M2-S2) — the owning wave index — carries through every rebuild here like
+ *  any other column: dropping it on a combat-phase compaction would erase wave
+ *  identity the instant a wave overlaps with combat, falsely settling waves. */
 export interface CombatCreeps {
   id: number[];
   hp: number[];
@@ -94,9 +97,10 @@ export interface CombatCreeps {
   headCol: number[];
   headRow: number[];
   progress: number[];
+  wave: number[];
 }
 
-/** The empty 9-column creep SoA — the single factory, reused by the sim barrel. */
+/** The empty 10-column creep SoA — the single factory, reused by the sim barrel. */
 export const emptyCreeps = (): CombatCreeps => ({
   id: [],
   hp: [],
@@ -107,6 +111,7 @@ export const emptyCreeps = (): CombatCreeps => ({
   headCol: [],
   headRow: [],
   progress: [],
+  wave: [],
 });
 
 /**
@@ -263,13 +268,33 @@ function inRange(cx: number, cy: number, towerX: number, towerY: number, range: 
   return dx * dx + dy * dy <= range * range;
 }
 
-/** Guarded non-negative integer add (bounty / score / bonus credits): a non-safe or
- *  overflowing operand is a deterministic no-op — never a platform-sensitive value.
- *  The single implementation, shared by the combat and wave/score paths (sim/index.ts). */
-export function safeAdd(base: number, amount: number): number {
+/**
+ * SATURATING non-negative integer add (bounty / kill bounty / early-call credit /
+ * every score branch): clamps to `Number.MAX_SAFE_INTEGER` on overflow — genuinely
+ * saturating, per the spec's "saturating arithmetic" (M2-S1's `safeAdd` instead
+ * returned the OLD value on overflow, a guard rather than saturation; identical to
+ * `satAdd` at every value real content ever reaches, since overflow is unreachable
+ * there — see `capability.ts`'s sv6 rationale). A non-safe or negative operand
+ * leaves `base` unchanged (still a deterministic no-op, never a platform-sensitive
+ * value). The single implementation, shared by the combat and wave/score paths
+ * (sim/index.ts). */
+export function satAdd(base: number, amount: number): number {
   if (!Number.isSafeInteger(amount) || amount < 0) return base;
-  if (Number.isSafeInteger(base) && base <= Number.MAX_SAFE_INTEGER - amount) return base + amount;
-  return base;
+  const b = Number.isSafeInteger(base) ? base : 0;
+  return b <= Number.MAX_SAFE_INTEGER - amount ? b + amount : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * SATURATING non-negative integer multiply — the `satAdd` companion for the
+ * scorer's `lives × survivalMul` term. A non-safe or negative operand yields `0`
+ * (mirrors `satAdd`'s non-safe-input handling, never a platform-sensitive value);
+ * overflow clamps to `Number.MAX_SAFE_INTEGER` rather than wrapping/losing
+ * precision through float multiplication.
+ */
+export function satMul(a: number, b: number): number {
+  if (!Number.isSafeInteger(a) || a < 0 || !Number.isSafeInteger(b) || b < 0) return 0;
+  if (a === 0 || b === 0) return 0;
+  return a <= Math.floor(Number.MAX_SAFE_INTEGER / b) ? a * b : Number.MAX_SAFE_INTEGER;
 }
 
 /**
@@ -324,7 +349,7 @@ export function runCombat(
     if (!isLiveHp(creeps.hp[i])) {
       if (killedByImpact.has(i)) {
         const amount = Number.isSafeInteger(creeps.bounty[i]) ? (creeps.bounty[i] as number) : 0;
-        nextBounty = safeAdd(nextBounty, amount);
+        nextBounty = satAdd(nextBounty, amount);
         killBounty += amount >= 0 ? amount : 0;
       }
       continue;
@@ -340,6 +365,7 @@ export function runCombat(
     survivors.headCol.push(creeps.headCol[i] as number);
     survivors.headRow.push(creeps.headRow[i] as number);
     survivors.progress.push(creeps.progress[i] as number);
+    survivors.wave.push(Number.isSafeInteger(creeps.wave[i]) ? (creeps.wave[i] as number) : 0);
   }
 
   // (3) Precompute the targetable live creeps once (position-valid + reachable).

@@ -21,7 +21,17 @@ import { execFileSync } from 'node:child_process';
 const BASE_SHA = process.env.BASE_SHA;
 const BASE_REF = process.env.BASE_REF || 'main';
 const TEST_PATH = 'packages/sim/src/determinism.test.ts';
-const INDEX_PATH = 'packages/sim/src/index.ts';
+// SIM_VERSION's home moved with M2-S2's single-sourcing (PLAN step 1): it now
+// lives on the dependency-free leaf `ruleset-shared.ts`, re-exported from
+// `index.ts` for the public API. A candidate list — not a single path — lets this
+// guard read EITHER commit correctly across the very PR that moves it: per
+// revision, the first candidate whose content matches RE_VERSION wins, so the base
+// commit (pre-move) still reads 5 from `index.ts` while HEAD (post-move) reads 6
+// from `ruleset-shared.ts`, with no special-casing of the migration commit itself.
+const VERSION_PATH_CANDIDATES = [
+  'packages/sim/src/ruleset-shared.ts',
+  'packages/sim/src/index.ts',
+];
 
 const RE_FINAL = /finalHash:\s*'([0-9a-f]+)'/;
 const RE_TRACE = /traceDigest:\s*'([0-9a-f]+)'/;
@@ -151,26 +161,38 @@ if (baseGolden === headGolden) {
 
 // The golden changed: SIM_VERSION must be readable on both sides and STRICTLY
 // INCREASE (a decrement or reuse is not a bump, and replays key on the version).
-const baseVersionRaw = match(fileAt(baseRef, INDEX_PATH), RE_VERSION);
-const headVersionRaw = match(fileAt('HEAD', INDEX_PATH), RE_VERSION);
+// Per revision, try each candidate path in order and use the first that matches —
+// so a revision where SIM_VERSION still lives at the old path (base) and one where
+// it has moved to the new leaf (HEAD) are both read correctly, with no special
+// case for the migration commit itself.
+function versionAt(ref) {
+  for (const path of VERSION_PATH_CANDIDATES) {
+    const raw = match(fileAt(ref, path), RE_VERSION);
+    if (raw !== null) return { raw, path };
+  }
+  return { raw: null, path: null };
+}
 
-if (baseVersionRaw === null || headVersionRaw === null) {
+const base = versionAt(baseRef);
+const head = versionAt('HEAD');
+
+if (base.raw === null || head.raw === null) {
   fail(
     'Determinism golden changed but SIM_VERSION could not be read as an integer ' +
-      `(base=${baseVersionRaw}, head=${headVersionRaw}) from ${INDEX_PATH}.`,
+      `(base=${base.raw}, head=${head.raw}) from any of: ${VERSION_PATH_CANDIDATES.join(', ')}.`,
   );
 }
 
-const baseVersion = Number(baseVersionRaw);
-const headVersion = Number(headVersionRaw);
+const baseVersion = Number(base.raw);
+const headVersion = Number(head.raw);
 
 if (headVersion <= baseVersion) {
   fail(
     'Determinism golden changed but SIM_VERSION did not increase.\n\n' +
       `   golden       ${baseGolden}  →  ${headGolden}\n` +
-      `   SIM_VERSION  ${baseVersion}  →  ${headVersion}\n\n` +
+      `   SIM_VERSION  ${baseVersion} (${base.path})  →  ${headVersion} (${head.path})\n\n` +
       'A change to finalHash/traceDigest is a determinism-affecting behavior change.\n' +
-      'Increase SIM_VERSION in packages/sim/src/index.ts in this PR (and note why).',
+      'Increase SIM_VERSION in packages/sim/src/ruleset-shared.ts in this PR (and note why).',
   );
 }
 
