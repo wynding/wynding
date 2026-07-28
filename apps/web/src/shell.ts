@@ -61,6 +61,19 @@ export interface ShellHud {
   readonly stars: ShellChip;
 }
 
+/** The wave-preview surface (M2-S2, PLAN.md P3 step 17) — its OWN visible block in BOTH
+ *  layouts, never chip-hosted (the Compact chip's `full` text is screen-reader-only, so
+ *  entries stuffed into the wave chip would be invisible to sighted Compact users).
+ *  Hosted inside `.wy-hud` — the existing focusable, keyboard-scrollable HUD scrollport
+ *  (contract §1) — so a long entry list is keyboard-reachable by inheritance rather than
+ *  needing its own tab stop. `overlay.ts` owns all three nodes' content/visibility every
+ *  frame; the Shell only builds the scaffolding. */
+export interface ShellPreview {
+  readonly root: HTMLElement;
+  readonly title: HTMLElement;
+  readonly list: HTMLUListElement;
+}
+
 export interface ShellDock {
   readonly root: HTMLElement;
   readonly pause: HTMLButtonElement;
@@ -113,6 +126,7 @@ export interface ShellHandle {
   /** The chips list — the labelled, keyboard-reachable scrollport (contract §1). */
   readonly hudBox: HTMLElement;
   readonly hud: ShellHud;
+  readonly preview: ShellPreview;
   readonly dock: ShellDock;
   readonly card: ShellCard;
   readonly panel: ShellPanel;
@@ -316,7 +330,21 @@ export function createShell(doc: Document): ShellHandle {
   const score = chip(doc, 'score');
   const wave = chip(doc, 'wave');
   const stars = chip(doc, 'stars');
-  hudBox.append(lives.root, bounty.root, score.root, wave.root, stars.root);
+
+  // --- Wave preview (M2-S2): its own block, near the countdown, inside the SAME
+  // keyboard-scrollable `.wy-hud` group the chips live in — never chip-hosted (see the
+  // `ShellPreview` doc comment). `overlay.ts` fills in the title/list text and toggles
+  // `hidden`; empty/hidden here is the safe pre-first-render default. ---
+  const preview = doc.createElement('div');
+  preview.className = 'wy-wave-preview';
+  preview.hidden = true;
+  const previewTitle = doc.createElement('p');
+  previewTitle.className = 'wy-wave-preview-title';
+  const previewList = doc.createElement('ul');
+  previewList.className = 'wy-wave-preview-list';
+  preview.append(previewTitle, previewList);
+
+  hudBox.append(lives.root, bounty.root, score.root, wave.root, preview, stars.root);
 
   // --- Dock: a status child in BOTH layouts (contract §1's topology amendment) ---
   const dock = doc.createElement('div');
@@ -440,6 +468,7 @@ export function createShell(doc: Document): ShellHandle {
     rail,
     hudBox,
     hud: { lives, bounty, score, wave, stars },
+    preview: { root: preview, title: previewTitle, list: previewList },
     dock: {
       root: dock,
       pause: pauseBtn,

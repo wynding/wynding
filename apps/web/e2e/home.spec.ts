@@ -21,10 +21,18 @@ const TARGET_MIN_PX = 44;
 
 /** The Standard status row's expected height once the link's 44px hit box is absorbed into
  *  the row's own padding (ui.css derives this exactly): 44px, up from ≈40.6px — a NET growth
- *  of ≈3.4px. The ceiling is what makes this test worth having: a naive `min-height: 44px`
- *  flex item would stack on top of the row's 2 × 0.5rem padding and land at ≈60px, taking
- *  ~19px from the board. A few px of slack for font-metric rounding, nowhere near 60. */
-const STANDARD_ROW_MAX_PX = 48;
+ *  of ≈3.4px OVER THE ROW'S OWN BASELINE CONTENT. The ceiling is what makes this test worth
+ *  having: a naive `min-height: 44px` flex item would stack ON TOP OF that growth and take a
+ *  further ~19px from the board.
+ *
+ *  The baseline itself moved at M2-S2 (PLAN.md P3 step 17): the wave chip is now VISIBLE
+ *  pre-start (the Start decouple makes its countdown meaningful before Start is ever
+ *  pressed) and the wave-preview surface — its own title + entry-list block — sits beside
+ *  it, both inside `.wy-hud`. Those two content rows are UNRELATED to the home link under
+ *  test here, so the ceiling is recalibrated to (new baseline + the same ~3.4px/nowhere-near
+ *  the naive-box-model slack this test exists to catch), not tightened back to the pre-M2-S2
+ *  figure. */
+const STANDARD_ROW_MAX_PX = 128;
 
 async function gotoAt(page: Page, size: { width: number; height: number }): Promise<void> {
   await page.setViewportSize(size);
@@ -254,7 +262,7 @@ test.describe('home affordance — Standard layout', () => {
       await page.evaluate(() => (window as unknown as { __wyNoNav?: true }).__wyNoNav === true),
       'Stay navigated or reloaded the page',
     ).toBe(true);
-    await expect(board).toHaveAttribute('data-run-started', 'true');
+    await expect(board).toHaveAttribute('data-started', 'true');
     expect(Number(await board.getAttribute('data-sim-tick'))).toBe(tickAtPause);
     await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
   });
@@ -299,6 +307,11 @@ test.describe('home affordance — Standard layout', () => {
   }) => {
     await gotoAt(page, STANDARD);
     await page.getByRole('button', { name: 'Start' }).click();
+    // Start no longer claims wave 1 (M2-S2, PLAN.md P3 step 15) — early-call it via the
+    // morphed primary control so this undefended loss resolves well within the wait below
+    // (wave 1's own natural 500-tick countdown alone would otherwise cost ~25s before a
+    // single creep even spawns).
+    await page.getByRole('button', { name: 'Call wave' }).click();
     const results = page.locator('.wy-results');
     await expect(results).toBeVisible({ timeout: 40_000 });
 

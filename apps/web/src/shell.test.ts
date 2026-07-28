@@ -111,7 +111,7 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.board.getAttribute('aria-label')).toBeNull();
   });
 
-  it('the HUD group holds Lives/Bounty/Score/wave/Stars chips, in that order', () => {
+  it('the HUD group holds Lives/Bounty/Score/wave/preview/Stars, in that order (M2-S2: the wave preview surface sits near the countdown)', () => {
     const shell = createShell(document);
     expect(shell.hudBox.className).toBe('wy-hud');
     expect(shell.hudBox.getAttribute('role')).toBe('group');
@@ -120,8 +120,16 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
       shell.hud.bounty.root,
       shell.hud.score.root,
       shell.hud.wave.root,
+      shell.preview.root,
       shell.hud.stars.root,
     ]);
+  });
+
+  it('the wave preview surface starts hidden, with its title/list scaffolding empty', () => {
+    const shell = createShell(document);
+    expect(shell.preview.root.hidden).toBe(true);
+    expect(shell.preview.title.textContent).toBe('');
+    expect(shell.preview.list.children).toHaveLength(0);
   });
 
   // Contract §1: the chips list is the bounded scrollport now that the Dock shares the

@@ -9,10 +9,12 @@ import {
   step,
   compileRuleset,
   deriveScore,
+  previewInputs,
   type SimInput,
   type SimState,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
+import type { Ruleset } from '@wynding/types';
 import { createProjection } from './projection';
 import { deriveViewModel, deriveHud } from './view-model';
 import { interpolateCreeps } from './interpolate';
@@ -22,6 +24,93 @@ import * as barrel from './index';
 
 const bundle = getBundledRuleset();
 const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+
+// A hand-built, sv6-legal SYNTHETIC bundle (M2-S2, PLAN.md P3 step 19) — the shipped
+// `wynding-core` bundle's three identical single-entry waves cannot catch an
+// aggregation/ordering bug in the preview join, so this exercises duplicate-creepId
+// aggregation and first-appearance ordering with a real `compileRuleset` pass rather than
+// a hand-built `CompiledRuleset` (which is opaque/branded — `assertRuleset` would reject
+// one anyway). Every creep stays `domain: 'ground'`, `armor: 0`, `immunities: []` — sv6's
+// capability profile keeps those closed (Out of scope), so only hp/speed/bounty vary
+// between the two kinds.
+const SYNTHETIC_BOARD_ID = 'wave-preview-board';
+const syntheticBundle: Ruleset = {
+  formatVersion: 2,
+  rulesetId: 'wave-preview-test',
+  version: 1,
+  creepCatalog: [
+    {
+      id: 'normal',
+      hp: 20,
+      speedFp: 26,
+      armor: 0,
+      domain: 'ground',
+      immunities: [],
+      leakCost: 1,
+      bounty: 1,
+    },
+    {
+      id: 'armored',
+      hp: 60,
+      speedFp: 18,
+      armor: 0,
+      domain: 'ground',
+      immunities: [],
+      leakCost: 1,
+      bounty: 3,
+    },
+  ],
+  towerCatalog: [
+    {
+      id: 'basic',
+      cost: 5,
+      attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
+      effects: [{ kind: 'direct', form: 'single', damage: 10 }],
+    },
+  ],
+  balance: {
+    startingLives: 10,
+    startingBounty: 80,
+    refundNum: 3,
+    refundDen: 4,
+    slowFloorNum: 1,
+    slowFloorDen: 4,
+    earlyCallBountyDivisor: 50,
+  },
+  scoring: { survivalMul: 25, starThresholds: [1, 6, 9], earlyCallScoreDivisor: 50 },
+  boards: [
+    {
+      id: SYNTHETIC_BOARD_ID,
+      widthTiles: 9,
+      heightTiles: 5,
+      entrance: { col: 0, row: 2 },
+      exit: { col: 8, row: 2 },
+      waves: [
+        {
+          index: 0,
+          countdownTicks: 100,
+          clearBonus: 4,
+          // First-appearance order 'armored' then 'normal' — deliberately NOT alphabetical
+          // or catalog order, so a bug that re-sorts the summary alphabetically or by
+          // catalog position (rather than preserving entry order) would be caught. The two
+          // 'normal' entries (counts 2 + 1) must aggregate to a single count-3 row.
+          entries: [
+            { creepId: 'armored', count: 1, spacingTicks: 10, offsetTicks: 0 },
+            { creepId: 'normal', count: 2, spacingTicks: 10, offsetTicks: 0 },
+            { creepId: 'normal', count: 1, spacingTicks: 10, offsetTicks: 5 },
+          ],
+        },
+        {
+          index: 1,
+          countdownTicks: 50,
+          clearBonus: 4,
+          entries: [{ creepId: 'normal', count: 1, spacingTicks: 10, offsetTicks: 0 }],
+        },
+      ],
+    },
+  ],
+};
+const syntheticRuleset = compileRuleset(syntheticBundle, SYNTHETIC_BOARD_ID);
 
 describe('projection — fit/letterbox + pointer inverse', () => {
   it('letterboxes a wide canvas: whole-pixel cells, centred board', () => {
@@ -72,14 +161,18 @@ describe('projection — fit/letterbox + pointer inverse', () => {
 });
 
 describe('view-model + hud derivation', () => {
-  it('derives HUD countdown/score/stars from a fresh pre-wave state', () => {
+  it('derives HUD countdown/score/stars from a fresh running (pre-first-launch) state', () => {
     const s = createInitialState(1, ruleset);
     const hud = deriveHud(s, ruleset);
-    expect(hud.phase).toBe('pre-wave');
+    expect(hud.phase).toBe('running');
     expect(hud.lives).toBe(ruleset.balance.startingLives);
     expect(hud.bounty).toBe(ruleset.balance.startingBounty);
     expect(hud.countdownSeconds).toBeGreaterThan(0); // counting down pre-launch
     expect(hud.stars).toBe(0);
+    expect(hud.waveCount).toBe(ruleset.waves.length);
+    expect(hud.waveCursor).toBe(0);
+    expect(hud.launchPending).toBe(false);
+    expect(hud.callable).toBe(true);
   });
 
   it('projects spawned creeps into the render view-model with a health fraction', () => {
@@ -91,7 +184,7 @@ describe('view-model + hud derivation', () => {
       expect(c.hpFrac).toBeGreaterThan(0);
       expect(c.hpFrac).toBeLessThanOrEqual(1);
     }
-    expect(vm.phase).toBe('active');
+    expect(vm.phase).toBe('running');
   });
 
   it('includes placed towers in the view-model', () => {
@@ -103,10 +196,12 @@ describe('view-model + hud derivation', () => {
     expect(vm.towers[0]).toMatchObject({ col: 3, row: 3 });
   });
 
-  it('hides the countdown once the wave is active (null)', () => {
+  it('resumes counting down once the first wave has launched (wave 2 of 3)', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
-    expect(deriveHud(s, ruleset).countdownSeconds).toBeNull();
+    const hud = deriveHud(s, ruleset);
+    expect(hud.countdownSeconds).toBeGreaterThan(0); // wave 2 is now counting down
+    expect(hud.waveCursor).toBe(1);
   });
 
   it('gives a ragged-HP creep a zero health fraction (no crash)', () => {
@@ -115,6 +210,115 @@ describe('view-model + hud derivation', () => {
     s.creeps.hp[0] = Number.NaN as unknown as number; // corrupt only the HP column
     const c = deriveViewModel(s, ruleset).creeps.find((v) => v.id === s.creeps.id[0]);
     expect(c?.hpFrac).toBe(0);
+  });
+});
+
+describe('hud wave preview (M2-S2, PLAN.md P3 step 16)', () => {
+  it('shows wave 1 of N with the shipped bundle’s single-creep-kind composition, callable true', () => {
+    const s = createInitialState(1, ruleset);
+    const hud = deriveHud(s, ruleset);
+    expect(hud.callable).toBe(true);
+    expect(hud.preview).toEqual({
+      kind: 'upcoming',
+      waveNumber: 1,
+      waveCount: ruleset.waves.length,
+      entries: [{ creepId: 'normal', count: 10, domain: 'ground', armor: 0, immunities: [] }],
+    });
+  });
+
+  it('surfaces a paused, queued call as launchPending via previewInputs, disabling callable', () => {
+    // `launchPending` is consumed within the tick it's set (the wave phase launches the
+    // SAME step() call the input phase queued it in) — it is only OBSERVABLE as pending
+    // via `previewInputs`'s projection (a paused client's uncommitted buffer), which is
+    // exactly the case `deriveHud` must accept a `PreviewState` for.
+    const s = createInitialState(1, ruleset);
+    const { preview } = previewInputs(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    expect(preview.launchPending).toBe(true);
+    const hud = deriveHud(preview, ruleset);
+    expect(hud.callable).toBe(false); // buffered call already queued
+    expect(hud.preview).toMatchObject({ kind: 'upcoming', waveNumber: 1 });
+  });
+
+  it('advances to the next wave’s composition after a real launch', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]); // launches wave 1 this same tick
+    const hud = deriveHud(s, ruleset);
+    expect(hud.waveCursor).toBe(1);
+    expect(hud.preview).toMatchObject({ kind: 'upcoming', waveNumber: 2 });
+    expect(hud.callable).toBe(true);
+  });
+
+  it('shows the last-wave marker once every wave has launched but the run is still live', () => {
+    let s = createInitialState(1, ruleset);
+    for (let i = 0; i < ruleset.waves.length; i++) {
+      s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    }
+    expect(s.waveCursor).toBe(ruleset.waves.length);
+    expect(s.phase).toBe('running'); // waves still resolving — not terminal yet
+    const hud = deriveHud(s, ruleset);
+    expect(hud.preview).toEqual({ kind: 'lastWave' });
+    expect(hud.callable).toBe(false); // no more waves to call
+  });
+
+  it('is null once the run resolves — the results dialog takes over', () => {
+    const lost: SimState = { ...createInitialState(1, ruleset), phase: 'lost', lives: 0 };
+    expect(deriveHud(lost, ruleset).preview).toBeNull();
+    expect(deriveHud(lost, ruleset).callable).toBe(false);
+  });
+});
+
+describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 step 19: the shipped bundle’s three identical single-entry waves cannot catch aggregation/ordering bugs)', () => {
+  it('aggregates a duplicate creepId across two entries into ONE summed row, in FIRST-APPEARANCE order (not alphabetical, not catalog order)', () => {
+    const s = createInitialState(1, syntheticRuleset);
+    const hud = deriveHud(s, syntheticRuleset);
+    expect(hud.preview).toEqual({
+      kind: 'upcoming',
+      waveNumber: 1,
+      waveCount: 2,
+      entries: [
+        { creepId: 'armored', count: 1, domain: 'ground', armor: 0, immunities: [] },
+        { creepId: 'normal', count: 3, domain: 'ground', armor: 0, immunities: [] }, // 2 + 1
+      ],
+    });
+  });
+
+  it('joins each row’s metadata off the CORRECT creep definition — the two kinds are not conflated', () => {
+    const s = createInitialState(1, syntheticRuleset);
+    const entries = deriveHud(s, syntheticRuleset).preview;
+    expect(entries).toMatchObject({
+      entries: [
+        { creepId: 'armored', count: 1 },
+        { creepId: 'normal', count: 3 },
+      ],
+    });
+    // Both rows read `domain`/`armor`/`immunities` off the compiled catalog, not a shared
+    // default — distinct hp/speed/bounty per kind (asserted via the compiled ruleset
+    // itself, since those axes aren't in the preview) proves the join key is `creepId`.
+    expect(syntheticRuleset.creepById['armored']?.hp).toBe(60);
+    expect(syntheticRuleset.creepById['normal']?.hp).toBe(20);
+  });
+
+  it('advances to wave 2’s single-entry composition after wave 1 launches', () => {
+    let s = createInitialState(1, syntheticRuleset);
+    s = step(s, syntheticRuleset, [{ kind: 'callWaveEarly' }]);
+    const hud = deriveHud(s, syntheticRuleset);
+    expect(hud.waveCursor).toBe(1);
+    expect(hud.preview).toEqual({
+      kind: 'upcoming',
+      waveNumber: 2,
+      waveCount: 2,
+      entries: [{ creepId: 'normal', count: 1, domain: 'ground', armor: 0, immunities: [] }],
+    });
+  });
+
+  it('shows the last-wave marker once wave 2 (the final wave) launches too', () => {
+    let s = createInitialState(1, syntheticRuleset);
+    s = step(s, syntheticRuleset, [{ kind: 'callWaveEarly' }]);
+    s = step(s, syntheticRuleset, [{ kind: 'callWaveEarly' }]);
+    expect(s.waveCursor).toBe(2);
+    const hud = deriveHud(s, syntheticRuleset);
+    expect(hud.preview).toEqual({ kind: 'lastWave' });
+    expect(hud.callable).toBe(false);
   });
 });
 
@@ -145,17 +349,21 @@ describe('hud score — earned components while live, authoritative once termina
     return s;
   }
 
-  it('reads 0 on a fresh pre-wave state — nothing has been earned yet', () => {
+  it('reads 0 on a fresh running (pre-first-launch) state — nothing has been earned yet', () => {
     const s = createInitialState(1, ruleset);
     expect(s.cumulativeKillBounty).toBe(0);
     expect(s.lives).toBeGreaterThan(0); // the survival term would be nonzero if it counted
     expect(deriveHud(s, ruleset).score).toBe(0);
   });
 
-  it('equals the accrued kill bounty mid-run', () => {
+  it('equals the accrued kill bounty PLUS the accrued early-call credit mid-run (M2-S2)', () => {
+    // `startDefendedRun` early-calls wave 1 at tick 0, which earns a real early-call
+    // credit at launch (the divisor is 50, sampled from the undecremented countdown) —
+    // the running score is `kb + credit`, not `kb` alone, once M2-S2's credit accrues.
     const s = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
-    expect(s.phase).toBe('active');
-    expect(deriveHud(s, ruleset).score).toBe(s.cumulativeKillBounty);
+    expect(s.phase).toBe('running');
+    expect(s.cumulativeEarlyCallCredit).toBeGreaterThan(0);
+    expect(deriveHud(s, ruleset).score).toBe(s.cumulativeKillBounty + s.cumulativeEarlyCallCredit);
   });
 
   it('does not change when a creep leaks while the run is active', () => {
@@ -167,7 +375,7 @@ describe('hud score — earned components while live, authoritative once termina
     const bountyBefore = killed.cumulativeKillBounty;
     const livesBefore = killed.lives;
     const leaked = stepUntil(killed, (x) => x.lives < livesBefore);
-    expect(leaked.phase).toBe('active'); // still live, not resolved by the leak
+    expect(leaked.phase).toBe('running'); // still live, not resolved by the leak
     expect(leaked.cumulativeKillBounty).toBe(bountyBefore); // the leak cost a life, not a kill
     expect(deriveHud(leaked, ruleset).score).toBe(scoreBefore);
   });
@@ -180,8 +388,11 @@ describe('hud score — earned components while live, authoritative once termina
     ] as const) {
       s = step(s, ruleset, [{ kind: 'placeTower', anchor }]);
     }
+    // Early-call only wave 1 — the later waves auto-launch on their own countdown
+    // (300 ticks each, chained off the prior wave's LAUNCH per PLAN.md's flip-tick rule),
+    // which the fixed defense clears within the `stepUntil` budget below.
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
-    const won = stepUntil(s, (x) => x.phase === 'won');
+    const won = stepUntil(s, (x) => x.phase === 'won', 10_000);
     expect(won.cumulativeKillBounty).toBeGreaterThan(0);
     expect(won.lives).toBeGreaterThan(0);
     const score = deriveHud(won, ruleset).score;
@@ -217,7 +428,7 @@ describe('hud score — earned components while live, authoritative once termina
 describe('interpolation — by entity id', () => {
   const vm = (tick: number, creeps: RenderVM['creeps']): RenderVM => ({
     tick,
-    phase: 'active',
+    phase: 'running',
     creeps,
     towers: [],
   });

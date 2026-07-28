@@ -158,13 +158,17 @@ describe('main — createApp wiring & frame loop', () => {
     expect(pauseBtn.hidden).toBe(true);
     expect(dockText(primaryBtn)).toBe('Start');
 
-    primaryBtn.click(); // launches the run (M1's one wave, immediately)
+    primaryBtn.click(); // unholds the run — Start no longer claims wave 1 (PLAN.md P3 step 15)
     // Start re-homes focus to the board (M3): overlay.update() hides the just-clicked
     // primary button, which would otherwise drop focus to document.body.
     expect(document.activeElement).toBe(board);
     sched.frame((clock += 16));
     expect(pauseBtn.hidden).toBe(false);
-    expect(primaryBtn.hidden).toBe(true); // hides for the rest of the run
+    // The primary control MORPHS rather than hiding: it stays visible for the rest of the
+    // run (Call wave), hiding only once the run is terminal — later waves auto-launch on
+    // their own countdown below without a further primary-button press.
+    expect(primaryBtn.hidden).toBe(false);
+    expect(dockText(primaryBtn)).toBe('Call wave');
 
     pauseBtn.click();
     sched.frame((clock += 16));
@@ -174,7 +178,8 @@ describe('main — createApp wiring & frame loop', () => {
     sched.frame((clock += 16));
     expect(dockText(speedBtn)).toBe('Speed: 2x');
 
-    // Drive frames until the run terminates (results screen appears).
+    // Drive frames until the run terminates (results screen appears) — later waves
+    // auto-launch on their own countdown even without further primary-button presses.
     const results = root.querySelector<HTMLElement>('.wy-results')!;
     for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
     expect(results.hidden).toBe(false);
@@ -353,10 +358,10 @@ describe('main — home link visibility (hidden only while the run is live)', ()
 
     dockButton(h.root, 'Start').click();
     // The seam: no frame between the click and this assertion. The run is now started but
-    // still in the pre-wave COUNTDOWN — the sim phase is unchanged, which is exactly why the
-    // rule reads `ui.started` rather than the phase.
+    // still counting down toward wave 1 — the sim's own phase is unchanged (`running`
+    // either way), which is exactly why the rule reads `ui.started` rather than the phase.
     expect(h.state()).toEqual(HIDDEN);
-    expect(h.board.dataset.simPhase).not.toBe('active');
+    expect(h.board.dataset.simPhase).toBe('running');
     // Hiding must not strand focus inside the link (see the RESUME case below): Start re-homes
     // focus to the board, so nothing is left pointing at a node that just left the tab order.
     expect(h.home.contains(document.activeElement)).toBe(false);
@@ -645,7 +650,7 @@ describe('main — the live-run exit guard (owned by main.ts)', () => {
     h.frame();
     const pending = Number(h.board.dataset.pendingAdds);
     expect(pending, 'fixture failed to queue a pre-start tower').toBeGreaterThan(0);
-    expect(h.board.dataset.runStarted).toBe('false'); // still HELD — that is the point
+    expect(h.board.dataset.started).toBe('false'); // still HELD — that is the point
     return pending;
   }
 
@@ -681,7 +686,7 @@ describe('main — the live-run exit guard (owned by main.ts)', () => {
     leave.querySelector<HTMLButtonElement>('.wy-leave-stay')!.click();
     h.frame();
     expect(Number(h.board.dataset.pendingAdds), 'Stay discarded the buffered plan').toBe(planned);
-    expect(h.board.dataset.runStarted).toBe('false'); // still held, still planning
+    expect(h.board.dataset.started).toBe('false'); // still held, still planning
     h.app.destroy();
   });
 
@@ -1006,7 +1011,9 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     primaryBtn.click();
     frame();
     expect(fs.calls()).toBe(0);
-    expect(primaryBtn.hidden).toBe(true); // the run started regardless
+    // The run started regardless — the control morphs to "Call wave" rather than hiding.
+    expect(primaryBtn.hidden).toBe(false);
+    expect(dockText(primaryBtn)).toBe('Call wave');
   });
 
   it('the keymapped start key routes through the SAME app-level path as the Dock button', () => {
@@ -1019,7 +1026,7 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     board.dispatchEvent(new KeyboardEvent('keydown', { code: START_KEY, cancelable: true }));
     frame();
     expect(fs.calls()).toBe(1);
-    expect(board.dataset.runStarted).toBe('true');
+    expect(board.dataset.started).toBe('true');
     expect(document.activeElement).toBe(board); // the same focus re-home the Dock path does
   });
 

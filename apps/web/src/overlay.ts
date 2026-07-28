@@ -12,7 +12,13 @@
 // save/restore.
 
 import { FP_ONE } from '@wynding/engine';
-import { COLOUR_MODES, type HudVM, type ColourMode } from '@wynding/render';
+import {
+  COLOUR_MODES,
+  type HudVM,
+  type HudPreview,
+  type PreviewEntryVM,
+  type ColourMode,
+} from '@wynding/render';
 import { MS_PER_TICK, isTerminalPhase, type CompiledRuleset } from '@wynding/sim';
 import { t } from './i18n/t';
 import { formatNumber } from './i18n/number';
@@ -103,9 +109,9 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
  *  the full localized message sits alongside it as the element's actual accessible text. A
  *  glyph has no language, so routing it through the `t()` catalog would create a
  *  translatable entry with nothing to translate — the same exemption the codebase already
- *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The two
- *  genuinely WORDED compact forms (the wave slot's countdown and active markers) do go
- *  through the catalog, as `hud.wave.compact.*`. */
+ *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The one
+ *  genuinely WORDED compact form (the wave slot's countdown) goes through the catalog, as
+ *  `hud.wave.compact.countdown`. */
 const ICONS = {
   lives: '♥',
   bounty: '◈',
@@ -166,7 +172,7 @@ export function createOverlay(
   abortGesture: () => void,
   install: InstallHandle,
 ): Overlay {
-  const { hud: hudEls, dock, card, panel, live, banner } = shell;
+  const { hud: hudEls, preview: previewEl, dock, card, panel, live, banner } = shell;
   const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
 
   // Dock markup contract (Story 11 P1): every Dock button carries an aria-hidden icon span
@@ -180,21 +186,30 @@ export function createOverlay(
 
   settingsParts.icon.textContent = ICONS.settings;
   settingsParts.text.textContent = t('controls.settings');
-  // The Dock's headline Start action (PLAN.md P4) — the old "Call wave now" button is
-  // gone; `primaryBtn` (the empty slot P1 reserved, carrying the shared `.wy-primary`
-  // primary-styled look — ui.css — with the results dialog's contrast spot-check scoped to
-  // `.wy-results .wy-primary` so it never samples this Dock button)
-  // is wired here. Visibility (visible pre-start, hidden for the rest of the run once
-  // pressed) and the Pause button's own hidden-pre-start state are both driven per-frame
-  // by `update()` below, since they depend on live `UiState`, not anything fixed at
-  // construction time.
-  // Start keeps its VISIBLE text label in both layouts (contract §2) — no icon form; the
-  // empty icon span collapses (`.wy-btn-icon:empty` has nothing to render).
+  // The Dock's MORPHING primary action (PLAN.md P3 step 15/17, M2-S2): `primaryBtn` (the
+  // empty slot P1 reserved, carrying the shared `.wy-primary` primary-styled look —
+  // ui.css — with the results dialog's contrast spot-check scoped to `.wy-results
+  // .wy-primary` so it never samples this Dock button) is wired here. Pre-start it reads
+  // "Start" and starts the run (which no longer claims wave 1 — Start ≠ claiming); once
+  // started it reads "Call wave" and enqueues `callWaveEarly` for whichever wave is next;
+  // it hides once the run is terminal. Text/visibility/the `aria-disabled` states are all
+  // driven per-frame by `update()`'s `renderPrimary` below, since they depend on live
+  // `HudVM`/`UiState`, not anything fixed at construction time.
+  // The button keeps its VISIBLE text label in both layouts in every state (contract §2)
+  // — no icon form; the empty icon span collapses (`.wy-btn-icon:empty` has nothing to
+  // render).
   primaryParts.text.textContent = t('controls.start');
 
   pauseBtn.addEventListener('click', () => onAction({ type: 'togglePause' }));
   speedBtn.addEventListener('click', () => onAction({ type: 'cycleSpeed' }));
-  primaryBtn.addEventListener('click', () => onAction({ type: 'start' }));
+  // `aria-disabled` (never native `disabled` — Round 2 finding #4: dynamically disabling
+  // the FOCUSED primary control, e.g. a just-clicked call landing pending, must not strand
+  // focus by dropping it from the tab order) is activation-suppressed here, at the one
+  // click site, rather than by removing the listener per state.
+  primaryBtn.addEventListener('click', () => {
+    if (primaryBtn.getAttribute('aria-disabled') === 'true') return;
+    onAction({ type: 'start' });
+  });
 
   // --- Card: the single M1 `basic` tower (PLAN.md P2) ---
   card.name.textContent = t('tower.basic.name');
@@ -630,10 +645,12 @@ export function createOverlay(
       // in-flight captured gesture must cancel by the Story 10 contract rather than commit
       // against geometry that moved underneath it.
       abortGesture();
-      // On the Start edge `update()` has ALREADY hidden `primaryBtn` before calling in here,
-      // and `focus()` on a hidden element no-ops (stranding focus on `document.body`). Re-home
-      // to a GUARANTEED-focusable target locally — the board, which is where focus lands on
-      // Start anyway — instead of depending on `update()`'s call ordering across modules.
+      // `focus()` on a hidden element no-ops (stranding focus on `document.body`), so the
+      // fallback must be conditionally GUARANTEED-focusable rather than hardcoded to one
+      // target: `primaryBtn` stays visible through the Start edge now (M2-S2's morph, PLAN.md
+      // P3 step 17 — it hides only once the run is terminal, never merely on Start), so it IS
+      // the fallback in the common case; the board remains the fallback for the one state
+      // where `primaryBtn` genuinely is hidden (terminal).
       if (!showBanner) reHomeFrom(banner.root, primaryBtn.hidden ? shell.board : primaryBtn);
       banner.root.hidden = !showBanner;
     }
@@ -823,6 +840,14 @@ export function createOverlay(
   // The live region's last-announced outcome sequence (Fix A) — `null` so the very first
   // `update()` call always announces, even when the initial outcome is `null` (message '').
   let lastAnnouncedSeq: number | null = null;
+  // The Start→Call-wave morph announcement's own one-shot latch (M2-S2, PLAN.md P3 step
+  // 17) — separate from `lastAnnouncedSeq` (which tracks placement/arm/sell outcomes, not
+  // this transition) so the two announcements can never suppress each other. Starts `true`
+  // (not `false`): the announcement is for a GENUINE `started` false→true edge, so it must
+  // stay silent unless `update()` actually observed the `false` side first — a caller whose
+  // very first `update()` call already has `ui.started === true` (a resumed/host-provided
+  // snapshot, not necessarily a fresh boot) must not read as "just started".
+  let announcedStarted = true;
   function renderPanel(ui: UiState, refund: number): void {
     const key =
       ui.armed !== null
@@ -884,6 +909,102 @@ export function createOverlay(
     }
   }
 
+  // --- Wave preview (M2-S2, PLAN.md P3 steps 16-17): its own visible surface in BOTH
+  // layouts, near the countdown, hosted inside the existing keyboard-scrollable `.wy-hud`
+  // group (never chip-hosted — Round 1 finding #7). ---
+
+  // Exhaustive literal-key lookup (never a computed key — the i18n extraction gate reads
+  // string-literal `t()` arguments only) for every catalog-id creep name. A creepId that
+  // isn't in the catalog (a forged/future content id this build doesn't know) falls back
+  // to the localized generic name rather than ever rendering a raw id (Round 2 finding
+  // #9 / ADR 0004) — dev-mode-only, since a genuinely compiled ruleset can't produce one
+  // (the preview's `entriesSummary` is derived from validated, catalog-resolved entries).
+  const CREEP_NAME: Readonly<Partial<Record<string, () => string>>> = {
+    normal: () => t('creep.normal.name'),
+  };
+  function creepName(id: string): string {
+    const label = CREEP_NAME[id];
+    if (label !== undefined) return label();
+    if (import.meta.env.DEV) {
+      // The ONE dev-mode diagnostic in this module — a mapping gap here is a content/
+      // catalog bug, worth surfacing loudly in dev.
+      console.warn(`wave preview: creep id '${id}' has no catalog name — using the fallback`);
+    }
+    return t('creep.unknown.name', { id });
+  }
+
+  /** "{count} × {name} — {domain}, armor {n}, {immunities}" (PLAN.md P3 step 17), never
+   *  colour/icon-only. `domain`/`immunities` fall back to the raw sv6 value outside
+   *  'ground'/empty — both are capability-closed at this milestone (Out of scope: "armor,
+   *  domains, immunities … capability stays closed on all of them"), so those branches are
+   *  unreached by the shipped bundle; kept so a future story that opens the capability
+   *  doesn't silently render nothing for a value it hasn't allocated a catalog key for yet. */
+  function previewEntryText(entry: PreviewEntryVM): string {
+    const domain = entry.domain === 'ground' ? t('hud.preview.domain.ground') : entry.domain;
+    const immunities =
+      entry.immunities.length === 0
+        ? t('hud.preview.immunities.none')
+        : entry.immunities.join(', ');
+    return t('hud.preview.entry', {
+      count: entry.count,
+      name: creepName(entry.creepId),
+      domain,
+      armor: t('hud.preview.armor', { armor: entry.armor }),
+      immunities,
+    });
+  }
+
+  function renderPreview(preview: HudPreview | null): void {
+    if (preview === null) {
+      previewEl.root.hidden = true;
+      return;
+    }
+    previewEl.root.hidden = false;
+    if (preview.kind === 'lastWave') {
+      previewEl.title.textContent = t('hud.preview.lastWave');
+      clearChildren(previewEl.list);
+      return;
+    }
+    previewEl.title.textContent = t('hud.preview.title', {
+      waveNumber: preview.waveNumber,
+      waveCount: preview.waveCount,
+    });
+    clearChildren(previewEl.list);
+    for (const entry of preview.entries) {
+      const li = doc.createElement('li');
+      li.textContent = previewEntryText(entry);
+      previewEl.list.appendChild(li);
+    }
+  }
+
+  /** The morphing primary control's text + `aria-disabled` state (PLAN.md P3 step 17):
+   *  pre-start "Start" (always enabled); once started, "Call wave" — `aria-disabled` while
+   *  a call is pending (own pending-launch label) OR the buffer is momentarily full
+   *  (`UiState.callWaveReady` folds both `HudVM.callable` and buffer capacity, Round 2
+   *  finding #3) OR the last wave has already launched (visible-disabled, never hidden —
+   *  Round 1 finding #5's callable/launchPending distinction plus the explicit
+   *  after-final-launch state); hidden once the run is terminal. `aria-disabled`, never
+   *  native `disabled` (Round 2 finding #4) — the click listener above suppresses
+   *  activation instead, so a disabled state never drops focus off a control that may
+   *  hold it (e.g. the just-clicked button landing pending). */
+  function renderPrimary(hud: HudVM, ui: UiState): void {
+    if (isTerminalPhase(hud.phase)) {
+      primaryBtn.hidden = true;
+      return;
+    }
+    primaryBtn.hidden = false;
+    if (!ui.started) {
+      if (primaryParts.text.textContent !== t('controls.start')) {
+        primaryParts.text.textContent = t('controls.start');
+      }
+      primaryBtn.setAttribute('aria-disabled', 'false');
+      return;
+    }
+    const label = hud.launchPending ? t('controls.callWave.pending') : t('controls.callWave');
+    if (primaryParts.text.textContent !== label) primaryParts.text.textContent = label;
+    primaryBtn.setAttribute('aria-disabled', String(!ui.callWaveReady));
+  }
+
   function outcomeMessage(outcome: PlacementOutcome | null): string {
     if (outcome === null) return '';
     const name = t('tower.basic.name');
@@ -920,29 +1041,20 @@ export function createOverlay(
       );
       setChip(hudEls.score, t('hud.score', { count: hud.score }), `${ICONS.score} ${hud.score}`);
       setChip(hudEls.stars, t('hud.stars', { count: hud.stars }), `${ICONS.stars} ${hud.stars}`);
-      // Wave slot states (Story 11 P1). Pre-start the slot is HIDDEN rather than carrying a
-      // prompt: the sim's countdown figure is meaningless while held (it never ticks down
-      // until Start), and the Dock's headline "Start" button is the affordance that says so
-      // — a chip repeating it would just cost a row of the Compact column. Once started,
-      // countdownSeconds is null for BOTH active and terminal phases — only label a live
-      // wave "in progress"; a finished match shows no wave chip (its outcome is the dialog).
-      // `countdown` carries the narrowing itself (null unless a started run is counting down),
-      // so `countdown !== null` types it as `number` in the branches below — no `as number`.
-      const countdown = view.ui.started ? hud.countdownSeconds : null;
-      const active = view.ui.started && hud.countdownSeconds === null && hud.phase === 'active';
+      // Wave chip: COUNTDOWN-ONLY (M2-S2, PLAN.md P3 step 17 — the composition text moved
+      // to its own preview surface below, so the chip no longer carries an "in progress"
+      // fallback). VISIBLE PRE-START now too (`HudVM.countdownSeconds` reads the sim's real
+      // `countdownRemaining`, which is meaningful before `start()` — the Start decouple —
+      // not just after); hidden once every wave has launched (its preview surface shows the
+      // last-wave marker instead) or the run is terminal.
       setChip(
         hudEls.wave,
-        countdown !== null
-          ? t('hud.countdown', { seconds: countdown })
-          : active
-            ? t('hud.wave.active')
-            : '',
-        countdown !== null
-          ? t('hud.wave.compact.countdown', { s: countdown })
-          : active
-            ? t('hud.wave.compact.active')
-            : '',
+        hud.countdownSeconds !== null ? t('hud.countdown', { seconds: hud.countdownSeconds }) : '',
+        hud.countdownSeconds !== null
+          ? t('hud.wave.compact.countdown', { s: hud.countdownSeconds })
+          : '',
       );
+      renderPreview(hud.preview);
       // Pause is HIDDEN (not disabled) pre-start (PLAN.md P4) — there's nothing to pause
       // yet, and a hidden control can't be tabbed to or announced as a false affordance.
       pauseBtn.hidden = !view.ui.started;
@@ -951,14 +1063,25 @@ export function createOverlay(
       pauseBtn.setAttribute('aria-pressed', String(view.paused));
       speedParts.icon.textContent = `${view.speed}${ICONS.speed}`;
       speedParts.text.textContent = t('controls.speed', { factor: view.speed });
-      // The primary Start action hides for the rest of the run once pressed (PLAN.md P4:
-      // M1 ships exactly one wave — there's no later-wave affordance to show instead).
-      primaryBtn.hidden = view.ui.started;
+      renderPrimary(hud, view.ui);
+      // The Start→Call-wave morph is announced through the existing polite live region
+      // (Round 1 finding #8): Start moves focus to the board and the HUD itself is not
+      // live, so without this the morph is undiscoverable to AT users. Fires exactly once
+      // per run, on the `started` false→true edge — `announcedStarted` resets with every
+      // fresh run (it goes false the moment `ui.started` itself does, e.g. Play-again), so
+      // the announcement re-arms for the next run rather than firing only the session's
+      // first Start.
+      if (!view.ui.started) {
+        announcedStarted = false;
+      } else if (!announcedStarted) {
+        announcedStarted = true;
+        live.textContent = t('live.started');
+      }
       card.root.setAttribute('aria-pressed', String(view.ui.armed !== null));
       // Home link auto-hide. VISIBLE while the run is held pre-start, while paused, and once
       // it resolves; HIDDEN for any started-and-unpaused moment — including the started
-      // pre-wave countdown, which is why this reads `ui.started` rather than the sim phase
-      // (the sim has no "held" concept; it sits in `pre-wave` either way).
+      // wave-1 countdown, which is why this reads `ui.started` rather than the sim phase
+      // (the sim has no "held" concept; it counts down toward wave 1 either way).
       //
       // `inert` is set HERE, in the same synchronous write as `data-live`, rather than being
       // left to the CSS transition: it removes the tab stop and every activation path the

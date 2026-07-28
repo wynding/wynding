@@ -158,10 +158,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   };
   const handle = deps.sceneFactory(board, geometry);
   const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap, {
-    // The keymapped start key routes through the SAME app-level transition as the Dock's
-    // Start button (PLAN.md Story 11 P4) — otherwise it would call `controller.start()`
-    // directly and skip the fullscreen request, the banner latch and the focus re-home.
-    onStart: () => startRun(),
+    // The keymapped `start` action routes through the SAME morphed app-level primary
+    // action as the Dock's primary button (PLAN.md P3 step 15) — otherwise it would call
+    // `controller.start()`/`controller.callWaveEarly()` directly and skip the fullscreen
+    // request, the banner latch and the focus re-home `startRun()` owns.
+    onStart: () => primaryAction(),
     // Same reasoning as `onStart`: the keymapped pause key must run the app-level transition
     // (which refreshes the home link's visibility synchronously), not `controller.togglePause()`.
     onTogglePause: () => togglePause(),
@@ -247,7 +248,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *
    *  Fullscreen is requested only on the `started` false→true EDGE: repeated Start presses
    *  mid-run never re-request, while Play-again (which returns the run to a pre-start state)
-   *  makes the next Start eligible again. */
+   *  makes the next Start eligible again. `startRun` itself no longer enqueues
+   *  `callWaveEarly` (`controller.start()` is now a trivial flag flip, PLAN.md P3 step 15 —
+   *  the Start decouple) — `primaryAction` below is what routes between this and the
+   *  Call-wave path once `started`. */
   function startRun(): void {
     const wasStarted = controller.uiState().started;
     controller.start();
@@ -282,6 +286,20 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // this handler rather than waiting for the frame loop — same reasoning as `ensurePaused`
     // above. Outside the edge deliberately: a repeat Start is a controller no-op, but the
     // refresh is cheap and keeps this path unconditionally correct.
+    refreshHud();
+  }
+
+  /** The morphed primary action (PLAN.md P3 step 15, M2-S2): the SAME control routes to
+   *  `startRun()` (with its fullscreen/install/focus edge handling) while `!started`, and
+   *  to `callWaveEarly()` once the run is under way. One function so the Dock button's
+   *  click and the keymapped `start` action (which now triggers the SAME morphed control,
+   *  not a fixed "Start") can never diverge on which path they take. */
+  function primaryAction(): void {
+    if (!controller.uiState().started) {
+      startRun();
+      return;
+    }
+    controller.callWaveEarly();
     refreshHud();
   }
 
@@ -348,7 +366,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.cycleSpeed();
         break;
       case 'start':
-        startRun();
+        primaryAction();
         break;
       case 'armTower':
         controller.armTower(action.tower);
@@ -385,9 +403,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         resultsShown = false;
         lastHudKey = '';
         // Repaint the HUD NOW rather than waiting for the next scheduled frame (#53): the
-        // fresh run is pre-wave and un-ticking, so until a frame lands the chips still read
-        // the finished run's terminal values — indefinitely if frames are throttled in a
-        // background tab. Same out-of-band refresh the install-state listener uses.
+        // fresh run is held (un-ticking) at wave 1's initial countdown, so until a frame
+        // lands the chips still read the finished run's terminal values — indefinitely if
+        // frames are throttled in a background tab. Same out-of-band refresh the
+        // install-state listener uses.
         refreshHud();
         break;
       case 'verify': {
@@ -424,13 +443,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // attributes on the board element so a spec can assert "held"/"frozen" directly
     // instead of inferring it from a short wait. Cheap dataset writes, so unconditional
     // every frame (no need to gate behind the hudKey throttle below): `data-sim-tick`/
-    // `data-sim-phase` mirror the real sim (frozen at 0/'pre-wave' while held — the sim
-    // itself has no "held" concept), `data-run-started` is the one place that distinction
-    // becomes visible, and `data-pending-adds` mirrors the Pending-build count shown by
-    // the board's own paused-planning presentation.
+    // `data-sim-phase` mirror the real sim (frozen at tick 0, `phase: 'running'`, while
+    // held — the sim itself has no "held" concept: `started` gates `advance()`, not the
+    // sim's own state machine), `data-started` (M2-S2: renamed from `data-run-started`, no
+    // behavior change) is the one place that distinction becomes visible, and
+    // `data-pending-adds` mirrors the Pending-build count shown by the board's own
+    // paused-planning presentation.
     board.dataset.simTick = String(f.curVm.tick);
     board.dataset.simPhase = f.curVm.phase;
-    board.dataset.runStarted = String(controller.uiState().started);
+    board.dataset.started = String(controller.uiState().started);
     board.dataset.pendingAdds = String(f.pendingAdds.length);
     // ...but the HUD only changes on a tick/pause/speed/selection boundary, so gate its
     // recompute + DOM writes on that (they're redundant on the ~60 fps render hot path).

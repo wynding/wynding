@@ -63,7 +63,7 @@ describe('input — keyboard (rebindable, drives the cursor & commands)', () => 
     expect(c.speed()).toBe(2);
   });
 
-  it('KeyC (the start key, PLAN.md P4) launches the run; then builds with confirm and sells with the sell key', () => {
+  it('KeyC (the start key, routed to the morphed primary action) unholds the run WITHOUT launching wave 1 (PLAN.md P3 step 15 decouple); then builds with confirm and sells with the sell key', () => {
     const c = createController(1);
     const km = createKeymap();
     attachInput(document, board, [], c, km, { getRect: () => RECT });
@@ -76,7 +76,8 @@ describe('input — keyboard (rebindable, drives the cursor & commands)', () => 
     board.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter' })); // confirm → build
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(1);
-    expect(c.hud().phase).toBe('active'); // the start key already launched the one wave
+    expect(c.hud().phase).toBe('running');
+    expect(c.hud().waveCursor).toBe(0); // Start claimed nothing — wave 1 hasn't launched
 
     c.aimAt(3, 3); // now selects the tower
     board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX' })); // sell

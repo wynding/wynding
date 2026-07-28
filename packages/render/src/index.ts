@@ -20,6 +20,8 @@ export type {
   TowerVM,
   RenderVM,
   HudVM,
+  HudPreview,
+  PreviewEntryVM,
   ColourMode,
   GhostVM,
   SelectionVM,

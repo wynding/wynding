@@ -5,6 +5,32 @@
 
 import type { SimPhase } from '@wynding/sim';
 
+/** One creep row in the wave preview (M2-S2) — the preview-facing axes
+ *  `CompiledCreep` carries, joined onto `waves[waveCursor].entriesSummary`. */
+export interface PreviewEntryVM {
+  readonly creepId: string;
+  readonly count: number;
+  readonly domain: 'ground' | 'air';
+  readonly armor: number;
+  readonly immunities: readonly ('slow' | 'stun')[];
+}
+
+/** The HUD's wave-preview surface (M2-S2, PLAN.md P3 step 16): `'upcoming'` while
+ *  `waveCursor < waveCount` shows the coming wave's composition (the authoritative
+ *  source is `CompiledWave.entriesSummary` — one row per creep id, first-appearance
+ *  order, already aggregated at compile time); `'lastWave'` is the explicit marker
+ *  once every wave has launched but the run hasn't resolved yet (nothing left to
+ *  preview, but the run is still live — distinct from `HudVM.preview === null`,
+ *  which means terminal). */
+export type HudPreview =
+  | {
+      readonly kind: 'upcoming';
+      readonly waveNumber: number;
+      readonly waveCount: number;
+      readonly entries: readonly PreviewEntryVM[];
+    }
+  | { readonly kind: 'lastWave' };
+
 /** One creep as the renderer sees it: derived point (fixed-point sim units) + health. */
 export interface CreepVM {
   readonly id: number;
@@ -49,6 +75,25 @@ export interface HudVM {
   readonly score: number;
   readonly stars: number;
   readonly won: boolean;
+  /** Total waves in the ruleset — static per run, but carried here so the overlay never
+   *  reaches back into `CompiledRuleset` for a single number. */
+  readonly waveCount: number;
+  /** Index of the next wave to launch (mirrors `SimState.waveCursor`). */
+  readonly waveCursor: number;
+  /** A buffered `callWaveEarly` not yet consumed by the wave phase — mirrors
+   *  `SimState.launchPending` (or its `previewInputs` projection, PLAN.md P3: "the
+   *  projection path surfaces a buffered call as `launchPending`"). Drives the primary
+   *  control's pending-launch state distinctly from `callable === false` for other
+   *  reasons (last wave, terminal). */
+  readonly launchPending: boolean;
+  /** Whether `callWaveEarly` would be accepted right now: `running && waveCursor <
+   *  waveCount && !launchPending` (PLAN.md P3 step 16). The web layer additionally folds
+   *  in tick-buffer capacity (step 15) — that's presentation-only and out of `@wynding/render`'s
+   *  scope, so this field is the sim-semantics half of "callable" only. */
+  readonly callable: boolean;
+  /** The wave-preview surface (PLAN.md P3 step 16) — `null` once the run is terminal
+   *  (there is nothing left to preview; the results dialog takes over). */
+  readonly preview: HudPreview | null;
 }
 
 /** Selectable colourblind mode (a11y setting, GAG §2). `default` = the base palette. */

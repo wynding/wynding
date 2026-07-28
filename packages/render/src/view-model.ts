@@ -6,13 +6,12 @@ import {
   projectCreep,
   deriveScore,
   deriveStars,
-  isTerminalPhase,
   MS_PER_TICK,
   type SimState,
   type PreviewState,
   type CompiledRuleset,
 } from '@wynding/sim';
-import type { RenderVM, HudVM, CreepVM, TowerVM } from './types';
+import type { RenderVM, HudVM, HudPreview, PreviewEntryVM, CreepVM, TowerVM } from './types';
 import { clamp01 } from './num';
 
 // The health-fraction denominator is a pure function of the (immutable) ruleset, but
@@ -64,30 +63,87 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
   return { tick: state.tick, phase: state.phase, creeps, towers };
 }
 
-/** Derive the HUD fields (countdown in whole seconds, score, stars) from `state`. Also
- *  accepts a `PreviewState` — the controller's pending-aware presentation reads the
- *  HUD off a `previewInputs()` result while the run itself stays uncommitted.
+/** Join `waves[waveCursor].entriesSummary` onto the compiled creep catalog for the
+ *  wave-preview surface (PLAN.md P3 step 16). `entriesSummary` is the wave's
+ *  authoritative preview source (first-appearance order, already aggregated at compile
+ *  time), so this is a straight per-row lookup — no aggregation logic lives here. A
+ *  creepId absent from `creepById` cannot occur for a genuinely compiled ruleset (every
+ *  `entriesSummary` row is derived from a validated, catalog-resolved entry), but the
+ *  join stays defensive rather than throwing: a forged/hand-built ruleset must not crash
+ *  the renderer, so a missing definition falls back to the safest sv6-legal values
+ *  (ground domain, no armor, no immunities) rather than dropping the row (an entry
+ *  disappearing from the preview is a worse UX bug than one rendering with placeholder
+ *  metadata — a player would trust the shorter list).
+ */
+function previewEntries(
+  wave: CompiledRuleset['waves'][number],
+  ruleset: CompiledRuleset,
+): PreviewEntryVM[] {
+  return wave.entriesSummary.map(({ creepId, count }) => {
+    const def = ruleset.creepById[creepId];
+    return {
+      creepId,
+      count,
+      domain: def?.domain ?? 'ground',
+      armor: def?.armor ?? 0,
+      immunities: def?.immunities ?? [],
+    };
+  });
+}
+
+/** Derive the wave-preview surface (PLAN.md P3 step 16): the coming wave's composition
+ *  while `waveCursor < waveCount`, the explicit last-wave marker once every wave has
+ *  launched but the run is still live, or `null` once terminal (the results dialog
+ *  takes over — there is nothing left to preview). */
+function derivePreview(
+  state: SimState | PreviewState,
+  ruleset: CompiledRuleset,
+): HudPreview | null {
+  const waveCount = ruleset.waves.length;
+  if (state.phase !== 'running') return null;
+  // Guarded like every other forged-state read in this module: a negative/non-integer
+  // `waveCursor` cannot address a real wave, so it reads as the safe "nothing left to
+  // preview" state rather than indexing out of bounds — `coerceSoa` never actually
+  // produces one (it's clamped to `[0, waves.length]`), but render code stays defensive
+  // regardless of what produced the state it's handed.
+  const cursor = Number.isSafeInteger(state.waveCursor) ? state.waveCursor : waveCount;
+  const wave = cursor >= 0 && cursor < waveCount ? ruleset.waves[cursor] : undefined;
+  if (wave === undefined) return { kind: 'lastWave' };
+  return {
+    kind: 'upcoming',
+    waveNumber: cursor + 1,
+    waveCount,
+    entries: previewEntries(wave, ruleset),
+  };
+}
+
+/** Derive the HUD fields (countdown in whole seconds, score, stars, wave preview) from
+ *  `state`. Also accepts a `PreviewState` — the controller's pending-aware presentation
+ *  reads the HUD off a `previewInputs()` result while the run itself stays uncommitted;
+ *  the wave-preview's `callable`/`launchPending` in particular MUST read the projection
+ *  (PLAN.md P3 step 16: "the projection path surfaces a buffered call as
+ *  `launchPending`") so a queued-while-paused call disables the control immediately.
  *
- *  `score` is phase-dependent (#53): the HUD shows the score components ALREADY EARNED,
- *  and the survival term (`lives × survivalMul`) is credited only at resolution. Rendering
- *  the authoritative terminal formula against a live state showed `Score: 250` before a
- *  wave had even launched. This is deliberately NOT a monotonicity guarantee — the rule is
- *  "earned so far", and a future score input (e.g. an M2 sell haircut) may legitimately
- *  lower a live score. Once terminal, `deriveScore` is authoritative and unchanged, so the
- *  results dialog and the replay-verify comparison still see the server-re-derivable number. */
+ *  `score` is now unconditionally `deriveScore` (#53's phase-dependent scorer, M2-S2):
+ *  the `running` branch already returns exactly the "earned so far" figure (Σ kill
+ *  bounty + Σ early-call credit, no survival term) the HUD wants live, and the `won`/
+ *  `lost` branches are the authoritative terminal formula the results dialog and the
+ *  replay-verify comparison compare against — one call now covers every phase. */
 export function deriveHud(state: SimState | PreviewState, ruleset: CompiledRuleset): HudVM {
-  const preWave = state.phase === 'pre-wave';
-  const ticksLeft = preWave ? Math.max(0, state.launchAtTick - state.tick) : 0;
-  // Guarded exactly as `deriveScore` guards the same accumulator, so a forged/ragged
-  // state reads 0 here rather than leaking NaN into the chip.
-  const earned = Number.isSafeInteger(state.cumulativeKillBounty) ? state.cumulativeKillBounty : 0;
+  const waveCount = ruleset.waves.length;
+  const counting = state.phase === 'running' && state.waveCursor < waveCount;
   return {
     phase: state.phase,
     lives: state.lives,
     bounty: state.bounty,
-    countdownSeconds: preWave ? Math.ceil((ticksLeft * MS_PER_TICK) / 1000) : null,
-    score: isTerminalPhase(state.phase) ? deriveScore(state, ruleset) : earned,
+    countdownSeconds: counting ? Math.ceil((state.countdownRemaining * MS_PER_TICK) / 1000) : null,
+    score: deriveScore(state, ruleset),
     stars: deriveStars(state, ruleset),
     won: state.phase === 'won',
+    waveCount,
+    waveCursor: state.waveCursor,
+    launchPending: state.launchPending,
+    callable: state.phase === 'running' && state.waveCursor < waveCount && !state.launchPending,
+    preview: derivePreview(state, ruleset),
   };
 }
