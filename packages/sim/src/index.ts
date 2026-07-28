@@ -332,10 +332,25 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   // computed here too since a repaired `waveResolved` needs it.
   const aliveByWave = deriveAliveByWave(state.creeps.wave, waveCount);
 
+  // The repair SOURCE itself must be clean (CodeRabbit PR #68): `coerceSoa` runs
+  // BEFORE step()'s tick-totality guard, so an unclamped forged `state.tick`
+  // (NaN/negative) would flow INTO every "repaired" launch tick — poisoned arrays
+  // that survive the subsequent no-op early-return into the hash/serializer. (An
+  // unclamped NaN would also make the write unrecognizable to the identity checks
+  // below — `NaN !== NaN` — re-triggering copy-on-write clones on every pass of a
+  // poisoned state: the hash would NOT move, but the repairs-nothing/copies-
+  // nothing hot-path property would be gone. Local QC round 2 pinned the precise
+  // property.) A poisoned tick clamps to 0 here; the totality guard still no-ops
+  // the step itself right after. With the clamp in place, `repairTick` is always
+  // a non-negative safe integer, so the `!== repairTick` write-avoidance guards
+  // below can only be false for a value that was already valid — they are kept
+  // for symmetry with the sibling branches, not because a NaN can reach them.
+  const repairTick = Number.isSafeInteger(state.tick) && state.tick >= 0 ? state.tick : 0;
+
   for (let k = 0; k < waveCount; k++) {
     if (k < waveCursor) {
       // LAUNCHED wave: its launch tick, if present, must be a safe int in
-      // [0, state.tick]; otherwise it is repaired to `state.tick` AND CASCADES —
+      // [0, repairTick]; otherwise it is repaired to `repairTick` AND CASCADES —
       // a repaired launch tick beside an exhausted spawn cursor would otherwise
       // resolve a wave that spawned nothing, so the cursor resets to 0 and
       // `resolved` to false alongside it.
@@ -343,11 +358,11 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       const tickValid =
         Number.isSafeInteger(rawTick) &&
         (rawTick as number) >= 0 &&
-        (rawTick as number) <= state.tick;
+        (rawTick as number) <= repairTick;
       let launchTickRepaired = false;
       if (!tickValid) {
-        if (launchTickCow.arr[k] !== state.tick) {
-          ownWaveLaunchTick()[k] = state.tick;
+        if (launchTickCow.arr[k] !== repairTick) {
+          ownWaveLaunchTick()[k] = repairTick;
         }
         launchTickRepaired = true;
       }

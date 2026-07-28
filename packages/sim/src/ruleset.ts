@@ -516,8 +516,8 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // is expanded, then the whole wave's spawns are stable-sorted by
   // `(offsetTicks, entryRow)` — the concurrent-stream interleave runs ONCE here, so
   // the sim only ever drains a pre-sorted cursor, never runtime-interleaves. Also
-  // aggregates the wave's `entriesSummary` (one row per creep id, first-appearance
-  // order) — the wave-preview's authoritative source.
+  // aggregates the wave's `entriesSummary` (one row per creep id, FIRST-ARRIVAL
+  // order over the sorted timeline) — the wave-preview's authoritative source.
   let totalSpawns = 0; // MAX_SCHEDULED_SPAWNS caps the aggregate across ALL waves.
   let minSpeedFp = Number.MAX_SAFE_INTEGER; // over every creep id ANY wave spawns.
   const tails: number[] = []; // per-wave max spawn offset — the bound gate's tail_k.

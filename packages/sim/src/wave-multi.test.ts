@@ -6,7 +6,7 @@
 // satAdd/satMul saturation helpers, and ragged wave-column termination.
 
 import { describe, it, expect } from 'vitest';
-import { createInitialState, step, deriveScore, type SimInput } from './index';
+import { createInitialState, step, deriveScore, hashSimState, type SimInput } from './index';
 import { satAdd, satMul } from './combat';
 import { testBundle, testRuleset } from './test-support';
 import { compileRuleset } from './ruleset';
@@ -318,6 +318,61 @@ describe('ragged wave-state termination (coerceSoa creep-wave-column totality)',
     expect(s.creeps.id).toHaveLength(1); // only the corrupted row was dropped
     expect(s.creeps.id[0]).toBe(survivingId);
   });
+
+  it('a `wave` column longer than `id` is truncated on the terminal-freeze path, and live rows survive the rebuild', () => {
+    // On a running state the movement rebuild (bounded by id.length) would erase
+    // the forged tail whether or not coerceSoa's length guard exists — a test
+    // there is vacuous for the guard (local QC round 1, mutation-proven). A path
+    // where movement never runs (here: the terminal freeze; the tick-totality
+    // no-op and previewInputs are the others) leaves only the guard between the
+    // forged tail and the hash. The terminal is a LOSS so live creeps remain on
+    // the board (local QC round 2: a won terminal has zero rows, which let a
+    // wipe-everything-on-mismatch mutant survive — the survivors assertion is
+    // load-bearing).
+    const ruleset = testRuleset(OPEN, {
+      creepHp: 10,
+      startingLives: 2,
+      waves: [{ waveCount: 6, waveSpacing: 3, countdownTicks: 5 }],
+    });
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, callEarly); // no towers — the first two leaks end the run
+    for (let t = 0; t < 400 && s.phase === 'running'; t++) s = step(s, ruleset, []);
+    expect(s.phase).toBe('lost'); // terminal WITH survivors still on the board
+    const survivors = [...s.creeps.id];
+    expect(survivors.length).toBeGreaterThan(0);
+    const twin = JSON.parse(JSON.stringify(s)) as typeof s;
+    s.creeps.wave.push(0); // forged trailing element beyond the row authority (`id`)
+    s = step(s, ruleset, []); // freeze path: coerceSoa runs, movement does not
+    const twinStepped = step(twin, ruleset, []);
+    expect(s.creeps.wave.length).toBe(s.creeps.id.length); // tail gone via the guard alone
+    expect(s.creeps.id).toEqual(survivors); // live rows untouched by the rebuild
+    expect(hashSimState(s)).toBe(hashSimState(twinStepped)); // and the hash never saw it
+  });
+
+  it('a forged non-numeric or negative tick cannot poison repaired launch ticks, and the repaired state is stable', () => {
+    // coerceSoa runs BEFORE step()'s tick-totality guard; the repair source is
+    // clamped (a poisoned state.tick repairs launch ticks to 0, never to NaN or a
+    // negative), so the post-repair state is canonical and a second pass leaves
+    // the hash unchanged. Both clamp branches are exercised: NaN (non-safe-int)
+    // and -5 (safe but negative — local QC round 2: this branch was uncovered),
+    // and Infinity (round 3: safe-int check dropped ⇒ repairTick = Infinity makes
+    // EVERY comparison pass, so the repair never fires and the forged 999 rides
+    // into the hash unrepaired — a distinct failure mode from both others).
+    for (const forged of [Number.NaN, -5, Number.POSITIVE_INFINITY]) {
+      const ruleset = testRuleset(OPEN, { waveCount: 1, countdownTicks: 20 });
+      let s = createInitialState(1, ruleset);
+      s = step(s, ruleset, callEarly); // wave 0 launched at tick 0
+      s.tick = forged as unknown as number;
+      s.waveLaunchTick[0] = 999; // forged future launch tick — forces a repair write
+      s = step(s, ruleset, []); // coerce repairs; the totality guard then no-ops
+      expect(s.waveLaunchTick[0]).toBe(0); // clamped repair source, cascade applied
+      expect(s.waveSpawnCursor[0]).toBe(0);
+      expect(s.waveResolved[0]).toBe(false);
+      const h1 = hashSimState(s);
+      s = step(s, ruleset, []); // an identical second pass moves nothing
+      expect(hashSimState(s)).toBe(h1);
+    }
+  });
 });
 
 describe('bound gate — the terminal-tick budget', () => {
@@ -353,6 +408,23 @@ describe('bound gate — the terminal-tick budget', () => {
     );
   });
 
+  it("an EARLY wave's tail can be the peak — a schedule whose first-wave tail exceeds the budget is rejected even though later prefixes are tiny", () => {
+    // Kills the "last wave wins" mutant (local QC round 1): the true peak is
+    // prefix_0 + tail_0 = 100 + 35_900 = 36_000, which with the nonzero traversal
+    // term must throw; a no-max formula reads wave 1's 200 and would accept.
+    expect(() =>
+      compileRuleset(
+        testBundle(OPEN, {
+          waves: [
+            { waveCount: 1, waveSpacing: 5, countdownTicks: 100, offsetTicks: 35_900 },
+            { waveCount: 1, waveSpacing: 5, countdownTicks: 100 },
+          ],
+        }),
+        'test',
+      ),
+    ).toThrow(/cannot reach a terminal state within the tick budget/);
+  });
+
   it("overlapping tails don't double-count: an early wave's long tail under later countdowns compiles (Codex PR #68)", () => {
     // countdowns [10k, 10k] with wave 0 carrying a 20k spawn offset: the latest
     // spawn is max(10k+20k, 20k+0) = 30k — feasible. The superseded
@@ -369,24 +441,20 @@ describe('bound gate — the terminal-tick budget', () => {
     expect(ruleset.waves).toHaveLength(2);
   });
 
-  it('a `wave` column longer than `id` is truncated by the totality pass, not hashed', () => {
-    const ruleset = testRuleset(OPEN, { waveCount: 2, waveSpacing: 1, countdownTicks: 20 });
-    let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, callEarly);
-    s = step(s, ruleset, []); // two creeps on board
-    expect(s.creeps.id.length).toBe(2);
-    const survivors = [...s.creeps.id];
-    s.creeps.wave.push(0); // forged trailing element beyond the row authority (`id`)
-    s = step(s, ruleset, []);
-    expect(s.creeps.wave.length).toBe(s.creeps.id.length); // tail gone
-    expect(s.creeps.id).toEqual(survivors); // valid rows untouched
-  });
-
   it('entriesSummary orders by FIRST ARRIVAL over the sorted timeline, not authored row order (Codex PR #68)', () => {
+    // Three entries whose arrival order [swift, normal, tank] is a NON-TRIVIAL
+    // permutation of authored order [normal, swift, tank] and anti-correlated
+    // with counts (2, 3, 4) — so authored order, reversed-authored order,
+    // count-descending, and count-ascending are ALL killed by the one fixture
+    // (local QC round 1: a two-entry fixture couldn't separate them).
     const base = testBundle(OPEN);
     const bundle = {
       ...base,
-      creepCatalog: [base.creepCatalog[0]!, { ...base.creepCatalog[0]!, id: 'swift' }],
+      creepCatalog: [
+        base.creepCatalog[0]!,
+        { ...base.creepCatalog[0]!, id: 'swift' },
+        { ...base.creepCatalog[0]!, id: 'tank' },
+      ],
       boards: [
         {
           ...base.boards[0]!,
@@ -396,9 +464,9 @@ describe('bound gate — the terminal-tick budget', () => {
               countdownTicks: 10,
               clearBonus: 0,
               entries: [
-                // Authored first, but its offset makes it arrive LAST.
-                { creepId: 'normal', count: 2, spacingTicks: 5, offsetTicks: 100 },
-                { creepId: 'swift', count: 3, spacingTicks: 5 },
+                { creepId: 'normal', count: 2, spacingTicks: 5, offsetTicks: 50 },
+                { creepId: 'swift', count: 3, spacingTicks: 5 }, // offset 0 — arrives first
+                { creepId: 'tank', count: 4, spacingTicks: 5, offsetTicks: 100 },
               ],
             },
           ],
@@ -409,6 +477,7 @@ describe('bound gate — the terminal-tick budget', () => {
     expect(ruleset.waves[0]!.entriesSummary).toEqual([
       { creepId: 'swift', count: 3 },
       { creepId: 'normal', count: 2 },
+      { creepId: 'tank', count: 4 },
     ]);
   });
 });

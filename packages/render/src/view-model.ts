@@ -65,8 +65,9 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
 
 /** Join `waves[waveCursor].entriesSummary` onto the compiled creep catalog for the
  *  wave-preview surface (PLAN.md P3 step 16). `entriesSummary` is the wave's
- *  authoritative preview source (first-appearance order, already aggregated at compile
- *  time), so this is a straight per-row lookup — no aggregation logic lives here. A
+ *  authoritative preview source (FIRST-ARRIVAL order over the sorted spawn timeline,
+ *  already aggregated at compile time), so this is a straight per-row lookup — no
+ *  aggregation logic lives here. A
  *  creepId absent from `creepById` cannot occur for a genuinely compiled ruleset (every
  *  `entriesSummary` row is derived from a validated, catalog-resolved entry), but the
  *  join stays defensive rather than throwing: a forged/hand-built ruleset must not crash

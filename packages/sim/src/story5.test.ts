@@ -110,7 +110,9 @@ describe('wave launch + countdown', () => {
   it('a call after the final wave has launched is a no-op (nothing callable)', () => {
     // (Renamed per CodeRabbit PR #68: `launchPending` never survives its own tick,
     // so "pending across ticks" is not a state this — or any — test can witness;
-    // the same-tick double-call no-op is covered in wave-multi.test.ts.)
+    // the same-tick double-call no-op is pinned 17 lines up in THIS file — the
+    // `accepted [true, false]` idempotence test. Local QC round 3 caught this
+    // comment previously pointing at wave-multi.test.ts, which has no such test.)
     const ruleset = testRuleset(OPEN, { waveCount: 1, countdownTicks: 50 });
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, callEarly); // consumed + launched within this same tick

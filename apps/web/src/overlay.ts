@@ -982,7 +982,31 @@ export function createOverlay(
         : `${preview.waveNumber}/${preview.waveCount}:${preview.entries
             .map((e) => `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.immunities.join('+')}`)
             .join('|')}`;
-    if (key === lastPreviewKey) return;
+    // Locale self-heal (local QC round 2): the key is CONTENT-only, so a runtime
+    // locale/catalog change would otherwise leave stale-language DOM until the wave
+    // moved — defeating the module's deferred-`t()` convention (line ~86). Like
+    // `renderPrimary`, the sentinel compares the exact strings this render would
+    // write: the title AND the first entry row (rows read five catalog keys the
+    // title doesn't — a title-only sentinel would self-heal the heading while the
+    // rows stayed stale; local QC round 2). On drift, fall through and rebuild.
+    // Unreachable while only `en` ships; load-bearing the day a second locale
+    // lands. (Consciously untested: exercising it would mean faking a runtime
+    // catalog-swap mechanism that does not exist. The MEMO direction — unchanged
+    // preview never rebuilds rows — IS pinned: overlay.test.ts node-identity test.)
+    const expectedTitle =
+      preview.kind === 'lastWave'
+        ? t('hud.preview.lastWave')
+        : t('hud.preview.title', { waveNumber: preview.waveNumber, waveCount: preview.waveCount });
+    const firstEntry = preview.kind === 'upcoming' ? preview.entries[0] : undefined;
+    const expectedFirstRow = firstEntry === undefined ? null : previewEntryText(firstEntry);
+    const firstRowCurrent = previewEl.list.firstElementChild?.textContent ?? null;
+    if (
+      key === lastPreviewKey &&
+      previewEl.title.textContent === expectedTitle &&
+      firstRowCurrent === expectedFirstRow
+    ) {
+      return;
+    }
     lastPreviewKey = key;
     if (preview.kind === 'lastWave') {
       previewEl.title.textContent = t('hud.preview.lastWave');

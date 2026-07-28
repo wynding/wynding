@@ -242,6 +242,35 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     expect(items[0]!.textContent).toBe('10 × Creep — ground, armor 0, no immunities');
   });
 
+  it('an unchanged preview never rebuilds its rows — node identity survives repeated updates (the SR-stability memo)', () => {
+    // The memo guard is an a11y contract (a screen-reader virtual cursor or
+    // braille display parked on a row must not have its node torn down every
+    // tick) and, post-locale-sentinel, it is drift-prone by construction: its
+    // three conjuncts must reproduce what the render writes byte-for-byte.
+    // Local QC round 3: disabling the guard left all web tests green — this
+    // test is the pin (it fails under a disabled or drifted guard).
+    const { overlay, shell } = setup();
+    const view = {
+      hud: hud({
+        preview: {
+          kind: 'upcoming' as const,
+          waveNumber: 2,
+          waveCount: 3,
+          entries: [{ creepId: 'normal', count: 10, domain: 'ground', armor: 0, immunities: [] }],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    };
+    overlay.update(view);
+    const firstRow = shell.preview.list.firstElementChild;
+    expect(firstRow).not.toBeNull();
+    for (let i = 0; i < 20; i++) overlay.update(view);
+    expect(shell.preview.list.firstElementChild).toBe(firstRow); // same NODE, not equal text
+  });
+
   it('shows the last-wave marker (no entry list) once every wave has launched', () => {
     const { overlay, shell } = setup();
     overlay.update({

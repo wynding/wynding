@@ -78,15 +78,19 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   // this spec deterministic and fast rather than waiting out three full natural countdowns
   // (smoke.spec.ts exercises the identical flow end-to-end, with the preview + axe).
   const callWave = page.getByRole('button', { name: 'Call wave' });
-  for (let i = 0; i < 3; i++) {
-    await expect(callWave).toBeVisible();
-    const tickBeforeCall = await board.getAttribute('data-sim-tick');
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  for (let waveNumber = 1; waveNumber <= 3; waveNumber++) {
+    // Gate each press on LAUNCH-specific state, not the free-running sim heartbeat:
+    // a tick boundary can fall between a tick-read and the click, so a tick-poll
+    // passes even when the press itself was swallowed or same-tick-deduped (local
+    // QC round 2 + CodeRabbit — the loop would silently stop testing "call every
+    // wave"). The preview title only advances when the PREVIOUS call actually
+    // landed, and the aria gate proves this press is genuinely accepted-able.
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 3`);
+    await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await callWave.click();
-    // Wait for the buffered call to actually land before the next press — a same-tick
-    // double press would just dedupe, not advance the wave cursor — by polling the tick
-    // itself rather than guessing at a duration.
-    await expect(board).not.toHaveAttribute('data-sim-tick', tickBeforeCall ?? '');
   }
+  await expect(previewTitle).toHaveText('Final wave launched — no more waves to call');
 
   // The run resolves — results dialog appears.
   const results = page.getByRole('dialog');

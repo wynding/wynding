@@ -30,10 +30,12 @@ function runToTerminal(c: Controller, cap = 6000): number {
 }
 
 /** Unhold the run AND claim wave 1 — `start()` no longer does the latter (PLAN.md P3
- *  step 15's decouple), so every test that needs a live wave does both. */
+ *  step 15's decouple), so every test that needs a live wave does both. Asserts the
+ *  claim was ACCEPTED: a silently-rejected setup call would leave the test running
+ *  waveless and fail somewhere misleading downstream (CodeRabbit PR #68). */
 function startAndCall(c: Controller): void {
   c.start();
-  c.callWaveEarly();
+  expect(c.callWaveEarly(), 'startAndCall: the wave-1 claim was rejected').toBe(true);
 }
 
 describe('controller — fixed loop, speed & pause', () => {
