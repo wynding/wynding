@@ -53,39 +53,85 @@ ordinary technical senses. Different senses are real inside the scope too ("hit 
 
 ### 3.5. QC before every push
 
-Verify proves the code runs; it cannot tell you the change is coherent with the documents it
-touches. That is the **QC pass**: before every push, re-read the staged diff with fresh eyes and
-adversarially — each patched paragraph checked **upward** against the PRD/ADRs it touches (the
-higher document wins), and **sideways** against its sibling patches in the same section. Review-fix
-pushes need it most, because patching one finding at a time is what authors contradictions.
+Verify proves the code runs; it cannot tell you the change is right. Before **every** push to a
+PR branch — initial or review-response, any size — run the **adversarial QC loop** over the
+push's delta:
 
-A `pre-push` hook enforces that the pass happened. It refuses to push any branch but `main`
-unless its tip commit carries a **QC record** — a `QC:` trailer holding that commit's own tree
-hash:
+1. **Independent adversarial reviewers** examine the delta — for code: code-review,
+   test-quality, and silent-failure lenses; for docs-only deltas: a coherence pass checking each
+   patched paragraph **upward** against the PRD/ADRs it touches (the higher document wins) and
+   **sideways** against its sibling patches. Reviewers are told to find problems, not to approve.
+2. **Adjudicate every finding against the code** — fixed, or declined with a stated reason,
+   never silently dropped — apply the fixes, and **re-run the loop with fresh eyes** until a
+   round yields nothing real.
+3. The loop's final act writes the evidence file (below).
+
+The mechanical gate (`pnpm run verify`, e2e where touched) is necessary but is **not** the QC
+loop. Review-fix pushes need the loop most, because patching one finding at a time is what
+authors contradictions.
+
+**Calibrate depth to the delta, and say so.** Full panel for behavior changes; a single reviewer
+is enough for a comment-only or docs-only delta. State the calibration where the owner can see
+it — as the note on the `QC:` trailer line (e.g. `QC: <tree-sha> 2 rounds, 3 reviewers, full
+panel`) — so a too-shallow loop can be vetoed per-PR rather than discovered per-incident.
+
+**If reviewers may mutate the tree** (mutation testing — proving a test can fail): at most ONE
+mutation-authorized reviewer per worktree at a time; read-only reviewers experiment on throwaway
+copies (`$TMPDIR`), never on the tree; and after every reviewer round, verify the tree is clean —
+`git diff HEAD --stat` **plus** a grep of each mutation target, because a same-size line swap is
+invisible in diff totals.
+
+A `pre-push` hook enforces that the loop happened. It refuses to push any branch but `main`
+unless both records exist for exactly the state being pushed:
+
+- the tip commit carries a **QC record** — a `QC:` trailer holding that commit's own tree
+  hash — and
+- **loop evidence** exists at `.claude/qc-evidence/<tree-sha>.json` for that same tree, written
+  as the loop's final step with its real tallies:
+
+```json
+{
+  "treeSha": "<full tree sha>",
+  "rounds": 2,
+  "findingsRaised": 5,
+  "findingsFixed": 4,
+  "findingsDeclined": 1,
+  "reviewers": ["code-review", "test-quality", "silent-failure"]
+}
+```
+
+The evidence file stays local (`.claude/` is gitignored — it describes a working process, not
+the product); the PR-visible summary is the trailer note. A human pushing a self-reviewed change
+records their own pass the same way (`"reviewers": ["<your-name>"], "rounds": 1`).
 
 ```bash
 git add -A
-# ... run the QC pass over the staged diff ...
-git commit -m "$(printf 'docs(prd): fix the thing\n\nQC: %s\n' "$(git write-tree)")"
+# ... run the loop; write .claude/qc-evidence/$(git write-tree).json ...
+git commit -m "$(printf 'docs(prd): fix the thing\n\nQC: %s 1 round, docs pass\n' "$(git write-tree)")"
 ```
 
 `git write-tree` prints the hash of the staged tree, which is the tree the commit gets — so an
-honest record costs one substitution, and it cannot be recycled: edit anything afterwards and the
-hashes stop matching, which is exactly when the pass is stale. Already committed? Amend it with
-`git commit --amend --no-edit --trailer "QC=$(git write-tree)"` (git 2.32+). `pnpm install` wires
-the hook by pointing `core.hooksPath` at the tracked `.githooks/` directory — if another tool
-already owns that setting, the install says so and leaves it alone, and you wire it yourself with
-`git config core.hooksPath .githooks`.
+honest record costs one substitution, and neither record can be recycled: edit anything
+afterwards and the hashes stop matching, which is exactly when the pass is stale. Already
+committed? Amend it with `git commit --amend --no-edit --trailer "QC=$(git write-tree)"` (git
+2.32+). `pnpm install` wires the hook by pointing `core.hooksPath` at the tracked `.githooks/`
+directory — if another tool already owns that setting, the install says so and leaves it alone,
+and you wire it yourself with `git config core.hooksPath .githooks`.
 
-The record is a claim, not a proof — it says someone ran the pass, and its absence is visible in
-the PR's commit list. **Emergencies only**, and never as a habit (the rationale is required, and
-must be at least 15 characters — long enough to be a reason rather than a keystroke):
+Both records are claims, not proofs — they say the pass and the loop happened, where a reviewer
+can see the claim. Their value is the boundary: a step checked at push time gets done; a step
+nothing checks gets skipped exactly when attention is consumed by the incident of the day.
+**Emergencies only**, and never as a habit (the rationale is required, and must be at least 15
+characters — long enough to be a reason rather than a keystroke; it covers both records):
 
 ```bash
 QC_OVERRIDE="hotfix for the broken deploy; QC follows in the next push" git push
 ```
 
 It is printed, and worth repeating in the PR thread — the commits will not carry it.
+
+**Push ritual, four inseparable steps:** adversarial QC loop → mechanical gate → `QC:` trailer
+(+ evidence file) → push + review trigger (§4).
 
 ### 4. Review — two models + owner
 
@@ -103,10 +149,36 @@ a reason, so gating it on P2 gates it on nearly everything and it never converge
 **decline** a P1/P2/P3 it judges out of bounds, but only with a reason code and a
 citation; a **P0 always escalates to the owner** and is never auto-declined.
 
+**Working the loop.** Codex does not auto-review pushes — it reviews when a PR opens, when a
+draft goes ready, or when someone comments `@codex review`. After a push, the
+`codex-review-request` workflow posts that comment for you (post it yourself if it didn't), and
+the `codex-freshness` status stays red until a Codex verdict — its review, or its "no major
+issues" comment; both carry a `Reviewed commit:` sha — covers the **current** head. "Codex
+clean" is that status being green, never an interpreted silence: reviewer silence is not
+approval. If Codex reports an infrastructure error, re-trigger with a fresh `@codex review`.
+
+Watch the loop with the repo watcher — don't hand-roll a poller:
+
+```bash
+node scripts/watch-pr.mjs <pr-number>
+```
+
+One request per cycle, every poll failure is an emitted event, and a periodic heartbeat line
+proves the watcher itself is alive. If the heartbeat stops, the watcher is dead — restart it;
+never read a watcher's silence as "no news".
+
+**Report pace, not just results.** While any gate is pending (CI, a bot review, a QC round): if
+~30 minutes pass with no progress visible from the PR side, proactively tell the owner where
+things stand — current state, the blocker, the options — instead of grinding silently;
+slow-but-converging and wedged look identical from the outside. And on the second consecutive
+infrastructure failure of the same sub-task (a reviewer agent, a CI job), stop relaunching and
+report the pattern with a recommendation rather than paying a third runtime.
+
 ### 5. Ship — gated + staged
 
-**Merge gate:** merge is blocked until **green CI AND Codex clean AND CodeRabbit approved
-AND owner approval** (all review threads resolved). **Deploy:** merge to `main`
+**Merge gate:** merge is blocked until **green CI AND Codex clean on the current head (the
+`codex-freshness` status) AND CodeRabbit approved AND owner approval** (all review threads
+resolved). **Deploy:** merge to `main`
 auto-deploys the web build to a staging URL; a human manually promotes to prod (web on AWS
 S3 + CloudFront). Mobile/desktop ship as tagged releases.
 

@@ -108,13 +108,19 @@ You can scope any task to one package with Turbo's filter, e.g.
 3. **Keep commits small and focused.** One logical change per commit. We use
    Conventional Commits: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`.
 4. **Run `pnpm run verify` before pushing.** CI runs the same gate on every PR.
-5. **Record a QC pass on the commit you push.** A tracked `pre-push` hook refuses a branch whose
-   tip commit has no `QC:` trailer for its own tree. Re-read the staged diff adversarially, then
+5. **QC the push, and record it.** A tracked `pre-push` hook refuses a branch unless the tip
+   commit carries a `QC:` trailer for its own tree AND `.claude/qc-evidence/<tree-sha>.json`
+   records the QC pass. Review the diff adversarially (for a solo change, your own careful pass,
+   recorded honestly, is the loop), write the evidence file, then
    `git commit -m "$(printf 'fix: subject\n\nQC: %s\n' "$(git write-tree)")"`. `pnpm install`
    wires the hook; if another hook manager already owns `core.hooksPath`, run
-   `git config core.hooksPath .githooks` yourself. The full rule, including the emergency
-   override, is in [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
-6. **Open a PR** against `main` and fill out the template (summary + test plan).
+   `git config core.hooksPath .githooks` yourself. The full rule, including the evidence-file
+   shape and the emergency override, is in
+   [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
+6. **Open a PR** against `main` and fill out the template (summary + test plan). Reviews come
+   from Codex + CodeRabbit + the owner; after any later push, a workflow requests a fresh Codex
+   review automatically (or comment `@codex review` yourself) — merges wait for the
+   `codex-freshness` status, i.e. a Codex review of the exact commit being merged.
 
 ## Working with AI Agents
 
