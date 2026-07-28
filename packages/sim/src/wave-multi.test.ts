@@ -352,8 +352,10 @@ describe('ragged wave-state termination (coerceSoa creep-wave-column totality)',
   it('a forged non-numeric or negative tick cannot poison repaired launch ticks, and the repaired state is stable', () => {
     // coerceSoa runs BEFORE step()'s tick-totality guard; the repair source is
     // clamped (a poisoned state.tick repairs launch ticks to 0, never to NaN or a
-    // negative), so the post-repair state is canonical and a second pass leaves
-    // the hash unchanged. Both clamp branches are exercised: NaN (non-safe-int)
+    // negative), so the repaired LIFECYCLE BLOCK is canonical and a second pass
+    // leaves the hash unchanged. (`state.tick` itself stays poisoned — the
+    // totality guard no-ops the step; only the lifecycle fields are repaired —
+    // CodeRabbit PR #68 round 3.) Both clamp branches are exercised: NaN (non-safe-int)
     // and -5 (safe but negative — local QC round 2: this branch was uncovered),
     // and Infinity (round 3: safe-int check dropped ⇒ repairTick = Infinity makes
     // EVERY comparison pass, so the repair never fires and the forged 999 rides

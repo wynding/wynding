@@ -922,15 +922,28 @@ export function createOverlay(
   const CREEP_NAME: Readonly<Partial<Record<string, () => string>>> = {
     normal: () => t('creep.normal.name'),
   };
+  // PURE name derivation — no side effects: the render-skip sentinel calls this
+  // every tick, and a should-I-skip comparison must never execute observable
+  // effects to compute its own inputs (CodeRabbit PR #68 round 3). The dev-mode
+  // mapping-gap warning lives in `warnUnmappedCreeps`, invoked only on the
+  // REBUILD path — once per rebuild, never per tick.
   function creepName(id: string): string {
     const label = CREEP_NAME[id];
     if (label !== undefined) return label();
-    if (import.meta.env.DEV) {
-      // The ONE dev-mode diagnostic in this module — a mapping gap here is a content/
-      // catalog bug, worth surfacing loudly in dev.
-      console.warn(`wave preview: creep id '${id}' has no catalog name — using the fallback`);
-    }
     return t('creep.unknown.name', { id });
+  }
+  function warnUnmappedCreeps(entries: readonly { readonly creepId: string }[]): void {
+    if (!import.meta.env.DEV) return;
+    for (const entry of entries) {
+      if (CREEP_NAME[entry.creepId] === undefined) {
+        // The ONE dev-mode diagnostic in this module — a mapping gap here is a
+        // content/catalog bug, worth surfacing loudly in dev (bounded: fires per
+        // preview REBUILD, not per tick).
+        console.warn(
+          `wave preview: creep id '${entry.creepId}' has no catalog name — using the fallback`,
+        );
+      }
+    }
   }
 
   // `domain`/`immunities` are CLOSED unions (`PreviewEntryVM`), fully enumerable today —
@@ -1018,6 +1031,7 @@ export function createOverlay(
       waveCount: preview.waveCount,
     });
     clearChildren(previewEl.list);
+    warnUnmappedCreeps(preview.entries); // dev diagnostic — rebuild path only
     for (const entry of preview.entries) {
       const li = doc.createElement('li');
       li.textContent = previewEntryText(entry);
