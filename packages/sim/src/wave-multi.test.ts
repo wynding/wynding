@@ -62,8 +62,8 @@ describe('wave handoff timing (G1) — a wave never decrements on its own flip t
 
 describe('cross-wave same-tick spawn ordering', () => {
   it('when two launched waves both have a spawn due the same tick, the earlier-launched wave spawns first (lower entity id)', () => {
-    // A GENUINE same-tick collision (CodeRabbit PR #68 — the previous construction
-    // never produced one): wave 0 launches at tick 0 (early call), entries spaced 5
+    // A GENUINE same-tick collision (the previous construction never produced
+    // one): wave 0 launches at tick 0 (early call), entries spaced 5
     // ⇒ spawns at ticks 0 and 5. Wave 1 launches at tick 1 (early call) with entry
     // offset 4 ⇒ its first spawn is due at tick 1 + 4 = 5 — the SAME tick as wave
     // 0's second spawn. Index-order draining must append wave 0's creep first.
@@ -118,7 +118,7 @@ describe('per-wave clear-bonus forfeit isolation', () => {
     for (let t = 0; t < 200 && !s.waveResolved[0]; t++) s = step(s, ruleset, []);
     expect(s.waveResolved[0]).toBe(true);
     expect(s.waveLeaked[0]).toBe(false); // the tower killed it before it reached the exit
-    // EXACT credited amount (CodeRabbit PR #68 — flags alone don't witness payment):
+    // EXACT credited amount — flags alone don't witness payment:
     // starting 80 − tower cost + the kill's bounty + wave 1's clear bonus (40),
     // nothing else (both early-call divisors are 0 in this fixture).
     const bountyAfterWave1 = s.bounty;
@@ -141,8 +141,8 @@ describe('per-wave clear-bonus forfeit isolation', () => {
 
 describe('settlement precedes terminal, uniformly, on the final tick (G8)', () => {
   it('a wave clearing on the SAME tick lives reach 0 still pays its bonus before the loss terminal', () => {
-    // The REAL construction (CodeRabbit PR #68 — the previous body never built the
-    // collision it named). Wave 0's sole creep is unkillable and leaks the last
+    // The REAL construction (the previous body never built the collision it
+    // named). Wave 0's sole creep is unkillable and leaks the last
     // life at a fixed tick L; wave 1's sole creep is one-shottable. The board is
     // wide enough that the leaker exits the tower's range long before it leaks, so
     // the tower is free to fire at the mark — whose impact (fire + travel ticks)
@@ -229,7 +229,7 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
     expect(s.phase).toBe('won');
     expect(s.waveResolved[0]).toBe(true);
     expect(s.waveLeaked[0]).toBe(false);
-    // The credited AMOUNT, not just the flags (CodeRabbit PR #68): starting 80 −
+    // The credited AMOUNT, not just the flags: starting 80 −
     // tower cost + the one kill's bounty + the clear bonus (7); divisors are 0.
     expect(s.bounty).toBe(80 - bundle.towerCatalog[0]!.cost + bundle.creepCatalog[0]!.bounty + 7);
   });
@@ -322,11 +322,11 @@ describe('ragged wave-state termination (coerceSoa creep-wave-column totality)',
   it('a `wave` column longer than `id` is truncated on the terminal-freeze path, and live rows survive the rebuild', () => {
     // On a running state the movement rebuild (bounded by id.length) would erase
     // the forged tail whether or not coerceSoa's length guard exists — a test
-    // there is vacuous for the guard (local QC round 1, mutation-proven). A path
+    // there is vacuous for the guard (mutation-proven). A path
     // where movement never runs (here: the terminal freeze; the tick-totality
     // no-op and previewInputs are the others) leaves only the guard between the
     // forged tail and the hash. The terminal is a LOSS so live creeps remain on
-    // the board (local QC round 2: a won terminal has zero rows, which let a
+    // the board (a won terminal has zero rows, which let a
     // wipe-everything-on-mismatch mutant survive — the survivors assertion is
     // load-bearing).
     const ruleset = testRuleset(OPEN, {
@@ -354,12 +354,13 @@ describe('ragged wave-state termination (coerceSoa creep-wave-column totality)',
     // clamped (a poisoned state.tick repairs launch ticks to 0, never to NaN or a
     // negative), so the repaired LIFECYCLE BLOCK is canonical and a second pass
     // leaves the hash unchanged. (`state.tick` itself stays poisoned — the
-    // totality guard no-ops the step; only the lifecycle fields are repaired —
-    // CodeRabbit PR #68 round 3.) Both clamp branches are exercised: NaN (non-safe-int)
-    // and -5 (safe but negative — local QC round 2: this branch was uncovered),
-    // and Infinity (round 3: safe-int check dropped ⇒ repairTick = Infinity makes
-    // EVERY comparison pass, so the repair never fires and the forged 999 rides
-    // into the hash unrepaired — a distinct failure mode from both others).
+    // totality guard no-ops the step; only the lifecycle fields are repaired.)
+    // Both clamp branches are exercised — NaN (non-safe-int) and -5 (safe but
+    // negative — kills the mutant that drops the sign check) — plus a third forged
+    // value on NaN's branch: Infinity (safe-int check dropped ⇒ repairTick =
+    // Infinity makes EVERY comparison pass, so the repair never fires and the
+    // forged 999 rides into the hash unrepaired — a distinct failure mode from
+    // both others).
     for (const forged of [Number.NaN, -5, Number.POSITIVE_INFINITY]) {
       const ruleset = testRuleset(OPEN, { waveCount: 1, countdownTicks: 20 });
       let s = createInitialState(1, ruleset);
@@ -384,8 +385,8 @@ describe('bound gate — the terminal-tick budget', () => {
   it('accepts exactly at the boundary and rejects one past it (a SHARP gate, not a vibe)', () => {
     // With one single-spawn wave (tail 0), the gate is countdown + maxTraversal ≤
     // MAX_MATCH_TICKS — binary-search the maximal accepted countdown, then prove
-    // the boundary is sharp: C* compiles, C*+1 throws. (CodeRabbit PR #68: the
-    // previous test neither landed on the boundary nor exercised the rejection.)
+    // the boundary is sharp: C* compiles, C*+1 throws (the previous test neither
+    // landed on the boundary nor exercised the rejection).
     let lo = 1;
     let hi = 36_000;
     while (lo < hi) {
@@ -411,7 +412,7 @@ describe('bound gate — the terminal-tick budget', () => {
   });
 
   it("an EARLY wave's tail can be the peak — a schedule whose first-wave tail exceeds the budget is rejected even though later prefixes are tiny", () => {
-    // Kills the "last wave wins" mutant (local QC round 1): the true peak is
+    // Kills the "last wave wins" mutant: the true peak is
     // prefix_0 + tail_0 = 100 + 35_900 = 36_000, which with the nonzero traversal
     // term must throw; a no-max formula reads wave 1's 200 and would accept.
     expect(() =>
@@ -427,7 +428,7 @@ describe('bound gate — the terminal-tick budget', () => {
     ).toThrow(/cannot reach a terminal state within the tick budget/);
   });
 
-  it("overlapping tails don't double-count: an early wave's long tail under later countdowns compiles (Codex PR #68)", () => {
+  it("overlapping tails don't double-count: an early wave's long tail under later countdowns compiles", () => {
     // countdowns [10k, 10k] with wave 0 carrying a 20k spawn offset: the latest
     // spawn is max(10k+20k, 20k+0) = 30k — feasible. The superseded
     // Σcountdowns + maxTail formula would have read 40k and falsely rejected.
@@ -443,12 +444,12 @@ describe('bound gate — the terminal-tick budget', () => {
     expect(ruleset.waves).toHaveLength(2);
   });
 
-  it('entriesSummary orders by FIRST ARRIVAL over the sorted timeline, not authored row order (Codex PR #68)', () => {
+  it('entriesSummary orders by FIRST ARRIVAL over the sorted timeline, not authored row order', () => {
     // Three entries whose arrival order [swift, normal, tank] is a NON-TRIVIAL
     // permutation of authored order [normal, swift, tank] and anti-correlated
     // with counts (2, 3, 4) — so authored order, reversed-authored order,
     // count-descending, and count-ascending are ALL killed by the one fixture
-    // (local QC round 1: a two-entry fixture couldn't separate them).
+    // (a two-entry fixture couldn't separate them).
     const base = testBundle(OPEN);
     const bundle = {
       ...base,

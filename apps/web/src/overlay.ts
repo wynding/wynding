@@ -202,7 +202,7 @@ export function createOverlay(
 
   pauseBtn.addEventListener('click', () => onAction({ type: 'togglePause' }));
   speedBtn.addEventListener('click', () => onAction({ type: 'cycleSpeed' }));
-  // `aria-disabled` (never native `disabled` — Round 2 finding #4: dynamically disabling
+  // `aria-disabled` (never native `disabled` — dynamically disabling
   // the FOCUSED primary control, e.g. a just-clicked call landing pending, must not strand
   // focus by dropping it from the tab order) is activation-suppressed here, at the one
   // click site, rather than by removing the listener per state.
@@ -398,8 +398,8 @@ export function createOverlay(
   settingsInner.appendChild(rebindList);
 
   // The board's `aria-label` names the ACTUAL bound movement/confirm/sell keys, not the
-  // hardcoded defaults (CodeRabbit) — so screen-reader instructions stay truthful after a
-  // rebind. Movement is four separate bindings, joined into the one {move} label; confirm/
+  // hardcoded defaults — so screen-reader instructions stay truthful after a rebind.
+  // Movement is four separate bindings, joined into the one {move} label; confirm/
   // sell are single bindings; an unbound action falls back to `settings.unbound` (via
   // `codeLabel`). Set here — overlay owns the Shell's dynamic content, like the Card hotkey
   // badge — and refreshed on every rebind below.
@@ -911,20 +911,22 @@ export function createOverlay(
 
   // --- Wave preview (M2-S2, PLAN.md P3 steps 16-17): its own visible surface in BOTH
   // layouts, near the countdown, hosted inside the existing keyboard-scrollable `.wy-hud`
-  // group (never chip-hosted — Round 1 finding #7). ---
+  // group — never chip-hosted: the Compact chip's full text is screen-reader-only,
+  // so a chip-hosted preview would be invisible to sighted Compact users. ---
 
   // Exhaustive literal-key lookup (never a computed key — the i18n extraction gate reads
   // string-literal `t()` arguments only) for every catalog-id creep name. A creepId that
   // isn't in the catalog (a forged/future content id this build doesn't know) falls back
-  // to the localized generic name rather than ever rendering a raw id (Round 2 finding
-  // #9 / ADR 0004) — dev-mode-only, since a genuinely compiled ruleset can't produce one
-  // (the preview's `entriesSummary` is derived from validated, catalog-resolved entries).
+  // to the localized generic name rather than ever rendering a raw id (ADR 0004:
+  // no user-facing string outside the catalog) — dev-mode-only, since a genuinely
+  // compiled ruleset can't produce one (the preview's `entriesSummary` is derived
+  // from validated, catalog-resolved entries).
   const CREEP_NAME: Readonly<Partial<Record<string, () => string>>> = {
     normal: () => t('creep.normal.name'),
   };
   // PURE name derivation — no side effects: the render-skip sentinel calls this
   // every tick, and a should-I-skip comparison must never execute observable
-  // effects to compute its own inputs (CodeRabbit PR #68 round 3). The dev-mode
+  // effects to compute its own inputs. The dev-mode
   // mapping-gap warning lives in `warnUnmappedCreeps`, invoked only on the
   // REBUILD path — once per rebuild, never per tick.
   function creepName(id: string): string {
@@ -995,13 +997,13 @@ export function createOverlay(
         : `${preview.waveNumber}/${preview.waveCount}:${preview.entries
             .map((e) => `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.immunities.join('+')}`)
             .join('|')}`;
-    // Locale self-heal (local QC round 2): the key is CONTENT-only, so a runtime
+    // Locale self-heal: the key is CONTENT-only, so a runtime
     // locale/catalog change would otherwise leave stale-language DOM until the wave
     // moved — defeating the module's deferred-`t()` convention (line ~86). Like
     // `renderPrimary`, the sentinel compares the exact strings this render would
     // write: the title AND the first entry row (rows read five catalog keys the
     // title doesn't — a title-only sentinel would self-heal the heading while the
-    // rows stayed stale; local QC round 2). On drift, fall through and rebuild.
+    // rows stayed stale). On drift, fall through and rebuild.
     // Unreachable while only `en` ships; load-bearing the day a second locale
     // lands. (Consciously untested: exercising it would mean faking a runtime
     // catalog-swap mechanism that does not exist. The MEMO direction — unchanged
@@ -1042,11 +1044,11 @@ export function createOverlay(
   /** The morphing primary control's text + `aria-disabled` state (PLAN.md P3 step 17):
    *  pre-start "Start" (always enabled); once started, "Call wave" — `aria-disabled` while
    *  a call is pending (own pending-launch label) OR the buffer is momentarily full
-   *  (`UiState.callWaveReady` folds both `HudVM.callable` and buffer capacity, Round 2
-   *  finding #3) OR the last wave has already launched (visible-disabled, never hidden —
-   *  Round 1 finding #5's callable/launchPending distinction plus the explicit
-   *  after-final-launch state); hidden once the run is terminal. `aria-disabled`, never
-   *  native `disabled` (Round 2 finding #4) — the click listener above suppresses
+   *  (`UiState.callWaveReady` folds both `HudVM.callable` and buffer capacity) OR the
+   *  last wave has already launched (visible-disabled, never hidden — the
+   *  callable/launchPending distinction plus the explicit after-final-launch state);
+   *  hidden once the run is terminal. `aria-disabled`, never
+   *  native `disabled` — the click listener above suppresses
    *  activation instead, so a disabled state never drops focus off a control that may
    *  hold it (e.g. the just-clicked button landing pending). */
   function renderPrimary(hud: HudVM, ui: UiState): void {
@@ -1126,8 +1128,8 @@ export function createOverlay(
       speedParts.icon.textContent = `${view.speed}${ICONS.speed}`;
       speedParts.text.textContent = t('controls.speed', { factor: view.speed });
       renderPrimary(hud, view.ui);
-      // The Start→Call-wave morph is announced through the existing polite live region
-      // (Round 1 finding #8): Start moves focus to the board and the HUD itself is not
+      // The Start→Call-wave morph is announced through the existing polite live region:
+      // Start moves focus to the board and the HUD itself is not
       // live, so without this the morph is undiscoverable to AT users. Fires exactly once
       // per run, on the `started` false→true edge — `announcedStarted` resets with every
       // fresh run (it goes false the moment `ui.started` itself does, e.g. Play-again), so

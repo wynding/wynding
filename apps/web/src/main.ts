@@ -9,7 +9,7 @@
 // covered, and only `packages/render/src/scene.ts` (Phaser/WebGL) is coverage-excluded.
 
 import './ui.css';
-import { createController } from './controller';
+import { createController, type Controller } from './controller';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
@@ -39,6 +39,10 @@ export interface AppDeps {
   readonly schedule: Scheduler;
   readonly now: () => number;
   readonly seed: number;
+  /** Test seam (same pattern as `sceneFactory`/`matchMedia`): lets a test wrap the
+   *  real controller to force UI states that are expensive to construct through the
+   *  DOM (e.g. `callWaveReady: false`). Defaults to `createController`. */
+  readonly controllerFactory?: (seed: number) => Controller;
   /** Wide-entropy seed source for Play-again (defaults to wall-clock `Date.now`). Kept
    *  separate from `now` (a monotonic frame clock) so a fresh run varies per reload. */
   readonly seedSource?: () => number;
@@ -67,7 +71,7 @@ export interface AppHandle {
 export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppHandle {
   const settings = createSettings({ reducedMotion: deps.prefersReducedMotion ?? false });
   const keymap = createKeymap();
-  const controller = createController(deps.seed);
+  const controller = (deps.controllerFactory ?? createController)(deps.seed);
   const seedSource = deps.seedSource ?? (() => Date.now() >>> 0);
   const navigate =
     deps.navigate ??
@@ -293,12 +297,18 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  `startRun()` (with its fullscreen/install/focus edge handling) while `!started`, and
    *  to `callWaveEarly()` once the run is under way. One function so the Dock button's
    *  click and the keymapped `start` action (which now triggers the SAME morphed control,
-   *  not a fixed "Start") can never diverge on which path they take. */
+   *  not a fixed "Start") can never diverge on which path they take. The
+   *  `callWaveReady` gate mirrors the overlay's `aria-disabled` click suppression:
+   *  the keyboard shortcut and the button must share activation semantics — a
+   *  disabled control must not announce a rejection (or dispatch at all) just
+   *  because the press arrived through the keymap. */
   function primaryAction(): void {
-    if (!controller.uiState().started) {
+    const ui = controller.uiState();
+    if (!ui.started) {
       startRun();
       return;
     }
+    if (!ui.callWaveReady) return; // exposed as disabled — the key press is inert too
     controller.callWaveEarly();
     refreshHud();
   }

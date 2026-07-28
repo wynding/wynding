@@ -15,8 +15,10 @@ const DEFAULTS: Readonly<Record<GameAction, string>> = {
   right: 'ArrowRight',
   confirm: 'Enter',
   sell: 'KeyX',
-  // Triggers `start()` (PLAN.md P4): pre-start, launches the run (M1's one wave); a
-  // no-op once already started (no later-wave UI in M1).
+  // The primary action's key. WHAT it does is the app wiring's call, not this
+  // table's: `main.ts` routes it through `primaryAction` (pre-start: unhold; then:
+  // call the counting-down wave, sharing the Dock button's disabled-state gate),
+  // while `input.ts`'s standalone default is a bare `controller.start()`.
   start: 'KeyC',
   pause: 'Space',
   speed: 'KeyF',

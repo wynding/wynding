@@ -30,6 +30,7 @@ vi.mock('./input', async (importOriginal) => {
 import { mount as mountMock } from '@wynding/render/scene';
 import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
+import { createController, type Controller } from './controller';
 
 // The shared fake handle the mocked scene returns (same object every mount call).
 const fakeHandle = (mountMock as unknown as () => RenderHandle)();
@@ -296,6 +297,7 @@ const HIDDEN = { live: true, inert: true };
 
 interface HomeAppOptions {
   readonly navigate?: (href: string) => void;
+  readonly controllerFactory?: (seed: number) => Controller;
   readonly matchMedia?: (query: string) => {
     matches: boolean;
     addEventListener: (t: 'change', l: () => void) => void;
@@ -319,6 +321,9 @@ function homeApp(options: HomeAppOptions = {}) {
     seed: 1,
     navigate,
     ...(options.matchMedia === undefined ? {} : { matchMedia: options.matchMedia }),
+    ...(options.controllerFactory === undefined
+      ? {}
+      : { controllerFactory: options.controllerFactory }),
   });
   const board = root.querySelector<HTMLElement>('.wy-board')!;
   return {
@@ -342,6 +347,54 @@ function homeApp(options: HomeAppOptions = {}) {
     state: (): { live: boolean; inert: boolean } => homeState(root),
   };
 }
+
+describe('main — keymap/button activation parity for the morphed primary control', () => {
+  it('the keymapped call never reaches the controller while the control is exposed as disabled', () => {
+    // The Dock button's click guard suppresses activation on `aria-disabled`;
+    // `primaryAction`'s `callWaveReady` gate must give the keymapped route the
+    // SAME semantics — otherwise a full-buffer press through the keyboard
+    // announces a `pendingCap` rejection for a control the UI presents as
+    // disabled. Constructing a genuinely full buffer through the DOM is
+    // prohibitively slow, so the injected wrapper forces the disabled UI state
+    // directly and counts what reaches the controller: while disabled, zero
+    // dispatches; re-enabled, the SAME press dispatches — both directions pinned,
+    // so a permanently-closed gate or one reading a boot-time-cached uiState
+    // (the exact stale-read regression class) fails here too.
+    let dispatches = 0;
+    let forceDisabled = true;
+    const h = homeApp({
+      controllerFactory: (seed) => {
+        const real = createController(seed);
+        const wrapped: Controller = {
+          ...real,
+          uiState: () =>
+            forceDisabled ? { ...real.uiState(), callWaveReady: false } : real.uiState(),
+          callWaveEarly: () => {
+            dispatches++;
+            return real.callWaveEarly();
+          },
+        };
+        return wrapped;
+      },
+    });
+    h.frame();
+    h.key('KeyC'); // Start — the `!started` branch, unaffected by the gate
+    h.frame();
+    expect(h.board.dataset.started).toBe('true');
+    h.key('KeyC'); // the press under test: exposed-disabled, must not dispatch
+    h.frame();
+    expect(dispatches).toBe(0);
+    expect(h.board.dataset.simPhase).toBe('running');
+    // The enabled leg runs against the REAL state (no fiction): the same press
+    // must now reach the controller — kills the closed-gate and cached-uiState
+    // mutants the disabled leg alone cannot see.
+    forceDisabled = false;
+    h.key('KeyC');
+    h.frame();
+    expect(dispatches).toBe(1);
+    h.app.destroy();
+  });
+});
 
 describe('main — home link visibility (hidden only while the run is live)', () => {
   it('is visible and interactive while the run is HELD pre-start', () => {
