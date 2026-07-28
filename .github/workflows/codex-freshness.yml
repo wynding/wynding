@@ -1,0 +1,76 @@
+name: Codex freshness
+
+# Keeps a `codex-freshness` commit status on each PR head saying whether Codex has
+# reviewed that exact commit (scripts/check-codex-freshness.mjs). The merge gate's "Codex
+# clean" claim is only honest for the CURRENT head — this makes staleness a red status
+# instead of a silent misread. Add `codex-freshness` to the branch-protection required
+# contexts to make it binding.
+#
+# Reporting goes through the commit-status API rather than the job's own conclusion, for
+# two reasons: a status can be posted from ANY event — including the `issue_comment` that
+# Codex's clean verdict arrives as, which runs in default-branch context and could never
+# attach a job check to the PR head — and a skipped or superseded job leaves the last real
+# status standing instead of masking it.
+#
+# SAFETY INVARIANT: `pull_request_target` grants a write-capable token, so this workflow
+# must NEVER check out or execute PR-head code. The checkout below takes the event's BASE
+# ref (the default for pull_request_target) — the script that runs is the one already on
+# main. Keep it that way.
+#
+# Known caveat: for fork-origin PRs the `pull_request_review` run gets a read-only token
+# (that event family executes in PR context), so its status post fails and the job goes
+# red on exit 2 — re-run the latest `pull_request_target` run, or dispatch this workflow
+# with the PR number, to refresh the status with a write token.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Codex's findings shape arrives as a PR review …
+  pull_request_review:
+    types: [submitted, dismissed]
+  # … and its clean shape ("Didn't find any major issues") as an issue comment.
+  issue_comment:
+    types: [created]
+  # Manual lever: re-evaluate any PR (e.g. after re-running a Codex review by hand).
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to evaluate
+        required: true
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: codex-freshness-${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    name: codex-freshness
+    # Only events that can change the answer. Skipping is safe: a skipped run posts no
+    # status, so the last real verdict keeps standing.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false) ||
+      github.event_name == 'pull_request_review' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.user.login, 'codex'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Evaluate and post the codex-freshness status
+        run: node scripts/check-codex-freshness.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          POST_STATUS: '1'
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
