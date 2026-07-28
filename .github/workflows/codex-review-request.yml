@@ -10,9 +10,10 @@ name: Codex review request
 # Codex must honor a trigger comment authored by `github-actions[bot]` for this to work.
 # If it ever stops answering bot-authored triggers, the symptom is a `codex-freshness`
 # status that stays red after pushes while this workflow reports success. (Same symptom
-# as a parsing drift in check-codex-freshness.mjs — the discriminator: does a NEW Codex
-# review appear after the bot's comment? No → Codex is ignoring the trigger, this file's
-# problem; yes → the script's parsing drifted.) Remedy here: route the comment through a
+# as a parsing drift in check-codex-freshness.mjs — the discriminator: does any NEW Codex
+# artifact, review or comment, appear after the bot's comment? No → Codex is ignoring the
+# trigger, this file's problem; yes → the script's parsing drifted.) Remedy here: route
+# the comment through a
 # fine-grained PAT (issues: write) stored as a secret instead of `github.token`, or
 # delete this workflow and fall back to the manual trigger documented in
 # docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
@@ -24,9 +25,10 @@ name: Codex review request
 # code than the failure it prevents.
 #
 # SAFETY INVARIANT: this workflow runs with a write-capable token and must never check
-# out or execute PR-head code. `pull_request_target` already defaults its checkout to the
-# PR base branch; `workflow_dispatch` defaults to whatever ref it was aimed at, which CAN
-# be a PR head — the `ref:` pin keeps every path on the default branch. Keep it.
+# out or execute PR-head code. `pull_request_target` already runs in the context of the
+# base repository's default branch; `workflow_dispatch` defaults to whatever ref it was
+# aimed at, which CAN be a PR head — the `ref:` pin keeps every path on the default
+# branch. Keep it.
 
 on:
   pull_request_target:

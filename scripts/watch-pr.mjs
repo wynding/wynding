@@ -46,13 +46,16 @@ const FIELDS = 'state,headRefOid,reviewDecision,statusCheckRollup,reviews,commen
 const JQ = `{
   state, headRefOid, reviewDecision,
   checks: [(.statusCheckRollup // [])[] | {type: (.__typename // ""), name: (.name // .context), state: ((.conclusion // "" | if . == "" then null else . end) // .state // .status)}],
-  reviews: [(.reviews // [])[] | {author: .author.login, state, at: .submittedAt, body: (.body // "")[0:100]}],
+  reviews: [(.reviews // [])[] | {id: (.id // ""), author: .author.login, state, at: .submittedAt, body: (.body // "")[0:100]}],
   comments: [(.comments // [])[] | {id, author: .author.login, at: .createdAt, body: (.body // "")[0:100], len: ((.body // "") | length)}]
 }`;
 
+// Usage errors print to STDOUT: the event stream is the channel this file's reader
+// watches (FATAL goes there for the same reason), and a watcher that dies mute to its
+// own reader is the failure shape this tool exists to end.
 const usage = (problem) => {
-  if (problem) console.error(`watch-pr: ${problem}`);
-  console.error(
+  if (problem) console.log(`watch-pr: ${problem}`);
+  console.log(
     'usage: node scripts/watch-pr.mjs <pr-number> [--interval 45-3600] [--heartbeat 1-1000] [--once]',
   );
   process.exit(1);
@@ -91,7 +94,7 @@ const requestedInterval = flags['--interval'] ?? 60;
 const interval = Math.max(MIN_INTERVAL, requestedInterval);
 if (interval > 3600) usage('--interval max is 3600 seconds');
 if (requestedInterval < MIN_INTERVAL) {
-  console.error(`watch-pr: --interval ${requestedInterval} raised to the ${MIN_INTERVAL}s floor`);
+  console.log(`watch-pr: --interval ${requestedInterval} raised to the ${MIN_INTERVAL}s floor`);
 }
 // The heartbeat cannot be disabled or pushed out of sight: it is the liveness signal the
 // whole contract rests on.
@@ -99,8 +102,10 @@ const heartbeatEvery = flags['--heartbeat'] ?? 10;
 if (heartbeatEvery < 1 || heartbeatEvery > 1000) usage('--heartbeat needs an integer 1-1000');
 
 const now = () => new Date().toISOString();
-const say = (kind, message) => console.log(`${now()} ${kind} ${message}`);
 const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
+// Every event is exactly one line: interpolated content (check names, bodies, states)
+// must never smuggle a newline that forges a second event.
+const say = (kind, message) => console.log(`${now()} ${kind} ${oneLine(String(message))}`);
 
 // Lead with the transport-level identity — execFileSync spreads it across three fields
 // (`code` for spawn-level failures, `signal` for kills, `status` for exits), and stderr
@@ -177,10 +182,22 @@ const checkLabel = (c) => (c.type === 'StatusContext' ? `${c.name} (status)` : c
 
 function summarize(snap) {
   const tally = { total: snap.checks.length, bad: 0, pending: 0 };
+  // STARTUP_FAILURE / ACTION_REQUIRED / STALE are terminal too — counting a dead check
+  // as "pending" is exactly the converging-vs-wedged confusion this summary must not
+  // create. (CANCELLED stays pending: concurrency superseding produces it routinely.)
+  const BAD = new Set([
+    'FAILURE',
+    'ERROR',
+    'TIMED_OUT',
+    'STARTUP_FAILURE',
+    'ACTION_REQUIRED',
+    'STALE',
+  ]);
+  const OK = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
   for (const c of snap.checks) {
     const s = String(c.state).toUpperCase();
-    if (s === 'FAILURE' || s === 'ERROR' || s === 'TIMED_OUT') tally.bad++;
-    else if (s !== 'SUCCESS' && s !== 'SKIPPED' && s !== 'NEUTRAL') tally.pending++;
+    if (BAD.has(s)) tally.bad++;
+    else if (!OK.has(s)) tally.pending++;
   }
   return (
     `state=${snap.state} head=${String(snap.headRefOid).slice(0, 8)} decision=${snap.reviewDecision || '-'} ` +
@@ -195,11 +212,13 @@ function diff(prev, snap) {
   if (prev.headRefOid !== snap.headRefOid) {
     say('HEAD', `${String(prev.headRefOid).slice(0, 8)} -> ${String(snap.headRefOid).slice(0, 8)}`);
   }
-  // submittedAt has second granularity and same-second same-author review bursts are
-  // real, so duplicate keys get an occurrence index — same treatment as checks.
+  // Key on the review's stable id when the API provides one; the composite fallback
+  // (submittedAt has second granularity, and same-second same-author bursts are real)
+  // gets an occurrence index, which is positional — an id never is.
   const keyedReviews = (reviews) => {
     const counts = new Map();
     return reviews.map((r) => {
+      if (r.id) return { ...r, key: `id:${r.id}` };
       const base = `${r.author}@${r.at}@${r.state}`;
       const n = counts.get(base) ?? 0;
       counts.set(base, n + 1);
@@ -294,6 +313,10 @@ async function main() {
         }
         if (snap.state !== 'OPEN') {
           say('POLL_ERROR', `unrecognized PR state ${JSON.stringify(snap.state)}`);
+          if (once) {
+            process.exitCode = 1; // POLL_ERROR under --once always means exit 1
+            return;
+          }
         }
         prev = snap;
       }

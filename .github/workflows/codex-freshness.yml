@@ -29,10 +29,11 @@ name: Codex freshness
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # Codex's findings shape arrives as a PR review (edits re-evaluate too — a body edited
-  # out of verdict shape must not leave a green status standing) …
+  # Codex's findings shape arrives as a PR review — its verdict head is the API-recorded
+  # commit_id, immutable once submitted, so only submission and dismissal can change the
+  # answer (a body edit cannot; `edited` is deliberately absent) …
   pull_request_review:
-    types: [submitted, edited, dismissed]
+    types: [submitted, dismissed]
   # … and its clean shape ("Didn't find any major issues") as an issue comment — which
   # can be edited into a verdict later, or deleted out of one, so those re-evaluate too.
   issue_comment:

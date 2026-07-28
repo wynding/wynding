@@ -37,8 +37,9 @@
 // ungated refs that ride alongside a gated branch pass without a line of their own. Stdin
 // the gate cannot read — or any line of it that does not parse as the protocol — REFUSES
 // the push. A terminal on fd 0 means the gate was run by hand rather than by git: it
-// announces that and exits 0, gating nothing. Genuinely empty stdin is the only
-// pass-through of git-supplied input (git hands over nothing on an up-to-date push), and
+// announces that and exits 0, gating nothing. Apart from the ungated destinations above,
+// genuinely empty stdin is the only git-supplied input that passes through (git hands
+// over nothing on an up-to-date push), and
 // it too is announced, so a chain-loading wrapper that swallowed stdin is visible instead
 // of silently ungated: a wrapper MUST hand this checker git's stdin unconsumed — run it
 // before anything else reads the pipe. A verified push announces itself too — the gate's
@@ -56,7 +57,10 @@ const EVIDENCE_DIR = '.claude/qc-evidence';
 const MIN_RATIONALE = 15;
 const ZERO = /^0+$/;
 
-const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+// Child stderr is captured, not inherited: git's own advice ("Use '--' to separate…")
+// arriving ahead of the gate's framed diagnosis reads as the gate speaking nonsense.
+const git = (...args) =>
+  execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 // The evidence directory lives at the top of the working tree (each worktree has its own).
 // A gate whose own failure mode is a stack trace is worse than no gate, here and below:
@@ -87,7 +91,10 @@ function applyOverride(refsLabel) {
   console.error(
     '⚠️  QC gate overridden — no QC record or loop evidence was required for this push.',
   );
-  console.error(`   rationale: ${override}`);
+  // Whitespace collapsed here as in the log line: an uncollapsed multi-line rationale
+  // could inject arbitrary column-0 lines into the gate's output — including a byte-exact
+  // forgery of the verified-pass announcement.
+  console.error(`   rationale: ${override.replace(/\s+/g, ' ')}`);
   console.error('   Say the same thing in the PR thread; the commits carry no record of it.');
   if (toplevel === null) {
     console.error(
@@ -206,6 +213,7 @@ if (pushes.length === 0) {
 const readFailures = [];
 const trailerFailures = [];
 const loopFailures = [];
+const verifiedRefs = [];
 for (const { localOid, remoteRef } of pushes) {
   // Name each problem by the DESTINATION branch — that is what the gate decisions key on,
   // and what a source ref like `HEAD` would mislabel.
@@ -220,6 +228,7 @@ for (const { localOid, remoteRef } of pushes) {
     );
     continue;
   }
+  verifiedRefs.push({ branch, tree }); // consumed by the pass announcement iff nothing fails
   // Any `QC: <tree-sha> [note]` line in the message counts — deliberately more forgiving than
   // git's own trailer-block rules, since the point is the record, not its placement.
   const recorded = message
@@ -229,8 +238,16 @@ for (const { localOid, remoteRef } of pushes) {
     .map((m) => m[1].toLowerCase());
 
   if (recorded.length === 0) {
+    // A trailer whose hash is under the 7-char floor exists but cannot match — the one
+    // mistake the prefix rule invites deserves its own diagnosis, not "no trailer".
+    const tooShort = message
+      .split('\n')
+      .some((line) => new RegExp(`^${TRAILER}:\\s*[0-9a-f]{1,6}\\b`, 'i').test(line));
     trailerFailures.push(
-      `${branch}: tip commit ${localOid.slice(0, 8)} has no \`${TRAILER}:\` trailer`,
+      tooShort
+        ? `${branch}: the \`${TRAILER}:\` trailer on ${localOid.slice(0, 8)} records a hash ` +
+            'shorter than 7 characters — record at least 7'
+        : `${branch}: tip commit ${localOid.slice(0, 8)} has no \`${TRAILER}:\` trailer`,
     );
   } else if (!recorded.some((hash) => tree.startsWith(hash))) {
     const records = recorded.map((hash) => hash.slice(0, 8)).join(', ');
@@ -366,13 +383,14 @@ if (readFailures.length + trailerFailures.length + loopFailures.length > 0) {
     console.error(
       "   Run the adversarial QC loop over this push's delta (docs/ai-workflow.md §3.5);",
     );
-    console.error('   its final act records the evidence for the tree you are pushing:');
+    console.error('   its final act records the evidence at the WORKTREE ROOT:');
     console.error('');
+    console.error('     top=$(git rev-parse --show-toplevel)');
     console.error('     tree=$(git rev-parse "HEAD^{tree}")');
-    console.error(`     mkdir -p ${EVIDENCE_DIR}`);
+    console.error(`     mkdir -p "$top/${EVIDENCE_DIR}"`);
     console.error(
       '     printf \'{ "treeSha": "%s", "rounds": 1, "findingsRaised": 0, "findingsFixed": 0,' +
-        ` "findingsDeclined": 0, "reviewers": ["<who>"] }\\n' "$tree" > ${EVIDENCE_DIR}/$tree.json`,
+        ` "findingsDeclined": 0, "reviewers": ["<who>"] }\\n' "$tree" > "$top/${EVIDENCE_DIR}/$tree.json"`,
     );
     console.error('');
     console.error(
@@ -385,12 +403,11 @@ if (readFailures.length + trailerFailures.length + loopFailures.length > 0) {
 }
 
 // Approval is never silent: a hook that did not run must be distinguishable from one
-// that passed.
-for (const { localOid, remoteRef } of pushes) {
-  const tree = git('rev-parse', `${localOid}^{tree}`);
+// that passed. Trees come from the validation loop above — no fresh git call can fail
+// here and refuse a push the gate already decided passes.
+for (const { branch, tree } of verifiedRefs) {
   console.error(
-    `QC gate: ${remoteRef.replace(/^refs\/heads\//, '')} verified — trailer and loop ` +
-      `evidence cover tree ${tree.slice(0, 8)}.`,
+    `QC gate: ${branch} verified — trailer and loop evidence cover tree ${tree.slice(0, 8)}.`,
   );
 }
 process.exit(0);

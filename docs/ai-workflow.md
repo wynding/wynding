@@ -169,8 +169,9 @@ citation; a **P0 always escalates to the owner** and is never auto-declined.
 draft goes ready, or when someone comments `@codex review`. After a push to a non-draft PR,
 the `codex-review-request` workflow posts that comment for you (post it yourself if it
 didn't — drafts are deliberately excluded, since going ready self-triggers a review), and
-the `codex-freshness` status is only green when a Codex verdict — its review, or its "no major
-issues" comment; both carry a `Reviewed commit:` sha — covers the **current** head. The status
+the `codex-freshness` status is only green when a Codex verdict — its review (the head it
+reviewed is the API-recorded one) or its "no major issues" comment (which prints a
+`Reviewed commit:` sha) — covers the **current** head. The status
 proves "Codex reviewed this exact commit", no more: "Codex clean" additionally means that
 review raised nothing left unaddressed (fixed, or declined in a resolved thread). Neither claim
 is ever an interpreted silence — reviewer silence is not approval. If Codex reports an

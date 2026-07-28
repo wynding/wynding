@@ -71,9 +71,10 @@ docs/      prd/  adr/  CONTEXT.md
    [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
 5. Open a PR against `main` with a summary + test plan. Codex does not auto-review pushes: the
    `codex-review-request` workflow comments `@codex review` after a push to a non-draft PR
-   (post it yourself if it didn't), and the merge gate needs the `codex-freshness` status green — a Codex verdict whose
-   `Reviewed commit:` sha is the **current** head (maintainers keep that context required) —
-   with the review's findings addressed. Reviewer silence is never approval.
+   (post it yourself if it didn't), and the merge gate needs the `codex-freshness` status
+   green — a Codex verdict, review or comment, whose recorded head is the **current** head
+   (maintainers keep that context required) — with the review's findings addressed. Reviewer
+   silence is never approval.
 
 > **Full methodology + tooling setup:** the plan → build → verify → review → ship loop and
 > how to install your agent's skills (gitignored, not committed) are in

@@ -14,17 +14,18 @@
 //     `**Reviewed commit:**` line, but the inline-findings shape can omit it, so the
 //     body is never consulted for reviews), or
 //   - an issue comment by that account ("Didn't find any major issues" — the clean shape
-//     posts no review object), which opens a line with `**Reviewed commit:** \`<sha>\``.
+//     posts no review object), whose body carries `**Reviewed commit:** \`<sha>\`` at the
+//     start of a line.
 // FRESH iff any non-dismissed verdict's recorded sha prefix-matches the current PR head.
 // Codex comments without a parseable verdict line (e.g. its infrastructure-error
 // comments) never count.
 // If Codex is ever renamed or changes that line, every PR presents as "permanently red
 // status + one @codex review comment per push". That symptom has two causes with one
-// discriminator: does a NEW Codex review appear after the bot's trigger comment? If yes,
-// Codex answered and the parsing here drifted — update CODEX_LOGIN and RE_REVIEWED below,
-// AND the contains(…, 'codex') prefilters in codex-freshness.yml, which gate that
-// workflow's job on the old name. If no, Codex stopped honoring bot-authored triggers —
-// see codex-review-request.yml.
+// discriminator: does any NEW Codex artifact — review or comment — appear after the
+// bot's trigger comment? If yes, Codex answered and the parsing here drifted — update
+// CODEX_LOGIN and RE_REVIEWED below, AND the contains(…, 'codex') prefilters in
+// codex-freshness.yml, which gate that workflow's job on the old name. If no, Codex
+// stopped honoring bot-authored triggers — see codex-review-request.yml.
 //
 // Exit codes: 0 = fresh, 1 = stale or no verdict (actionable: trigger a review),
 // 2 = could not determine (API/config failure). Automation reacting to this script must
@@ -42,7 +43,7 @@
 // Local use (read-only, exit code is the report; HEAD_SHA takes the full sha, a unique
 // prefix of 7-64 hex chars, or an empty value meaning "the PR's current head from the
 // API" — anything else exits 2):
-//   PR_NUMBER=68 [HEAD_SHA=<sha>] [GITHUB_TOKEN=…] node scripts/check-codex-freshness.mjs
+//   PR_NUMBER=68 [HEAD_SHA=<sha>] [GITHUB_TOKEN|GH_TOKEN=…] node scripts/check-codex-freshness.mjs
 
 // Any escape from the normal flow means "could not determine", never "stale" — exit 1
 // triggers automation (a review request), and a crash must not. Node's fetch buries the
@@ -163,6 +164,11 @@ try {
   const verdicts = [];
   for (const r of reviews) {
     if (r.user?.login !== CODEX_LOGIN || r.state === 'DISMISSED') continue;
+    // Codex's infrastructure errors arrive as comments today, but if one ever lands as a
+    // review object its commit_id must not count — a body is never REQUIRED to carry a
+    // verdict line (the inline-findings shape has none), yet the known error signature
+    // disqualifies.
+    if (/Something went wrong\. Try again later/i.test(r.body ?? '')) continue;
     // The API's commit_id is authoritative for reviews — the inline-findings body shape
     // carries no verdict line at all, and a body can echo author-controlled text.
     const sha = r.commit_id;
@@ -176,8 +182,9 @@ try {
     if (sha) verdicts.push({ sha: sha.toLowerCase(), kind: 'comment', when: c.created_at });
   }
 
-  // Bidirectional prefix match: verdicts record 10-hex prefixes, and a local run may
-  // supply HEAD_SHA as a prefix too — either side may be the shorter one.
+  // Bidirectional prefix match: comment verdicts record 10-hex prefixes (review verdicts
+  // carry the full commit id), and a local run may supply HEAD_SHA as a prefix too —
+  // either side may be the shorter one.
   const fresh = verdicts.find((v) => headSha.startsWith(v.sha) || v.sha.startsWith(headSha));
   const latest = verdicts.reduce((a, b) => (!a || (b.when ?? '') > (a.when ?? '') ? b : a), null);
 
