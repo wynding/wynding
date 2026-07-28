@@ -1,31 +1,32 @@
 name: Codex review request
 
 # Codex reviews when a PR opens, when a draft goes ready, or when someone comments
-# "@codex review" — never on pushes. This workflow posts that comment automatically after
-# a push whose new head lacks a Codex verdict, so a fix-push cannot sit unreviewed because
-# nobody remembered the trigger. (`opened` is deliberately absent: Codex reviews new PRs
-# on its own.)
+# "@codex review" — never on pushes. Pushes are therefore the one gap, and `synchronize`
+# is deliberately the only PR trigger here: `opened` and `ready_for_review` self-trigger a
+# Codex review already, and this workflow's freshness pre-check cannot see that review
+# coming (Codex takes minutes to answer), so subscribing to those events would spend a
+# duplicate review nearly every time.
 #
-# FEASIBILITY NOTE: whether Codex honors triggers authored by `github-actions[bot]` was
-# unverified when this landed — it was probed live on the PR that introduced it. If Codex
-# ever stops answering bot-authored triggers, either route the comment through a
-# fine-grained PAT (issues: write) stored as a secret, or delete this workflow and fall
-# back to the documented manual trigger; the codex-freshness status stays red either way,
-# so a missed trigger is loud, not silent.
+# Codex must honor a trigger comment authored by `github-actions[bot]` for this to work.
+# If it ever stops answering bot-authored triggers, the symptom is a `codex-freshness`
+# status that stays red after pushes while this workflow reports success: route the
+# comment through a fine-grained PAT (issues: write) stored as a secret instead of
+# `github.token`, or delete this workflow and fall back to the manual trigger documented
+# in docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
+# green on its own.
 #
 # No duplicate-comment guard beyond the freshness pre-check and the concurrency group:
 # the only real overlap is a hand-posted trigger racing this workflow, and the cost of
 # that race is one redundant review. A guard keyed on comment timestamps would be more
 # code than the failure it prevents.
 #
-# SAFETY INVARIANT: `pull_request_target` grants a write-capable token, so this workflow
-# must NEVER check out or execute PR-head code. The checkout below takes the event's BASE
-# ref (the default for pull_request_target) — the script that runs is the one already on
-# main. Keep it that way.
+# SAFETY INVARIANT: `pull_request_target` grants a write-capable token, so the checkout
+# below is PINNED to the repository's default branch — this workflow must never check out
+# or execute PR-head code. Keep the `ref:` line.
 
 on:
   pull_request_target:
-    types: [synchronize, ready_for_review]
+    types: [synchronize]
   # Manual lever (also the feasibility probe: a dispatch posts the same bot-authored
   # comment the automatic path would).
   workflow_dispatch:
@@ -39,18 +40,18 @@ permissions:
   pull-requests: write
   issues: write # PR conversation comments post through the issues API
 
-concurrency:
-  group: codex-review-request-${{ inputs.pr_number || github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   request:
     name: codex-review-request
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    concurrency:
+      group: codex-review-request-${{ inputs.pr_number || github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

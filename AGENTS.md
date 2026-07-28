@@ -64,13 +64,15 @@ docs/      prd/  adr/  CONTEXT.md
 4. Run the adversarial QC loop before every push — independent reviewer lenses over the push's
    delta, every finding fixed or declined with a reason, looped until a round finds nothing
    real. A `pre-push` hook refuses a branch unless the tip commit carries a `QC:` trailer for
-   its own tree (`git commit -m "$(printf 'docs: subject\n\nQC: %s\n' "$(git write-tree)")"`)
+   its own tree, with a note saying how deep the loop went
+   (`git commit -m "$(printf 'docs: subject\n\nQC: %s 1 round, docs pass\n' "$(git write-tree)")"`),
    AND `.claude/qc-evidence/<tree-sha>.json` records the loop. The full rule is in
    [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
 5. Open a PR against `main` with a summary + test plan. Codex does not auto-review pushes: the
    `codex-review-request` workflow comments `@codex review` after a push (post it yourself if it
-   didn't), and the merge gate's "Codex clean" is the `codex-freshness` status — a Codex verdict
-   whose `Reviewed commit:` sha is the **current** head. Reviewer silence is never approval.
+   didn't), and the merge gate needs the `codex-freshness` status green — a Codex verdict whose
+   `Reviewed commit:` sha is the **current** head (maintainers keep that context required) —
+   with the review's findings addressed. Reviewer silence is never approval.
 
 > **Full methodology + tooling setup:** the plan → build → verify → review → ship loop and
 > how to install your agent's skills (gitignored, not committed) are in

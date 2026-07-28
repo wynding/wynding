@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 // watch-pr.mjs — the review-loop PR watcher (docs/ai-workflow.md §4).
 //
-// Polls one PR and prints an event line for every change: new reviews, new conversation
-// comments, check-state transitions, head pushes, review-decision changes. Built to be
-// trusted while unattended, which mostly means being loud about its own health:
+// Polls one PR and prints an event line for every change: new reviews, new or edited
+// conversation comments, check-state transitions, head pushes, review-decision changes.
+// Built to be trusted while unattended, which mostly means being loud about its own
+// health — the contract is that this process NEVER goes quiet while alive:
 //
-//   - ONE `gh pr view` invocation per cycle (a single GraphQL request), interval floored
-//     at 45s — well under secondary-rate-limit territory, so the watcher cannot kill
-//     itself the way ad-hoc multi-endpoint pollers have.
-//   - Every poll failure prints a POLL_ERROR event and the loop continues. Silence is
-//     never load-bearing: a HEARTBEAT line prints every few polls regardless of change,
-//     so "no output for N minutes" always means "the watcher itself is dead", not "no
-//     news" — treat it that way.
+//   - ONE `gh pr view` invocation per cycle (gh may paginate a PR that grows past ~100
+//     reviews or comments), interval floored at 45s — far from rate-limit territory, so
+//     the watcher cannot kill itself the way ad-hoc multi-endpoint pollers have.
+//   - The call carries a hard timeout of one interval, so a hung network path surfaces
+//     as a POLL_ERROR event instead of freezing the loop alive and mute.
+//   - Every poll failure prints a POLL_ERROR event and the loop continues — except when
+//     the very first polls all fail (never reached the PR: wrong number, dead auth),
+//     which prints FATAL and exits 1 rather than emitting errors forever.
+//   - Any other internal failure prints FATAL on stdout (the event stream) and exits 1.
+//   - A HEARTBEAT line prints every few polls regardless of change, so "no output for
+//     N minutes" always means the watcher is gone — restart it; never read its silence
+//     as "no news".
 //
 // Exits 0 on its own only when the PR merges or closes.
 //
@@ -25,47 +31,91 @@
 import { execFileSync } from 'node:child_process';
 
 const MIN_INTERVAL = 45;
+const NEVER_CONNECTED_LIMIT = 3;
 
-// Trim response weight in the same single call: review/comment bodies on a busy PR run
-// to megabytes, and the watcher only diffs identities and states.
+// The --jq projection trims what is PRINTED, not what crosses the wire (gh applies jq
+// client-side); bodies are kept in the field list because the event lines quote them.
 const FIELDS = 'state,headRefOid,reviewDecision,statusCheckRollup,reviews,comments';
 const JQ = `{
   state, headRefOid, reviewDecision,
-  checks: [(.statusCheckRollup // [])[] | {name: (.name // .context), state: (.conclusion // .state // .status)}],
+  checks: [(.statusCheckRollup // [])[] | {type: (.__typename // ""), name: (.name // .context), state: (.conclusion // .state // .status)}],
   reviews: [(.reviews // [])[] | {author: .author.login, state, at: .submittedAt, body: (.body // "")[0:100]}],
   comments: [(.comments // [])[] | {id, author: .author.login, at: .createdAt, body: (.body // "")[0:100]}]
 }`;
 
-const args = process.argv.slice(2);
-const prNumber = args.find((a) => /^\d+$/.test(a));
-const flag = (name, fallback) => {
-  const i = args.indexOf(`--${name}`);
-  if (i === -1) return fallback;
-  const v = Number(args[i + 1]);
-  return Number.isFinite(v) ? v : fallback;
-};
-const once = args.includes('--once');
-const interval = Math.max(MIN_INTERVAL, flag('interval', 60));
-const heartbeatEvery = Math.max(0, flag('heartbeat', 10));
-
-if (!prNumber) {
+const usage = (problem) => {
+  if (problem) console.error(`watch-pr: ${problem}`);
   console.error(
     'usage: node scripts/watch-pr.mjs <pr-number> [--interval s] [--heartbeat n] [--once]',
   );
   process.exit(1);
+};
+
+// Flags consume their values here so a numeric flag value can never be mistaken for the
+// PR number (`--heartbeat 5 68` watches #68, not #5).
+const args = process.argv.slice(2);
+const VALUE_FLAGS = new Set(['--interval', '--heartbeat']);
+const flags = {};
+const positionals = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (VALUE_FLAGS.has(a)) {
+    const v = Number(args[i + 1]);
+    if (!Number.isInteger(v) || v < 0) usage(`${a} needs a non-negative integer`);
+    flags[a] = v;
+    i++;
+  } else if (a === '--once') {
+    flags[a] = true;
+  } else {
+    positionals.push(a);
+  }
 }
+if (positionals.length !== 1 || !/^\d+$/.test(positionals[0])) {
+  usage(positionals.length > 1 ? `unexpected argument: ${positionals[1]}` : undefined);
+}
+const prNumber = positionals[0];
+const once = flags['--once'] === true;
+const interval = Math.max(MIN_INTERVAL, flags['--interval'] ?? 60);
+const heartbeatEvery = flags['--heartbeat'] ?? 10;
 
 const now = () => new Date().toISOString();
 const say = (kind, message) => console.log(`${now()} ${kind} ${message}`);
 const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
 
+// gh's stderr puts the diagnostic last (advisories first) — keep the tail, note the rest.
+const pollErrorMessage = (err) => {
+  const raw = String(err?.stderr || err?.message || err);
+  const lines = raw
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tail = oneLine(lines.at(-1) ?? raw).slice(0, 300);
+  return lines.length > 1 ? `${tail} [+${lines.length - 1} earlier line(s)]` : tail;
+};
+
 function poll() {
   const raw = execFileSync('gh', ['pr', 'view', prNumber, '--json', FIELDS, '--jq', JQ], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: interval * 1000, // a hung call becomes a POLL_ERROR, never a mute freeze
+    killSignal: 'SIGKILL',
   });
   return JSON.parse(raw);
 }
+
+// Rollup entries are check-runs AND status contexts in one list; two producers may share
+// a display name, so diff keys carry the type (and an index for exact duplicates).
+function keyedChecks(checks) {
+  const counts = new Map();
+  return checks.map((c) => {
+    const base = `${c.type}:${c.name}`;
+    const n = counts.get(base) ?? 0;
+    counts.set(base, n + 1);
+    return { ...c, key: n === 0 ? base : `${base}#${n}` };
+  });
+}
+
+const checkLabel = (c) => (c.type === 'StatusContext' ? `${c.name} (status)` : c.name);
 
 function summarize(snap) {
   const tally = { total: snap.checks.length, bad: 0, pending: 0 };
@@ -75,7 +125,7 @@ function summarize(snap) {
     else if (s !== 'SUCCESS' && s !== 'SKIPPED' && s !== 'NEUTRAL') tally.pending++;
   }
   return (
-    `state=${snap.state} head=${snap.headRefOid.slice(0, 8)} decision=${snap.reviewDecision || '-'} ` +
+    `state=${snap.state} head=${String(snap.headRefOid).slice(0, 8)} decision=${snap.reviewDecision || '-'} ` +
     `checks=${tally.total - tally.bad - tally.pending}/${tally.total} ok` +
     (tally.bad ? ` ${tally.bad} FAILING` : '') +
     (tally.pending ? ` ${tally.pending} pending` : '') +
@@ -85,22 +135,26 @@ function summarize(snap) {
 
 function diff(prev, snap) {
   if (prev.headRefOid !== snap.headRefOid) {
-    say('HEAD', `${prev.headRefOid.slice(0, 8)} -> ${snap.headRefOid.slice(0, 8)}`);
+    say('HEAD', `${String(prev.headRefOid).slice(0, 8)} -> ${String(snap.headRefOid).slice(0, 8)}`);
   }
-  const seenReviews = new Set(prev.reviews.map((r) => `${r.author}@${r.at}`));
+  const seenReviews = new Set(prev.reviews.map((r) => `${r.author}@${r.at}@${r.state}`));
   for (const r of snap.reviews) {
-    if (!seenReviews.has(`${r.author}@${r.at}`)) {
+    if (!seenReviews.has(`${r.author}@${r.at}@${r.state}`)) {
       say('REVIEW', `${r.author} ${r.state} at ${r.at}: ${oneLine(r.body)}`);
     }
   }
-  const seenComments = new Set(prev.comments.map((c) => c.id));
+  const prevComments = new Map(prev.comments.map((c) => [c.id, c.body]));
   for (const c of snap.comments) {
-    if (!seenComments.has(c.id)) say('COMMENT', `${c.author} at ${c.at}: ${oneLine(c.body)}`);
+    if (!prevComments.has(c.id)) {
+      say('COMMENT', `${c.author} at ${c.at}: ${oneLine(c.body)}`);
+    } else if (prevComments.get(c.id) !== c.body) {
+      say('COMMENT_EDITED', `${c.author}: ${oneLine(c.body)}`);
+    }
   }
-  const prevChecks = new Map(prev.checks.map((c) => [c.name, c.state]));
-  for (const c of snap.checks) {
-    const before = prevChecks.get(c.name);
-    if (before !== c.state) say('CHECK', `${c.name}: ${before ?? '(new)'} -> ${c.state}`);
+  const prevChecks = new Map(keyedChecks(prev.checks).map((c) => [c.key, c.state]));
+  for (const c of keyedChecks(snap.checks)) {
+    const before = prevChecks.get(c.key);
+    if (before !== c.state) say('CHECK', `${checkLabel(c)}: ${before ?? '(new)'} -> ${c.state}`);
   }
   if (prev.reviewDecision !== snap.reviewDecision) {
     say('DECISION', `${prev.reviewDecision || '-'} -> ${snap.reviewDecision || '-'}`);
@@ -111,26 +165,45 @@ const sleep = (s) => new Promise((resolve) => setTimeout(resolve, s * 1000));
 
 let prev = null;
 let polls = 0;
+let consecutiveFailures = 0;
+let everSucceeded = false;
 for (;;) {
-  let snap = null;
   try {
-    snap = poll();
-  } catch (err) {
-    // The whole point: a failed poll is an EVENT, not a silence.
-    say('POLL_ERROR', oneLine(String(err.stderr || err.message)).slice(0, 200));
-    if (once) process.exit(1);
-  }
-  if (snap) {
-    polls++;
-    if (prev === null) say('WATCHING', `PR #${prNumber} — ${summarize(snap)}`);
-    else diff(prev, snap);
-    if (heartbeatEvery > 0 && polls % heartbeatEvery === 0) say('HEARTBEAT', summarize(snap));
-    if (snap.state !== 'OPEN') {
-      say('DONE', `PR #${prNumber} is ${snap.state}`);
-      process.exit(0);
+    let snap = null;
+    try {
+      snap = poll();
+    } catch (err) {
+      // The whole point: a failed poll is an EVENT, not a silence.
+      say('POLL_ERROR', pollErrorMessage(err));
+      if (once) process.exit(1);
+      consecutiveFailures++;
+      if (!everSucceeded && consecutiveFailures >= NEVER_CONNECTED_LIMIT) {
+        say(
+          'FATAL',
+          `never reached PR #${prNumber} after ${consecutiveFailures} attempts — ` +
+            'check the PR number and gh auth',
+        );
+        process.exit(1);
+      }
     }
-    prev = snap;
+    if (snap) {
+      everSucceeded = true;
+      consecutiveFailures = 0;
+      polls++;
+      if (prev === null) say('WATCHING', `PR #${prNumber} — ${summarize(snap)}`);
+      else diff(prev, snap);
+      if (heartbeatEvery > 0 && polls % heartbeatEvery === 0) say('HEARTBEAT', summarize(snap));
+      if (snap.state !== 'OPEN') {
+        say('DONE', `PR #${prNumber} is ${snap.state}`);
+        process.exit(0);
+      }
+      prev = snap;
+    }
+    if (once) process.exit(0);
+  } catch (err) {
+    // A processing bug must die LOUDLY on the event stream, not vanish onto stderr.
+    say('FATAL', oneLine(String(err?.stack ?? err)).slice(0, 300));
+    process.exit(1);
   }
-  if (once) process.exit(0);
   await sleep(interval);
 }
