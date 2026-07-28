@@ -85,8 +85,9 @@ should be (a same-size swap inside an already-dirty file changes no summary line
 see a mutation committed or amended into `HEAD`, or one under a gitignored path — so confirm
 `HEAD` is where you left it **and** grep each mutation target for its restored text.
 
-A `pre-push` hook enforces that the loop happened. It refuses any push whose destination is a
-branch other than `main` unless both records exist for exactly the state being pushed:
+A `pre-push` hook requires a record that the loop happened. It refuses any push whose
+destination is a branch other than `main` (deletions and tags excepted) unless both records
+exist for exactly the state being pushed:
 
 - the tip commit carries a **QC record** — a `QC:` trailer holding that commit's own tree
   hash — and
@@ -121,10 +122,12 @@ honest record costs one substitution, and neither record can be recycled: edit a
 afterwards and the hashes stop matching, which is exactly when the pass is stale. Already
 committed? Amend it with `git commit --amend --no-edit --trailer "QC=$(git write-tree)"` (git
 2.32+). `pnpm install` wires the hook by pointing `core.hooksPath` at the tracked `.githooks/`
-directory — unless another tool already owns that setting **or** hooks already exist in
-`.git/hooks`; the install says which and leaves both alone. Move any existing hooks into
-`.githooks/` (or chain-load ours from yours — the checker reads git's stdin protocol) before
-wiring it yourself with `git config core.hooksPath .githooks`.
+directory — unless another tool already owns that setting (reconcile, then run
+`git config core.hooksPath .githooks` yourself) **or** hooks already exist in the repo's shared
+hooks directory (move them into `.githooks/` first, or chain-load ours from yours — it reads
+git's stdin protocol, so invoke it **before** anything else consumes stdin; a wrapper that
+drains the pipe would leave the gate announcing "no refs on stdin" and gating nothing). The
+install says which case it hit and leaves both alone.
 
 Both records are claims, not proofs — they say the pass and the loop happened, where a reviewer
 can see the claim. Their value is the boundary: a step checked at push time gets done; a step
@@ -136,8 +139,8 @@ characters — long enough to be a reason rather than a keystroke; it covers bot
 QC_OVERRIDE="hotfix for the broken deploy; QC follows in the next push" git push
 ```
 
-It is printed, appended to a local `.claude/qc-evidence/overrides.log`, and worth repeating in
-the PR thread — the commits will not carry it.
+It is printed, appended best-effort to a local `.claude/qc-evidence/overrides.log`, and worth
+repeating in the PR thread — the commits will not carry it.
 
 **Push ritual, four inseparable steps:** adversarial QC loop → mechanical gate → `QC:` trailer
 (+ evidence file) → push + review trigger (§4).
@@ -175,8 +178,9 @@ node scripts/watch-pr.mjs <pr-number>
 ```
 
 One request per cycle, every poll failure is an emitted event, and a periodic heartbeat line
-proves the watcher itself is alive. If the heartbeat stops, the watcher is dead — restart it;
-never read a watcher's silence as "no news".
+proves the watcher itself is alive. If its output stops entirely, the watcher is dead —
+restart it (heartbeats pause during failure streaks; you see POLL_ERROR lines instead); never
+read a watcher's silence as "no news".
 
 **Report pace, not just results.** While any gate is pending (CI, a bot review, a QC round): if
 ~30 minutes pass with no progress visible from the PR side, proactively tell the owner where
@@ -219,7 +223,10 @@ agents) are the contract — adapt the grill / verify / review steps to your har
 
 - A **GitHub remote** + branch protection on `main` (required checks + reviews).
 - `codex-freshness` in the branch-protection **required contexts** — the workflow posts the
-  status either way; only the contexts list makes it block merges.
+  status either way; only the contexts list makes it block merges. Order matters: the
+  workflows must be on `main` before the context is required (these events run the workflow
+  file from the default branch), and each PR already open at wiring time needs one manual
+  dispatch to seed its status.
 - The **CodeRabbit** GitHub app installed on the repo.
 - **Codex** available for review (and the grill / plan loops).
 

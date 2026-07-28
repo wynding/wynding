@@ -78,7 +78,12 @@ export default tseslint.config(
     // the Node globals they legitimately use.
     files: ['scripts/**/*.mjs', 'eslint-rules/**/*.mjs'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly' },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+      },
     },
   },
 );

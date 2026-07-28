@@ -21,14 +21,17 @@
 // making the steps structurally unforgettable at the push boundary: a step the hook checks
 // gets done; a step nothing checks gets skipped exactly when attention is somewhere else.
 //
-// Emergency escape hatch for both legs: QC_OVERRIDE="<rationale>". Each overridden push is
-// appended to `.claude/qc-evidence/overrides.log` (local, best-effort) so the bypass
-// leaves a trace a postmortem can find.
+// Emergency escape hatch for both legs (honored on every refusal path, including broken
+// input): QC_OVERRIDE="<rationale>". Each overridden push is appended best-effort to
+// `.claude/qc-evidence/overrides.log` so the bypass leaves a trace a postmortem can find.
 //
 // Reads git's pre-push stdin protocol: `<local-ref> <local-oid> <remote-ref> <remote-oid>`
-// per ref. Deletions and pushes whose destination is the default branch are not gated.
-// Stdin the gate cannot read or parse REFUSES the push — a gate that shrugs at its own
-// input failure is silently disabled exactly when something is wrong.
+// per ref. Deletions, tag pushes, and pushes whose destination is `main` are not gated.
+// Stdin the gate cannot read — or any line of it that does not parse as the protocol —
+// REFUSES the push. Genuinely empty stdin is the one pass-through (git hands over nothing
+// on an up-to-date push), and it is announced on stderr so a chain-loading wrapper that
+// swallowed stdin is visible instead of silently ungated: a wrapper MUST hand this checker
+// git's stdin unconsumed — run it before anything else reads the pipe.
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -42,63 +45,6 @@ const ZERO = /^0+$/;
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 
-let stdinError = null;
-const stdin = (() => {
-  if (process.stdin.isTTY) return ''; // Run by hand rather than by git — nothing to gate.
-  try {
-    return readFileSync(0, 'utf8');
-  } catch (err) {
-    stdinError = err;
-    return '';
-  }
-})();
-
-if (stdinError) {
-  console.error('❌ QC gate: could not read the ref list git passes on stdin — refusing to');
-  console.error(`   guess what is being pushed (${stdinError.message.split('\n')[0]}).`);
-  console.error('   Re-run the push. Emergency only: QC_OVERRIDE="why this push cannot wait".');
-  process.exit(1);
-}
-
-const rawLines = stdin
-  .split('\n')
-  .map((line) => line.trim())
-  .filter((line) => line.length > 0);
-
-// A protocol line is `<local-ref> <local-oid> <remote-ref> <remote-oid>`: token count
-// alone is not enough (any four words match), so the oids must look like object ids and
-// the destination like a ref.
-const looksLikeOid = (s) => /^[0-9a-f]{40,64}$/i.test(s);
-const entries = rawLines
-  .map((line) => line.split(/\s+/))
-  .filter((parts) => parts.length === 4)
-  .map(([localRef, localOid, remoteRef, remoteOid]) => ({
-    localRef,
-    localOid,
-    remoteRef,
-    remoteOid,
-  }))
-  .filter(
-    ({ localOid, remoteRef, remoteOid }) =>
-      looksLikeOid(localOid) && looksLikeOid(remoteOid) && remoteRef.startsWith('refs/'),
-  );
-
-// Non-empty stdin that parses to zero protocol lines is a malformed handoff from git,
-// not an empty push — fail closed rather than silently gating nothing.
-if (rawLines.length > 0 && entries.length === 0) {
-  console.error("❌ QC gate: the pre-push input did not parse as git's ref protocol —");
-  console.error(`   got ${rawLines.length} line(s), none of the form "<ref> <oid> <ref> <oid>".`);
-  console.error('   Re-run the push. Emergency only: QC_OVERRIDE="why this push cannot wait".');
-  process.exit(1);
-}
-
-const pushes = entries
-  .filter(({ localOid }) => !ZERO.test(localOid)) // a deletion pushes no content
-  // Branches only. A tag names history that already exists — it cannot be re-committed to carry
-  // a record, so gating one would refuse a release push with advice that cannot be followed.
-  .filter(({ remoteRef }) => remoteRef.startsWith('refs/heads/'))
-  .filter(({ remoteRef }) => remoteRef !== `refs/heads/${DEFAULT_BRANCH}`);
-
 // The evidence directory lives at the top of the working tree (each worktree has its own).
 // A gate whose own failure mode is a stack trace is worse than no gate, here and below:
 // whatever git cannot answer, say so as a QC failure with the way out.
@@ -111,13 +57,9 @@ const toplevel = (() => {
 })();
 
 const override = (process.env.QC_OVERRIDE ?? '').trim();
-if (pushes.length > 0 && override.length > 0) {
-  if (override.length < MIN_RATIONALE) {
-    console.error(
-      `❌ QC gate: QC_OVERRIDE needs a real rationale (at least ${MIN_RATIONALE} characters).`,
-    );
-    process.exit(1);
-  }
+
+/** Emergency bypass: warn loudly, leave a best-effort local trace, allow the push. */
+function applyOverride(refsLabel) {
   console.error(
     '⚠️  QC gate overridden — no QC record or loop evidence was required for this push.',
   );
@@ -126,26 +68,113 @@ if (pushes.length > 0 && override.length > 0) {
   if (toplevel !== null) {
     try {
       mkdirSync(join(toplevel, EVIDENCE_DIR), { recursive: true });
-      const refs = pushes
-        .map((p) => `${p.localRef.replace(/^refs\/heads\//, '')}@${p.localOid.slice(0, 8)}`)
-        .join(' ');
       appendFileSync(
         join(toplevel, EVIDENCE_DIR, 'overrides.log'),
-        `${new Date().toISOString()} ${refs} — ${override}\n`,
+        `${new Date().toISOString()} ${refsLabel} — ${override}\n`,
       );
       console.error(`   (logged to ${EVIDENCE_DIR}/overrides.log)`);
-    } catch {
-      // Logging must never block an emergency push; the printed rationale above stands.
+    } catch (err) {
+      // Never block an emergency push over bookkeeping — but never fail silently either.
+      console.error(
+        `   (could not log the override to ${EVIDENCE_DIR}/overrides.log: ` +
+          `${String(err?.message ?? err).split('\n')[0]})`,
+      );
+      console.error('   Record this bypass in the PR thread — nothing else will.');
     }
   }
   process.exit(0);
 }
 
+/** True when an override was supplied; exits instead when its rationale is too short. */
+function overrideRequested() {
+  if (override.length === 0) return false;
+  if (override.length < MIN_RATIONALE) {
+    console.error(
+      `❌ QC gate: QC_OVERRIDE needs a real rationale (at least ${MIN_RATIONALE} characters).`,
+    );
+    process.exit(1);
+  }
+  return true;
+}
+
+let stdinError = null;
+const stdin = (() => {
+  if (process.stdin.isTTY) return ''; // Run by hand rather than by git — nothing to gate.
+  try {
+    return readFileSync(0, 'utf8');
+  } catch (err) {
+    stdinError = err;
+    return '';
+  }
+})();
+
+if (stdinError) {
+  if (overrideRequested()) applyOverride('(refs unknown — stdin unreadable)');
+  console.error('❌ QC gate: could not read the ref list git passes on stdin — refusing to');
+  console.error(`   guess what is being pushed (${stdinError.message.split('\n')[0]}).`);
+  console.error('   Re-run the push. Emergency only: QC_OVERRIDE="why this push cannot wait".');
+  process.exit(1);
+}
+
+const rawLines = stdin
+  .split('\n')
+  .map((line) => line.trim())
+  .filter((line) => line.length > 0);
+
+// Git hands over zero bytes on an up-to-date push, so empty stdin is legitimate — but a
+// chain-loading wrapper that drained the pipe looks identical, so say what happened.
+if (rawLines.length === 0 && !process.stdin.isTTY) {
+  console.error('QC gate: no refs on stdin — nothing gated.');
+  process.exit(0);
+}
+
+// A protocol line is `<local-ref> <local-oid> <remote-ref> <remote-oid>`: token count
+// alone is not enough (any four words match), so the oids must look like object ids and
+// the destination like a ref. ANY line that fails refuses the whole push — a ref the gate
+// cannot parse is a ref it cannot gate.
+const looksLikeOid = (s) => /^[0-9a-f]{40,64}$/i.test(s);
+const parsedLines = rawLines.map((line) => {
+  const parts = line.split(/\s+/);
+  const ok =
+    parts.length === 4 &&
+    looksLikeOid(parts[1]) &&
+    looksLikeOid(parts[3]) &&
+    parts[2].startsWith('refs/');
+  return ok
+    ? { localRef: parts[0], localOid: parts[1], remoteRef: parts[2], remoteOid: parts[3] }
+    : { badLine: line };
+});
+const badLines = parsedLines.filter((p) => p.badLine !== undefined);
+if (badLines.length > 0) {
+  if (overrideRequested()) applyOverride(`(unparsed input: ${badLines.length} line(s))`);
+  console.error("❌ QC gate: the pre-push input did not fully parse as git's ref protocol —");
+  for (const { badLine } of badLines) console.error(`   - ${badLine.slice(0, 100)}`);
+  console.error('   Re-run the push. Emergency only: QC_OVERRIDE="why this push cannot wait".');
+  process.exit(1);
+}
+
+const pushes = parsedLines
+  .filter(({ localOid }) => !ZERO.test(localOid)) // a deletion pushes no content
+  // Branches only. A tag names history that already exists — it cannot be re-committed to carry
+  // a record, so gating one would refuse a release push with advice that cannot be followed.
+  .filter(({ remoteRef }) => remoteRef.startsWith('refs/heads/'))
+  .filter(({ remoteRef }) => remoteRef !== `refs/heads/${DEFAULT_BRANCH}`);
+
+if (pushes.length > 0 && overrideRequested()) {
+  applyOverride(
+    pushes
+      .map((p) => `${p.remoteRef.replace(/^refs\/heads\//, '')}@${p.localOid.slice(0, 8)}`)
+      .join(' '),
+  );
+}
+
 const readFailures = [];
 const trailerFailures = [];
 const loopFailures = [];
-for (const { localRef, localOid } of pushes) {
-  const branch = localRef.replace(/^refs\/heads\//, '');
+for (const { localOid, remoteRef } of pushes) {
+  // Name each problem by the DESTINATION branch — that is what the gate decisions key on,
+  // and what a source ref like `HEAD` would mislabel.
+  const branch = remoteRef.replace(/^refs\/heads\//, '');
   let tree, message;
   try {
     tree = git('rev-parse', `${localOid}^{tree}`);
@@ -160,7 +189,7 @@ for (const { localRef, localOid } of pushes) {
   // git's own trailer-block rules, since the point is the record, not its placement.
   const recorded = message
     .split('\n')
-    .map((line) => line.match(new RegExp(`^${TRAILER}:\\s*([0-9a-f]{7,40})\\b`, 'i')))
+    .map((line) => line.match(new RegExp(`^${TRAILER}:\\s*([0-9a-f]{7,64})\\b`, 'i')))
     .filter(Boolean)
     .map((m) => m[1].toLowerCase());
 

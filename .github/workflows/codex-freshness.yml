@@ -21,9 +21,9 @@ name: Codex freshness
 # repository's default branch — this workflow must never check out or execute PR-head
 # code. Keep the `ref:` line.
 #
-# Fork-origin PRs: if an event's token arrives read-only, the status POST fails and the
-# job goes red on exit 2 (loud, never a silent green) — refresh the status by dispatching
-# this workflow with the PR number.
+# If the status POST fails for any reason (token scope, API outage), the job goes red on
+# exit 2 — loud, never a silent green. Refresh the status by dispatching this workflow
+# with the PR number.
 
 on:
   pull_request_target:
@@ -50,12 +50,16 @@ permissions:
 jobs:
   evaluate:
     name: evaluate codex freshness
-    # Only events that can change the answer: pushes/reopens, Codex's own reviews (and
-    # their dismissal), Codex's own comments. Skipping is safe: a skipped job posts no
-    # status and never enters the concurrency group, so the last real verdict keeps
-    # standing. (Concurrency lives at JOB level for exactly that reason — workflow-level
-    # groups are entered before the `if` is evaluated, so a to-be-skipped run would
-    # cancel a live one carrying a newer answer.)
+    # Runs only on events that can change the answer, and only for non-draft PRs:
+    # opens/pushes/reopens/ready-for-review, reviews or comments from a codex-ish login
+    # (a cheap substring prefilter — the exact-login check lives in the script), and
+    # manual dispatch. Codex's own review/comment events are NOT draft-filtered, so a
+    # draft can still receive a status from a Codex comment. Skipping is safe: a skipped
+    # job posts no status, so the last real verdict keeps standing. (Concurrency lives at
+    # JOB level because workflow-level groups are definitely entered before any `if` is
+    # evaluated — a to-be-skipped run would cancel a live one carrying a newer answer.
+    # A job-level group is assumed not to be acquired by a skipped job; if a live run
+    # ever appears cancelled by a skipped one, this assumption is where to look.)
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false) ||

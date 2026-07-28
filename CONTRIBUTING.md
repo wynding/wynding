@@ -114,16 +114,18 @@ You can scope any task to one package with Turbo's filter, e.g.
    recorded honestly, is the loop), write the evidence file, then
    `git commit -m "$(printf 'fix: subject\n\nQC: %s 1 round, self\n' "$(git write-tree)")"`
    (the words after the hash are a free-form depth note). `pnpm install` wires the hook; if
-   another hook manager owns `core.hooksPath` or hooks already exist in `.git/hooks`, the
-   install leaves them alone and says so — move them into `.githooks/` before wiring it by hand
-   with `git config core.hooksPath .githooks`. The full rule, including the evidence-file shape
+   another hook manager owns `core.hooksPath` or hooks already exist in the repo's shared
+   hooks directory, the install leaves them alone and says so — reconcile the first case, or
+   move existing hooks into `.githooks/` for the second, then wire by hand with
+   `git config core.hooksPath .githooks`. The full rule, including the evidence-file shape
    and the emergency override, is in
    [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
 6. **Open a PR** against `main` and fill out the template (summary + test plan). Reviews come
    from Codex + CodeRabbit + the owner; after any later push, a workflow requests a fresh Codex
    review automatically (or comment `@codex review` yourself) — merges wait for a Codex review
    of the exact commit being merged (the `codex-freshness` status, a required check once the
-   maintainer wires it).
+   maintainer wires it) **and** for its findings to be addressed; a green status means Codex
+   looked, not that it was happy.
 
 ## Working with AI Agents
 

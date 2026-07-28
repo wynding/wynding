@@ -16,8 +16,10 @@
 // verdict's recorded sha prefix-matches the current PR head. Codex artifacts without a
 // parseable verdict line (e.g. its infrastructure-error comments) never count.
 // If Codex is ever renamed or changes that line, every PR presents as "permanently red
-// status + one @codex review comment per push" — that symptom means: update CODEX_LOGIN
-// and RE_REVIEWED below.
+// status + one @codex review comment per push". That symptom has two causes with one
+// discriminator: does a NEW Codex review appear after the bot's trigger comment? If yes,
+// Codex answered and the parsing here drifted — update CODEX_LOGIN and RE_REVIEWED below.
+// If no, Codex stopped honoring bot-authored triggers — see codex-review-request.yml.
 //
 // Exit codes: 0 = fresh, 1 = stale or no verdict (actionable: trigger a review),
 // 2 = could not determine (API/config failure). Automation reacting to this script must
@@ -36,9 +38,14 @@
 //   PR_NUMBER=68 [HEAD_SHA=<sha>] [GITHUB_TOKEN=…] node scripts/check-codex-freshness.mjs
 
 // Any escape from the normal flow means "could not determine", never "stale" — exit 1
-// triggers automation (a review request), and a crash must not.
+// triggers automation (a review request), and a crash must not. Node's fetch buries the
+// actionable half of a network error (ECONNREFUSED, ENOTFOUND, TLS) in err.cause, so
+// surface it — exit 2 hands the message to a human.
 const indeterminate = (err) => {
-  console.error(`❌ codex-freshness: could not determine freshness — ${err?.message ?? err}`);
+  const detail = err?.cause?.message
+    ? `${err?.message ?? err} (${err.cause.message})`
+    : (err?.message ?? err);
+  console.error(`❌ codex-freshness: could not determine freshness — ${detail}`);
   console.error('   (API or configuration failure, not a verdict. Re-run once it is resolved.)');
   process.exit(2);
 };
@@ -47,9 +54,12 @@ process.on('unhandledRejection', indeterminate);
 
 const CODEX_LOGIN = 'chatgpt-codex-connector[bot]';
 const STATUS_CONTEXT = 'codex-freshness';
-// Anchored to a line start so a verdict line QUOTED inside some other Codex-authored
-// text (a blockquote, an error report citing a doc example) cannot count as a verdict.
-const RE_REVIEWED = /^\s*\*{0,2}Reviewed commit:\s*\*{0,2}\s*`?([0-9a-f]{7,40})/im;
+// A verdict line must start its line at column 0, and fenced code regions are stripped
+// before matching — so a verdict QUOTED inside other Codex-authored text (a blockquote or
+// `- ` list item fails the anchor; a fenced error report citing an old verdict is
+// stripped; a 4-space-indented block fails the anchor) cannot count as a verdict.
+const RE_REVIEWED = /^\*{0,2}Reviewed commit:\s*\*{0,2}\s*`?([0-9a-f]{7,40})/im;
+const stripFences = (s) => s.replace(/(```|~~~)[\s\S]*?\1/g, '');
 const MAX_PAGES = 50; // 5 000 items — far beyond any real PR; a runaway guard, not a limit
 
 const REPO = process.env.GITHUB_REPOSITORY ?? 'wynding/wynding';
@@ -134,12 +144,12 @@ try {
   const verdicts = [];
   for (const r of reviews) {
     if (r.user?.login !== CODEX_LOGIN || r.state === 'DISMISSED') continue;
-    const sha = r.body?.match(RE_REVIEWED)?.[1];
+    const sha = stripFences(r.body ?? '').match(RE_REVIEWED)?.[1];
     if (sha) verdicts.push({ sha: sha.toLowerCase(), kind: 'review', when: r.submitted_at });
   }
   for (const c of comments) {
     if (c.user?.login !== CODEX_LOGIN) continue;
-    const sha = c.body?.match(RE_REVIEWED)?.[1];
+    const sha = stripFences(c.body ?? '').match(RE_REVIEWED)?.[1];
     if (sha) verdicts.push({ sha: sha.toLowerCase(), kind: 'comment', when: c.created_at });
   }
 

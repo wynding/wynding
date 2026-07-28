@@ -8,16 +8,17 @@
 //
 //   - ONE `gh pr view` invocation per cycle (gh may paginate a PR that grows past ~100
 //     reviews or comments), interval floored at 45s — far from rate-limit territory, so
-//     the watcher cannot kill itself the way ad-hoc multi-endpoint pollers have.
+//     the watcher cannot rate-limit itself to death.
 //   - The call carries a hard timeout of one interval, so a hung network path surfaces
 //     as a POLL_ERROR event instead of freezing the loop alive and mute.
 //   - Every poll failure prints a POLL_ERROR event and the loop continues — except when
 //     the very first polls all fail (never reached the PR: wrong number, dead auth),
 //     which prints FATAL and exits 1 rather than emitting errors forever.
 //   - Any other internal failure prints FATAL on stdout (the event stream) and exits 1.
-//   - A HEARTBEAT line prints every few polls regardless of change, so "no output for
-//     N minutes" always means the watcher is gone — restart it; never read its silence
-//     as "no news".
+//   - A HEARTBEAT line prints every few polls regardless of change (unless disabled with
+//     --heartbeat 0), so "no output for N minutes" always means the watcher is gone —
+//     restart it; never read its silence as "no news". (Heartbeats count successful
+//     polls, so a failure streak shows POLL_ERROR lines instead.)
 //
 // Exits 0 on its own only when the PR merges or closes.
 //
@@ -33,14 +34,17 @@ import { execFileSync } from 'node:child_process';
 const MIN_INTERVAL = 45;
 const NEVER_CONNECTED_LIMIT = 3;
 
-// The --jq projection trims what is PRINTED, not what crosses the wire (gh applies jq
-// client-side); bodies are kept in the field list because the event lines quote them.
+// The --jq projection is applied client-side by gh (review/comment bodies still cross the
+// wire inside the atomic `reviews`/`comments` fields); it trims what is printed AND what
+// is diffed. Comment-edit detection compares the 100-char excerpt plus the full length,
+// so only an edit that preserves both escapes notice. A running CheckRun carries
+// `conclusion: ""`, which jq's // would keep — hence the explicit empty-string fallback.
 const FIELDS = 'state,headRefOid,reviewDecision,statusCheckRollup,reviews,comments';
 const JQ = `{
   state, headRefOid, reviewDecision,
-  checks: [(.statusCheckRollup // [])[] | {type: (.__typename // ""), name: (.name // .context), state: (.conclusion // .state // .status)}],
+  checks: [(.statusCheckRollup // [])[] | {type: (.__typename // ""), name: (.name // .context), state: ((.conclusion // "" | if . == "" then null else . end) // .state // .status)}],
   reviews: [(.reviews // [])[] | {author: .author.login, state, at: .submittedAt, body: (.body // "")[0:100]}],
-  comments: [(.comments // [])[] | {id, author: .author.login, at: .createdAt, body: (.body // "")[0:100]}]
+  comments: [(.comments // [])[] | {id, author: .author.login, at: .createdAt, body: (.body // "")[0:100], len: ((.body // "") | length)}]
 }`;
 
 const usage = (problem) => {
@@ -82,15 +86,18 @@ const now = () => new Date().toISOString();
 const say = (kind, message) => console.log(`${now()} ${kind} ${message}`);
 const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
 
-// gh's stderr puts the diagnostic last (advisories first) — keep the tail, note the rest.
+// Lead with the transport-level identity (a SIGKILLed hang says ETIMEDOUT, and stderr may
+// hold only a pre-kill advisory); then gh's stderr tail, where its own diagnostics land.
 const pollErrorMessage = (err) => {
-  const raw = String(err?.stderr || err?.message || err);
+  const code = err?.code ? `${err.code}${err?.signal ? ` (${err.signal})` : ''}: ` : '';
+  const raw = String(err?.stderr || '').trim() || String(err?.message ?? err);
   const lines = raw
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-  const tail = oneLine(lines.at(-1) ?? raw).slice(0, 300);
-  return lines.length > 1 ? `${tail} [+${lines.length - 1} earlier line(s)]` : tail;
+  const tail = oneLine(lines.at(-1) ?? '') || String(err?.message ?? err);
+  const more = lines.length > 1 ? ` [+${lines.length - 1} earlier line(s)]` : '';
+  return `${code}${tail}${more}`.slice(0, 300);
 };
 
 function poll() {
@@ -143,11 +150,11 @@ function diff(prev, snap) {
       say('REVIEW', `${r.author} ${r.state} at ${r.at}: ${oneLine(r.body)}`);
     }
   }
-  const prevComments = new Map(prev.comments.map((c) => [c.id, c.body]));
+  const prevComments = new Map(prev.comments.map((c) => [c.id, `${c.len}:${c.body}`]));
   for (const c of snap.comments) {
     if (!prevComments.has(c.id)) {
       say('COMMENT', `${c.author} at ${c.at}: ${oneLine(c.body)}`);
-    } else if (prevComments.get(c.id) !== c.body) {
+    } else if (prevComments.get(c.id) !== `${c.len}:${c.body}`) {
       say('COMMENT_EDITED', `${c.author}: ${oneLine(c.body)}`);
     }
   }

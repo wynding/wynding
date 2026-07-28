@@ -9,10 +9,13 @@ name: Codex review request
 #
 # Codex must honor a trigger comment authored by `github-actions[bot]` for this to work.
 # If it ever stops answering bot-authored triggers, the symptom is a `codex-freshness`
-# status that stays red after pushes while this workflow reports success: route the
-# comment through a fine-grained PAT (issues: write) stored as a secret instead of
-# `github.token`, or delete this workflow and fall back to the manual trigger documented
-# in docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
+# status that stays red after pushes while this workflow reports success. (Same symptom
+# as a parsing drift in check-codex-freshness.mjs — the discriminator: does a NEW Codex
+# review appear after the bot's comment? No → Codex is ignoring the trigger, this file's
+# problem; yes → the script's parsing drifted.) Remedy here: route the comment through a
+# fine-grained PAT (issues: write) stored as a secret instead of `github.token`, or
+# delete this workflow and fall back to the manual trigger documented in
+# docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
 # green on its own.
 #
 # No duplicate-comment guard beyond the freshness pre-check and the concurrency group:
@@ -20,15 +23,17 @@ name: Codex review request
 # that race is one redundant review. A guard keyed on comment timestamps would be more
 # code than the failure it prevents.
 #
-# SAFETY INVARIANT: `pull_request_target` grants a write-capable token, so the checkout
-# below is PINNED to the repository's default branch — this workflow must never check out
-# or execute PR-head code. Keep the `ref:` line.
+# SAFETY INVARIANT: this workflow runs with a write-capable token and must never check
+# out or execute PR-head code. Both its triggers already default to trusted refs (never
+# the PR head); the `ref:` pin hardens that to the default branch on every path,
+# including whatever ref a `workflow_dispatch` was aimed at. Keep the `ref:` line.
 
 on:
   pull_request_target:
     types: [synchronize]
-  # Manual lever (also the feasibility probe: a dispatch posts the same bot-authored
-  # comment the automatic path would).
+  # Manual lever: re-request a review for a head Codex has not covered. Doubles as the
+  # feasibility probe for bot-authored triggers — but only on a PR whose current head
+  # LACKS a verdict; on a fresh head the run posts nothing and exits.
   workflow_dispatch:
     inputs:
       pr_number:
