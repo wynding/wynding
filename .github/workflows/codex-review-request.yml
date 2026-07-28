@@ -1,0 +1,78 @@
+name: Codex review request
+
+# Codex reviews when a PR opens, when a draft goes ready, or when someone comments
+# "@codex review" — never on pushes. This workflow posts that comment automatically after
+# a push whose new head lacks a Codex verdict, so a fix-push cannot sit unreviewed because
+# nobody remembered the trigger. (`opened` is deliberately absent: Codex reviews new PRs
+# on its own.)
+#
+# FEASIBILITY NOTE: whether Codex honors triggers authored by `github-actions[bot]` was
+# unverified when this landed — it was probed live on the PR that introduced it. If Codex
+# ever stops answering bot-authored triggers, either route the comment through a
+# fine-grained PAT (issues: write) stored as a secret, or delete this workflow and fall
+# back to the documented manual trigger; the codex-freshness status stays red either way,
+# so a missed trigger is loud, not silent.
+#
+# No duplicate-comment guard beyond the freshness pre-check and the concurrency group:
+# the only real overlap is a hand-posted trigger racing this workflow, and the cost of
+# that race is one redundant review. A guard keyed on comment timestamps would be more
+# code than the failure it prevents.
+#
+# SAFETY INVARIANT: `pull_request_target` grants a write-capable token, so this workflow
+# must NEVER check out or execute PR-head code. The checkout below takes the event's BASE
+# ref (the default for pull_request_target) — the script that runs is the one already on
+# main. Keep it that way.
+
+on:
+  pull_request_target:
+    types: [synchronize, ready_for_review]
+  # Manual lever (also the feasibility probe: a dispatch posts the same bot-authored
+  # comment the automatic path would).
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to request a Codex review for
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write # PR conversation comments post through the issues API
+
+concurrency:
+  group: codex-review-request-${{ inputs.pr_number || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    name: codex-review-request
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Comment "@codex review" if the current head lacks a Codex verdict
+        run: |
+          set -euo pipefail
+          ec=0
+          node scripts/check-codex-freshness.mjs || ec=$?
+          case "$ec" in
+            0) echo "Current head already has a Codex verdict — no trigger needed." ;;
+            1)
+              gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "@codex review"
+              echo "Requested a Codex review of the new head."
+              ;;
+            *)
+              # Exit 2 = the check could not determine freshness. Do NOT comment on a
+              # guess — a flaky API call must not spend a review.
+              echo "Could not determine freshness (exit $ec) — not commenting." >&2
+              exit "$ec"
+              ;;
+          esac
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
