@@ -54,8 +54,8 @@ Requirements:
 - Node.js 22 LTS or newer.
 - pnpm (pinned via the `packageManager` field; `corepack enable` provisions it).
 
-This is a **pnpm + Turborepo** monorepo. Useful scripts (all run through Turbo,
-cached per package):
+This is a **pnpm + Turborepo** monorepo. Useful scripts (the package-scoped ones run
+through Turbo, cached per package):
 
 - `pnpm run build` — build every package/app.
 - `pnpm run typecheck` — `tsc -b` across the project graph.
@@ -126,7 +126,7 @@ You can scope any task to one package with Turbo's filter, e.g.
    [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
 6. **Open a PR** against `main` and fill out the template (summary + test plan). Reviews come
    from Codex + CodeRabbit + the owner; after any later push, a workflow requests a fresh Codex
-   review automatically (or comment `@codex review` yourself) — merges wait for a Codex review
+   review automatically (non-draft PRs; or comment `@codex review` yourself) — merges wait for a Codex review
    of the exact commit being merged (the `codex-freshness` status, a required check once the
    maintainer wires it) **and** for its findings to be addressed; a green status means Codex
    looked, not that it was happy.

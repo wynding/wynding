@@ -79,9 +79,10 @@ export default tseslint.config(
     // the Node globals they legitimately use.
     files: ['scripts/**/*.mjs', 'eslint-rules/**/*.mjs'],
     languageOptions: {
-      // The full Node set, not a hand-curated list: `lint:scripts` gates every verify
-      // run, and a missing entry would fail CI on an ordinary Node global.
-      globals: globals.node,
+      // The full ESM-shaped Node set, not a hand-curated list: `lint:scripts` gates
+      // every verify run, and a missing entry would fail CI on an ordinary Node global.
+      // nodeBuiltin (not node) so CJS-only names like `require` stay flagged in .mjs.
+      globals: globals.nodeBuiltin,
     },
   },
 );

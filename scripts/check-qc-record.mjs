@@ -3,10 +3,11 @@
 //
 // Refuses to push a branch unless BOTH records exist for exactly the state being pushed:
 //
-//  1. A `QC: <tree-sha>` trailer on the tip commit, whose hash is that commit's own tree.
-//     `git write-tree` prints that hash from the staged index, so recording an honest pass
-//     costs one substitution in the commit command — and the record cannot be recycled,
-//     because any later edit changes the tree.
+//  1. A `QC: <tree-sha>` trailer on the tip commit recording that commit's own tree —
+//     the full hash, or any prefix of at least 7 hex chars. `git write-tree` prints that
+//     hash from the staged index, so recording an honest pass costs one substitution in
+//     the commit command — and the record cannot be recycled, because any later edit
+//     changes the tree.
 //  2. Loop evidence: `.claude/qc-evidence/<tree-sha>.json` (full tree sha in both the
 //     filename and the `treeSha` field), written as the adversarial QC loop's final act,
 //     tallying its rounds, findings, and reviewers for that same tree. All six fields are
@@ -35,10 +36,14 @@
 // destination is `main` are not gated — a push with nothing else in it says so on stderr;
 // ungated refs that ride alongside a gated branch pass without a line of their own. Stdin
 // the gate cannot read — or any line of it that does not parse as the protocol — REFUSES
-// the push. Genuinely empty stdin is the one pass-through (git hands over nothing on an
-// up-to-date push), and it too is announced, so a chain-loading wrapper that swallowed
-// stdin is visible instead of silently ungated: a wrapper MUST hand this checker git's
-// stdin unconsumed — run it before anything else reads the pipe.
+// the push. A terminal on fd 0 means the gate was run by hand rather than by git: it
+// announces that and exits 0, gating nothing. Genuinely empty stdin is the only
+// pass-through of git-supplied input (git hands over nothing on an up-to-date push), and
+// it too is announced, so a chain-loading wrapper that swallowed stdin is visible instead
+// of silently ungated: a wrapper MUST hand this checker git's stdin unconsumed — run it
+// before anything else reads the pipe. A verified push announces itself too — the gate's
+// approval is never silent, so a hook that did not run cannot be mistaken for one that
+// passed.
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -56,10 +61,12 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 // The evidence directory lives at the top of the working tree (each worktree has its own).
 // A gate whose own failure mode is a stack trace is worse than no gate, here and below:
 // whatever git cannot answer, say so as a QC failure with the way out.
+let toplevelError = null;
 const toplevel = (() => {
   try {
     return git('rev-parse', '--show-toplevel');
-  } catch {
+  } catch (err) {
+    toplevelError = String(err?.message ?? err).split('\n')[0];
     return null;
   }
 })();
@@ -83,8 +90,10 @@ function applyOverride(refsLabel) {
   console.error(`   rationale: ${override}`);
   console.error('   Say the same thing in the PR thread; the commits carry no record of it.');
   if (toplevel === null) {
-    console.error('   (could not resolve the worktree root — this override was NOT logged;');
-    console.error('   record the bypass in the PR thread — nothing else will.)');
+    console.error(
+      `   (could not resolve the worktree root (${toplevelError}) — this override was NOT`,
+    );
+    console.error('   logged; record the bypass in the PR thread — nothing else will.)');
     process.exit(0);
   }
   try {
@@ -126,9 +135,11 @@ const stdin = (() => {
 })();
 
 if (stdinError) {
-  if (overrideValid) applyOverride('(refs unknown — stdin unreadable)');
+  // Diagnose FIRST, even when an override will allow the push — a bypass must never hide
+  // the fault that made it necessary.
   console.error('❌ QC gate: could not read the ref list git passes on stdin — refusing to');
   console.error(`   guess what is being pushed (${stdinError.message.split('\n')[0]}).`);
+  if (overrideValid) applyOverride('(refs unknown — stdin unreadable)');
   noteShortOverride();
   console.error('   Re-run the push. Emergency only: QC_OVERRIDE="why this push cannot wait".');
   process.exit(1);
@@ -164,9 +175,14 @@ const parsedLines = rawLines.map((line) => {
 });
 const badLines = parsedLines.filter((p) => p.badLine !== undefined);
 if (badLines.length > 0) {
-  if (overrideValid) applyOverride(`(unparsed input: ${badLines.length} line(s))`);
+  // Diagnose FIRST, even when an override will allow the push.
   console.error("❌ QC gate: the pre-push input did not fully parse as git's ref protocol —");
   for (const { badLine } of badLines) console.error(`   - ${badLine.slice(0, 100)}`);
+  if (overrideValid) {
+    applyOverride(
+      `(unparsed input: ${badLines.length} line(s); first: ${JSON.stringify(badLines[0].badLine.slice(0, 60))})`,
+    );
+  }
   noteShortOverride();
   console.error('   Re-run the push. Emergency only: QC_OVERRIDE="why this push cannot wait".');
   process.exit(1);
@@ -227,7 +243,9 @@ for (const { localOid, remoteRef } of pushes) {
   // Loop evidence for the same tree.
   const shortPath = `${EVIDENCE_DIR}/${tree.slice(0, 8)}….json`;
   if (toplevel === null) {
-    loopFailures.push(`${branch}: could not resolve the worktree root to look for ${shortPath}`);
+    loopFailures.push(
+      `${branch}: could not resolve the worktree root (${toplevelError}) to look for ${shortPath}`,
+    );
     continue;
   }
   let raw;
@@ -254,11 +272,11 @@ for (const { localOid, remoteRef } of pushes) {
   } else {
     const fileSha = evidence.treeSha.toLowerCase();
     if (fileSha !== tree) {
-      // The trailer leg's regex accepts a prefix, so a truncated evidence sha is a
-      // plausible mistake deserving its own diagnosis — not "re-run the loop". Anything
-      // that is not a clean prefix or a clean overrun gets shown quoted, so an empty or
+      // The trailer leg accepts a prefix, so a truncated evidence sha is a plausible
+      // mistake deserving its own diagnosis — not "re-run the loop". Anything that is
+      // not a clean prefix or a clean overrun gets shown quoted, so an empty or
       // whitespace value is visible in the message.
-      if (fileSha.length >= 7 && fileSha.length < tree.length && tree.startsWith(fileSha)) {
+      if (fileSha.length > 0 && fileSha.length < tree.length && tree.startsWith(fileSha)) {
         problems.push(
           `treeSha ${evidence.treeSha.slice(0, 8)}… is truncated — the evidence file needs the full tree sha`,
         );
@@ -306,16 +324,18 @@ for (const { localOid, remoteRef } of pushes) {
 }
 
 if (readFailures.length + trailerFailures.length + loopFailures.length > 0) {
+  // Diagnose FIRST, even when an override will allow the push — the operator must see
+  // what the gate objected to, not just that it stood aside.
+  console.error('❌ QC gate: push refused — the QC record does not cover what you are pushing.');
+  for (const f of [...readFailures, ...trailerFailures, ...loopFailures]) {
+    console.error(`   - ${f}`);
+  }
   if (overrideValid) {
     applyOverride(
       pushes
         .map((p) => `${p.remoteRef.replace(/^refs\/heads\//, '')}@${p.localOid.slice(0, 8)}`)
         .join(' '),
     );
-  }
-  console.error('❌ QC gate: push refused — the QC record does not cover what you are pushing.');
-  for (const f of [...readFailures, ...trailerFailures, ...loopFailures]) {
-    console.error(`   - ${f}`);
   }
   noteShortOverride();
   if (readFailures.length > 0) {
@@ -364,4 +384,13 @@ if (readFailures.length + trailerFailures.length + loopFailures.length > 0) {
   process.exit(1);
 }
 
+// Approval is never silent: a hook that did not run must be distinguishable from one
+// that passed.
+for (const { localOid, remoteRef } of pushes) {
+  const tree = git('rev-parse', `${localOid}^{tree}`);
+  console.error(
+    `QC gate: ${remoteRef.replace(/^refs\/heads\//, '')} verified — trailer and loop ` +
+      `evidence cover tree ${tree.slice(0, 8)}.`,
+  );
+}
 process.exit(0);

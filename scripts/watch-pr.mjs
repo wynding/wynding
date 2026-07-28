@@ -26,7 +26,8 @@
 // Usage:
 //   node scripts/watch-pr.mjs <pr-number> [--interval <seconds>] [--heartbeat <polls>] [--once]
 //
-//   --interval   seconds between polls (default 60, floor 45, max 3600)
+//   --interval   seconds between polls (default 60, floor 45 — announced when clamped —
+//                max 3600)
 //   --heartbeat  full-snapshot line every N polls (default 10, range 1-1000)
 //   --once       one poll: print the snapshot and exit (0 ok, 1 poll failed)
 
@@ -52,7 +53,7 @@ const JQ = `{
 const usage = (problem) => {
   if (problem) console.error(`watch-pr: ${problem}`);
   console.error(
-    'usage: node scripts/watch-pr.mjs <pr-number> [--interval s] [--heartbeat n>=1] [--once]',
+    'usage: node scripts/watch-pr.mjs <pr-number> [--interval 45-3600] [--heartbeat 1-1000] [--once]',
   );
   process.exit(1);
 };
@@ -81,11 +82,17 @@ if (positionals.length !== 1 || !/^\d+$/.test(positionals[0])) {
 }
 const prNumber = positionals[0];
 const once = flags['--once'] === true;
-// Bounded on both ends: the floor keeps the poll rate honest, and the ceiling keeps the
-// value inside setTimeout's 32-bit range — an overflowed timer fires after 1 ms, which
-// would turn this into a rate-limit-tripping hot loop.
-const interval = Math.max(MIN_INTERVAL, flags['--interval'] ?? 60);
+// Bounded on both ends. The ceiling is a policy cap — an hour is already far past useful
+// for a review loop — and it keeps the value comfortably inside setTimeout's 32-bit range
+// (past 2^31−1 ms a timer silently fires after 1 ms, a rate-limit-tripping hot loop).
+// The floor protects the rate limit; a low request is honored at 45 and says so, because
+// a silently adjusted poll period corrupts the caller's timing arithmetic.
+const requestedInterval = flags['--interval'] ?? 60;
+const interval = Math.max(MIN_INTERVAL, requestedInterval);
 if (interval > 3600) usage('--interval max is 3600 seconds');
+if (requestedInterval < MIN_INTERVAL) {
+  console.error(`watch-pr: --interval ${requestedInterval} raised to the ${MIN_INTERVAL}s floor`);
+}
 // The heartbeat cannot be disabled or pushed out of sight: it is the liveness signal the
 // whole contract rests on.
 const heartbeatEvery = flags['--heartbeat'] ?? 10;
@@ -138,10 +145,17 @@ function poll() {
     killSignal: 'SIGKILL',
   });
   const snap = JSON.parse(raw);
-  // A falsy or non-object result must be an ERROR, not a skipped iteration — the loop
-  // only speaks from the success and failure branches, and a value that lands in neither
-  // would leave it silently alive forever.
-  if (snap === null || typeof snap !== 'object') {
+  // Anything that is not a full snapshot must be an ERROR, not a skipped iteration or a
+  // FATAL: the loop only speaks from its success and failure branches (a value landing in
+  // neither would leave it silently alive forever), and a malformed-but-parseable payload
+  // is a retryable poll condition, not a bug in the differ.
+  const shaped =
+    snap !== null &&
+    typeof snap === 'object' &&
+    !Array.isArray(snap) &&
+    typeof snap.state === 'string' &&
+    [snap.checks, snap.reviews, snap.comments].every(Array.isArray);
+  if (!shaped) {
     throw new Error(`gh returned ${JSON.stringify(raw.slice(0, 60))} instead of a snapshot`);
   }
   return snap;
@@ -181,9 +195,20 @@ function diff(prev, snap) {
   if (prev.headRefOid !== snap.headRefOid) {
     say('HEAD', `${String(prev.headRefOid).slice(0, 8)} -> ${String(snap.headRefOid).slice(0, 8)}`);
   }
-  const seenReviews = new Set(prev.reviews.map((r) => `${r.author}@${r.at}@${r.state}`));
-  for (const r of snap.reviews) {
-    if (!seenReviews.has(`${r.author}@${r.at}@${r.state}`)) {
+  // submittedAt has second granularity and same-second same-author review bursts are
+  // real, so duplicate keys get an occurrence index — same treatment as checks.
+  const keyedReviews = (reviews) => {
+    const counts = new Map();
+    return reviews.map((r) => {
+      const base = `${r.author}@${r.at}@${r.state}`;
+      const n = counts.get(base) ?? 0;
+      counts.set(base, n + 1);
+      return { ...r, key: n === 0 ? base : `${base}#${n}` };
+    });
+  };
+  const seenReviews = new Set(keyedReviews(prev.reviews).map((r) => r.key));
+  for (const r of keyedReviews(snap.reviews)) {
+    if (!seenReviews.has(r.key)) {
       say('REVIEW', `${r.author} ${r.state} at ${r.at}: ${oneLine(r.body)}`);
     }
   }
@@ -223,8 +248,9 @@ const sleep = (s) => new Promise((resolve) => setTimeout(resolve, s * 1000));
 // stdout pipes are asynchronous on macOS (Node's documented process-I/O behavior), where
 // process.exit() discards any still-buffered writes — which would truncate away the
 // DONE/FATAL line that a reader behind a pipe needs most. Letting the loop end naturally
-// flushes everything. (Small fixed-size emitters like the pre-push gate are safe with
-// process.exit; this file streams unbounded events, hence the care.)
+// flushes everything. (Small bounded emitters like the pre-push gate — a few lines per
+// pushed ref, far inside a pipe buffer — are safe with process.exit; this file streams
+// unbounded events, hence the care.)
 async function main() {
   let prev = null;
   let polls = 0;
@@ -260,9 +286,14 @@ async function main() {
         if (prev === null) say('WATCHING', `PR #${prNumber} — ${summarize(snap)}`);
         else diff(prev, snap);
         if (polls % heartbeatEvery === 0) say('HEARTBEAT', summarize(snap));
-        if (snap.state !== 'OPEN') {
+        // Exit 0 only on the KNOWN terminal states — an unrecognized state must never
+        // read as "resolved", the one way this watcher could lie by exiting quietly.
+        if (snap.state === 'MERGED' || snap.state === 'CLOSED') {
           say('DONE', `PR #${prNumber} is ${snap.state}`);
           return;
+        }
+        if (snap.state !== 'OPEN') {
+          say('POLL_ERROR', `unrecognized PR state ${JSON.stringify(snap.state)}`);
         }
         prev = snap;
       }

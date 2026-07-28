@@ -23,15 +23,16 @@ name: Codex freshness
 # never check out or execute PR-head code. Keep the `ref:` line.
 #
 # If the status POST fails for any reason (token scope, API outage), the job goes red on
-# exit 2 — loud, never a silent green. Refresh the status by dispatching this workflow
-# with the PR number.
+# exit 2 — loud, never a silent green — and the PREVIOUS status keeps standing until a
+# successful run replaces it. Refresh by dispatching this workflow with the PR number.
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # Codex's findings shape arrives as a PR review …
+  # Codex's findings shape arrives as a PR review (edits re-evaluate too — a body edited
+  # out of verdict shape must not leave a green status standing) …
   pull_request_review:
-    types: [submitted, dismissed]
+    types: [submitted, edited, dismissed]
   # … and its clean shape ("Didn't find any major issues") as an issue comment — which
   # can be edited into a verdict later, or deleted out of one, so those re-evaluate too.
   issue_comment:

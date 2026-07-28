@@ -9,12 +9,15 @@
 // (docs/ai-workflow.md §4).
 //
 // A Codex verdict, in this repo's observed shapes, is either:
-//   - a PR review by `chatgpt-codex-connector[bot]` (findings shape), or
+//   - a PR review by `chatgpt-codex-connector[bot]` — its API `commit_id` names the
+//     reviewed head authoritatively (review bodies usually repeat it in a
+//     `**Reviewed commit:**` line, but the inline-findings shape can omit it, so the
+//     body is never consulted for reviews), or
 //   - an issue comment by that account ("Didn't find any major issues" — the clean shape
-//     posts no review object),
-// and BOTH open a line with `**Reviewed commit:** \`<sha>\``. FRESH iff any non-dismissed
-// verdict's recorded sha prefix-matches the current PR head. Codex artifacts without a
-// parseable verdict line (e.g. its infrastructure-error comments) never count.
+//     posts no review object), which opens a line with `**Reviewed commit:** \`<sha>\``.
+// FRESH iff any non-dismissed verdict's recorded sha prefix-matches the current PR head.
+// Codex comments without a parseable verdict line (e.g. its infrastructure-error
+// comments) never count.
 // If Codex is ever renamed or changes that line, every PR presents as "permanently red
 // status + one @codex review comment per push". That symptom has two causes with one
 // discriminator: does a NEW Codex review appear after the bot's trigger comment? If yes,
@@ -36,8 +39,9 @@
 // arrives as. In that mode a stale verdict exits 0: the red status IS the report, and
 // the job stays green so the workflow only fails when the check itself could not run.
 //
-// Local use (read-only, exit code is the report; HEAD_SHA takes the full sha or a unique
-// prefix of 7-64 hex chars — anything else exits 2):
+// Local use (read-only, exit code is the report; HEAD_SHA takes the full sha, a unique
+// prefix of 7-64 hex chars, or an empty value meaning "the PR's current head from the
+// API" — anything else exits 2):
 //   PR_NUMBER=68 [HEAD_SHA=<sha>] [GITHUB_TOKEN=…] node scripts/check-codex-freshness.mjs
 
 // Any escape from the normal flow means "could not determine", never "stale" — exit 1
@@ -57,14 +61,17 @@ process.on('unhandledRejection', indeterminate);
 
 const CODEX_LOGIN = 'chatgpt-codex-connector[bot]';
 const STATUS_CONTEXT = 'codex-freshness';
-// A verdict line must start its line at column 0, and only the portion of a body BEFORE
-// its first fence-marker line is searched: Codex's verdict line always precedes any
-// fenced content, while quoted material (a PR file echoed back, an error log) arrives at
-// or after a fence. Searching a verbatim prefix can never splice text into a new match,
-// so a mangled or hostile artifact can LOSE its verdict — fail-safe, a stale answer just
-// re-requests a review — but never gain one. Blockquotes, `- ` list items, and indented
-// blocks fail the column-0 anchor. Residual: a verdict quoted at column 0 as plain prose
-// or inside an HTML wrapper, before any fence, still counts.
+// Comment bodies only (reviews use their API commit_id): a verdict line must start its
+// line at column 0, and only the portion of a body BEFORE its first fence-marker line is
+// searched — Codex's verdict line always precedes any fenced content, while quoted
+// material (a PR file echoed back, an error log) arrives at or after a fence. Searching
+// a verbatim prefix can never splice text into a new match, so a mangled or hostile
+// artifact can LOSE its verdict — fail-safe, a stale answer just re-requests a review —
+// but never gain one. Blockquotes, `- ` list items, and indented blocks fail the
+// column-0 anchor. Residual: a verdict at column 0 as plain prose or inside an HTML
+// wrapper (or HTML comment), before any fence, still counts — and .match() takes the
+// FIRST such line, so an echoed line earlier in a body would pre-empt a real one below
+// it; no observed Codex comment shape embeds foreign text.
 const RE_REVIEWED = /^\*{0,2}Reviewed commit:\s*\*{0,2}\s*`?([0-9a-f]{7,40})/im;
 const beforeFences = (s) => s.split(/^ {0,3}(?:```|~~~)/m)[0];
 const MAX_PAGES = 50; // 5 000 items — far beyond any real PR; a runaway guard, not a limit
@@ -156,8 +163,12 @@ try {
   const verdicts = [];
   for (const r of reviews) {
     if (r.user?.login !== CODEX_LOGIN || r.state === 'DISMISSED') continue;
-    const sha = beforeFences(r.body ?? '').match(RE_REVIEWED)?.[1];
-    if (sha) verdicts.push({ sha: sha.toLowerCase(), kind: 'review', when: r.submitted_at });
+    // The API's commit_id is authoritative for reviews — the inline-findings body shape
+    // carries no verdict line at all, and a body can echo author-controlled text.
+    const sha = r.commit_id;
+    if (typeof sha === 'string' && /^[0-9a-f]{7,64}$/i.test(sha)) {
+      verdicts.push({ sha: sha.toLowerCase(), kind: 'review', when: r.submitted_at });
+    }
   }
   for (const c of comments) {
     if (c.user?.login !== CODEX_LOGIN) continue;

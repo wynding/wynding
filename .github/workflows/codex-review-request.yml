@@ -48,6 +48,8 @@ permissions:
 jobs:
   request:
     name: codex-review-request
+    # draft == false: a draft is not waiting on review, and a review spent on it would be
+    # spent again at ready_for_review (which self-triggers Codex).
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     concurrency:
       group: codex-review-request-${{ inputs.pr_number || github.event.pull_request.number }}

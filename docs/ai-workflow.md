@@ -34,7 +34,8 @@ reproducer; a failing `sim` test beats a console log.
 ### 3. Verify — the local gate (identical to CI)
 
 `pnpm run verify` must be green before you push (`format:check` + `typecheck` + `lint` +
-`test` with coverage, plus the repo guards). Two gates are hard:
+`test` with coverage, plus the root guards — i18n, dependabot config, glossary, scripts
+lint). Two gates are hard:
 
 - **Determinism** — same `(seed, ruleset, inputs)` → byte-identical state; the
   world-hash / replay tests must pass. Lint bans `Math.random`/`Date`/`performance` in the
@@ -90,7 +91,7 @@ destination is a branch other than `main` (deletions and tags excepted) unless b
 exist for exactly the state being pushed:
 
 - the tip commit carries a **QC record** — a `QC:` trailer holding that commit's own tree
-  hash — and
+  hash (a ≥ 7-char prefix of it is accepted) — and
 - **loop evidence** exists at `.claude/qc-evidence/<tree-sha>.json` for that same tree, written
   as the loop's final step with its real tallies:
 
@@ -165,8 +166,9 @@ a reason, so gating it on P2 gates it on nearly everything and it never converge
 citation; a **P0 always escalates to the owner** and is never auto-declined.
 
 **Working the loop.** Codex does not auto-review pushes — it reviews when a PR opens, when a
-draft goes ready, or when someone comments `@codex review`. After a push, the
-`codex-review-request` workflow posts that comment for you (post it yourself if it didn't), and
+draft goes ready, or when someone comments `@codex review`. After a push to a non-draft PR,
+the `codex-review-request` workflow posts that comment for you (post it yourself if it
+didn't — drafts are deliberately excluded, since going ready self-triggers a review), and
 the `codex-freshness` status is only green when a Codex verdict — its review, or its "no major
 issues" comment; both carry a `Reviewed commit:` sha — covers the **current** head. The status
 proves "Codex reviewed this exact commit", no more: "Codex clean" additionally means that
