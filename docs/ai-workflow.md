@@ -140,7 +140,10 @@ QC_OVERRIDE="hotfix for the broken deploy; QC follows in the next push" git push
 ```
 
 It is printed, appended best-effort to a local `.claude/qc-evidence/overrides.log`, and worth
-repeating in the PR thread — the commits will not carry it.
+repeating in the PR thread — the commits will not carry it. A rationale under 15 characters is
+ignored with a note, and a push the gate passes on its own merits ignores the variable
+entirely. If the hook itself cannot run (`node` missing from a GUI client's PATH, a broken
+checkout), the last resort is `git push --no-verify` — then fix the hook.
 
 **Push ritual, four inseparable steps:** adversarial QC loop → mechanical gate → `QC:` trailer
 (+ evidence file) → push + review trigger (§4).
@@ -225,8 +228,8 @@ agents) are the contract — adapt the grill / verify / review steps to your har
 - `codex-freshness` in the branch-protection **required contexts** — the workflow posts the
   status either way; only the contexts list makes it block merges. Order matters: the
   workflows must be on `main` before the context is required (these events run the workflow
-  file from the default branch), and each PR already open at wiring time needs one manual
-  dispatch to seed its status.
+  file from `main`, not from the PR branch), and each PR already open at wiring time needs
+  one manual dispatch to seed its status.
 - The **CodeRabbit** GitHub app installed on the repo.
 - **Codex** available for review (and the grill / plan loops).
 

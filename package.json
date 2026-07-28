@@ -21,9 +21,10 @@
     "i18n:check": "node scripts/i18n-check.mjs",
     "check:dependabot-config": "node scripts/check-dependabot-config.mjs",
     "check:glossary": "node scripts/check-glossary-terms.mjs",
+    "lint:scripts": "eslint scripts eslint-rules",
     "size": "node scripts/size-limit.mjs",
     "prepare": "node scripts/install-git-hooks.mjs",
-    "verify": "pnpm run format:check && pnpm run i18n:check && pnpm run check:dependabot-config && pnpm run check:glossary && turbo run typecheck lint test",
+    "verify": "pnpm run format:check && pnpm run i18n:check && pnpm run check:dependabot-config && pnpm run check:glossary && pnpm run lint:scripts && turbo run typecheck lint test",
     "clean": "turbo run clean && rm -rf node_modules .turbo"
   },
   "devDependencies": {

@@ -24,9 +24,9 @@ name: Codex review request
 # code than the failure it prevents.
 #
 # SAFETY INVARIANT: this workflow runs with a write-capable token and must never check
-# out or execute PR-head code. Both its triggers already default to trusted refs (never
-# the PR head); the `ref:` pin hardens that to the default branch on every path,
-# including whatever ref a `workflow_dispatch` was aimed at. Keep the `ref:` line.
+# out or execute PR-head code. `pull_request_target` already defaults its checkout to the
+# PR base branch; `workflow_dispatch` defaults to whatever ref it was aimed at, which CAN
+# be a PR head — the `ref:` pin keeps every path on the default branch. Keep it.
 
 on:
   pull_request_target:

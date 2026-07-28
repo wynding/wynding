@@ -15,10 +15,10 @@
 //     the very first polls all fail (never reached the PR: wrong number, dead auth),
 //     which prints FATAL and exits 1 rather than emitting errors forever.
 //   - Any other internal failure prints FATAL on stdout (the event stream) and exits 1.
-//   - A HEARTBEAT line prints every few polls regardless of change (unless disabled with
-//     --heartbeat 0), so "no output for N minutes" always means the watcher is gone —
-//     restart it; never read its silence as "no news". (Heartbeats count successful
-//     polls, so a failure streak shows POLL_ERROR lines instead.)
+//   - A HEARTBEAT line prints every few polls regardless of change, so "no output for
+//     N minutes" always means the watcher is gone — restart it; never read its silence
+//     as "no news". (Heartbeats count successful polls, so a failure streak shows
+//     POLL_ERROR lines instead.)
 //
 // Exits 0 on its own only when the PR merges or closes.
 //
@@ -26,7 +26,7 @@
 //   node scripts/watch-pr.mjs <pr-number> [--interval <seconds>] [--heartbeat <polls>] [--once]
 //
 //   --interval   seconds between polls (default 60, floor 45)
-//   --heartbeat  full-snapshot line every N polls (default 10; 0 disables)
+//   --heartbeat  full-snapshot line every N polls (default 10, minimum 1)
 //   --once       one poll: print the snapshot and exit (0 ok, 1 poll failed)
 
 import { execFileSync } from 'node:child_process';
@@ -50,7 +50,7 @@ const JQ = `{
 const usage = (problem) => {
   if (problem) console.error(`watch-pr: ${problem}`);
   console.error(
-    'usage: node scripts/watch-pr.mjs <pr-number> [--interval s] [--heartbeat n] [--once]',
+    'usage: node scripts/watch-pr.mjs <pr-number> [--interval s] [--heartbeat n>=1] [--once]',
   );
   process.exit(1);
 };
@@ -80,24 +80,42 @@ if (positionals.length !== 1 || !/^\d+$/.test(positionals[0])) {
 const prNumber = positionals[0];
 const once = flags['--once'] === true;
 const interval = Math.max(MIN_INTERVAL, flags['--interval'] ?? 60);
+// The heartbeat cannot be disabled: it is the liveness signal the whole contract rests on.
 const heartbeatEvery = flags['--heartbeat'] ?? 10;
+if (heartbeatEvery < 1) usage('--heartbeat needs an integer >= 1');
 
 const now = () => new Date().toISOString();
 const say = (kind, message) => console.log(`${now()} ${kind} ${message}`);
 const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
 
-// Lead with the transport-level identity (a SIGKILLed hang says ETIMEDOUT, and stderr may
-// hold only a pre-kill advisory); then gh's stderr tail, where its own diagnostics land.
+// Lead with the transport-level identity — execFileSync spreads it across three fields
+// (`code` for spawn-level failures, `signal` for kills, `status` for exits), and stderr
+// may hold only a pre-kill advisory. Then gh's stderr TAIL, where its diagnostics land;
+// when stderr is empty, err.message is the reconstructed argv (its last line is the JQ
+// program's closing brace), so take its FIRST line instead.
 const pollErrorMessage = (err) => {
-  const code = err?.code ? `${err.code}${err?.signal ? ` (${err.signal})` : ''}: ` : '';
-  const raw = String(err?.stderr || '').trim() || String(err?.message ?? err);
-  const lines = raw
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const tail = oneLine(lines.at(-1) ?? '') || String(err?.message ?? err);
-  const more = lines.length > 1 ? ` [+${lines.length - 1} earlier line(s)]` : '';
-  return `${code}${tail}${more}`.slice(0, 300);
+  const identity = [
+    err?.code,
+    err?.signal,
+    err?.status != null && err?.status !== 0 ? `exit ${err.status}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const id = identity ? `${identity}: ` : '';
+  const stderrText = String(err?.stderr || '').trim();
+  let tail;
+  let more = '';
+  if (stderrText) {
+    const lines = stderrText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    tail = oneLine(lines.at(-1) ?? '');
+    if (lines.length > 1) more = ` [+${lines.length - 1} earlier line(s)]`;
+  } else {
+    tail = oneLine(String(err?.message ?? err).split('\n')[0]);
+  }
+  return `${id}${tail}${more}`.slice(0, 300);
 };
 
 function poll() {
@@ -151,6 +169,7 @@ function diff(prev, snap) {
     }
   }
   const prevComments = new Map(prev.comments.map((c) => [c.id, `${c.len}:${c.body}`]));
+  const snapCommentIds = new Set(snap.comments.map((c) => c.id));
   for (const c of snap.comments) {
     if (!prevComments.has(c.id)) {
       say('COMMENT', `${c.author} at ${c.at}: ${oneLine(c.body)}`);
@@ -158,10 +177,21 @@ function diff(prev, snap) {
       say('COMMENT_EDITED', `${c.author}: ${oneLine(c.body)}`);
     }
   }
-  const prevChecks = new Map(keyedChecks(prev.checks).map((c) => [c.key, c.state]));
-  for (const c of keyedChecks(snap.checks)) {
+  for (const c of prev.comments) {
+    if (!snapCommentIds.has(c.id)) say('COMMENT_DELETED', `${c.author}'s comment at ${c.at}`);
+  }
+  const prevKeyed = keyedChecks(prev.checks);
+  const snapKeyed = keyedChecks(snap.checks);
+  const prevChecks = new Map(prevKeyed.map((c) => [c.key, c.state]));
+  const snapCheckKeys = new Set(snapKeyed.map((c) => c.key));
+  for (const c of snapKeyed) {
     const before = prevChecks.get(c.key);
     if (before !== c.state) say('CHECK', `${checkLabel(c)}: ${before ?? '(new)'} -> ${c.state}`);
+  }
+  // Disappearances are events too — a status vanishing from the rollup is exactly the
+  // kind of change this watcher exists to surface.
+  for (const c of prevKeyed) {
+    if (!snapCheckKeys.has(c.key)) say('CHECK', `${checkLabel(c)}: ${c.state} -> (gone)`);
   }
   if (prev.reviewDecision !== snap.reviewDecision) {
     say('DECISION', `${prev.reviewDecision || '-'} -> ${snap.reviewDecision || '-'}`);
@@ -170,47 +200,60 @@ function diff(prev, snap) {
 
 const sleep = (s) => new Promise((resolve) => setTimeout(resolve, s * 1000));
 
-let prev = null;
-let polls = 0;
-let consecutiveFailures = 0;
-let everSucceeded = false;
-for (;;) {
-  try {
-    let snap = null;
+// Terminal events set process.exitCode and RETURN instead of calling process.exit():
+// pipes are asynchronous on this platform, and process.exit() discards any still-buffered
+// stdout — which would truncate away the DONE/FATAL line that a reader behind a pipe
+// needs most. Letting the loop end naturally flushes everything.
+async function main() {
+  let prev = null;
+  let polls = 0;
+  let consecutiveFailures = 0;
+  let everSucceeded = false;
+  for (;;) {
     try {
-      snap = poll();
+      let snap = null;
+      try {
+        snap = poll();
+      } catch (err) {
+        // The whole point: a failed poll is an EVENT, not a silence.
+        say('POLL_ERROR', pollErrorMessage(err));
+        if (once) {
+          process.exitCode = 1;
+          return;
+        }
+        consecutiveFailures++;
+        if (!everSucceeded && consecutiveFailures >= NEVER_CONNECTED_LIMIT) {
+          say(
+            'FATAL',
+            `never reached PR #${prNumber} after ${consecutiveFailures} attempts — ` +
+              'check the PR number and gh auth',
+          );
+          process.exitCode = 1;
+          return;
+        }
+      }
+      if (snap) {
+        everSucceeded = true;
+        consecutiveFailures = 0;
+        polls++;
+        if (prev === null) say('WATCHING', `PR #${prNumber} — ${summarize(snap)}`);
+        else diff(prev, snap);
+        if (polls % heartbeatEvery === 0) say('HEARTBEAT', summarize(snap));
+        if (snap.state !== 'OPEN') {
+          say('DONE', `PR #${prNumber} is ${snap.state}`);
+          return;
+        }
+        prev = snap;
+      }
+      if (once) return;
     } catch (err) {
-      // The whole point: a failed poll is an EVENT, not a silence.
-      say('POLL_ERROR', pollErrorMessage(err));
-      if (once) process.exit(1);
-      consecutiveFailures++;
-      if (!everSucceeded && consecutiveFailures >= NEVER_CONNECTED_LIMIT) {
-        say(
-          'FATAL',
-          `never reached PR #${prNumber} after ${consecutiveFailures} attempts — ` +
-            'check the PR number and gh auth',
-        );
-        process.exit(1);
-      }
+      // A processing bug must die LOUDLY on the event stream, not vanish onto stderr.
+      say('FATAL', oneLine(String(err?.stack ?? err)).slice(0, 300));
+      process.exitCode = 1;
+      return;
     }
-    if (snap) {
-      everSucceeded = true;
-      consecutiveFailures = 0;
-      polls++;
-      if (prev === null) say('WATCHING', `PR #${prNumber} — ${summarize(snap)}`);
-      else diff(prev, snap);
-      if (heartbeatEvery > 0 && polls % heartbeatEvery === 0) say('HEARTBEAT', summarize(snap));
-      if (snap.state !== 'OPEN') {
-        say('DONE', `PR #${prNumber} is ${snap.state}`);
-        process.exit(0);
-      }
-      prev = snap;
-    }
-    if (once) process.exit(0);
-  } catch (err) {
-    // A processing bug must die LOUDLY on the event stream, not vanish onto stderr.
-    say('FATAL', oneLine(String(err?.stack ?? err)).slice(0, 300));
-    process.exit(1);
+    await sleep(interval);
   }
-  await sleep(interval);
 }
+
+await main();

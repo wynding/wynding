@@ -34,7 +34,8 @@
 // arrives as. In that mode a stale verdict exits 0: the red status IS the report, and
 // the job stays green so the workflow only fails when the check itself could not run.
 //
-// Local use (read-only, exit code is the report):
+// Local use (read-only, exit code is the report; HEAD_SHA takes the full sha or a unique
+// prefix of at least 7 hex chars):
 //   PR_NUMBER=68 [HEAD_SHA=<sha>] [GITHUB_TOKEN=…] node scripts/check-codex-freshness.mjs
 
 // Any escape from the normal flow means "could not determine", never "stale" — exit 1
@@ -54,12 +55,16 @@ process.on('unhandledRejection', indeterminate);
 
 const CODEX_LOGIN = 'chatgpt-codex-connector[bot]';
 const STATUS_CONTEXT = 'codex-freshness';
-// A verdict line must start its line at column 0, and fenced code regions are stripped
-// before matching — so a verdict QUOTED inside other Codex-authored text (a blockquote or
-// `- ` list item fails the anchor; a fenced error report citing an old verdict is
-// stripped; a 4-space-indented block fails the anchor) cannot count as a verdict.
+// A verdict line must start its line at column 0, and fenced regions are stripped before
+// matching (an unterminated fence strips to end-of-body — a truncated error report is
+// exactly the shape that lacks its closing marker) — so the common quoting shapes cannot
+// count as a verdict: blockquotes, `- ` list items, and 4-space-indented blocks fail the
+// anchor; fenced blocks are stripped. Residual: a verdict quoted at column 0 as plain
+// prose or inside an HTML wrapper still counts. Stripping can only err toward "stale"
+// (a mangled artifact loses its verdict, never gains one), which re-requests a review —
+// the fail-safe direction.
 const RE_REVIEWED = /^\*{0,2}Reviewed commit:\s*\*{0,2}\s*`?([0-9a-f]{7,40})/im;
-const stripFences = (s) => s.replace(/(```|~~~)[\s\S]*?\1/g, '');
+const stripFences = (s) => s.replace(/(```|~~~)[\s\S]*?(\1|$)/g, '');
 const MAX_PAGES = 50; // 5 000 items — far beyond any real PR; a runaway guard, not a limit
 
 const REPO = process.env.GITHUB_REPOSITORY ?? 'wynding/wynding';
@@ -153,7 +158,9 @@ try {
     if (sha) verdicts.push({ sha: sha.toLowerCase(), kind: 'comment', when: c.created_at });
   }
 
-  const fresh = verdicts.find((v) => headSha.startsWith(v.sha));
+  // Bidirectional prefix match: verdicts record 10-hex prefixes, and a local run may
+  // supply HEAD_SHA as a prefix too — either side may be the shorter one.
+  const fresh = verdicts.find((v) => headSha.startsWith(v.sha) || v.sha.startsWith(headSha));
   const latest = verdicts.reduce((a, b) => (!a || (b.when ?? '') > (a.when ?? '') ? b : a), null);
 
   if (fresh) {

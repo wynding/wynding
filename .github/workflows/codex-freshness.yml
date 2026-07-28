@@ -16,10 +16,10 @@ name: Codex freshness
 # same name would collide with it in the branch-protection namespace with the opposite
 # polarity (the job stays green on a stale verdict; the status goes red).
 #
-# SAFETY INVARIANT: some of these events run write-capable and some (`pull_request_review`)
-# default GITHUB_REF to the PR merge ref, so the checkout below is PINNED to the
-# repository's default branch — this workflow must never check out or execute PR-head
-# code. Keep the `ref:` line.
+# SAFETY INVARIANT: every trigger here runs with this workflow's write-capable token
+# (statuses: write), and `pull_request_review` additionally defaults GITHUB_REF to the PR
+# merge ref, so the checkout below is PINNED to the repository's default branch — this
+# workflow must never check out or execute PR-head code. Keep the `ref:` line.
 #
 # If the status POST fails for any reason (token scope, API outage), the job goes red on
 # exit 2 — loud, never a silent green. Refresh the status by dispatching this workflow
@@ -50,7 +50,8 @@ permissions:
 jobs:
   evaluate:
     name: evaluate codex freshness
-    # Runs only on events that can change the answer, and only for non-draft PRs:
+    # Runs only on events that can change the answer — and, for pull_request_target
+    # events, only for non-draft PRs:
     # opens/pushes/reopens/ready-for-review, reviews or comments from a codex-ish login
     # (a cheap substring prefilter — the exact-login check lives in the script), and
     # manual dispatch. Codex's own review/comment events are NOT draft-filtered, so a

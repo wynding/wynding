@@ -111,9 +111,10 @@ You can scope any task to one package with Turbo's filter, e.g.
 5. **QC the push, and record it.** A tracked `pre-push` hook refuses a branch unless the tip
    commit carries a `QC:` trailer for its own tree AND `.claude/qc-evidence/<tree-sha>.json`
    records the QC pass. Review the diff adversarially (for a solo change, your own careful pass,
-   recorded honestly, is the loop), write the evidence file, then
+   recorded honestly, is the loop), stage the change (`git add -A`), write the evidence file
+   for `$(git write-tree)`, then
    `git commit -m "$(printf 'fix: subject\n\nQC: %s 1 round, self\n' "$(git write-tree)")"`
-   (the words after the hash are a free-form depth note). `pnpm install` wires the hook; if
+   (the words after the hash are a free-form depth note — the hook checks only the hash). `pnpm install` wires the hook; if
    another hook manager owns `core.hooksPath` or hooks already exist in the repo's shared
    hooks directory, the install leaves them alone and says so — reconcile the first case, or
    move existing hooks into `.githooks/` for the second, then wire by hand with
