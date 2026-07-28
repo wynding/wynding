@@ -1170,22 +1170,32 @@ describe('controller — call-wave readiness (UiState.callWaveReady, PLAN.md P3 
     expect(c.uiState().callWaveReady).toBe(false);
   });
 
-  it('is false once the per-tick buffer is full — a full 64-command buffer must not leave an "enabled" control that silently no-ops (Round 2 finding #3)', () => {
-    const c = createController(1);
-    c.pause();
-    for (let i = 0; i < MAX_INPUTS_PER_TICK / 2; i++) {
-      const col = i % 2 === 0 ? 3 : 10; // two cells, alternating — never a stale duplicate
-      c.aimAt(col, 3);
-      expect(c.confirm()).toBe(true);
-      c.aimAt(col, 3);
-      expect(c.sellSelected()).toBe(true);
-    }
-    expect(c.uiState().callWaveReady).toBe(false); // buffer full, even though nothing else blocks it
-    // The rare edge case the plan calls out: pressing anyway announces the SAME
-    // 'pendingCap' rejection build/sell commands use, via the existing live-region path.
-    expect(c.callWaveEarly()).toBe(false);
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
-  });
+  it(
+    'is false once the per-tick buffer is full — a full 64-command buffer must not leave an "enabled" control that silently no-ops (Round 2 finding #3)',
+    // Filling all 64 slots through the PUBLIC api is deliberately expensive:
+    // every enqueue re-projects the whole pending buffer, and each buffered
+    // placement re-runs the maze-invariant check — O(n²) with n = 64. Fast
+    // locally (~0.3 s) but past vitest's 5 s default on CI runners (it timed
+    // out there on 3e9b8eb), so the budget is explicit. A cheaper synthetic
+    // fill would bypass the exact projection path this test exists to cover.
+    { timeout: 20_000 },
+    () => {
+      const c = createController(1);
+      c.pause();
+      for (let i = 0; i < MAX_INPUTS_PER_TICK / 2; i++) {
+        const col = i % 2 === 0 ? 3 : 10; // two cells, alternating — never a stale duplicate
+        c.aimAt(col, 3);
+        expect(c.confirm()).toBe(true);
+        c.aimAt(col, 3);
+        expect(c.sellSelected()).toBe(true);
+      }
+      expect(c.uiState().callWaveReady).toBe(false); // buffer full, even though nothing else blocks it
+      // The rare edge case the plan calls out: pressing anyway announces the SAME
+      // 'pendingCap' rejection build/sell commands use, via the existing live-region path.
+      expect(c.callWaveEarly()).toBe(false);
+      expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
+    },
+  );
 
   it('is false once every wave has already launched (nothing left to call)', () => {
     const c = createController(1);
