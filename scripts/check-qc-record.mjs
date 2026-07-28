@@ -32,9 +32,10 @@
 //
 // Reads git's pre-push stdin protocol: `<local-ref> <local-oid> <remote-ref> <remote-oid>`
 // per ref. Deletions, non-branch destinations (tags included), and pushes whose
-// destination is `main` are not gated — each ungated outcome says so on stderr. Stdin the
-// gate cannot read — or any line of it that does not parse as the protocol — REFUSES the
-// push. Genuinely empty stdin is the one pass-through (git hands over nothing on an
+// destination is `main` are not gated — a push with nothing else in it says so on stderr;
+// ungated refs that ride alongside a gated branch pass without a line of their own. Stdin
+// the gate cannot read — or any line of it that does not parse as the protocol — REFUSES
+// the push. Genuinely empty stdin is the one pass-through (git hands over nothing on an
 // up-to-date push), and it too is announced, so a chain-loading wrapper that swallowed
 // stdin is visible instead of silently ungated: a wrapper MUST hand this checker git's
 // stdin unconsumed — run it before anything else reads the pipe.
@@ -42,6 +43,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isatty } from 'node:tty';
 
 const DEFAULT_BRANCH = 'main';
 const TRAILER = 'QC';
@@ -105,7 +107,10 @@ function applyOverride(refsLabel) {
   process.exit(0);
 }
 
-if (process.stdin.isTTY) {
+// isatty(0), NOT process.stdin.isTTY: merely touching process.stdin materializes a socket
+// on fd 0 and flips it non-blocking, after which readFileSync(0) throws EAGAIN whenever
+// the writer pauses mid-stream — a slow chain-loading wrapper would brick every push.
+if (isatty(0)) {
   console.error('QC gate: stdin is a terminal — not invoked by git, nothing gated.');
   process.exit(0);
 }
@@ -176,8 +181,8 @@ const pushes = parsedLines
 
 if (pushes.length === 0) {
   console.error(
-    `QC gate: only ungated destinations in this push (${DEFAULT_BRANCH}, tags, deletions) — ` +
-      'nothing to check.',
+    'QC gate: only destinations the gate does not cover in this push ' +
+      `(${DEFAULT_BRANCH}, tags/non-branch refs, deletions) — nothing to check.`,
   );
   process.exit(0);
 }
@@ -249,13 +254,24 @@ for (const { localOid, remoteRef } of pushes) {
   } else {
     const fileSha = evidence.treeSha.toLowerCase();
     if (fileSha !== tree) {
-      // The trailer leg documents prefixes as legal, so a truncated evidence sha is a
-      // plausible mistake deserving its own diagnosis — not "re-run the loop".
-      problems.push(
-        tree.startsWith(fileSha)
-          ? `treeSha ${evidence.treeSha.slice(0, 8)}… is truncated — the evidence file needs the full tree sha`
-          : `treeSha ${evidence.treeSha.slice(0, 8)} is not this push's tree ${tree.slice(0, 8)} — evidence from an earlier state`,
-      );
+      // The trailer leg's regex accepts a prefix, so a truncated evidence sha is a
+      // plausible mistake deserving its own diagnosis — not "re-run the loop". Anything
+      // that is not a clean prefix or a clean overrun gets shown quoted, so an empty or
+      // whitespace value is visible in the message.
+      if (fileSha.length >= 7 && fileSha.length < tree.length && tree.startsWith(fileSha)) {
+        problems.push(
+          `treeSha ${evidence.treeSha.slice(0, 8)}… is truncated — the evidence file needs the full tree sha`,
+        );
+      } else if (fileSha.length > tree.length && fileSha.startsWith(tree)) {
+        problems.push(
+          `treeSha is ${fileSha.length} characters — longer than a tree sha; the value is malformed`,
+        );
+      } else {
+        problems.push(
+          `treeSha ${JSON.stringify(evidence.treeSha.slice(0, 12))} is not this push's tree ` +
+            `${tree.slice(0, 8)} — evidence from an earlier state`,
+        );
+      }
     }
   }
   if (!Number.isInteger(evidence?.rounds) || evidence.rounds < 1) {

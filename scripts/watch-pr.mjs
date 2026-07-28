@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // watch-pr.mjs — the review-loop PR watcher (docs/ai-workflow.md §4).
 //
-// Polls one PR and prints an event line for every change: new reviews, new or edited
-// conversation comments, check-state transitions, head pushes, review-decision changes.
+// Polls one PR and prints an event line for every change: new reviews; new, edited, or
+// deleted conversation comments; check-state transitions (including a check vanishing
+// from the rollup); head pushes; review-decision changes.
 // Built to be trusted while unattended, which mostly means being loud about its own
 // health — the contract is that this process NEVER goes quiet while alive:
 //
@@ -20,16 +21,17 @@
 //     as "no news". (Heartbeats count successful polls, so a failure streak shows
 //     POLL_ERROR lines instead.)
 //
-// Exits 0 on its own only when the PR merges or closes.
+// Left running, it exits 0 only when the PR merges or closes.
 //
 // Usage:
 //   node scripts/watch-pr.mjs <pr-number> [--interval <seconds>] [--heartbeat <polls>] [--once]
 //
-//   --interval   seconds between polls (default 60, floor 45)
-//   --heartbeat  full-snapshot line every N polls (default 10, minimum 1)
+//   --interval   seconds between polls (default 60, floor 45, max 3600)
+//   --heartbeat  full-snapshot line every N polls (default 10, range 1-1000)
 //   --once       one poll: print the snapshot and exit (0 ok, 1 poll failed)
 
 import { execFileSync } from 'node:child_process';
+import { inspect } from 'node:util';
 
 const MIN_INTERVAL = 45;
 const NEVER_CONNECTED_LIMIT = 3;
@@ -79,10 +81,15 @@ if (positionals.length !== 1 || !/^\d+$/.test(positionals[0])) {
 }
 const prNumber = positionals[0];
 const once = flags['--once'] === true;
+// Bounded on both ends: the floor keeps the poll rate honest, and the ceiling keeps the
+// value inside setTimeout's 32-bit range — an overflowed timer fires after 1 ms, which
+// would turn this into a rate-limit-tripping hot loop.
 const interval = Math.max(MIN_INTERVAL, flags['--interval'] ?? 60);
-// The heartbeat cannot be disabled: it is the liveness signal the whole contract rests on.
+if (interval > 3600) usage('--interval max is 3600 seconds');
+// The heartbeat cannot be disabled or pushed out of sight: it is the liveness signal the
+// whole contract rests on.
 const heartbeatEvery = flags['--heartbeat'] ?? 10;
-if (heartbeatEvery < 1) usage('--heartbeat needs an integer >= 1');
+if (heartbeatEvery < 1 || heartbeatEvery > 1000) usage('--heartbeat needs an integer 1-1000');
 
 const now = () => new Date().toISOString();
 const say = (kind, message) => console.log(`${now()} ${kind} ${message}`);
@@ -115,7 +122,12 @@ const pollErrorMessage = (err) => {
   } else {
     tail = oneLine(String(err?.message ?? err).split('\n')[0]);
   }
-  return `${id}${tail}${more}`.slice(0, 300);
+  // A POLL_ERROR with no diagnostic would be a bare timestamp — when every normal field
+  // is empty or stringifies uselessly, show the error's structure instead.
+  if (!tail || tail === '[object Object]') {
+    tail = oneLine(inspect(err, { depth: 1 })).slice(0, 200);
+  }
+  return (`${id}${tail}${more}`.trim() || 'unrecognized failure (no diagnostic)').slice(0, 300);
 };
 
 function poll() {
@@ -125,7 +137,14 @@ function poll() {
     timeout: interval * 1000, // a hung call becomes a POLL_ERROR, never a mute freeze
     killSignal: 'SIGKILL',
   });
-  return JSON.parse(raw);
+  const snap = JSON.parse(raw);
+  // A falsy or non-object result must be an ERROR, not a skipped iteration — the loop
+  // only speaks from the success and failure branches, and a value that lands in neither
+  // would leave it silently alive forever.
+  if (snap === null || typeof snap !== 'object') {
+    throw new Error(`gh returned ${JSON.stringify(raw.slice(0, 60))} instead of a snapshot`);
+  }
+  return snap;
 }
 
 // Rollup entries are check-runs AND status contexts in one list; two producers may share
@@ -201,9 +220,11 @@ function diff(prev, snap) {
 const sleep = (s) => new Promise((resolve) => setTimeout(resolve, s * 1000));
 
 // Terminal events set process.exitCode and RETURN instead of calling process.exit():
-// pipes are asynchronous on this platform, and process.exit() discards any still-buffered
-// stdout — which would truncate away the DONE/FATAL line that a reader behind a pipe
-// needs most. Letting the loop end naturally flushes everything.
+// stdout pipes are asynchronous on macOS (Node's documented process-I/O behavior), where
+// process.exit() discards any still-buffered writes — which would truncate away the
+// DONE/FATAL line that a reader behind a pipe needs most. Letting the loop end naturally
+// flushes everything. (Small fixed-size emitters like the pre-push gate are safe with
+// process.exit; this file streams unbounded events, hence the care.)
 async function main() {
   let prev = null;
   let polls = 0;

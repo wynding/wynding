@@ -18,8 +18,10 @@
 // If Codex is ever renamed or changes that line, every PR presents as "permanently red
 // status + one @codex review comment per push". That symptom has two causes with one
 // discriminator: does a NEW Codex review appear after the bot's trigger comment? If yes,
-// Codex answered and the parsing here drifted — update CODEX_LOGIN and RE_REVIEWED below.
-// If no, Codex stopped honoring bot-authored triggers — see codex-review-request.yml.
+// Codex answered and the parsing here drifted — update CODEX_LOGIN and RE_REVIEWED below,
+// AND the contains(…, 'codex') prefilters in codex-freshness.yml, which gate that
+// workflow's job on the old name. If no, Codex stopped honoring bot-authored triggers —
+// see codex-review-request.yml.
 //
 // Exit codes: 0 = fresh, 1 = stale or no verdict (actionable: trigger a review),
 // 2 = could not determine (API/config failure). Automation reacting to this script must
@@ -35,7 +37,7 @@
 // the job stays green so the workflow only fails when the check itself could not run.
 //
 // Local use (read-only, exit code is the report; HEAD_SHA takes the full sha or a unique
-// prefix of at least 7 hex chars):
+// prefix of 7-64 hex chars — anything else exits 2):
 //   PR_NUMBER=68 [HEAD_SHA=<sha>] [GITHUB_TOKEN=…] node scripts/check-codex-freshness.mjs
 
 // Any escape from the normal flow means "could not determine", never "stale" — exit 1
@@ -55,16 +57,16 @@ process.on('unhandledRejection', indeterminate);
 
 const CODEX_LOGIN = 'chatgpt-codex-connector[bot]';
 const STATUS_CONTEXT = 'codex-freshness';
-// A verdict line must start its line at column 0, and fenced regions are stripped before
-// matching (an unterminated fence strips to end-of-body — a truncated error report is
-// exactly the shape that lacks its closing marker) — so the common quoting shapes cannot
-// count as a verdict: blockquotes, `- ` list items, and 4-space-indented blocks fail the
-// anchor; fenced blocks are stripped. Residual: a verdict quoted at column 0 as plain
-// prose or inside an HTML wrapper still counts. Stripping can only err toward "stale"
-// (a mangled artifact loses its verdict, never gains one), which re-requests a review —
-// the fail-safe direction.
+// A verdict line must start its line at column 0, and only the portion of a body BEFORE
+// its first fence-marker line is searched: Codex's verdict line always precedes any
+// fenced content, while quoted material (a PR file echoed back, an error log) arrives at
+// or after a fence. Searching a verbatim prefix can never splice text into a new match,
+// so a mangled or hostile artifact can LOSE its verdict — fail-safe, a stale answer just
+// re-requests a review — but never gain one. Blockquotes, `- ` list items, and indented
+// blocks fail the column-0 anchor. Residual: a verdict quoted at column 0 as plain prose
+// or inside an HTML wrapper, before any fence, still counts.
 const RE_REVIEWED = /^\*{0,2}Reviewed commit:\s*\*{0,2}\s*`?([0-9a-f]{7,40})/im;
-const stripFences = (s) => s.replace(/(```|~~~)[\s\S]*?(\1|$)/g, '');
+const beforeFences = (s) => s.split(/^ {0,3}(?:```|~~~)/m)[0];
 const MAX_PAGES = 50; // 5 000 items — far beyond any real PR; a runaway guard, not a limit
 
 const REPO = process.env.GITHUB_REPOSITORY ?? 'wynding/wynding';
@@ -142,6 +144,11 @@ try {
   // runs, and the status must describe the commit someone would actually merge.
   if (!headSha) headSha = (await api(`/repos/${REPO}/pulls/${prNumber}`)).head.sha;
   headSha = headSha.toLowerCase();
+  if (!/^[0-9a-f]{7,64}$/.test(headSha)) {
+    // A malformed head is "cannot determine", never "stale" — and a too-short prefix
+    // could false-match some verdict, the one direction this script must never err.
+    indeterminate(new Error(`HEAD_SHA must be 7-64 hex characters, got "${headSha}"`));
+  }
 
   const reviews = await paged(`/repos/${REPO}/pulls/${prNumber}/reviews`);
   const comments = await paged(`/repos/${REPO}/issues/${prNumber}/comments`);
@@ -149,12 +156,12 @@ try {
   const verdicts = [];
   for (const r of reviews) {
     if (r.user?.login !== CODEX_LOGIN || r.state === 'DISMISSED') continue;
-    const sha = stripFences(r.body ?? '').match(RE_REVIEWED)?.[1];
+    const sha = beforeFences(r.body ?? '').match(RE_REVIEWED)?.[1];
     if (sha) verdicts.push({ sha: sha.toLowerCase(), kind: 'review', when: r.submitted_at });
   }
   for (const c of comments) {
     if (c.user?.login !== CODEX_LOGIN) continue;
-    const sha = stripFences(c.body ?? '').match(RE_REVIEWED)?.[1];
+    const sha = beforeFences(c.body ?? '').match(RE_REVIEWED)?.[1];
     if (sha) verdicts.push({ sha: sha.toLowerCase(), kind: 'comment', when: c.created_at });
   }
 

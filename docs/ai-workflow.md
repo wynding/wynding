@@ -180,7 +180,7 @@ Watch the loop with the repo watcher — don't hand-roll a poller:
 node scripts/watch-pr.mjs <pr-number>
 ```
 
-One request per cycle, every poll failure is an emitted event, and a periodic heartbeat line
+One `gh` call per cycle, every poll failure is an emitted event, and a periodic heartbeat line
 proves the watcher itself is alive. If its output stops entirely, the watcher is dead —
 restart it (heartbeats pause during failure streaks; you see POLL_ERROR lines instead); never
 read a watcher's silence as "no news".

@@ -1,9 +1,10 @@
 name: CI
 
-# Automated gate. Runs the same `verify` contributors run locally: Prettier
-# check, then Turbo-orchestrated typecheck + lint + test across the workspace,
-# then a build smoke gate. Every CI run is cold — there is no cross-run `.turbo`
-# cache or remote cache configured, so each run recomputes every package.
+# Automated gate. Runs the same `verify` contributors run locally: Prettier check
+# and the root guards (i18n, dependabot config, glossary, scripts lint), then
+# Turbo-orchestrated typecheck + lint + test across the workspace, then a build
+# smoke gate. Every CI run is cold — there is no cross-run `.turbo` cache or
+# remote cache configured, so each run recomputes every package.
 
 on:
   pull_request:

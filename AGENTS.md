@@ -63,9 +63,9 @@ docs/      prd/  adr/  CONTEXT.md
 3. Conventional Commits (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`).
 4. Run the adversarial QC loop before every push — independent reviewer lenses over the push's
    delta, every finding fixed or declined with a reason, looped until a round finds nothing
-   real. A `pre-push` hook refuses a branch unless the tip commit carries a `QC:` trailer for
-   its own tree — add a note saying how deep the loop went (convention; the hook checks only
-   the hash) —
+   real. A `pre-push` hook refuses a branch push (destinations other than `main`; deletions
+   and tags exempt) unless the tip commit carries a `QC:` trailer for its own tree — add a
+   note saying how deep the loop went (convention; the hook checks only the hash) —
    (`git commit -m "$(printf 'docs: subject\n\nQC: %s 1 round, docs pass\n' "$(git write-tree)")"`),
    AND `.claude/qc-evidence/<tree-sha>.json` records the loop. The full rule is in
    [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).

@@ -46,7 +46,7 @@ git clone https://github.com/wynding/wynding.git
 cd wynding
 corepack enable          # provisions the pinned pnpm from package.json
 pnpm install
-pnpm run verify          # format:check + typecheck + lint + test, across the workspace
+pnpm run verify          # format:check + repo guards + scripts lint + typecheck + lint + test
 ```
 
 Requirements:
@@ -59,7 +59,9 @@ cached per package):
 
 - `pnpm run build` — build every package/app.
 - `pnpm run typecheck` — `tsc -b` across the project graph.
-- `pnpm run lint` — ESLint (flat config).
+- `pnpm run lint` — ESLint (flat config) over the workspace packages.
+- `pnpm run lint:scripts` — ESLint over the root `scripts/` and `eslint-rules/` (not part
+  of the Turbo workspace, so the package lint cannot reach them).
 - `pnpm test` — Vitest unit/integration suites.
 - `pnpm run format` / `pnpm run format:check` — Prettier (write / check).
 - `pnpm run verify` — the full local gate CI also runs (see `.github/workflows/ci.yml`).
@@ -108,8 +110,9 @@ You can scope any task to one package with Turbo's filter, e.g.
 3. **Keep commits small and focused.** One logical change per commit. We use
    Conventional Commits: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`.
 4. **Run `pnpm run verify` before pushing.** CI runs the same gate on every PR.
-5. **QC the push, and record it.** A tracked `pre-push` hook refuses a branch unless the tip
-   commit carries a `QC:` trailer for its own tree AND `.claude/qc-evidence/<tree-sha>.json`
+5. **QC the push, and record it.** A tracked `pre-push` hook refuses a branch push
+   (destinations other than `main`; deletions and tags exempt) unless the tip commit
+   carries a `QC:` trailer for its own tree AND `.claude/qc-evidence/<tree-sha>.json`
    records the QC pass. Review the diff adversarially (for a solo change, your own careful pass,
    recorded honestly, is the loop), stage the change (`git add -A`), write the evidence file
    for `$(git write-tree)`, then

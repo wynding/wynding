@@ -17,9 +17,10 @@ name: Codex freshness
 # polarity (the job stays green on a stale verdict; the status goes red).
 #
 # SAFETY INVARIANT: every trigger here runs with this workflow's write-capable token
-# (statuses: write), and `pull_request_review` additionally defaults GITHUB_REF to the PR
-# merge ref, so the checkout below is PINNED to the repository's default branch — this
-# workflow must never check out or execute PR-head code. Keep the `ref:` line.
+# (statuses: write); `pull_request_review` defaults GITHUB_REF to the PR merge ref and
+# `workflow_dispatch` to whatever ref it was aimed at — both can be PR-authored code — so
+# the checkout below is PINNED to the repository's default branch. This workflow must
+# never check out or execute PR-head code. Keep the `ref:` line.
 #
 # If the status POST fails for any reason (token scope, API outage), the job goes red on
 # exit 2 — loud, never a silent green. Refresh the status by dispatching this workflow
@@ -31,9 +32,10 @@ on:
   # Codex's findings shape arrives as a PR review …
   pull_request_review:
     types: [submitted, dismissed]
-  # … and its clean shape ("Didn't find any major issues") as an issue comment.
+  # … and its clean shape ("Didn't find any major issues") as an issue comment — which
+  # can be edited into a verdict later, or deleted out of one, so those re-evaluate too.
   issue_comment:
-    types: [created]
+    types: [created, edited, deleted]
   # Manual lever: re-evaluate any PR (e.g. after re-running a Codex review by hand).
   workflow_dispatch:
     inputs:
