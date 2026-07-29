@@ -71,10 +71,12 @@ jobs:
     # Codex's own comment events are NOT draft-filtered, so a
     # draft can still receive a status from a Codex comment. Skipping is safe: a skipped
     # job posts no status, so the last real verdict keeps standing. (Concurrency lives at
-    # JOB level because workflow-level groups are definitely entered before any `if` is
-    # evaluated — a to-be-skipped run would cancel a live one carrying a newer answer.
-    # A job-level group is assumed not to be acquired by a skipped job; if a live run
-    # ever appears cancelled by a skipped one, this assumption is where to look.)
+    # JOB level because workflow-level groups are entered before any `if` is evaluated.
+    # cancel-in-progress is FALSE: a cancellation could kill a re-evaluation between its
+    # API reads and its status write, and the catch's error-overwrite never runs in a
+    # cancelled job — so runs queue serially instead. Bursts waste a few API calls on
+    # superseded answers; the newest run still posts last, so the context always ends on
+    # the newest answer.)
     # The dispatch branch also enforces the aim-at-main rule from the SAFETY INVARIANT: a
     # dispatch aimed anywhere else is skipped instead of running that ref's copy of this
     # job. Honest-path tripwire only — a modified ref's copy could drop this very guard,
@@ -89,7 +91,7 @@ jobs:
        github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
     concurrency:
       group: codex-freshness-${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

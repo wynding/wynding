@@ -213,9 +213,12 @@ const checkLabel = (c) => (c.type === 'StatusContext' ? `${c.name} (status)` : c
 
 function summarize(snap) {
   const tally = { total: snap.checks.length, bad: 0, pending: 0 };
-  // STARTUP_FAILURE / ACTION_REQUIRED / STALE are terminal too — counting a dead check
-  // as "pending" is exactly the converging-vs-wedged confusion this summary must not
-  // create. (CANCELLED stays pending: concurrency superseding produces it routinely.)
+  // STARTUP_FAILURE / ACTION_REQUIRED / STALE / CANCELLED are terminal too — counting a
+  // dead check as "pending" is exactly the converging-vs-wedged confusion this summary
+  // must not create. CANCELLED is the contested one: a manually-killed run with no
+  // replacement wedges the merge while reading as "converging", so it counts as BAD;
+  // the price is a short FAILING flicker when concurrency supersedes a run on this same
+  // head (the replacement flips it back), and honest alarm beats a converging lie.
   const BAD = new Set([
     'FAILURE',
     'ERROR',
@@ -223,6 +226,7 @@ function summarize(snap) {
     'STARTUP_FAILURE',
     'ACTION_REQUIRED',
     'STALE',
+    'CANCELLED',
   ]);
   const OK = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
   for (const c of snap.checks) {
