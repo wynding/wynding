@@ -2,6 +2,7 @@
 // Non-type-checked recommended rules only — fast, and independent of each
 // package's TS program (type-aware linting can be layered in later).
 import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 import wynding from './eslint-rules/no-ui-literals.mjs';
 
@@ -78,7 +79,10 @@ export default tseslint.config(
     // the Node globals they legitimately use.
     files: ['scripts/**/*.mjs', 'eslint-rules/**/*.mjs'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly' },
+      // The full ESM-shaped Node set, not a hand-curated list: `lint:scripts` gates
+      // every verify run, and a missing entry would fail CI on an ordinary Node global.
+      // nodeBuiltin (not node) so CJS-only names like `require` stay flagged in .mjs.
+      globals: globals.nodeBuiltin,
     },
   },
 );

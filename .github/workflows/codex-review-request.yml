@@ -1,0 +1,103 @@
+name: Codex review request
+
+# Codex reviews when a PR opens, when a draft goes ready, or when someone comments
+# "@codex review" — never on pushes. Pushes are therefore the one gap, and `synchronize`
+# is deliberately the only PR trigger here: `opened` and `ready_for_review` self-trigger a
+# Codex review already, and this workflow's freshness pre-check cannot see that review
+# coming (Codex takes minutes to answer), so subscribing to those events would spend a
+# duplicate review nearly every time.
+#
+# Codex must honor a trigger comment authored by `github-actions[bot]` for this to work.
+# If it ever stops answering bot-authored triggers, the symptom is a `codex-freshness`
+# status that stays red after pushes while this workflow reports success. (Same symptom
+# as a parsing drift in check-codex-freshness.mjs — the discriminator: does any NEW Codex
+# artifact, review or comment, appear after the bot's comment? No → Codex is ignoring the
+# trigger, this file's problem; yes → the script's parsing drifted.) Remedy here: route
+# the comment through a
+# fine-grained PAT (issues: write) stored as a secret instead of `github.token`, or
+# delete this workflow and fall back to the manual trigger documented in
+# docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
+# green on its own.
+#
+# No duplicate-comment guard beyond the freshness pre-check and the concurrency group:
+# the only real overlap is a hand-posted trigger racing this workflow, and the cost of
+# that race is one redundant review. A guard keyed on comment timestamps would be more
+# code than the failure it prevents.
+#
+# SAFETY INVARIANT: this workflow runs with a write-capable token and must never check
+# out or execute PR-head code. `pull_request_target` already runs in the context of the
+# base repository's default branch; `workflow_dispatch` defaults to whatever ref it was
+# aimed at, which CAN be a PR head — the `ref:` pin keeps every path on the default
+# branch. Keep it.
+
+on:
+  pull_request_target:
+    types: [synchronize]
+  # Manual lever: re-request a review for a head Codex has not covered. Doubles as the
+  # feasibility probe for bot-authored triggers — but only on a PR whose current head
+  # LACKS a verdict; on a fresh head the run posts nothing and exits.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to request a Codex review for
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read # the freshness pre-check only reads PR metadata
+  issues: write # the trigger POSTs to the REST issues API below, which this scope covers
+
+jobs:
+  request:
+    name: codex-review-request
+    # draft == false: a draft is not waiting on review, and a review spent on it would be
+    # spent again at ready_for_review (which self-triggers Codex). The dispatch branch
+    # enforces the aim-at-main rule (SAFETY INVARIANT): aimed anywhere else, the run is
+    # skipped instead of executing that ref's copy. Honest-path tripwire only — a modified
+    # ref's copy could drop the guard; the insider boundary is rulesets (docs).
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref_name == github.event.repository.default_branch) ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false)
+    concurrency:
+      group: codex-review-request-${{ inputs.pr_number || github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Comment "@codex review" if the current head lacks a Codex verdict
+        run: |
+          set -euo pipefail
+          # A missing script also makes node exit 1 — the same code as a confirmed-stale
+          # verdict — so close that overload before it can buy a spurious trigger comment.
+          [ -f scripts/check-codex-freshness.mjs ] || {
+            echo "check-codex-freshness.mjs is missing from the default branch" >&2
+            exit 2
+          }
+          ec=0
+          node scripts/check-codex-freshness.mjs || ec=$?
+          case "$ec" in
+            0) echo "Current head already has a Codex verdict — no trigger needed." ;;
+            1)
+              # The REST issues endpoint, deliberately not `gh pr comment` — that command
+              # posts via GraphQL addComment, whose scope mapping is murkier than the
+              # documented issues-write grant this call rides on.
+              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'
+              echo "Requested a Codex review of the new head."
+              ;;
+            *)
+              # Exit 2 = the check could not determine freshness. Do NOT comment on a
+              # guess — a flaky API call must not spend a review.
+              echo "Could not determine freshness (exit $ec) — not commenting." >&2
+              exit "$ec"
+              ;;
+          esac
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}

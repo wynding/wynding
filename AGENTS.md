@@ -58,14 +58,23 @@ docs/      prd/  adr/  CONTEXT.md
 ## Workflow
 
 1. Make the change in the smallest package that owns the concern.
-2. `pnpm run verify` (format:check + typecheck + lint + test, plus the repo guards) before
-   committing.
+2. `pnpm run verify` (format:check + typecheck + lint + test, plus the root guards —
+   i18n, dependabot config, glossary, scripts lint) before committing.
 3. Conventional Commits (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`).
-4. QC the staged diff before every push, and record it: a `pre-push` hook refuses a branch whose
-   tip commit has no `QC:` trailer for its own tree
-   (`git commit -m "$(printf 'docs: subject\n\nQC: %s\n' "$(git write-tree)")"`). The rule is in
+4. Run the adversarial QC loop before every push — independent reviewer lenses over the push's
+   delta, every finding fixed or declined with a reason, looped until a round finds nothing
+   real. A `pre-push` hook refuses a branch push (destinations other than `main`; deletions
+   and tags exempt) unless the tip commit carries a `QC:` trailer for its own tree — add a
+   note saying how deep the loop went (convention; the hook checks only the hash) —
+   (`git commit -m "$(printf 'docs: subject\n\nQC: %s 1 round, docs pass\n' "$(git write-tree)")"`),
+   AND `.claude/qc-evidence/<tree-sha>.json` records the loop. The full rule is in
    [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
-5. Open a PR against `main` with a summary + test plan.
+5. Open a PR against `main` with a summary + test plan. Codex does not auto-review pushes: the
+   `codex-review-request` workflow comments `@codex review` after a push to a non-draft PR
+   (post it yourself if it didn't), and the merge gate needs the `codex-freshness` status
+   green — a Codex verdict, review or comment, whose recorded head is the **current** head
+   (maintainers keep that context required) — with the review's findings addressed. Reviewer
+   silence is never approval.
 
 > **Full methodology + tooling setup:** the plan → build → verify → review → ship loop and
 > how to install your agent's skills (gitignored, not committed) are in

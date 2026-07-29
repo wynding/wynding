@@ -1,0 +1,109 @@
+name: Codex freshness
+
+# Keeps a `codex-freshness` commit status on each PR head saying whether Codex has
+# reviewed that exact commit (scripts/check-codex-freshness.mjs). The merge gate's "Codex
+# reviewed the current head" claim is only honest for the CURRENT head — this makes
+# staleness a red status instead of a silent misread. Add `codex-freshness` to the
+# branch-protection required contexts to make it binding (maintainer setup,
+# docs/ai-workflow.md).
+#
+# Reporting goes through the commit-status API rather than the job's own conclusion, for
+# two reasons: a status can be posted from ANY event — including the `issue_comment` that
+# Codex's clean verdict arrives as, which runs in default-branch context and could never
+# attach a job check to the PR head — and a skipped or superseded job leaves the last real
+# status standing instead of masking it. The job is deliberately NOT named
+# `codex-freshness`: the status context owns that string, and a job check-run with the
+# same name would collide with it in the branch-protection namespace with the opposite
+# polarity (the job stays green on a stale verdict; the status goes red).
+#
+# SAFETY INVARIANT: every trigger here runs with this workflow's write-capable token
+# (statuses: write). Every subscribed event runs this file's copy on the default branch —
+# pull_request_review is deliberately not among them (see `on:` below) — but
+# `workflow_dispatch` executes the copy at whatever ref it is aimed at, which can be
+# PR-authored code. So: aim dispatches at the default branch only, and the checkout below
+# stays PINNED to the default branch so no path ever executes PR-head scripts. Keep the
+# `ref:` line.
+#
+# If the evaluation or its status POST fails, the job goes red on exit 2 — loud, never a
+# silent green — and the script best-effort-overwrites the context with an `error` status
+# first, so a failed RE-evaluation (say, after the qualifying comment was edited away)
+# cannot leave a stale green standing. Only if that overwrite also fails (API fully down)
+# does the previous status stand. Refresh by dispatching this workflow with the PR number.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Codex's clean shape ("Didn't find any major issues") arrives as an issue comment —
+  # which can be edited into a verdict later, or deleted out of one, so those re-evaluate.
+  issue_comment:
+    types: [created, edited, deleted]
+  # pull_request_review is DELIBERATELY absent. GitHub runs that event from the PR merge
+  # ref's copy of this file — PR-authored YAML — and this workflow's write-capable token
+  # must never be reachable from definitions a PR controls (the checkout pin guards code,
+  # not the YAML itself, which is parsed before any step runs; observed live on PR #71: a
+  # Codex review ran the branch's copy with statuses: write available). The cost: a
+  # findings-shape Codex review — a PR review whose verdict head is the API-recorded
+  # commit_id — does not refresh the status in real time. Findings mean a fix push is
+  # coming, and `synchronize` re-evaluates then; the no-changes-needed case, and a review
+  # dismissal or a verdict edited away on an unchanged head, take one manual dispatch.
+  # Manual lever: re-evaluate any PR (aim it at the default branch only — a dispatch
+  # executes the YAML at the ref it targets).
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to evaluate
+        required: true
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+  issues: read
+
+jobs:
+  evaluate:
+    name: evaluate codex freshness
+    # Runs only on events that can change the answer — and, for pull_request_target
+    # events, only for non-draft PRs:
+    # opens/pushes/reopens/ready-for-review, comments from Codex's exact login (the same
+    # login the script trusts — on a Codex rename, update BOTH places; the filter binds,
+    # because issue_comment always runs main's copy of this file), and manual dispatch.
+    # Codex's own comment events are NOT draft-filtered, so a
+    # draft can still receive a status from a Codex comment. Skipping is safe: a skipped
+    # job posts no status, so the last real verdict keeps standing. (Concurrency lives at
+    # JOB level because workflow-level groups are entered before any `if` is evaluated.
+    # cancel-in-progress is FALSE: a cancellation could kill a re-evaluation between its
+    # API reads and its status write, and the catch's error-overwrite never runs in a
+    # cancelled job — so runs queue serially instead. Bursts waste a few API calls on
+    # superseded answers; the newest run still posts last, so the context always ends on
+    # the newest answer.)
+    # The dispatch branch also enforces the aim-at-main rule from the SAFETY INVARIANT: a
+    # dispatch aimed anywhere else is skipped instead of running that ref's copy of this
+    # job. Honest-path tripwire only — a modified ref's copy could drop this very guard,
+    # which is why the rule itself lives in docs/ai-workflow.md and the real insider
+    # boundary is rulesets (maintainer setup there).
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref_name == github.event.repository.default_branch) ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
+    concurrency:
+      group: codex-freshness-${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Evaluate and post the codex-freshness status
+        run: node scripts/check-codex-freshness.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          POST_STATUS: '1'
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}

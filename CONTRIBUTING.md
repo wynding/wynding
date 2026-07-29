@@ -46,7 +46,7 @@ git clone https://github.com/wynding/wynding.git
 cd wynding
 corepack enable          # provisions the pinned pnpm from package.json
 pnpm install
-pnpm run verify          # format:check + typecheck + lint + test, across the workspace
+pnpm run verify          # format:check + repo guards + scripts lint + typecheck + lint + test
 ```
 
 Requirements:
@@ -54,12 +54,14 @@ Requirements:
 - Node.js 22 LTS or newer.
 - pnpm (pinned via the `packageManager` field; `corepack enable` provisions it).
 
-This is a **pnpm + Turborepo** monorepo. Useful scripts (all run through Turbo,
-cached per package):
+This is a **pnpm + Turborepo** monorepo. Useful scripts (the package-scoped ones run
+through Turbo, cached per package):
 
 - `pnpm run build` — build every package/app.
 - `pnpm run typecheck` — `tsc -b` across the project graph.
-- `pnpm run lint` — ESLint (flat config).
+- `pnpm run lint` — ESLint (flat config) over the workspace packages.
+- `pnpm run lint:scripts` — ESLint over the root `scripts/` and `eslint-rules/` (not part
+  of the Turbo workspace, so the package lint cannot reach them).
 - `pnpm test` — Vitest unit/integration suites.
 - `pnpm run format` / `pnpm run format:check` — Prettier (write / check).
 - `pnpm run verify` — the full local gate CI also runs (see `.github/workflows/ci.yml`).
@@ -108,13 +110,26 @@ You can scope any task to one package with Turbo's filter, e.g.
 3. **Keep commits small and focused.** One logical change per commit. We use
    Conventional Commits: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`.
 4. **Run `pnpm run verify` before pushing.** CI runs the same gate on every PR.
-5. **Record a QC pass on the commit you push.** A tracked `pre-push` hook refuses a branch whose
-   tip commit has no `QC:` trailer for its own tree. Re-read the staged diff adversarially, then
-   `git commit -m "$(printf 'fix: subject\n\nQC: %s\n' "$(git write-tree)")"`. `pnpm install`
-   wires the hook; if another hook manager already owns `core.hooksPath`, run
-   `git config core.hooksPath .githooks` yourself. The full rule, including the emergency
-   override, is in [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
-6. **Open a PR** against `main` and fill out the template (summary + test plan).
+5. **QC the push, and record it.** A tracked `pre-push` hook refuses a branch push
+   (destinations other than `main`; deletions and tags exempt) unless the tip commit
+   carries a `QC:` trailer for its own tree AND `.claude/qc-evidence/<tree-sha>.json`
+   records the QC pass. Review the diff adversarially (for a solo change, your own careful pass,
+   recorded honestly, is the loop), stage the change (`git add -A`), write the evidence file
+   for `$(git write-tree)`, then
+   `git commit -m "$(printf 'fix: subject\n\nQC: %s 1 round, self\n' "$(git write-tree)")"`
+   (the words after the hash are a free-form depth note — the hook checks only the hash). `pnpm install` wires the hook; if
+   another hook manager owns `core.hooksPath` or hooks already exist in the repo's shared
+   hooks directory, the install leaves them alone and says so — reconcile the first case, or
+   move existing hooks into `.githooks/` for the second, then wire by hand with
+   `git config core.hooksPath .githooks`. The full rule, including the evidence-file shape
+   and the emergency override, is in
+   [docs/ai-workflow.md](docs/ai-workflow.md#35-qc-before-every-push).
+6. **Open a PR** against `main` and fill out the template (summary + test plan). Reviews come
+   from Codex + CodeRabbit + the owner; after any later push, a workflow requests a fresh Codex
+   review automatically (non-draft PRs; or comment `@codex review` yourself) — merges wait for a Codex review
+   of the exact commit being merged (the `codex-freshness` status, a required check once the
+   maintainer wires it) **and** for its findings to be addressed; a green status means Codex
+   looked, not that it was happy.
 
 ## Working with AI Agents
 

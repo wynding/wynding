@@ -34,7 +34,8 @@ reproducer; a failing `sim` test beats a console log.
 ### 3. Verify — the local gate (identical to CI)
 
 `pnpm run verify` must be green before you push (`format:check` + `typecheck` + `lint` +
-`test` with coverage, plus the repo guards). Two gates are hard:
+`test` with coverage, plus the root guards — i18n, dependabot config, glossary, scripts
+lint). Two gates are hard:
 
 - **Determinism** — same `(seed, ruleset, inputs)` → byte-identical state; the
   world-hash / replay tests must pass. Lint bans `Math.random`/`Date`/`performance` in the
@@ -53,39 +54,100 @@ ordinary technical senses. Different senses are real inside the scope too ("hit 
 
 ### 3.5. QC before every push
 
-Verify proves the code runs; it cannot tell you the change is coherent with the documents it
-touches. That is the **QC pass**: before every push, re-read the staged diff with fresh eyes and
-adversarially — each patched paragraph checked **upward** against the PRD/ADRs it touches (the
-higher document wins), and **sideways** against its sibling patches in the same section. Review-fix
-pushes need it most, because patching one finding at a time is what authors contradictions.
+Verify proves the code runs; it cannot tell you the change is right. Before **every** push to a
+PR branch — initial or review-response, any size — run the **adversarial QC loop** over the
+push's delta:
 
-A `pre-push` hook enforces that the pass happened. It refuses to push any branch but `main`
-unless its tip commit carries a **QC record** — a `QC:` trailer holding that commit's own tree
-hash:
+1. **Independent adversarial reviewers** examine the delta — for code: code-review,
+   test-quality, and silent-failure lenses; for docs-only deltas: a coherence pass checking each
+   patched paragraph **upward** against the PRD/ADRs it touches (the higher document wins) and
+   **sideways** against its sibling patches. Reviewers are told to find problems, not to approve.
+2. **Adjudicate every finding against the code** — fixed, or declined with a stated reason,
+   never silently dropped — apply the fixes, and **re-run the loop with fresh eyes** until a
+   round yields nothing real.
+3. The loop's final act writes the evidence file (below).
+
+The mechanical gate (`pnpm run verify`, e2e where touched) is necessary but is **not** the QC
+loop. Review-fix pushes need the loop most, because patching one finding at a time is what
+authors contradictions.
+
+**Calibrate depth to the delta, and say so.** Full panel for behavior changes; a single reviewer
+is enough for a comment-only or docs-only delta. State the calibration where the owner can see
+it — as the note on the `QC:` trailer line (e.g. `QC: <tree-sha> 2 rounds, 3 reviewers, full
+panel`) — so a too-shallow loop can be vetoed per-PR rather than discovered per-incident. (The
+hook accepts a bare trailer — the note is process, not mechanics; loop pushes carry it so the
+depth is visible.)
+
+**If reviewers may mutate the tree** (mutation testing — proving a test can fail): at most ONE
+mutation-authorized reviewer per worktree at a time; read-only reviewers experiment on throwaway
+copies (`$TMPDIR`), never on the tree; and after every reviewer round, verify the state.
+`git diff HEAD --stat` catches an edit left in the working tree only if you know what its output
+should be (a same-size swap inside an already-dirty file changes no summary line), and it cannot
+see a mutation committed or amended into `HEAD`, or one under a gitignored path — so confirm
+`HEAD` is where you left it **and** grep each mutation target for its restored text.
+
+A `pre-push` hook requires a record that the loop happened. It refuses any push whose
+destination is a branch other than `main` (deletions and tags excepted) unless both records
+exist for exactly the state being pushed:
+
+- the tip commit carries a **QC record** — a `QC:` trailer holding that commit's own tree
+  hash (a ≥ 7-char prefix of it is accepted) — and
+- **loop evidence** exists at `.claude/qc-evidence/<tree-sha>.json` for that same tree, written
+  as the loop's final step with its real tallies:
+
+```json
+{
+  "treeSha": "<full tree sha>",
+  "rounds": 2,
+  "findingsRaised": 5,
+  "findingsFixed": 4,
+  "findingsDeclined": 1,
+  "reviewers": ["code-review", "test-quality", "silent-failure"]
+}
+```
+
+All six fields are required and the tallies must balance — `findingsRaised` equals
+`findingsFixed` + `findingsDeclined`, because every finding is fixed or declined, never
+dropped; extra keys are ignored. The evidence file stays local (`.claude/` is gitignored — it
+describes a working process, not the product); the PR-visible summary is the trailer note. A human pushing a self-reviewed change
+records their own pass the same way (`"reviewers": ["<your-name>"], "rounds": 1`).
 
 ```bash
 git add -A
-# ... run the QC pass over the staged diff ...
-git commit -m "$(printf 'docs(prd): fix the thing\n\nQC: %s\n' "$(git write-tree)")"
+# ... run the loop; write .claude/qc-evidence/$(git write-tree).json ...
+git commit -m "$(printf 'docs(prd): fix the thing\n\nQC: %s 1 round, docs pass\n' "$(git write-tree)")"
 ```
 
 `git write-tree` prints the hash of the staged tree, which is the tree the commit gets — so an
-honest record costs one substitution, and it cannot be recycled: edit anything afterwards and the
-hashes stop matching, which is exactly when the pass is stale. Already committed? Amend it with
-`git commit --amend --no-edit --trailer "QC=$(git write-tree)"` (git 2.32+). `pnpm install` wires
-the hook by pointing `core.hooksPath` at the tracked `.githooks/` directory — if another tool
-already owns that setting, the install says so and leaves it alone, and you wire it yourself with
-`git config core.hooksPath .githooks`.
+honest record costs one substitution, and neither record can be recycled: edit anything
+afterwards and the hashes stop matching, which is exactly when the pass is stale. Already
+committed? Amend it with `git commit --amend --no-edit --trailer "QC=$(git write-tree)"` (git
+2.32+). `pnpm install` wires the hook by pointing `core.hooksPath` at the tracked `.githooks/`
+directory — unless another tool already owns that setting (reconcile, then run
+`git config core.hooksPath .githooks` yourself) **or** hooks already exist in the repo's shared
+hooks directory (move them into `.githooks/` first, or chain-load ours from yours — it reads
+git's stdin protocol, so invoke it **before** anything else consumes stdin; a wrapper that
+drains the pipe would leave the gate announcing "no refs on stdin" and gating nothing). The
+install says which case it hit and leaves both alone.
 
-The record is a claim, not a proof — it says someone ran the pass, and its absence is visible in
-the PR's commit list. **Emergencies only**, and never as a habit (the rationale is required, and
-must be at least 15 characters — long enough to be a reason rather than a keystroke):
+Both records are claims, not proofs — they say the pass and the loop happened, where a reviewer
+can see the claim. Their value is the boundary: a step checked at push time gets done; a step
+nothing checks gets skipped exactly when attention is consumed by the incident of the day.
+**Emergencies only**, and never as a habit (the rationale is required, and must be at least 15
+characters — long enough to be a reason rather than a keystroke; it covers both records):
 
 ```bash
 QC_OVERRIDE="hotfix for the broken deploy; QC follows in the next push" git push
 ```
 
-It is printed, and worth repeating in the PR thread — the commits will not carry it.
+It is printed, appended best-effort to a local `.claude/qc-evidence/overrides.log`, and worth
+repeating in the PR thread — the commits will not carry it. A rationale under 15 characters is
+ignored with a note, and a push the gate passes on its own merits ignores the variable
+entirely. If the hook itself cannot run (`node` missing from a GUI client's PATH, a broken
+checkout), the last resort is `git push --no-verify` — then fix the hook.
+
+**Push ritual, four inseparable steps:** adversarial QC loop → mechanical gate → `QC:` trailer
+(+ evidence file) → push + review trigger (§4).
 
 ### 4. Review — two models + owner
 
@@ -103,10 +165,45 @@ a reason, so gating it on P2 gates it on nearly everything and it never converge
 **decline** a P1/P2/P3 it judges out of bounds, but only with a reason code and a
 citation; a **P0 always escalates to the owner** and is never auto-declined.
 
+**Working the loop.** Codex does not auto-review pushes — it reviews when a PR opens, when a
+draft goes ready, or when someone comments `@codex review`. After a push to a non-draft PR,
+the `codex-review-request` workflow posts that comment for you (post it yourself if it
+didn't — drafts are deliberately excluded, since going ready self-triggers a review), and
+the `codex-freshness` status is only green when a Codex verdict — its review (the head it
+reviewed is the API-recorded one) or its "no major issues" comment (which prints a
+`Reviewed commit:` sha) — covers the **current** head. The status
+proves "Codex reviewed this exact commit", no more: "Codex clean" additionally means that
+review raised nothing left unaddressed (fixed, or declined in a resolved thread). Neither claim
+is ever an interpreted silence — reviewer silence is not approval. If Codex reports an
+infrastructure error, re-trigger with a fresh `@codex review`. One refresh asymmetry, by
+design: a clean-verdict _comment_ flips the status by itself, but a findings-shape _review_
+is picked up on the next push — or, when no push is coming (findings all declined, or a
+review dismissed), by one dispatch of the `codex-freshness` workflow with the PR number.
+
+Watch the loop with the repo watcher — don't hand-roll a poller:
+
+```bash
+node scripts/watch-pr.mjs <pr-number>
+```
+
+One `gh` call per cycle, every poll failure is an emitted event, and a periodic heartbeat line
+proves the watcher itself is alive. If its output stops entirely, the watcher is dead —
+restart it (heartbeats pause during failure streaks; you see POLL_ERROR lines instead); never
+read a watcher's silence as "no news".
+
+**Report pace, not just results.** While any gate is pending (CI, a bot review, a QC round): if
+~30 minutes pass with no progress visible from the PR side, proactively tell the owner where
+things stand — current state, the blocker, the options — instead of grinding silently;
+slow-but-converging and wedged look identical from the outside. And on the second consecutive
+infrastructure failure of the same sub-task (a reviewer agent, a CI job), stop relaunching and
+report the pattern with a recommendation rather than paying a third runtime.
+
 ### 5. Ship — gated + staged
 
-**Merge gate:** merge is blocked until **green CI AND Codex clean AND CodeRabbit approved
-AND owner approval** (all review threads resolved). **Deploy:** merge to `main`
+**Merge gate:** merge is blocked until **green CI AND a Codex review of the current head (the
+`codex-freshness` status, binding once in the branch-protection required contexts — maintainer
+setup below) with its findings addressed AND CodeRabbit approved AND owner approval** (all
+review threads resolved). **Deploy:** merge to `main`
 auto-deploys the web build to a staging URL; a human manually promotes to prod (web on AWS
 S3 + CloudFront). Mobile/desktop ship as tagged releases.
 
@@ -134,6 +231,21 @@ agents) are the contract — adapt the grill / verify / review steps to your har
 ## Services the full gate depends on (maintainer setup)
 
 - A **GitHub remote** + branch protection on `main` (required checks + reviews).
+- `codex-freshness` in the branch-protection **required contexts** — the workflow posts the
+  status either way; only the contexts list makes it block merges. Order matters: the
+  workflows must be on `main` before the context is required — every subscribed event
+  (`pull_request_target`, `issue_comment`) runs the copy on `main`, and `workflow_dispatch`
+  needs the file on `main` to be dispatchable but executes the copy at the ref it is aimed
+  at, so aim dispatches at `main` only — both jobs skip a dispatch aimed elsewhere (an
+  honest-path tripwire; a modified ref's copy could drop it). `pull_request_review` is deliberately not
+  subscribed: GitHub runs that event from the PR merge ref's copy — PR-authored YAML with
+  the write token reachable (observed live on PR #71) — so a findings-shape Codex review
+  refreshes the status on the next push, or via one dispatch (same lever after dismissing
+  a review). Each PR already open at wiring time needs one manual dispatch to seed its
+  status. Boundary, stated plainly: commit statuses guard honest-process drift, not a
+  malicious write-access actor — anyone who can push a branch can forge any status from a
+  push-triggered workflow of their own. Insider-proof enforcement is ruleset territory
+  (required workflows), an owner decision.
 - The **CodeRabbit** GitHub app installed on the repo.
 - **Codex** available for review (and the grill / plan loops).
 
