@@ -820,8 +820,9 @@ export function createOverlay(
   /** Data-driven from the armed/selected `CompiledTower` (M2-S3 retires the closed-union
    *  `exhaustive: never` throw — catalog ids are OPEN, so a legitimate modded bundle's
    *  tower must render real stats, never crash the Panel). `damage` is Σ of the tower's
-   *  `direct` effect amounts, in authored order (a `slow` tower has zero direct effects
-   *  today, so its damage row reads 0 — accurate, not a placeholder). A `towerId` this
+   *  `direct` effect amounts, in authored order (the shipped `slow` tower's row reads its
+   *  own direct total, 2 — a hypothetical pure-support bundle would honestly read 0; QC
+   *  round 2 corrected this line's earlier zero-direct-effects claim). A `towerId` this
    *  build's catalog doesn't resolve (defensive — the armed/selection state machine only
    *  ever holds a validated id) falls back to all-zero stats rather than throwing. */
   function towerStats(towerId: string): TowerStats {

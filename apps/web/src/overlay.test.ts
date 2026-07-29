@@ -787,6 +787,26 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(text).toContain('Fire rate: 0.7/s'); // cadence 30, same as basic
   });
 
+  // QC round 2: the SELECTED branch funnels through the same towerStats(id) seam, but a
+  // wrong-id regression there (e.g. reading the armed id, or towers[0]) would have passed
+  // the armed-only variant above — pin the selection path on the slow tower too.
+  it("the Panel shows a SELECTED slow tower's own stats — never basic's", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'slow' } }),
+      refund: 6,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Slow Tower');
+    expect(text).toContain('Cost: 8');
+    expect(text).toContain('Damage: 2');
+    expect(text).not.toContain('Damage: 10');
+  });
+
   it('the Panel shows a selected tower with Sell (live refund) and a permanent Max-level Upgrade', () => {
     const { overlay, panel, actions } = setup();
     overlay.update({

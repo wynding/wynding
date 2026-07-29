@@ -439,6 +439,20 @@ describe('coerceSoa totality — the new creep/tower columns (via step()/preview
     // The dead row is invisible to the canonical walk; only the new tower counts.
     expect(countValidTowers(RULESET.board.grid, s.towers, RULESET.towerById)).toBe(1);
   });
+
+  it('pads short col/row with an OUT-OF-BOUNDS value — a forged row with valid towerId/spend must not materialize at (0,0) (QC round 2)', () => {
+    const s = createInitialState(1, RULESET);
+    s.towers.id.push(7);
+    s.towers.spend.push(5); // basic's exact cost…
+    s.towers.targetId.push(0);
+    s.towers.nextFireTick.push(0);
+    s.towers.towerId.push('basic'); // …and a resolvable id —
+    // col/row columns deliberately left EMPTY: a 0-pad would place this row at (0,0).
+    expect(() => step(s, RULESET, [])).not.toThrow();
+    expect(s.towers.col[0]).toBe(-1);
+    expect(s.towers.row[0]).toBe(-1);
+    expect(countValidTowers(RULESET.board.grid, s.towers, RULESET.towerById)).toBe(0);
+  });
 });
 
 describe('the slow-aware bound gate (Codex R2-4/G10)', () => {

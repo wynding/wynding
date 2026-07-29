@@ -379,9 +379,14 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   // whole towers container via `structuredClone`.)
   {
     const rowCount = t.id.length;
+    // Pad `col`/`row` with -1, NOT 0 (QC round 2): 0 is a REAL coordinate — a forged
+    // state with intact towerId/spend columns but a short `col` column would otherwise
+    // materialize a live tower at (0,0). -1 fails `footprintBuildable`'s bounds check,
+    // so a padded row is invalid no matter what its other columns claim.
+    const PAD = -1;
     const numericCols = [t.col, t.row, t.spend, t.targetId, t.nextFireTick];
     for (const colArr of numericCols) {
-      while (colArr.length < rowCount) colArr.push(0);
+      while (colArr.length < rowCount) colArr.push(PAD);
       if (colArr.length > rowCount) colArr.length = rowCount;
     }
     while (t.towerId.length < rowCount) t.towerId.push('');

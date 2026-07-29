@@ -64,9 +64,11 @@ export interface SlowTelegraphPaintOp {
   readonly alpha: number;
 }
 
-/** The pulse's oscillation period (ms of render time) and radius band. One full
- *  out-and-back every `PULSE_PERIOD_MS`; the radius sweeps `[1.4r, 2.0r]` — never
- *  inside the guaranteed ring, so the motion reads as an aura breathing outward. */
+/** The pulse's oscillation period (MILLISECONDS of render time — the caller owns the
+ *  conversion from `renderTimeOf`'s fractional-TICK domain via `MS_PER_TICK`; QC round
+ *  2 caught the unconverted-ticks variant, whose real period was 45 s) and radius band.
+ *  One full out-and-back every `PULSE_PERIOD_MS`; the radius sweeps `[1.4r, 2.0r]` —
+ *  never inside the guaranteed ring, so the motion reads as an aura breathing outward. */
 const PULSE_PERIOD_MS = 900;
 const PULSE_R_MIN = 1.4;
 const PULSE_R_SPAN = 0.6;

@@ -6,6 +6,7 @@
 // DOM overlay owned by apps/web (ADR 0003 §3: canvas text isn't semantic/axe-visible).
 
 import Phaser from 'phaser';
+import { MS_PER_TICK } from '@wynding/sim';
 import { createProjection, type Projection } from './projection';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
@@ -392,7 +393,17 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     drawTracers(gfx, pal, overlay, prevVm, curVm, alpha, interpolatedById);
     // The same render-time seam the tracers use drives the telegraph pulse — one clock,
     // so the aura's motion and tracer motion can never run on different time bases.
-    drawCreeps(gfx, pal, interpolated, overlay.reducedMotion, renderTimeOf(prevVm, curVm, alpha));
+    // CLOCK DOMAIN (QC round 2): `renderTimeOf` is in fractional TICKS (tracers.test.ts:
+    // `renderTimeOf(vm(5), vm(6), 0.5) === 5.5`); the paint-plan's pulse period is
+    // MILLISECONDS (`renderTimeMs`) — convert here, or the 900ms breath becomes a
+    // 900-TICK (45s) one and the motion cue is imperceptible inside a 40-tick slow.
+    drawCreeps(
+      gfx,
+      pal,
+      interpolated,
+      overlay.reducedMotion,
+      renderTimeOf(prevVm, curVm, alpha) * MS_PER_TICK,
+    );
     drawGhost(gfx, pal, overlay);
     drawSparks(gfx, pal, overlay);
   };
