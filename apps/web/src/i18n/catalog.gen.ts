@@ -22,6 +22,7 @@ export const EN = {
   "hud.preview.immunity.stun": "stun",
   "hud.preview.lastWave": "Final wave launched — no more waves to call",
   "creep.normal.name": "Creep",
+  "creep.fast.name": "Fast Creep",
   "creep.unknown.name": "Unknown creep ({id})",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -53,7 +54,8 @@ export const EN = {
   "action.start": "Start / Call wave",
   "action.pause": "Pause",
   "action.speed": "Cycle speed",
-  "action.armTower1": "Arm basic tower",
+  "action.armTower1": "Arm tower 1",
+  "action.armTower2": "Arm tower 2",
   "results.won": "You held the line!",
   "results.lost": "The creeps broke through.",
   "results.summary": "Score {score} — {stars} of 3 stars",
@@ -61,6 +63,8 @@ export const EN = {
   "verify.mismatch": "Verification mismatch: the replay re-simulated to a different outcome.",
   "verify.fail": "Verification failed: {reason}",
   "tower.basic.name": "Basic Tower",
+  "tower.slow.name": "Slow Tower",
+  "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
   "panel.cost": "Cost: {cost}",
   "panel.damage": "Damage: {damage}",
@@ -121,6 +125,7 @@ export interface MessageParams {
   "hud.preview.immunity.stun": Record<never, never>;
   "hud.preview.lastWave": Record<never, never>;
   "creep.normal.name": Record<never, never>;
+  "creep.fast.name": Record<never, never>;
   "creep.unknown.name": { "id": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
@@ -153,6 +158,7 @@ export interface MessageParams {
   "action.pause": Record<never, never>;
   "action.speed": Record<never, never>;
   "action.armTower1": Record<never, never>;
+  "action.armTower2": Record<never, never>;
   "results.won": Record<never, never>;
   "results.lost": Record<never, never>;
   "results.summary": { "score": string | number; "stars": string | number };
@@ -160,6 +166,8 @@ export interface MessageParams {
   "verify.mismatch": Record<never, never>;
   "verify.fail": { "reason": string | number };
   "tower.basic.name": Record<never, never>;
+  "tower.slow.name": Record<never, never>;
+  "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
   "panel.cost": { "cost": string | number };
   "panel.damage": { "damage": string | number };

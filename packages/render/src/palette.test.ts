@@ -53,6 +53,7 @@ const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'tower',
   'ghostValid',
   'ghostInvalid',
+  'slowed',
 ];
 
 // `range`'s weakest essential draw: the ghost-preview stroke at alpha 0.7 (scene.ts:174).

@@ -22,6 +22,7 @@ import {
   deriveStars,
   hashSimState,
   isTerminalPhase,
+  forEachValidTower,
   MS_PER_TICK,
   SIM_VERSION,
   type SimState,
@@ -47,13 +48,13 @@ import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 export type Speed = 1 | 2;
 
 /**
- * The M1-local "armed tower type" identifier (PLAN.md P2). This is deliberately NOT
- * `@wynding/types`' `TowerKind`: that package is not a web dependency, and `placeTower`'s
- * `SimInput` carries no kind at all (M1 ships exactly one tower, so the sim never needed
- * to disambiguate). Supporting more than one placeable kind is a future `SimInput` schema
- * change, not a web-layer concern — this union stays a single literal until that lands.
+ * The armed-tower identifier (M2-S3): a compiled-catalog tower id (`ruleset.towerById`
+ * resolves it), validated at the `armTower` call site rather than by the type — the
+ * closed `'basic'`-only union dies here, since `SimInput.placeTower.towerId` (and the
+ * compiled catalog it names) is now genuinely open (sv7 compiles up to `MAX_TOWERS`
+ * distinct kinds, and a modded bundle's set is not this module's to enumerate).
  */
-export type ArmedTower = 'basic';
+export type ArmedTower = string;
 
 /** A build/select target under the cursor: either an empty anchor with placement
  *  validity, or an existing tower to select. */
@@ -72,9 +73,9 @@ export interface AimResult {
  *  creep occupancy, a full input buffer) reports as 'other' (one generic localized
  *  "can't build there" string at the call site). */
 export type PlacementOutcome =
-  | { readonly kind: 'armed' }
-  | { readonly kind: 'disarmed' }
-  | { readonly kind: 'placed' }
+  | { readonly kind: 'armed'; readonly towerId: string }
+  | { readonly kind: 'disarmed'; readonly towerId: string }
+  | { readonly kind: 'placed'; readonly towerId: string }
   | {
       readonly kind: 'rejected';
       readonly reason: 'bounty' | 'occupied' | 'other' | 'pendingCap';
@@ -88,7 +89,12 @@ export type PlacementOutcome =
 export interface UiState {
   readonly started: boolean;
   readonly armed: ArmedTower | null;
-  readonly selection: { readonly col: number; readonly row: number; readonly id: number } | null;
+  readonly selection: {
+    readonly col: number;
+    readonly row: number;
+    readonly id: number;
+    readonly towerId: string;
+  } | null;
   readonly lastOutcome: PlacementOutcome | null;
   /** Bumped every time an outcome is RECORDED — even when it's identical in content to the
    *  previous one (e.g. rejecting the same occupied cell twice in a row). The live region
@@ -114,10 +120,14 @@ export interface FrameSnapshot {
   readonly ghost: GhostVM | null;
   readonly selection: SelectionVM | null;
   /** Towers accepted into the tick buffer but not yet committed by a tick (the common
-   *  case: paused planning) — anchor cells only, presentation reads them from the shared
-   *  projection below, never by parsing raw commands. Empty whenever the buffer is empty
-   *  (the hot 60 fps path — no allocation). */
-  readonly pendingAdds: readonly { readonly col: number; readonly row: number }[];
+   *  case: paused planning) — anchor cells + the queued tower's catalog id (M2-S3),
+   *  presentation reads them from the shared projection below, never by parsing raw
+   *  commands. Empty whenever the buffer is empty (the hot 60 fps path — no allocation). */
+  readonly pendingAdds: readonly {
+    readonly col: number;
+    readonly row: number;
+    readonly towerId: string;
+  }[];
   /** Committed towers whose sell is accepted into the buffer but not yet committed —
    *  presented as already-gone (hidden immediately), not merely "about to sell". */
   readonly pendingSells: readonly { readonly col: number; readonly row: number }[];
@@ -173,9 +183,10 @@ export interface Controller {
   sellSelected(): boolean;
   /** The refund the selected tower would return right now (0 if none selected). */
   refundForSelection(): number;
-  /** Toggle `kind` armed for placement (PLAN.md P2 table, row 1): arms it and clears any
-   *  selection, or — if already armed — disarms. Mouse/keyboard-Card entry point. */
-  armTower(kind: ArmedTower): void;
+  /** Toggle `towerId` armed for placement (PLAN.md P2 table, row 1; M2-S3: a no-op unless
+   *  it resolves in the compiled catalog): arms it and clears any selection, or — if
+   *  already armed — disarms. Mouse/keyboard-Card entry point. */
+  armTower(towerId: ArmedTower): void;
   /** Pointer/mouse click at a board cell — the armed/selection state machine (PLAN.md P2
    *  table): armed is placement-only (an occupied/unaffordable/blocked cell rejects with
    *  a persistent invalid ghost and stays armed; a valid cell places, disarms, and selects
@@ -218,7 +229,19 @@ export interface Controller {
   verifyRun(): VerifyResult;
 }
 
-const RANGE_FP = (r: CompiledRuleset): number => r.tower.rangeFp;
+/** A tower's attack range (fixed-point sim units), by catalog id (M2-S3 — replaces the
+ *  M1-era single-tower `ruleset.tower.rangeFp`). RANGE_FP-consuming sites re-key on the
+ *  ACTING id: the armed id for the aim/build ghost, the selection's own id for its range
+ *  ring — never a single ruleset-wide constant. `0` for an unresolved id (defensive; a
+ *  validated armed/selection id always resolves). */
+const RANGE_FP = (r: CompiledRuleset, towerId: string): number =>
+  r.towerById[towerId]?.rangeFp ?? 0;
+
+/** A tower's cost, by catalog id — the affordability comparisons' single source (M2-S3
+ *  replaces `ruleset.tower.cost`). `Number.MAX_SAFE_INTEGER` for an unresolved id, so an
+ *  invalid armed id can never read as affordable by accident. */
+const COST_FP = (r: CompiledRuleset, towerId: string): number =>
+  r.towerById[towerId]?.cost ?? Number.MAX_SAFE_INTEGER;
 
 /**
  * Classify a candidate command against the CURRENT tick's buffer, before it is queued.
@@ -289,10 +312,13 @@ export function outcomesMatch(
   );
 }
 
-/** A tower-anchor cell (col,row) — the presentation unit for pending builds/sells. */
+/** A tower-anchor cell (col,row) + its catalog id — the presentation unit for pending
+ *  builds/sells (M2-S3: `towerId` threads through so a queued slow tower keeps its
+ *  shape-distinct identity, Codex R1-7). */
 interface TowerAnchor {
   readonly col: number;
   readonly row: number;
+  readonly towerId: string;
 }
 
 /**
@@ -310,13 +336,21 @@ function diffPendingTowers(
   const additions: TowerAnchor[] = [];
   for (let i = 0; i < projected.id.length; i++) {
     if (!committedIds.has(projected.id[i] as number)) {
-      additions.push({ col: projected.col[i] as number, row: projected.row[i] as number });
+      additions.push({
+        col: projected.col[i] as number,
+        row: projected.row[i] as number,
+        towerId: projected.towerId[i] as string,
+      });
     }
   }
   const sells: TowerAnchor[] = [];
   for (let i = 0; i < committed.id.length; i++) {
     if (!projectedIds.has(committed.id[i] as number)) {
-      sells.push({ col: committed.col[i] as number, row: committed.row[i] as number });
+      sells.push({
+        col: committed.col[i] as number,
+        row: committed.row[i] as number,
+        towerId: committed.towerId[i] as string,
+      });
     }
   }
   return { additions, sells };
@@ -530,17 +564,23 @@ export function createController(seed: number): Controller {
   /** The tower whose 2×2 footprint covers (col,row), or null. Reads the SHARED projection
    *  so a pending (not-yet-committed) build/sell is reflected in selection/hit-testing —
    *  e.g. `confirm()`'s post-queue re-aim selects the just-queued tower rather than
-   *  showing an invalid ghost (#40), and a pending sell's cell stops resolving as a tower. */
-  const towerAt = (col: number, row: number): { col: number; row: number; id: number } | null => {
+   *  showing an invalid ghost (#40), and a pending sell's cell stops resolving as a tower.
+   *  Re-implemented over the CANONICAL `forEachValidTower` walk (Codex R3-2, M2-S3): an
+   *  invalid row (unknown `towerId`, spend↔towerId mismatch) is not hit-testable/
+   *  selectable, matching the sim and the render VM exactly. */
+  const towerAt = (
+    col: number,
+    row: number,
+  ): { col: number; row: number; id: number; towerId: string } | null => {
     const towers = pendingProjection()?.preview.towers ?? state.towers;
-    for (let i = 0; i < towers.id.length; i++) {
-      const tc = towers.col[i] as number;
-      const tr = towers.row[i] as number;
+    let found: { col: number; row: number; id: number; towerId: string } | null = null;
+    forEachValidTower(grid, towers, ruleset.towerById, (i, id, tc, tr) => {
+      if (found !== null) return;
       if (col >= tc && col <= tc + 1 && row >= tr && row <= tr + 1) {
-        return { col: tc, row: tr, id: towers.id[i] as number };
+        found = { col: tc, row: tr, id, towerId: towers.towerId[i] as string };
       }
-    }
-    return null;
+    });
+    return found;
   };
 
   const inBounds = (col: number, row: number): boolean =>
@@ -553,15 +593,15 @@ export function createController(seed: number): Controller {
   // `MAX_INPUTS_PER_TICK` (the replay contract's per-tick limit — PLAN.md P3 step 15
   // drops the P4-era pre-start reservation, so this is the one cap now, held or not), so
   // the preview never promises a placement that a subsequent confirm/click would reject.
-  const placementValid = (col: number, row: number): boolean => {
-    const key = `${col},${row},${buffer.length},${state.tick}`;
+  const placementValid = (col: number, row: number, towerId: string): boolean => {
+    const key = `${col},${row},${buffer.length},${state.tick},${towerId}`;
     if (key === aimMemoKey) return aimMemoValid;
     if (buffer.length >= MAX_INPUTS_PER_TICK) {
       aimMemoKey = key;
       aimMemoValid = false;
       return false;
     }
-    const candidate: SimInput = { kind: 'placeTower', anchor: { col, row } };
+    const candidate: SimInput = { kind: 'placeTower', anchor: { col, row }, towerId };
     const { accepted } = previewInputs(state, ruleset, [...buffer, candidate]);
     const valid = accepted[accepted.length - 1] === true;
     aimMemoKey = key;
@@ -578,7 +618,7 @@ export function createController(seed: number): Controller {
         // Armed: an existing tower is an occupied cell, not a selection target — mirrors
         // clickAt's occupied-cell rejection so the keyboard cursor can't silently arm
         // `selection` (enabling a stray Sell) while a Card is still armed for placement.
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, armed) };
         bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
         return { kind: 'blocked', col, row, valid: false };
       }
@@ -586,15 +626,23 @@ export function createController(seed: number): Controller {
       selection = {
         col: existing.col,
         row: existing.row,
-        rangeFp: RANGE_FP(ruleset),
+        rangeFp: RANGE_FP(ruleset, existing.towerId),
         id: existing.id,
+        towerId: existing.towerId,
       };
       bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
       return { kind: 'tower', col: existing.col, row: existing.row, valid: true };
     }
     selection = null; // a click/keyboard aim on an empty cell is a build intent — deselect
-    const valid = placementValid(col, row);
-    ghost = { col, row, valid, rangeFp: RANGE_FP(ruleset) };
+    if (armed === null) {
+      // Unarmed: with `towerId` now required there is no honest candidate command to
+      // preview (PLAN.md P3 step 16, Codex R1-4) — no ghost, no verdict.
+      ghost = null;
+      bumpUiRev();
+      return { kind: 'blocked', col, row, valid: false };
+    }
+    const valid = placementValid(col, row, armed);
+    ghost = { col, row, valid, rangeFp: RANGE_FP(ruleset, armed) };
     bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
     return { kind: 'ghost', col, row, valid };
   };
@@ -619,10 +667,10 @@ export function createController(seed: number): Controller {
     // invalid ghost rather than clearing it; previously the null-on-tower branch let the
     // slightest hover erase the rejection cue over the very footprint a click had rejected.
     if (towerAt(col, row) !== null) {
-      ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+      ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, armed) };
       return;
     }
-    ghost = { col, row, valid: placementValid(col, row), rangeFp: RANGE_FP(ruleset) };
+    ghost = { col, row, valid: placementValid(col, row, armed), rangeFp: RANGE_FP(ruleset, armed) };
   };
 
   /** Mouse/pointer click at a board cell — the armed/selection state machine (PLAN.md P2
@@ -634,9 +682,10 @@ export function createController(seed: number): Controller {
     if (!inBounds(col, row)) return;
     cur = { col, row };
     if (armed !== null) {
+      const towerId = armed;
       const existing = towerAt(col, row);
       if (existing !== null) {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
         setOutcome({ kind: 'rejected', reason: 'occupied' });
         return;
       }
@@ -646,14 +695,17 @@ export function createController(seed: number): Controller {
       // 'bounty'/'other'. Checked before `placementValid` (which itself folds the cap
       // into its memoized result) so this exact branch can attach the distinct outcome.
       if (buffer.length >= MAX_INPUTS_PER_TICK) {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
         setOutcome({ kind: 'rejected', reason: 'pendingCap' });
         return;
       }
-      if (!placementValid(col, row)) {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+      if (!placementValid(col, row, towerId)) {
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
         const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
-        setOutcome({ kind: 'rejected', reason: bounty < ruleset.tower.cost ? 'bounty' : 'other' });
+        setOutcome({
+          kind: 'rejected',
+          reason: bounty < COST_FP(ruleset, towerId) ? 'bounty' : 'other',
+        });
         return;
       }
       // Valid placement. `enqueueVerdict` never reports 'duplicate' for `placeTower`
@@ -661,17 +713,17 @@ export function createController(seed: number): Controller {
       // already ruled out 'full' at the CURRENT cap, so only 'queue' remains in the
       // common case — 'full' stays as a defensive fallback in case the buffer changed
       // underneath us between the check and here.
-      const cmd: SimInput = { kind: 'placeTower', anchor: { col, row } };
+      const cmd: SimInput = { kind: 'placeTower', anchor: { col, row }, towerId };
       const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset) };
+        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
         setOutcome({ kind: 'rejected', reason: 'other' });
         return;
       }
       buffer.push(cmd);
       bufferRev++;
       armed = null; // disarm BEFORE the outcome/re-aim below — never re-arms
-      setOutcome({ kind: 'placed' });
+      setOutcome({ kind: 'placed', towerId });
       aimAt(col, row); // selects the just-placed (now-pending) tower
       return;
     }
@@ -681,33 +733,44 @@ export function createController(seed: number): Controller {
     selection =
       existing === null
         ? null
-        : { col: existing.col, row: existing.row, rangeFp: RANGE_FP(ruleset), id: existing.id };
+        : {
+            col: existing.col,
+            row: existing.row,
+            rangeFp: RANGE_FP(ruleset, existing.towerId),
+            id: existing.id,
+            towerId: existing.towerId,
+          };
     ghost = null;
     bumpUiRev();
   };
 
-  /** Toggle `kind` armed (PLAN.md P2 table, row 1): arm it (clearing any selection), or —
-   *  if already armed — disarm. */
-  const armTower = (kind: ArmedTower): void => {
-    if (armed === kind) {
+  /** Arm `towerId` for placement (PLAN.md P2 table, row 1; M2-S3): a no-op unless it
+   *  resolves in the compiled catalog (`ruleset.towerById`) — armed always names a real,
+   *  buildable tower or nothing. `armed === towerId` toggles off (disarm); a DIFFERENT
+   *  id switches in one action (clearing any board selection, today's rule — never both
+   *  armed and selected at once). */
+  const armTower = (towerId: string): void => {
+    if (ruleset.towerById[towerId] === undefined) return; // unresolved catalog id — no-op
+    if (armed === towerId) {
       armed = null;
       ghost = null;
-      setOutcome({ kind: 'disarmed' });
+      setOutcome({ kind: 'disarmed', towerId });
       return;
     }
-    armed = kind;
+    armed = towerId;
     selection = null;
     ghost = null;
-    setOutcome({ kind: 'armed' });
+    setOutcome({ kind: 'armed', towerId });
   };
 
   /** Document-scope Escape (PLAN.md P2 table): armed disarms; otherwise a selection
    *  deselects. No-op in neither state. */
   const escape = (): void => {
     if (armed !== null) {
+      const towerId = armed;
       armed = null;
       ghost = null;
-      setOutcome({ kind: 'disarmed' });
+      setOutcome({ kind: 'disarmed', towerId });
       return;
     }
     if (selection !== null) {
@@ -868,13 +931,16 @@ export function createController(seed: number): Controller {
       // false via `selection`.
       aimAt(cur.col, cur.row);
       if (ghost === null || !ghost.valid) {
-        // A `ghost === null` here means aimAt selected an existing tower instead (unarmed
-        // cursor landing on an occupied cell) — that's a selection, not a placement
-        // attempt, so it stays silent. Any other invalid ghost IS a rejected placement
-        // attempt and must announce to the live region (docs/accessibility-checklist.md),
-        // mirroring clickAt's occupied/pendingCap/bounty/other reasons.
-        if (ghost !== null) {
-          if (armed !== null && towerAt(ghost.col, ghost.row) !== null) {
+        // A `ghost === null` here means aimAt either selected an existing tower instead
+        // (unarmed cursor landing on an occupied cell) or the cursor is UNARMED over an
+        // empty cell (M2-S3: no honest candidate to preview) — neither is a rejected
+        // placement attempt, so both stay silent. Any other invalid ghost (armed) IS a
+        // rejected placement attempt and must announce to the live region
+        // (docs/accessibility-checklist.md), mirroring clickAt's occupied/pendingCap/
+        // bounty/other reasons.
+        if (ghost !== null && armed !== null) {
+          const towerId = armed;
+          if (towerAt(ghost.col, ghost.row) !== null) {
             setOutcome({ kind: 'rejected', reason: 'occupied' });
           } else if (buffer.length >= MAX_INPUTS_PER_TICK) {
             setOutcome({ kind: 'rejected', reason: 'pendingCap' });
@@ -882,30 +948,34 @@ export function createController(seed: number): Controller {
             const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
             setOutcome({
               kind: 'rejected',
-              reason: bounty < ruleset.tower.cost ? 'bounty' : 'other',
+              reason: bounty < COST_FP(ruleset, towerId) ? 'bounty' : 'other',
             });
           }
         }
         return false;
       }
-      const cmd: SimInput = { kind: 'placeTower', anchor: { col: ghost.col, row: ghost.row } };
+      // `ghost.valid` is only ever true while ARMED (aimAt never sets a truthy verdict
+      // while unarmed, M2-S3) — `armed` hasn't changed since the aimAt() call above.
+      const towerId = armed;
+      if (towerId === null) return false; // defensive — unreachable given aimAt's contract
+      const cmd: SimInput = {
+        kind: 'placeTower',
+        anchor: { col: ghost.col, row: ghost.row },
+        towerId,
+      };
       const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') return false;
       if (verdict === 'queue') {
         buffer.push(cmd);
         bufferRev++;
       }
-      // Disarm on ANY successful placement, regardless of input path (PLAN.md P2 table,
-      // "any | successful placement | never re-arms") — a keyboard-Enter build while a
-      // Card is armed must leave the Card unarmed too, not just the mouse/Card path.
-      if (armed !== null) {
-        armed = null;
-      }
-      // Announce on ANY successful placement, not just the armed/Card path — the pure
-      // keyboard cursor flow (arrow keys + Enter) builds without ever arming a Card, and
-      // the live region must still announce success there too
+      // Disarm on ANY successful placement (PLAN.md P2 table, "any | successful
+      // placement | never re-arms").
+      armed = null;
+      // Announce on ANY successful placement — the pure keyboard cursor flow (arrow keys
+      // + Enter, now requiring an armed Card first) still gets its own announcement here
       // (docs/accessibility-checklist.md).
-      setOutcome({ kind: 'placed' });
+      setOutcome({ kind: 'placed', towerId });
       // Re-evaluate the ghost against the now-larger buffer (the just-queued build may
       // make this same cell invalid for a second placement while paused). `towerAt` now
       // reads the shared projection, so this resolves to a SELECTION on the just-queued
@@ -950,7 +1020,14 @@ export function createController(seed: number): Controller {
         started,
         armed,
         selection:
-          selection === null ? null : { col: selection.col, row: selection.row, id: selection.id },
+          selection === null
+            ? null
+            : {
+                col: selection.col,
+                row: selection.row,
+                id: selection.id,
+                towerId: selection.towerId,
+              },
         lastOutcome,
         outcomeSeq,
         // `deriveHud`'s `callable` already reads the shared preview projection (so a
@@ -1000,7 +1077,12 @@ export function createController(seed: number): Controller {
       selOverlay =
         selection === null
           ? null
-          : { col: selection.col, row: selection.row, rangeFp: selection.rangeFp };
+          : {
+              col: selection.col,
+              row: selection.row,
+              rangeFp: selection.rangeFp,
+              towerId: selection.towerId,
+            };
     }
     return selOverlay;
   }

@@ -12,6 +12,8 @@ import { resolvePalette, type Palette } from './palette';
 import { boardPaintOps, type BoardPaintOp } from './board-cells';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
+import { creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
+import { towerFootprintMarkFor } from './tower-paint';
 import type { RenderVM, RenderOverlay, RenderHandle, ColourMode } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -230,14 +232,27 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       const size = projection.cellPx * 2; // 2×2 footprint
       g.fillStyle(pal.tower, 1);
       g.fillRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
+      // `slow` vs `basic` footprint mark (M2-S3): same `pal.tower` colour, shape carries
+      // the distinction — an inner concentric ring for `'ringed'` (slow), nothing extra
+      // for `'plain'` (basic).
+      if (towerFootprintMarkFor(t.towerId) === 'ringed') {
+        g.lineStyle(2, pal.floor, 1);
+        g.strokeCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+      }
     }
     // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
-    // the dual shape+alpha cue distinguishing "pending" from a committed tower.
+    // the dual shape+alpha cue distinguishing "pending" from a committed tower — carries
+    // its own footprint mark too, so a slow tower queued while paused keeps its
+    // shape-distinct identity (Codex R1-7).
     for (const p of o.pendingAdds) {
       const pt = projection.cellToPixel(p.col, p.row);
       const size = projection.cellPx * 2;
       g.lineStyle(3, pal.tower, 0.6);
       g.strokeRoundedRect(pt.x + 2, pt.y + 2, size - 4, size - 4, 6);
+      if (towerFootprintMarkFor(p.towerId) === 'ringed') {
+        g.lineStyle(1, pal.tower, 0.6);
+        g.strokeCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+      }
     }
     if (o.selection !== null) {
       const c = projection.cellToPixel(o.selection.col, o.selection.row);
@@ -251,18 +266,39 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   const drawCreeps = (
     g: Phaser.GameObjects.Graphics,
     pal: Palette,
-    interpolated: readonly { x: number; y: number; hpFrac: number }[],
+    interpolated: readonly {
+      x: number;
+      y: number;
+      hpFrac: number;
+      creepId: string;
+      slowed: boolean;
+    }[],
+    reducedMotion: boolean,
   ): void => {
     for (const c of interpolated) {
       const p = projection.fpToPixel(c.x, c.y);
       const r = Math.max(3, projection.cellPx * 0.35);
       const hpColour = c.hpFrac < 0.34 ? pal.creepLowHp : pal.creep;
-      g.fillStyle(hpColour, 1); // set once — used for both the silhouette and the pip
-      // triangle silhouette — a shape cue distinct from the tower's square
-      g.fillTriangle(p.x, p.y - r, p.x + r, p.y + r, p.x - r, p.y + r);
+      const op = creepSilhouettePaintOp(c.creepId, p.x, p.y, r, hpColour, c.hpFrac);
+      g.fillStyle(op.colour, 1); // set once — used for both the silhouette and the pip
+      // Silhouette keyed on `creepId`'s shape (M2-S3): `normal` keeps the triangle (a
+      // shape cue distinct from the tower's square); `fast` draws a diamond, visibly
+      // distinct at cell scale; an unknown id falls back to the triangle (total).
+      if (op.shape === 'diamond') {
+        g.fillTriangle(op.x, op.y - r, op.x + r, op.y, op.x, op.y + r);
+        g.fillTriangle(op.x, op.y - r, op.x - r, op.y, op.x, op.y + r);
+      } else {
+        g.fillTriangle(op.x, op.y - r, op.x + r, op.y + r, op.x - r, op.y + r);
+      }
       // health pip: length AND colour encode HP (dual cue) — warning tint only when low.
       // hpFrac is already clamped to [0,1] by deriveViewModel (CreepVM invariant).
-      g.fillRect(p.x - r, p.y - r - 4, r * 2 * c.hpFrac, 3);
+      g.fillRect(op.x - r, op.y - r - 4, r * 2 * op.hpFrac, 3);
+      // Slowed telegraph (M2-S3): a shape cue (ring) ALWAYS accompanies a live slow; the
+      // motion cue (pulse) yields to reduced motion (WCAG 2.3.3 / GAG §2).
+      for (const tel of slowTelegraphPaintOps(c, r, reducedMotion, pal.slowed)) {
+        g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.kind === 'ring' ? 0.9 : 0.4);
+        g.strokeCircle(tel.x, tel.y, tel.r);
+      }
     }
   };
 
@@ -352,7 +388,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     drawBoard(gfx, overlay.colourMode);
     drawTowers(gfx, pal, curVm, overlay);
     drawTracers(gfx, pal, overlay, prevVm, curVm, alpha, interpolatedById);
-    drawCreeps(gfx, pal, interpolated);
+    drawCreeps(gfx, pal, interpolated, overlay.reducedMotion);
     drawGhost(gfx, pal, overlay);
     drawSparks(gfx, pal, overlay);
   };

@@ -247,6 +247,7 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
     // Build one tower beside the entrance lane so this run actually SCORES — the plain
     // undefended fixture used elsewhere in this file ends at 0, which would make the
     // Play-again assertion below pass with or without the fix.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' })); // arm the basic Card (M2-S3)
     for (let i = 0; i < 3; i++) key('ArrowRight');
     for (let i = 0; i < 2; i++) key('ArrowUp'); // entrance row 11 → row 9
     key('Enter'); // confirm the build
@@ -697,6 +698,7 @@ describe('main — the live-run exit guard (owned by main.ts)', () => {
    *  run — the planning path `effectiveCap()` reserves a slot for. Returns the resulting
    *  pending count so a caller can assert the plan survived something. */
   function planTowerWhileHeld(h: ReturnType<typeof homeApp>): number {
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' })); // arm the basic Card (M2-S3)
     for (let i = 0; i < 3; i++) h.key('ArrowRight');
     for (let i = 0; i < 2; i++) h.key('ArrowUp'); // entrance row 11 → row 9
     h.key('Enter'); // confirm the build — buffered, not committed (the run is held)
@@ -907,6 +909,7 @@ describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
     // Build one tower at (3,3) — Pending (PLAN.md P4: pre-start planning is fully
     // available, and the shared pending projection presents it instantly regardless of
     // whether the run has been started), so there is something to sell later.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' })); // arm the basic Card (M2-S3)
     moveTo(3, 3 - 11); // entrance row 11 → row 3
     key('Enter'); // confirm the build (Pending)
     sched.frame((clock += 16));
@@ -921,6 +924,7 @@ describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
     sched.frame((clock += 16));
     const afterFirstSell = hudText();
 
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' })); // re-arm (M2-S3)
     moveTo(7, 0); // (3,3) → (10,3), the other well-known buildable cell in this fixture
     key('Enter'); // build again — a second, distinct pending economy change, SAME sim tick
     sched.frame((clock += 16));

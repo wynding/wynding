@@ -30,6 +30,10 @@ export interface Palette {
   readonly ghostInvalid: number;
   /** Impact-spark FX colour. */
   readonly spark: number;
+  /** Slow-status telegraph cue (M2-S3) — the redundant colour channel behind the
+   *  shape/ring the telegraph ALWAYS draws (`creep-paint.ts`); gated ≥ 3:1 like every
+   *  other opaque cue (`palette.test.ts`). */
+  readonly slowed: number;
 }
 
 // Base palette: high-contrast, colourblind-safe hues (Okabe–Ito). Valid/invalid also
@@ -46,6 +50,7 @@ const DEFAULT: Palette = {
   ghostValid: 0x009e73,
   ghostInvalid: 0xd55e00,
   spark: 0xffffff,
+  slowed: 0x56b4e9, // sky blue — the slow telegraph's redundant colour channel
 };
 
 // Deutan/protan (red–green) shift the green/red pair toward blue/orange separation.

@@ -26,9 +26,11 @@ export function interpolateCreeps(prev: RenderVM | null, cur: RenderVM, alpha: n
     } else {
       out.push({
         id: c.id,
+        creepId: c.creepId,
         x: p.x + (c.x - p.x) * a,
         y: p.y + (c.y - p.y) * a,
         hpFrac: c.hpFrac, // health snaps to current (no visual value in blending it)
+        slowed: c.slowed, // status snaps to current, like hpFrac (no visual value blending it)
       });
     }
   }

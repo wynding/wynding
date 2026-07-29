@@ -98,20 +98,21 @@ interface PressEntry {
   dragging: boolean;
 }
 
-/** Attach input handling to `boardEl` + `cardEls` for `controller`. Returns a handle to
- *  detach. `cardEls` is every Rail Card (M1 ships exactly one, PLAN.md P2) — Card gestures
- *  need the input manager's shared pointer registry (PLAN.md P3), so they're wired here
- *  rather than left to `overlay.ts`'s plain `click` listener (which still owns the MOUSE
- *  click-toggle path unchanged). */
+/** Attach input handling to `boardEl` + `cards` for `controller`. Returns a handle to
+ *  detach. `cards` is every Rail Card (M2-S3: one per catalog tower, `{el, towerId}`
+ *  pairs) — Card gestures need the input manager's shared pointer registry (PLAN.md P3),
+ *  so they're wired here rather than left to `overlay.ts`'s plain `click` listener (which
+ *  still owns the MOUSE click-toggle path unchanged). */
 export function attachInput(
   doc: Document,
   boardEl: HTMLElement,
-  cardEls: readonly HTMLElement[],
+  cards: readonly { readonly el: HTMLElement; readonly towerId: string }[],
   controller: Controller,
   keymap: Keymap,
   options: InputOptions = {},
 ): InputHandle {
   const grid = controller.ruleset.board.grid;
+  const cardEls = cards.map((c) => c.el);
   const getRect = options.getRect ?? (() => boardEl.getBoundingClientRect() as DOMRect);
   // jsdom has no `elementFromPoint` at all (not even a null-returning stub) — default to
   // "never over chrome" rather than throwing when the browser API is absent.
@@ -496,8 +497,9 @@ export function attachInput(
         controller.cycleSpeed();
         break;
       case 'armTower1':
+      case 'armTower2':
         // Intentionally NOT handled here: arming must work from "any state" (PLAN.md P2
-        // table) regardless of whether the board currently has focus (e.g. focus on the
+        // table) regardless of whether the board currently has focus (e.g. focus on a
         // Card, or nowhere at all), so it's a document-scope listener in overlay.ts. This
         // case only exists so the switch stays exhaustive over `GameAction` — the
         // preventDefault() above still consumes the key here when the board IS focused.
@@ -509,7 +511,7 @@ export function attachInput(
   // listener, untouched); touch/pen is tap-vs-drag (PLAN.md P3) ---
 
   const cardCleanups: (() => void)[] = [];
-  for (const cardEl of cardEls) {
+  for (const { el: cardEl, towerId } of cards) {
     const onCardPointerDown = (e: PointerEvent): void => {
       if (e.button !== 0) return; // primary button / touch only — reject right/middle/no-button (e.g. a pen barrel press)
       if (e.pointerType === 'mouse') return; // mouse Card interaction is click-toggle only
@@ -534,10 +536,14 @@ export function attachInput(
         const dy = e.clientY - press.startY;
         if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return; // still under the tap threshold
         press.dragging = true;
-        // Arm to begin the drag-from-rail flow — but never TOGGLE (a card already armed
-        // by an earlier gesture must stay armed, not flip off) — `armTower` only arms when
-        // called while unarmed.
-        if (controller.uiState().armed === null) controller.armTower('basic');
+        // Arm THIS card's tower to begin the drag-from-rail flow (M2-S3): the guard is
+        // `armed !== card.towerId`, not `armed === null` — a drag STARTED FROM a card is
+        // an unambiguous intent to place THAT card's tower, so a drag from the slow
+        // Card while `basic` is still armed must SWITCH, not merely leave `basic` armed
+        // (Codex R1-6; the old null-only guard would leave `basic` armed while dragging
+        // from the slow Card). Equal (already armed with this exact card's tower) →
+        // nothing to do — `armTower` itself would otherwise read as a toggle-off.
+        if (controller.uiState().armed !== towerId) controller.armTower(towerId);
       }
       updateGhostFromPoint(e.clientX, e.clientY); // coordinates mapped onto the board
     };
@@ -568,9 +574,9 @@ export function attachInput(
         return;
       }
       if (!press.dragging) {
-        // Tap: toggle armed per the P2 table, and suppress the subsequent synthetic click
-        // so it doesn't double-toggle.
-        controller.armTower('basic');
+        // Tap: toggle THIS card's tower armed per the P2 table, and suppress the
+        // subsequent synthetic click so it doesn't double-toggle.
+        controller.armTower(towerId);
         armClickSuppression();
         return;
       }

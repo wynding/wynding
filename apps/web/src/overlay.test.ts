@@ -22,6 +22,7 @@ import {
 
 const bundle = getBundledRuleset();
 const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+const CARD_DESCRIPTORS = ruleset.towers.map((t) => ({ towerId: t.id }));
 
 // A fixed 280×240 board rect → 28×24 cells at 10 px each (mirrors input.test.ts) so the
 // settings-open integration tests below can place/hold a real gesture under jsdom (whose
@@ -90,7 +91,7 @@ function setup(
   const actions: UiAction[] = [];
   const settings = createSettings();
   const keymap = createKeymap();
-  const shell = createShell(document);
+  const shell = createShell(document, CARD_DESCRIPTORS);
   document.body.appendChild(shell.root);
   const install = options.install ?? defaultInstall();
   const overlay = createOverlay(
@@ -123,7 +124,7 @@ function setup(
     speedBtn: shell.dock.speed,
     primaryBtn: shell.dock.primary,
     settingsBtn: shell.dock.settings,
-    card: shell.card,
+    card: shell.cards[0]!,
     panel: shell.panel,
     live: shell.live,
   };
@@ -634,6 +635,81 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('a second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
+    const { shell } = setup();
+    expect(shell.cards).toHaveLength(2);
+    const slowCard = shell.cards[1]!;
+    expect(slowCard.towerId).toBe('slow');
+    expect(slowCard.name.textContent).toBe('Slow Tower');
+    expect(slowCard.cost.textContent).toBe('Cost: 8');
+    expect(slowCard.hotkey.textContent).toBe('2'); // Digit2 default
+    expect(slowCard.root.getAttribute('aria-keyshortcuts')).toBe('2');
+  });
+
+  it('a card at catalog index ≥ 2 gets NO hotkey badge/aria-keyshortcuts at all (Codex R2-2)', () => {
+    // Three-tower descriptor list — index 2 has no ARM_HOTKEY_ACTIONS slot.
+    const threeTowerRuleset = ruleset;
+    const shell = createShell(document, [
+      { towerId: 'basic' },
+      { towerId: 'slow' },
+      { towerId: 'basic' }, // a synthetic third slot — id doesn't matter, only the index does
+    ]);
+    document.body.appendChild(shell.root);
+    const overlay = createOverlay(
+      document,
+      () => {},
+      () => {},
+      createSettings(),
+      createKeymap(),
+      shell,
+      threeTowerRuleset,
+      () => {},
+      defaultInstall(),
+    );
+    document.body.append(
+      overlay.resultsEl,
+      overlay.settingsEl,
+      overlay.instructionsEl,
+      overlay.leaveEl,
+    );
+    const thirdCard = shell.cards[2]!;
+    expect(thirdCard.hotkey.textContent).toBe('');
+    expect(thirdCard.root.hasAttribute('aria-keyshortcuts')).toBe(false);
+    overlay.destroy();
+  });
+
+  it('a legal one-tower bundle filters armTower2 from the rebind list, and its document hotkey no-ops (Codex R3-1)', () => {
+    const oneCardShell = createShell(document, [{ towerId: 'basic' }]);
+    document.body.appendChild(oneCardShell.root);
+    const actions: UiAction[] = [];
+    const overlay = createOverlay(
+      document,
+      (a) => actions.push(a),
+      () => {},
+      createSettings(),
+      createKeymap(),
+      oneCardShell,
+      ruleset,
+      () => {},
+      defaultInstall(),
+    );
+    document.body.append(
+      overlay.resultsEl,
+      overlay.settingsEl,
+      overlay.instructionsEl,
+      overlay.leaveEl,
+    );
+    // No phantom rebindable action for a slot that doesn't exist.
+    const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
+      (el) => el.textContent,
+    );
+    expect(rebindNames).not.toContain('Arm tower 2');
+    // The document hotkey no-ops too — cards[1] doesn't exist.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+    expect(actions).toEqual([]);
+    overlay.destroy();
+  });
+
   it('the board aria-label names the actual bound keys and refreshes on rebind', () => {
     const { keymap, overlay, shell, settingsBtn } = setup();
     // Initially derived from the default keymap (arrows / Enter / X), not hardcoded.
@@ -694,7 +770,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7 } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic' } }),
       refund: 3,
     });
     expect(panel.root.hidden).toBe(false);
@@ -713,7 +789,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('a refund change on the SAME selection updates the Sell label in place, preserving the button element (no re-creation)', () => {
     const { overlay, panel } = setup();
-    const selection = { col: 1, row: 1, id: 7 };
+    const selection = { col: 1, row: 1, id: 7, towerId: 'basic' };
     overlay.update({
       hud: hud(),
       paused: false,
@@ -781,7 +857,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7 } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic' } }),
       refund: 3,
     });
     const panelBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
@@ -836,9 +912,11 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       });
       return live.textContent!;
     };
-    expect(render({ kind: 'armed' })).toBe('Basic Tower armed. Place it on the board.');
-    expect(render({ kind: 'disarmed' })).toBe('Placement cancelled.');
-    expect(render({ kind: 'placed' })).toBe('Basic Tower placed.');
+    expect(render({ kind: 'armed', towerId: 'basic' })).toBe(
+      'Basic Tower armed. Place it on the board.',
+    );
+    expect(render({ kind: 'disarmed', towerId: 'basic' })).toBe('Placement cancelled.');
+    expect(render({ kind: 'placed', towerId: 'basic' })).toBe('Basic Tower placed.');
     expect(render({ kind: 'rejected', reason: 'bounty' })).toBe('Not enough Bounty.');
     expect(render({ kind: 'rejected', reason: 'occupied' })).toBe('That cell is already occupied.');
     expect(render({ kind: 'rejected', reason: 'other' })).toBe("Can't build there.");
@@ -855,7 +933,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ lastOutcome: { kind: 'placed' as const } }),
+      ui: uiState({ lastOutcome: { kind: 'placed' as const, towerId: 'basic' } }),
       refund: 0,
     };
     overlay.update(frame); // first render: establishes the message, one write
@@ -908,20 +986,26 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(evt.defaultPrevented).toBe(true); // ...and the key is consumed, so the button isn't also clicked
   });
 
-  it('fails closed (throws) for an unknown tower kind rather than inventing stats', () => {
-    const { overlay } = setup();
-    // M1's `ArmedTower` union is the single literal 'basic' — a future kind reaching the
-    // Panel without being taught its stats is a programmer error. Force that path with an
-    // unsafe cast (the only way to construct an invalid `ArmedTower` at the type level).
+  // M2-S3 (Codex R1-5): `ArmedTower` is now an OPEN catalog-id string — any schema-valid
+  // direct+slow tower compiles at sv7, so a legitimate modded bundle can arm an id this
+  // build's `TOWER_NAME` map doesn't recognize. A crash here would break on that
+  // legitimate bundle, so the Panel renders the localized fallback name + zeroed stats
+  // (never fabricated numbers) instead of throwing — the exact `CREEP_NAME` strategy.
+  it('renders the localized unknown-tower fallback name (never throws) for an id this build does not recognize', () => {
+    const { overlay, panel } = setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(() =>
       overlay.update({
         hud: hud(),
         paused: false,
         speed: 1,
-        ui: uiState({ armed: 'turret' as unknown as UiState['armed'] }),
+        ui: uiState({ armed: 'turret' }),
         refund: 0,
       }),
-    ).toThrow(/unknown tower kind/);
+    ).not.toThrow();
+    expect(panel.root.textContent).toContain('Unknown tower (turret)');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("catalog id 'turret'"));
+    warnSpy.mockRestore();
   });
 });
 
@@ -1319,14 +1403,21 @@ describe('overlay — settings dialog (modal)', () => {
     // click routes through the overlay's abortGesture into the input manager, exactly as
     // main.ts wires it. Reproduces the P2 finding: a pointer captured on the board before
     // the modal opens still delivers its pointerup to the release path.
-    const shell = createShell(document);
+    const shell = createShell(document, CARD_DESCRIPTORS);
     document.body.appendChild(shell.root);
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    const input = attachInput(document, shell.board, [shell.card.root], c, createKeymap(), {
-      getRect: () => RECT,
-      isModalOpen: () => shell.root.hasAttribute('inert'),
-    });
+    const input = attachInput(
+      document,
+      shell.board,
+      [{ el: shell.cards[0]!.root, towerId: 'basic' }],
+      c,
+      createKeymap(),
+      {
+        getRect: () => RECT,
+        isModalOpen: () => shell.root.hasAttribute('inert'),
+      },
+    );
     const overlay = createOverlay(
       document,
       () => {},
@@ -1363,14 +1454,21 @@ describe('overlay — settings dialog (modal)', () => {
   });
 
   it('a held Card drag disarms and places nothing when settings opens then releases', () => {
-    const shell = createShell(document);
+    const shell = createShell(document, CARD_DESCRIPTORS);
     document.body.appendChild(shell.root);
     const c = createController(1);
     c.start();
-    const input = attachInput(document, shell.board, [shell.card.root], c, createKeymap(), {
-      getRect: () => RECT,
-      isModalOpen: () => shell.root.hasAttribute('inert'),
-    });
+    const input = attachInput(
+      document,
+      shell.board,
+      [{ el: shell.cards[0]!.root, towerId: 'basic' }],
+      c,
+      createKeymap(),
+      {
+        getRect: () => RECT,
+        isModalOpen: () => shell.root.hasAttribute('inert'),
+      },
+    );
     const overlay = createOverlay(
       document,
       () => {},
@@ -1389,14 +1487,14 @@ describe('overlay — settings dialog (modal)', () => {
       overlay.leaveEl,
     );
 
-    shell.card.root.dispatchEvent(ptr('pointerdown', 10, 10, 1));
-    shell.card.root.dispatchEvent(ptr('pointermove', 35, 105, 1)); // crosses the drag threshold → arms
+    shell.cards[0]!.root.dispatchEvent(ptr('pointerdown', 10, 10, 1));
+    shell.cards[0]!.root.dispatchEvent(ptr('pointermove', 35, 105, 1)); // crosses the drag threshold → arms
     expect(c.uiState().armed).toBe('basic');
 
     shell.dock.settings.click(); // open settings → abort → Card-drag disarms
     expect(c.uiState().armed).toBeNull();
 
-    shell.card.root.dispatchEvent(ptr('pointerup', 35, 105, 1)); // the delayed release
+    shell.cards[0]!.root.dispatchEvent(ptr('pointerup', 35, 105, 1)); // the delayed release
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(0); // nothing placed
 

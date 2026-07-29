@@ -189,11 +189,45 @@ describe('view-model + hud derivation', () => {
 
   it('includes placed towers in the view-model', () => {
     let s = createInitialState(1, ruleset);
-    const build: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 3 } };
+    const build: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' };
     s = step(s, ruleset, [build]);
     const vm = deriveViewModel(s, ruleset);
     expect(vm.towers).toHaveLength(1);
-    expect(vm.towers[0]).toMatchObject({ col: 3, row: 3 });
+    expect(vm.towers[0]).toMatchObject({ col: 3, row: 3, towerId: 'basic' });
+  });
+
+  it('projects each creep’s catalog id and the true per-creep hpFrac denominator (M2-S3)', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    const vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps.length).toBeGreaterThan(0);
+    for (const c of vm.creeps) {
+      expect(c.creepId).toBe('normal');
+      expect(c.slowed).toBe(false);
+      const def = ruleset.creepById['normal'];
+      expect(c.hpFrac).toBeCloseTo((def?.hp ?? 1) / (def?.hp ?? 1));
+    }
+  });
+
+  it('projects `slowed` from a live slowMulFp column value', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    s.creeps.slowMulFp[0] = 128;
+    s.creeps.slowUntilTick[0] = s.tick + 10;
+    const vm = deriveViewModel(s, ruleset);
+    const c = vm.creeps.find((v) => v.id === s.creeps.id[0]);
+    expect(c?.slowed).toBe(true);
+  });
+
+  it('does not draw a sim-invalid tower row (Codex R3-2: forged towerId is never drawn)', () => {
+    let s = createInitialState(1, ruleset);
+    const build: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' };
+    s = step(s, ruleset, [build]);
+    // Forge the row's towerId to something the catalog doesn't resolve — the sim's own
+    // `forEachValidTower` walk (and thus the render VM) must classify it invisible.
+    s.towers.towerId[0] = 'nonexistent';
+    const vm = deriveViewModel(s, ruleset);
+    expect(vm.towers).toHaveLength(0);
   });
 
   it('resumes counting down once the first wave has launched (wave 2 of 3)', () => {
@@ -335,7 +369,7 @@ describe('hud score — earned components while live, authoritative once termina
   /** A run with a single defender, wave launched. */
   function startDefendedRun(): SimState {
     let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, [{ kind: 'placeTower', anchor: DEFENDER }]);
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: DEFENDER, towerId: 'basic' }]);
     return step(s, ruleset, [{ kind: 'callWaveEarly' }]);
   }
 
@@ -386,7 +420,7 @@ describe('hud score — earned components while live, authoritative once termina
       { col: 3, row: 9 },
       { col: 3, row: 12 },
     ] as const) {
-      s = step(s, ruleset, [{ kind: 'placeTower', anchor }]);
+      s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'basic' }]);
     }
     // Early-call only wave 1 — the later waves auto-launch on their own countdown
     // (300 ticks each, chained off the prior wave's LAUNCH per PLAN.md's flip-tick rule),
@@ -434,27 +468,29 @@ describe('interpolation — by entity id', () => {
   });
 
   it('blends a creep present in both snapshots by its id', () => {
-    const prev = vm(0, [{ id: 1, x: 0, y: 0, hpFrac: 1 }]);
-    const cur = vm(1, [{ id: 1, x: 100, y: 40, hpFrac: 1 }]);
+    const prev = vm(0, [{ id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false }]);
+    const cur = vm(1, [{ id: 1, creepId: 'normal', x: 100, y: 40, hpFrac: 1, slowed: false }]);
     const out = interpolateCreeps(prev, cur, 0.5);
-    expect(out).toEqual([{ id: 1, x: 50, y: 20, hpFrac: 1 }]);
+    expect(out).toEqual([{ id: 1, creepId: 'normal', x: 50, y: 20, hpFrac: 1, slowed: false }]);
   });
 
   it('shows a just-spawned creep (only in current) at its current point, no blend', () => {
     const prev = vm(0, []);
-    const cur = vm(1, [{ id: 7, x: 12, y: 34, hpFrac: 1 }]);
-    expect(interpolateCreeps(prev, cur, 0.5)).toEqual([{ id: 7, x: 12, y: 34, hpFrac: 1 }]);
+    const cur = vm(1, [{ id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false }]);
+    expect(interpolateCreeps(prev, cur, 0.5)).toEqual([
+      { id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false },
+    ]);
   });
 
   it('does not resurrect a creep that left the world (only in previous)', () => {
-    const prev = vm(0, [{ id: 1, x: 0, y: 0, hpFrac: 1 }]);
+    const prev = vm(0, [{ id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false }]);
     const cur = vm(1, []);
     expect(interpolateCreeps(prev, cur, 0.5)).toEqual([]);
   });
 
   it('clamps a stale/overshooting alpha to [0,1]', () => {
-    const prev = vm(0, [{ id: 1, x: 0, y: 0, hpFrac: 1 }]);
-    const cur = vm(1, [{ id: 1, x: 100, y: 0, hpFrac: 1 }]);
+    const prev = vm(0, [{ id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false }]);
+    const cur = vm(1, [{ id: 1, creepId: 'normal', x: 100, y: 0, hpFrac: 1, slowed: false }]);
     expect(interpolateCreeps(prev, cur, 2).at(0)?.x).toBe(100);
     expect(interpolateCreeps(prev, cur, -1).at(0)?.x).toBe(0);
     expect(interpolateCreeps(null, cur, NaN).at(0)?.x).toBe(100); // null prev → current

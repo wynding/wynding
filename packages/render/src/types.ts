@@ -34,11 +34,17 @@ export type HudPreview =
 /** One creep as the renderer sees it: derived point (fixed-point sim units) + health. */
 export interface CreepVM {
   readonly id: number;
+  /** Catalog id (M2-S3) — keys the silhouette shape (`creep-paint.ts`) and the per-creep
+   *  max-HP join (`creepById[creepId].hp`) `hpFrac` is now derived against. */
+  readonly creepId: string;
   /** Fixed-point sim point (256 units = 1 cell) — projected to pixels by `projection`. */
   readonly x: number;
   readonly y: number;
   /** Remaining-health fraction in [0,1] for the health pip (dual-encoded, not colour-only). */
   readonly hpFrac: number;
+  /** Whether an active slow status affects this creep right now (`slowMulFp !== 0`,
+   *  M2-S3) — drives the slowed telegraph's shape+motion cues (`creep-paint.ts`). */
+  readonly slowed: boolean;
 }
 
 /** One tower as the renderer sees it: its 2×2 anchor cell. */
@@ -46,6 +52,9 @@ export interface TowerVM {
   readonly id: number;
   readonly col: number;
   readonly row: number;
+  /** Catalog id (M2-S3) — keys the footprint mark distinguishing `slow` from `basic`
+   *  (`tower-paint.ts`); both share `palette.tower` (shape carries the distinction). */
+  readonly towerId: string;
 }
 
 /** The compact per-tick render snapshot (the "view-model"). Two of these + an alpha
@@ -115,6 +124,8 @@ export interface SelectionVM {
   readonly col: number;
   readonly row: number;
   readonly rangeFp: number;
+  /** The selected tower's catalog id (M2-S3) — keys the Panel's per-id stats. */
+  readonly towerId: string;
 }
 
 /** One in-flight shot (Tracer, #32/P6): fp-unit origin (the firing tower's centre) +
@@ -142,8 +153,14 @@ export interface RenderOverlay {
    *  frame still flash (the scene only sees the latest two view-models). */
   readonly sparks: readonly { readonly x: number; readonly y: number }[];
   /** Towers accepted into the tick buffer but not yet committed (paused planning, #37+
-   *  #27) — anchor cells only. Drawn with a non-colour cue (dual-encoded per ADR 0003). */
-  readonly pendingAdds: readonly { readonly col: number; readonly row: number }[];
+   *  #27) — anchor cells + the queued tower's catalog id (M2-S3, Codex R1-7: a slow
+   *  tower queued while paused must keep its shape-distinct identity). Drawn with a
+   *  non-colour cue (dual-encoded per ADR 0003). */
+  readonly pendingAdds: readonly {
+    readonly col: number;
+    readonly row: number;
+    readonly towerId: string;
+  }[];
   /** Committed towers whose sell is accepted but not yet committed — hidden immediately
    *  rather than drawn as still-present. */
   readonly pendingSells: readonly { readonly col: number; readonly row: number }[];
