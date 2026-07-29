@@ -102,9 +102,17 @@ const heartbeatEvery = flags['--heartbeat'] ?? 10;
 if (heartbeatEvery < 1 || heartbeatEvery > 1000) usage('--heartbeat needs an integer 1-1000');
 
 const now = () => new Date().toISOString();
-const oneLine = (s) => s.replace(/\s+/g, ' ').trim();
-// Every event is exactly one line: interpolated content (check names, bodies, states)
-// must never smuggle a newline that forges a second event.
+const oneLine = (s) =>
+  s
+    .replace(/[\p{Cc}\p{Cf}]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+// Every event is exactly one line of plain printable text. Interpolated content (check
+// names, bodies, states) is attacker-writable on a public repo, and must not forge a
+// second event (a newline) or repaint an existing one (ANSI cursor/erase escapes, bidi
+// overrides — a terminal obeys both even mid-line). So every control or format character
+// (Cc/Cf) becomes a space — ZWJ emoji in an excerpt degrade, a fair price for a log
+// line — and then runs of whitespace collapse.
 const say = (kind, message) => console.log(`${now()} ${kind} ${oneLine(String(message))}`);
 
 // Lead with the transport-level identity — execFileSync spreads it across three fields

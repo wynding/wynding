@@ -12,7 +12,8 @@
 //   - a PR review by `chatgpt-codex-connector[bot]` — its API `commit_id` names the
 //     reviewed head authoritatively (review bodies usually repeat it in a
 //     `**Reviewed commit:**` line, but the inline-findings shape can omit it, so the
-//     body is never consulted for reviews), or
+//     verdict head never comes from a review body; the body's one job is the
+//     error-signature disqualifier in the review loop below), or
 //   - an issue comment by that account ("Didn't find any major issues" — the clean shape
 //     posts no review object), whose body carries `**Reviewed commit:** \`<sha>\`` at the
 //     start of a line.
