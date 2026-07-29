@@ -120,7 +120,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // COMPACT-gated (not pointer-gated — decision 1), so it is hidden here even under a
     // fine pointer.
     await expect(page.locator('.wy-wordmark')).toBeHidden();
-    // Both Cards' hotkey badges (M2-S3: card-hotkey-hidden ×2).
+    // Both Cards' hotkey badges (M2-S3: card-hotkey-hidden ×2) — count pinned first, so a
+    // renamed/removed badge class cannot pass this loop vacuously (QC round 1).
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(2);
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeHidden();
 
@@ -397,6 +399,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     expect(stage.y).toBeGreaterThanOrEqual(status.y + status.height - 1);
 
     await expect(page.locator('.wy-wordmark')).toBeVisible();
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(2); // vacuous-pass guard (QC round 1)
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeVisible();
 
@@ -462,6 +465,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const status = (await regionRect(page, 'status')) as Rect;
     expect(status.height).toBeGreaterThanOrEqual(SHORT_DESKTOP.height * 0.9);
     // The badge is Compact-gated, NOT pointer-gated: a fine pointer does not bring it back.
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(2); // vacuous-pass guard (QC round 1)
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeHidden();
     await expect(page.locator('.wy-wordmark')).toBeHidden();

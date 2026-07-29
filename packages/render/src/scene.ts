@@ -274,6 +274,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       slowed: boolean;
     }[],
     reducedMotion: boolean,
+    renderTime: number,
   ): void => {
     for (const c of interpolated) {
       const p = projection.fpToPixel(c.x, c.y);
@@ -293,10 +294,11 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       // health pip: length AND colour encode HP (dual cue) — warning tint only when low.
       // hpFrac is already clamped to [0,1] by deriveViewModel (CreepVM invariant).
       g.fillRect(op.x - r, op.y - r - 4, r * 2 * op.hpFrac, 3);
-      // Slowed telegraph (M2-S3): a shape cue (ring) ALWAYS accompanies a live slow; the
-      // motion cue (pulse) yields to reduced motion (WCAG 2.3.3 / GAG §2).
-      for (const tel of slowTelegraphPaintOps(c, r, reducedMotion, pal.slowed)) {
-        g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.kind === 'ring' ? 0.9 : 0.4);
+      // Slowed telegraph (M2-S3): a shape cue (ring, opaque) ALWAYS accompanies a live
+      // slow; the motion cue (pulse, radius driven by render time) yields to reduced
+      // motion (WCAG 2.3.3 / GAG §2). Alphas live in the plan, not here.
+      for (const tel of slowTelegraphPaintOps(c, r, reducedMotion, pal.slowed, renderTime)) {
+        g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.alpha);
         g.strokeCircle(tel.x, tel.y, tel.r);
       }
     }
@@ -388,7 +390,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     drawBoard(gfx, overlay.colourMode);
     drawTowers(gfx, pal, curVm, overlay);
     drawTracers(gfx, pal, overlay, prevVm, curVm, alpha, interpolatedById);
-    drawCreeps(gfx, pal, interpolated, overlay.reducedMotion);
+    // The same render-time seam the tracers use drives the telegraph pulse — one clock,
+    // so the aura's motion and tracer motion can never run on different time bases.
+    drawCreeps(gfx, pal, interpolated, overlay.reducedMotion, renderTimeOf(prevVm, curVm, alpha));
     drawGhost(gfx, pal, overlay);
     drawSparks(gfx, pal, overlay);
   };

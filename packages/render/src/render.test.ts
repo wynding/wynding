@@ -474,6 +474,13 @@ describe('interpolation — by entity id', () => {
     expect(out).toEqual([{ id: 1, creepId: 'normal', x: 50, y: 20, hpFrac: 1, slowed: false }]);
   });
 
+  it('the blend path snaps NON-DEFAULT creepId/slowed from the CURRENT snapshot (QC round 1 — a rebuild that dropped or defaulted the new fields would pass the all-defaults case above)', () => {
+    const prev = vm(0, [{ id: 1, creepId: 'fast', x: 0, y: 0, hpFrac: 1, slowed: false }]);
+    const cur = vm(1, [{ id: 1, creepId: 'fast', x: 100, y: 40, hpFrac: 0.5, slowed: true }]);
+    const out = interpolateCreeps(prev, cur, 0.5);
+    expect(out).toEqual([{ id: 1, creepId: 'fast', x: 50, y: 20, hpFrac: 0.5, slowed: true }]);
+  });
+
   it('shows a just-spawned creep (only in current) at its current point, no blend', () => {
     const prev = vm(0, []);
     const cur = vm(1, [{ id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false }]);

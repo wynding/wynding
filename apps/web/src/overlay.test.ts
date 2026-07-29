@@ -764,6 +764,29 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions.map((a) => a.type)).toEqual(['closePanel']);
   });
 
+  // QC round 1: the wrong-stats regression guard PLAN step 21 named (G18's bug — a
+  // towerStats that hardcoded basic's numbers, or read towers[0] instead of
+  // towerById[towerId], would render basic's stats on a slow tower and pass every other
+  // test in the suite, since they all exercise 'basic').
+  it("the Panel shows the SLOW tower's own stats when slow is armed — never basic's", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'slow' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Slow Tower');
+    expect(text).toContain('Cost: 8');
+    expect(text).toContain('Damage: 2'); // Σ direct amounts of the slow bundle — not basic's 10
+    expect(text).not.toContain('Damage: 10');
+    expect(text).toContain('Range: 4.0 tiles');
+    expect(text).toContain('Fire rate: 0.7/s'); // cadence 30, same as basic
+  });
+
   it('the Panel shows a selected tower with Sell (live refund) and a permanent Max-level Upgrade', () => {
     const { overlay, panel, actions } = setup();
     overlay.update({
@@ -851,6 +874,25 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
+  // QC round 1: G17 requires the re-home to resolve WHICH card — a hardcoded
+  // cards[0].root.focus() would pass the basic-card test above.
+  it('a disarm-close from the SLOW card re-homes focus to the SLOW card, not the first card', () => {
+    const { overlay, shell, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'slow' }),
+      refund: 0,
+    });
+    const panelBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
+    panelBtn.focus();
+    expect(panel.root.contains(document.activeElement)).toBe(true);
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(document.activeElement).toBe(shell.cards[1]!.root);
+    expect(document.activeElement).not.toBe(shell.cards[0]!.root);
+  });
+
   it('closing the Panel from a DESELECT while a Panel control has focus re-homes focus to the board', () => {
     const { overlay, shell, panel } = setup();
     overlay.update({
@@ -915,6 +957,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(render({ kind: 'armed', towerId: 'basic' })).toBe(
       'Basic Tower armed. Place it on the board.',
     );
+    // QC round 1: the announcements must name the ACTUAL armed tower — a hardcoded
+    // t('tower.basic.name') in outcomeMessage would pass the basic-only assertions above.
+    expect(render({ kind: 'armed', towerId: 'slow' })).toBe(
+      'Slow Tower armed. Place it on the board.',
+    );
+    expect(render({ kind: 'placed', towerId: 'slow' })).toBe('Slow Tower placed.');
     expect(render({ kind: 'disarmed', towerId: 'basic' })).toBe('Placement cancelled.');
     expect(render({ kind: 'placed', towerId: 'basic' })).toBe('Basic Tower placed.');
     expect(render({ kind: 'rejected', reason: 'bounty' })).toBe('Not enough Bounty.');

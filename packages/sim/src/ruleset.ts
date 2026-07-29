@@ -133,7 +133,7 @@ export interface CompiledTower {
 
 /** Sim-owned compile-time projection of `CreepDef` — v1 field set, `kind`
  *  renamed `id`, plus the preview-facing axes the render VM joins on: `armor` and
- *  frozen `immunities` (both capability-gated to `0`/`[]` at sv6 — present on the
+ *  frozen `immunities` (both capability-gated to `0`/`[]` at sv7 — present on the
  *  compiled surface now so the preview text can read them without a schema import,
  *  ahead of the story that lets them vary). */
 export interface CompiledCreep {
@@ -555,7 +555,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   for (const t of towers) towerById[t.id] = t;
 
   // The catalog-wide STRONGEST slow (min mulFp — smaller multiplies speed down
-  // further) over every compiled tower's slow effects; `null` iff no catalog tower
+  // further) over every compiled tower's slow effects; `0` iff no catalog tower
   // carries one (the bound gate then uses `effectiveSpeedFp`'s `mulFp === 0`
   // no-slow case, matching movement's own no-active-slow case exactly).
   let strongestMulFp = 0;

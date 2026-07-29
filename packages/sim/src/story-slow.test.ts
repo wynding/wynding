@@ -11,6 +11,7 @@ import {
   forEachValidTower,
   materializeTowerMask,
   findValidTowerIndex,
+  countValidTowers,
   type SimInput,
 } from './index';
 import { runCombat, type Impact } from './combat';
@@ -414,6 +415,29 @@ describe('coerceSoa totality — the new creep/tower columns (via step()/preview
     step(s, RULESET, [{ kind: 'placeTower', anchor: { col: 5, row: 5 }, towerId: 'basic' }]);
     (s.towers as unknown as { towerId?: unknown }).towerId = undefined;
     expect(() => step(s, RULESET, [])).not.toThrow();
+  });
+
+  it('pads a short tower column to the row authority, so a later placement cannot revive a dead row (QC round 1)', () => {
+    // A restored container whose towerId column is MISSING: the old row must stay
+    // invalid (unresolvable ''), and an accepted placeTower must land ALL its column
+    // values at the same tail index — never towerId at index 0 beside id/col/row at
+    // index 1 (the zombie-revival misalignment).
+    const s = createInitialState(1, RULESET);
+    s.towers.id.push(7);
+    s.towers.col.push(5);
+    s.towers.row.push(5);
+    s.towers.spend.push(5);
+    s.towers.targetId.push(0);
+    s.towers.nextFireTick.push(0);
+    // towerId column deliberately left EMPTY (length 0 vs id length 1).
+    step(s, RULESET, [{ kind: 'placeTower', anchor: { col: 10, row: 5 }, towerId: 'basic' }]);
+    expect(s.towers.towerId).toHaveLength(s.towers.id.length); // aligned
+    expect(s.towers.towerId[0]).toBe(''); // the dead row stays inert…
+    const newRow = s.towers.id.length - 1;
+    expect(s.towers.towerId[newRow]).toBe('basic'); // …and the paid row is real,
+    expect(s.towers.col[newRow]).toBe(10); // at its own coordinates.
+    // The dead row is invisible to the canonical walk; only the new tower counts.
+    expect(countValidTowers(RULESET.board.grid, s.towers, RULESET.towerById)).toBe(1);
   });
 });
 

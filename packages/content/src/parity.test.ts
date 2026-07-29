@@ -168,7 +168,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(state.waveResolved).toEqual([true, true, true]);
     expect(state.waveCursor).toBe(3);
     // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty, and the
-    // two early-call credits (⌊500/50⌋ at tick 0, ⌊50/50⌋ at tick 550 — wave 1's
+    // two early-call credits (⌊500/50⌋ at tick 0, ⌊51/50⌋ at tick 550 (the call tick skips its own decrement, so the sampled remainder is 51) — wave 1's
     // natural launch pays nothing, its countdown having already reached 0) all
     // landed: cumulativeKillBounty is the SCORED kill-bounty channel (clear bonus
     // pays into `bounty`, the spendable economy, not the score), and the credit

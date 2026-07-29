@@ -367,6 +367,26 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   if (!Array.isArray(t.targetId)) t.targetId = [];
   if (!Array.isArray(t.nextFireTick)) t.nextFireTick = [];
   if (!Array.isArray(t.towerId)) t.towerId = [];
+  // Column ALIGNMENT to the row authority (`id`) — QC round 1: row VALIDITY stays lazy in
+  // `forEachValidTower` (a padded row's `towerId` of `''` never resolves, so it is
+  // invisible and unsellable exactly like today's forged rows), but the LENGTHS must
+  // agree before any `placeTower` push appends at each column's own tail: a restored
+  // container with a short `towerId` column would otherwise land the new row's catalog id
+  // at index 0 while its id/col/row land at index N — reviving a dead row at its old
+  // coordinates (a "zombie" wall the sim itself re-validates as live) while the paid-for
+  // row stays invalid. Deterministic pad/truncate; padded values are inert under the lazy
+  // rule. (Tower columns need no copy-on-write: `partialCloneForPreview` deep-clones the
+  // whole towers container via `structuredClone`.)
+  {
+    const rowCount = t.id.length;
+    const numericCols = [t.col, t.row, t.spend, t.targetId, t.nextFireTick];
+    for (const colArr of numericCols) {
+      while (colArr.length < rowCount) colArr.push(0);
+      if (colArr.length > rowCount) colArr.length = rowCount;
+    }
+    while (t.towerId.length < rowCount) t.towerId.push('');
+    if (t.towerId.length > rowCount) t.towerId.length = rowCount;
+  }
 
   if (!Array.isArray(state.impacts)) state.impacts = [];
 

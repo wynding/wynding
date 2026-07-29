@@ -44,7 +44,9 @@ function compositeOver(fg: number, bg: number, a: number): number {
   return (mix(fr, br) << 16) | (mix(fgc, bg2) << 8) | mix(fb, bb);
 }
 
-// The seven cues the scene draws OPAQUE against the floor (source colour, no compositing).
+// The eight cues the scene draws OPAQUE against the floor (source colour, no compositing) —
+// `slowed`'s essential ring is drawn at alpha 1 (the pulse, alpha 0.4, is the non-essential
+// motion cue), so gating it as opaque is exact, not an approximation.
 const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'entrance',
   'exit',
