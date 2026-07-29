@@ -216,7 +216,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Domain engagement:** each **attacking tower targets ground, air, or both** (a support-only
   tower attacks nothing and has no target domain); each creep is ground or
   flying. A tower can only hit creeps in a domain it targets — so some creeps are simply ignored
-  by some towers. Debuffs obey the same rule (an air-targeting slow can slow flyers). Which
+  by some towers. Status effects obey the same rule (an air-targeting slow can slow flyers). Which
   towers and creeps sit where is content/tuning; a **dedicated anti-air** tower is just the
   air-only case.
 
@@ -337,7 +337,7 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   Events sharing an `impact_tick` resolve in a **deterministic total order** (a stable scheduling
   key), and within an AoE, effects apply over creeps in a **deterministic order** (by creep id) —
   so ordering-sensitive effects (e.g. chance-based stun drawing from the sim RNG) are reproducible.
-  The exact cross-effect ordering (direct damage, debuffs, deaths, RNG draws) is a
+  The exact cross-effect ordering (direct damage, status effects, deaths, RNG draws) is a
   determinism-gated detail fixed when the combat sim is built.
 - **Pathfinding** is a flow-field + A* with a deterministic tie-break. Movement is
   8-connected; the **diagonal step cost uses a fixed-point approximation of √2** (no

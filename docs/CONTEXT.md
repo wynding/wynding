@@ -36,6 +36,20 @@ slow, stun, DoT, support, burst. A tower is a data-defined bundle of effect
 primitives, not a fixed archetype.
 _Avoid_: ability, power, spell.
 
+**Status effect**:
+An applied, timed instance of an effect primitive on a creep — a slow, stun, or
+DoT record with a duration. Slow and stun never stack: the strongest magnitude
+wins, and a weaker application neither extends nor overrides it. DoTs are
+per-source: each source's DoT coexists, and only a re-application from the same
+source refreshes it.
+_Avoid_: debuff, ailment.
+
+**Telegraph**:
+The on-board visual cue that a status effect is active on a creep, dual-encoded
+per the accessibility standard: a shape cue always (never color alone), plus a
+motion cue that yields to reduced-motion — shape is the guaranteed channel.
+_Avoid_: indicator, status icon.
+
 **Maze**:
 The walkable route left over after towers are placed. The player builds the maze
 out of towers to lengthen the creeps' path.
