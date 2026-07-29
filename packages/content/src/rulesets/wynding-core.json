@@ -12,6 +12,16 @@
       "immunities": [],
       "leakCost": 1,
       "bounty": 1
+    },
+    {
+      "id": "fast",
+      "hp": 16,
+      "speedFp": 44,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 2
     }
   ],
   "towerCatalog": [
@@ -25,6 +35,20 @@
         "travelTicks": 4
       },
       "effects": [{ "kind": "direct", "form": "single", "damage": 10 }]
+    },
+    {
+      "id": "slow",
+      "cost": 8,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 2 },
+        { "kind": "slow", "mulFp": 128, "durationTicks": 40 }
+      ]
     }
   ],
   "balance": {
@@ -64,8 +88,8 @@
         {
           "index": 2,
           "countdownTicks": 300,
-          "clearBonus": 4,
-          "entries": [{ "creepId": "normal", "count": 10, "spacingTicks": 20 }]
+          "clearBonus": 5,
+          "entries": [{ "creepId": "fast", "count": 8, "spacingTicks": 15 }]
         }
       ]
     }
