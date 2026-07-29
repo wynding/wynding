@@ -51,8 +51,14 @@ jobs:
   request:
     name: codex-review-request
     # draft == false: a draft is not waiting on review, and a review spent on it would be
-    # spent again at ready_for_review (which self-triggers Codex).
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    # spent again at ready_for_review (which self-triggers Codex). The dispatch branch
+    # enforces the aim-at-main rule (SAFETY INVARIANT): aimed anywhere else, the run is
+    # skipped instead of executing that ref's copy. Honest-path tripwire only — a modified
+    # ref's copy could drop the guard; the insider boundary is rulesets (docs).
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref_name == github.event.repository.default_branch) ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false)
     concurrency:
       group: codex-review-request-${{ inputs.pr_number || github.event.pull_request.number }}
       cancel-in-progress: true

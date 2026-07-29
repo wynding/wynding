@@ -236,7 +236,8 @@ agents) are the contract — adapt the grill / verify / review steps to your har
   workflows must be on `main` before the context is required — every subscribed event
   (`pull_request_target`, `issue_comment`) runs the copy on `main`, and `workflow_dispatch`
   needs the file on `main` to be dispatchable but executes the copy at the ref it is aimed
-  at, so aim dispatches at `main` only. `pull_request_review` is deliberately not
+  at, so aim dispatches at `main` only — both jobs skip a dispatch aimed elsewhere (an
+  honest-path tripwire; a modified ref's copy could drop it). `pull_request_review` is deliberately not
   subscribed: GitHub runs that event from the PR merge ref's copy — PR-authored YAML with
   the write token reachable (observed live on PR #71) — so a findings-shape Codex review
   refreshes the status on the next push, or via one dispatch (same lever after dismissing
