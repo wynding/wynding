@@ -24,9 +24,11 @@ name: Codex freshness
 # stays PINNED to the default branch so no path ever executes PR-head scripts. Keep the
 # `ref:` line.
 #
-# If the status POST fails for any reason (token scope, API outage), the job goes red on
-# exit 2 — loud, never a silent green — and the PREVIOUS status keeps standing until a
-# successful run replaces it. Refresh by dispatching this workflow with the PR number.
+# If the evaluation or its status POST fails, the job goes red on exit 2 — loud, never a
+# silent green — and the script best-effort-overwrites the context with an `error` status
+# first, so a failed RE-evaluation (say, after the qualifying comment was edited away)
+# cannot leave a stale green standing. Only if that overwrite also fails (API fully down)
+# does the previous status stand. Refresh by dispatching this workflow with the PR number.
 
 on:
   pull_request_target:

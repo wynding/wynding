@@ -25,9 +25,8 @@
 // discriminator: does any NEW Codex artifact — review or comment — appear after the
 // bot's trigger comment? If yes, Codex answered and the parsing here drifted — update
 // CODEX_LOGIN and RE_REVIEWED below, AND the exact-login comment filter in
-// codex-freshness.yml's job `if`, which gates that workflow's job on the old name. If no,
-// Codex
-// stopped honoring bot-authored triggers — see codex-review-request.yml.
+// codex-freshness.yml's job `if`, which gates that workflow's job on the old name.
+// If no, Codex stopped honoring bot-authored triggers — see codex-review-request.yml.
 //
 // Exit codes: 0 = fresh, 1 = stale or no verdict (actionable: trigger a review),
 // 2 = could not determine (API/config failure). Automation reacting to this script must
@@ -40,7 +39,9 @@
 // branch-protection contexts list matches statuses as well as job check-runs, and a
 // status can be (re)posted from any event, including the `issue_comment` the clean shape
 // arrives as. In that mode a stale verdict exits 0: the red status IS the report, and
-// the job stays green so the workflow only fails when the check itself could not run.
+// the job stays green so the workflow only fails when the check itself could not run —
+// after best-effort overwriting the context with `error` (the catch at the bottom), so a
+// failed re-evaluation cannot leave a previously-green status standing.
 //
 // Local use (read-only, exit code is the report; HEAD_SHA takes the full sha, a unique
 // prefix of 7-64 hex chars, or an empty value meaning "the PR's current head from the
@@ -216,5 +217,28 @@ try {
   }
   process.exit(1);
 } catch (err) {
+  // The one fail-open corner (Codex's PR #71 finding): an event that can invalidate a
+  // verdict on an UNCHANGED head — the qualifying comment edited or deleted — starts a
+  // re-evaluation whose failure would otherwise leave the previous green status standing,
+  // and the job's own red is not what branch protection requires. Best effort, before the
+  // loud exit: overwrite the context with an `error` status, so the gate cannot keep
+  // trusting a verdict this run could not confirm. Every direction of this write is safe —
+  // `error` never unblocks anything; at worst it demands one dispatch after a flake. Only
+  // if this POST fails too (API fully down) does the old status stand: the documented
+  // residual, answered by the red job plus a codex-freshness dispatch.
+  if (POSTING && /^[0-9a-f]{7,64}$/.test(String(headSha ?? ''))) {
+    try {
+      await postStatus(
+        headSha,
+        'error',
+        'could not re-evaluate — dispatch codex-freshness for this PR',
+      );
+      console.error('   (posted an error status so the previous verdict cannot stand silently)');
+    } catch {
+      console.error(
+        '   (error-status post also failed — a previous status may stand; dispatch to refresh)',
+      );
+    }
+  }
   indeterminate(err);
 }
