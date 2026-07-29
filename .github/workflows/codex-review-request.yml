@@ -44,8 +44,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  issues: write # PR conversation comments post through the issues API
+  pull-requests: read # the freshness pre-check only reads PR metadata
+  issues: write # the trigger POSTs to the REST issues API below, which this scope covers
 
 jobs:
   request:
@@ -73,7 +73,10 @@ jobs:
           case "$ec" in
             0) echo "Current head already has a Codex verdict — no trigger needed." ;;
             1)
-              gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "@codex review"
+              # The REST issues endpoint, deliberately not `gh pr comment` — that command
+              # posts via GraphQL addComment, whose scope mapping is murkier than the
+              # documented issues-write grant this call rides on.
+              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'
               echo "Requested a Codex review of the new head."
               ;;
             *)

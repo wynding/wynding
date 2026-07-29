@@ -58,9 +58,13 @@ jobs:
     name: evaluate codex freshness
     # Runs only on events that can change the answer — and, for pull_request_target
     # events, only for non-draft PRs:
-    # opens/pushes/reopens/ready-for-review, reviews or comments from a codex-ish login
-    # (a cheap substring prefilter — the exact-login check lives in the script), and
-    # manual dispatch. Codex's own review/comment events are NOT draft-filtered, so a
+    # opens/pushes/reopens/ready-for-review, reviews or comments from Codex's exact login
+    # (the same login the script trusts — on a Codex rename, update BOTH places), and
+    # manual dispatch. The login filter hard-binds for issue_comment, which always runs
+    # main's copy of this file; pull_request_review runs the PR merge ref's copy — filter,
+    # permissions and all — so for that event main's copy can only promise what the
+    # SAFETY INVARIANT above states. Codex's own review/comment events are NOT
+    # draft-filtered, so a
     # draft can still receive a status from a Codex comment. Skipping is safe: a skipped
     # job posts no status, so the last real verdict keeps standing. (Concurrency lives at
     # JOB level because workflow-level groups are definitely entered before any `if` is
@@ -71,10 +75,10 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false) ||
       (github.event_name == 'pull_request_review' &&
-       contains(github.event.review.user.login, 'codex')) ||
+       github.event.review.user.login == 'chatgpt-codex-connector[bot]') ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request != null &&
-       contains(github.event.comment.user.login, 'codex'))
+       github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
     concurrency:
       group: codex-freshness-${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: true

@@ -230,9 +230,11 @@ agents) are the contract — adapt the grill / verify / review steps to your har
 - A **GitHub remote** + branch protection on `main` (required checks + reviews).
 - `codex-freshness` in the branch-protection **required contexts** — the workflow posts the
   status either way; only the contexts list makes it block merges. Order matters: the
-  workflows must be on `main` before the context is required (these events run the workflow
-  file from `main`, not from the PR branch), and each PR already open at wiring time needs
-  one manual dispatch to seed its status.
+  workflows must be on `main` before the context is required — `pull_request_target` and
+  `issue_comment` always run the copy on `main`; `workflow_dispatch` needs the file on
+  `main` to be dispatchable but executes the copy at the ref it is aimed at; only
+  `pull_request_review` runs the PR merge ref's copy (observed live on PR #71) — and each
+  PR already open at wiring time needs one manual dispatch to seed its status.
 - The **CodeRabbit** GitHub app installed on the repo.
 - **Codex** available for review (and the grill / plan loops).
 

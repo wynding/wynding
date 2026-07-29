@@ -24,8 +24,8 @@
 // status + one @codex review comment per push". That symptom has two causes with one
 // discriminator: does any NEW Codex artifact — review or comment — appear after the
 // bot's trigger comment? If yes, Codex answered and the parsing here drifted — update
-// CODEX_LOGIN and RE_REVIEWED below, AND the contains(…, 'codex') prefilters in
-// codex-freshness.yml, which gate that workflow's job on the old name. If no, Codex
+// CODEX_LOGIN and RE_REVIEWED below, AND the exact-login filters in codex-freshness.yml's
+// job `if`, which gate that workflow's job on the old name. If no, Codex
 // stopped honoring bot-authored triggers — see codex-review-request.yml.
 //
 // Exit codes: 0 = fresh, 1 = stale or no verdict (actionable: trigger a review),

@@ -62,6 +62,13 @@ const ZERO = /^0+$/;
 const git = (...args) =>
   execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
+// execFileSync's own `.message` is "Command failed: <argv>" boilerplate — git's actual
+// reason is on the stderr captured above, so diagnoses read from there first.
+const gitFailureReason = (err) =>
+  String(err?.stderr || err?.message || err)
+    .trim()
+    .split('\n')[0] || 'unknown failure';
+
 // The evidence directory lives at the top of the working tree (each worktree has its own).
 // A gate whose own failure mode is a stack trace is worse than no gate, here and below:
 // whatever git cannot answer, say so as a QC failure with the way out.
@@ -70,7 +77,7 @@ const toplevel = (() => {
   try {
     return git('rev-parse', '--show-toplevel');
   } catch (err) {
-    toplevelError = String(err?.message ?? err).split('\n')[0];
+    toplevelError = gitFailureReason(err);
     return null;
   }
 })();
@@ -184,7 +191,10 @@ const badLines = parsedLines.filter((p) => p.badLine !== undefined);
 if (badLines.length > 0) {
   // Diagnose FIRST, even when an override will allow the push.
   console.error("❌ QC gate: the pre-push input did not fully parse as git's ref protocol —");
-  for (const { badLine } of badLines) console.error(`   - ${badLine.slice(0, 100)}`);
+  // JSON-quoted like the log line below it: a crafted line could otherwise repaint the
+  // gate's own diagnostics with \r or terminal escapes.
+  for (const { badLine } of badLines)
+    console.error(`   - ${JSON.stringify(badLine.slice(0, 100))}`);
   if (overrideValid) {
     applyOverride(
       `(unparsed input: ${badLines.length} line(s); first: ${JSON.stringify(badLines[0].badLine.slice(0, 60))})`,
@@ -224,7 +234,7 @@ for (const { localOid, remoteRef } of pushes) {
     message = git('show', '-s', '--format=%B', localOid);
   } catch (err) {
     readFailures.push(
-      `${branch}: could not read ${localOid.slice(0, 8)} — ${err.message.split('\n')[0]}`,
+      `${branch}: could not read ${localOid.slice(0, 8)} — ${gitFailureReason(err)}`,
     );
     continue;
   }

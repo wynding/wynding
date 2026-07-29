@@ -7,9 +7,11 @@
 // Built to be trusted while unattended, which mostly means being loud about its own
 // health — the contract is that this process NEVER goes quiet while alive:
 //
-//   - ONE `gh pr view` invocation per cycle (gh may paginate a PR that grows past ~100
-//     reviews or comments), interval floored at 45s — far from rate-limit territory, so
-//     the watcher cannot rate-limit itself to death.
+//   - ONE `gh pr view` invocation per cycle, interval floored at 45s — far from
+//     rate-limit territory, so the watcher cannot rate-limit itself to death. gh itself
+//     paginates large list fields under that one invocation (verified at gh 2.93: a
+//     669-comment PR arrives whole), so the snapshot is complete; a gh old enough to
+//     truncate instead of paginate would narrow detection to the first ~100 items.
 //   - The call carries a hard timeout of one interval, so a hung network path surfaces
 //     as a POLL_ERROR event instead of freezing the loop alive and mute.
 //   - Every poll failure prints a POLL_ERROR event and the loop continues — except when
@@ -32,23 +34,26 @@
 //   --once       one poll: print the snapshot and exit (0 ok, 1 poll failed)
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { inspect } from 'node:util';
 
 const MIN_INTERVAL = 45;
 const NEVER_CONNECTED_LIMIT = 3;
 
-// The --jq projection is applied client-side by gh (review/comment bodies still cross the
-// wire inside the atomic `reviews`/`comments` fields); it trims what is printed AND what
-// is diffed. Comment-edit detection compares the 100-char excerpt plus the full length,
-// so only an edit that preserves both escapes notice. A running CheckRun carries
+// The --jq projection is applied client-side by gh (full items still cross the wire
+// inside the atomic `reviews`/`comments` fields). Review bodies are excerpted here —
+// reviews are only ever announced, never edit-tracked — but comment bodies arrive WHOLE
+// so poll() can fingerprint the full text (an edit past a display excerpt must still
+// flip COMMENT_EDITED), then keeps only excerpt + hash. A running CheckRun carries
 // `conclusion: ""`, which jq's // would keep — hence the explicit empty-string fallback.
 const FIELDS = 'state,headRefOid,reviewDecision,statusCheckRollup,reviews,comments';
 const JQ = `{
   state, headRefOid, reviewDecision,
   checks: [(.statusCheckRollup // [])[] | {type: (.__typename // ""), name: (.name // .context), state: ((.conclusion // "" | if . == "" then null else . end) // .state // .status)}],
   reviews: [(.reviews // [])[] | {id: (.id // ""), author: .author.login, state, at: .submittedAt, body: (.body // "")[0:100]}],
-  comments: [(.comments // [])[] | {id, author: .author.login, at: .createdAt, body: (.body // "")[0:100], len: ((.body // "") | length)}]
+  comments: [(.comments // [])[] | {id, author: .author.login, at: .createdAt, body: (.body // "")}]
 }`;
+const fingerprint = (s) => createHash('sha256').update(s).digest('hex');
 
 // Usage errors print to STDOUT: the event stream is the channel this file's reader
 // watches (FATAL goes there for the same reason), and a watcher that dies mute to its
@@ -156,6 +161,12 @@ function poll() {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: interval * 1000, // a hung call becomes a POLL_ERROR, never a mute freeze
     killSignal: 'SIGKILL',
+    // Full comment bodies cross this boundary for fingerprinting, and gh paginates the
+    // list fields, so the payload is unbounded — a marathon PR can ship tens of MB, and
+    // maxBuffer counts BYTES (JSON escaping and UTF-8 width land here). Node's 1 MiB
+    // default would turn such a PR into a permanent POLL_ERROR loop; at 32 MiB an
+    // overflow still surfaces as a loud per-cycle POLL_ERROR (ENOBUFS), never silence.
+    maxBuffer: 32 * 1024 * 1024,
   });
   const snap = JSON.parse(raw);
   // Anything that is not a full snapshot must be an ERROR, not a skipped iteration or a
@@ -171,6 +182,18 @@ function poll() {
   if (!shaped) {
     throw new Error(`gh returned ${JSON.stringify(raw.slice(0, 60))} instead of a snapshot`);
   }
+  // Reduce each comment to what the differ needs — excerpt for display, hash for change
+  // detection — so full bodies never outlive the poll that fetched them.
+  snap.comments = snap.comments.map((c) => {
+    const body = String(c?.body ?? '');
+    return {
+      id: c?.id,
+      author: c?.author,
+      at: c?.at,
+      excerpt: body.slice(0, 100),
+      fp: fingerprint(body),
+    };
+  });
   return snap;
 }
 
@@ -239,13 +262,13 @@ function diff(prev, snap) {
       say('REVIEW', `${r.author} ${r.state} at ${r.at}: ${oneLine(r.body)}`);
     }
   }
-  const prevComments = new Map(prev.comments.map((c) => [c.id, `${c.len}:${c.body}`]));
+  const prevComments = new Map(prev.comments.map((c) => [c.id, c.fp]));
   const snapCommentIds = new Set(snap.comments.map((c) => c.id));
   for (const c of snap.comments) {
     if (!prevComments.has(c.id)) {
-      say('COMMENT', `${c.author} at ${c.at}: ${oneLine(c.body)}`);
-    } else if (prevComments.get(c.id) !== `${c.len}:${c.body}`) {
-      say('COMMENT_EDITED', `${c.author}: ${oneLine(c.body)}`);
+      say('COMMENT', `${c.author} at ${c.at}: ${oneLine(c.excerpt)}`);
+    } else if (prevComments.get(c.id) !== c.fp) {
+      say('COMMENT_EDITED', `${c.author}: ${oneLine(c.excerpt)}`);
     }
   }
   for (const c of prev.comments) {
