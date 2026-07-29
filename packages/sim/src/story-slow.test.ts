@@ -17,7 +17,13 @@ import { runCombat, type Impact } from './combat';
 import { emptyTowers } from './tower';
 import { compileRuleset, RulesetError } from './ruleset';
 import { effectiveSpeedFp } from './ruleset-shared';
-import { testBundle, testRuleset, pushCreep, TEST_SLOW_TOWER, TEST_FAST_CREEP } from './test-support';
+import {
+  testBundle,
+  testRuleset,
+  pushCreep,
+  TEST_SLOW_TOWER,
+  TEST_FAST_CREEP,
+} from './test-support';
 
 const LANE = {
   widthTiles: 14,
@@ -424,7 +430,11 @@ describe('the slow-aware bound gate (Codex R2-4/G10)', () => {
   } as const;
 
   it('compiles without a slow tower in the catalog, rejects once one is added', () => {
-    const withoutSlow = testBundle(BOUND_BOARD, { waveCount: 1, waveSpacing: 1, countdownTicks: 1 });
+    const withoutSlow = testBundle(BOUND_BOARD, {
+      waveCount: 1,
+      waveSpacing: 1,
+      countdownTicks: 1,
+    });
     expect(() => compileRuleset(withoutSlow, 'test')).not.toThrow();
 
     const withSlow = testBundle(BOUND_BOARD, {
@@ -450,7 +460,7 @@ describe('fast creep catalog entry', () => {
     expect(ruleset.creepById['normal']!.speedFp).toBe(26); // unaffected
   });
 
-  it('a spawned fast creep resolves its own catalog stats (hp/speed) at spawn, not the normal creep\'s', () => {
+  it("a spawned fast creep resolves its own catalog stats (hp/speed) at spawn, not the normal creep's", () => {
     const ruleset = testRuleset(LANE, {
       extraCreeps: [TEST_FAST_CREEP],
       waves: [{ waveCount: 1, waveSpacing: 1, creepId: 'fast' }],

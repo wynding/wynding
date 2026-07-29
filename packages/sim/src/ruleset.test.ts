@@ -176,7 +176,9 @@ describe('compileRuleset — tower catalog domains', () => {
     // 'slow' is ALLOWED at sv7 (M2-S3) — 'stun' still isn't (still S6's job).
     rejects(
       (b) =>
-        (b.towerCatalog[0]!.effects = [{ kind: 'stun', chanceNum: 64, durationTicks: 30 } as never]),
+        (b.towerCatalog[0]!.effects = [
+          { kind: 'stun', chanceNum: 64, durationTicks: 30 } as never,
+        ]),
     );
     rejects(
       (b) =>

@@ -30,7 +30,8 @@ const TOWER_BY_ID = RULESET.towerById;
 const RANGE = TEST_TOWER.rangeFp;
 const TRAVEL_TICKS = TEST_TOWER.travelTicks;
 const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
-const DIRECT_DAMAGE = (TEST_TOWER.effects.find((e) => e.kind === 'direct') as { amount: number }).amount;
+const DIRECT_DAMAGE = (TEST_TOWER.effects.find((e) => e.kind === 'direct') as { amount: number })
+  .amount;
 // Bounty follows the compiled creep catalog for the same reason the tower stats do
 // above — a testBundle bounty edit must move these economy assertions with it.
 const KILL_BOUNTY = RULESET.creepById[RULESET.waves[0]!.spawns[0]!.creepId]!.bounty;

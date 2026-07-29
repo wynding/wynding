@@ -450,7 +450,8 @@ export function runCombat(
       killedByImpact.add(idx);
     } else {
       for (const effect of imp.effects) {
-        if (effect.kind === 'slow') applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
+        if (effect.kind === 'slow')
+          applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
       }
     }
   }
@@ -484,7 +485,9 @@ export function runCombat(
     survivors.headRow.push(creeps.headRow[i] as number);
     survivors.progress.push(creeps.progress[i] as number);
     survivors.wave.push(Number.isSafeInteger(creeps.wave[i]) ? (creeps.wave[i] as number) : 0);
-    survivors.creepId.push(typeof creeps.creepId[i] === 'string' ? (creeps.creepId[i] as string) : '');
+    survivors.creepId.push(
+      typeof creeps.creepId[i] === 'string' ? (creeps.creepId[i] as string) : '',
+    );
     survivors.slowMulFp.push(safeSlowColumn(creeps.slowMulFp[i]));
     survivors.slowUntilTick.push(safeSlowColumn(creeps.slowUntilTick[i]));
   }

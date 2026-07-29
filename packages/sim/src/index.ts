@@ -342,7 +342,8 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       const rawMul = cc.slowMulFp[i];
       const rawUntil = cc.slowUntilTick[i];
       const mulValid =
-        rawMul === 0 || (Number.isSafeInteger(rawMul) && (rawMul as number) >= 1 && (rawMul as number) <= 255);
+        rawMul === 0 ||
+        (Number.isSafeInteger(rawMul) && (rawMul as number) >= 1 && (rawMul as number) <= 255);
       const untilValid = Number.isSafeInteger(rawUntil) && (rawUntil as number) >= 0;
       const pairShapeOk = mulValid && untilValid && (rawMul === 0) === (rawUntil === 0);
       const expired = pairShapeOk && rawMul !== 0 && (rawUntil as number) < repairTick;

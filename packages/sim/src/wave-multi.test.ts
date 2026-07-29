@@ -189,7 +189,10 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
     let witnessed = false;
     for (let t1 = 1; t1 <= 200 && !witnessed; t1++) {
       let s = createInitialState(1, ruleset);
-      s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' }, ...callEarly]);
+      s = step(s, ruleset, [
+        { kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' },
+        ...callEarly,
+      ]);
       let leakTick = -1;
       let killTick = -1;
       for (let t = 1; t <= 600 && s.phase === 'running'; t++) {
@@ -224,7 +227,10 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
     });
     const ruleset = compileRuleset(bundle, 'test');
     let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' }, ...callEarly]);
+    s = step(s, ruleset, [
+      { kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' },
+      ...callEarly,
+    ]);
     for (let t = 0; t < 200 && s.phase === 'running'; t++) s = step(s, ruleset, []);
     expect(s.phase).toBe('won');
     expect(s.waveResolved[0]).toBe(true);
@@ -258,7 +264,10 @@ describe('deriveScore — outcome-dependent branches + credit forfeiture on a lo
       earlyCallScoreDivisor: 10,
     });
     let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' }, ...callEarly]);
+    s = step(s, ruleset, [
+      { kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' },
+      ...callEarly,
+    ]);
     for (let t = 0; t < 500 && s.phase === 'running'; t++) s = step(s, ruleset, []);
     expect(s.phase).toBe('won');
     const expected =
