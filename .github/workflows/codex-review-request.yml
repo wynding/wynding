@@ -68,6 +68,12 @@ jobs:
       - name: Comment "@codex review" if the current head lacks a Codex verdict
         run: |
           set -euo pipefail
+          # A missing script also makes node exit 1 — the same code as a confirmed-stale
+          # verdict — so close that overload before it can buy a spurious trigger comment.
+          [ -f scripts/check-codex-freshness.mjs ] || {
+            echo "check-codex-freshness.mjs is missing from the default branch" >&2
+            exit 2
+          }
           ec=0
           node scripts/check-codex-freshness.mjs || ec=$?
           case "$ec" in

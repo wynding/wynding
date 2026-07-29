@@ -175,7 +175,10 @@ reviewed is the API-recorded one) or its "no major issues" comment (which prints
 proves "Codex reviewed this exact commit", no more: "Codex clean" additionally means that
 review raised nothing left unaddressed (fixed, or declined in a resolved thread). Neither claim
 is ever an interpreted silence — reviewer silence is not approval. If Codex reports an
-infrastructure error, re-trigger with a fresh `@codex review`.
+infrastructure error, re-trigger with a fresh `@codex review`. One refresh asymmetry, by
+design: a clean-verdict _comment_ flips the status by itself, but a findings-shape _review_
+is picked up on the next push — or, when no push is coming (findings all declined, or a
+review dismissed), by one dispatch of the `codex-freshness` workflow with the PR number.
 
 Watch the loop with the repo watcher — don't hand-roll a poller:
 
@@ -230,11 +233,18 @@ agents) are the contract — adapt the grill / verify / review steps to your har
 - A **GitHub remote** + branch protection on `main` (required checks + reviews).
 - `codex-freshness` in the branch-protection **required contexts** — the workflow posts the
   status either way; only the contexts list makes it block merges. Order matters: the
-  workflows must be on `main` before the context is required — `pull_request_target` and
-  `issue_comment` always run the copy on `main`; `workflow_dispatch` needs the file on
-  `main` to be dispatchable but executes the copy at the ref it is aimed at; only
-  `pull_request_review` runs the PR merge ref's copy (observed live on PR #71) — and each
-  PR already open at wiring time needs one manual dispatch to seed its status.
+  workflows must be on `main` before the context is required — every subscribed event
+  (`pull_request_target`, `issue_comment`) runs the copy on `main`, and `workflow_dispatch`
+  needs the file on `main` to be dispatchable but executes the copy at the ref it is aimed
+  at, so aim dispatches at `main` only. `pull_request_review` is deliberately not
+  subscribed: GitHub runs that event from the PR merge ref's copy — PR-authored YAML with
+  the write token reachable (observed live on PR #71) — so a findings-shape Codex review
+  refreshes the status on the next push, or via one dispatch (same lever after dismissing
+  a review). Each PR already open at wiring time needs one manual dispatch to seed its
+  status. Boundary, stated plainly: commit statuses guard honest-process drift, not a
+  malicious write-access actor — anyone who can push a branch can forge any status from a
+  push-triggered workflow of their own. Insider-proof enforcement is ruleset territory
+  (required workflows), an owner decision.
 - The **CodeRabbit** GitHub app installed on the repo.
 - **Codex** available for review (and the grill / plan loops).
 

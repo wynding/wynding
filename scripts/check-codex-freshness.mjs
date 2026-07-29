@@ -24,8 +24,9 @@
 // status + one @codex review comment per push". That symptom has two causes with one
 // discriminator: does any NEW Codex artifact — review or comment — appear after the
 // bot's trigger comment? If yes, Codex answered and the parsing here drifted — update
-// CODEX_LOGIN and RE_REVIEWED below, AND the exact-login filters in codex-freshness.yml's
-// job `if`, which gate that workflow's job on the old name. If no, Codex
+// CODEX_LOGIN and RE_REVIEWED below, AND the exact-login comment filter in
+// codex-freshness.yml's job `if`, which gates that workflow's job on the old name. If no,
+// Codex
 // stopped honoring bot-authored triggers — see codex-review-request.yml.
 //
 // Exit codes: 0 = fresh, 1 = stale or no verdict (actionable: trigger a review),
@@ -137,7 +138,7 @@ if (!prNumber && process.env.GITHUB_EVENT_PATH) {
   try {
     const { readFileSync } = await import('node:fs');
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-    // `pull_request` / `pull_request_review` payloads carry .pull_request; the clean shape
+    // `pull_request`-family payloads carry .pull_request; the clean shape
     // arrives as `issue_comment`, which carries .issue instead.
     prNumber = event.pull_request?.number ?? event.issue?.number;
   } catch (err) {
@@ -202,7 +203,9 @@ try {
       ? `   Latest verdict is a ${latest.kind} for ${short(latest.sha)} at ${latest.when ?? 'unknown time'}.`
       : `   No Codex verdict found on PR #${prNumber} at all.`,
   );
-  console.error('   Comment "@codex review" on the PR; the status refreshes when Codex answers.');
+  console.error('   Comment "@codex review". A clean verdict (comment) refreshes this status');
+  console.error('   by itself; a findings review lands on the next push — or run one');
+  console.error('   codex-freshness dispatch with this PR number.');
   if (POSTING) {
     await postStatus(
       headSha,

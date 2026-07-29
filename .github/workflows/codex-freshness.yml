@@ -17,10 +17,12 @@ name: Codex freshness
 # polarity (the job stays green on a stale verdict; the status goes red).
 #
 # SAFETY INVARIANT: every trigger here runs with this workflow's write-capable token
-# (statuses: write); `pull_request_review` defaults GITHUB_REF to the PR merge ref and
-# `workflow_dispatch` to whatever ref it was aimed at — both can be PR-authored code — so
-# the checkout below is PINNED to the repository's default branch. This workflow must
-# never check out or execute PR-head code. Keep the `ref:` line.
+# (statuses: write). Every subscribed event runs this file's copy on the default branch —
+# pull_request_review is deliberately not among them (see `on:` below) — but
+# `workflow_dispatch` executes the copy at whatever ref it is aimed at, which can be
+# PR-authored code. So: aim dispatches at the default branch only, and the checkout below
+# stays PINNED to the default branch so no path ever executes PR-head scripts. Keep the
+# `ref:` line.
 #
 # If the status POST fails for any reason (token scope, API outage), the job goes red on
 # exit 2 — loud, never a silent green — and the PREVIOUS status keeps standing until a
@@ -29,18 +31,21 @@ name: Codex freshness
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # Codex's findings shape arrives as a PR review — its verdict head is the API-recorded
-  # commit_id, immutable once submitted. The body is never the verdict head, but the known
-  # infrastructure-error signature in one disqualifies it (the script's review loop), so a
-  # body edit CAN change the answer — `edited` re-evaluates alongside submission and
-  # dismissal …
-  pull_request_review:
-    types: [submitted, edited, dismissed]
-  # … and its clean shape ("Didn't find any major issues") as an issue comment — which
-  # can be edited into a verdict later, or deleted out of one, so those re-evaluate too.
+  # Codex's clean shape ("Didn't find any major issues") arrives as an issue comment —
+  # which can be edited into a verdict later, or deleted out of one, so those re-evaluate.
   issue_comment:
     types: [created, edited, deleted]
-  # Manual lever: re-evaluate any PR (e.g. after re-running a Codex review by hand).
+  # pull_request_review is DELIBERATELY absent. GitHub runs that event from the PR merge
+  # ref's copy of this file — PR-authored YAML — and this workflow's write-capable token
+  # must never be reachable from definitions a PR controls (the checkout pin guards code,
+  # not the YAML itself, which is parsed before any step runs; observed live on PR #71: a
+  # Codex review ran the branch's copy with statuses: write available). The cost: a
+  # findings-shape Codex review — a PR review whose verdict head is the API-recorded
+  # commit_id — does not refresh the status in real time. Findings mean a fix push is
+  # coming, and `synchronize` re-evaluates then; the no-changes-needed case, and a review
+  # dismissal or a verdict edited away on an unchanged head, take one manual dispatch.
+  # Manual lever: re-evaluate any PR (aim it at the default branch only — a dispatch
+  # executes the YAML at the ref it targets).
   workflow_dispatch:
     inputs:
       pr_number:
@@ -58,13 +63,10 @@ jobs:
     name: evaluate codex freshness
     # Runs only on events that can change the answer — and, for pull_request_target
     # events, only for non-draft PRs:
-    # opens/pushes/reopens/ready-for-review, reviews or comments from Codex's exact login
-    # (the same login the script trusts — on a Codex rename, update BOTH places), and
-    # manual dispatch. The login filter hard-binds for issue_comment, which always runs
-    # main's copy of this file; pull_request_review runs the PR merge ref's copy — filter,
-    # permissions and all — so for that event main's copy can only promise what the
-    # SAFETY INVARIANT above states. Codex's own review/comment events are NOT
-    # draft-filtered, so a
+    # opens/pushes/reopens/ready-for-review, comments from Codex's exact login (the same
+    # login the script trusts — on a Codex rename, update BOTH places; the filter binds,
+    # because issue_comment always runs main's copy of this file), and manual dispatch.
+    # Codex's own comment events are NOT draft-filtered, so a
     # draft can still receive a status from a Codex comment. Skipping is safe: a skipped
     # job posts no status, so the last real verdict keeps standing. (Concurrency lives at
     # JOB level because workflow-level groups are definitely entered before any `if` is
@@ -74,8 +76,6 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false) ||
-      (github.event_name == 'pull_request_review' &&
-       github.event.review.user.login == 'chatgpt-codex-connector[bot]') ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request != null &&
        github.event.comment.user.login == 'chatgpt-codex-connector[bot]')
