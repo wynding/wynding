@@ -1,30 +1,42 @@
-// combat.ts — Story 4 combat: scheduled-impact fire, sticky "first" targeting,
-// per-kill bounty. Pure, deterministic, integer-only.
+// combat.ts — Story 4 combat + Story 3's (M2) status-effect framework: scheduled-
+// impact fire, sticky "first" targeting, per-kill bounty, and per-impact direct/
+// slow resolution. Pure, deterministic, integer-only.
 //
 // A tower ACQUIRES the in-range creep nearest the exit (min route-distance, ties to
 // the lower id) and holds it while it stays present, alive, and in range. Each fire
-// SNAPSHOTS its effects and schedules an IMPACT at `tick + TRAVEL_TICKS`; the impact
-// resolves later, in queue order, applying direct damage to the still-live target or
-// — if it died or leaked in flight — being consumed as a WASTED shot. A kill credits
-// `KILL_BOUNTY`. Everything reads the POST-MOVE world, and impacts resolve BEFORE
-// firing so a kill can free a tower to re-acquire and fire the same tick.
+// SNAPSHOTS its catalog effects (fresh plain objects — impacts serialize into the
+// world-hash, so a shared reference across fires would let one impact's runtime
+// state bleed into another's) and schedules an IMPACT at `tick + travelTicks`; the
+// impact resolves later, in queue order, against the still-live target or — if it
+// died or leaked in flight — is consumed as a WASTED shot. Everything reads the
+// POST-MOVE world, and impacts resolve BEFORE firing so a kill can free a tower to
+// re-acquire and fire the same tick.
 //
-// Effects go through a minimal `applyEffect` dispatch carrying `{kind:'direct',
-// amount}`. This is a SHAPE for future primitives (a seam), not the full M2 stacking
-// model — DoT's refresh-don't-stack needs a source/effect identity M2 will add then.
+// STATUS-EFFECT ORDER (M2-S3, the pinned combat order — G7/Codex R1-11): per
+// impact, over its single affected creep, first pass applies EVERY `direct` effect
+// in AUTHORED relative order, then a death check, then — only if the creep
+// survived — a second pass applies every `slow` effect in authored relative order
+// via the strongest-wins/refresh-at-equal stacking rule (a lethal hit applies no
+// statuses). An EXPIRY SWEEP closes the combat phase after firing: every creep
+// whose `slowUntilTick` has reached this tick resets to `(0, 0)` — durations end
+// INCLUSIVELY (active through the tick it was applied for `D` more, gone from the
+// very next tick's movement). This shape is built so stun (S6) and DoT (S5) slot
+// in without reordering: direct-then-status-with-a-death-check-between is the
+// GENERAL rule, not a slow-specific one.
 //
 // TOTALITY: every restored container is validated/canonicalized like the SoA state.
 // A malformed impact is dropped; the queue is capped at `MAX_IN_FLIGHT_IMPACTS`; new
 // counters are safe-integer-guarded with a deterministic no-op on overflow. The cap
 // is a forged-state / DoS backstop, NOT a genuine-play limit: each valid tower holds
-// ≤1 impact in flight (`FIRE_INTERVAL 30 > TRAVEL_TICKS 4`) and placement enforces
-// `MAX_TOWERS`, so in-flight ≈ live towers, with a bounded slack — a tower sold within
-// the last `TRAVEL_TICKS` still has its impact resident until it resolves. On any
-// budget-conforming board that slack stays far under the `MAX_TOWERS` (1000) cap vs
-// the ~143 physical tower capacity, so the cap never bites genuine play; a caller that
-// drives the queue to the cap by abusive sell/rebuild churn is exactly the forged/DoS
-// case the backstop exists for, where a queue-full fire is a deterministic no-op that
-// retries next tick (total and reproducible for every `step()` caller).
+// ≤1 impact in flight (`travelTicks < cadenceTicks`, the schema's own rule) and
+// placement enforces `MAX_TOWERS`, so in-flight ≈ live towers, with a bounded slack —
+// a tower sold within the last `travelTicks` still has its impact resident until it
+// resolves. On any budget-conforming board that slack stays far under the
+// `MAX_TOWERS` (1000) cap vs the physical tower capacity, so the cap never bites
+// genuine play; a caller that drives the queue to the cap by abusive sell/rebuild
+// churn is exactly the forged/DoS case the backstop exists for, where a queue-full
+// fire is a deterministic no-op that retries next tick (total and reproducible for
+// every `step()` caller).
 
 import { FP_ONE } from '@wynding/engine';
 import { ORTHO_COST, DIAG_COST, type Grid } from './board';
@@ -32,22 +44,29 @@ import type { DistanceField } from './pathfinding';
 import { distAt } from './field-access';
 import { deriveValidCreepPosition, cellOf, type CreepGeometry } from './movement';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
-import type { CompiledTower } from './ruleset';
+import type { CompiledEffect, CompiledTower } from './ruleset';
 
-// Combat tuning (range, per-hit damage, fire cadence, projectile travel, kill
-// bounty) is NO LONGER a hardcoded constant here — Story 5 migrated it into the
-// ruleset bundle (ADR 0007). Tower stats arrive as the `tower: CompiledTower` param
-// of `runCombat` — the sim-owned compiled projection (v2's raw `TowerDef` carries a
-// discriminated `effects` array instead of a flat `damage`; `compileRuleset`
-// resolves that down to the single value this module reads); kill bounty is a
-// per-creep SoA column credited from the killed creep's own value (correct for
-// future mixed-kind waves).
+// Combat tuning (range, per-hit damage, fire cadence, projectile travel) is NO
+// LONGER a hardcoded constant here — Story 5 migrated it into the ruleset bundle
+// (ADR 0007); M2-S3 migrates the whole EFFECT LIST (direct + slow) the same way.
+// Tower stats arrive as the `towerById` param of `runCombat` — the sim-owned
+// compiled catalog lookup (v2's raw `TowerDef` carries a discriminated `effects`
+// array; `compileRuleset` resolves it into `CompiledEffect[]` per tower, in
+// authored order); kill bounty is a per-creep SoA column credited from the killed
+// creep's own value (correct for mixed-kind waves).
 
 /** Forged-state / DoS backstop on the resident impact queue (never bites real play). */
 export const MAX_IN_FLIGHT_IMPACTS = MAX_TOWERS;
 
-/** One effect primitive an impact applies. M1 emits exactly `direct`. */
-export type EffectPrimitive = { readonly kind: 'direct'; readonly amount: number };
+/** Hard cap on effects per impact — mirrors the schema's own per-tower effects
+ *  ceiling (8), since a snapshot carries the whole tower bundle. */
+const MAX_IMPACT_EFFECTS = 8;
+
+/** One effect primitive an impact applies, snapshotted fresh per fire from the
+ *  tower's `CompiledEffect[]` (M2-S3 generalizes M1's `direct`-only shape). */
+export type EffectPrimitive =
+  | { readonly kind: 'direct'; readonly amount: number }
+  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number };
 
 /** A scheduled impact: resolves at `impactTick`, hitting the creep `targetId`. */
 export interface Impact {
@@ -86,7 +105,14 @@ export interface StepEvents {
 /** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it).
  *  `wave` (M2-S2) — the owning wave index — carries through every rebuild here like
  *  any other column: dropping it on a combat-phase compaction would erase wave
- *  identity the instant a wave overlaps with combat, falsely settling waves. */
+ *  identity the instant a wave overlaps with combat, falsely settling waves.
+ *  `creepId`/`slowMulFp`/`slowUntilTick` (M2-S3) are appended AFTER `wave` (hash-
+ *  load-bearing position, mirrored in `index.ts`'s `CreepArrays`/
+ *  `ReadonlyCreepArrays`): `creepId` is the catalog id (named for the open-catalog-
+ *  id language, matching `ScheduledSpawn.creepId`); `slowMulFp`/`slowUntilTick` are
+ *  the per-creep slow status pair — `slowMulFp === 0` means no active slow (the
+ *  full model, G6: strongest-wins non-stacking means at most one live slow per
+ *  creep, so a column pair is exactly right, not a shortcut). */
 export interface CombatCreeps {
   id: number[];
   hp: number[];
@@ -98,9 +124,12 @@ export interface CombatCreeps {
   headRow: number[];
   progress: number[];
   wave: number[];
+  creepId: string[]; // catalog id, resolved at spawn
+  slowMulFp: number[]; // 0 = no active slow
+  slowUntilTick: number[]; // 0 = no active slow (paired with slowMulFp)
 }
 
-/** The empty 10-column creep SoA — the single factory, reused by the sim barrel. */
+/** The empty 13-column creep SoA — the single factory, reused by the sim barrel. */
 export const emptyCreeps = (): CombatCreeps => ({
   id: [],
   hp: [],
@@ -112,12 +141,47 @@ export const emptyCreeps = (): CombatCreeps => ({
   headRow: [],
   progress: [],
   wave: [],
+  creepId: [],
+  slowMulFp: [],
+  slowUntilTick: [],
 });
 
+/** True iff `e` is a valid `EffectPrimitive`: `direct` — a positive safe-integer
+ *  `amount`; `slow` — `mulFp` 1..255 and `durationTicks` a positive safe integer
+ *  ≤ 1,000,000 (the schema's `GENERIC_MAX`). Any other shape is invalid. */
+function validEffectPrimitive(e: unknown): e is EffectPrimitive {
+  if (e === null || typeof e !== 'object') return false;
+  const rec = e as { kind?: unknown; amount?: unknown; mulFp?: unknown; durationTicks?: unknown };
+  if (rec.kind === 'direct') {
+    return Number.isSafeInteger(rec.amount) && (rec.amount as number) > 0;
+  }
+  if (rec.kind === 'slow') {
+    return (
+      Number.isSafeInteger(rec.mulFp) &&
+      (rec.mulFp as number) >= 1 &&
+      (rec.mulFp as number) <= 255 &&
+      Number.isSafeInteger(rec.durationTicks) &&
+      (rec.durationTicks as number) > 0 &&
+      (rec.durationTicks as number) <= 1_000_000
+    );
+  }
+  return false;
+}
+
+/** Rebuild one validated effect primitive to its exact canonical shape (never a
+ *  spread — an unknown extra property on a forged effect must not leak into the
+ *  world-hash). */
+function canonicalEffectPrimitive(e: EffectPrimitive): EffectPrimitive {
+  return e.kind === 'direct'
+    ? { kind: 'direct', amount: e.amount }
+    : { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+}
+
 /**
- * True iff `imp` is M1's sole valid impact shape: safe-integer `impactTick`/
- * `targetId` and an `effects` array of length exactly 1 holding `{kind:'direct',
- * amount}` with `amount` a positive safe integer. Any other shape is dropped.
+ * True iff `imp` is a valid impact shape: safe-integer `impactTick`/`targetId` and
+ * an `effects` array of length 1..{@link MAX_IMPACT_EFFECTS} (mirrors the schema's
+ * own per-tower effects cap, since a snapshot carries the whole bundle) holding
+ * only valid {@link EffectPrimitive} entries. Any other shape is dropped.
  */
 function validImpact(imp: unknown): imp is Impact {
   if (imp === null || typeof imp !== 'object') return false;
@@ -127,31 +191,27 @@ function validImpact(imp: unknown): imp is Impact {
     effects?: unknown;
   };
   if (!Number.isSafeInteger(impactTick) || !Number.isSafeInteger(targetId)) return false;
-  if (!Array.isArray(effects) || effects.length !== 1) return false;
-  const e = effects[0] as { kind?: unknown; amount?: unknown } | null;
-  if (e === null || typeof e !== 'object') return false;
-  if (e.kind !== 'direct') return false;
-  if (!Number.isSafeInteger(e.amount) || (e.amount as number) <= 0) return false;
-  return true;
+  if (!Array.isArray(effects) || effects.length < 1 || effects.length > MAX_IMPACT_EFFECTS) {
+    return false;
+  }
+  return effects.every(validEffectPrimitive);
 }
 
 /**
  * Canonicalize the restored impact queue: keep only valid entries (re-built to the
- * exact `{impactTick, targetId, effects:[{kind,amount}]}` shape so serialization is
- * stable), in array order, capped at {@link MAX_IN_FLIGHT_IMPACTS}. Excess forged
- * entries drop in array order.
+ * exact `{impactTick, targetId, effects:[...]}` shape, each effect rebuilt per kind,
+ * so serialization is stable), in array order, capped at
+ * {@link MAX_IN_FLIGHT_IMPACTS}. Excess forged entries drop in array order.
  */
 function canonicalImpacts(impacts: readonly unknown[]): Impact[] {
   const out: Impact[] = [];
   for (const imp of impacts) {
     if (out.length >= MAX_IN_FLIGHT_IMPACTS) break;
     if (!validImpact(imp)) continue;
-    // validImpact guarantees effects.length === 1, so element 0 is present.
-    const effect = imp.effects[0] as EffectPrimitive;
     out.push({
       impactTick: imp.impactTick,
       targetId: imp.targetId,
-      effects: [{ kind: 'direct', amount: effect.amount }],
+      effects: imp.effects.map(canonicalEffectPrimitive),
     });
   }
   return out;
@@ -219,6 +279,12 @@ function isLiveHp(hp: unknown): boolean {
   return Number.isSafeInteger(hp) && (hp as number) > 0;
 }
 
+/** Coerce a stored slow-column value to a safe integer, defaulting a
+ *  missing/forged (ragged) entry to 0 — mirrors `tower.ts`'s `safeCombatColumn`. */
+function safeSlowColumn(value: number | undefined): number {
+  return Number.isSafeInteger(value) ? (value as number) : 0;
+}
+
 /** The result of a live-creep lookup: the SoA row index plus its already-derived
  *  resolution point (avoids re-deriving `deriveValidCreepPosition` at the call site). */
 interface LiveCreepLookup {
@@ -250,14 +316,39 @@ function findLiveCreep(creeps: CombatCreeps, targetId: number, grid: Grid): Live
   return null;
 }
 
-/** Apply one effect to a creep row; direct damage is branch-saturating (no underflow). */
-function applyEffect(creeps: CombatCreeps, idx: number, effect: EffectPrimitive): void {
-  if (effect.kind === 'direct') {
-    const hp = creeps.hp[idx] as number;
-    // Subtraction runs only when amount < hp, so the result is always a positive
-    // safe integer — never a raw subtraction that could pass MIN_SAFE_INTEGER.
-    creeps.hp[idx] = effect.amount >= hp ? 0 : hp - effect.amount;
+/** Apply one `direct` effect to a creep row; branch-saturating (no underflow). */
+function applyDirect(creeps: CombatCreeps, idx: number, amount: number): void {
+  const hp = creeps.hp[idx] as number;
+  // Subtraction runs only when amount < hp, so the result is always a positive
+  // safe integer — never a raw subtraction that could pass MIN_SAFE_INTEGER.
+  creeps.hp[idx] = amount >= hp ? 0 : hp - amount;
+}
+
+/**
+ * Apply one `slow` effect to a creep row under the STRONGEST-WINS, refresh-only-
+ * at-equal-or-stronger stacking rule (G6/decision, Codex R1-11's within-class
+ * authored-order proof): no active slow, or one strictly weaker than `mulFp`
+ * (smaller `mulFp` ⇒ stronger — the creep moves slower) → write the new pair
+ * (`mulFp`, `satAdd(tick, durationTicks)`); an EQUAL-strength active slow refreshes
+ * its expiry to the NEW duration (restart-the-clock — the later-authored
+ * application controls the final expiry among same-strength effects, sequential
+ * refresh, never a max); a genuinely weaker incoming slow is a no-write no-op.
+ */
+function applySlow(
+  creeps: CombatCreeps,
+  idx: number,
+  mulFp: number,
+  durationTicks: number,
+  tick: number,
+): void {
+  const active = creeps.slowMulFp[idx] as number;
+  if (active === 0 || mulFp < active) {
+    creeps.slowMulFp[idx] = mulFp;
+    creeps.slowUntilTick[idx] = satAdd(tick, durationTicks);
+  } else if (mulFp === active) {
+    creeps.slowUntilTick[idx] = satAdd(tick, durationTicks);
   }
+  // else: mulFp > active (weaker) — no write.
 }
 
 /** True iff a creep point is within `range` of a tower centre (inclusive, no sqrt). */
@@ -297,15 +388,29 @@ export function satMul(a: number, b: number): number {
   return a <= Math.floor(Number.MAX_SAFE_INTEGER / b) ? a * b : Number.MAX_SAFE_INTEGER;
 }
 
+/** Fresh per-fire snapshot of one tower's compiled effect bundle, in authored order
+ *  (impacts serialize into the world-hash — a shared reference across fires would
+ *  let one impact's runtime object identity bleed into another's). */
+function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] {
+  return effects.map((e) =>
+    e.kind === 'direct'
+      ? { kind: 'direct', amount: e.amount }
+      : { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks },
+  );
+}
+
 /**
  * Run the combat phase for one tick over the POST-MOVE world. Returns the new creep
  * SoA (dead creeps swept), the surviving impact queue, and the updated bounty;
  * mutates `towers.targetId`/`towers.nextFireTick` in place (by source row) and
- * `creeps.hp` during resolution. `tick` is the pre-increment `state.tick`.
+ * `creeps.hp`/`slowMulFp`/`slowUntilTick` during resolution. `tick` is the
+ * pre-increment `state.tick`.
  *
- * Order (PLAN §13): resolve due impacts → sweep dead + credit bounty → per-tower
- * target + fire. Impacts with `impactTick <= tick` resolve (draining forged overdue
- * entries too) in queue array-iteration order — a deterministic total order.
+ * Order (PLAN §13, extended M2-S3 with the status-effect close): resolve due
+ * impacts (direct → death check → slow, per impact) → sweep dead + credit bounty →
+ * per-tower target + fire → EXPIRY SWEEP. Impacts with `impactTick <= tick` resolve
+ * (draining forged overdue entries too) in queue array-iteration order — a
+ * deterministic total order.
  */
 export function runCombat(
   creeps: CombatCreeps,
@@ -315,15 +420,18 @@ export function runCombat(
   bounty: number,
   field: DistanceField,
   grid: Grid,
-  tower: CompiledTower,
+  towerById: Readonly<Partial<Record<string, CompiledTower>>>,
   events?: StepEvents,
 ): { creeps: CombatCreeps; impacts: Impact[]; bounty: number; killBounty: number } {
   const canonical = canonicalImpacts(impacts);
-  const range = tower.rangeFp;
 
-  // (1) RESOLVE due impacts; keep the rest. Track creeps an impact kills THIS tick
-  //     (positive hp → 0) so only those earn bounty — a forged non-positive-hp row
-  //     is swept with no bounty.
+  // (1) RESOLVE due impacts; keep the rest. Per impact, over its single affected
+  //     creep: PASS 1 applies every `direct` effect in authored order, THEN a death
+  //     check, THEN — only if the creep survived — PASS 2 applies every `slow`
+  //     effect in authored order via the stacking rule (a lethal hit applies no
+  //     statuses — G7/decision). Track creeps an impact kills THIS tick (positive
+  //     hp → 0) so only those earn bounty — a forged non-positive-hp row is swept
+  //     with no bounty.
   const kept: Impact[] = [];
   const killedByImpact = new Set<number>();
   for (const imp of canonical) {
@@ -335,13 +443,23 @@ export function runCombat(
     if (found === null) continue;
     const { index: idx, point } = found;
     events?.impactPoints.push(point); // captured BEFORE damage applies
-    for (const effect of imp.effects) applyEffect(creeps, idx, effect);
-    if ((creeps.hp[idx] as number) <= 0) killedByImpact.add(idx);
+    for (const effect of imp.effects) {
+      if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount);
+    }
+    if ((creeps.hp[idx] as number) <= 0) {
+      killedByImpact.add(idx);
+    } else {
+      for (const effect of imp.effects) {
+        if (effect.kind === 'slow') applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
+      }
+    }
   }
 
   // (2) SWEEP dead (hp ≤ 0 or non-safe) into a fresh SoA; credit only impact kills,
   //     from each killed creep's own bounty column. `killBounty` is the total kill
   //     income this tick (the sim adds it to the monotonic score accumulator).
+  //     `creepId`/`slowMulFp`/`slowUntilTick` thread through by source row like any
+  //     other column.
   let nextBounty = bounty;
   let killBounty = 0;
   const survivors = emptyCreeps();
@@ -366,6 +484,9 @@ export function runCombat(
     survivors.headRow.push(creeps.headRow[i] as number);
     survivors.progress.push(creeps.progress[i] as number);
     survivors.wave.push(Number.isSafeInteger(creeps.wave[i]) ? (creeps.wave[i] as number) : 0);
+    survivors.creepId.push(typeof creeps.creepId[i] === 'string' ? (creeps.creepId[i] as string) : '');
+    survivors.slowMulFp.push(safeSlowColumn(creeps.slowMulFp[i]));
+    survivors.slowUntilTick.push(safeSlowColumn(creeps.slowUntilTick[i]));
   }
 
   // (3) Precompute the targetable live creeps once (position-valid + reachable).
@@ -394,7 +515,13 @@ export function runCombat(
   }
 
   // (4) Per valid tower: hold-or-acquire the sticky "first" target, then fire.
-  forEachValidTower(grid, towers, tower.cost, (i, _id, col, row) => {
+  //     `towerById[towers.towerId[i]]` resolves this row's per-kind stats — the SAME
+  //     resolution `forEachValidTower` itself used to canonicalize the row, so a
+  //     valid row always resolves here too.
+  forEachValidTower(grid, towers, towerById, (i, _id, col, row) => {
+    const def = towerById[towers.towerId[i] as string];
+    if (def === undefined) return; // unreachable: forEachValidTower already proved this row valid
+    const range = def.rangeFp;
     // 2×2 footprint centre = the shared corner of its four cells (units-per-tile FP_ONE).
     const towerX = (col + 1) * FP_ONE;
     const towerY = (row + 1) * FP_ONE;
@@ -432,13 +559,13 @@ export function runCombat(
     const fireable = !Number.isSafeInteger(nft) || tick >= (nft as number);
     if (!fireable) return;
     if (kept.length >= MAX_IN_FLIGHT_IMPACTS) return; // cap full — retry next tick, no advance
-    const impactTick = tick + tower.travelTicks;
-    const nextFire = tick + tower.cadenceTicks;
+    const impactTick = tick + def.travelTicks;
+    const nextFire = tick + def.cadenceTicks;
     if (!Number.isSafeInteger(impactTick) || !Number.isSafeInteger(nextFire)) return; // overflow no-op
     kept.push({
       impactTick,
       targetId: target,
-      effects: [{ kind: 'direct', amount: tower.damage }],
+      effects: snapshotEffects(def.effects), // fresh objects per fire (Codex — hash-serialized)
     });
     events?.fired.push({
       originX: towerX,
@@ -449,6 +576,18 @@ export function runCombat(
     });
     towers.nextFireTick[i] = nextFire;
   });
+
+  // (5) EXPIRY SWEEP — closes the combat phase (M2-S3, G8): every creep whose
+  //     `slowUntilTick` has reached this tick resets to `(0, 0)`. Durations end
+  //     INCLUSIVELY (a slow applied at T for D ticks is observed through movement/
+  //     firing at T+D, then cleared here so no expired record survives into the
+  //     next tick's movement).
+  for (let i = 0; i < survivors.id.length; i++) {
+    if (survivors.slowMulFp[i] !== 0 && (survivors.slowUntilTick[i] as number) <= tick) {
+      survivors.slowMulFp[i] = 0;
+      survivors.slowUntilTick[i] = 0;
+    }
+  }
 
   return { creeps: survivors, impacts: kept, bounty: nextBounty, killBounty };
 }

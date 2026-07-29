@@ -2,9 +2,10 @@
 //
 // The v2 schema is pinned STRUCTURALLY once (formatVersion 2, fixed for all of M2) —
 // but a given sim BEHAVIOR version only implements a subset of what the shape can
-// express (e.g. `SIM_VERSION` 6 simulates only direct/single-target damage against
-// ground creeps and one tower, though now across a full multi-wave schedule). The
-// capability profile is that subset, gating kinds, cardinalities, AND values in
+// express (e.g. `SIM_VERSION` 7 simulates a real tower catalog, each tower still
+// direct/single-target plus an optional `slow` effect, against ground creeps only,
+// across a full multi-wave schedule). The capability profile is that subset,
+// gating kinds, cardinalities, AND values in
 // `compileRuleset` — so a schema-valid bundle that describes something this sim
 // build cannot yet simulate (a `slow` effect, nonzero armor, ...) is rejected
 // loudly at compile time rather than silently mis-simulated. `formatVersion` never
@@ -38,37 +39,36 @@ export interface CapabilityProfile {
   readonly maxEarlyCallScoreDivisor: number;
 }
 
-/** `SIM_VERSION` 6 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  the multi-wave engine — still one tower, a single direct/single-target effect,
- *  ground-only, no immunities/roles/armor, one uniform leak cost, but now up to
- *  64 board waves of up to 16 concurrent entries each, with a real stream offset
- *  and both economy divisors (and the per-wave clear bonus) live at full value.
+/** `SIM_VERSION` 7 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  catalog towers + the status-effect framework — a REAL tower catalog (up to 64
+ *  entries, the schema's own ceiling) each still exactly a direct/single effect
+ *  PLUS now an optional `slow` effect, ground-only, no immunities/roles/armor, one
+ *  uniform leak cost, the same 64-wave/16-entry/full-economy wave engine sv6
+ *  already simulated.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv5 profile is deleted with this bump —
- *  a live sv5 entry would misdescribe v6 tick code, and replay's strict version
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv6 profile is deleted with this bump —
+ *  a live sv6 entry would misdescribe v7 tick code, and replay's strict version
  *  equality already owns cross-version rejection, so there is nothing for a stale
  *  profile to serve.
  *
- *  sv6 CEILINGS DEFER TO THE SCHEMA (G11 as corrected in Codex R2): a capability
- *  ceiling narrows only what THIS SIM BUILD cannot correctly simulate — not a
- *  product/balance opinion (that is the ruleset schema's job). v6 simulates any
- *  magnitude the v2 schema can express on the wave/economy axes (waves, entries,
- *  offsets, clear bonus, both early-call divisors): the schema's own structural
- *  caps (64 waves, 16 entries/wave) and its `GENERIC_MAX` (1_000_000) are already
- *  the widest values `validateRulesetShape` lets through, saturating arithmetic
- *  (`satAdd`/`satMul`) makes an over-large divisor floor to 0 rather than
- *  misbehave, and the real constraint on a match's tick budget is the compile-time
- *  bound gate (`ruleset.ts`), not this profile. So these dimensions carry the
- *  schema's own ceiling verbatim rather than inventing a narrower product cap
- *  without spec authority. */
+ *  `maxTowerCatalogSize`/`maxEffectsPerBundle` WIDEN TO THE SCHEMA CAP (the
+ *  narrows-only-what-the-build-cannot-simulate principle, G11/Codex R2): sv7
+ *  compiles every catalog entry (step 3), so the catalog-cardinality ceiling is no
+ *  longer this sim build's own restriction — it defers to the schema's own widest
+ *  legal catalog (64) exactly like the wave/economy axes already do. Likewise
+ *  `maxEffectsPerBundle` widens to the schema's per-tower effects cap (8) now that
+ *  a bundle may legitimately carry both a direct and a slow effect (2 of 8) — still
+ *  narrower than 8 would be an invented product opinion this profile has no
+ *  authority to hold. `allowedEffectKinds` gains `'slow'` — the one new sim
+ *  primitive this story implements. Every other axis is untouched from sv6. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  6: {
-    maxTowerCatalogSize: 1,
+  7: {
+    maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,
     maxOffsetTicks: 1_000_000,
-    maxEffectsPerBundle: 1,
-    allowedEffectKinds: ['direct'],
+    maxEffectsPerBundle: 8,
+    allowedEffectKinds: ['direct', 'slow'],
     allowedDirectForms: ['single'],
     allowedTowerDomains: ['ground'],
     allowedCreepDomains: ['ground'],

@@ -47,9 +47,10 @@ const RULESET_POCKET = testRuleset({
   exit: { col: 8, row: 2 },
 });
 
-const place = (col: number, row: number): SimInput => ({
+const place = (col: number, row: number, towerId = 'basic'): SimInput => ({
   kind: 'placeTower',
   anchor: { col, row },
+  towerId,
 });
 const sell = (tower: number): SimInput => ({ kind: 'sellTower', tower });
 const callEarly: SimInput = { kind: 'callWaveEarly' };
@@ -66,6 +67,9 @@ function restingCreep(state: SimState, id: number, col: number, row: number, hp 
   state.creeps.headRow.push(row);
   state.creeps.progress.push(0);
   state.creeps.wave.push(0);
+  state.creeps.creepId.push('normal');
+  state.creeps.slowMulFp.push(0);
+  state.creeps.slowUntilTick.push(0);
 }
 
 /** A mid-edge creep row: at the (col,row) centre, committed toward (headCol,headRow). */
@@ -89,6 +93,9 @@ function committedCreep(
   state.creeps.headRow.push(headRow);
   state.creeps.progress.push(progress);
   state.creeps.wave.push(0);
+  state.creeps.creepId.push('normal');
+  state.creeps.slowMulFp.push(0);
+  state.creeps.slowUntilTick.push(0);
 }
 
 describe('placeTower / sellTower — accept path and economy', () => {
@@ -109,7 +116,9 @@ describe('placeTower / sellTower — accept path and economy', () => {
     step(s, RULESET_LANE, [sell(1)]);
     expect(s.towers.id).toHaveLength(0);
     expect(s.bounty).toBe(78); // 75 + 3
-    expect(materializeTowerMask(LANE_GRID, s.towers, TOWER_COST).every((b) => b === 0)).toBe(true);
+    expect(
+      materializeTowerMask(LANE_GRID, s.towers, RULESET_LANE.towerById).every((b) => b === 0),
+    ).toBe(true);
   });
 
   it('computes the refund with quotient/remainder integer arithmetic', () => {
@@ -393,13 +402,21 @@ describe('dynamic re-path (commit-to-next through step)', () => {
 
 describe('tower-state totality (canonical row rule; cold-restore consistent)', () => {
   type Corruptor = (s: SimState) => void;
-  const pushTowerRow = (s: SimState, id: number, col: number, row: number, spend: number): void => {
+  const pushTowerRow = (
+    s: SimState,
+    id: number,
+    col: number,
+    row: number,
+    spend: number,
+    towerId = 'basic',
+  ): void => {
     s.towers.id.push(id);
     s.towers.col.push(col);
     s.towers.row.push(row);
     s.towers.spend.push(spend);
     s.towers.targetId.push(0);
     s.towers.nextFireTick.push(0);
+    s.towers.towerId.push(towerId);
   };
 
   const invisibleRows: ReadonlyArray<[string, Corruptor]> = [
@@ -420,10 +437,10 @@ describe('tower-state totality (canonical row rule; cold-restore consistent)', (
     it(`skips a row with ${label}: invisible in the mask and not sellable`, () => {
       const s = createInitialState(1, RULESET_LANE);
       corrupt(s);
-      expect(materializeTowerMask(LANE_GRID, s.towers, TOWER_COST).every((b) => b === 0)).toBe(
-        true,
-      );
-      expect(findValidTowerIndex(LANE_GRID, s.towers, 7, TOWER_COST)).toBe(-1);
+      expect(
+        materializeTowerMask(LANE_GRID, s.towers, RULESET_LANE.towerById).every((b) => b === 0),
+      ).toBe(true);
+      expect(findValidTowerIndex(LANE_GRID, s.towers, 7, RULESET_LANE.towerById)).toBe(-1);
       const bountyBefore = s.bounty;
       expect(() => step(s, RULESET_LANE, [sell(7)])).not.toThrow();
       expect(s.bounty).toBe(bountyBefore);
@@ -434,7 +451,7 @@ describe('tower-state totality (canonical row rule; cold-restore consistent)', (
     const s = createInitialState(1, RULESET_LANE);
     pushTowerRow(s, 7, 2, 1, TOWER_COST);
     pushTowerRow(s, 7, 5, 3, TOWER_COST); // same id, disjoint footprint — shadowed
-    const mask = materializeTowerMask(LANE_GRID, s.towers, TOWER_COST);
+    const mask = materializeTowerMask(LANE_GRID, s.towers, RULESET_LANE.towerById);
     expect(mask[1 * 9 + 2]).toBe(1); // first row's footprint is real
     expect(mask[3 * 9 + 5]).toBe(0); // shadowed duplicate is invisible
     step(s, RULESET_LANE, [sell(7)]);
@@ -446,7 +463,7 @@ describe('tower-state totality (canonical row rule; cold-restore consistent)', (
     const s = createInitialState(1, RULESET_LANE);
     pushTowerRow(s, 7, 2, 1, TOWER_COST);
     pushTowerRow(s, 8, 3, 2, TOWER_COST); // overlaps (3,2) with row 7
-    const mask = materializeTowerMask(LANE_GRID, s.towers, TOWER_COST);
+    const mask = materializeTowerMask(LANE_GRID, s.towers, RULESET_LANE.towerById);
     expect(mask[2 * 9 + 3]).toBe(1); // row 7's cell
     expect(mask[3 * 9 + 4]).toBe(0); // row 8 contributed nothing
     const bountyBefore = s.bounty;

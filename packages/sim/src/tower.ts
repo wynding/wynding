@@ -8,12 +8,18 @@
 //
 // TOTALITY — one canonical iteration rule. Materialization, id lookup (sell), and
 // compaction all classify rows with the SAME `forEachValidTower` walk: a row is
-// valid iff all four columns are present safe integers, `spend` is exactly
-// the ruleset tower `cost` (M1 has no upgrades), the 2×2 footprint is in-bounds and
-// buildable-open, and it does not overlap an earlier valid row; on a duplicate id
-// the first valid row wins. Any invalid row is skipped — invisible in the mask and
-// not sellable — so a corrupt restored tower can never crash `step` or desync a
-// re-simulation.
+// valid iff `col`/`row` are present safe integers, `towerId` resolves in the
+// compiled catalog (`towerById`) AND `spend` is EXACTLY that catalog entry's `cost`
+// (M2-S3 generalizes M1's single-cost canonicalization to per-kind — G4: M2 has no
+// upgrades, so a genuine row's spend is always its own tower's cost), the 2×2
+// footprint is in-bounds and buildable-open, and it does not overlap an earlier
+// valid row; on a duplicate id the first valid row wins. Any invalid row is
+// skipped — invisible in the mask and not sellable — so a corrupt restored tower
+// can never crash `step` or desync a re-simulation.
+//
+// `forEachValidTower` joins the sim BARREL exports (Codex R3-2): presentation must
+// classify rows by the SAME canonical rule — a sim-invisible row must not be
+// drawn, selectable, or placement-blocking in the UI.
 
 import type { Cell } from '@wynding/types';
 import type { Grid } from './board';
@@ -23,11 +29,15 @@ import { deriveValidCreepPosition } from './movement';
 /**
  * Structure-of-arrays tower storage (mirrors `CreepArrays`). `(col,row)` is the
  * 2×2 anchor (top-left); the footprint is the anchor plus (1,0), (0,1), (1,1).
- * `spend` is the cumulative bounty invested — always the tower `cost` in M1; stored
- * now so refunds stay forward-compatible when upgrades land. `targetId` is the
- * sticky locked creep (`0` = none) and `nextFireTick` the earliest tick this tower
- * may fire (`0` = no warm-up) — the Story-4 combat columns, carried by source row
- * through every construction/compaction path so a sell never resets a survivor.
+ * `spend` is the cumulative bounty invested — always the resolved tower's `cost`
+ * (M2 has no upgrades); stored now so refunds stay forward-compatible when
+ * upgrades land. `targetId` is the sticky locked creep (`0` = none) and
+ * `nextFireTick` the earliest tick this tower may fire (`0` = no warm-up) — the
+ * Story-4 combat columns, carried by source row through every construction/
+ * compaction path so a sell never resets a survivor. `towerId` (M2-S3) is the
+ * CATALOG id this row was built as — matching `SimInput.placeTower.towerId` — NOT
+ * the entity id (`id` stays that); appended after `nextFireTick` (hash-load-bearing
+ * position).
  */
 export interface TowerArrays {
   id: number[];
@@ -36,12 +46,13 @@ export interface TowerArrays {
   spend: number[];
   targetId: number[];
   nextFireTick: number[];
+  towerId: string[];
 }
 
-/** The empty 6-column tower SoA — the single factory (mirrors `emptyCreeps`), so a
+/** The empty 7-column tower SoA — the single factory (mirrors `emptyCreeps`), so a
  *  future column is added in ONE place, never re-hand-rolled across call sites. */
 export function emptyTowers(): TowerArrays {
-  return { id: [], col: [], row: [], spend: [], targetId: [], nextFireTick: [] };
+  return { id: [], col: [], row: [], spend: [], targetId: [], nextFireTick: [], towerId: [] };
 }
 
 /** Coerce a stored combat column value to a safe integer, defaulting a
@@ -83,15 +94,41 @@ function footprintBuildable(grid: Grid, col: number, row: number): boolean {
   return true;
 }
 
+/** The structural, READONLY columns `forEachValidTower`'s walk needs (the
+ *  `CreepPlacementView` precedent in this module, Codex R4-1): the walk only
+ *  reads, so a mutable `TowerArrays` is assignable to it for the sim's write
+ *  paths, and the barrel's deep-readonly `ReadonlyTowerArrays` (`PreviewState`,
+ *  deliberately incompatible with the mutable type) is ALSO a legal argument with
+ *  no cast — presentation's read-only consumers share this exact classification. */
+export interface TowerValidityView {
+  readonly id: readonly number[];
+  readonly col: readonly number[];
+  readonly row: readonly number[];
+  readonly spend: readonly number[];
+  readonly towerId: readonly string[];
+}
+
+/** The one field row-validity classification needs from a compiled tower —
+ *  structural (not the full `CompiledTower`), so this module needs no import from
+ *  `ruleset.ts` (mirrors `CreepPlacementView`'s decoupling from the barrel). */
+export interface TowerCostLookup {
+  readonly cost: number;
+}
+
 /**
  * Walk the VALID tower rows of `towers` in index order — the single canonical
- * classification every consumer (mask, sell lookup, compaction) shares, so they
- * can never disagree about which rows exist. See the module doc for the rule.
+ * classification every consumer (mask, sell lookup, compaction, combat, the
+ * render VM) shares, so they can never disagree about which rows exist. See the
+ * module doc for the rule. `towerById` is the compiled catalog (M2-S3: row
+ * validity generalizes from M1's single flat cost to PER-KIND — a row is valid
+ * only if its `towerId` resolves in the catalog AND its `spend` equals that
+ * catalog entry's `cost`, so a forged spend↔towerId mismatch is invisible here
+ * exactly like an unresolvable id).
  */
 export function forEachValidTower(
   grid: Grid,
-  towers: TowerArrays,
-  cost: number,
+  towers: TowerValidityView,
+  towerById: Readonly<Partial<Record<string, TowerCostLookup>>>,
   visit: (index: number, id: number, col: number, row: number) => void,
 ): void {
   const seenIds = new Set<number>();
@@ -100,11 +137,13 @@ export function forEachValidTower(
     const id = towers.id[i];
     const col = towers.col[i];
     const row = towers.row[i];
+    const def = towerById[towers.towerId[i] as string];
     if (
       !Number.isSafeInteger(id) ||
       !Number.isSafeInteger(col) ||
       !Number.isSafeInteger(row) ||
-      towers.spend[i] !== cost
+      def === undefined ||
+      towers.spend[i] !== def.cost
     ) {
       continue;
     }
@@ -127,14 +166,18 @@ export function forEachValidTower(
 
 /**
  * Rematerialize the row-major tower blocked mask from the SoA — a pure function
- * of `(grid, towers)`, recomputed rather than cached so it can never desync from
- * the state it derives from. Only valid rows contribute; every marked cell is
- * buildable-open, so the mask can never cover an opening (the exit stays legal
- * for `computeDistanceField`).
+ * of `(grid, towers, towerById)`, recomputed rather than cached so it can never
+ * desync from the state it derives from. Only valid rows contribute; every marked
+ * cell is buildable-open, so the mask can never cover an opening (the exit stays
+ * legal for `computeDistanceField`).
  */
-export function materializeTowerMask(grid: Grid, towers: TowerArrays, cost: number): Uint8Array {
+export function materializeTowerMask(
+  grid: Grid,
+  towers: TowerValidityView,
+  towerById: Readonly<Partial<Record<string, TowerCostLookup>>>,
+): Uint8Array {
   const mask = new Uint8Array(grid.width * grid.height);
-  forEachValidTower(grid, towers, cost, (_i, _id, col, row) => {
+  forEachValidTower(grid, towers, towerById, (_i, _id, col, row) => {
     for (const [dc, dr] of FOOTPRINT_DELTAS) {
       mask[(row + dr) * grid.width + (col + dc)] = 1;
     }
@@ -146,12 +189,12 @@ export function materializeTowerMask(grid: Grid, towers: TowerArrays, cost: numb
  *  an invalid or shadowed-duplicate row is not sellable. */
 export function findValidTowerIndex(
   grid: Grid,
-  towers: TowerArrays,
+  towers: TowerValidityView,
   id: number,
-  cost: number,
+  towerById: Readonly<Partial<Record<string, TowerCostLookup>>>,
 ): number {
   let found = -1;
-  forEachValidTower(grid, towers, cost, (i, rowId) => {
+  forEachValidTower(grid, towers, towerById, (i, rowId) => {
     if (found === -1 && rowId === id) found = i;
   });
   return found;
@@ -169,9 +212,13 @@ export function refundFor(spend: number, refundNum: number, refundDen: number): 
 }
 
 /** The number of live valid tower rows in `towers` (for the placement cap). */
-export function countValidTowers(grid: Grid, towers: TowerArrays, cost: number): number {
+export function countValidTowers(
+  grid: Grid,
+  towers: TowerValidityView,
+  towerById: Readonly<Partial<Record<string, TowerCostLookup>>>,
+): number {
   let count = 0;
-  forEachValidTower(grid, towers, cost, () => {
+  forEachValidTower(grid, towers, towerById, () => {
     count++;
   });
   return count;
