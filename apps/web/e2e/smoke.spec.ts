@@ -34,9 +34,12 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.locator('.wy-status')).toContainText('Lives:');
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-rail')).toBeVisible();
-  // The Rail's Card (PLAN.md P2) — the single M1 `basic` tower, unarmed at load.
-  await expect(page.locator('.wy-card')).toBeVisible();
-  await expect(page.locator('.wy-card')).toHaveAttribute('aria-pressed', 'false');
+  // The Rail's Cards (PLAN.md P2, M2-S3: one per catalog tower) — unarmed at load.
+  await expect(page.locator('.wy-card')).toHaveCount(2);
+  for (const c of await page.locator('.wy-card').all()) {
+    await expect(c).toBeVisible();
+    await expect(c).toHaveAttribute('aria-pressed', 'false');
+  }
   // Pre-start (PLAN.md P4): Pause is hidden (nothing to pause yet), and the Dock's
   // primary button reads "Start".
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
@@ -250,6 +253,46 @@ test('arms the Card, places a tower via the keyboard cursor, sells it via the Pa
   await expect(board).toBeFocused(); // Sell → focus returns to the board
 });
 
+test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it, and the 2-card Rail is axe-clean', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const slowCard = page.getByRole('button', { name: /Slow Tower/ });
+  const board = page.locator('.wy-board');
+  const panel = page.locator('.wy-panel');
+
+  // Click-arm.
+  await expect(panel).toBeHidden();
+  await slowCard.click();
+  await expect(slowCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel).toContainText('Slow Tower');
+  await expect(board).toBeFocused();
+
+  // axe with the 2-card Rail, one card armed.
+  const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
+
+  await slowCard.click(); // disarm — back to a clean slate for the hotkey path
+  await expect(slowCard).toHaveAttribute('aria-pressed', 'false');
+
+  // Digit2 (armTower2's default binding) arms from document scope, exactly like Digit1
+  // arms the basic Card.
+  await page.keyboard.press('Digit2');
+  await expect(slowCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(board).toBeFocused();
+
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  await expect(slowCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  await expect(panel).toContainText('Slow Tower'); // now selected
+
+  // axe with the just-placed slow tower selected (Sell + Upgrade row).
+  const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
+});
+
 test('supports player-started runs, pause / speed controls, early-calls all three waves with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
@@ -299,10 +342,17 @@ test('supports player-started runs, pause / speed controls, early-calls all thre
   await page.getByRole('button', { name: /^Speed:/ }).click();
 
   // Early-call every wave via the morphed primary control, checking the preview shows the
-  // CORRECT upcoming wave before each call (PLAN.md P3 step 19). All three waves ship the
-  // same single-creep-kind composition, so the check is on the wave NUMBER, not content.
+  // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since M2-S3's
+  // wave 3 is a DISTINCT fast-creep composition (waves 1-2 stay the single normal-creep
+  // kind).
+  const EXPECTED_COMPOSITION: Record<number, string> = {
+    1: '10 × Creep — ground, armor 0, no immunities',
+    2: '10 × Creep — ground, armor 0, no immunities',
+    3: '8 × Fast Creep — ground, armor 0, no immunities',
+  };
   for (let waveNumber = 1; waveNumber <= 3; waveNumber++) {
     await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 3`);
+    await expect(preview.locator('li')).toHaveText([EXPECTED_COMPOSITION[waveNumber]!]);
     await callWave.click();
   }
   // Every wave has launched: the preview's explicit last-wave marker, and the control is
@@ -440,9 +490,10 @@ test('settings: focusing the last rebind control then closing via Escape restore
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
 
-  // The last rebind row (armTower1, GAME_ACTIONS' last entry) — reachable and visible
-  // within the dialog's own scrollport before it closes.
-  const lastRebind = page.getByRole('button', { name: 'Rebind Arm basic tower' });
+  // The last rebind row (armTower2, GAME_ACTIONS' last entry as of M2-S3 — the
+  // last-entry pin moved from armTower1) — reachable and visible within the dialog's
+  // own scrollport before it closes.
+  const lastRebind = page.getByRole('button', { name: 'Rebind Arm tower 2' });
   await lastRebind.focus();
   await expect(lastRebind).toBeFocused();
   await expect(lastRebind).toBeInViewport();
@@ -582,7 +633,7 @@ test('200% text zoom at the smallest supported landscape viewport (658×320): th
   expect(await overflowsInternally('.wy-settings'), '.wy-settings should scroll internally').toBe(
     true,
   );
-  const lastRebind = page.getByRole('button', { name: 'Rebind Arm basic tower' });
+  const lastRebind = page.getByRole('button', { name: 'Rebind Arm tower 2' });
   await lastRebind.scrollIntoViewIfNeeded();
   await lastRebind.focus();
   await expect(lastRebind).toBeFocused();

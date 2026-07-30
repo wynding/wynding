@@ -85,13 +85,16 @@ export interface ShellDock {
   readonly primary: HTMLButtonElement;
 }
 
-/** The single M1 tower Card (PLAN.md P2) — a whole clickable/focusable button so its
- *  name/cost/hotkey children never need their own separate hit targets. */
+/** One tower Card (PLAN.md P2, M2-S3: one per catalog tower) — a whole clickable/
+ *  focusable button so its name/cost/hotkey children never need their own separate hit
+ *  targets. */
 export interface ShellCard {
   readonly root: HTMLButtonElement;
   readonly name: HTMLSpanElement;
   readonly cost: HTMLSpanElement;
   readonly hotkey: HTMLSpanElement;
+  /** The catalog tower id this Card arms (M2-S3). */
+  readonly towerId: string;
 }
 
 /** The unified tower details Panel container (PLAN.md P2) — empty/hidden scaffolding;
@@ -128,7 +131,9 @@ export interface ShellHandle {
   readonly hud: ShellHud;
   readonly preview: ShellPreview;
   readonly dock: ShellDock;
-  readonly card: ShellCard;
+  /** The Rail's Cards, one per catalog tower (M2-S3), in catalog order — widened from
+   *  the M1-era single `card` (shell receives the card-descriptor list from `main.ts`). */
+  readonly cards: readonly ShellCard[];
   readonly panel: ShellPanel;
   readonly banner: ShellBanner;
   /** The assistive `aria-live` announcer (PLAN.md P2) — armed/disarmed, placement
@@ -276,8 +281,13 @@ function chip(doc: Document, slot: string): ShellChip {
 
 /** Build the Shell into a detached root; the caller appends `handle.root` wherever the
  *  pinned topology requires (a direct child of `#app`, alongside the results/settings/
- *  rotate siblings). */
-export function createShell(doc: Document): ShellHandle {
+ *  rotate siblings). `cardDescriptors` (M2-S3) is the catalog-order list of tower ids the
+ *  Rail builds one Card per — `main.ts` derives it from `ruleset.towers`; DOM per card is
+ *  unchanged from the M1 single-Card shape. */
+export function createShell(
+  doc: Document,
+  cardDescriptors: readonly { readonly towerId: string }[],
+): ShellHandle {
   const shell = doc.createElement('div');
   shell.className = 'wy-shell';
 
@@ -424,28 +434,32 @@ export function createShell(doc: Document): ShellHandle {
   rail.className = 'wy-rail';
   rail.setAttribute(REGION_ATTR, 'rail');
 
-  // --- Card: the single M1 `basic` tower (PLAN.md P2). Name/cost/hotkey content and
-  // aria-pressed/aria-keyshortcuts are filled in by overlay.ts (dynamic: the hotkey badge
-  // is live, re-rendered after rebinding). ---
-  const card = doc.createElement('button');
-  card.type = 'button';
-  card.className = 'wy-card';
-  card.setAttribute('aria-pressed', 'false');
-  const cardName = doc.createElement('span');
-  cardName.className = 'wy-card-name';
-  const cardCost = doc.createElement('span');
-  cardCost.className = 'wy-card-cost';
-  const cardHotkey = doc.createElement('span');
-  cardHotkey.className = 'wy-card-hotkey';
-  card.append(cardName, cardCost, cardHotkey);
+  // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), catalog order. Name/cost/hotkey
+  // content and aria-pressed/aria-keyshortcuts are filled in by overlay.ts (dynamic: the
+  // hotkey badge is live, re-rendered after rebinding). DOM per card is unchanged from the
+  // M1 single-Card shape. ---
+  const cards: ShellCard[] = cardDescriptors.map(({ towerId }) => {
+    const root = doc.createElement('button');
+    root.type = 'button';
+    root.className = 'wy-card';
+    root.setAttribute('aria-pressed', 'false');
+    const name = doc.createElement('span');
+    name.className = 'wy-card-name';
+    const cost = doc.createElement('span');
+    cost.className = 'wy-card-cost';
+    const hotkey = doc.createElement('span');
+    hotkey.className = 'wy-card-hotkey';
+    root.append(name, cost, hotkey);
+    return { root, name, cost, hotkey, towerId };
+  });
 
-  // --- Panel: opens below the Card, inside the Rail (PLAN.md P2). Empty scaffolding —
+  // --- Panel: opens below the Cards, inside the Rail (PLAN.md P2). Empty scaffolding —
   // overlay.ts rebuilds its content per armed/selection change and toggles `hidden`. ---
   const panel = doc.createElement('div');
   panel.className = 'wy-panel';
   panel.hidden = true;
 
-  rail.append(card, panel);
+  rail.append(...cards.map((c) => c.root), panel);
 
   // --- Assistive live region (PLAN.md P2): visually hidden, always present in the DOM so
   // a screen reader picks up the very first announcement (a region inserted only when
@@ -476,7 +490,7 @@ export function createShell(doc: Document): ShellHandle {
       settings: settingsBtn,
       primary: primaryBtn,
     },
-    card: { root: card, name: cardName, cost: cardCost, hotkey: cardHotkey },
+    cards,
     panel: { root: panel },
     banner: {
       root: banner,

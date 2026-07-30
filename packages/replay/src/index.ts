@@ -115,6 +115,10 @@ function inputDomainError(input: object, ruleset: CompiledRuleset): string | nul
       ) {
         return 'placeTower.anchor is out of bounds';
       }
+      const towerId = (input as { towerId?: unknown }).towerId;
+      if (typeof towerId !== 'string' || ruleset.towerById[towerId] === undefined) {
+        return 'placeTower.towerId must name a catalog tower';
+      }
       return null;
     }
     default:

@@ -40,7 +40,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(getBundledRuleset('wynding-core')).toBe(ruleset);
   });
 
-  it('carries the creep catalog: one ground creep, `normal`', () => {
+  it('carries the creep catalog: `normal` and the S3 `fast` creep', () => {
     expect(ruleset.creepCatalog).toEqual([
       {
         id: 'normal',
@@ -52,16 +52,35 @@ describe('getBundledRuleset (happy path + authored values)', () => {
         leakCost: 1,
         bounty: 1,
       },
+      {
+        id: 'fast',
+        hp: 16,
+        speedFp: 44,
+        armor: 0,
+        domain: 'ground',
+        immunities: [],
+        leakCost: 1,
+        bounty: 2,
+      },
     ]);
   });
 
-  it('carries the tower catalog: one single-target tower, `basic`', () => {
+  it('carries the tower catalog: `basic` and the S3 `slow` tower (ground-scoped)', () => {
     expect(ruleset.towerCatalog).toEqual([
       {
         id: 'basic',
         cost: 5,
         attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
         effects: [{ kind: 'direct', form: 'single', damage: 10 }],
+      },
+      {
+        id: 'slow',
+        cost: 8,
+        attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
+        effects: [
+          { kind: 'direct', form: 'single', damage: 2 },
+          { kind: 'slow', mulFp: 128, durationTicks: 40 },
+        ],
       },
     ]);
   });
@@ -95,12 +114,13 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(board.exit).toEqual({ col: 27, row: 11 });
   });
 
-  it('carries the three waves: 10 × normal @ spacing 20, clear bonus 4 each, countdown 500/300/300', () => {
-    const entries = [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }];
+  it('carries the three waves: 10 × normal @ spacing 20 (×2), then 8 × fast @ spacing 15 (the S3 slow-showcase)', () => {
+    const normalEntries = [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }];
+    const fastEntries = [{ creepId: 'fast', count: 8, spacingTicks: 15, offsetTicks: 0 }];
     expect(board.waves).toEqual([
-      { index: 0, countdownTicks: 500, clearBonus: 4, entries },
-      { index: 1, countdownTicks: 300, clearBonus: 4, entries },
-      { index: 2, countdownTicks: 300, clearBonus: 4, entries },
+      { index: 0, countdownTicks: 500, clearBonus: 4, entries: normalEntries },
+      { index: 1, countdownTicks: 300, clearBonus: 4, entries: normalEntries },
+      { index: 2, countdownTicks: 300, clearBonus: 5, entries: fastEntries },
     ]);
   });
 

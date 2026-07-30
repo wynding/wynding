@@ -86,7 +86,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // Pinned DOM topology (PLAN.md P1): #app > .wy-shell (status + main/stage/board+dock +
   // rail) as siblings of the results/settings/rotate overlays — the Shell is the ONLY node
   // the modal owner (`modal.ts`, wired inside `createOverlay`) ever toggles `inert` on.
-  const shell = createShell(doc);
+  // The Rail builds one Card per catalog tower (M2-S3), in catalog order.
+  const cardDescriptors = controller.ruleset.towers.map((t) => ({ towerId: t.id }));
+  const shell = createShell(doc, cardDescriptors);
   const board = shell.board;
 
   // The install path (Story 11 P3). `matchMediaFn` is resolved below for the rotate prompt;
@@ -136,7 +138,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     shell,
     controller.ruleset,
     // Cancel any in-flight placement gesture when settings opens, exactly as the rotate
-    // prompt does. The input manager is created below (it needs `shell.card.root`), so this
+    // prompt does. The input manager is created below (it needs `shell.cards`), so this
     // is a deferred forward reference — the same wiring as the hoisted `onAction` above; the
     // closure only runs at click time, long after `input` is initialized.
     () => input.abort(),
@@ -161,7 +163,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     exit: { col: grid.exit.col, row: grid.exit.row },
   };
   const handle = deps.sceneFactory(board, geometry);
-  const input: InputHandle = attachInput(doc, board, [shell.card.root], controller, keymap, {
+  const inputCards = shell.cards.map((c) => ({ el: c.root, towerId: c.towerId }));
+  const input: InputHandle = attachInput(doc, board, inputCards, controller, keymap, {
     // The keymapped `start` action routes through the SAME morphed app-level primary
     // action as the Dock's primary button (PLAN.md P3 step 15) — otherwise it would call
     // `controller.start()`/`controller.callWaveEarly()` directly and skip the fullscreen

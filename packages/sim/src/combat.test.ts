@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { createInitialState, step, type SimInput } from './index';
 import type { TowerArrays } from './tower';
 import { runCombat, type CombatCreeps, type Impact, type StepEvents } from './combat';
+import type { CompiledEffect } from './ruleset';
 import { testRuleset } from './test-support';
 
 // A large open board so targeting geometry is clean; exit on the right at row 6.
@@ -21,12 +22,22 @@ const GRID = RULESET.board.grid;
 // Tuning now lives in the ruleset; mirror the compiled M1 tower stats as locals for
 // the tests. `runCombat` takes the sim-owned `CompiledTower` (the raw v2 `TowerDef`
 // carries a discriminated `effects` array instead of a flat `damage`), so `TEST_TOWER`
-// here is `RULESET.tower` — the compiled projection — not `test-support`'s raw def.
-const TEST_TOWER = RULESET.tower;
+// here is `RULESET.towerById['basic']` — the compiled projection — not
+// `test-support`'s raw def. `runCombat` itself now takes the whole `towerById` map
+// (M2-S3: a real catalog, not one flat tower), so `TOWER_BY_ID` is the arg every
+// call site below passes.
+const TEST_TOWER = RULESET.towerById['basic']!;
+const TOWER_BY_ID = RULESET.towerById;
 const RANGE = TEST_TOWER.rangeFp;
 const TRAVEL_TICKS = TEST_TOWER.travelTicks;
 const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
-const DIRECT_DAMAGE = TEST_TOWER.damage;
+// A type predicate rather than a cast (CodeRabbit #73): if `basic` ever loses its
+// direct effect this throws a NAMED error at module load, not an opaque TypeError.
+const DIRECT_EFFECT = TEST_TOWER.effects.find(
+  (e): e is Extract<CompiledEffect, { kind: 'direct' }> => e.kind === 'direct',
+);
+if (DIRECT_EFFECT === undefined) throw new Error('`basic` must carry a direct effect');
+const DIRECT_DAMAGE = DIRECT_EFFECT.amount;
 // Bounty follows the compiled creep catalog for the same reason the tower stats do
 // above — a testBundle bounty edit must move these economy assertions with it.
 const KILL_BOUNTY = RULESET.creepById[RULESET.waves[0]!.spawns[0]!.creepId]!.bounty;
@@ -40,6 +51,7 @@ function oneTower(targetId = 0, nextFireTick = 0): TowerArrays {
     spend: [5],
     targetId: [targetId],
     nextFireTick: [nextFireTick],
+    towerId: ['basic'],
   };
 }
 
@@ -61,6 +73,9 @@ function restingCreeps(
     headRow: rows.map((r) => r.row),
     progress: rows.map(() => 0), // progress 0 (rest)
     wave: rows.map(() => 0),
+    creepId: rows.map(() => 'normal'),
+    slowMulFp: rows.map(() => 0),
+    slowUntilTick: rows.map(() => 0),
   };
 }
 
@@ -81,6 +96,9 @@ function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCre
     headRow: [row],
     progress: [0],
     wave: [0],
+    creepId: ['normal'],
+    slowMulFp: [0],
+    slowUntilTick: [0],
   };
 }
 
@@ -89,7 +107,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: DIRECT_DAMAGE }]); // in range
     const towers = oneTower();
 
-    const t0 = runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TEST_TOWER);
+    const t0 = runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(t0.impacts).toHaveLength(1);
     expect(t0.impacts[0]?.impactTick).toBe(TRAVEL_TICKS);
     expect(t0.impacts[0]?.targetId).toBe(1);
@@ -99,7 +117,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
     expect(t0.bounty).toBe(0);
 
     // Resolve at the impact tick: hp → 0, creep swept, bounty credited.
-    const t4 = runCombat(t0.creeps, towers, t0.impacts, TRAVEL_TICKS, 0, FIELD, GRID, TEST_TOWER);
+    const t4 = runCombat(t0.creeps, towers, t0.impacts, TRAVEL_TICKS, 0, FIELD, GRID, TOWER_BY_ID);
     expect(t4.creeps.id).toHaveLength(0); // killed and swept
     expect(t4.impacts).toHaveLength(0); // impact consumed
     expect(t4.bounty).toBe(KILL_BOUNTY);
@@ -111,7 +129,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       { id: 2, col: 7, row: 7, hp: 100 }, // a bystander that must be untouched
     ]);
     const towers = oneTower();
-    const t0 = runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TEST_TOWER);
+    const t0 = runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(t0.impacts[0]?.targetId).toBe(1);
 
     // Target 1 leaves play before the impact lands: drop it from the SoA.
@@ -126,6 +144,9 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       headRow: [7],
       progress: [0],
       wave: [0],
+      creepId: ['normal'],
+      slowMulFp: [0],
+      slowUntilTick: [0],
     };
     const t4 = runCombat(
       withoutTarget,
@@ -135,7 +156,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       0,
       FIELD,
       GRID,
-      TEST_TOWER,
+      TOWER_BY_ID,
     );
     expect(t4.bounty).toBe(0); // wasted — no bounty
     expect(t4.creeps.hp[0]).toBe(100); // bystander undamaged (impact was for id 1)
@@ -149,11 +170,11 @@ describe('runCombat — inclusive range boundary', () => {
   it('targets a creep whose point is exactly RANGE away, but not one a unit beyond', () => {
     // Tower centre (1536,1536). A point at x = 1536 + RANGE, y = 1536 is exactly RANGE.
     const onEdge = creepAtPoint(1, 1536 + RANGE, 1536, 10);
-    const inRangeResult = runCombat(onEdge, oneTower(), [], 0, 0, FIELD, GRID, TEST_TOWER);
+    const inRangeResult = runCombat(onEdge, oneTower(), [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(inRangeResult.impacts).toHaveLength(1); // inclusive — fired
 
     const beyond = creepAtPoint(1, 1536 + RANGE + 1, 1536, 10);
-    const outResult = runCombat(beyond, oneTower(), [], 0, 0, FIELD, GRID, TEST_TOWER);
+    const outResult = runCombat(beyond, oneTower(), [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(outResult.impacts).toHaveLength(0); // one unit past the boundary — no target
   });
 });
@@ -171,6 +192,9 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       headRow: [7],
       progress: [0],
       wave: [0],
+      creepId: ['normal'],
+      slowMulFp: [0],
+      slowUntilTick: [0],
     };
     const impact: Impact = {
       impactTick: TRAVEL_TICKS,
@@ -186,7 +210,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       0,
       FIELD,
       GRID,
-      TEST_TOWER,
+      TOWER_BY_ID,
       events,
     );
     expect(events.impactPoints).toHaveLength(0);
@@ -200,7 +224,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(creeps, oneTower(), [impact], 0, 0, FIELD, GRID, TEST_TOWER, events);
+    const result = runCombat(creeps, oneTower(), [impact], 0, 0, FIELD, GRID, TOWER_BY_ID, events);
     expect(result.creeps.hp[0]).toBe(100 - DIRECT_DAMAGE); // damaged, alive
     expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6) }]);
   });
@@ -213,7 +237,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(creeps, oneTower(), [impact], 0, 0, FIELD, GRID, TEST_TOWER, events);
+    const result = runCombat(creeps, oneTower(), [impact], 0, 0, FIELD, GRID, TOWER_BY_ID, events);
     expect(result.creeps.id).toHaveLength(0); // killed and swept
     expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6) }]);
   });
@@ -225,7 +249,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       { impactTick: 0, targetId: 1, effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }] },
     ];
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(creeps, oneTower(), impacts, 0, 0, FIELD, GRID, TEST_TOWER, events);
+    const result = runCombat(creeps, oneTower(), impacts, 0, 0, FIELD, GRID, TOWER_BY_ID, events);
     expect(result.creeps.id).toHaveLength(0); // killed once
     expect(events.impactPoints).toHaveLength(1); // the second impact resolves against a dead row — wasted
   });
@@ -237,7 +261,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
     let impacts: Impact[] = [];
     const towers = oneTower();
     for (let t = 0; t <= FIRE_INTERVAL; t++) {
-      const r = runCombat(cur, towers, impacts, t, 0, FIELD, GRID, TEST_TOWER, events);
+      const r = runCombat(cur, towers, impacts, t, 0, FIELD, GRID, TOWER_BY_ID, events);
       cur = r.creeps;
       impacts = r.impacts;
     }
@@ -251,7 +275,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
   it('firing emits exactly one fired event with the exact origin and tick window', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
     const events: StepEvents = { impactPoints: [], fired: [] };
-    runCombat(creeps, oneTower(), [], 0, 0, FIELD, GRID, TEST_TOWER, events);
+    runCombat(creeps, oneTower(), [], 0, 0, FIELD, GRID, TOWER_BY_ID, events);
     // Tower at (5,5): footprint centre = ((5+1)·256, (5+1)·256) = (1536,1536).
     expect(events.fired).toEqual([
       { originX: 1536, originY: 1536, targetId: 1, launchTick: 0, impactTick: TRAVEL_TICKS },
@@ -261,7 +285,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
   it('a wasted (no-target) tick fires nothing — no fired event either', () => {
     const creeps = restingCreeps([]); // nothing in range
     const events: StepEvents = { impactPoints: [], fired: [] };
-    runCombat(creeps, oneTower(), [], 0, 0, FIELD, GRID, TEST_TOWER, events);
+    runCombat(creeps, oneTower(), [], 0, 0, FIELD, GRID, TOWER_BY_ID, events);
     expect(events.fired).toEqual([]);
   });
 
@@ -272,7 +296,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
     let cur = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
     let impacts: Impact[] = [];
     for (let t = 0; t < FIRE_INTERVAL; t++) {
-      const r = runCombat(cur, towers, impacts, t, 0, FIELD, GRID, TEST_TOWER, events);
+      const r = runCombat(cur, towers, impacts, t, 0, FIELD, GRID, TOWER_BY_ID, events);
       cur = r.creeps;
       impacts = r.impacts;
     }
@@ -281,7 +305,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
     // again. A state-derived origin (re-reading `towers.targetId` later) would report
     // B for BOTH shots; the fired-event route must keep the first shot's target as A.
     cur = restingCreeps([{ id: 2, col: 7, row: 6, hp: 1000 }]);
-    runCombat(cur, towers, impacts, FIRE_INTERVAL, 0, FIELD, GRID, TEST_TOWER, events);
+    runCombat(cur, towers, impacts, FIRE_INTERVAL, 0, FIELD, GRID, TOWER_BY_ID, events);
 
     expect(events.fired).toHaveLength(2);
     expect(events.fired[0]).toMatchObject({ targetId: 1, launchTick: 0, impactTick: TRAVEL_TICKS });
@@ -302,7 +326,7 @@ describe('runCombat — sticky "first" targeting', () => {
       { id: 2, col: 7, row: 7, hp: 100 },
     ]);
     const towers = oneTower();
-    runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TEST_TOWER);
+    runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(towers.targetId[0]).toBe(2);
   });
 
@@ -310,7 +334,7 @@ describe('runCombat — sticky "first" targeting', () => {
     // Acquire creep A (id 1) at col 7 alone.
     const towers = oneTower();
     const aOnly = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
-    runCombat(aOnly, towers, [], 0, 0, FIELD, GRID, TEST_TOWER);
+    runCombat(aOnly, towers, [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(towers.targetId[0]).toBe(1);
 
     // A HIGHER-priority creep B (id 2, nearer the exit ⇒ smaller route distance)
@@ -319,12 +343,12 @@ describe('runCombat — sticky "first" targeting', () => {
       { id: 1, col: 7, row: 6, hp: 100 },
       { id: 2, col: 9, row: 6, hp: 100 }, // nearer the exit — would win a fresh acquire
     ]);
-    runCombat(bothPresent, towers, [], 1, 0, FIELD, GRID, TEST_TOWER);
+    runCombat(bothPresent, towers, [], 1, 0, FIELD, GRID, TOWER_BY_ID);
     expect(towers.targetId[0]).toBe(1); // did NOT swap to the higher-priority creep
 
     // A leaves play — the tower re-acquires the remaining in-range creep B.
     const bOnly = restingCreeps([{ id: 2, col: 9, row: 6, hp: 100 }]);
-    runCombat(bOnly, towers, [], 2, 0, FIELD, GRID, TEST_TOWER);
+    runCombat(bOnly, towers, [], 2, 0, FIELD, GRID, TOWER_BY_ID);
     expect(towers.targetId[0]).toBe(2);
   });
 });
@@ -349,6 +373,9 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
     headRow: rows.map(() => 6),
     progress: rows.map((r) => r.progress),
     wave: rows.map(() => 0),
+    creepId: rows.map(() => 'normal'),
+    slowMulFp: rows.map(() => 0),
+    slowUntilTick: rows.map(() => 0),
   });
 
   it('targets the creep further along a shared cell over a lower-id trailing creep', () => {
@@ -359,7 +386,7 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
       { id: 9, hp: 100, progress: 100 },
     ]);
     const towers = oneTower();
-    runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TEST_TOWER);
+    runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(towers.targetId[0]).toBe(9);
   });
 
@@ -370,7 +397,7 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
       { id: 1, hp: 100, progress: 70 },
     ]);
     const towers = oneTower();
-    runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TEST_TOWER);
+    runCombat(creeps, towers, [], 0, 0, FIELD, GRID, TOWER_BY_ID);
     expect(towers.targetId[0]).toBe(1);
   });
 });
@@ -382,7 +409,7 @@ describe('runCombat — fire cadence and no warm-up', () => {
     let impacts: Impact[] = [];
     const fireTicks: number[] = [];
     for (let t = 0; t <= FIRE_INTERVAL; t++) {
-      const r = runCombat(creeps, towers, impacts, t, 0, FIELD, GRID, TEST_TOWER);
+      const r = runCombat(creeps, towers, impacts, t, 0, FIELD, GRID, TOWER_BY_ID);
       // A fresh impact scheduled at t + TRAVEL_TICKS means the tower fired this tick.
       if (r.impacts.some((i) => i.impactTick === t + TRAVEL_TICKS)) fireTicks.push(t);
       impacts = r.impacts;
@@ -403,6 +430,7 @@ describe("sellTower preserves survivors' cooldown and lock", () => {
     const place = (col: number, row: number): SimInput => ({
       kind: 'placeTower',
       anchor: { col, row },
+      towerId: 'basic',
     });
     step(s, RULESET, [place(3, 3), place(9, 3)]);
     expect(s.towers.id).toHaveLength(2);
@@ -422,6 +450,7 @@ describe("sellTower preserves survivors' cooldown and lock", () => {
     const place = (col: number, row: number): SimInput => ({
       kind: 'placeTower',
       anchor: { col, row },
+      towerId: 'basic',
     });
     step(s, RULESET, [place(3, 3), place(9, 3)]);
     // Forge a ragged SoA: the combat columns are shorter than id (missing entries).

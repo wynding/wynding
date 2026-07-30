@@ -22,6 +22,7 @@ import {
 
 const bundle = getBundledRuleset();
 const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+const CARD_DESCRIPTORS = ruleset.towers.map((t) => ({ towerId: t.id }));
 
 // A fixed 280×240 board rect → 28×24 cells at 10 px each (mirrors input.test.ts) so the
 // settings-open integration tests below can place/hold a real gesture under jsdom (whose
@@ -90,7 +91,7 @@ function setup(
   const actions: UiAction[] = [];
   const settings = createSettings();
   const keymap = createKeymap();
-  const shell = createShell(document);
+  const shell = createShell(document, CARD_DESCRIPTORS);
   document.body.appendChild(shell.root);
   const install = options.install ?? defaultInstall();
   const overlay = createOverlay(
@@ -123,7 +124,7 @@ function setup(
     speedBtn: shell.dock.speed,
     primaryBtn: shell.dock.primary,
     settingsBtn: shell.dock.settings,
-    card: shell.card,
+    card: shell.cards[0]!,
     panel: shell.panel,
     live: shell.live,
   };
@@ -324,6 +325,39 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     // The dev-only warn is asserted conditionally — Vitest defaults DEV to true, but a
     // production-mode run must not fail on a behaviour (the warn) that build mode elides.
     if (import.meta.env.DEV) expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  // QC r3 (the `CREEP_NAME` mirror of the tower-side Codex #73 fix): an id colliding
+  // with an inherited `Object.prototype` key must take the localized fallback — a plain
+  // object map would render an object-derived string into accessible preview text AND
+  // suppress `warnUnmappedCreeps`' mapping-gap diagnostic (the `=== undefined` check
+  // sees the inherited member) — the double silent failure the null prototype prevents.
+  it('a creep id colliding with an Object.prototype key falls back too — and still fires the dev mapping-gap warn', () => {
+    const { overlay, shell } = setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    overlay.update({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 1,
+          waveCount: 1,
+          entries: [
+            { creepId: 'constructor', count: 4, domain: 'ground', armor: 2, immunities: [] },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    const text = shell.preview.list.querySelector('li')!.textContent;
+    expect(text).toBe('4 × Unknown creep (constructor) — ground, armor 2, no immunities');
+    expect(text).not.toContain('[object');
+    if (import.meta.env.DEV) {
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("creep id 'constructor'"));
+    }
     warnSpy.mockRestore();
   });
 
@@ -634,6 +668,81 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('a second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
+    const { shell } = setup();
+    expect(shell.cards).toHaveLength(2);
+    const slowCard = shell.cards[1]!;
+    expect(slowCard.towerId).toBe('slow');
+    expect(slowCard.name.textContent).toBe('Slow Tower');
+    expect(slowCard.cost.textContent).toBe('Cost: 8');
+    expect(slowCard.hotkey.textContent).toBe('2'); // Digit2 default
+    expect(slowCard.root.getAttribute('aria-keyshortcuts')).toBe('2');
+  });
+
+  it('a card at catalog index ≥ 2 gets NO hotkey badge/aria-keyshortcuts at all (Codex R2-2)', () => {
+    // Three-tower descriptor list — index 2 has no ARM_HOTKEY_ACTIONS slot.
+    const threeTowerRuleset = ruleset;
+    const shell = createShell(document, [
+      { towerId: 'basic' },
+      { towerId: 'slow' },
+      { towerId: 'basic' }, // a synthetic third slot — id doesn't matter, only the index does
+    ]);
+    document.body.appendChild(shell.root);
+    const overlay = createOverlay(
+      document,
+      () => {},
+      () => {},
+      createSettings(),
+      createKeymap(),
+      shell,
+      threeTowerRuleset,
+      () => {},
+      defaultInstall(),
+    );
+    document.body.append(
+      overlay.resultsEl,
+      overlay.settingsEl,
+      overlay.instructionsEl,
+      overlay.leaveEl,
+    );
+    const thirdCard = shell.cards[2]!;
+    expect(thirdCard.hotkey.textContent).toBe('');
+    expect(thirdCard.root.hasAttribute('aria-keyshortcuts')).toBe(false);
+    overlay.destroy();
+  });
+
+  it('a legal one-tower bundle filters armTower2 from the rebind list, and its document hotkey no-ops (Codex R3-1)', () => {
+    const oneCardShell = createShell(document, [{ towerId: 'basic' }]);
+    document.body.appendChild(oneCardShell.root);
+    const actions: UiAction[] = [];
+    const overlay = createOverlay(
+      document,
+      (a) => actions.push(a),
+      () => {},
+      createSettings(),
+      createKeymap(),
+      oneCardShell,
+      ruleset,
+      () => {},
+      defaultInstall(),
+    );
+    document.body.append(
+      overlay.resultsEl,
+      overlay.settingsEl,
+      overlay.instructionsEl,
+      overlay.leaveEl,
+    );
+    // No phantom rebindable action for a slot that doesn't exist.
+    const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
+      (el) => el.textContent,
+    );
+    expect(rebindNames).not.toContain('Arm tower 2');
+    // The document hotkey no-ops too — cards[1] doesn't exist.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
+    expect(actions).toEqual([]);
+    overlay.destroy();
+  });
+
   it('the board aria-label names the actual bound keys and refreshes on rebind', () => {
     const { keymap, overlay, shell, settingsBtn } = setup();
     // Initially derived from the default keymap (arrows / Enter / X), not hardcoded.
@@ -688,13 +797,56 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions.map((a) => a.type)).toEqual(['closePanel']);
   });
 
+  // QC round 1: the wrong-stats regression guard PLAN step 21 named (G18's bug — a
+  // towerStats that hardcoded basic's numbers, or read towers[0] instead of
+  // towerById[towerId], would render basic's stats on a slow tower and pass every other
+  // test in the suite, since they all exercise 'basic').
+  it("the Panel shows the SLOW tower's own stats when slow is armed — never basic's", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'slow' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Slow Tower');
+    expect(text).toContain('Cost: 8');
+    expect(text).toContain('Damage: 2'); // Σ direct amounts of the slow bundle — not basic's 10
+    expect(text).not.toContain('Damage: 10');
+    expect(text).toContain('Range: 4.0 tiles');
+    expect(text).toContain('Fire rate: 0.7/s'); // cadence 30, same as basic
+  });
+
+  // QC round 2: the SELECTED branch funnels through the same towerStats(id) seam, but a
+  // wrong-id regression there (e.g. reading the armed id, or towers[0]) would have passed
+  // the armed-only variant above — pin the selection path on the slow tower too.
+  it("the Panel shows a SELECTED slow tower's own stats — never basic's", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'slow' } }),
+      refund: 6,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Slow Tower');
+    expect(text).toContain('Cost: 8');
+    expect(text).toContain('Damage: 2');
+    expect(text).not.toContain('Damage: 10');
+  });
+
   it('the Panel shows a selected tower with Sell (live refund) and a permanent Max-level Upgrade', () => {
     const { overlay, panel, actions } = setup();
     overlay.update({
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7 } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic' } }),
       refund: 3,
     });
     expect(panel.root.hidden).toBe(false);
@@ -713,7 +865,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('a refund change on the SAME selection updates the Sell label in place, preserving the button element (no re-creation)', () => {
     const { overlay, panel } = setup();
-    const selection = { col: 1, row: 1, id: 7 };
+    const selection = { col: 1, row: 1, id: 7, towerId: 'basic' };
     overlay.update({
       hud: hud(),
       paused: false,
@@ -775,13 +927,32 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
+  // QC round 1: G17 requires the re-home to resolve WHICH card — a hardcoded
+  // cards[0].root.focus() would pass the basic-card test above.
+  it('a disarm-close from the SLOW card re-homes focus to the SLOW card, not the first card', () => {
+    const { overlay, shell, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'slow' }),
+      refund: 0,
+    });
+    const panelBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
+    panelBtn.focus();
+    expect(panel.root.contains(document.activeElement)).toBe(true);
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(document.activeElement).toBe(shell.cards[1]!.root);
+    expect(document.activeElement).not.toBe(shell.cards[0]!.root);
+  });
+
   it('closing the Panel from a DESELECT while a Panel control has focus re-homes focus to the board', () => {
     const { overlay, shell, panel } = setup();
     overlay.update({
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7 } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic' } }),
       refund: 3,
     });
     const panelBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
@@ -836,9 +1007,17 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       });
       return live.textContent!;
     };
-    expect(render({ kind: 'armed' })).toBe('Basic Tower armed. Place it on the board.');
-    expect(render({ kind: 'disarmed' })).toBe('Placement cancelled.');
-    expect(render({ kind: 'placed' })).toBe('Basic Tower placed.');
+    expect(render({ kind: 'armed', towerId: 'basic' })).toBe(
+      'Basic Tower armed. Place it on the board.',
+    );
+    // QC round 1: the announcements must name the ACTUAL armed tower — a hardcoded
+    // t('tower.basic.name') in outcomeMessage would pass the basic-only assertions above.
+    expect(render({ kind: 'armed', towerId: 'slow' })).toBe(
+      'Slow Tower armed. Place it on the board.',
+    );
+    expect(render({ kind: 'placed', towerId: 'slow' })).toBe('Slow Tower placed.');
+    expect(render({ kind: 'disarmed', towerId: 'basic' })).toBe('Placement cancelled.');
+    expect(render({ kind: 'placed', towerId: 'basic' })).toBe('Basic Tower placed.');
     expect(render({ kind: 'rejected', reason: 'bounty' })).toBe('Not enough Bounty.');
     expect(render({ kind: 'rejected', reason: 'occupied' })).toBe('That cell is already occupied.');
     expect(render({ kind: 'rejected', reason: 'other' })).toBe("Can't build there.");
@@ -855,7 +1034,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ lastOutcome: { kind: 'placed' as const } }),
+      ui: uiState({ lastOutcome: { kind: 'placed' as const, towerId: 'basic' } }),
       refund: 0,
     };
     overlay.update(frame); // first render: establishes the message, one write
@@ -908,20 +1087,48 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(evt.defaultPrevented).toBe(true); // ...and the key is consumed, so the button isn't also clicked
   });
 
-  it('fails closed (throws) for an unknown tower kind rather than inventing stats', () => {
-    const { overlay } = setup();
-    // M1's `ArmedTower` union is the single literal 'basic' — a future kind reaching the
-    // Panel without being taught its stats is a programmer error. Force that path with an
-    // unsafe cast (the only way to construct an invalid `ArmedTower` at the type level).
+  // M2-S3 (Codex R1-5): `ArmedTower` is now an OPEN catalog-id string — any schema-valid
+  // direct+slow tower compiles at sv7, so a legitimate modded bundle can arm an id this
+  // build's `TOWER_NAME` map doesn't recognize. A crash here would break on that
+  // legitimate bundle, so the Panel renders the localized fallback name + zeroed stats
+  // (never fabricated numbers) instead of throwing — the exact `CREEP_NAME` strategy.
+  it('renders the localized unknown-tower fallback name (never throws) for an id this build does not recognize', () => {
+    const { overlay, panel } = setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(() =>
       overlay.update({
         hud: hud(),
         paused: false,
         speed: 1,
-        ui: uiState({ armed: 'turret' as unknown as UiState['armed'] }),
+        ui: uiState({ armed: 'turret' }),
         refund: 0,
       }),
-    ).toThrow(/unknown tower kind/);
+    ).not.toThrow();
+    expect(panel.root.textContent).toContain('Unknown tower (turret)');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("catalog id 'turret'"));
+    warnSpy.mockRestore();
+  });
+
+  // Codex #73: `'constructor'` is a schema-legal catalog id that collides with an
+  // inherited `Object.prototype` key. A plain-object `TOWER_NAME` would resolve it to
+  // the inherited `Object` constructor and render an object-derived string; the
+  // null-prototype map must miss and take the same localized fallback as any unknown id.
+  it('an id colliding with an Object.prototype key falls back too, never an inherited member', () => {
+    const { overlay, panel } = setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() =>
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ armed: 'constructor' }),
+        refund: 0,
+      }),
+    ).not.toThrow();
+    expect(panel.root.textContent).toContain('Unknown tower (constructor)');
+    expect(panel.root.textContent).not.toContain('[object');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("catalog id 'constructor'"));
+    warnSpy.mockRestore();
   });
 });
 
@@ -1319,14 +1526,21 @@ describe('overlay — settings dialog (modal)', () => {
     // click routes through the overlay's abortGesture into the input manager, exactly as
     // main.ts wires it. Reproduces the P2 finding: a pointer captured on the board before
     // the modal opens still delivers its pointerup to the release path.
-    const shell = createShell(document);
+    const shell = createShell(document, CARD_DESCRIPTORS);
     document.body.appendChild(shell.root);
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    const input = attachInput(document, shell.board, [shell.card.root], c, createKeymap(), {
-      getRect: () => RECT,
-      isModalOpen: () => shell.root.hasAttribute('inert'),
-    });
+    const input = attachInput(
+      document,
+      shell.board,
+      [{ el: shell.cards[0]!.root, towerId: 'basic' }],
+      c,
+      createKeymap(),
+      {
+        getRect: () => RECT,
+        isModalOpen: () => shell.root.hasAttribute('inert'),
+      },
+    );
     const overlay = createOverlay(
       document,
       () => {},
@@ -1363,14 +1577,21 @@ describe('overlay — settings dialog (modal)', () => {
   });
 
   it('a held Card drag disarms and places nothing when settings opens then releases', () => {
-    const shell = createShell(document);
+    const shell = createShell(document, CARD_DESCRIPTORS);
     document.body.appendChild(shell.root);
     const c = createController(1);
     c.start();
-    const input = attachInput(document, shell.board, [shell.card.root], c, createKeymap(), {
-      getRect: () => RECT,
-      isModalOpen: () => shell.root.hasAttribute('inert'),
-    });
+    const input = attachInput(
+      document,
+      shell.board,
+      [{ el: shell.cards[0]!.root, towerId: 'basic' }],
+      c,
+      createKeymap(),
+      {
+        getRect: () => RECT,
+        isModalOpen: () => shell.root.hasAttribute('inert'),
+      },
+    );
     const overlay = createOverlay(
       document,
       () => {},
@@ -1389,14 +1610,14 @@ describe('overlay — settings dialog (modal)', () => {
       overlay.leaveEl,
     );
 
-    shell.card.root.dispatchEvent(ptr('pointerdown', 10, 10, 1));
-    shell.card.root.dispatchEvent(ptr('pointermove', 35, 105, 1)); // crosses the drag threshold → arms
+    shell.cards[0]!.root.dispatchEvent(ptr('pointerdown', 10, 10, 1));
+    shell.cards[0]!.root.dispatchEvent(ptr('pointermove', 35, 105, 1)); // crosses the drag threshold → arms
     expect(c.uiState().armed).toBe('basic');
 
     shell.dock.settings.click(); // open settings → abort → Card-drag disarms
     expect(c.uiState().armed).toBeNull();
 
-    shell.card.root.dispatchEvent(ptr('pointerup', 35, 105, 1)); // the delayed release
+    shell.cards[0]!.root.dispatchEvent(ptr('pointerup', 35, 105, 1)); // the delayed release
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(0); // nothing placed
 

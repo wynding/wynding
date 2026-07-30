@@ -101,7 +101,37 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
   pause: () => t('action.pause'),
   speed: () => t('action.speed'),
   armTower1: () => t('action.armTower1'),
+  armTower2: () => t('action.armTower2'),
 };
+
+/** Tower display names by catalog id (M2-S3) — a PARTIAL literal-key map (mirrors
+ *  `CREEP_NAME`'s strategy exactly, Codex R1-5): catalog ids are OPEN strings (any
+ *  schema-valid direct+slow tower compiles at sv7), so a closed union/exhaustive switch
+ *  would crash on a legitimate modded bundle. An id this build doesn't recognize falls
+ *  back to the localized `tower.unknown.name` (never a raw id) plus a dev-mode console
+ *  warning — the mapping-gap diagnostic, same posture as `warnUnmappedCreeps`. The map is
+ *  null-prototype (Codex #73): a schema-legal id that collides with an inherited
+ *  `Object.prototype` key (`'constructor'`, `'toString'`, …) must miss and take the
+ *  fallback, never resolve to an inherited member — the same guard the paint maps carry. */
+const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assign(
+  Object.create(null) as Partial<Record<string, () => string>>,
+  // `satisfies` (QC r3): as `Object.assign`'s inferred source the literal is otherwise
+  // checked against NOTHING — an eager `t(...)` entry (the exact thunk-contract slip
+  // this map exists to prevent) would compile clean and crash at render.
+  {
+    basic: () => t('tower.basic.name'),
+    slow: () => t('tower.slow.name'),
+  } satisfies Record<string, () => string>,
+);
+
+function towerName(towerId: string): string {
+  const label = TOWER_NAME[towerId];
+  if (label !== undefined) return label();
+  if (import.meta.env.DEV) {
+    console.warn(`tower: catalog id '${towerId}' has no display name — using the fallback`);
+  }
+  return t('tower.unknown.name', { id: towerId });
+}
 
 /** Glance-form glyphs for the Compact chips and Dock buttons (Story 11 P1).
  *
@@ -172,7 +202,7 @@ export function createOverlay(
   abortGesture: () => void,
   install: InstallHandle,
 ): Overlay {
-  const { hud: hudEls, preview: previewEl, dock, card, panel, live, banner } = shell;
+  const { hud: hudEls, preview: previewEl, dock, cards, panel, live, banner } = shell;
   const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
 
   // Dock markup contract (Story 11 P1): every Dock button carries an aria-hidden icon span
@@ -211,18 +241,45 @@ export function createOverlay(
     onAction({ type: 'start' });
   });
 
-  // --- Card: the single M1 `basic` tower (PLAN.md P2) ---
-  card.name.textContent = t('tower.basic.name');
-  card.cost.textContent = t('panel.cost', { cost: ruleset.tower.cost });
-  card.root.addEventListener('click', () => onAction({ type: 'armTower', tower: 'basic' }));
+  // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), wired in a loop ---
+  // The catalog-index → hotkey ACTION map: a card at index ≥ 2 (a modded bundle; sv7
+  // compiles up to `MAX_TOWERS` catalog towers) has NO hotkey at all (Codex R2-2) —
+  // scaling the hotkey model past two slots is S12. `GAME_ACTIONS`/`keymap` only define
+  // `armTower1`/`armTower2`, so this array is the single place that ceiling lives.
+  const ARM_HOTKEY_ACTIONS: readonly GameAction[] = ['armTower1', 'armTower2'];
+  const hotkeyActionForCardIndex = (index: number): GameAction | null =>
+    ARM_HOTKEY_ACTIONS[index] ?? null;
 
-  function refreshCardHotkey(): void {
-    const label = formatKeyLabel(keymap.codeFor('armTower1'));
-    card.hotkey.textContent = label ?? t('settings.unbound');
-    if (label !== null) card.root.setAttribute('aria-keyshortcuts', label);
-    else card.root.removeAttribute('aria-keyshortcuts');
+  for (const c of cards) {
+    c.name.textContent = towerName(c.towerId);
+    const cost = ruleset.towerById[c.towerId]?.cost ?? 0;
+    c.cost.textContent = t('panel.cost', { cost });
+    c.root.addEventListener('click', () => onAction({ type: 'armTower', tower: c.towerId }));
   }
-  refreshCardHotkey();
+
+  /** Refresh card at `index`'s live hotkey badge — a card at catalog index ≥ 2 gets no
+   *  badge/`aria-keyshortcuts` at all (Codex R2-2), remaining fully keyboard-operable as
+   *  a native button in the tab order. */
+  function refreshCardHotkey(index: number): void {
+    const c = cards[index];
+    if (c === undefined) return;
+    const action = hotkeyActionForCardIndex(index);
+    if (action === null) {
+      // No hotkey slot for this card at all (catalog index ≥ 2) — badge hidden, no
+      // aria-keyshortcuts, still fully keyboard-operable as a native button.
+      c.hotkey.textContent = '';
+      c.root.removeAttribute('aria-keyshortcuts');
+      return;
+    }
+    const label = formatKeyLabel(keymap.codeFor(action));
+    c.hotkey.textContent = label ?? t('settings.unbound');
+    if (label !== null) c.root.setAttribute('aria-keyshortcuts', label);
+    else c.root.removeAttribute('aria-keyshortcuts');
+  }
+  function refreshAllCardHotkeys(): void {
+    for (let i = 0; i < cards.length; i++) refreshCardHotkey(i);
+  }
+  refreshAllCardHotkeys();
 
   // The scaffold both dialog modals share: a hidden `role="dialog"` sibling of the Shell, an
   // inner box, and a header carrying the `<h2>` title and an aria-labelled close button. Each
@@ -348,7 +405,15 @@ export function createOverlay(
   const codeLabel = (action: GameAction): string =>
     formatKeyLabel(keymap.codeFor(action)) ?? t('settings.unbound');
 
-  for (const action of GAME_ACTIONS) {
+  // Slot actions are CATALOG-GATED (Codex R3-1): with a legal one-tower bundle,
+  // `armTower2` names a slot that doesn't exist — filtered out of the rebind list
+  // entirely (no phantom rebindable action for a slot with no Card). `armTower1` stays
+  // listed as long as at least one tower exists (M2 ships ≥ 1, per the schema).
+  const REBINDABLE_ACTIONS = GAME_ACTIONS.filter(
+    (action) => action !== 'armTower2' || cards.length >= 2,
+  );
+
+  for (const action of REBINDABLE_ACTIONS) {
     const li = doc.createElement('li');
     const name = doc.createElement('span');
     name.textContent = ACTION_LABEL[action]();
@@ -417,10 +482,10 @@ export function createOverlay(
       btn.textContent = codeLabel(action);
       btn.setAttribute('aria-label', t('settings.rebind', { action: ACTION_LABEL[action]() }));
     }
-    // A rebind of ANY action can displace `armTower1` from its key (the keymap is a
-    // bijection) — refresh the Card's live hotkey badge on every rebind, not just when the
-    // player rebinds armTower1 itself.
-    refreshCardHotkey();
+    // A rebind of ANY action can displace `armTower1`/`armTower2` from its key (the
+    // keymap is a bijection) — refresh every Card's live hotkey badge on every rebind,
+    // not just when the player rebinds an arm action itself.
+    refreshAllCardHotkeys();
     // Same bijection reasoning for the board's aria instructions: any rebind can move the
     // movement/confirm/sell keys they name, so refresh them here too.
     refreshBoardAria();
@@ -710,7 +775,7 @@ export function createOverlay(
   });
   closeBtn.addEventListener('click', () => modal.close(settingsOverlay));
 
-  // --- Game-level Escape + the armTower1 hotkey: document scope, PLAN.md P2 ---
+  // --- Game-level Escape + the armTower1/armTower2 hotkeys: document scope, PLAN.md P2, M2-S3 ---
   // The modal owner's OWN Escape listener (registered above, capture phase) already
   // preventDefault()s + stopPropagation()s whenever a genuinely-open modal is dismissable
   // or state-driven, so this bubble-phase listener never even fires in that case. The one
@@ -729,13 +794,20 @@ export function createOverlay(
     // focus, so it's handled here rather than the board-scoped switch in input.ts. Guard
     // auto-repeat (a held key must not toggle arm on/off/on/off) — the discrete-action
     // repeat-gate input.ts applies to its own switch doesn't reach this listener.
-    if (!e.repeat && keymap.actionFor(e.code) === 'armTower1') {
-      // Consume the key so a rebind onto Enter/Space can't ALSO activate whatever native
-      // button currently has focus (e.g. the settings opener) — the same keypress would both
-      // arm and synthetically click it.
-      e.preventDefault();
-      onAction({ type: 'armTower', tower: 'basic' });
-    }
+    // `armTower1`/`armTower2` map to catalog index 0/1 (M2-S3) — `armTower2` is a
+    // catalog-gated no-op when there is no second tower/Card (Codex R3-1's `towers[1]`
+    // guard, mirrored here on `cards[1]`).
+    if (e.repeat) return;
+    const action = keymap.actionFor(e.code);
+    const index = action === 'armTower1' ? 0 : action === 'armTower2' ? 1 : null;
+    if (index === null) return;
+    const c = cards[index];
+    if (c === undefined) return; // no such slot (e.g. armTower2 on a one-tower bundle)
+    // Consume the key so a rebind onto Enter/Space can't ALSO activate whatever native
+    // button currently has focus (e.g. the settings opener) — the same keypress would both
+    // arm and synthetically click it.
+    e.preventDefault();
+    onAction({ type: 'armTower', tower: c.towerId });
   };
   doc.addEventListener('keydown', onGameKeydown);
 
@@ -754,26 +826,30 @@ export function createOverlay(
     readonly targets: string;
   }
 
-  function towerStats(kind: ArmedTower): TowerStats {
-    switch (kind) {
-      case 'basic':
-        return {
-          name: t('tower.basic.name'),
-          cost: ruleset.tower.cost,
-          damage: ruleset.tower.damage,
-          rangeTiles: formatNumber(ruleset.tower.rangeFp / FP_ONE),
-          fireRate: formatNumber(TICKS_PER_SECOND / ruleset.tower.cadenceTicks),
-          targets: t('tower.targets.ground'),
-        };
-      default: {
-        // M1 ships exactly one tower kind (`ArmedTower` is the single literal 'basic') —
-        // an unknown kind reaching here is a programmer error (a new variant added
-        // without teaching the Panel its stats). Fail closed rather than render
-        // fabricated numbers.
-        const exhaustive: never = kind;
-        throw new Error(`panel: unknown tower kind ${JSON.stringify(exhaustive)}`);
-      }
-    }
+  /** Data-driven from the armed/selected `CompiledTower` (M2-S3 retires the closed-union
+   *  `exhaustive: never` throw — catalog ids are OPEN, so a legitimate modded bundle's
+   *  tower must render real stats, never crash the Panel). `damage` is Σ of the tower's
+   *  `direct` effect amounts, in authored order (the shipped `slow` tower's row reads its
+   *  own direct total, 2 — a hypothetical pure-support bundle would honestly read 0; QC
+   *  round 2 corrected this line's earlier zero-direct-effects claim). A `towerId` this
+   *  build's catalog doesn't resolve (defensive — the armed/selection state machine only
+   *  ever holds a validated id) falls back to all-zero stats rather than throwing. */
+  function towerStats(towerId: string): TowerStats {
+    const def = ruleset.towerById[towerId];
+    const damage =
+      def === undefined
+        ? 0
+        : def.effects.reduce((sum, e) => (e.kind === 'direct' ? sum + e.amount : sum), 0);
+    return {
+      name: towerName(towerId),
+      cost: def?.cost ?? 0,
+      damage,
+      rangeTiles: formatNumber((def?.rangeFp ?? 0) / FP_ONE),
+      fireRate: formatNumber(TICKS_PER_SECOND / (def?.cadenceTicks ?? 1)),
+      // sv7's capability profile only ever compiles `domain: 'ground'` — literal-keyed
+      // to the one domain the catalog can produce; a future capability bump adds its own.
+      targets: t('tower.targets.ground'),
+    };
   }
 
   function appendStatRows(container: HTMLElement, stats: TowerStats): void {
@@ -887,7 +963,7 @@ export function createOverlay(
       appendCloseButton(panel.root);
       panel.root.hidden = false;
     } else if (ui.selection !== null) {
-      const stats = towerStats('basic'); // M1 ships exactly one placeable kind
+      const stats = towerStats(ui.selection.towerId);
       const heading = doc.createElement('p');
       heading.className = 'wy-panel-name';
       heading.textContent = stats.name;
@@ -904,7 +980,13 @@ export function createOverlay(
     // focus always lands on document.body here). A disarm-close (was armed, now closed) →
     // the Card; every other close/transition → the board.
     if (hadPanelFocus && !panel.root.contains(doc.activeElement)) {
-      if (prevKey.startsWith('armed:') && key === 'closed') card.root.focus();
+      // A disarm-close re-homes to the CARD that armed it — resolved via `shell.cards`
+      // (the `armed:${towerId}` teardown key already switches on re-arm, M2-S3).
+      const armedTowerId = prevKey.startsWith('armed:') ? prevKey.slice('armed:'.length) : null;
+      const armedCard =
+        armedTowerId === null ? undefined : cards.find((c) => c.towerId === armedTowerId);
+      if (armedTowerId !== null && key === 'closed' && armedCard !== undefined)
+        armedCard.root.focus();
       else shell.board.focus();
     }
   }
@@ -921,9 +1003,15 @@ export function createOverlay(
   // no user-facing string outside the catalog) — dev-mode-only, since a genuinely
   // compiled ruleset can't produce one (the preview's `entriesSummary` is derived
   // from validated, catalog-resolved entries).
-  const CREEP_NAME: Readonly<Partial<Record<string, () => string>>> = {
-    normal: () => t('creep.normal.name'),
-  };
+  // Null-prototype for the same reason as `TOWER_NAME` (Codex #73): an id like
+  // `'constructor'` must miss, not resolve to an inherited `Object.prototype` member.
+  const CREEP_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assign(
+    Object.create(null) as Partial<Record<string, () => string>>,
+    {
+      normal: () => t('creep.normal.name'),
+      fast: () => t('creep.fast.name'),
+    } satisfies Record<string, () => string>, // QC r3: same rationale as `TOWER_NAME`
+  );
   // PURE name derivation — no side effects: the render-skip sentinel calls this
   // every tick, and a should-I-skip comparison must never execute observable
   // effects to compute its own inputs. The dev-mode
@@ -1071,14 +1159,13 @@ export function createOverlay(
 
   function outcomeMessage(outcome: PlacementOutcome | null): string {
     if (outcome === null) return '';
-    const name = t('tower.basic.name');
     switch (outcome.kind) {
       case 'armed':
-        return t('live.armed', { name });
+        return t('live.armed', { name: towerName(outcome.towerId) });
       case 'disarmed':
         return t('live.disarmed');
       case 'placed':
-        return t('live.placed', { name });
+        return t('live.placed', { name: towerName(outcome.towerId) });
       case 'rejected':
         if (outcome.reason === 'bounty') return t('live.rejected.bounty');
         if (outcome.reason === 'occupied') return t('live.rejected.occupied');
@@ -1141,7 +1228,9 @@ export function createOverlay(
         announcedStarted = true;
         live.textContent = t('live.started');
       }
-      card.root.setAttribute('aria-pressed', String(view.ui.armed !== null));
+      for (const c of cards) {
+        c.root.setAttribute('aria-pressed', String(view.ui.armed === c.towerId));
+      }
       // Home link auto-hide. VISIBLE while the run is held pre-start, while paused, and once
       // it resolves; HIDDEN for any started-and-unpaused moment — including the started
       // wave-1 countdown, which is why this reads `ui.started` rather than the sim phase

@@ -96,6 +96,7 @@ describe('sim smoke', () => {
       (c) => (c.headRow = []),
       (c) => (c.progress = []),
       (c) => (c.wave = []),
+      (c) => (c.creepId = []), // M2-S3: an unresolvable/missing creepId drops the row too
     ];
     for (const corrupt of corruptions) {
       const s = createInitialState(1, RULESET);
@@ -110,6 +111,9 @@ describe('sim smoke', () => {
         headRow: [2],
         progress: [0],
         wave: [0],
+        creepId: ['normal'],
+        slowMulFp: [0],
+        slowUntilTick: [0],
       };
       corrupt(s.creeps);
       const out = step(s, RULESET, []);
@@ -192,7 +196,7 @@ describe('step() StepEvents plumbing (#31/#32)', () => {
     });
     let s = createInitialState(1, wide);
     s = step(s, wide, [
-      { kind: 'placeTower', anchor: { col: 3, row: 5 } },
+      { kind: 'placeTower', anchor: { col: 3, row: 5 }, towerId: 'basic' },
       { kind: 'callWaveEarly' },
     ]);
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -210,7 +214,7 @@ describe('previewInputs — read-only PreviewState contract (#30/P3)', () => {
   it('never throws with every creeps column array and impacts frozen, across all command kinds', () => {
     let s = createInitialState(1, RULESET);
     s = step(s, RULESET, [
-      { kind: 'placeTower', anchor: { col: 2, row: 1 } },
+      { kind: 'placeTower', anchor: { col: 2, row: 1 }, towerId: 'basic' },
       { kind: 'callWaveEarly' },
     ]);
     // Freeze every creeps column array AND impacts — previewInputs must never attempt to
@@ -219,7 +223,7 @@ describe('previewInputs — read-only PreviewState contract (#30/P3)', () => {
     Object.freeze(s.impacts);
     const before = hashSimState(s);
     const allKinds: SimInput[] = [
-      { kind: 'placeTower', anchor: { col: 5, row: 1 } },
+      { kind: 'placeTower', anchor: { col: 5, row: 1 }, towerId: 'basic' },
       { kind: 'sellTower', tower: 999 },
       { kind: 'callWaveEarly' },
       { kind: 'noop' },

@@ -263,6 +263,70 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible(); // now a selection
   });
 
+  test('M2-S3: a tap arms the SECOND (slow) Card — aria-pressed asserted on both Cards — and a drag from it SWITCHES the armed tower while basic is armed', async ({
+    page,
+  }) => {
+    const basicCard = page.getByRole('button', { name: /Basic Tower/ });
+    const slowCard = page.getByRole('button', { name: /Slow Tower/ });
+    const slowBox = (await slowCard.boundingBox()) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    const scx = slowBox.x + slowBox.width / 2;
+    const scy = slowBox.y + slowBox.height / 2;
+
+    // A tap on the SECOND card arms it — aria-pressed asserted on BOTH cards, not just
+    // the one that changed.
+    await tap(session, scx, scy);
+    await expect(slowCard).toHaveAttribute('aria-pressed', 'true');
+    await expect(basicCard).toHaveAttribute('aria-pressed', 'false');
+    await tap(session, scx, scy); // disarm — back to a clean slate
+    await expect(slowCard).toHaveAttribute('aria-pressed', 'false');
+
+    // Now arm BASIC first (via its own tap), then drag from the SLOW card — the drag
+    // threshold guard is `armed !== card.towerId`, so a drag started from a DIFFERENT
+    // card's element must SWITCH the armed tower, not leave basic armed (Codex R1-6).
+    const basicBox = (await basicCard.boundingBox()) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    await tap(session, basicBox.x + basicBox.width / 2, basicBox.y + basicBox.height / 2);
+    await expect(basicCard).toHaveAttribute('aria-pressed', 'true');
+
+    const board = page.locator('.wy-board');
+    const box = (await board.boundingBox()) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    const projection = createProjection({
+      cols: GRID.cols,
+      rows: GRID.rows,
+      cssWidth: box.width,
+      cssHeight: box.height,
+      dpr: 1,
+    });
+    const cellPx = projection.cellPx;
+    const releaseCell = { col: 14, row: 14 };
+    const releasePx = projection.cellToPixel(releaseCell.col, releaseCell.row);
+    const releaseX = box.x + releasePx.x + cellPx / 2;
+    const releaseY = box.y + releasePx.y + cellPx / 2;
+
+    await pressMoveRelease(session, { x: scx, y: scy }, { x: releaseX, y: releaseY });
+
+    // Placed → disarmed, and the just-placed selection is the SLOW tower, not basic.
+    await expect(basicCard).toHaveAttribute('aria-pressed', 'false');
+    await expect(slowCard).toHaveAttribute('aria-pressed', 'false');
+    const panel = page.locator('.wy-panel');
+    await expect(panel).toContainText('Slow Tower');
+    await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible();
+  });
+
   test('a Card drag released off-board or over Shell chrome cancels and disarms (no placement)', async ({
     page,
   }) => {

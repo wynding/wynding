@@ -116,7 +116,9 @@ describe('replay validate() — re-simulation budget caps', () => {
   });
 
   it('rejects a replay whose total tower commands exceed the budget', () => {
-    const build: SimInput[] = [{ kind: 'placeTower', anchor: { col: 1, row: 1 } }];
+    const build: SimInput[] = [
+      { kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId: 'basic' },
+    ];
     const r = validate(
       makeReplay({ tickInputs: Array.from({ length: 1_001 }, () => build) }),
       m1Ruleset,
@@ -181,6 +183,33 @@ describe('replay validate() — command-union validation (ADR 0006 §4)', () => 
       validate(withInput({ kind: 'placeTower', anchor: { col: -1, row: 1 } }), m1Ruleset).reason,
     ).toContain('out of bounds');
   });
+
+  it('rejects a placeTower whose towerId does not name a catalog tower', () => {
+    for (const towerId of ['no-such-tower', 1, null, undefined]) {
+      expect(
+        validate(withInput({ kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId }), m1Ruleset)
+          .reason,
+      ).toContain('placeTower.towerId must name a catalog tower');
+    }
+  });
+
+  it('validates a known-id placeTower whose placement is illegal as a no-op replay (structurally well-formed)', () => {
+    // The entrance cell is not buildable — the sim's canPlaceTower rejects it as a
+    // no-op, but the command is structurally well-formed (a known towerId), so the
+    // replay validates rather than being rejected at the domain-validation stage.
+    const r = validate(
+      makeReplay({
+        tickInputs: [
+          [
+            { kind: 'placeTower', anchor: { col: 0, row: 11 }, towerId: 'basic' },
+            { kind: 'callWaveEarly' },
+          ],
+        ],
+      }),
+      m1Ruleset,
+    );
+    expect(r.ok).toBe(true);
+  });
 });
 
 describe('replay validate() — terminal contract (ADR 0006)', () => {
@@ -189,7 +218,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     // canonical replay must END at the terminal tick — ANY logged tick after it (even an
     // empty or noop-only one) is padding and rejected (strict PLAN/ADR 0006 contract).
     for (const trailing of [
-      [{ kind: 'placeTower', anchor: { col: 1, row: 1 } }] as SimInput[],
+      [{ kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId: 'basic' }] as SimInput[],
       [{ kind: 'noop' }] as SimInput[],
       [] as SimInput[],
     ]) {

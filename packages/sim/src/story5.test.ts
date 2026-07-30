@@ -26,9 +26,10 @@ const OPEN = {
 } as const;
 
 const callEarly: SimInput[] = [{ kind: 'callWaveEarly' }];
-const place = (col: number, row: number): SimInput => ({
+const place = (col: number, row: number, towerId = 'basic'): SimInput => ({
   kind: 'placeTower',
   anchor: { col, row },
+  towerId,
 });
 
 /** Run to a terminal phase (won/lost) or a tick cap; returns the final state. */
@@ -427,7 +428,8 @@ describe('compiled ruleset snapshots its tuning', () => {
     expect(Object.isFrozen(ruleset)).toBe(true); // the wrapper (can't replace a field)
     expect(Object.isFrozen(ruleset.balance)).toBe(true);
     expect(Object.isFrozen(ruleset.scoring)).toBe(true);
-    expect(Object.isFrozen(ruleset.tower)).toBe(true);
+    expect(Object.isFrozen(ruleset.towers)).toBe(true);
+    expect(Object.isFrozen(ruleset.towerById)).toBe(true);
     expect(Object.isFrozen(ruleset.waves)).toBe(true);
     expect(Object.isFrozen(ruleset.waves[0]!.spawns)).toBe(true);
     expect(Object.isFrozen(ruleset.creepById)).toBe(true); // a frozen record, not a Map
@@ -435,7 +437,7 @@ describe('compiled ruleset snapshots its tuning', () => {
       (ruleset.balance as { startingLives: number }).startingLives = 999;
     }).toThrow(); // strict-mode write to a frozen object
     expect(() => {
-      (ruleset as { tower: unknown }).tower = {}; // can't replace a field on the frozen wrapper
+      (ruleset as { towers: unknown }).towers = []; // can't replace a field on the frozen wrapper
     }).toThrow();
     expect(() => {
       (ruleset.creepById as Record<string, unknown>).normal = {}; // frozen record

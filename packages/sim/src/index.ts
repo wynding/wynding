@@ -36,7 +36,7 @@ import {
   refundFor,
 } from './tower';
 import { assertRuleset, type CompiledRuleset } from './ruleset';
-import { SIM_VERSION } from './ruleset-shared';
+import { SIM_VERSION, effectiveSpeedFp } from './ruleset-shared';
 
 /** Simulation cadence: 20 Hz. Must match the render loop's tick duration. */
 export const MS_PER_TICK = 50;
@@ -78,6 +78,15 @@ export function isTerminalPhase(phase: SimPhase): boolean {
  * alive-counter state anywhere in `SimState`: the resolution phase derives each
  * wave's alive count from this column every tick (step 9), so no removal path
  * (leak, sweep, a future drop) can desynchronize a counter from reality.
+ *
+ * `creepId`/`slowMulFp`/`slowUntilTick` (M2-S3) are appended AFTER `wave` — hash-
+ * load-bearing position, mirrored in `combat.ts`'s `CombatCreeps`/`emptyCreeps()`
+ * and this file's `ReadonlyCreepArrays`/`PreviewState`. `creepId` is the CATALOG id
+ * resolved at spawn (matching `ScheduledSpawn.creepId`/`PreviewEntryVM.creepId` —
+ * NOT `kind`, which M2-S1 deliberately renamed away); the render VM's per-creep max
+ * HP and silhouette both join on it. `slowMulFp`/`slowUntilTick` are the per-creep
+ * slow-status column pair (`slowMulFp === 0` ⟺ no active slow, the full model —
+ * strongest-wins non-stacking means at most one live slow per creep).
  */
 export interface CreepArrays {
   id: number[];
@@ -90,6 +99,9 @@ export interface CreepArrays {
   headRow: number[];
   progress: number[]; // fixed-point arc-length travelled from `from`, in [0, edgeLen)
   wave: number[]; // owning wave index, resolved at spawn (M2-S2)
+  creepId: string[]; // catalog id, resolved at spawn (M2-S3)
+  slowMulFp: number[]; // 0 = no active slow (M2-S3)
+  slowUntilTick: number[]; // 0 = no active slow, paired with slowMulFp (M2-S3)
 }
 
 /**
@@ -139,9 +151,17 @@ export interface SimState {
 }
 
 /** Per-tick inputs (the replayable command log). Creep spawns come from the ruleset
- *  wave schedule, NOT the log (ADR 0006) — there is no manual spawn command. */
+ *  wave schedule, NOT the log (ADR 0006) — there is no manual spawn command.
+ *  `placeTower.towerId` (M2-S3) names the CATALOG tower to build (ADR 0006 §4: a
+ *  catalog-unknown or malformed `towerId` is structurally malformed input that
+ *  invalidates the replay at the replay-validator layer; the sim itself stays
+ *  total with a defensive no-op — see `applyInputPhase`). */
 export type SimInput =
-  | { readonly kind: 'placeTower'; readonly anchor: { readonly col: number; readonly row: number } }
+  | {
+      readonly kind: 'placeTower';
+      readonly anchor: { readonly col: number; readonly row: number };
+      readonly towerId: string;
+    }
   | { readonly kind: 'sellTower'; readonly tower: number } // EntityId of the tower
   | { readonly kind: 'callWaveEarly' } // buffer an early launch of the current wave
   | { readonly kind: 'noop' };
@@ -163,8 +183,12 @@ function maskEquals(a: Uint8Array, b: Uint8Array): boolean {
 
 /** The exit-sourced distance field for `grid` under the current tower SoA, reusing
  *  the cached field while the materialized mask is unchanged. Pure in its result. */
-function effectiveField(grid: Grid, towers: TowerArrays, cost: number): DistanceField {
-  const mask = materializeTowerMask(grid, towers, cost); // O(towers), never throws
+function effectiveField(
+  grid: Grid,
+  towers: TowerArrays,
+  towerById: CompiledRuleset['towerById'],
+): DistanceField {
+  const mask = materializeTowerMask(grid, towers, towerById); // O(towers), never throws
   const memo = fieldCache.get(grid);
   if (memo !== undefined && maskEquals(memo.mask, mask)) return memo.field;
   const field = computeDistanceField(grid, mask);
@@ -215,34 +239,60 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   if (!Array.isArray(c.headRow)) c.headRow = [];
   if (!Array.isArray(c.progress)) c.progress = [];
   if (!Array.isArray(c.wave)) c.wave = [];
+  if (!Array.isArray(c.creepId)) c.creepId = [];
+  if (!Array.isArray(c.slowMulFp)) c.slowMulFp = [];
+  if (!Array.isArray(c.slowUntilTick)) c.slowUntilTick = [];
 
   const waveCount = ruleset.waves.length;
+  const { creepById } = ruleset;
 
-  // Creep `wave` column totality: a row whose wave id isn't a safe int in
-  // [0, waveCount) can never be attributed to a real wave — dropped here (the
-  // existing invalid-row policy) so the resolution phase's per-wave alive
-  // histogram (derived from this very column) is never polluted by a forged
-  // wave id, and so a forged/ragged column can never itself desync the count.
-  // Any row whose OTHER columns are ragged (a length mismatch elsewhere) is left
-  // for the per-phase ragged-row policy downstream (movement's existing guard);
-  // this pass only ever narrows by `wave` validity. A `wave` column LONGER than
-  // `id` also trips the rebuild (CodeRabbit PR #68): `id` is the row authority,
-  // and a trailing tail beyond it would otherwise ride into the hash untouched —
-  // the rebuild below iterates `id`'s length, so the tail simply doesn't survive
-  // (and the rebuild allocates fresh arrays, so the shared-column preview
-  // contract is preserved).
-  let sawInvalidWave = c.wave.length > c.id.length;
-  for (let i = 0; i < c.id.length && !sawInvalidWave; i++) {
+  // Creep `wave`/`creepId` column totality (M2-S3 generalizes the M2-S2 `wave`-only
+  // rule): a row whose wave id isn't a safe int in [0, waveCount), OR whose
+  // `creepId` doesn't resolve in the compiled catalog, can never be attributed to a
+  // real spawn — dropped here (the existing invalid-row policy) so the resolution
+  // phase's per-wave alive histogram (derived from this very column) is never
+  // polluted, and the render VM's per-creep max-HP join (`creepById[creepId].hp`)
+  // never sees an unresolvable id. Any row whose OTHER columns are ragged (a length
+  // mismatch elsewhere) is left for the per-phase ragged-row policy downstream
+  // (movement's existing guard); this pass only ever narrows by `wave`/`creepId`
+  // validity. Any of `wave`/`creepId`/`slowMulFp`/`slowUntilTick` LONGER than `id`
+  // also trips the rebuild (CodeRabbit PR #68, extended): `id` is the row
+  // authority, and a trailing tail beyond it would otherwise ride into the hash
+  // untouched — the rebuild below iterates `id`'s length, so the tail simply
+  // doesn't survive (and the rebuild allocates fresh arrays, so the shared-column
+  // preview contract is preserved).
+  let sawInvalidRow =
+    c.wave.length > c.id.length ||
+    c.creepId.length > c.id.length ||
+    c.slowMulFp.length > c.id.length ||
+    c.slowUntilTick.length > c.id.length;
+  for (let i = 0; i < c.id.length && !sawInvalidRow; i++) {
     const w = c.wave[i];
-    if (!Number.isSafeInteger(w) || (w as number) < 0 || (w as number) >= waveCount) {
-      sawInvalidWave = true;
+    const cid = c.creepId[i];
+    if (
+      !Number.isSafeInteger(w) ||
+      (w as number) < 0 ||
+      (w as number) >= waveCount ||
+      typeof cid !== 'string' ||
+      creepById[cid] === undefined
+    ) {
+      sawInvalidRow = true;
     }
   }
-  if (sawInvalidWave) {
+  if (sawInvalidRow) {
     const filtered: CreepArrays = emptyCreeps();
     for (let i = 0; i < c.id.length; i++) {
       const w = c.wave[i];
-      if (!Number.isSafeInteger(w) || (w as number) < 0 || (w as number) >= waveCount) continue;
+      const cid = c.creepId[i];
+      if (
+        !Number.isSafeInteger(w) ||
+        (w as number) < 0 ||
+        (w as number) >= waveCount ||
+        typeof cid !== 'string' ||
+        creepById[cid] === undefined
+      ) {
+        continue;
+      }
       filtered.id.push(c.id[i] as number);
       filtered.hp.push(c.hp[i] as number);
       filtered.bounty.push(c.bounty[i] as number);
@@ -253,8 +303,57 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       filtered.headRow.push(c.headRow[i] as number);
       filtered.progress.push(c.progress[i] as number);
       filtered.wave.push(w as number);
+      filtered.creepId.push(cid);
+      // Slow-pair VALUE repair runs below, on the (now row-clean) filtered result —
+      // carry the raw values through here; the value repair pass normalizes them.
+      filtered.slowMulFp.push(c.slowMulFp[i] as number);
+      filtered.slowUntilTick.push(c.slowUntilTick[i] as number);
     }
     state.creeps = filtered;
+  }
+
+  // Slow-pair VALUE repair (M2-S3, Codex R1-1/G13): a row survives the drop pass
+  // above but its `(slowMulFp, slowUntilTick)` pair may still be forged. Valid iff
+  // `slowMulFp` is 0 or a safe int in 1..255, `slowUntilTick` a non-negative safe
+  // int, `slowMulFp === 0 ⟺ slowUntilTick === 0`, AND the record is not already
+  // EXPIRED (`slowMulFp !== 0 && slowUntilTick < repairTick` is cleared too — a
+  // forged/restored expired record must not slow the entry tick's movement, since
+  // movement runs before this tick's own expiry sweep; a GENUINE boundary state
+  // always carries `slowUntilTick >= tick`, since the sweep removes records at
+  // their final tick's combat close, so `=== repairTick` is live and preserved).
+  // Any violation resets the pair to `(0, 0)`. Writes go through the S2 `cow`
+  // copy-on-write cells below (the preview clone SHARES creep column arrays — an
+  // in-place repair would otherwise mutate live state through that reference); the
+  // well-formed hot path repairs nothing and copies nothing.
+  {
+    const repairTick = Number.isSafeInteger(state.tick) && state.tick >= 0 ? state.tick : 0;
+    const cc = state.creeps;
+    let mulOwned: number[] | null = null;
+    let untilOwned: number[] | null = null;
+    const ownMul = (): number[] => {
+      if (mulOwned === null) mulOwned = cc.slowMulFp.slice();
+      return mulOwned;
+    };
+    const ownUntil = (): number[] => {
+      if (untilOwned === null) untilOwned = cc.slowUntilTick.slice();
+      return untilOwned;
+    };
+    for (let i = 0; i < cc.id.length; i++) {
+      const rawMul = cc.slowMulFp[i];
+      const rawUntil = cc.slowUntilTick[i];
+      const mulValid =
+        rawMul === 0 ||
+        (Number.isSafeInteger(rawMul) && (rawMul as number) >= 1 && (rawMul as number) <= 255);
+      const untilValid = Number.isSafeInteger(rawUntil) && (rawUntil as number) >= 0;
+      const pairShapeOk = mulValid && untilValid && (rawMul === 0) === (rawUntil === 0);
+      const expired = pairShapeOk && rawMul !== 0 && (rawUntil as number) < repairTick;
+      if (!pairShapeOk || expired) {
+        if (cc.slowMulFp[i] !== 0) ownMul()[i] = 0;
+        if (cc.slowUntilTick[i] !== 0) ownUntil()[i] = 0;
+      }
+    }
+    if (mulOwned !== null) cc.slowMulFp = mulOwned;
+    if (untilOwned !== null) cc.slowUntilTick = untilOwned;
   }
 
   if (state.towers == null || typeof state.towers !== 'object') {
@@ -267,6 +366,32 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   if (!Array.isArray(t.spend)) t.spend = [];
   if (!Array.isArray(t.targetId)) t.targetId = [];
   if (!Array.isArray(t.nextFireTick)) t.nextFireTick = [];
+  if (!Array.isArray(t.towerId)) t.towerId = [];
+  // Column ALIGNMENT to the row authority (`id`) — QC round 1: row VALIDITY stays lazy in
+  // `forEachValidTower` (a padded row's `towerId` of `''` never resolves, so it is
+  // invisible and unsellable exactly like today's forged rows), but the LENGTHS must
+  // agree before any `placeTower` push appends at each column's own tail: a restored
+  // container with a short `towerId` column would otherwise land the new row's catalog id
+  // at index 0 while its id/col/row land at index N — reviving a dead row at its old
+  // coordinates (a "zombie" wall the sim itself re-validates as live) while the paid-for
+  // row stays invalid. Deterministic pad/truncate; padded values are inert under the lazy
+  // rule. (Tower columns need no copy-on-write: `partialCloneForPreview` deep-clones the
+  // whole towers container via `structuredClone`.)
+  {
+    const rowCount = t.id.length;
+    // Pad `col`/`row` with -1, NOT 0 (QC round 2): 0 is a REAL coordinate — a forged
+    // state with intact towerId/spend columns but a short `col` column would otherwise
+    // materialize a live tower at (0,0). -1 fails `footprintBuildable`'s bounds check,
+    // so a padded row is invalid no matter what its other columns claim.
+    const PAD = -1;
+    const numericCols = [t.col, t.row, t.spend, t.targetId, t.nextFireTick];
+    for (const colArr of numericCols) {
+      while (colArr.length < rowCount) colArr.push(PAD);
+      if (colArr.length > rowCount) colArr.length = rowCount;
+    }
+    while (t.towerId.length < rowCount) t.towerId.push('');
+    if (t.towerId.length > rowCount) t.towerId.length = rowCount;
+  }
 
   if (!Array.isArray(state.impacts)) state.impacts = [];
 
@@ -512,9 +637,8 @@ function applyInputPhase(
   ruleset: CompiledRuleset,
   inputs: readonly SimInput[],
 ): boolean[] {
-  const { board, tower, balance } = ruleset;
+  const { board, towerById, balance } = ruleset;
   const { grid } = board;
-  const cost = tower.cost;
   const accepted: boolean[] = [];
 
   for (const input of inputs as readonly unknown[]) {
@@ -526,17 +650,30 @@ function applyInputPhase(
 
     if (kind === 'placeTower') {
       const anchor = (input as { anchor?: unknown }).anchor;
+      // A non-string or catalog-unresolved `towerId` is the sim-total BACKSTOP
+      // no-op (ADR 0006 §4): the replay validator owns the structural rejection of
+      // a malformed/unknown towerId; the sim never throws on it.
+      const catalogTowerId = (input as { towerId?: unknown }).towerId;
+      if (typeof catalogTowerId !== 'string') {
+        accepted.push(false);
+        continue;
+      }
+      const def = towerById[catalogTowerId];
+      if (def === undefined) {
+        accepted.push(false);
+        continue;
+      }
       // Sim-owned cap: a build past MAX_TOWERS is a deterministic no-op, so the
       // in-flight impact queue stays bounded for every step() caller.
       if (
         state.towers.id.length >= MAX_TOWERS &&
-        countValidTowers(grid, state.towers, cost) >= MAX_TOWERS
+        countValidTowers(grid, state.towers, towerById) >= MAX_TOWERS
       ) {
         accepted.push(false);
         continue;
       }
-      const towerMask = materializeTowerMask(grid, state.towers, cost);
-      if (!canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty, cost)) {
+      const towerMask = materializeTowerMask(grid, state.towers, towerById);
+      if (!canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty, def.cost)) {
         accepted.push(false);
         continue;
       }
@@ -549,14 +686,15 @@ function applyInputPhase(
       state.towers.id.push(newTowerId);
       state.towers.col.push(cell.col);
       state.towers.row.push(cell.row);
-      state.towers.spend.push(cost);
+      state.towers.spend.push(def.cost);
       state.towers.targetId.push(0); // no lock
       state.towers.nextFireTick.push(0); // no warm-up — may fire this tick
-      state.bounty -= cost;
+      state.towers.towerId.push(catalogTowerId);
+      state.bounty -= def.cost;
       accepted.push(true);
     } else if (kind === 'sellTower') {
-      const towerId = (input as { tower?: unknown }).tower;
-      if (!Number.isSafeInteger(towerId)) {
+      const entityId = (input as { tower?: unknown }).tower;
+      if (!Number.isSafeInteger(entityId)) {
         accepted.push(false);
         continue;
       } // malformed id — no-op
@@ -564,7 +702,7 @@ function applyInputPhase(
         accepted.push(false);
         continue;
       } // corrupt bounty — no-op
-      const index = findValidTowerIndex(grid, state.towers, towerId as number, cost);
+      const index = findValidTowerIndex(grid, state.towers, entityId as number, towerById);
       if (index === -1) {
         accepted.push(false);
         continue;
@@ -584,7 +722,7 @@ function applyInputPhase(
       // survivor's target lock or cooldown).
       const src = state.towers;
       const compacted: TowerArrays = emptyTowers();
-      forEachValidTower(grid, src, cost, (i, id, col, row) => {
+      forEachValidTower(grid, src, towerById, (i, id, col, row) => {
         if (i === index) return;
         compacted.id.push(id);
         compacted.col.push(col);
@@ -592,6 +730,7 @@ function applyInputPhase(
         compacted.spend.push(src.spend[i] as number);
         compacted.targetId.push(safeCombatColumn(src.targetId[i]));
         compacted.nextFireTick.push(safeCombatColumn(src.nextFireTick[i]));
+        compacted.towerId.push(src.towerId[i] as string);
       });
       state.towers = compacted;
       accepted.push(true);
@@ -662,10 +801,9 @@ export function step(
   // ticks cannot change the final world-hash or score (re-derivation is stable).
   if (isTerminalPhase(state.phase)) return state;
 
-  const { board, tower, balance, scoring, waves, creepById } = ruleset;
+  const { board, towerById, balance, scoring, waves, creepById } = ruleset;
   const { grid } = board;
   const { entrance } = grid;
-  const cost = tower.cost;
   const waveCount = waves.length;
 
   // 1) INPUT PHASE — array order; each command re-validated against evolving state.
@@ -733,6 +871,9 @@ export function step(
           state.creeps.headRow.push(entrance.row);
           state.creeps.progress.push(0);
           state.creeps.wave.push(k);
+          state.creeps.creepId.push(entry.creepId);
+          state.creeps.slowMulFp.push(0); // fresh spawn — never slowed yet
+          state.creeps.slowUntilTick.push(0);
         }
       }
       state.waveSpawnCursor[k] = cursor + 1;
@@ -741,13 +882,17 @@ export function step(
 
   // 3) DERIVE the effective field once for this tick from the final tower SoA.
   const field =
-    state.towers.id.length === 0 ? board.field : effectiveField(grid, state.towers, cost);
+    state.towers.id.length === 0 ? board.field : effectiveField(grid, state.towers, towerById);
 
   // 4) MOVEMENT PHASE — advance each creep at its own speed over the post-input field.
   //    A creep reaching the exit leaks (costs `leakCost` lives, bumps `leakedCount`
   //    and its owning wave's `waveLeaked`); a corrupt row is dropped (no life lost).
-  //    Rebuild to compact both removals — `wave` threads through by source row like
-  //    any other column.
+  //    Rebuild to compact both removals — `wave`/`creepId`/`slowMulFp`/`slowUntilTick`
+  //    thread through by source row like any other column. The per-row travel budget
+  //    is the SLOW-AWARE `effectiveSpeedFp` (ruleset-shared.ts) — THE single
+  //    implementation shared verbatim with the compile-time bound gate (Codex R2-4):
+  //    a live (non-expired-by-entry-coercion) slow multiplies the base speed down,
+  //    floored by the ruleset's slow floor, never below 1.
   const src = state.creeps;
   const next: CreepArrays = emptyCreeps();
   for (let i = 0; i < src.id.length; i++) {
@@ -757,6 +902,12 @@ export function step(
     if (!Number.isSafeInteger(src.bounty[i]) || !Number.isSafeInteger(src.speed[i])) continue;
     const speed = src.speed[i] as number;
     const wave = src.wave[i] as number; // coerceSoa already dropped any invalid-wave row
+    const creepId = src.creepId[i] as string; // coerceSoa already dropped any unresolvable-id row
+    const slowMulFp = Number.isSafeInteger(src.slowMulFp[i]) ? (src.slowMulFp[i] as number) : 0;
+    const slowUntilTick = Number.isSafeInteger(src.slowUntilTick[i])
+      ? (src.slowUntilTick[i] as number)
+      : 0;
+    const effSpeed = effectiveSpeedFp(speed, slowMulFp, balance.slowFloorNum, balance.slowFloorDen);
     const outcome = advanceCreep(
       field,
       src.id[i],
@@ -766,7 +917,7 @@ export function step(
       src.headCol[i],
       src.headRow[i],
       src.progress[i],
-      speed,
+      effSpeed,
     );
     if (outcome.kind === 'drop') continue;
     if (outcome.kind === 'leak') {
@@ -796,13 +947,18 @@ export function step(
     next.headRow.push(outcome.headRow);
     next.progress.push(outcome.progress);
     next.wave.push(wave);
+    next.creepId.push(creepId);
+    next.slowMulFp.push(slowMulFp);
+    next.slowUntilTick.push(slowUntilTick);
   }
   state.creeps = next;
 
-  // 5) COMBAT PHASE (Story 4) — over the POST-MOVE world: resolve due impacts, sweep
-  //    dead creeps and credit per-creep bounty, then hold/acquire + fire. The kill
-  //    bounty this tick also feeds the monotonic score accumulator. `wave` threads
-  //    through the combat survivor compaction like any other column (combat.ts).
+  // 5) COMBAT PHASE (Story 4 + M2-S3's status framework) — over the POST-MOVE
+  //    world: resolve due impacts (direct → death check → slow), sweep dead
+  //    creeps and credit per-creep bounty, then hold/acquire + fire, then the
+  //    expiry sweep. The kill bounty this tick also feeds the monotonic score
+  //    accumulator. `wave`/`creepId`/`slowMulFp`/`slowUntilTick` thread through
+  //    the combat survivor compaction like any other column (combat.ts).
   const combat = runCombat(
     state.creeps,
     state.towers,
@@ -811,7 +967,7 @@ export function step(
     state.bounty,
     field,
     grid,
-    tower,
+    towerById,
     events,
   );
   state.creeps = combat.creeps;
@@ -902,6 +1058,9 @@ export interface ReadonlyCreepArrays {
   readonly headRow: readonly number[];
   readonly progress: readonly number[];
   readonly wave: readonly number[];
+  readonly creepId: readonly string[];
+  readonly slowMulFp: readonly number[];
+  readonly slowUntilTick: readonly number[];
 }
 
 /** Deep-readonly view of `TowerArrays` — see `ReadonlyCreepArrays`. */
@@ -912,6 +1071,7 @@ export interface ReadonlyTowerArrays {
   readonly spend: readonly number[];
   readonly targetId: readonly number[];
   readonly nextFireTick: readonly number[];
+  readonly towerId: readonly string[];
 }
 
 /**
@@ -1077,6 +1237,7 @@ export {
   type CompiledBalance,
   type CompiledScoring,
   type CompiledTower,
+  type CompiledEffect,
   type CompiledCreep,
   type CompiledWave,
   type ScheduledSpawn,
@@ -1086,3 +1247,19 @@ export {
 export { validateRulesetShape, parseRulesetJson, MAX_RULESET_TEXT_UNITS } from './ruleset-schema';
 // The per-`simVersion` capability profile (M2-S1).
 export { capabilityProfile, type CapabilityProfile } from './capability';
+// Tower SoA + the canonical row-validity walk (M2-S3, Codex R3-2): `forEachValidTower`
+// joins the barrel so presentation (the render VM's tower projection, the
+// controller's `towerAt`/hit-testing) classifies rows by the SAME rule the sim
+// itself uses for the mask/sell/combat — a sim-invisible row (unknown `towerId`,
+// spend↔towerId mismatch) can never be drawn, selectable, or placement-blocking.
+export {
+  forEachValidTower,
+  materializeTowerMask,
+  findValidTowerIndex,
+  countValidTowers,
+  canPlaceTower,
+  MAX_TOWERS,
+  type TowerArrays,
+  type TowerValidityView,
+  type TowerCostLookup,
+} from './tower';

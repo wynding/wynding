@@ -91,6 +91,7 @@ describe('controller — input → command mapping', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     expect(c.aimAt(-1, -1)).toMatchObject({ kind: 'blocked', valid: false });
+    c.armTower('basic'); // M2-S3: an honest ghost/verdict requires an armed tower id
     const aim = c.aimAt(3, 3);
     expect(aim.kind).toBe('ghost');
     expect(aim.valid).toBe(true);
@@ -100,32 +101,46 @@ describe('controller — input → command mapping', () => {
     expect(c.frame().curVm.towers[0]).toMatchObject({ col: 3, row: 3 });
   });
 
-  it('the pure-keyboard cursor flow (no Card armed) announces both a successful placement and a rejection to the live region', () => {
+  it('the keyboard cursor flow, once a Card is armed, announces both a successful placement and a rejection to the live region', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    expect(c.uiState().armed).toBeNull(); // never armed a Card — the board-cursor path only
+    expect(c.uiState().armed).toBeNull();
+    c.armTower('basic');
     c.aimAt(3, 3);
     expect(c.confirm()).toBe(true);
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'placed' }); // success is announced too
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'placed', towerId: 'basic' }); // success is announced too
     tick(c);
     expect(c.frame().curVm.towers).toHaveLength(1);
 
     // (2,2) is a known blocked-terrain cell (see the `armed` clickAt test asserting the
     // same coordinate resolves to `reason: 'other'`) — empty, in-bounds, but unbuildable, so
     // this is a genuine rejected placement attempt, not a silent tower-selection.
+    c.armTower('basic'); // confirm() disarmed on the successful placement above
     const aim = c.aimAt(2, 2);
     expect(aim).toMatchObject({ kind: 'ghost', valid: false });
     expect(c.confirm()).toBe(false);
     expect(c.uiState().lastOutcome).toMatchObject({ kind: 'rejected' }); // rejection is announced too
   });
 
+  it('an unarmed keyboard cursor over an empty cell produces no ghost/verdict (PLAN.md P3 step 16, Codex R1-4)', () => {
+    const c = createController(1);
+    c.start();
+    expect(c.uiState().armed).toBeNull();
+    const aim = c.aimAt(3, 3);
+    expect(aim).toMatchObject({ kind: 'blocked', valid: false });
+    expect(c.frame().ghost).toBeNull();
+    expect(c.confirm()).toBe(false); // nothing armed — silent no-op, no rejection announced
+    expect(c.uiState().lastOutcome).toBeNull();
+  });
+
   it('selects a placed tower, reports a positive refund, and sells it', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
-    const sel = c.aimAt(3, 3); // now a tower occupies (3,3)
+    const sel = c.aimAt(3, 3); // now a tower occupies (3,3) — selection works unarmed
     expect(sel.kind).toBe('tower');
     expect(c.frame().selection).not.toBeNull();
     expect(c.refundForSelection()).toBeGreaterThan(0);
@@ -137,6 +152,7 @@ describe('controller — input → command mapping', () => {
   it('drops the selection once the selected tower is sold (no phantom ring / stale Sell)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -148,24 +164,26 @@ describe('controller — input → command mapping', () => {
     expect(c.refundForSelection()).toBe(0);
   });
 
-  it('a first keyboard confirm (no prior hover) aims at the cursor instead of no-oping', () => {
+  it('a first keyboard confirm (no prior hover, unarmed) is a silent no-op — nothing to confirm', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     expect(c.frame().ghost).toBeNull(); // fresh run: nothing aimed yet
-    c.confirm(); // must aim at the cursor rather than silently returning
-    // The cursor cell was resolved (a ghost or a tower selection now exists).
-    expect(c.frame().ghost !== null || c.frame().selection !== null).toBe(true);
+    expect(c.confirm()).toBe(false); // unarmed — no honest candidate to confirm
+    expect(c.frame().ghost).toBeNull();
+    expect(c.frame().selection).toBeNull();
   });
 
   it('confirm over an invalid ghost is a no-op (#47)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // the (3,3) tower is committed
     // (2,2) is itself empty — towerAt(2,2) is null, so this resolves to a GHOST — but its
     // footprint (cols 2-3, rows 2-3) overlaps the committed tower's cell (3,3), so it must
     // be invalid.
+    c.armTower('basic'); // confirm() disarmed on the successful placement above
     const aim = c.aimAt(2, 2);
     expect(aim).toEqual({ kind: 'ghost', col: 2, row: 2, valid: false });
     expect(c.confirm()).toBe(false);
@@ -184,6 +202,7 @@ describe('controller — input → command mapping', () => {
     const c = createController(1);
     startAndCall(c);
     tick(c, 14); // the wave-early creep has not yet reached (2,11)
+    c.armTower('basic');
     const aim = c.aimAt(2, 11);
     expect(aim).toMatchObject({ kind: 'ghost', valid: true }); // valid one tick before it arrives
     tick(c); // advance WITHOUT re-aiming — the creep now occupies (2,11); `ghost` is stale
@@ -199,6 +218,7 @@ describe('controller — input → command mapping', () => {
     const a2 = c.aimAt(5, 5); // same cell/buffer/tick → memoized, same result
     expect(a2).toEqual(a1);
 
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -212,6 +232,7 @@ describe('controller — input → command mapping', () => {
   it('previewAt is a no-op while unarmed (PLAN.md P2: the ghost preview is an armed-only affordance)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -228,6 +249,7 @@ describe('controller — input → command mapping', () => {
   it('previewAt updates the build ghost while ARMED (selection is already null — arming clears it)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // a real committed tower at (3,3), for the hover-over-tower case below
@@ -278,10 +300,11 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.pause();
     const bountyBefore = c.hud().bounty;
+    c.armTower('basic');
     c.aimAt(3, 3);
     expect(c.confirm()).toBe(true);
     const f = c.frame();
-    expect(f.pendingAdds).toEqual([{ col: 3, row: 3 }]);
+    expect(f.pendingAdds).toEqual([{ col: 3, row: 3, towerId: 'basic' }]);
     expect(f.curVm.towers).toHaveLength(0); // not committed — pending only
     expect(c.hud().bounty).toBeLessThan(bountyBefore); // presented spend, not the stale figure
   });
@@ -290,6 +313,7 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.pause();
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     const aim = c.aimAt(3, 3);
@@ -301,6 +325,7 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.pause();
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     expect(c.frame().pendingAdds).toHaveLength(1);
@@ -321,6 +346,7 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
     for (const [col, row] of footprint) {
       const c = createController(1);
       c.start(); // PLAN.md P4: advance() no-ops while held
+      c.armTower('basic');
       c.aimAt(3, 3);
       c.confirm();
       tick(c); // commit the build
@@ -330,17 +356,22 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
       const aim = c.aimAt(col, row); // select via one of the four footprint cells
       expect(aim.kind).toBe('tower');
       expect(c.sellSelected()).toBe(true);
-      expect(c.frame().pendingSells).toEqual([{ col: 3, row: 3 }]);
-      // sellSelected() re-aims at the sold anchor — now resolves as a buildable ghost.
-      expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: true });
+      expect(c.frame().pendingSells).toEqual([{ col: 3, row: 3, towerId: 'basic' }]);
+      // sellSelected() re-aims at the sold anchor — now resolves as a buildable ghost —
+      // but is UNARMED (aim only selects/builds when armed, M2-S3): must re-arm to rebuild.
+      expect(c.frame().ghost).toBeNull();
+      c.armTower('basic');
+      const reaim = c.aimAt(3, 3);
+      expect(reaim).toMatchObject({ col: 3, row: 3, valid: true });
       expect(c.confirm()).toBe(true); // rebuild at the same anchor
-      expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3 }]);
+      expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3, towerId: 'basic' }]);
     }
   });
 
   it('a pending sell hides the committed tower immediately (presentation, not just "about to sell")', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -350,7 +381,7 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
     c.aimAt(3, 3);
     c.sellSelected();
     const f = c.frame();
-    expect(f.pendingSells).toEqual([{ col: 3, row: 3 }]);
+    expect(f.pendingSells).toEqual([{ col: 3, row: 3, towerId: 'basic' }]);
     // curVm.towers (committed) still lists it — the SCENE hides it via pendingSells, not
     // by the committed view-model itself. The presentation authority is `pendingSells`.
     expect(f.curVm.towers).toHaveLength(1);
@@ -359,6 +390,7 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
   it('duplicate/no-op queued commands create no false pending visuals', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // commit one tower
@@ -368,13 +400,14 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
     // Mashing sellSelected again is a no-op (`enqueueVerdict` dedupes; the selection is
     // already gone by the first call's re-aim) — never a second (false) pending visual.
     expect(c.sellSelected()).toBe(false);
-    expect(c.frame().pendingSells).toEqual([{ col: 3, row: 3 }]);
+    expect(c.frame().pendingSells).toEqual([{ col: 3, row: 3, towerId: 'basic' }]);
   });
 
   it('build → select → sell within one pause shows the correct (projected) refund', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.pause();
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm(); // pending build, not committed
     const aim = c.aimAt(3, 3); // select the pending tower
@@ -388,16 +421,18 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.pause();
+    c.armTower('basic');
     c.aimAt(3, 3);
     expect(c.confirm()).toBe(true); // pending build, not committed
     c.aimAt(3, 3); // select the pending tower
     expect(c.sellSelected()).toBe(true); // cancels the pending build — nets to empty
     expect(c.frame().pendingAdds).toEqual([]);
     expect(c.frame().pendingSells).toEqual([]); // never committed, so nothing to "hide" either
+    c.armTower('basic'); // re-arm — sellSelected's re-aim resolves an unarmed ghost (none)
     const reaim = c.aimAt(3, 3);
     expect(reaim).toMatchObject({ kind: 'ghost', valid: true }); // buildable again
     expect(c.confirm()).toBe(true); // the rebuild must actually queue, not silently no-op
-    expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3 }]);
+    expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3, towerId: 'basic' }]);
     c.resume();
     tick(c);
     expect(c.frame().curVm.towers).toHaveLength(1); // the rebuild actually committed
@@ -413,6 +448,7 @@ describe('controller — same-tick & paused ordering (determinism hazards)', () 
     // [callWaveEarly]; the build below appends to it: [callWaveEarly, placeTower(3,3)].
     c.start();
     c.callWaveEarly();
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // single step consumes both, in order
@@ -426,8 +462,10 @@ describe('controller — same-tick & paused ordering (determinism hazards)', () 
     c.start(); // PLAN.md P4: flips the advance gate — still held by pause() below
     c.pause();
     c.callWaveEarly(); // queued while paused, alongside the builds below
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm(); // queued while paused
+    c.armTower('basic');
     c.aimAt(10, 3);
     c.confirm(); // second, non-overlapping build queued
     tick(c, 3); // paused → nothing flushes
@@ -458,8 +496,10 @@ describe('controller — paused buffer-flood dedup + cap (P1)', () => {
   it('mashing sellSelected on one tower dedupes; a second selected tower still queues distinctly', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
+    c.armTower('basic');
     c.aimAt(10, 3);
     c.confirm();
     tick(c); // both towers exist
@@ -499,13 +539,15 @@ describe('controller — enqueueVerdict classifier (unit)', () => {
     // silently drop a legitimate sell-then-rebuild-while-still-pending. Real duplicate
     // prevention is `towerAt`'s job (reads the shared projection) — see
     // controller.test.ts's "sell-then-rebuild ... while still pending" test below.
-    const buffer: SimInput[] = [{ kind: 'placeTower', anchor: { col: 3, row: 3 } }];
-    expect(enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 3, row: 3 } })).toBe(
-      'queue',
-    );
-    expect(enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 4, row: 3 } })).toBe(
-      'queue',
-    );
+    const buffer: SimInput[] = [
+      { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' },
+    ];
+    expect(
+      enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' }),
+    ).toBe('queue');
+    expect(
+      enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 4, row: 3 }, towerId: 'basic' }),
+    ).toBe('queue');
   });
 
   it('a buffer at the cap without an equivalent command is full', () => {
@@ -547,6 +589,7 @@ describe('controller — replay recording, terminal truncation & verify', () => 
   it('the recorded log is deeply immutable — commands and nested anchors are frozen clones', () => {
     const c = createController(7);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // flush the placeTower into the log
@@ -569,6 +612,7 @@ describe('controller — replay recording, terminal truncation & verify', () => 
   it('verifyRun() mid-run (non-terminal) reports a distinct not-terminal outcome, never a mismatch (#41)', () => {
     const c = createController(7);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -605,6 +649,7 @@ describe('controller — replay recording, terminal truncation & verify', () => 
   it('offers no sell refund once the match is terminal (preview mirrors the frozen step)', () => {
     const c = createController(7);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     runToTerminal(c);
@@ -631,6 +676,7 @@ describe('controller — run lifecycle (startRun cleanup, §7)', () => {
   it('startRun resets tick, towers, log, speed, pause and selection', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c, 5);
@@ -647,6 +693,43 @@ describe('controller — run lifecycle (startRun cleanup, §7)', () => {
     expect(c.speed()).toBe(1);
     expect(c.isPaused()).toBe(false);
     expect(c.buildReplay().seed).toBe(99);
+  });
+
+  // QC r3: the tower hit-test index memoizes on (tick, bufferRev) and BOTH counters
+  // restart per run, so this exact sequence recreates run 1's memo key in run 2 —
+  // `callWaveEarly` is the one rev bump with no `towerAt` call to overwrite the slot.
+  // Without `reset()`'s explicit clear, run 1's pending tower would hit-test as a
+  // phantom: a visibly empty cell that rejects placement with no error anywhere.
+  it('Play-again: a phantom pending tower from the previous run must never hit-test', () => {
+    const c = createController(7);
+    c.start();
+    tick(c, 3);
+    c.armTower('basic');
+    c.clickAt(5, 5); // queues the build — the post-queue re-aim memoizes it at (tick 3, rev 1)
+    c.startRun(7); // Play again, same seed: tick AND rev restart at 0
+    c.start();
+    tick(c, 3); // tick 3 again, rev still 0
+    expect(c.callWaveEarly()).toBe(true); // rev 0 → 1 with no towerAt call — the key collides
+    c.armTower('basic');
+    c.aimAt(5, 5); // first hit-test of run 2 — must see run 2's EMPTY cell, not the phantom
+    expect(c.frame().ghost?.valid).toBe(true);
+  });
+
+  // QC r3: the commit-side half of `pendingRevision`'s documented contract ("queued or
+  // committed"). The bump is refundCache's ONLY invalidation signal — its key carries
+  // no tick leg — so "commits always advance the tick" must never become the excuse to
+  // delete it.
+  it('committing a non-empty buffer bumps pendingRevision, not just queuing into it', () => {
+    const c = createController(1);
+    c.start();
+    c.pause();
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm(); // queued while paused — the queue-side bump
+    const queued = c.frame().pendingRevision;
+    c.resume();
+    tick(c); // the commit — must bump again
+    expect(c.frame().pendingRevision).toBeGreaterThan(queued);
   });
 });
 
@@ -670,6 +753,7 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
     startAndCall(c);
     // Mirrors @wynding/render's own combat-carrying fixture: a 2×2 tower straddling the
     // entrance row so the wave must pass through its range.
+    c.armTower('basic');
     c.aimAt(2, 10);
     c.confirm();
     let sparks: { x: number; y: number }[] = [];
@@ -692,6 +776,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
   it('a tower straddling the lane shows a well-formed tracer in flight, then prunes it after impact', () => {
     const c = createController(1);
     startAndCall(c);
+    c.armTower('basic');
     c.aimAt(2, 10);
     c.confirm();
     let n = 0;
@@ -724,6 +809,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
   it('startRun clears every in-flight tracer — no tracer crosses run identity', () => {
     const c = createController(1);
     startAndCall(c);
+    c.armTower('basic');
     c.aimAt(2, 10);
     c.confirm();
     let n = 0;
@@ -739,6 +825,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
   it('a resolved match prunes every tracer (no tracer survives past terminal)', () => {
     const c = createController(1);
     startAndCall(c);
+    c.armTower('basic');
     c.aimAt(2, 10);
     c.confirm();
     runToTerminal(c);
@@ -749,6 +836,7 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
   it('a multi-tick catch-up (advance called several times before frame() is read) accumulates tracers without loss', () => {
     const c = createController(1);
     startAndCall(c);
+    c.armTower('basic');
     c.aimAt(2, 10);
     c.confirm();
     // The straddling tower's range (4 tiles) already covers the entrance, so it fires
@@ -774,15 +862,34 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.uiState().armed).toBeNull();
     c.armTower('basic');
     expect(c.uiState().armed).toBe('basic');
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'armed' });
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'armed', towerId: 'basic' });
     c.armTower('basic'); // "click Card again" — toggles off
     expect(c.uiState().armed).toBeNull();
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'disarmed' });
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'disarmed', towerId: 'basic' });
+  });
+
+  it('armTower(unknownId) is a no-op unless it resolves in the compiled catalog (M2-S3)', () => {
+    const c = createController(1);
+    c.start();
+    const before = c.uiState();
+    c.armTower('nonexistent-tower-id');
+    expect(c.uiState()).toEqual(before); // untouched — no arm, no outcome recorded
+  });
+
+  it('armTower switches a DIFFERENT id in one action (not a toggle-off) — basic → slow', () => {
+    const c = createController(1);
+    c.start();
+    c.armTower('basic');
+    expect(c.uiState().armed).toBe('basic');
+    c.armTower('slow');
+    expect(c.uiState().armed).toBe('slow'); // switched, not toggled off
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'armed', towerId: 'slow' });
   });
 
   it('any state: the armTower1 key (routed to armTower by the caller) arms; arming clears any selection', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -809,7 +916,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.armTower('basic');
     c.clickAt(3, 3);
     expect(c.uiState().armed).toBeNull(); // disarmed
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'placed' });
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'placed', towerId: 'basic' });
     const sel = c.uiState().selection;
     expect(sel).toMatchObject({ col: 3, row: 3 }); // selects the just-placed tower
     tick(c);
@@ -819,6 +926,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('armed: click an OCCUPIED cell (an existing tower) rejects, stays armed, ghost persists invalid', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // a real committed tower at (3,3)
@@ -833,6 +941,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('armed: hovering the occupied footprint keeps the invalid ghost — a click-then-move never erases the rejection cue', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // committed tower at (3,3), footprint cols 3-4 / rows 3-4
@@ -848,6 +957,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('armed: clicking the SAME occupied cell twice in a row records the identical outcome twice, bumping outcomeSeq both times', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // a real committed tower at (3,3)
@@ -865,6 +975,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it("armed: click a cell whose footprint overlaps an existing tower (but isn't itself occupied) rejects as 'other', not 'occupied'", () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // committed tower at (3,3), footprint cols 3-4/rows 3-4
@@ -886,6 +997,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
       for (const col of [2, 5, 8, 11, 14, 17, 20, 23]) cells.push([col, row]);
     expect(cells).toHaveLength(16);
     for (const [col, row] of cells) {
+      c.armTower('basic');
       c.aimAt(col, row);
       expect(c.confirm()).toBe(true);
     }
@@ -893,6 +1005,33 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.clickAt(2, 8); // a fresh, otherwise-buildable cell — now unaffordable (bounty is 0)
     expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'bounty' });
     expect(c.uiState().armed).toBe('basic'); // stays armed
+  });
+
+  it('the aim memo key includes the armed tower id — same cell, basic affordable, slow not: switching arms MUST re-evaluate (Codex R1-3)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    // Drain the starting 80 Bounty to exactly 5 (15 basic builds × cost 5) — affordable
+    // for `basic` (cost 5) but NOT for `slow` (cost 8), all queued into this one tick's
+    // buffer (placement validity reads the cumulative pending preview).
+    const cells: Array<[number, number]> = [];
+    for (const row of [2, 5])
+      for (const col of [2, 5, 8, 11, 14, 17, 20, 23]) cells.push([col, row]);
+    for (const [col, row] of cells.slice(0, 15)) {
+      c.armTower('basic');
+      c.aimAt(col, row);
+      expect(c.confirm()).toBe(true);
+    }
+    const FRESH: [number, number] = [2, 8]; // an otherwise-buildable, never-touched cell
+    c.armTower('basic');
+    const basicAim = c.aimAt(...FRESH);
+    expect(basicAim).toMatchObject({ kind: 'ghost', valid: true }); // basic: affordable (5 == 5)
+    // Switch armed to `slow` on the SAME cell in the SAME tick — the aim memo key must
+    // include the armed id, or the affordable-basic verdict would leak onto the
+    // unaffordable-slow candidate (a stale `true` reused from the basic memo entry).
+    c.armTower('slow'); // different id → switches in one action (not a toggle-off)
+    expect(c.uiState().armed).toBe('slow');
+    const slowAim = c.aimAt(...FRESH);
+    expect(slowAim).toMatchObject({ kind: 'ghost', valid: false }); // slow: unaffordable (5 < 8)
   });
 
   it('armed: document-scope Escape disarms; the ghost clears immediately', () => {
@@ -904,12 +1043,13 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.escape();
     expect(c.uiState().armed).toBeNull();
     expect(c.frame().ghost).toBeNull();
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'disarmed' });
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'disarmed', towerId: 'basic' });
   });
 
   it('armed: keyboard-cursor aim onto an existing tower is blocked (occupied), never silently selects it', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -924,6 +1064,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('unarmed: clickAt on a placed tower selects it (Panel: stats + actions)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -935,6 +1076,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('unarmed: clickAt on an empty/invalid cell deselects (Panel closes) — never places', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -950,6 +1092,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('selected: Escape deselects (Panel closes); ghost clears', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -981,6 +1124,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     seen.push(c.uiRev());
     c.escape(); // deselect
     seen.push(c.uiRev());
+    c.armTower('basic');
     c.aimAt(10, 3); // a distinct, non-overlapping cell (the (3,3) build is still pending)
     c.confirm();
     seen.push(c.uiRev());
@@ -1016,6 +1160,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('sellSelected() reports the outcome with the refund captured at press time, and the Panel closes immediately (no tick needed)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
@@ -1064,9 +1209,10 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
 
   it('start() flips started and begins stepping; Pending pre-start builds commit on the first stepped tick — wave 1 does NOT auto-launch (Start ≠ claiming, PLAN.md P3 step 15 decouple)', () => {
     const c = createController(1);
+    c.armTower('basic');
     c.aimAt(3, 3);
     expect(c.confirm()).toBe(true); // Pending — building is fully available pre-start
-    expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3 }]);
+    expect(c.frame().pendingAdds).toEqual([{ col: 3, row: 3, towerId: 'basic' }]);
     expect(c.frame().curVm.towers).toHaveLength(0); // not yet committed — still held
     expect(c.hud().phase).toBe('running');
     expect(c.hud().waveCursor).toBe(0);
@@ -1098,6 +1244,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
 
   it('replay round-trip of a started run validates', () => {
     const c = createController(1);
+    c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     c.start();
@@ -1129,6 +1276,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     // 80).
     function fillToCap(c: Controller, cycles: number): void {
       for (let i = 0; i < cycles; i++) {
+        c.armTower('basic');
         c.aimAt(3, 3);
         expect(c.confirm()).toBe(true); // build (Pending)
         c.aimAt(3, 3); // select the just-Pending tower (shared projection)
@@ -1143,6 +1291,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
 
       // The 65th planning action is rejected: invalid ghost + the distinct 'pendingCap'
       // announcement (not the generic 'other').
+      c.armTower('basic');
       c.aimAt(10, 3); // a fresh, otherwise-perfectly-buildable cell
       expect(c.frame().ghost).toMatchObject({ col: 10, row: 3, valid: false });
       expect(c.confirm()).toBe(false);
@@ -1186,6 +1335,7 @@ describe('controller — call-wave readiness (UiState.callWaveReady, PLAN.md P3 
       c.pause();
       for (let i = 0; i < MAX_INPUTS_PER_TICK / 2; i++) {
         const col = i % 2 === 0 ? 3 : 10; // two cells, alternating — never a stale duplicate
+        c.armTower('basic');
         c.aimAt(col, 3);
         expect(c.confirm()).toBe(true);
         c.aimAt(col, 3);

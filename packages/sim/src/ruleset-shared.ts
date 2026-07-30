@@ -24,8 +24,10 @@ export class RulesetError extends Error {
  *  never drift apart the way the pre-S2 duplicated-literal scheme could (S1 deferred
  *  this single-sourcing to S2, which owns the first version bump).
  *  History: Story 5 (wave lifecycle, win/loss, score, per-creep columns) bumped
- *  4 → 5; M2 Story 2 (the multi-wave engine) bumps 5 → 6. */
-export const SIM_VERSION = 6;
+ *  4 → 5; M2 Story 2 (the multi-wave engine) bumped 5 → 6; M2 Story 3 (catalog
+ *  towers + the status-effect framework: a real tower catalog, `slow`, per-creep
+ *  status columns) bumps 6 → 7. */
+export const SIM_VERSION = 7;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;
@@ -39,5 +41,39 @@ const IMMUNITY_ORDER = ['slow', 'stun'] as const;
 export function canonicalImmunities(immunities: readonly ('slow' | 'stun')[]): ('slow' | 'stun')[] {
   return [...new Set(immunities)].sort(
     (a, b) => IMMUNITY_ORDER.indexOf(a) - IMMUNITY_ORDER.indexOf(b),
+  );
+}
+
+/** Integer ceiling division — `⌈a/b⌉` via `Math.floor((a+b-1)/b)`, never float
+ *  division (the determinism contract). Used once, below, but named for its own
+ *  proof obligation (Codex R2-4's formula cites it explicitly). */
+function ceilDiv(a: number, b: number): number {
+  return Math.floor((a + b - 1) / b);
+}
+
+/**
+ * The ONE effective-speed formula (M2-S3, Codex R2-4): both the compile-time bound
+ * gate (`ruleset.ts`) and runtime movement (`index.ts`'s `advanceCreep` call site)
+ * call this EXACT function, so the replay-bound authority can never drift from
+ * actual movement. `mulFp === 0` means "no active slow" (the creep's own column
+ * pair, or the catalog-wide "no slow tower" case for the bound gate) — the base
+ * speed, untouched. Otherwise the effective speed is the largest of three floors,
+ * so a schema-legal degenerate bundle can never mint a permanent 0-speed stall:
+ *   - `1` — the totality rail (unreachable at any shipped content).
+ *   - `⌊base·mulFp/256⌋` — the authored multiplier (floor rounding).
+ *   - `⌈base·slowFloorNum/slowFloorDen⌉` — the ruleset's slow floor (ceil rounding),
+ *     so the floor is never UNDER-applied by truncation.
+ */
+export function effectiveSpeedFp(
+  baseSpeedFp: number,
+  mulFp: number,
+  slowFloorNum: number,
+  slowFloorDen: number,
+): number {
+  if (mulFp === 0) return baseSpeedFp;
+  return Math.max(
+    1,
+    Math.floor((baseSpeedFp * mulFp) / 256),
+    ceilDiv(baseSpeedFp * slowFloorNum, slowFloorDen),
   );
 }

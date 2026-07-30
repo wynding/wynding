@@ -20,11 +20,18 @@
 // because a runtime test cannot see "the same commit," that rule is enforced by a
 // CI diff-check (scripts/check-determinism-version.mjs), not by an assertion here.
 //
-// M2-S2 regenerates the golden over a 3-WAVE test bundle (PLAN.md step 11 /
-// PLAN-REVIEW-LOG G14): SIM_VERSION's bump to 6 already satisfies the CI guard's
+// M2-S2 regenerated the golden over a 3-WAVE test bundle (PLAN.md step 11 /
+// PLAN-REVIEW-LOG G14): SIM_VERSION's bump to 6 already satisfied the CI guard's
 // strict-increase requirement, and a 3-wave scenario is the only one that can
 // exercise the new multi-wave lifecycle (wave handoff, a SECOND early call on a
 // later wave, per-wave clear bonus, the early-call credit accumulator) at all.
+//
+// M2-S3 (SIM_VERSION 6 → 7) regenerates the golden AGAIN, over a v7 bundle that
+// additionally exercises the status-effect framework: a SECOND tower catalog
+// entry (`slow`, ground-scoped, direct-then-slow — mirrors the shipped bundle's
+// authored order) built alongside `basic`, and wave 1 recomposed to spawn `fast`
+// creeps (a second creep catalog entry) instead of `normal` — so the golden trace
+// actually observes a creep's `slowMulFp` go nonzero at least once.
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
@@ -37,14 +44,14 @@ import {
   type SimInput,
   type SimState,
 } from './index';
-import { testBundle, testRuleset } from './test-support';
+import { testBundle, testRuleset, TEST_SLOW_TOWER, TEST_FAST_CREEP } from './test-support';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 
 /** Fixed seed for the canonical determinism scenario. */
 const SCENARIO_SEED = 0x5eed; // 24301
-/** Scenario length — reaches the scenario's terminal (a loss at tick 536, once the
- *  sold tower leaves waves 0/1 undefended) with trailing frozen ticks, so the
- *  golden also exercises the freeze-on-terminal path within the same run. */
+/** Scenario length — reaches the scenario's terminal (a loss at tick 452, once
+ *  selling the basic tower leaves the run thin enough) with trailing frozen
+ *  ticks, so the golden also exercises the freeze-on-terminal path in-run. */
 const SCENARIO_TICKS = 600;
 
 const OPEN_28x24 = {
@@ -56,51 +63,64 @@ const OPEN_28x24 = {
 
 /**
  * The canonical ruleset — built INLINE from a board geometry (NOT imported from
- * @wynding/content, which would introduce a sim → content runtime edge). Mirrors the
- * M1 board (28×24, entrance/exit on row 11, so creeps run the full 27-cell width)
- * but grows to THREE waves (10 `normal` creeps each, spacing 20, clearBonus 4) with
- * both early-call divisors live (50/50) — the multi-wave engine's own vocabulary,
- * not just M1's single wave carried over.
+ * @wynding/content, which would introduce a sim → content runtime edge). Mirrors
+ * the M1 board (28×24, entrance/exit on row 11, so creeps run the full 27-cell
+ * width) but grows to THREE waves (10 creeps each, spacing 20, clearBonus 4) with
+ * both early-call divisors live (50/50) — the multi-wave engine's own vocabulary.
+ * M2-S3: the tower catalog gains `slow` (`TEST_SLOW_TOWER`, `extraTowers`) beside
+ * `basic`, and wave 1 (the one this scenario's second early call launches) spawns
+ * `fast` creeps (`TEST_FAST_CREEP`, `extraCreeps`) instead of `normal` — so BOTH
+ * new catalog axes (a second tower kind, a second creep kind) are exercised.
  */
 const SCENARIO_RULESET: CompiledRuleset = compileRuleset(
   testBundle(OPEN_28x24, {
     waves: [
       { waveCount: 10, waveSpacing: 20, countdownTicks: 500, waveClearBonus: 4 },
-      { waveCount: 10, waveSpacing: 20, countdownTicks: 300, waveClearBonus: 4 },
+      { waveCount: 10, waveSpacing: 20, countdownTicks: 300, waveClearBonus: 4, creepId: 'fast' },
       { waveCount: 10, waveSpacing: 20, countdownTicks: 300, waveClearBonus: 4 },
     ],
     earlyCallBountyDivisor: 50,
     earlyCallScoreDivisor: 50,
+    extraTowers: [TEST_SLOW_TOWER],
+    extraCreeps: [TEST_FAST_CREEP],
   }),
   'test',
 );
 
 /**
- * The entity id the canonical build receives: wave 0 (launched by the tick-0
- * call-early) spawns creep id 1 at tick 0; the tower placed at tick 2 (before the
- * next spawn at tick 20) gets id 2 from the shared entity-id space.
+ * The entity ids the canonical build receives: wave 0 (launched by the tick-0
+ * call-early) spawns creep id 1 at tick 0; the `basic` tower placed at tick 2
+ * (before the next spawn at tick 20) gets id 2, and the `slow` tower placed at
+ * tick 3 gets id 3 — both from the shared entity-id space, both still ahead of
+ * any later spawn.
  */
-const SCENARIO_TOWER_ID = 2;
+const BASIC_TOWER_ID = 2;
+const SLOW_TOWER_ID = 3;
 
 /**
  * The canonical input log: a pure function of the tick index. It exercises the FULL
  * command vocabulary — TWO `callWaveEarly` calls (tick 0 launches wave 0; tick 250,
- * mid-run, launches wave 1 early — both pay the early-call bounty/credit from the
- * undecremented countdown), an accepted build into the creeps' lane (forcing a
- * visible re-route AND combat kills), a rejected build (the deterministic-no-op
- * path), an explicit `noop`, and a later sell (re-opening the lane, and — with no
- * defense left — the scenario ends in a loss once wave 1's creeps run undefended).
+ * mid-run, launches wave 1 — the `fast`-creep wave — early, both paying the
+ * early-call bounty/credit from the undecremented countdown), TWO accepted builds
+ * into the creeps' lane (`basic` then `slow`, forcing a visible re-route AND
+ * combat kills AND a slow application), a rejected build (the deterministic-no-op
+ * path), an explicit `noop`, and a later sell of the `basic` tower (re-opening
+ * part of the lane; with `slow` alone left standing, the scenario still ends in a
+ * loss once undefended creeps overwhelm it).
  */
 function canonicalInputs(tick: number): SimInput[] {
   if (tick === 0) return [{ kind: 'callWaveEarly' }]; // launch wave 0 now
   // Build a 2×2 wall across the straight lane (row 11 at cols 5-6): creeps re-route.
-  if (tick === 2) return [{ kind: 'placeTower', anchor: { col: 5, row: 10 } }];
+  if (tick === 2) return [{ kind: 'placeTower', anchor: { col: 5, row: 10 }, towerId: 'basic' }];
+  // A second wall cell further down the (now-detoured) lane — clear of the basic
+  // tower's footprint (cols 5-6) — so the slow tower gets its own hits in too.
+  if (tick === 3) return [{ kind: 'placeTower', anchor: { col: 8, row: 10 }, towerId: 'slow' }];
   // A rejected build (border footprint) — pins the validation-no-op path.
-  if (tick === 4) return [{ kind: 'placeTower', anchor: { col: 0, row: 0 } }];
-  // Sell the wall — the lane re-opens and later creeps run straight again.
-  if (tick === 201) return [{ kind: 'sellTower', tower: SCENARIO_TOWER_ID }];
-  // A SECOND early call, well into the run and on a LATER wave — the multi-wave
-  // handoff + a second early-call bounty/credit payment.
+  if (tick === 4) return [{ kind: 'placeTower', anchor: { col: 0, row: 0 }, towerId: 'basic' }];
+  // Sell the basic wall — part of the lane re-opens; the slow tower stands alone.
+  if (tick === 201) return [{ kind: 'sellTower', tower: BASIC_TOWER_ID }];
+  // A SECOND early call, well into the run and on a LATER (fast-creep) wave — the
+  // multi-wave handoff + a second early-call bounty/credit payment.
   if (tick === 250) return [{ kind: 'callWaveEarly' }];
   if (tick % 7 === 0) return [{ kind: 'noop' }]; // exercise the noop path
   return [];
@@ -123,8 +143,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '0ec526ce',
-  traceDigest: '3431d8b2', // fnv1a(trace.join(':'))
+  finalHash: 'ba477e20',
+  traceDigest: '9b461515', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 
@@ -142,57 +162,51 @@ describe('determinism gate', () => {
     expect(fnv1a(trace.join(':'))).toBe(GOLDEN.traceDigest);
   });
 
-  it('witnesses creeps crossing and leaking to a LOSS (wave 1 runs undefended after the sell)', () => {
+  it('witnesses creeps crossing and leaking to a LOSS (selling the basic tower leaves the lane thin)', () => {
     // The golden is only meaningful if the scenario actually exercises leaks;
-    // selling the only tower at tick 201 leaves waves 0/1's remaining creeps
-    // undefended, so lives fall all the way to 0 (a loss) before wave 2 ever
-    // launches — the loss-priority resolution path (settlement before terminal).
+    // selling the basic tower at tick 201 (the slow tower alone can't hold the
+    // line) leaves the run undefended enough that lives fall all the way to 0
+    // (a loss) — the loss-priority resolution path (settlement before terminal).
     const { state } = runCanonical();
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
-    expect(state.waveCursor).toBe(2); // wave 2 never got the chance to launch
   });
 
-  it('witnesses a build, a visible re-route, combat kills, a sell, and the multi-wave early-call economy', () => {
-    // The golden must exercise the full Story-3 + Story-4 + M2-S2 vocabulary: the
-    // tick-2 build lands (bounty 80 + wave-0's early-call bounty 10 − TOWER_COST 5
-    // = 85); live creeps visibly leave the straight row-11 lane to route around it;
-    // the tower fires and KILLS creeps, each credit raising bounty while it stands;
-    // the tick-201 sell refunds 3 and removes the tower; and BOTH early calls
-    // (tick 0 + tick 250) pay into the cumulative early-call credit.
+  it('witnesses two builds (basic+slow), a visible re-route, combat kills, a slow application, a sell, and the multi-wave early-call economy', () => {
+    // The golden must exercise the full Story-3 + Story-4 + M2-S2 + M2-S3
+    // vocabulary: the tick-2/tick-3 builds land; live creeps visibly leave the
+    // straight row-11 lane to route around them; the towers fire and KILL creeps,
+    // each credit raising bounty while they stand; at least one creep is observed
+    // SLOWED (`slowMulFp !== 0`) at some tick; the tick-201 sell removes the basic
+    // tower (the slow tower survives); and BOTH early calls (tick 0 + tick 250)
+    // pay into the cumulative early-call credit.
     let state = createInitialState(SCENARIO_SEED, SCENARIO_RULESET);
-    let sawTower = false;
-    let towerFirstBounty = -1;
+    let sawBothTowers = false;
     let sawDetour = false;
     let sawKill = false;
+    let sawSlowedCreep = false;
     let prevBounty = state.bounty;
     for (let t = 0; t < SCENARIO_TICKS; t++) {
       state = step(state, SCENARIO_RULESET, canonicalInputs(t));
-      if (state.towers.id.length === 1) {
-        if (!sawTower) {
-          sawTower = true;
-          towerFirstBounty = state.bounty; // captured before any kill credits
-          expect(state.towers.id[0]).toBe(SCENARIO_TOWER_ID);
-        }
-        // Bounty rises only from a combat kill while the tower stands (the sell's
-        // refund lands the same tick the tower is removed, so towers.length is 0).
-        if (state.bounty > prevBounty) sawKill = true;
-      }
+      if (state.towers.id.length === 2) sawBothTowers = true;
+      // Bounty rises only from a combat kill while at least one tower stands.
+      if (state.towers.id.length >= 1 && state.bounty > prevBounty) sawKill = true;
+      if (state.creeps.slowMulFp.some((m) => m !== 0)) sawSlowedCreep = true;
       if (state.creeps.headRow.some((r) => r !== undefined && r !== 11)) sawDetour = true;
       prevBounty = state.bounty;
     }
-    expect(sawTower).toBe(true);
-    expect(towerFirstBounty).toBe(85); // 80 + ⌊500/50⌋ early-call bounty − TOWER_COST 5
+    expect(sawBothTowers).toBe(true); // both basic and slow stood at once
     expect(sawDetour).toBe(true); // the straight-lane board never leaves row 11 unbuilt
-    expect(sawKill).toBe(true); // the tower actually killed a creep and earned bounty
-    expect(state.towers.id).toHaveLength(0); // sold
+    expect(sawKill).toBe(true); // a tower actually killed a creep and earned bounty
+    expect(sawSlowedCreep).toBe(true); // the slow tower actually slowed a creep
+    expect(state.towers.id).toEqual([SLOW_TOWER_ID]); // basic sold, slow survives
     // ⌊500/50⌋ = 10 (the tick-0 call at full countdown) + ⌊51/50⌋ = 1 (the tick-250
     // call: wave 1's 300-tick countdown began decrementing at tick 1, so 249
     // decrements leave rem = 51) — NOT ⌊300/50⌋: the second call is mid-countdown.
     expect(state.cumulativeEarlyCallCredit).toBe(11);
     // The terminal the header documents, pinned (tick freezes at the terminal):
     expect(state.phase).toBe('lost');
-    expect(state.tick).toBe(536);
+    expect(state.tick).toBe(452);
   });
 
   it('continues byte-identically after a mid-run serialize/restore (resume path)', () => {
@@ -257,18 +271,21 @@ describe('determinism gate', () => {
 });
 
 /**
- * v5-CONTINUITY WITNESSES (PLAN.md step 11 / PLAN-REVIEW-LOG G14): a SINGLE-wave
- * bundle carrying M1's exact numbers (both early-call divisors 0, survivalMul 25 —
- * `test-support`'s defaults) — built INLINE, mirroring `packages/content`'s shipped
- * M1 artifact (`parity.test.ts`'s pre-verified scenario A/B, whose literals this
- * file duplicates by provenance, not by import — sim must not depend on content).
- * At these numbers wave-1's launch tick, spawn ticks, movement, and combat are
- * BYTE-IDENTICAL to v5 (no second wave, no early-call credit): v6 reproduces the
- * exact same lives/terminal-tick/score outcomes — only the world-hash's SHAPE
- * changes (new state fields), which is why this witness pins the OBSERVABLE
- * outcomes, not a hash.
+ * v7-CONTINUITY WITNESSES (PLAN.md step 11 / PLAN-REVIEW-LOG G14, carried forward
+ * from M2-S2's v5-continuity witnesses): a SINGLE-wave, SINGLE-tower ('basic'
+ * only — no `slow`, no `fast`) bundle carrying M1's exact numbers (both
+ * early-call divisors 0, survivalMul 25 — `test-support`'s defaults) — built
+ * INLINE, mirroring `packages/content`'s shipped M1 artifact (`parity.test.ts`'s
+ * pre-verified scenario A/B, whose literals this file duplicates by provenance,
+ * not by import — sim must not depend on content). At these numbers no slow
+ * effect and no `fast` creep is ever compiled or spawned, so wave-1's launch
+ * tick, spawn ticks, movement, and combat are BYTE-IDENTICAL to v5/v6 (no second
+ * wave, no early-call credit, no status effects): v7 reproduces the EXACT SAME
+ * lives/terminal-tick/score outcomes as v5 did — only the world-hash's SHAPE
+ * changes (three new creep columns, one new tower column), which is why this
+ * witness pins the OBSERVABLE outcomes, not a hash.
  */
-describe('v5-continuity witnesses (single-wave M1-numbers bundle)', () => {
+describe('v7-continuity witnesses (single-wave, single-tower M1-numbers bundle)', () => {
   const M1_RULESET = testRuleset(OPEN_28x24);
 
   it('scenario A (canonical inputs, 500 ticks): lives 2, terminal tick 446, score 52 (a win, 1 star)', () => {
@@ -281,9 +298,9 @@ describe('v5-continuity witnesses (single-wave M1-numbers bundle)', () => {
         t === 0
           ? [{ kind: 'callWaveEarly' }]
           : t === 2
-            ? [{ kind: 'placeTower', anchor: { col: 5, row: 10 } }]
+            ? [{ kind: 'placeTower', anchor: { col: 5, row: 10 }, towerId: 'basic' }]
             : t === 4
-              ? [{ kind: 'placeTower', anchor: { col: 0, row: 0 } }]
+              ? [{ kind: 'placeTower', anchor: { col: 0, row: 0 }, towerId: 'basic' }]
               : t === 201
                 ? [{ kind: 'sellTower', tower: 2 }]
                 : t % 7 === 0

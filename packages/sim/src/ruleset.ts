@@ -27,7 +27,10 @@
 //     `waves[]` schedule; `CompiledCreep` gains the preview-facing `armor`/
 //     `immunities` axes. `creepByKind` → `creepById`, and the compiled tower/
 //     schedule `kind` → `id`/`creepId` (a catalog id is an open string, not a
-//     closed union member) are M2-S1's renames, unchanged here.
+//     closed union member) are M2-S1's renames, unchanged here. M2-S3 replaces
+//     the single `CompiledTower` field with `towers[]`/`towerById` (a real
+//     catalog), deletes flat `damage` for an authored-order `effects: CompiledEffect[]`
+//     (direct/slow), and moves `slowFloorNum`/`slowFloorDen` onto `CompiledBalance`.
 //
 // The module graph is one-way: `ruleset-shared.ts` (the leaf: `RulesetError`,
 // `canonicalImmunities`, `SIM_VERSION`) ← {`ruleset-schema.ts`, `capability.ts`} ←
@@ -37,9 +40,9 @@
 // this module and `index.ts`'s public re-export can never drift apart.
 
 import { canonicalJson, sha256Hex } from '@wynding/engine';
-import type { EffectDef, Ruleset, RulesetBoard, TowerDef } from '@wynding/types';
+import type { EffectDef, Ruleset, RulesetBoard, TowerDef, TowerTargetDomain } from '@wynding/types';
 import { loadBoard, type BoardContext } from './context';
-import { RulesetError, canonicalImmunities, SIM_VERSION } from './ruleset-shared';
+import { RulesetError, canonicalImmunities, effectiveSpeedFp, SIM_VERSION } from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
 import { capabilityProfile, type CapabilityProfile } from './capability';
 
@@ -79,12 +82,17 @@ export interface CompiledWave {
  *  here — v2 moved them to the wave schedule) and the flat `earlyCallBonus`
  *  replaced by the real divisor the wave phase reads at launch time.
  *  `leakCost` stays DERIVED (read from the per-creep v2 schema under the
- *  capability profile's uniformity guarantee) rather than a raw bundle field. */
+ *  capability profile's uniformity guarantee) rather than a raw bundle field.
+ *  `slowFloorNum`/`slowFloorDen` (M2-S3) compile straight through from the
+ *  validated bundle — the ratio `effectiveSpeedFp` (ruleset-shared.ts) floors a
+ *  slowed creep's speed against, shared verbatim by the bound gate and movement. */
 export interface CompiledBalance {
   readonly startingLives: number;
   readonly startingBounty: number;
   readonly refundNum: number;
   readonly refundDen: number;
+  readonly slowFloorNum: number;
+  readonly slowFloorDen: number;
   readonly leakCost: number;
   readonly earlyCallBountyDivisor: number;
 }
@@ -97,14 +105,27 @@ export interface CompiledScoring {
   readonly earlyCallScoreDivisor: number;
 }
 
-/** Sim-owned compile-time projection of `TowerDef` — v1 field set, `kind` renamed
- *  `id`. `damage` is read from the bundle's single direct/single effect (the
- *  capability profile guarantees exactly one effect, kind `direct`, form
- *  `single`, at this sim's behavior version). */
+/** One compiled effect primitive a tower's fire snapshots per shot, in AUTHORED
+ *  order (m2.md §Combat) — the fire-time application list `combat.ts` clones fresh
+ *  per fire (impacts serialize into the world-hash, so a shared reference across
+ *  fires would let one impact's runtime mutation bleed into another's). Only the
+ *  two kinds the sv7 capability profile allows (`allowedEffectKinds`) ever appear
+ *  here; a future story widens this union alongside its own capability bump. */
+export type CompiledEffect =
+  | { readonly kind: 'direct'; readonly amount: number }
+  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number };
+
+/** Sim-owned compile-time projection of `TowerDef` — `kind` renamed `id` (decision
+ *  4). `effects` REPLACES v1's flat `damage` (G3): the fire-time snapshot needs the
+ *  whole authored-order bundle (a parallel `damage` field would be a second source
+ *  of truth), projected from the bundle's `effects` array in authored order.
+ *  `domain` (from `attack.domain`) is projected AHEAD of the story that lets it
+ *  vary (`'ground'` at sv7 — the `CompiledCreep.armor` precedent). */
 export interface CompiledTower {
   readonly id: string;
   readonly cost: number;
-  readonly damage: number;
+  readonly effects: readonly CompiledEffect[];
+  readonly domain: TowerTargetDomain;
   readonly rangeFp: number;
   readonly cadenceTicks: number;
   readonly travelTicks: number;
@@ -112,7 +133,7 @@ export interface CompiledTower {
 
 /** Sim-owned compile-time projection of `CreepDef` — v1 field set, `kind`
  *  renamed `id`, plus the preview-facing axes the render VM joins on: `armor` and
- *  frozen `immunities` (both capability-gated to `0`/`[]` at sv6 — present on the
+ *  frozen `immunities` (both capability-gated to `0`/`[]` at sv7 — present on the
  *  compiled surface now so the preview text can read them without a schema import,
  *  ahead of the story that lets them vary). */
 export interface CompiledCreep {
@@ -136,8 +157,13 @@ export interface CompiledRuleset {
   readonly board: BoardContext;
   readonly balance: CompiledBalance;
   readonly scoring: CompiledScoring;
-  /** The single M1 tower stat block (one tower kind at M1). */
-  readonly tower: CompiledTower;
+  /** The full compiled tower catalog, in AUTHORED order (M2-S3 — replaces M1/M2-S1's
+   *  single flat `tower`). */
+  readonly towers: readonly CompiledTower[];
+  /** Tower stat lookup by catalog id — a FROZEN null-prototype plain record (the
+   *  `creepById` precedent), so a retained ruleset is genuinely immutable and a
+   *  JSON `id: "__proto__"` can't escape the deep-freeze via the prototype chain. */
+  readonly towerById: Readonly<Partial<Record<string, CompiledTower>>>;
   /** Creep stat lookup by id — a FROZEN plain record (not a Map, whose `set/delete`
    *  `Object.freeze` can't block), so a retained ruleset is genuinely immutable.
    *  Renamed from v1's `creepByKind` (decision 4/M2-S1 invariant 1). */
@@ -480,36 +506,66 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // catalog entry carries exactly that value.
   const leakCost = normalized.creepCatalog[0]!.leakCost;
 
-  const towerDef: TowerDef = normalized.towerCatalog[0]!; // profile: exactly one tower
-  // damage := the bundle's single direct/single effect's damage (profile: exactly
-  // one effect, kind direct, form single, at this sim's behavior version).
-  const directEffect = towerDef.effects.find(
-    (e): e is Extract<EffectDef, { kind: 'direct'; form: 'single' }> =>
-      e.kind === 'direct' && e.form === 'single',
-  );
-  if (directEffect === undefined) {
+  // Compile EVERY catalog tower (sv7: `maxTowerCatalogSize` widens to the schema cap
+  // 64 — step 3) — the same per-tower guards M1/sv6 ran on its lone entry (attack
+  // present, cadence present, ≥ 1 direct/single effect) now run over each one.
+  function compileEffect(e: EffectDef, towerId: string): CompiledEffect {
+    if (e.kind === 'direct' && e.form === 'single') return { kind: 'direct', amount: e.damage };
+    if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+    // Unreachable at sv7: `allowedEffectKinds`/`allowedDirectForms` already rejected
+    // anything else in `checkCapabilityGlobal`, above. Defensive, not load-bearing.
     throw new RulesetError(
-      `tower '${towerDef.id}' must have a direct/single effect at simVersion ${SIM_VERSION}`,
+      `tower '${towerId}' has an effect this sim build cannot compile at simVersion ${SIM_VERSION}`,
     );
   }
-  if (towerDef.attack === undefined) {
-    throw new RulesetError(
-      `tower '${towerDef.id}' must have an attack at simVersion ${SIM_VERSION}`,
+  const towers: CompiledTower[] = normalized.towerCatalog.map((towerDef: TowerDef) => {
+    const directEffect = towerDef.effects.find(
+      (e): e is Extract<EffectDef, { kind: 'direct'; form: 'single' }> =>
+        e.kind === 'direct' && e.form === 'single',
     );
+    if (directEffect === undefined) {
+      throw new RulesetError(
+        `tower '${towerDef.id}' must have a direct/single effect at simVersion ${SIM_VERSION}`,
+      );
+    }
+    if (towerDef.attack === undefined) {
+      throw new RulesetError(
+        `tower '${towerDef.id}' must have an attack at simVersion ${SIM_VERSION}`,
+      );
+    }
+    if (towerDef.attack.cadenceTicks === undefined) {
+      throw new RulesetError(
+        `tower '${towerDef.id}' attack.cadenceTicks is required at simVersion ${SIM_VERSION}`,
+      );
+    }
+    return {
+      id: towerDef.id,
+      cost: towerDef.cost,
+      effects: towerDef.effects.map((e) => compileEffect(e, towerDef.id)),
+      domain: towerDef.attack.domain,
+      rangeFp: towerDef.attack.rangeFp,
+      cadenceTicks: towerDef.attack.cadenceTicks,
+      travelTicks: towerDef.attack.travelTicks,
+    };
+  });
+  // Null-prototype record — see `creepById`'s doc for why (`__proto__` catalog ids).
+  const towerById: Partial<Record<string, CompiledTower>> = Object.create(null) as Partial<
+    Record<string, CompiledTower>
+  >;
+  for (const t of towers) towerById[t.id] = t;
+
+  // The catalog-wide STRONGEST slow (min mulFp — smaller multiplies speed down
+  // further) over every compiled tower's slow effects; `0` iff no catalog tower
+  // carries one (the bound gate then uses `effectiveSpeedFp`'s `mulFp === 0`
+  // no-slow case, matching movement's own no-active-slow case exactly).
+  let strongestMulFp = 0;
+  for (const t of towers) {
+    for (const e of t.effects) {
+      if (e.kind === 'slow' && (strongestMulFp === 0 || e.mulFp < strongestMulFp)) {
+        strongestMulFp = e.mulFp;
+      }
+    }
   }
-  if (towerDef.attack.cadenceTicks === undefined) {
-    throw new RulesetError(
-      `tower '${towerDef.id}' attack.cadenceTicks is required at simVersion ${SIM_VERSION}`,
-    );
-  }
-  const tower: CompiledTower = {
-    id: towerDef.id,
-    cost: towerDef.cost,
-    damage: directEffect.damage,
-    rangeFp: towerDef.attack.rangeFp,
-    cadenceTicks: towerDef.attack.cadenceTicks,
-    travelTicks: towerDef.attack.travelTicks,
-  };
 
   // Compile EVERY board wave into an explicit per-spawn timeline (G7): each entry's
   // stream (first spawn at `offsetTicks`, then every `spacingTicks`, `count` times)
@@ -519,7 +575,13 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // aggregates the wave's `entriesSummary` (one row per creep id, FIRST-ARRIVAL
   // order over the sorted timeline) — the wave-preview's authoritative source.
   let totalSpawns = 0; // MAX_SCHEDULED_SPAWNS caps the aggregate across ALL waves.
-  let minSpeedFp = Number.MAX_SAFE_INTEGER; // over every creep id ANY wave spawns.
+  // The bound gate's terminal-tick bound must survive hostile SELF-SLOWING (a
+  // built `slow` tower stretches every traversal) — so this tracks the MINIMUM
+  // EFFECTIVE speed (step 4, Codex R2-4's `effectiveSpeedFp`, shared verbatim with
+  // movement) under the catalog-wide `strongestMulFp` above, not the raw base
+  // speed. Without any catalog slow effect, `strongestMulFp` is 0 and
+  // `effectiveSpeedFp` returns `speedFp` unchanged — byte-identical to sv6.
+  let minEffSpeedFp = Number.MAX_SAFE_INTEGER; // over every creep id ANY wave spawns.
   const tails: number[] = []; // per-wave max spawn offset — the bound gate's tail_k.
   const waves: CompiledWave[] = [];
   for (const wave of board.waves) {
@@ -561,7 +623,13 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     tails.push(spawns[spawns.length - 1]!.offsetTicks); // sorted ascending ⇒ last is max
     for (const s of spawns) {
       const def = creepById[s.creepId]!; // resolved above
-      if (def.speedFp < minSpeedFp) minSpeedFp = def.speedFp;
+      const eff = effectiveSpeedFp(
+        def.speedFp,
+        strongestMulFp,
+        normalized.balance.slowFloorNum,
+        normalized.balance.slowFloorDen,
+      );
+      if (eff < minEffSpeedFp) minEffSpeedFp = eff;
     }
     // Preview order = FIRST-ARRIVAL order over the SORTED spawn timeline, not the
     // authored entry order: with per-entry offsets the first creeps a player sees can
@@ -606,7 +674,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     if (last > latestSpawnTick) latestSpawnTick = last;
   });
   const cells = boardCtx.grid.width * boardCtx.grid.height;
-  const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minSpeedFp);
+  const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minEffSpeedFp);
   if (latestSpawnTick + maxTraversalTicks > MAX_MATCH_TICKS) {
     throw new RulesetError('ruleset cannot reach a terminal state within the tick budget');
   }
@@ -627,6 +695,8 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     startingBounty: normalized.balance.startingBounty,
     refundNum: normalized.balance.refundNum,
     refundDen: normalized.balance.refundDen,
+    slowFloorNum: normalized.balance.slowFloorNum,
+    slowFloorDen: normalized.balance.slowFloorDen,
     leakCost,
     earlyCallBountyDivisor: normalized.balance.earlyCallBountyDivisor,
   };
@@ -642,21 +712,23 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     board: boardCtx,
     balance,
     scoring,
-    tower,
+    towers,
+    towerById,
     creepById,
     waves,
     digest,
   };
-  // Freeze the compiled tuning (balance/scoring/tower/creep defs/waves) so a
-  // retained ruleset can't be mutated at runtime and diverge from its digest. The
+  // Freeze the compiled tuning (balance/scoring/tower catalog/creep defs/waves) so
+  // a retained ruleset can't be mutated at runtime and diverge from its digest. The
   // board machinery (grid methods, typed-array fields) is intentionally left
   // untouched.
   deepFreeze(compiled.balance);
   deepFreeze(compiled.scoring);
-  deepFreeze(compiled.tower);
+  deepFreeze(compiled.towers);
+  deepFreeze(compiled.towerById);
   deepFreeze(compiled.waves);
   deepFreeze(compiled.creepById);
-  Object.freeze(compiled); // freeze the WRAPPER too, so `ruleset.tower = …` can't replace a field
+  Object.freeze(compiled); // freeze the WRAPPER too, so `ruleset.towers = …` can't replace a field
   validated.add(compiled);
   return compiled;
 }

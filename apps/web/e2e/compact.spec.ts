@@ -120,7 +120,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // COMPACT-gated (not pointer-gated — decision 1), so it is hidden here even under a
     // fine pointer.
     await expect(page.locator('.wy-wordmark')).toBeHidden();
-    await expect(page.locator('.wy-card-hotkey')).toBeHidden();
+    // Both Cards' hotkey badges (M2-S3: card-hotkey-hidden ×2) — count pinned first, so a
+    // renamed/removed badge class cannot pass this loop vacuously (QC round 1).
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(2);
+    for (const badge of await page.locator('.wy-card-hotkey').all())
+      await expect(badge).toBeHidden();
 
     // All FIVE chip slots are visible pre-start now (M2-S2, PLAN.md P3 step 15's Start
     // decouple): the wave chip is countdown-only and the sim's real `countdownRemaining`
@@ -395,7 +399,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     expect(stage.y).toBeGreaterThanOrEqual(status.y + status.height - 1);
 
     await expect(page.locator('.wy-wordmark')).toBeVisible();
-    await expect(page.locator('.wy-card-hotkey')).toBeVisible();
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(2); // vacuous-pass guard (QC round 1)
+    for (const badge of await page.locator('.wy-card-hotkey').all())
+      await expect(badge).toBeVisible();
 
     // The full-form chips are what's painted; the glance forms never render on Standard.
     const chips = await visibleChipAccessibleText(page);
@@ -459,7 +465,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const status = (await regionRect(page, 'status')) as Rect;
     expect(status.height).toBeGreaterThanOrEqual(SHORT_DESKTOP.height * 0.9);
     // The badge is Compact-gated, NOT pointer-gated: a fine pointer does not bring it back.
-    await expect(page.locator('.wy-card-hotkey')).toBeHidden();
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(2); // vacuous-pass guard (QC round 1)
+    for (const badge of await page.locator('.wy-card-hotkey').all())
+      await expect(badge).toBeHidden();
     await expect(page.locator('.wy-wordmark')).toBeHidden();
 
     await assertDeclaredRegions(page);

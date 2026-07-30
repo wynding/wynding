@@ -40,4 +40,15 @@ describe('keymap — rebindable controls (GAG §2)', () => {
     km.reset();
     expect(km.codeFor('pause')).toBe('Space');
   });
+
+  // M2-S3: armTower2 is inserted immediately after armTower1 (settings-list adjacency —
+  // GAME_ACTIONS derives from DEFAULTS' insertion order), defaulted to Digit2.
+  it('armTower2 is inserted right after armTower1, defaulted to Digit2', () => {
+    const km = createKeymap();
+    const idx1 = GAME_ACTIONS.indexOf('armTower1');
+    const idx2 = GAME_ACTIONS.indexOf('armTower2');
+    expect(idx2).toBe(idx1 + 1);
+    expect(km.codeFor('armTower2')).toBe('Digit2');
+    expect(km.actionFor('Digit2')).toBe('armTower2');
+  });
 });

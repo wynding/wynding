@@ -6,12 +6,15 @@
 // DOM overlay owned by apps/web (ADR 0003 §3: canvas text isn't semantic/axe-visible).
 
 import Phaser from 'phaser';
+import { MS_PER_TICK } from '@wynding/sim';
 import { createProjection, type Projection } from './projection';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
 import { boardPaintOps, type BoardPaintOp } from './board-cells';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
+import { creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
+import { towerFootprintMarkFor } from './tower-paint';
 import type { RenderVM, RenderOverlay, RenderHandle, ColourMode } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -230,14 +233,33 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       const size = projection.cellPx * 2; // 2×2 footprint
       g.fillStyle(pal.tower, 1);
       g.fillRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
+      // `slow` vs `basic` footprint mark (M2-S3): both bodies share `pal.tower` — a
+      // palette decision (S3 mints no second tower colour), with the per-tower
+      // distinction carried by SHAPE — an inner concentric ring for `'ringed'` (slow),
+      // nothing extra for `'plain'` (basic) — so ADR 0003's redundant-encoding rule
+      // holds whatever the palette later does. The committed ring strokes `pal.floor`
+      // so it reads against the solid `pal.tower` fill; the pending branch below
+      // strokes `pal.tower` instead — its body is an unfilled outline, so there is no
+      // fill to contrast against and the ring keeps the pending cue's own colour +
+      // alpha (CodeRabbit #73: the two branches differ on purpose).
+      if (towerFootprintMarkFor(t.towerId) === 'ringed') {
+        g.lineStyle(2, pal.floor, 1);
+        g.strokeCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+      }
     }
     // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
-    // the dual shape+alpha cue distinguishing "pending" from a committed tower.
+    // the dual shape+alpha cue distinguishing "pending" from a committed tower — carries
+    // its own footprint mark too, so a slow tower queued while paused keeps its
+    // shape-distinct identity (Codex R1-7).
     for (const p of o.pendingAdds) {
       const pt = projection.cellToPixel(p.col, p.row);
       const size = projection.cellPx * 2;
       g.lineStyle(3, pal.tower, 0.6);
       g.strokeRoundedRect(pt.x + 2, pt.y + 2, size - 4, size - 4, 6);
+      if (towerFootprintMarkFor(p.towerId) === 'ringed') {
+        g.lineStyle(1, pal.tower, 0.6);
+        g.strokeCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+      }
     }
     if (o.selection !== null) {
       const c = projection.cellToPixel(o.selection.col, o.selection.row);
@@ -251,18 +273,41 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   const drawCreeps = (
     g: Phaser.GameObjects.Graphics,
     pal: Palette,
-    interpolated: readonly { x: number; y: number; hpFrac: number }[],
+    interpolated: readonly {
+      x: number;
+      y: number;
+      hpFrac: number;
+      creepId: string;
+      slowed: boolean;
+    }[],
+    reducedMotion: boolean,
+    renderTimeMs: number, // MILLISECONDS — the unit lives in the name (QC r3), the tick→ms conversion happens at the call site
   ): void => {
     for (const c of interpolated) {
       const p = projection.fpToPixel(c.x, c.y);
       const r = Math.max(3, projection.cellPx * 0.35);
       const hpColour = c.hpFrac < 0.34 ? pal.creepLowHp : pal.creep;
-      g.fillStyle(hpColour, 1); // set once — used for both the silhouette and the pip
-      // triangle silhouette — a shape cue distinct from the tower's square
-      g.fillTriangle(p.x, p.y - r, p.x + r, p.y + r, p.x - r, p.y + r);
+      const op = creepSilhouettePaintOp(c.creepId, p.x, p.y, r, hpColour, c.hpFrac);
+      g.fillStyle(op.colour, 1); // set once — used for both the silhouette and the pip
+      // Silhouette keyed on `creepId`'s shape (M2-S3): `normal` keeps the triangle (a
+      // shape cue distinct from the tower's square); `fast` draws a diamond, visibly
+      // distinct at cell scale; an unknown id falls back to the triangle (total).
+      if (op.shape === 'diamond') {
+        g.fillTriangle(op.x, op.y - r, op.x + r, op.y, op.x, op.y + r);
+        g.fillTriangle(op.x, op.y - r, op.x - r, op.y, op.x, op.y + r);
+      } else {
+        g.fillTriangle(op.x, op.y - r, op.x + r, op.y + r, op.x - r, op.y + r);
+      }
       // health pip: length AND colour encode HP (dual cue) — warning tint only when low.
       // hpFrac is already clamped to [0,1] by deriveViewModel (CreepVM invariant).
-      g.fillRect(p.x - r, p.y - r - 4, r * 2 * c.hpFrac, 3);
+      g.fillRect(op.x - r, op.y - r - 4, r * 2 * op.hpFrac, 3);
+      // Slowed telegraph (M2-S3): a shape cue (ring, opaque) ALWAYS accompanies a live
+      // slow; the motion cue (pulse, radius driven by render time) yields to reduced
+      // motion (WCAG 2.3.3 / GAG §2). Alphas live in the plan, not here.
+      for (const tel of slowTelegraphPaintOps(c, r, reducedMotion, pal.slowed, renderTimeMs)) {
+        g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.alpha);
+        g.strokeCircle(tel.x, tel.y, tel.r);
+      }
     }
   };
 
@@ -272,13 +317,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     g: Phaser.GameObjects.Graphics,
     pal: Palette,
     overlay: RenderOverlay,
-    prevVm: RenderVM | null,
-    curVm: RenderVM,
-    alpha: number,
+    renderTimeTicks: number, // fractional TICKS — derived ONCE per frame in `draw` (CodeRabbit #73); the unit lives in the name (QC r3)
     interpolatedById: ReadonlyMap<number, { x: number; y: number }>,
   ): void => {
-    const renderTime = renderTimeOf(prevVm, curVm, alpha);
-    const positioned = positionTracers(overlay.tracers, interpolatedById, renderTime);
+    const positioned = positionTracers(overlay.tracers, interpolatedById, renderTimeTicks);
     for (const op of tracerPaintOps(positioned, overlay.reducedMotion, pal)) {
       const p = projection.fpToPixel(op.x, op.y); // op.x/y are fp-unit sim coordinates
       g.fillStyle(op.colour, 1);
@@ -351,8 +393,16 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     gfx.clear();
     drawBoard(gfx, overlay.colourMode);
     drawTowers(gfx, pal, curVm, overlay);
-    drawTracers(gfx, pal, overlay, prevVm, curVm, alpha, interpolatedById);
-    drawCreeps(gfx, pal, interpolated);
+    // ONE render-time derivation per frame, shared by tracers and the telegraph pulse
+    // (CodeRabbit #73) — the "one clock" invariant is structural, not two calls that
+    // happen to agree.
+    const renderTimeTicks = renderTimeOf(prevVm, curVm, alpha);
+    drawTracers(gfx, pal, overlay, renderTimeTicks, interpolatedById);
+    // CLOCK DOMAIN (QC round 2): `renderTimeOf` is in fractional TICKS (tracers.test.ts:
+    // `renderTimeOf(vm(5), vm(6), 0.5) === 5.5`); the paint-plan's pulse period is
+    // MILLISECONDS (`renderTimeMs`) — convert here, or the 900ms breath becomes a
+    // 900-TICK (45s) one and the motion cue is imperceptible inside a 40-tick slow.
+    drawCreeps(gfx, pal, interpolated, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
     drawGhost(gfx, pal, overlay);
     drawSparks(gfx, pal, overlay);
   };

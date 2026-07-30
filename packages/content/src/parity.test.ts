@@ -1,16 +1,22 @@
-// parity.test.ts — behavioral-parity goldens (PLAN M2-S2 step 13).
+// parity.test.ts — an S3-shipped-content snapshot (PLAN M2-S3 step 13).
 //
-// The whole point of re-encoding the ruleset to v2 (schema-validated JSON, a
-// capability profile, discriminated effect bundles) is that NOTHING about how the
-// sim actually simulates the shipped content may change out from under the content
-// package. This file is the proof: load the bundled artifact through the real
-// production path — the registry, then `compileRuleset` — and run it against two
-// pre-verified golden scenarios (a hands-off loss and a full win), asserting every
-// observable of the terminal state (world-hash, per-tick trace digest, lives,
-// terminal tick, score, stars) against literals computed BEFORE this file existed,
-// by running the untouched sim over the shipped bundle. If any assertion below
-// fails, the compile mapping (or something upstream of it) changed BEHAVIOR — fix
-// the code, never the literal.
+// Through M2-S1/S2 this file's charter was "behavior must not change / literals are
+// never updated" — a TS-era-format-migration parity proof. That charter is retired
+// as of M2-S3: this story DELIBERATELY changes the shipped bundle (the `slow` tower,
+// the `fast` creep, wave 2's re-composition), so the literals below are NOT frozen —
+// they are a snapshot of what the shipped content actually does, re-pinned every
+// time the bundle intentionally changes. Old-behavior CONTINUITY (proving the v7 sim
+// reproduces pre-S3 outcomes) lives exclusively in the sim package's own continuity
+// witnesses (PLAN.md step 11), not here.
+//
+// This file still loads the bundled artifact through the real production path — the
+// registry, then `compileRuleset` — and pins every observable of two scenarios (a
+// hands-off loss and a full win, the latter now exercising the `slow` tower) against
+// literals computed by running the untouched sim over the shipped bundle. The
+// winning scenario also PROVES its `slow` placements landed (Codex R2-3): a
+// self-consistent golden alone cannot certify that new commands weren't silent
+// no-ops, so the terminal state is asserted to hold surviving `slow` towers, and a
+// mid-trace probe asserts some creep carried a nonzero `slowMulFp` at some tick.
 //
 // Regenerate every literal below with:
 //   pnpm --filter @wynding/content exec vitest run parity
@@ -55,10 +61,14 @@ function fnv1a(s: string): string {
 }
 
 /** Run `ticks` steps of the bundled ruleset from a fresh state, seeded and driven
- *  by `inputs`. Returns the terminal state and the per-tick world-hash trace. */
+ *  by `inputs`. Returns the terminal state and the per-tick world-hash trace.
+ *  `probe`, if given, is called with the post-step state on every tick — used to
+ *  observe transient per-tick facts (e.g. a slow status landing) that the terminal
+ *  state alone cannot prove (Codex R2-3). */
 function runScenario(
   inputs: (tick: number) => SimInput[],
   ticks: number,
+  probe?: (state: SimState) => void,
 ): { state: SimState; trace: string[] } {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
@@ -67,6 +77,7 @@ function runScenario(
   for (let t = 0; t < ticks; t++) {
     state = step(state, ruleset, inputs(t));
     trace.push(hashSimState(state));
+    probe?.(state);
   }
   return { state, trace };
 }
@@ -78,8 +89,8 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     const noInputs = (): SimInput[] => [];
     const { state, trace } = runScenario(noInputs, 1200);
 
-    expect(hashSimState(state)).toBe('22460978');
-    expect(fnv1a(trace.join(':'))).toBe('a09f3865');
+    expect(hashSimState(state)).toBe('9ae805af');
+    expect(fnv1a(trace.join(':'))).toBe('90d4d8a9');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
@@ -87,27 +98,43 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(deriveStars(state, ruleset)).toBe(0);
   });
 
-  it('winning scenario (early calls + placements, 1500 ticks) matches the pinned golden exactly', () => {
-    // A wall of towers flanking the row-11 lane (row 10 and row 12, every third
-    // column), placed one per tick as budget allows: enough total DPS to clear
-    // all three waves outright. Wave 0 is early-called at tick 0 (paying the
-    // early-call bounty/credit from the undecremented 500-tick countdown); wave 1
-    // launches naturally at tick 300 (its countdown, not an early call, so it pays
-    // no credit — `rem` is 0 at natural expiry); wave 2 is early-called at tick 550
-    // (50 ticks before its natural expiry, paying a small bounty/credit); the
-    // tick-1050 call is a deliberate no-op — every wave has already launched by
-    // then, exercising `!launchPending`'s already-launched-cursor branch.
+  it('winning scenario (early calls + placements, incl. two `slow` towers, 1500 ticks) matches the pinned golden exactly', () => {
+    // A wall of `basic` towers flanking the row-11 lane (row 10 and row 12, every
+    // third column), placed one per tick as budget allows: enough total DPS to
+    // clear all three waves outright. Once the wall is fully placed, two `slow`
+    // towers go up off-lane (rows 7 and 15, `slowAnchors` below) — proving the slow path
+    // client/server-identically at content level (step 12). Wave 0 is
+    // early-called at tick 0 (paying the early-call bounty/credit from the
+    // undecremented 500-tick countdown); wave 1 launches naturally at tick 300
+    // (its countdown, not an early call, so it pays no credit — `rem` is 0 at
+    // natural expiry); wave 2 is early-called at tick 550 (50 ticks before its
+    // natural expiry, paying a small bounty/credit); the tick-1050 call is a
+    // deliberate no-op — every wave has already launched by then, exercising
+    // `!launchPending`'s already-launched-cursor branch.
     const anchors: { col: number; row: number }[] = [];
     for (let col = 1; col <= 26; col += 3) {
       anchors.push({ col, row: 10 });
       anchors.push({ col, row: 12 });
     }
+    // Rows 7 and 15 — within the `slow` tower's 4-cell range of the row-11 lane,
+    // clear of the row-10/row-12 basic wall's 2×2 footprints (so no placement
+    // overlap) — placed once bounty has recovered from the wall build.
+    const slowAnchors: { col: number; row: number }[] = [
+      { col: 2, row: 7 },
+      { col: 5, row: 15 },
+    ];
     let anchorIdx = 0;
     function inputs(tick: number): SimInput[] {
       const out: SimInput[] = [];
       if (anchorIdx < anchors.length) {
-        out.push({ kind: 'placeTower', anchor: anchors[anchorIdx]! });
+        out.push({ kind: 'placeTower', anchor: anchors[anchorIdx]!, towerId: 'basic' });
         anchorIdx++;
+      }
+      if (tick === 600) {
+        out.push({ kind: 'placeTower', anchor: slowAnchors[0]!, towerId: 'slow' });
+      }
+      if (tick === 610) {
+        out.push({ kind: 'placeTower', anchor: slowAnchors[1]!, towerId: 'slow' });
       }
       if (tick === 0) out.push({ kind: 'callWaveEarly' }); // wave 0
       if (tick === 550) out.push({ kind: 'callWaveEarly' }); // wave 2
@@ -117,29 +144,41 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
-    const { state, trace } = runScenario(inputs, 1500);
+    // Mid-trace probe (Codex R2-3): a self-consistent golden alone cannot certify
+    // the `slow` commands actually landed — this asserts some creep really carried
+    // an active slow status at some tick during the run.
+    let sawSlowedCreep = false;
+    const { state, trace } = runScenario(inputs, 1500, (s) => {
+      sawSlowedCreep ||= s.creeps.slowMulFp.some((mulFp) => mulFp !== 0);
+    });
+    expect(sawSlowedCreep).toBe(true);
 
-    expect(hashSimState(state)).toBe('44cf9bd6');
-    expect(fnv1a(trace.join(':'))).toBe('fbd4d46a');
+    // Terminal proof the `slow` placements survived (not sim-silently no-op'd):
+    // two rows still carry `towerId === 'slow'`.
+    const slowTowerCount = state.towers.towerId.filter((id) => id === 'slow').length;
+    expect(slowTowerCount).toBe(2);
+
+    expect(hashSimState(state)).toBe('7d86a7e3');
+    expect(fnv1a(trace.join(':'))).toBe('8a7db223');
     expect(state.phase).toBe('won');
     expect(state.lives).toBe(10);
-    expect(state.tick).toBe(752);
+    expect(state.tick).toBe(679);
     // Every wave cleared, and the game recognizes it: waveResolved is exhaustive,
     // waveCursor ran past the last wave.
     expect(state.waveResolved).toEqual([true, true, true]);
     expect(state.waveCursor).toBe(3);
-    // Per-wave clear bonuses (4 each × 3 waves), kill bounty, and the two
-    // early-call credits (⌊500/50⌋ at tick 0, ⌊50/50⌋ at tick 550 — wave 1's
+    // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty, and the
+    // two early-call credits (⌊500/50⌋ at tick 0, ⌊51/50⌋ at tick 550 (the call tick skips its own decrement, so the sampled remainder is 51) — wave 1's
     // natural launch pays nothing, its countdown having already reached 0) all
     // landed: cumulativeKillBounty is the SCORED kill-bounty channel (clear bonus
     // pays into `bounty`, the spendable economy, not the score), and the credit
     // channel is exactly the two early-call payouts.
-    expect(state.cumulativeKillBounty).toBe(30);
+    expect(state.cumulativeKillBounty).toBe(36);
     expect(state.cumulativeEarlyCallCredit).toBe(11);
-    expect(state.bounty).toBe(53);
+    expect(state.bounty).toBe(44);
     // Win score formula: kill-bounty + early-call credit + lives × survivalMul.
-    expect(deriveScore(state, ruleset)).toBe(30 + 11 + 10 * ruleset.scoring.survivalMul);
-    expect(deriveScore(state, ruleset)).toBe(391);
+    expect(deriveScore(state, ruleset)).toBe(36 + 11 + 10 * ruleset.scoring.survivalMul);
+    expect(deriveScore(state, ruleset)).toBe(397);
     expect(deriveStars(state, ruleset)).toBe(3);
   });
 });
@@ -149,7 +188,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // A change here means the shipped artifact's CONTENT changed (or its normalized
 // encoding did) — not a behavior change per se, but every deployed replay/leaderboard
 // entry binds to this exact digest (ADR 0007 §3), so a change is never silent.
-const SHIPPED_RULESET_HASH = '0c210f144d54728009726982e3cfa8813235d08b760bd05d860dd413a8fb1736';
+const SHIPPED_RULESET_HASH = '75f305ad689810f6cd27630e602d3d439ac2ee73b3690317e520295c106fc87a';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {

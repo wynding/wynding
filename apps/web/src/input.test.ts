@@ -72,6 +72,7 @@ describe('input — keyboard (rebindable, drives the cursor & commands)', () => 
     board.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC' })); // start
     expect(c.uiState().started).toBe(true);
 
+    c.armTower('basic');
     c.aimAt(3, 3); // a valid ghost
     board.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter' })); // confirm → build
     c.advance(50);
@@ -414,7 +415,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a Card move of 7px (below DRAG_THRESHOLD_PX = 8) is a tap — toggles armed and suppresses the synthetic click', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 17, 10, 'touch')); // 7px — under the 8px threshold
     card.dispatchEvent(ptr('pointerup', 17, 10, 'touch'));
@@ -428,7 +431,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a non-primary pen press (barrel/right button) registers no gesture — its pointerup neither arms nor places', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'pen', 2)); // pen barrel/right button — button !== 0
     card.dispatchEvent(ptr('pointerup', 10, 10, 'pen', 2));
     expect(c.uiState().armed).toBeNull(); // never armed
@@ -438,7 +443,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a second tap-toggle before the first synthetic click arrives still suppresses BOTH clicks (no shared reset-on-press race)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     // First tap: arms. Its browser-dispatched synthetic click hasn't arrived yet.
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointerup', 10, 10, 'touch'));
@@ -459,7 +466,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a Card move of exactly DRAG_THRESHOLD_PX (8px) is a drag — the comparison is strict (`< 8` is a tap), so the boundary itself arms', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 18, 10, 'touch')); // exactly 8px — NOT `< 8`, so a drag
     expect(c.uiState().armed).toBe('basic'); // armed by the drag, not a tap-toggle
@@ -468,7 +477,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a Card move of 9px (above DRAG_THRESHOLD_PX = 8) is a drag — arms and starts press-adjust-release mapped onto the board', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 19, 10, 'touch')); // 9px — over the threshold
     expect(c.uiState().armed).toBe('basic'); // armed by the drag, not a tap-toggle
@@ -481,7 +492,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a valid drag-from-rail release places (disarm → select)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses threshold, anchor (3,8)
     card.dispatchEvent(ptr('pointerup', 35, 105, 'touch'));
@@ -494,7 +507,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('an off-board / invalid / chrome drag release cancels AND disarms (unlike the board-native drag)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses threshold, armed
     card.dispatchEvent(ptr('pointerup', 9999, 9999, 'touch')); // released off the board entirely
@@ -505,7 +520,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('an invalid-cell drag release also disarms (drag-flow, unlike a board-origin invalid release)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     c.armTower('basic');
     board.dispatchEvent(ptr('pointerdown', 35, 65, 'touch')); // build at (3,6) directly
     board.dispatchEvent(ptr('pointerup', 35, 65, 'touch'));
@@ -526,7 +543,7 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     chrome.className = 'wy-status';
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), {
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
       getRect: () => RECT,
       elementFromPoint: () => chrome,
     });
@@ -539,7 +556,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a Card press cancelled BEFORE the drag threshold performs no toggle — preserves the pre-gesture armed state (initially unarmed)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     expect(c.uiState().armed).toBeNull();
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointercancel', 10, 10, 'touch'));
@@ -549,7 +568,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a Card press cancelled BEFORE the drag threshold performs no toggle — preserves the pre-gesture armed state (initially armed)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     c.armTower('basic');
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointercancel', 10, 10, 'touch'));
@@ -559,7 +580,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a Card drag cancelled AFTER crossing the threshold disarms (uniform cancellation)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses threshold, armed
     expect(c.uiState().armed).toBe('basic');
@@ -571,7 +594,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('mouse Card interaction is untouched — no drag-from-rail, pointer events on the Card no-op', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'mouse'));
     card.dispatchEvent(ptr('pointermove', 35, 105, 'mouse')); // far past the drag threshold
     card.dispatchEvent(ptr('pointerup', 35, 105, 'mouse'));
@@ -582,7 +607,7 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a drag release over the board does NOT arm click-suppression — a genuine Card click within the expiry window is not swallowed', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), {
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
       getRect: () => RECT,
       elementFromPoint: () => board, // the release point resolves to the board, not the Card
     });
@@ -604,7 +629,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a second concurrent contact voids a Card gesture regardless of origin (cross-origin multi-touch)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     board.dispatchEvent(ptr('pointerdown', 35, 35, 'touch', 0, 1)); // board finger down
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch', 0, 2)); // Card finger down (concurrent!)
     card.dispatchEvent(ptr('pointermove', 35, 105, 'touch', 0, 2)); // would have crossed threshold
@@ -618,7 +645,9 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   it('a Card drag already past the threshold that gets voided mid-flight (by a concurrent second contact) disarms and clears the ghost on release — the SAME cancellation contract as pointercancel', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch', 0, 1)); // finger A: Card press
     card.dispatchEvent(ptr('pointermove', 35, 105, 'touch', 0, 1)); // crosses threshold: armed + ghost
     expect(c.uiState().armed).toBe('basic');
@@ -627,6 +656,39 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     card.dispatchEvent(ptr('pointerup', 35, 105, 'touch', 0, 1)); // A releases — voided, was dragging
     expect(c.uiState().armed).toBeNull(); // disarmed, not left invisibly armed
     expect(c.frame().ghost).toBeNull(); // cleared
+  });
+
+  it('a drag STARTED FROM a card SWITCHES the armed tower — basic armed, drag from the slow Card places slow (Codex R1-6, M2-S3)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    const card2 = document.createElement('button');
+    document.body.appendChild(card2);
+    attachInput(
+      document,
+      board,
+      [
+        { el: card, towerId: 'basic' },
+        { el: card2, towerId: 'slow' },
+      ],
+      c,
+      createKeymap(),
+      { getRect: () => RECT },
+    );
+    c.armTower('basic');
+    expect(c.uiState().armed).toBe('basic');
+    // The OLD guard (`armed === null`) would have left `basic` armed here — the drag
+    // threshold guard must be `armed !== card.towerId`, so a drag from a DIFFERENT
+    // card's Card switches instead of no-op'ing.
+    card2.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card2.dispatchEvent(ptr('pointermove', 30, 10, 'touch')); // well past the threshold
+    expect(c.uiState().armed).toBe('slow'); // switched
+    card2.dispatchEvent(ptr('pointerup', 30, 10, 'touch'));
+    c.advance(50);
+    const towers = c.frame().curVm.towers;
+    expect(towers).toHaveLength(1);
+    // The committed tower is the slow one — asserted via the pending/committed towerId
+    // the shared projection carries (state SoA), not merely "a tower exists".
+    expect(c.uiState().selection?.towerId).toBe('slow');
   });
 });
 
@@ -660,7 +722,9 @@ describe('input — letterbox margin: out-of-grid is a no-target, not an edge ce
   it('a Card drag released in the margin cancels AND disarms (drag-flow, unlike the board tap-flow)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => LETTERBOX });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => LETTERBOX,
+    });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 45, 105, 'touch')); // crosses the threshold onto the grid, armed
     expect(c.uiState().armed).toBe('basic');
@@ -686,7 +750,14 @@ describe('input — cleanup: destroy(), reset(), abort() (PLAN.md P3)', () => {
   it('destroy() removes the contextmenu long-press-suppression listeners from the board and every Card', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    const handle = attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    const handle = attachInput(
+      document,
+      board,
+      [{ el: card, towerId: 'basic' }],
+      c,
+      createKeymap(),
+      { getRect: () => RECT },
+    );
     const boardEvt = new Event('contextmenu', { cancelable: true, bubbles: true });
     board.dispatchEvent(boardEvt);
     expect(boardEvt.defaultPrevented).toBe(true);
@@ -706,7 +777,14 @@ describe('input — cleanup: destroy(), reset(), abort() (PLAN.md P3)', () => {
   it('reset() clears the pointer registry — a stray release after reset is not treated as a click', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    const handle = attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    const handle = attachInput(
+      document,
+      board,
+      [{ el: card, towerId: 'basic' }],
+      c,
+      createKeymap(),
+      { getRect: () => RECT },
+    );
     board.dispatchEvent(ptr('pointerdown', 35, 35, 'touch', 0, 1)); // press started on board
     handle.reset();
     board.dispatchEvent(ptr('pointerup', 35, 35, 'touch', 0, 1)); // reset cleared the press origin
@@ -717,7 +795,14 @@ describe('input — cleanup: destroy(), reset(), abort() (PLAN.md P3)', () => {
   it('abort() cancels an in-flight board gesture (stays armed, ghost cleared) and a Card drag (disarms) — the P5 rotate-abort surface', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    const handle = attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    const handle = attachInput(
+      document,
+      board,
+      [{ el: card, towerId: 'basic' }],
+      c,
+      createKeymap(),
+      { getRect: () => RECT },
+    );
     c.armTower('basic');
     board.dispatchEvent(ptr('pointerdown', 35, 105, 'touch'));
     expect(c.frame().ghost).not.toBeNull();
@@ -744,7 +829,7 @@ describe('input — modal-open commit guard (the class guard)', () => {
     document.body.appendChild(shellHost);
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    attachInput(document, board, [card], c, createKeymap(), {
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
       getRect: () => RECT,
       isModalOpen: () => shellHost.hasAttribute('inert'),
     });
@@ -766,7 +851,7 @@ describe('input — modal-open commit guard (the class guard)', () => {
     document.body.appendChild(shellHost);
     const c = createController(1);
     c.start();
-    attachInput(document, board, [card], c, createKeymap(), {
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
       getRect: () => RECT,
       isModalOpen: () => shellHost.hasAttribute('inert'),
     });
@@ -786,7 +871,9 @@ describe('input — modal-open commit guard (the class guard)', () => {
     // Regression guard: with the default (never-open) signal, the commit path is unchanged.
     const c = createController(1);
     c.start();
-    attachInput(document, board, [card], c, createKeymap(), { getRect: () => RECT });
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+    });
     c.armTower('basic');
     board.dispatchEvent(ptr('pointerdown', 35, 105, 'touch'));
     board.dispatchEvent(ptr('pointerup', 35, 105, 'touch')); // valid ghost → commits normally

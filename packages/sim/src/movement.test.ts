@@ -413,7 +413,7 @@ describe('mid-transitional serialize/restore is byte-identical (determinism)', (
     entrance: { col: 0, row: 2 },
     exit: { col: 8, row: 2 },
   });
-  const wall: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 1 } };
+  const wall: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' };
 
   it('resumes identically when snapshotted on a transitional tick', () => {
     // Reference run: inject a creep, advance a few ticks, wall the lane (re-path →

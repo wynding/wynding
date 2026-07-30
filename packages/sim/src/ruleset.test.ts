@@ -172,10 +172,13 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects an effect kind/form unsupported at simVersion 5 (valid schema, capability-gated)', () => {
+  it('rejects an effect kind/form unsupported at simVersion 7 (valid schema, capability-gated)', () => {
+    // 'slow' is ALLOWED at sv7 (M2-S3) — 'stun' still isn't (still S6's job).
     rejects(
       (b) =>
-        (b.towerCatalog[0]!.effects = [{ kind: 'slow', mulFp: 64, durationTicks: 30 } as never]),
+        (b.towerCatalog[0]!.effects = [
+          { kind: 'stun', chanceNum: 64, durationTicks: 30 } as never,
+        ]),
     );
     rejects(
       (b) =>
@@ -185,18 +188,21 @@ describe('compileRuleset — tower catalog domains', () => {
     );
   });
 
-  it('rejects a multi-tower catalog (capability: maxTowerCatalogSize 1)', () => {
-    rejects((b) =>
-      b.towerCatalog.push({
-        id: 'rapid',
-        cost: 5,
-        attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
-        effects: [{ kind: 'direct', form: 'single', damage: 10 }],
-      }),
-    );
+  it('compiles a multi-tower catalog (capability: maxTowerCatalogSize widens to 64 at sv7) — every entry compiled independently', () => {
+    const b = base();
+    b.towerCatalog.push({
+      id: 'rapid',
+      cost: 5,
+      attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
+      effects: [{ kind: 'direct', form: 'single', damage: 10 }],
+    });
+    const compiled = compileRuleset(b as Ruleset, 'test');
+    expect(compiled.towers).toHaveLength(2);
+    expect(compiled.towerById['rapid']!.cost).toBe(5);
+    expect(compiled.towerById['basic']!.cost).toBe(5);
   });
 
-  it('rejects a tower attack domain unsupported at simVersion 6', () => {
+  it('rejects a tower attack domain unsupported at simVersion 7', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.domain = 'both'));
   });
 });
@@ -254,7 +260,8 @@ describe('compileRuleset — success', () => {
     expect(compiled.waves[0]!.spawns).toHaveLength(4);
     expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 10, 15]);
     expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);
-    expect(compiled.tower.cost).toBe(5);
+    expect(compiled.towers).toHaveLength(1);
+    expect(compiled.towerById['basic']!.cost).toBe(5);
     expect(compiled.digest).toMatch(/^[0-9a-f]{64}$/);
   });
 

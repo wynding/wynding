@@ -21,9 +21,10 @@ const OPEN = {
   exit: { col: 8, row: 2 },
 } as const;
 
-const place = (col: number, row: number): SimInput => ({
+const place = (col: number, row: number, towerId = 'basic'): SimInput => ({
   kind: 'placeTower',
   anchor: { col, row },
+  towerId,
 });
 
 /** Advance to `active` (creeps spawning) via an early call, returning the state. */

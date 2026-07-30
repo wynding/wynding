@@ -4,7 +4,7 @@
 // determinism golden — build their rulesets inline, with no sim→content edge. The
 // numbers mirror the M1 content but tests may override the board/wave/economy.
 
-import type { Ruleset, TowerDef } from '@wynding/types';
+import type { CreepDef, Ruleset, TowerDef } from '@wynding/types';
 import type { GridSpec } from './board';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 import { cellCenterX, cellCenterY } from './movement';
@@ -16,6 +16,30 @@ export const TEST_TOWER: TowerDef = {
   cost: 5,
   attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
   effects: [{ kind: 'direct', form: 'single', damage: 10 }],
+};
+
+/** The M2-S3 `slow` tower stat block — ground-scoped, direct-then-slow authored
+ *  order (mirrors the shipped `wynding-core` bundle's `slow` tower, step 12). */
+export const TEST_SLOW_TOWER: TowerDef = {
+  id: 'slow',
+  cost: 8,
+  attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
+  effects: [
+    { kind: 'direct', form: 'single', damage: 2 },
+    { kind: 'slow', mulFp: 128, durationTicks: 40 },
+  ],
+};
+
+/** The M2-S3 `fast` creep stat block (mirrors the shipped bundle's `fast` creep). */
+export const TEST_FAST_CREEP: CreepDef = {
+  id: 'fast',
+  hp: 16,
+  speedFp: 44,
+  armor: 0,
+  domain: 'ground',
+  immunities: [],
+  leakCost: 1,
+  bounty: 2,
 };
 
 /** Overrides for a test bundle (all optional). `waveCount`/`waveSpacing` name the
@@ -31,6 +55,9 @@ export interface TestWaveOpts {
   readonly countdownTicks?: number;
   readonly waveClearBonus?: number;
   readonly offsetTicks?: number;
+  /** Which catalog creep this wave's single entry spawns (M2-S3; default 'normal') —
+   *  pair with `TestBundleOpts.extraCreeps` to spawn a non-default catalog id. */
+  readonly creepId?: string;
 }
 export interface TestBundleOpts {
   readonly creepHp?: number;
@@ -50,6 +77,17 @@ export interface TestBundleOpts {
   /** `0` = off (M1 default); `⌊ticksRemaining / earlyCallScoreDivisor⌋` score credit
    *  at an early call. */
   readonly earlyCallScoreDivisor?: number;
+  /** Extra tower catalog entries appended after the default 'basic' tower (M2-S3) —
+   *  e.g. `[TEST_SLOW_TOWER]` for slow-application/stacking/capability tests. A
+   *  bundle with ONLY these (no 'basic') is expressed by passing `towers` instead. */
+  readonly extraTowers?: readonly TowerDef[];
+  /** Full tower-catalog override (M2-S3) — replaces the default `[TEST_TOWER]`
+   *  entirely (mutually exclusive with `extraTowers`; `extraTowers` is ignored if
+   *  this is given). For the common "basic + slow" case, prefer `extraTowers`. */
+  readonly towers?: readonly TowerDef[];
+  /** Extra creep catalog entries appended after the default 'normal' creep
+   *  (M2-S3) — e.g. `[TEST_FAST_CREEP]`, referenced by a wave's `creepId` override. */
+  readonly extraCreeps?: readonly CreepDef[];
 }
 
 /** Build a raw ruleset bundle for a board geometry, with M1-ish defaults. */
@@ -77,8 +115,9 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
         leakCost: 1,
         bounty: opts.creepBounty ?? 1,
       },
+      ...(opts.extraCreeps ?? []),
     ],
-    towerCatalog: [TEST_TOWER],
+    towerCatalog: opts.towers ?? [TEST_TOWER, ...(opts.extraTowers ?? [])],
     balance: {
       startingLives: opts.startingLives ?? 10,
       startingBounty: opts.startingBounty ?? 80,
@@ -106,7 +145,7 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
           clearBonus: w.waveClearBonus ?? 0,
           entries: [
             {
-              creepId: 'normal',
+              creepId: w.creepId ?? 'normal',
               count: w.waveCount ?? 10,
               spacingTicks: w.waveSpacing ?? 20,
               ...(w.offsetTicks !== undefined ? { offsetTicks: w.offsetTicks } : {}),
@@ -123,9 +162,15 @@ export function testRuleset(spec: GridSpec, opts: TestBundleOpts = {}): Compiled
   return compileRuleset(testBundle(spec, opts), 'test');
 }
 
-/** Insert a creep directly into a state's SoA (bypassing the wave), resting at a
- *  cell centre — the manual setup movement/tower/combat unit tests need now that
- *  there is no `spawnCreep` command. */
+/** Insert a creep directly into a state's SoA (bypassing the wave) — the manual setup
+ *  movement/tower/combat unit tests need now that there is no `spawnCreep` command.
+ *  The row STARTS at the `(col,row)` cell centre (`fromX`/`fromY` are always that
+ *  centre); by default it RESTS there (sentinel head), and the `headCol`/`headRow`/
+ *  `progress` trio instead makes it a committed mid-edge row (QC r3 — the head differs
+ *  from the origin and progress is nonzero). `creepId` defaults to `'normal'` (the
+ *  default bundle's catalog id — override to `'fast'`/a test-bundle `extraCreeps` id
+ *  when the ruleset under test carries a different catalog); `slowMulFp`/
+ *  `slowUntilTick` default to `(0, 0)` — no active slow (M2-S3). */
 export function pushCreep(
   state: SimState,
   args: {
@@ -136,6 +181,15 @@ export function pushCreep(
     readonly bounty?: number;
     readonly speed?: number;
     readonly wave?: number;
+    readonly creepId?: string;
+    readonly slowMulFp?: number;
+    readonly slowUntilTick?: number;
+    /** A committed mid-edge row: head differs from (col,row) and progress is nonzero
+     *  (CodeRabbit #73 — `tower.test.ts`'s `committedCreep` delegates here so new SoA
+     *  columns thread through ONE helper). Defaults keep the at-rest sentinel shape. */
+    readonly headCol?: number;
+    readonly headRow?: number;
+    readonly progress?: number;
   },
 ): void {
   state.creeps.id.push(args.id);
@@ -144,8 +198,11 @@ export function pushCreep(
   state.creeps.speed.push(args.speed ?? 26);
   state.creeps.fromX.push(cellCenterX(args.col));
   state.creeps.fromY.push(cellCenterY(args.row));
-  state.creeps.headCol.push(args.col);
-  state.creeps.headRow.push(args.row);
-  state.creeps.progress.push(0);
+  state.creeps.headCol.push(args.headCol ?? args.col);
+  state.creeps.headRow.push(args.headRow ?? args.row);
+  state.creeps.progress.push(args.progress ?? 0);
   state.creeps.wave.push(args.wave ?? 0);
+  state.creeps.creepId.push(args.creepId ?? 'normal');
+  state.creeps.slowMulFp.push(args.slowMulFp ?? 0);
+  state.creeps.slowUntilTick.push(args.slowUntilTick ?? 0);
 }
