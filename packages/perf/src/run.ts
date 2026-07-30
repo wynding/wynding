@@ -29,7 +29,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseRulesetJson, compileRuleset } from '@wynding/sim';
-import type { Replay } from '@wynding/replay';
+import { validate, type Replay } from '@wynding/replay';
 import { STRESS_RULESET_URL } from '@wynding/content/stress';
 import { runSampled, WARMUP_TICKS, SAMPLE_TICKS, type SampledTick } from './harness';
 import { stressRouteLength } from './layout';
@@ -290,6 +290,36 @@ if (dueBlastSamples.length === 0) {
 // case is already caught above as an ordinary oracle failure.
 const allAssertions: OracleAssertion[] = [...oracleResult.assertions, ...controlAssertions];
 const gatePass = gateResult === null || gateResult.status === 'unset' ? true : gateResult.pass;
+// The committed stress replay is accepted by the REAL replay path — the same
+// `validate()` re-simulation the server runs against an untrusted client submission. A
+// scenario the validator would reject is not one worth measuring: overlapping anchors,
+// exhausted bounty, or inputs past the validator's per-tick cap would all still *sample*
+// fine and post plausible percentiles.
+//
+// RUN AFTER THE MEASURED RUNS, NOT BEFORE, and that ordering is load-bearing. Placed
+// first, this call's ~4,000-tick re-simulation is extra JIT warm-up ahead of the control
+// scenario — and it moved locally-measured R from ~1.68 to ~2.31, a 37% shift from
+// nothing but warm-up. `R0` is recorded under the ordering below (control, then stress),
+// so anything that runs before them changes the conditions the baseline was taken under
+// and silently rebaselines the gate. Measure first, then check.
+//
+// It lives in this job rather than in `scenario.test.ts` (where it started) because it
+// costs ~8s locally and 21.2s on `ubuntu-latest`. That belongs in the perf job, which
+// already pays for simulation, not in `turbo run test` — where it taxed every
+// contributor's `verify` and, on a 2-core runner, starved `apps/web`'s suite until a
+// neighbouring test began timing out. See `scenario.test.ts`'s note.
+const stressValidation = validate(stressReplay, bundle);
+if (!stressValidation.ok) {
+  console.error(
+    `\nFATAL: the committed stress replay is REJECTED by the replay validator — ` +
+      `${stressValidation.reason ?? 'no reason given'}.\n` +
+      `Every number above was measured against a scenario the real replay path does not ` +
+      `accept. If a simVersion bump landed, regenerate with ` +
+      `\`pnpm -C packages/perf run gen:scenario\`.`,
+  );
+  process.exitCode = 1;
+}
+
 const escalation = evaluateEscalation(allAssertions, gatePass);
 
 const allFailing = allAssertions.filter((a) => !a.pass);

@@ -194,9 +194,15 @@ p50 denominator cancels **scale** but not **tail variance**, and a shared-vCPU r
 fatter tail than a quiet workstation. The median denominator barely moves with tail noise by
 construction; the numerator absorbs all of it.
 
-Two costs follow, and they are real. **A local `pnpm run perf` cannot preflight this gate** —
-locally R sits near 1.7 against a 3.11 ceiling, apparent headroom that does not exist on CI; read
-a local R only against other local runs. And **R0 must be re-recorded when the runner class
+It is worse than cross-machine drift: R is not stable on **one** machine either. The same
+commit, on the same laptop, measured 1.66–1.79 across 8 runs when it was quiet and 2.21–2.36
+across 6 runs hours later under ordinary background load — **≈ 30% from ambient load alone, no
+code change**. A fresh CI VM is, ironically, the steadier environment: three samples spanning
+6.5%.
+
+Two costs follow, and they are real. **A local `pnpm run perf` cannot preflight this gate**, and
+cannot even reproduce itself across sessions; read a local R only against other local runs taken
+back to back, never against the ceiling. And **R0 must be re-recorded when the runner class
 changes** (an image bump, a move to larger runners), not only when blast cost does. The tolerance
 was not widened to fit: the three CI samples span 6.5%, comfortably inside 25%. p99 rather than p99.9, over a floor of ≥ 500
 due-blast samples, so a single preempted tick cannot fail CI while a systematic regression in

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { parseRulesetJson, SIM_VERSION, type SimInput } from '@wynding/sim';
-import { currentRulesetHash, validate, type Replay } from '@wynding/replay';
+import { currentRulesetHash, type Replay } from '@wynding/replay';
 import { STRESS_RULESET_URL } from '@wynding/content/stress';
 import { buildStressReplay, buildControlReplay } from './scenario';
 
@@ -94,26 +94,23 @@ describe('tickInputs shape', () => {
   });
 });
 
-describe('the stress replay validates end to end through the real replay path', () => {
-  // Deliberately the one expensive test in this package: it re-simulates the whole
-  // ~4,000-tick stress run (via `validate`, the SAME re-simulation path the server runs
-  // against an untrusted client submission). It earns that cost because it is the only
-  // test in this package that proves the committed replay is not merely well-shaped JSON
-  // but a scenario the real sim accepts and completes — anchors that don't overlap,
-  // bounty that doesn't run out, inputs the validator's per-tick cap and structural
-  // checks don't reject. Nothing else in this package or `content`'s stress tests
-  // exercises that path.
-  //
-  // The timeout is 120s against a MEASURED ~8s locally, and that gap is deliberate. The
-  // first CI run of this test took **21.2s** and failed a 20s ceiling: `ubuntu-latest`
-  // runs this roughly 2.6x slower than the authoring machine, and a shared runner's
-  // slowest moments are worse again. A timeout sized to "comfortably above what my laptop
-  // does" is how you ship a test that only fails for other people. Sized instead so the
-  // test fails when the SCENARIO broke, never when the runner was busy — an intermittently
-  // red suite teaches everyone to re-run rather than to read.
-  it('validate(stressReplay, bundle) returns ok: true', () => {
-    const replay = buildStressReplay(bundle);
-    const result = validate(replay, bundle);
-    expect(result.ok).toBe(true);
-  }, 120_000);
-});
+// The full `validate()` end-to-end re-simulation used to live here. It MOVED to
+// `run.ts` (the `perf` CI job) rather than being deleted — see that file's startup
+// check. Two reasons, both measured rather than assumed:
+//
+//   1. COST IN THE WRONG PLACE. It re-simulates the whole ~4,000-tick stress run: ~8s
+//      locally, and **21.2s on `ubuntu-latest`**, which failed a 20s ceiling on S4b's
+//      first CI run. `turbo run test` is part of `pnpm run verify`, the loop every
+//      contributor runs on every change, and PLAN step 20's whole argument for keeping
+//      sustained simulation out of `verify` applies to a test just as much as to a
+//      script.
+//   2. IT WAS STARVING A NEIGHBOUR. Adding this package gave `turbo run test` a
+//      CPU-heavy task to schedule alongside `apps/web`'s suite; on a 2-core runner
+//      `apps/web`'s 64-pending-command controller test — previously green and near its
+//      5s default — began timing out at 5.9s. The contention was ours; so is the fix.
+//
+// The cheap staleness guards STAY here, and they are the ones that actually catch a
+// forgotten regeneration: `simVersion`, `rulesetHash`, and a deep-equal against the
+// committed JSON. What moved is only the expensive proof that the real replay path
+// ACCEPTS the scenario — which the `perf` job now asserts before it measures anything,
+// on every PR.

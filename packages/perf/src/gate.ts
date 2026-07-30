@@ -108,10 +108,13 @@ export const TOLERANCE = 1.25;
  * on.
  *
  * TWO CONSEQUENCES, both real costs of this design, stated rather than papered over:
- *   1. A LOCAL `pnpm run perf` CANNOT PREDICT THE GATE. On the authoring machine R sits
- *      near 1.7 against a 3.11 ceiling — enormous apparent headroom that does not exist on
- *      CI. Read a local R as a regression signal relative to other local runs, never as a
- *      preflight of this gate.
+ *   1. A LOCAL `pnpm run perf` CANNOT PREDICT THE GATE — and, measured, cannot even
+ *      predict ITSELF across sessions. On a quiet authoring machine R sat at 1.66-1.79
+ *      (8 runs); hours later, same commit, same machine, but under ordinary background
+ *      load, the same command measured 2.21-2.36 (6 runs). A ~30% drift from ambient load
+ *      alone, no code change. So a local R is only comparable to other local runs taken
+ *      back to back, and never to this gate's ceiling. (CI is, ironically, the steadier
+ *      environment: a fresh VM per run gave three samples spanning 6.5%.)
  *   2. R0 must be re-recorded whenever the RUNNER class changes (a GitHub image bump, a
  *      move to larger runners), not only when blast cost changes. That is a maintenance
  *      obligation this gate creates.
