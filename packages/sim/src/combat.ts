@@ -857,12 +857,14 @@ export function runCombat(
         : 0;
     let heldSeen = false; // first matching row decides the hold — mirrors findLiveCreep
     let heldInRange = false;
+    let heldLive: LiveCreep | null = null;
     let best: LiveCreep | null = null;
     for (const c of live) {
       const within = inRange(c.x, c.y, towerX, towerY, range);
       if (held !== 0 && !heldSeen && c.id === held) {
         heldSeen = true;
         heldInRange = within;
+        heldLive = c;
       }
       if (
         within &&
@@ -872,11 +874,14 @@ export function runCombat(
       }
     }
     // Hold the locked creep while it is present and in range; otherwise acquire the
-    // in-range creep nearest the exit (ties → lower id), or none.
-    const target = held !== 0 && heldInRange ? held : best === null ? 0 : best.id;
+    // in-range creep nearest the exit (ties → lower id), or none. `targetLive` is the
+    // SAME row this decision was made from — `heldLive` for a hold, `best` for a fresh
+    // acquire — never re-derived, so a blast fire below reuses exactly what targeting saw.
+    const targetLive = held !== 0 && heldInRange ? heldLive : best;
+    const target = targetLive === null ? 0 : targetLive.id;
     towers.targetId[i] = target;
 
-    if (target === 0) return;
+    if (targetLive === null) return;
     const nft = towers.nextFireTick[i];
     const fireable = !Number.isSafeInteger(nft) || tick >= (nft as number);
     if (!fireable) return;
@@ -904,25 +909,18 @@ export function runCombat(
       });
     } else {
       // Blast tower (M2-S4a step 2): lead the target along its route at fire-time
-      // effective speed. `target` was resolved above EITHER from `held` (found by
-      // scanning `live` for a matching id) OR from `best` (a `LiveCreep` drawn
-      // directly from `live`) — never `0` (checked above) — so it always matches a
-      // `live` entry; the fallback below is a totality rail, unreachable in
-      // practice, kept so this closure never throws.
-      const targetLive = live.find((c) => c.id === target);
-      const point =
-        targetLive === undefined
-          ? { x: towerX, y: towerY }
-          : predictBlastPoint(
-              field,
-              grid,
-              survivors,
-              targetLive.index,
-              { x: targetLive.x, y: targetLive.y },
-              def.travelTicks,
-              slowFloorNum,
-              slowFloorDen,
-            );
+      // effective speed, from the SAME `LiveCreep` row the selection pass above
+      // already matched (`targetLive`, non-null here — checked above) — no re-scan.
+      const point = predictBlastPoint(
+        field,
+        grid,
+        survivors,
+        targetLive.index,
+        { x: targetLive.x, y: targetLive.y },
+        def.travelTicks,
+        slowFloorNum,
+        slowFloorDen,
+      );
       kept.push({
         kind: 'blast',
         impactTick,

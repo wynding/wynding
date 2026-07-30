@@ -170,6 +170,14 @@ export type TracerVM =
       readonly impactTick: number;
     };
 
+/** One impact/spark point in fixed-point sim units — shared shape for `RenderOverlay.sparks`,
+ *  `scene.ts`'s internal `Spark` (which adds a `bornAt` stamp), and its `preReady` buffer. */
+export interface SparkPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly radiusFp: number;
+}
+
 /** Board-space presentation state handed to `draw()` alongside the two view-models.
  *  Everything here is transient UI (not sim state): the aiming ghost, the selection
  *  ring, and the accessibility palette/motion choices the scene draws with. */
@@ -184,7 +192,7 @@ export interface RenderOverlay {
    *  the scene draws as an expanding-and-fading RING instead (`scene.ts`) so a blast
    *  landing reads at its real footprint, not a point. One list, not a parallel array —
    *  each entry already carries everything the scene needs to draw itself. */
-  readonly sparks: readonly { readonly x: number; readonly y: number; readonly radiusFp: number }[];
+  readonly sparks: readonly SparkPoint[];
   /** Towers accepted into the tick buffer but not yet committed (paused planning, #37+
    *  #27) — anchor cells + the queued tower's catalog id (M2-S3, Codex R1-7: a slow
    *  tower queued while paused must keep its shape-distinct identity). Drawn with a

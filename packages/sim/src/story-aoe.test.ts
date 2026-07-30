@@ -18,7 +18,7 @@ import {
   type Impact,
   type StepEvents,
 } from './combat';
-import { emptyTowers, MAX_TOWERS } from './tower';
+import { emptyTowers, MAX_TOWERS, type TowerArrays } from './tower';
 import { compileRuleset, RulesetError, AOE_SCAN_CEILING } from './ruleset';
 import { testBundle, testRuleset, TEST_AOE_TOWER, TEST_SWARM_CREEP } from './test-support';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
@@ -78,6 +78,21 @@ function restingCreeps(
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
   };
+}
+
+/** A single fresh AoE tower, anchored at (5,5), id 100, untargeted, ready to fire —
+ *  the shared fixture behind the lead-and-clamp/fired-event/dead-target-in-flight
+ *  cases below (all five wanted the exact same row). */
+function aoeTower(): TowerArrays {
+  const towers = { ...emptyTowers() };
+  towers.id.push(100);
+  towers.col.push(5);
+  towers.row.push(5);
+  towers.spend.push(TEST_AOE_TOWER.cost);
+  towers.targetId.push(0);
+  towers.nextFireTick.push(0);
+  towers.towerId.push('aoe');
+  return towers;
 }
 
 const RULESET = testRuleset(LANE, { extraTowers: [TEST_AOE_TOWER] });
@@ -376,14 +391,7 @@ describe('blastMembers — eligibility guards (membership, not ordering)', () =>
 
 describe('blast resolution — lead-and-clamp (fire-time prediction reuses advanceCreep)', () => {
   it('a target whose predicted flight would leak lands the blast at the EXIT CENTRE', () => {
-    const towers = { ...emptyTowers() };
-    towers.id.push(100);
-    towers.col.push(5);
-    towers.row.push(5);
-    towers.spend.push(TEST_AOE_TOWER.cost);
-    towers.targetId.push(0);
-    towers.nextFireTick.push(0);
-    towers.towerId.push('aoe');
+    const towers = aoeTower();
 
     // A creep in range (tower footprint centre (1536,1536), rangeFp 1024) with an
     // enormous per-tick speed: `travelTicks(8) × effectiveSpeedFp(huge)` vastly
@@ -422,14 +430,7 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
   // drops the slow term changes the PRODUCTION point while this test's independently
   // computed expectation stays keyed to the true slowed budget.
   it('a slowed target’s predicted lead point matches advanceCreep’s own output for the SLOWED budget', () => {
-    const towers = { ...emptyTowers() };
-    towers.id.push(100);
-    towers.col.push(5);
-    towers.row.push(5);
-    towers.spend.push(TEST_AOE_TOWER.cost);
-    towers.targetId.push(0);
-    towers.nextFireTick.push(0);
-    towers.towerId.push('aoe');
+    const towers = aoeTower();
 
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
     creeps.speed[0] = 640;
@@ -482,14 +483,7 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
   });
 
   it('an UNSLOWED target’s predicted lead point is a pinned fixed value (regression anchor alongside the slowed case)', () => {
-    const towers = { ...emptyTowers() };
-    towers.id.push(100);
-    towers.col.push(5);
-    towers.row.push(5);
-    towers.spend.push(TEST_AOE_TOWER.cost);
-    towers.targetId.push(0);
-    towers.nextFireTick.push(0);
-    towers.towerId.push('aoe');
+    const towers = aoeTower();
 
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
     creeps.speed[0] = 100;
@@ -519,14 +513,7 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
 
 describe('blast resolution — fired StepEvents carries the scheduled destination (M2-S4a step 12)', () => {
   it('a blast tower firing emits a kind:"blast" fired event whose destX/destY match the resolved impact point', () => {
-    const towers = { ...emptyTowers() };
-    towers.id.push(100);
-    towers.col.push(5);
-    towers.row.push(5);
-    towers.spend.push(TEST_AOE_TOWER.cost);
-    towers.targetId.push(0);
-    towers.nextFireTick.push(0);
-    towers.towerId.push('aoe');
+    const towers = aoeTower();
 
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -566,14 +553,7 @@ describe('blast resolution — fired StepEvents carries the scheduled destinatio
 
 describe('blast resolution — dead-target-in-flight still blasts; zero-member still emits its event', () => {
   it('the fire-time target vanishing before impactTick does not waste the blast — it still resolves by radius', () => {
-    const towers = { ...emptyTowers() };
-    towers.id.push(100);
-    towers.col.push(5);
-    towers.row.push(5);
-    towers.spend.push(TEST_AOE_TOWER.cost);
-    towers.targetId.push(0);
-    towers.nextFireTick.push(0);
-    towers.towerId.push('aoe');
+    const towers = aoeTower();
 
     // Tick 0: fire at a resting, in-range creep (id 1).
     const t0Creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);

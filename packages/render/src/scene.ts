@@ -15,7 +15,7 @@ import { createDprTracker, clampDpr } from './dpr-tracker';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
 import { creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
 import { towerFootprintMarkFor } from './tower-paint';
-import type { RenderVM, RenderOverlay, RenderHandle, ColourMode } from './types';
+import type { RenderVM, RenderOverlay, RenderHandle, ColourMode, SparkPoint } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
  *  entities, not board dimensions). */
@@ -29,13 +29,8 @@ export interface BoardGeometry {
 /** How long (ms) an impact-spark stays lit; damped further under reduced motion. */
 const SPARK_MS = 180;
 
-interface Spark {
-  x: number;
-  y: number;
-  /** `0` for a `targeted` impact (drawn as the pre-M2-S4a fading dot); a `blast`'s true
-   *  radius otherwise (drawn as an expanding-and-fading RING, `drawSparks`). */
-  radiusFp: number;
-  bornAt: number;
+interface Spark extends SparkPoint {
+  readonly bornAt: number;
 }
 
 /** Mount the Phaser board renderer into `el`. The returned handle is fed the last two
@@ -137,7 +132,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // They're held UNstamped and given a real bornAt on the first ready frame, so they
   // aren't lost (controller already drained them) nor stamped with a ~0 time that would
   // make them expire instantly.
-  const preReady: { x: number; y: number; radiusFp: number }[] = [];
+  const preReady: SparkPoint[] = [];
 
   // Scale.NONE (not RESIZE, #28/P5): RESIZE auto-stretches the canvas' CSS AND backing
   //-store size to the parent on its own internal ResizeObserver, which would fight

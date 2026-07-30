@@ -367,7 +367,6 @@ test('the Splash Tower ghost + blast-radius preview stay functional and axe-clea
   await page.getByRole('button', { name: 'Close' }).click();
 
   const splashCard = page.getByRole('button', { name: /Splash Tower/ });
-  const board = page.locator('.wy-board');
   await splashCard.click();
   await expect(splashCard).toHaveAttribute('aria-pressed', 'true');
 
