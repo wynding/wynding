@@ -107,7 +107,7 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
 
 /** Tower display names by catalog id (M2-S3) — a PARTIAL literal-key map (mirrors
  *  `CREEP_NAME`'s strategy exactly, Codex R1-5): catalog ids are OPEN strings (any
- *  schema-valid direct+slow tower compiles at sv7), so a closed union/exhaustive switch
+ *  schema-valid direct/aoe/slow tower compiles at sv8), so a closed union/exhaustive switch
  *  would crash on a legitimate modded bundle. An id this build doesn't recognize falls
  *  back to the localized `tower.unknown.name` (never a raw id) plus a dev-mode console
  *  warning — the mapping-gap diagnostic, same posture as `warnUnmappedCreeps`. The map is
@@ -244,8 +244,9 @@ export function createOverlay(
   });
 
   // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), wired in a loop ---
-  // The catalog-index → hotkey ACTION map: a card at index ≥ 3 (a modded bundle; sv8
-  // compiles up to `MAX_TOWERS` catalog towers) has NO hotkey at all (Codex R2-2,
+  // The catalog-index → hotkey ACTION map: a card at index ≥ 3 (a modded bundle; sv8's
+  // `maxTowerCatalogSize` allows 64 CATALOG entries — `MAX_TOWERS` (1,000) is the
+  // separate cap on PLACED towers) has NO hotkey at all (Codex R2-2,
   // widened M2-S4a) — scaling the hotkey model past three slots is S12.
   // `GAME_ACTIONS`/`keymap` only define `armTower1`/`armTower2`/`armTower3`, so this
   // array is the single place that ceiling lives.
@@ -841,7 +842,7 @@ export function createOverlay(
    *  `exhaustive: never` throw — catalog ids are OPEN, so a legitimate modded bundle's
    *  tower must render real stats, never crash the Panel). `damage` is Σ of the tower's
    *  `direct` AND `aoe` effect amounts, in authored order (both are direct damage's two
-   *  forms — m2.md §Effect primitive — so `splash`'s blast damage must count here just
+   *  forms — CONTEXT.md's Effect primitive entry — so `splash`'s blast damage must count here just
    *  as `basic`'s single-target damage does; the shipped `slow` tower's row reads its
    *  own direct total, 2 — a hypothetical pure-support bundle would honestly read 0; QC
    *  round 2 corrected this line's earlier zero-direct-effects claim). A `towerId` this

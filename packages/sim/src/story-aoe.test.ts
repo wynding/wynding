@@ -351,9 +351,13 @@ describe('blastMembers — eligibility guards (membership, not ordering)', () =>
 
   it('a live row with a non-safe-integer id (a forged/restored SoA — coerceSoa validates only wave/creepId, never id) is excluded from membership', () => {
     // Deleting `if (!Number.isSafeInteger(id)) continue;` would let this row into
-    // `members`, sorting on `NaN - b.id` (always false, so it would land wherever
-    // the comparator's implementation-defined NaN handling puts it) instead of
-    // being dropped outright.
+    // `members` carrying a NaN sort key. The mechanism is NOT "the comparator returns
+    // NaN" (QC round-3): `NaN - b.id` is NaN, which is FALSY, so `||` falls through to
+    // the `a.idx - b.idx` tiebreak and the comparator never returns NaN at all. The
+    // damage is that it goes NON-TRANSITIVE against the other rows — for ids
+    // [50, NaN, 10] at idx [0,1,2]: cmp(0,1) = −1, cmp(1,2) = −1, but cmp(0,2) = +40 —
+    // and a non-transitive comparator makes `Array.prototype.sort`'s output
+    // engine-dependent, which is precisely what the determinism contract forbids.
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
     creeps.id[0] = NaN;
     const imp = { x: cx(7), y: cy(6), radiusFp: 50 };

@@ -39,7 +39,7 @@ export interface CapabilityProfile {
   readonly allowedImmunities: readonly string[];
   readonly allowedRoles: readonly string[];
   readonly maxArmor: number;
-  /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 7 —
+  /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 8 —
    *  m2.md: "leakCost = 1 until S10"); the compiled surface exposes that single
    *  value as `CompiledBalance.leakCost`. */
   readonly requiredLeakCost: number;

@@ -573,17 +573,21 @@ export function applyImpactToCreep(
  *   - `leak`  → the exit centre — m2.md's "clamped to the exit" falls straight out
  *     of `advanceCreep`'s own `leak` branch; no separate clamp to write.
  *   - `drop`  → the target's CURRENT point (`currentPoint`, already derived by the
- *     caller) — a TOTALITY RAIL: unreachable here because `idx` is always drawn
- *     from `live` (a row this same combat pass already proved position-valid and
- *     reachable), kept only so this function, like every other seam in this file,
- *     never throws on a state it cannot itself prove impossible.
+ *     caller) — a TOTALITY RAIL. Precisely (QC round 3, reconciling this with
+ *     `blastMembers`' own note, which said the opposite): `live` proves each row
+ *     position-valid and reachable, but it does NOT prove `id` is a safe integer —
+ *     `live.push` casts it — and a non-safe `id` is `advanceCreep`'s FIRST guard. So
+ *     the rail IS reachable when `runCombat` is called directly, as the sim tests do.
+ *     It is NOT reachable through `step()`, because movement runs before combat and
+ *     drops such rows first. Kept so this seam, like every other in this file, never
+ *     throws on a state it cannot itself prove impossible.
  *
  * TWO DELIBERATE APPROXIMATIONS — both acceptable because this is a PREDICTION,
  * not a re-simulation, so it must be DETERMINISTIC, never required to match real
  * movement tick-for-tick:
  *   (a) ONE re-path computed AT FIRE TIME, never recomputed per tick even if the
  *       maze changes under it afterward — a blast tower commits to its shot's
- *       landing point the instant it fires, like a real projectile already in the
+ *       landing point the instant it fires, like a real shot already in the
  *       air.
  *   (b) `travelTicks × effectiveSpeedFp` spends the WHOLE budget in a single call
  *       rather than flooring per-tick the way genuine movement accumulates it — the
@@ -688,11 +692,14 @@ export function blastMembers(
     if (geom === null) continue;
     if (!inRange(geom.point.x, geom.point.y, imp.x, imp.y, imp.radiusFp)) continue;
     const id = creeps.id[i];
-    // NOT dead: the restore path (`coerceSoa`, index.ts) validates only `wave`/
-    // `creepId` per row, never `id` itself — a forged/restored state can carry a
-    // non-safe-integer `id` on an otherwise-live row, and this branch is what
-    // drops it from blast membership rather than sorting on a bad key (QC round-1
-    // #9 — a prior comment here wrongly claimed this branch was unreachable).
+    // NOT dead, but narrower than QC round-1 #9's comment claimed (corrected round 3):
+    // the restore path (`coerceSoa`, index.ts) validates only `wave`/`creepId` per row,
+    // never `id`, so a forged state can carry a non-safe-integer `id` on an otherwise-
+    // live row — reachable when `runCombat` is called DIRECTLY (the sim tests do), which
+    // is why this branch has a witness. Through `step()` it is unreachable: movement
+    // precedes combat and `advanceCreep` drops such a row first. So this branch is a
+    // totality rail for direct callers, not the production drop site — the same
+    // reconciliation `predictBlastPoint`'s `drop` rail now carries.
     if (!Number.isSafeInteger(id)) continue;
     members.push({ idx: i, id: id as number });
   }

@@ -221,8 +221,9 @@ const FP_DIAG_LEN = 362;
  * spawns; the shipped bundle schedules 34, the stress scene (S4b) ~304. A REAL
  * compile-time REJECTION (never a runtime truncation, decision 6): truncating a
  * blast mid-scan would silently drop damage, the corner-cut this project forbids.
- * `ruleset.test.ts` pins this derivation (the formula and the resulting max legal
- * `totalScheduledSpawns`) so the constant cannot silently drift. FROZEN AT S4A
+ * `story-aoe.test.ts` pins this derivation (the formula, the accept/reject boundary at
+ * 2,000/2,001 spawns, and an aoe-gated negative control) so the constant cannot silently
+ * drift; `ruleset.test.ts` only redirects readers there. FROZEN AT S4A
  * (risk log): S4b may report evidence about the order of magnitude but may not move
  * it — changing it changes which bundles compile, a behavior change requiring its
  * own `simVersion` bump. */
