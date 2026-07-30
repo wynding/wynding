@@ -85,54 +85,52 @@ export function stressStat(dueBlastSamples: readonly SampledTick[]): number {
 export const TOLERANCE = 1.25;
 
 /**
- * `R0` — the baseline ratio recorded by S4b: **1.69**.
+ * `R0` — the baseline ratio: **2.49**, recorded on `ubuntu-latest`.
  *
- * The MEDIAN of 8 consecutive recording runs (1.6627, 1.6700, 1.6740, 1.6819, 1.7145,
- * 1.7145, 1.7393, 1.7948 — median 1.6982, mean 1.7065, sd 0.045), rounded DOWN to the
- * nearer hundredth. Down, not to-nearest: a lower R0 makes the ceiling stricter, so the
- * rounding can only ever cost a false alarm, never hide a regression.
+ * The MEDIAN of 3 consecutive CI runs (2.3585, 2.4978, 2.5129 — median 2.4978), rounded
+ * DOWN to the nearer hundredth. Down, not to-nearest: a lower R0 makes the ceiling
+ * stricter, so the rounding can only ever cost a false alarm, never hide a regression.
+ * Ceiling 3.1125, against the worst observed run of 2.5129 — about 24% headroom.
  *
- * WHY A MEDIAN OF 8 AND NOT "the first run" (QC round 1). The first draft took R0 from
- * n = 2. A review then measured this statistic's actual run-to-run spread and found the
- * two-sample baseline was calibrating a number it had no business calibrating: with the
- * ORIGINAL control workload, R ranged 1.71–2.39 (sd 0.136) across 23 runs on one idle
- * machine. Two things fixed that. First, QC: the control had been dropping the chill
- * pair's `slow` effect entirely (0 peak slowed creeps vs the stress run's 304), running
- * a ~28.6% lighter live-creep population (median 160 vs 224) than the stress scenario.
- * Matching the chill pair's slow definition NARROWED that gap — to ~19.2% (median 181 vs
- * 224) — it did not close it, and structurally cannot: a single-form twin can never
- * reproduce an area effect's coverage (`scenario.ts`'s `buildControlReplay` doc has the
- * full accounting). That narrowing alone cut the sd to 0.045 — roughly 3x tighter —
- * because numerator and denominator now move closer together, though not identically.
- * Second, taking the median of 8 rather than one lucky observation. What was
- * pre-declared before any measurement, and is what matters methodologically, is
- * unchanged: both statistics, the >= 500 due-blast sample floor, and the 25% tolerance.
+ * RECORDED ON THE RUNNER, NOT THE LAPTOP, AND THAT DISTINCTION IS THE WHOLE FINDING.
+ * S4b first recorded R0 = 1.69 from 8 runs on the authoring machine (range 1.663-1.795,
+ * sd 0.045) on the theory this file still states above: a ratio should cancel CPU-speed
+ * scale, so a baseline taken anywhere should transfer. **It did not.** The first CI run
+ * measured 2.3585 against that 2.1125 ceiling and failed the gate, and two re-runs landed
+ * at 2.4978 and 2.5129 — the ratio moved ~1.4x across machines even though `controlStat`
+ * itself moved only ~1.55x (0.183ms local -> 0.272-0.290ms on CI).
  *
- * Ceiling is therefore 1.69 x 1.25 = 2.1125, against a worst observed run of 1.7948 —
- * about 18% headroom. A SECOND 8-run set taken later on the same machine ranged
- * 1.652-1.810 (sd 0.054), so the honest worst-observed is 1.810, not 1.7948: against that,
- * headroom is ~17% and the ceiling sits ~5.6 standard deviations out. Read the spread as
- * roughly +/-5% rather than as either set's exact range. A gate that trips at 5-6 sigma on
- * this machine is not going to flap here; whether it flaps on a shared-vCPU runner with a
- * fatter tail is the open question the next paragraph names.
+ * The cause is the limitation this file already names but had not yet measured: a p99
+ * numerator over a p50 denominator cancels SCALE but not TAIL VARIANCE, and a shared-vCPU
+ * runner has a far fatter tail than a quiet workstation. The denominator is a median, so
+ * it barely moves with tail noise by construction; the numerator absorbs all of it. So R
+ * is not machine-portable, and R0 is only meaningful for the machine class it was taken
+ * on.
  *
- * PROVENANCE, stated plainly because it bounds what this number means: every run was
- * taken on the AUTHOR'S DEV MACHINE (Node v26.0.0, macOS 26.5.2, Apple M4 Pro), not on
- * the `ubuntu-latest` runner where the gate actually executes. Cross-machine transfer is
- * exactly what the ratio is *designed* for — a slower runner scales `controlStat` and
- * `stressStat` together — but "designed for" is a claim, and S4b's first CI run is its
- * first real test. A shared-vCPU runner also has a fatter tail than this machine, and the
- * numerator is a p99 while the denominator is a median, so the ratio cancels CPU-speed
- * SCALE but not the tail's own jitter. If CI's observed R lands outside the ceiling, that
- * is a finding ABOUT THE METHODOLOGY, not a regression in blast cost, and the honest
- * response is to re-record R0 from the runner — with the sample count and spread stated,
- * as above — never to widen TOLERANCE until it fits.
+ * TWO CONSEQUENCES, both real costs of this design, stated rather than papered over:
+ *   1. A LOCAL `pnpm run perf` CANNOT PREDICT THE GATE. On the authoring machine R sits
+ *      near 1.7 against a 3.11 ceiling — enormous apparent headroom that does not exist on
+ *      CI. Read a local R as a regression signal relative to other local runs, never as a
+ *      preflight of this gate.
+ *   2. R0 must be re-recorded whenever the RUNNER class changes (a GitHub image bump, a
+ *      move to larger runners), not only when blast cost changes. That is a maintenance
+ *      obligation this gate creates.
+ *
+ * What was pre-declared before any measurement is unchanged, and is what matters
+ * methodologically: both statistics, the >= 500 due-blast sample floor, and the 25%
+ * tolerance. Only R0 — explicitly defined as "the ratio this scene records" — moved, and
+ * it moved to the machine the gate actually runs on. TOLERANCE was NOT widened to fit; the
+ * three CI samples span 6.5%, comfortably inside 25%.
+ *
+ * n = 3 is thin, and knowingly so: each sample costs a full CI run. If this gate proves
+ * flaky in practice, the fix is more samples and a re-recorded median — with the count and
+ * spread stated, as here — never a wider tolerance.
  *
  * Changing this value at all requires an explicit, reviewed commit with justification in
  * the PR. It is never inferred and never auto-updated by a later run: a gate that
  * rebaselines itself measures nothing.
  */
-export const R0: number | null = 1.69;
+export const R0: number | null = 2.49;
 
 /** One of two outcomes: `'unset'` (R0 has not been committed yet — this run only
  *  records `R`, the gate cannot enforce anything) or `'evaluated'` (R0 is committed,

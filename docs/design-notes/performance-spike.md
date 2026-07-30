@@ -180,11 +180,25 @@ residual is structural rather than tunable. `R` therefore isolates blast cost **
 slow coverage**, not blast cost alone. Round 1's fix narrowed the population gap from −28.6% to
 −19.2% and took slow coverage from zero; it did not close either.
 
-`R0 = 1.69`: the median of 8 consecutive runs (median 1.698, mean 1.706, **sd 0.045**, range
-1.663–1.795), rounded down. Ceiling 2.113, against the worst run in that set (1.795) — about 18%
-headroom, or roughly **seven** standard deviations. A second 8-run set taken later on the same
-machine ranged 1.652–1.810 (sd 0.054), so read the spread as **≈ ±5%** rather than as the first
-set's exact range; the ceiling clears both comfortably. p99 rather than p99.9, over a floor of ≥ 500
+`R0 = 2.49`, **recorded on `ubuntu-latest`** — the median of 3 CI runs (2.3585, 2.4978, 2.5129),
+rounded down. Ceiling 3.113, against the worst of those (2.513) — about 24% headroom.
+
+**R does not transfer between machines, and finding that out is one of this story's results.**
+R0 was first recorded at 1.69 from 8 runs on the authoring machine (range 1.663–1.795, sd 0.045)
+on the theory that a ratio cancels CPU-speed scale. The first CI run measured **2.3585** and
+failed the 2.113 ceiling; two re-runs gave 2.4978 and 2.5129. So the ratio moved ~1.4× across
+machines while `controlStat` alone moved only ~1.55× (0.183 ms local → 0.272–0.290 ms on CI).
+
+The cause is the limitation the gate already carried but had not measured: a p99 numerator over a
+p50 denominator cancels **scale** but not **tail variance**, and a shared-vCPU runner has a much
+fatter tail than a quiet workstation. The median denominator barely moves with tail noise by
+construction; the numerator absorbs all of it.
+
+Two costs follow, and they are real. **A local `pnpm run perf` cannot preflight this gate** —
+locally R sits near 1.7 against a 3.11 ceiling, apparent headroom that does not exist on CI; read
+a local R only against other local runs. And **R0 must be re-recorded when the runner class
+changes** (an image bump, a move to larger runners), not only when blast cost does. The tolerance
+was not widened to fit: the three CI samples span 6.5%, comfortably inside 25%. p99 rather than p99.9, over a floor of ≥ 500
 due-blast samples, so a single preempted tick cannot fail CI while a systematic regression in
 blast cost still does.
 

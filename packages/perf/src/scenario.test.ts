@@ -96,17 +96,24 @@ describe('tickInputs shape', () => {
 
 describe('the stress replay validates end to end through the real replay path', () => {
   // Deliberately the one expensive test in this package: it re-simulates the whole
-  // ~4,000-tick stress run (via `validate`, the SAME re-simulation path the server
-  // runs against an untrusted client submission) — several seconds of wall time
-  // (hence the raised per-test timeout below). It earns that cost because it is the
-  // only test in this package that proves the committed replay is not merely
-  // well-shaped JSON but a scenario the real sim accepts and completes — anchors that
-  // don't overlap, bounty that doesn't run out, inputs the validator's per-tick cap
-  // and structural checks don't reject. Nothing else in this package or `content`'s
-  // stress tests exercises that path.
+  // ~4,000-tick stress run (via `validate`, the SAME re-simulation path the server runs
+  // against an untrusted client submission). It earns that cost because it is the only
+  // test in this package that proves the committed replay is not merely well-shaped JSON
+  // but a scenario the real sim accepts and completes — anchors that don't overlap,
+  // bounty that doesn't run out, inputs the validator's per-tick cap and structural
+  // checks don't reject. Nothing else in this package or `content`'s stress tests
+  // exercises that path.
+  //
+  // The timeout is 120s against a MEASURED ~8s locally, and that gap is deliberate. The
+  // first CI run of this test took **21.2s** and failed a 20s ceiling: `ubuntu-latest`
+  // runs this roughly 2.6x slower than the authoring machine, and a shared runner's
+  // slowest moments are worse again. A timeout sized to "comfortably above what my laptop
+  // does" is how you ship a test that only fails for other people. Sized instead so the
+  // test fails when the SCENARIO broke, never when the runner was busy — an intermittently
+  // red suite teaches everyone to re-run rather than to read.
   it('validate(stressReplay, bundle) returns ok: true', () => {
     const replay = buildStressReplay(bundle);
     const result = validate(replay, bundle);
     expect(result.ok).toBe(true);
-  }, 20_000);
+  }, 120_000);
 });
