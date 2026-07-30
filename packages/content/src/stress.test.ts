@@ -130,24 +130,44 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
     expect(traversal).toBe(14127);
   });
 
-  // latestSpawnTick: single wave, countdown, tail = (count-1) × spacing (the last
-  // spawn of each of the wave's identical entries, all at offset 0) — read off the
-  // bundle's own wave schedule, not re-typed.
+  // latestSpawnTick: countdown + the wave's TAIL, where the tail is the maximum over
+  // EVERY entry of `offsetTicks + (count-1) × spacingTicks` — the compiler's own
+  // definition (`ruleset.ts` takes the max spawn offset across the whole sorted
+  // timeline), reduced over all 16 entries rather than read off `entries[0]`.
+  //
+  // QC (CodeRabbit): reading only the first entry left this guard green while a LATER
+  // entry's count, spacing, or offset changed the compiled schedule underneath it — the
+  // exact class of "the test pins a number the code no longer produces" this file was
+  // already hardened against once for hand-typed literals.
   const wave = board?.waves[0];
   const countdownTicks = wave?.countdownTicks;
-  const entry = wave?.entries[0];
-  const count = entry?.count;
-  const spacingTicks = entry?.spacingTicks;
+  const entries = wave?.entries ?? [];
+  const waveTail = entries.reduce(
+    (max, e) => Math.max(max, (e.offsetTicks ?? 0) + (e.count - 1) * e.spacingTicks),
+    0,
+  );
+  const totalScheduledSpawns = entries.reduce((sum, e) => sum + e.count, 0);
 
-  it('the wave schedule is countdown 100, 19x spacing 100', () => {
+  it('the wave schedule is countdown 100, 16 entries of 19 at spacing 100, all at offset 0', () => {
     expect(countdownTicks).toBe(100);
-    expect(count).toBe(19);
-    expect(spacingTicks).toBe(100);
+    expect(entries).toHaveLength(16);
+    for (const e of entries) {
+      expect(e.count).toBe(19);
+      expect(e.spacingTicks).toBe(100);
+      expect(e.offsetTicks ?? 0).toBe(0);
+    }
   });
 
-  it('latestSpawnTick = countdownTicks + (count-1)*spacingTicks = 1900', () => {
-    const latestSpawnTick = countdownTicks! + (count! - 1) * spacingTicks!;
-    expect(latestSpawnTick).toBe(1900);
+  it('latestSpawnTick = countdownTicks + max tail over every entry = 1900', () => {
+    expect(waveTail).toBe(1800);
+    expect(countdownTicks! + waveTail).toBe(1900);
+  });
+
+  it('the wave schedules 304 spawns in total, summed over every entry', () => {
+    // ADR 0005's "~300 concurrent" target, and the multiplicand in the AoE scan-work
+    // bound below. Summed rather than re-typed as `16 * 19` for the same reason the
+    // tail is a max rather than `entries[0]`'s: a changed entry must move it.
+    expect(totalScheduledSpawns).toBe(304);
   });
 
   it('total bound = 1900 + 14127 = 16027, comfortably under MAX_MATCH_TICKS (36000)', () => {
@@ -194,7 +214,14 @@ describe('the AoE scan-work ceiling headroom (PLAN step 16)', () => {
   // `ruleset.ts`'s gate) — frozen at S4a per the handoff, so this asserts the
   // literal `2_000_000` rather than widening sim's exports for a test.
   it('MAX_TOWERS (1000) * totalScheduledSpawns (304) = 304000 <= AOE_SCAN_CEILING (2000000)', () => {
-    const totalScheduledSpawns = 16 * 19;
+    // Summed over every entry of every wave, not `16 * 19` re-typed: the compiler counts
+    // each entry's `count` across the whole schedule (`ruleset.ts`'s `totalSpawns`), so a
+    // changed or added entry must move this number too (QC, CodeRabbit).
+    const scanBundle = parseRulesetJson(readFileSync(STRESS_RULESET_URL, 'utf8'));
+    const totalScheduledSpawns = (scanBundle.boards[0]?.waves ?? []).reduce(
+      (sum, w) => sum + w.entries.reduce((n, e) => n + e.count, 0),
+      0,
+    );
     expect(totalScheduledSpawns).toBe(304);
     expect(MAX_TOWERS).toBe(1_000);
     const worstCaseScanWork = MAX_TOWERS * totalScheduledSpawns;

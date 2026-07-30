@@ -162,7 +162,7 @@ Absolute ceilings on a `ubuntu-latest` runner would let the threshold be picked 
 results on a CPU that is not a stable reference, and gating raw `max` magnifies runner
 variance. So the gate is a **ratio**, computed in one process:
 
-```
+```text
 R = p99(step() over the stress run's due-blast ticks) / p50(step() over the control run)
 CI fails when R > R0 × 1.25
 ```
@@ -246,7 +246,9 @@ ADR 0005 pins **≥ 30 fps on low-end** (33.3 ms/frame) and **60 fps on mid-rang
 Three things sharpen rather than soften this:
 
 1. **The sim is not the bottleneck.** `step()` costs 0.2–0.32 ms per 50 ms tick. Even the
-   low-end profile advanced 205 ticks during its 10-second window — the sim kept perfect time
+   low-end profile advanced 205 ticks during its 10-second window against ~200 expected at
+   20 Hz — the sim held cadence to within a few ticks of real time (the small overshoot is
+   window-boundary rounding, not drift)
    while frames took 92 ms. The cost is in the presentation layer, not the deterministic core.
 2. **The emulation flatters.** A 6× CPU throttle on an Apple M4 Pro with a Metal GPU is not a
    low-end Android webview; it is far faster, and its GPU is in a different class. A real
@@ -344,7 +346,7 @@ amount of emulation closes:
 
 ## Reproducing this
 
-```
+```sh
 pnpm run perf                              # headless: oracle + step() percentiles + the ratio gate
 pnpm -C apps/web run perf:e2e              # browser: both emulation profiles
 ```
@@ -355,6 +357,6 @@ rather than eyeballed. The initial-JS figure comes from `pnpm run size` instead.
 committed scenario after any `simVersion` bump — the replay envelope stamps `simVersion` and
 `rulesetHash`, and S5–S10 are six more bumps:
 
-```
+```sh
 pnpm -C packages/perf run gen:scenario
 ```

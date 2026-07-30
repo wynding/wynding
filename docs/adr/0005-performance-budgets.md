@@ -158,7 +158,8 @@ replacement before measuring again.
    low-end (budget 33.3 ms, the 30 fps floor) and **34.2 ms** mid-range (budget 16.7 ms, the
    60 fps target). Both trigger the rule above; both are outright breaches, 3× and 2× over.
    `step()` costs 0.2–0.32 ms per **50 ms tick** — and the low-end profile advanced 205 sim
-   ticks during its 10-second window, keeping perfect time while frames took 92 ms — so the
+   ticks during its 10-second window against ~200 expected at 20 Hz, holding cadence to within a
+   few ticks of real time while frames took 92 ms — so the
    cost sits in the presentation layer, not the deterministic core. The emulation flatters rather than penalizes — a 6× CPU
    throttle on an Apple M4 Pro is far faster than a low-end Android webview — so a real device
    should be expected to do worse. This is the "early signal to revisit the Phaser bet" the
@@ -177,7 +178,10 @@ replacement before measuring again.
 
 Everything else measured clear, with margin: JS heap **47.4 MB** on the low-end profile (the one
 the ~256 MB budget is written for), worst-of-20 input latency **56.7 ms** against 100 ms, and
-initial JS **0.36 MB** gzipped against 3 MB. `step()` measured 0.32 ms against the tighter 2 ms
+initial JS **0.36 MB** gzipped against 3 MB — **JS only, and that is the whole payload:
+this build ships no wasm**, so the budget's "JS (+ wasm)" and the measurement cover the same
+bytes. If a wasm module ever lands, `scripts/size-limit.mjs` must be widened before this figure
+is quoted against the budget again. `step()` measured 0.32 ms against the tighter 2 ms
 budget, but that figure is **indicative only** — the headless harness is unthrottled by design,
 so it speaks to neither device budget directly, per (d) above.
 
