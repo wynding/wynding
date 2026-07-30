@@ -246,6 +246,53 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
   });
 });
 
+describe('blast resolution — fired StepEvents carries the scheduled destination (M2-S4a step 12)', () => {
+  it('a blast tower firing emits a kind:"blast" fired event whose destX/destY match the resolved impact point', () => {
+    const towers = { ...emptyTowers() };
+    towers.id.push(100);
+    towers.col.push(5);
+    towers.row.push(5);
+    towers.spend.push(TEST_AOE_TOWER.cost);
+    towers.targetId.push(0);
+    towers.nextFireTick.push(0);
+    towers.towerId.push('aoe');
+
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
+    const events: StepEvents = { impactPoints: [], fired: [] };
+    const result = runCombat(
+      creeps,
+      towers,
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      RULESET.towerById,
+      SF_NUM,
+      SF_DEN,
+      events,
+    );
+    expect(result.impacts).toHaveLength(1);
+    const imp = result.impacts[0]!;
+    if (imp.kind !== 'blast') throw new Error('expected a blast impact');
+    // The fired event's destination is the SAME lead point the impact itself carries —
+    // a render-layer tracer interpolating toward `destX`/`destY` lands exactly where the
+    // blast will resolve, unlike a `targeted` tracer chasing a creep's live position.
+    expect(events.fired).toEqual([
+      {
+        kind: 'blast',
+        originX: 1536, // footprint centre of a tower anchored at (5,5): (5+1)·256
+        originY: 1536,
+        targetId: 1,
+        destX: imp.x,
+        destY: imp.y,
+        launchTick: 0,
+        impactTick: TEST_AOE_TOWER.attack!.travelTicks, // TEST_AOE_TOWER is a fixed attacking-tower fixture
+      },
+    ]);
+  });
+});
+
 describe('blast resolution — dead-target-in-flight still blasts; zero-member still emits its event', () => {
   it('the fire-time target vanishing before impactTick does not waste the blast — it still resolves by radius', () => {
     const towers = { ...emptyTowers() };

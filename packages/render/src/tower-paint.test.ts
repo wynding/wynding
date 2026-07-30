@@ -11,6 +11,10 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
   it('draws slow with a distinct ringed mark', () => {
     expect(towerFootprintMarkFor('slow')).toBe('ringed');
   });
+  it('draws splash with a distinct crosshair mark (M2-S4a) — never reuses ringed', () => {
+    expect(towerFootprintMarkFor('splash')).toBe('crosshair');
+    expect(towerFootprintMarkFor('splash')).not.toBe(towerFootprintMarkFor('slow'));
+  });
   it('falls back to plain for an unknown id — never throws', () => {
     expect(towerFootprintMarkFor('__proto__')).toBe('plain');
     expect(towerFootprintMarkFor('')).toBe('plain');

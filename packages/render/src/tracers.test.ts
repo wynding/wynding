@@ -10,11 +10,25 @@ function vm(tick: number): RenderVM {
   return { tick, phase: 'running', creeps: [], towers: [] };
 }
 
-function flight(overrides: Partial<TracerVM> = {}): TracerVM {
+function flight(overrides: Partial<Extract<TracerVM, { kind: 'targeted' }>> = {}): TracerVM {
   return {
+    kind: 'targeted',
     originX: 0,
     originY: 0,
     targetId: 1,
+    launchTick: 10,
+    impactTick: 14,
+    ...overrides,
+  };
+}
+
+function blastFlight(overrides: Partial<Extract<TracerVM, { kind: 'blast' }>> = {}): TracerVM {
+  return {
+    kind: 'blast',
+    originX: 0,
+    originY: 0,
+    destX: 400,
+    destY: 0,
     launchTick: 10,
     impactTick: 14,
     ...overrides,
@@ -95,6 +109,24 @@ describe('positionTracers', () => {
       { x: 200, y: 0 },
       { x: 0, y: 200 },
     ]);
+  });
+
+  // M2-S4a step 12: a blast tracer's aim point is its OWN fixed `destX`/`destY`, never
+  // `interpolatedTargets` — a blast lands at a fire-time predicted point whether or not
+  // its original target survives the flight, so its tracer must fly there too.
+  it('a blast tracer lerps toward its own fixed destX/destY, ignoring interpolatedTargets entirely', () => {
+    const [p] = positionTracers([blastFlight()], targets, 12); // (12-10)/(14-10) = 0.5
+    expect(p).toEqual({ x: 200, y: 0 });
+  });
+
+  it('a blast tracer is NEVER dropped, even with an empty interpolatedTargets map (the original target is long gone)', () => {
+    const out = positionTracers([blastFlight()], new Map(), 12);
+    expect(out).toEqual([{ x: 200, y: 0 }]);
+  });
+
+  it('a blast tracer at the impact fraction sits exactly at its destination', () => {
+    const [p] = positionTracers([blastFlight()], new Map(), 14);
+    expect(p).toEqual({ x: 400, y: 0 });
   });
 });
 

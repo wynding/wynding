@@ -156,9 +156,11 @@ export interface Controller {
   advance(wallDtMs: number): void;
   /** The interpolation snapshot for the current frame. */
   frame(): FrameSnapshot;
-  /** Impact-spark points resolved since the last call, then cleared. Accumulated per sim
-   *  tick so a multi-tick catch-up frame still flashes every kill. */
-  drainSparks(): { x: number; y: number }[];
+  /** Impact points resolved since the last call, then cleared. Accumulated per sim tick
+   *  so a multi-tick catch-up frame still flashes every kill. `radiusFp` is `0` for a
+   *  `targeted` impact (a spark) or a `blast`'s true radius (M2-S4a step 11, an
+   *  expanding-and-fading ring — `scene.ts`). */
+  drainSparks(): { x: number; y: number; radiusFp: number }[];
   /** Derived HUD fields for the DOM overlay. */
   hud(): HudVM;
   isPaused(): boolean;
@@ -242,6 +244,14 @@ const RANGE_FP = (r: CompiledRuleset, towerId: string): number =>
  *  invalid armed id can never read as affordable by accident. */
 const COST_FP = (r: CompiledRuleset, towerId: string): number =>
   r.towerById[towerId]?.cost ?? Number.MAX_SAFE_INTEGER;
+
+/** A tower's AoE blast radius (fixed-point sim units), by catalog id — `null` for a
+ *  single-target tower (no `aoe` effect) or an unresolved id (M2-S4a step 14). Feeds
+ *  `GhostVM.blastRadiusFp` so the armed-`splash` ghost can preview its blast alongside
+ *  its range ring. Capability.ts's radius-uniform gate guarantees at most one radius
+ *  among a tower's `aoe` effects, so the first match is unambiguous. */
+const BLAST_RADIUS_FP = (r: CompiledRuleset, towerId: string): number | null =>
+  r.towerById[towerId]?.effects.find((e) => e.kind === 'aoe')?.radiusFp ?? null;
 
 /**
  * Classify a candidate command against the CURRENT tick's buffer, before it is queued.
@@ -405,7 +415,7 @@ export function createController(seed: number): Controller {
   // selected — `selection` is only reassigned on aim/tick.
   let selOverlaySrc: (SelectionVM & { id: number }) | null = null;
   let selOverlay: SelectionVM | null = null;
-  let pendingSparks: { x: number; y: number }[]; // impact points resolved since the last drain
+  let pendingSparks: { x: number; y: number; radiusFp: number }[]; // impact points resolved since the last drain
   // Live in-flight-shot list (Tracer, #32/P6): appended from each tick's drained `fired`
   // events, pruned in `frame()` once render time passes a flight's `impactTick` — no
   // tracer crosses run identity (cleared on `reset()`) or survives past terminal.
@@ -674,7 +684,13 @@ export function createController(seed: number): Controller {
         // Armed: an existing tower is an occupied cell, not a selection target — mirrors
         // clickAt's occupied-cell rejection so the keyboard cursor can't silently arm
         // `selection` (enabling a stray Sell) while a Card is still armed for placement.
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, armed) };
+        ghost = {
+          col,
+          row,
+          valid: false,
+          rangeFp: RANGE_FP(ruleset, armed),
+          blastRadiusFp: BLAST_RADIUS_FP(ruleset, armed),
+        };
         bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
         return { kind: 'blocked', col, row, valid: false };
       }
@@ -698,7 +714,13 @@ export function createController(seed: number): Controller {
       return { kind: 'blocked', col, row, valid: false };
     }
     const valid = placementValid(col, row, armed);
-    ghost = { col, row, valid, rangeFp: RANGE_FP(ruleset, armed) };
+    ghost = {
+      col,
+      row,
+      valid,
+      rangeFp: RANGE_FP(ruleset, armed),
+      blastRadiusFp: BLAST_RADIUS_FP(ruleset, armed),
+    };
     bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
     return { kind: 'ghost', col, row, valid };
   };
@@ -723,10 +745,22 @@ export function createController(seed: number): Controller {
     // invalid ghost rather than clearing it; previously the null-on-tower branch let the
     // slightest hover erase the rejection cue over the very footprint a click had rejected.
     if (towerAt(col, row) !== null) {
-      ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, armed) };
+      ghost = {
+        col,
+        row,
+        valid: false,
+        rangeFp: RANGE_FP(ruleset, armed),
+        blastRadiusFp: BLAST_RADIUS_FP(ruleset, armed),
+      };
       return;
     }
-    ghost = { col, row, valid: placementValid(col, row, armed), rangeFp: RANGE_FP(ruleset, armed) };
+    ghost = {
+      col,
+      row,
+      valid: placementValid(col, row, armed),
+      rangeFp: RANGE_FP(ruleset, armed),
+      blastRadiusFp: BLAST_RADIUS_FP(ruleset, armed),
+    };
   };
 
   /** Mouse/pointer click at a board cell — the armed/selection state machine (PLAN.md P2
@@ -741,7 +775,13 @@ export function createController(seed: number): Controller {
       const towerId = armed;
       const existing = towerAt(col, row);
       if (existing !== null) {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
+        ghost = {
+          col,
+          row,
+          valid: false,
+          rangeFp: RANGE_FP(ruleset, towerId),
+          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
+        };
         setOutcome({ kind: 'rejected', reason: 'occupied' });
         return;
       }
@@ -751,12 +791,24 @@ export function createController(seed: number): Controller {
       // 'bounty'/'other'. Checked before `placementValid` (which itself folds the cap
       // into its memoized result) so this exact branch can attach the distinct outcome.
       if (buffer.length >= MAX_INPUTS_PER_TICK) {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
+        ghost = {
+          col,
+          row,
+          valid: false,
+          rangeFp: RANGE_FP(ruleset, towerId),
+          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
+        };
         setOutcome({ kind: 'rejected', reason: 'pendingCap' });
         return;
       }
       if (!placementValid(col, row, towerId)) {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
+        ghost = {
+          col,
+          row,
+          valid: false,
+          rangeFp: RANGE_FP(ruleset, towerId),
+          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
+        };
         const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
         setOutcome({
           kind: 'rejected',
@@ -772,7 +824,13 @@ export function createController(seed: number): Controller {
       const cmd: SimInput = { kind: 'placeTower', anchor: { col, row }, towerId };
       const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') {
-        ghost = { col, row, valid: false, rangeFp: RANGE_FP(ruleset, towerId) };
+        ghost = {
+          col,
+          row,
+          valid: false,
+          rangeFp: RANGE_FP(ruleset, towerId),
+          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
+        };
         setOutcome({ kind: 'rejected', reason: 'other' });
         return;
       }
@@ -942,7 +1000,7 @@ export function createController(seed: number): Controller {
         tracers,
       };
     },
-    drainSparks(): { x: number; y: number }[] {
+    drainSparks(): { x: number; y: number; radiusFp: number }[] {
       if (pendingSparks.length === 0) return [];
       const out = pendingSparks;
       pendingSparks = [];

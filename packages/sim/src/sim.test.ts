@@ -162,12 +162,14 @@ describe('step() StepEvents plumbing (#31/#32)', () => {
     s.tick = -1; // forges the tick-totality no-op path
     const events: StepEvents = {
       impactPoints: [{ x: 1, y: 2, radiusFp: 0 }],
-      fired: [{ originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 }],
+      fired: [
+        { kind: 'targeted', originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 },
+      ],
     };
     step(s, RULESET, [], events);
     expect(events.impactPoints).toEqual([{ x: 1, y: 2, radiusFp: 0 }]); // untouched — appended nothing
     expect(events.fired).toEqual([
-      { originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 },
+      { kind: 'targeted', originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 },
     ]);
   });
 
@@ -176,12 +178,14 @@ describe('step() StepEvents plumbing (#31/#32)', () => {
     s.phase = 'won';
     const events: StepEvents = {
       impactPoints: [{ x: 3, y: 4, radiusFp: 0 }],
-      fired: [{ originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 }],
+      fired: [
+        { kind: 'targeted', originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 },
+      ],
     };
     step(s, RULESET, [], events);
     expect(events.impactPoints).toEqual([{ x: 3, y: 4, radiusFp: 0 }]); // untouched — appended nothing
     expect(events.fired).toEqual([
-      { originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 },
+      { kind: 'targeted', originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 },
     ]);
   });
 

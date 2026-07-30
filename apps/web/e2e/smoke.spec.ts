@@ -34,8 +34,8 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.locator('.wy-status')).toContainText('Lives:');
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-rail')).toBeVisible();
-  // The Rail's Cards (PLAN.md P2, M2-S3: one per catalog tower) — unarmed at load.
-  await expect(page.locator('.wy-card')).toHaveCount(2);
+  // The Rail's Cards (PLAN.md P2, M2-S3/M2-S4a: one per catalog tower) — unarmed at load.
+  await expect(page.locator('.wy-card')).toHaveCount(3);
   for (const c of await page.locator('.wy-card').all()) {
     await expect(c).toBeVisible();
     await expect(c).toHaveAttribute('aria-pressed', 'false');
@@ -291,6 +291,92 @@ test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it
   // axe with the just-placed slow tower selected (Sell + Upgrade row).
   const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
+});
+
+// M2-S4a step 15: the blast ring + radius preview are DECORATIVE canvas-only cues (outcomes
+// stay carried by HP pips, per the Tracer/Blast glossary entries), so axe cannot see them at
+// all — the a11y obligation here is text (the Panel's `panel.blastRadius` row) plus reduced-
+// motion compliance, never ring-only. The ring's own geometry/damping is unit-tested
+// (`packages/render/src/scene.ts` consumers — `tower-paint.test.ts`, `creep-paint.test.ts`);
+// this e2e proves the DOM-visible half: the Card/Panel/hotkey surface stays fully functional
+// and axe-clean for valid placement, invalid (occupied) placement, AND under reduced motion.
+test('the third Card (M2-S4a): arms Splash Tower by click AND by Digit3, labels its blast radius as TEXT, and stays axe-clean for valid + invalid placement', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const splashCard = page.getByRole('button', { name: /Splash Tower/ });
+  const board = page.locator('.wy-board');
+  const panel = page.locator('.wy-panel');
+
+  // Click-arm.
+  await expect(panel).toBeHidden();
+  await splashCard.click();
+  await expect(splashCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel).toContainText('Splash Tower');
+  // The blast radius is labelled as TEXT, alongside the range stat every tower already
+  // shows — never ring-only (PLAN.md step 14/15's a11y obligation).
+  await expect(panel).toContainText('Blast radius:');
+  await expect(panel).toContainText('Range:');
+  await expect(board).toBeFocused();
+
+  // axe with the 3-card Rail, the third Card armed.
+  const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
+
+  await splashCard.click(); // disarm — back to a clean slate for the hotkey path
+  await expect(splashCard).toHaveAttribute('aria-pressed', 'false');
+
+  // Digit3 (armTower3's default binding) arms from document scope, exactly like Digit1/
+  // Digit2 arm the first two Cards.
+  await page.keyboard.press('Digit3');
+  await expect(splashCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(board).toBeFocused();
+
+  // VALID placement, via the keyboard cursor.
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  await expect(splashCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  await expect(panel).toContainText('Splash Tower'); // now selected
+  await expect(panel).toContainText('Blast radius:');
+
+  const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
+
+  // INVALID placement: re-arm and aim at the SAME (now-occupied) cell — the keyboard
+  // cursor never moved off it, so this exercises the occupied-cell rejection (PLAN.md P2
+  // table: a persistent invalid ghost, still armed, never a crash).
+  await page.keyboard.press('Digit3');
+  await page.keyboard.press('Enter');
+  await expect(splashCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
+
+  const invalidAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(invalidAudit.violations, JSON.stringify(invalidAudit.violations, null, 2)).toEqual([]);
+});
+
+test('the Splash Tower ghost + blast-radius preview stay functional and axe-clean under reduced motion (M2-S4a step 15)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Reduce motion').check();
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  const splashCard = page.getByRole('button', { name: /Splash Tower/ });
+  const board = page.locator('.wy-board');
+  await splashCard.click();
+  await expect(splashCard).toHaveAttribute('aria-pressed', 'true');
+
+  // Aim the board so the ghost (with its damped, shape-distinct blast-radius ring) is
+  // drawn on the canvas — decorative, out of axe's scope (ADR 0003 §3); this proves the
+  // DOM-visible flow doesn't regress with the setting on. The ring's own reduced-motion
+  // damping is unit-tested where it's actually assertable (`scene.ts`'s consumers).
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowUp');
+
+  const audit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
 test('supports player-started runs, pause / speed controls, early-calls all three waves with the preview checked before each, and reaches a result', async ({

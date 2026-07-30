@@ -132,14 +132,33 @@ export interface StepEvents {
    *  that retargets before the shot resolves would otherwise break the association —
    *  this carries the ORIGINAL target's identity/timing over the tick regardless of
    *  later retargeting). Purely presentational: append-only, never hash-relevant,
-   *  never serialized — same contract as `impactPoints` (combat.ts, #31 precedent). */
-  readonly fired: {
-    originX: number;
-    originY: number;
-    targetId: number;
-    launchTick: number;
-    impactTick: number;
-  }[];
+   *  never serialized — same contract as `impactPoints` (combat.ts, #31 precedent).
+   *  A discriminated union (M2-S4a step 12, mirroring `Impact`): a `targeted` shot's
+   *  tracer chases its target's CURRENT position (`targetId`, resolved by the render
+   *  layer's per-frame interpolation); a `blast` shot is already point-locked at fire
+   *  time (`destX`/`destY`, the same `predictBlastPoint` lead point the impact itself
+   *  will land at) — left undiscriminated, every blast tracer would visibly fly toward
+   *  wherever its fire-time target ends up, not where the blast actually lands. */
+  readonly fired: (
+    | {
+        readonly kind: 'targeted';
+        readonly originX: number;
+        readonly originY: number;
+        readonly targetId: number;
+        readonly launchTick: number;
+        readonly impactTick: number;
+      }
+    | {
+        readonly kind: 'blast';
+        readonly originX: number;
+        readonly originY: number;
+        readonly targetId: number;
+        readonly destX: number;
+        readonly destY: number;
+        readonly launchTick: number;
+        readonly impactTick: number;
+      }
+  )[];
 }
 
 /** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it).
@@ -848,6 +867,14 @@ export function runCombat(
         targetId: target,
         effects: snapshotEffects(def.effects), // fresh objects per fire (Codex — hash-serialized)
       });
+      events?.fired.push({
+        kind: 'targeted',
+        originX: towerX,
+        originY: towerY,
+        targetId: target,
+        launchTick: tick,
+        impactTick,
+      });
     } else {
       // Blast tower (M2-S4a step 2): lead the target along its route at fire-time
       // effective speed. `target` was resolved above EITHER from `held` (found by
@@ -877,14 +904,17 @@ export function runCombat(
         radiusFp,
         effects: snapshotEffects(def.effects),
       });
+      events?.fired.push({
+        kind: 'blast',
+        originX: towerX,
+        originY: towerY,
+        targetId: target,
+        destX: point.x,
+        destY: point.y,
+        launchTick: tick,
+        impactTick,
+      });
     }
-    events?.fired.push({
-      originX: towerX,
-      originY: towerY,
-      targetId: target,
-      launchTick: tick,
-      impactTick,
-    });
     towers.nextFireTick[i] = nextFire;
   });
 

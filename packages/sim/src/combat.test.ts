@@ -410,7 +410,14 @@ describe('runCombat — fired StepEvents (#32)', () => {
     );
     // Tower at (5,5): footprint centre = ((5+1)·256, (5+1)·256) = (1536,1536).
     expect(events.fired).toEqual([
-      { originX: 1536, originY: 1536, targetId: 1, launchTick: 0, impactTick: TRAVEL_TICKS },
+      {
+        kind: 'targeted',
+        originX: 1536,
+        originY: 1536,
+        targetId: 1,
+        launchTick: 0,
+        impactTick: TRAVEL_TICKS,
+      },
     ]);
   });
 
