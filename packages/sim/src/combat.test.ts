@@ -5,7 +5,13 @@
 import { describe, it, expect } from 'vitest';
 import { createInitialState, step, type SimInput } from './index';
 import type { TowerArrays } from './tower';
-import { runCombat, type CombatCreeps, type Impact, type StepEvents } from './combat';
+import {
+  runCombat,
+  applyImpactToCreep,
+  type CombatCreeps,
+  type Impact,
+  type StepEvents,
+} from './combat';
 import type { CompiledEffect } from './ruleset';
 import { testRuleset } from './test-support';
 
@@ -713,5 +719,51 @@ describe("sellTower preserves survivors' cooldown and lock", () => {
     expect(s.towers.targetId.every((v) => Number.isSafeInteger(v))).toBe(true);
     expect(s.towers.nextFireTick.every((v) => Number.isSafeInteger(v))).toBe(true);
     expect(JSON.stringify(s.towers)).not.toContain('null');
+  });
+});
+
+// QC round-2: "a lethal hit applies no statuses" (m2.md, `applyImpactToCreep`'s own
+// doc comment) had no direct witness. Every existing test that reaches PASS 2's
+// death-gated branch observes it only through `runCombat`, which SWEEPS the killed
+// row before its slow columns could be read — so reordering PASS 1/PASS 2 (statuses
+// applied before the death check) or deleting the death gate entirely survives all
+// of them. `applyImpactToCreep` is called directly here, on the row BEFORE any
+// sweep, so its slow columns are still readable after the lethal call returns.
+describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before the sweep)', () => {
+  it('a hit that kills the row leaves its slow columns untouched, even though the impact carries a slow effect', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 8 }]);
+    const killedByImpact = new Set<number>();
+    applyImpactToCreep(
+      creeps,
+      0,
+      [
+        { kind: 'direct', amount: 8 }, // exactly lethal
+        { kind: 'slow', mulFp: 128, durationTicks: 30 },
+      ],
+      0,
+      killedByImpact,
+    );
+    expect(creeps.hp[0]).toBeLessThanOrEqual(0);
+    expect(killedByImpact.has(0)).toBe(true);
+    expect(creeps.slowMulFp[0]).toBe(0); // PASS 2 never ran on the killed row
+    expect(creeps.slowUntilTick[0]).toBe(0);
+  });
+
+  it('a NON-lethal hit still applies its slow — the guard is death-gated, not a blanket status skip', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
+    const killedByImpact = new Set<number>();
+    applyImpactToCreep(
+      creeps,
+      0,
+      [
+        { kind: 'direct', amount: 8 },
+        { kind: 'slow', mulFp: 128, durationTicks: 30 },
+      ],
+      0,
+      killedByImpact,
+    );
+    expect(creeps.hp[0]).toBeGreaterThan(0);
+    expect(killedByImpact.has(0)).toBe(false);
+    expect(creeps.slowMulFp[0]).toBe(128);
   });
 });

@@ -263,10 +263,19 @@ describe('previewInputs — read-only PreviewState contract (#30/P3)', () => {
       // @ts-expect-error PreviewState's readonly columns are not assignable to step()'s
       // mutable SimState — the read-only contract is a typecheck failure, never a live call.
       step(preview, RULESET, []);
-      // @ts-expect-error preview.impacts is deeply readonly — effects is `readonly
-      // EffectPrimitive[]`, so pushing onto it (which would mutate the shared, live-state
-      // impact object) is a typecheck failure, never a live call.
-      preview.impacts[0].effects.push({ kind: 'direct', amount: 1 });
+      // The index is narrowed into a local FIRST (QC round-2 #12): under the repo-wide
+      // `noUncheckedIndexedAccess`, `preview.impacts[0].effects.push(...)` raises BOTH
+      // TS2532 (possibly-undefined) and TS2339, and a single `@ts-expect-error` is
+      // satisfied by EITHER — so the directive stayed green even with `effects` made
+      // mutable again, silently covering nothing. Narrowing first removes TS2532, leaving
+      // the readonly violation as the only error the directive can be satisfied by.
+      const firstImpact = preview.impacts[0];
+      if (firstImpact !== undefined) {
+        // @ts-expect-error preview.impacts is deeply readonly — effects is `readonly
+        // EffectPrimitive[]`, so pushing onto it (which would mutate the shared,
+        // live-state impact object) is a typecheck failure, never a live call.
+        firstImpact.effects.push({ kind: 'direct', amount: 1 });
+      }
     }
   });
 

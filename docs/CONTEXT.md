@@ -73,6 +73,20 @@ shot's real flight window. Purely decorative — damage outcomes are always carr
 by the impact spark and HP pips, never by the tracer.
 _Avoid_: projectile, bullet, missile.
 
+**Impact**:
+The landing of a fired shot — scheduled when a tower fires and resolved at the tick
+it arrives, so a slow shot is dodgeable and its outcome always reads the fire-time
+snapshot of the firing tower. An impact is either **target-locked** (bound to one
+creep, wasted if that creep dies or leaks in flight) or a **blast**.
+_Avoid_: damage event.
+
+**Blast**:
+A point-locked impact: it lands at a point that led the target along the creep's
+path at fire-time speed, and affects every creep within its radius, whether or not
+the original target is still alive. AoE names the effect form a tower authors; a
+blast is one landing of it.
+_Avoid_: explosion, area hit.
+
 **Wave**:
 A scheduled burst of creeps the player must survive. Waves come in a finite,
 ordered sequence — a board's **wave schedule**.

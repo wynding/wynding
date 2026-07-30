@@ -253,10 +253,12 @@ export const MAX_BLAST_RADIUS_FP = 2048;
  * (`targeted`) or a bounds-checked `(x, y, radiusFp)` (`blast`): `x`/`y` must fall
  * ON-BOARD (`[0, grid.width·FP_ONE)` / `[0, grid.height·FP_ONE)` — an out-of-board
  * blast is structurally forged, never real fire-time output; this ON-BOARD bound
- * alone is necessary AND sufficient — the schema caps board AREA (`CELL_CAP`), not
- * per-axis tile counts, so a legal board can run thousands of tiles along one axis,
- * and `inRange`'s own overflow-proof early-out (`Math.abs(dx) > range`) already
- * keeps the membership arithmetic bounded to `|dx| ≤ MAX_BLAST_RADIUS_FP` regardless
+ * alone is necessary AND sufficient — the schema caps each axis at `GENERIC_MAX`
+ * (1e6 tiles: `ruleset-schema.ts`'s `widthTiles`/`heightTiles`), not board area
+ * (`CELL_CAP` is `buildGrid`'s own cap, not the schema's), so a legal board can run
+ * up to a million tiles along one axis, and `inRange`'s own overflow-proof early-out
+ * (`Math.abs(dx) > range`) already keeps the membership arithmetic bounded to
+ * `|dx| ≤ MAX_BLAST_RADIUS_FP` regardless
  * of how far `x`/`y` sit from a creep — so no separate coordinate ceiling is needed)
  * AND `radiusFp` under {@link MAX_BLAST_RADIUS_FP}. Any other shape, or an
  * unrecognized `kind`, is dropped.
@@ -521,10 +523,11 @@ function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] 
 
 /** The AoE radius this tower's compiled bundle fires as a blast, or `null` for a
  *  single-target tower. Form-uniform and radius-uniform BY CONSTRUCTION
- *  (capability.ts's sv8 compile-time gates: a tower's direct effects are all
- *  `single` or all `aoe`, and every `aoe` effect in one bundle shares one radius),
- *  so this simply locates the (unique, if present) radius rather than reconciling
- *  several. */
+ *  (ruleset.ts's `checkCapabilityGlobal` sv8 compile-time gates, scoped PER TOWER,
+ *  not capability.ts's profile: a tower's direct effects are all `single` or all
+ *  `aoe`, and every `aoe` effect ON THAT TOWER shares one radius — not a
+ *  catalog-wide radius, so `frost-splash` and `splash` can differ), so this simply
+ *  locates the (unique, if present) radius rather than reconciling several. */
 function blastRadiusOf(effects: readonly CompiledEffect[]): number | null {
   for (const e of effects) {
     if (e.kind === 'aoe') return e.radiusFp;
@@ -540,7 +543,7 @@ function blastRadiusOf(effects: readonly CompiledEffect[]): number | null {
  * IDENTICAL for both — a blast's outer loop over its radius membership is the only
  * difference from a targeted impact's trivial one-creep "loop".
  */
-function applyImpactToCreep(
+export function applyImpactToCreep(
   creeps: CombatCreeps,
   idx: number,
   effects: readonly EffectPrimitive[],

@@ -3,9 +3,10 @@
 // lead-and-clamp prediction, dead-target-in-flight, zero-member events, no-status-
 // on-a-lethal-hit), the sv8 form-uniform/radius-uniform/AOE_SCAN_CEILING compiler
 // gates, forged-blast totality, and the done-criterion showcase scenario (a wave of
-// fragile `swarm`-like creeps that SURVIVES one well-placed blast tower — 5 of 16
-// leak through even at the best of 521 legal anchors, an owner-ratified pinned
-// measurement, not a bug).
+// fragile `swarm`-like creeps that SURVIVES one well-placed blast tower — 5 of 16 leak
+// through even at this fixture's best anchor, an owner-ratified pinned measurement, not
+// a bug; see the block comment on that scenario for how it relates to the real board's
+// 521-anchor sweep).
 
 import { describe, it, expect } from 'vitest';
 import { createInitialState, step, isTerminalPhase, hashSimState } from './index';
@@ -275,8 +276,21 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
   // both green, since nothing about `runCombat`'s own outcome today observes the
   // traversal order (see `blastMembers`'s doc comment, combat.ts). Asserting the
   // returned SoA row-index order DIRECTLY, against the same shuffled/duplicate-id
-  // fixture above, is what actually pins it — this is the only place ascending-id
-  // and the row-index tiebreak are load-bearing on their own.
+  // fixture below, is what actually pins ASCENDING-ID order and catches an
+  // INVERTED tiebreak.
+  //
+  // QC round-2: it does NOT catch a DELETED tiebreak (`|| a.idx - b.idx` simply
+  // removed). `members` is always pushed in ascending SoA-index order (the `for (let
+  // i = 0; ...)` loop in `blastMembers`), and `Array.prototype.sort` has been
+  // required stable since ES2019 — so for equal-id rows, sorting by `id` ALONE
+  // already reproduces the identical ascending-index order the explicit tiebreak
+  // asserts. No fixture built from `blastMembers`'s own inputs can distinguish
+  // "tiebreak present" from "tiebreak absent, relying on stable sort + push order";
+  // only INVERTING it is observable. The explicit `|| a.idx - b.idx` is kept anyway
+  // as an EXPLICIT total order the function's contract can name and rely on, rather
+  // than an implicit dependency on `sort`'s stability guarantee and this loop's
+  // push order — both true today, but neither is what the tiebreak clause itself
+  // is FOR.
   it('blastMembers returns rows in ascending creep-id order, ties broken by SoA row index (directly pinned)', () => {
     const rowsA = [
       { id: 50, col: 7, row: 6, hp: 100 },
@@ -296,6 +310,63 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
     // whole was shuffled — proof the tiebreak is row index, not e.g. array order
     // reversed or first-occurrence-only.
     expect(blastMembers(restingCreeps(rowsB), GRID, imp)).toEqual([0, 3, 2, 1]);
+  });
+});
+
+// QC round-2: `blastMembers`'s three eligibility guards (`combat.ts`) were only
+// ORDER-tested (above) — every one of the three `continue`s below is deletable with
+// the whole suite green, since the order tests' fixtures are all live, on-lattice,
+// safe-integer rows. Each guard gets its own witness here.
+describe('blastMembers — eligibility guards (membership, not ordering)', () => {
+  it('a dead row inside the blast radius is excluded — bounty and killBounty stay 0, not the paid-out amount', () => {
+    // Deleting `if (!isLiveHp(creeps.hp[i])) continue;` would let this dead row pay
+    // its bounty — HASH-RELEVANT: `killBounty` feeds `cumulativeKillBounty`, which
+    // feeds score, which feeds `hashSimState` (`runCombat`'s own comment, combat.ts
+    // §(2): "a forged non-positive-hp row is swept with no bounty").
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 0 }]);
+    creeps.bounty[0] = 7;
+    const impact: Impact = {
+      kind: 'blast',
+      impactTick: 0,
+      x: cx(7),
+      y: cy(6),
+      radiusFp: 50,
+      effects: [{ kind: 'direct', amount: 15 }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      SF_NUM,
+      SF_DEN,
+    );
+    expect(result.bounty).toBe(0);
+    expect(result.killBounty).toBe(0);
+  });
+
+  it('a live row with a non-safe-integer id (a forged/restored SoA — coerceSoa validates only wave/creepId, never id) is excluded from membership', () => {
+    // Deleting `if (!Number.isSafeInteger(id)) continue;` would let this row into
+    // `members`, sorting on `NaN - b.id` (always false, so it would land wherever
+    // the comparator's implementation-defined NaN handling puts it) instead of
+    // being dropped outright.
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
+    creeps.id[0] = NaN;
+    const imp = { x: cx(7), y: cy(6), radiusFp: 50 };
+    expect(blastMembers(creeps, GRID, imp)).toEqual([]);
+  });
+
+  it('a live row whose headCol sits 3 cells from fromCol — deriveValidCreepPosition returns null — is excluded from membership', () => {
+    // Deleting `if (geom === null) continue;` would crash on `geom.point.x` instead
+    // of skipping a row whose position cannot be derived.
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
+    creeps.headCol[0] = 10; // |10 − 7| = 3 > 1, so deriveValidCreepPosition rejects it
+    const imp = { x: cx(7), y: cy(6), radiusFp: 50 };
+    expect(blastMembers(creeps, GRID, imp)).toEqual([]);
   });
 });
 
@@ -573,8 +644,15 @@ describe('blast resolution — dead-target-in-flight still blasts; zero-member s
   });
 });
 
-describe('blast resolution — a lethal blast applies no statuses', () => {
-  it('a creep killed by the direct pass gets no slow from the same blast; a surviving sibling does', () => {
+// QC round-2: this describe's title and this test's title both claimed to prove "a
+// lethal blast applies no statuses". They don't — the killed row is swept before
+// its slow columns could be read, so this only verifies the SURVIVOR clause
+// (`result.creeps.slowMulFp[0]`, the one remaining row). The actual "no statuses on
+// a lethal hit" rule is pinned directly, pre-sweep, in `combat.test.ts`'s
+// `applyImpactToCreep` describe block, which calls the function itself instead of
+// going through `runCombat`'s sweep.
+describe('blast resolution — a lethal blast still kills and sweeps; a surviving sibling in the same blast still gets slowed', () => {
+  it('a creep killed by the direct pass is dead+swept; a surviving sibling in the same blast still gets its slow', () => {
     const creeps = restingCreeps([
       { id: 1, col: 7, row: 6, hp: 8 }, // dies to the direct pass
       { id: 2, col: 7, row: 6, hp: 100 }, // survives
@@ -770,9 +848,11 @@ describe('forged-blast bounds (Codex R1-16) — dropped with no unsafe arithmeti
 });
 
 describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a wave of fragile swarm-like creeps', () => {
-  // A minimal synthetic ruleset fixture, built INLINE (never importing
-  // `@wynding/content` — the real `splash`/`swarm` catalog entries are Phase 2's,
-  // someone else's work, not yet in `wynding-core.json`): one `aoe` tower
+  // A minimal synthetic ruleset fixture, built INLINE. It never imports
+  // `@wynding/content` — `packages/sim` sits UPSTREAM of `content` in the one-way
+  // dependency graph, so it cannot, and the real `splash`/`swarm` entries (which DID land
+  // in `wynding-core.json` earlier on this branch) are unreachable from here by design:
+  // one `aoe` tower
   // (`TEST_AOE_TOWER`, mirroring `splash`'s exact numbers) and a wave of 16
   // `swarm`-shaped creeps (`TEST_SWARM_CREEP`: hp 7, speed 30 — dies to one blast
   // whose damage is 8), spaced tightly (5 ticks) so several are caught by one
@@ -783,7 +863,7 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
     waves: [{ waveCount: 16, waveSpacing: 5, countdownTicks: 1, creepId: 'swarm' }],
   });
 
-  function runShowcase(): { state: ReturnType<typeof createInitialState>; ticks: number } {
+  function runShowcase(): { state: ReturnType<typeof createInitialState> } {
     let state = createInitialState(0xf00d, SHOWCASE);
     // Pinned anchor: (5,5) — off the straight row-6 lane, footprint centre
     // (1536,1536), well within the tower's rangeFp (1024) of the lane.
@@ -797,22 +877,29 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
       state = step(state, SHOWCASE, []);
       ticks++;
     }
-    return { state, ticks };
+    return { state }; // `ticks` is bounded by CAP below and pinned by the golden's tick field
   }
 
-  // OWNER-RATIFIED PINNED EXPECTATION (QC round-1 #1): this scenario does NOT clear
-  // the wave, and that is the accepted outcome, not a bug. Mutation testing swept
-  // all 521 legal anchors on the real board: the BEST single `splash` placement
-  // still leaks 5 of 16 `swarm` creeps; only two of the 521 anchors clear the wave
-  // outright. The owner's ruling was to pin the MEASURED outcome — no balance
-  // numbers (splash's damage/radius, swarm's hp/spacing, or the wave itself) were
-  // tuned to make this anchor clear. A prior version of this test asserted only
-  // `won` + a hash, a bar loose enough to tolerate up to 9 of 16 leaking (`lives`
-  // bottoms out at 10 − 9 = 1, still `won`) — it could not tell "this pinned anchor"
-  // from "some other anchor that leaks nearly twice as many". The three assertions
-  // below pin the measured numbers directly: `leakedCount === 5` (matching the best
-  // of all 521 anchors), `lives === 5` (10 starting lives − 5 leaks × 1 leakCost),
-  // and `cumulativeKillBounty === 11` (11 of the 16 `swarm` kills, 1 bounty each).
+  // OWNER-RATIFIED PINNED EXPECTATION (QC round-1 #1, provenance corrected at round 2):
+  // this scenario does NOT clear the wave, and that is the accepted outcome, not a bug.
+  //
+  // TWO SEPARATE MEASUREMENTS, kept distinct because round 1's comment conflated them:
+  //   - THIS fixture is the 14×14 synthetic `LANE` above, which has 117 legal anchors.
+  //     Its best also leaks 5, which is why the number below is 5.
+  //   - The exhaustive sweep behind the OWNER'S RULING ran over the real 28×24 board and
+  //     the shipped bundle: 521 legal anchors, of which **ZERO** clear the wave; the best
+  //     leaks 5 of 16. It takes **TWO** towers — e.g. (4,9) + (5,12) — to clear it. (Round
+  //     1's comment said "only two of the 521 anchors clear", which is impossible and was a
+  //     mis-transcription of "two towers".) That sweep is recorded in `docs/milestones/m2.md`'s
+  //     flags section, not reproduced here — this test pins one fixture, not the sweep.
+  //
+  // The ruling was to pin the MEASURED outcome: no balance number (splash's damage/radius,
+  // swarm's hp/spacing, or the wave itself) was tuned to make this anchor clear. The three
+  // assertions below pin those numbers directly — `leakedCount === 5`, `lives === 5`
+  // (10 starting − 5 leaks × 1 leakCost), `cumulativeKillBounty === 11` (11 of 16 kills at
+  // 1 bounty each) — so a degradation fails on a NAMED value rather than only on the golden
+  // hash, which is re-pinned wholesale at every `simVersion` bump and so cannot be relied on
+  // as this rule's guard for the six bumps M2 still has left.
   it('reaches a terminal WIN state that still leaked 5 of 16 — the measured, owner-ratified outcome', () => {
     const { state } = runShowcase();
     expect(isTerminalPhase(state.phase)).toBe(true);

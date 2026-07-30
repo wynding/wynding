@@ -167,9 +167,11 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // waveCursor ran past the last wave.
     expect(state.waveResolved).toEqual([true, true, true]);
     expect(state.waveCursor).toBe(3);
-    // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty (wave 2's
+    // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty (wave 1's
     // re-composition to 16 × `swarm` — M2-S4a step 9 — adds 6 more 1-bounty kills over
-    // the old 10 × `normal`), and the two early-call credits (⌊500/50⌋ at tick 0,
+    // the old 10 × `normal`; waves are 0-based throughout this file, so this is the
+    // SECOND wave, distinct from `:6`'s S3-era "wave 2" which names the THIRD), and
+    // the two early-call credits (⌊500/50⌋ at tick 0,
     // ⌊51/50⌋ at tick 550 (the call tick skips its own decrement, so the sampled
     // remainder is 51) — wave 1's natural launch pays nothing, its countdown having
     // already reached 0) all landed: cumulativeKillBounty is the SCORED kill-bounty

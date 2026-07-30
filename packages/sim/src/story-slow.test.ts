@@ -332,7 +332,12 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
     expect(result.creeps.id).toHaveLength(0); // dead — swept
   });
 
-  it('a lethal direct applies NO status: the creep dies before the slow pass, a non-lethal sibling survives slowed', () => {
+  // QC round-2: this title previously claimed "a lethal direct applies NO status",
+  // but the killed row (creep 1) is swept before its slow columns could be read —
+  // this only verifies creep 2, the SURVIVING sibling, still gets its slow. The
+  // "no statuses on a lethal hit" rule itself is pinned pre-sweep, directly against
+  // `applyImpactToCreep`, in `combat.test.ts`.
+  it('creep 1 dies to its own impact and is swept; creep 2, hit by an identical impact but non-lethally, still gets its slow', () => {
     const creeps = {
       id: [1, 2],
       hp: [10, 100], // creep 1 dies to the direct; creep 2 survives it
