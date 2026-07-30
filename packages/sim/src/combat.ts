@@ -42,7 +42,15 @@ import { FP_ONE } from '@wynding/engine';
 import { ORTHO_COST, DIAG_COST, type Grid } from './board';
 import type { DistanceField } from './pathfinding';
 import { distAt } from './field-access';
-import { deriveValidCreepPosition, cellOf, type CreepGeometry } from './movement';
+import {
+  advanceCreep,
+  cellCenterX,
+  cellCenterY,
+  deriveValidCreepPosition,
+  cellOf,
+  type CreepGeometry,
+} from './movement';
+import { effectiveSpeedFp } from './ruleset-shared';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
 import type { CompiledEffect, CompiledTower } from './ruleset';
 
@@ -73,12 +81,33 @@ export type EffectPrimitive =
   | { readonly kind: 'direct'; readonly amount: number }
   | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number };
 
-/** A scheduled impact: resolves at `impactTick`, hitting the creep `targetId`. */
-export interface Impact {
-  readonly impactTick: number;
-  readonly targetId: number;
-  readonly effects: EffectPrimitive[];
-}
+/**
+ * A scheduled impact, resolving at `impactTick` (M2-S4a: a discriminated union —
+ * hash-breaking even for single-target play, hence the sv8 bump and golden re-pin):
+ *   - `targeted` — bound to one creep (`targetId`); wasted if that creep is dead or
+ *     gone by `impactTick` (the pre-S4a shape, renamed).
+ *   - `blast` — point-locked at `(x,y)` (the fire-time predicted lead point, see
+ *     `predictBlastPoint`), affecting every creep within `radiusFp` at resolution,
+ *     whether or not the original target survived the flight.
+ * Both carry the same `effects` shape — the impact's `kind` is what distinguishes
+ * "one creep" from "every creep in a radius"; the per-creep effect application
+ * (`applyImpactToCreep`) is identical either way.
+ */
+export type Impact =
+  | {
+      readonly kind: 'targeted';
+      readonly impactTick: number;
+      readonly targetId: number;
+      readonly effects: EffectPrimitive[];
+    }
+  | {
+      readonly kind: 'blast';
+      readonly impactTick: number;
+      readonly x: number;
+      readonly y: number;
+      readonly radiusFp: number;
+      readonly effects: EffectPrimitive[];
+    };
 
 /**
  * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,
@@ -88,10 +117,16 @@ export interface Impact {
  * pre-populated collector passed through either early return is left unchanged.
  */
 export interface StepEvents {
-  /** Resolution points of impacts that LANDED (hit a still-live target) this tick, in
-   *  queue-resolution order — captured BEFORE damage applies. A wasted shot (leaked
-   *  target, or an earlier same-tick impact already killed it) appends nothing. */
-  readonly impactPoints: { x: number; y: number }[];
+  /** Resolution points of impacts that RESOLVED this tick, in queue-resolution
+   *  order. `radiusFp` (M2-S4a) is `0` for a `targeted` impact (a spark, captured
+   *  BEFORE damage applies, ONLY when it hit a still-live target — a wasted
+   *  targeted shot appends nothing) or the blast's true radius for a `blast`
+   *  impact (emitted UNCONDITIONALLY, before membership scanning — every resolved
+   *  blast lands visibly even if it catches nobody, or its original target died in
+   *  flight; Codex R1-12). Phase 3 (out of this story's sim-only scope) threads
+   *  `radiusFp` through `RenderOverlay.sparks`; the sim emits the shape now so a
+   *  later builder never has to touch this type again. */
+  readonly impactPoints: { x: number; y: number; radiusFp: number }[];
   /** Shots FIRED this tick (#32), in fire order — fp-unit origin (firing tower centre)
    *  + the target locked AT FIRE TIME (never re-derived from `state.impacts`: a tower
    *  that retargets before the shot resolves would otherwise break the association —
@@ -182,49 +217,113 @@ function canonicalEffectPrimitive(e: EffectPrimitive): EffectPrimitive {
     : { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
 }
 
+/** Structural safety bound on a blast impact's point coordinates (M2-S4a). Large
+ *  enough to cover any legal board (a board's fp extent is width/height TILES ×
+ *  256; the schema caps board tiles far under this) yet small enough that a
+ *  membership test's `dx²`/`dy²` can never leave the safe-integer domain even
+ *  against an adversarial creep position — the same totality argument `inRange`'s
+ *  overflow-proof early-out already relies on, extended to bound the OTHER operand.
+ *  A forged blast coordinate outside this range is dropped by `validImpact`,
+ *  before any arithmetic ever touches it. */
+const MAX_BLAST_COORD_FP = 1_000_000;
+
+/** Structural cap on a blast's radius — DELIBERATELY a SEPARATE constant from the
+ *  capability profile's `maxAoeRadiusFp` (mirrors `MAX_IMPACT_EFFECTS`'s
+ *  relationship to `maxEffectsPerBundle`, above): this is combat's own runtime
+ *  totality bound on a resolved impact, independent of any one `simVersion`'s
+ *  authoring ceiling. The layers share an INVARIANT, not a binding —
+ *  `capability.test.ts` pins the LIVE profile's `maxAoeRadiusFp` under this cap, so
+ *  one layer can never silently drift wider than the other. */
+export const MAX_BLAST_RADIUS_FP = 2048;
+
 /**
- * True iff `imp` is a valid impact shape: safe-integer `impactTick`/`targetId` and
- * an `effects` array of length 1..{@link MAX_IMPACT_EFFECTS} (mirrors the schema's
- * own per-tower effects cap, since a snapshot carries the whole bundle) holding
- * only valid {@link EffectPrimitive} entries. Any other shape is dropped.
+ * True iff `imp` is a valid impact shape: safe-integer `impactTick`, an `effects`
+ * array of length 1..{@link MAX_IMPACT_EFFECTS} (mirrors the schema's own per-tower
+ * effects cap, since a snapshot carries the whole bundle) holding only valid
+ * {@link EffectPrimitive} entries, and — per `kind` — a safe-integer `targetId`
+ * (`targeted`) or a bounds-checked `(x, y, radiusFp)` (`blast`): `x`/`y` must fall
+ * ON-BOARD (`[0, grid.width·FP_ONE)` / `[0, grid.height·FP_ONE)` — an out-of-board
+ * blast is structurally forged, never real fire-time output) AND under {@link
+ * MAX_BLAST_COORD_FP} (belt-and-suspenders against a future huge board); `radiusFp`
+ * under {@link MAX_BLAST_RADIUS_FP}. Any other shape, or an unrecognized `kind`, is
+ * dropped.
  */
-function validImpact(imp: unknown): imp is Impact {
+function validImpact(imp: unknown, grid: Grid): imp is Impact {
   if (imp === null || typeof imp !== 'object') return false;
-  const { impactTick, targetId, effects } = imp as {
-    impactTick?: unknown;
-    targetId?: unknown;
-    effects?: unknown;
-  };
-  if (!Number.isSafeInteger(impactTick) || !Number.isSafeInteger(targetId)) return false;
-  if (!Array.isArray(effects) || effects.length < 1 || effects.length > MAX_IMPACT_EFFECTS) {
+  const rec = imp as { kind?: unknown; impactTick?: unknown; effects?: unknown };
+  if (!Number.isSafeInteger(rec.impactTick)) return false;
+  if (
+    !Array.isArray(rec.effects) ||
+    rec.effects.length < 1 ||
+    rec.effects.length > MAX_IMPACT_EFFECTS ||
+    !rec.effects.every(validEffectPrimitive)
+  ) {
     return false;
   }
-  return effects.every(validEffectPrimitive);
+  if (rec.kind === 'targeted') {
+    const targetId = (imp as { targetId?: unknown }).targetId;
+    return Number.isSafeInteger(targetId);
+  }
+  if (rec.kind === 'blast') {
+    const { x, y, radiusFp } = imp as { x?: unknown; y?: unknown; radiusFp?: unknown };
+    const maxX = Math.min(MAX_BLAST_COORD_FP, grid.width * FP_ONE - 1);
+    const maxY = Math.min(MAX_BLAST_COORD_FP, grid.height * FP_ONE - 1);
+    return (
+      Number.isSafeInteger(x) &&
+      (x as number) >= 0 &&
+      (x as number) <= maxX &&
+      Number.isSafeInteger(y) &&
+      (y as number) >= 0 &&
+      (y as number) <= maxY &&
+      Number.isSafeInteger(radiusFp) &&
+      (radiusFp as number) >= 1 &&
+      (radiusFp as number) <= MAX_BLAST_RADIUS_FP
+    );
+  }
+  return false;
 }
 
 /**
- * Canonicalize the restored impact queue: keep only valid entries (re-built to the
- * exact `{impactTick, targetId, effects:[...]}` shape, each effect rebuilt per kind,
- * so serialization is stable), in array order, capped at
- * {@link MAX_IN_FLIGHT_IMPACTS}. Excess forged entries drop in array order.
+ * Canonicalize the restored impact queue: keep only valid entries (on-board for a
+ * `blast`, per `validImpact`'s `grid` bound), each rebuilt PER-VARIANT to its exact
+ * canonical shape (never a spread — an unknown extra property on a forged impact
+ * must not leak into the world-hash; `canonicalEffectPrimitive` precedent above),
+ * in array order, capped at {@link MAX_IN_FLIGHT_IMPACTS}. Excess or malformed
+ * entries drop in array order — a mixed queue of well-formed and forged/malformed
+ * `targeted`/`blast` entries resolves only its valid members.
  */
-function canonicalImpacts(impacts: readonly unknown[]): Impact[] {
+function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
   const out: Impact[] = [];
   for (const imp of impacts) {
     if (out.length >= MAX_IN_FLIGHT_IMPACTS) break;
-    if (!validImpact(imp)) continue;
-    out.push({
-      impactTick: imp.impactTick,
-      targetId: imp.targetId,
-      effects: imp.effects.map(canonicalEffectPrimitive),
-    });
+    if (!validImpact(imp, grid)) continue;
+    out.push(
+      imp.kind === 'targeted'
+        ? {
+            kind: 'targeted',
+            impactTick: imp.impactTick,
+            targetId: imp.targetId,
+            effects: imp.effects.map(canonicalEffectPrimitive),
+          }
+        : {
+            kind: 'blast',
+            impactTick: imp.impactTick,
+            x: imp.x,
+            y: imp.y,
+            radiusFp: imp.radiusFp,
+            effects: imp.effects.map(canonicalEffectPrimitive),
+          },
+    );
   }
   return out;
 }
 
-/** A live creep for targeting: positive-hp, position-valid, reachable. */
+/** A live creep for targeting: positive-hp, position-valid, reachable. `index` is
+ *  its row in `survivors` (M2-S4a) — a blast fire needs the target's raw movement
+ *  columns (`predictBlastPoint`), not just its derived point. */
 interface LiveCreep {
   readonly id: number;
+  readonly index: number;
   readonly x: number;
   readonly y: number;
   readonly dist: number;
@@ -395,13 +494,141 @@ export function satMul(a: number, b: number): number {
 
 /** Fresh per-fire snapshot of one tower's compiled effect bundle, in authored order
  *  (impacts serialize into the world-hash — a shared reference across fires would
- *  let one impact's runtime object identity bleed into another's). */
+ *  let one impact's runtime object identity bleed into another's). An `aoe`
+ *  compiled effect collapses to the same `direct` {@link EffectPrimitive} a
+ *  single-target effect would — the impact's OWN `kind` (`targeted` vs `blast`)
+ *  already carries "this direct damage applies over an area"; the per-creep
+ *  primitive list stays exactly the shape `applyImpactToCreep` already knows. */
 function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] {
-  return effects.map((e) =>
-    e.kind === 'direct'
-      ? { kind: 'direct', amount: e.amount }
-      : { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks },
+  return effects.map((e) => {
+    if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+    return { kind: 'direct', amount: e.amount }; // 'direct' or 'aoe' — same primitive
+  });
+}
+
+/** The AoE radius this tower's compiled bundle fires as a blast, or `null` for a
+ *  single-target tower. Form-uniform and radius-uniform BY CONSTRUCTION
+ *  (capability.ts's sv8 compile-time gates: a tower's direct effects are all
+ *  `single` or all `aoe`, and every `aoe` effect in one bundle shares one radius),
+ *  so this simply locates the (unique, if present) radius rather than reconciling
+ *  several. */
+function blastRadiusOf(effects: readonly CompiledEffect[]): number | null {
+  for (const e of effects) {
+    if (e.kind === 'aoe') return e.radiusFp;
+  }
+  return null;
+}
+
+/**
+ * Apply one impact's effects to a single creep row: PASS 1 every `direct` effect
+ * in AUTHORED order → death check → PASS 2 (only if the creep survived) every
+ * `slow` effect in authored order (the M2-S3 STATUS-EFFECT ORDER, file header).
+ * Shared by `targeted` and `blast` resolution: m2.md's "per creep" nesting is
+ * IDENTICAL for both — a blast's outer loop over its radius membership is the only
+ * difference from a targeted impact's trivial one-creep "loop".
+ */
+function applyImpactToCreep(
+  creeps: CombatCreeps,
+  idx: number,
+  effects: readonly EffectPrimitive[],
+  tick: number,
+  killedByImpact: Set<number>,
+): void {
+  for (const effect of effects) {
+    if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount);
+  }
+  if ((creeps.hp[idx] as number) <= 0) {
+    killedByImpact.add(idx);
+  } else {
+    for (const effect of effects) {
+      if (effect.kind === 'slow') applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
+    }
+  }
+}
+
+/**
+ * Predict a blast's fire-time landing POINT for a target at row `idx` of
+ * `survivors` — REUSES `advanceCreep` VERBATIM (M2-S4a step 2; no new geometry
+ * code). The budget is `travelTicks × effectiveSpeedFp(...)` — the SAME formula
+ * movement itself reads — spent in ONE re-path call, right now, rather than
+ * simulated tick-by-tick:
+ *   - `move`  → the projected point, re-derived via {@link deriveValidCreepPosition}
+ *     (the single seam movement/targeting/placement all share).
+ *   - `leak`  → the exit centre — m2.md's "clamped to the exit" falls straight out
+ *     of `advanceCreep`'s own `leak` branch; no separate clamp to write.
+ *   - `drop`  → the target's CURRENT point (`currentPoint`, already derived by the
+ *     caller) — a TOTALITY RAIL: unreachable here because `idx` is always drawn
+ *     from `live` (a row this same combat pass already proved position-valid and
+ *     reachable), kept only so this function, like every other seam in this file,
+ *     never throws on a state it cannot itself prove impossible.
+ *
+ * TWO DELIBERATE APPROXIMATIONS — both acceptable because this is a PREDICTION,
+ * not a re-simulation, so it must be DETERMINISTIC, never required to match real
+ * movement tick-for-tick:
+ *   (a) ONE re-path computed AT FIRE TIME, never recomputed per tick even if the
+ *       maze changes under it afterward — a blast tower commits to its shot's
+ *       landing point the instant it fires, like a real projectile already in the
+ *       air.
+ *   (b) `travelTicks × effectiveSpeedFp` spends the WHOLE budget in a single call
+ *       rather than flooring per-tick the way genuine movement accumulates it — the
+ *       two can only ever differ by sub-cell rounding at a waypoint boundary.
+ * Routing BOTH through `advanceCreep` itself — movement's own function — is what
+ * keeps prediction and real movement from drifting into two independent
+ * geometries.
+ *
+ * LOOP BOUND (no new DoS surface): a hostile bundle could author an enormous
+ * `travelTicks × speedFp` product, but `advanceCreep`'s internal walk is bounded by
+ * ROUTE LENGTH, not by `budget` — the distance field strictly DESCENDS every step,
+ * so the walk reaches the exit (⇒ `leak`) within at most the board's max route
+ * length regardless of how large `budget` is, then the point clamps there. This is
+ * `advanceCreep`'s own existing termination proof (movement.ts), which already
+ * covers budgets far larger than one tick's worth — a blast's one-shot budget adds
+ * nothing new to that argument.
+ */
+function predictBlastPoint(
+  field: DistanceField,
+  grid: Grid,
+  survivors: CombatCreeps,
+  idx: number,
+  currentPoint: { readonly x: number; readonly y: number },
+  travelTicks: number,
+  slowFloorNum: number,
+  slowFloorDen: number,
+): { readonly x: number; readonly y: number } {
+  const budget =
+    travelTicks *
+    effectiveSpeedFp(
+      survivors.speed[idx] as number,
+      safeSlowColumn(survivors.slowMulFp[idx]),
+      slowFloorNum,
+      slowFloorDen,
+    );
+  const outcome = advanceCreep(
+    field,
+    survivors.id[idx],
+    survivors.hp[idx],
+    survivors.fromX[idx],
+    survivors.fromY[idx],
+    survivors.headCol[idx],
+    survivors.headRow[idx],
+    survivors.progress[idx],
+    budget,
   );
+  if (outcome.kind === 'leak') {
+    return { x: cellCenterX(field.exit.col), y: cellCenterY(field.exit.row) };
+  }
+  if (outcome.kind === 'move') {
+    const geom = deriveValidCreepPosition(
+      outcome.fromX,
+      outcome.fromY,
+      outcome.headCol,
+      outcome.headRow,
+      outcome.progress,
+      grid,
+    );
+    if (geom !== null) return geom.point;
+  }
+  return currentPoint; // 'drop' (totality rail, unreachable for a live-proved target)
 }
 
 /**
@@ -409,13 +636,17 @@ function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] 
  * SoA (dead creeps swept), the surviving impact queue, and the updated bounty;
  * mutates `towers.targetId`/`towers.nextFireTick` in place (by source row) and
  * `creeps.hp`/`slowMulFp`/`slowUntilTick` during resolution. `tick` is the
- * pre-increment `state.tick`.
+ * pre-increment `state.tick`. `slowFloorNum`/`slowFloorDen` (M2-S4a) are the
+ * ruleset's slow floor — needed here (not just by movement) because a blast's
+ * fire-time lead prediction reads the SAME `effectiveSpeedFp` formula.
  *
- * Order (PLAN §13, extended M2-S3 with the status-effect close): resolve due
- * impacts (direct → death check → slow, per impact) → sweep dead + credit bounty →
- * per-tower target + fire → EXPIRY SWEEP. Impacts with `impactTick <= tick` resolve
- * (draining forged overdue entries too) in queue array-iteration order — a
- * deterministic total order.
+ * Order (PLAN §13, extended M2-S3 with the status-effect close, M2-S4a with blast
+ * resolution): resolve due impacts (direct → death check → slow, per impact; a
+ * `blast` impact's "per impact" loop runs over every creep in its radius, in
+ * creep-id order) → sweep dead + credit bounty → per-tower target + fire (a
+ * `targeted` or `blast` impact, per the tower's compiled effects) → EXPIRY SWEEP.
+ * Impacts with `impactTick <= tick` resolve (draining forged overdue entries too)
+ * in queue array-iteration order — a deterministic total order.
  */
 export function runCombat(
   creeps: CombatCreeps,
@@ -426,17 +657,22 @@ export function runCombat(
   field: DistanceField,
   grid: Grid,
   towerById: Readonly<Partial<Record<string, CompiledTower>>>,
+  slowFloorNum: number,
+  slowFloorDen: number,
   events?: StepEvents,
 ): { creeps: CombatCreeps; impacts: Impact[]; bounty: number; killBounty: number } {
-  const canonical = canonicalImpacts(impacts);
+  const canonical = canonicalImpacts(impacts, grid);
 
-  // (1) RESOLVE due impacts; keep the rest. Per impact, over its single affected
-  //     creep: PASS 1 applies every `direct` effect in authored order, THEN a death
-  //     check, THEN — only if the creep survived — PASS 2 applies every `slow`
-  //     effect in authored order via the stacking rule (a lethal hit applies no
-  //     statuses — G7/decision). Track creeps an impact kills THIS tick (positive
-  //     hp → 0) so only those earn bounty — a forged non-positive-hp row is swept
-  //     with no bounty.
+  // (1) RESOLVE due impacts; keep the rest. Per impact, the nesting is: outer loop
+  //     = affected creeps (a `targeted` impact's single creep, or a `blast`'s
+  //     radius-membership set in CREEP-ID ASCENDING order, ties by SoA row index —
+  //     an EXPLICIT SORT, never spawn/array order, since forged state can carry any
+  //     order or duplicate ids); per creep, PASS 1 applies every `direct` effect in
+  //     authored order, THEN a death check, THEN — only if the creep survived —
+  //     PASS 2 applies every `slow` effect in authored order via the stacking rule
+  //     (a lethal hit applies no statuses — G7/decision; `applyImpactToCreep`).
+  //     Track creeps an impact kills THIS tick (positive hp → 0) so only those earn
+  //     bounty — a forged non-positive-hp row is swept with no bounty.
   const kept: Impact[] = [];
   const killedByImpact = new Set<number>();
   for (const imp of canonical) {
@@ -444,20 +680,40 @@ export function runCombat(
       kept.push(imp);
       continue;
     }
-    const found = findLiveCreep(creeps, imp.targetId, grid); // null ⇒ wasted shot
-    if (found === null) continue;
-    const { index: idx, point } = found;
-    events?.impactPoints.push(point); // captured BEFORE damage applies
-    for (const effect of imp.effects) {
-      if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount);
+    if (imp.kind === 'targeted') {
+      const found = findLiveCreep(creeps, imp.targetId, grid); // null ⇒ wasted shot
+      if (found === null) continue;
+      const { index: idx, point } = found;
+      events?.impactPoints.push({ x: point.x, y: point.y, radiusFp: 0 }); // BEFORE damage
+      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact);
+      continue;
     }
-    if ((creeps.hp[idx] as number) <= 0) {
-      killedByImpact.add(idx);
-    } else {
-      for (const effect of imp.effects) {
-        if (effect.kind === 'slow')
-          applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
-      }
+    // BLAST — the presentation event is emitted UNCONDITIONALLY, before membership
+    // scanning (Codex R1-12): a blast that catches nobody, or whose original target
+    // is long dead, still resolved and still lands visibly. `findLiveCreep`'s
+    // dead-target early-out is a `targeted`-only rule — a blast scans by radius
+    // membership, never by the fire-time target's id.
+    events?.impactPoints.push({ x: imp.x, y: imp.y, radiusFp: imp.radiusFp });
+    const members: { readonly idx: number; readonly id: number }[] = [];
+    for (let i = 0; i < creeps.id.length; i++) {
+      if (!isLiveHp(creeps.hp[i])) continue;
+      const geom = deriveValidCreepPosition(
+        creeps.fromX[i],
+        creeps.fromY[i],
+        creeps.headCol[i],
+        creeps.headRow[i],
+        creeps.progress[i],
+        grid,
+      );
+      if (geom === null) continue;
+      if (!inRange(geom.point.x, geom.point.y, imp.x, imp.y, imp.radiusFp)) continue;
+      const id = creeps.id[i];
+      if (!Number.isSafeInteger(id)) continue; // defensive; a valid-hp row always has one
+      members.push({ idx: i, id: id as number });
+    }
+    members.sort((a, b) => a.id - b.id || a.idx - b.idx); // creep-id ascending, row-index tiebreak
+    for (const m of members) {
+      applyImpactToCreep(creeps, m.idx, imp.effects, tick, killedByImpact);
     }
   }
 
@@ -519,7 +775,7 @@ export function runCombat(
       survivors.progress[i] as number,
     );
     if (dist === null) continue; // unreachable next waypoint ⇒ not the "first" target
-    live.push({ id: survivors.id[i] as number, x: geom.point.x, y: geom.point.y, dist });
+    live.push({ id: survivors.id[i] as number, index: i, x: geom.point.x, y: geom.point.y, dist });
   }
 
   // (4) Per valid tower: hold-or-acquire the sticky "first" target, then fire.
@@ -570,11 +826,46 @@ export function runCombat(
     const impactTick = tick + def.travelTicks;
     const nextFire = tick + def.cadenceTicks;
     if (!Number.isSafeInteger(impactTick) || !Number.isSafeInteger(nextFire)) return; // overflow no-op
-    kept.push({
-      impactTick,
-      targetId: target,
-      effects: snapshotEffects(def.effects), // fresh objects per fire (Codex — hash-serialized)
-    });
+
+    const radiusFp = blastRadiusOf(def.effects);
+    if (radiusFp === null) {
+      // Single-target tower — unchanged pre-M2-S4a shape.
+      kept.push({
+        kind: 'targeted',
+        impactTick,
+        targetId: target,
+        effects: snapshotEffects(def.effects), // fresh objects per fire (Codex — hash-serialized)
+      });
+    } else {
+      // Blast tower (M2-S4a step 2): lead the target along its route at fire-time
+      // effective speed. `target` was resolved above EITHER from `held` (found by
+      // scanning `live` for a matching id) OR from `best` (a `LiveCreep` drawn
+      // directly from `live`) — never `0` (checked above) — so it always matches a
+      // `live` entry; the fallback below is a totality rail, unreachable in
+      // practice, kept so this closure never throws.
+      const targetLive = live.find((c) => c.id === target);
+      const point =
+        targetLive === undefined
+          ? { x: towerX, y: towerY }
+          : predictBlastPoint(
+              field,
+              grid,
+              survivors,
+              targetLive.index,
+              { x: targetLive.x, y: targetLive.y },
+              def.travelTicks,
+              slowFloorNum,
+              slowFloorDen,
+            );
+      kept.push({
+        kind: 'blast',
+        impactTick,
+        x: point.x,
+        y: point.y,
+        radiusFp,
+        effects: snapshotEffects(def.effects),
+      });
+    }
     events?.fired.push({
       originX: towerX,
       originY: towerY,

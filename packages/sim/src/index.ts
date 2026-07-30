@@ -968,6 +968,8 @@ export function step(
     field,
     grid,
     towerById,
+    balance.slowFloorNum,
+    balance.slowFloorDen,
     events,
   );
   state.creeps = combat.creeps;

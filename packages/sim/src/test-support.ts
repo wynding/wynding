@@ -42,6 +42,31 @@ export const TEST_FAST_CREEP: CreepDef = {
   bounty: 2,
 };
 
+/** The M2-S4a AoE (blast) tower stat block — ground-scoped, a single `aoe` direct
+ *  effect (mirrors the shipped `wynding-core` bundle's `splash` tower's shape,
+ *  m2.md §The towers: cost 12, damage 8, radiusFp 384, range 1024, cadence 60,
+ *  travel 8 — the story's showcase numbers, reused here so a sim-only fixture
+ *  exercises the real showcase shape without any `@wynding/content` import). */
+export const TEST_AOE_TOWER: TowerDef = {
+  id: 'aoe',
+  cost: 12,
+  attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 60, travelTicks: 8 },
+  effects: [{ kind: 'direct', form: 'aoe', damage: 8, radiusFp: 384 }],
+};
+
+/** The M2-S4a `swarm` creep stat block — AoE's showcase target (mirrors the
+ *  shipped bundle's `swarm`: hp 7, speed 30, bounty 1, m2.md §The creeps). */
+export const TEST_SWARM_CREEP: CreepDef = {
+  id: 'swarm',
+  hp: 7,
+  speedFp: 30,
+  armor: 0,
+  domain: 'ground',
+  immunities: [],
+  leakCost: 1,
+  bounty: 1,
+};
+
 /** Overrides for a test bundle (all optional). `waveCount`/`waveSpacing` name the
  *  ENTRY inside each wave (kept from M1 for call-site continuity — an unfortunate
  *  but pre-existing name collision with the new multi-wave `waves` option below);

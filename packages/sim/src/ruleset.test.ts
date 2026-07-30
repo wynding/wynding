@@ -172,23 +172,27 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects an effect kind/form unsupported at simVersion 7 (valid schema, capability-gated)', () => {
-    // 'slow' is ALLOWED at sv7 (M2-S3) — 'stun' still isn't (still S6's job).
+  it('rejects an effect kind unsupported at simVersion 8 (valid schema, capability-gated)', () => {
+    // 'slow' is allowed (M2-S3), 'aoe' is now ALSO allowed (M2-S4a) — 'stun' still
+    // isn't (still S6's job).
     rejects(
       (b) =>
         (b.towerCatalog[0]!.effects = [
           { kind: 'stun', chanceNum: 64, durationTicks: 30 } as never,
         ]),
     );
-    rejects(
-      (b) =>
-        (b.towerCatalog[0]!.effects = [
-          { kind: 'direct', form: 'aoe', damage: 10, radiusFp: 300 } as never,
-        ]),
-    );
   });
 
-  it('compiles a multi-tower catalog (capability: maxTowerCatalogSize widens to 64 at sv7) — every entry compiled independently', () => {
+  it('compiles an aoe direct effect (capability: allowedDirectForms widens to include aoe at sv8)', () => {
+    const b = base();
+    b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 10, radiusFp: 300 }];
+    const compiled = compileRuleset(b as Ruleset, 'test');
+    expect(compiled.towerById['basic']!.effects).toEqual([
+      { kind: 'aoe', amount: 10, radiusFp: 300 },
+    ]);
+  });
+
+  it('compiles a multi-tower catalog (capability: maxTowerCatalogSize widens to 64 at sv8) — every entry compiled independently', () => {
     const b = base();
     b.towerCatalog.push({
       id: 'rapid',
@@ -202,8 +206,35 @@ describe('compileRuleset — tower catalog domains', () => {
     expect(compiled.towerById['basic']!.cost).toBe(5);
   });
 
-  it('rejects a tower attack domain unsupported at simVersion 7', () => {
+  it('rejects a tower attack domain unsupported at simVersion 8', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.domain = 'both'));
+  });
+
+  it('rejects a tower mixing single and aoe direct forms (form-uniform, M2-S4a)', () => {
+    rejects(
+      (b) =>
+        (b.towerCatalog[0]!.effects = [
+          { kind: 'direct', form: 'single', damage: 10 },
+          { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
+        ]),
+    );
+  });
+
+  it('rejects a tower whose two aoe effects carry different radii (radius-uniform, M2-S4a)', () => {
+    rejects(
+      (b) =>
+        (b.towerCatalog[0]!.effects = [
+          { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
+          { kind: 'direct', form: 'aoe', damage: 4, radiusFp: 400 },
+        ]),
+    );
+  });
+
+  it('rejects an aoe radiusFp over the capability profile’s maxAoeRadiusFp (2048)', () => {
+    rejects(
+      (b) =>
+        (b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 8, radiusFp: 2049 }]),
+    );
   });
 });
 

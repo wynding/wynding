@@ -1,5 +1,5 @@
 // capability.test.ts — the per-simVersion capability profile (M2-S1, widened at
-// M2-S2 to sv6, widened again at M2-S3 to sv7): the simVersion-7 profile's exact
+// M2-S2 to sv6, M2-S3 to sv7, M2-S4a to sv8): the simVersion-8 profile's exact
 // shape, an unknown-simVersion throw, and — since the profile itself is inert data
 // gated only inside `compileRuleset` — accept-at-boundary / reject-beyond-boundary
 // coverage for every dimension still narrower than the schema, exercised through
@@ -10,7 +10,7 @@
 // premise is per-dimension coverage — removing a capability check must turn a case
 // red, not shift it to a different throw.
 //
-// sv7 DEFERS TO THE SCHEMA on waves/entries/offsets/clearBonus/both early-call
+// sv8 DEFERS TO THE SCHEMA on waves/entries/offsets/clearBonus/both early-call
 // divisors (unchanged from sv6) AND NOW ALSO on `maxTowerCatalogSize`/
 // `maxEffectsPerBundle` (capability.ts's header comment) — those dimensions no
 // longer have a capability-layer rejection boundary distinct from the schema's own
@@ -20,7 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { capabilityProfile } from './capability';
-import { MAX_IMPACT_EFFECTS } from './combat';
+import { MAX_IMPACT_EFFECTS, MAX_BLAST_RADIUS_FP } from './combat';
 import { compileRuleset, RulesetError } from './ruleset';
 import { SIM_VERSION } from './index';
 import { testBundle } from './test-support';
@@ -76,15 +76,22 @@ describe('capabilityProfile', () => {
     );
   });
 
-  it('simVersion 7 is the catalog-towers + status-effect-framework profile, deferring wave/economy/catalog-size axes to the schema', () => {
-    expect(capabilityProfile(7)).toEqual({
+  // Same INVARIANT-not-binding relationship (M2-S4a) between the profile's
+  // `maxAoeRadiusFp` (an authoring ceiling, per simVersion) and combat's own
+  // `MAX_BLAST_RADIUS_FP` (a runtime totality bound, independent of simVersion).
+  it('the live profile’s maxAoeRadiusFp fits inside combat’s runtime blast-radius cap', () => {
+    expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
+  });
+
+  it('simVersion 8 is the AoE + one-shot-one-shape profile, deferring wave/economy/catalog-size axes to the schema', () => {
+    expect(capabilityProfile(8)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
       maxEntriesPerWave: 16,
       maxOffsetTicks: 1_000_000,
       maxEffectsPerBundle: 8,
       allowedEffectKinds: ['direct', 'slow'],
-      allowedDirectForms: ['single'],
+      allowedDirectForms: ['single', 'aoe'],
       allowedTowerDomains: ['ground'],
       allowedCreepDomains: ['ground'],
       allowedImmunities: [],
@@ -94,6 +101,7 @@ describe('capabilityProfile', () => {
       maxClearBonus: 1_000_000,
       maxEarlyCallBountyDivisor: 1_000_000,
       maxEarlyCallScoreDivisor: 1_000_000,
+      maxAoeRadiusFp: 2048,
     });
   });
 
@@ -108,7 +116,7 @@ describe('capabilityProfile', () => {
 });
 
 describe('capability gate — accept at boundary, reject beyond, per dimension', () => {
-  it('maxTowerCatalogSize defers to the schema ceiling (64) at sv7 — a multi-tower catalog compiles', () => {
+  it('maxTowerCatalogSize defers to the schema ceiling (64) at sv8 — a multi-tower catalog compiles', () => {
     compiles(() => {});
     compiles((b) =>
       b.towerCatalog.push({
@@ -147,7 +155,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.boards[0]!.waves[0]!.entries[0]!.offsetTicks = 30));
   });
 
-  it('maxEffectsPerBundle defers to the schema ceiling (8) at sv7 — a maximal direct+slow bundle compiles', () => {
+  it('maxEffectsPerBundle defers to the schema ceiling (8) at sv8 — a maximal direct+slow bundle compiles', () => {
     compiles(() => {});
     compiles((b) => {
       b.towerCatalog[0]!.effects = [
@@ -176,21 +184,21 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'stun', chanceNum: 64, durationTicks: 30 },
       ];
-    }, "effect kind 'stun' unsupported at simVersion 7");
+    }, "effect kind 'stun' unsupported at simVersion 8");
   });
 
-  it("allowedDirectForms: 'single' accepted, 'aoe' rejected", () => {
+  it("allowedDirectForms: 'single' accepted, 'aoe' now ALSO accepted (sv8), 'stun'-adjacent forms still unreachable", () => {
     compiles(() => {});
-    rejects((b) => {
+    compiles((b) => {
       b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 10, radiusFp: 300 }];
-    }, "effect form 'aoe' unsupported at simVersion 7");
+    });
   });
 
   it("allowedTowerDomains: 'ground' accepted, 'both' rejected", () => {
     compiles(() => {});
     rejects(
       (b) => (b.towerCatalog[0]!.attack!.domain = 'both'),
-      "tower attack domain 'both' unsupported at simVersion 7",
+      "tower attack domain 'both' unsupported at simVersion 8",
     );
   });
 
@@ -198,7 +206,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles(() => {});
     rejects(
       (b) => (b.creepCatalog[0]!.domain = 'air'),
-      "creep domain 'air' unsupported at simVersion 7",
+      "creep domain 'air' unsupported at simVersion 8",
     );
   });
 
@@ -206,7 +214,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.immunities = []));
     rejects(
       (b) => (b.creepCatalog[0]!.immunities = ['slow']),
-      "creep immunity 'slow' unsupported at simVersion 7",
+      "creep immunity 'slow' unsupported at simVersion 8",
     );
   });
 
@@ -214,7 +222,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles(() => {});
     rejects(
       (b) => (b.creepCatalog[0]!.role = 'boss'),
-      "creep role 'boss' unsupported at simVersion 7",
+      "creep role 'boss' unsupported at simVersion 8",
     );
   });
 
@@ -222,7 +230,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.armor = 0));
     rejects(
       (b) => (b.creepCatalog[0]!.armor = 1),
-      "creep 'normal' armor 1 exceeds 0 at simVersion 7",
+      "creep 'normal' armor 1 exceeds 0 at simVersion 8",
     );
   });
 
@@ -230,13 +238,13 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 1 }));
     rejects(
       (b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 }),
-      "creep 'other' leakCost 2 unsupported at simVersion 7 (must be 1)",
+      "creep 'other' leakCost 2 unsupported at simVersion 8 (must be 1)",
     );
     // Uniform-but-nonzero must ALSO reject — m2.md pins "leakCost = 1 until S10";
     // a whole catalog at 2 is still content this sim build cannot simulate.
     rejects(
       (b) => (b.creepCatalog[0]!.leakCost = 2),
-      "creep 'normal' leakCost 2 unsupported at simVersion 7 (must be 1)",
+      "creep 'normal' leakCost 2 unsupported at simVersion 8 (must be 1)",
     );
   });
 

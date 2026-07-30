@@ -32,6 +32,13 @@
 // authored order) built alongside `basic`, and wave 1 recomposed to spawn `fast`
 // creeps (a second creep catalog entry) instead of `normal` — so the golden trace
 // actually observes a creep's `slowMulFp` go nonzero at least once.
+//
+// M2-S4a (SIM_VERSION 7 → 8) re-pins the TRACE digest only: `Impact` becomes a
+// `targeted`/`blast` discriminated union (every impact now serializes a `kind`
+// field), which changes every mid-run world-hash that has a resident impact —
+// this scenario's OWN bundle carries no AoE tower (AoE gets its own coverage in
+// `story-aoe.test.ts`), so no blast is ever scheduled here; the hash moves purely
+// because `targeted` impacts gained a discriminant field.
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
@@ -144,7 +151,10 @@ function runCanonical(
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
   finalHash: 'ba477e20',
-  traceDigest: '9b461515', // fnv1a(trace.join(':'))
+  traceDigest: 'bf0529ce', // fnv1a(trace.join(':')) — re-pinned for SIM_VERSION 8 (M2-S4a):
+  // `Impact` becomes a `targeted`/`blast` discriminated union, so every mid-run
+  // per-tick hash with a resident impact moves even though this scenario's FINAL
+  // tick (post-terminal, impact queue drained) happens to still hash the same.
 } as const;
 // -------------------------------------------------------------------------------
 
