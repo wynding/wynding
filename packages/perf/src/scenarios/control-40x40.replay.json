@@ -1,0 +1,1308 @@
+{
+  "seed": 1234,
+  "boardId": "stress-40x40",
+  "rulesetHash": "8ecac5bdc3940a7336a2efd1e021cb0ac2f5970343ca356ef67e2b44b2f4a2cf",
+  "simVersion": 8,
+  "tickInputs": [
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 5
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 7
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 11
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 13
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 17
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 19
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 23
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 25
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 29
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 31
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 35
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 37
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 1
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 5
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 7
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 11
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 13
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 17
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 19
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 23
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 25
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 29
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 31
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 35
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 5
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 7
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 11
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 13
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 17
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 19
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 23
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 25
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 29
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 31
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 35
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 37
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 1
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 5
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 7
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 11
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 13
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 17
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 19
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 23
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 25
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 29
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 31
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 35
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 5
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 7
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 11
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 13
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 17
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 19
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 23
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 25
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 29
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 31
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 35
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 37
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 1
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 5
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 7
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 11
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 13
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 17
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 19
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 23
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 25
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 29
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 31
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 35
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 5
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 7
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 11
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 13
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 17
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 19
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 23
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 25
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 29
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 31
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 35
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 37
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 1
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 3
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 5
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 7
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 9
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 11
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 13
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 17
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 19
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 23
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 25
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 27
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 29
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 31
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 33
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 35
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 25,
+          "row": 36
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 37,
+          "row": 21
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 35,
+          "row": 19
+        },
+        "towerId": "stress-chill-single"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 33,
+          "row": 17
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 31,
+          "row": 15
+        },
+        "towerId": "stress-single"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 29,
+          "row": 13
+        },
+        "towerId": "stress-chill-single"
+      }
+    ]
+  ]
+}

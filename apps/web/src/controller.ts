@@ -43,7 +43,7 @@ import {
   type TracerVM,
 } from '@wynding/render';
 import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
-import { getBundledRuleset, defaultBoardId } from '@wynding/content';
+import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
 
 export type Speed = 1 | 2;
 
@@ -391,10 +391,28 @@ function freezeRecorded(inputs: readonly SimInput[]): readonly SimInput[] {
   );
 }
 
-/** Create the game controller for `seed`. Content/ruleset are fixed (M1 single board). */
-export function createController(seed: number): Controller {
-  const bundle = getBundledRuleset();
-  const boardId = defaultBoardId(bundle);
+/**
+ * PERF-ONLY injection seam (M2-S4b, PLAN step 22): lets a caller hand in an
+ * already-parsed bundle and the board id to compile it against, bypassing the bundled
+ * registry entirely. The stress bundle is deliberately absent from
+ * `@wynding/content`'s registry (it must never reach the client build — see
+ * `packages/content/src/stress.ts`), so the browser perf harness (`apps/web/perf`)
+ * could not otherwise load it at all. Same spirit as `AppDeps.sceneFactory`/
+ * `controllerFactory` in `main.ts`: an injectable seam that production code never
+ * supplies. The production call site (`main.ts`'s `boot()`) passes nothing.
+ */
+export interface ControllerContent {
+  readonly bundle: Ruleset;
+  readonly boardId: string;
+}
+
+/** Create the game controller for `seed`. Content/ruleset are fixed (M1 single board)
+ *  UNLESS `content` is supplied (perf-only, see {@link ControllerContent}) — omitting
+ *  it is byte-identical in behaviour to before this seam existed:
+ *  `getBundledRuleset()` then `defaultBoardId(bundle)`. */
+export function createController(seed: number, content?: ControllerContent): Controller {
+  const bundle = content?.bundle ?? getBundledRuleset();
+  const boardId = content?.boardId ?? defaultBoardId(bundle);
   const ruleset = compileRuleset(bundle, boardId);
   const grid = ruleset.board.grid;
   const cols = grid.width;

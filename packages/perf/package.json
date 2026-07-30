@@ -1,0 +1,28 @@
+{
+  "name": "@wynding/perf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The ADR 0005 stress scenario and its measurement harness — most-downstream in the workspace graph (depends on sim/replay/content/types), so nothing shipped may import it. See src/index.ts's header for why it cannot live in packages/sim or scripts/.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "lint": "eslint src",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "gen:scenario": "tsx src/generate.ts",
+    "perf": "tsx src/run.ts"
+  },
+  "dependencies": {
+    "@wynding/content": "workspace:*",
+    "@wynding/replay": "workspace:*",
+    "@wynding/sim": "workspace:*",
+    "@wynding/types": "workspace:*"
+  }
+}

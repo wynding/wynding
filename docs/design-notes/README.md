@@ -12,6 +12,8 @@ implementation detail, not an amendment to the decision it serves.
 
 Current notes:
 
+- [`performance-spike.md`](performance-spike.md) — implements ADR 0005 (performance
+  budgets): the seeded stress scenario, the two harnesses, and what the spike measured.
 - [`replay-and-commands.md`](replay-and-commands.md) — implements ADR 0006 (input-command
   and replay schema).
 - [`ruleset-format.md`](ruleset-format.md) — implements ADR 0007 (ruleset data format and

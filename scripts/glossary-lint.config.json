@@ -135,6 +135,11 @@
       "why": "Structural senses — the product has a frame, a tick has an outer frame of phases — not a rendered frame."
     },
     {
+      "term": "frame",
+      "pattern": "frame[- ](rate|budget|time)",
+      "why": "The rendered sense, which CONTEXT.md's Tick entry itself calls a render concept and bars only as a SYNONYM for 'tick'. The entry above covers the structural senses; this one covers the render-side compounds m2.md needs from M2-S4b on, hyphenated or spaced: the spike reports 95th-percentile frame time against a frame-rate floor. A frame time is emphatically not a tick — the whole point of the render/sim decoupling is that they are different clocks — so calling it a tick would be the actual drift. Kept to these compounds so a bare 'frame' meaning a tick still trips."
+    },
+    {
       "term": "layer",
       "pattern": "fresh layer|presentation-layer",
       "why": "A fresh layer of tuning, and the presentation layer of the app — not a creep's domain."

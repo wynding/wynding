@@ -64,6 +64,51 @@ jobs:
       - run: pnpm --filter @wynding/web exec playwright install --with-deps chromium
       - run: pnpm --filter @wynding/web run e2e
 
+  # Performance gate (ADR 0005 §Validation, M2-S4b): runs the seeded stress scenario —
+  # ~300 concurrent creeps, 150 towers, blasts and slows live — and fails on two things.
+  # First the WORKLOAD ORACLE: a passing perf run proves nothing about what it measured,
+  # because `placeTower` with insufficient bounty is a deterministic no-op and `step()`
+  # freezes on a terminal phase, so a mis-authored scenario measures an almost-empty or
+  # wholly inert sim and posts superb percentiles. The oracle asserts the scene is the
+  # one the ADR describes before any timing is believed. Then the RELATIVE GATE: the
+  # ratio of the stress run's p99 `step()` over its due-blast ticks to a blast-free
+  # control workload's p50, run in the same process, so a slow or noisy runner scales
+  # both terms and cancels out.
+  #
+  # Its own job, NOT part of `verify` (PLAN M2-S4b step 20) — though not for the reason
+  # the plan assumed: the full two-scenario run measures ~2.3s, not the "minutes" the
+  # plan predicted, so cost is not what keeps it out. What keeps it out is that a timing
+  # measurement inside `verify` would be run on whatever the developer's machine happens
+  # to be doing, and a gate that flaps locally is a gate people learn to ignore. Anyone
+  # can still run it directly: `pnpm run perf`.
+  #
+  # Invoked through pnpm rather than turbo on purpose — turbo would cache the task on an
+  # unchanged input hash, and a cached perf run measures nothing at all. `pnpm -C` rather
+  # than `pnpm --filter`: a `--filter` that matches NO package prints "No projects matched
+  # the filters" and exits **0** (verified on pnpm 10.33.0), so renaming this package or
+  # moving it out of the workspace glob would turn this job green having measured nothing.
+  # `-C` exits non-zero on a missing directory.
+  #
+  # This job is expected to carry the route-length shortfall as a KNOWN-OPEN finding
+  # (see docs/milestones/m2.md's flags): it prints under ESCALATION but does not by
+  # itself fail the job, so a real regression stays visible. Any OTHER oracle failure,
+  # and any ratio-gate failure, still fails here.
+  perf:
+    name: perf (stress oracle + step() ratio gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run perf
+
   # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
   # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is
   # paired with a version bump, so this PR-only job diffs the golden against the
