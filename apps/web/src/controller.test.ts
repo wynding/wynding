@@ -896,8 +896,12 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
     // A blast tracer carries its OWN fixed destination — never a `targetId` to chase
     // (unlike a `targeted` tracer), because the blast lands at its fire-time predicted
     // point whether or not the original target survives the flight.
-    expect(Number.isFinite(t.destX)).toBe(true);
-    expect(Number.isFinite(t.destY)).toBe(true);
+    // PINNED (QC round-1 #11): a bare `Number.isFinite` check passes for `0`, and
+    // passes identically if destX/destY were accidentally swapped — neither of those
+    // bugs would fail it. The exact, DISTINCT pair below (computed once by running
+    // the real code) catches both.
+    expect(t.destX).toBe(362);
+    expect(t.destY).toBe(2944);
   });
 });
 

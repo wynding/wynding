@@ -12,6 +12,14 @@
 // loudly at compile time rather than silently mis-simulated. `formatVersion` never
 // bumps for this; only `simVersion` does, and each story that adds behavior widens
 // its own dimension(s) here alongside its `SIM_VERSION` bump.
+//
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv8 (a profile field wider than or equal
+// to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
+// and this profile's own gate has no rejection witness of its own —
+// `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
+// both early-call divisors, `maxTowerCatalogSize`, `maxEffectsPerBundle`, and (M2-
+// S4a QC round-1 #12) `allowedDirectForms` — the schema's `form` field is a
+// `'single' | 'aoe'` enum with no third legal value to test a reject against.
 
 import { RulesetError } from './ruleset-shared';
 

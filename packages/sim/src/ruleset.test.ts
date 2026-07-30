@@ -236,6 +236,16 @@ describe('compileRuleset — tower catalog domains', () => {
         (b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 8, radiusFp: 2049 }]),
     );
   });
+
+  // QC round-1 #13: only the reject half (2049) of this boundary was pinned — admits
+  // the accept half too, matching AOE_SCAN_CEILING's own accept-at-boundary/reject-
+  // beyond-boundary convention (story-aoe.test.ts's "admits exactly the pinned
+  // boundary" pair).
+  it('admits an aoe radiusFp exactly AT the capability profile’s maxAoeRadiusFp (2048)', () => {
+    const b = base();
+    b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 8, radiusFp: 2048 }];
+    expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
+  });
 });
 
 describe('compileRuleset — wave domains', () => {

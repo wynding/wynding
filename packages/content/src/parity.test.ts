@@ -167,7 +167,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // waveCursor ran past the last wave.
     expect(state.waveResolved).toEqual([true, true, true]);
     expect(state.waveCursor).toBe(3);
-    // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty (wave 1's
+    // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty (wave 2's
     // re-composition to 16 × `swarm` — M2-S4a step 9 — adds 6 more 1-bounty kills over
     // the old 10 × `normal`), and the two early-call credits (⌊500/50⌋ at tick 0,
     // ⌊51/50⌋ at tick 550 (the call tick skips its own decrement, so the sampled

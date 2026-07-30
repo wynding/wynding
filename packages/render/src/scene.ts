@@ -412,13 +412,19 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
         g.fillCircle(p.x, p.y, Math.max(2, projection.cellPx * 0.3 * k));
       } else {
         // Blast landing (M2-S4a step 13): an expanding-and-fading RING at the blast's
-        // TRUE radius — grows outward from nothing to its real footprint as it fades,
-        // damped under reduced motion exactly like the targeted spark above (same halved
-        // alpha). Decorative only: the outcome is carried by HP pips, never this ring
-        // (Tracer/Blast glossary entries), so a reduced-motion or colourblind player who
-        // barely perceives it loses no essential information.
+        // TRUE radius — grows outward from nothing to its real footprint as it fades.
+        // Under reduced motion this is NOT the same posture as the targeted spark above
+        // (QC round-1 #7 — a prior version wrongly claimed it was): the spark only
+        // shrinks a fill within a small sub-cell radius, so halving its `life`/alpha is
+        // pure damping. This ring instead SWEEPS OUTWARD across the blast's true
+        // (possibly multi-tile) radius — halving `life` alone would have COMPRESSED that
+        // same sweep into a shorter window, making the ring move FASTER over a LARGER
+        // area under "reduced" motion, an ADR 0003 regression. So `grow` is clamped to
+        // its final value (the ring holds at its full static radius, only fading) under
+        // reduced motion; only the alpha is damped, matching the actual "less motion"
+        // intent.
         const maxR = projection.fpLenToPixel(s.radiusFp);
-        const grow = 1 - k; // 0 → 1 as the ring ages, opposite of the fade
+        const grow = o.reducedMotion ? 1 : 1 - k; // 0 → 1 as the ring ages, opposite of the fade
         g.lineStyle(2, pal.spark, o.reducedMotion ? 0.5 * k : k);
         g.strokeCircle(p.x, p.y, Math.max(2, maxR * grow));
       }

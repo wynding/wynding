@@ -16,6 +16,15 @@
 // longer have a capability-layer rejection boundary distinct from the schema's own
 // ceiling, so this file instead asserts they compile at (or near) the SCHEMA's
 // boundary rather than testing a capability-specific reject.
+//
+// `allowedDirectForms` (QC round-1 #12) joins this deferred-to-schema list at sv8,
+// UNAVOIDABLY: the v2 schema's own `form` field is an enum of exactly `'single'` /
+// `'aoe'` (ruleset-schema.ts), so there is no schema-legal way to author a THIRD
+// form value that could reach `allowedDirectForms` and be rejected BY IT — the
+// schema wall trips first, every time. `allowedDirectForms`'s "'single' accepted,
+// 'aoe' now ALSO accepted" test below therefore has no reject case of its own
+// (deleting the gate entirely still leaves every test green, since both legal
+// forms pass regardless) — recorded here rather than left silently missing.
 
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
@@ -187,7 +196,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     }, "effect kind 'stun' unsupported at simVersion 8");
   });
 
-  it("allowedDirectForms: 'single' accepted, 'aoe' now ALSO accepted (sv8), 'stun'-adjacent forms still unreachable", () => {
+  it("allowedDirectForms: 'single' accepted, 'aoe' now ALSO accepted (sv8) — no reject case exists (see header comment)", () => {
     compiles(() => {});
     compiles((b) => {
       b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 10, radiusFp: 300 }];

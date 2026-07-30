@@ -441,11 +441,14 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
         `tower '${tower.id}' mixes direct effect forms (single + aoe) — must be form-uniform at simVersion ${v}`,
       );
     }
-    // RADIUS-UNIFORM: every `aoe` effect in one bundle must share exactly one
-    // radius, so the blast's radius is unambiguous (`frost-splash`, S10, rides its
-    // `slow` on the SAME blast as its `aoe` damage — there must be exactly one
-    // radius to draw the blast from). Also enforces the profile's own radius
-    // ceiling per aoe effect (`maxAoeRadiusFp`).
+    // RADIUS-UNIFORM: every `aoe` effect ON ONE TOWER (QC round-1 #10 — a prior
+    // version of this comment said "one bundle", which wrongly implied a CATALOG-
+    // WIDE radius; the check below is scoped to `tower.effects`, per-tower, so
+    // `frost-splash` and `splash` can freely carry different radii) must share
+    // exactly one radius, so the blast's radius is unambiguous (`frost-splash`,
+    // S10, rides its `slow` on the SAME blast as its `aoe` damage — there must be
+    // exactly one radius to draw that tower's blast from). Also enforces the
+    // profile's own radius ceiling per aoe effect (`maxAoeRadiusFp`).
     const aoeEffects = tower.effects.filter(
       (e): e is Extract<EffectDef, { kind: 'direct'; form: 'aoe' }> =>
         e.kind === 'direct' && e.form === 'aoe',

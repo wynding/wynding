@@ -253,7 +253,7 @@ test('arms the Card, places a tower via the keyboard cursor, sells it via the Pa
   await expect(board).toBeFocused(); // Sell → focus returns to the board
 });
 
-test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it, and the 2-card Rail is axe-clean', async ({
+test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it, and the 3-card Rail is axe-clean', async ({
   page,
 }) => {
   await page.goto('/');
@@ -296,10 +296,13 @@ test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it
 // M2-S4a step 15: the blast ring + radius preview are DECORATIVE canvas-only cues (outcomes
 // stay carried by HP pips, per the Tracer/Blast glossary entries), so axe cannot see them at
 // all — the a11y obligation here is text (the Panel's `panel.blastRadius` row) plus reduced-
-// motion compliance, never ring-only. The ring's own geometry/damping is unit-tested
-// (`packages/render/src/scene.ts` consumers — `tower-paint.test.ts`, `creep-paint.test.ts`);
-// this e2e proves the DOM-visible half: the Card/Panel/hotkey surface stays fully functional
-// and axe-clean for valid placement, invalid (occupied) placement, AND under reduced motion.
+// motion compliance, never ring-only. The ring's own geometry/reduced-motion damping is NOT
+// unit-tested anywhere (QC round-1 #8 — a prior version of this comment wrongly pointed to
+// `tower-paint.test.ts`/`creep-paint.test.ts`, which cover only id→shape maps; no test in
+// `packages/render` imports `scene.ts` at all — it stays coverage-excluded by long-standing
+// convention, per `docs/accessibility-checklist.md`'s own honest closing line). This e2e
+// proves the DOM-visible half: the Card/Panel/hotkey surface stays fully functional and
+// axe-clean for valid placement, invalid (occupied) placement, AND under reduced motion.
 test('the third Card (M2-S4a): arms Splash Tower by click AND by Digit3, labels its blast radius as TEXT, and stays axe-clean for valid + invalid placement', async ({
   page,
 }) => {
@@ -371,7 +374,10 @@ test('the Splash Tower ghost + blast-radius preview stay functional and axe-clea
   // Aim the board so the ghost (with its damped, shape-distinct blast-radius ring) is
   // drawn on the canvas — decorative, out of axe's scope (ADR 0003 §3); this proves the
   // DOM-visible flow doesn't regress with the setting on. The ring's own reduced-motion
-  // damping is unit-tested where it's actually assertable (`scene.ts`'s consumers).
+  // damping has NO unit-test coverage (QC round-1 #8 — `scene.ts` stays coverage-excluded
+  // by long-standing convention, not meaningfully testable under jsdom); this e2e pass is
+  // the only place the setting is exercised end-to-end, and it verifies DOM/axe stability
+  // only, never the ring's own pixels.
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowUp');
 

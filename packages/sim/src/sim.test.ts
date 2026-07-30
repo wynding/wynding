@@ -10,7 +10,9 @@ import {
   type SimInput,
   type SimState,
   type StepEvents,
+  type ReadonlyImpact,
 } from './index';
+import type { Impact } from './combat';
 import { testRuleset } from './test-support';
 
 /** A small straight board: entrance (0,2) → exit (4,2), four orthogonal edges. */
@@ -265,6 +267,24 @@ describe('previewInputs — read-only PreviewState contract (#30/P3)', () => {
       // EffectPrimitive[]`, so pushing onto it (which would mutate the shared, live-state
       // impact object) is a typecheck failure, never a live call.
       preview.impacts[0].effects.push({ kind: 'direct', amount: 1 });
+    }
+  });
+
+  it('compile-only: ReadonlyImpact stays a true per-branch union, not a collapsed intersection (QC round-1 #2)', () => {
+    if (false as boolean) {
+      // A coordinate-less "blast" (missing x/y/radiusFp) must NOT typecheck as a
+      // ReadonlyImpact — a plain `Omit<Impact, 'effects'>` would wrongly accept this,
+      // since it collapses the union to the fields common to BOTH `targeted` and
+      // `blast`, silently dropping `targetId`/`x`/`y`/`radiusFp` from the type.
+      // @ts-expect-error a `blast` ReadonlyImpact must carry x/y/radiusFp.
+      const bad: ReadonlyImpact = { kind: 'blast', impactTick: 0, effects: [] };
+      // A real (mutable) Impact array must still be assignable to a ReadonlyImpact
+      // array — the distributive rewrite must not narrow the public type below what
+      // combat.ts's own Impact union already produces.
+      const impacts: Impact[] = [];
+      const ro: readonly ReadonlyImpact[] = impacts;
+      void bad;
+      void ro;
     }
   });
 });

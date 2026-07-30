@@ -668,7 +668,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('a second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
+  it('the second of three Cards (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
     expect(shell.cards).toHaveLength(3);
     const slowCard = shell.cards[1]!;

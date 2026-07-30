@@ -236,16 +236,6 @@ function canonicalEffectPrimitive(e: EffectPrimitive): EffectPrimitive {
     : { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
 }
 
-/** Structural safety bound on a blast impact's point coordinates (M2-S4a). Large
- *  enough to cover any legal board (a board's fp extent is width/height TILES ×
- *  256; the schema caps board tiles far under this) yet small enough that a
- *  membership test's `dx²`/`dy²` can never leave the safe-integer domain even
- *  against an adversarial creep position — the same totality argument `inRange`'s
- *  overflow-proof early-out already relies on, extended to bound the OTHER operand.
- *  A forged blast coordinate outside this range is dropped by `validImpact`,
- *  before any arithmetic ever touches it. */
-const MAX_BLAST_COORD_FP = 1_000_000;
-
 /** Structural cap on a blast's radius — DELIBERATELY a SEPARATE constant from the
  *  capability profile's `maxAoeRadiusFp` (mirrors `MAX_IMPACT_EFFECTS`'s
  *  relationship to `maxEffectsPerBundle`, above): this is combat's own runtime
@@ -262,10 +252,14 @@ export const MAX_BLAST_RADIUS_FP = 2048;
  * {@link EffectPrimitive} entries, and — per `kind` — a safe-integer `targetId`
  * (`targeted`) or a bounds-checked `(x, y, radiusFp)` (`blast`): `x`/`y` must fall
  * ON-BOARD (`[0, grid.width·FP_ONE)` / `[0, grid.height·FP_ONE)` — an out-of-board
- * blast is structurally forged, never real fire-time output) AND under {@link
- * MAX_BLAST_COORD_FP} (belt-and-suspenders against a future huge board); `radiusFp`
- * under {@link MAX_BLAST_RADIUS_FP}. Any other shape, or an unrecognized `kind`, is
- * dropped.
+ * blast is structurally forged, never real fire-time output; this ON-BOARD bound
+ * alone is necessary AND sufficient — the schema caps board AREA (`CELL_CAP`), not
+ * per-axis tile counts, so a legal board can run thousands of tiles along one axis,
+ * and `inRange`'s own overflow-proof early-out (`Math.abs(dx) > range`) already
+ * keeps the membership arithmetic bounded to `|dx| ≤ MAX_BLAST_RADIUS_FP` regardless
+ * of how far `x`/`y` sit from a creep — so no separate coordinate ceiling is needed)
+ * AND `radiusFp` under {@link MAX_BLAST_RADIUS_FP}. Any other shape, or an
+ * unrecognized `kind`, is dropped.
  */
 function validImpact(imp: unknown, grid: Grid): imp is Impact {
   if (imp === null || typeof imp !== 'object') return false;
@@ -285,8 +279,8 @@ function validImpact(imp: unknown, grid: Grid): imp is Impact {
   }
   if (rec.kind === 'blast') {
     const { x, y, radiusFp } = imp as { x?: unknown; y?: unknown; radiusFp?: unknown };
-    const maxX = Math.min(MAX_BLAST_COORD_FP, grid.width * FP_ONE - 1);
-    const maxY = Math.min(MAX_BLAST_COORD_FP, grid.height * FP_ONE - 1);
+    const maxX = grid.width * FP_ONE - 1;
+    const maxY = grid.height * FP_ONE - 1;
     return (
       Number.isSafeInteger(x) &&
       (x as number) >= 0 &&
@@ -651,6 +645,59 @@ function predictBlastPoint(
 }
 
 /**
+ * Gather a blast's radius-membership set, sorted CREEP-ID ASCENDING with a
+ * row-index tiebreak (m2.md §Combat: "outer loop = affected creeps in creep-id
+ * order"). Returns SoA row indices, not ids — a duplicate/forged id is kept as a
+ * distinct row (M2-S4a's forged-SoA fixture).
+ *
+ * DO NOT REMOVE THIS SORT AS DEAD WORK (QC round-1 #6 keeps the prior "unobservable
+ * today" reasoning below, now DIRECTLY PINNED rather than only order-independence-
+ * tested — `story-aoe.test.ts` asserts the returned order itself, against the same
+ * shuffled/duplicate-id fixture the order-independence test already used): at sv8
+ * the traversal order is still NOT outcome-observable through `runCombat` — every
+ * affected creep is damaged independently, deaths are collected in an index Set,
+ * and bounty is credited by the later SoA sweep — but the order becomes
+ * load-bearing at S6, when stun's chance roll draws from the sim RNG *inside* this
+ * traversal and m2.md pins the draw sequence to exactly this order — a per-tick
+ * divergence that would break replay determinism. It is established now,
+ * unobservably through `runCombat` alone, so S6 inherits it rather than having to
+ * introduce it: the same reason combat.ts already fixes the direct-then-status
+ * shape ahead of the stories that need it. Extracting this as its own exported
+ * function is what makes the order itself — not just its irrelevance to today's
+ * outcome — directly assertable.
+ */
+export function blastMembers(
+  creeps: CombatCreeps,
+  grid: Grid,
+  imp: { readonly x: number; readonly y: number; readonly radiusFp: number },
+): readonly number[] {
+  const members: { readonly idx: number; readonly id: number }[] = [];
+  for (let i = 0; i < creeps.id.length; i++) {
+    if (!isLiveHp(creeps.hp[i])) continue;
+    const geom = deriveValidCreepPosition(
+      creeps.fromX[i],
+      creeps.fromY[i],
+      creeps.headCol[i],
+      creeps.headRow[i],
+      creeps.progress[i],
+      grid,
+    );
+    if (geom === null) continue;
+    if (!inRange(geom.point.x, geom.point.y, imp.x, imp.y, imp.radiusFp)) continue;
+    const id = creeps.id[i];
+    // NOT dead: the restore path (`coerceSoa`, index.ts) validates only `wave`/
+    // `creepId` per row, never `id` itself — a forged/restored state can carry a
+    // non-safe-integer `id` on an otherwise-live row, and this branch is what
+    // drops it from blast membership rather than sorting on a bad key (QC round-1
+    // #9 — a prior comment here wrongly claimed this branch was unreachable).
+    if (!Number.isSafeInteger(id)) continue;
+    members.push({ idx: i, id: id as number });
+  }
+  members.sort((a, b) => a.id - b.id || a.idx - b.idx);
+  return members.map((m) => m.idx);
+}
+
+/**
  * Run the combat phase for one tick over the POST-MOVE world. Returns the new creep
  * SoA (dead creeps swept), the surviving impact queue, and the updated bounty;
  * mutates `towers.targetId`/`towers.nextFireTick` in place (by source row) and
@@ -713,38 +760,8 @@ export function runCombat(
     // dead-target early-out is a `targeted`-only rule — a blast scans by radius
     // membership, never by the fire-time target's id.
     events?.impactPoints.push({ x: imp.x, y: imp.y, radiusFp: imp.radiusFp });
-    const members: { readonly idx: number; readonly id: number }[] = [];
-    for (let i = 0; i < creeps.id.length; i++) {
-      if (!isLiveHp(creeps.hp[i])) continue;
-      const geom = deriveValidCreepPosition(
-        creeps.fromX[i],
-        creeps.fromY[i],
-        creeps.headCol[i],
-        creeps.headRow[i],
-        creeps.progress[i],
-        grid,
-      );
-      if (geom === null) continue;
-      if (!inRange(geom.point.x, geom.point.y, imp.x, imp.y, imp.radiusFp)) continue;
-      const id = creeps.id[i];
-      if (!Number.isSafeInteger(id)) continue; // defensive; a valid-hp row always has one
-      members.push({ idx: i, id: id as number });
-    }
-    // CREEP-ID ASCENDING, row-index tiebreak (m2.md §Combat: "outer loop = affected
-    // creeps in creep-id order"). DO NOT REMOVE THIS SORT AS DEAD WORK: at sv8 the
-    // traversal order is genuinely NOT outcome-observable — every affected creep is
-    // damaged independently, deaths are collected in an index Set, and bounty is credited
-    // by the later SoA sweep, so no test can currently distinguish it (the story-aoe
-    // ordering test therefore asserts order-INDEPENDENCE of the result, which is the only
-    // honest assertion available today). The order becomes load-bearing at S6, when stun's
-    // chance roll draws from the sim RNG *inside* this traversal and m2.md pins the draw
-    // sequence to exactly this order — a per-tick divergence that would break replay
-    // determinism. It is established now, unobservably, so S6 inherits it rather than
-    // having to introduce it: the same reason combat.ts already fixes the
-    // direct-then-status shape ahead of the stories that need it.
-    members.sort((a, b) => a.id - b.id || a.idx - b.idx);
-    for (const m of members) {
-      applyImpactToCreep(creeps, m.idx, imp.effects, tick, killedByImpact);
+    for (const idx of blastMembers(creeps, grid, imp)) {
+      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact);
     }
   }
 
