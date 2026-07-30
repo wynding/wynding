@@ -117,6 +117,15 @@ export interface GhostVM {
   readonly valid: boolean;
   /** Tower attack range in fixed-point sim units, for the preview range ring. */
   readonly rangeFp: number;
+  /** The armed tower's AoE blast radius (fixed-point sim units), `null` for a
+   *  single-target tower (M2-S4a step 14). A 12-bounty `splash` is an informed
+   *  purchase, matching the wave-preview philosophy — so this previews the blast
+   *  radius too, drawn SHAPE-DISTINCT from the range ring above (`scene.ts`): two
+   *  plain concentric circles at the same footprint would be ambiguous (is the
+   *  inner one the splash, a permanent aura, or the range? — Codex R1-15). The
+   *  Panel labels both rings as text (`panel.range`/`panel.blastRadius`), so the
+   *  ring itself stays decorative, never the sole carrier (ADR 0003 §3). */
+  readonly blastRadiusFp: number | null;
 }
 
 /** A currently-selected tower whose range ring is shown (for sell/inspect). */
@@ -128,18 +137,45 @@ export interface SelectionVM {
   readonly towerId: string;
 }
 
-/** One in-flight shot (Tracer, #32/P6): fp-unit origin (the firing tower's centre) +
- *  the target locked at fire time, over its real launch→impact tick window. Carried
- *  from the sim's `StepEvents.fired` (never inferred from `state.impacts`, whose
- *  `targetId` a retargeting tower can overwrite mid-flight) straight through the
- *  controller to here — purely decorative, never essential (damage/outcomes are
- *  always carried by the impact spark + HP pips). */
-export interface TracerVM {
-  readonly originX: number;
-  readonly originY: number;
-  readonly targetId: number;
-  readonly launchTick: number;
-  readonly impactTick: number;
+/** One in-flight shot (Tracer, #32/P6): fp-unit origin (the firing tower's centre),
+ *  over its real launch→impact tick window. Carried from the sim's `StepEvents.fired`
+ *  straight through the controller to here — purely decorative, never essential
+ *  (damage/outcomes are always carried by the impact spark + HP pips).
+ *
+ *  A discriminated union (M2-S4a step 12, mirroring `StepEvents.fired`/`Impact`):
+ *  `targeted` chases its `targetId`'s CURRENT interpolated position (never re-derived
+ *  from `state.impacts`, whose `targetId` a retargeting tower can overwrite mid-
+ *  flight — this carries the ORIGINAL fire-time target) and is dropped if that target
+ *  is no longer drawn (died/leaked in flight — nothing to aim at); `blast` interpolates
+ *  toward its OWN fixed `destX`/`destY` (the same fire-time lead point the impact will
+ *  land at) regardless of whether the original target survives — left undiscriminated,
+ *  every blast tracer would visibly fly toward wherever its fire-time target ends up
+ *  rather than where the blast actually lands (`tracers.ts`). */
+export type TracerVM =
+  | {
+      readonly kind: 'targeted';
+      readonly originX: number;
+      readonly originY: number;
+      readonly targetId: number;
+      readonly launchTick: number;
+      readonly impactTick: number;
+    }
+  | {
+      readonly kind: 'blast';
+      readonly originX: number;
+      readonly originY: number;
+      readonly destX: number;
+      readonly destY: number;
+      readonly launchTick: number;
+      readonly impactTick: number;
+    };
+
+/** One impact/spark point in fixed-point sim units — shared shape for `RenderOverlay.sparks`,
+ *  `scene.ts`'s internal `Spark` (which adds a `bornAt` stamp), and its `preReady` buffer. */
+export interface SparkPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly radiusFp: number;
 }
 
 /** Board-space presentation state handed to `draw()` alongside the two view-models.
@@ -148,10 +184,15 @@ export interface TracerVM {
 export interface RenderOverlay {
   readonly ghost: GhostVM | null;
   readonly selection: SelectionVM | null;
-  /** Impact-spark points (fixed-point sim units) that RESOLVED since the last frame —
+  /** Impact points (fixed-point sim units) that RESOLVED since the last frame —
    *  accumulated per sim tick by the controller so kills during a multi-tick catch-up
-   *  frame still flash (the scene only sees the latest two view-models). */
-  readonly sparks: readonly { readonly x: number; readonly y: number }[];
+   *  frame still flash (the scene only sees the latest two view-models). `radiusFp`
+   *  (M2-S4a step 11, threaded from `StepEvents.impactPoints`) is `0` for a `targeted`
+   *  impact — the pre-existing small fading spark — or the blast's true radius, which
+   *  the scene draws as an expanding-and-fading RING instead (`scene.ts`) so a blast
+   *  landing reads at its real footprint, not a point. One list, not a parallel array —
+   *  each entry already carries everything the scene needs to draw itself. */
+  readonly sparks: readonly SparkPoint[];
   /** Towers accepted into the tick buffer but not yet committed (paused planning, #37+
    *  #27) — anchor cells + the queued tower's catalog id (M2-S3, Codex R1-7: a slow
    *  tower queued while paused must keep its shape-distinct identity). Drawn with a

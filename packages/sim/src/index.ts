@@ -968,6 +968,8 @@ export function step(
     field,
     grid,
     towerById,
+    balance.slowFloorNum,
+    balance.slowFloorDen,
     events,
   );
   state.creeps = combat.creeps;
@@ -1081,10 +1083,22 @@ export interface ReadonlyTowerArrays {
  * Impact[]` would leave `preview.impacts[0].effects` mutable and let a "read-only"
  * preview mutate the live simulation through it. `effects` is re-typed `readonly` here;
  * every other `Impact` field is already readonly.
+ *
+ * `Impact` is a DISCRIMINATED UNION (`targeted` | `blast`, combat.ts) — a plain
+ * `Omit<Impact, 'effects'>` distributes over neither branch; it collapses to the
+ * fields common to BOTH members (dropping `targetId` from `targeted` and `x`/`y`/
+ * `radiusFp` from `blast` alike), and a hand-built object like `{ kind: 'blast',
+ * impactTick: 0, effects: [] }` — missing every coordinate — would then wrongly
+ * typecheck as a `ReadonlyImpact`. `WithReadonlyEffects` instead maps DISTRIBUTIVELY
+ * (the `I extends unknown ? … : never` conditional forces the compiler to apply
+ * `Omit`/intersection to each union member separately, then re-union the results),
+ * so `ReadonlyImpact` stays the true union of a readonly-effects `targeted` and a
+ * readonly-effects `blast`, each still carrying its own discriminant-specific fields.
  */
-export interface ReadonlyImpact extends Omit<Impact, 'effects'> {
-  readonly effects: readonly EffectPrimitive[];
-}
+type WithReadonlyEffects<I> = I extends unknown
+  ? Omit<I, 'effects'> & { readonly effects: readonly EffectPrimitive[] }
+  : never;
+export type ReadonlyImpact = WithReadonlyEffects<Impact>;
 
 /**
  * The read-only result of `previewInputs` (#30/P3). Structurally a deep-readonly view

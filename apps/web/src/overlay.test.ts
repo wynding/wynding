@@ -668,9 +668,9 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('a second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
+  it('the second of three Cards (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    expect(shell.cards).toHaveLength(2);
+    expect(shell.cards).toHaveLength(3);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
@@ -679,13 +679,25 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(slowCard.root.getAttribute('aria-keyshortcuts')).toBe('2');
   });
 
-  it('a card at catalog index ≥ 2 gets NO hotkey badge/aria-keyshortcuts at all (Codex R2-2)', () => {
-    // Three-tower descriptor list — index 2 has no ARM_HOTKEY_ACTIONS slot.
-    const threeTowerRuleset = ruleset;
+  // M2-S4a: the third catalog tower (`splash`) gets the third hotkey slot.
+  it('a third Card (M2-S4a) shows the splash tower and carries the Digit3 hotkey badge', () => {
+    const { shell } = setup();
+    const splashCard = shell.cards[2]!;
+    expect(splashCard.towerId).toBe('splash');
+    expect(splashCard.name.textContent).toBe('Splash Tower');
+    expect(splashCard.cost.textContent).toBe('Cost: 12');
+    expect(splashCard.hotkey.textContent).toBe('3'); // Digit3 default
+    expect(splashCard.root.getAttribute('aria-keyshortcuts')).toBe('3');
+  });
+
+  it('a card at catalog index ≥ 3 gets NO hotkey badge/aria-keyshortcuts at all (Codex R2-2, widened M2-S4a)', () => {
+    // Four-tower descriptor list — index 3 has no ARM_HOTKEY_ACTIONS slot.
+    const fourTowerRuleset = ruleset;
     const shell = createShell(document, [
       { towerId: 'basic' },
       { towerId: 'slow' },
-      { towerId: 'basic' }, // a synthetic third slot — id doesn't matter, only the index does
+      { towerId: 'splash' },
+      { towerId: 'basic' }, // a synthetic fourth slot — id doesn't matter, only the index does
     ]);
     document.body.appendChild(shell.root);
     const overlay = createOverlay(
@@ -695,7 +707,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       createSettings(),
       createKeymap(),
       shell,
-      threeTowerRuleset,
+      fourTowerRuleset,
       () => {},
       defaultInstall(),
     );
@@ -705,9 +717,9 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       overlay.instructionsEl,
       overlay.leaveEl,
     );
-    const thirdCard = shell.cards[2]!;
-    expect(thirdCard.hotkey.textContent).toBe('');
-    expect(thirdCard.root.hasAttribute('aria-keyshortcuts')).toBe(false);
+    const fourthCard = shell.cards[3]!;
+    expect(fourthCard.hotkey.textContent).toBe('');
+    expect(fourthCard.root.hasAttribute('aria-keyshortcuts')).toBe(false);
     overlay.destroy();
   });
 
@@ -791,10 +803,35 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(text).toContain('Range: 4.0 tiles'); // rangeFp 1024 / FP_ONE 256
     expect(text).toContain('Fire rate: 0.7/s'); // (1000/50) / 30 cadenceTicks
     expect(text).toContain('Targets: Ground');
+    // `basic` has no `aoe` effect — no blast-radius row at all (not even a "0").
+    expect(text).not.toContain('Blast radius');
 
     const closeBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
     closeBtn.click();
     expect(actions.map((a) => a.type)).toEqual(['closePanel']);
+  });
+
+  // M2-S4a: `splash`'s damage is carried by its `aoe` effect (kind 'aoe', not 'direct')
+  // — the Panel's damage sum must include it, or an AoE tower would read "Damage: 0"
+  // despite dealing real damage. The blast radius is exposed as its own text row
+  // (never ring-only — the ghost-preview a11y obligation, PLAN.md step 14/15).
+  it("the Panel shows the SPLASH tower's AoE damage and blast-radius stat row", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'splash' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Splash Tower');
+    expect(text).toContain('Cost: 12');
+    expect(text).toContain('Damage: 8'); // the aoe effect's amount, not 0
+    expect(text).toContain('Range: 4.0 tiles');
+    expect(text).toContain('Fire rate: 0.3/s'); // (1000/50) / 60 cadenceTicks
+    expect(text).toContain('Blast radius: 1.5 tiles'); // radiusFp 384 / FP_ONE 256
   });
 
   // QC round 1: the wrong-stats regression guard PLAN step 21 named (G18's bug — a

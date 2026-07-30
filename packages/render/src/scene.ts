@@ -15,7 +15,7 @@ import { createDprTracker, clampDpr } from './dpr-tracker';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
 import { creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
 import { towerFootprintMarkFor } from './tower-paint';
-import type { RenderVM, RenderOverlay, RenderHandle, ColourMode } from './types';
+import type { RenderVM, RenderOverlay, RenderHandle, ColourMode, SparkPoint } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
  *  entities, not board dimensions). */
@@ -29,10 +29,8 @@ export interface BoardGeometry {
 /** How long (ms) an impact-spark stays lit; damped further under reduced motion. */
 const SPARK_MS = 180;
 
-interface Spark {
-  x: number;
-  y: number;
-  bornAt: number;
+interface Spark extends SparkPoint {
+  readonly bornAt: number;
 }
 
 /** Mount the Phaser board renderer into `el`. The returned handle is fed the last two
@@ -134,7 +132,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // They're held UNstamped and given a real bornAt on the first ready frame, so they
   // aren't lost (controller already drained them) nor stamped with a ~0 time that would
   // make them expire instantly.
-  const preReady: { x: number; y: number }[] = [];
+  const preReady: SparkPoint[] = [];
 
   // Scale.NONE (not RESIZE, #28/P5): RESIZE auto-stretches the canvas' CSS AND backing
   //-store size to the parent on its own internal ResizeObserver, which would fight
@@ -217,6 +215,25 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     }
   };
 
+  // Four short spokes radiating from `(cx,cy)` out to `spoke`, with a gap at the centre
+  // (never touching it) — the `'crosshair'` footprint mark AND the ghost's blast-radius
+  // preview share this exact motif (drawn at different scales: the footprint mark at
+  // `size * 0.22`, the ghost preview at the full blast radius) so "area effect" reads as
+  // one consistent shape language, always distinct from the closed `'ringed'` circle and
+  // the smooth range ring (never colour alone — ADR 0003).
+  const drawCrosshair = (
+    g: Phaser.GameObjects.Graphics,
+    cx: number,
+    cy: number,
+    spoke: number,
+  ): void => {
+    const gap = spoke * 0.4;
+    g.lineBetween(cx, cy - spoke, cx, cy - gap);
+    g.lineBetween(cx, cy + gap, cx, cy + spoke);
+    g.lineBetween(cx - spoke, cy, cx - gap, cy);
+    g.lineBetween(cx + gap, cy, cx + spoke, cy);
+  };
+
   const drawTowers = (
     g: Phaser.GameObjects.Graphics,
     pal: Palette,
@@ -233,18 +250,24 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       const size = projection.cellPx * 2; // 2×2 footprint
       g.fillStyle(pal.tower, 1);
       g.fillRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
-      // `slow` vs `basic` footprint mark (M2-S3): both bodies share `pal.tower` — a
-      // palette decision (S3 mints no second tower colour), with the per-tower
-      // distinction carried by SHAPE — an inner concentric ring for `'ringed'` (slow),
-      // nothing extra for `'plain'` (basic) — so ADR 0003's redundant-encoding rule
-      // holds whatever the palette later does. The committed ring strokes `pal.floor`
-      // so it reads against the solid `pal.tower` fill; the pending branch below
-      // strokes `pal.tower` instead — its body is an unfilled outline, so there is no
-      // fill to contrast against and the ring keeps the pending cue's own colour +
-      // alpha (CodeRabbit #73: the two branches differ on purpose).
-      if (towerFootprintMarkFor(t.towerId) === 'ringed') {
+      // `slow`/`splash` vs `basic` footprint mark (M2-S3, extended M2-S4a): all bodies
+      // share `pal.tower` — a palette decision (S3 mints no second tower colour), with
+      // the per-tower distinction carried by SHAPE — an inner concentric ring for
+      // `'ringed'` (slow), four short radiating spokes for `'crosshair'` (splash — the
+      // same "area effect" motif the ghost's blast-radius preview below draws at cell
+      // scale, per ADR 0003's redundant-encoding rule), nothing extra for `'plain'`
+      // (basic). The committed marks stroke `pal.floor` so they read against the solid
+      // `pal.tower` fill; the pending branch below strokes `pal.tower` instead — its
+      // body is an unfilled outline, so there is no fill to contrast against and the
+      // mark keeps the pending cue's own colour + alpha (CodeRabbit #73: the two
+      // branches differ on purpose).
+      const mark = towerFootprintMarkFor(t.towerId);
+      if (mark === 'ringed') {
         g.lineStyle(2, pal.floor, 1);
         g.strokeCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+      } else if (mark === 'crosshair') {
+        g.lineStyle(2, pal.floor, 1);
+        drawCrosshair(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
       }
     }
     // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
@@ -256,9 +279,13 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       const size = projection.cellPx * 2;
       g.lineStyle(3, pal.tower, 0.6);
       g.strokeRoundedRect(pt.x + 2, pt.y + 2, size - 4, size - 4, 6);
-      if (towerFootprintMarkFor(p.towerId) === 'ringed') {
+      const pendingMark = towerFootprintMarkFor(p.towerId);
+      if (pendingMark === 'ringed') {
         g.lineStyle(1, pal.tower, 0.6);
         g.strokeCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+      } else if (pendingMark === 'crosshair') {
+        g.lineStyle(1, pal.tower, 0.6);
+        drawCrosshair(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
       }
     }
     if (o.selection !== null) {
@@ -289,12 +316,15 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       const hpColour = c.hpFrac < 0.34 ? pal.creepLowHp : pal.creep;
       const op = creepSilhouettePaintOp(c.creepId, p.x, p.y, r, hpColour, c.hpFrac);
       g.fillStyle(op.colour, 1); // set once — used for both the silhouette and the pip
-      // Silhouette keyed on `creepId`'s shape (M2-S3): `normal` keeps the triangle (a
-      // shape cue distinct from the tower's square); `fast` draws a diamond, visibly
-      // distinct at cell scale; an unknown id falls back to the triangle (total).
+      // Silhouette keyed on `creepId`'s shape (M2-S3, extended M2-S4a): `normal` keeps
+      // the triangle (a shape cue distinct from the tower's rounded square); `fast`
+      // draws a diamond; `swarm` draws a small square (fragile/numerous, distinct from
+      // both at cell scale); an unknown id falls back to the triangle (total).
       if (op.shape === 'diamond') {
         g.fillTriangle(op.x, op.y - r, op.x + r, op.y, op.x, op.y + r);
         g.fillTriangle(op.x, op.y - r, op.x - r, op.y, op.x, op.y + r);
+      } else if (op.shape === 'square') {
+        g.fillRect(op.x - r, op.y - r, r * 2, r * 2);
       } else {
         g.fillTriangle(op.x, op.y - r, op.x + r, op.y + r, op.x - r, op.y + r);
       }
@@ -335,12 +365,22 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     if (o.ghost.valid) {
       g.lineStyle(3, pal.ghostValid, 1); // solid outline = valid
       g.strokeRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
+      const cx = p.x + projection.cellPx;
+      const cy = p.y + projection.cellPx;
       g.lineStyle(1, pal.range, 0.7);
-      g.strokeCircle(
-        p.x + projection.cellPx,
-        p.y + projection.cellPx,
-        projection.fpLenToPixel(o.ghost.rangeFp),
-      );
+      g.strokeCircle(cx, cy, projection.fpLenToPixel(o.ghost.rangeFp));
+      // Armed-splash blast-radius preview (M2-S4a step 14): a 12-bounty long-lob is an
+      // informed purchase, matching the wave-preview philosophy. The ghost already draws
+      // the range ring above — a SECOND plain circle at the same footprint would be
+      // genuinely ambiguous (is the inner one the splash, a permanent aura, or the range?
+      // — Codex R1-15), so this draws the same radiating-spoke motif the committed
+      // `'crosshair'` footprint mark uses, at the full blast radius: shape-distinct from
+      // the smooth range circle, never colour alone. Text carries the exact number
+      // regardless (`panel.blastRadius`, Panel) — the ring itself stays decorative.
+      if (o.ghost.blastRadiusFp !== null) {
+        g.lineStyle(2, pal.range, 0.9);
+        drawCrosshair(g, cx, cy, projection.fpLenToPixel(o.ghost.blastRadiusFp));
+      }
     } else {
       g.lineStyle(3, pal.ghostInvalid, 1); // crossed-out = invalid (shape, not colour alone)
       g.strokeRect(p.x + 2, p.y + 2, size - 4, size - 4);
@@ -361,9 +401,30 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
         continue;
       }
       const p = projection.fpToPixel(s.x, s.y);
-      const k = 1 - age / life;
-      g.fillStyle(pal.spark, o.reducedMotion ? 0.5 * k : k);
-      g.fillCircle(p.x, p.y, Math.max(2, projection.cellPx * 0.3 * k));
+      const k = 1 - age / life; // 1 → 0 as the spark ages (both variants fade the same way)
+      if (s.radiusFp === 0) {
+        g.fillStyle(pal.spark, o.reducedMotion ? 0.5 * k : k);
+        g.fillCircle(p.x, p.y, Math.max(2, projection.cellPx * 0.3 * k));
+      } else {
+        // Blast landing (M2-S4a step 13): an expanding-and-fading RING at the blast's
+        // TRUE radius — grows outward from nothing to its real footprint as it fades.
+        // Under reduced motion this is NOT the same posture as the targeted spark above
+        // (QC round-1 #7 — a prior version wrongly claimed it was). Reduced motion cuts
+        // `life` to 0.4× and alpha to 0.5× for BOTH cues. For the spark that is nearly
+        // pure damping: it shrinks a fill inside a sub-cell radius, so the shorter window
+        // does speed that shrink up (~2.5×), but over a distance small enough not to read
+        // as motion. This ring instead SWEEPS OUTWARD across the blast's true, possibly
+        // multi-tile radius — the same shortened `life` would COMPRESS that sweep,
+        // making the ring travel FASTER over a LARGER area under "reduced" motion, an
+        // ADR 0003 regression. So `grow` is clamped to its final value: the ring holds at
+        // its full static radius and only fades. The honest summary is that `life`/alpha
+        // damping is sufficient when the animated distance is sub-cell and insufficient
+        // once it is not — which is why only this branch needs the clamp.
+        const maxR = projection.fpLenToPixel(s.radiusFp);
+        const grow = o.reducedMotion ? 1 : 1 - k; // 0 → 1 as the ring ages, opposite of the fade
+        g.lineStyle(2, pal.spark, o.reducedMotion ? 0.5 * k : k);
+        g.strokeCircle(p.x, p.y, Math.max(2, maxR * grow));
+      }
     }
   };
 
@@ -376,14 +437,15 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     // Consume drained spark points — the controller clears them on drain, so dropping them
     // here would lose those flashes permanently. Before READY, hold them unstamped.
     if (gfx === null) {
-      for (const pt of overlay.sparks) preReady.push({ x: pt.x, y: pt.y });
+      for (const pt of overlay.sparks) preReady.push({ x: pt.x, y: pt.y, radiusFp: pt.radiusFp });
       return; // Phaser not READY yet — nothing to draw into
     }
     if (resizeObserver === null) syncProjection(); // fallback only when no ResizeObserver
     const bornAt = now();
-    for (const pt of preReady) sparks.push({ x: pt.x, y: pt.y, bornAt }); // stamp held points
+    for (const pt of preReady) sparks.push({ x: pt.x, y: pt.y, radiusFp: pt.radiusFp, bornAt }); // stamp held points
     preReady.length = 0;
-    for (const pt of overlay.sparks) sparks.push({ x: pt.x, y: pt.y, bornAt });
+    for (const pt of overlay.sparks)
+      sparks.push({ x: pt.x, y: pt.y, radiusFp: pt.radiusFp, bornAt });
     const pal = resolvePalette(overlay.colourMode); // resolve once per frame, pass down
     // Computed ONCE and shared: the creep pass draws these points; the tracer pass
     // reuses the SAME interpolated points as its lerp targets (#32/P6) so a tracer

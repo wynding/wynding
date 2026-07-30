@@ -200,6 +200,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
 
   it('a stronger slow (lower mulFp) REPLACES an active weaker one', () => {
     const impact: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: [
@@ -207,13 +208,25 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 100, durationTicks: 5 }, // stronger — replaces
       ],
     };
-    const result = runCombat(oneRestingCreep(100), emptyTowers(), [impact], 0, 0, FIELD, GRID, {});
+    const result = runCombat(
+      oneRestingCreep(100),
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.slowMulFp[0]).toBe(100);
     expect(result.creeps.slowUntilTick[0]).toBe(5);
   });
 
   it('a weaker slow (higher mulFp) is a NO-WRITE no-op against an active stronger one', () => {
     const impact: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: [
@@ -221,7 +234,18 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 200, durationTicks: 5 }, // weaker — no-op
       ],
     };
-    const result = runCombat(oneRestingCreep(100), emptyTowers(), [impact], 0, 0, FIELD, GRID, {});
+    const result = runCombat(
+      oneRestingCreep(100),
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.slowMulFp[0]).toBe(100);
     expect(result.creeps.slowUntilTick[0]).toBe(20); // unchanged by the weaker second effect
   });
@@ -231,6 +255,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
     // wrongly took the max instead of the sequential refresh, this would read 50,
     // not 10.
     const impact: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: [
@@ -238,13 +263,25 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 128, durationTicks: 10 }, // equal strength — refreshes
       ],
     };
-    const result = runCombat(oneRestingCreep(100), emptyTowers(), [impact], 0, 0, FIELD, GRID, {});
+    const result = runCombat(
+      oneRestingCreep(100),
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.slowMulFp[0]).toBe(128);
     expect(result.creeps.slowUntilTick[0]).toBe(10); // the LATER application's duration wins
   });
 
   it('direct-then-slow (authored order) applies direct in pass 1 regardless of the slow entries interleaved after it', () => {
     const impact: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: [
@@ -252,7 +289,18 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
       ],
     };
-    const result = runCombat(oneRestingCreep(100), emptyTowers(), [impact], 0, 0, FIELD, GRID, {});
+    const result = runCombat(
+      oneRestingCreep(100),
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.hp[0]).toBe(90);
     expect(result.creeps.slowMulFp[0]).toBe(128); // survived — slow pass ran too
   });
@@ -261,6 +309,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
     // A lethal direct listed AFTER the slow entry: the creep must still die (the
     // CLASS order is direct-then-slow, independent of authored array position).
     const impact: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: [
@@ -268,11 +317,27 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'direct', amount: 999 },
       ],
     };
-    const result = runCombat(oneRestingCreep(10), emptyTowers(), [impact], 0, 0, FIELD, GRID, {});
+    const result = runCombat(
+      oneRestingCreep(10),
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.id).toHaveLength(0); // dead — swept
   });
 
-  it('a lethal direct applies NO status: the creep dies before the slow pass, a non-lethal sibling survives slowed', () => {
+  // QC round-2: this title previously claimed "a lethal direct applies NO status",
+  // but the killed row (creep 1) is swept before its slow columns could be read —
+  // this only verifies creep 2, the SURVIVING sibling, still gets its slow. The
+  // "no statuses on a lethal hit" rule itself is pinned pre-sweep, directly against
+  // `applyImpactToCreep`, in `combat.test.ts`.
+  it('creep 1 dies to its own impact and is swept; creep 2, hit by an identical impact but non-lethally, still gets its slow', () => {
     const creeps = {
       id: [1, 2],
       hp: [10, 100], // creep 1 dies to the direct; creep 2 survives it
@@ -290,6 +355,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
     };
     const impacts: Impact[] = [
       {
+        kind: 'targeted',
         impactTick: 0,
         targetId: 1,
         effects: [
@@ -298,6 +364,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         ],
       },
       {
+        kind: 'targeted',
         impactTick: 0,
         targetId: 2,
         effects: [
@@ -306,13 +373,25 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         ],
       },
     ];
-    const result = runCombat(creeps, emptyTowers(), impacts, 0, 0, FIELD, GRID, {});
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      impacts,
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.id).toEqual([2]); // creep 1 dead+swept; creep 2 survives
     expect(result.creeps.slowMulFp[0]).toBe(128); // creep 2 got its slow
   });
 
   it('an impact carrying exactly MAX_IMPACT_EFFECTS effects RESOLVES; one more is dropped whole (QC r3 — the cap is a boundary, not a rejection of legal bundles)', () => {
     const atCap: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: [
@@ -323,12 +402,24 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 128, durationTicks: 40 },
       ],
     };
-    const result = runCombat(oneRestingCreep(100), emptyTowers(), [atCap], 0, 0, FIELD, GRID, {});
+    const result = runCombat(
+      oneRestingCreep(100),
+      emptyTowers(),
+      [atCap],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.hp[0]).toBe(100 - (MAX_IMPACT_EFFECTS - 1)); // every direct landed
     expect(result.creeps.slowMulFp[0]).toBe(128); // and the slow applied
     // One MORE effect makes the snapshot structurally invalid — canonicalImpacts drops
     // it whole (totality): no damage, no slow, no throw.
     const overCap: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: Array.from({ length: MAX_IMPACT_EFFECTS + 1 }, (): EffectPrimitive => ({
@@ -345,6 +436,8 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       FIELD,
       GRID,
       {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
     );
     expect(untouched.creeps.hp[0]).toBe(100);
     expect(untouched.creeps.slowMulFp[0]).toBe(0);
@@ -355,11 +448,23 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
     // actually happens (combat drains overdue impacts at the current tick), so the
     // expiry is satAdd(tick, durationTicks), never the forged impactTick's.
     const overdue: Impact = {
+      kind: 'targeted',
       impactTick: 0,
       targetId: 1,
       effects: [{ kind: 'slow', mulFp: 128, durationTicks: 40 }],
     };
-    const result = runCombat(oneRestingCreep(100), emptyTowers(), [overdue], 5, 0, FIELD, GRID, {});
+    const result = runCombat(
+      oneRestingCreep(100),
+      emptyTowers(),
+      [overdue],
+      5,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.slowMulFp[0]).toBe(128);
     expect(result.creeps.slowUntilTick[0]).toBe(45); // 5 + 40 — resolution-tick anchored
   });
@@ -389,7 +494,18 @@ describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
   }
 
   it('is still active AT its final tick (inclusive), then cleared by the sweep', () => {
-    const result = runCombat(slowedCreep(5), emptyTowers(), [], 5, 0, FIELD, GRID, {});
+    const result = runCombat(
+      slowedCreep(5),
+      emptyTowers(),
+      [],
+      5,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     // The expiry sweep clears it THIS tick (== boundary) — so movement (which ran
     // BEFORE combat, in step()) still saw it active for tick 5's own movement.
     expect(result.creeps.slowMulFp[0]).toBe(0);
@@ -397,7 +513,18 @@ describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
   });
 
   it('is NOT cleared one tick before its boundary', () => {
-    const result = runCombat(slowedCreep(5), emptyTowers(), [], 4, 0, FIELD, GRID, {});
+    const result = runCombat(
+      slowedCreep(5),
+      emptyTowers(),
+      [],
+      4,
+      0,
+      FIELD,
+      GRID,
+      {},
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
     expect(result.creeps.slowMulFp[0]).toBe(128);
     expect(result.creeps.slowUntilTick[0]).toBe(5);
   });

@@ -89,8 +89,8 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     const noInputs = (): SimInput[] => [];
     const { state, trace } = runScenario(noInputs, 1200);
 
-    expect(hashSimState(state)).toBe('9ae805af');
-    expect(fnv1a(trace.join(':'))).toBe('90d4d8a9');
+    expect(hashSimState(state)).toBe('f230e4b1');
+    expect(fnv1a(trace.join(':'))).toBe('81b792f2');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
@@ -158,27 +158,31 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     const slowTowerCount = state.towers.towerId.filter((id) => id === 'slow').length;
     expect(slowTowerCount).toBe(2);
 
-    expect(hashSimState(state)).toBe('7d86a7e3');
-    expect(fnv1a(trace.join(':'))).toBe('8a7db223');
+    expect(hashSimState(state)).toBe('f81cc6b6');
+    expect(fnv1a(trace.join(':'))).toBe('fd5504cb');
     expect(state.phase).toBe('won');
     expect(state.lives).toBe(10);
-    expect(state.tick).toBe(679);
+    expect(state.tick).toBe(697);
     // Every wave cleared, and the game recognizes it: waveResolved is exhaustive,
     // waveCursor ran past the last wave.
     expect(state.waveResolved).toEqual([true, true, true]);
     expect(state.waveCursor).toBe(3);
-    // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty, and the
-    // two early-call credits (⌊500/50⌋ at tick 0, ⌊51/50⌋ at tick 550 (the call tick skips its own decrement, so the sampled remainder is 51) — wave 1's
-    // natural launch pays nothing, its countdown having already reached 0) all
-    // landed: cumulativeKillBounty is the SCORED kill-bounty channel (clear bonus
-    // pays into `bounty`, the spendable economy, not the score), and the credit
-    // channel is exactly the two early-call payouts.
-    expect(state.cumulativeKillBounty).toBe(36);
+    // Per-wave clear bonuses (4/4/5 across the three waves), kill bounty (wave 1's
+    // re-composition to 16 × `swarm` — M2-S4a step 9 — adds 6 more 1-bounty kills over
+    // the old 10 × `normal`; waves are 0-based throughout this file, so this is the
+    // SECOND wave, distinct from `:6`'s S3-era "wave 2" which names the THIRD), and
+    // the two early-call credits (⌊500/50⌋ at tick 0,
+    // ⌊51/50⌋ at tick 550 (the call tick skips its own decrement, so the sampled
+    // remainder is 51) — wave 1's natural launch pays nothing, its countdown having
+    // already reached 0) all landed: cumulativeKillBounty is the SCORED kill-bounty
+    // channel (clear bonus pays into `bounty`, the spendable economy, not the score),
+    // and the credit channel is exactly the two early-call payouts.
+    expect(state.cumulativeKillBounty).toBe(42);
     expect(state.cumulativeEarlyCallCredit).toBe(11);
-    expect(state.bounty).toBe(44);
+    expect(state.bounty).toBe(50);
     // Win score formula: kill-bounty + early-call credit + lives × survivalMul.
-    expect(deriveScore(state, ruleset)).toBe(36 + 11 + 10 * ruleset.scoring.survivalMul);
-    expect(deriveScore(state, ruleset)).toBe(397);
+    expect(deriveScore(state, ruleset)).toBe(42 + 11 + 10 * ruleset.scoring.survivalMul);
+    expect(deriveScore(state, ruleset)).toBe(403);
     expect(deriveStars(state, ruleset)).toBe(3);
   });
 });
@@ -188,7 +192,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // A change here means the shipped artifact's CONTENT changed (or its normalized
 // encoding did) — not a behavior change per se, but every deployed replay/leaderboard
 // entry binds to this exact digest (ADR 0007 §3), so a change is never silent.
-const SHIPPED_RULESET_HASH = '75f305ad689810f6cd27630e602d3d439ac2ee73b3690317e520295c106fc87a';
+const SHIPPED_RULESET_HASH = 'd1cd587d0c9e6a3d1fbdd0c8a8f9fda38ea08464e43d573b0009ac5353810e67';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {

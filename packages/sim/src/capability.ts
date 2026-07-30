@@ -2,15 +2,24 @@
 //
 // The v2 schema is pinned STRUCTURALLY once (formatVersion 2, fixed for all of M2) —
 // but a given sim BEHAVIOR version only implements a subset of what the shape can
-// express (e.g. `SIM_VERSION` 7 simulates a real tower catalog, each tower still
-// direct/single-target plus an optional `slow` effect, against ground creeps only,
-// across a full multi-wave schedule). The capability profile is that subset,
+// express (e.g. `SIM_VERSION` 8 simulates a real tower catalog, each tower a direct
+// effect — single-target or, now, an AoE blast — plus an optional `slow` effect,
+// against ground creeps only, across a full multi-wave schedule). The capability
+// profile is that subset,
 // gating kinds, cardinalities, AND values in
 // `compileRuleset` — so a schema-valid bundle that describes something this sim
 // build cannot yet simulate (a `slow` effect, nonzero armor, ...) is rejected
 // loudly at compile time rather than silently mis-simulated. `formatVersion` never
 // bumps for this; only `simVersion` does, and each story that adds behavior widens
 // its own dimension(s) here alongside its `SIM_VERSION` bump.
+//
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv8 (a profile field wider than or equal
+// to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
+// and this profile's own gate has no rejection witness of its own —
+// `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
+// both early-call divisors, `maxTowerCatalogSize`, `maxEffectsPerBundle`, and (M2-
+// S4a QC round-1 #12) `allowedDirectForms` — the schema's `form` field is a
+// `'single' | 'aoe'` enum with no third legal value to test a reject against.
 
 import { RulesetError } from './ruleset-shared';
 
@@ -30,46 +39,49 @@ export interface CapabilityProfile {
   readonly allowedImmunities: readonly string[];
   readonly allowedRoles: readonly string[];
   readonly maxArmor: number;
-  /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 7 —
+  /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 8 —
    *  m2.md: "leakCost = 1 until S10"); the compiled surface exposes that single
    *  value as `CompiledBalance.leakCost`. */
   readonly requiredLeakCost: number;
   readonly maxClearBonus: number;
   readonly maxEarlyCallBountyDivisor: number;
   readonly maxEarlyCallScoreDivisor: number;
+  /** Ceiling on an `aoe` effect's `radiusFp` (M2-S4a) — 2048 (8 tiles) at sv8:
+   *  generous against the shipped `splash`'s 384, wide enough for a future combo
+   *  tower, yet small enough to stop a board-spanning blast. Checked per aoe effect
+   *  in `checkCapabilityGlobal` alongside the radius-uniform gate. */
+  readonly maxAoeRadiusFp: number;
 }
 
-/** `SIM_VERSION` 7 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  catalog towers + the status-effect framework — a REAL tower catalog (up to 64
- *  entries, the schema's own ceiling) each still exactly a direct/single effect
- *  PLUS now an optional `slow` effect, ground-only, no immunities/roles/armor, one
- *  uniform leak cost, the same 64-wave/16-entry/full-economy wave engine sv6
- *  already simulated.
+/** `SIM_VERSION` 8 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  AoE + the form-uniform/radius-uniform "one-shot-one-shape" model (M2-S4a) — a
+ *  tower's direct effect may now be `aoe` as well as `single`, ground-only, no
+ *  immunities/roles/armor, one uniform leak cost, the same 64-wave/16-entry/
+ *  full-economy wave engine sv6/sv7 already simulated.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv6 profile is deleted with this bump —
- *  a live sv6 entry would misdescribe v7 tick code, and replay's strict version
- *  equality already owns cross-version rejection, so there is nothing for a stale
- *  profile to serve.
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv7 profile is deleted with this bump —
+ *  a live sv7 entry would misdescribe v8 tick code (it could no longer compile
+ *  `splash`/`frost-splash`-shaped content correctly, since v8 relaxed the
+ *  per-tower "direct effect" guard to accept either form), and replay's strict
+ *  version equality already owns cross-version rejection, so there is nothing for
+ *  a stale profile to serve.
  *
- *  `maxTowerCatalogSize`/`maxEffectsPerBundle` WIDEN TO THE SCHEMA CAP (the
- *  narrows-only-what-the-build-cannot-simulate principle, G11/Codex R2): sv7
- *  compiles every catalog entry (step 3), so the catalog-cardinality ceiling is no
- *  longer this sim build's own restriction — it defers to the schema's own widest
- *  legal catalog (64) exactly like the wave/economy axes already do. Likewise
- *  `maxEffectsPerBundle` widens to the schema's per-tower effects cap (8) now that
- *  a bundle may legitimately carry both a direct and a slow effect (2 of 8) — still
- *  narrower than 8 would be an invented product opinion this profile has no
- *  authority to hold. `allowedEffectKinds` gains `'slow'` — the one new sim
- *  primitive this story implements. Every other axis is untouched from sv6. */
+ *  `allowedDirectForms` gains `'aoe'` — the one new sim primitive this story
+ *  implements — alongside a new `maxAoeRadiusFp` ceiling (2048 fp, 8 tiles: see its
+ *  own doc). The two NEW cross-field gates the "one-shot-one-shape" model needs
+ *  (form-uniform per tower, radius-uniform across a tower's aoe effects) are NOT
+ *  profile fields — they compare effects WITHIN one tower, so they are compile-time
+ *  checks in `ruleset.ts`'s `checkCapabilityGlobal`, run alongside this profile's
+ *  own gates. Every other axis is untouched from sv7. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  7: {
+  8: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,
     maxOffsetTicks: 1_000_000,
     maxEffectsPerBundle: 8,
     allowedEffectKinds: ['direct', 'slow'],
-    allowedDirectForms: ['single'],
+    allowedDirectForms: ['single', 'aoe'],
     allowedTowerDomains: ['ground'],
     allowedCreepDomains: ['ground'],
     allowedImmunities: [],
@@ -79,6 +91,7 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxClearBonus: 1_000_000,
     maxEarlyCallBountyDivisor: 1_000_000,
     maxEarlyCallScoreDivisor: 1_000_000,
+    maxAoeRadiusFp: 2048,
   },
 };
 

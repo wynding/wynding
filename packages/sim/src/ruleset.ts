@@ -45,6 +45,7 @@ import { loadBoard, type BoardContext } from './context';
 import { RulesetError, canonicalImmunities, effectiveSpeedFp, SIM_VERSION } from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
 import { capabilityProfile, type CapabilityProfile } from './capability';
+import { MAX_TOWERS } from './tower';
 
 export { RulesetError } from './ruleset-shared';
 
@@ -108,11 +109,16 @@ export interface CompiledScoring {
 /** One compiled effect primitive a tower's fire snapshots per shot, in AUTHORED
  *  order (m2.md §Combat) — the fire-time application list `combat.ts` clones fresh
  *  per fire (impacts serialize into the world-hash, so a shared reference across
- *  fires would let one impact's runtime mutation bleed into another's). Only the
- *  two kinds the sv7 capability profile allows (`allowedEffectKinds`) ever appear
- *  here; a future story widens this union alongside its own capability bump. */
+ *  fires would let one impact's runtime mutation bleed into another's). `aoe`
+ *  (M2-S4a) is direct damage's AREA form — a separate compiled kind from `direct`
+ *  (single-target) because ONLY it carries `radiusFp` and only its presence turns a
+ *  tower's fire into a `blast` impact (`combat.ts`'s firing logic keys on it). Only
+ *  the kinds the LIVE capability profile allows (`allowedEffectKinds`/
+ *  `allowedDirectForms`) ever appear here; a future story widens this union
+ *  alongside its own capability bump. */
 export type CompiledEffect =
   | { readonly kind: 'direct'; readonly amount: number }
+  | { readonly kind: 'aoe'; readonly amount: number; readonly radiusFp: number }
   | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number };
 
 /** Sim-owned compile-time projection of `TowerDef` — `kind` renamed `id` (decision
@@ -202,6 +208,26 @@ export const MAX_MATCH_TICKS = 36_000;
  *  unit used for the worst-case traversal bound (mirrors replay's re-simulation
  *  ceiling, `MAX_MATCH_TICKS` above). */
 const FP_DIAG_LEN = 362;
+
+/**
+ * Compile-time ceiling on AoE scan-work (M2-S4a, step 7 — Codex R1-4/R1-5): per-tick
+ * combat cost is `residentImpacts + dueBlasts × liveCreeps` (only impacts DUE this
+ * tick scan creeps; resident future impacts are queue traversal only). A bundle
+ * whose CATALOG contains any `aoe` tower is rejected here if its worst-legal
+ * workload — `MAX_TOWERS × totalScheduledSpawns` (every placed tower could be a
+ * blast tower, due the same tick, scanning every creep the bundle could ever have
+ * concurrently alive, bounded above by the total spawn count) — exceeds this many
+ * distance tests per tick. `2_000_000` admits `MAX_TOWERS` (1000) × 2,000 scheduled
+ * spawns; the shipped bundle schedules 34, the stress scene (S4b) ~304. A REAL
+ * compile-time REJECTION (never a runtime truncation, decision 6): truncating a
+ * blast mid-scan would silently drop damage, the corner-cut this project forbids.
+ * `story-aoe.test.ts` pins this derivation (the formula, the accept/reject boundary at
+ * 2,000/2,001 spawns, and an aoe-gated negative control) so the constant cannot silently
+ * drift; `ruleset.test.ts` only redirects readers there. FROZEN AT S4A
+ * (risk log): S4b may report evidence about the order of magnitude but may not move
+ * it — changing it changes which bundles compile, a behavior change requiring its
+ * own `simVersion` bump. */
+export const AOE_SCAN_CEILING = 2_000_000;
 
 // `canonicalImmunities` is imported from `ruleset-schema.ts` (one shared
 // implementation — the canonical order is a `rulesetHash` input, so a second copy
@@ -403,6 +429,44 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
         `tower attack domain '${tower.attack.domain}' unsupported at simVersion ${v}`,
       );
     }
+    // FORM-UNIFORM (sv8, "one-shot-one-shape"): a tower's `direct` effects must be
+    // ALL single-target or ALL aoe, never mixed — one fire produces exactly one
+    // impact SHAPE (`combat.ts` builds either a `targeted` or a `blast` impact per
+    // tower, never both). Scoped to `kind === 'direct'` only (`burst`'s own form
+    // isn't reachable at sv8 — `allowedEffectKinds` already excludes it).
+    const directForms = new Set(
+      tower.effects.filter((e) => e.kind === 'direct').map((e) => e.form),
+    );
+    if (directForms.size > 1) {
+      throw new RulesetError(
+        `tower '${tower.id}' mixes direct effect forms (single + aoe) — must be form-uniform at simVersion ${v}`,
+      );
+    }
+    // RADIUS-UNIFORM: every `aoe` effect ON ONE TOWER (QC round-1 #10 — a prior
+    // version of this comment said "one bundle", which wrongly implied a CATALOG-
+    // WIDE radius; the check below is scoped to `tower.effects`, per-tower, so
+    // `frost-splash` and `splash` can freely carry different radii) must share
+    // exactly one radius, so the blast's radius is unambiguous (`frost-splash`,
+    // S10, rides its `slow` on the SAME blast as its `aoe` damage — there must be
+    // exactly one radius to draw that tower's blast from). Also enforces the
+    // profile's own radius ceiling per aoe effect (`maxAoeRadiusFp`).
+    const aoeEffects = tower.effects.filter(
+      (e): e is Extract<EffectDef, { kind: 'direct'; form: 'aoe' }> =>
+        e.kind === 'direct' && e.form === 'aoe',
+    );
+    const aoeRadii = new Set(aoeEffects.map((e) => e.radiusFp));
+    if (aoeRadii.size > 1) {
+      throw new RulesetError(
+        `tower '${tower.id}' has multiple aoe radii — must share one radius at simVersion ${v}`,
+      );
+    }
+    for (const e of aoeEffects) {
+      if (e.radiusFp > profile.maxAoeRadiusFp) {
+        throw new RulesetError(
+          `tower '${tower.id}' aoe radiusFp ${e.radiusFp} exceeds ${profile.maxAoeRadiusFp} at simVersion ${v}`,
+        );
+      }
+    }
   }
   if (bundle.balance.earlyCallBountyDivisor > profile.maxEarlyCallBountyDivisor) {
     throw new RulesetError(
@@ -508,11 +572,16 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
 
   // Compile EVERY catalog tower (sv7: `maxTowerCatalogSize` widens to the schema cap
   // 64 — step 3) — the same per-tower guards M1/sv6 ran on its lone entry (attack
-  // present, cadence present, ≥ 1 direct/single effect) now run over each one.
+  // present, cadence present, ≥ 1 direct effect) now run over each one. M2-S4a widens
+  // "direct effect" from single-target-only to EITHER form (single or aoe) — `splash`
+  // has no single-target effect and would be rejected by the old single-only guard.
   function compileEffect(e: EffectDef, towerId: string): CompiledEffect {
     if (e.kind === 'direct' && e.form === 'single') return { kind: 'direct', amount: e.damage };
+    if (e.kind === 'direct' && e.form === 'aoe') {
+      return { kind: 'aoe', amount: e.damage, radiusFp: e.radiusFp };
+    }
     if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
-    // Unreachable at sv7: `allowedEffectKinds`/`allowedDirectForms` already rejected
+    // Unreachable at sv8: `allowedEffectKinds`/`allowedDirectForms` already rejected
     // anything else in `checkCapabilityGlobal`, above. Defensive, not load-bearing.
     throw new RulesetError(
       `tower '${towerId}' has an effect this sim build cannot compile at simVersion ${SIM_VERSION}`,
@@ -520,12 +589,11 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   }
   const towers: CompiledTower[] = normalized.towerCatalog.map((towerDef: TowerDef) => {
     const directEffect = towerDef.effects.find(
-      (e): e is Extract<EffectDef, { kind: 'direct'; form: 'single' }> =>
-        e.kind === 'direct' && e.form === 'single',
+      (e): e is Extract<EffectDef, { kind: 'direct' }> => e.kind === 'direct',
     );
     if (directEffect === undefined) {
       throw new RulesetError(
-        `tower '${towerDef.id}' must have a direct/single effect at simVersion ${SIM_VERSION}`,
+        `tower '${towerDef.id}' must have a direct effect (single or aoe) at simVersion ${SIM_VERSION}`,
       );
     }
     if (towerDef.attack === undefined) {
@@ -653,6 +721,19 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       spawns,
       entriesSummary,
     });
+  }
+
+  // AoE scan-work ceiling (M2-S4a, step 7): only gated when the catalog contains ANY
+  // aoe tower — a catalog with none can never schedule a blast, so its per-tick
+  // combat cost is bounded by `residentImpacts` alone, unaffected by creep count.
+  const hasAoeTower = towers.some((t) => t.effects.some((e) => e.kind === 'aoe'));
+  if (hasAoeTower) {
+    const worstCaseScanWork = MAX_TOWERS * totalSpawns;
+    if (worstCaseScanWork > AOE_SCAN_CEILING) {
+      throw new RulesetError(
+        `AoE scan-work ceiling exceeded: MAX_TOWERS (${MAX_TOWERS}) × totalScheduledSpawns (${totalSpawns}) = ${worstCaseScanWork} > ${AOE_SCAN_CEILING}`,
+      );
+    }
   }
 
   // Reject a bundle whose BASELINE run can't reach a terminal state within the replay

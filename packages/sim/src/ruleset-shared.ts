@@ -26,8 +26,11 @@ export class RulesetError extends Error {
  *  History: Story 5 (wave lifecycle, win/loss, score, per-creep columns) bumped
  *  4 → 5; M2 Story 2 (the multi-wave engine) bumped 5 → 6; M2 Story 3 (catalog
  *  towers + the status-effect framework: a real tower catalog, `slow`, per-creep
- *  status columns) bumps 6 → 7. */
-export const SIM_VERSION = 7;
+ *  status columns) bumped 6 → 7; M2 Story 4a (AoE: `Impact` becomes a
+ *  `targeted`/`blast` discriminated union — hash-breaking even for single-target
+ *  play — plus the `aoe` direct form and the form-uniform/radius-uniform
+ *  compile-time gates) bumps 7 → 8. */
+export const SIM_VERSION = 8;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

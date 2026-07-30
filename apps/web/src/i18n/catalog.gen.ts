@@ -23,6 +23,7 @@ export const EN = {
   "hud.preview.lastWave": "Final wave launched — no more waves to call",
   "creep.normal.name": "Creep",
   "creep.fast.name": "Fast Creep",
+  "creep.swarm.name": "Swarm Creep",
   "creep.unknown.name": "Unknown creep ({id})",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -56,6 +57,7 @@ export const EN = {
   "action.speed": "Cycle speed",
   "action.armTower1": "Arm tower 1",
   "action.armTower2": "Arm tower 2",
+  "action.armTower3": "Arm tower 3",
   "results.won": "You held the line!",
   "results.lost": "The creeps broke through.",
   "results.summary": "Score {score} — {stars} of 3 stars",
@@ -64,6 +66,7 @@ export const EN = {
   "verify.fail": "Verification failed: {reason}",
   "tower.basic.name": "Basic Tower",
   "tower.slow.name": "Slow Tower",
+  "tower.splash.name": "Splash Tower",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
   "panel.cost": "Cost: {cost}",
@@ -71,6 +74,7 @@ export const EN = {
   "panel.range": "Range: {tiles} tiles",
   "panel.fireRate": "Fire rate: {rate}/s",
   "panel.targets": "Targets: {targets}",
+  "panel.blastRadius": "Blast radius: {tiles} tiles",
   "panel.close": "Close panel",
   "panel.sell": "Sell (refund {refund})",
   "panel.upgrade": "Max level",
@@ -126,6 +130,7 @@ export interface MessageParams {
   "hud.preview.lastWave": Record<never, never>;
   "creep.normal.name": Record<never, never>;
   "creep.fast.name": Record<never, never>;
+  "creep.swarm.name": Record<never, never>;
   "creep.unknown.name": { "id": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
@@ -159,6 +164,7 @@ export interface MessageParams {
   "action.speed": Record<never, never>;
   "action.armTower1": Record<never, never>;
   "action.armTower2": Record<never, never>;
+  "action.armTower3": Record<never, never>;
   "results.won": Record<never, never>;
   "results.lost": Record<never, never>;
   "results.summary": { "score": string | number; "stars": string | number };
@@ -167,6 +173,7 @@ export interface MessageParams {
   "verify.fail": { "reason": string | number };
   "tower.basic.name": Record<never, never>;
   "tower.slow.name": Record<never, never>;
+  "tower.splash.name": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
   "panel.cost": { "cost": string | number };
@@ -174,6 +181,7 @@ export interface MessageParams {
   "panel.range": { "tiles": string | number };
   "panel.fireRate": { "rate": string | number };
   "panel.targets": { "targets": string | number };
+  "panel.blastRadius": { "tiles": string | number };
   "panel.close": Record<never, never>;
   "panel.sell": { "refund": string | number };
   "panel.upgrade": Record<never, never>;

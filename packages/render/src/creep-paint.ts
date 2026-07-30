@@ -5,14 +5,17 @@
 // carries (`CreepVM.creepId`).
 
 /** The silhouette shapes the scene can draw. `'triangle'` is the pre-M2-S3 creep shape;
- *  `'diamond'` is `fast`'s visibly-distinct-at-cell-scale shape. An id this build's
- *  catalog doesn't recognize draws `'triangle'` too (TOTAL — never throw; a forged/future
- *  content id must still render something, per the `tower.unknown.name` precedent). */
-export type CreepShape = 'triangle' | 'diamond';
+ *  `'diamond'` is `fast`'s visibly-distinct-at-cell-scale shape; `'square'` is `swarm`'s
+ *  (M2-S4a) — a small, blocky silhouette that reads as fragile/numerous rather than fast,
+ *  visibly distinct from both at cell scale. An id this build's catalog doesn't recognize
+ *  draws `'triangle'` too (TOTAL — never throw; a forged/future content id must still
+ *  render something, per the `tower.unknown.name` precedent). */
+export type CreepShape = 'triangle' | 'diamond' | 'square';
 
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
   normal: 'triangle',
   fast: 'diamond',
+  swarm: 'square',
 };
 
 /** The shape to draw for `creepId` — total over any string, including a JSON id like

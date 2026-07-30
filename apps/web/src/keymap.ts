@@ -16,7 +16,8 @@ export type GameAction =
   | 'pause'
   | 'speed'
   | 'armTower1'
-  | 'armTower2';
+  | 'armTower2'
+  | 'armTower3';
 
 const DEFAULTS: Readonly<Record<GameAction, string>> = {
   up: 'ArrowUp',
@@ -32,14 +33,16 @@ const DEFAULTS: Readonly<Record<GameAction, string>> = {
   start: 'KeyC',
   pause: 'Space',
   speed: 'KeyF',
-  // Arms the Card at catalog index 0/1 for placement (PLAN.md P2, M2-S3). Handled at
-  // document scope (overlay.ts), not the board's own keydown switch, so it works
-  // regardless of which element currently has focus (a Card, the board, or neither) —
-  // "any state" per the P2 table. `armTower2` is inserted right after `armTower1`
-  // (settings-list adjacency; `GAME_ACTIONS` derives from insertion order) — a no-op on
-  // a legal one-tower bundle (Codex R3-1's `towers[1]`/`cards[1]` guard, overlay.ts).
+  // Arms the Card at catalog index 0/1/2 for placement (PLAN.md P2, M2-S3; `armTower3`
+  // M2-S4a). Handled at document scope (overlay.ts), not the board's own keydown
+  // switch, so it works regardless of which element currently has focus (a Card, the
+  // board, or neither) — "any state" per the P2 table. `armTower2`/`armTower3` are
+  // inserted right after `armTower1` in slot order (settings-list adjacency;
+  // `GAME_ACTIONS` derives from insertion order) — each a no-op on a bundle without
+  // that many towers (Codex R3-1's `towers[n]`/`cards[n]` guard, overlay.ts).
   armTower1: 'Digit1',
   armTower2: 'Digit2',
+  armTower3: 'Digit3',
 };
 
 // Derived from DEFAULTS (insertion order) so the action list, the union, and the default

@@ -10,7 +10,9 @@ import {
   type SimInput,
   type SimState,
   type StepEvents,
+  type ReadonlyImpact,
 } from './index';
+import type { Impact } from './combat';
 import { testRuleset } from './test-support';
 
 /** A small straight board: entrance (0,2) → exit (4,2), four orthogonal edges. */
@@ -161,13 +163,15 @@ describe('step() StepEvents plumbing (#31/#32)', () => {
     const s = createInitialState(1, RULESET);
     s.tick = -1; // forges the tick-totality no-op path
     const events: StepEvents = {
-      impactPoints: [{ x: 1, y: 2 }],
-      fired: [{ originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 }],
+      impactPoints: [{ x: 1, y: 2, radiusFp: 0 }],
+      fired: [
+        { kind: 'targeted', originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 },
+      ],
     };
     step(s, RULESET, [], events);
-    expect(events.impactPoints).toEqual([{ x: 1, y: 2 }]); // untouched — appended nothing
+    expect(events.impactPoints).toEqual([{ x: 1, y: 2, radiusFp: 0 }]); // untouched — appended nothing
     expect(events.fired).toEqual([
-      { originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 },
+      { kind: 'targeted', originX: 1, originY: 2, targetId: 3, launchTick: 4, impactTick: 5 },
     ]);
   });
 
@@ -175,13 +179,15 @@ describe('step() StepEvents plumbing (#31/#32)', () => {
     const s = createInitialState(1, RULESET);
     s.phase = 'won';
     const events: StepEvents = {
-      impactPoints: [{ x: 3, y: 4 }],
-      fired: [{ originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 }],
+      impactPoints: [{ x: 3, y: 4, radiusFp: 0 }],
+      fired: [
+        { kind: 'targeted', originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 },
+      ],
     };
     step(s, RULESET, [], events);
-    expect(events.impactPoints).toEqual([{ x: 3, y: 4 }]); // untouched — appended nothing
+    expect(events.impactPoints).toEqual([{ x: 3, y: 4, radiusFp: 0 }]); // untouched — appended nothing
     expect(events.fired).toEqual([
-      { originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 },
+      { kind: 'targeted', originX: 5, originY: 6, targetId: 7, launchTick: 8, impactTick: 9 },
     ]);
   });
 
@@ -257,10 +263,37 @@ describe('previewInputs — read-only PreviewState contract (#30/P3)', () => {
       // @ts-expect-error PreviewState's readonly columns are not assignable to step()'s
       // mutable SimState — the read-only contract is a typecheck failure, never a live call.
       step(preview, RULESET, []);
-      // @ts-expect-error preview.impacts is deeply readonly — effects is `readonly
-      // EffectPrimitive[]`, so pushing onto it (which would mutate the shared, live-state
-      // impact object) is a typecheck failure, never a live call.
-      preview.impacts[0].effects.push({ kind: 'direct', amount: 1 });
+      // The index is narrowed into a local FIRST (QC round-2 #12): under the repo-wide
+      // `noUncheckedIndexedAccess`, `preview.impacts[0].effects.push(...)` raises BOTH
+      // TS2532 (possibly-undefined) and TS2339, and a single `@ts-expect-error` is
+      // satisfied by EITHER — so the directive stayed green even with `effects` made
+      // mutable again, silently covering nothing. Narrowing first removes TS2532, leaving
+      // the readonly violation as the only error the directive can be satisfied by.
+      const firstImpact = preview.impacts[0];
+      if (firstImpact !== undefined) {
+        // @ts-expect-error preview.impacts is deeply readonly — effects is `readonly
+        // EffectPrimitive[]`, so pushing onto it (which would mutate the shared,
+        // live-state impact object) is a typecheck failure, never a live call.
+        firstImpact.effects.push({ kind: 'direct', amount: 1 });
+      }
+    }
+  });
+
+  it('compile-only: ReadonlyImpact stays a true per-branch union, not a collapsed intersection (QC round-1 #2)', () => {
+    if (false as boolean) {
+      // A coordinate-less "blast" (missing x/y/radiusFp) must NOT typecheck as a
+      // ReadonlyImpact — a plain `Omit<Impact, 'effects'>` would wrongly accept this,
+      // since it collapses the union to the fields common to BOTH `targeted` and
+      // `blast`, silently dropping `targetId`/`x`/`y`/`radiusFp` from the type.
+      // @ts-expect-error a `blast` ReadonlyImpact must carry x/y/radiusFp.
+      const bad: ReadonlyImpact = { kind: 'blast', impactTick: 0, effects: [] };
+      // A real (mutable) Impact array must still be assignable to a ReadonlyImpact
+      // array — the distributive rewrite must not narrow the public type below what
+      // combat.ts's own Impact union already produces.
+      const impacts: Impact[] = [];
+      const ro: readonly ReadonlyImpact[] = impacts;
+      void bad;
+      void ro;
     }
   });
 });

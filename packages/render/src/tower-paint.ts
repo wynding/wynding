@@ -4,12 +4,17 @@
 
 /** The footprint marks the scene can draw over a tower's 2×2 fill. `'plain'` is the
  *  pre-M2-S3 look (no extra mark — `basic`); `'ringed'` adds a concentric inner ring
- *  (`slow`'s distinct mark). An unrecognized id draws `'plain'` (total, never throw). */
-export type TowerFootprintMark = 'plain' | 'ringed';
+ *  (`slow`'s distinct mark). `'crosshair'` is `splash`'s (M2-S4a) — four short spokes
+ *  radiating from the footprint centre, evoking "area effect" — a SHAPE distinct from
+ *  `'ringed'`'s closed circle, not a third colour (the vocabulary widens rather than
+ *  reusing `'ringed'`, since `slow` already owns that mark). An unrecognized id draws
+ *  `'plain'` (total, never throw). */
+export type TowerFootprintMark = 'plain' | 'ringed' | 'crosshair';
 
 const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   basic: 'plain',
   slow: 'ringed',
+  splash: 'crosshair',
 };
 
 /** The footprint mark for `towerId` — total over any string, `hasOwnProperty`-guarded

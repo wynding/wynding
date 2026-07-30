@@ -33,12 +33,17 @@ export function renderTimeOf(prevVm: RenderVM | null, curVm: RenderVM, alpha: nu
 }
 
 /**
- * Lerp each in-flight tracer from its fp-unit origin to its target's CURRENT
- * interpolated point, at fraction `clamp01((renderTime - launchTick) / (impactTick -
- * launchTick))`. A tracer whose target is no longer drawn (died or leaked mid-flight)
- * is DROPPED — no target point to aim at, and drawing one anyway would visibly point
- * at nothing. A non-positive flight span (a forged/degenerate launch===impact tick)
- * resolves to fraction 1 (already arrived) rather than dividing by zero.
+ * Lerp each in-flight tracer from its fp-unit origin toward its aim point, at fraction
+ * `clamp01((renderTime - launchTick) / (impactTick - launchTick))`. A non-positive
+ * flight span (a forged/degenerate launch===impact tick) resolves to fraction 1
+ * (already arrived) rather than dividing by zero.
+ *
+ * The aim point depends on `kind` (M2-S4a step 12): a `targeted` tracer aims at its
+ * `targetId`'s CURRENT interpolated point and is DROPPED if that target is no longer
+ * drawn (died or leaked mid-flight — no point to aim at, and drawing one anyway would
+ * visibly point at nothing); a `blast` tracer aims at its OWN fixed `destX`/`destY` —
+ * the fire-time predicted lead point the impact itself will land at — regardless of
+ * whether the original target survived, and is therefore NEVER dropped.
  */
 export function positionTracers(
   flights: readonly TracerVM[],
@@ -47,13 +52,19 @@ export function positionTracers(
 ): PositionedTracer[] {
   const out: PositionedTracer[] = [];
   for (const f of flights) {
-    const target = interpolatedTargets.get(f.targetId);
-    if (target === undefined) continue;
+    let aim: { readonly x: number; readonly y: number };
+    if (f.kind === 'targeted') {
+      const target = interpolatedTargets.get(f.targetId);
+      if (target === undefined) continue;
+      aim = target;
+    } else {
+      aim = { x: f.destX, y: f.destY };
+    }
     const span = f.impactTick - f.launchTick;
     const frac = span > 0 ? clamp01((renderTime - f.launchTick) / span) : 1;
     out.push({
-      x: f.originX + (target.x - f.originX) * frac,
-      y: f.originY + (target.y - f.originY) * frac,
+      x: f.originX + (aim.x - f.originX) * frac,
+      y: f.originY + (aim.y - f.originY) * frac,
     });
   }
   return out;

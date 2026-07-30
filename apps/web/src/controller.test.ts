@@ -770,6 +770,29 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
     }
     expect(c.drainSparks()).toEqual([]); // drained sparks are cleared, not re-reported
   });
+
+  it('a splash (AoE) tower kill carries its true blast radiusFp, not 0 (M2-S4a step 11)', () => {
+    const c = createController(1);
+    startAndCall(c);
+    c.armTower('splash');
+    c.aimAt(2, 10);
+    c.confirm();
+    const splashRadiusFp = c.ruleset.towerById['splash']?.effects.find(
+      (e) => e.kind === 'aoe',
+    )?.radiusFp;
+    expect(splashRadiusFp).toBeGreaterThan(0);
+    let sparks: { x: number; y: number; radiusFp: number }[] = [];
+    let n = 0;
+    while (sparks.length === 0 && !c.isTerminal() && n < 300) {
+      c.advance(TICK);
+      sparks = c.drainSparks();
+      n++;
+    }
+    expect(sparks.length).toBeGreaterThan(0);
+    // Every spark from a splash blast carries the SAME true radius — never 0 (the
+    // targeted-spark sentinel) and never a fabricated/half value.
+    for (const pt of sparks) expect(pt.radiusFp).toBe(splashRadiusFp);
+  });
 });
 
 describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
@@ -852,6 +875,63 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
       expect(Number.isFinite(t.originY)).toBe(true);
       expect(t.launchTick).toBeLessThan(t.impactTick);
     }
+  });
+
+  it('a splash (AoE) tower fires a kind:"blast" tracer carrying its own fixed destX/destY (M2-S4a step 12)', () => {
+    const c = createController(1);
+    startAndCall(c);
+    c.armTower('splash');
+    c.aimAt(2, 10);
+    c.confirm();
+    let n = 0;
+    while (c.frame().tracers.length === 0 && !c.isTerminal() && n < 300) {
+      c.advance(TICK);
+      n++;
+    }
+    const inFlight = c.frame().tracers;
+    expect(inFlight.length).toBeGreaterThan(0);
+    const t = inFlight[0];
+    expect(t?.kind).toBe('blast');
+    if (t?.kind !== 'blast') throw new Error('expected a blast tracer');
+    // A blast tracer carries its OWN fixed destination — never a `targetId` to chase
+    // (unlike a `targeted` tracer), because the blast lands at its fire-time predicted
+    // point whether or not the original target survives the flight.
+    // PINNED (QC round-1 #11): a bare `Number.isFinite` check passes for `0`, and
+    // passes identically if destX/destY were accidentally swapped — neither of those
+    // bugs would fail it. The exact, DISTINCT pair below (computed once by running
+    // the real code) catches both.
+    expect(t.destX).toBe(362);
+    expect(t.destY).toBe(2944);
+  });
+});
+
+describe('controller — GhostVM.blastRadiusFp (M2-S4a step 14)', () => {
+  it('carries the AoE radius for an armed splash ghost, and null for a single-target one', () => {
+    const c = createController(1);
+    c.start();
+    const splashRadiusFp = c.ruleset.towerById['splash']?.effects.find(
+      (e) => e.kind === 'aoe',
+    )?.radiusFp;
+    expect(splashRadiusFp).toBeGreaterThan(0);
+
+    c.armTower('splash');
+    c.previewAt(10, 10);
+    expect(c.frame().ghost?.blastRadiusFp).toBe(splashRadiusFp);
+
+    c.armTower('basic'); // switching arms re-derives the ghost fresh (M2-S3)
+    c.previewAt(10, 10);
+    expect(c.frame().ghost?.blastRadiusFp).toBeNull();
+  });
+
+  it('the keyboard-cursor aim path (aimAt) carries the same blastRadiusFp as the pointer preview path', () => {
+    const c = createController(1);
+    c.start();
+    const splashRadiusFp = c.ruleset.towerById['splash']?.effects.find(
+      (e) => e.kind === 'aoe',
+    )?.radiusFp;
+    c.armTower('splash');
+    c.aimAt(10, 10);
+    expect(c.frame().ghost?.blastRadiusFp).toBe(splashRadiusFp);
   });
 });
 

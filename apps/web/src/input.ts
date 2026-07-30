@@ -498,6 +498,7 @@ export function attachInput(
         break;
       case 'armTower1':
       case 'armTower2':
+      case 'armTower3':
         // Intentionally NOT handled here: arming must work from "any state" (PLAN.md P2
         // table) regardless of whether the board currently has focus (e.g. focus on a
         // Card, or nowhere at all), so it's a document-scope listener in overlay.ts. This

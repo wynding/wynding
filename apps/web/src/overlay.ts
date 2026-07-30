@@ -102,11 +102,12 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
   speed: () => t('action.speed'),
   armTower1: () => t('action.armTower1'),
   armTower2: () => t('action.armTower2'),
+  armTower3: () => t('action.armTower3'),
 };
 
 /** Tower display names by catalog id (M2-S3) — a PARTIAL literal-key map (mirrors
  *  `CREEP_NAME`'s strategy exactly, Codex R1-5): catalog ids are OPEN strings (any
- *  schema-valid direct+slow tower compiles at sv7), so a closed union/exhaustive switch
+ *  schema-valid direct/aoe/slow tower compiles at sv8), so a closed union/exhaustive switch
  *  would crash on a legitimate modded bundle. An id this build doesn't recognize falls
  *  back to the localized `tower.unknown.name` (never a raw id) plus a dev-mode console
  *  warning — the mapping-gap diagnostic, same posture as `warnUnmappedCreeps`. The map is
@@ -121,6 +122,7 @@ const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assig
   {
     basic: () => t('tower.basic.name'),
     slow: () => t('tower.slow.name'),
+    splash: () => t('tower.splash.name'),
   } satisfies Record<string, () => string>,
 );
 
@@ -242,11 +244,13 @@ export function createOverlay(
   });
 
   // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), wired in a loop ---
-  // The catalog-index → hotkey ACTION map: a card at index ≥ 2 (a modded bundle; sv7
-  // compiles up to `MAX_TOWERS` catalog towers) has NO hotkey at all (Codex R2-2) —
-  // scaling the hotkey model past two slots is S12. `GAME_ACTIONS`/`keymap` only define
-  // `armTower1`/`armTower2`, so this array is the single place that ceiling lives.
-  const ARM_HOTKEY_ACTIONS: readonly GameAction[] = ['armTower1', 'armTower2'];
+  // The catalog-index → hotkey ACTION map: a card at index ≥ 3 (a modded bundle; sv8's
+  // `maxTowerCatalogSize` allows 64 CATALOG entries — `MAX_TOWERS` (1,000) is the
+  // separate cap on PLACED towers) has NO hotkey at all (Codex R2-2,
+  // widened M2-S4a) — scaling the hotkey model past three slots is S12.
+  // `GAME_ACTIONS`/`keymap` only define `armTower1`/`armTower2`/`armTower3`, so this
+  // array is the single place that ceiling lives.
+  const ARM_HOTKEY_ACTIONS: readonly GameAction[] = ['armTower1', 'armTower2', 'armTower3'];
   const hotkeyActionForCardIndex = (index: number): GameAction | null =>
     ARM_HOTKEY_ACTIONS[index] ?? null;
 
@@ -257,15 +261,15 @@ export function createOverlay(
     c.root.addEventListener('click', () => onAction({ type: 'armTower', tower: c.towerId }));
   }
 
-  /** Refresh card at `index`'s live hotkey badge — a card at catalog index ≥ 2 gets no
-   *  badge/`aria-keyshortcuts` at all (Codex R2-2), remaining fully keyboard-operable as
-   *  a native button in the tab order. */
+  /** Refresh card at `index`'s live hotkey badge — a card at catalog index ≥ 3 gets no
+   *  badge/`aria-keyshortcuts` at all (Codex R2-2, widened M2-S4a), remaining fully
+   *  keyboard-operable as a native button in the tab order. */
   function refreshCardHotkey(index: number): void {
     const c = cards[index];
     if (c === undefined) return;
     const action = hotkeyActionForCardIndex(index);
     if (action === null) {
-      // No hotkey slot for this card at all (catalog index ≥ 2) — badge hidden, no
+      // No hotkey slot for this card at all (catalog index ≥ 3) — badge hidden, no
       // aria-keyshortcuts, still fully keyboard-operable as a native button.
       c.hotkey.textContent = '';
       c.root.removeAttribute('aria-keyshortcuts');
@@ -405,13 +409,16 @@ export function createOverlay(
   const codeLabel = (action: GameAction): string =>
     formatKeyLabel(keymap.codeFor(action)) ?? t('settings.unbound');
 
-  // Slot actions are CATALOG-GATED (Codex R3-1): with a legal one-tower bundle,
-  // `armTower2` names a slot that doesn't exist — filtered out of the rebind list
-  // entirely (no phantom rebindable action for a slot with no Card). `armTower1` stays
-  // listed as long as at least one tower exists (M2 ships ≥ 1, per the schema).
-  const REBINDABLE_ACTIONS = GAME_ACTIONS.filter(
-    (action) => action !== 'armTower2' || cards.length >= 2,
-  );
+  // Slot actions are CATALOG-GATED (Codex R3-1, widened M2-S4a for `armTower3`): with a
+  // bundle short of three towers, `armTower2`/`armTower3` name slots that don't exist —
+  // filtered out of the rebind list entirely (no phantom rebindable action for a slot
+  // with no Card). `armTower1` stays listed as long as at least one tower exists (M2
+  // ships ≥ 1, per the schema).
+  const REBINDABLE_ACTIONS = GAME_ACTIONS.filter((action) => {
+    if (action === 'armTower2') return cards.length >= 2;
+    if (action === 'armTower3') return cards.length >= 3;
+    return true;
+  });
 
   for (const action of REBINDABLE_ACTIONS) {
     const li = doc.createElement('li');
@@ -775,7 +782,7 @@ export function createOverlay(
   });
   closeBtn.addEventListener('click', () => modal.close(settingsOverlay));
 
-  // --- Game-level Escape + the armTower1/armTower2 hotkeys: document scope, PLAN.md P2, M2-S3 ---
+  // --- Game-level Escape + the armTower1/armTower2/armTower3 hotkeys: document scope, PLAN.md P2, M2-S3/S4a ---
   // The modal owner's OWN Escape listener (registered above, capture phase) already
   // preventDefault()s + stopPropagation()s whenever a genuinely-open modal is dismissable
   // or state-driven, so this bubble-phase listener never even fires in that case. The one
@@ -794,15 +801,16 @@ export function createOverlay(
     // focus, so it's handled here rather than the board-scoped switch in input.ts. Guard
     // auto-repeat (a held key must not toggle arm on/off/on/off) — the discrete-action
     // repeat-gate input.ts applies to its own switch doesn't reach this listener.
-    // `armTower1`/`armTower2` map to catalog index 0/1 (M2-S3) — `armTower2` is a
-    // catalog-gated no-op when there is no second tower/Card (Codex R3-1's `towers[1]`
-    // guard, mirrored here on `cards[1]`).
+    // `armTower1`/`armTower2`/`armTower3` map to catalog index 0/1/2 (M2-S3, widened
+    // M2-S4a) via `ARM_HOTKEY_ACTIONS`' own order — a catalog-gated no-op when there is
+    // no tower/Card at that index (Codex R3-1's `towers[n]` guard, mirrored here on
+    // `cards[n]`).
     if (e.repeat) return;
     const action = keymap.actionFor(e.code);
-    const index = action === 'armTower1' ? 0 : action === 'armTower2' ? 1 : null;
-    if (index === null) return;
+    const index = action === null ? -1 : ARM_HOTKEY_ACTIONS.indexOf(action);
+    if (index === -1) return;
     const c = cards[index];
-    if (c === undefined) return; // no such slot (e.g. armTower2 on a one-tower bundle)
+    if (c === undefined) return; // no such slot (e.g. armTower3 on a two-tower bundle)
     // Consume the key so a rebind onto Enter/Space can't ALSO activate whatever native
     // button currently has focus (e.g. the settings opener) — the same keypress would both
     // arm and synthetically click it.
@@ -824,12 +832,18 @@ export function createOverlay(
     readonly rangeTiles: string;
     readonly fireRate: string;
     readonly targets: string;
+    /** The AoE blast radius, in tiles — `null` for a tower with no `aoe` effect (the
+     *  shipped `basic`/`slow`), so the Panel row is omitted rather than reading "0"
+     *  (M2-S4a). Text, not ring-only (PLAN.md step 14/15's a11y obligation). */
+    readonly blastRadiusTiles: string | null;
   }
 
   /** Data-driven from the armed/selected `CompiledTower` (M2-S3 retires the closed-union
    *  `exhaustive: never` throw — catalog ids are OPEN, so a legitimate modded bundle's
    *  tower must render real stats, never crash the Panel). `damage` is Σ of the tower's
-   *  `direct` effect amounts, in authored order (the shipped `slow` tower's row reads its
+   *  `direct` AND `aoe` effect amounts, in authored order (both are direct damage's two
+   *  forms — CONTEXT.md's Effect primitive entry — so `splash`'s blast damage must count here just
+   *  as `basic`'s single-target damage does; the shipped `slow` tower's row reads its
    *  own direct total, 2 — a hypothetical pure-support bundle would honestly read 0; QC
    *  round 2 corrected this line's earlier zero-direct-effects claim). A `towerId` this
    *  build's catalog doesn't resolve (defensive — the armed/selection state machine only
@@ -839,7 +853,11 @@ export function createOverlay(
     const damage =
       def === undefined
         ? 0
-        : def.effects.reduce((sum, e) => (e.kind === 'direct' ? sum + e.amount : sum), 0);
+        : def.effects.reduce(
+            (sum, e) => (e.kind === 'direct' || e.kind === 'aoe' ? sum + e.amount : sum),
+            0,
+          );
+    const aoeEffect = def?.effects.find((e) => e.kind === 'aoe');
     return {
       name: towerName(towerId),
       cost: def?.cost ?? 0,
@@ -849,6 +867,7 @@ export function createOverlay(
       // sv7's capability profile only ever compiles `domain: 'ground'` — literal-keyed
       // to the one domain the catalog can produce; a future capability bump adds its own.
       targets: t('tower.targets.ground'),
+      blastRadiusTiles: aoeEffect === undefined ? null : formatNumber(aoeEffect.radiusFp / FP_ONE),
     };
   }
 
@@ -859,6 +878,9 @@ export function createOverlay(
       t('panel.range', { tiles: stats.rangeTiles }),
       t('panel.fireRate', { rate: stats.fireRate }),
       t('panel.targets', { targets: stats.targets }),
+      ...(stats.blastRadiusTiles === null
+        ? []
+        : [t('panel.blastRadius', { tiles: stats.blastRadiusTiles })]),
     ];
     for (const text of rows) {
       const p = doc.createElement('p');
@@ -1010,6 +1032,7 @@ export function createOverlay(
     {
       normal: () => t('creep.normal.name'),
       fast: () => t('creep.fast.name'),
+      swarm: () => t('creep.swarm.name'),
     } satisfies Record<string, () => string>, // QC r3: same rationale as `TOWER_NAME`
   );
   // PURE name derivation — no side effects: the render-skip sentinel calls this

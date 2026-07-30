@@ -17,6 +17,9 @@ describe('creepShapeFor — id-keyed silhouette (total over any string)', () => 
   it('gives fast a visibly distinct diamond', () => {
     expect(creepShapeFor('fast')).toBe('diamond');
   });
+  it('gives swarm a visibly distinct square (M2-S4a)', () => {
+    expect(creepShapeFor('swarm')).toBe('square');
+  });
   it('falls back to the default triangle for an unknown id — never throws', () => {
     expect(creepShapeFor('__proto__')).toBe('triangle');
     expect(creepShapeFor('')).toBe('triangle');
