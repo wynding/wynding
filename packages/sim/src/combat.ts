@@ -711,7 +711,19 @@ export function runCombat(
       if (!Number.isSafeInteger(id)) continue; // defensive; a valid-hp row always has one
       members.push({ idx: i, id: id as number });
     }
-    members.sort((a, b) => a.id - b.id || a.idx - b.idx); // creep-id ascending, row-index tiebreak
+    // CREEP-ID ASCENDING, row-index tiebreak (m2.md §Combat: "outer loop = affected
+    // creeps in creep-id order"). DO NOT REMOVE THIS SORT AS DEAD WORK: at sv8 the
+    // traversal order is genuinely NOT outcome-observable — every affected creep is
+    // damaged independently, deaths are collected in an index Set, and bounty is credited
+    // by the later SoA sweep, so no test can currently distinguish it (the story-aoe
+    // ordering test therefore asserts order-INDEPENDENCE of the result, which is the only
+    // honest assertion available today). The order becomes load-bearing at S6, when stun's
+    // chance roll draws from the sim RNG *inside* this traversal and m2.md pins the draw
+    // sequence to exactly this order — a per-tick divergence that would break replay
+    // determinism. It is established now, unobservably, so S6 inherits it rather than
+    // having to introduce it: the same reason combat.ts already fixes the
+    // direct-then-status shape ahead of the stories that need it.
+    members.sort((a, b) => a.id - b.id || a.idx - b.idx);
     for (const m of members) {
       applyImpactToCreep(creeps, m.idx, imp.effects, tick, killedByImpact);
     }
