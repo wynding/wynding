@@ -78,9 +78,6 @@ importers:
       '@wynding/sim':
         specifier: workspace:*
         version: link:../../packages/sim
-      '@wynding/types':
-        specifier: workspace:*
-        version: link:../../packages/types
     devDependencies:
       '@axe-core/playwright':
         specifier: ^4.10.0
