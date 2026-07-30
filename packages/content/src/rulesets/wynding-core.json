@@ -22,6 +22,16 @@
       "immunities": [],
       "leakCost": 1,
       "bounty": 2
+    },
+    {
+      "id": "swarm",
+      "hp": 7,
+      "speedFp": 30,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 1
     }
   ],
   "towerCatalog": [
@@ -49,6 +59,17 @@
         { "kind": "direct", "form": "single", "damage": 2 },
         { "kind": "slow", "mulFp": 128, "durationTicks": 40 }
       ]
+    },
+    {
+      "id": "splash",
+      "cost": 12,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 60,
+        "travelTicks": 8
+      },
+      "effects": [{ "kind": "direct", "form": "aoe", "damage": 8, "radiusFp": 384 }]
     }
   ],
   "balance": {
@@ -83,7 +104,7 @@
           "index": 1,
           "countdownTicks": 300,
           "clearBonus": 4,
-          "entries": [{ "creepId": "normal", "count": 10, "spacingTicks": 20 }]
+          "entries": [{ "creepId": "swarm", "count": 16, "spacingTicks": 5 }]
         },
         {
           "index": 2,

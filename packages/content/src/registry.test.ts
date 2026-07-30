@@ -40,7 +40,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(getBundledRuleset('wynding-core')).toBe(ruleset);
   });
 
-  it('carries the creep catalog: `normal` and the S3 `fast` creep', () => {
+  it('carries the creep catalog: `normal`, the S3 `fast` creep, and the S4a `swarm` creep', () => {
     expect(ruleset.creepCatalog).toEqual([
       {
         id: 'normal',
@@ -62,10 +62,20 @@ describe('getBundledRuleset (happy path + authored values)', () => {
         leakCost: 1,
         bounty: 2,
       },
+      {
+        id: 'swarm',
+        hp: 7,
+        speedFp: 30,
+        armor: 0,
+        domain: 'ground',
+        immunities: [],
+        leakCost: 1,
+        bounty: 1,
+      },
     ]);
   });
 
-  it('carries the tower catalog: `basic` and the S3 `slow` tower (ground-scoped)', () => {
+  it('carries the tower catalog: `basic`, the S3 `slow` tower, and the S4a `splash` tower (all ground-scoped)', () => {
     expect(ruleset.towerCatalog).toEqual([
       {
         id: 'basic',
@@ -81,6 +91,12 @@ describe('getBundledRuleset (happy path + authored values)', () => {
           { kind: 'direct', form: 'single', damage: 2 },
           { kind: 'slow', mulFp: 128, durationTicks: 40 },
         ],
+      },
+      {
+        id: 'splash',
+        cost: 12,
+        attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 60, travelTicks: 8 },
+        effects: [{ kind: 'direct', form: 'aoe', damage: 8, radiusFp: 384 }],
       },
     ]);
   });
@@ -114,12 +130,13 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(board.exit).toEqual({ col: 27, row: 11 });
   });
 
-  it('carries the three waves: 10 × normal @ spacing 20 (×2), then 8 × fast @ spacing 15 (the S3 slow-showcase)', () => {
+  it('carries the three waves: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase)', () => {
     const normalEntries = [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }];
+    const swarmEntries = [{ creepId: 'swarm', count: 16, spacingTicks: 5, offsetTicks: 0 }];
     const fastEntries = [{ creepId: 'fast', count: 8, spacingTicks: 15, offsetTicks: 0 }];
     expect(board.waves).toEqual([
       { index: 0, countdownTicks: 500, clearBonus: 4, entries: normalEntries },
-      { index: 1, countdownTicks: 300, clearBonus: 4, entries: normalEntries },
+      { index: 1, countdownTicks: 300, clearBonus: 4, entries: swarmEntries },
       { index: 2, countdownTicks: 300, clearBonus: 5, entries: fastEntries },
     ]);
   });

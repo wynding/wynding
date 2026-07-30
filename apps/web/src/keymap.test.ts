@@ -51,4 +51,15 @@ describe('keymap — rebindable controls (GAG §2)', () => {
     expect(km.codeFor('armTower2')).toBe('Digit2');
     expect(km.actionFor('Digit2')).toBe('armTower2');
   });
+
+  // M2-S4a: armTower3 continues the same slot-order adjacency right after armTower2,
+  // defaulted to Digit3.
+  it('armTower3 is inserted right after armTower2, defaulted to Digit3', () => {
+    const km = createKeymap();
+    const idx2 = GAME_ACTIONS.indexOf('armTower2');
+    const idx3 = GAME_ACTIONS.indexOf('armTower3');
+    expect(idx3).toBe(idx2 + 1);
+    expect(km.codeFor('armTower3')).toBe('Digit3');
+    expect(km.actionFor('Digit3')).toBe('armTower3');
+  });
 });

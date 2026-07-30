@@ -268,7 +268,7 @@ test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it
   await expect(panel).toContainText('Slow Tower');
   await expect(board).toBeFocused();
 
-  // axe with the 2-card Rail, one card armed.
+  // axe with the 3-card Rail, one card armed.
   const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
 
@@ -342,12 +342,12 @@ test('supports player-started runs, pause / speed controls, early-calls all thre
   await page.getByRole('button', { name: /^Speed:/ }).click();
 
   // Early-call every wave via the morphed primary control, checking the preview shows the
-  // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since M2-S3's
-  // wave 3 is a DISTINCT fast-creep composition (waves 1-2 stay the single normal-creep
-  // kind).
+  // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since wave 2
+  // is M2-S4a's DISTINCT swarm-creep composition and wave 3 is M2-S3's DISTINCT
+  // fast-creep composition (only wave 1 stays the single normal-creep kind).
   const EXPECTED_COMPOSITION: Record<number, string> = {
     1: '10 × Creep — ground, armor 0, no immunities',
-    2: '10 × Creep — ground, armor 0, no immunities',
+    2: '16 × Swarm Creep — ground, armor 0, no immunities',
     3: '8 × Fast Creep — ground, armor 0, no immunities',
   };
   for (let waveNumber = 1; waveNumber <= 3; waveNumber++) {
@@ -490,10 +490,10 @@ test('settings: focusing the last rebind control then closing via Escape restore
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
 
-  // The last rebind row (armTower2, GAME_ACTIONS' last entry as of M2-S3 — the
-  // last-entry pin moved from armTower1) — reachable and visible within the dialog's
-  // own scrollport before it closes.
-  const lastRebind = page.getByRole('button', { name: 'Rebind Arm tower 2' });
+  // The last rebind row (armTower3, GAME_ACTIONS' last entry as of M2-S4a — the
+  // last-entry pin moved from armTower1 at M2-S3, then armTower2 to armTower3 here) —
+  // reachable and visible within the dialog's own scrollport before it closes.
+  const lastRebind = page.getByRole('button', { name: 'Rebind Arm tower 3' });
   await lastRebind.focus();
   await expect(lastRebind).toBeFocused();
   await expect(lastRebind).toBeInViewport();

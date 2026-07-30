@@ -433,9 +433,16 @@ describe('hud score — earned components while live, authoritative once termina
 
   it('folds the survival term in at a win, matching deriveScore exactly', () => {
     let s = createInitialState(1, ruleset);
+    // M2-S4a widened wave 2 to 16 × `swarm` @ spacing 5 (was 10 × `normal` @ spacing 20)
+    // — the old 2-tower defense (content story #68's fixture) now loses to that faster
+    // pressure, so the fixed defense grows to 5 `basic` towers, still well inside the
+    // starting bounty (5 × cost 5 = 25 of 80), to clear all three waves with margin.
     for (const anchor of [
       { col: 3, row: 9 },
       { col: 3, row: 12 },
+      { col: 6, row: 9 },
+      { col: 6, row: 12 },
+      { col: 9, row: 9 },
     ] as const) {
       s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'basic' }]);
     }
