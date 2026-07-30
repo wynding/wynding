@@ -109,11 +109,20 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
  *  schema-valid direct+slow tower compiles at sv7), so a closed union/exhaustive switch
  *  would crash on a legitimate modded bundle. An id this build doesn't recognize falls
  *  back to the localized `tower.unknown.name` (never a raw id) plus a dev-mode console
- *  warning — the mapping-gap diagnostic, same posture as `warnUnmappedCreeps`. */
-const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = {
-  basic: () => t('tower.basic.name'),
-  slow: () => t('tower.slow.name'),
-};
+ *  warning — the mapping-gap diagnostic, same posture as `warnUnmappedCreeps`. The map is
+ *  null-prototype (Codex #73): a schema-legal id that collides with an inherited
+ *  `Object.prototype` key (`'constructor'`, `'toString'`, …) must miss and take the
+ *  fallback, never resolve to an inherited member — the same guard the paint maps carry. */
+const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assign(
+  Object.create(null) as Partial<Record<string, () => string>>,
+  // `satisfies` (QC r3): as `Object.assign`'s inferred source the literal is otherwise
+  // checked against NOTHING — an eager `t(...)` entry (the exact thunk-contract slip
+  // this map exists to prevent) would compile clean and crash at render.
+  {
+    basic: () => t('tower.basic.name'),
+    slow: () => t('tower.slow.name'),
+  } satisfies Record<string, () => string>,
+);
 
 function towerName(towerId: string): string {
   const label = TOWER_NAME[towerId];
@@ -994,10 +1003,15 @@ export function createOverlay(
   // no user-facing string outside the catalog) — dev-mode-only, since a genuinely
   // compiled ruleset can't produce one (the preview's `entriesSummary` is derived
   // from validated, catalog-resolved entries).
-  const CREEP_NAME: Readonly<Partial<Record<string, () => string>>> = {
-    normal: () => t('creep.normal.name'),
-    fast: () => t('creep.fast.name'),
-  };
+  // Null-prototype for the same reason as `TOWER_NAME` (Codex #73): an id like
+  // `'constructor'` must miss, not resolve to an inherited `Object.prototype` member.
+  const CREEP_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assign(
+    Object.create(null) as Partial<Record<string, () => string>>,
+    {
+      normal: () => t('creep.normal.name'),
+      fast: () => t('creep.fast.name'),
+    } satisfies Record<string, () => string>, // QC r3: same rationale as `TOWER_NAME`
+  );
   // PURE name derivation — no side effects: the render-skip sentinel calls this
   // every tick, and a should-I-skip comparison must never execute observable
   // effects to compute its own inputs. The dev-mode

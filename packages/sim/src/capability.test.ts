@@ -20,6 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { capabilityProfile } from './capability';
+import { MAX_IMPACT_EFFECTS } from './combat';
 import { compileRuleset, RulesetError } from './ruleset';
 import { SIM_VERSION } from './index';
 import { testBundle } from './test-support';
@@ -61,6 +62,18 @@ describe('capabilityProfile', () => {
     // sv6 is deleted with the bump (G11) — a live sv6 entry would misdescribe v7
     // tick code, so it must throw exactly like any other unknown version.
     expect(() => capabilityProfile(6)).toThrow(RulesetError);
+  });
+
+  // The profile's per-bundle ceiling and combat's `MAX_IMPACT_EFFECTS` are DELIBERATELY
+  // separate constants (CodeRabbit #73): the profile is a verbatim per-simVersion record
+  // whose numbers never move because another layer was edited; the cap is combat's
+  // structural bound on any snapshot it accepts. The layers share an INVARIANT instead
+  // of a binding — and since dead profiles are deleted at each bump (G11), pinning the
+  // live one pins the whole surface.
+  it('the live profile’s effects-per-bundle ceiling fits inside the runtime impact cap', () => {
+    expect(capabilityProfile(SIM_VERSION).maxEffectsPerBundle).toBeLessThanOrEqual(
+      MAX_IMPACT_EFFECTS,
+    );
   });
 
   it('simVersion 7 is the catalog-towers + status-effect-framework profile, deferring wave/economy/catalog-size axes to the schema', () => {

@@ -59,8 +59,13 @@ import type { CompiledEffect, CompiledTower } from './ruleset';
 export const MAX_IN_FLIGHT_IMPACTS = MAX_TOWERS;
 
 /** Hard cap on effects per impact — mirrors the schema's own per-tower effects
- *  ceiling (8), since a snapshot carries the whole tower bundle. */
-const MAX_IMPACT_EFFECTS = 8;
+ *  ceiling (8), since a snapshot carries the whole tower bundle. Deliberately a
+ *  SEPARATE constant from the capability profiles' `maxEffectsPerBundle` (CodeRabbit
+ *  #73): each profile is a verbatim per-simVersion record whose numbers must never
+ *  move because another layer was edited, so the layers share an INVARIANT, not a
+ *  binding — `capability.test.ts` pins the LIVE profile's ceiling under this cap
+ *  (the only one: dead profiles are deleted at each bump, G11). */
+export const MAX_IMPACT_EFFECTS = 8;
 
 /** One effect primitive an impact applies, snapshotted fresh per fire from the
  *  tower's `CompiledEffect[]` (M2-S3 generalizes M1's `direct`-only shape). */

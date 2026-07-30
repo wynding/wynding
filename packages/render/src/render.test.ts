@@ -204,9 +204,26 @@ describe('view-model + hud derivation', () => {
     for (const c of vm.creeps) {
       expect(c.creepId).toBe('normal');
       expect(c.slowed).toBe(false);
-      const def = ruleset.creepById['normal'];
-      expect(c.hpFrac).toBeCloseTo((def?.hp ?? 1) / (def?.hp ?? 1));
+      expect(c.hpFrac).toBe(1); // undamaged: full pip regardless of denominator
     }
+    // The DENOMINATOR itself (CodeRabbit #73 — the old assertion was def.hp/def.hp, a
+    // tautology): retag row 0 as `fast` (catalog max 16) at 8 hp — half a pip against
+    // ITS OWN catalog max, not `normal`'s 20 (the single-kind global the VM used to
+    // assume) and not current hp (which would read full).
+    s.creeps.creepId[0] = 'fast';
+    s.creeps.hp[0] = 8;
+    const damaged = deriveViewModel(s, ruleset).creeps[0];
+    expect(damaged?.hpFrac).toBeCloseTo(8 / 16);
+    // Two kinds in ONE view-model (QC r3): a denominator hoisted from row 0 would read
+    // row 1 as 5/16 instead of 5/20 — advance to the second spawn and pin BOTH rows.
+    for (let i = 0; i < 40 && s.creeps.id.length < 2; i++) s = step(s, ruleset, []);
+    expect(s.creeps.id.length).toBe(2);
+    s.creeps.creepId[0] = 'fast';
+    s.creeps.hp[0] = 8;
+    s.creeps.hp[1] = 5; // row 1 stays `normal` (catalog max 20)
+    const two = deriveViewModel(s, ruleset);
+    expect(two.creeps[0]?.hpFrac).toBeCloseTo(8 / 16);
+    expect(two.creeps[1]?.hpFrac).toBeCloseTo(5 / 20);
   });
 
   it('projects `slowed` from a live slowMulFp column value', () => {

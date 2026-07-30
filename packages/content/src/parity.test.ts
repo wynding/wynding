@@ -102,7 +102,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // A wall of `basic` towers flanking the row-11 lane (row 10 and row 12, every
     // third column), placed one per tick as budget allows: enough total DPS to
     // clear all three waves outright. Once the wall is fully placed, two `slow`
-    // towers go up off-lane (row 9 and row 13) — proving the slow path
+    // towers go up off-lane (rows 7 and 15, `slowAnchors` below) — proving the slow path
     // client/server-identically at content level (step 12). Wave 0 is
     // early-called at tick 0 (paying the early-call bounty/credit from the
     // undecremented 500-tick countdown); wave 1 launches naturally at tick 300

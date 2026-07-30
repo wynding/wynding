@@ -694,6 +694,43 @@ describe('controller — run lifecycle (startRun cleanup, §7)', () => {
     expect(c.isPaused()).toBe(false);
     expect(c.buildReplay().seed).toBe(99);
   });
+
+  // QC r3: the tower hit-test index memoizes on (tick, bufferRev) and BOTH counters
+  // restart per run, so this exact sequence recreates run 1's memo key in run 2 —
+  // `callWaveEarly` is the one rev bump with no `towerAt` call to overwrite the slot.
+  // Without `reset()`'s explicit clear, run 1's pending tower would hit-test as a
+  // phantom: a visibly empty cell that rejects placement with no error anywhere.
+  it('Play-again: a phantom pending tower from the previous run must never hit-test', () => {
+    const c = createController(7);
+    c.start();
+    tick(c, 3);
+    c.armTower('basic');
+    c.clickAt(5, 5); // queues the build — the post-queue re-aim memoizes it at (tick 3, rev 1)
+    c.startRun(7); // Play again, same seed: tick AND rev restart at 0
+    c.start();
+    tick(c, 3); // tick 3 again, rev still 0
+    expect(c.callWaveEarly()).toBe(true); // rev 0 → 1 with no towerAt call — the key collides
+    c.armTower('basic');
+    c.aimAt(5, 5); // first hit-test of run 2 — must see run 2's EMPTY cell, not the phantom
+    expect(c.frame().ghost?.valid).toBe(true);
+  });
+
+  // QC r3: the commit-side half of `pendingRevision`'s documented contract ("queued or
+  // committed"). The bump is refundCache's ONLY invalidation signal — its key carries
+  // no tick leg — so "commits always advance the tick" must never become the excuse to
+  // delete it.
+  it('committing a non-empty buffer bumps pendingRevision, not just queuing into it', () => {
+    const c = createController(1);
+    c.start();
+    c.pause();
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm(); // queued while paused — the queue-side bump
+    const queued = c.frame().pendingRevision;
+    c.resume();
+    tick(c); // the commit — must bump again
+    expect(c.frame().pendingRevision).toBeGreaterThan(queued);
+  });
 });
 
 describe('controller — impact-spark plumbing via StepEvents (#31)', () => {

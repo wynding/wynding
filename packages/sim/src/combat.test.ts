@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { createInitialState, step, type SimInput } from './index';
 import type { TowerArrays } from './tower';
 import { runCombat, type CombatCreeps, type Impact, type StepEvents } from './combat';
+import type { CompiledEffect } from './ruleset';
 import { testRuleset } from './test-support';
 
 // A large open board so targeting geometry is clean; exit on the right at row 6.
@@ -30,8 +31,13 @@ const TOWER_BY_ID = RULESET.towerById;
 const RANGE = TEST_TOWER.rangeFp;
 const TRAVEL_TICKS = TEST_TOWER.travelTicks;
 const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
-const DIRECT_DAMAGE = (TEST_TOWER.effects.find((e) => e.kind === 'direct') as { amount: number })
-  .amount;
+// A type predicate rather than a cast (CodeRabbit #73): if `basic` ever loses its
+// direct effect this throws a NAMED error at module load, not an opaque TypeError.
+const DIRECT_EFFECT = TEST_TOWER.effects.find(
+  (e): e is Extract<CompiledEffect, { kind: 'direct' }> => e.kind === 'direct',
+);
+if (DIRECT_EFFECT === undefined) throw new Error('`basic` must carry a direct effect');
+const DIRECT_DAMAGE = DIRECT_EFFECT.amount;
 // Bounty follows the compiled creep catalog for the same reason the tower stats do
 // above — a testBundle bounty edit must move these economy assertions with it.
 const KILL_BOUNTY = RULESET.creepById[RULESET.waves[0]!.spawns[0]!.creepId]!.bounty;

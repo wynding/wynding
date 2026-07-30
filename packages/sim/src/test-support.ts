@@ -162,12 +162,15 @@ export function testRuleset(spec: GridSpec, opts: TestBundleOpts = {}): Compiled
   return compileRuleset(testBundle(spec, opts), 'test');
 }
 
-/** Insert a creep directly into a state's SoA (bypassing the wave), resting at a
- *  cell centre — the manual setup movement/tower/combat unit tests need now that
- *  there is no `spawnCreep` command. `creepId` defaults to `'normal'` (the default
- *  bundle's catalog id — override to `'fast'`/a test-bundle `extraCreeps` id when
- *  the ruleset under test carries a different catalog); `slowMulFp`/`slowUntilTick`
- *  default to `(0, 0)` — no active slow (M2-S3). */
+/** Insert a creep directly into a state's SoA (bypassing the wave) — the manual setup
+ *  movement/tower/combat unit tests need now that there is no `spawnCreep` command.
+ *  The row STARTS at the `(col,row)` cell centre (`fromX`/`fromY` are always that
+ *  centre); by default it RESTS there (sentinel head), and the `headCol`/`headRow`/
+ *  `progress` trio instead makes it a committed mid-edge row (QC r3 — the head differs
+ *  from the origin and progress is nonzero). `creepId` defaults to `'normal'` (the
+ *  default bundle's catalog id — override to `'fast'`/a test-bundle `extraCreeps` id
+ *  when the ruleset under test carries a different catalog); `slowMulFp`/
+ *  `slowUntilTick` default to `(0, 0)` — no active slow (M2-S3). */
 export function pushCreep(
   state: SimState,
   args: {
@@ -181,6 +184,12 @@ export function pushCreep(
     readonly creepId?: string;
     readonly slowMulFp?: number;
     readonly slowUntilTick?: number;
+    /** A committed mid-edge row: head differs from (col,row) and progress is nonzero
+     *  (CodeRabbit #73 — `tower.test.ts`'s `committedCreep` delegates here so new SoA
+     *  columns thread through ONE helper). Defaults keep the at-rest sentinel shape. */
+    readonly headCol?: number;
+    readonly headRow?: number;
+    readonly progress?: number;
   },
 ): void {
   state.creeps.id.push(args.id);
@@ -189,9 +198,9 @@ export function pushCreep(
   state.creeps.speed.push(args.speed ?? 26);
   state.creeps.fromX.push(cellCenterX(args.col));
   state.creeps.fromY.push(cellCenterY(args.row));
-  state.creeps.headCol.push(args.col);
-  state.creeps.headRow.push(args.row);
-  state.creeps.progress.push(0);
+  state.creeps.headCol.push(args.headCol ?? args.col);
+  state.creeps.headRow.push(args.headRow ?? args.row);
+  state.creeps.progress.push(args.progress ?? 0);
   state.creeps.wave.push(args.wave ?? 0);
   state.creeps.creepId.push(args.creepId ?? 'normal');
   state.creeps.slowMulFp.push(args.slowMulFp ?? 0);

@@ -12,10 +12,6 @@ import { testRuleset, pushCreep } from './test-support';
 /** The M1 tower cost (was an exported const; now ruleset content). */
 const TOWER_COST = 5;
 
-/** Fixed-point centre of a cell coordinate. */
-const cx = (col: number): number => col * 256 + 128;
-const cy = (row: number): number => row * 256 + 128;
-
 /** The cell a creep row currently occupies (derived), or null if its state is corrupt. */
 function occ(s: SimState, k: number, grid: Parameters<typeof deriveValidCreepPosition>[5]) {
   return deriveValidCreepPosition(
@@ -55,21 +51,11 @@ const place = (col: number, row: number, towerId = 'basic'): SimInput => ({
 const sell = (tower: number): SimInput => ({ kind: 'sellTower', tower });
 const callEarly: SimInput = { kind: 'callWaveEarly' };
 
-/** A creep row at rest (sentinel head) injected straight into the SoA. */
+/** A creep row at rest (sentinel head) injected straight into the SoA — a thin
+ *  delegation to `pushCreep` (CodeRabbit #73): every SoA column threads through ONE
+ *  helper, so a new column never needs hand-copying here. */
 function restingCreep(state: SimState, id: number, col: number, row: number, hp = 5): void {
-  state.creeps.id.push(id);
-  state.creeps.hp.push(hp);
-  state.creeps.bounty.push(1);
-  state.creeps.speed.push(26);
-  state.creeps.fromX.push(cx(col));
-  state.creeps.fromY.push(cy(row));
-  state.creeps.headCol.push(col);
-  state.creeps.headRow.push(row);
-  state.creeps.progress.push(0);
-  state.creeps.wave.push(0);
-  state.creeps.creepId.push('normal');
-  state.creeps.slowMulFp.push(0);
-  state.creeps.slowUntilTick.push(0);
+  pushCreep(state, { id, hp, col, row });
 }
 
 /** A mid-edge creep row: at the (col,row) centre, committed toward (headCol,headRow). */
@@ -83,19 +69,7 @@ function committedCreep(
   progress: number,
   hp = 5,
 ): void {
-  state.creeps.id.push(id);
-  state.creeps.hp.push(hp);
-  state.creeps.bounty.push(1);
-  state.creeps.speed.push(26);
-  state.creeps.fromX.push(cx(col));
-  state.creeps.fromY.push(cy(row));
-  state.creeps.headCol.push(headCol);
-  state.creeps.headRow.push(headRow);
-  state.creeps.progress.push(progress);
-  state.creeps.wave.push(0);
-  state.creeps.creepId.push('normal');
-  state.creeps.slowMulFp.push(0);
-  state.creeps.slowUntilTick.push(0);
+  pushCreep(state, { id, hp, col, row, headCol, headRow, progress });
 }
 
 describe('placeTower / sellTower — accept path and economy', () => {

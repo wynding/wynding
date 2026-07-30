@@ -435,6 +435,25 @@ export function createController(seed: number): Controller {
   // readers and must never derive it separately (deriveHud runs deriveScore/deriveStars/
   // derivePreview, and main.ts's refreshHud() calls both back-to-back on every refresh).
   let hudMemo: { tick: number; rev: number; vm: HudVM } | null = null;
+  // The valid-tower hit-test index behind `towerAt` (CodeRabbit #73): `forEachValidTower`
+  // allocates scratch (a Set + a grid-sized Uint8Array) per walk, and `towerAt` sits on
+  // the pointermove hot path — so the walk runs once per (tick, bufferRev) and hit-tests
+  // scan the cached entries. Same key as `previewMemo`/`hudMemo`, and the same Play-again
+  // rule: tick indices restart at 0 across `reset()`, so the index clears there too.
+  // The `tick` leg is defense-in-depth (QC r3): towers change only through buffered
+  // inputs today, so `rev` (including `onTick`'s commit bump) covers every reachable
+  // change and no current test can falsify the `tick` comparison — it exists for the
+  // first mechanic that mutates towers OUTSIDE the input phase (destruction, upgrades).
+  let towerIndexMemo: {
+    tick: number;
+    rev: number;
+    entries: {
+      readonly col: number;
+      readonly row: number;
+      readonly id: number;
+      readonly towerId: string;
+    }[];
+  } | null = null;
   // Armed/selection state machine (PLAN.md P2): `armed` is purely `apps/web` presentation
   // state — it never enters the sim or the replay log. `uiRev` is the DOM overlay's
   // observation key (bumped on every `uiState()`-visible change) and `lastOutcome` is what
@@ -473,6 +492,11 @@ export function createController(seed: number): Controller {
     const events: StepEvents = { impactPoints: [], fired: [] };
     state = step(state, ruleset, inputs, events);
     buffer = []; // FRESH buffer — the just-recorded copy can never be mutated by reuse
+    // Committing a non-empty buffer CHANGES the pending set (pending → committed), so it
+    // bumps the revision — `pendingRevision`'s documented contract ("queued or
+    // committed") now holds at the commit boundary too (QC r3), and the memo keys no
+    // longer depend on `step` always advancing the tick.
+    if (inputs.length > 0) bufferRev += 1;
     prevVm = curVm;
     curVm = deriveViewModel(state, ruleset);
     for (const pt of events.impactPoints) pendingSparks.push(pt);
@@ -512,6 +536,7 @@ export function createController(seed: number): Controller {
     bufferRev = 0;
     previewMemo = null;
     hudMemo = null;
+    towerIndexMemo = null;
     // Clear the per-run memo/caches — the next run reuses tick indices from 0, so a stale
     // (col,row,bufferLen,tick) verdict must never carry across a Play-again.
     aimMemoKey = '';
@@ -568,19 +593,50 @@ export function createController(seed: number): Controller {
    *  Re-implemented over the CANONICAL `forEachValidTower` walk (Codex R3-2, M2-S3): an
    *  invalid row (unknown `towerId`, spend↔towerId mismatch) is not hit-testable/
    *  selectable, matching the sim and the render VM exactly. */
+  const validTowerEntries = (): readonly {
+    readonly col: number;
+    readonly row: number;
+    readonly id: number;
+    readonly towerId: string;
+  }[] => {
+    if (
+      towerIndexMemo !== null &&
+      towerIndexMemo.tick === state.tick &&
+      towerIndexMemo.rev === bufferRev
+    ) {
+      return towerIndexMemo.entries;
+    }
+    const towers = pendingProjection()?.preview.towers ?? state.towers;
+    const entries: {
+      readonly col: number;
+      readonly row: number;
+      readonly id: number;
+      readonly towerId: string;
+    }[] = [];
+    forEachValidTower(grid, towers, ruleset.towerById, (i, id, tc, tr) => {
+      entries.push({ col: tc, row: tr, id, towerId: towers.towerId[i] as string });
+    });
+    towerIndexMemo = { tick: state.tick, rev: bufferRev, entries };
+    return entries;
+  };
+  // The RETURN is a shared cached entry (pre-memo each call minted a fresh object).
+  // The `readonly` typing makes a DIRECT write through it a compile error — not a
+  // runtime guarantee (a widening assignment or `Object.assign` still compiles); no
+  // caller writes today, and a per-walk `Object.freeze` would buy that guarantee at an
+  // allocation cost nothing currently needs (QC r3).
   const towerAt = (
     col: number,
     row: number,
-  ): { col: number; row: number; id: number; towerId: string } | null => {
-    const towers = pendingProjection()?.preview.towers ?? state.towers;
-    let found: { col: number; row: number; id: number; towerId: string } | null = null;
-    forEachValidTower(grid, towers, ruleset.towerById, (i, id, tc, tr) => {
-      if (found !== null) return;
-      if (col >= tc && col <= tc + 1 && row >= tr && row <= tr + 1) {
-        found = { col: tc, row: tr, id, towerId: towers.towerId[i] as string };
-      }
-    });
-    return found;
+  ): {
+    readonly col: number;
+    readonly row: number;
+    readonly id: number;
+    readonly towerId: string;
+  } | null => {
+    for (const e of validTowerEntries()) {
+      if (col >= e.col && col <= e.col + 1 && row >= e.row && row <= e.row + 1) return e;
+    }
+    return null;
   };
 
   const inBounds = (col: number, row: number): boolean =>

@@ -14,7 +14,7 @@ import {
   countValidTowers,
   type SimInput,
 } from './index';
-import { runCombat, type Impact } from './combat';
+import { runCombat, MAX_IMPACT_EFFECTS, type EffectPrimitive, type Impact } from './combat';
 import { emptyTowers } from './tower';
 import { compileRuleset, RulesetError } from './ruleset';
 import { effectiveSpeedFp } from './ruleset-shared';
@@ -155,14 +155,23 @@ describe('slow application — movement reads the per-creep slow columns', () =>
     // Run enough ticks for the impact (travelTicks 2) to resolve and apply the slow.
     for (let t = 0; t < 5; t++) step(s, ruleset, []);
     expect(s.creeps.slowMulFp[0]).toBe(128);
-    expect(s.creeps.slowUntilTick[0]).toBeGreaterThan(0);
+    // Deterministic expiry pin (CodeRabbit #73), derived from the def so a test-bundle
+    // edit moves it (QC r3): the first `step` call processes tick 0, so the placement
+    // lands in tick 0's input phase, the tower (nextFireTick 0) fires that same tick's
+    // combat phase, and the impact resolves `travelTicks` later — tick 2. The duration
+    // is INCLUSIVE per m2.md ("applied at T for D, observed through T + D"): movement at
+    // tick 42 still reads the slow; that tick's combat-phase sweep then removes it.
+    const slowEffect = TEST_SLOW_TOWER.effects.find((e) => e.kind === 'slow');
+    if (slowEffect?.kind !== 'slow') throw new Error('TEST_SLOW_TOWER must carry a slow effect');
+    const attack = TEST_SLOW_TOWER.attack; // optional on TowerDef (support towers) — guard it
+    if (attack === undefined) throw new Error('TEST_SLOW_TOWER must carry an attack block');
+    expect(s.creeps.slowUntilTick[0]).toBe(attack.travelTicks + slowEffect.durationTicks); // 2 + 40 = 42
     // Effective speed at mulFp 128 over base 26 is 13 (see effectiveSpeedFp tests) —
     // strictly less than the unslowed 26, so progress accumulates at half rate.
     const progressBefore = s.creeps.progress[0] as number;
     step(s, ruleset, []);
     const delta = (s.creeps.progress[0] as number) - progressBefore;
-    expect(delta).toBeLessThan(26);
-    expect(delta).toBeGreaterThan(0);
+    expect(delta).toBe(13); // effectiveSpeedFp(26, 128, 1, 4) — the exact slowed rate
   });
 });
 
@@ -301,6 +310,59 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
     expect(result.creeps.id).toEqual([2]); // creep 1 dead+swept; creep 2 survives
     expect(result.creeps.slowMulFp[0]).toBe(128); // creep 2 got its slow
   });
+
+  it('an impact carrying exactly MAX_IMPACT_EFFECTS effects RESOLVES; one more is dropped whole (QC r3 — the cap is a boundary, not a rejection of legal bundles)', () => {
+    const atCap: Impact = {
+      impactTick: 0,
+      targetId: 1,
+      effects: [
+        ...Array.from({ length: MAX_IMPACT_EFFECTS - 1 }, (): EffectPrimitive => ({
+          kind: 'direct',
+          amount: 1,
+        })),
+        { kind: 'slow', mulFp: 128, durationTicks: 40 },
+      ],
+    };
+    const result = runCombat(oneRestingCreep(100), emptyTowers(), [atCap], 0, 0, FIELD, GRID, {});
+    expect(result.creeps.hp[0]).toBe(100 - (MAX_IMPACT_EFFECTS - 1)); // every direct landed
+    expect(result.creeps.slowMulFp[0]).toBe(128); // and the slow applied
+    // One MORE effect makes the snapshot structurally invalid — canonicalImpacts drops
+    // it whole (totality): no damage, no slow, no throw.
+    const overCap: Impact = {
+      impactTick: 0,
+      targetId: 1,
+      effects: Array.from({ length: MAX_IMPACT_EFFECTS + 1 }, (): EffectPrimitive => ({
+        kind: 'direct',
+        amount: 1,
+      })),
+    };
+    const untouched = runCombat(
+      oneRestingCreep(100),
+      emptyTowers(),
+      [overCap],
+      0,
+      0,
+      FIELD,
+      GRID,
+      {},
+    );
+    expect(untouched.creeps.hp[0]).toBe(100);
+    expect(untouched.creeps.slowMulFp[0]).toBe(0);
+  });
+
+  it('an overdue forged impact (impactTick < tick) anchors its slow expiry to the RESOLUTION tick, not the stale schedule (QC r3)', () => {
+    // m2.md's inclusive rule reads "applied at T" — T is the tick the application
+    // actually happens (combat drains overdue impacts at the current tick), so the
+    // expiry is satAdd(tick, durationTicks), never the forged impactTick's.
+    const overdue: Impact = {
+      impactTick: 0,
+      targetId: 1,
+      effects: [{ kind: 'slow', mulFp: 128, durationTicks: 40 }],
+    };
+    const result = runCombat(oneRestingCreep(100), emptyTowers(), [overdue], 5, 0, FIELD, GRID, {});
+    expect(result.creeps.slowMulFp[0]).toBe(128);
+    expect(result.creeps.slowUntilTick[0]).toBe(45); // 5 + 40 — resolution-tick anchored
+  });
 });
 
 describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
@@ -408,6 +470,26 @@ describe('coerceSoa totality — the new creep/tower columns (via step()/preview
     expect(preview.creeps.slowUntilTick[0]).toBe(0);
     expect(s.creeps.slowMulFp[0]).toBe(999); // source untouched
     expect(s.creeps.slowUntilTick[0]).toBe(40);
+  });
+
+  it('densifies a SHORT slow pair to the row authority — absent tail rows become the inert (0,0), present rows keep their live pair (CodeRabbit #73)', () => {
+    const s = createInitialState(1, RULESET);
+    pushCreep(s, { id: 1, hp: 10, col: 6, row: 6 });
+    pushCreep(s, { id: 2, hp: 10, col: 6, row: 6 });
+    s.creeps.slowMulFp = [128]; // forged short: one entry against two rows
+    s.creeps.slowUntilTick = [40];
+    // The PREVIEW layer pins coerceSoa's OWN densifier (QC r3): previewInputs runs no
+    // movement phase, so a repair that failed to grow the columns has nothing
+    // downstream to mask it (step()'s movement rebuild would independently densify).
+    const { preview } = previewInputs(s, RULESET, [{ kind: 'noop' }]);
+    expect(preview.creeps.id).toEqual([1, 2]); // densify, never row-drop
+    expect(preview.creeps.slowMulFp).toEqual([128, 0]);
+    expect(preview.creeps.slowUntilTick).toEqual([40, 0]);
+    // And end-to-end through step(): the committed state lands the same dense shape.
+    expect(() => step(s, RULESET, [])).not.toThrow();
+    expect(s.creeps.id).toEqual([1, 2]);
+    expect(s.creeps.slowMulFp).toEqual([128, 0]);
+    expect(s.creeps.slowUntilTick).toEqual([40, 0]);
   });
 
   it('coerces a missing towerId container to an empty array (totality)', () => {

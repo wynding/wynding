@@ -328,6 +328,39 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     warnSpy.mockRestore();
   });
 
+  // QC r3 (the `CREEP_NAME` mirror of the tower-side Codex #73 fix): an id colliding
+  // with an inherited `Object.prototype` key must take the localized fallback — a plain
+  // object map would render an object-derived string into accessible preview text AND
+  // suppress `warnUnmappedCreeps`' mapping-gap diagnostic (the `=== undefined` check
+  // sees the inherited member) — the double silent failure the null prototype prevents.
+  it('a creep id colliding with an Object.prototype key falls back too — and still fires the dev mapping-gap warn', () => {
+    const { overlay, shell } = setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    overlay.update({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 1,
+          waveCount: 1,
+          entries: [
+            { creepId: 'constructor', count: 4, domain: 'ground', armor: 2, immunities: [] },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    const text = shell.preview.list.querySelector('li')!.textContent;
+    expect(text).toBe('4 × Unknown creep (constructor) — ground, armor 2, no immunities');
+    expect(text).not.toContain('[object');
+    if (import.meta.env.DEV) {
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("creep id 'constructor'"));
+    }
+    warnSpy.mockRestore();
+  });
+
   it('rebuilds the entry list on every render (no stale rows left behind from a shorter previous wave)', () => {
     const { overlay, shell } = setup();
     const two = {
@@ -1073,6 +1106,28 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     ).not.toThrow();
     expect(panel.root.textContent).toContain('Unknown tower (turret)');
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("catalog id 'turret'"));
+    warnSpy.mockRestore();
+  });
+
+  // Codex #73: `'constructor'` is a schema-legal catalog id that collides with an
+  // inherited `Object.prototype` key. A plain-object `TOWER_NAME` would resolve it to
+  // the inherited `Object` constructor and render an object-derived string; the
+  // null-prototype map must miss and take the same localized fallback as any unknown id.
+  it('an id colliding with an Object.prototype key falls back too, never an inherited member', () => {
+    const { overlay, panel } = setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() =>
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ armed: 'constructor' }),
+        refund: 0,
+      }),
+    ).not.toThrow();
+    expect(panel.root.textContent).toContain('Unknown tower (constructor)');
+    expect(panel.root.textContent).not.toContain('[object');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("catalog id 'constructor'"));
     warnSpy.mockRestore();
   });
 });
