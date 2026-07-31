@@ -13,7 +13,7 @@ import { resolvePalette, type Palette } from './palette';
 import { boardPaintOps, type BoardPaintOp } from './board-cells';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
-import { creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
+import { creepSilhouettePaintOp, slowTelegraphPaintOps, dotTelegraphPaintOps } from './creep-paint';
 import { towerFootprintMarkFor } from './tower-paint';
 import type { RenderVM, RenderOverlay, RenderHandle, ColourMode, SparkPoint } from './types';
 
@@ -234,6 +234,24 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     g.lineBetween(cx + gap, cy, cx + spoke, cy);
   };
 
+  // A small teardrop outline at `(cx,cy)`: a circular bulb offset downward, plus two
+  // lines converging to a point above it — the `'droplet'` footprint mark (M2-S5a,
+  // `venom`), evoking "applies a lingering effect". Distinct in SHAPE from both the
+  // closed `'ringed'` circle and the radiating `'crosshair'` spokes (never colour alone
+  // — ADR 0003); `spoke` plays the same role as `drawCrosshair`'s (the mark's half-size).
+  const drawDroplet = (
+    g: Phaser.GameObjects.Graphics,
+    cx: number,
+    cy: number,
+    spoke: number,
+  ): void => {
+    const bulbR = spoke * 0.55;
+    const bulbCy = cy + spoke * 0.25;
+    g.strokeCircle(cx, bulbCy, bulbR);
+    g.lineBetween(cx - bulbR * 0.7, bulbCy - bulbR * 0.6, cx, cy - spoke);
+    g.lineBetween(cx + bulbR * 0.7, bulbCy - bulbR * 0.6, cx, cy - spoke);
+  };
+
   const drawTowers = (
     g: Phaser.GameObjects.Graphics,
     pal: Palette,
@@ -250,17 +268,18 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       const size = projection.cellPx * 2; // 2×2 footprint
       g.fillStyle(pal.tower, 1);
       g.fillRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
-      // `slow`/`splash` vs `basic` footprint mark (M2-S3, extended M2-S4a): all bodies
-      // share `pal.tower` — a palette decision (S3 mints no second tower colour), with
-      // the per-tower distinction carried by SHAPE — an inner concentric ring for
-      // `'ringed'` (slow), four short radiating spokes for `'crosshair'` (splash — the
-      // same "area effect" motif the ghost's blast-radius preview below draws at cell
-      // scale, per ADR 0003's redundant-encoding rule), nothing extra for `'plain'`
-      // (basic). The committed marks stroke `pal.floor` so they read against the solid
-      // `pal.tower` fill; the pending branch below strokes `pal.tower` instead — its
-      // body is an unfilled outline, so there is no fill to contrast against and the
-      // mark keeps the pending cue's own colour + alpha (CodeRabbit #73: the two
-      // branches differ on purpose).
+      // `slow`/`splash`/`venom` vs `basic` footprint mark (M2-S3, extended M2-S4a,
+      // M2-S5a): all bodies share `pal.tower` — a palette decision (S3 mints no second
+      // tower colour), with the per-tower distinction carried by SHAPE — an inner
+      // concentric ring for `'ringed'` (slow), four short radiating spokes for
+      // `'crosshair'` (splash — the same "area effect" motif the ghost's blast-radius
+      // preview below draws at cell scale, per ADR 0003's redundant-encoding rule), a
+      // small teardrop for `'droplet'` (venom), nothing extra for `'plain'` (basic). The
+      // committed marks stroke `pal.floor` so they read against the solid `pal.tower`
+      // fill; the pending branch below strokes `pal.tower` instead — its body is an
+      // unfilled outline, so there is no fill to contrast against and the mark keeps the
+      // pending cue's own colour + alpha (CodeRabbit #73: the two branches differ on
+      // purpose).
       const mark = towerFootprintMarkFor(t.towerId);
       if (mark === 'ringed') {
         g.lineStyle(2, pal.floor, 1);
@@ -268,6 +287,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       } else if (mark === 'crosshair') {
         g.lineStyle(2, pal.floor, 1);
         drawCrosshair(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+      } else if (mark === 'droplet') {
+        g.lineStyle(2, pal.floor, 1);
+        drawDroplet(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
       }
     }
     // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
@@ -286,6 +308,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       } else if (pendingMark === 'crosshair') {
         g.lineStyle(1, pal.tower, 0.6);
         drawCrosshair(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+      } else if (pendingMark === 'droplet') {
+        g.lineStyle(1, pal.tower, 0.6);
+        drawDroplet(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
       }
     }
     if (o.selection !== null) {
@@ -306,6 +331,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       hpFrac: number;
       creepId: string;
       slowed: boolean;
+      poisoned: boolean;
     }[],
     reducedMotion: boolean,
     renderTimeMs: number, // MILLISECONDS — the unit lives in the name (QC r3), the tick→ms conversion happens at the call site
@@ -316,15 +342,24 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       const hpColour = c.hpFrac < 0.34 ? pal.creepLowHp : pal.creep;
       const op = creepSilhouettePaintOp(c.creepId, p.x, p.y, r, hpColour, c.hpFrac);
       g.fillStyle(op.colour, 1); // set once — used for both the silhouette and the pip
-      // Silhouette keyed on `creepId`'s shape (M2-S3, extended M2-S4a): `normal` keeps
-      // the triangle (a shape cue distinct from the tower's rounded square); `fast`
-      // draws a diamond; `swarm` draws a small square (fragile/numerous, distinct from
-      // both at cell scale); an unknown id falls back to the triangle (total).
+      // Silhouette keyed on `creepId`'s shape (M2-S3, extended M2-S4a, M2-S5a): `normal`
+      // keeps the triangle (a shape cue distinct from the tower's rounded square);
+      // `fast` draws a diamond; `swarm` draws a small square (fragile/numerous, distinct
+      // from both at cell scale); `armored` draws a six-sided plated hexagon
+      // (armoured/tanky, distinct from all three); an unknown id falls back to the
+      // triangle (total).
       if (op.shape === 'diamond') {
         g.fillTriangle(op.x, op.y - r, op.x + r, op.y, op.x, op.y + r);
         g.fillTriangle(op.x, op.y - r, op.x - r, op.y, op.x, op.y + r);
       } else if (op.shape === 'square') {
         g.fillRect(op.x - r, op.y - r, r * 2, r * 2);
+      } else if (op.shape === 'hexagon') {
+        const pts: { x: number; y: number }[] = [];
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 2; // apex up, like the other shapes
+          pts.push({ x: op.x + r * Math.cos(angle), y: op.y + r * Math.sin(angle) });
+        }
+        g.fillPoints(pts, true);
       } else {
         g.fillTriangle(op.x, op.y - r, op.x + r, op.y + r, op.x - r, op.y + r);
       }
@@ -337,6 +372,20 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       for (const tel of slowTelegraphPaintOps(c, r, reducedMotion, pal.slowed, renderTimeMs)) {
         g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.alpha);
         g.strokeCircle(tel.x, tel.y, tel.r);
+      }
+      // DoT ("poisoned") telegraph (M2-S5a, PLAN.md step 32 — an ESSENTIAL cue, not a
+      // decorative one: HP pips show damage already TAKEN, a DoT record is
+      // armor-bypassing damage already SCHEDULED, which no other surface reveals). Three
+      // pips (opaque) ALWAYS accompany a live DoT record; the drift cue (radius/alpha
+      // driven by render time) yields to reduced motion (WCAG 2.3.3 / GAG §2). Sits at
+      // r×1.8 — deliberately OUTSIDE the slowed ring's r×1.4 above, so a creep carrying
+      // BOTH statuses reads as two distinct concentric cues, never a muddle. No per-tick
+      // live-region announcement accompanies this — see the rationale at
+      // `dotTelegraphPaintOps` (per-tick chatter would flood a screen reader; the state,
+      // not the tick, is what matters).
+      for (const tel of dotTelegraphPaintOps(c, r, reducedMotion, pal.poisoned, renderTimeMs)) {
+        g.fillStyle(tel.colour, tel.alpha);
+        g.fillCircle(tel.x, tel.y, tel.r);
       }
     }
   };

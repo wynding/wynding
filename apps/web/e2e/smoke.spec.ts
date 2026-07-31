@@ -384,6 +384,125 @@ test('the Splash Tower ghost + blast-radius preview stay functional and axe-clea
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
+// M2-S5a step 31/33: `venom` adds a `dot` effect (armor-bypassing damage-over-time) and a
+// footprint mark distinct from `basic`/`slow`/`splash`. The DoT telegraph (three pips +
+// drift, on a poisoned creep) and the footprint's droplet mark are DECORATIVE canvas-only
+// cues (outcomes stay carried by HP pips, per the Tracer glossary entry — PLAN.md step
+// 32 makes the telegraph ESSENTIAL to draw, not essential for axe, since the underlying
+// scheduled-damage FACT is also readable as the Panel's `panel.dot` text row below), so
+// axe cannot see the canvas cues at all — same posture the blast ring/crosshair preview
+// already established (M2-S4a). This e2e proves the DOM-visible half: the Card/Panel/
+// hotkey surface stays fully functional and axe-clean for valid + invalid placement.
+test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels its DoT stat as TEXT, and stays axe-clean for valid + invalid placement', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const venomCard = page.getByRole('button', { name: /Venom Tower/ });
+  const board = page.locator('.wy-board');
+  const panel = page.locator('.wy-panel');
+
+  // Click-arm.
+  await expect(panel).toBeHidden();
+  await venomCard.click();
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel).toContainText('Venom Tower');
+  // The DoT is labelled as TEXT, alongside the range stat every tower already shows —
+  // never telegraph-only (PLAN.md step 31/32's a11y obligation): magnitude, cadence, and
+  // duration all read out (`panel.dot`, mirrored exactly from `overlay.test.ts`).
+  await expect(panel).toContainText('Poison: 2/tick every 0.5s for 3.0s');
+  await expect(panel).toContainText('Range:');
+  await expect(board).toBeFocused();
+
+  // axe with the 4-card Rail, the fourth Card armed.
+  const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
+
+  await venomCard.click(); // disarm — back to a clean slate for the hotkey path
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'false');
+
+  // Digit4 (armTower4's default binding) arms from document scope, exactly like
+  // Digit1/2/3 arm the first three Cards.
+  await page.keyboard.press('Digit4');
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(board).toBeFocused();
+
+  // VALID placement, via the keyboard cursor.
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  await expect(panel).toContainText('Venom Tower'); // now selected
+  await expect(panel).toContainText('Poison: 2/tick every 0.5s for 3.0s');
+
+  const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
+
+  // INVALID placement: re-arm and aim at the SAME (now-occupied) cell — the keyboard
+  // cursor never moved off it, so this exercises the occupied-cell rejection (PLAN.md P2
+  // table: a persistent invalid ghost, still armed, never a crash).
+  await page.keyboard.press('Digit4');
+  await page.keyboard.press('Enter');
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
+
+  const invalidAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(invalidAudit.violations, JSON.stringify(invalidAudit.violations, null, 2)).toEqual([]);
+});
+
+test('the Venom Tower ghost stays functional and axe-clean under reduced motion, and a live run with an Armored Creep on the board (its hexagon silhouette + wave-4 preview text) is axe-clean (M2-S5a steps 31/32/36)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Reduce motion').check();
+  await page.getByRole('button', { name: 'Close' }).click();
+
+  const venomCard = page.getByRole('button', { name: /Venom Tower/ });
+  await venomCard.click();
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'true');
+
+  // Aim the board so the ghost is drawn on the canvas — decorative, out of axe's scope
+  // (ADR 0003 §3); this proves the DOM-visible flow doesn't regress with the setting on.
+  // The DoT telegraph's own reduced-motion damping is unit-tested at source
+  // (`creep-paint.test.ts`), not here — `scene.ts` stays coverage-excluded by
+  // long-standing convention (not meaningfully testable under jsdom).
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter'); // place it — commits the venom tower to the board
+
+  const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
+
+  // Start unholds the run — the Dock's primary control morphs from "Start" to
+  // "Call wave" (M2-S2's decouple), which is what makes early-calling waves 1..4 below
+  // possible.
+  await page.getByRole('button', { name: 'Start' }).click();
+
+  // Early-call through to wave 4 (M2-S5a's `armored` creep — a hexagon silhouette on
+  // canvas, out of axe's scope, but its wave-preview composition IS a DOM/AT surface:
+  // `armor 6`, never `armor 0`, now that a wave actually carries a nonzero-armor creep
+  // — PLAN.md step 36's "preview's now-nonzero armor text").
+  const callWave = page.getByRole('button', { name: 'Call wave' });
+  const preview = page.locator('.wy-wave-preview');
+  for (let waveNumber = 1; waveNumber <= 3; waveNumber++) await callWave.click();
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 4');
+  await expect(preview.locator('li')).toHaveText([
+    '6 × Armored Creep — ground, armor 6, no immunities',
+  ]);
+
+  const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(previewAudit.violations, JSON.stringify(previewAudit.violations, null, 2)).toEqual([]);
+
+  // Call wave 4 and let the (reduced-motion, decorative) poisoned telegraph + hexagon
+  // silhouette actually render for a moment on canvas — proving the live-run DOM stays
+  // axe-clean with an armored, poisoned creep on the board, not merely the wave preview.
+  await callWave.click();
+  await page.waitForTimeout(1000);
+
+  const liveAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(liveAudit.violations, JSON.stringify(liveAudit.violations, null, 2)).toEqual([]);
+});
+
 test('supports player-started runs, pause / speed controls, early-calls all four waves with the preview checked before each, and reaches a result', async ({
   page,
 }) => {

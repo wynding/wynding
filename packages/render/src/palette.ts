@@ -34,6 +34,11 @@ export interface Palette {
    *  shape/ring the telegraph ALWAYS draws (`creep-paint.ts`); gated ≥ 3:1 like every
    *  other opaque cue (`palette.test.ts`). */
   readonly slowed: number;
+  /** DoT ("poisoned") telegraph cue (M2-S5a) — the redundant colour channel behind the
+   *  three-pip shape cue the telegraph ALWAYS draws (`creep-paint.ts`); an essential cue
+   *  (PLAN.md step 32, same posture as `slowed`), gated ≥ 3:1 like every other opaque
+   *  cue (`palette.test.ts`). */
+  readonly poisoned: number;
 }
 
 // Base palette: high-contrast, colourblind-safe hues (Okabe–Ito). Valid/invalid also
@@ -51,6 +56,8 @@ const DEFAULT: Palette = {
   ghostInvalid: 0xd55e00,
   spark: 0xffffff,
   slowed: 0x56b4e9, // sky blue — the slow telegraph's redundant colour channel
+  poisoned: 0x009e73, // bluish green (Okabe-Ito) — same colourblind-safe family as
+  // `slowed`, distinguishable from it — the DoT telegraph's redundant colour channel
 };
 
 // Deutan/protan (red–green) shift the green/red pair toward blue/orange separation.

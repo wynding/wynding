@@ -44,9 +44,11 @@ function compositeOver(fg: number, bg: number, a: number): number {
   return (mix(fr, br) << 16) | (mix(fgc, bg2) << 8) | mix(fb, bb);
 }
 
-// The eight cues the scene draws OPAQUE against the floor (source colour, no compositing) —
+// The nine cues the scene draws OPAQUE against the floor (source colour, no compositing) —
 // `slowed`'s essential ring is drawn at alpha 1 (the pulse, alpha 0.4, is the non-essential
-// motion cue), so gating it as opaque is exact, not an approximation.
+// motion cue), so gating it as opaque is exact, not an approximation. `poisoned` (M2-S5a)
+// is the same essential-cue category: its three guaranteed pips are also alpha 1 (the
+// drift cue, alpha ≤ 0.5, is the non-essential motion cue) — PLAN.md step 32.
 const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'entrance',
   'exit',
@@ -56,6 +58,7 @@ const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'ghostValid',
   'ghostInvalid',
   'slowed',
+  'poisoned',
 ];
 
 // `range`'s weakest essential draw: the ghost-preview stroke at alpha 0.7 (scene.ts:174).
