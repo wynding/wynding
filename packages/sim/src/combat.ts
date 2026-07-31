@@ -146,14 +146,47 @@ export interface DotRecord {
   readonly untilTick: number; // INCLUSIVE final tick
 }
 
-/** Forged-state / DoS backstop on the resident DoT-record table — the direct
- *  analogue of {@link MAX_IN_FLIGHT_IMPACTS}: `applyDot` simply drops a new-pair
- *  application once the table is full, the same deterministic-no-op precedent,
- *  already reviewed there. Deliberately NOT a per-creep source cap —
- *  that would contradict `docs/CONTEXT.md`'s Status effect entry ("each source's
- *  DoT coexists"). Its value is provisional in THIS packet; P4 measures it against
- *  a hostile-state benchmark and may bring it down before sv9 ships. */
-export const MAX_DOT_RECORDS = 20_000;
+/**
+ * Forged-state / DoS backstop on the resident DoT-record table — the direct
+ * analogue of {@link MAX_IN_FLIGHT_IMPACTS}, and expressed the same structural way
+ * (a multiple of {@link MAX_TOWERS}, not a bare literal): `applyDot` simply drops a
+ * new-pair application once the table is full, the same deterministic-no-op
+ * precedent, already reviewed there. Deliberately NOT a per-creep source cap — that
+ * would contradict `docs/CONTEXT.md`'s Status effect entry ("each source's DoT
+ * coexists"). Resident-state only, never a compile-time gate: see m2.md's amended S5
+ * clause and issue #77 for why no compiler-visible bound was derivable.
+ *
+ * MEASURED, not guessed (M2-S5a P4, `packages/perf/src/dot-bench.ts`). The first
+ * draft named 20,000; the benchmark rejected it. `step()` p99 against table size, on
+ * the blast-free stress scene, holding the table AT the stated size on every sampled
+ * tick (empty-table baseline p99 ≈ 0.27 ms):
+ *
+ *     500 → 0.50 ms   2,000 → 0.83 ms    5,000 → 1.52 ms
+ *   1,000 → 0.60 ms   4,000 → 1.24 ms   10,000 → 2.75 ms   20,000 → 7.13 ms
+ *
+ * Linear at ≈0.25 ms per 1,000 records until it turns superlinear near 20,000 (the
+ * per-tick rebuild's allocation pressure). At 20,000 a single `step()` costs 7.13 ms
+ * — 43% of a 60 Hz frame ON A FAST DEV MACHINE, so a certain dropped frame on ADR
+ * 0005's mid-range target. A rail whose whole promise is "never bites real play"
+ * must not hand forged state a deterministic way to make the game unplayable.
+ *
+ * `4 × MAX_TOWERS` instead, for the headroom the rail actually needs. A venom-shaped
+ * tower carries about `durationTicks / cadenceTicks` live records at once — 2 for the
+ * shipped `venom` (60/30), ≈7 for the stress bundle's longer-duration twin (200/30) —
+ * so the stress scene's 50 venom towers bound to roughly 350 concurrent records, and
+ * the shipped catalog to far fewer. 4,000 leaves ≈8× headroom over that while costing
+ * 1.24 ms, 5.8× cheaper than 20,000.
+ *
+ * The asymmetry drove the choice: set too high, the cost is only weaker DoS
+ * resistance, since real play never approaches the rail; set too low, real DoT
+ * applications silently become no-ops. So this is deliberately generous over measured
+ * real peaks rather than as high as the frame budget can bear.
+ *
+ * Like `AOE_SCAN_CEILING` this is capability-shaped — once sv9 ships, moving it is a
+ * behaviour change owing its own `simVersion` bump. If S5b's stress scene lands
+ * anywhere near it, that is a finding to raise, not a constant to nudge.
+ */
+export const MAX_DOT_RECORDS = 4 * MAX_TOWERS;
 
 /**
  * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,

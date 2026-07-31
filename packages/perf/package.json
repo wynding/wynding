@@ -17,7 +17,8 @@
     "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo",
     "gen:scenario": "tsx src/generate.ts",
-    "perf": "tsx src/run.ts"
+    "perf": "tsx src/run.ts",
+    "bench:dot": "tsx src/dot-bench.ts"
   },
   "dependencies": {
     "@wynding/content": "workspace:*",
