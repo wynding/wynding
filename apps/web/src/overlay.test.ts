@@ -869,6 +869,39 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(text).toContain('Blast radius: 1.5 tiles'); // radiusFp 384 / FP_ONE 256
   });
 
+  // M2-S5a P7: `venom`'s `dot` effect surfaces as its own text row (magnitude/cadence/
+  // duration, never ring/colour-only) — the direct effect's damage (2) is the Panel's
+  // "Damage:" row same as any other tower; the DoT's own per-tick amount is separate.
+  it("the Panel shows the VENOM tower's DoT stat row (magnitude/cadence/duration)", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'venom' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Venom Tower');
+    expect(text).toContain('Cost: 9');
+    expect(text).toContain('Damage: 2'); // the direct effect's amount only
+    expect(text).toContain('Poison: 2/tick every 0.5s for 3.0s'); // dot: 2/10cadence/60duration ticks
+  });
+
+  it('the Panel shows no DoT row for the BASIC tower (no `dot` effect)', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    expect(panel.root.textContent).not.toContain('Poison');
+  });
+
   // QC round 1: the wrong-stats regression guard PLAN step 21 named (G18's bug — a
   // towerStats that hardcoded basic's numbers, or read towers[0] instead of
   // towerById[towerId], would render basic's stats on a slow tower and pass every other

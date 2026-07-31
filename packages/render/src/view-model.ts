@@ -19,6 +19,11 @@ import { clamp01 } from './num';
 export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): RenderVM {
   const grid = ruleset.board.grid;
 
+  // Built ONCE per call, not per creep — a per-creep `state.dots.some(...)` scan would be
+  // an O(creeps × records) rebuild of the same membership test every iteration.
+  const poisonedIds = new Set<number>();
+  for (const rec of state.dots) poisonedIds.add(rec.targetId);
+
   const creeps: CreepVM[] = [];
   for (let i = 0; i < state.creeps.id.length; i++) {
     const p = projectCreep(state.creeps, i, grid);
@@ -42,6 +47,7 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       y: p.y,
       hpFrac,
       slowed: Number.isSafeInteger(slowMulFp) && (slowMulFp as number) !== 0,
+      poisoned: poisonedIds.has(state.creeps.id[i] as number),
     });
   }
 

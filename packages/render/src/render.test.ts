@@ -236,6 +236,49 @@ describe('view-model + hud derivation', () => {
     expect(c?.slowed).toBe(true);
   });
 
+  it('projects `poisoned` from live DoT records, many-to-many-ish (M2-S5a P7)', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    for (let i = 0; i < 400 && s.creeps.id.length < 5; i++) s = step(s, ruleset, []);
+    expect(s.creeps.id.length).toBe(5);
+    const ids = Array.from(s.creeps.id) as number[];
+    // Two independent sources DoT the SAME target (ids[0]) — a many-to-one relation —
+    // plus a lone record on ids[2]; ids[1]/ids[3]/ids[4] carry no record at all.
+    s.dots = [
+      {
+        targetId: ids[0]!,
+        sourceId: 101,
+        amount: 2,
+        cadenceTicks: 10,
+        nextTickTick: s.tick + 10,
+        untilTick: s.tick + 60,
+      },
+      {
+        targetId: ids[0]!,
+        sourceId: 202,
+        amount: 2,
+        cadenceTicks: 10,
+        nextTickTick: s.tick + 10,
+        untilTick: s.tick + 60,
+      },
+      {
+        targetId: ids[2]!,
+        sourceId: 303,
+        amount: 2,
+        cadenceTicks: 10,
+        nextTickTick: s.tick + 10,
+        untilTick: s.tick + 60,
+      },
+    ];
+    const vm = deriveViewModel(s, ruleset);
+    const poisonedById = new Map(vm.creeps.map((c) => [c.id, c.poisoned]));
+    expect(poisonedById.get(ids[0]!)).toBe(true);
+    expect(poisonedById.get(ids[1]!)).toBe(false);
+    expect(poisonedById.get(ids[2]!)).toBe(true);
+    expect(poisonedById.get(ids[3]!)).toBe(false);
+    expect(poisonedById.get(ids[4]!)).toBe(false);
+  });
+
   it('does not draw a sim-invalid tower row (Codex R3-2: forged towerId is never drawn)', () => {
     let s = createInitialState(1, ruleset);
     const build: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' };
@@ -492,36 +535,69 @@ describe('interpolation — by entity id', () => {
   });
 
   it('blends a creep present in both snapshots by its id', () => {
-    const prev = vm(0, [{ id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false }]);
-    const cur = vm(1, [{ id: 1, creepId: 'normal', x: 100, y: 40, hpFrac: 1, slowed: false }]);
+    const prev = vm(0, [
+      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
+    const cur = vm(1, [
+      { id: 1, creepId: 'normal', x: 100, y: 40, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
     const out = interpolateCreeps(prev, cur, 0.5);
-    expect(out).toEqual([{ id: 1, creepId: 'normal', x: 50, y: 20, hpFrac: 1, slowed: false }]);
+    expect(out).toEqual([
+      { id: 1, creepId: 'normal', x: 50, y: 20, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
   });
 
   it('the blend path snaps NON-DEFAULT creepId/slowed from the CURRENT snapshot (QC round 1 — a rebuild that dropped or defaulted the new fields would pass the all-defaults case above)', () => {
-    const prev = vm(0, [{ id: 1, creepId: 'fast', x: 0, y: 0, hpFrac: 1, slowed: false }]);
-    const cur = vm(1, [{ id: 1, creepId: 'fast', x: 100, y: 40, hpFrac: 0.5, slowed: true }]);
+    const prev = vm(0, [
+      { id: 1, creepId: 'fast', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
+    const cur = vm(1, [
+      { id: 1, creepId: 'fast', x: 100, y: 40, hpFrac: 0.5, slowed: true, poisoned: false },
+    ]);
     const out = interpolateCreeps(prev, cur, 0.5);
-    expect(out).toEqual([{ id: 1, creepId: 'fast', x: 50, y: 20, hpFrac: 0.5, slowed: true }]);
+    expect(out).toEqual([
+      { id: 1, creepId: 'fast', x: 50, y: 20, hpFrac: 0.5, slowed: true, poisoned: false },
+    ]);
+  });
+
+  it('snaps `poisoned` from the CURRENT snapshot on a genuinely-interpolated frame (M2-S5a P7 — guards a field-by-field rebuild silently dropping it)', () => {
+    const prev = vm(0, [
+      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
+    const cur = vm(1, [
+      { id: 1, creepId: 'normal', x: 100, y: 40, hpFrac: 1, slowed: false, poisoned: true },
+    ]);
+    const out = interpolateCreeps(prev, cur, 0.5);
+    expect(out).toEqual([
+      { id: 1, creepId: 'normal', x: 50, y: 20, hpFrac: 1, slowed: false, poisoned: true },
+    ]);
   });
 
   it('shows a just-spawned creep (only in current) at its current point, no blend', () => {
     const prev = vm(0, []);
-    const cur = vm(1, [{ id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false }]);
+    const cur = vm(1, [
+      { id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
     expect(interpolateCreeps(prev, cur, 0.5)).toEqual([
-      { id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false },
+      { id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false, poisoned: false },
     ]);
   });
 
   it('does not resurrect a creep that left the world (only in previous)', () => {
-    const prev = vm(0, [{ id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false }]);
+    const prev = vm(0, [
+      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
     const cur = vm(1, []);
     expect(interpolateCreeps(prev, cur, 0.5)).toEqual([]);
   });
 
   it('clamps a stale/overshooting alpha to [0,1]', () => {
-    const prev = vm(0, [{ id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false }]);
-    const cur = vm(1, [{ id: 1, creepId: 'normal', x: 100, y: 0, hpFrac: 1, slowed: false }]);
+    const prev = vm(0, [
+      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
+    const cur = vm(1, [
+      { id: 1, creepId: 'normal', x: 100, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+    ]);
     expect(interpolateCreeps(prev, cur, 2).at(0)?.x).toBe(100);
     expect(interpolateCreeps(prev, cur, -1).at(0)?.x).toBe(0);
     expect(interpolateCreeps(null, cur, NaN).at(0)?.x).toBe(100); // null prev → current

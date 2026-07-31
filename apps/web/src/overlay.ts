@@ -848,6 +848,15 @@ export function createOverlay(
      *  shipped `basic`/`slow`), so the Panel row is omitted rather than reading "0"
      *  (M2-S4a). Text, not ring-only (PLAN.md step 14/15's a11y obligation). */
     readonly blastRadiusTiles: string | null;
+    /** The DoT's per-tick damage, cadence, and duration (in seconds, matching
+     *  `fireRate`'s own tick→second conversion) — `null` for a tower with no `dot`
+     *  effect (the shipped `basic`/`slow`/`splash`), so the Panel row is omitted
+     *  rather than reading zeros (M2-S5a P7, mirrors `blastRadiusTiles`'s posture). */
+    readonly dot: {
+      readonly damage: number;
+      readonly cadence: string;
+      readonly duration: string;
+    } | null;
   }
 
   /** Data-driven from the armed/selected `CompiledTower` (M2-S3 retires the closed-union
@@ -870,6 +879,7 @@ export function createOverlay(
             0,
           );
     const aoeEffect = def?.effects.find((e) => e.kind === 'aoe');
+    const dotEffect = def?.effects.find((e) => e.kind === 'dot');
     return {
       name: towerName(towerId),
       cost: def?.cost ?? 0,
@@ -880,6 +890,14 @@ export function createOverlay(
       // to the one domain the catalog can produce; a future capability bump adds its own.
       targets: t('tower.targets.ground'),
       blastRadiusTiles: aoeEffect === undefined ? null : formatNumber(aoeEffect.radiusFp / FP_ONE),
+      dot:
+        dotEffect === undefined
+          ? null
+          : {
+              damage: dotEffect.amount,
+              cadence: formatNumber(dotEffect.cadenceTicks / TICKS_PER_SECOND),
+              duration: formatNumber(dotEffect.durationTicks / TICKS_PER_SECOND),
+            },
     };
   }
 
@@ -893,6 +911,15 @@ export function createOverlay(
       ...(stats.blastRadiusTiles === null
         ? []
         : [t('panel.blastRadius', { tiles: stats.blastRadiusTiles })]),
+      ...(stats.dot === null
+        ? []
+        : [
+            t('panel.dot', {
+              damage: stats.dot.damage,
+              cadence: stats.dot.cadence,
+              duration: stats.dot.duration,
+            }),
+          ]),
     ];
     for (const text of rows) {
       const p = doc.createElement('p');

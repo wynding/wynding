@@ -45,6 +45,11 @@ export interface CreepVM {
   /** Whether an active slow status affects this creep right now (`slowMulFp !== 0`,
    *  M2-S3) — drives the slowed telegraph's shape+motion cues (`creep-paint.ts`). */
   readonly slowed: boolean;
+  /** Whether a live DoT record targets this creep right now (`SimState.dots` carries
+   *  a matching `targetId`, M2-S5a) — a boolean, not a count: multiple co-ticking
+   *  records on the same creep (independent `venom` sources) still read as one
+   *  poisoned cue, drives the poisoned telegraph (`creep-paint.ts`). */
+  readonly poisoned: boolean;
 }
 
 /** One tower as the renderer sees it: its 2×2 anchor cell. */
