@@ -42,6 +42,20 @@ export const TEST_FAST_CREEP: CreepDef = {
   bounty: 2,
 };
 
+/** The M2-S5a `venom` tower stat block — ground-scoped, direct-then-dot authored
+ *  order (mirrors the shipped `wynding-core` bundle's `venom` tower, step 22):
+ *  cost 9, damage 2, DoT 2/tick every 10 ticks for 60 ticks, range 1024, cadence
+ *  30, travel 2. */
+export const TEST_DOT_TOWER: TowerDef = {
+  id: 'venom',
+  cost: 9,
+  attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
+  effects: [
+    { kind: 'direct', form: 'single', damage: 2 },
+    { kind: 'dot', damagePerTick: 2, cadenceTicks: 10, durationTicks: 60 },
+  ],
+};
+
 /** The M2-S4a AoE (blast) tower stat block — ground-scoped, a single `aoe` direct
  *  effect (mirrors the shipped `wynding-core` bundle's `splash` tower's shape,
  *  m2.md §The towers: cost 12, damage 8, radiusFp 384, range 1024, cadence 60,

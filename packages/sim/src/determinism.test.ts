@@ -50,6 +50,19 @@
 // contributes: this scenario's bundle carries no `dot` effect. The move is
 // EXPECTED and driven purely by `sourceId` entering the hash — no behavioral
 // number (leak count, lives, score, outcome) changed alongside it.
+//
+// M2-S5a P3 (still SIM_VERSION 9) re-pins both values AGAIN, and this time
+// BEHAVIORAL numbers move too — legitimately, because THE SCENARIO ITSELF IS
+// DIFFERENT rather than the semantics having drifted. The catalog gains `venom`
+// (`TEST_DOT_TOWER`) and the input log gains a third build at tick 5, so a
+// resident, ticking `SimState.dots` record now rides a long stretch of the trace:
+// before this packet the canonical scenario carried no `dot` effect at all, so
+// `dots` had never once appeared in the permanent golden and DoT would not have
+// been part of the standing determinism witness for any later story. The terminal
+// moves 452 → 454. `venom` joins `basic` in the tick-201 sell so that the
+// scenario's two long-standing witnesses — `lives === 0` and a single surviving
+// `slow` tower — are preserved EXACTLY; see `canonicalInputs`' own note for the
+// measured reason.
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
@@ -62,14 +75,20 @@ import {
   type SimInput,
   type SimState,
 } from './index';
-import { testBundle, testRuleset, TEST_SLOW_TOWER, TEST_FAST_CREEP } from './test-support';
+import {
+  testBundle,
+  testRuleset,
+  TEST_SLOW_TOWER,
+  TEST_FAST_CREEP,
+  TEST_DOT_TOWER,
+} from './test-support';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 
 /** Fixed seed for the canonical determinism scenario. */
 const SCENARIO_SEED = 0x5eed; // 24301
-/** Scenario length — reaches the scenario's terminal (a loss at tick 452, once
- *  selling the basic tower leaves the run thin enough) with trailing frozen
- *  ticks, so the golden also exercises the freeze-on-terminal path in-run. */
+/** Scenario length — reaches the scenario's terminal (a loss at tick 454, once
+ *  selling the basic and venom towers leaves the run thin enough) with trailing
+ *  frozen ticks, so the golden also exercises the freeze-on-terminal path in-run. */
 const SCENARIO_TICKS = 600;
 
 const OPEN_28x24 = {
@@ -89,6 +108,11 @@ const OPEN_28x24 = {
  * `basic`, and wave 1 (the one this scenario's second early call launches) spawns
  * `fast` creeps (`TEST_FAST_CREEP`, `extraCreeps`) instead of `normal` — so BOTH
  * new catalog axes (a second tower kind, a second creep kind) are exercised.
+ * M2-S5a P3: the tower catalog gains `venom` (`TEST_DOT_TOWER`, `extraTowers`)
+ * beside `basic`/`slow` — the scenario's THIRD build (tick 5), so the canonical
+ * trace carries a resident, ticking `SimState.dots` record for a stretch of the
+ * run (the scenario built no `dot` effect before this packet, so `dots` had never
+ * once appeared in the permanent golden).
  */
 const SCENARIO_RULESET: CompiledRuleset = compileRuleset(
   testBundle(OPEN_28x24, {
@@ -99,7 +123,7 @@ const SCENARIO_RULESET: CompiledRuleset = compileRuleset(
     ],
     earlyCallBountyDivisor: 50,
     earlyCallScoreDivisor: 50,
-    extraTowers: [TEST_SLOW_TOWER],
+    extraTowers: [TEST_SLOW_TOWER, TEST_DOT_TOWER],
     extraCreeps: [TEST_FAST_CREEP],
   }),
   'test',
@@ -114,17 +138,28 @@ const SCENARIO_RULESET: CompiledRuleset = compileRuleset(
  */
 const BASIC_TOWER_ID = 2;
 const SLOW_TOWER_ID = 3;
+const VENOM_TOWER_ID = 4;
 
 /**
  * The canonical input log: a pure function of the tick index. It exercises the FULL
  * command vocabulary — TWO `callWaveEarly` calls (tick 0 launches wave 0; tick 250,
  * mid-run, launches wave 1 — the `fast`-creep wave — early, both paying the
- * early-call bounty/credit from the undecremented countdown), TWO accepted builds
- * into the creeps' lane (`basic` then `slow`, forcing a visible re-route AND
- * combat kills AND a slow application), a rejected build (the deterministic-no-op
- * path), an explicit `noop`, and a later sell of the `basic` tower (re-opening
- * part of the lane; with `slow` alone left standing, the scenario still ends in a
- * loss once undefended creeps overwhelm it).
+ * early-call bounty/credit from the undecremented countdown), THREE accepted builds
+ * into the creeps' lane (`basic`, `slow`, then `venom` — forcing a visible re-route
+ * AND combat kills AND a slow application AND a resident, ticking DoT record), a
+ * rejected build (the deterministic-no-op path), an explicit `noop`, and a later
+ * sell of BOTH the `basic` and `venom` towers (re-opening part of the lane; with
+ * `slow` alone left standing, the scenario still ends in a loss once undefended
+ * creeps overwhelm it).
+ *
+ * WHY `venom` joins `basic` in the tick-201 sell (measured, M2-S5a P3): leaving it
+ * standing ALSO still reaches a loss — `phase` is `'lost'` either way — but it
+ * overshoots to `lives === -1` (two creeps leak on the fatal tick; `index.ts`
+ * deliberately applies no low clamp, since win/loss resolution reads `lives <= 0`)
+ * and leaves `towers.id` as `[3, 4]`. Selling both keeps this scenario's two
+ * long-standing witnesses EXACTLY as they were — `lives === 0` and a single
+ * surviving `slow` tower — so P3 moves the hashes and the terminal tick without
+ * quietly rewriting what the scenario asserts about itself.
  */
 function canonicalInputs(tick: number): SimInput[] {
   if (tick === 0) return [{ kind: 'callWaveEarly' }]; // launch wave 0 now
@@ -135,8 +170,19 @@ function canonicalInputs(tick: number): SimInput[] {
   if (tick === 3) return [{ kind: 'placeTower', anchor: { col: 8, row: 10 }, towerId: 'slow' }];
   // A rejected build (border footprint) — pins the validation-no-op path.
   if (tick === 4) return [{ kind: 'placeTower', anchor: { col: 0, row: 0 }, towerId: 'basic' }];
-  // Sell the basic wall — part of the lane re-opens; the slow tower stands alone.
-  if (tick === 201) return [{ kind: 'sellTower', tower: BASIC_TOWER_ID }];
+  // A third wall cell (M2-S5a P3), further down the same detoured lane, clear of
+  // both earlier footprints (cols 5-6, 8-9) — venom's own hits land, and its DoT
+  // record rides resident in `SimState.dots` across a stretch of the trace.
+  if (tick === 5) return [{ kind: 'placeTower', anchor: { col: 11, row: 10 }, towerId: 'venom' }];
+  // Sell the basic AND venom walls — part of the lane re-opens; the slow tower
+  // stands alone (M2-S5a P3: venom joins basic in this sell so the scenario still
+  // reaches a loss, per this function's header comment).
+  if (tick === 201) {
+    return [
+      { kind: 'sellTower', tower: BASIC_TOWER_ID },
+      { kind: 'sellTower', tower: VENOM_TOWER_ID },
+    ];
+  }
   // A SECOND early call, well into the run and on a LATER (fast-creep) wave — the
   // multi-wave handoff + a second early-call bounty/credit payment.
   if (tick === 250) return [{ kind: 'callWaveEarly' }];
@@ -161,8 +207,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '6f00531a', // re-pinned M2-S5a P2: Impact.sourceId enters the world-hash.
-  traceDigest: '82263924', // fnv1a(trace.join(':')) — re-pinned M2-S5a P2, same reason.
+  finalHash: 'a82d533f', // re-pinned M2-S5a P3: the scenario itself gained a `venom` tower.
+  traceDigest: 'ddcb9dc0', // fnv1a(trace.join(':')) — re-pinned M2-S5a P3, same reason.
 } as const;
 // -------------------------------------------------------------------------------
 
@@ -180,51 +226,73 @@ describe('determinism gate', () => {
     expect(fnv1a(trace.join(':'))).toBe(GOLDEN.traceDigest);
   });
 
-  it('witnesses creeps crossing and leaking to a LOSS (selling the basic tower leaves the lane thin)', () => {
+  it('witnesses creeps crossing and leaking to a LOSS (selling the basic+venom towers leaves the lane thin)', () => {
     // The golden is only meaningful if the scenario actually exercises leaks;
-    // selling the basic tower at tick 201 (the slow tower alone can't hold the
-    // line) leaves the run undefended enough that lives fall all the way to 0
-    // (a loss) — the loss-priority resolution path (settlement before terminal).
+    // selling the basic AND venom towers at tick 201 (the slow tower alone can't
+    // hold the line) leaves the run undefended enough that lives fall all the way
+    // to 0 (a loss) — the loss-priority resolution path (settlement before
+    // terminal). Both are sold so `lives` lands exactly on 0 rather than
+    // overshooting to -1; see `canonicalInputs`' note.
     const { state } = runCanonical();
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
   });
 
-  it('witnesses two builds (basic+slow), a visible re-route, combat kills, a slow application, a sell, and the multi-wave early-call economy', () => {
-    // The golden must exercise the full Story-3 + Story-4 + M2-S2 + M2-S3
-    // vocabulary: the tick-2/tick-3 builds land; live creeps visibly leave the
+  it('witnesses three builds (basic+slow+venom), a visible re-route, combat kills, a slow application, a RESIDENT TICKING DoT record, a sell, and the multi-wave early-call economy', () => {
+    // The golden must exercise the full Story-3 + Story-4 + M2-S2 + M2-S3 + M2-S5a
+    // vocabulary: the tick-2/3/5 builds land; live creeps visibly leave the
     // straight row-11 lane to route around them; the towers fire and KILL creeps,
     // each credit raising bounty while they stand; at least one creep is observed
-    // SLOWED (`slowMulFp !== 0`) at some tick; the tick-201 sell removes the basic
-    // tower (the slow tower survives); and BOTH early calls (tick 0 + tick 250)
-    // pay into the cumulative early-call credit.
+    // SLOWED (`slowMulFp !== 0`) at some tick; at least one DoT record is observed
+    // RESIDENT in `SimState.dots` and observed actually TICKING (its `nextTickTick`
+    // advancing, i.e. damage dealt — a merely-resident record would prove the state
+    // shape serializes but not that the tick step ever ran); the tick-201 sell
+    // removes basic and venom (the slow tower survives); and BOTH early calls
+    // (tick 0 + tick 250) pay into the cumulative early-call credit.
     let state = createInitialState(SCENARIO_SEED, SCENARIO_RULESET);
-    let sawBothTowers = false;
+    let sawAllThreeTowers = false;
     let sawDetour = false;
     let sawKill = false;
     let sawSlowedCreep = false;
+    let sawResidentDot = false;
+    let sawDotTick = false;
+    let prevNextTickByPair = new Map<string, number>();
     let prevBounty = state.bounty;
     for (let t = 0; t < SCENARIO_TICKS; t++) {
       state = step(state, SCENARIO_RULESET, canonicalInputs(t));
-      if (state.towers.id.length === 2) sawBothTowers = true;
+      if (state.towers.id.length === 3) sawAllThreeTowers = true;
       // Bounty rises only from a combat kill while at least one tower stands.
       if (state.towers.id.length >= 1 && state.bounty > prevBounty) sawKill = true;
       if (state.creeps.slowMulFp.some((m) => m !== 0)) sawSlowedCreep = true;
       if (state.creeps.headRow.some((r) => r !== undefined && r !== 11)) sawDetour = true;
+      if (state.dots.length > 0) sawResidentDot = true;
+      // A record whose `nextTickTick` ADVANCED between ticks was one the tick step
+      // actually fired this tick — the witness that DoT is live in the golden, not
+      // merely serialized into it.
+      const nextByPair = new Map<string, number>();
+      for (const r of state.dots) {
+        const key = `${r.targetId}:${r.sourceId}`;
+        nextByPair.set(key, r.nextTickTick);
+        const prev = prevNextTickByPair.get(key);
+        if (prev !== undefined && r.nextTickTick > prev) sawDotTick = true;
+      }
+      prevNextTickByPair = nextByPair;
       prevBounty = state.bounty;
     }
-    expect(sawBothTowers).toBe(true); // both basic and slow stood at once
+    expect(sawAllThreeTowers).toBe(true); // basic, slow and venom stood at once
     expect(sawDetour).toBe(true); // the straight-lane board never leaves row 11 unbuilt
     expect(sawKill).toBe(true); // a tower actually killed a creep and earned bounty
     expect(sawSlowedCreep).toBe(true); // the slow tower actually slowed a creep
-    expect(state.towers.id).toEqual([SLOW_TOWER_ID]); // basic sold, slow survives
+    expect(sawResidentDot).toBe(true); // a DoT record rode the serialized state
+    expect(sawDotTick).toBe(true); // and the tick step actually fired it
+    expect(state.towers.id).toEqual([SLOW_TOWER_ID]); // basic+venom sold, slow survives
     // ⌊500/50⌋ = 10 (the tick-0 call at full countdown) + ⌊51/50⌋ = 1 (the tick-250
     // call: wave 1's 300-tick countdown began decrementing at tick 1, so 249
     // decrements leave rem = 51) — NOT ⌊300/50⌋: the second call is mid-countdown.
     expect(state.cumulativeEarlyCallCredit).toBe(11);
     // The terminal the header documents, pinned (tick freezes at the terminal):
     expect(state.phase).toBe('lost');
-    expect(state.tick).toBe(452);
+    expect(state.tick).toBe(454);
   });
 
   it('continues byte-identically after a mid-run serialize/restore (resume path)', () => {
