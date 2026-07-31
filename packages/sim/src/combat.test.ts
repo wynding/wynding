@@ -8,6 +8,7 @@ import { emptyTowers, type TowerArrays } from './tower';
 import {
   runCombat,
   applyImpactToCreep,
+  applyDot,
   MAX_DOT_RECORDS,
   type CombatCreeps,
   type DotRecord,
@@ -844,7 +845,7 @@ describe("sellTower preserves survivors' cooldown and lock", () => {
 describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before the sweep)', () => {
   it('a hit that kills the row leaves its slow columns untouched, even though the impact carries a slow effect', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 8 }]);
-    const killedByImpact = new Set<number>();
+    const killedThisPhase = new Set<number>();
     applyImpactToCreep(
       creeps,
       0,
@@ -853,18 +854,20 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
       ],
       0,
-      killedByImpact,
+      killedThisPhase,
       {},
+      [],
+      100,
     );
     expect(creeps.hp[0]).toBeLessThanOrEqual(0);
-    expect(killedByImpact.has(0)).toBe(true);
+    expect(killedThisPhase.has(0)).toBe(true);
     expect(creeps.slowMulFp[0]).toBe(0); // PASS 2 never ran on the killed row
     expect(creeps.slowUntilTick[0]).toBe(0);
   });
 
   it('a NON-lethal hit still applies its slow — the guard is death-gated, not a blanket status skip', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
-    const killedByImpact = new Set<number>();
+    const killedThisPhase = new Set<number>();
     applyImpactToCreep(
       creeps,
       0,
@@ -873,11 +876,13 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
       ],
       0,
-      killedByImpact,
+      killedThisPhase,
       {},
+      [],
+      100,
     );
     expect(creeps.hp[0]).toBeGreaterThan(0);
-    expect(killedByImpact.has(0)).toBe(false);
+    expect(killedThisPhase.has(0)).toBe(false);
     expect(creeps.slowMulFp[0]).toBe(128);
   });
 });
@@ -1287,7 +1292,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
   });
 });
 
-describe("EffectPrimitive's `dot` variant (M2-S5a P2: STATE SHAPE ONLY — a `dot` primitive that reaches applyImpactToCreep does nothing; applying it is P3)", () => {
+describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that reaches applyImpactToCreep now calls applyDot)", () => {
   it('a valid dot primitive survives canonicalization with its exact fields and no extra properties', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
     const impact = {
@@ -1317,7 +1322,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P2: STATE SHAPE ONLY — a `do
     ]);
   });
 
-  it('a dot primitive that reaches applyImpactToCreep (impact resolves this tick) applies NOTHING — no direct damage, no dots record, no crash (that is P3)', () => {
+  it('a dot primitive that reaches applyImpactToCreep (impact resolves this tick) appends a fresh DoT record — no direct damage this tick (the record has not ticked yet)', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
     const impact = {
       kind: 'targeted',
@@ -1340,8 +1345,11 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P2: STATE SHAPE ONLY — a `do
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
     );
-    expect(result.creeps.hp[0]).toBe(1000); // no damage — 'dot' is neither 'direct' nor 'slow'
-    expect(result.dots).toEqual([]); // no record appended — applyDot doesn't exist yet
+    expect(result.creeps.hp[0]).toBe(1000); // no damage yet — 'dot' is neither 'direct' nor 'slow',
+    // and the fresh record's nextTickTick (10) is not yet due at tick 0.
+    expect(result.dots).toEqual([
+      { targetId: 1, sourceId: 100, amount: 3, cadenceTicks: 10, nextTickTick: 10, untilTick: 60 },
+    ]);
     expect(result.impacts).toHaveLength(0); // resolved (consumed), not kept
   });
 
@@ -1369,5 +1377,424 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P2: STATE SHAPE ONLY — a `do
       RULESET.balance.slowFloorDen,
     );
     expect(result.impacts).toHaveLength(0);
+  });
+});
+
+// M2-S5a P3 — `applyDot` unit tests: append, refresh (the tick-cadence-anchoring
+// rule), and the capacity/drop branch. Called directly, mirroring this file's
+// `applyImpactToCreep`-direct-call precedent above (pinned before any sweep).
+describe('applyDot — append, refresh, drop (M2-S5a P3)', () => {
+  it('appends a fresh record for a new (targetId, sourceId) pair: nextTickTick = tick + cadenceTicks, untilTick = tick + durationTicks', () => {
+    const dots: DotRecord[] = [];
+    applyDot(dots, 1, 100, { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 }, 20);
+    expect(dots).toEqual([
+      { targetId: 1, sourceId: 100, amount: 5, cadenceTicks: 10, nextTickTick: 30, untilTick: 80 },
+    ]);
+  });
+
+  it('refreshes an existing pair: adopts the new amount, extends untilTick, and leaves nextTickTick UNCHANGED from the first call', () => {
+    const dots: DotRecord[] = [];
+    applyDot(dots, 1, 100, { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 }, 0);
+    expect(dots[0]).toMatchObject({ nextTickTick: 10 });
+    applyDot(dots, 1, 100, { kind: 'dot', amount: 9, cadenceTicks: 10, durationTicks: 60 }, 5);
+    expect(dots).toEqual([
+      { targetId: 1, sourceId: 100, amount: 9, cadenceTicks: 10, nextTickTick: 10, untilTick: 65 },
+    ]);
+  });
+
+  it('at MAX_DOT_RECORDS capacity, a NEW pair is dropped (table length unchanged, dotDropped increments by 1) while a REFRESH of an existing pair at the same full table still succeeds', () => {
+    const dots: DotRecord[] = Array.from({ length: MAX_DOT_RECORDS }, (_, i) => ({
+      targetId: 1,
+      sourceId: i + 1,
+      amount: 1,
+      cadenceTicks: 10,
+      nextTickTick: 100,
+      untilTick: 200,
+    }));
+    const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
+
+    // A genuinely new pair — dropped, counted, no growth.
+    applyDot(
+      dots,
+      1,
+      MAX_DOT_RECORDS + 1,
+      { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 },
+      0,
+      events,
+    );
+    expect(dots).toHaveLength(MAX_DOT_RECORDS);
+    expect(events.dotDropped).toBe(1);
+
+    // A refresh of an EXISTING pair (sourceId 1, already in the table) at the same
+    // full table still succeeds — the capacity check runs AFTER the lookup, so a
+    // refresh is never mistaken for "the table is full."
+    applyDot(
+      dots,
+      1,
+      1,
+      { kind: 'dot', amount: 42, cadenceTicks: 10, durationTicks: 999 },
+      50,
+      events,
+    );
+    expect(dots).toHaveLength(MAX_DOT_RECORDS); // still no growth
+    expect(dots[0]).toMatchObject({ targetId: 1, sourceId: 1, amount: 42, untilTick: 50 + 999 });
+    expect(events.dotDropped).toBe(1); // unchanged — a refresh is not a drop
+  });
+});
+
+describe('runCombat — DoT applyDot integration at capacity (M2-S5a P3)', () => {
+  it("at MAX_DOT_RECORDS capacity, the same impact's direct damage still lands even though its new DoT record is dropped", () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    // Fill the table to the cap with distinct pairs all targeting the SAME live
+    // creep (so point 5's survivor-cleanup filter doesn't strip them below the
+    // cap before the drop-branch assertion) and both far from due and far from
+    // expiry (so the tick/expiry steps don't disturb the table size either).
+    const fullTable: DotRecord[] = Array.from({ length: MAX_DOT_RECORDS }, (_, i) => ({
+      targetId: 1,
+      sourceId: i + 1, // 1..MAX_DOT_RECORDS — the new impact's sourceId (below) never collides
+      amount: 1,
+      cadenceTicks: 1000,
+      nextTickTick: 100_000,
+      untilTick: 200_000,
+    }));
+    const impact: Impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      sourceId: 999_999, // distinct from every filler sourceId (1..MAX_DOT_RECORDS)
+      effects: [
+        { kind: 'direct', amount: DIRECT_DAMAGE },
+        { kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 },
+      ],
+    };
+    const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      fullTable,
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      events,
+    );
+    expect(result.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // direct damage still landed
+    expect(result.dots).toHaveLength(MAX_DOT_RECORDS); // new record dropped — size unchanged
+    expect(events.dotDropped).toBe(1);
+  });
+});
+
+describe('runCombat — DoT tick step (M2-S5a P3)', () => {
+  it('a record ticks only once nextTickTick <= tick, dealing its exact magnitude and advancing nextTickTick by exactly cadenceTicks', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const record: DotRecord = {
+      targetId: 1,
+      sourceId: 100,
+      amount: 7,
+      cadenceTicks: 10,
+      nextTickTick: 10,
+      untilTick: 1000,
+    };
+    const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
+
+    // tick 9 — not yet due, no damage, no tick counted.
+    const before = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      [record],
+      9,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      events,
+    );
+    expect(before.creeps.hp[0]).toBe(1000);
+    expect(events.dotTicks).toBe(0);
+
+    // tick 10 — due, ticks exactly once.
+    const at = runCombat(
+      before.creeps,
+      emptyTowers(),
+      [],
+      before.dots,
+      10,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      events,
+    );
+    expect(at.creeps.hp[0]).toBe(1000 - 7);
+    expect(events.dotTicks).toBe(1);
+    expect(at.dots[0]).toMatchObject({ nextTickTick: 20 }); // advanced by exactly cadenceTicks (10)
+  });
+
+  it('armor bypass: a DoT tick deals its full magnitude, unreduced by the target creep armor', () => {
+    const armoredDotDef: CreepDef = {
+      id: 'armored-dot',
+      hp: 1000,
+      speedFp: 26,
+      armor: 6,
+      domain: 'ground',
+      immunities: [],
+      leakCost: 1,
+      bounty: 1,
+    };
+    const ARMOR_RULESET = testRuleset(
+      { widthTiles: 14, heightTiles: 14, entrance: { col: 0, row: 6 }, exit: { col: 13, row: 6 } },
+      { extraCreeps: [armoredDotDef] },
+    );
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    creeps.creepId[0] = 'armored-dot';
+    const record: DotRecord = {
+      targetId: 1,
+      sourceId: 100,
+      amount: 9,
+      cadenceTicks: 10,
+      nextTickTick: 0,
+      untilTick: 1000,
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      [record],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      ARMOR_RULESET.creepById,
+      ARMOR_RULESET.balance.slowFloorNum,
+      ARMOR_RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000 - 9); // full magnitude — armor (6) never subtracted
+  });
+
+  it('at most one tick per record per sim tick — a forged, far-backdated nextTickTick still deals exactly one tick, not a catch-up burst', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const tick = 2000;
+    const record: DotRecord = {
+      targetId: 1,
+      sourceId: 100,
+      amount: 5,
+      cadenceTicks: 10,
+      nextTickTick: tick - 1000, // forged far behind — a catch-up loop would fire ~100 times
+      untilTick: tick + 100,
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      [record],
+      tick,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000 - 5); // exactly one tick's damage
+    expect(result.dots[0]).toMatchObject({ nextTickTick: tick - 1000 + 10 }); // advanced by exactly one cadenceTicks
+  });
+
+  it("creep-id-ascending, row-index-tiebreak traversal order (mirrors blastMembers' own order rule) — a shuffled SoA with a duplicate id ticks the LOWER-index duplicate, leaving the other untouched", () => {
+    // Rows deliberately NOT in id order (30, 10, 10, 20) — id 10 appears TWICE, at
+    // row indices 1 and 2. Sorted order is (10,1) → (10,2) → (20,3) → (30,0). Since
+    // a DoT record ticks AT MOST ONCE per call, whichever row is processed FIRST for
+    // a given id consumes the tick (advancing nextTickTick past `tick`), so the
+    // SECOND row sharing that id sees the record already ticked and is untouched —
+    // this is what makes the sort order directly observable in the result.
+    const creeps = restingCreeps([
+      { id: 30, col: 7, row: 6, hp: 1000 }, // idx 0
+      { id: 10, col: 7, row: 6, hp: 1000 }, // idx 1 — lower idx wins the tick
+      { id: 10, col: 7, row: 6, hp: 1000 }, // idx 2 — duplicate id, untouched
+      { id: 20, col: 7, row: 6, hp: 1000 }, // idx 3
+    ]);
+    const records: DotRecord[] = [
+      {
+        targetId: 10,
+        sourceId: 100,
+        amount: 5,
+        cadenceTicks: 10,
+        nextTickTick: 0,
+        untilTick: 1000,
+      },
+      {
+        targetId: 20,
+        sourceId: 100,
+        amount: 7,
+        cadenceTicks: 10,
+        nextTickTick: 0,
+        untilTick: 1000,
+      },
+      {
+        targetId: 30,
+        sourceId: 100,
+        amount: 3,
+        cadenceTicks: 10,
+        nextTickTick: 0,
+        untilTick: 1000,
+      },
+    ];
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      records,
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    // Survivor order mirrors the original (nothing died): idx0=30, idx1=10, idx2=10, idx3=20.
+    expect(result.creeps.hp).toEqual([1000 - 3, 1000 - 5, 1000, 1000 - 7]);
+  });
+
+  it('a record whose target is swept (the DoT tick itself killed the creep) is dropped from the returned dots table', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 5 }]);
+    const record: DotRecord = {
+      targetId: 1,
+      sourceId: 100,
+      amount: 10, // lethal
+      cadenceTicks: 10,
+      nextTickTick: 0,
+      untilTick: 1000,
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      [record],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.id).toHaveLength(0); // killed by the DoT tick, swept
+    expect(result.dots).toEqual([]); // its own record dies with it
+  });
+
+  it('expiry is INCLUSIVE: a record with untilTick === tick still ticks this tick, then is gone from the returned table', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const tick = 50;
+    const record: DotRecord = {
+      targetId: 1,
+      sourceId: 100,
+      amount: 4,
+      cadenceTicks: 10,
+      nextTickTick: tick,
+      untilTick: tick,
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      [record],
+      tick,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000 - 4); // ticked THIS tick (step 2, before the expiry sweep)
+    expect(result.dots).toEqual([]); // then expired and removed in this same call (step 6)
+  });
+});
+
+describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 precedent)', () => {
+  it('increments dotTicks and dotDropped only when the collector supplies them', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100_000 }]); // generous — survives every tick below
+    const fullTable: DotRecord[] = Array.from({ length: MAX_DOT_RECORDS }, (_, i) => ({
+      targetId: 1,
+      sourceId: i + 1,
+      amount: 1,
+      cadenceTicks: 5,
+      nextTickTick: 0, // every filler is due at tick 0
+      untilTick: 100_000,
+    }));
+    const impact: Impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      sourceId: 999_999, // distinct from every filler sourceId — a genuinely new pair
+      effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 }],
+    };
+    const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      fullTable,
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      events,
+    );
+    expect(events.dotTicks).toBe(MAX_DOT_RECORDS); // every filler record was due and ticked
+    expect(events.dotDropped).toBe(1); // the impact's new record was dropped (table at cap)
+    expect(result.creeps.hp[0]).toBe(100_000 - MAX_DOT_RECORDS); // one point of damage per tick
+  });
+
+  it('a bare { impactPoints: [], fired: [] } collector (the pre-existing shape, neither counter present) is left otherwise untouched and does not throw', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const record: DotRecord = {
+      targetId: 1,
+      sourceId: 100,
+      amount: 3,
+      cadenceTicks: 5,
+      nextTickTick: 0,
+      untilTick: 1000,
+    };
+    const events: StepEvents = { impactPoints: [], fired: [] };
+    expect(() => {
+      runCombat(
+        creeps,
+        emptyTowers(),
+        [],
+        [record],
+        0,
+        0,
+        FIELD,
+        GRID,
+        TOWER_BY_ID,
+        RULESET.creepById,
+        RULESET.balance.slowFloorNum,
+        RULESET.balance.slowFloorDen,
+        events,
+      );
+    }).not.toThrow();
+    expect(Object.keys(events)).toEqual(['impactPoints', 'fired']); // no new keys appeared
   });
 });
