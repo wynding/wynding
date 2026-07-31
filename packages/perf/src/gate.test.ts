@@ -29,7 +29,7 @@ describe('stressStat() — p99 over the due-blast subset', () => {
   });
 });
 
-describe('R0 — the committed first-run baseline', () => {
+describe('R0 — the committed CI-runner baseline', () => {
   // Pinned by VALUE on purpose. `R0` is the one number in this package that a future
   // reader could plausibly "just nudge" to make a red gate go green, and a nudge is
   // invisible in a diff that only says `2.0` → `2.4`. Failing this test is the point:

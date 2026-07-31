@@ -87,47 +87,109 @@ export const TOLERANCE = 1.25;
 /**
  * `R0` — the baseline ratio: **2.49**, recorded on `ubuntu-latest`.
  *
- * The MEDIAN of 3 consecutive CI runs (2.3585, 2.4978, 2.5129 — median 2.4978), rounded
- * DOWN to the nearer hundredth. Down, not to-nearest: a lower R0 makes the ceiling
- * stricter, so the rounding can only ever cost a false alarm, never hide a regression.
- * Ceiling 3.1125, against the worst observed run of 2.5129 — about 24% headroom.
+ * The MEDIAN of the first 3 CI samples — in the order they were taken, 2.3585, 2.5129,
+ * 2.4978, so the median is 2.4978 — rounded DOWN to the nearer hundredth. Down, not
+ * to-nearest: a lower R0 makes the ceiling stricter, so the rounding can only ever cost a
+ * false alarm, never hide a regression. Ceiling = 2.49 x 1.25 = 3.1125. (A fourth sample,
+ * 2.4915, had already landed when this was chosen and was not used; including it leaves
+ * R0 at 2.49 either way.)
+ *
+ * PROVENANCE. `ubuntu-latest` is a moving alias, so consequence 2 below ("re-record when
+ * the runner class changes") is unactionable without the resolved identity: image
+ * **ubuntu-24.04**, release **ubuntu24/20260720.247**, **`node-version: 22`** (`ci.yml`'s
+ * `perf` job), repo `wynding/wynding`, all samples 2026-07-30. The local runs it is
+ * contrasted with below were **Node 26** — a different V8 major, and an unmeasured
+ * confound in the local-vs-CI gap, which the rest of this doc attributes to tail variance
+ * alone.
  *
  * RECORDED ON THE RUNNER, NOT THE LAPTOP, AND THAT DISTINCTION IS THE WHOLE FINDING.
  * S4b first recorded R0 = 1.69 from 8 runs on the authoring machine (range 1.663-1.795,
  * sd 0.045) on the theory this file still states above: a ratio should cancel CPU-speed
  * scale, so a baseline taken anywhere should transfer. **It did not.** The first CI run
- * measured 2.3585 against that 2.1125 ceiling and failed the gate, and two re-runs landed
- * at 2.4978 and 2.5129 — the ratio moved ~1.4x across machines even though `controlStat`
- * itself moved only ~1.55x (0.183ms local -> 0.272-0.290ms on CI).
+ * measured 2.3585 against that 2.1125 ceiling and failed the gate, and re-runs landed at
+ * 2.5129 and 2.4978 — the ratio moved 1.47x across machines (the two committed R0 values,
+ * 2.49/1.69; median-to-median it is 1.48), while `controlStat`, which is
+ * EXPECTED to scale with machine speed, moved ~1.53x (0.183ms local -> 0.272/0.279/0.290ms
+ * on the three CI runs, median 0.279; the ratio spans 1.49-1.58 across them). A quantity
+ * built to be scale-invariant moved almost as much as the raw statistic it was built to
+ * normalise.
  *
  * The cause is the limitation this file already names but had not yet measured: a p99
- * numerator over a p50 denominator cancels SCALE but not TAIL VARIANCE, and a shared-vCPU
- * runner has a far fatter tail than a quiet workstation. The denominator is a median, so
- * it barely moves with tail noise by construction; the numerator absorbs all of it. So R
- * is not machine-portable, and R0 is only meaningful for the machine class it was taken
- * on.
+ * numerator over a p50 denominator cancels SCALE but not TAIL VARIANCE, and a hosted runner
+ * has a far fatter tail than a quiet workstation. "Hosted", not "shared": each job gets its
+ * own VM (see below) — what it shares is the PHYSICAL HOST, with tenants it cannot see, and
+ * that is where the tail comes from. The denominator is a median, so it barely moves with
+ * tail noise by construction; the numerator absorbs all of it. So R is not machine-portable,
+ * and R0 is only meaningful for the machine class it was taken on.
+ *
+ * THE CEILING HAS ALREADY BEEN EXCEEDED ON UNCHANGED CODE. R0 was chosen from the first
+ * three samples; S4b's branch went on to produce eight in total, and the full record is
+ * the honest one to read this gate against:
+ *
+ *   |  # | Actions job | started (UTC) | commit      |      R |
+ *   |----|-------------|---------------|-------------|--------|
+ *   |  1 | 91025915959 |      22:53:11 | 9e5b7b8 a1  | 2.3585 |
+ *   |  2 | 91026954496 |      22:59:02 | 9e5b7b8 a2  | 2.5129 |
+ *   |  3 | 91027669811 |      23:03:03 | 9e5b7b8 a3  | 2.4978 |
+ *   |  4 | 91028220425 |      23:06:13 | 9e5b7b8 a4  | 2.4915 |
+ *   |  5 | 91028488168 |      23:07:48 | 2cccfc4     | 3.0331 |
+ *   |  6 | 91029071138 |      23:11:22 | 9e5b7b8 a5  | 3.2478 |
+ *   |  7 | 91029800584 |      23:15:44 | 93c3f90     | 2.5937 |
+ *   |  8 | 91030969809 |      23:22:51 | f420491     | 2.6050 |
+ *
+ * Samples 1-4 and 6 are the SAME COMMIT re-run five times: 2.3585 to 3.2478, a **37.7%
+ * spread on byte-identical code**. Sample 6 is ABOVE the 3.1125 ceiling this constant
+ * creates; sample 5 is ~2.5% under it. NOTHING VISIBLE SEPARATES THE TWO HIGH SAMPLES FROM
+ * THE OTHERS. Two rounds of QC chased the obvious hypothesis — concurrent load from this
+ * repo's own jobs — and it survives neither the model nor the data. The model: these eight
+ * perf jobs report eight DISTINCT `runner_name`s, so no two shared a machine, and a
+ * sibling job in the same run was never contending for this one's CPU. (Multi-core
+ * GitHub-hosted runners get a VM each; only single-CPU runners share one, and
+ * `ubuntu-latest` is not single-CPU.) The data agrees: the most-overlapped sample of the
+ * eight has the LOWEST R. What would actually explain it — which physical host each VM
+ * landed on, and what else was running there — is exactly what the Actions API cannot
+ * show. Treat the 37.7% as unexplained runner variance, and do not let a plausible story
+ * stand in for a measurement.
+ *
+ * So the gate's flake rate is not "comfortable". Stated precisely, because the two
+ * readings differ: the shipped ceiling has been EVALUATED three times (samples 5, 7, 8)
+ * and passed all three; but of the eight samples measured on this runner class, ONE would
+ * have failed it. "Roughly 1-in-8" is that counterfactual, not an observed failure rate.
+ * `perf` is NOT a required check on `main` (branch protection requires `verify` and
+ * `codex-freshness` only), so a flake is noise rather than something that stops a merge —
+ * but it is noise people learn to ignore, and that is this gate's real risk. Left OPEN for
+ * an owner ruling; see `docs/milestones/m2.md`'s S4 flags.
+ *
+ * WHY R0 IS NOT BEING MOVED AGAIN. This doc's own pre-declared response to flake is "more
+ * samples and a re-recorded median, never a wider tolerance". Applying it: the median of
+ * all eight is 2.5533 -> R0 2.55, ceiling 3.1875 — which still would not have accommodated
+ * sample 6. It changes no observed sample's verdict, so re-recording buys nothing but a
+ * second threshold edit under pressure on one branch, which is the pattern this file warns
+ * against. The value stays at 2.49 and the finding is escalated instead.
  *
  * TWO CONSEQUENCES, both real costs of this design, stated rather than papered over:
  *   1. A LOCAL `pnpm run perf` CANNOT PREDICT THE GATE — and, measured, cannot even
  *      predict ITSELF across sessions. On a quiet authoring machine R sat at 1.66-1.79
  *      (8 runs); hours later, same commit, same machine, but under ordinary background
- *      load, the same command measured 2.21-2.36 (6 runs). A ~30% drift from ambient load
- *      alone, no code change. So a local R is only comparable to other local runs taken
- *      back to back, and never to this gate's ceiling. (CI is, ironically, the steadier
- *      environment: a fresh VM per run gave three samples spanning 6.5%.)
+ *      load, the same command measured 2.21-2.36 (6 runs); a later 32-run interleaved
+ *      series on that machine spanned 1.638-2.560, **56%** (an uncommitted review harness,
+ *      both arms of an ordering A/B pooled). So a local R is only
+ *      comparable to other local runs taken back to back, and never to this gate's
+ *      ceiling.
  *   2. R0 must be re-recorded whenever the RUNNER class changes (a GitHub image bump, a
- *      move to larger runners), not only when blast cost changes. That is a maintenance
- *      obligation this gate creates.
+ *      move to larger runners), not only when blast cost changes — against the resolved
+ *      image recorded under PROVENANCE above, not against the `ubuntu-latest` alias. That
+ *      is a maintenance obligation this gate creates.
  *
  * What was pre-declared before any measurement is unchanged, and is what matters
  * methodologically: both statistics, the >= 500 due-blast sample floor, and the 25%
  * tolerance. Only R0 — explicitly defined as "the ratio this scene records" — moved, and
- * it moved to the machine the gate actually runs on. TOLERANCE was NOT widened to fit; the
- * three CI samples span 6.5%, comfortably inside 25%.
- *
- * n = 3 is thin, and knowingly so: each sample costs a full CI run. If this gate proves
- * flaky in practice, the fix is more samples and a re-recorded median — with the count and
- * spread stated, as here — never a wider tolerance.
+ * it moved to the machine the gate actually runs on. TOLERANCE was NOT widened to fit, and
+ * should not be: the worst sample sits 30.4% above R0 (3.2478 / 2.49), so absorbing it
+ * needs TOLERANCE >= 1.31. A gate that permits a 31% regression in blast cost before it
+ * complains is not worth the CI minutes. (The 37.7% figure above is max/min across the
+ * eight — the right measure of how noisy the runner is, but NOT the number to compare
+ * against a tolerance that multiplies a median.)
  *
  * Changing this value at all requires an explicit, reviewed commit with justification in
  * the PR. It is never inferred and never auto-updated by a later run: a gate that
@@ -177,7 +239,11 @@ export function evaluateGate(
     // report, with no clue why. Name the diagnosis instead of leaving a reader to
     // reverse-engineer it from an opaque `NaN`: a zero-ms control median is itself a
     // broken measurement (the control run measured nothing), not a real "infinitely
-    // fast blast cost" result.
+    // fast blast cost" result. And "fails closed" holds only for the EXIT CODE — the
+    // report would not even show the non-finite value, because `JSON.stringify` turns
+    // `Infinity` and `NaN` into `null`, so `PERF-REPORT`'s `r` would read `null` beside
+    // `"pass": false` with nothing naming the cause (QC). Throwing is what keeps the
+    // diagnosis visible.
     throw new Error(
       'evaluateGate: controlStat is 0ms — the control scenario recorded a zero-millisecond ' +
         'median step(), which makes R uninterpretable. This is a broken control ' +

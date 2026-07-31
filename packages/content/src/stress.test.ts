@@ -29,7 +29,7 @@ import {
   MAX_TOWERS,
 } from '@wynding/sim';
 import { bundledRulesetIds, getBundledRuleset } from './registry';
-import { STRESS_RULESET_ID, STRESS_RULESET_URL } from './stress';
+import { STRESS_BOARD_ID, STRESS_RULESET_ID, STRESS_RULESET_URL } from './stress';
 
 describe('the stress bundle compiles through the genuine parse/compile path', () => {
   // If this test were deleted, a bundle that fails structural validation or a
@@ -76,10 +76,17 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   // mutants killed). Asserting the INPUT first, then feeding that
   // same variable into the formula, means a bundle edit changes what this test
   // computes, not just what it happens to match.
+  // Thrown, not `?.`-chained, for the reason the board lookups below give: an absent
+  // entry otherwise reaches the arithmetic as `undefined`, turns `minEffSpeedFp` and
+  // `traversal` into `NaN`, and reports three or four confusing failures for one cause.
   const runner = bundle.creepCatalog.find((c) => c.id === 'stress-runner');
+  if (runner === undefined) throw new Error("no creep 'stress-runner' in the stress bundle");
   const chill = bundle.towerCatalog.find((t) => t.id === 'stress-chill');
-  const speedFp = runner?.speedFp;
-  const mulFp = chill?.effects.find((e) => e.kind === 'slow')?.mulFp;
+  if (chill === undefined) throw new Error("no tower 'stress-chill' in the stress bundle");
+  const slow = chill.effects.find((e) => e.kind === 'slow');
+  if (slow === undefined) throw new Error("'stress-chill' has no slow effect");
+  const speedFp = runner.speedFp;
+  const mulFp = slow.mulFp;
   const slowFloorNum = bundle.balance.slowFloorNum;
   const slowFloorDen = bundle.balance.slowFloorDen;
 
@@ -98,21 +105,24 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   // with baseSpeedFp = 60 (stress-runner), mulFp = 179 (stress-chill, the
   // catalog's only/strongest slow), slowFloorNum/Den = 1/4 — all read off the
   // bundle above, not re-typed.
+  const minEffSpeedFp = Math.max(
+    1,
+    Math.floor((speedFp * mulFp) / 256),
+    Math.ceil((speedFp * slowFloorNum) / slowFloorDen),
+  );
+
   it('minEffSpeedFp = effectiveSpeedFp(speedFp, mulFp, slowFloorNum, slowFloorDen) = 41', () => {
-    const minEffSpeedFp = Math.max(
-      1,
-      Math.floor((speedFp! * mulFp!) / 256),
-      Math.ceil((speedFp! * slowFloorNum) / slowFloorDen),
-    );
     expect(minEffSpeedFp).toBe(41);
   });
 
   // Traversal term: ⌈cells × FP_DIAG_LEN / minEffSpeedFp⌉, cells = 40×40 = 1600,
   // FP_DIAG_LEN = 362 (`ruleset.ts`'s fixed-point diagonal cell length). `cells` is
   // read off the bundle's own board dimensions, not re-typed as a literal.
-  const board = bundle.boards.find((b) => b.id === 'stress-40x40');
-  const widthTiles = board?.widthTiles;
-  const heightTiles = board?.heightTiles;
+  const board = bundle.boards.find((b) => b.id === STRESS_BOARD_ID);
+  if (board === undefined) throw new Error(`no board '${STRESS_BOARD_ID}' in the stress bundle`);
+  const widthTiles = board.widthTiles;
+  const heightTiles = board.heightTiles;
+  const traversal = Math.ceil((widthTiles * heightTiles * 362) / minEffSpeedFp);
 
   it('board dimensions are 40x40', () => {
     expect(widthTiles).toBe(40);
@@ -120,13 +130,6 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   });
 
   it('traversal = ceil(widthTiles*heightTiles*362 / minEffSpeedFp) = 14127', () => {
-    const minEffSpeedFp = Math.max(
-      1,
-      Math.floor((speedFp! * mulFp!) / 256),
-      Math.ceil((speedFp! * slowFloorNum) / slowFloorDen),
-    );
-    const cells = widthTiles! * heightTiles!;
-    const traversal = Math.ceil((cells * 362) / minEffSpeedFp);
     expect(traversal).toBe(14127);
   });
 
@@ -139,14 +142,41 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   // entry's count, spacing, or offset changed the compiled schedule underneath it — the
   // exact class of "the test pins a number the code no longer produces" this file was
   // already hardened against once for hand-typed literals.
-  const wave = board?.waves[0];
-  const countdownTicks = wave?.countdownTicks;
-  const entries = wave?.entries ?? [];
-  const waveTail = entries.reduce(
-    (max, e) => Math.max(max, (e.offsetTicks ?? 0) + (e.count - 1) * e.spacingTicks),
+  const waves = board.waves;
+  // Not `?.`-guarded: the schema requires 1..64 waves (`ruleset-schema.ts`), and `board`
+  // already threw above if it were missing, so an optional chain here would be a dead
+  // branch pretending to be a check.
+  const wave = waves[0]!;
+  const countdownTicks = wave.countdownTicks;
+  const entries = wave.entries;
+  const tailOf = (w: (typeof waves)[number]): number =>
+    w.entries.reduce(
+      (max, e) => Math.max(max, (e.offsetTicks ?? 0) + (e.count - 1) * e.spacingTicks),
+      0,
+    );
+  const waveTail = tailOf(wave);
+  const totalScheduledSpawns = waves.reduce(
+    (sum, w) => sum + w.entries.reduce((n, e) => n + e.count, 0),
     0,
   );
-  const totalScheduledSpawns = entries.reduce((sum, e) => sum + e.count, 0);
+
+  // The compiler's own bound, mirrored exactly (`ruleset.ts`): wave k launches at the
+  // PREFIX SUM of countdowns 1..k, so its last spawn lands at `prefix_k + tail_k`, and the
+  // run's latest spawn is the MAX of that over k — not `waves[0]`'s, and not
+  // `Σcountdowns + maxTail`, which double-counts overlap. The bundle has one wave today,
+  // so all three agree; they stop agreeing the moment a second wave is added, and then
+  // only this form is right (QC: verified by adding a valid second wave, which moves the
+  // real bound to 19,327 while a `waves[0]` reading still computes 16,027).
+  //
+  // A `for` loop rather than a `reduce` closing over a mutable `prefixCountdown`: the
+  // reduce form is correct only while it is evaluated exactly once, and nothing about it
+  // says so (QC round 2).
+  let prefixCountdown = 0;
+  let latestSpawnTick = 0;
+  for (const w of waves) {
+    prefixCountdown += w.countdownTicks;
+    latestSpawnTick = Math.max(latestSpawnTick, prefixCountdown + tailOf(w));
+  }
 
   it('the wave schedule is countdown 100, 16 entries of 19 at spacing 100, all at offset 0', () => {
     expect(countdownTicks).toBe(100);
@@ -160,7 +190,10 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
 
   it('latestSpawnTick = countdownTicks + max tail over every entry = 1900', () => {
     expect(waveTail).toBe(1800);
-    expect(countdownTicks! + waveTail).toBe(1900);
+    expect(countdownTicks + waveTail).toBe(1900);
+    // The prefix-sum form the compiler actually uses agrees, as it must while there is
+    // exactly one wave — this is what ties the simple reading above to the real bound.
+    expect(latestSpawnTick).toBe(1900);
   });
 
   it('the wave schedules 304 spawns in total, summed over every entry', () => {
@@ -170,8 +203,11 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
     expect(totalScheduledSpawns).toBe(304);
   });
 
-  it('total bound = 1900 + 14127 = 16027, comfortably under MAX_MATCH_TICKS (36000)', () => {
-    const total = 1900 + 14127;
+  it('total bound = latestSpawnTick + traversal = 16027, comfortably under MAX_MATCH_TICKS (36000)', () => {
+    // Derived from the same bundle-read terms the tests above pin, not re-typed as
+    // `1900 + 14127`: re-typing left this test green under a bundle mutation that turned
+    // its siblings red (QC), which is the one thing a bound like this must not do.
+    const total = latestSpawnTick + traversal;
     expect(total).toBe(16027);
     expect(MAX_MATCH_TICKS).toBe(36_000);
     expect(total).toBeLessThan(MAX_MATCH_TICKS);
@@ -213,12 +249,22 @@ describe('the AoE scan-work ceiling headroom (PLAN step 16)', () => {
   // exported from `@wynding/sim`'s public barrel (only used internally by
   // `ruleset.ts`'s gate) — frozen at S4a per the handoff, so this asserts the
   // literal `2_000_000` rather than widening sim's exports for a test.
+  const scanBundle = parseRulesetJson(readFileSync(STRESS_RULESET_URL, 'utf8'));
+  // Found by id, never `boards[0]`: a board added ahead of the stress board would
+  // otherwise silently move this whole assertion onto the wrong one (QC). Thrown rather
+  // than `?.`-chained for the same reason `towerById` below throws — an undefined board
+  // reaches the assertions as `0`/`NaN` and reports four confusing failures for one
+  // cause.
+  const scanBoard = scanBundle.boards.find((b) => b.id === STRESS_BOARD_ID);
+  if (scanBoard === undefined) {
+    throw new Error(`no board '${STRESS_BOARD_ID}' in the stress bundle`);
+  }
+
   it('MAX_TOWERS (1000) * totalScheduledSpawns (304) = 304000 <= AOE_SCAN_CEILING (2000000)', () => {
     // Summed over every entry of every wave, not `16 * 19` re-typed: the compiler counts
     // each entry's `count` across the whole schedule (`ruleset.ts`'s `totalSpawns`), so a
     // changed or added entry must move this number too (QC, CodeRabbit).
-    const scanBundle = parseRulesetJson(readFileSync(STRESS_RULESET_URL, 'utf8'));
-    const totalScheduledSpawns = (scanBundle.boards[0]?.waves ?? []).reduce(
+    const totalScheduledSpawns = scanBoard.waves.reduce(
       (sum, w) => sum + w.entries.reduce((n, e) => n + e.count, 0),
       0,
     );

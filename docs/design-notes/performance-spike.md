@@ -6,19 +6,24 @@ was measured. _Recorded by M2 Story 4b (2026-07-30). Re-measured and extended by
 subsequent effect story (S5–S10); S11 runs the catalog-scale gate and the deferred
 real-device pass._
 
-**Read the two headline findings first — [What the spike found](#what-the-spike-found).**
+**Read the three headline findings first — [What the spike found](#what-the-spike-found).**
 They are numbered to match ADR 0005's amendment, which cites them by number.
-Both are recorded as findings for the owner, not as accepted results.
+All three are recorded as findings for the owner, not as accepted results.
 
 ## What is measured, and by what
 
 Two harnesses, deliberately separate, because they answer different questions and one of
 them can be trusted much further than the other.
 
-| Harness  | Where                            | Answers                                      | Gates CI?                         |
-| -------- | -------------------------------- | -------------------------------------------- | --------------------------------- |
-| Headless | `packages/perf` (Node)           | `step()` time; is the scene the ADR's scene? | **Yes** — `pnpm run perf`         |
-| Browser  | `apps/web/e2e-perf` (Playwright) | frame time, JS heap, input latency           | **No** — recorded-only this story |
+| Harness  | Where                            | Answers                                      | Gates CI?                                             |
+| -------- | -------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| Headless | `packages/perf` (Node)           | `step()` time; is the scene the ADR's scene? | Runs on every PR (`pnpm run perf`) — **not required** |
+| Browser  | `apps/web/e2e-perf` (Playwright) | frame time, JS heap, input latency           | **No** — recorded-only this story                     |
+
+"Not required" is exact: `main`'s branch protection requires `verify (format, typecheck, lint,
+test)` and `codex-freshness`, and nothing else. A red `perf` job is visible on the PR but does not
+stop a merge — which is why the ratio gate's flake rate below is a nuisance rather than an
+outage, and equally why a true positive there needs someone to look.
 
 The headless harness is the trustworthy one: `step()` is pure integer simulation with no
 GPU, no compositor, and no device dependence beyond raw CPU. The browser harness measures
@@ -180,37 +185,85 @@ residual is structural rather than tunable. `R` therefore isolates blast cost **
 slow coverage**, not blast cost alone. Round 1's fix narrowed the population gap from −28.6% to
 −19.2% and took slow coverage from zero; it did not close either.
 
-`R0 = 2.49`, **recorded on `ubuntu-latest`** — the median of 3 CI runs (2.3585, 2.4978, 2.5129),
-rounded down. Ceiling 3.113, against the worst of those (2.513) — about 24% headroom.
+`R0 = 2.49`, **recorded on `ubuntu-latest`** — the median of the first 3 CI samples, in the order
+taken 2.3585, 2.5129, 2.4978, rounded down. Ceiling 3.1125. The runner identity that baseline belongs to is
+image `ubuntu-24.04`, release `ubuntu24/20260720.247`, Node 22; the local runs below were Node
+26, a different V8 major and an unmeasured confound in the gap.
 
 **R does not transfer between machines, and finding that out is one of this story's results.**
 R0 was first recorded at 1.69 from 8 runs on the authoring machine (range 1.663–1.795, sd 0.045)
 on the theory that a ratio cancels CPU-speed scale. The first CI run measured **2.3585** and
-failed the 2.113 ceiling; two re-runs gave 2.4978 and 2.5129. So the ratio moved ~1.4× across
-machines while `controlStat` alone moved only ~1.55× (0.183 ms local → 0.272–0.290 ms on CI).
+failed the 2.1125 ceiling; re-runs gave 2.5129 and 2.4978. So the ratio moved 1.47× across
+machines, while `controlStat` — which is _expected_ to scale with machine speed — moved ~1.53×
+(0.183 ms local → 0.272/0.279/0.290 ms on the three CI runs, a 1.49–1.58× span). A quantity built
+to be scale-invariant moved almost as much as the raw statistic it was built to normalise.
 
 The cause is the limitation the gate already carried but had not measured: a p99 numerator over a
-p50 denominator cancels **scale** but not **tail variance**, and a shared-vCPU runner has a much
-fatter tail than a quiet workstation. The median denominator barely moves with tail noise by
-construction; the numerator absorbs all of it.
+p50 denominator cancels **scale** but not **tail variance**, and a hosted runner has a much fatter
+tail than a quiet workstation. "Hosted", not "shared": each job gets its own VM (below) — what it
+shares is the **physical host**, with tenants it cannot see, and that is where the tail comes from.
+The median denominator barely moves with tail noise by construction; the numerator absorbs all of
+it.
 
 It is worse than cross-machine drift: R is not stable on **one** machine either. The same
 commit, on the same laptop, measured 1.66–1.79 across 8 runs when it was quiet and 2.21–2.36
 across 6 runs hours later under ordinary background load — **≈ 30% from ambient load alone, no
-code change**. A fresh CI VM is, ironically, the steadier environment: three samples spanning
-6.5%.
+code change**. A later 32-run interleaved series on that machine spanned 1.638–2.560, **56%** —
+measured in an uncommitted review harness, with both arms of an ordering A/B pooled.
+
+**And the CI runner is no steadier — the committed ceiling has already been exceeded on
+unchanged code.** R0 was chosen from the first three CI samples; the branch went on to produce
+eight, and the full record is the honest one to read this gate against:
+
+| #   | Actions job | started (UTC) | commit     | R          |
+| --- | ----------- | ------------- | ---------- | ---------- |
+| 1   | 91025915959 | 22:53:11      | 9e5b7b8 a1 | 2.3585     |
+| 2   | 91026954496 | 22:59:02      | 9e5b7b8 a2 | 2.5129     |
+| 3   | 91027669811 | 23:03:03      | 9e5b7b8 a3 | 2.4978     |
+| 4   | 91028220425 | 23:06:13      | 9e5b7b8 a4 | 2.4915     |
+| 5   | 91028488168 | 23:07:48      | 2cccfc4    | **3.0331** |
+| 6   | 91029071138 | 23:11:22      | 9e5b7b8 a5 | **3.2478** |
+| 7   | 91029800584 | 23:15:44      | 93c3f90    | 2.5937     |
+| 8   | 91030969809 | 23:22:51      | f420491    | 2.6050     |
+
+Samples 1–4 and 6 are the **same commit re-run five times**: 2.3585 → 3.2478, a **37.7% spread
+on byte-identical code**. Sample 6 is _above_ the 3.1125 ceiling; sample 5 is ~2.5% under it.
+
+**Nothing visible distinguishes the two high samples from the other six.** The obvious hypothesis
+is concurrent load from this repo's own jobs, and it survives neither the model nor the data. The
+eight perf jobs report eight **distinct `runner_name`s**, so no two shared a machine and a sibling
+job in the same run was never contending for this one's CPU — multi-core GitHub-hosted runners get
+a VM each, and only single-CPU runners share one. The data agrees: the most-overlapped sample has
+the **lowest** R. What _would_ explain it — which physical host each VM landed on, and what else
+was running there — is precisely what the Actions API cannot show. The honest reading is
+unexplained runner variance: chasing it twice produced a plausible story both times and evidence
+neither time.
+
+So the earlier reading — "three samples span 6.5%, comfortably inside 25%" — described a window,
+not the population. Three consecutive samples cannot bound a shared-runner tail; the local set
+made exactly that inference from 8 samples spanning 8%, and it failed. State the flake rate
+precisely, because the two readings differ: the shipped ceiling has been **evaluated three times
+(samples 5, 7, 8) and passed all three**, but **one of the eight samples measured on this runner
+class would have failed it**. "Roughly 1-in-8" is that counterfactual, not an observed failure
+rate. R0 is **not** being moved again to chase it: the median of all eight is 2.5533 → R0 2.55,
+ceiling 3.1875, which still would not have accommodated sample 6 and changes no observed sample's
+verdict. The tolerance is not being widened either: the worst sample sits **30.4% above R0**
+(3.2478 / 2.49), so absorbing it needs `TOLERANCE ≥ 1.31` — a gate that permits a 31% regression
+in blast cost before complaining is not worth the CI minutes. (The 37.7% above is max/min, the
+right measure of runner noise but not the one to compare against a tolerance that multiplies a
+median.) **Left OPEN for an owner ruling.**
 
 Two costs follow, and they are real. **A local `pnpm run perf` cannot preflight this gate**, and
 cannot even reproduce itself across sessions; read a local R only against other local runs taken
 back to back, never against the ceiling. And **R0 must be re-recorded when the runner class
-changes** (an image bump, a move to larger runners), not only when blast cost does. The tolerance
-was not widened to fit: the three CI samples span 6.5%, comfortably inside 25%. p99 rather than p99.9, over a floor of ≥ 500
-due-blast samples, so a single preempted tick cannot fail CI while a systematic regression in
-blast cost still does.
+changes** — against the resolved image recorded above, not the `ubuntu-latest` alias — not only
+when blast cost does.
 
-The ratio cancels **CPU-speed scale** — a uniformly slower runner moves both terms together —
-but it does **not** cancel tail variance, because the numerator is a p99 and the denominator a
-median. That is why the tolerance is 25% and not something tighter.
+The statistic is p99 rather than p99.9, over a floor of ≥ 500 due-blast samples, so a single
+preempted tick cannot fail CI while a systematic regression in blast cost still does. The ratio
+cancels **CPU-speed scale** — a uniformly slower runner moves both terms together — but it does
+**not** cancel tail variance, because the numerator is a p99 and the denominator a median. That
+is the design's known limit, and the table above is what it costs in practice.
 
 ### Frame time, heap and input latency — browser, emulated
 
@@ -297,6 +350,25 @@ prints under `ESCALATION` — it simply does not, by itself, fail the CI job. Th
 this shortfall is a **constant**, so a permanently-red job would make every other oracle
 assertion and the ratio gate invisible behind it, and a check that is always red is a check
 people learn to ignore. Any other oracle failure, and any gate failure, still fails CI.
+
+### Finding 3 — the relative CI gate is noisier than its own tolerance
+
+The ratio `R` was designed so that measuring both terms in one process would cancel runner speed
+and let one baseline transfer anywhere. It cancels **scale** and not **tail variance**, and the
+difference is not academic: the baseline recorded on the authoring machine had to be re-recorded
+on the runner (1.69 → 2.49), and the branch then produced **eight CI samples spanning 2.3585–3.2478
+(37.7%), five of them on byte-identical code** — one of which is _above_ the ceiling the committed
+`R0` creates.
+
+Widening the tolerance is not the fix: absorbing that sample needs `TOLERANCE ≥ 1.31`, and a gate
+that permits a 31% regression in blast cost before complaining is not worth running. Re-recording
+`R0` from all eight changes no sample's verdict. **The decision is the owner's** — accept the flake
+rate, move the job to a dedicated runner and re-record, or change the statistic so numerator and
+denominator carry tail alike.
+
+The full eight-sample record, the runner provenance, and why the obvious explanations do not hold
+are in [The CI regression gate](#the-ci-regression-gate) above and in
+`packages/perf/src/gate.ts`'s `R0` doc.
 
 ## The escalation trigger
 

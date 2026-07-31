@@ -82,7 +82,7 @@ normative, and now load-bearing: see the Amendment's Finding 1.)_
 The spike above is now built and recorded:
 [`docs/design-notes/performance-spike.md`](../design-notes/performance-spike.md) carries the
 pinned parameters and every measured number. Four things changed against what this ADR
-assumed, and two findings came back. (b) is the substantive scope
+assumed, and three findings came back. (b) is the substantive scope
 change; (c) and (d) follow from it.
 
 **(a) The scenario runs on a purpose-built synthetic 40×40 board, not the shipped one.** The
@@ -151,7 +151,7 @@ re-cutting a threshold after seeing the results it fired on is exactly what this
 and the spike forbid everywhere else. Recorded now, changed by a later story that pins its
 replacement before measuring again.
 
-### Findings from the first run — both open, both the owner's call
+### Findings from the spike — all three open, all the owner's call
 
 1. **Frame time is over budget on both profiles, and the sim is not why.** Measured **95th-percentile
    frame time** — the statistic the Measurement methodology section above names: **100.4 ms**
@@ -175,6 +175,25 @@ replacement before measuring again.
    600 and the oracle still reports the shortfall, carried as a named known-open finding so it
    cannot mask every other signal in the same CI job. A **second, un-waivable** assertion pins
    the measured 329, so the waiver covers 329→600 and nothing below it.
+3. **The relative CI gate is noisier than its own tolerance.** This ADR asked for a regression
+   gate that would not be hostage to runner variance, and the answer was a ratio —
+   `R = p99(stress due-blast ticks) / p50(control)`, both measured in one process, so a uniformly
+   slower machine moves both terms and cancels out. **The cancellation is real for scale and
+   absent for tail.** A p99 numerator over a p50 denominator: the median denominator barely moves
+   with tail noise by construction, and the numerator absorbs all of it. Consequences, measured:
+   the baseline recorded on the authoring machine (1.69, 8 runs, sd 0.045) did not transfer and
+   had to be re-recorded on the runner (2.49); the branch then produced **eight CI samples
+   spanning 2.3585–3.2478 (37.7%), five of them on byte-identical code**, one of which is _above_
+   the ceiling that `R0` creates. Widening the tolerance is not the fix: absorbing that sample
+   needs `TOLERANCE ≥ 1.31`, and a gate that permits a 31% regression in blast cost before
+   complaining is not worth running. Re-recording `R0` from all eight changes no sample's verdict.
+   Raised, not resolved: the gate ships as-is (`perf` is not a required check, so a flake is noise
+   rather than something that stops a merge) with the full record in `packages/perf/src/gate.ts`.
+   The owner's options are to accept the flake rate, move the job to a dedicated runner and
+   re-record, or change the statistic so numerator and denominator carry tail alike — a
+   like-for-like p99/p99 comparison drifted only ±0.7%, but that figure comes from **three local
+   runs on a quiet machine and has never been measured on CI**, so it is a lead rather than a
+   remedy.
 
 Everything else measured clear, with margin: JS heap **47.4 MB** on the low-end profile (the one
 the ~256 MB budget is written for), worst-of-20 input latency **56.7 ms** against 100 ms, and

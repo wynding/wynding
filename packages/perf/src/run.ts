@@ -3,16 +3,26 @@
 // committed replays, runs the control scenario then the stress scenario IN ONE
 // PROCESS, runs the workload oracle (`oracle.ts`, PLAN step 18) against the stress
 // run, the control-window sanity checks against the control run, computes the ratio
-// gate (`gate.ts`, PLAN step 21), and prints a human report plus one machine-readable
+// gate (`gate.ts`, PLAN step 21), asserts the real replay validator ACCEPTS both
+// committed replays, and prints a human report plus one machine-readable
 // `PERF-REPORT: ` JSON line.
 //
 // This file is a CLI entry point — like `generate.ts`, it is excluded from the
 // coverage gate (`vitest.config.ts`) because its correctness is exercised by actually
 // running it (this packet's Definition of Done), not by a unit test that would just
-// re-mock every import to assert `console.log` was called. The one piece of real
-// decision logic this file has — "does this run's combination of assertion failures
-// and gate outcome exit non-zero" — is pulled out into `escalation.ts`'s pure
-// `evaluateEscalation`, which IS unit-tested directly (`escalation.test.ts`).
+// re-mock every import to assert `console.log` was called. Everything here that is a
+// real DECISION rather than printing lives in `escalation.ts` and is unit-tested there
+// (`escalation.test.ts`): `allRunAssertions` assembles this run's assertions, including
+// the two replay-validator verdicts, and `evaluateEscalation` folds them plus the gate
+// outcome into the single `process.exitCode` assignment at the bottom of this file.
+//
+// One caveat, since the point of that structure is that the report and the exit code
+// agree: it holds for every DECIDED outcome, not for a THROW. `evaluateGate` throws on a
+// zero-millisecond control median, `compileRuleset` throws on an unbuildable bundle, and
+// `stats.ts` throws on an empty series — any of those exits non-zero from a bare stack
+// trace with no `PERF-REPORT:` line emitted at all. That is the intended behaviour (a
+// broken measurement must not publish numbers), but a consumer parsing for the report
+// line must treat "absent" as a third outcome, not as success.
 //
 // Phase 4 wired this into a root `perf` script (`pnpm run perf` -> `pnpm -C
 // packages/perf run perf` -> this file) and a dedicated CI job (`.github/workflows/
@@ -29,13 +39,25 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseRulesetJson, compileRuleset } from '@wynding/sim';
-import { validate, type Replay } from '@wynding/replay';
+import { validate, type Replay, type ValidationResult } from '@wynding/replay';
 import { STRESS_RULESET_URL } from '@wynding/content/stress';
 import { runSampled, WARMUP_TICKS, SAMPLE_TICKS, type SampledTick } from './harness';
 import { stressRouteLength } from './layout';
-import { runOracle, KNOWN_OPEN_ASSERTIONS, type OracleAssertion, isDueBlastSample } from './oracle';
+import {
+  runOracle,
+  KNOWN_OPEN_ASSERTIONS,
+  DUE_BLAST_SAMPLES_THRESHOLD,
+  type OracleAssertion,
+  isDueBlastSample,
+} from './oracle';
 import { evaluateGate, TOLERANCE, R0, type GateResult } from './gate';
-import { evaluateEscalation } from './escalation';
+import {
+  evaluateEscalation,
+  allRunAssertions,
+  REPLAY_ACCEPTED_ASSERTIONS,
+  REPLAY_KEYS,
+  type ReplayKey,
+} from './escalation';
 import { percentile, min, max, mean } from './stats';
 
 const scenariosDir = join(dirname(fileURLToPath(import.meta.url)), 'scenarios');
@@ -260,11 +282,27 @@ for (const a of controlAssertions) {
 // block. Short-circuit cleanly here instead: report it as a loud, named failure (the
 // oracle's own "samples with >= 1 due blast" assertion already covers it above), not
 // a crash.
+//
+// The short-circuit is the oracle's FLOOR, not merely "> 0" (QC). `stressStat`'s whole
+// p99-not-p99.9 argument rests on that floor: over 3 due-blast samples, `percentile(…, 99)`
+// returns the MAXIMUM — the single noisiest tick, exactly the statistic p99 was chosen to
+// avoid. Such a run already exits non-zero via the oracle, but with `>0` it would still
+// publish `{"status":"evaluated","pass":true}` in `PERF-REPORT`, indistinguishable from a
+// real 1,671-sample run to anyone diffing that line against a later re-measurement.
 console.log('');
 console.log('=== gate (PLAN step 21) ===');
 let gateResult: GateResult | null = null;
-if (dueBlastSamples.length === 0) {
-  console.log('  gate NOT evaluated — no due-blast samples in the stress window. See the workload');
+// The `=== 0` disjunct is not redundant with the floor: it is what keeps this guard
+// correct if `DUE_BLAST_SAMPLES_THRESHOLD` is ever set to 0 (the natural way to write "no
+// floor"), where `length < 0` is never true and an empty subset would reach `stressStat`
+// and throw — the bare stack trace QC round-1 fix 2 removed (QC round 2).
+if (dueBlastSamples.length === 0 || dueBlastSamples.length < DUE_BLAST_SAMPLES_THRESHOLD) {
+  console.log(
+    `  gate NOT evaluated — only ${dueBlastSamples.length} due-blast samples in the stress window,`,
+  );
+  console.log(
+    `  under the ${DUE_BLAST_SAMPLES_THRESHOLD} the statistic requires. See the workload`,
+  );
   console.log('  oracle failure above ("samples with >= 1 due blast"): this is that failure,');
   console.log('  not a separate one, and it already forces a non-zero exit.');
 } else {
@@ -282,45 +320,95 @@ if (dueBlastSamples.length === 0) {
   }
 }
 
-// 8) The known-open exit-code decision — `escalation.ts`'s
-// `evaluateEscalation`, folding the stress oracle's assertions AND the control
-// sanity checks (never known-open — see `escalation.ts`'s doc) into one list. A gate
-// that was not evaluated (recording-only R0, or no due-blast samples) counts as
-// `gatePass: true`: it cannot itself force a non-zero exit, though the empty-subset
-// case is already caught above as an ordinary oracle failure.
-const allAssertions: OracleAssertion[] = [...oracleResult.assertions, ...controlAssertions];
-const gatePass = gateResult === null || gateResult.status === 'unset' ? true : gateResult.pass;
-// The committed stress replay is accepted by the REAL replay path — the same
-// `validate()` re-simulation the server runs against an untrusted client submission. A
+// 8) The replay-validator checks — are the committed replays accepted by the REAL
+// `validate()` re-simulation the server runs against an untrusted client submission? A
 // scenario the validator would reject is not one worth measuring: overlapping anchors,
 // exhausted bounty, or inputs past the validator's per-tick cap would all still *sample*
 // fine and post plausible percentiles.
 //
-// RUN AFTER THE MEASURED RUNS, NOT BEFORE, and that ordering is load-bearing. Placed
-// first, this call's ~4,000-tick re-simulation is extra JIT warm-up ahead of the control
-// scenario — and it moved locally-measured R from ~1.68 to ~2.31, a 37% shift from
-// nothing but warm-up. `R0` is recorded under the ordering below (control, then stress),
-// so anything that runs before them changes the conditions the baseline was taken under
-// and silently rebaselines the gate. Measure first, then check.
+// BOTH replays, not just the stress one: the control supplies the gate's DENOMINATOR
+// (`gate.ts`'s `controlStat`), so the argument above applies to it verbatim. Checking one
+// and not the other was an asymmetry with no defence (QC).
 //
-// It lives in this job rather than in `scenario.test.ts` (where it started) because it
-// costs ~8s locally and 21.2s on `ubuntu-latest`. That belongs in the perf job, which
-// already pays for simulation, not in `turbo run test` — where it taxed every
-// contributor's `verify` and, on a 2-core runner, starved `apps/web`'s suite until a
-// neighbouring test began timing out. See `scenario.test.ts`'s note.
-const stressValidation = validate(stressReplay, bundle);
-if (!stressValidation.ok) {
+// These run after the measured runs, and that ordering is NOT load-bearing — an earlier
+// version of this comment claimed placing them first acted as JIT warm-up and moved
+// locally-measured R by 37%. That was refuted by 32 interleaved A/B runs in a standalone
+// harness: the measured ordering effect was 0.973x, and the claimed mechanism is absent —
+// warm-up would have to lower the control median, and the two arms' control medians
+// differed by a factor of 1.001. (That series ran in a throwaway review harness, not
+// committed, so its absolute millisecond figures are not this file's `controlStat` and are
+// not reproducible from the repo; only the ratio transfers.) The original "1.68 -> 2.31"
+// was two samples from a distribution spanning 56% on that machine — see `gate.ts`'s R0
+// doc for how noisy this measurement is. The calls stay here only because this is the
+// shape R0 was recorded under, and there is no reason to perturb it.
+//
+// They live in this job rather than in `scenario.test.ts` (where the stress one started)
+// because of where the cost lands, not how large it is: the two calls are ~0.6s each
+// (stress 645ms, control 576ms), while the test that held the stress one took 21.2s and
+// 28.1s on two `ubuntu-latest` runs of the same commit, against a 20s ceiling. See
+// `scenario.test.ts`'s note for the measured breakdown.
+// ONE keyed record, read by all three consumers below (the FATAL message, the assertion
+// list, the report fields). Keeping it keyed removes the loose per-replay booleans that used to
+// be transposable between them — a mutation that swapped those two arguments left the
+// FATAL line naming one replay while the escalation line named the other, telling the
+// operator two different things in one run (QC round 2). It does NOT make transposition
+// impossible: handing `allRunAssertions` a re-keyed record still typechecks, and no test
+// sees this file. See `escalation.ts` for what that seam does and does not cover.
+const validations: Readonly<Record<ReplayKey, ValidationResult>> = {
+  stress: validate(stressReplay, bundle),
+  control: validate(controlReplay, bundle),
+};
+for (const key of REPLAY_KEYS) {
+  const result = validations[key];
+  if (result.ok) continue;
   console.error(
-    `\nFATAL: the committed stress replay is REJECTED by the replay validator — ` +
-      `${stressValidation.reason ?? 'no reason given'}.\n` +
+    `\nFATAL: the committed ${key} replay is REJECTED by the replay validator — ` +
+      `${result.reason ?? 'no reason given'}.\n` +
       `Every number above was measured against a scenario the real replay path does not ` +
       `accept. If a simVersion bump landed, regenerate with ` +
       `\`pnpm -C packages/perf run gen:scenario\`.`,
   );
-  process.exitCode = 1;
 }
 
+// 9) The known-open exit-code decision — `escalation.ts`'s `evaluateEscalation`, over
+// `allRunAssertions`: the stress oracle's assertions, the control sanity checks, and both
+// replay-validator verdicts (none of the last two groups is ever known-open — see
+// `escalation.ts`'s doc). A gate that was not evaluated (recording-only R0, or too few
+// due-blast samples) counts as `gatePass: true`: it cannot itself force a non-zero exit,
+// though the too-few case is already caught above as an ordinary oracle failure.
+//
+// The validation verdicts join that list rather than setting `process.exitCode` beside
+// it, so `evaluateEscalation` stays the ONE place the exit code is decided and the
+// `PERF-REPORT:` line below cannot disagree with it (QC: it used to publish
+// `"exitNonZero": false` on a run that exited 1). The list is ASSEMBLED in
+// `escalation.ts` rather than here for the same reason: this file is excluded from the
+// coverage gate and reached by no test, so a verdict dropped from the array here would
+// restore that bug with every test still green.
+const allAssertions: OracleAssertion[] = allRunAssertions({
+  oracle: oracleResult.assertions,
+  control: controlAssertions,
+  replays: validations,
+});
+const gatePass = gateResult === null || gateResult.status === 'unset' ? true : gateResult.pass;
+
 const escalation = evaluateEscalation(allAssertions, gatePass);
+
+// Printed, not just reported: without this block an accepted replay and a `validate()`
+// call quietly replaced by `{ ok: true }` produce byte-identical human output, and the
+// only positive evidence lives in the JSON line — the same "the report can see it, the
+// operator cannot" asymmetry this check was added to remove, pointing the other way (QC).
+// Selected by NAME EQUALITY against the exported constants, never by a string suffix: a
+// suffix literal duplicated here is one a rename would silently drop a row from, and one
+// a future oracle assertion could accidentally match into (QC round 2, verified by
+// mutation).
+const replayAssertionNames = new Set<string>(Object.values(REPLAY_ACCEPTED_ASSERTIONS));
+console.log('');
+console.log('=== replay validator (the real re-simulation path) ===');
+for (const a of allAssertions.filter((x) => replayAssertionNames.has(x.name))) {
+  console.log(
+    `  [${a.pass ? 'PASS' : 'FAIL'}] ${a.name}: measured=${a.measured} threshold=${a.threshold}`,
+  );
+}
 
 const allFailing = allAssertions.filter((a) => !a.pass);
 if (allFailing.length > 0) {
@@ -365,7 +453,7 @@ if (gateResult !== null && gateResult.status === 'evaluated' && !gateResult.pass
   console.log('=== GATE FAILURE: R exceeds R0 × TOLERANCE ===');
 }
 
-// 9) Machine-readable report — a single JSON line, prefixed `PERF-REPORT: `, so Phase 6
+// 10) Machine-readable report — a single JSON line, prefixed `PERF-REPORT: `, so Phase 6
 // can lift these tables into the spike document without re-running the harness.
 const report = {
   warmupTicks: WARMUP_TICKS,
@@ -388,6 +476,9 @@ const report = {
     towersPlacedAfterBuild: controlResult.towersPlacedAfterBuild,
     leftoverBountyAfterBuild: controlResult.leftoverBountyAfterBuild,
     assertions: controlAssertions,
+    /** As `stress.replayValid`, for the replay that supplies the gate's denominator. */
+    replayValid: validations.control.ok,
+    replayRejectionReason: validations.control.ok ? null : (validations.control.reason ?? null),
   },
   stress: {
     percentilesAll: stressAllTable,
@@ -415,6 +506,11 @@ const report = {
     towersPlacedAfterBuild: stressResult.towersPlacedAfterBuild,
     leftoverBountyAfterBuild: stressResult.leftoverBountyAfterBuild,
     routeLength,
+    /** Whether the REAL replay validator accepts the committed stress replay. `false`
+     *  means every percentile above was measured against a scenario the replay path
+     *  rejects, and none of them should be lifted into a document. */
+    replayValid: validations.stress.ok,
+    replayRejectionReason: validations.stress.ok ? null : (validations.stress.reason ?? null),
   },
   oracle: oracleResult,
   gate: gateResult,

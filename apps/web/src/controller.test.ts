@@ -1364,25 +1364,37 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
       }
     }
 
-    it('accepts up to MAX_INPUTS_PER_TICK Pending build/sell commands pre-start, then rejects the next with a distinct pendingCap outcome and an invalid ghost — Start still succeeds (no reservation needed)', () => {
-      const c = createController(1);
-      // 32 build+sell cycles = 64 commands = MAX_INPUTS_PER_TICK exactly.
-      fillToCap(c, MAX_INPUTS_PER_TICK / 2);
+    it(
+      'accepts up to MAX_INPUTS_PER_TICK Pending build/sell commands pre-start, then rejects the next with a distinct pendingCap outcome and an invalid ghost — Start still succeeds (no reservation needed)',
+      // Same O(n²)-with-n=64 shape as the sibling below, which has carried an explicit
+      // 20s budget since 98e6a3d (PR #68, squashed into 2edd61f) for exactly this
+      // reason. This one was left on vitest's 5s default and duly timed out on CI (run
+      // 30589511344) — the family is CI-marginal, not this test specifically, so it gets
+      // the same explicit budget rather than a shrunken workload that would stop
+      // covering the projection path. A budget, not a diagnosis: nothing else in the
+      // repo watches this path's cost, so if it regresses, this timeout is the only
+      // signal.
+      { timeout: 20_000 },
+      () => {
+        const c = createController(1);
+        // 32 build+sell cycles = 64 commands = MAX_INPUTS_PER_TICK exactly.
+        fillToCap(c, MAX_INPUTS_PER_TICK / 2);
 
-      // The 65th planning action is rejected: invalid ghost + the distinct 'pendingCap'
-      // announcement (not the generic 'other').
-      c.armTower('basic');
-      c.aimAt(10, 3); // a fresh, otherwise-perfectly-buildable cell
-      expect(c.frame().ghost).toMatchObject({ col: 10, row: 3, valid: false });
-      expect(c.confirm()).toBe(false);
-      expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
+        // The 65th planning action is rejected: invalid ghost + the distinct 'pendingCap'
+        // announcement (not the generic 'other').
+        c.armTower('basic');
+        c.aimAt(10, 3); // a fresh, otherwise-perfectly-buildable cell
+        expect(c.frame().ghost).toMatchObject({ col: 10, row: 3, valid: false });
+        expect(c.confirm()).toBe(false);
+        expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
 
-      // Start is a trivial flag flip now — no reserved slot to guarantee, it just works.
-      c.start();
-      expect(c.uiState().started).toBe(true);
-      tick(c);
-      expect(c.hud().phase).toBe('running');
-    });
+        // Start is a trivial flag flip now — no reserved slot to guarantee, it just works.
+        c.start();
+        expect(c.uiState().started).toBe(true);
+        tick(c);
+        expect(c.hud().phase).toBe('running');
+      },
+    );
   });
 });
 
