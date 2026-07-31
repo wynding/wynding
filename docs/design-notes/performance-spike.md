@@ -79,21 +79,23 @@ the scene before believing any timing (`packages/perf/src/oracle.ts`), and the b
 carries the same checks (150 towers, 0 leftover bounty, ≥ 280 creeps live, phase still
 `running`, and the sim tick genuinely advancing across the window).
 
-Ten assertions on the stress run — thresholds **committed before measurement**, except two
+Nine assertions on the stress run — thresholds **committed before measurement**, except two
 regression tripwires deliberately pinned to a measured value (the 329 route floor and the 200
 median-creep floor, both named as such in `oracle.ts`) — plus six on the
 CONTROL run — phase, 150 towers, zero leftover bounty, zero due blasts, median live creeps within
-a band of the recorded 181, and non-zero peak slow coverage. The gate's _denominator_ needs
-guarding too: a control that silently got heavier or lighter would move `R` and mask a real blast
-regression, and "blast-free" was a comment before it was a checked fact.
+a band of the recorded 181, and non-zero peak slow coverage. Two more assert that the real replay
+validator accepts each committed replay. The gate's _denominator_ needs guarding too: a control
+that silently got heavier or lighter would move `R` and mask a real blast regression, and
+"blast-free" was a comment before it was a checked fact.
 
-Two of the ten cover route length, deliberately: one against the committed 600-cell floor (missed,
-and waived as a named known-open finding) and one against the **329 actually measured**
-(un-waivable). Without the second the waiver would have left every value below 329 unmonitored —
-a maze with no path at all would have printed the same known-open line and exited 0. A peak alone is not enough —
-a window of one tick at 304 creeps and 2,499 at one creep passes every peak-based check, so
-the oracle asserts a **median** too. A missed floor is escalated as a finding, never lowered
-to fit.
+Route length is **one** un-waivable assertion at the measured 329, since the owner ruling of
+2026-07-31 re-pinned the floor (finding 2). The story shipped two — a waived 600 and a floor
+beneath it — because a waiver with nothing under it left every value below 329 unmonitored: a
+maze with no path at all would have printed the same known-open line and exited 0. With the gap
+closed by ruling there is nothing to waive, and **`KNOWN_OPEN_ASSERTIONS` is now empty**. A peak
+alone is not enough either — a window of one tick at 304 creeps and 2,499 at one creep passes
+every peak-based check, so the oracle asserts a **median** too. A missed floor is escalated as a
+finding, never lowered to fit.
 
 ## Methodology (the parameters ADR 0005 says the spike pins)
 
@@ -107,8 +109,10 @@ Percentiles are nearest-rank, in both harnesses.
 
 **Browser.** Per profile: build the 150-tower maze through the real player-intent API
 (`armTower` + `clickAt`, 3 per tick), fast-forward the sim to **tick 1,950** (just past the
-last spawn, where all 304 creeps are live), then sample real `requestAnimationFrame` deltas
-over a **10-second** window. Frame **times** are reported, not frame rates: ADR 0005's
+last spawn, where all 304 creeps are live), then immediately sample real
+`requestAnimationFrame` deltas over a **10-second** window. Frame sampling runs **before** the
+input-latency clicks, so both profiles open their window at the same tick over the same board —
+sampling after them was the first pass's mistake, and it made the two profiles incomparable. Frame **times** are reported, not frame rates: ADR 0005's
 budget is a floor, and an fps percentile runs the wrong way — a "p99 fps" is the _best_
 frame of the window. Input latency is 20 real pointer interactions, each paired FIFO with
 its own observed response, timed entirely in-browser so no Playwright IPC round trip
@@ -271,20 +275,31 @@ is the design's known limit, and the table above is what it costs in practice.
 
 | Metric                     | low-end (6×)  | mid-range (2×) | ADR 0005 budget         | Verdict      |
 | -------------------------- | ------------- | -------------- | ----------------------- | ------------ |
-| **Frame time p50**         | **91.8 ms**   | **33.1 ms**    | 33.3 ms / 16.7 ms       | **BREACHED** |
-| **Frame time p95**         | **100.4 ms**  | **34.2 ms**    | (the ADR's statistic)   | **BREACHED** |
-| fps at p50 frame time      | 10.9          | 30.2           | ≥ 30 floor / 60 target  | **BREACHED** |
-| fps at p95 frame time      | 10.0          | 29.2           | ≥ 30 floor / 60 target  | **BREACHED** |
-| JS heap                    | 47.4 MB       | 42.1 MB        | < ~256 MB (low-end)     | pass         |
-| Input latency p50 / max    | 9.4 / 56.7 ms | 1.5 / 38.4 ms  | < 100 ms                | pass         |
-| Frames sampled in 10 s     | 107           | 328            | —                       |              |
-| Sim ticks advanced in 10 s | 205           | 203            | (200 expected at 20 Hz) |              |
-| Scene setup to peak load   | 4.4 s         | 1.5 s          | —                       |              |
+| **Frame time p50**         | **58.4 ms**   | **16.8 ms**    | 33.3 ms / 16.7 ms       | **BREACHED** |
+| **Frame time p95**         | **66.8 ms**   | **25.6 ms**    | (the ADR's statistic)   | **BREACHED** |
+| Frame time p99             | 67.5 ms       | 25.9 ms        | —                       |              |
+| fps at p50 frame time      | 17.1          | 59.5           | ≥ 30 floor / 60 target  | **BREACHED** |
+| fps at p95 frame time      | 15.0          | 39.1           | ≥ 30 floor / 60 target  | **BREACHED** |
+| JS heap                    | 42.1 MB       | 50.4 MB        | < ~256 MB (low-end)     | pass         |
+| Input latency p50 / max    | 4.8 / 34.4 ms | 0.9 / 2.3 ms   | < 100 ms                | pass         |
+| Frames sampled in 10 s     | 167           | 528            | —                       |              |
+| Sim ticks advanced in 10 s | 204           | 201            | (200 expected at 20 Hz) |              |
+| Scene setup to peak load   | 3.0 s         | 1.0 s          | —                       |              |
 
-Towers placed **150** and leftover bounty **0** on both profiles; live creeps **304** when the maze finished
-building and **224 / 272** at the sampling window's close (the 20 input-latency clicks run in
-between, so the window opens later than the fast-forward tick); phase still `running` throughout. The numbers
-describe a genuinely loaded scene that was still simulating when sampling ended.
+Towers placed **150**, leftover bounty **0**, and live creeps **304** on both profiles at the
+moment each sampling window opened — tick 1968 low-end and 1960 mid-range. Phase `running`
+throughout; **256 / 288** creeps still live after the window and the 20 latency clicks. The
+numbers describe a genuinely loaded scene that was still simulating when sampling ended.
+
+> **These figures supersede a first set, and the correction is worth knowing.** The original run
+> sampled frames _after_ the 20 input-latency clicks, which take profile-dependent wall time while
+> the sim keeps advancing — so the two profiles opened their windows at different ticks over
+> different boards and were not comparable with each other. Sampling now runs first, pinning both
+> to tick ~1960 with all 304 creeps live. The measured effect was large and in the opposite
+> direction to the one predicted when the flaw was found: low-end p95 moved **100.4 → 66.8 ms** and
+> mid-range **34.2 → 25.6 ms**, i.e. the post-click numbers were _worse_, not better, even though
+> the post-click board carried fewer creeps. Why post-click sampling measures slower is **not
+> established** — it is not the creep count, and no further claim is made here.
 
 Initial JS is **0.36 MB gzipped** against the < 3 MB budget — a **pass**, but measured by
 `pnpm run size` over `apps/web/dist`, not by either harness. It is not a per-profile figure
@@ -295,19 +310,26 @@ and the browser harness builds a different artifact (`dist-perf/`) entirely.
 ### Finding 1 — frame time is over budget on both profiles, and the sim is not why
 
 ADR 0005 pins **≥ 30 fps on low-end** (33.3 ms/frame) and **60 fps on mid-range**
-(16.7 ms/frame) under exactly this load. Measured p95 frame time: **100.4 ms** and **34.2 ms**
-— 3× and 2× over. Both trigger the escalation formula with room to spare.
+(16.7 ms/frame) under exactly this load. Measured p95 frame time: **66.8 ms** and **25.6 ms**
+— 2.0× and 1.5× over. Both trigger the escalation formula.
+
+The margin is narrower than the spike's first pass reported (100.4 / 34.2 ms, since superseded —
+see the note under the results table), and on mid-range the **median** frame now lands at 16.8 ms,
+essentially on the 60 fps target; it is the p95 tail, at 39 fps, that breaches. The ADR's named
+statistic is the p95, so the finding stands, but "mid-range holds 60 fps until it doesn't" is a
+materially different problem from "mid-range runs at 30 fps", and worth knowing before anyone
+acts on it.
 
 Three things sharpen rather than soften this:
 
 1. **The sim is not the bottleneck.** `step()` costs 0.2–0.32 ms per 50 ms tick. Even the
-   low-end profile advanced 205 ticks during its 10-second window against ~200 expected at
+   low-end profile advanced 204 ticks during its 10-second window against ~200 expected at
    20 Hz — the sim held cadence to within a few ticks of real time (the small overshoot is
    window-boundary rounding, not drift)
-   while frames took 92 ms. The cost is in the presentation layer, not the deterministic core.
+   while frames took 58 ms. The cost is in the presentation layer, not the deterministic core.
 2. **The emulation flatters.** A 6× CPU throttle on an Apple M4 Pro with a Metal GPU is not a
    low-end Android webview; it is far faster, and its GPU is in a different class. A real
-   low-end device should be expected to do **worse** than 92 ms/frame here, not better.
+   low-end device should be expected to do **worse** than 58 ms/frame here, not better.
 3. **This is the ceiling scene, not real M2 play.** The specced arc never reaches 300
    concurrent creeps. The breach says the stack cannot hold the ADR's stated worst case; it
    does not say M2's actual content is unplayable.
@@ -385,10 +407,10 @@ Evaluated against the results above:
 
 | Metric                | Measured | Trigger at | Result                |
 | --------------------- | -------- | ---------- | --------------------- |
-| fps, low-end          | 10.0     | ≤ 37.5     | **TRIGGERS** (breach) |
-| fps, mid-range        | 29.2     | ≤ 75       | **TRIGGERS** (breach) |
-| JS heap, low-end      | 47.4 MB  | ≥ 192 MB   | clear                 |
-| Input latency, max    | 56.7 ms  | ≥ 75 ms    | clear                 |
+| fps, low-end          | 15.0     | ≤ 37.5     | **TRIGGERS** (breach) |
+| fps, mid-range        | 39.1     | ≤ 75       | **TRIGGERS** (breach) |
+| JS heap, low-end      | 42.1 MB  | ≥ 192 MB   | clear                 |
+| Input latency, max    | 34.4 ms  | ≥ 75 ms    | clear                 |
 | Initial JS gzipped    | 0.36 MB  | ≥ 2.25 MB  | clear                 |
 | `step()` (indicative) | 0.323 ms | ≥ 1.5 ms   | clear, but see below  |
 
@@ -417,13 +439,13 @@ amount of emulation closes:
 - **`step()` under real device CPU.** The headless harness is unthrottled by design (it is a
   regression gate, not a device measurement), so the < 2 ms / < 5 ms budgets are not directly
   measured on any device-like profile.
-- **The two profiles did not sample the same scene.** Frame sampling runs after the 20 input-latency
-  clicks, and those clicks take profile-dependent wall time while the sim keeps advancing — so the
-  slower profile starts its window at a later tick with a lighter board (224 live creeps at the
-  low-end window's close against 272 mid-range). Both profiles breached their budget regardless, so
-  Finding 1 stands, but the low-end figure is measured against the _easier_ of the two scenes and
-  the profiles are not strictly comparable to each other. Sample frames before the clicks, or pin
-  both to the same tick, before treating the two columns as a like-for-like pair.
+- ~~**The two profiles did not sample the same scene.**~~ **Fixed by owner ruling, 2026-07-31**,
+  and the numbers above are the re-measurement. Frame sampling used to run after the 20
+  input-latency clicks, which take profile-dependent wall time while the sim advances, so each
+  profile opened its window at a different tick over a different board. Sampling now runs first,
+  pinning both to tick ~1960 with all 304 creeps live. Worth recording that the predicted
+  _direction_ of the error was wrong: the post-click windows carried fewer creeps but measured
+  **worse** frame times, not better. See the note under the results table.
 
 ## A note on measuring instrumented tests
 

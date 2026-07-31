@@ -439,10 +439,13 @@ if (escalation.knownOpenFailures.length > 0) {
 
 if (escalation.staleKnownOpen.length > 0) {
   console.log('');
-  console.log('=== STALE KNOWN-OPEN WAIVER ===');
+  console.log('=== STALE KNOWN-OPEN WAIVER — THIS FAILS THE JOB ===');
   console.log('The following are on oracle.ts KNOWN_OPEN_ASSERTIONS but PASSED this run.');
-  console.log('A stale waiver is its own defect — remove the entry (owner ruling, not');
-  console.log('auto-removed by this passing run):');
+  console.log('A stale waiver is its own defect and exits non-zero (owner ruling,');
+  console.log('2026-07-31): a waived assertion that gets fixed and later regresses lands');
+  console.log('back inside its own waiver band and would otherwise pass unnoticed. The');
+  console.log('fix is to remove the entry — an owner ruling, never an auto-removal by a');
+  console.log('passing run:');
   for (const name of escalation.staleKnownOpen) {
     console.log(`  - ${name}`);
   }

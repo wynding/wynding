@@ -168,43 +168,39 @@ describe('a window where every sample has 0 live creeps fails the qualifying-sam
 });
 
 describe('route length', () => {
-  it('a route under 600 cells fails', () => {
-    const result = runOracle(passingInput({ routeLength: 329 }));
-    const assertion = result.assertions.find((a) => a.name === 'scripted maze route length');
-    expect(assertion?.measured).toBe(329);
-    expect(assertion?.pass).toBe(false);
-    expect(result.pass).toBe(false);
-  });
-
-  it('exactly 600 cells passes (>=, not >)', () => {
-    const result = runOracle(passingInput({ routeLength: 600 }));
-    const assertion = result.assertions.find((a) => a.name === 'scripted maze route length');
-    expect(assertion?.pass).toBe(true);
-  });
-
-  // The measured-floor assertion (QC round 2: the 600-cell shortfall's KNOWN-OPEN
-  // waiver had no floor of its own — a regression from the measured 329 down to 1
-  // printed under the same `[KNOWN-OPEN]` tag and exited 0, invisible to CI). This
-  // second assertion is under a DISTINCT name from the 600-cell one above and is never
-  // on `KNOWN_OPEN_ASSERTIONS`, so a regression below 329 fails CI even though the
-  // 600-cell shortfall stays waived.
-  it('a route under the 329-cell measured floor fails, un-waivably', () => {
+  // ONE assertion since the owner ruling of 2026-07-31 re-pinned the floor from the
+  // pre-measurement 600 to the measured 329. The story shipped two — a waived 600 and an
+  // un-waivable 329 beneath it — because the waiver otherwise left everything below 329
+  // unmonitored: a regression from 329 to 1 printed under the same `[KNOWN-OPEN]` tag and
+  // exited 0. With the gap closed by ruling there is nothing left to waive, so the pair
+  // collapses to a single un-waivable tripwire at the measured value.
+  it('a route under the 329-cell floor fails', () => {
     const result = runOracle(passingInput({ routeLength: 328 }));
-    const assertion = result.assertions.find(
-      (a) => a.name === 'scripted maze route length — measured floor',
-    );
+    const assertion = result.assertions.find((a) => a.name === 'scripted maze route length');
     expect(assertion?.measured).toBe(328);
     expect(assertion?.threshold).toBe(ROUTE_LENGTH_FLOOR);
     expect(assertion?.pass).toBe(false);
     expect(result.pass).toBe(false);
   });
 
-  it('exactly the 329-cell measured floor passes (>=, not >)', () => {
+  it('exactly the 329-cell floor passes (>=, not >)', () => {
     const result = runOracle(passingInput({ routeLength: 329 }));
-    const assertion = result.assertions.find(
-      (a) => a.name === 'scripted maze route length — measured floor',
-    );
+    const assertion = result.assertions.find((a) => a.name === 'scripted maze route length');
     expect(assertion?.pass).toBe(true);
+    expect(result.pass).toBe(true);
+  });
+
+  it('is a zero-slack tripwire: the committed scene measures exactly the floor', () => {
+    // Deliberate. The sim is deterministic against a committed replay, so an unchanged
+    // layout reproduces 329 every run — there is no noise for slack to absorb, and any
+    // drop is a real regression.
+    expect(ROUTE_LENGTH_FLOOR).toBe(329);
+  });
+
+  it('there is exactly ONE route-length assertion — the waived twin is gone', () => {
+    const result = runOracle(passingInput({ routeLength: 329 }));
+    const routeAssertions = result.assertions.filter((a) => a.name.includes('route length'));
+    expect(routeAssertions).toHaveLength(1);
   });
 });
 
@@ -334,19 +330,18 @@ describe('isQualifyingSample()', () => {
 describe('KNOWN_OPEN_ASSERTIONS — pinned by value', () => {
   // The same reasoning `gate.test.ts` applies to `R0`, for the same reason: this list is
   // the ONLY mechanism in the package that turns a red assertion green, and widening it
-  // is a one-line diff that reads as housekeeping. Adding
-  // 'scripted maze route length — measured floor' here would silently disarm the
-  // un-waivable 329 floor — and every other test would stay green, because
-  // `escalation.test.ts` derives its names from this array and `runOracle` never reads
-  // it. `oracle.ts` states that intent in prose; a comment is not a guard.
+  // is a one-line diff that reads as housekeeping. `oracle.ts` states that intent in
+  // prose; a comment is not a guard.
   //
-  // A NEW entry is a deliberate act requiring an owner ruling (see the list's doc), so
-  // failing this test is the point: it puts the ruling in front of whoever is editing.
-  it('is exactly the one entry S4b recorded and escalated', () => {
-    expect(KNOWN_OPEN_ASSERTIONS).toEqual(['scripted maze route length']);
+  // It is EMPTY as of the owner ruling of 2026-07-31, which resolved its single entry by
+  // re-pinning the route-length floor to the measured value. Pinning empty is stricter
+  // than pinning one name: any addition at all now fails here, which is exactly the
+  // moment the ruling the list's doc requires should be written down.
+  it('is empty — every oracle assertion currently stands on its own merits', () => {
+    expect(KNOWN_OPEN_ASSERTIONS).toEqual([]);
   });
 
-  it('does not contain the measured-floor assertion, which must never be waivable', () => {
-    expect(KNOWN_OPEN_ASSERTIONS).not.toContain('scripted maze route length — measured floor');
+  it('does not contain the route-length assertion, which is now an un-waivable tripwire', () => {
+    expect(KNOWN_OPEN_ASSERTIONS).not.toContain('scripted maze route length');
   });
 });

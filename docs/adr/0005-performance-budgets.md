@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-18
 - **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below)
+- **Rulings:** 2026-07-31 (all three findings answered; see Findings from the spike)
 
 ## Context
 
@@ -134,8 +135,12 @@ recommendation to the owner**, who takes one of two branches: the real-device pa
 S11 at the latest**, or an explicit dated acceptance is recorded here. The scope call stays
 🔴 Owner rather than being auto-decided by a threshold.
 
-**Status of that recommendation as of this amendment: OPEN.** The fps trigger fired (Finding 1
-below) and neither branch has been taken — S4b raises it, it does not resolve it. The deadline
+**Status of that recommendation: the S11 branch is taken (owner ruling, 2026-07-31).** The fps
+trigger fired (Finding 1 below); the owner's answer is the real-device pass at S11, **not** an
+acceptance of the numbers. One addition to the rule as written: the owner also directs that the
+_diagnosis_ — establishing where the frame time actually goes — happen **before** S11 rather than
+at it, since five more effect stories land on this renderer in between and the spike deliberately
+measured without diagnosing. The deadline
 reads "at S11 at the latest" rather than the drafting note's "before the next effect story"
 because (b) already moved the pass to S11; a rule demanding it before S5 would have been
 unsatisfiable the moment it was written.
@@ -146,17 +151,28 @@ display cannot exceed ~60, so that metric triggers unconditionally and its margi
 information beyond the outright breach. The low-end trigger (≤ 37.5 against a 30 floor) is
 well-formed.
 
-It is **deliberately not fixed here**. The trigger was pinned before any measurement, and
+**Owner ruling, 2026-07-31: fix it, as a separate deliberate edit.** Not folded into S4b — the
+same reasoning that kept it unfixed here applies to fixing it in the same breath as reporting the
+results it fired on. The replacement must be a well-formed trigger for a vsync-capped metric
+(e.g. margin against the 16.7 ms frame-time budget rather than against an unreachable 75 fps).
+Until that lands, read the mid-range fps row as carrying no information beyond the outright
+breach.
+
+It was **deliberately not fixed here**. The trigger was pinned before any measurement, and
 re-cutting a threshold after seeing the results it fired on is exactly what this amendment
 and the spike forbid everywhere else. Recorded now, changed by a later story that pins its
 replacement before measuring again.
 
-### Findings from the spike — all three open, all the owner's call
+### Findings from the spike — all three ruled on 2026-07-31
 
 1. **Frame time is over budget on both profiles, and the sim is not why.** Measured **95th-percentile
-   frame time** — the statistic the Measurement methodology section above names: **100.4 ms**
-   low-end (budget 33.3 ms, the 30 fps floor) and **34.2 ms** mid-range (budget 16.7 ms, the
-   60 fps target). Both trigger the rule above; both are outright breaches, 3× and 2× over.
+   frame time** — the statistic the Measurement methodology section above names: **66.8 ms**
+   low-end (budget 33.3 ms, the 30 fps floor) and **25.6 ms** mid-range (budget 16.7 ms, the
+   60 fps target). Both trigger the rule above; both are outright breaches, 2.0× and 1.5× over.
+   (These supersede a first pass that read 100.4 / 34.2 ms and sampled frames after the
+   input-latency clicks; see the spike's results table for the correction. Note mid-range's
+   **median** frame is now 16.8 ms — on target — so the breach there is a p95 tail at 39 fps,
+   not a uniformly slow profile.)
    `step()` costs 0.2–0.32 ms per **50 ms tick** — and the low-end profile advanced 205 sim
    ticks during its 10-second window against ~200 expected at 20 Hz, holding cadence to within a
    few ticks of real time while frames took 92 ms — so the
@@ -165,17 +181,21 @@ replacement before measuring again.
    should be expected to do worse. This is the "early signal to revisit the Phaser bet" the
    Validation section above names. S4b deliberately measures without diagnosing or optimizing;
    the first question for whoever picks it up is where the frame time actually goes.
-2. **The scripted route is 329 cells against a committed floor of 600.** The floor cannot be met
-   at this ADR's own ~150-tower figure: a 2×2 tower buys ≈ 2.2 cells of route, so 150 towers cap
-   near 330 on _any_ board size (measured over band-only layouts under a ≤ 150-tower budget:
-   40×40 → 307, 50×50 → 298, 60×60 → 308, 80×80 → 329; the committed 40×40 layout reaches 329
-   with six additional tail baffles). On the 40×40 board, 600 is unreachable at **any** tower
-   count — twelve bands is all that fits, capping at 459 — so reaching it needs both a larger
-   board and roughly 270 towers. Escalated rather than lowered to fit: the threshold stays at
-   600 and the oracle still reports the shortfall, carried as a named known-open finding so it
-   cannot mask every other signal in the same CI job. A **second, un-waivable** assertion pins
-   the measured 329, so the waiver covers 329→600 and nothing below it.
-3. **The relative CI gate is noisier than its own tolerance.** This ADR asked for a regression
+2. **The scripted route is 329 cells against a committed floor of 600 — RESOLVED by ruling,
+   2026-07-31: the floor is re-pinned to the measured 329.** The 600 could not be met at this
+   ADR's own ~150-tower figure: a 2×2 tower buys ≈ 2.2 cells of route, so 150 towers cap near 330
+   on _any_ board size (measured over band-only layouts under a ≤ 150-tower budget: 40×40 → 307,
+   50×50 → 298, 60×60 → 308, 80×80 → 329; the committed 40×40 layout reaches 329 with six
+   additional tail baffles). On the 40×40 board, 600 is unreachable at **any** tower count —
+   twelve bands is all that fits, capping at 459 — so reaching it needs both a larger board and
+   roughly 270 towers, which would make the scene less like real play rather than more. S4b
+   escalated rather than lowered to fit, as PLAN step 18 requires; the escalation is now
+   answered. The oracle carries **one** un-waivable assertion at 329 with zero slack (the sim is
+   deterministic, so an unchanged layout reproduces it exactly), the waived twin is gone, and
+   `KNOWN_OPEN_ASSERTIONS` is **empty**.
+
+3. **The relative CI gate is noisier than its own tolerance — ACCEPTED as-is by ruling,
+   2026-07-31, with the flake rate on record.** This ADR asked for a regression
    gate that would not be hostage to runner variance, and the answer was a ratio —
    `R = p99(stress due-blast ticks) / p50(control)`, both measured in one process, so a uniformly
    slower machine moves both terms and cancels out. **The cancellation is real for scale and
@@ -187,16 +207,17 @@ replacement before measuring again.
    the ceiling that `R0` creates. Widening the tolerance is not the fix: absorbing that sample
    needs `TOLERANCE ≥ 1.31`, and a gate that permits a 31% regression in blast cost before
    complaining is not worth running. Re-recording `R0` from all eight changes no sample's verdict.
-   Raised, not resolved: the gate ships as-is (`perf` is not a required check, so a flake is noise
-   rather than something that stops a merge) with the full record in `packages/perf/src/gate.ts`.
-   The owner's options are to accept the flake rate, move the job to a dedicated runner and
-   re-record, or change the statistic so numerator and denominator carry tail alike — a
-   like-for-like p99/p99 comparison drifted only ±0.7%, but that figure comes from **three local
-   runs on a quiet machine and has never been measured on CI**, so it is a lead rather than a
-   remedy.
+   The ruling is to **ship as-is and live with the flake** (`perf` is not a required check, so a
+   flake is noise rather than something that stops a merge), with the full record in
+   `packages/perf/src/gate.ts`. The two alternatives were weighed and declined for now: a
+   dedicated runner costs infrastructure for a non-required job, and switching to p99/p99 rests
+   on a ±0.7% figure from **three local runs on a quiet machine that has never been measured on
+   CI** — adopting it as the fix would repeat the exact reasoning that produced the untransferable
+   `R0 = 1.69`. Revisit if the job flakes in practice; the honest expectation, from the only
+   population measured, is roughly 1 run in 8.
 
-Everything else measured clear, with margin: JS heap **47.4 MB** on the low-end profile (the one
-the ~256 MB budget is written for), worst-of-20 input latency **56.7 ms** against 100 ms, and
+Everything else measured clear, with margin: JS heap **42.1 MB** on the low-end profile (the one
+the ~256 MB budget is written for), worst-of-20 input latency **34.4 ms** against 100 ms, and
 initial JS **0.36 MB** gzipped against 3 MB — **JS only, and that is the whole payload:
 this build ships no wasm**, so the budget's "JS (+ wasm)" and the measurement cover the same
 bytes. If a wasm module ever lands, `scripts/size-limit.mjs` must be widened before this figure

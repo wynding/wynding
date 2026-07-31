@@ -89,8 +89,15 @@ export interface EscalationResult {
   readonly knownOpenFailures: readonly OracleAssertion[];
   /** Names from `KNOWN_OPEN_ASSERTIONS` whose assertion is currently PASSING this
    *  run — a stale waiver (`KNOWN_OPEN_ASSERTIONS`'s doc comment: "say so loudly and
-   *  tell the reader to remove it — a stale waiver is its own defect"). Not itself a
-   *  cause of `exitNonZero`: a stale waiver is a finding to report, not a failure. */
+   *  tell the reader to remove it — a stale waiver is its own defect").
+   *
+   *  This DOES force `exitNonZero` (owner ruling, 2026-07-31). It previously did not, on
+   *  the reasoning that a stale waiver is a finding to report rather than a failure. The
+   *  hole that left: a waived assertion that gets fixed and later regresses lands back
+   *  inside its own waiver band and exits 0 — for the route length, anything between the
+   *  floor and the waived threshold would have been invisible. Failing costs a one-line
+   *  edit at exactly the moment someone has improved things and can see why; not failing
+   *  costs a silent regression later. */
   readonly staleKnownOpen: readonly string[];
 }
 
@@ -103,6 +110,13 @@ export interface EscalationResult {
  * failures here — there is no mechanism for a control-window regression, or either replay
  * being rejected by the validator, to ride through on the maze's known-open waiver.
  *
+ * `knownOpen` — the waiver list, defaulting to the module's `KNOWN_OPEN_ASSERTIONS`. A
+ * parameter rather than a hard reference so this function's behaviour around waivers can
+ * be tested against a list of the test's choosing — the committed list is EMPTY today
+ * (its one entry was resolved by owner ruling), and a waiver mechanism that only has
+ * tests while some finding happens to be open is a mechanism that rots between uses. The
+ * same shape `evaluateGate` uses for `r0`; `run.ts` always takes the default.
+ *
  * `gatePass` — `true` when the ratio gate PASSED, or was NOT EVALUATED at all (an
  * `'unset'` R0 — a recording-only run — or fewer than `DUE_BLAST_SAMPLES_THRESHOLD`
  * due-blast samples in the window, see `run.ts`); `false` only when the gate WAS evaluated
@@ -114,16 +128,17 @@ export interface EscalationResult {
 export function evaluateEscalation(
   assertions: readonly OracleAssertion[],
   gatePass: boolean,
+  knownOpen: readonly string[] = KNOWN_OPEN_ASSERTIONS,
 ): EscalationResult {
   const failing = assertions.filter((a) => !a.pass);
-  const isKnownOpen = (a: OracleAssertion): boolean => KNOWN_OPEN_ASSERTIONS.includes(a.name);
+  const isKnownOpen = (a: OracleAssertion): boolean => knownOpen.includes(a.name);
   const nonKnownOpenFailures = failing.filter((a) => !isKnownOpen(a));
   const knownOpenFailures = failing.filter(isKnownOpen);
-  const staleKnownOpen = KNOWN_OPEN_ASSERTIONS.filter((name) =>
+  const staleKnownOpen = knownOpen.filter((name) =>
     assertions.some((a) => a.name === name && a.pass),
   );
   return {
-    exitNonZero: nonKnownOpenFailures.length > 0 || !gatePass,
+    exitNonZero: nonKnownOpenFailures.length > 0 || !gatePass || staleKnownOpen.length > 0,
     nonKnownOpenFailures,
     knownOpenFailures,
     staleKnownOpen,

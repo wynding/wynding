@@ -63,13 +63,12 @@ const SAMPLE_WINDOW_MS = 10_000;
  *  percentile. */
 const INPUT_LATENCY_SAMPLES = 20;
 
-/** QC round 2: the original floor was 100, justified by "10 real seconds at even a
- *  terrible ~15 fps is 150 frames" — a GUESS, and this story's own recorded low-end
- *  run refuted it: the low-end profile (6x CPU throttle) posted p50=91.8ms (10.9 fps)
- *  and produced only 107 frames in the 10s window (`docs/design-notes/
- *  performance-spike.md`). A floor of 100 was one slow run away from failing on a
- *  genuine, if slow, measurement — exactly the flap this file exists to avoid
- *  elsewhere.
+/** The original floor was 100, justified by "10 real seconds at even a terrible ~15 fps
+ *  is 150 frames" — a GUESS, and the recorded low-end run refuted it: the low-end
+ *  profile (6x CPU throttle) produced only 107 frames in its 10s window (that run has
+ *  since been superseded; the current one produces 167, but the point stands). A floor
+ *  of 100 was one slow run away from failing on a genuine, if slow, measurement —
+ *  exactly the flap this file exists to avoid elsewhere.
  *
  *  Set against the MEASURED 107 instead: this floor exists only to catch "the
  *  sampling loop measured nothing" (a genuinely stalled or newly-broken loop — zero or
@@ -172,6 +171,26 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
   const bounty = await page.evaluate(() => window.wyndingPerf!.bounty());
   expect(bounty).toBe(LEFTOVER_BOUNTY_THRESHOLD);
 
+  // FRAME SAMPLING RUNS FIRST, BEFORE THE LATENCY CLICKS, and the order is load-bearing
+  // (owner ruling, 2026-07-31). The clicks take profile-dependent wall time while the sim
+  // keeps advancing, so sampling after them started each profile's window at a different
+  // tick with a different board — the slower profile got the LIGHTER scene, which is
+  // backwards, and made the two profiles' frame times non-comparable with each other.
+  // Sampling first pins both windows to the same tick and the same population.
+  //
+  // fps: sample real rAF frame deltas over a sustained window (never a single lucky
+  // frame, per ADR 0005's methodology). `startSampling` resolves its own promise once
+  // the window closes, so this `evaluate` call blocks for ~`SAMPLE_WINDOW_MS`.
+  // QC (the frozen-sim-loop guard): bracket the window with `tick()` reads, proving the sim actually
+  // advanced while sampling was in progress — see `MIN_TICKS_ADVANCED`'s doc comment.
+  const tickAtSampleStart = await page.evaluate(() => window.wyndingPerf!.tick());
+  await page.evaluate((ms) => window.wyndingPerf!.startSampling(ms), SAMPLE_WINDOW_MS);
+  const tickAtSampleEnd = await page.evaluate(() => window.wyndingPerf!.tick());
+  expect(tickAtSampleEnd).toBeGreaterThanOrEqual(tickAtSampleStart + MIN_TICKS_ADVANCED);
+
+  const frameDeltas = await page.evaluate(() => window.wyndingPerf!.frameDeltas);
+  const frameTimesMs = frameDeltas.filter((d) => d > 0);
+
   // Input latency: real pointer clicks (Playwright's `locator.click()` dispatches
   // genuine trusted-ish pointer events, not a synthetic DOM event), each toggling
   // arm/disarm on the first Rail Card. `main-perf.ts` times dispatch-to-observable-
@@ -201,19 +220,6 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
   // could.
   expect(inputLatencies).toHaveLength(INPUT_LATENCY_SAMPLES);
 
-  // fps: sample real rAF frame deltas over a sustained window (never a single lucky
-  // frame, per ADR 0005's methodology). `startSampling` resolves its own promise once
-  // the window closes, so this `evaluate` call blocks for ~`SAMPLE_WINDOW_MS`.
-  // QC (the frozen-sim-loop guard): bracket the window with `tick()` reads, proving the sim actually
-  // advanced while sampling was in progress — see `MIN_TICKS_ADVANCED`'s doc comment.
-  const tickAtSampleStart = await page.evaluate(() => window.wyndingPerf!.tick());
-  await page.evaluate((ms) => window.wyndingPerf!.startSampling(ms), SAMPLE_WINDOW_MS);
-  const tickAtSampleEnd = await page.evaluate(() => window.wyndingPerf!.tick());
-  expect(tickAtSampleEnd).toBeGreaterThanOrEqual(tickAtSampleStart + MIN_TICKS_ADVANCED);
-
-  const frameDeltas = await page.evaluate(() => window.wyndingPerf!.frameDeltas);
-  const frameTimesMs = frameDeltas.filter((d) => d > 0);
-
   // QC (the stalled-sampling-loop floor): the assertion that stops a stalled/suppressed sampling loop from
   // reporting `null` for every fps figure while the test itself stays green.
   // `packages/perf/src/stats.ts`'s `percentile` already throws on a genuinely EMPTY
@@ -234,11 +240,13 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
     p99: fpsAtFrameTimeMs(frameTimeMs.p99),
   };
 
-  // QC (the frozen-sim-loop guard, second half): re-read `liveCreepCount()` AFTER the sampling
-  // window too, not just before it. The pre-window read above is taken before 20
-  // throttled UI round-trips and 10s of sampling — a run that lost creeps to kills (or
-  // even resolved, though `endPhase` below would catch that) over that stretch would
-  // have its BOARD SIZE overstated by reporting only the earlier number.
+  // The frozen-sim-loop guard, second half: re-read `liveCreepCount()` after the sampling
+  // window and the latency clicks, not just before them — a run that lost creeps to kills
+  // (or even resolved, though `endPhase` below would catch that) over that stretch would
+  // have its BOARD SIZE overstated by reporting only the earlier number. Note this read
+  // now lands after the clicks rather than before them, so it is no longer the population
+  // the frame times were measured over; that is `liveCreepsAtSetup`, taken immediately
+  // before the window opens. Both are reported.
   const liveCreepsAtSampleEnd = await page.evaluate(() => window.wyndingPerf!.liveCreepCount());
 
   // The second budget-INDEPENDENT assertion, and it must run AFTER the window, not

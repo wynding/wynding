@@ -61,24 +61,27 @@ export const PEAK_LIVE_CREEPS_THRESHOLD = 280;
  *  count of that measurement, not a present count of this file's assertion list.) */
 export const MEDIAN_LIVE_CREEPS_THRESHOLD = 200;
 
-/** The scripted maze's entrance-to-exit route must be at least 600 cells — otherwise
- *  creeps clear the board too fast for 304 spawns (16 × 19, staggered) to ever be
- *  concurrently on the board at once, silently undershooting the ADR's concurrency
- *  target regardless of how many creeps are scheduled to spawn. */
-export const ROUTE_LENGTH_THRESHOLD = 600;
-
-/** The measured route-length FLOOR — 329 cells, the value this maze actually
- *  achieves — and, unlike `ROUTE_LENGTH_THRESHOLD` above, deliberately NOT eligible for
- *  `KNOWN_OPEN_ASSERTIONS` (see that list's doc: the 600-cell shortfall is the one
- *  waived entry today). `run.ts`'s `[KNOWN-OPEN]` tag on the 600-cell assertion prints
- *  under ESCALATION but exits 0 — that waiver is correct for the gap between 329 and
- *  600 (an owner-acknowledged, not-yet-resolved shortfall), but on its own it left
- *  EVERYTHING below 329 unmonitored too: a regression from 329 down to, say, 1 would
- *  print under the same `[KNOWN-OPEN]` tag and exit 0, invisible to CI. This second,
- *  un-waivable assertion pins the floor we actually measured, under a DISTINCT name
- *  from the 600-cell one, so it is never added to `KNOWN_OPEN_ASSERTIONS` by a future
- *  edit that means to waive the other one. The waiver covers 329..600; it covers
- *  nothing below 329. */
+/** The scripted maze's entrance-to-exit route floor: **329 cells**, the value this maze
+ *  actually achieves. A route that is too short lets creeps clear the board faster than
+ *  304 staggered spawns (16 × 19) can accumulate, silently undershooting the ADR's
+ *  concurrency target regardless of how many creeps are scheduled.
+ *
+ *  RE-PINNED FROM 600 BY OWNER RULING, 2026-07-31. S4b committed 600 before measuring,
+ *  carried the 329 shortfall as a known-open finding, and escalated it rather than
+ *  lowering it to fit. The escalation was answered: 600 is not reachable at ADR 0005's
+ *  own ~150-tower figure on any board size (a 2×2 tower buys ≈2.2 cells of route, capping
+ *  near 330; measured 307/298/308/329 on 40×40/50×50/60×60/80×80), and on the committed
+ *  40×40 board it is unreachable at ANY tower count — twelve bands is all that fits,
+ *  capping at 459. Reaching 600 needs both a larger board and roughly 270 towers, which
+ *  would make the scene less like real play, not more. So the floor is now the measured
+ *  value, with that reasoning recorded here and in ADR 0005's finding 2.
+ *
+ *  This is a REGRESSION TRIPWIRE with zero slack, and that is deliberate: the sim is
+ *  fully deterministic against a committed replay, so an unchanged layout reproduces 329
+ *  exactly. Any drop fails CI. There is no longer a waiver above it — the previous
+ *  arrangement (a waived 600 assertion plus this un-waivable floor beneath it) existed
+ *  only to stop the 329..600 gap masking everything below 329, and collapses to a single
+ *  assertion now that the gap is closed by ruling. */
 export const ROUTE_LENGTH_FLOOR = 329;
 
 /** Every sample in the window must have `phase === 'running'`. A single non-`running`
@@ -103,11 +106,15 @@ export const REQUIRE_ALL_RUNNING = true;
  *   - The list is emptied by an OWNER RULING, not by a passing run. A green local run
  *     is not authorization to delete an entry.
  *
- * Currently: the scripted maze's route length (`ROUTE_LENGTH_THRESHOLD` above), a
- * real, measured shortfall (329 cells vs the committed 600-cell floor) escalated to
- * the owner per PLAN step 18 — "never lowered to fit" — and not yet resolved.
+ * **Currently EMPTY**, and that is the intended resting state. Its one entry — the
+ * scripted maze's 329-vs-600 route shortfall — was resolved by owner ruling on
+ * 2026-07-31 (see `ROUTE_LENGTH_FLOOR` above): the floor was re-pinned to the measured
+ * value, so the assertion passes on its own terms and needs no waiver. The mechanism
+ * stays because the next escalated-but-unresolved finding will need it; an empty list
+ * means every oracle assertion currently fails CI on its own merits, which is the
+ * healthy state.
  */
-export const KNOWN_OPEN_ASSERTIONS: readonly string[] = ['scripted maze route length'];
+export const KNOWN_OPEN_ASSERTIONS: readonly string[] = [];
 
 /** At least 500 samples (an ABSOLUTE count, not a ratio of the window) must have at
  *  least one due blast. This is deliberately a count, not a percentage: it is ALSO the
@@ -250,12 +257,6 @@ export function runOracle(input: OracleInput): OracleResult {
     },
     {
       name: 'scripted maze route length',
-      measured: routeLength,
-      threshold: ROUTE_LENGTH_THRESHOLD,
-      pass: routeLength >= ROUTE_LENGTH_THRESHOLD,
-    },
-    {
-      name: 'scripted maze route length — measured floor',
       measured: routeLength,
       threshold: ROUTE_LENGTH_FLOOR,
       pass: routeLength >= ROUTE_LENGTH_FLOOR,

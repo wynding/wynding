@@ -1,8 +1,8 @@
 // escalation.test.ts — the known-open exit-code decision, separating owner-
-// acknowledged open findings from ordinary failures. Every
-// scenario PLAN's fix asked for by name: a non-known-open failure exits non-zero; a
-// known-open failure alone does not; a gate failure alone does; a known-open
-// assertion that passes is reported as stale.
+// acknowledged open findings from ordinary failures. Every scenario PLAN's fix asked for
+// by name: a non-known-open failure exits non-zero; a known-open failure alone does not;
+// a gate failure alone does; and a known-open assertion that PASSES is a stale waiver,
+// which exits non-zero too (owner ruling, 2026-07-31).
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -20,42 +20,63 @@ function assertion(name: string, pass: boolean): OracleAssertion {
   return { name, measured: pass, threshold: true, pass };
 }
 
-const KNOWN_OPEN_NAME = KNOWN_OPEN_ASSERTIONS[0]!;
+// A waiver list of this test's choosing, not the committed one: `KNOWN_OPEN_ASSERTIONS`
+// is EMPTY today (its single entry was resolved by owner ruling on 2026-07-31), and these
+// cases must keep testing the mechanism whether or not a finding happens to be open.
+const KNOWN_OPEN_NAME = 'scripted maze route length';
+const WAIVED = [KNOWN_OPEN_NAME];
 
 describe('evaluateEscalation()', () => {
   it('a non-known-open failure exits non-zero', () => {
-    const result = evaluateEscalation([assertion('peak concurrent live creeps', false)], true);
+    const result = evaluateEscalation(
+      [assertion('peak concurrent live creeps', false)],
+      true,
+      WAIVED,
+    );
     expect(result.exitNonZero).toBe(true);
     expect(result.nonKnownOpenFailures.map((a) => a.name)).toEqual(['peak concurrent live creeps']);
   });
 
   it('a known-open failure alone does not exit non-zero', () => {
-    const result = evaluateEscalation([assertion(KNOWN_OPEN_NAME, false)], true);
+    const result = evaluateEscalation([assertion(KNOWN_OPEN_NAME, false)], true, WAIVED);
     expect(result.exitNonZero).toBe(false);
     expect(result.knownOpenFailures.map((a) => a.name)).toEqual([KNOWN_OPEN_NAME]);
     expect(result.nonKnownOpenFailures).toHaveLength(0);
   });
 
   it('a gate failure alone exits non-zero, even when every assertion passes', () => {
-    const result = evaluateEscalation([assertion('peak concurrent live creeps', true)], false);
+    const result = evaluateEscalation(
+      [assertion('peak concurrent live creeps', true)],
+      false,
+      WAIVED,
+    );
     expect(result.exitNonZero).toBe(true);
     expect(result.nonKnownOpenFailures).toHaveLength(0);
   });
 
-  it('a known-open assertion that currently passes is reported as a stale waiver', () => {
-    const result = evaluateEscalation([assertion(KNOWN_OPEN_NAME, true)], true);
+  it('a known-open assertion that currently passes is a STALE WAIVER and exits non-zero', () => {
+    // Owner ruling, 2026-07-31: a stale waiver fails the job rather than merely printing.
+    // The window it closes: a waived assertion that gets fixed and later regresses lands
+    // back inside its own waiver band and would otherwise exit 0 — for the route length
+    // that was every value between the un-waivable floor and the waived threshold.
+    const result = evaluateEscalation([assertion(KNOWN_OPEN_NAME, true)], true, WAIVED);
     expect(result.staleKnownOpen).toEqual([KNOWN_OPEN_NAME]);
-    expect(result.exitNonZero).toBe(false);
+    expect(result.exitNonZero).toBe(true);
+    expect(result.nonKnownOpenFailures).toHaveLength(0); // nothing FAILED; the waiver is the defect
   });
 
   it('a known-open failure plus a gate failure still exits non-zero — the gate forces it, not the waiver', () => {
-    const result = evaluateEscalation([assertion(KNOWN_OPEN_NAME, false)], false);
+    const result = evaluateEscalation([assertion(KNOWN_OPEN_NAME, false)], false, WAIVED);
     expect(result.exitNonZero).toBe(true);
     expect(result.knownOpenFailures).toHaveLength(1);
   });
 
   it('a fully passing run with a passing gate does not exit non-zero and reports no stale waiver when the known-open assertion is absent from this run', () => {
-    const result = evaluateEscalation([assertion('peak concurrent live creeps', true)], true);
+    const result = evaluateEscalation(
+      [assertion('peak concurrent live creeps', true)],
+      true,
+      WAIVED,
+    );
     expect(result.exitNonZero).toBe(false);
     expect(result.staleKnownOpen).toHaveLength(0);
   });
@@ -156,5 +177,17 @@ describe('allRunAssertions() — the whole run in one list', () => {
     const all = allRunAssertions({ oracle, control, replays: replays() });
     expect(all[0]).toEqual(oracle[0]);
     expect(all[1]).toEqual(control[0]);
+  });
+});
+
+describe('the committed waiver list', () => {
+  it('is what evaluateEscalation uses when no list is passed', () => {
+    // The default-parameter path, which `run.ts` is the only real caller of. Every case
+    // above passes an explicit list, so without this the default would be untested — the
+    // same gap `gate.test.ts` closes for `R0`.
+    const stale = evaluateEscalation([assertion('scripted maze route length', true)], true);
+    expect(stale.staleKnownOpen).toEqual([]);
+    expect(stale.exitNonZero).toBe(false);
+    expect(KNOWN_OPEN_ASSERTIONS).toEqual([]);
   });
 });
