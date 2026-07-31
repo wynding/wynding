@@ -151,8 +151,8 @@ describe('compileRuleset — creep catalog domains', () => {
     rejects((b) => (b.creepCatalog[0]!.domain = 'air'));
   });
 
-  it('rejects nonzero armor / any immunity / role — all capability-gated to 0/none at simVersion 5', () => {
-    rejects((b) => (b.creepCatalog[0]!.armor = 1));
+  it('rejects armor past the capability ceiling, and any immunity / role — capability-gated (M2-S5a widened maxArmor 0 → 16)', () => {
+    rejects((b) => (b.creepCatalog[0]!.armor = 17)); // one past the live profile's maxArmor ceiling
     rejects((b) => (b.creepCatalog[0]!.immunities = ['slow']));
     rejects((b) => (b.creepCatalog[0]!.role = 'boss'));
   });

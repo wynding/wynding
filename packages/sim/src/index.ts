@@ -968,6 +968,7 @@ export function step(
     field,
     grid,
     towerById,
+    creepById,
     balance.slowFloorNum,
     balance.slowFloorDen,
     events,

@@ -29,8 +29,10 @@ export class RulesetError extends Error {
  *  status columns) bumped 6 → 7; M2 Story 4a (AoE: `Impact` becomes a
  *  `targeted`/`blast` discriminated union — hash-breaking even for single-target
  *  play — plus the `aoe` direct form and the form-uniform/radius-uniform
- *  compile-time gates) bumps 7 → 8. */
-export const SIM_VERSION = 8;
+ *  compile-time gates) bumped 7 → 8; M2 Story 5a (flat armor arithmetic on the
+ *  `direct` primitive, resolved per creep row via the `creepById` combat seam)
+ *  bumps 8 → 9. */
+export const SIM_VERSION = 9;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

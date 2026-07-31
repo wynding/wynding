@@ -34,6 +34,42 @@ const LANE = {
 const cx = (col: number): number => col * 256 + 128;
 const cy = (row: number): number => row * 256 + 128;
 
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a — this
+// local wrapper supplies an empty one (`{}`, unarmored) so this file's ~17 existing
+// call sites, which exercise pre-armor behaviour, don't need one-by-one edits. The
+// param types are DERIVED from `runCombat` itself (never duplicated) so this wrapper
+// can never silently drift from the real signature (mirrors `combat.test.ts`'s
+// `runCombatT`).
+type RunCombatParams = Parameters<typeof runCombat>;
+function runCombatT(
+  creeps: RunCombatParams[0],
+  towers: RunCombatParams[1],
+  impacts: RunCombatParams[2],
+  tick: RunCombatParams[3],
+  bounty: RunCombatParams[4],
+  field: RunCombatParams[5],
+  grid: RunCombatParams[6],
+  towerById: RunCombatParams[7],
+  slowFloorNum: RunCombatParams[9],
+  slowFloorDen: RunCombatParams[10],
+  events?: RunCombatParams[11],
+): ReturnType<typeof runCombat> {
+  return runCombat(
+    creeps,
+    towers,
+    impacts,
+    tick,
+    bounty,
+    field,
+    grid,
+    towerById,
+    {},
+    slowFloorNum,
+    slowFloorDen,
+    events,
+  );
+}
+
 /** A creep whose DERIVED point is exactly `(px,py)` — a progress-0 transitional row
  *  (mirrors `combat.test.ts`'s `creepAtPoint`). */
 function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCreeps {
@@ -114,7 +150,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
       radiusFp: RADIUS,
       effects: [{ kind: 'direct', amount: 10 }],
     };
-    const onResult = runCombat(
+    const onResult = runCombatT(
       onBoundary,
       emptyTowers(),
       [impact],
@@ -129,7 +165,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
     expect(onResult.creeps.hp[0]).toBe(90); // hit — inclusive boundary
 
     const beyond = creepAtPoint(1, CENTER.x + RADIUS + 1, CENTER.y, 100);
-    const beyondResult = runCombat(
+    const beyondResult = runCombatT(
       beyond,
       emptyTowers(),
       [impact],
@@ -165,7 +201,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
     };
 
     const onCircle = creepAtPoint(1, CENTER.x + 180, CENTER.y + 240, 100);
-    const onResult = runCombat(
+    const onResult = runCombatT(
       onCircle,
       emptyTowers(),
       [impact],
@@ -182,7 +218,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
     // Both individual deltas (181, 240) stay under `range` (300), so the Chebyshev
     // early-out cannot reject this on its own — only the true circle test can.
     const justOutside = creepAtPoint(1, CENTER.x + 181, CENTER.y + 240, 100);
-    const outsideResult = runCombat(
+    const outsideResult = runCombatT(
       justOutside,
       emptyTowers(),
       [impact],
@@ -216,7 +252,7 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       radiusFp: 50,
       effects: [{ kind: 'direct', amount: 15 }],
     };
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
@@ -249,7 +285,7 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       radiusFp: 50,
       effects: [{ kind: 'direct', amount: 15 }],
     };
-    const resultA = runCombat(
+    const resultA = runCombatT(
       restingCreeps(rowsA),
       emptyTowers(),
       [impact],
@@ -261,7 +297,7 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       SF_NUM,
       SF_DEN,
     );
-    const resultB = runCombat(
+    const resultB = runCombatT(
       restingCreeps(rowsB),
       emptyTowers(),
       [impact],
@@ -348,7 +384,7 @@ describe('blastMembers — eligibility guards (membership, not ordering)', () =>
       radiusFp: 50,
       effects: [{ kind: 'direct', amount: 15 }],
     };
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
@@ -401,7 +437,7 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
     creeps.speed[0] = 1_000_000;
 
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       towers,
       [],
@@ -437,7 +473,7 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
     creeps.slowMulFp[0] = 64; // quarter-speed multiplier (mulFp/256)
     creeps.slowUntilTick[0] = 1_000; // still active at fire time (tick 0)
 
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       towers,
       [],
@@ -488,7 +524,7 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
     creeps.speed[0] = 100;
 
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       towers,
       [],
@@ -517,7 +553,7 @@ describe('blast resolution — fired StepEvents carries the scheduled destinatio
 
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       towers,
       [],
@@ -557,7 +593,7 @@ describe('blast resolution — dead-target-in-flight still blasts; zero-member s
 
     // Tick 0: fire at a resting, in-range creep (id 1).
     const t0Creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 10_000 }]);
-    const t0 = runCombat(
+    const t0 = runCombatT(
       t0Creeps,
       towers,
       [],
@@ -581,7 +617,7 @@ describe('blast resolution — dead-target-in-flight still blasts; zero-member s
     const resolveCreeps = creepAtPoint(2, blast.x, blast.y, 100);
 
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(
+    const result = runCombatT(
       resolveCreeps,
       towers,
       t0.impacts,
@@ -610,7 +646,7 @@ describe('blast resolution — dead-target-in-flight still blasts; zero-member s
       effects: [{ kind: 'direct', amount: 10 }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(
+    const result = runCombatT(
       emptyCreeps(),
       emptyTowers(),
       [impact],
@@ -652,7 +688,7 @@ describe('blast resolution — a lethal blast still kills and sweeps; a survivin
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
       ],
     };
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
@@ -811,7 +847,7 @@ describe('forged-blast bounds (Codex R1-16) — dropped with no unsafe arithmeti
     const events: StepEvents = { impactPoints: [], fired: [] };
     let result!: ReturnType<typeof runCombat>;
     expect(() => {
-      result = runCombat(
+      result = runCombatT(
         creeps,
         emptyTowers(),
         malformed,

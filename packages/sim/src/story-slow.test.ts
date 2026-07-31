@@ -36,6 +36,42 @@ const LANE = {
 const cx = (col: number): number => col * 256 + 128;
 const cy = (row: number): number => row * 256 + 128;
 
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a — this
+// local wrapper supplies an empty one (`{}`, unarmored) so this file's ~11 existing
+// call sites, which exercise pre-armor behaviour, don't need one-by-one edits. The
+// param types are DERIVED from `runCombat` itself (never duplicated) so this wrapper
+// can never silently drift from the real signature (mirrors `combat.test.ts`'s
+// `runCombatT`).
+type RunCombatParams = Parameters<typeof runCombat>;
+function runCombatT(
+  creeps: RunCombatParams[0],
+  towers: RunCombatParams[1],
+  impacts: RunCombatParams[2],
+  tick: RunCombatParams[3],
+  bounty: RunCombatParams[4],
+  field: RunCombatParams[5],
+  grid: RunCombatParams[6],
+  towerById: RunCombatParams[7],
+  slowFloorNum: RunCombatParams[9],
+  slowFloorDen: RunCombatParams[10],
+  events?: RunCombatParams[11],
+): ReturnType<typeof runCombat> {
+  return runCombat(
+    creeps,
+    towers,
+    impacts,
+    tick,
+    bounty,
+    field,
+    grid,
+    towerById,
+    {},
+    slowFloorNum,
+    slowFloorDen,
+    events,
+  );
+}
+
 describe('placeTower — by catalog towerId', () => {
   const RULESET = testRuleset(LANE, { extraTowers: [TEST_SLOW_TOWER] });
 
@@ -208,7 +244,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 100, durationTicks: 5 }, // stronger — replaces
       ],
     };
-    const result = runCombat(
+    const result = runCombatT(
       oneRestingCreep(100),
       emptyTowers(),
       [impact],
@@ -234,7 +270,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 200, durationTicks: 5 }, // weaker — no-op
       ],
     };
-    const result = runCombat(
+    const result = runCombatT(
       oneRestingCreep(100),
       emptyTowers(),
       [impact],
@@ -263,7 +299,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 128, durationTicks: 10 }, // equal strength — refreshes
       ],
     };
-    const result = runCombat(
+    const result = runCombatT(
       oneRestingCreep(100),
       emptyTowers(),
       [impact],
@@ -289,7 +325,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
       ],
     };
-    const result = runCombat(
+    const result = runCombatT(
       oneRestingCreep(100),
       emptyTowers(),
       [impact],
@@ -317,7 +353,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'direct', amount: 999 },
       ],
     };
-    const result = runCombat(
+    const result = runCombatT(
       oneRestingCreep(10),
       emptyTowers(),
       [impact],
@@ -373,7 +409,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         ],
       },
     ];
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       impacts,
@@ -402,7 +438,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         { kind: 'slow', mulFp: 128, durationTicks: 40 },
       ],
     };
-    const result = runCombat(
+    const result = runCombatT(
       oneRestingCreep(100),
       emptyTowers(),
       [atCap],
@@ -427,7 +463,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         amount: 1,
       })),
     };
-    const untouched = runCombat(
+    const untouched = runCombatT(
       oneRestingCreep(100),
       emptyTowers(),
       [overCap],
@@ -453,7 +489,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       targetId: 1,
       effects: [{ kind: 'slow', mulFp: 128, durationTicks: 40 }],
     };
-    const result = runCombat(
+    const result = runCombatT(
       oneRestingCreep(100),
       emptyTowers(),
       [overdue],
@@ -494,7 +530,7 @@ describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
   }
 
   it('is still active AT its final tick (inclusive), then cleared by the sweep', () => {
-    const result = runCombat(
+    const result = runCombatT(
       slowedCreep(5),
       emptyTowers(),
       [],
@@ -513,7 +549,7 @@ describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
   });
 
   it('is NOT cleared one tick before its boundary', () => {
-    const result = runCombat(
+    const result = runCombatT(
       slowedCreep(5),
       emptyTowers(),
       [],

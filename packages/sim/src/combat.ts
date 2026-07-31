@@ -52,7 +52,7 @@ import {
 } from './movement';
 import { effectiveSpeedFp } from './ruleset-shared';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
-import type { CompiledEffect, CompiledTower } from './ruleset';
+import type { CompiledCreep, CompiledEffect, CompiledTower } from './ruleset';
 
 // Combat tuning (range, per-hit damage, fire cadence, projectile travel) is NO
 // LONGER a hardcoded constant here — Story 5 migrated it into the ruleset bundle
@@ -435,12 +435,17 @@ function findLiveCreep(creeps: CombatCreeps, targetId: number, grid: Grid): Live
   return null;
 }
 
-/** Apply one `direct` effect to a creep row; branch-saturating (no underflow). */
-function applyDirect(creeps: CombatCreeps, idx: number, amount: number): void {
+/** Apply one `direct` effect to a creep row, net of flat `armor` (M2-S5a):
+ *  `max(0, amount - armor)` blanks a hit at or under the creep's armor entirely.
+ *  Still branch-saturating (no underflow) on the ARMORED amount — armor can only
+ *  shrink the damage applied here, never change the no-underflow discipline
+ *  itself, so a `0`-armor call is byte-identical to the pre-armor subtraction. */
+function applyDirect(creeps: CombatCreeps, idx: number, amount: number, armor: number): void {
   const hp = creeps.hp[idx] as number;
-  // Subtraction runs only when amount < hp, so the result is always a positive
+  const armored = amount > armor ? amount - armor : 0;
+  // Subtraction runs only when armored < hp, so the result is always a positive
   // safe integer — never a raw subtraction that could pass MIN_SAFE_INTEGER.
-  creeps.hp[idx] = amount >= hp ? 0 : hp - amount;
+  creeps.hp[idx] = armored >= hp ? 0 : hp - armored;
 }
 
 /**
@@ -542,6 +547,13 @@ function blastRadiusOf(effects: readonly CompiledEffect[]): number | null {
  * Shared by `targeted` and `blast` resolution: m2.md's "per creep" nesting is
  * IDENTICAL for both — a blast's outer loop over its radius membership is the only
  * difference from a targeted impact's trivial one-creep "loop".
+ *
+ * `creepById` (M2-S5a) resolves this row's armor ONCE — a single lookup reused for
+ * every `direct` effect in PASS 1, never re-resolved per effect. The `?? 0` is a
+ * TOTALITY RAIL, not a balance choice: an unresolved `creepId` (forged state, or a
+ * row whose catalog entry the caller never compiled) takes unarmored damage rather
+ * than throwing — the same never-throw discipline every other lookup in this file
+ * already carries.
  */
 export function applyImpactToCreep(
   creeps: CombatCreeps,
@@ -549,9 +561,11 @@ export function applyImpactToCreep(
   effects: readonly EffectPrimitive[],
   tick: number,
   killedByImpact: Set<number>,
+  creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
 ): void {
+  const armor = creepById[creeps.creepId[idx] as string]?.armor ?? 0;
   for (const effect of effects) {
-    if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount);
+    if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount, armor);
   }
   if ((creeps.hp[idx] as number) <= 0) {
     killedByImpact.add(idx);
@@ -723,6 +737,12 @@ export function blastMembers(
  * `targeted` or `blast` impact, per the tower's compiled effects) → EXPIRY SWEEP.
  * Impacts with `impactTick <= tick` resolve (draining forged overdue entries too)
  * in queue array-iteration order — a deterministic total order.
+ *
+ * `creepById` (M2-S5a) is REQUIRED, symmetric with `towerById` above it: it is the
+ * armor lookup `applyImpactToCreep` resolves once per creep row for every `direct`
+ * effect. Required rather than optional-with-a-`{}`-default deliberately — a
+ * forgotten call site must fail to compile, not silently simulate unarmored,
+ * which is exactly the class of bug this parameter exists to prevent.
  */
 export function runCombat(
   creeps: CombatCreeps,
@@ -733,6 +753,7 @@ export function runCombat(
   field: DistanceField,
   grid: Grid,
   towerById: Readonly<Partial<Record<string, CompiledTower>>>,
+  creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
   slowFloorNum: number,
   slowFloorDen: number,
   events?: StepEvents,
@@ -761,7 +782,7 @@ export function runCombat(
       if (found === null) continue;
       const { index: idx, point } = found;
       events?.impactPoints.push({ x: point.x, y: point.y, radiusFp: 0 }); // BEFORE damage
-      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact);
+      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact, creepById);
       continue;
     }
     // BLAST — the presentation event is emitted UNCONDITIONALLY, before membership
@@ -771,7 +792,7 @@ export function runCombat(
     // membership, never by the fire-time target's id.
     events?.impactPoints.push({ x: imp.x, y: imp.y, radiusFp: imp.radiusFp });
     for (const idx of blastMembers(creeps, grid, imp)) {
-      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact);
+      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact, creepById);
     }
   }
 

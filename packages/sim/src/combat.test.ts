@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { createInitialState, step, type SimInput } from './index';
-import type { TowerArrays } from './tower';
+import { emptyTowers, type TowerArrays } from './tower';
 import {
   runCombat,
   applyImpactToCreep,
@@ -14,6 +14,7 @@ import {
 } from './combat';
 import type { CompiledEffect } from './ruleset';
 import { testRuleset } from './test-support';
+import type { CreepDef } from '@wynding/types';
 
 // A large open board so targeting geometry is clean; exit on the right at row 6.
 const RULESET = testRuleset({
@@ -47,6 +48,42 @@ const DIRECT_DAMAGE = DIRECT_EFFECT.amount;
 // Bounty follows the compiled creep catalog for the same reason the tower stats do
 // above — a testBundle bounty edit must move these economy assertions with it.
 const KILL_BOUNTY = RULESET.creepById[RULESET.waves[0]!.spawns[0]!.creepId]!.bounty;
+
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a — this
+// local wrapper supplies an empty one (`{}`, unarmored) so this file's ~20 existing
+// call sites, which exercise pre-armor behaviour, don't need one-by-one edits. The
+// param types are DERIVED from `runCombat` itself (never duplicated) so this wrapper
+// can never silently drift from the real signature. Tests that exercise armor call
+// `runCombat`/`applyImpactToCreep` directly with a real `creepById`.
+type RunCombatParams = Parameters<typeof runCombat>;
+function runCombatT(
+  creeps: RunCombatParams[0],
+  towers: RunCombatParams[1],
+  impacts: RunCombatParams[2],
+  tick: RunCombatParams[3],
+  bounty: RunCombatParams[4],
+  field: RunCombatParams[5],
+  grid: RunCombatParams[6],
+  towerById: RunCombatParams[7],
+  slowFloorNum: RunCombatParams[9],
+  slowFloorDen: RunCombatParams[10],
+  events?: RunCombatParams[11],
+): ReturnType<typeof runCombat> {
+  return runCombat(
+    creeps,
+    towers,
+    impacts,
+    tick,
+    bounty,
+    field,
+    grid,
+    towerById,
+    {},
+    slowFloorNum,
+    slowFloorDen,
+    events,
+  );
+}
 
 /** One tower at (5,5); footprint centre = ((5+1)·256, (5+1)·256) = (1536,1536). */
 function oneTower(targetId = 0, nextFireTick = 0): TowerArrays {
@@ -113,7 +150,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: DIRECT_DAMAGE }]); // in range
     const towers = oneTower();
 
-    const t0 = runCombat(
+    const t0 = runCombatT(
       creeps,
       towers,
       [],
@@ -134,7 +171,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
     expect(t0.bounty).toBe(0);
 
     // Resolve at the impact tick: hp → 0, creep swept, bounty credited.
-    const t4 = runCombat(
+    const t4 = runCombatT(
       t0.creeps,
       towers,
       t0.impacts,
@@ -157,7 +194,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       { id: 2, col: 7, row: 7, hp: 100 }, // a bystander that must be untouched
     ]);
     const towers = oneTower();
-    const t0 = runCombat(
+    const t0 = runCombatT(
       creeps,
       towers,
       [],
@@ -187,7 +224,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       slowMulFp: [0],
       slowUntilTick: [0],
     };
-    const t4 = runCombat(
+    const t4 = runCombatT(
       withoutTarget,
       towers,
       t0.impacts,
@@ -211,7 +248,7 @@ describe('runCombat — inclusive range boundary', () => {
   it('targets a creep whose point is exactly RANGE away, but not one a unit beyond', () => {
     // Tower centre (1536,1536). A point at x = 1536 + RANGE, y = 1536 is exactly RANGE.
     const onEdge = creepAtPoint(1, 1536 + RANGE, 1536, 10);
-    const inRangeResult = runCombat(
+    const inRangeResult = runCombatT(
       onEdge,
       oneTower(),
       [],
@@ -226,7 +263,7 @@ describe('runCombat — inclusive range boundary', () => {
     expect(inRangeResult.impacts).toHaveLength(1); // inclusive — fired
 
     const beyond = creepAtPoint(1, 1536 + RANGE + 1, 1536, 10);
-    const outResult = runCombat(
+    const outResult = runCombatT(
       beyond,
       oneTower(),
       [],
@@ -266,7 +303,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
-    runCombat(
+    runCombatT(
       withoutTarget,
       oneTower(),
       [impact],
@@ -291,7 +328,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       oneTower(),
       [impact],
@@ -317,7 +354,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       oneTower(),
       [impact],
@@ -351,7 +388,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       },
     ];
     const events: StepEvents = { impactPoints: [], fired: [] };
-    const result = runCombat(
+    const result = runCombatT(
       creeps,
       oneTower(),
       impacts,
@@ -375,7 +412,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
     let impacts: Impact[] = [];
     const towers = oneTower();
     for (let t = 0; t <= FIRE_INTERVAL; t++) {
-      const r = runCombat(
+      const r = runCombatT(
         cur,
         towers,
         impacts,
@@ -401,7 +438,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
   it('firing emits exactly one fired event with the exact origin and tick window', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
     const events: StepEvents = { impactPoints: [], fired: [] };
-    runCombat(
+    runCombatT(
       creeps,
       oneTower(),
       [],
@@ -430,7 +467,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
   it('a wasted (no-target) tick fires nothing — no fired event either', () => {
     const creeps = restingCreeps([]); // nothing in range
     const events: StepEvents = { impactPoints: [], fired: [] };
-    runCombat(
+    runCombatT(
       creeps,
       oneTower(),
       [],
@@ -453,7 +490,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
     let cur = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
     let impacts: Impact[] = [];
     for (let t = 0; t < FIRE_INTERVAL; t++) {
-      const r = runCombat(
+      const r = runCombatT(
         cur,
         towers,
         impacts,
@@ -474,7 +511,7 @@ describe('runCombat — fired StepEvents (#32)', () => {
     // again. A state-derived origin (re-reading `towers.targetId` later) would report
     // B for BOTH shots; the fired-event route must keep the first shot's target as A.
     cur = restingCreeps([{ id: 2, col: 7, row: 6, hp: 1000 }]);
-    runCombat(
+    runCombatT(
       cur,
       towers,
       impacts,
@@ -507,7 +544,7 @@ describe('runCombat — sticky "first" targeting', () => {
       { id: 2, col: 7, row: 7, hp: 100 },
     ]);
     const towers = oneTower();
-    runCombat(
+    runCombatT(
       creeps,
       towers,
       [],
@@ -526,7 +563,7 @@ describe('runCombat — sticky "first" targeting', () => {
     // Acquire creep A (id 1) at col 7 alone.
     const towers = oneTower();
     const aOnly = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
-    runCombat(
+    runCombatT(
       aOnly,
       towers,
       [],
@@ -546,7 +583,7 @@ describe('runCombat — sticky "first" targeting', () => {
       { id: 1, col: 7, row: 6, hp: 100 },
       { id: 2, col: 9, row: 6, hp: 100 }, // nearer the exit — would win a fresh acquire
     ]);
-    runCombat(
+    runCombatT(
       bothPresent,
       towers,
       [],
@@ -562,7 +599,7 @@ describe('runCombat — sticky "first" targeting', () => {
 
     // A leaves play — the tower re-acquires the remaining in-range creep B.
     const bOnly = restingCreeps([{ id: 2, col: 9, row: 6, hp: 100 }]);
-    runCombat(
+    runCombatT(
       bOnly,
       towers,
       [],
@@ -611,7 +648,7 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
       { id: 9, hp: 100, progress: 100 },
     ]);
     const towers = oneTower();
-    runCombat(
+    runCombatT(
       creeps,
       towers,
       [],
@@ -633,7 +670,7 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
       { id: 1, hp: 100, progress: 70 },
     ]);
     const towers = oneTower();
-    runCombat(
+    runCombatT(
       creeps,
       towers,
       [],
@@ -656,7 +693,7 @@ describe('runCombat — fire cadence and no warm-up', () => {
     let impacts: Impact[] = [];
     const fireTicks: number[] = [];
     for (let t = 0; t <= FIRE_INTERVAL; t++) {
-      const r = runCombat(
+      const r = runCombatT(
         creeps,
         towers,
         impacts,
@@ -742,6 +779,7 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
       ],
       0,
       killedByImpact,
+      {},
     );
     expect(creeps.hp[0]).toBeLessThanOrEqual(0);
     expect(killedByImpact.has(0)).toBe(true);
@@ -761,9 +799,177 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
       ],
       0,
       killedByImpact,
+      {},
     );
     expect(creeps.hp[0]).toBeGreaterThan(0);
     expect(killedByImpact.has(0)).toBe(false);
     expect(creeps.slowMulFp[0]).toBe(128);
+  });
+});
+
+// M2-S5a — flat armor on the `direct` primitive (`applyDirect`'s `max(0, amount -
+// armor)`, resolved once per creep row via `runCombat`'s `creepById` param). All
+// five cases go through `runCombat` itself (not a private `applyDirect` unit call —
+// there is none exported), asserting the resulting hp as a NUMBER, never a hash
+// (the done-criterion's own framing).
+describe('runCombat — armor (M2-S5a)', () => {
+  /** An armored creep def, appended to the catalog under a distinct id so the
+   *  default 'normal' creep (armor 0) is untouched for every other test in this
+   *  file. `hp` is generous — these tests assert per-hit damage, not a kill. */
+  function armoredCreepDef(id: string, armor: number): CreepDef {
+    return {
+      id,
+      hp: 1000,
+      speedFp: 26,
+      armor,
+      domain: 'ground',
+      immunities: [],
+      leakCost: 1,
+      bounty: 1,
+    };
+  }
+
+  it("basic's damage 10 against armor 6 deals exactly 4 per hit (the done-criterion)", () => {
+    const ARMOR_RULESET = testRuleset(
+      { widthTiles: 14, heightTiles: 14, entrance: { col: 0, row: 6 }, exit: { col: 13, row: 6 } },
+      { extraCreeps: [armoredCreepDef('armored6', 6)] },
+    );
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    creeps.creepId[0] = 'armored6';
+    const impact: Impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      ARMOR_RULESET.creepById,
+      ARMOR_RULESET.balance.slowFloorNum,
+      ARMOR_RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000 - 4); // 10 - 6 armor = 4
+  });
+
+  it('armor at or above the incoming damage deals exactly 0 — the creep survives, provably', () => {
+    const ARMOR_RULESET = testRuleset(
+      { widthTiles: 14, heightTiles: 14, entrance: { col: 0, row: 6 }, exit: { col: 13, row: 6 } },
+      { extraCreeps: [armoredCreepDef('armored16', 16)] }, // 16 ≥ DIRECT_DAMAGE (10)
+    );
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    creeps.creepId[0] = 'armored16';
+    const impact: Impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      ARMOR_RULESET.creepById,
+      ARMOR_RULESET.balance.slowFloorNum,
+      ARMOR_RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000); // fully blanked
+    expect(result.creeps.hp[0]).toBeGreaterThan(0); // provably alive
+    expect(result.creeps.id).toContain(1); // present among survivors, not swept
+  });
+
+  it('armor 0 leaves the existing unarmored path byte-identical to today', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]); // creepId 'normal', armor 0
+    const impact: Impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // unarmored — no change
+  });
+
+  it("a blast's per-creep damage is armored the same way, for free (snapshotEffects collapses aoe → direct)", () => {
+    const ARMOR_RULESET = testRuleset(
+      { widthTiles: 14, heightTiles: 14, entrance: { col: 0, row: 6 }, exit: { col: 13, row: 6 } },
+      { extraCreeps: [armoredCreepDef('armored6', 6)] },
+    );
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    creeps.creepId[0] = 'armored6';
+    const point = { x: cx(7), y: cy(6) };
+    const impact: Impact = {
+      kind: 'blast',
+      impactTick: 0,
+      x: point.x,
+      y: point.y,
+      radiusFp: 300,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10, same as a splash's per-creep amount
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      ARMOR_RULESET.creepById,
+      ARMOR_RULESET.balance.slowFloorNum,
+      ARMOR_RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000 - 4); // armored identically to a targeted hit
+  });
+
+  it("a creep whose creepId doesn't resolve in creepById takes unarmored damage rather than throwing (totality rail)", () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    creeps.creepId[0] = 'ghost-creep-id'; // absent from RULESET.creepById entirely
+    const impact: Impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    let result: ReturnType<typeof runCombat> | undefined;
+    expect(() => {
+      result = runCombat(
+        creeps,
+        emptyTowers(),
+        [impact],
+        0,
+        0,
+        FIELD,
+        GRID,
+        TOWER_BY_ID,
+        RULESET.creepById,
+        RULESET.balance.slowFloorNum,
+        RULESET.balance.slowFloorDen,
+      );
+    }).not.toThrow();
+    expect(result?.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // unarmored — the `?? 0` rail
   });
 });
