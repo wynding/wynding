@@ -87,11 +87,12 @@ describe('stressAnchors()', () => {
   // `run.ts` used to each carry that copy independently, which could only ever drift
   // together since they were byte-identical).
   //
-  // PLAN step 18's committed floor for the scripted maze is 600 cells — this asserts
-  // the MEASURED value, 329, which falls short of that floor. This is a known
-  // shortfall, escalated to the owner per the plan (PLAN step 18: "If tuning cannot
-  // reach a floor, that is escalated as a finding, never lowered to fit"), not
-  // silently accepted here. Do not change either number to make them agree.
+  // 329 is the maze's committed route length and the oracle's un-waivable floor
+  // (`oracle.ts`'s `ROUTE_LENGTH_FLOOR`). PLAN step 18 committed 600 before measuring;
+  // the shortfall was escalated rather than lowered to fit, and the owner re-pinned the
+  // floor to the measured value on 2026-07-31 (ADR 0005 finding 2) because 600 is not
+  // reachable at the ADR's own ~150-tower figure on any board size. Changing this number
+  // to make something else agree is exactly what the escalation existed to prevent.
   it('routes the entrance to the exit in exactly 329 cells', () => {
     const text = readFileSync(STRESS_RULESET_URL, 'utf8');
     const bundle = parseRulesetJson(text);

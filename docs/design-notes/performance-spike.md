@@ -7,8 +7,9 @@ subsequent effect story (S5–S10); S11 runs the catalog-scale gate and the defe
 real-device pass._
 
 **Read the three headline findings first — [What the spike found](#what-the-spike-found).**
-They are numbered to match ADR 0005's amendment, which cites them by number.
-All three are recorded as findings for the owner, not as accepted results.
+They are numbered to match ADR 0005's amendment, which cites them by number. All three were
+recorded as findings for the owner rather than as accepted results, and **all three were ruled on
+2026-07-31**; each finding below carries its ruling.
 
 ## What is measured, and by what
 
@@ -230,6 +231,12 @@ eight, and the full record is the honest one to read this gate against:
 | 7   | 91029800584 | 23:15:44      | 93c3f90    | 2.5937     |
 | 8   | 91030969809 | 23:22:51      | f420491    | 2.6050     |
 
+The eight rows above are the population every figure in this section and in `gate.ts`'s `R0` doc
+is derived from — a snapshot taken when the ruling below was made, not a closed set. A ninth run
+(`408412e`) has since measured **2.3355**, a new low that widens the observed span to 39.1% and
+changes no conclusion here. Every CI run adds a sample; do not re-derive the statistics per run,
+and if the set is ever recomputed, recompute **all four copies** of them together.
+
 Samples 1–4 and 6 are the **same commit re-run five times**: 2.3585 → 3.2478, a **37.7% spread
 on byte-identical code**. Sample 6 is _above_ the 3.1125 ceiling; sample 5 is ~2.5% under it.
 
@@ -342,7 +349,7 @@ before the numbers exist optimizes the wrong thing. The first question for whoev
 is where the frame time actually goes — Phaser draw calls, the per-frame view-model derivation
 over 304 creeps, or the DOM overlay.
 
-### Finding 2 — the scripted route is 329 cells against a committed floor of 600
+### Finding 2 — the scripted route is 329 cells against a committed floor of 600 (ruled: re-pinned to 329)
 
 The workload oracle's route-length floor is **not met**, and cannot be met at ADR 0005's own
 ~150-tower figure. This is measured, not estimated:
@@ -368,12 +375,18 @@ to the ADR's target, not the target to the scene. **The decision is the owner's*
 as the measured near-maze-length route and re-pin the floor with that reasoning recorded, or
 raise the tower count above the ADR's ~150 and enlarge the board.
 
-Until then it is carried as a **named known-open finding** (`packages/perf/src/oracle.ts`'s
-`KNOWN_OPEN_ASSERTIONS`). The threshold stays at 600, the assertion still runs, and it still
-prints under `ESCALATION` — it simply does not, by itself, fail the CI job. That is deliberate:
-this shortfall is a **constant**, so a permanently-red job would make every other oracle
-assertion and the ratio gate invisible behind it, and a check that is always red is a check
-people learn to ignore. Any other oracle failure, and any gate failure, still fails CI.
+**Ruled 2026-07-31: the first branch.** The floor is re-pinned to the measured 329, with the
+reasoning above recorded in `oracle.ts`'s `ROUTE_LENGTH_FLOOR` and ADR 0005's finding 2. Reaching
+600 would need a larger board and roughly 270 towers, making the scene less like real play rather
+than more.
+
+The oracle now carries **one** route assertion, un-waivable, at 329, with zero slack — the sim is
+deterministic against a committed replay, so an unchanged maze reproduces it exactly and any drop
+fails CI. During the story it carried two (a waived 600 plus a floor beneath it), because a waiver
+with nothing under it left every value below 329 unmonitored: a maze with no path at all would
+have printed the same `[KNOWN-OPEN]` line and exited 0. With the gap closed by ruling there is
+nothing left to waive, and **`KNOWN_OPEN_ASSERTIONS` is now empty** — every oracle assertion fails
+CI on its own merits.
 
 ### Finding 3 — the relative CI gate is noisier than its own tolerance
 
@@ -383,6 +396,11 @@ difference is not academic: the baseline recorded on the authoring machine had t
 on the runner (1.69 → 2.49), and the branch then produced **eight CI samples spanning 2.3585–3.2478
 (37.7%), five of them on byte-identical code** — one of which is _above_ the ceiling the committed
 `R0` creates.
+
+**Ruled 2026-07-31: ship as-is and live with the flake**, with the rate on record. A dedicated
+runner costs infrastructure for a job that is not required, and the p99/p99 alternative rests on
+three local runs never measured on CI — adopting it would repeat the reasoning that produced the
+untransferable `R0 = 1.69`. Revisit if it flakes in practice; expect roughly 1 run in 8.
 
 Widening the tolerance is not the fix: absorbing that sample needs `TOLERANCE ≥ 1.31`, and a gate
 that permits a 31% regression in blast cost before complaining is not worth running. Re-recording
