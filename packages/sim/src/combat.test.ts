@@ -8,7 +8,9 @@ import { emptyTowers, type TowerArrays } from './tower';
 import {
   runCombat,
   applyImpactToCreep,
+  MAX_DOT_RECORDS,
   type CombatCreeps,
+  type DotRecord,
   type Impact,
   type StepEvents,
 } from './combat';
@@ -49,30 +51,33 @@ const DIRECT_DAMAGE = DIRECT_EFFECT.amount;
 // above — a testBundle bounty edit must move these economy assertions with it.
 const KILL_BOUNTY = RULESET.creepById[RULESET.waves[0]!.spawns[0]!.creepId]!.bounty;
 
-// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a — this
-// local wrapper supplies an empty one (`{}`, unarmored) so this file's ~20 existing
-// call sites, which exercise pre-armor behaviour, don't need one-by-one edits. The
-// param types are DERIVED from `runCombat` itself (never duplicated) so this wrapper
-// can never silently drift from the real signature. Tests that exercise armor call
-// `runCombat`/`applyImpactToCreep` directly with a real `creepById`.
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
+// this local wrapper supplies an empty one (`{}`, unarmored) so this file's ~20
+// existing call sites, which exercise pre-armor behaviour, don't need one-by-one
+// edits. M2-S5a P2 then added a `dots` parameter (STATE SHAPE ONLY — no behaviour
+// in this packet), which this wrapper likewise defaults to `[]`. The param types
+// are DERIVED from `runCombat` itself (never duplicated) so this wrapper can never
+// silently drift from the real signature. Tests that exercise armor or DoT state
+// call `runCombat`/`applyImpactToCreep` directly with a real `creepById`/`dots`.
 type RunCombatParams = Parameters<typeof runCombat>;
 function runCombatT(
   creeps: RunCombatParams[0],
   towers: RunCombatParams[1],
   impacts: RunCombatParams[2],
-  tick: RunCombatParams[3],
-  bounty: RunCombatParams[4],
-  field: RunCombatParams[5],
-  grid: RunCombatParams[6],
-  towerById: RunCombatParams[7],
-  slowFloorNum: RunCombatParams[9],
-  slowFloorDen: RunCombatParams[10],
-  events?: RunCombatParams[11],
+  tick: RunCombatParams[4],
+  bounty: RunCombatParams[5],
+  field: RunCombatParams[6],
+  grid: RunCombatParams[7],
+  towerById: RunCombatParams[8],
+  slowFloorNum: RunCombatParams[10],
+  slowFloorDen: RunCombatParams[11],
+  events?: RunCombatParams[12],
 ): ReturnType<typeof runCombat> {
   return runCombat(
     creeps,
     towers,
     impacts,
+    [],
     tick,
     bounty,
     field,
@@ -300,6 +305,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       kind: 'targeted',
       impactTick: TRAVEL_TICKS,
       targetId: 1, // no row with this id — the target already left
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -325,6 +331,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -351,6 +358,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -378,12 +386,14 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
         kind: 'targeted',
         impactTick: 0,
         targetId: 1,
+        sourceId: 100,
         effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
       },
       {
         kind: 'targeted',
         impactTick: 0,
         targetId: 1,
+        sourceId: 100,
         effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
       },
     ];
@@ -840,12 +850,14 @@ describe('runCombat — armor (M2-S5a)', () => {
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10
     };
     const result = runCombat(
       creeps,
       emptyTowers(),
       [impact],
+      [],
       0,
       0,
       FIELD,
@@ -869,12 +881,14 @@ describe('runCombat — armor (M2-S5a)', () => {
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const result = runCombat(
       creeps,
       emptyTowers(),
       [impact],
+      [],
       0,
       0,
       FIELD,
@@ -895,12 +909,14 @@ describe('runCombat — armor (M2-S5a)', () => {
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const result = runCombat(
       creeps,
       emptyTowers(),
       [impact],
+      [],
       0,
       0,
       FIELD,
@@ -927,12 +943,14 @@ describe('runCombat — armor (M2-S5a)', () => {
       x: point.x,
       y: point.y,
       radiusFp: 300,
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10, same as a splash's per-creep amount
     };
     const result = runCombat(
       creeps,
       emptyTowers(),
       [impact],
+      [],
       0,
       0,
       FIELD,
@@ -952,6 +970,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     let result: ReturnType<typeof runCombat> | undefined;
@@ -960,6 +979,7 @@ describe('runCombat — armor (M2-S5a)', () => {
         creeps,
         emptyTowers(),
         [impact],
+        [],
         0,
         0,
         FIELD,
@@ -971,5 +991,318 @@ describe('runCombat — armor (M2-S5a)', () => {
       );
     }).not.toThrow();
     expect(result?.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // unarmored — the `?? 0` rail
+  });
+});
+
+// M2-S5a P2 — the DoT STATE SHAPE, with NO behaviour: nothing here ticks, applies,
+// or expires a DoT record (P3). `runCombat`'s `dots` param is canonicalized and
+// returned unchanged — these tests pin that canonicalization exactly the way
+// `combat.test.ts`'s existing forged-impact tests pin `canonicalImpacts`.
+describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
+  const noTowers = emptyTowers();
+
+  /** Run `runCombat` against a fixed one-creep world with no impacts — isolates
+   *  the `dots` canonicalization rail under test from targeting/firing. */
+  function runWithDots(dots: readonly unknown[]): ReturnType<typeof runCombat> {
+    return runCombat(
+      restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
+      noTowers,
+      [],
+      dots,
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+  }
+
+  const VALID: DotRecord = {
+    targetId: 1,
+    sourceId: 100,
+    amount: 2,
+    cadenceTicks: 10,
+    nextTickTick: 10,
+    untilTick: 60,
+  };
+
+  it('a well-formed record survives canonicalization to its exact shape, unchanged', () => {
+    const result = runWithDots([VALID]);
+    expect(result.dots).toEqual([VALID]);
+  });
+
+  it('a well-formed record with an unknown extra property is rebuilt to its exact canonical shape (never a spread — the property is dropped, not leaked)', () => {
+    const forged = { ...VALID, extra: 'nope' };
+    const result = runWithDots([forged]);
+    expect(result.dots).toEqual([VALID]);
+    expect(Object.keys(result.dots[0]!)).toEqual(Object.keys(VALID));
+  });
+
+  it('a battery of individually-forged records — non-safe/negative fields across every column, zero ids, cadenceTicks 0, untilTick < nextTickTick — each dropped with no unsafe arithmetic, mixed alongside well-formed entries that DO survive', () => {
+    const other: DotRecord = { ...VALID, sourceId: 200 };
+    const malformed: unknown[] = [
+      { ...VALID, targetId: 0 }, // zero targetId — not an entity id
+      { ...VALID, targetId: -1 }, // negative targetId
+      { ...VALID, targetId: 1.5 }, // non-safe-integer targetId
+      { ...VALID, sourceId: 0 }, // zero sourceId — not an entity id
+      { ...VALID, sourceId: -1 }, // negative sourceId
+      { ...VALID, sourceId: Number.MAX_SAFE_INTEGER + 1 }, // non-safe-integer sourceId
+      { ...VALID, amount: 0 }, // amount must be ≥ 1
+      { ...VALID, amount: -5 },
+      { ...VALID, cadenceTicks: 0 }, // cadenceTicks must be ≥ 1
+      { ...VALID, cadenceTicks: -1 },
+      { ...VALID, nextTickTick: -1 }, // non-negative
+      { ...VALID, untilTick: -1 },
+      { ...VALID, nextTickTick: 60, untilTick: 10 }, // untilTick < nextTickTick — structurally forged
+      null,
+      42,
+      'not a record',
+      VALID, // well-formed — survives
+      other, // well-formed, distinct pair — survives
+    ];
+    const result = runWithDots(malformed);
+    expect(result.dots).toEqual([VALID, other]);
+  });
+
+  it("duplicate (targetId, sourceId) pairs deduplicate, keeping the FIRST occurrence (a canonical-form invariant, not applyDot's job)", () => {
+    const first: DotRecord = { ...VALID, amount: 2, untilTick: 60 };
+    const second: DotRecord = { ...VALID, amount: 999, untilTick: 999 }; // same pair — would win under last-wins
+    const result = runWithDots([first, second]);
+    expect(result.dots).toEqual([first]);
+  });
+
+  it('an over-cap array keeps only the first MAX_DOT_RECORDS valid records, in array order', () => {
+    const many: DotRecord[] = Array.from({ length: MAX_DOT_RECORDS + 5 }, (_, i) => ({
+      ...VALID,
+      sourceId: i + 1, // distinct pairs — never deduplicated, so the cap alone is under test
+    }));
+    const result = runWithDots(many);
+    expect(result.dots).toHaveLength(MAX_DOT_RECORDS);
+    expect(result.dots).toEqual(many.slice(0, MAX_DOT_RECORDS));
+  });
+
+  it('a long all-invalid array is walked to completion without inspecting every entry (the raw-scan bound, 4× the record cap) — a pre-existing latent defect in canonicalImpacts, closed here in both functions', () => {
+    // Every entry is individually invalid (amount 0), so `out.length` never reaches
+    // MAX_DOT_RECORDS on its own — without the raw-scan bound this walk would still
+    // terminate, but only after inspecting all 4×MAX_DOT_RECORDS+500 entries. The
+    // bound's effect isn't independently observable from the OUTPUT (empty either
+    // way); this test's job is to prove the call returns promptly on a hostile array
+    // many times longer than any legitimate table could be.
+    const allInvalid: unknown[] = new Array(4 * MAX_DOT_RECORDS + 500).fill({
+      ...VALID,
+      amount: 0,
+    });
+    const result = runWithDots(allInvalid);
+    expect(result.dots).toEqual([]);
+  });
+
+  it("a non-array `dots` value coerces to an empty table through step()'s coerceSoa — never throws", () => {
+    const s = createInitialState(1, RULESET);
+    // @ts-expect-error forging a non-array onto SimState.dots — coerceSoa's job to repair
+    s.dots = 42;
+    expect(() => step(s, RULESET, [])).not.toThrow();
+    expect(s.dots).toEqual([]);
+  });
+});
+
+describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
+  it('a targeted impact with a malformed sourceId (zero) is dropped whole — no damage, not kept', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      sourceId: 0, // malformed — 0 is not an entity id
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(0);
+    expect(result.creeps.hp[0]).toBe(1000); // dropped whole — the effect never applied
+  });
+
+  it('a targeted impact with a non-safe-integer sourceId is dropped whole', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      sourceId: -1,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(0);
+    expect(result.creeps.hp[0]).toBe(1000);
+  });
+
+  it('a blast impact with a malformed sourceId (zero) is dropped whole — no damage, not kept', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'blast',
+      impactTick: 0,
+      x: cx(7),
+      y: cy(6),
+      radiusFp: 50,
+      sourceId: 0, // malformed
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(0);
+    expect(result.creeps.hp[0]).toBe(1000);
+  });
+
+  it('a blast impact with a negative sourceId is dropped whole', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'blast',
+      impactTick: 0,
+      x: cx(7),
+      y: cy(6),
+      radiusFp: 50,
+      sourceId: -5,
+      effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(0);
+    expect(result.creeps.hp[0]).toBe(1000);
+  });
+});
+
+describe("EffectPrimitive's `dot` variant (M2-S5a P2: STATE SHAPE ONLY — a `dot` primitive that reaches applyImpactToCreep does nothing; applying it is P3)", () => {
+  it('a valid dot primitive survives canonicalization with its exact fields and no extra properties', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'targeted',
+      impactTick: 100, // future — stays in the kept queue unresolved, so its effects stay inspectable
+      targetId: 1,
+      sourceId: 100,
+      effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60, forged: 'nope' }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(1);
+    expect(result.impacts[0]!.effects).toEqual([
+      { kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 },
+    ]);
+  });
+
+  it('a dot primitive that reaches applyImpactToCreep (impact resolves this tick) applies NOTHING — no direct damage, no dots record, no crash (that is P3)', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'targeted',
+      impactTick: 0, // resolves THIS tick
+      targetId: 1,
+      sourceId: 100,
+      effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.creeps.hp[0]).toBe(1000); // no damage — 'dot' is neither 'direct' nor 'slow'
+    expect(result.dots).toEqual([]); // no record appended — applyDot doesn't exist yet
+    expect(result.impacts).toHaveLength(0); // resolved (consumed), not kept
+  });
+
+  it('an invalid dot primitive (durationTicks 0) makes the whole impact drop', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'targeted',
+      impactTick: 100,
+      targetId: 1,
+      sourceId: 100,
+      effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 0 }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(0);
   });
 });

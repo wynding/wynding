@@ -34,30 +34,32 @@ const LANE = {
 const cx = (col: number): number => col * 256 + 128;
 const cy = (row: number): number => row * 256 + 128;
 
-// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a — this
-// local wrapper supplies an empty one (`{}`, unarmored) so this file's ~17 existing
-// call sites, which exercise pre-armor behaviour, don't need one-by-one edits. The
-// param types are DERIVED from `runCombat` itself (never duplicated) so this wrapper
-// can never silently drift from the real signature (mirrors `combat.test.ts`'s
-// `runCombatT`).
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
+// this local wrapper supplies an empty one (`{}`, unarmored) so this file's ~17
+// existing call sites, which exercise pre-armor behaviour, don't need one-by-one
+// edits. M2-S5a P2 then added a `dots` parameter (STATE SHAPE ONLY — no behaviour
+// in this packet), which this wrapper likewise defaults to `[]`. The param types
+// are DERIVED from `runCombat` itself (never duplicated) so this wrapper can never
+// silently drift from the real signature (mirrors `combat.test.ts`'s `runCombatT`).
 type RunCombatParams = Parameters<typeof runCombat>;
 function runCombatT(
   creeps: RunCombatParams[0],
   towers: RunCombatParams[1],
   impacts: RunCombatParams[2],
-  tick: RunCombatParams[3],
-  bounty: RunCombatParams[4],
-  field: RunCombatParams[5],
-  grid: RunCombatParams[6],
-  towerById: RunCombatParams[7],
-  slowFloorNum: RunCombatParams[9],
-  slowFloorDen: RunCombatParams[10],
-  events?: RunCombatParams[11],
+  tick: RunCombatParams[4],
+  bounty: RunCombatParams[5],
+  field: RunCombatParams[6],
+  grid: RunCombatParams[7],
+  towerById: RunCombatParams[8],
+  slowFloorNum: RunCombatParams[10],
+  slowFloorDen: RunCombatParams[11],
+  events?: RunCombatParams[12],
 ): ReturnType<typeof runCombat> {
   return runCombat(
     creeps,
     towers,
     impacts,
+    [],
     tick,
     bounty,
     field,
@@ -148,6 +150,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
       x: CENTER.x,
       y: CENTER.y,
       radiusFp: RADIUS,
+      sourceId: 1,
       effects: [{ kind: 'direct', amount: 10 }],
     };
     const onResult = runCombatT(
@@ -197,6 +200,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
       x: CENTER.x,
       y: CENTER.y,
       radiusFp: RADIUS,
+      sourceId: 1,
       effects: [{ kind: 'direct', amount: 10 }],
     };
 
@@ -250,6 +254,7 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       x: cx(7),
       y: cy(6),
       radiusFp: 50,
+      sourceId: 1,
       effects: [{ kind: 'direct', amount: 15 }],
     };
     const result = runCombatT(
@@ -283,6 +288,7 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       x: cx(7),
       y: cy(6),
       radiusFp: 50,
+      sourceId: 1,
       effects: [{ kind: 'direct', amount: 15 }],
     };
     const resultA = runCombatT(
@@ -382,6 +388,7 @@ describe('blastMembers — eligibility guards (membership, not ordering)', () =>
       x: cx(7),
       y: cy(6),
       radiusFp: 50,
+      sourceId: 1,
       effects: [{ kind: 'direct', amount: 15 }],
     };
     const result = runCombatT(
@@ -643,6 +650,7 @@ describe('blast resolution — dead-target-in-flight still blasts; zero-member s
       x: cx(7),
       y: cy(6),
       radiusFp: 50,
+      sourceId: 1,
       effects: [{ kind: 'direct', amount: 10 }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -683,6 +691,7 @@ describe('blast resolution — a lethal blast still kills and sweeps; a survivin
       x: cx(7),
       y: cy(6),
       radiusFp: 50,
+      sourceId: 1,
       effects: [
         { kind: 'direct', amount: 8 },
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
@@ -928,7 +937,9 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
     expect(state.lives).toBe(5);
     expect(state.cumulativeKillBounty).toBe(11);
     // GOLDEN — a behavior change here requires re-pinning this alongside the three
-    // measured values above.
-    expect(hashSimState(state)).toBe('586d1afa');
+    // measured values above. Re-pinned M2-S5a P2: `Impact.sourceId` enters the
+    // world-hash; the three measured values above are UNCHANGED, so this is a
+    // hash-only move, not a behavior change.
+    expect(hashSimState(state)).toBe('4546bf54');
   });
 });

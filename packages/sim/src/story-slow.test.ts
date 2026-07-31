@@ -36,30 +36,32 @@ const LANE = {
 const cx = (col: number): number => col * 256 + 128;
 const cy = (row: number): number => row * 256 + 128;
 
-// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a — this
-// local wrapper supplies an empty one (`{}`, unarmored) so this file's ~11 existing
-// call sites, which exercise pre-armor behaviour, don't need one-by-one edits. The
-// param types are DERIVED from `runCombat` itself (never duplicated) so this wrapper
-// can never silently drift from the real signature (mirrors `combat.test.ts`'s
-// `runCombatT`).
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
+// this local wrapper supplies an empty one (`{}`, unarmored) so this file's ~11
+// existing call sites, which exercise pre-armor behaviour, don't need one-by-one
+// edits. M2-S5a P2 then added a `dots` parameter (STATE SHAPE ONLY — no behaviour
+// in this packet), which this wrapper likewise defaults to `[]`. The param types
+// are DERIVED from `runCombat` itself (never duplicated) so this wrapper can never
+// silently drift from the real signature (mirrors `combat.test.ts`'s `runCombatT`).
 type RunCombatParams = Parameters<typeof runCombat>;
 function runCombatT(
   creeps: RunCombatParams[0],
   towers: RunCombatParams[1],
   impacts: RunCombatParams[2],
-  tick: RunCombatParams[3],
-  bounty: RunCombatParams[4],
-  field: RunCombatParams[5],
-  grid: RunCombatParams[6],
-  towerById: RunCombatParams[7],
-  slowFloorNum: RunCombatParams[9],
-  slowFloorDen: RunCombatParams[10],
-  events?: RunCombatParams[11],
+  tick: RunCombatParams[4],
+  bounty: RunCombatParams[5],
+  field: RunCombatParams[6],
+  grid: RunCombatParams[7],
+  towerById: RunCombatParams[8],
+  slowFloorNum: RunCombatParams[10],
+  slowFloorDen: RunCombatParams[11],
+  events?: RunCombatParams[12],
 ): ReturnType<typeof runCombat> {
   return runCombat(
     creeps,
     towers,
     impacts,
+    [],
     tick,
     bounty,
     field,
@@ -239,6 +241,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: [
         { kind: 'slow', mulFp: 150, durationTicks: 20 },
         { kind: 'slow', mulFp: 100, durationTicks: 5 }, // stronger — replaces
@@ -265,6 +268,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: [
         { kind: 'slow', mulFp: 100, durationTicks: 20 },
         { kind: 'slow', mulFp: 200, durationTicks: 5 }, // weaker — no-op
@@ -294,6 +298,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: [
         { kind: 'slow', mulFp: 128, durationTicks: 50 },
         { kind: 'slow', mulFp: 128, durationTicks: 10 }, // equal strength — refreshes
@@ -320,6 +325,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: [
         { kind: 'direct', amount: 10 },
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
@@ -348,6 +354,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: [
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
         { kind: 'direct', amount: 999 },
@@ -394,6 +401,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         kind: 'targeted',
         impactTick: 0,
         targetId: 1,
+        sourceId: 1,
         effects: [
           { kind: 'direct', amount: 10 },
           { kind: 'slow', mulFp: 128, durationTicks: 30 },
@@ -403,6 +411,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         kind: 'targeted',
         impactTick: 0,
         targetId: 2,
+        sourceId: 1,
         effects: [
           { kind: 'direct', amount: 10 },
           { kind: 'slow', mulFp: 128, durationTicks: 30 },
@@ -430,6 +439,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: [
         ...Array.from({ length: MAX_IMPACT_EFFECTS - 1 }, (): EffectPrimitive => ({
           kind: 'direct',
@@ -458,6 +468,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: Array.from({ length: MAX_IMPACT_EFFECTS + 1 }, (): EffectPrimitive => ({
         kind: 'direct',
         amount: 1,
@@ -487,6 +498,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       kind: 'targeted',
       impactTick: 0,
       targetId: 1,
+      sourceId: 1,
       effects: [{ kind: 'slow', mulFp: 128, durationTicks: 40 }],
     };
     const result = runCombatT(

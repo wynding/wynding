@@ -39,6 +39,17 @@
 // this scenario's OWN bundle carries no AoE tower (AoE gets its own coverage in
 // `story-aoe.test.ts`), so no blast is ever scheduled here; the hash moves purely
 // because `targeted` impacts gained a discriminant field.
+//
+// M2-S5a P2 (still SIM_VERSION 9, the bump already happened in P1) re-pins BOTH
+// the final hash and the trace digest: `Impact` gains a REQUIRED `sourceId` field
+// on both variants — the firing tower's entity id, snapshotted at fire time — which
+// changes every mid-run world-hash with a resident impact, including the FINAL
+// tick this time (unlike M2-S4a's move, above). This packet adds STATE SHAPE ONLY
+// (`SimState.dots`, canonicalized and returned unchanged by `runCombat` — no DoT
+// primitive reaches `applyDot` or a tick step yet, both P3), so `dots` itself never
+// contributes: this scenario's bundle carries no `dot` effect. The move is
+// EXPECTED and driven purely by `sourceId` entering the hash — no behavioral
+// number (leak count, lives, score, outcome) changed alongside it.
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
@@ -150,11 +161,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: 'ba477e20',
-  traceDigest: 'bf0529ce', // fnv1a(trace.join(':')) — re-pinned for SIM_VERSION 8 (M2-S4a):
-  // `Impact` becomes a `targeted`/`blast` discriminated union, so every mid-run
-  // per-tick hash with a resident impact moves even though this scenario's FINAL
-  // tick (post-terminal, impact queue drained) happens to still hash the same.
+  finalHash: '6f00531a', // re-pinned M2-S5a P2: Impact.sourceId enters the world-hash.
+  traceDigest: '82263924', // fnv1a(trace.join(':')) — re-pinned M2-S5a P2, same reason.
 } as const;
 // -------------------------------------------------------------------------------
 

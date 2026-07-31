@@ -89,8 +89,10 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     const noInputs = (): SimInput[] => [];
     const { state, trace } = runScenario(noInputs, 1200);
 
-    expect(hashSimState(state)).toBe('f230e4b1');
-    expect(fnv1a(trace.join(':'))).toBe('81b792f2');
+    // Re-pinned M2-S5a P2: `Impact.sourceId` enters the world-hash; every OTHER
+    // assertion in this test is unchanged, so this is a hash-only move.
+    expect(hashSimState(state)).toBe('a4c6461f');
+    expect(fnv1a(trace.join(':'))).toBe('ed24d8ff');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
@@ -158,8 +160,10 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     const slowTowerCount = state.towers.towerId.filter((id) => id === 'slow').length;
     expect(slowTowerCount).toBe(2);
 
-    expect(hashSimState(state)).toBe('f81cc6b6');
-    expect(fnv1a(trace.join(':'))).toBe('fd5504cb');
+    // Re-pinned M2-S5a P2: `Impact.sourceId` enters the world-hash; every OTHER
+    // assertion in this test is unchanged, so this is a hash-only move.
+    expect(hashSimState(state)).toBe('ac6c6108');
+    expect(fnv1a(trace.join(':'))).toBe('42c92327');
     expect(state.phase).toBe('won');
     expect(state.lives).toBe(10);
     expect(state.tick).toBe(697);
