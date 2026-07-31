@@ -119,7 +119,13 @@ export interface CompiledScoring {
 export type CompiledEffect =
   | { readonly kind: 'direct'; readonly amount: number }
   | { readonly kind: 'aoe'; readonly amount: number; readonly radiusFp: number }
-  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number };
+  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number }
+  | {
+      readonly kind: 'dot';
+      readonly amount: number;
+      readonly cadenceTicks: number;
+      readonly durationTicks: number;
+    };
 
 /** Sim-owned compile-time projection of `TowerDef` — `kind` renamed `id` (decision
  *  4). `effects` REPLACES v1's flat `damage` (G3): the fire-time snapshot needs the
@@ -423,6 +429,15 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
       ) {
         throw new RulesetError(`effect form '${effect.form}' unsupported at simVersion ${v}`);
       }
+      // maxDotDurationTicks bounds the tick-scheduling operand the schema's own
+      // `durationTicks >= cadenceTicks` rule doesn't: together the two rules bound
+      // both a DoT's cadence and its duration, so tick scheduling can never
+      // saturate at any bundle that compiles.
+      if (effect.kind === 'dot' && effect.durationTicks > profile.maxDotDurationTicks) {
+        throw new RulesetError(
+          `tower '${tower.id}' dot durationTicks ${effect.durationTicks} exceeds ${profile.maxDotDurationTicks} at simVersion ${v}`,
+        );
+      }
     }
     if (tower.attack !== undefined && !profile.allowedTowerDomains.includes(tower.attack.domain)) {
       throw new RulesetError(
@@ -581,7 +596,15 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       return { kind: 'aoe', amount: e.damage, radiusFp: e.radiusFp };
     }
     if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
-    // Unreachable at sv8: `allowedEffectKinds`/`allowedDirectForms` already rejected
+    if (e.kind === 'dot') {
+      return {
+        kind: 'dot',
+        amount: e.damagePerTick,
+        cadenceTicks: e.cadenceTicks,
+        durationTicks: e.durationTicks,
+      };
+    }
+    // Unreachable at sv9: `allowedEffectKinds`/`allowedDirectForms` already rejected
     // anything else in `checkCapabilityGlobal`, above. Defensive, not load-bearing.
     throw new RulesetError(
       `tower '${towerId}' has an effect this sim build cannot compile at simVersion ${SIM_VERSION}`,

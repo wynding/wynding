@@ -14,7 +14,7 @@ import {
   type Impact,
   type StepEvents,
 } from './combat';
-import type { CompiledEffect } from './ruleset';
+import type { CompiledEffect, CompiledTower } from './ruleset';
 import { testRuleset } from './test-support';
 import type { CreepDef } from '@wynding/types';
 
@@ -246,6 +246,71 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
     // The impact is consumed; a fresh fire this tick (cooldown from t0 was 30) is not
     // due yet, so no new impact should appear from resolution alone.
     expect(t4.impacts.every((i: Impact) => i.impactTick > TRAVEL_TICKS)).toBe(true);
+  });
+});
+
+// A `venom`-shaped tower (M2-S5a P3): a compiled bundle of `direct single` + `dot`,
+// exactly the shape the sv9 profile now compiles (`allowedEffectKinds` widened to
+// include `dot` in this same packet). This exercises the REAL fire path —
+// `runCombat` → `snapshotEffects` — not a hand-built impact object, so it is the
+// regression guard for the defect `snapshotEffects` used to have: everything but
+// `slow` fell through to `{ kind: 'direct', amount: e.amount }`, which would have
+// silently turned a compiled `dot` into a second `direct` hit.
+const VENOM_TOWER: CompiledTower = {
+  id: 'venom',
+  cost: 10,
+  effects: [
+    { kind: 'direct', amount: 5 },
+    { kind: 'dot', amount: 2, cadenceTicks: 10, durationTicks: 60 },
+  ],
+  domain: 'ground',
+  rangeFp: RANGE,
+  cadenceTicks: FIRE_INTERVAL,
+  travelTicks: TRAVEL_TICKS,
+};
+const VENOM_BY_ID = { ...TOWER_BY_ID, venom: VENOM_TOWER };
+
+/** One `venom` tower at (5,5) — mirrors `oneTower` above but fires the bundle under test. */
+function venomTower(targetId = 0, nextFireTick = 0): TowerArrays {
+  return {
+    id: [100],
+    col: [5],
+    row: [5],
+    spend: [10],
+    targetId: [targetId],
+    nextFireTick: [nextFireTick],
+    towerId: ['venom'],
+  };
+}
+
+describe("runCombat — a firing `venom`-shaped tower snapshots BOTH primitives onto the queued Impact (M2-S5a P3, regression guard for combat.ts:517's defect)", () => {
+  it('the queued impact carries direct AND dot, the dot NOT silently collapsed to a second direct', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]); // in range
+    const towers = venomTower();
+
+    const t0 = runCombatT(
+      creeps,
+      towers,
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      VENOM_BY_ID,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+
+    expect(t0.impacts).toHaveLength(1);
+    expect(t0.impacts[0]?.kind).toBe('targeted');
+    expect(t0.impacts[0]?.sourceId).toBe(100);
+    expect(t0.impacts[0]?.effects).toEqual([
+      { kind: 'direct', amount: 5 },
+      { kind: 'dot', amount: 2, cadenceTicks: 10, durationTicks: 60 },
+    ]);
+    // The regression this guards: a fallen-through dot would have produced a
+    // SECOND `{ kind: 'direct', amount: 2 }` instead of the `dot` primitive above.
+    expect(t0.impacts[0]?.effects.filter((e) => e.kind === 'direct')).toHaveLength(1);
   });
 });
 

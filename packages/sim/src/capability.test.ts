@@ -94,14 +94,14 @@ describe('capabilityProfile', () => {
     expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
   });
 
-  it('simVersion 9 is the armored-creep profile, deferring wave/economy/catalog-size axes to the schema', () => {
+  it('simVersion 9 is the armored-creep-and-DoT profile, deferring wave/economy/catalog-size axes to the schema', () => {
     expect(capabilityProfile(9)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
       maxEntriesPerWave: 16,
       maxOffsetTicks: 1_000_000,
       maxEffectsPerBundle: 8,
-      allowedEffectKinds: ['direct', 'slow'],
+      allowedEffectKinds: ['direct', 'slow', 'dot'],
       allowedDirectForms: ['single', 'aoe'],
       allowedTowerDomains: ['ground'],
       allowedCreepDomains: ['ground'],
@@ -113,6 +113,7 @@ describe('capabilityProfile', () => {
       maxEarlyCallBountyDivisor: 1_000_000,
       maxEarlyCallScoreDivisor: 1_000_000,
       maxAoeRadiusFp: 2048,
+      maxDotDurationTicks: 100_000,
     });
   });
 
@@ -182,12 +183,18 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     });
   });
 
-  it("allowedEffectKinds: 'direct'+'slow' accepted, 'stun' rejected", () => {
+  it("allowedEffectKinds: 'direct'+'slow'+'dot' accepted, 'stun' rejected", () => {
     compiles(() => {});
     compiles((b) => {
       b.towerCatalog[0]!.effects = [
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'slow', mulFp: 128, durationTicks: 40 },
+      ];
+    });
+    compiles((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
       ];
     });
     rejects((b) => {
@@ -196,6 +203,21 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'stun', chanceNum: 64, durationTicks: 30 },
       ];
     }, "effect kind 'stun' unsupported at simVersion 9");
+  });
+
+  it('maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected', () => {
+    compiles((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_000 },
+      ];
+    });
+    rejects((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
+      ];
+    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 9");
   });
 
   it("allowedDirectForms: 'single' accepted, 'aoe' also accepted — no reject case exists (see header comment)", () => {

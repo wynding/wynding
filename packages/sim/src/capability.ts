@@ -3,13 +3,14 @@
 // The v2 schema is pinned STRUCTURALLY once (formatVersion 2, fixed for all of M2) —
 // but a given sim BEHAVIOR version only implements a subset of what the shape can
 // express (e.g. `SIM_VERSION` 9 simulates a real tower catalog, each tower a direct
-// effect — single-target or an AoE blast — plus an optional `slow` effect, against
-// ground creeps only, each creep now able to carry flat armor, across a full
-// multi-wave schedule). The capability profile is that subset,
+// effect — single-target or an AoE blast — plus an optional `slow` and/or `dot`
+// effect, against ground creeps only, each creep now able to carry flat armor,
+// across a full multi-wave schedule). The capability profile is that subset,
 // gating kinds, cardinalities, AND values in
 // `compileRuleset` — so a schema-valid bundle that describes something this sim
-// build cannot yet simulate (a `dot` effect, armor past the ceiling, ...) is
-// rejected loudly at compile time rather than silently mis-simulated.
+// build cannot yet simulate (armor past the ceiling, a DoT past the duration
+// ceiling, ...) is rejected loudly at compile time rather than silently
+// mis-simulated.
 // `formatVersion` never bumps for this; only `simVersion` does, and each story that
 // adds behavior widens its own dimension(s) here alongside its `SIM_VERSION` bump.
 //
@@ -51,14 +52,20 @@ export interface CapabilityProfile {
    *  tower, yet small enough to stop a board-spanning blast. Checked per aoe effect
    *  in `checkCapabilityGlobal` alongside the radius-uniform gate. */
   readonly maxAoeRadiusFp: number;
+  /** Ceiling on a `dot` effect's `durationTicks` (M2-S5a) — 100,000 at sv9. Together
+   *  with the schema's own `durationTicks >= cadenceTicks` rule, this bounds both
+   *  operands a DoT's tick scheduling reads, so it can never saturate at any bundle
+   *  that compiles. Checked per `dot` effect in `checkCapabilityGlobal`. */
+  readonly maxDotDurationTicks: number;
 }
 
 /** `SIM_VERSION` 9 (imported from `./ruleset-shared`, the dependency-free leaf):
  *  flat armor arithmetic on top of sv8's AoE + form-uniform/radius-uniform
  *  "one-shot-one-shape" model — a tower's direct effect may be `aoe` as well as
  *  `single`, ground-only, no immunities/roles, one uniform leak cost, the same
- *  64-wave/16-entry/full-economy wave engine sv6/sv7 already simulated, and now
- *  each creep may carry flat armor up to this profile's `maxArmor` ceiling.
+ *  64-wave/16-entry/full-economy wave engine sv6/sv7 already simulated, each creep
+ *  may carry flat armor up to this profile's `maxArmor` ceiling, and (M2-S5a P3) a
+ *  tower may also carry a `dot` effect, applied and ticked by this same sim build.
  *
  *  ONE PROFILE, NOT A HISTORY (G11): the sv8 profile is deleted with this bump —
  *  a live sv8 entry would misdescribe v9 tick code (it could no longer compile
@@ -66,15 +73,15 @@ export interface CapabilityProfile {
  *  reads), and replay's strict version equality already owns cross-version
  *  rejection, so there is nothing for a stale profile to serve.
  *
- *  `maxArmor` widens `0 → 16` — the only widened axis this story touches. `16` is
- *  a bounding ceiling, not a balance guard: it admits this story's `6` and a later
- *  story's `8`/`5` without a further widening, and any value at or above the
- *  catalog's largest damage blanks equally, so there is no meaningfully tighter
- *  number. `allowedEffectKinds` deliberately stays `['direct', 'slow']` — widening
- *  it to admit `dot` here would let a bundle compile an effect this sim build
- *  cannot yet apply, precisely the half-state this profile exists to prevent; a
- *  later packet widens it in the same packet that implements DoT application.
- *  Every other axis is untouched from sv8. */
+ *  `maxArmor` widens `0 → 16` — a bounding ceiling, not a balance guard: it admits
+ *  this story's `6` and a later story's `8`/`5` without a further widening, and any
+ *  value at or above the catalog's largest damage blanks equally, so there is no
+ *  meaningfully tighter number. `allowedEffectKinds` widens `['direct', 'slow'] →
+ *  ['direct', 'slow', 'dot']` in this same packet (M2-S5a P3) that implements DoT
+ *  application — a bundle can never compile an effect this sim build cannot apply.
+ *  `maxDotDurationTicks: 100_000`, paired with the schema's own
+ *  `durationTicks >= cadenceTicks` rule, bounds both operands a DoT's tick
+ *  scheduling reads. Every other axis is untouched from sv8. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
   9: {
     maxTowerCatalogSize: 64,
@@ -82,7 +89,7 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxEntriesPerWave: 16,
     maxOffsetTicks: 1_000_000,
     maxEffectsPerBundle: 8,
-    allowedEffectKinds: ['direct', 'slow'],
+    allowedEffectKinds: ['direct', 'slow', 'dot'],
     allowedDirectForms: ['single', 'aoe'],
     allowedTowerDomains: ['ground'],
     allowedCreepDomains: ['ground'],
@@ -94,6 +101,7 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxEarlyCallBountyDivisor: 1_000_000,
     maxEarlyCallScoreDivisor: 1_000_000,
     maxAoeRadiusFp: 2048,
+    maxDotDurationTicks: 100_000,
   },
 };
 

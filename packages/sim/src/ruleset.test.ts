@@ -192,6 +192,35 @@ describe('compileRuleset — tower catalog domains', () => {
     ]);
   });
 
+  it('compiles a dot direct effect (capability: allowedEffectKinds widens to include dot at sv9)', () => {
+    const b = base();
+    b.towerCatalog[0]!.effects = [
+      { kind: 'direct', form: 'single', damage: 10 },
+      { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
+    ];
+    const compiled = compileRuleset(b as Ruleset, 'test');
+    expect(compiled.towerById['basic']!.effects).toEqual([
+      { kind: 'direct', amount: 10 },
+      { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 },
+    ]);
+  });
+
+  it('rejects a dot durationTicks past the capability ceiling (M2-S5a maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected)', () => {
+    const b = base();
+    b.towerCatalog[0]!.effects = [
+      { kind: 'direct', form: 'single', damage: 10 },
+      { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_000 },
+    ];
+    expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
+    rejects(
+      (b) =>
+        (b.towerCatalog[0]!.effects = [
+          { kind: 'direct', form: 'single', damage: 10 },
+          { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
+        ]),
+    );
+  });
+
   it('compiles a multi-tower catalog (capability: maxTowerCatalogSize widens to 64 at sv8) — every entry compiled independently', () => {
     const b = base();
     b.towerCatalog.push({

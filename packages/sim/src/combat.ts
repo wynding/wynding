@@ -683,10 +683,22 @@ export function satMul(a: number, b: number): number {
  *  compiled effect collapses to the same `direct` {@link EffectPrimitive} a
  *  single-target effect would — the impact's OWN `kind` (`targeted` vs `blast`)
  *  already carries "this direct damage applies over an area"; the per-creep
- *  primitive list stays exactly the shape `applyImpactToCreep` already knows. */
+ *  primitive list stays exactly the shape `applyImpactToCreep` already knows.
+ *  `slow` and `dot` each map to their OWN explicit primitive — critically, `dot`
+ *  is NOT allowed to fall through to the `direct`/`aoe` collapse above: a compiled
+ *  `dot` that fell through would fire as raw direct damage, silently dropping its
+ *  cadence/duration and never reaching `applyDot`. */
 function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] {
   return effects.map((e) => {
     if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+    if (e.kind === 'dot') {
+      return {
+        kind: 'dot',
+        amount: e.amount,
+        cadenceTicks: e.cadenceTicks,
+        durationTicks: e.durationTicks,
+      };
+    }
     return { kind: 'direct', amount: e.amount }; // 'direct' or 'aoe' — same primitive
   });
 }
