@@ -398,6 +398,16 @@ describe('validateRulesetShape — tower catalog + effects', () => {
     });
   });
 
+  it('rejects more than one dot effect per bundle, with a named error (M2-S5a)', () => {
+    const b = clone();
+    const t = (b.towerCatalog as Record<string, unknown>[])[0]!;
+    t.effects = [
+      { kind: 'dot', damagePerTick: 1, cadenceTicks: 10, durationTicks: 60 },
+      { kind: 'dot', damagePerTick: 2, cadenceTicks: 20, durationTicks: 80 },
+    ];
+    expect(() => validateRulesetShape(b)).toThrow(/at most one dot effect/);
+  });
+
   it('rejects a burst bundle whose attack carries cadenceTicks', () => {
     rejects((b) => {
       const t = (b.towerCatalog as Record<string, unknown>[])[0]!;

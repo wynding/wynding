@@ -19,6 +19,13 @@
 // waves, plus a `venom` PAIR built ahead of wave 4) and pins whatever the sim actually
 // produces: the exact leak count, lives remaining, and terminal outcome.
 //
+// AND THE PREDICTION WAS OPTIMISTIC — which is exactly why it is measured (QC round 1).
+// The pinned 26 DoT ticks across six `armored` creeps is 52 damage total, ~9 per creep,
+// not the ~30 per creep the arithmetic suggested: a creep is only in a venom tower's
+// range for part of its pass, so most records expire unfinished. DoT is decisive here
+// regardless — the second test below removes the venom pair and the wave leaks — but the
+// margin comes from the pair plus the basic wall together, not from DoT alone.
+//
 // Regenerate every literal below with:
 //   pnpm --filter @wynding/content exec vitest run story-armored-wave
 // after temporarily logging the values (see parity.test.ts's header for the harness
@@ -106,7 +113,12 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     // venom pair is placed at tick 1300/1310 and only wave 4's `armored` creeps (spawning
     // from tick 1400) are ever in range of it, so every tick counted here is wave-4 DoT.
     expect(sawLiveDotRecord).toBe(true);
-    expect(events.dotTicks).toBe(27);
+    // 26, not the 27 this originally pinned (QC round 1): the first draft's DoT tick step
+    // re-checked liveness only when the traversal list was built, so a record whose target
+    // an EARLIER record in the same bucket had already killed still counted a tick that
+    // dealt no damage. Fixing that removed exactly one phantom from this run — a small
+    // number, but it was a wrong one baked into a golden.
+    expect(events.dotTicks).toBe(26);
     expect(events.dotDropped).toBe(0);
 
     // Terminal proof the placements survived (not silently no-op'd): six `basic` and both
@@ -134,5 +146,48 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     expect(hashSimState(state)).toBe('2ed4d52e');
     expect(deriveScore(state, ruleset)).toBe(410);
     expect(deriveStars(state, ruleset)).toBe(3);
+  });
+
+  // The COUNTERFACTUAL (QC round 1). The test above pins that the build clears wave 4,
+  // but on its own it cannot show the venom pair is what does it — a balance change
+  // making DoT irrelevant would simply require re-pinning `dotTicks`/`tick`/the hash,
+  // which is precisely the failure mode this file exists to guard against. So: the same
+  // script, same seed, same basic wall, with ONLY the venom pair removed.
+  it('the same build WITHOUT the venom pair leaks the armored wave — DoT is what clears it', () => {
+    const basicAnchors: { col: number; row: number }[] = [
+      { col: 2, row: 10 },
+      { col: 2, row: 12 },
+      { col: 6, row: 10 },
+      { col: 6, row: 12 },
+      { col: 10, row: 10 },
+      { col: 10, row: 12 },
+    ];
+    let nextBasic = 0;
+    function inputs(tick: number): SimInput[] {
+      const out: SimInput[] = [];
+      if (tick % 10 === 0 && nextBasic < basicAnchors.length) {
+        out.push({ kind: 'placeTower', anchor: basicAnchors[nextBasic]!, towerId: 'basic' });
+        nextBasic++;
+      }
+      return out;
+    }
+
+    const bundle = getBundledRuleset();
+    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
+    const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
+    for (let t = 0; t < 1900; t++) {
+      state = step(state, ruleset, inputs(t), events);
+    }
+
+    // No venom tower stands, so no DoT record is ever created — the armor-bypass channel
+    // is entirely absent, and `basic`'s 10 damage nets only 4/hit against armor 6.
+    expect(events.dotTicks).toBe(0);
+    expect(state.dots).toEqual([]);
+    // The armored wave now leaks. This is the assertion that makes the first test mean
+    // something: the venom pair is worth exactly these leaks.
+    expect(state.leakedCount).toBe(4);
+    expect(state.waveLeaked).toEqual([false, false, false, true]);
+    expect(state.lives).toBe(6);
   });
 });

@@ -626,8 +626,11 @@ describe('the record cap — a table at MAX_DOT_RECORDS drops the application an
   });
 });
 
-describe('creep-id traversal order — a deliberately shuffled SoA with a duplicate id', () => {
-  it('ticks in creep-id-ascending order with a row-index tiebreak, so the LOWER-index duplicate consumes the tick and the other is untouched', () => {
+describe('traversal order — a deliberately shuffled SoA with a duplicate id', () => {
+  // Witnesses the ROW-INDEX TIEBREAK only, not the creep-id key — see the twin of this
+  // test in `combat.test.ts` and the traversal's own comment in `combat.ts` for why the
+  // id key is unobservable today and kept anyway (QC round 1).
+  it('ticks the LOWER-index duplicate, leaving the other untouched', () => {
     // Rows deliberately NOT in id order (30, 10, 10, 20) — id 10 appears twice, at
     // row indices 1 and 2. Sorted order is (10,1) → (10,2) → (20,3) → (30,0). A DoT
     // record ticks at most once per call, so whichever row is visited FIRST for a

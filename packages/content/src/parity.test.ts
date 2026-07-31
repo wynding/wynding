@@ -185,8 +185,9 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // launch pays nothing, its countdown having already reached 0; wave 3 also
     // launches naturally, so it too pays no credit) all landed: cumulativeKillBounty
     // is the SCORED kill-bounty channel (clear bonus pays into `bounty`, the
-    // spendable economy, not the score), and the credit channel is exactly the two
-    // early-call payouts (42 + 18 = 60).
+    // spendable economy, not the score) — 42 from the three pre-S5a waves plus 18 for
+    // wave 3's six `armored` at bounty 3 = 60 — while the credit channel is exactly the
+    // two early-call payouts, 11.
     expect(state.cumulativeKillBounty).toBe(60);
     expect(state.cumulativeEarlyCallCredit).toBe(11);
     expect(state.bounty).toBe(73);

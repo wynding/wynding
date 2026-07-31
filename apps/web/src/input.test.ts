@@ -882,3 +882,17 @@ describe('input — modal-open commit guard (the class guard)', () => {
     expect(c.uiState().armed).toBeNull(); // committed → disarmed → selected
   });
 });
+
+describe('input — slot-action keys defer preventDefault to overlay.ts (M2-S5a QC round 1)', () => {
+  it('Digit5 (unbacked) is NOT preventDefault-ed by input.ts; Digit1 behaves the same way at this layer', () => {
+    const c = createController(1);
+    c.start();
+    attachInput(document, board, [], c, createKeymap(), { getRect: () => RECT });
+    const e5 = new KeyboardEvent('keydown', { code: 'Digit5', cancelable: true });
+    board.dispatchEvent(e5);
+    expect(e5.defaultPrevented).toBe(false);
+    const e1 = new KeyboardEvent('keydown', { code: 'Digit1', cancelable: true });
+    board.dispatchEvent(e1);
+    expect(e1.defaultPrevented).toBe(false);
+  });
+});

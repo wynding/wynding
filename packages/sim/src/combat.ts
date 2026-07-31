@@ -158,11 +158,15 @@ export interface DotRecord {
  *
  * MEASURED, not guessed (M2-S5a P4, `packages/perf/src/dot-bench.ts`). The first
  * draft named 20,000; the benchmark rejected it. `step()` p99 against table size, on
- * the blast-free stress scene, holding the table AT the stated size on every sampled
- * tick (empty-table baseline p99 ≈ 0.27 ms):
+ * `dot-bench.ts`'s scene with the table held AT the stated size on every sampled tick
+ * (empty-table baseline p99 ≈ 0.27 ms):
  *
  *     500 → 0.50 ms   2,000 → 0.83 ms    5,000 → 1.52 ms
  *   1,000 → 0.60 ms   4,000 → 1.24 ms   10,000 → 2.75 ms   20,000 → 7.13 ms
+ *
+ * Reproducing the table takes one edit: `dot-bench.ts` measures at whatever
+ * `MAX_DOT_RECORDS` currently is, so the sweep was taken by re-running it against each
+ * size in turn. The committed tool reports the single at-cap/empty pair, not the curve.
  *
  * Linear at ≈0.25 ms per 1,000 records until it turns superlinear near 20,000 (the
  * per-tick rebuild's allocation pressure). At 20,000 a single `step()` costs 7.13 ms
@@ -170,12 +174,20 @@ export interface DotRecord {
  * 0005's mid-range target. A rail whose whole promise is "never bites real play"
  * must not hand forged state a deterministic way to make the game unplayable.
  *
- * `4 × MAX_TOWERS` instead, for the headroom the rail actually needs. A venom-shaped
- * tower carries about `durationTicks / cadenceTicks` live records at once — 2 for the
- * shipped `venom` (60/30), ≈7 for the stress bundle's longer-duration twin (200/30) —
- * so the stress scene's 50 venom towers bound to roughly 350 concurrent records, and
- * the shipped catalog to far fewer. 4,000 leaves ≈8× headroom over that while costing
- * 1.24 ms, 5.8× cheaper than 20,000.
+ * `4 × MAX_TOWERS` instead, for the headroom the rail actually needs. A DoT-carrying
+ * tower holds AT MOST about `durationTicks / its FIRE cadence` live records at once —
+ * that many shots fit inside one duration window, and a re-hit refreshes rather than
+ * adds: the shipped `venom` is 60/30 = 2. It is an upper bound, not a typical value;
+ * sticky targeting means consecutive shots often land on the SAME creep and merely
+ * refresh, so the real count runs lower. Real peaks are therefore in the low hundreds even on a board
+ * saturated with them, against a rail of 4,000 — which costs 1.24 ms, 5.8× cheaper
+ * than 20,000.
+ *
+ * NOTE the bound above is analytic, not measured on a DoT-bearing scene: no such scene
+ * exists yet. `stress-40x40.json` carries `direct` and `slow` only, and `dot-bench.ts`
+ * seeds SYNTHETIC filler records to reach the cap rather than simulating towers that
+ * produce them. S5b adds the DoT-bearing stress twin and measures the real peak — until
+ * then, do not cite a measured concurrency figure here, because there isn't one.
  *
  * The asymmetry drove the choice: set too high, the cost is only weaker DoS
  * resistance, since real play never approaches the rail; set too low, real DoT
@@ -302,10 +314,12 @@ export const emptyCreeps = (): CombatCreeps => ({
 
 /** True iff `e` is a valid `EffectPrimitive`: `direct` — a positive safe-integer
  *  `amount`; `slow` — `mulFp` 1..255 and `durationTicks` a positive safe integer
- *  ≤ 1,000,000 (the schema's `GENERIC_MAX`); `dot` — `amount` a positive safe
- *  integer, `cadenceTicks` a positive safe integer, `durationTicks` a positive
- *  safe integer ≤ 1,000,000 (the same `GENERIC_MAX` bound `slow` already uses).
- *  Any other shape is invalid. */
+ *  ≤ 1,000,000 (the schema's `GENERIC_MAX`); `dot` — `amount` and `cadenceTicks`
+ *  positive safe integers, `durationTicks` a positive safe integer ≤ 1,000,000 (the
+ *  same `GENERIC_MAX` bound `slow` already uses) AND `≥ cadenceTicks`, mirroring the
+ *  schema's own pair rule. That pair rule is the load-bearing one: without it a forged
+ *  impact mints a record whose first tick is already past its expiry. Any other shape
+ *  is invalid. */
 function validEffectPrimitive(e: unknown): e is EffectPrimitive {
   if (e === null || typeof e !== 'object') return false;
   const rec = e as {
@@ -329,6 +343,18 @@ function validEffectPrimitive(e: unknown): e is EffectPrimitive {
     );
   }
   if (rec.kind === 'dot') {
+    // The pair rule `durationTicks >= cadenceTicks` mirrors the schema's own
+    // (`ruleset-schema.ts`), and bounds `cadenceTicks` transitively via `durationTicks`'
+    // own ceiling — so no separate cadence ceiling is needed here (QC round 2 proved a
+    // standalone one was dead code). The pair rule itself is load-bearing (QC round 1):
+    // `applyDot` derives `nextTickTick = satAdd(tick, cadenceTicks)` and
+    // `untilTick = satAdd(tick, durationTicks)`, so without them a forged impact with a
+    // huge `cadenceTicks` minted a record with `untilTick < nextTickTick` — exactly the
+    // shape `validDotRecord` calls structurally forged. That record was world-hashed on
+    // the tick it landed and silently dropped by `canonicalDotRecords` on the next,
+    // leaving `SimState.dots` not closed under its own canonical form. Deterministic
+    // either way, but it made "structurally forged ⇒ dropped" depend on which door the
+    // record came through.
     return (
       Number.isSafeInteger(rec.amount) &&
       (rec.amount as number) > 0 &&
@@ -336,7 +362,8 @@ function validEffectPrimitive(e: unknown): e is EffectPrimitive {
       (rec.cadenceTicks as number) > 0 &&
       Number.isSafeInteger(rec.durationTicks) &&
       (rec.durationTicks as number) > 0 &&
-      (rec.durationTicks as number) <= 1_000_000
+      (rec.durationTicks as number) <= 1_000_000 &&
+      (rec.durationTicks as number) >= (rec.cadenceTicks as number)
     );
   }
   return false;
@@ -479,9 +506,24 @@ function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
 /**
  * True iff `rec` is a valid `DotRecord`: `targetId`/`sourceId` positive safe
  * integers (entity ids; `0` is not one, mirroring `Impact.sourceId` above),
- * `amount ≥ 1`, `cadenceTicks ≥ 1`, `nextTickTick`/`untilTick` non-negative safe
- * integers with `untilTick ≥ nextTickTick` (a record whose expiry precedes its
- * next tick is structurally forged). Any other shape is invalid.
+ * `amount ≥ 1`, `1 ≤ cadenceTicks ≤ 1,000,000`, `nextTickTick`/`untilTick`
+ * non-negative safe integers. Any other shape is invalid.
+ *
+ * There is deliberately NO `untilTick ≥ nextTickTick` rule (QC round 2). The first
+ * draft had one, calling the opposite shape "structurally forged" — but the SIM ITSELF
+ * produces it on the ordinary gameplay path: the tick step advances `nextTickTick` by
+ * one cadence without regard to `untilTick`, so any record whose remaining duration is
+ * not a whole number of cadences ends its life with its next tick scheduled past its
+ * expiry. That is a perfectly well-formed record meaning "no further ticks are due, but
+ * the effect has not expired yet". With the rule in place, `canonicalDotRecords` deleted
+ * such records on the very next tick — several ticks early — so the poisoned telegraph
+ * blinked off before the DoT actually ended, and `SimState.dots` was not closed under
+ * its own canonical form on the shipped `venom`'s normal path.
+ *
+ * The `cadenceTicks` ceiling moved HERE from `validEffectPrimitive`, where it was dead
+ * code (that conjunction already implied it via `durationTicks`). Here it is the only
+ * thing bounding the operand `satAdd(nextTickTick, cadenceTicks)` reads on a restored
+ * table, so it is load-bearing rather than decorative.
  */
 function validDotRecord(rec: unknown): rec is DotRecord {
   if (rec === null || typeof rec !== 'object') return false;
@@ -502,11 +544,11 @@ function validDotRecord(rec: unknown): rec is DotRecord {
     (r.amount as number) >= 1 &&
     Number.isSafeInteger(r.cadenceTicks) &&
     (r.cadenceTicks as number) >= 1 &&
+    (r.cadenceTicks as number) <= 1_000_000 &&
     Number.isSafeInteger(r.nextTickTick) &&
     (r.nextTickTick as number) >= 0 &&
     Number.isSafeInteger(r.untilTick) &&
-    (r.untilTick as number) >= 0 &&
-    (r.untilTick as number) >= (r.nextTickTick as number)
+    (r.untilTick as number) >= 0
   );
 }
 
@@ -1170,6 +1212,17 @@ export function runCombat(
   //     numbering: a row an impact just killed this tick already reads non-live here
   //     and correctly does not tick.
   //
+  //     THE ID KEY IS CURRENTLY UNOBSERVABLE, and is kept deliberately (QC round 1
+  //     tried hard to witness it and could not, so no test pretends to). `liveOrder` is
+  //     built by an ascending row scan, so it is already idx-ascending before the sort;
+  //     the idx tiebreak alone therefore reproduces the relative order of same-id rows
+  //     whatever the id key does, and because `dotsByTarget` buckets BY id, the order
+  //     in which distinct ids are visited cannot affect any bucket's outcome. It is
+  //     canonical-form belt-and-braces: it stops mattering only while nothing inside
+  //     this traversal consumes shared state. S6 changes that — the stun roll draws
+  //     from the sim RNG in here, at which point visit order becomes replay-load-
+  //     bearing and this key is what makes it deterministic. Do not "simplify" it away.
+  //
   //     O(creeps + records), NEVER O(creeps × records): one pass over `canonicalDots`
   //     (mutated by step (1)'s `applyDot` calls above) buckets record INDICES by
   //     `targetId`, preserving array order; then one pass over the id-sorted live
@@ -1185,21 +1238,64 @@ export function runCombat(
   const liveOrder: { readonly id: number; readonly idx: number }[] = [];
   for (let i = 0; i < creeps.id.length; i++) {
     if (!isLiveHp(creeps.hp[i])) continue;
+    // `Number.isSafeInteger` guard, matching `blastMembers`' identical sort (see its
+    // own note): `liveOrder` is gated on hp, never on `id`, and the push below casts.
+    // A non-safe `id` would make the comparator return `NaN`, and an inconsistent
+    // comparator yields an IMPLEMENTATION-DEFINED permutation — which for a project
+    // whose server re-sims in Node while clients run browser engines is a determinism
+    // hazard, not a tidiness one. Unreachable through `step()` (movement drops such
+    // rows first) but reachable when `runCombat` is called directly, as the sim tests
+    // do — the same reachability `blastMembers` already guards. Like the id key below,
+    // it has no independent test witness and no test pretends otherwise: a non-safe id
+    // matches no record's `targetId`, so removing the guard changes no output — it
+    // changes only whether a `NaN` can reach the comparator.
+    if (!Number.isSafeInteger(creeps.id[i])) continue;
     liveOrder.push({ id: creeps.id[i] as number, idx: i });
   }
   liveOrder.sort((a, b) => a.id - b.id || a.idx - b.idx);
+  // AT MOST ONE TICK PER RECORD PER SIM TICK, enforced by RECORD IDENTITY rather than
+  // by the `if` below alone (QC round 1). `dotsByTarget` is keyed by creep id, so when
+  // several live rows share one id — forged/restored state; `coerceSoa` does not
+  // de-duplicate `creeps.id` — every such row re-enters the SAME bucket and re-reads a
+  // record the previous row already advanced. With the `if` as the only bound, a
+  // backdated record fired once PER ROW, so `tick - nextTickTick > cadenceTicks × (rows
+  // - 1)` produced a burst: the invariant, its "totality proof" prose, and
+  // `StepEvents.dotTicks` were all wrong together. Bounding on the record's own index
+  // restores the stated rule exactly, and costs nothing in genuine play, where ids are
+  // unique and the set is touched once per record.
+  const tickedRecords = new Set<number>();
   for (const { id, idx } of liveOrder) {
     const bucket = dotsByTarget.get(id);
     if (bucket === undefined) continue;
+    // Whether this row walked the whole bucket. It matters because `tickedRecords` bounds
+    // the WORK a duplicate row can redo, not the ITERATIONS it spends discovering there is
+    // none (QC round 2): with N rows sharing one id, each still re-walked the same
+    // M-record bucket, so the traversal was O(rows × records) after all — 2,000 forged
+    // same-id rows against a full table measured 46 ms in one `step()`, six times the
+    // 7.13 ms this file's own `MAX_DOT_RECORDS` note rejects as unplayable. A bucket that
+    // completed is spent for this tick: every record in it either ticked (and is in
+    // `tickedRecords`) or was not due, and not-due cannot become due within one tick. So
+    // drop it and let later duplicate rows miss in O(1). A bucket abandoned by the
+    // liveness `break` is deliberately KEPT — its unvisited records are still owed to the
+    // next live row sharing this id.
+    let walkedWholeBucket = true;
     for (const ri of bucket) {
+      if (tickedRecords.has(ri)) continue;
+      // Re-checked EVERY iteration, not just when `liveOrder` was built: an earlier
+      // record in this same bucket may already have killed this row, and a corpse must
+      // not keep ticking. Without this, `applyDirect` was a no-op at hp 0 but
+      // `dotTicks` still counted the phantom and `nextTickTick` still advanced.
+      if (!isLiveHp(creeps.hp[idx])) {
+        walkedWholeBucket = false;
+        break;
+      }
       const record = canonicalDots[ri] as DotRecord;
-      // AT MOST ONE TICK PER RECORD PER SIM TICK — no catch-up loop: even a forged
-      // backdated `nextTickTick` (far behind `tick`) ticks exactly once here and
-      // advances by exactly one `cadenceTicks`, never a burst. This single `if`
-      // (not a `while`) IS the totality proof against a spinning/catch-up record —
-      // it costs nothing in normal operation, since a record is never behind in
-      // genuine play.
+      // No catch-up loop: even a forged backdated `nextTickTick` (far behind `tick`)
+      // ticks exactly once and advances by exactly one `cadenceTicks`, never a burst.
+      // This single `if` (not a `while`), together with `tickedRecords` above, is the
+      // totality proof against a spinning/catch-up record.
       if (record.nextTickTick > tick) continue;
+      tickedRecords.add(ri);
       // The literal `0` here is INTENTIONAL — armor bypass, not a forgotten/
       // placeholder argument: a DoT tick deals its `amount` bypassing armor
       // entirely, reusing `applyDirect`'s already-reviewed branch-saturating
@@ -1224,6 +1320,7 @@ export function runCombat(
       };
       if ((creeps.hp[idx] as number) <= 0) killedThisPhase.add(idx);
     }
+    if (walkedWholeBucket) dotsByTarget.delete(id);
   }
 
   // (3) SWEEP dead (hp ≤ 0 or non-safe) into a fresh SoA; credit kills from step (1)

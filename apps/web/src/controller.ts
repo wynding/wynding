@@ -520,8 +520,24 @@ export function createController(seed: number, content?: ControllerContent): Con
     // target locked at fire time). Accumulate across a multi-tick catch-up frame so the
     // scene flashes every kill and shows every shot (it only sees the latest view-model
     // pair each animation frame).
-    const events: StepEvents = { impactPoints: [], fired: [] };
+    // `dotDropped` is collected here (M2-S5a, QC round 1) even though nothing renders
+    // it. `applyDot` silently discards a new DoT record once the table hits
+    // `MAX_DOT_RECORDS`, and that rail is the one failure mode the constant's own doc
+    // calls dangerous — "set too low, real DoT applications silently become no-ops".
+    // Shipping the only instrument for detecting it switched off would mean the first
+    // report is a player saying poison sometimes stops working, with nothing to look at.
+    // Unreachable today (the cap is 4,000 against real peaks in the low hundreds), so
+    // this is a tripwire for a future story that widens a DoT duration, not a live
+    // concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
+    // costs an increment only on the drop path.
+    const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
     state = step(state, ruleset, inputs, events);
+    if (import.meta.env.DEV && (events.dotDropped ?? 0) > 0) {
+      console.warn(
+        `sim: ${String(events.dotDropped)} DoT application(s) dropped this tick — the ` +
+          `record table hit MAX_DOT_RECORDS. DoT is silently no-opping for some creeps.`,
+      );
+    }
     buffer = []; // FRESH buffer — the just-recorded copy can never be mutated by reuse
     // Committing a non-empty buffer CHANGES the pending set (pending → committed), so it
     // bumps the revision — `pendingRevision`'s documented contract ("queued or

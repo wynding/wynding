@@ -256,7 +256,7 @@ export function createOverlay(
   });
 
   // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), wired in a loop ---
-  // The catalog-index → hotkey ACTION map: a card at index ≥ 9 (a modded bundle; sv8's
+  // The catalog-index → hotkey ACTION map: a card at index ≥ 9 (a modded bundle; sv9's
   // `maxTowerCatalogSize` allows 64 CATALOG entries — `MAX_TOWERS` (1,000) is the
   // separate cap on PLACED towers) has NO hotkey at all (Codex R2-2, widened M2-S4a,
   // generalized to nine slots PLAN.md P6) — scaling the hotkey model past nine slots is

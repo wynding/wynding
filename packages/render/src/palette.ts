@@ -56,8 +56,14 @@ const DEFAULT: Palette = {
   ghostInvalid: 0xd55e00,
   spark: 0xffffff,
   slowed: 0x56b4e9, // sky blue — the slow telegraph's redundant colour channel
-  poisoned: 0x009e73, // bluish green (Okabe-Ito) — same colourblind-safe family as
-  // `slowed`, distinguishable from it — the DoT telegraph's redundant colour channel
+  // Reddish purple (Okabe-Ito) — the DoT telegraph's redundant colour channel. NOT
+  // bluish green, which the first draft used (QC round 1): that is byte-identical to
+  // `tower`/`ghostValid`, and since creeps path straight along tower footprints the
+  // pips sat on a body of exactly their own colour and vanished. The pairwise gate in
+  // `palette.test.ts` now pins this against every cue a pip can be drawn over. Sharing
+  // a value with `range` is deliberate and safe — that is a thin selection ring drawn
+  // only while a tower is selected, never a filled body under a creep.
+  poisoned: 0xcc79a7,
 };
 
 // Deutan/protan (red–green) shift the green/red pair toward blue/orange separation.
@@ -78,6 +84,18 @@ const TRITAN: Palette = {
   exit: 0xd55e00,
   creep: 0xcc79a7, // magenta
   range: 0x56b4e9,
+  // Yellow here, not DEFAULT's reddish purple: this mode gives `creep` the magenta
+  // 0xcc79a7, and a telegraph byte-identical to a creep body would be no cue at all.
+  // What this buys, stated precisely (QC round 2 measured it): yellow separates well
+  // from the BACKGROUNDS a pip is actually drawn over — this mode's bluish-green
+  // `tower` and the dark `floor` — which is the collision that made the first draft
+  // unusable. It does NOT separate strongly from this mode's magenta `creep` under
+  // simulated tritanopia; the pips sit outside the silhouette at r*1.8 so they are not
+  // drawn ON it, and the always-on SHAPE cue carries the state regardless, colour being
+  // the redundant channel per the Telegraph glossary. The gate below is byte-equality,
+  // so it cannot see perceptual distance — a real CVD-distance gate is worth having and
+  // is not in this story.
+  poisoned: 0xf0e442,
 };
 
 const PALETTES: Record<ColourMode, Palette> = {

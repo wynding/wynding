@@ -145,13 +145,26 @@ export interface DotTelegraphPaintOp {
   readonly alpha: number;
 }
 
-// Three pips at 90°/210°/330° (evenly spaced, apex up) around the silhouette, each a
-// filled circle. The pip RING sits at r*1.8 — deliberately OUTSIDE the slowed ring's
+// Three pips evenly spaced around the silhouette (apex up), each a filled circle.
+// The pip RING sits at r*1.8 — deliberately OUTSIDE the slowed ring's
 // r*1.4 (`slowTelegraphPaintOps` above), so a creep carrying BOTH statuses reads as two
-// concentric, non-overlapping cues rather than a muddled composite (PLAN.md step 31).
-const DOT_PIP_ANGLES_DEG = [90, 210, 330] as const;
+// concentric cues rather than a muddled composite (PLAN.md step 31). Their DRAWN extents
+// separate at ordinary cell sizes but touch at the narrow floor, where `DOT_PIP_MIN_PX`
+// holds the pips at 1.5px while the ring stays proportional (QC round 2) — a deliberate
+// trade: a visible pip that grazes the ring beats a sub-pixel pip that is not there.
+// Canvas y grows DOWNWARD, so apex-up is sin < 0 — 270°, not 90° (QC round 1: the
+// first draft's [90, 210, 330] put the lone pip at the BOTTOM, making this the one cue
+// pointing opposite the triangle silhouette and `scene.ts`'s hexagon, which both offset
+// by -90° for exactly this reason).
+const DOT_PIP_ANGLES_DEG = [270, 30, 150] as const;
 const DOT_PIP_RADIUS_MUL = 1.8;
 const DOT_PIP_SIZE_MUL = 0.18;
+/** Floor on a pip's drawn radius, in px. The pips are the GUARANTEED shape cue, so they
+ *  may not thin to nothing at the smallest supported cell: at `CELL_PX_MIN_NARROW` (10)
+ *  the silhouette radius is 3.5, and `3.5 × 0.18 = 0.63` px would draw a 1.26 px dot —
+ *  an essential cue effectively invisible exactly where legibility is tightest (QC
+ *  round 1). Mirrors the silhouette's own `Math.max(3, cellPx * 0.35)` clamp. */
+const DOT_PIP_MIN_PX = 1.5;
 
 // The drift cue's period and outward travel — its own constants (distinct from the
 // pulse's), following the same idiom: a render-time-driven phase in [0, 1), converted to
@@ -196,7 +209,7 @@ export function dotTelegraphPaintOps(
       kind: 'pip',
       x: p.x,
       y: p.y,
-      r: r * DOT_PIP_SIZE_MUL,
+      r: Math.max(DOT_PIP_MIN_PX, r * DOT_PIP_SIZE_MUL),
       colour: poisonedColour,
       alpha: 1,
     });
@@ -216,7 +229,7 @@ export function dotTelegraphPaintOps(
         kind: 'drift',
         x: p.x,
         y: p.y,
-        r: r * DOT_PIP_SIZE_MUL,
+        r: Math.max(DOT_PIP_MIN_PX, r * DOT_PIP_SIZE_MUL),
         colour: poisonedColour,
         alpha: 0.5 * (1 - phase), // fades out as it drifts outward
       });

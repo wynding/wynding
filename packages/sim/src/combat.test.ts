@@ -10,11 +10,31 @@ import {
   applyImpactToCreep,
   applyDot,
   MAX_DOT_RECORDS,
+  MAX_IN_FLIGHT_IMPACTS,
   type CombatCreeps,
   type DotRecord,
   type Impact,
   type StepEvents,
 } from './combat';
+
+/** Wraps `arr` in a `Proxy` that counts every INDEXED element access (`get` on a
+ *  numeric-string key) — including accesses made internally by `for...of`, since the
+ *  array's own `Symbol.iterator` reads `this[i]`/`this.length` through the receiver,
+ *  which is the proxy itself when the iterator is invoked on it. Used to WITNESS the
+ *  raw-scan bound (`4 × <cap>` entries inspected) on `canonicalImpacts`/
+ *  `canonicalDotRecords`: a real witness of HOW MANY entries were inspected, not an
+ *  inference from prompt return time (QC round — the prior "long array, returns
+ *  promptly" test proved nothing the OUTPUT didn't already prove on its own). */
+function countedArray<T>(arr: readonly T[]): { proxy: readonly T[]; accessCount: () => number } {
+  let count = 0;
+  const proxy = new Proxy(arr as T[], {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && /^\d+$/.test(prop)) count++;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  return { proxy, accessCount: () => count };
+}
 import type { CompiledEffect, CompiledTower } from './ruleset';
 import { testRuleset } from './test-support';
 import type { CreepDef } from '@wynding/types';
@@ -1111,7 +1131,7 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
     expect(Object.keys(result.dots[0]!)).toEqual(Object.keys(VALID));
   });
 
-  it('a battery of individually-forged records — non-safe/negative fields across every column, zero ids, cadenceTicks 0, untilTick < nextTickTick — each dropped with no unsafe arithmetic, mixed alongside well-formed entries that DO survive', () => {
+  it('a battery of individually-forged records — non-safe/negative fields across every column, zero ids, cadenceTicks 0, cadenceTicks past its ceiling — each dropped with no unsafe arithmetic, mixed alongside well-formed entries that DO survive', () => {
     const other: DotRecord = { ...VALID, sourceId: 200 };
     const malformed: unknown[] = [
       { ...VALID, targetId: 0 }, // zero targetId — not an entity id
@@ -1126,7 +1146,12 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
       { ...VALID, cadenceTicks: -1 },
       { ...VALID, nextTickTick: -1 }, // non-negative
       { ...VALID, untilTick: -1 },
-      { ...VALID, nextTickTick: 60, untilTick: 10 }, // untilTick < nextTickTick — structurally forged
+      // `cadenceTicks` past its ceiling — the bound moved here from
+      // `validEffectPrimitive`, where it was dead code (QC round 2).
+      { ...VALID, cadenceTicks: 1_000_001 },
+      // NOTE there is deliberately no `untilTick < nextTickTick` case any more: the sim
+      // itself produces that shape whenever a record's remaining duration is not a whole
+      // number of cadences, so it is well-formed, not forged. See `validDotRecord`.
       null,
       42,
       'not a record',
@@ -1154,19 +1179,54 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
     expect(result.dots).toEqual(many.slice(0, MAX_DOT_RECORDS));
   });
 
-  it('a long all-invalid array is walked to completion without inspecting every entry (the raw-scan bound, 4× the record cap) — a pre-existing latent defect in canonicalImpacts, closed here in both functions', () => {
+  it('a long all-invalid array is walked to at most the raw-scan bound (4× the record cap), witnessed by COUNTING actual element accesses, not inferred from the output', () => {
     // Every entry is individually invalid (amount 0), so `out.length` never reaches
-    // MAX_DOT_RECORDS on its own — without the raw-scan bound this walk would still
-    // terminate, but only after inspecting all 4×MAX_DOT_RECORDS+500 entries. The
-    // bound's effect isn't independently observable from the OUTPUT (empty either
-    // way); this test's job is to prove the call returns promptly on a hostile array
-    // many times longer than any legitimate table could be.
-    const allInvalid: unknown[] = new Array(4 * MAX_DOT_RECORDS + 500).fill({
-      ...VALID,
-      amount: 0,
-    });
-    const result = runWithDots(allInvalid);
+    // MAX_DOT_RECORDS on its own — the walk would still terminate without the raw-scan
+    // bound (the array is finite), so the OUTPUT alone (empty either way) cannot tell
+    // "bounded at 4×the cap" apart from "walked in full, all 4×CAP+500 entries". The
+    // `countedArray` proxy counts every element actually read, giving a real witness.
+    const rawLength = 4 * MAX_DOT_RECORDS + 500;
+    const allInvalid: unknown[] = new Array(rawLength).fill({ ...VALID, amount: 0 });
+    const { proxy, accessCount } = countedArray(allInvalid);
+    const result = runWithDots(proxy);
     expect(result.dots).toEqual([]);
+    // One extra element GET happens before the bound's own check fires (the for-of
+    // iterator fetches element N+1 before the loop body's `scanned >= maxRawScan`
+    // check can break) — so the bound is `4×CAP + 1`, not `4×CAP`, verified against the
+    // real implementation rather than assumed.
+    expect(accessCount()).toBeLessThanOrEqual(4 * MAX_DOT_RECORDS + 1);
+    expect(accessCount()).toBeLessThan(rawLength); // did NOT walk the whole hostile array
+  });
+
+  it("canonicalImpacts' own raw-scan bound (the twin of the above) — a long all-invalid impacts array is inspected at most 4× MAX_IN_FLIGHT_IMPACTS times, witnessed the same way", () => {
+    const rawLength = 4 * MAX_IN_FLIGHT_IMPACTS + 500;
+    // Individually invalid: an empty `effects` array fails `validImpact`'s length ≥ 1
+    // check, so `out.length` never grows.
+    const allInvalidImpacts: unknown[] = new Array(rawLength).fill({
+      kind: 'targeted',
+      impactTick: 0,
+      targetId: 1,
+      sourceId: 100,
+      effects: [],
+    });
+    const { proxy, accessCount } = countedArray(allInvalidImpacts);
+    const result = runCombat(
+      restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
+      emptyTowers(),
+      proxy,
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toEqual([]);
+    expect(accessCount()).toBeLessThanOrEqual(4 * MAX_IN_FLIGHT_IMPACTS + 1); // same +1, see the twin test above
+    expect(accessCount()).toBeLessThan(rawLength);
   });
 
   it("a non-array `dots` value coerces to an empty table through step()'s coerceSoa — never throws", () => {
@@ -1361,6 +1421,64 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       targetId: 1,
       sourceId: 100,
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 0 }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(0);
+  });
+
+  // M2-S5a QC round 1 — `validEffectPrimitive`'s `dot` variant carries the SAME
+  // `GENERIC_MAX` (1,000,000) ceiling on `cadenceTicks` as `durationTicks` already had,
+  // plus the pair rule `durationTicks >= cadenceTicks` (mirroring the schema's own):
+  // without them a forged impact with a huge `cadenceTicks` could mint a record with
+  // `untilTick < nextTickTick` (see `validEffectPrimitive`'s own comment). Neither bound
+  // had a witness before this packet.
+  it('a dot primitive whose cadenceTicks exceeds the 1,000,000 GENERIC_MAX ceiling makes the whole impact drop', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'targeted',
+      impactTick: 100,
+      targetId: 1,
+      sourceId: 100,
+      effects: [{ kind: 'dot', amount: 3, cadenceTicks: 1_000_001, durationTicks: 1_000_001 }],
+    };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [impact],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+    );
+    expect(result.impacts).toHaveLength(0);
+  });
+
+  it('a dot primitive whose durationTicks is below its cadenceTicks makes the whole impact drop (a DoT must tick at least once)', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+    const impact = {
+      kind: 'targeted',
+      impactTick: 100,
+      targetId: 1,
+      sourceId: 100,
+      effects: [{ kind: 'dot', amount: 3, cadenceTicks: 60, durationTicks: 59 }],
     };
     const result = runCombat(
       creeps,
@@ -1613,13 +1731,19 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
     expect(result.dots[0]).toMatchObject({ nextTickTick: tick - 1000 + 10 }); // advanced by exactly one cadenceTicks
   });
 
-  it("creep-id-ascending, row-index-tiebreak traversal order (mirrors blastMembers' own order rule) — a shuffled SoA with a duplicate id ticks the LOWER-index duplicate, leaving the other untouched", () => {
+  it("row-index-tiebreak traversal order (mirrors blastMembers' own order rule) — a shuffled SoA with a duplicate id ticks the LOWER-index duplicate, leaving the other untouched", () => {
     // Rows deliberately NOT in id order (30, 10, 10, 20) — id 10 appears TWICE, at
     // row indices 1 and 2. Sorted order is (10,1) → (10,2) → (20,3) → (30,0). Since
     // a DoT record ticks AT MOST ONCE per call, whichever row is processed FIRST for
     // a given id consumes the tick (advancing nextTickTick past `tick`), so the
-    // SECOND row sharing that id sees the record already ticked and is untouched —
-    // this is what makes the sort order directly observable in the result.
+    // SECOND row sharing that id sees the record already ticked and is untouched.
+    //
+    // NOTE what this does and does NOT witness (QC round 1): it pins the ROW-INDEX
+    // TIEBREAK, not the id key. Deleting the id key — or reversing it — leaves this
+    // green, because `liveOrder` is built by an ascending row scan and so is already
+    // idx-ascending before the sort. The id key's own justification is at the
+    // traversal in `combat.ts`; it is deliberately kept despite being unobservable
+    // today, and no test here claims otherwise.
     const creeps = restingCreeps([
       { id: 30, col: 7, row: 6, hp: 1000 }, // idx 0
       { id: 10, col: 7, row: 6, hp: 1000 }, // idx 1 — lower idx wins the tick
@@ -1725,6 +1849,106 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
     );
     expect(result.creeps.hp[0]).toBe(1000 - 4); // ticked THIS tick (step 2, before the expiry sweep)
     expect(result.dots).toEqual([]); // then expired and removed in this same call (step 6)
+  });
+
+  // M2-S5a QC round 1 regression guard — the bug `tickedRecords` fixes: several LIVE
+  // rows sharing one creep id used to each re-enter the SAME bucket and re-read the
+  // record the previous row had already advanced, so a single far-backdated record
+  // fired once PER ROW (a "catch-up burst" proportional to row count, not to elapsed
+  // ticks). Driven through `step()` — the reviewer's own proof site — with forged
+  // duplicate-id state, not `runCombat` directly, per the QC note.
+  it('several live rows sharing one creep id: a far-backdated record ticks EXACTLY ONCE (not once per row), nextTickTick advances by exactly one cadenceTicks', () => {
+    const s = createInitialState(1, RULESET);
+    const ROWS = 5;
+    // Forge N rows all sharing creep id 1, resting in-range/in-bounds so every row is
+    // both `isLiveHp` and a valid movement/targeting position.
+    s.creeps = {
+      id: Array.from({ length: ROWS }, () => 1),
+      hp: Array.from({ length: ROWS }, () => 1000),
+      bounty: Array.from({ length: ROWS }, () => 1),
+      speed: Array.from({ length: ROWS }, () => 26),
+      fromX: Array.from({ length: ROWS }, () => cx(7)),
+      fromY: Array.from({ length: ROWS }, () => cy(6)),
+      headCol: Array.from({ length: ROWS }, () => 7),
+      headRow: Array.from({ length: ROWS }, () => 6),
+      progress: Array.from({ length: ROWS }, () => 0),
+      wave: Array.from({ length: ROWS }, () => 0),
+      creepId: Array.from({ length: ROWS }, () => 'normal'),
+      slowMulFp: Array.from({ length: ROWS }, () => 0),
+      slowUntilTick: Array.from({ length: ROWS }, () => 0),
+    };
+    s.tick = 2000;
+    const preStepTick = s.tick; // step() advances s.tick — runCombat itself sees the PRE-increment value
+    const record: DotRecord = {
+      targetId: 1,
+      sourceId: 100,
+      amount: 5,
+      cadenceTicks: 10,
+      nextTickTick: preStepTick - 1000, // forged far behind — a catch-up-per-row bug fires ~ROWS times
+      untilTick: preStepTick + 100,
+    };
+    s.dots = [record];
+    const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
+    step(s, RULESET, [], events);
+
+    expect(events.dotTicks).toBe(1); // exactly one tick applied, not one per row
+    // Exactly one row took the 5-damage tick; every other row of the ROWS sharing the
+    // id is untouched — a per-row burst would have dropped ALL of them by 5 (or more).
+    const damaged = s.creeps.hp.filter((hp) => hp === 1000 - 5).length;
+    const untouched = s.creeps.hp.filter((hp) => hp === 1000).length;
+    expect(damaged).toBe(1);
+    expect(untouched).toBe(ROWS - 1);
+    expect(s.dots[0]).toMatchObject({ nextTickTick: preStepTick - 1000 + 10 }); // exactly one cadenceTicks
+  });
+});
+
+// M2-S5a QC round 1 regression guard — "corpse stops ticking": two DoT records on ONE
+// creep, the first lethal. Before this fix, the second record's tick was only gated by
+// `record.nextTickTick > tick`, re-checked once per bucket entry but not re-reading the
+// row's live-ness between records in the SAME bucket — a corpse could still take a
+// SECOND tick (and its `dotTicks`/`nextTickTick` advance) after the first already
+// killed it. the tick step's per-record `if (!isLiveHp(creeps.hp[idx])) break;` in `runCombat` (checked on
+// EVERY bucket iteration, not just once at bucket-build time) is what this pins.
+describe('runCombat — a corpse stops ticking (M2-S5a QC round 1)', () => {
+  it('two records on one creep, the first lethal: the second does not count a tick or advance', () => {
+    const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 5 }]);
+    const records: DotRecord[] = [
+      {
+        targetId: 1,
+        sourceId: 100,
+        amount: 10, // lethal on its own
+        cadenceTicks: 10,
+        nextTickTick: 0,
+        untilTick: 1000,
+      },
+      {
+        targetId: 1,
+        sourceId: 200, // a distinct source — same bucket (same targetId), second entry
+        amount: 3,
+        cadenceTicks: 10,
+        nextTickTick: 0, // also due this tick
+        untilTick: 1000,
+      },
+    ];
+    const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      records,
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      events,
+    );
+    expect(result.creeps.id).toHaveLength(0); // killed by the first record, swept
+    expect(result.dots).toEqual([]); // both records die with the creep (survivor filter)
+    expect(events.dotTicks).toBe(1); // only the FIRST (lethal) record counted a tick
   });
 });
 

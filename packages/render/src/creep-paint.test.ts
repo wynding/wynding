@@ -9,6 +9,7 @@ import {
   slowTelegraphPaintOps,
   dotTelegraphPaintOps,
 } from './creep-paint';
+import { resolvePalette } from './palette';
 
 // The narrow floor's cell size (apps/web/e2e/compact.spec.ts's CELL_PX_MIN_NARROW) — the
 // silhouette radius the scene actually draws at that floor (`max(3, cellPx * 0.35)`).
@@ -93,7 +94,10 @@ describe('slowTelegraphPaintOps', () => {
   });
 });
 
-const POISONED = 0x009e73;
+// Driven from the REAL palette (not a hand-copied literal, QC round — a hand-copied
+// constant is asserted right back out and never notices a palette change; `palette.ts`
+// changed `poisoned` since this file was first written and nothing here caught it).
+const POISONED = resolvePalette('default').poisoned;
 
 // Distance from the creep centre to a pip's drawn point, for asserting the essential
 // cue's ring radius (`Math.hypot`, since the ops are already resolved to x/y points).
@@ -128,7 +132,10 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
       expect(pipDistance(p!, 0, 0)).toBeCloseTo(R * 1.8, 6);
     }
     const [slowRing] = slowTelegraphPaintOps({ x: 0, y: 0, slowed: true }, R, true, 0x56b4e9, 0);
-    expect(R * 1.8).toBeGreaterThan(slowRing!.r); // r×1.8 > r×1.4 — outside the slow ring
+    // The REAL returned pip distance vs the REAL returned ring radius — not a literal
+    // the test itself computed on both sides (QC round: `R * 1.8 > slowRing.r` degenerates
+    // to "is 6.3 > 4.9", true independent of what either function actually returns).
+    expect(pipDistance(p1!, 0, 0)).toBeGreaterThan(slowRing!.r);
   });
 
   it('the drift cue genuinely MOVES outward and fades: distance grows and alpha shrinks across render times', () => {

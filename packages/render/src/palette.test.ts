@@ -106,3 +106,31 @@ describe('contrast gate — canvas cues vs the board floor (WCAG 1.4.11 non-text
     });
   }
 });
+
+// `poisoned`'s pips are drawn OVER the scene's other cues (a poisoned creep can be
+// pathing across a tower footprint, sitting under the ghost-valid outline, etc.) — a
+// value byte-identical to one of them makes the pip vanish into the body it's drawn on,
+// exactly the defect the first `poisoned` draft had (`0x009e73`, identical to
+// `tower`/`ghostValid` — see `palette.ts`'s own comment). Scoped deliberately to the
+// cues a pip is actually drawn OVER: `tower`, `ghostValid`, `creep`, `creepLowHp`,
+// `floor`. NOT `range` (a thin selection ring, never a filled body under a creep) and
+// NOT `slowed` (that pair already shares a value with `entrance`, pre-existing and out
+// of scope here — do not widen this gate to something not yet fixed).
+const POISONED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
+  'tower',
+  'ghostValid',
+  'creep',
+  'creepLowHp',
+  'floor',
+];
+
+describe('poisoned — pairwise distinctness from every cue a pip can be drawn over (M2-S5a)', () => {
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": poisoned differs from tower/ghostValid/creep/creepLowHp/floor`, () => {
+      const pal = resolvePalette(mode);
+      for (const key of POISONED_MUST_DIFFER_FROM) {
+        expect(pal.poisoned).not.toBe(pal[key]);
+      }
+    });
+  }
+});
