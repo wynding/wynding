@@ -70,8 +70,8 @@ describe('replayAcceptedAssertion() — the validator verdict as an ordinary ass
   // makes the two agree.
   it('a rejected replay is a FAILING assertion that forces a non-zero exit', () => {
     // Pinned whole, not just `.pass`: `measured` and `threshold` are what `run.ts` prints
-    // under ESCALATION and what lands in `PERF-REPORT`, so a mutant that reported
-    // `measured: true` for a rejected replay would otherwise survive — it did.
+    // under ESCALATION and what lands in `PERF-REPORT`, so asserting only `.pass` would
+    // let a rejected replay be reported as `measured: true` in both places.
     const a = replayAcceptedAssertion('stress', false);
     expect(a).toEqual({
       name: REPLAY_ACCEPTED_ASSERTIONS.stress,
@@ -117,10 +117,10 @@ describe('replayAcceptedAssertion() — the validator verdict as an ordinary ass
 
 describe('allRunAssertions() — the whole run in one list', () => {
   // This assembly lives in this module, not in `run.ts`, precisely so it can be tested:
-  // `run.ts` is excluded from the coverage gate and reached by no test, so dropping a
-  // replay verdict from the array there would restore the "exits 0 on a rejected replay"
-  // bug with every test green — that mutation was verified to survive when the list is
-  // built inline. These tests are what make the same mistake red.
+  // `run.ts` is excluded from the coverage gate and reached by no test, so a replay
+  // verdict dropped from the array there would exit 0 on a rejected replay with every
+  // test still green. Assembled here, the same omission is a test failure — which is what
+  // the cases below hold.
   const oracle = [assertion('peak concurrent live creeps', true)];
   const control = [assertion('control: accepted tower placements', true)];
   const replays = (...rejected: readonly ReplayKey[]) =>
