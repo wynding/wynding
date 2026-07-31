@@ -668,9 +668,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('the second of three Cards (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
+  it('the second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    expect(shell.cards).toHaveLength(3);
+    // One Card per catalog tower: 4 since M2-S5a added `venom` (was 3 at M2-S4a).
+    // The slot WIRING for card 4 — its hotkey badge, rebind entry and label — is
+    // P6's; this assertion tracks the catalog's size, which is content, not wiring.
+    expect(shell.cards).toHaveLength(4);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');

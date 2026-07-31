@@ -32,6 +32,16 @@
       "immunities": [],
       "leakCost": 1,
       "bounty": 1
+    },
+    {
+      "id": "armored",
+      "hp": 36,
+      "speedFp": 22,
+      "armor": 6,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 3
     }
   ],
   "towerCatalog": [
@@ -70,6 +80,20 @@
         "travelTicks": 8
       },
       "effects": [{ "kind": "direct", "form": "aoe", "damage": 8, "radiusFp": 384 }]
+    },
+    {
+      "id": "venom",
+      "cost": 9,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 2 },
+        { "kind": "dot", "damagePerTick": 2, "cadenceTicks": 10, "durationTicks": 60 }
+      ]
     }
   ],
   "balance": {
@@ -111,6 +135,12 @@
           "countdownTicks": 300,
           "clearBonus": 5,
           "entries": [{ "creepId": "fast", "count": 8, "spacingTicks": 15 }]
+        },
+        {
+          "index": 3,
+          "countdownTicks": 300,
+          "clearBonus": 5,
+          "entries": [{ "creepId": "armored", "count": 6, "spacingTicks": 25 }]
         }
       ]
     }

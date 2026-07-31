@@ -72,7 +72,7 @@ describe('field-01 compiles for the sim as the single source of truth', () => {
     expect(s.lives).toBe(ruleset.balance.startingLives);
     expect(s.bounty).toBe(ruleset.balance.startingBounty);
     expect(s.phase).toBe('running');
-    expect(compiled.waves).toHaveLength(3); // three waves
+    expect(compiled.waves).toHaveLength(4); // four waves
     expect(compiled.waves[0]!.spawns).toHaveLength(10); // 10 creeps per wave
   });
 });
