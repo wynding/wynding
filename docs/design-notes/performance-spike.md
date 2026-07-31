@@ -253,7 +253,9 @@ in blast cost before complaining is not worth the CI minutes. (The 37.7% above i
 right measure of runner noise but not the one to compare against a tolerance that multiplies a
 median.) **Left OPEN for an owner ruling.**
 
-Two costs follow, and they are real. **A local `pnpm run perf` cannot preflight this gate**, and
+Two costs follow, and they are real. **A local `pnpm run perf` cannot reliably preflight the CI
+result** — it runs the same gate and is still a useful local regression check, it simply cannot
+predict the runner's verdict — and it
 cannot even reproduce itself across sessions; read a local R only against other local runs taken
 back to back, never against the ceiling. And **R0 must be re-recorded when the runner class
 changes** — against the resolved image recorded above, not the `ubuntu-latest` alias — not only
@@ -415,6 +417,43 @@ amount of emulation closes:
 - **`step()` under real device CPU.** The headless harness is unthrottled by design (it is a
   regression gate, not a device measurement), so the < 2 ms / < 5 ms budgets are not directly
   measured on any device-like profile.
+- **The two profiles did not sample the same scene.** Frame sampling runs after the 20 input-latency
+  clicks, and those clicks take profile-dependent wall time while the sim keeps advancing — so the
+  slower profile starts its window at a later tick with a lighter board (224 live creeps at the
+  low-end window's close against 272 mid-range). Both profiles breached their budget regardless, so
+  Finding 1 stands, but the low-end figure is measured against the _easier_ of the two scenes and
+  the profiles are not strictly comparable to each other. Sample frames before the clicks, or pin
+  both to the same tick, before treating the two columns as a like-for-like pair.
+
+## A note on measuring instrumented tests
+
+Recorded here because getting it wrong cost three review rounds, and the trap is not specific
+to this repo.
+
+The `validate()` re-simulation now in `run.ts` was originally a test in
+`packages/perf/src/scenario.test.ts`, and the note explaining its move carried a wrong number
+three times running. The measured truth, all on the authoring machine:
+
+| what                                 | cost            |
+| ------------------------------------ | --------------- |
+| `validate()` under `tsx`             | ~0.65 s         |
+| `validate()` inside vitest           | ~1.15 s         |
+| the whole test, vitest, no coverage  | ~1.15 s         |
+| the whole test, vitest, `--coverage` | ~7.5 s          |
+| the whole test on `ubuntu-latest`    | 21.2 s / 28.1 s |
+
+Three things fall out. **Vitest's module runner alone makes the simulation ~1.8× slower** before
+instrumentation is involved — so a `tsx`-measured function call and a vitest-measured test are not
+comparable, and the difference is big enough to invert a conclusion. **v8 coverage costs ~6.5×
+on top of that**, and `verify` turns it on. And **the re-simulation is essentially the whole of
+the instrumented 7.5 s** — uninstrumented it is ~0.65 s, roughly a tenth — which is why excluding
+a sim-heavy path from coverage is the cheap fix, and why misdiagnosing the cost as "the
+simulation is slow" hides that fix rather than pointing at it.
+
+The practical rule: **measure both halves in one harness, and measure with and without coverage,
+before concluding a test is too expensive for `verify`.** The original estimate here was accurate
+within ~6%; two successive attempts to "correct" it were not, and both failed the same way — by
+dividing a number from one harness by a number from another.
 
 ## Reproducing this
 

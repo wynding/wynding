@@ -102,7 +102,7 @@ describe('evaluateGate() — a zero controlStat throws a named diagnostic', () =
   });
 });
 
-describe('evaluateGate() — the default r0 parameter (QC: the default-parameter path was untested)', () => {
+describe('evaluateGate() — the default r0 parameter', () => {
   // Every other test above passes `r0` explicitly, so the default-parameter path
   // (`r0: number | null = R0`) was never exercised by this suite. Calling with only
   // two arguments is the one thing that actually runs that default.

@@ -19,7 +19,7 @@
 // `stress-single`, `stress-chill` -> `stress-chill-single` — in the SAME process, then
 // the stress scenario, and gates the RATIO `R = stressStat / controlStat` — not either
 // statistic alone. This control is NOT a genuine one-dimension twin of the stress
-// scenario: the twins also match the chill pair's `slow` effect definition (QC: an
+// scenario: the twins also match the chill pair's `slow` effect definition (an
 // earlier draft dropped it entirely), but a single-form tower cannot reproduce an
 // area effect's slow COVERAGE, so the control unavoidably carries a lighter creep
 // population too (measured median 181 vs the stress run's 224, peak slowed creeps 109
@@ -30,7 +30,7 @@
 // A slow or noisy runner scales both terms together, which cancels CPU-SPEED SCALE: a
 // machine that is uniformly 2x slower moves both `controlStat` and `stressStat` by
 // roughly the same factor, so `R` survives the move roughly intact. It does NOT cancel
-// TAIL VARIANCE (QC: an earlier wording, "cancels the noise out", overclaimed this):
+// TAIL VARIANCE (an earlier wording, "cancels the noise out", overclaimed this):
 // measured across three runs on one quiet machine, `R` itself swung ±6% run to run,
 // while a like-for-like p99/p99 comparison over the same runs swung only ±0.7%. A
 // p99-over-p50 ratio cancels scale, not the tail's own run-to-run jitter — which is
@@ -140,7 +140,7 @@ export const TOLERANCE = 1.25;
  * Samples 1-4 and 6 are the SAME COMMIT re-run five times: 2.3585 to 3.2478, a **37.7%
  * spread on byte-identical code**. Sample 6 is ABOVE the 3.1125 ceiling this constant
  * creates; sample 5 is ~2.5% under it. NOTHING VISIBLE SEPARATES THE TWO HIGH SAMPLES FROM
- * THE OTHERS. Two rounds of QC chased the obvious hypothesis — concurrent load from this
+ * THE OTHERS. The obvious hypothesis was chased twice — concurrent load from this
  * repo's own jobs — and it survives neither the model nor the data. The model: these eight
  * perf jobs report eight DISTINCT `runner_name`s, so no two shared a machine, and a
  * sibling job in the same run was never contending for this one's CPU. (Multi-core
@@ -242,7 +242,7 @@ export function evaluateGate(
     // fast blast cost" result. And "fails closed" holds only for the EXIT CODE — the
     // report would not even show the non-finite value, because `JSON.stringify` turns
     // `Infinity` and `NaN` into `null`, so `PERF-REPORT`'s `r` would read `null` beside
-    // `"pass": false` with nothing naming the cause (QC). Throwing is what keeps the
+    // `"pass": false` with nothing naming the cause. Throwing is what keeps the
     // diagnosis visible.
     throw new Error(
       'evaluateGate: controlStat is 0ms — the control scenario recorded a zero-millisecond ' +

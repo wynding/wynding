@@ -1,8 +1,7 @@
 // escalation.ts — decides `run.ts`'s exit code from the workload oracle's assertions
 // (both the stress-run oracle, `oracle.ts`, and `run.ts`'s own control-window sanity
 // checks) plus the ratio gate's pass/fail, and separates "owner-acknowledged open
-// findings" (`oracle.ts`'s `KNOWN_OPEN_ASSERTIONS`) from everything else (QC round-1
-// fix 4). Pure — no I/O, no sim invocation — so it is unit-testable directly, unlike
+// findings" (`oracle.ts`'s `KNOWN_OPEN_ASSERTIONS`) from everything else. Pure — no I/O, no sim invocation — so it is unit-testable directly, unlike
 // `run.ts` itself, which is a CLI entry point excluded from the coverage gate
 // (`vitest.config.ts`) because its correctness is exercised by actually running it.
 // Pulling this decision out into its own function is what makes it testable at all.
@@ -42,7 +41,7 @@ export type ReplayKey = keyof typeof REPLAY_ACCEPTED_ASSERTIONS;
  *  Before this existed the check set `process.exitCode` directly and the machine-readable
  *  report still published `"exitNonZero": false` with a clean-looking table set and no
  *  field recording the rejection at all — the one artifact downstream consumers read was
- *  the only one that could not see the failure (QC). */
+ *  the only one that could not see the failure. */
 export function replayAcceptedAssertion(which: ReplayKey, ok: boolean): OracleAssertion {
   return { name: REPLAY_ACCEPTED_ASSERTIONS[which], measured: ok, threshold: true, pass: ok };
 }
@@ -54,10 +53,10 @@ export function replayAcceptedAssertion(which: ReplayKey, ok: boolean): OracleAs
  * coverage gate and reached by no test: assembled there, dropping a replay verdict from
  * the array restored the exact bug this module exists to prevent — a rejected replay
  * exiting 0, beside a report claiming `"exitNonZero": false` — with every test still
- * green (QC: verified by mutation). Assembled here, that same mistake IS a test failure.
+ * green — verified by mutation. Assembled here, that same mistake IS a test failure.
  *
- * Be precise about what that does and does not cover, because the first version of this
- * comment overclaimed it (QC round 2). A verdict dropped or mis-built INSIDE this
+ * Be precise about what that does and does not cover, because an earlier version of this
+ * comment overclaimed it. A verdict dropped or mis-built INSIDE this
  * function is caught by `escalation.test.ts`. The CALL SITE is not: nothing stops
  * `run.ts` passing a hard-coded `{ ok: true }`, or abandoning this function for an inline
  * array literal, and no unit test can see either while `run.ts` is a coverage-excluded

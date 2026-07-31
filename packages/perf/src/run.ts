@@ -100,8 +100,8 @@ const oracleResult = runOracle({
 // leftover bounty, or a stray blast) would silently corrupt the ratio gate's
 // denominator; the four structural checks below catch exactly that. They do NOT, on
 // their own, catch a control that stayed structurally intact but merely got SLOWER or
-// HEAVIER — a scene-shaped control whose creep population quietly drifted (QC round
-// 2: the earlier version of this comment claimed they did). Two more checks close
+// HEAVIER — a scene-shaped control whose creep population quietly drifted (an
+// earlier version of this comment claimed they did). Two more checks close
 // that gap. The control's MEDIAN live creeps must stay within a stated band of the
 // value recorded here (`CONTROL_MEDIAN_LIVE_CREEPS_RECORDED`) — a directional swing
 // in the control's weight, the one thing the first four checks cannot see, fails
@@ -274,8 +274,8 @@ for (const a of controlAssertions) {
   );
 }
 
-// 7) The ratio gate (PLAN step 21) — moved BELOW the report/oracle printing (QC
-// round-1 fix 2: `evaluateGate` used to run FIRST, before anything was printed, and
+// 7) The ratio gate (PLAN step 21) — moved BELOW the report/oracle printing:
+// `evaluateGate` used to run FIRST, before anything was printed, and
 // `stressStat` THROWS (via `percentile`) on an empty `dueBlastSamples` — "no blasts
 // actually due during the sampling window" is one of PLAN step 18's own named failure
 // modes, and it used to produce a bare stack trace instead of the oracle escalation
@@ -283,7 +283,7 @@ for (const a of controlAssertions) {
 // oracle's own "samples with >= 1 due blast" assertion already covers it above), not
 // a crash.
 //
-// The short-circuit is the oracle's FLOOR, not merely "> 0" (QC). `stressStat`'s whole
+// The short-circuit is the oracle's FLOOR, not merely "> 0". `stressStat`'s whole
 // p99-not-p99.9 argument rests on that floor: over 3 due-blast samples, `percentile(…, 99)`
 // returns the MAXIMUM — the single noisiest tick, exactly the statistic p99 was chosen to
 // avoid. Such a run already exits non-zero via the oracle, but with `>0` it would still
@@ -295,7 +295,7 @@ let gateResult: GateResult | null = null;
 // The `=== 0` disjunct is not redundant with the floor: it is what keeps this guard
 // correct if `DUE_BLAST_SAMPLES_THRESHOLD` is ever set to 0 (the natural way to write "no
 // floor"), where `length < 0` is never true and an empty subset would reach `stressStat`
-// and throw — the bare stack trace QC round-1 fix 2 removed (QC round 2).
+// and throw — the bare stack trace an earlier fix removed.
 if (dueBlastSamples.length === 0 || dueBlastSamples.length < DUE_BLAST_SAMPLES_THRESHOLD) {
   console.log(
     `  gate NOT evaluated — only ${dueBlastSamples.length} due-blast samples in the stress window,`,
@@ -328,7 +328,7 @@ if (dueBlastSamples.length === 0 || dueBlastSamples.length < DUE_BLAST_SAMPLES_T
 //
 // BOTH replays, not just the stress one: the control supplies the gate's DENOMINATOR
 // (`gate.ts`'s `controlStat`), so the argument above applies to it verbatim. Checking one
-// and not the other was an asymmetry with no defence (QC).
+// and not the other was an asymmetry with no defence.
 //
 // These run after the measured runs, and that ordering is NOT load-bearing — an earlier
 // version of this comment claimed placing them first acted as JIT warm-up and moved
@@ -351,7 +351,7 @@ if (dueBlastSamples.length === 0 || dueBlastSamples.length < DUE_BLAST_SAMPLES_T
 // list, the report fields). Keeping it keyed removes the loose per-replay booleans that used to
 // be transposable between them — a mutation that swapped those two arguments left the
 // FATAL line naming one replay while the escalation line named the other, telling the
-// operator two different things in one run (QC round 2). It does NOT make transposition
+// operator two different things in one run. It does NOT make transposition
 // impossible: handing `allRunAssertions` a re-keyed record still typechecks, and no test
 // sees this file. See `escalation.ts` for what that seam does and does not cover.
 const validations: Readonly<Record<ReplayKey, ValidationResult>> = {
@@ -379,7 +379,7 @@ for (const key of REPLAY_KEYS) {
 //
 // The validation verdicts join that list rather than setting `process.exitCode` beside
 // it, so `evaluateEscalation` stays the ONE place the exit code is decided and the
-// `PERF-REPORT:` line below cannot disagree with it (QC: it used to publish
+// `PERF-REPORT:` line below cannot disagree with it (it used to publish
 // `"exitNonZero": false` on a run that exited 1). The list is ASSEMBLED in
 // `escalation.ts` rather than here for the same reason: this file is excluded from the
 // coverage gate and reached by no test, so a verdict dropped from the array here would
@@ -396,11 +396,11 @@ const escalation = evaluateEscalation(allAssertions, gatePass);
 // Printed, not just reported: without this block an accepted replay and a `validate()`
 // call quietly replaced by `{ ok: true }` produce byte-identical human output, and the
 // only positive evidence lives in the JSON line — the same "the report can see it, the
-// operator cannot" asymmetry this check was added to remove, pointing the other way (QC).
+// operator cannot" asymmetry this check was added to remove, pointing the other way.
 // Selected by NAME EQUALITY against the exported constants, never by a string suffix: a
 // suffix literal duplicated here is one a rename would silently drop a row from, and one
-// a future oracle assertion could accidentally match into (QC round 2, verified by
-// mutation).
+// a future oracle assertion could accidentally match into — verified by
+// mutation.
 const replayAssertionNames = new Set<string>(Object.values(REPLAY_ACCEPTED_ASSERTIONS));
 console.log('');
 console.log('=== replay validator (the real re-simulation path) ===');

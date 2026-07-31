@@ -70,7 +70,7 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   const bundle = parseRulesetJson(text);
 
   // Read the actual knobs off the parsed bundle rather than typing their values in
-  // as literals — QC: a test that only computes from hand-typed literals never
+  // as literals — a test that only computes from hand-typed literals never
   // notices `speedFp` or `mulFp` changing in the bundle itself (mutating `speedFp`
   // 60->30, or `mulFp` 179->128, left this suite green before this fix — 0 of 5
   // mutants killed). Asserting the INPUT first, then feeding that
@@ -138,7 +138,7 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   // definition (`ruleset.ts` takes the max spawn offset across the whole sorted
   // timeline), reduced over all 16 entries rather than read off `entries[0]`.
   //
-  // QC (CodeRabbit): reading only the first entry left this guard green while a LATER
+  // Reading only the first entry left this guard green while a LATER
   // entry's count, spacing, or offset changed the compiled schedule underneath it — the
   // exact class of "the test pins a number the code no longer produces" this file was
   // already hardened against once for hand-typed literals.
@@ -165,12 +165,12 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   // run's latest spawn is the MAX of that over k — not `waves[0]`'s, and not
   // `Σcountdowns + maxTail`, which double-counts overlap. The bundle has one wave today,
   // so all three agree; they stop agreeing the moment a second wave is added, and then
-  // only this form is right (QC: verified by adding a valid second wave, which moves the
-  // real bound to 19,327 while a `waves[0]` reading still computes 16,027).
+  // only this form is right: a valid second wave moves the real bound to 19,327 while a
+  // `waves[0]` reading still computes 16,027.
   //
   // A `for` loop rather than a `reduce` closing over a mutable `prefixCountdown`: the
   // reduce form is correct only while it is evaluated exactly once, and nothing about it
-  // says so (QC round 2).
+  // says so.
   let prefixCountdown = 0;
   let latestSpawnTick = 0;
   for (const w of waves) {
@@ -206,7 +206,7 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   it('total bound = latestSpawnTick + traversal = 16027, comfortably under MAX_MATCH_TICKS (36000)', () => {
     // Derived from the same bundle-read terms the tests above pin, not re-typed as
     // `1900 + 14127`: re-typing left this test green under a bundle mutation that turned
-    // its siblings red (QC), which is the one thing a bound like this must not do.
+    // its siblings red, which is the one thing a bound like this must not do.
     const total = latestSpawnTick + traversal;
     expect(total).toBe(16027);
     expect(MAX_MATCH_TICKS).toBe(36_000);
@@ -221,7 +221,7 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
   });
 });
 
-describe('the two idle-benchmark guards, read from the bundle (PLAN step 16, QC: read from the bundle rather than hand-typed literals)', () => {
+describe('the two idle-benchmark guards, read from the bundle (PLAN step 16)', () => {
   // The header comment above explains WHY `startingLives` and `hp` are both pinned
   // at 1,000,000 — a mortal creep or an ordinary lives total would let the scenario
   // decay into an idle benchmark that still "passes" (PLAN step 18's whole point).
@@ -251,7 +251,7 @@ describe('the AoE scan-work ceiling headroom (PLAN step 16)', () => {
   // literal `2_000_000` rather than widening sim's exports for a test.
   const scanBundle = parseRulesetJson(readFileSync(STRESS_RULESET_URL, 'utf8'));
   // Found by id, never `boards[0]`: a board added ahead of the stress board would
-  // otherwise silently move this whole assertion onto the wrong one (QC). Thrown rather
+  // otherwise silently move this whole assertion onto the wrong one. Thrown rather
   // than `?.`-chained for the same reason `towerById` below throws — an undefined board
   // reaches the assertions as `0`/`NaN` and reports four confusing failures for one
   // cause.
@@ -263,7 +263,7 @@ describe('the AoE scan-work ceiling headroom (PLAN step 16)', () => {
   it('MAX_TOWERS (1000) * totalScheduledSpawns (304) = 304000 <= AOE_SCAN_CEILING (2000000)', () => {
     // Summed over every entry of every wave, not `16 * 19` re-typed: the compiler counts
     // each entry's `count` across the whole schedule (`ruleset.ts`'s `totalSpawns`), so a
-    // changed or added entry must move this number too (QC, CodeRabbit).
+    // changed or added entry must move this number too.
     const totalScheduledSpawns = scanBoard.waves.reduce(
       (sum, w) => sum + w.entries.reduce((n, e) => n + e.count, 0),
       0,
@@ -277,7 +277,7 @@ describe('the AoE scan-work ceiling headroom (PLAN step 16)', () => {
   });
 });
 
-describe('the control twins are pairwise identical to their stress counterpart except form (QC round 2)', () => {
+describe('the control twins are pairwise identical to their stress counterpart except form', () => {
   // `stress-single` and `stress-chill-single` appear nowhere else in this file, and
   // the perf harness's own tests never touch tower definitions — so nothing asserted
   // that the twins the ratio gate's control scenario relies on (`@wynding/perf`'s
@@ -333,7 +333,7 @@ describe('the control twins are pairwise identical to their stress counterpart e
     expect(controlDirectRest).toEqual(stressDirectRest);
 
     // Every non-direct effect (the chill pair's `slow`) must match exactly, unchanged —
-    // this is what QC round 1 fixed and what this test now pins.
+    // this is what this test now pins.
     expect(nonDirectEffects(control)).toEqual(nonDirectEffects(stress));
   }
 

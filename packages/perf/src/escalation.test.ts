@@ -1,5 +1,5 @@
-// escalation.test.ts — the known-open exit-code decision (QC: separating owner-
-// acknowledged open findings from ordinary failures). Every
+// escalation.test.ts — the known-open exit-code decision, separating owner-
+// acknowledged open findings from ordinary failures. Every
 // scenario PLAN's fix asked for by name: a non-known-open failure exits non-zero; a
 // known-open failure alone does not; a gate failure alone does; a known-open
 // assertion that passes is reported as stale.
@@ -71,7 +71,7 @@ describe('replayAcceptedAssertion() — the validator verdict as an ordinary ass
   it('a rejected replay is a FAILING assertion that forces a non-zero exit', () => {
     // Pinned whole, not just `.pass`: `measured` and `threshold` are what `run.ts` prints
     // under ESCALATION and what lands in `PERF-REPORT`, so a mutant that reported
-    // `measured: true` for a rejected replay would otherwise survive (QC: it did).
+    // `measured: true` for a rejected replay would otherwise survive — it did.
     const a = replayAcceptedAssertion('stress', false);
     expect(a).toEqual({
       name: REPLAY_ACCEPTED_ASSERTIONS.stress,
@@ -103,7 +103,7 @@ describe('replayAcceptedAssertion() — the validator verdict as an ordinary ass
     // accept, so there is no reading under which waiving it is right. If someone adds any
     // of these names to KNOWN_OPEN_ASSERTIONS, this test is what stops them. Iterated over
     // the constant rather than naming the two by hand, so a third replay added later is
-    // covered without anyone remembering to extend this (QC round 2).
+    // covered without anyone remembering to extend this.
     for (const name of Object.values(REPLAY_ACCEPTED_ASSERTIONS)) {
       expect(KNOWN_OPEN_ASSERTIONS).not.toContain(name);
     }
@@ -119,8 +119,8 @@ describe('allRunAssertions() — the whole run in one list', () => {
   // This assembly lives in this module, not in `run.ts`, precisely so it can be tested:
   // `run.ts` is excluded from the coverage gate and reached by no test, so dropping a
   // replay verdict from the array there would restore the "exits 0 on a rejected replay"
-  // bug with every test green (QC verified that mutation survives when the list is built
-  // inline). These tests are what make the same mistake red.
+  // bug with every test green — that mutation was verified to survive when the list is
+  // built inline. These tests are what make the same mistake red.
   const oracle = [assertion('peak concurrent live creeps', true)];
   const control = [assertion('control: accepted tower placements', true)];
   const replays = (...rejected: readonly ReplayKey[]) =>
@@ -138,7 +138,7 @@ describe('allRunAssertions() — the whole run in one list', () => {
   });
 
   // Both directions, not just one: a mutation that dropped only the STRESS verdict used to
-  // survive everything except an incidental length check (QC round 2).
+  // survive everything except an incidental length check.
   for (const key of REPLAY_KEYS) {
     it(`a rejected ${key} replay exits non-zero — every replay the run measures against is load-bearing`, () => {
       const result = evaluateEscalation(

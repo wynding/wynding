@@ -138,12 +138,6 @@ export const QUALIFYING_SAMPLES_THRESHOLD = 2_000;
  *  somehow still read 150 by coincidence of a different failure. */
 export const LEFTOVER_BOUNTY_THRESHOLD = 0;
 
-/** A sample QUALIFIES when the sim was actually simulating a populated board this
- *  tick: `phase === 'running'` AND at least one creep is live. A `running` tick with
- *  zero live creeps (e.g. between waves, or after every spawned creep has already
- *  leaked/died) is real simulation time but not the SUSTAINED workload ADR 0005's
- *  budgets describe — counting it toward the floor would let an otherwise-idle window
- *  pass by riding on ticks where `step()` had almost nothing to do. */
 /** A sample where at least one blast landed. Exported so `run.ts`'s gate subset and this
  *  file's `DUE_BLAST_SAMPLES_THRESHOLD` count are provably THE SAME SET — `gate.ts`'s p99
  *  reasoning leans on that ("with the oracle's >= 500-sample due-blast floor, p99 discards
@@ -154,6 +148,12 @@ export function isDueBlastSample(sample: SampledTick): boolean {
   return sample.dueBlasts >= 1;
 }
 
+/** A sample QUALIFIES when the sim was actually simulating a populated board this
+ *  tick: `phase === 'running'` AND at least one creep is live. A `running` tick with
+ *  zero live creeps (e.g. between waves, or after every spawned creep has already
+ *  leaked/died) is real simulation time but not the SUSTAINED workload ADR 0005's
+ *  budgets describe — counting it toward the floor would let an otherwise-idle window
+ *  pass by riding on ticks where `step()` had almost nothing to do. */
 export function isQualifyingSample(sample: SampledTick): boolean {
   return sample.phase === 'running' && sample.liveCreeps > 0;
 }

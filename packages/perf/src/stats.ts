@@ -22,6 +22,14 @@ export function percentile(xs: readonly number[], p: number): number {
   if (xs.length === 0) {
     throw new Error('percentile() of an empty sample set is undefined');
   }
+  if (!Number.isFinite(p) || p < 0 || p > 100) {
+    // The same discipline as the empty-set throw above, for the same reason: `NaN`
+    // reaches `Math.ceil` and returns `undefined` through a non-null assertion, and a
+    // finite out-of-range `p` silently clamps to the min or max. Both would publish a
+    // number that is not the percentile anyone asked for. Every call site today passes a
+    // literal 50/95/99, so this guards the day one of them becomes computed.
+    throw new RangeError(`percentile() needs 0..100, got ${p}`);
+  }
   const sorted = [...xs].sort((a, b) => a - b);
   const rank = Math.ceil((p / 100) * sorted.length) - 1;
   const index = Math.min(sorted.length - 1, Math.max(0, rank));

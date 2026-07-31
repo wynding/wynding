@@ -8,6 +8,14 @@ describe('percentile()', () => {
     expect(() => percentile([], 50)).toThrow();
   });
 
+  it.each([NaN, Infinity, -Infinity, -1, 101])('throws on an out-of-range p (%p)', (p) => {
+    // Pinned rather than left to clamp: a non-finite `p` used to reach `Math.ceil` and
+    // return `undefined` through the non-null assertion, and an out-of-range finite `p`
+    // silently clamped to the min or max — either way publishing a number that is not the
+    // percentile the caller asked for.
+    expect(() => percentile([1, 2, 3], p)).toThrow(RangeError);
+  });
+
   it('a single element is every percentile', () => {
     expect(percentile([42], 0)).toBe(42);
     expect(percentile([42], 50)).toBe(42);
