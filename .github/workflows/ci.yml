@@ -89,10 +89,12 @@ jobs:
   # moving it out of the workspace glob would turn this job green having measured nothing.
   # `-C` exits non-zero on a missing directory.
   #
-  # This job is expected to carry the route-length shortfall as a KNOWN-OPEN finding
-  # (see docs/milestones/m2.md's flags): it prints under ESCALATION but does not by
-  # itself fail the job, so a real regression stays visible. Any OTHER oracle failure,
-  # and any ratio-gate failure, still fails here.
+  # EVERY oracle assertion fails this job on its own merits — `KNOWN_OPEN_ASSERTIONS`
+  # is empty as of the owner ruling of 2026-07-31, which re-pinned the route-length
+  # floor to the measured 329 and retired the waived 600 (ADR 0005 finding 2). A red
+  # run here is a real finding: do NOT read a route-length failure as the expected
+  # waived shortfall, which is what this comment used to describe. A stale waiver —
+  # a name on that list whose assertion has started passing — also fails, deliberately.
   perf:
     name: perf (stress oracle + step() ratio gate)
     runs-on: ubuntu-latest

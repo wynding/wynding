@@ -191,7 +191,7 @@ replacement before measuring again.
    roughly 270 towers, which would make the scene less like real play rather than more. S4b
    escalated rather than lowered to fit, as PLAN step 18 requires; the escalation is now
    answered. The oracle carries **one** un-waivable assertion at 329 with zero slack (the sim is
-   deterministic, so an unchanged layout reproduces it exactly), the waived twin is gone, and
+   deterministic, so an unchanged maze reproduces it exactly), the waived twin is gone, and
    `KNOWN_OPEN_ASSERTIONS` is **empty**.
 
 3. **The relative CI gate is noisier than its own tolerance — ACCEPTED as-is by ruling,
