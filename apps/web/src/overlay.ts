@@ -23,7 +23,7 @@ import { MS_PER_TICK, isTerminalPhase, type CompiledRuleset } from '@wynding/sim
 import { t } from './i18n/t';
 import { formatNumber } from './i18n/number';
 import type { SettingsStore } from './settings';
-import { GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
+import { ARM_TOWER_ACTIONS, GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
@@ -90,6 +90,11 @@ const COLOUR_LABEL: Record<ColourMode, () => string> = {
   deutan: () => t('settings.colourMode.deutan'),
   tritan: () => t('settings.colourMode.tritan'),
 };
+// `armTower1`..`armTower9` stay spelled out here — the one thing `keymap.ts`'s
+// `ARM_TOWER_ACTIONS` list must NOT drive (PLAN.md P6, Codex R1-13): a computed
+// `t(`action.armTower${n}`)` key reads as unused to the i18n-check gate above, and
+// `Record<GameAction, ...>` against the derived union keeps a missing entry a compile
+// error rather than a runtime fallback.
 const ACTION_LABEL: Record<GameAction, () => string> = {
   up: () => t('action.up'),
   down: () => t('action.down'),
@@ -103,6 +108,12 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
   armTower1: () => t('action.armTower1'),
   armTower2: () => t('action.armTower2'),
   armTower3: () => t('action.armTower3'),
+  armTower4: () => t('action.armTower4'),
+  armTower5: () => t('action.armTower5'),
+  armTower6: () => t('action.armTower6'),
+  armTower7: () => t('action.armTower7'),
+  armTower8: () => t('action.armTower8'),
+  armTower9: () => t('action.armTower9'),
 };
 
 /** Tower display names by catalog id (M2-S3) — a PARTIAL literal-key map (mirrors
@@ -123,6 +134,7 @@ const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assig
     basic: () => t('tower.basic.name'),
     slow: () => t('tower.slow.name'),
     splash: () => t('tower.splash.name'),
+    venom: () => t('tower.venom.name'),
   } satisfies Record<string, () => string>,
 );
 
@@ -244,13 +256,12 @@ export function createOverlay(
   });
 
   // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), wired in a loop ---
-  // The catalog-index → hotkey ACTION map: a card at index ≥ 3 (a modded bundle; sv8's
+  // The catalog-index → hotkey ACTION map: a card at index ≥ 9 (a modded bundle; sv8's
   // `maxTowerCatalogSize` allows 64 CATALOG entries — `MAX_TOWERS` (1,000) is the
-  // separate cap on PLACED towers) has NO hotkey at all (Codex R2-2,
-  // widened M2-S4a) — scaling the hotkey model past three slots is S12.
-  // `GAME_ACTIONS`/`keymap` only define `armTower1`/`armTower2`/`armTower3`, so this
-  // array is the single place that ceiling lives.
-  const ARM_HOTKEY_ACTIONS: readonly GameAction[] = ['armTower1', 'armTower2', 'armTower3'];
+  // separate cap on PLACED towers) has NO hotkey at all (Codex R2-2, widened M2-S4a,
+  // generalized to nine slots PLAN.md P6) — scaling the hotkey model past nine slots is
+  // S12. `keymap.ts`'s `ARM_TOWER_ACTIONS` is the single place that ceiling lives.
+  const ARM_HOTKEY_ACTIONS: readonly GameAction[] = ARM_TOWER_ACTIONS;
   const hotkeyActionForCardIndex = (index: number): GameAction | null =>
     ARM_HOTKEY_ACTIONS[index] ?? null;
 
@@ -409,15 +420,16 @@ export function createOverlay(
   const codeLabel = (action: GameAction): string =>
     formatKeyLabel(keymap.codeFor(action)) ?? t('settings.unbound');
 
-  // Slot actions are CATALOG-GATED (Codex R3-1, widened M2-S4a for `armTower3`): with a
-  // bundle short of three towers, `armTower2`/`armTower3` name slots that don't exist —
-  // filtered out of the rebind list entirely (no phantom rebindable action for a slot
-  // with no Card). `armTower1` stays listed as long as at least one tower exists (M2
-  // ships ≥ 1, per the schema).
+  // Slot actions are CATALOG-GATED (Codex R3-1, widened M2-S4a for `armTower3`,
+  // generalized to nine slots PLAN.md P6): a slot beyond `cards.length` names a Card
+  // that doesn't exist — filtered out of the rebind list entirely (no phantom
+  // rebindable action). One slot-index compare replaces the old two-line ladder, and it
+  // keeps the same result for slots 2/3 that the ladder already gave. `armTower1` stays
+  // listed as long as at least one tower exists (M2 ships ≥ 1, per the schema).
   const REBINDABLE_ACTIONS = GAME_ACTIONS.filter((action) => {
-    if (action === 'armTower2') return cards.length >= 2;
-    if (action === 'armTower3') return cards.length >= 3;
-    return true;
+    const slotIndex = (ARM_TOWER_ACTIONS as readonly GameAction[]).indexOf(action);
+    if (slotIndex === -1) return true; // not a slot action at all
+    return cards.length > slotIndex;
   });
 
   for (const action of REBINDABLE_ACTIONS) {
@@ -782,7 +794,7 @@ export function createOverlay(
   });
   closeBtn.addEventListener('click', () => modal.close(settingsOverlay));
 
-  // --- Game-level Escape + the armTower1/armTower2/armTower3 hotkeys: document scope, PLAN.md P2, M2-S3/S4a ---
+  // --- Game-level Escape + the armTower1..armTower9 hotkeys: document scope, PLAN.md P2, M2-S3/S4a/P6 ---
   // The modal owner's OWN Escape listener (registered above, capture phase) already
   // preventDefault()s + stopPropagation()s whenever a genuinely-open modal is dismissable
   // or state-driven, so this bubble-phase listener never even fires in that case. The one
@@ -801,10 +813,10 @@ export function createOverlay(
     // focus, so it's handled here rather than the board-scoped switch in input.ts. Guard
     // auto-repeat (a held key must not toggle arm on/off/on/off) — the discrete-action
     // repeat-gate input.ts applies to its own switch doesn't reach this listener.
-    // `armTower1`/`armTower2`/`armTower3` map to catalog index 0/1/2 (M2-S3, widened
-    // M2-S4a) via `ARM_HOTKEY_ACTIONS`' own order — a catalog-gated no-op when there is
-    // no tower/Card at that index (Codex R3-1's `towers[n]` guard, mirrored here on
-    // `cards[n]`).
+    // `armTower1`..`armTower9` map to catalog index 0..8 (M2-S3, widened M2-S4a,
+    // generalized to nine slots PLAN.md P6) via `ARM_HOTKEY_ACTIONS`' own order — a
+    // catalog-gated no-op when there is no tower/Card at that index (Codex R3-1's
+    // `towers[n]` guard, mirrored here on `cards[n]`).
     if (e.repeat) return;
     const action = keymap.actionFor(e.code);
     const index = action === null ? -1 : ARM_HOTKEY_ACTIONS.indexOf(action);
@@ -1033,6 +1045,7 @@ export function createOverlay(
       normal: () => t('creep.normal.name'),
       fast: () => t('creep.fast.name'),
       swarm: () => t('creep.swarm.name'),
+      armored: () => t('creep.armored.name'),
     } satisfies Record<string, () => string>, // QC r3: same rationale as `TOWER_NAME`
   );
   // PURE name derivation — no side effects: the render-skip sentinel calls this

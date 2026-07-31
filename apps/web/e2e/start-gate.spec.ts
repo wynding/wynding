@@ -79,14 +79,14 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   // (smoke.spec.ts exercises the identical flow end-to-end, with the preview + axe).
   const callWave = page.getByRole('button', { name: 'Call wave' });
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
-  for (let waveNumber = 1; waveNumber <= 3; waveNumber++) {
+  for (let waveNumber = 1; waveNumber <= 4; waveNumber++) {
     // Gate each press on LAUNCH-specific state, not the free-running sim heartbeat:
     // a tick boundary can fall between a tick-read and the click, so a tick-poll
     // passes even when the press itself was swallowed or same-tick-deduped (local
     // QC round 2 + CodeRabbit — the loop would silently stop testing "call every
     // wave"). The preview title only advances when the PREVIOUS call actually
     // landed, and the aria gate proves this press is genuinely accepted-able.
-    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 3`);
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 4`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await callWave.click();
   }

@@ -14,7 +14,7 @@
 
 import { createProjection, type Projection } from '@wynding/render';
 import type { Controller } from './controller';
-import type { Keymap } from './keymap';
+import { ARM_TOWER_ACTIONS, type GameAction, type Keymap } from './keymap';
 
 export interface InputHandle {
   destroy(): void;
@@ -468,6 +468,14 @@ export function attachInput(
     const isMovement =
       action === 'up' || action === 'down' || action === 'left' || action === 'right';
     if (e.repeat && !isMovement) return;
+    // Slot actions (`armTower1`..`armTower9`) are intentionally NOT handled here: arming
+    // must work from "any state" (PLAN.md P2 table) regardless of whether the board
+    // currently has focus (e.g. focus on a Card, or nowhere at all), so it's a
+    // document-scope listener in overlay.ts. One membership test against `keymap.ts`'s
+    // `ARM_TOWER_ACTIONS` (PLAN.md P6, generalized from the old `armTower1`/`armTower2`/
+    // `armTower3` case ladder) covers every slot action — the preventDefault() above still
+    // consumes the key here when the board IS focused.
+    if ((ARM_TOWER_ACTIONS as readonly GameAction[]).includes(action)) return;
     switch (action) {
       case 'up':
         controller.moveCursor(0, -1);
@@ -495,15 +503,6 @@ export function attachInput(
         break;
       case 'speed':
         controller.cycleSpeed();
-        break;
-      case 'armTower1':
-      case 'armTower2':
-      case 'armTower3':
-        // Intentionally NOT handled here: arming must work from "any state" (PLAN.md P2
-        // table) regardless of whether the board currently has focus (e.g. focus on a
-        // Card, or nowhere at all), so it's a document-scope listener in overlay.ts. This
-        // case only exists so the switch stays exhaustive over `GameAction` — the
-        // preventDefault() above still consumes the key here when the board IS focused.
         break;
     }
   };

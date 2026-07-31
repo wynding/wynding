@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createKeymap, GAME_ACTIONS } from './keymap';
+import { createKeymap, GAME_ACTIONS, type ArmTowerAction } from './keymap';
 
 describe('keymap — rebindable controls (GAG §2)', () => {
   it('starts on the default layout and resolves both directions', () => {
@@ -61,5 +61,31 @@ describe('keymap — rebindable controls (GAG §2)', () => {
     expect(idx3).toBe(idx2 + 1);
     expect(km.codeFor('armTower3')).toBe('Digit3');
     expect(km.actionFor('Digit3')).toBe('armTower3');
+  });
+
+  // PLAN.md P6, M2-S5a: the slot-wiring generalization. armTower1..armTower3 must come out
+  // byte-identical to before (Digit1..Digit3, contiguous, in order); armTower4..armTower9
+  // continue the SAME adjacency and Digit-N pattern, generated rather than hand-written.
+  it('generates armTower1..armTower9 contiguously, each defaulted to its own DigitN', () => {
+    const km = createKeymap();
+    for (let n = 1; n <= 9; n++) {
+      const action = `armTower${n}` as ArmTowerAction;
+      const idx = GAME_ACTIONS.indexOf(action);
+      if (n > 1) {
+        const prev = `armTower${n - 1}` as ArmTowerAction;
+        expect(idx).toBe(GAME_ACTIONS.indexOf(prev) + 1);
+      }
+      expect(km.codeFor(action)).toBe(`Digit${n}`);
+      expect(km.actionFor(`Digit${n}`)).toBe(action);
+    }
+  });
+
+  it('a displaced slot binding leaves the displaced action unbound, not defaulted (keymap.ts:77)', () => {
+    const km = createKeymap();
+    // Steal armTower4's default key (Digit4) via an unrelated action.
+    const displaced = km.rebind('up', 'Digit4');
+    expect(displaced).toBe('armTower4');
+    expect(km.codeFor('armTower4')).toBeNull(); // no DEFAULTS fallback
+    expect(km.actionFor('Digit4')).toBe('up');
   });
 });

@@ -24,6 +24,7 @@ export const EN = {
   "creep.normal.name": "Creep",
   "creep.fast.name": "Fast Creep",
   "creep.swarm.name": "Swarm Creep",
+  "creep.armored.name": "Armored Creep",
   "creep.unknown.name": "Unknown creep ({id})",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -58,6 +59,12 @@ export const EN = {
   "action.armTower1": "Arm tower 1",
   "action.armTower2": "Arm tower 2",
   "action.armTower3": "Arm tower 3",
+  "action.armTower4": "Arm tower 4",
+  "action.armTower5": "Arm tower 5",
+  "action.armTower6": "Arm tower 6",
+  "action.armTower7": "Arm tower 7",
+  "action.armTower8": "Arm tower 8",
+  "action.armTower9": "Arm tower 9",
   "results.won": "You held the line!",
   "results.lost": "The creeps broke through.",
   "results.summary": "Score {score} — {stars} of 3 stars",
@@ -67,6 +74,7 @@ export const EN = {
   "tower.basic.name": "Basic Tower",
   "tower.slow.name": "Slow Tower",
   "tower.splash.name": "Splash Tower",
+  "tower.venom.name": "Venom Tower",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
   "panel.cost": "Cost: {cost}",
@@ -131,6 +139,7 @@ export interface MessageParams {
   "creep.normal.name": Record<never, never>;
   "creep.fast.name": Record<never, never>;
   "creep.swarm.name": Record<never, never>;
+  "creep.armored.name": Record<never, never>;
   "creep.unknown.name": { "id": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
@@ -165,6 +174,12 @@ export interface MessageParams {
   "action.armTower1": Record<never, never>;
   "action.armTower2": Record<never, never>;
   "action.armTower3": Record<never, never>;
+  "action.armTower4": Record<never, never>;
+  "action.armTower5": Record<never, never>;
+  "action.armTower6": Record<never, never>;
+  "action.armTower7": Record<never, never>;
+  "action.armTower8": Record<never, never>;
+  "action.armTower9": Record<never, never>;
   "results.won": Record<never, never>;
   "results.lost": Record<never, never>;
   "results.summary": { "score": string | number; "stars": string | number };
@@ -174,6 +189,7 @@ export interface MessageParams {
   "tower.basic.name": Record<never, never>;
   "tower.slow.name": Record<never, never>;
   "tower.splash.name": Record<never, never>;
+  "tower.venom.name": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
   "panel.cost": { "cost": string | number };

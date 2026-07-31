@@ -35,7 +35,7 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-rail')).toBeVisible();
   // The Rail's Cards (PLAN.md P2, M2-S3/M2-S4a: one per catalog tower) — unarmed at load.
-  await expect(page.locator('.wy-card')).toHaveCount(3);
+  await expect(page.locator('.wy-card')).toHaveCount(4);
   for (const c of await page.locator('.wy-card').all()) {
     await expect(c).toBeVisible();
     await expect(c).toHaveAttribute('aria-pressed', 'false');
@@ -384,7 +384,7 @@ test('the Splash Tower ghost + blast-radius preview stay functional and axe-clea
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
-test('supports player-started runs, pause / speed controls, early-calls all three waves with the preview checked before each, and reaches a result', async ({
+test('supports player-started runs, pause / speed controls, early-calls all four waves with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -402,7 +402,7 @@ test('supports player-started runs, pause / speed controls, early-calls all thre
   // 1's composition pre-start — the shipped bundle's single creep kind.
   const preview = page.locator('.wy-wave-preview');
   await expect(preview).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 3');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 4');
   await expect(preview.locator('li')).toHaveText(['10 × Creep — ground, armor 0, no immunities']);
 
   // axe audit with the wave preview visible (PLAN.md P3 step 19) — the preview is a real
@@ -440,9 +440,10 @@ test('supports player-started runs, pause / speed controls, early-calls all thre
     1: '10 × Creep — ground, armor 0, no immunities',
     2: '16 × Swarm Creep — ground, armor 0, no immunities',
     3: '8 × Fast Creep — ground, armor 0, no immunities',
+    4: '6 × Armored Creep — ground, armor 6, no immunities',
   };
-  for (let waveNumber = 1; waveNumber <= 3; waveNumber++) {
-    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 3`);
+  for (let waveNumber = 1; waveNumber <= 4; waveNumber++) {
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 4`);
     await expect(preview.locator('li')).toHaveText([EXPECTED_COMPOSITION[waveNumber]!]);
     await callWave.click();
   }
@@ -527,9 +528,9 @@ test('supports player-started runs, pause / speed controls, early-calls all thre
   await expect(page.locator('.wy-board')).toBeFocused();
 
   // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
-  // again — including the wave preview going back to wave 1 of 3.
+  // again — including the wave preview going back to wave 1 of 4.
   await expect(waveChip).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 3');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 4');
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });
