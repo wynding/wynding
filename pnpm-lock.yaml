@@ -88,6 +88,9 @@ importers:
       '@types/pngjs':
         specifier: ^6.0.5
         version: 6.0.5
+      '@wynding/perf':
+        specifier: workspace:*
+        version: link:../../packages/perf
       jsdom:
         specifier: ^25.0.0
         version: 25.0.1
@@ -112,6 +115,21 @@ importers:
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
+
+  packages/perf:
+    dependencies:
+      '@wynding/content':
+        specifier: workspace:*
+        version: link:../content
+      '@wynding/replay':
+        specifier: workspace:*
+        version: link:../replay
+      '@wynding/sim':
+        specifier: workspace:*
+        version: link:../sim
+      '@wynding/types':
+        specifier: workspace:*
+        version: link:../types
 
   packages/render:
     dependencies:

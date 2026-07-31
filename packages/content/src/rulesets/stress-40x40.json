@@ -1,0 +1,93 @@
+{
+  "formatVersion": 2,
+  "rulesetId": "stress-40x40",
+  "version": 1,
+  "creepCatalog": [
+    {
+      "id": "stress-runner",
+      "hp": 1000000,
+      "speedFp": 60,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 1
+    }
+  ],
+  "towerCatalog": [
+    {
+      "id": "stress-blast",
+      "cost": 12,
+      "attack": { "domain": "ground", "rangeFp": 1024, "cadenceTicks": 60, "travelTicks": 8 },
+      "effects": [{ "kind": "direct", "form": "aoe", "damage": 4, "radiusFp": 384 }]
+    },
+    {
+      "id": "stress-chill",
+      "cost": 12,
+      "attack": { "domain": "ground", "rangeFp": 1024, "cadenceTicks": 45, "travelTicks": 4 },
+      "effects": [
+        { "kind": "direct", "form": "aoe", "damage": 1, "radiusFp": 384 },
+        { "kind": "slow", "mulFp": 179, "durationTicks": 200 }
+      ]
+    },
+    {
+      "id": "stress-single",
+      "cost": 12,
+      "attack": { "domain": "ground", "rangeFp": 1024, "cadenceTicks": 60, "travelTicks": 8 },
+      "effects": [{ "kind": "direct", "form": "single", "damage": 4 }]
+    },
+    {
+      "id": "stress-chill-single",
+      "cost": 12,
+      "attack": { "domain": "ground", "rangeFp": 1024, "cadenceTicks": 45, "travelTicks": 4 },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 1 },
+        { "kind": "slow", "mulFp": 179, "durationTicks": 200 }
+      ]
+    }
+  ],
+  "balance": {
+    "startingLives": 1000000,
+    "startingBounty": 1800,
+    "refundNum": 3,
+    "refundDen": 4,
+    "slowFloorNum": 1,
+    "slowFloorDen": 4,
+    "earlyCallBountyDivisor": 50
+  },
+  "scoring": { "survivalMul": 35, "starThresholds": [1, 6, 9], "earlyCallScoreDivisor": 50 },
+  "boards": [
+    {
+      "id": "stress-40x40",
+      "widthTiles": 40,
+      "heightTiles": 40,
+      "entrance": { "col": 0, "row": 20 },
+      "exit": { "col": 39, "row": 20 },
+      "waves": [
+        {
+          "index": 0,
+          "countdownTicks": 100,
+          "clearBonus": 1,
+          "entries": [
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 }
+          ]
+        }
+      ]
+    }
+  ]
+}

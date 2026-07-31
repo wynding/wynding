@@ -532,8 +532,13 @@ function rafScheduler(onFrame: (nowMs: number) => void): () => void {
  *  `SceneFactory`, so it is used directly — the assignment type-checks the arity. */
 const phaserSceneFactory: SceneFactory = mountScene;
 
-/** Boot the app against the real browser globals. Guarded so importing this module under
- *  the test runner (which has no #app until a test mounts one) does not auto-run. */
+/** Boot the app against the real browser globals. Returns `null` on a missing `#app`
+ *  rather than throwing — `./boot-entry.ts` is the module that decides a missing root
+ *  is fatal for the shipped app; this module has no auto-run of its own (QC round-1
+ *  fix 1) precisely so that importing `createApp`/`boot` — as `apps/web/perf/
+ *  main-perf.ts` does, to drive the real app against the stress bundle instead of the
+ *  shipped ruleset — never has the side effect of also booting a second, production
+ *  app into `#app`. */
 export function boot(doc: Document): AppHandle | null {
   const root = doc.getElementById('app');
   if (root === null) return null;
@@ -550,19 +555,4 @@ export function boot(doc: Document): AppHandle | null {
     prefersReducedMotion,
     storage: dismissalStorage(),
   });
-}
-
-/** True under the Vitest runner — used to keep the module-load auto-boot (and its loud
- *  missing-#app failure) from firing when a test merely imports this module. */
-function isTestRunner(): boolean {
-  const g = globalThis as { process?: { env?: Record<string, string | undefined> } };
-  return !!g.process?.env?.VITEST;
-}
-
-// Auto-boot in a real browser. A missing/mis-IDed #app mount point is a hard,
-// visible failure (a blank page with a thrown error), never a silent no-op.
-if (typeof document !== 'undefined' && !isTestRunner()) {
-  if (boot(document) === null) {
-    throw new Error('missing #app root element');
-  }
 }

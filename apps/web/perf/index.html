@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- No manifest link, no icons, no service worker (unlike the production index.html):
+         this page is a perf-only harness, never installed, never shipped. Its ONLY
+         consumer is `vite.perf.config.ts` (see that file's header for why it cannot be
+         bolted onto the production build). -->
+    <title>Wynding perf harness</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main-perf.ts"></script>
+  </body>
+</html>
