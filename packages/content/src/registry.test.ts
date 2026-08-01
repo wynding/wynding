@@ -14,6 +14,7 @@ import {
   MAX_MATCH_TICKS,
   rulesetDigest,
   RulesetError,
+  DIAG_LEN,
 } from '@wynding/sim';
 import {
   DEFAULT_RULESET_ID,
@@ -245,7 +246,7 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   });
 
   const cells = board.widthTiles * board.heightTiles;
-  const traversal = Math.ceil((cells * 362) / minEffSpeedFp);
+  const traversal = Math.ceil((cells * DIAG_LEN) / minEffSpeedFp);
 
   it('board is 28x24 (672 cells); traversal = ceil(672*362/11) = 22115', () => {
     expect(board.widthTiles).toBe(28);

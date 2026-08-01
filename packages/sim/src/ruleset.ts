@@ -44,6 +44,7 @@ import type { EffectDef, Ruleset, RulesetBoard, TowerDef, TowerTargetDomain } fr
 import { loadBoard, type BoardContext } from './context';
 import { RulesetError, canonicalImmunities, effectiveSpeedFp, SIM_VERSION } from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
+import { DIAG_LEN } from './movement';
 import { capabilityProfile, type CapabilityProfile } from './capability';
 import { MAX_TOWERS } from './tower';
 
@@ -209,11 +210,6 @@ const MAX_SCHEDULED_SPAWNS = 10_000;
  *  ceiling — so replay imports THIS constant (rather than duplicating the literal) and
  *  the two can never drift into a compiles-but-times-out gap. */
 export const MAX_MATCH_TICKS = 36_000;
-
-/** Fixed-point diagonal step length (≈ √2 × 256); the generous per-cell route-length
- *  unit used for the worst-case traversal bound (mirrors replay's re-simulation
- *  ceiling, `MAX_MATCH_TICKS` above). */
-const FP_DIAG_LEN = 362;
 
 /**
  * Compile-time ceiling on AoE scan-work (M2-S4a, step 7 — Codex R1-4/R1-5): per-tick
@@ -797,7 +793,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     if (last > latestSpawnTick) latestSpawnTick = last;
   });
   const cells = boardCtx.grid.width * boardCtx.grid.height;
-  const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minEffSpeedFp);
+  const maxTraversalTicks = Math.ceil((cells * DIAG_LEN) / minEffSpeedFp);
   if (latestSpawnTick + maxTraversalTicks > MAX_MATCH_TICKS) {
     throw new RulesetError('ruleset cannot reach a terminal state within the tick budget');
   }

@@ -1253,6 +1253,10 @@ export type { StepEvents } from './combat';
 // DoT records + the resident-queue caps (M2-S5a, #77): `packages/perf` consumes
 // both through this barrel (P4's `dot-bench.ts`). `MAX_IN_FLIGHT_IMPACTS` was not
 // previously re-exported — added here alongside its DoT analogue.
+// The ONE fixed-point diagonal edge length. Shared so `compileRuleset`'s traversal
+// bound and actual movement can never disagree (CodeRabbit, PR #78 — they were two
+// private copies of 362, with nothing enforcing that they matched).
+export { DIAG_LEN } from './movement';
 export {
   type DotRecord,
   MAX_DOT_RECORDS,
