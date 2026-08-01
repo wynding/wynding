@@ -440,6 +440,25 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
       // exist, reject the combination LOUDLY at compile time until a story needs it and
       // re-derives the bound. Same posture as S4a's form-uniform/radius-uniform gates,
       // which exist to stop exactly this kind of unvalidated composition.
+      // Bound how many live records ONE source can hold, by tying a DoT's duration to
+      // its tower's own fire cadence (Codex P2, PR #78). `maxDotDurationTicks` bounds
+      // the absolute number but not the RATIO, and the ratio is what sets record count:
+      // ~`durationTicks / fire cadence` shots land inside a duration window, each able
+      // to seed a different creep. At the profile's 100,000 ticks against a 2-tick
+      // cadence that is ~50,000 records from a single tower, an order of magnitude past
+      // `MAX_DOT_RECORDS` — reachable by a bundle that compiles clean.
+      if (effect.kind === 'dot' && tower.attack !== undefined) {
+        const fireCadence = tower.attack.cadenceTicks ?? 0;
+        const ratioCeiling = profile.maxDotDurationCadenceRatio * fireCadence;
+        // `?? 0` keeps this total on a pre-schema-validation shape; a 0 cadence makes the
+        // ceiling 0, so any positive duration is rejected — the safe direction.
+        if (effect.durationTicks > ratioCeiling) {
+          throw new RulesetError(
+            `tower '${tower.id}' dot durationTicks ${effect.durationTicks} exceeds ${ratioCeiling} ` +
+              `(${profile.maxDotDurationCadenceRatio}× its ${fireCadence}-tick attack cadence) at simVersion ${v}`,
+          );
+        }
+      }
       if (
         effect.kind === 'dot' &&
         tower.effects.some((e) => e.kind === 'direct' && e.form === 'aoe')

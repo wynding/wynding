@@ -206,19 +206,22 @@ describe('compileRuleset — tower catalog domains', () => {
   });
 
   it('rejects a dot durationTicks past the capability ceiling (M2-S5a maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected)', () => {
+    // Fire cadence 20,000 so the duration:cadence RATIO gate (8x -> 160,000, Codex P2 on
+    // PR #78) sits clear of the ABSOLUTE ceiling this test isolates.
     const b = base();
+    b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
     b.towerCatalog[0]!.effects = [
       { kind: 'direct', form: 'single', damage: 10 },
       { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_000 },
     ];
     expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
-    rejects(
-      (b) =>
-        (b.towerCatalog[0]!.effects = [
-          { kind: 'direct', form: 'single', damage: 10 },
-          { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
-        ]),
-    );
+    rejects((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
+      ];
+    });
   });
 
   it('compiles a multi-tower catalog (capability: maxTowerCatalogSize widens to 64 at sv8) — every entry compiled independently', () => {

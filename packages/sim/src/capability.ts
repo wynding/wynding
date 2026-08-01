@@ -57,6 +57,17 @@ export interface CapabilityProfile {
    *  operands a DoT's tick scheduling reads, so it can never saturate at any bundle
    *  that compiles. Checked per `dot` effect in `checkCapabilityGlobal`. */
   readonly maxDotDurationTicks: number;
+  /** Ceiling on a `dot` effect's `durationTicks` as a MULTIPLE of its tower's own attack
+   *  cadence (M2-S5a, Codex P2 on PR #78) — 8 at sv9. This is what bounds how many live
+   *  records ONE source can hold: a tower lands at most `durationTicks / fire cadence`
+   *  shots inside a duration window, each potentially on a different creep, and a re-hit
+   *  refreshes rather than adds. `maxDotDurationTicks` alone does not bound it —
+   *  100,000 ticks against a 2-tick cadence admits ~50,000 records from a single tower,
+   *  which is an order of magnitude past `MAX_DOT_RECORDS`. 8 admits the shipped `venom`
+   *  (60/30 = 2) and the stress bundle's longer twin (200/30 ≈ 6.7) with room, while
+   *  cutting the worst case per source from ~50,000 to 8. Checked per `dot` effect in
+   *  `checkCapabilityGlobal`, against the tower's OWN attack cadence. */
+  readonly maxDotDurationCadenceRatio: number;
 }
 
 /** `SIM_VERSION` 9 (imported from `./ruleset-shared`, the dependency-free leaf):
@@ -102,6 +113,7 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxEarlyCallScoreDivisor: 1_000_000,
     maxAoeRadiusFp: 2048,
     maxDotDurationTicks: 100_000,
+    maxDotDurationCadenceRatio: 8,
   },
 };
 

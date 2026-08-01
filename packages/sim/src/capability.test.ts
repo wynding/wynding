@@ -114,6 +114,7 @@ describe('capabilityProfile', () => {
       maxEarlyCallScoreDivisor: 1_000_000,
       maxAoeRadiusFp: 2048,
       maxDotDurationTicks: 100_000,
+      maxDotDurationCadenceRatio: 8,
     });
   });
 
@@ -207,17 +208,44 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
 
   it('maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected', () => {
     compiles((b) => {
+      // Fire cadence 20,000 so the duration:cadence RATIO gate (8x -> 160,000) sits
+      // clear of the ABSOLUTE ceiling this test isolates. At 12,500 the two coincide
+      // exactly at 100,000 and the ratio message fires instead.
+      b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
       b.towerCatalog[0]!.effects = [
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_000 },
       ];
     });
     rejects((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
       b.towerCatalog[0]!.effects = [
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
       ];
     }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 9");
+  });
+
+  it('maxDotDurationCadenceRatio: a DoT may last 8x its tower fire cadence, not 9x (Codex P2, PR #78)', () => {
+    // The absolute ceiling above bounds the NUMBER; this bounds the RATIO, which is what
+    // actually sets how many live records one source can hold (~duration / fire cadence
+    // shots land inside a duration window, each able to seed a different creep). Without
+    // it, 100,000 ticks against a 2-tick cadence admits ~50,000 records from ONE tower —
+    // an order of magnitude past MAX_DOT_RECORDS, on a bundle that compiles clean.
+    compiles((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 30;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 240 }, // 8 x 30
+      ];
+    });
+    rejects((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 30;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 241 },
+      ];
+    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 9");
   });
 
   // M2-S5a P8 (CodeRabbit, PR #78) — not a `capabilityProfile` field (the profile has
