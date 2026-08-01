@@ -1380,7 +1380,16 @@ export function runCombat(
       // ticks exactly once and advances by exactly one `cadenceTicks`, never a burst.
       // This single `if` (not a `while`), together with `tickedRecords` above, is the
       // totality proof against a spinning/catch-up record.
-      if (record.nextTickTick > tick) continue;
+      //
+      // `untilTick < tick` skips a record that ALREADY EXPIRED before this tick (Codex
+      // P2, PR #78). Note the strict `<`: inclusive expiry is preserved, so a record
+      // whose `untilTick` IS this tick still ticks — that is the documented rule, and
+      // step (6) removes it afterwards. Only a restored state reaches this: the sim
+      // never leaves an expired record resident, because step (6) runs every phase. But
+      // `canonicalDotRecords` cannot filter it — it never sees `tick` — so without this
+      // guard a hand-edited save got one free tick of armor-bypassing damage, able to
+      // kill and award bounty, from a DoT that had already ended.
+      if (record.nextTickTick > tick || record.untilTick < tick) continue;
       tickedRecords.add(ri);
       // The literal `0` here is INTENTIONAL — armor bypass, not a forgotten/
       // placeholder argument: a DoT tick deals its `amount` bypassing armor

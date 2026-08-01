@@ -1059,6 +1059,40 @@ describe('runCombat — armor (M2-S5a)', () => {
 // or expires a DoT record (P3). `runCombat`'s `dots` param is canonicalized and
 // returned unchanged — these tests pin that canonicalization exactly the way
 // `combat.test.ts`'s existing forged-impact tests pin `canonicalImpacts`.
+describe('DoT tick step — an already-expired record does not tick (Codex P2, PR #78)', () => {
+  const REC = { targetId: 1, sourceId: 9, amount: 40, cadenceTicks: 10 };
+  const tickAt = (dots: unknown[], tick: number): ReturnType<typeof runCombat> =>
+    runCombat(
+      restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
+      emptyTowers(),
+      [],
+      dots,
+      tick,
+      0,
+      FIELD,
+      GRID,
+      {},
+      {},
+      1,
+      4,
+    );
+
+  it('a record whose untilTick is BEFORE this tick is skipped — it deals no damage and is swept', () => {
+    // Only a restored/forged state reaches this: the sim never leaves an expired record
+    // resident, since the expiry sweep runs every phase. `canonicalDotRecords` cannot
+    // catch it either — it never sees `tick`.
+    const r = tickAt([{ ...REC, nextTickTick: 0, untilTick: 5 }], 1000);
+    expect(r.creeps.hp[0]).toBe(1000); // a finished DoT deals nothing
+    expect(r.dots).toEqual([]);
+  });
+
+  it('a record whose untilTick IS this tick still ticks — inclusive expiry is preserved', () => {
+    const r = tickAt([{ ...REC, nextTickTick: 1000, untilTick: 1000 }], 1000);
+    expect(r.creeps.hp[0]).toBe(960); // fires on its final tick...
+    expect(r.dots).toEqual([]); // ...then is removed
+  });
+});
+
 describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
   const noTowers = emptyTowers();
 
