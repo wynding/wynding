@@ -90,6 +90,11 @@ const PULSE_R_SPAN = 0.6;
  * motion cue (QC round 1). A non-finite `renderTimeMs` is treated as 0 (total; the
  * telegraph still renders, merely un-animated for that frame).
  */
+/** NOTE the units: `creep.x`/`y` here are PIXELS (the projected centre), NOT the
+ *  fixed-point sim units `CreepVM` carries — unlike `tracerPaintOps`, which takes and
+ *  emits fixed-point and is converted by its executor. Both signatures are bare
+ *  `{x, y}`, and passing the raw `CreepVM` drew this cue off-canvas for two milestones
+ *  (Codex, PR #78). */
 export function slowTelegraphPaintOps(
   creep: { readonly x: number; readonly y: number; readonly slowed: boolean },
   r: number,
@@ -194,6 +199,7 @@ function dotPipPoint(
  * `renderTimeMs` is treated as 0 (total; the telegraph still renders, merely
  * un-animated for that frame) — same posture as `slowTelegraphPaintOps`.
  */
+/** Units as `slowTelegraphPaintOps` above: `creep.x`/`y` are PIXELS, not fixed-point. */
 export function dotTelegraphPaintOps(
   creep: { readonly x: number; readonly y: number; readonly poisoned: boolean },
   r: number,

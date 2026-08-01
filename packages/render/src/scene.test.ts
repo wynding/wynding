@@ -322,3 +322,41 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
     expect(reduced.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1); // ring only
   });
 });
+
+// The regression Codex caught on PR #78. `CreepVM.x`/`y` are FIXED-POINT sim units (256
+// per cell); the silhouette projects them, but both telegraph plans were handed the raw
+// creep, so their cues drew ~256x away from the visible creep — off-canvas. The slowed
+// telegraph carried this from M2-S3 and had therefore never rendered at all; the DoT
+// telegraph inherited it. These assert the cues land ON the projected centre, so passing
+// the raw creep again fails immediately.
+describe('drawCreeps — both telegraphs draw at the PROJECTED centre, not fixed-point (PR #78)', () => {
+  const CREEP = {
+    x: 5 * 256,
+    y: 5 * 256,
+    hpFrac: 1,
+    creepId: 'normal',
+    slowed: true,
+    poisoned: true,
+  };
+
+  it('the slowed ring and the poison pips are centred within a cell of the silhouette', () => {
+    const g = fakeGraphics();
+    drawCreeps(g, PAL, [CREEP], true, 0, PROJECTION);
+    const p = PROJECTION.fpToPixel(CREEP.x, CREEP.y);
+    // Sanity: the projection must actually MOVE the point, or this test proves nothing.
+    expect(Math.hypot(p.x - CREEP.x, p.y - CREEP.y)).toBeGreaterThan(PROJECTION.cellPx);
+
+    const ring = g.calls.find((c) => c.method === 'strokeCircle');
+    expect(ring).toBeDefined();
+    const [rx, ry] = ring!.args as [number, number, number];
+    expect(Math.hypot(rx - p.x, ry - p.y)).toBeLessThan(PROJECTION.cellPx);
+
+    const pips = g.calls.filter((c) => c.method === 'fillCircle');
+    expect(pips.length).toBeGreaterThan(0);
+    for (const pip of pips) {
+      const [px, py] = pip.args as [number, number, number];
+      // Pips sit at r*1.8 from centre, well inside one cell at this scale.
+      expect(Math.hypot(px - p.x, py - p.y)).toBeLessThan(PROJECTION.cellPx * 2);
+    }
+  });
+});

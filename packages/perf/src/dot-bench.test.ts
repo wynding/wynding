@@ -6,7 +6,10 @@
 // never in a test `turbo run test`/`pnpm run verify` runs on every change.
 
 import { describe, it, expect } from 'vitest';
-import { MAX_DOT_RECORDS } from '@wynding/sim';
+import { MAX_DOT_RECORDS, compileRuleset, createInitialState, step } from '@wynding/sim';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { STRESS_RULESET_URL, STRESS_BOARD_ID } from '@wynding/content/stress';
 import { makeFillerDotRecord, makeSourceIdAllocator, topUpDotRecords } from './dot-bench';
 import { WARMUP_TICKS, SAMPLE_TICKS } from './harness';
 
@@ -101,5 +104,39 @@ describe('topUpDotRecords()', () => {
   it('does not throw when already at cap even with zero live creeps (nothing left to seed)', () => {
     const atCap = topUpDotRecords([], [1], 3, makeSourceIdAllocator());
     expect(() => topUpDotRecords(atCap, [], 3, makeSourceIdAllocator())).not.toThrow();
+  });
+});
+
+// The regression Codex caught on PR #78. A filler must survive `validDotRecord`, or every
+// timed `step()` canonicalizes the table to empty and the bench measures nothing — while
+// its own pre-step length assertion still passes, because the top-up runs before it. QC
+// round 2 moved a `cadenceTicks <= 1_000_000` bound onto `validDotRecord` and broke the
+// tool that way (the curve itself predates the bound and still reproduces).
+//
+// This is deliberately an END-TO-END witness, not an assertion that the cadence is under
+// some literal: restating a bound defined in THIS package would stay green if
+// `validDotRecord` tightened again, which is precisely the recurrence it must prevent.
+// It drives a real `step()` and asserts the record is still resident afterwards.
+describe('makeFillerDotRecord() — survives the sim canonicalizer (PR #78)', () => {
+  it('a filler seeded into SimState.dots is still resident after a real step()', () => {
+    const bundle = JSON.parse(
+      readFileSync(fileURLToPath(STRESS_RULESET_URL), 'utf8'),
+    ) as Parameters<typeof compileRuleset>[0];
+    const ruleset = compileRuleset(bundle, STRESS_BOARD_ID);
+    // Step until the scene actually has a live creep: a record whose target is not among
+    // the survivors is dropped by the SWEEP, which would mask the canonicalization
+    // question this test exists to ask.
+    let state = createInitialState(1, ruleset);
+    for (let t = 0; t < 400 && state.creeps.id.length === 0; t++) {
+      state = step(state, ruleset, []);
+    }
+    expect(state.creeps.id.length).toBeGreaterThan(0);
+    const targetId = state.creeps.id[0]!;
+    state.dots = [makeFillerDotRecord(targetId, 5_000)];
+
+    const next = step(state, ruleset, []);
+
+    expect(next.dots.length).toBe(1);
+    expect(next.dots[0]).toMatchObject({ sourceId: 5_000 });
   });
 });

@@ -45,7 +45,7 @@
 // `nextTickTick`/`untilTick` far past the sampled window, so nothing a filler
 // record itself does can drain the table), the table is topped back up to exactly
 // `MAX_DOT_RECORDS` OUTSIDE the timed region whenever the scene's own deaths/leaks
-// shrink it, and `runArm` asserts the exact expected count (`MAX_DOT_RECORDS` or
+// shrink it, and `runArm` asserts the exact expected count BEFORE, and a residency floor AFTER, every timed `step()` (`MAX_DOT_RECORDS` or
 // `0`) immediately before every timed `step()`. A run that cannot hold the table at
 // the cap (the scene has zero live creeps to seed against) throws loudly rather
 // than reporting a smaller-table number as though it were the cap.
@@ -77,8 +77,8 @@ import { percentile } from './stats';
 const FILLER_SOURCE_ID_BASE = 1_000_000_000;
 
 /** Strictly beyond `WARMUP_TICKS + SAMPLE_TICKS` (2,700) — a filler record's
- *  `cadenceTicks`/`nextTickTick`/`untilTick` are pinned to this so NO filler record
- *  ever ticks or expires inside this bench's run. Deliberate, not an oversight: the
+ *  `nextTickTick`/`untilTick` are pinned to this so NO filler record ever ticks or
+ *  expires inside this bench's run. Deliberate, not an oversight: the
  *  two arms this file compares (`dots` at the cap vs. `dots: []`) are constructed
  *  to differ ONLY in resident-table size, never in whether a tick actually fires
  *  `applyDirect` — so the measured delta is the cost of carrying `MAX_DOT_RECORDS`
@@ -87,6 +87,10 @@ const FILLER_SOURCE_ID_BASE = 1_000_000_000;
  *  firing record's damage/death cascade — that path is already exercised by
  *  `combat.test.ts`. */
 const FILLER_HORIZON_TICKS = 10_000_000;
+
+/** The largest `cadenceTicks` `validDotRecord` accepts (`combat.ts`). A filler must sit
+ *  at or under it to survive canonicalization — see `makeFillerDotRecord`. */
+const MAX_DOT_CADENCE_TICKS = 1_000_000;
 
 /** Returns a closure handing out a strictly increasing, never-repeating source id
  *  starting at `FILLER_SOURCE_ID_BASE` — every filler record created in one arm's
@@ -108,7 +112,16 @@ export function makeFillerDotRecord(targetId: number, sourceId: number): DotReco
     targetId,
     sourceId,
     amount: 1,
-    cadenceTicks: FILLER_HORIZON_TICKS,
+    // MUST satisfy `validDotRecord`'s ceiling, or every filler is silently dropped by
+    // `canonicalDotRecords` inside the timed `step()` and the bench measures an EMPTY
+    // table while its own pre-step assertion still passes (the top-up runs before the
+    // assertion). That is what happened when QC round 2 moved the
+    // `cadenceTicks <= 1_000_000` bound onto `validDotRecord` — caught by Codex on
+    // PR #78. It broke the TOOL, not the evidence: the sweep curve recorded at
+    // `MAX_DOT_RECORDS` was measured before that bound existed, and the repaired bench
+    // reproduces it. `nextTickTick` is what keeps the record from ever firing, so the
+    // cadence only has to be legal, not large.
+    cadenceTicks: MAX_DOT_CADENCE_TICKS,
     nextTickTick: FILLER_HORIZON_TICKS,
     untilTick: FILLER_HORIZON_TICKS,
   };
@@ -156,7 +169,7 @@ export function topUpDotRecords(
 
 /** One sampled tick's raw `step()` wall-clock — deliberately narrower than
  *  `harness.ts`'s `SampledTick`: this bench needs nothing beyond the timing
- *  itself, since the cap-adjacency assertion runs BEFORE the timed region, not
+ *  itself, since the cap-adjacency assertions bracket the timed region, not
  *  from anything the sample would carry. */
 export interface DotBenchSample {
   readonly tick: number;
@@ -212,6 +225,25 @@ function runArm(replay: Replay, ruleset: CompiledRuleset, atCap: boolean): RunAr
     const start = performance.now();
     state = step(state, ruleset, inputs, events);
     const ms = performance.now() - start;
+
+    // POST-step residency, not just pre-step (Codex, PR #78). The pre-step assertion
+    // above cannot see the table being canonicalized away INSIDE `step()`: the top-up
+    // runs before it, so a filler shape `validDotRecord` rejects passes the pre-check
+    // and is then dropped during the very tick being timed — the bench would report
+    // at-cap numbers for an empty table and silently invalidate the evidence that sets
+    // `MAX_DOT_RECORDS`. Exactly that happened when the cadence bound moved onto
+    // `validDotRecord`. A small drop from deaths/leaks is normal and the next tick's
+    // top-up restores it; a collapse to zero never is.
+    if (inSample && atCap && state.dots.length < MAX_DOT_RECORDS / 2) {
+      throw new Error(
+        `dot-bench: only ${state.dots.length} record(s) resident after tick ${tick}'s ` +
+          `timed step(), far below the ${MAX_DOT_RECORDS} cap — the fillers are being ` +
+          `rejected by the sim's canonicalizer, so this run measures a much smaller ` +
+          `table than it reports. Check makeFillerDotRecord against validDotRecord in ` +
+          `combat.ts. (Half the cap, not zero: a bound rejecting all-but-one filler ` +
+          `would slip past an is-it-empty check.)`,
+      );
+    }
 
     if (inSample) samples.push({ tick, ms });
   }

@@ -188,7 +188,20 @@ export function drawCreeps(
     // Slowed telegraph (M2-S3): a shape cue (ring, opaque) ALWAYS accompanies a live
     // slow; the motion cue (pulse, radius driven by render time) yields to reduced
     // motion (WCAG 2.3.3 / GAG §2). Alphas live in the plan, not here.
-    for (const tel of slowTelegraphPaintOps(c, r, reducedMotion, pal.slowed, renderTimeMs)) {
+    // BOTH telegraphs take the PROJECTED pixel centre `p`, never the raw `c` (Codex
+    // review, PR #78). `CreepVM.x`/`y` are fixed-point sim units — 256 per cell, as the
+    // silhouette's own `projection.fpToPixel(c.x, c.y)` above makes plain — so passing
+    // `c` drew both cues around coordinates that are ~256× the pixel position, i.e. far
+    // off-canvas. The slowed telegraph carried this from M2-S3 and has therefore never
+    // actually rendered; M2-S5a reproduced it in the DoT telegraph. `scene.test.ts` now
+    // pins that both plans receive the projected centre.
+    for (const tel of slowTelegraphPaintOps(
+      { ...p, slowed: c.slowed },
+      r,
+      reducedMotion,
+      pal.slowed,
+      renderTimeMs,
+    )) {
       g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.alpha);
       g.strokeCircle(tel.x, tel.y, tel.r);
     }
@@ -202,7 +215,13 @@ export function drawCreeps(
     // live-region announcement accompanies this — see the rationale at
     // `dotTelegraphPaintOps` (per-tick chatter would flood a screen reader; the state,
     // not the tick, is what matters).
-    for (const tel of dotTelegraphPaintOps(c, r, reducedMotion, pal.poisoned, renderTimeMs)) {
+    for (const tel of dotTelegraphPaintOps(
+      { ...p, poisoned: c.poisoned },
+      r,
+      reducedMotion,
+      pal.poisoned,
+      renderTimeMs,
+    )) {
       g.fillStyle(tel.colour, tel.alpha);
       g.fillCircle(tel.x, tel.y, tel.r);
     }
