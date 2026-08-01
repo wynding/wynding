@@ -228,16 +228,19 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 9");
   });
 
-  it('the ratio gate and MAX_DOT_RECORDS are the SAME multiple of MAX_TOWERS — compiled content can reach the rail but never exceed it', () => {
+  it('MAX_DOT_RECORDS budgets (ratio + 1) per source, so compiled content can reach the rail but never exceed it', () => {
     // The property both reviewers found missing (Codex P2 + CodeRabbit, PR #78): the gate
     // admitted 8 records per source while the rail budgeted 4, so schema-valid content
-    // could silently lose applications. One source holds exactly `ratio` live records
-    // (`floor((durationTicks - 1) / fire cadence) + 1`, which is `ratio` when
-    // `durationTicks = ratio × cadence`), and no board places more than MAX_TOWERS.
+    // could silently lose applications. A source's PEAK is `ratio + 1`, not `ratio`:
+    // impacts resolve in step (1) while expiry runs in step (6), so the shot landing on
+    // the tick a record expires still sees it — and that is when capacity is tested.
     expect(capabilityProfile(SIM_VERSION).maxDotDurationCadenceRatio).toBe(
       MAX_DOT_DURATION_CADENCE_RATIO,
     );
-    expect(MAX_DOT_RECORDS).toBe(MAX_DOT_DURATION_CADENCE_RATIO * MAX_TOWERS);
+    // `+ 1`: impacts resolve in step (1) but expiry runs in step (6), so on the tick a
+    // source's oldest record expires, the newly-landing shot still sees it — the peak is
+    // `ratio + 1` for that one tick, and that is when capacity is tested (Codex P2).
+    expect(MAX_DOT_RECORDS).toBe((MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWERS);
   });
 
   it('maxDotDurationCadenceRatio: a DoT may last 8x its tower fire cadence, not 9x (Codex P2, PR #78)', () => {

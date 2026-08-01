@@ -174,38 +174,57 @@ export interface DotRecord {
  * 0005's mid-range target. A rail whose whole promise is "never bites real play"
  * must not hand forged state a deterministic way to make the game unplayable.
  *
- * So the rail is DERIVED, not chosen (Codex P2 and CodeRabbit both reached the same gap
- * from opposite sides, PR #78). `MAX_DOT_DURATION_CADENCE_RATIO × MAX_TOWERS`: the
- * capability gate admits `durationTicks ≤ ratio × fire cadence`, which lets ONE source
- * hold exactly `ratio` live records, and a match has at most `MAX_TOWERS` distinct
- * SOURCES. Note that second step is about sources, not live towers, and the difference
- * matters: a sold tower's records keep ticking (the story's own owner ruling) and entity
- * ids are never reused, so the towers that fired inside one duration window are NOT
- * bounded by how many stand at once. What bounds them is that a match can only ever
- * MINT `MAX_TOWERS` tower ids — concurrent placement is gated there, and total churn is
- * gated by the replay validator's own per-replay tower-command cap. That second gate
- * lives in `packages/replay`, downstream of this package, so it is a fact about accepted
- * replays rather than something `packages/sim` can assert — the same layering caveat
- * issue #77 already records for the compile-time bound question.
- * Compiled content driven by an accepted replay can therefore REACH this rail but never
- * EXCEED it — the
- * property every earlier draft lacked. `4 × MAX_TOWERS` budgeted four records per tower
- * while the gate admitted eight, so schema-valid content could silently lose
- * applications; the two multiples are now one constant, and `capability.test.ts` pins
- * them together so they cannot drift apart again.
+ * THE RAIL IS DERIVED, not chosen — `(RATIO + 1) × MAX_TOWERS`. Both halves matter and
+ * both were wrong in earlier drafts, so the derivation is spelled out rather than
+ * asserted (Codex + CodeRabbit, PR #78, across three rounds on this one constant):
  *
- * At 8,000 the measured p99 is 3.53 ms, ABOVE the 2.75 ms the sweep above shows at
- * 10,000 — because the sweep predates the per-phase `buildDotIndex` pass, which trades
- * an `O(impacts × affected creeps × records)` worst case for a flat `O(records)` map
- * build every phase. That is the right trade (the path it removed was unbounded in two
- * dimensions), but it does cost more AT the cap, and the numbers should not be read as
- * if the tool had not changed underneath them.
+ *   PER SOURCE, the peak is `RATIO + 1`, not `RATIO`. Landings from one source are >= its
+ *   fire cadence `C` apart, and a record survives while `untilTick > tick` with
+ *   `untilTick = landing + D`, so prior resident landings sit in `[t-D, t-C]` spaced >= C
+ *   — at most `floor(D/C) = RATIO` of them. The landing being applied makes `RATIO + 1`.
+ *   The extra one is real, not defensive: impacts resolve in step (1) while expiry runs
+ *   in step (6), so on the tick a source's oldest record expires, the newly-landing shot
+ *   still sees it — and that is exactly when `applyDot` tests capacity. A re-hit
+ *   refreshes rather than appends, so it can never add a target.
  *
- * 3.53 ms is a hostile-state ceiling, not a play cost: reaching it needs 1,000 DoT
- * towers all in sustained contact, against ~150 on the stress scene. Real tables sit in
- * the hundreds. The asymmetry still holds — too high costs only DoS resistance, since
- * real play never nears the rail, while too low silently no-ops real applications — but
- * the rail is now bounded by what the compiler admits rather than by judgement.
+ *   ACROSS SOURCES, the count is `min(MAX_TOWERS, MAX_TOTAL_TOWER_COMMANDS)`. Sources are
+ *   not live towers: a sold tower's records keep ticking (this story's owner ruling) and
+ *   entity ids are never reused, so what matters is how many tower ids a match can MINT.
+ *   `packages/sim` does NOT bound that — its placement gate is a live-count check, and
+ *   build/sell/build mints fresh ids indefinitely. The real bound is
+ *   `MAX_TOTAL_TOWER_COMMANDS` (1,000) in `packages/replay`, which counts every
+ *   `placeTower` before acceptance. It happens to equal `MAX_TOWERS`, which is a
+ *   COINCIDENCE, not a binding: it is motivated there as a pathfinding-CPU budget and says
+ *   nothing about DoT. Raising it to allow longer matches — a change touching nothing in
+ *   this package — would let a replay mint that many DoT sources and silently drop
+ *   applications, with no test failing. Named here so the breadcrumb exists; it cannot be
+ *   imported without the layering back-edge AGENTS.md blocks, the same caveat issue #77
+ *   records for the compile-time bound question.
+ *
+ * Worst legitimate table at a capacity test is therefore `(RATIO+1)*S - 1 = 8,999`, just
+ * under the rail: compiled content driven by an accepted replay can REACH it but never
+ * EXCEED it. `4 × MAX_TOWERS` budgeted four records per source while the gate admitted
+ * eight, so schema-valid content lost applications; `capability.test.ts` now pins the gate
+ * and the rail together.
+ *
+ * Cost at 9,000: p99 2.69 / 2.72 / 2.88 ms over three runs — call it ~2.9 ms, the top of
+ * the range, since a ceiling should not be quoted from its cheapest sample. An earlier
+ * single reading at 8,000 said 3.53 ms; it was never re-run, so the honest statement is
+ * that single samples here vary by more than the differences being compared, not that any
+ * particular one was wrong. The sweep table above is single-sample per size and carries
+ * the same caveat — it is sound for the order-of-magnitude call it was used for (rejecting
+ * 20,000 at 7.13 ms) and should not be read to a tenth of a millisecond. It also predates
+ * the per-phase `buildDotIndex` pass, which trades an unbounded
+ * `O(impacts × affected creeps × records)` path for a flat `O(records)` map build; the
+ * post-change readings show no measurable penalty at the cap (9,000 now costs what the old
+ * table showed at 10,000), so that trade looks free at this scale.
+ *
+ * ~2.9 ms is a hostile-state ceiling, not a play cost: reaching it needs ~1,000 DoT
+ * sources in sustained contact, against ~150 towers on the whole stress scene. Real
+ * tables sit in the hundreds. The asymmetry still holds — too high costs only DoS
+ * resistance, since real play never nears the rail, while too low silently no-ops real
+ * applications — but the rail is now bounded by what the compiler admits rather than by
+ * judgement.
  *
  * NOTE the per-source bound is analytic, not measured on a DoT-bearing scene: no such
  * scene exists yet. `stress-40x40.json` carries `direct` and `slow` only, and
@@ -217,7 +236,7 @@ export interface DotRecord {
  * behaviour change owing its own `simVersion` bump. If S5b's stress scene lands
  * anywhere near it, that is a finding to raise, not a constant to nudge.
  */
-export const MAX_DOT_RECORDS = MAX_DOT_DURATION_CADENCE_RATIO * MAX_TOWERS;
+export const MAX_DOT_RECORDS = (MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWERS;
 
 /**
  * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,

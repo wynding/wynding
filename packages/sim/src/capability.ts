@@ -65,7 +65,8 @@ export interface CapabilityProfile {
    *  100,000 ticks against a 2-tick cadence admits ~50,000 records from a single tower,
    *  which is an order of magnitude past `MAX_DOT_RECORDS`. 8 admits the shipped `venom`
    *  (60/30 = 2) and the stress bundle's longer twin (200/30 ≈ 6.7) with room, while
-   *  cutting the worst case per source from ~50,000 to 8. Checked per `dot` effect in
+   *  cutting the worst case per source from ~50,000 to 9 (the ratio plus the one record still
+   *  resident when the next shot lands — see `MAX_DOT_RECORDS`). Checked per `dot` effect in
    *  `checkCapabilityGlobal`, against the tower's OWN attack cadence. */
   readonly maxDotDurationCadenceRatio: number;
 }
