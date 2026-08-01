@@ -29,7 +29,9 @@
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { capabilityProfile } from './capability';
-import { MAX_IMPACT_EFFECTS, MAX_BLAST_RADIUS_FP } from './combat';
+import { MAX_IMPACT_EFFECTS, MAX_BLAST_RADIUS_FP, MAX_DOT_RECORDS } from './combat';
+import { MAX_TOWERS } from './tower';
+import { MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 import { compileRuleset, RulesetError } from './ruleset';
 import { SIM_VERSION } from './index';
 import { testBundle } from './test-support';
@@ -224,6 +226,18 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
       ];
     }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 9");
+  });
+
+  it('the ratio gate and MAX_DOT_RECORDS are the SAME multiple of MAX_TOWERS — compiled content can reach the rail but never exceed it', () => {
+    // The property both reviewers found missing (Codex P2 + CodeRabbit, PR #78): the gate
+    // admitted 8 records per source while the rail budgeted 4, so schema-valid content
+    // could silently lose applications. One source holds exactly `ratio` live records
+    // (`floor((durationTicks - 1) / fire cadence) + 1`, which is `ratio` when
+    // `durationTicks = ratio × cadence`), and no board places more than MAX_TOWERS.
+    expect(capabilityProfile(SIM_VERSION).maxDotDurationCadenceRatio).toBe(
+      MAX_DOT_DURATION_CADENCE_RATIO,
+    );
+    expect(MAX_DOT_RECORDS).toBe(MAX_DOT_DURATION_CADENCE_RATIO * MAX_TOWERS);
   });
 
   it('maxDotDurationCadenceRatio: a DoT may last 8x its tower fire cadence, not 9x (Codex P2, PR #78)', () => {

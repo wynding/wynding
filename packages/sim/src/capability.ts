@@ -22,7 +22,7 @@
 // S4a QC round-1 #12) `allowedDirectForms` — the schema's `form` field is a
 // `'single' | 'aoe'` enum with no third legal value to test a reject against.
 
-import { RulesetError } from './ruleset-shared';
+import { RulesetError, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 
 /** The gated dimensions a `compileRuleset` call enforces against a bundle, keyed by
  *  the sim's behavior version. Every field here is a CEILING (or, for the allow-
@@ -113,7 +113,7 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxEarlyCallScoreDivisor: 1_000_000,
     maxAoeRadiusFp: 2048,
     maxDotDurationTicks: 100_000,
-    maxDotDurationCadenceRatio: 8,
+    maxDotDurationCadenceRatio: MAX_DOT_DURATION_CADENCE_RATIO,
   },
 };
 

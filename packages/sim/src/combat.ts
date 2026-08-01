@@ -50,7 +50,7 @@ import {
   cellOf,
   type CreepGeometry,
 } from './movement';
-import { effectiveSpeedFp } from './ruleset-shared';
+import { effectiveSpeedFp, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
 import type { CompiledCreep, CompiledEffect, CompiledTower } from './ruleset';
 
@@ -174,31 +174,50 @@ export interface DotRecord {
  * 0005's mid-range target. A rail whose whole promise is "never bites real play"
  * must not hand forged state a deterministic way to make the game unplayable.
  *
- * `4 × MAX_TOWERS` instead, for the headroom the rail actually needs. A DoT-carrying
- * tower holds AT MOST about `durationTicks / its FIRE cadence` live records at once —
- * that many shots fit inside one duration window, and a re-hit refreshes rather than
- * adds: the shipped `venom` is 60/30 = 2. It is an upper bound, not a typical value;
- * sticky targeting means consecutive shots often land on the SAME creep and merely
- * refresh, so the real count runs lower. Real peaks are therefore in the low hundreds even on a board
- * saturated with them, against a rail of 4,000 — which costs 1.24 ms, 5.8× cheaper
- * than 20,000.
+ * So the rail is DERIVED, not chosen (Codex P2 and CodeRabbit both reached the same gap
+ * from opposite sides, PR #78). `MAX_DOT_DURATION_CADENCE_RATIO × MAX_TOWERS`: the
+ * capability gate admits `durationTicks ≤ ratio × fire cadence`, which lets ONE source
+ * hold exactly `ratio` live records, and a match has at most `MAX_TOWERS` distinct
+ * SOURCES. Note that second step is about sources, not live towers, and the difference
+ * matters: a sold tower's records keep ticking (the story's own owner ruling) and entity
+ * ids are never reused, so the towers that fired inside one duration window are NOT
+ * bounded by how many stand at once. What bounds them is that a match can only ever
+ * MINT `MAX_TOWERS` tower ids — concurrent placement is gated there, and total churn is
+ * gated by the replay validator's own per-replay tower-command cap. That second gate
+ * lives in `packages/replay`, downstream of this package, so it is a fact about accepted
+ * replays rather than something `packages/sim` can assert — the same layering caveat
+ * issue #77 already records for the compile-time bound question.
+ * Compiled content driven by an accepted replay can therefore REACH this rail but never
+ * EXCEED it — the
+ * property every earlier draft lacked. `4 × MAX_TOWERS` budgeted four records per tower
+ * while the gate admitted eight, so schema-valid content could silently lose
+ * applications; the two multiples are now one constant, and `capability.test.ts` pins
+ * them together so they cannot drift apart again.
  *
- * NOTE the bound above is analytic, not measured on a DoT-bearing scene: no such scene
- * exists yet. `stress-40x40.json` carries `direct` and `slow` only, and `dot-bench.ts`
- * seeds SYNTHETIC filler records to reach the cap rather than simulating towers that
- * produce them. S5b adds the DoT-bearing stress twin and measures the real peak — until
- * then, do not cite a measured concurrency figure here, because there isn't one.
+ * At 8,000 the measured p99 is 3.53 ms, ABOVE the 2.75 ms the sweep above shows at
+ * 10,000 — because the sweep predates the per-phase `buildDotIndex` pass, which trades
+ * an `O(impacts × affected creeps × records)` worst case for a flat `O(records)` map
+ * build every phase. That is the right trade (the path it removed was unbounded in two
+ * dimensions), but it does cost more AT the cap, and the numbers should not be read as
+ * if the tool had not changed underneath them.
  *
- * The asymmetry drove the choice: set too high, the cost is only weaker DoS
- * resistance, since real play never approaches the rail; set too low, real DoT
- * applications silently become no-ops. So this is deliberately generous over measured
- * real peaks rather than as high as the frame budget can bear.
+ * 3.53 ms is a hostile-state ceiling, not a play cost: reaching it needs 1,000 DoT
+ * towers all in sustained contact, against ~150 on the stress scene. Real tables sit in
+ * the hundreds. The asymmetry still holds — too high costs only DoS resistance, since
+ * real play never nears the rail, while too low silently no-ops real applications — but
+ * the rail is now bounded by what the compiler admits rather than by judgement.
+ *
+ * NOTE the per-source bound is analytic, not measured on a DoT-bearing scene: no such
+ * scene exists yet. `stress-40x40.json` carries `direct` and `slow` only, and
+ * `dot-bench.ts` seeds SYNTHETIC filler records to reach the cap rather than simulating
+ * towers that produce them. S5b adds the DoT-bearing stress twin and measures the real
+ * peak — until then, do not cite a measured concurrency figure here.
  *
  * Like `AOE_SCAN_CEILING` this is capability-shaped — once sv9 ships, moving it is a
  * behaviour change owing its own `simVersion` bump. If S5b's stress scene lands
  * anywhere near it, that is a finding to raise, not a constant to nudge.
  */
-export const MAX_DOT_RECORDS = 4 * MAX_TOWERS;
+export const MAX_DOT_RECORDS = MAX_DOT_DURATION_CADENCE_RATIO * MAX_TOWERS;
 
 /**
  * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,

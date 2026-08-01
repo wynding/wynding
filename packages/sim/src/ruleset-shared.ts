@@ -84,3 +84,15 @@ export function effectiveSpeedFp(
     ceilDiv(baseSpeedFp * slowFloorNum, slowFloorDen),
   );
 }
+
+/** The most live records ONE DoT source can hold, and therefore the multiple this rail
+ *  is derived from. A tower lands `floor((durationTicks - 1) / fire cadence) + 1` shots
+ *  inside a duration window, each able to seed a different creep (a re-hit refreshes
+ *  rather than adds), so when the capability profile admits `durationTicks` up to
+ *  `N × fire cadence` that expression is exactly `N`. Cross-checked against the shipped
+ *  `venom` (60/30): `floor(59/30) + 1 = 2`, which is what it actually holds.
+ *
+ *  `capability.ts`'s `maxDotDurationCadenceRatio` MUST equal this — that gate is what
+ *  makes the derivation below true rather than aspirational, and `capability.test.ts`
+ *  pins the two together. */
+export const MAX_DOT_DURATION_CADENCE_RATIO = 8;
