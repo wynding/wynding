@@ -153,8 +153,10 @@ export interface DotRecord {
  * new-pair application once the table is full, the same deterministic-no-op
  * precedent, already reviewed there. Deliberately NOT a per-creep source cap — that
  * would contradict `docs/CONTEXT.md`'s Status effect entry ("each source's DoT
- * coexists"). Resident-state only, never a compile-time gate: see m2.md's amended S5
- * clause and issue #77 for why no compiler-visible bound was derivable.
+ * coexists"). NOT resident-state-only — an earlier draft said so, and m2.md's S5 clause
+ * was amended to match before PR #78's review derived the compiler gate this rail is now
+ * built on (see the derivation below). What is still outside the compiler is only the
+ * SOURCE COUNT; issue #77 narrows to that.
  *
  * MEASURED, not guessed (M2-S5a P4, `packages/perf/src/dot-bench.ts`). The first
  * draft named 20,000; the benchmark rejected it. `step()` p99 against table size, on
