@@ -58,6 +58,7 @@ import {
   parseRulesetJson,
   step,
   MAX_DOT_RECORDS,
+  MAX_DOT_CADENCE_TICKS,
   type CompiledRuleset,
   type DotRecord,
   type SimState,
@@ -87,10 +88,6 @@ const FILLER_SOURCE_ID_BASE = 1_000_000_000;
  *  firing record's damage/death cascade — that path is already exercised by
  *  `combat.test.ts`. */
 const FILLER_HORIZON_TICKS = 10_000_000;
-
-/** The largest `cadenceTicks` `validDotRecord` accepts (`combat.ts`). A filler must sit
- *  at or under it to survive canonicalization — see `makeFillerDotRecord`. */
-const MAX_DOT_CADENCE_TICKS = 1_000_000;
 
 /** Returns a closure handing out a strictly increasing, never-repeating source id
  *  starting at `FILLER_SOURCE_ID_BASE` — every filler record created in one arm's

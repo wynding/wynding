@@ -375,12 +375,23 @@ function validEffectPrimitive(e: unknown): e is EffectPrimitive {
 function canonicalEffectPrimitive(e: EffectPrimitive): EffectPrimitive {
   if (e.kind === 'direct') return { kind: 'direct', amount: e.amount };
   if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
-  return {
-    kind: 'dot',
-    amount: e.amount,
-    cadenceTicks: e.cadenceTicks,
-    durationTicks: e.durationTicks,
-  };
+  // EXHAUSTIVE on purpose — `dot` is matched, never a fallthrough (CodeRabbit, PR #78).
+  // A trailing `return {kind:'dot', ...}` would rebuild any future fourth variant AS a
+  // dot, reading `amount`/`cadenceTicks`/`durationTicks` off an object that has none of
+  // them, and that result goes straight into the world-hash. That is precisely the defect
+  // `snapshotEffects` carried in the other direction (collapsing everything non-`slow`
+  // into `direct`), documented at its own definition. The `never` check below makes
+  // adding a variant a COMPILE error here instead.
+  if (e.kind === 'dot') {
+    return {
+      kind: 'dot',
+      amount: e.amount,
+      cadenceTicks: e.cadenceTicks,
+      durationTicks: e.durationTicks,
+    };
+  }
+  const unreachable: never = e;
+  return unreachable;
 }
 
 /** Structural cap on a blast's radius — DELIBERATELY a SEPARATE constant from the
@@ -525,6 +536,13 @@ function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
  * thing bounding the operand `satAdd(nextTickTick, cadenceTicks)` reads on a restored
  * table, so it is load-bearing rather than decorative.
  */
+/** The largest `cadenceTicks` a restored `DotRecord` may carry. Exported (CodeRabbit,
+ *  PR #78) so `packages/perf`'s DoT benchmark BINDS to the real bound instead of
+ *  restating the literal in its own package — a restated copy would drift silently, and
+ *  a filler that violates this is dropped by `canonicalDotRecords` mid-`step()`, which
+ *  is exactly how the benchmark came to be timing an empty table. */
+export const MAX_DOT_CADENCE_TICKS = 1_000_000;
+
 function validDotRecord(rec: unknown): rec is DotRecord {
   if (rec === null || typeof rec !== 'object') return false;
   const r = rec as {
@@ -544,7 +562,7 @@ function validDotRecord(rec: unknown): rec is DotRecord {
     (r.amount as number) >= 1 &&
     Number.isSafeInteger(r.cadenceTicks) &&
     (r.cadenceTicks as number) >= 1 &&
-    (r.cadenceTicks as number) <= 1_000_000 &&
+    (r.cadenceTicks as number) <= MAX_DOT_CADENCE_TICKS &&
     Number.isSafeInteger(r.nextTickTick) &&
     (r.nextTickTick as number) >= 0 &&
     Number.isSafeInteger(r.untilTick) &&
@@ -773,18 +791,40 @@ function applySlow(
  * re-derived from currently-alive towers, so a later reader should not "fix" this by
  * adding a check against `towers` here.
  */
+export function dotIndexKey(targetId: number, sourceId: number): string {
+  return `${targetId}:${sourceId}`;
+}
+
+/** Build the `(targetId, sourceId) → row` index `applyDot` consults, ONCE per combat
+ *  phase. Without it `applyDot` linear-scanned the whole table per application, so a
+ *  restored state resolving up to `MAX_IN_FLIGHT_IMPACTS` due impacts — blast impacts
+ *  visiting many creeps each — cost `O(impacts × affected creeps × records)`
+ *  (CodeRabbit, PR #78). Same defect class as the duplicate-id traversal blow-up fixed
+ *  in the tick step, and the same remedy: pay `O(records)` once, then `O(1)` per lookup.
+ *  `canonicalDotRecords` has already deduped the pair, so one row per key is exact. */
+export function buildDotIndex(dots: readonly DotRecord[]): Map<string, number> {
+  const index = new Map<string, number>();
+  for (let i = 0; i < dots.length; i++) {
+    const rec = dots[i] as DotRecord;
+    index.set(dotIndexKey(rec.targetId, rec.sourceId), i);
+  }
+  return index;
+}
+
 export function applyDot(
   dots: DotRecord[],
+  index: Map<string, number>,
   targetId: number,
   sourceId: number,
   effect: Extract<EffectPrimitive, { kind: 'dot' }>,
   tick: number,
   events?: StepEvents,
 ): void {
-  for (let i = 0; i < dots.length; i++) {
-    const rec = dots[i] as DotRecord;
-    if (rec.targetId !== targetId || rec.sourceId !== sourceId) continue;
-    dots[i] = {
+  const key = dotIndexKey(targetId, sourceId);
+  const at = index.get(key);
+  if (at !== undefined) {
+    const rec = dots[at] as DotRecord;
+    dots[at] = {
       targetId,
       sourceId,
       amount: effect.amount,
@@ -798,6 +838,7 @@ export function applyDot(
     if (events?.dotDropped !== undefined) events.dotDropped++;
     return;
   }
+  index.set(key, dots.length);
   dots.push({
     targetId,
     sourceId,
@@ -917,6 +958,7 @@ export function applyImpactToCreep(
   killedThisPhase: Set<number>,
   creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
   dots: DotRecord[],
+  dotIndex: Map<string, number>,
   sourceId: number,
   events?: StepEvents,
 ): void {
@@ -930,7 +972,7 @@ export function applyImpactToCreep(
     for (const effect of effects) {
       if (effect.kind === 'slow') applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
       if (effect.kind === 'dot') {
-        applyDot(dots, creeps.id[idx] as number, sourceId, effect, tick, events);
+        applyDot(dots, dotIndex, creeps.id[idx] as number, sourceId, effect, tick, events);
       }
     }
   }
@@ -1159,6 +1201,8 @@ export function runCombat(
   //     below — one death-tracking set for the whole phase, one sweep credits both.
   const kept: Impact[] = [];
   const killedThisPhase = new Set<number>();
+  // Built ONCE per phase and mutated by `applyDot` on append — see `buildDotIndex`.
+  const dotIndex = buildDotIndex(canonicalDots);
   for (const imp of canonical) {
     if (imp.impactTick > tick) {
       kept.push(imp);
@@ -1177,6 +1221,7 @@ export function runCombat(
         killedThisPhase,
         creepById,
         canonicalDots,
+        dotIndex,
         imp.sourceId,
         events,
       );
@@ -1197,6 +1242,7 @@ export function runCombat(
         killedThisPhase,
         creepById,
         canonicalDots,
+        dotIndex,
         imp.sourceId,
         events,
       );

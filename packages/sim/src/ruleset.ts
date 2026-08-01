@@ -433,6 +433,25 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
       // `durationTicks >= cadenceTicks` rule doesn't: together the two rules bound
       // both a DoT's cadence and its duration, so tick scheduling can never
       // saturate at any bundle that compiles.
+      // An `aoe` direct effect plus a `dot` on ONE tower is rejected at sv9 (Codex P2,
+      // PR #78). The sim could simulate it, but `MAX_DOT_RECORDS` was sized on the
+      // single-target application model — about `durationTicks / fire cadence` records
+      // per tower, since each shot lands on one creep. A blast applies the DoT to EVERY
+      // member it catches, so ~41 such towers over 100 creeps in radius needs 4,100
+      // distinct (targetId, sourceId) records and silently starts dropping applications
+      // at a rail that compiled clean. No tower in M2's catalog combines the two, so
+      // rather than inflate a capability-shaped constant for content that does not
+      // exist, reject the combination LOUDLY at compile time until a story needs it and
+      // re-derives the bound. Same posture as S4a's form-uniform/radius-uniform gates,
+      // which exist to stop exactly this kind of unvalidated composition.
+      if (
+        effect.kind === 'dot' &&
+        tower.effects.some((e) => e.kind === 'direct' && e.form === 'aoe')
+      ) {
+        throw new RulesetError(
+          `tower '${tower.id}' combines an aoe direct effect with a dot effect, unsupported at simVersion ${v}`,
+        );
+      }
       if (effect.kind === 'dot' && effect.durationTicks > profile.maxDotDurationTicks) {
         throw new RulesetError(
           `tower '${tower.id}' dot durationTicks ${effect.durationTicks} exceeds ${profile.maxDotDurationTicks} at simVersion ${v}`,

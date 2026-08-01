@@ -48,23 +48,45 @@ import { getBundledRuleset, defaultBoardId } from './registry';
 /** Fixed seed — same convention as parity.test.ts. */
 const SCENARIO_SEED = 0x5eed;
 
+// The scripted build's `basic` wall, stated so the scenario is reproducible by reading
+// it, and SHARED (module scope, not per-test copies) by both tests below — the second
+// test's claim of using "the same script, same seed, same basic wall" is only true if
+// this is structurally the same array/function both tests build on, not two literals
+// that merely happen to currently match (CodeRabbit, PR #78, Major).
+//
+// A `basic` pair at columns 2, 6 and 10 (rows 10 and 12, flanking the row-11 lane, the
+// same flanking geometry parity.test.ts uses) — six towers total, cost 30 of the
+// starting 80 bounty. This is a deliberately modest wall: enough `basic` DPS (10
+// damage, armor-0 against every creep in waves 0-2) to handle the three unarmored
+// waves, not an overbuilt wall sized to also brute-force the armored wave on its own.
+const basicAnchors: { col: number; row: number }[] = [
+  { col: 2, row: 10 },
+  { col: 2, row: 12 },
+  { col: 6, row: 10 },
+  { col: 6, row: 12 },
+  { col: 10, row: 10 },
+  { col: 10, row: 12 },
+];
+
+/** Builds a fresh `inputs`-style placement function for `basicAnchors`: one `basic`
+ *  placed every 10 ticks, in anchor order, starting at tick 0 — an unhurried early
+ *  build, not a first-tick rush. Returns a NEW closure (its own `nextBasic` cursor)
+ *  each call so the two tests below never share placement state, even though they
+ *  build on the exact same `basicAnchors` array. */
+function basicWallInputs(): (tick: number) => SimInput[] {
+  let nextBasic = 0;
+  return (tick: number): SimInput[] => {
+    const out: SimInput[] = [];
+    if (tick % 10 === 0 && nextBasic < basicAnchors.length) {
+      out.push({ kind: 'placeTower', anchor: basicAnchors[nextBasic]!, towerId: 'basic' });
+      nextBasic++;
+    }
+    return out;
+  };
+}
+
 describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build measurement', () => {
   it('a small basic wall for waves 0-2, plus a venom pair built ahead of wave 4, clears the whole game', () => {
-    // --- The scripted build, stated so the scenario is reproducible by reading it ---
-    //
-    // A `basic` pair at columns 2, 6 and 10 (rows 10 and 12, flanking the row-11 lane,
-    // the same flanking geometry parity.test.ts uses) — six towers total, cost 30 of the
-    // starting 80 bounty. This is a deliberately modest wall: enough `basic` DPS (10 damage,
-    // armor-0 against every creep in waves 0-2) to handle the three unarmored waves, not an
-    // overbuilt wall sized to also brute-force the armored wave on its own.
-    const basicAnchors: { col: number; row: number }[] = [
-      { col: 2, row: 10 },
-      { col: 2, row: 12 },
-      { col: 6, row: 10 },
-      { col: 6, row: 12 },
-      { col: 10, row: 10 },
-      { col: 10, row: 12 },
-    ];
     // The `venom` PAIR (the grill's arithmetic, PLAN.md step 38) — column 16, rows 10 and
     // 12, the same flanking geometry. Built at ticks 1300/1310, well ahead of wave 4's
     // natural launch at tick 1400 (countdowns 500+300+300+300), so both towers have
@@ -76,15 +98,9 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
       { col: 16, row: 12 },
     ];
 
-    let nextBasic = 0;
+    const basicWall = basicWallInputs();
     function inputs(tick: number): SimInput[] {
-      const out: SimInput[] = [];
-      // One `basic` placed every 10 ticks, in anchor order, starting at tick 0 — an
-      // unhurried early build, not a first-tick rush.
-      if (tick % 10 === 0 && nextBasic < basicAnchors.length) {
-        out.push({ kind: 'placeTower', anchor: basicAnchors[nextBasic]!, towerId: 'basic' });
-        nextBasic++;
-      }
+      const out = basicWall(tick);
       if (tick === 1300) {
         out.push({ kind: 'placeTower', anchor: venomAnchors[0]!, towerId: 'venom' });
       }
@@ -100,10 +116,15 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     // A reused, mutable `StepEvents` collector (combat.ts's documented contract: the two
     // DoT counters are mutable and NOT reset per-call) — accumulates `dotTicks`/`dotDropped`
     // across the whole run, proving DoT actually engaged rather than merely being present
-    // in the bundle.
+    // in the bundle. The two ARRAYS on the same object are append-only and nothing drains
+    // them, so they are cleared each tick (CodeRabbit, PR #78): over 1,900 ticks they would
+    // otherwise retain every impact point and every shot fired for the whole run, for no
+    // reason — only the scalar counters are being accumulated on purpose.
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
     let sawLiveDotRecord = false;
     for (let t = 0; t < 1900; t++) {
+      events.impactPoints.length = 0;
+      events.fired.length = 0;
       state = step(state, ruleset, inputs(t), events);
       sawLiveDotRecord ||= state.dots.length > 0;
     }
@@ -154,29 +175,15 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
   // which is precisely the failure mode this file exists to guard against. So: the same
   // script, same seed, same basic wall, with ONLY the venom pair removed.
   it('the same build WITHOUT the venom pair leaks the armored wave — DoT is what clears it', () => {
-    const basicAnchors: { col: number; row: number }[] = [
-      { col: 2, row: 10 },
-      { col: 2, row: 12 },
-      { col: 6, row: 10 },
-      { col: 6, row: 12 },
-      { col: 10, row: 10 },
-      { col: 10, row: 12 },
-    ];
-    let nextBasic = 0;
-    function inputs(tick: number): SimInput[] {
-      const out: SimInput[] = [];
-      if (tick % 10 === 0 && nextBasic < basicAnchors.length) {
-        out.push({ kind: 'placeTower', anchor: basicAnchors[nextBasic]!, towerId: 'basic' });
-        nextBasic++;
-      }
-      return out;
-    }
+    const inputs = basicWallInputs();
 
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
     for (let t = 0; t < 1900; t++) {
+      events.impactPoints.length = 0;
+      events.fired.length = 0;
       state = step(state, ruleset, inputs(t), events);
     }
 

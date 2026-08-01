@@ -9,6 +9,7 @@ import type { GridSpec } from './board';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 import { cellCenterX, cellCenterY } from './movement';
 import type { SimState } from './index';
+import { runCombat } from './combat';
 
 /** The standard M1 single-target tower stat block. */
 export const TEST_TOWER: TowerDef = {
@@ -244,4 +245,60 @@ export function pushCreep(
   state.creeps.creepId.push(args.creepId ?? 'normal');
   state.creeps.slowMulFp.push(args.slowMulFp ?? 0);
   state.creeps.slowUntilTick.push(args.slowUntilTick ?? 0);
+}
+
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
+// this wrapper supplies an empty one (`{}`, unarmored) so pre-armor call sites across
+// `combat.test.ts`/`story-aoe.test.ts`/`story-slow.test.ts` don't need one-by-one
+// edits. M2-S5a P2 then added a `dots` parameter (STATE SHAPE ONLY — no behaviour in
+// this packet), which this wrapper likewise defaults to `[]`. The param types are
+// DERIVED from `runCombat` itself (never duplicated) via `Parameters<typeof
+// runCombat>[N]` so this wrapper can never silently drift from the real signature.
+// Tests that exercise armor or DoT state call `runCombat`/`applyImpactToCreep`
+// directly with a real `creepById`/`dots`.
+//
+// CodeRabbit (PR #78, Major) flagged the THREE verbatim-identical copies of this
+// wrapper (one per test file) as fragile: `runCombat`'s `tick`/`bounty` params are
+// both bare `number`, and its `impacts`/`dots` params are both bare `readonly
+// unknown[]` — two same-typed pairs sit adjacent in the parameter list, so a future
+// positional shift in `runCombat` could silently retarget this wrapper at the wrong
+// slot without a type error. The clean fix would be to reference each parameter BY
+// NAME instead of by tuple index, but `runCombat`'s own signature (production code,
+// off-limits for this packet) has no named-parameters form to reference — it takes
+// 13 bare positional arguments, and the ambiguous pairs above have no more specific
+// type to import that `runCombat` itself doesn't already erase (its `impacts`/`dots`
+// parameters are typed `readonly unknown[]`, not `Impact[]`/`DotRecord[]`, so a
+// narrower import wouldn't be enforced by `runCombat`'s own type and wouldn't catch a
+// positional swap either). So this packet takes the acceptable fallback the plan
+// allows: centralize the ONE `Parameters<...>[N]`-indexed definition here instead of
+// three independent copies, so the hazard exists in exactly one place.
+type RunCombatParams = Parameters<typeof runCombat>;
+export function runCombatT(
+  creeps: RunCombatParams[0],
+  towers: RunCombatParams[1],
+  impacts: RunCombatParams[2],
+  tick: RunCombatParams[4],
+  bounty: RunCombatParams[5],
+  field: RunCombatParams[6],
+  grid: RunCombatParams[7],
+  towerById: RunCombatParams[8],
+  slowFloorNum: RunCombatParams[10],
+  slowFloorDen: RunCombatParams[11],
+  events?: RunCombatParams[12],
+): ReturnType<typeof runCombat> {
+  return runCombat(
+    creeps,
+    towers,
+    impacts,
+    [],
+    tick,
+    bounty,
+    field,
+    grid,
+    towerById,
+    {},
+    slowFloorNum,
+    slowFloorDen,
+    events,
+  );
 }

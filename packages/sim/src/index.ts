@@ -1253,7 +1253,12 @@ export type { StepEvents } from './combat';
 // DoT records + the resident-queue caps (M2-S5a, #77): `packages/perf` consumes
 // both through this barrel (P4's `dot-bench.ts`). `MAX_IN_FLIGHT_IMPACTS` was not
 // previously re-exported — added here alongside its DoT analogue.
-export { type DotRecord, MAX_DOT_RECORDS, MAX_IN_FLIGHT_IMPACTS } from './combat';
+export {
+  type DotRecord,
+  MAX_DOT_RECORDS,
+  MAX_DOT_CADENCE_TICKS,
+  MAX_IN_FLIGHT_IMPACTS,
+} from './combat';
 // Ruleset bundle (M1 Story 5, re-encoded to v2 in M2-S1): compilation, the content
 // digest, and the boundary guard.
 export {

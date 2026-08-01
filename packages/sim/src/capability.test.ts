@@ -220,6 +220,29 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 9");
   });
 
+  // M2-S5a P8 (CodeRabbit, PR #78) — not a `capabilityProfile` field (the profile has
+  // no data dimension for this), but a hardcoded compile-time gate in `compileRuleset`
+  // living right beside the `maxDotDurationTicks` check above: `MAX_DOT_RECORDS` was
+  // sized on the single-target application model (one shot lands on one creep), and a
+  // blast applying a DoT to every member it catches can blow that table out at a
+  // bundle that would otherwise compile clean. Recorded here, next to the sibling
+  // dot-duration gate, rather than in ruleset.test.ts's structural-rejection block,
+  // since this file's `rejects` helper is what pins the gate's own message text.
+  it('rejects a tower combining an aoe direct effect with a dot effect, naming both in the message; a dot on a single-target tower still compiles', () => {
+    compiles((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
+      ];
+    });
+    rejects((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
+      ];
+    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 9");
+  });
+
   it("allowedDirectForms: 'single' accepted, 'aoe' also accepted — no reject case exists (see header comment)", () => {
     compiles(() => {});
     compiles((b) => {

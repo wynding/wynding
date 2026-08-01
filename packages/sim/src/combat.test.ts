@@ -9,6 +9,7 @@ import {
   runCombat,
   applyImpactToCreep,
   applyDot,
+  buildDotIndex,
   MAX_DOT_RECORDS,
   MAX_IN_FLIGHT_IMPACTS,
   type CombatCreeps,
@@ -36,7 +37,7 @@ function countedArray<T>(arr: readonly T[]): { proxy: readonly T[]; accessCount:
   return { proxy, accessCount: () => count };
 }
 import type { CompiledEffect, CompiledTower } from './ruleset';
-import { testRuleset } from './test-support';
+import { testRuleset, runCombatT } from './test-support';
 import type { CreepDef } from '@wynding/types';
 
 // A large open board so targeting geometry is clean; exit on the right at row 6.
@@ -72,44 +73,12 @@ const DIRECT_DAMAGE = DIRECT_EFFECT.amount;
 // above — a testBundle bounty edit must move these economy assertions with it.
 const KILL_BOUNTY = RULESET.creepById[RULESET.waves[0]!.spawns[0]!.creepId]!.bounty;
 
-// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
-// this local wrapper supplies an empty one (`{}`, unarmored) so this file's ~20
-// existing call sites, which exercise pre-armor behaviour, don't need one-by-one
-// edits. M2-S5a P2 then added a `dots` parameter (STATE SHAPE ONLY — no behaviour
-// in this packet), which this wrapper likewise defaults to `[]`. The param types
-// are DERIVED from `runCombat` itself (never duplicated) so this wrapper can never
-// silently drift from the real signature. Tests that exercise armor or DoT state
-// call `runCombat`/`applyImpactToCreep` directly with a real `creepById`/`dots`.
-type RunCombatParams = Parameters<typeof runCombat>;
-function runCombatT(
-  creeps: RunCombatParams[0],
-  towers: RunCombatParams[1],
-  impacts: RunCombatParams[2],
-  tick: RunCombatParams[4],
-  bounty: RunCombatParams[5],
-  field: RunCombatParams[6],
-  grid: RunCombatParams[7],
-  towerById: RunCombatParams[8],
-  slowFloorNum: RunCombatParams[10],
-  slowFloorDen: RunCombatParams[11],
-  events?: RunCombatParams[12],
-): ReturnType<typeof runCombat> {
-  return runCombat(
-    creeps,
-    towers,
-    impacts,
-    [],
-    tick,
-    bounty,
-    field,
-    grid,
-    towerById,
-    {},
-    slowFloorNum,
-    slowFloorDen,
-    events,
-  );
-}
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1, then
+// a `dots` parameter at P2 — `runCombatT` (imported from `./test-support`, shared
+// verbatim with `story-aoe.test.ts`/`story-slow.test.ts`) defaults both (`{}`/`[]`)
+// so this file's ~20 existing call sites, which exercise pre-armor/pre-DoT behaviour,
+// don't need one-by-one edits. Tests that exercise armor or DoT state call
+// `runCombat`/`applyImpactToCreep` directly with a real `creepById`/`dots`.
 
 /** One tower at (5,5); footprint centre = ((5+1)·256, (5+1)·256) = (1536,1536). */
 function oneTower(targetId = 0, nextFireTick = 0): TowerArrays {
@@ -877,6 +846,7 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
       killedThisPhase,
       {},
       [],
+      buildDotIndex([]),
       100,
     );
     expect(creeps.hp[0]).toBeLessThanOrEqual(0);
@@ -899,6 +869,7 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
       killedThisPhase,
       {},
       [],
+      buildDotIndex([]),
       100,
     );
     expect(creeps.hp[0]).toBeGreaterThan(0);
@@ -1352,6 +1323,24 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
   });
 });
 
+// M2-S5a P8 (CodeRabbit, PR #78) asked for a test proving `canonicalEffectPrimitive`'s
+// exhaustive `'direct' | 'slow' | 'dot'` match (its trailing `const unreachable: never
+// = e` in combat.ts) is actually exhaustive. That guarantee is COMPILE-TIME ONLY — the
+// `never` check makes adding a fourth `EffectPrimitive` variant a compile error at
+// that function, not a runtime behaviour to assert on. No runtime test can exercise
+// "what happens on a 4th variant" because no legal 4th variant exists to construct.
+// The one RUNTIME-observable claim — that the `'dot'` arm rebuilds its exact fields
+// and drops unknown extras, the same shape-fidelity precedent already pinned for
+// `'direct'`/`'slow'` at this file's "a well-formed record with an unknown extra
+// property..." test above — is already covered by the very next test below (dot
+// round-trips through `canonicalImpacts`, which calls `canonicalEffectPrimitive`
+// internally, with a forged extra `forged` property and asserts it is stripped). A
+// second, duplicate test would assert nothing new. `canonicalEffectPrimitive` itself
+// is also unexported (module-private), so a `@ts-expect-error`-on-a-bogus-4th-variant
+// compile test isn't reachable from here without adding an export purely for test
+// access — and this codebase's only other `never` exhaustiveness check (combat.ts's
+// own, this same function) has no such test precedent to follow. So: no test added
+// here: this comment is the record of that decision, not a gap.
 describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that reaches applyImpactToCreep now calls applyDot)", () => {
   it('a valid dot primitive survives canonicalization with its exact fields and no extra properties', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
@@ -1504,7 +1493,14 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
 describe('applyDot — append, refresh, drop (M2-S5a P3)', () => {
   it('appends a fresh record for a new (targetId, sourceId) pair: nextTickTick = tick + cadenceTicks, untilTick = tick + durationTicks', () => {
     const dots: DotRecord[] = [];
-    applyDot(dots, 1, 100, { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 }, 20);
+    applyDot(
+      dots,
+      buildDotIndex(dots),
+      1,
+      100,
+      { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 },
+      20,
+    );
     expect(dots).toEqual([
       { targetId: 1, sourceId: 100, amount: 5, cadenceTicks: 10, nextTickTick: 30, untilTick: 80 },
     ]);
@@ -1512,12 +1508,78 @@ describe('applyDot — append, refresh, drop (M2-S5a P3)', () => {
 
   it('refreshes an existing pair: adopts the new amount, extends untilTick, and leaves nextTickTick UNCHANGED from the first call', () => {
     const dots: DotRecord[] = [];
-    applyDot(dots, 1, 100, { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 }, 0);
+    applyDot(
+      dots,
+      buildDotIndex(dots),
+      1,
+      100,
+      { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 },
+      0,
+    );
     expect(dots[0]).toMatchObject({ nextTickTick: 10 });
-    applyDot(dots, 1, 100, { kind: 'dot', amount: 9, cadenceTicks: 10, durationTicks: 60 }, 5);
+    applyDot(
+      dots,
+      buildDotIndex(dots),
+      1,
+      100,
+      { kind: 'dot', amount: 9, cadenceTicks: 10, durationTicks: 60 },
+      5,
+    );
     expect(dots).toEqual([
       { targetId: 1, sourceId: 100, amount: 9, cadenceTicks: 10, nextTickTick: 10, untilTick: 65 },
     ]);
+  });
+
+  // M2-S5a P8 (CodeRabbit, PR #78) — `applyDot` now RESOLVES through a caller-built
+  // `index` instead of linear-scanning `dots`. The two tests above already cover
+  // append/refresh CONTENT; these two specifically witness the INDEX plumbing: that a
+  // refresh is found via `index.get` (not a scan) and that `applyDot` itself keeps the
+  // index correct after an append, by reusing the SAME index object across two calls.
+  it('a refresh resolves through the index: the existing row updates IN PLACE (same array index) and nextTickTick is unchanged from before the call', () => {
+    const dots: DotRecord[] = [
+      { targetId: 1, sourceId: 100, amount: 5, cadenceTicks: 10, nextTickTick: 30, untilTick: 80 },
+      { targetId: 2, sourceId: 200, amount: 3, cadenceTicks: 10, nextTickTick: 40, untilTick: 90 },
+    ];
+    const index = buildDotIndex(dots);
+    const nextTickTickBefore = dots[0]!.nextTickTick;
+    applyDot(
+      dots,
+      index,
+      1,
+      100,
+      { kind: 'dot', amount: 9, cadenceTicks: 10, durationTicks: 60 },
+      50,
+    );
+    expect(dots).toHaveLength(2); // no growth — the SAME row was updated, not appended
+    expect(dots[0]).toMatchObject({ targetId: 1, sourceId: 100, amount: 9, untilTick: 110 });
+    expect(dots[0]!.nextTickTick).toBe(nextTickTickBefore); // only amount/untilTick change
+    expect(dots[1]).toMatchObject({ targetId: 2, sourceId: 200 }); // the other row untouched
+  });
+
+  it('an append updates the index so a second call on the SAME pair refreshes rather than appending a duplicate', () => {
+    const dots: DotRecord[] = [];
+    const index = buildDotIndex(dots); // built once, reused across both calls below
+    applyDot(
+      dots,
+      index,
+      1,
+      100,
+      { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 },
+      0,
+    );
+    expect(dots).toHaveLength(1); // appended
+    // Same pair, same `index` object — if `applyDot` failed to `index.set` on append,
+    // this would append a SECOND row instead of finding the first via the index.
+    applyDot(
+      dots,
+      index,
+      1,
+      100,
+      { kind: 'dot', amount: 9, cadenceTicks: 10, durationTicks: 60 },
+      5,
+    );
+    expect(dots).toHaveLength(1); // still one row — refreshed, not appended
+    expect(dots[0]).toMatchObject({ targetId: 1, sourceId: 100, amount: 9 });
   });
 
   it('at MAX_DOT_RECORDS capacity, a NEW pair is dropped (table length unchanged, dotDropped increments by 1) while a REFRESH of an existing pair at the same full table still succeeds', () => {
@@ -1534,6 +1596,7 @@ describe('applyDot — append, refresh, drop (M2-S5a P3)', () => {
     // A genuinely new pair — dropped, counted, no growth.
     applyDot(
       dots,
+      buildDotIndex(dots),
       1,
       MAX_DOT_RECORDS + 1,
       { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 },
@@ -1548,6 +1611,7 @@ describe('applyDot — append, refresh, drop (M2-S5a P3)', () => {
     // refresh is never mistaken for "the table is full."
     applyDot(
       dots,
+      buildDotIndex(dots),
       1,
       1,
       { kind: 'dot', amount: 42, cadenceTicks: 10, durationTicks: 999 },

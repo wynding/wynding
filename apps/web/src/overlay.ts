@@ -427,7 +427,7 @@ export function createOverlay(
   // keeps the same result for slots 2/3 that the ladder already gave. `armTower1` stays
   // listed as long as at least one tower exists (M2 ships ≥ 1, per the schema).
   const REBINDABLE_ACTIONS = GAME_ACTIONS.filter((action) => {
-    const slotIndex = (ARM_TOWER_ACTIONS as readonly GameAction[]).indexOf(action);
+    const slotIndex = ARM_HOTKEY_ACTIONS.indexOf(action);
     if (slotIndex === -1) return true; // not a slot action at all
     return cards.length > slotIndex;
   });

@@ -20,7 +20,13 @@ import {
 } from './combat';
 import { emptyTowers, MAX_TOWERS, type TowerArrays } from './tower';
 import { compileRuleset, RulesetError, AOE_SCAN_CEILING } from './ruleset';
-import { testBundle, testRuleset, TEST_AOE_TOWER, TEST_SWARM_CREEP } from './test-support';
+import {
+  testBundle,
+  testRuleset,
+  TEST_AOE_TOWER,
+  TEST_SWARM_CREEP,
+  runCombatT,
+} from './test-support';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
 import { effectiveSpeedFp } from './ruleset-shared';
 
@@ -34,43 +40,11 @@ const LANE = {
 const cx = (col: number): number => col * 256 + 128;
 const cy = (row: number): number => row * 256 + 128;
 
-// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
-// this local wrapper supplies an empty one (`{}`, unarmored) so this file's ~17
-// existing call sites, which exercise pre-armor behaviour, don't need one-by-one
-// edits. M2-S5a P2 then added a `dots` parameter (STATE SHAPE ONLY — no behaviour
-// in this packet), which this wrapper likewise defaults to `[]`. The param types
-// are DERIVED from `runCombat` itself (never duplicated) so this wrapper can never
-// silently drift from the real signature (mirrors `combat.test.ts`'s `runCombatT`).
-type RunCombatParams = Parameters<typeof runCombat>;
-function runCombatT(
-  creeps: RunCombatParams[0],
-  towers: RunCombatParams[1],
-  impacts: RunCombatParams[2],
-  tick: RunCombatParams[4],
-  bounty: RunCombatParams[5],
-  field: RunCombatParams[6],
-  grid: RunCombatParams[7],
-  towerById: RunCombatParams[8],
-  slowFloorNum: RunCombatParams[10],
-  slowFloorDen: RunCombatParams[11],
-  events?: RunCombatParams[12],
-): ReturnType<typeof runCombat> {
-  return runCombat(
-    creeps,
-    towers,
-    impacts,
-    [],
-    tick,
-    bounty,
-    field,
-    grid,
-    towerById,
-    {},
-    slowFloorNum,
-    slowFloorDen,
-    events,
-  );
-}
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1, then
+// a `dots` parameter at P2 — `runCombatT` (imported from `./test-support`, shared
+// verbatim with `combat.test.ts`/`story-slow.test.ts`) defaults both (`{}`/`[]`) so
+// this file's ~17 existing call sites, which exercise pre-armor/pre-DoT behaviour,
+// don't need one-by-one edits.
 
 /** A creep whose DERIVED point is exactly `(px,py)` — a progress-0 transitional row
  *  (mirrors `combat.test.ts`'s `creepAtPoint`). */

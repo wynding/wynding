@@ -14,7 +14,7 @@ import {
   countValidTowers,
   type SimInput,
 } from './index';
-import { runCombat, MAX_IMPACT_EFFECTS, type EffectPrimitive, type Impact } from './combat';
+import { MAX_IMPACT_EFFECTS, type EffectPrimitive, type Impact } from './combat';
 import { emptyTowers } from './tower';
 import { compileRuleset, RulesetError } from './ruleset';
 import { effectiveSpeedFp } from './ruleset-shared';
@@ -24,6 +24,7 @@ import {
   pushCreep,
   TEST_SLOW_TOWER,
   TEST_FAST_CREEP,
+  runCombatT,
 } from './test-support';
 
 const LANE = {
@@ -36,43 +37,11 @@ const LANE = {
 const cx = (col: number): number => col * 256 + 128;
 const cy = (row: number): number => row * 256 + 128;
 
-// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
-// this local wrapper supplies an empty one (`{}`, unarmored) so this file's ~11
-// existing call sites, which exercise pre-armor behaviour, don't need one-by-one
-// edits. M2-S5a P2 then added a `dots` parameter (STATE SHAPE ONLY — no behaviour
-// in this packet), which this wrapper likewise defaults to `[]`. The param types
-// are DERIVED from `runCombat` itself (never duplicated) so this wrapper can never
-// silently drift from the real signature (mirrors `combat.test.ts`'s `runCombatT`).
-type RunCombatParams = Parameters<typeof runCombat>;
-function runCombatT(
-  creeps: RunCombatParams[0],
-  towers: RunCombatParams[1],
-  impacts: RunCombatParams[2],
-  tick: RunCombatParams[4],
-  bounty: RunCombatParams[5],
-  field: RunCombatParams[6],
-  grid: RunCombatParams[7],
-  towerById: RunCombatParams[8],
-  slowFloorNum: RunCombatParams[10],
-  slowFloorDen: RunCombatParams[11],
-  events?: RunCombatParams[12],
-): ReturnType<typeof runCombat> {
-  return runCombat(
-    creeps,
-    towers,
-    impacts,
-    [],
-    tick,
-    bounty,
-    field,
-    grid,
-    towerById,
-    {},
-    slowFloorNum,
-    slowFloorDen,
-    events,
-  );
-}
+// `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1, then
+// a `dots` parameter at P2 — `runCombatT` (imported from `./test-support`, shared
+// verbatim with `combat.test.ts`/`story-aoe.test.ts`) defaults both (`{}`/`[]`) so
+// this file's ~11 existing call sites, which exercise pre-armor/pre-DoT behaviour,
+// don't need one-by-one edits.
 
 describe('placeTower — by catalog towerId', () => {
   const RULESET = testRuleset(LANE, { extraTowers: [TEST_SLOW_TOWER] });
