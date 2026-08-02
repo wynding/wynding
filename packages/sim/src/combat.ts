@@ -147,140 +147,52 @@ export interface DotRecord {
 }
 
 /**
- * Forged-state / DoS backstop on the resident DoT-record table — the direct
- * analogue of {@link MAX_IN_FLIGHT_IMPACTS}, and expressed the same structural way
- * (a multiple of {@link MAX_TOWERS}, not a bare literal): `applyDot` simply drops a
- * new-pair application once the table is full, the same deterministic-no-op
- * precedent, already reviewed there. Deliberately NOT a per-creep source cap — that
- * would contradict `docs/CONTEXT.md`'s Status effect entry ("each source's DoT
- * coexists"). NOT resident-state-only — an earlier draft said so, and m2.md's S5 clause
- * was amended to match before PR #78's review derived the compiler gate this rail is now
- * built on (see the derivation below). What is still outside the compiler is only the
- * SOURCE COUNT; issue #77 narrows to that.
+ * Forged-state / DoS backstop on the resident DoT-record table — the analogue of
+ * {@link MAX_IN_FLIGHT_IMPACTS}, expressed the same structural way (a multiple of
+ * {@link MAX_TOWERS}, not a bare literal): `applyDot` deterministically drops a NEW-PAIR
+ * application once the table is full. Deliberately NOT a per-creep source cap, which would
+ * contradict `docs/CONTEXT.md`'s Status effect entry ("each source's DoT coexists").
  *
- * MEASURED, not guessed (M2-S5a P4, `packages/perf/src/dot-bench.ts`). The first
- * draft named 20,000; the benchmark rejected it. `step()` p99 against table size, on
- * `dot-bench.ts`'s scene with the table held AT the stated size on every sampled tick
- * (empty-table baseline p99 ≈ 0.27 ms):
+ * DERIVED, not chosen. One source holds at most `RATIO + 1` records: `RATIO` prior
+ * residents — bounded by the compile-time duration:cadence gate in `checkCapabilityGlobal`,
+ * which is what makes this rail derived rather than judged — plus the landing being applied,
+ * which still sees the oldest record because impacts resolve in step (1) while expiry runs
+ * in step (6), and that is exactly when `applyDot` tests capacity. A re-hit refreshes rather
+ * than appends, so it can never add a target. Across sources the count `S` is
+ * `min(MAX_TOWERS, MAX_TOTAL_TOWER_COMMANDS)` = 1,000 (see the HAZARD below — sources are
+ * minted tower ids, not live towers, since a sold tower's records keep ticking). So the
+ * worst legitimate table at a capacity test is `(RATIO+1)*S - 1 = 8,999`, just under the
+ * rail: compiled content driven by an accepted replay can REACH it, never EXCEED it.
  *
- *     500 → 0.50 ms   2,000 → 0.83 ms    5,000 → 1.52 ms
- *   1,000 → 0.60 ms   4,000 → 1.24 ms   10,000 → 2.75 ms   20,000 → 7.13 ms
+ * Do not widen the duration:cadence gate — nor the aoe-plus-dot rejection beside it, whose
+ * blast fan-out breaks the per-source bound — without re-deriving this;
+ * `capability.test.ts` pins gate and rail together. The dangerous direction is DOWN: set
+ * too low, real DoT applications silently become no-ops (`controller.ts`'s `dotDropped`
+ * counter is the tripwire). Too high costs only DoS resistance, since real play never
+ * nears the rail.
  *
- * Reproducing the table takes one edit: `dot-bench.ts` measures at whatever
- * `MAX_DOT_RECORDS` currently is, so the sweep was taken by re-running it against each
- * size in turn. The committed tool reports the single at-cap/empty pair, not the curve.
+ * HAZARD (issue #77): only the duration:cadence half is compiler-visible. `packages/sim`
+ * does not bound tower-id minting — its placement gate is a live-count check, and
+ * build/sell/build mints fresh ids indefinitely — so the SOURCE COUNT rests on
+ * `packages/replay`'s `MAX_TOTAL_TOWER_COMMANDS` (1,000). That equals `MAX_TOWERS` by
+ * COINCIDENCE, not by binding: it is motivated there as a pathfinding-CPU budget and says
+ * nothing about DoT. Raise it to allow longer matches — a change touching nothing in this
+ * package — and a replay could mint that many sources and silently drop applications, with
+ * no test failing. It cannot be imported here without the layering back-edge AGENTS.md
+ * blocks, the same caveat issue #77 records.
  *
- * Linear at ≈0.25 ms per 1,000 records until it turns superlinear near 20,000 (the
- * per-tick rebuild's allocation pressure). At 20,000 a single `step()` costs 7.13 ms ON A
- * FAST DEV MACHINE — 3.6× ADR 0005's `< 2 ms` mid-range `step()` budget, and past its
- * `< 5 ms` low-end one as well. (An earlier revision judged this line against a 60 Hz
- * frame instead — "43% of a frame" — which is a rendering budget, not the ADR's step
- * budget; the whole block now uses the step budget throughout, because mixing the two let
- * it read strict where it wanted "unplayable" and lenient where it wanted "affordable".)
- * A rail whose whole promise is "never bites real play" must not hand forged state a
- * deterministic way to make the game unplayable.
+ * Cost evidence, and the limits of that evidence: `packages/perf/src/dot-bench.ts`.
  *
- * THE RAIL IS DERIVED, not chosen — `(RATIO + 1) × MAX_TOWERS`. Both halves matter and
- * both were wrong in earlier drafts, so the derivation is spelled out rather than
- * asserted (Codex + CodeRabbit, PR #78, across three rounds on this one constant):
+ * Reaching the rail is a hostile state, not a play cost — it needs ~1,000 DoT sources in
+ * sustained contact, against ~150 towers on the whole stress scene, and real tables sit in
+ * the hundreds. The per-source bound is analytic, not measured on a DoT-bearing scene: none
+ * exists yet (`stress-40x40.json` carries `direct` and `slow` only, and `dot-bench.ts` seeds
+ * SYNTHETIC filler to reach the cap). S5b adds the DoT-bearing stress twin; until then, do
+ * not cite a measured concurrency figure here.
  *
- *   PER SOURCE, the peak is `RATIO + 1`, not `RATIO`. Landings from one source are >= its
- *   fire cadence `C` apart, and a record survives while `untilTick > tick` with
- *   `untilTick = landing + D`, so prior resident landings sit in `[t-D, t-C]` spaced >= C
- *   — at most `floor(D/C) = RATIO` of them. The landing being applied makes `RATIO + 1`.
- *   The extra one is real, not defensive: impacts resolve in step (1) while expiry runs
- *   in step (6), so on the tick a source's oldest record expires, the newly-landing shot
- *   still sees it — and that is exactly when `applyDot` tests capacity. A re-hit
- *   refreshes rather than appends, so it can never add a target.
- *
- *   ACROSS SOURCES, the count is `min(MAX_TOWERS, MAX_TOTAL_TOWER_COMMANDS)`. Sources are
- *   not live towers: a sold tower's records keep ticking (this story's owner ruling) and
- *   entity ids are never reused, so what matters is how many tower ids a match can MINT.
- *   `packages/sim` does NOT bound that — its placement gate is a live-count check, and
- *   build/sell/build mints fresh ids indefinitely. The real bound is
- *   `MAX_TOTAL_TOWER_COMMANDS` (1,000) in `packages/replay`, which counts every
- *   `placeTower` before acceptance. It happens to equal `MAX_TOWERS`, which is a
- *   COINCIDENCE, not a binding: it is motivated there as a pathfinding-CPU budget and says
- *   nothing about DoT. Raising it to allow longer matches — a change touching nothing in
- *   this package — would let a replay mint that many DoT sources and silently drop
- *   applications, with no test failing. Named here so the breadcrumb exists; it cannot be
- *   imported without the layering back-edge AGENTS.md blocks, the same caveat issue #77
- *   records for the compile-time bound question.
- *
- * Worst legitimate table at a capacity test is therefore `(RATIO+1)*S - 1 = 8,999`, just
- * under the rail: compiled content driven by an accepted replay can REACH it but never
- * EXCEED it. `4 × MAX_TOWERS` budgeted four records per source while the gate admits NINE
- * — `RATIO` prior residents plus the landing being applied, per the derivation above — so
- * schema-valid content lost applications; `capability.test.ts` now pins the gate and the
- * rail together. (This sentence read "eight" until QC round 4: it was written when the rail
- * was `RATIO × MAX_TOWERS` and counted records per TOWER, and survived the `(RATIO+1)`
- * correction with its old number.)
- *
- * Cost at 9,000: p99 2.69 / 2.72 / 2.88 ms over three runs in one session — call it
- * ~2.9 ms, the top of that range, since a ceiling should not be quoted from its cheapest
- * sample. QC round 3 re-ran the same benchmark against unchanged code and got 4.05 /
- * 4.11 ms: not a regression (an A/B of this function's round-3 rewrite against its
- * predecessor on the same machine, same minute, read 4.059 vs 4.054 ms) but a different
- * MACHINE STATE. So the spread ACROSS sessions is ~2.7-4.1 ms, wider than the spread
- * within any one of them, and this number must be read as "a few milliseconds on a
- * developer laptop", never as a constant. An earlier single reading at 8,000 said
- * 3.53 ms; it was never re-run, so the honest statement is that single samples here vary
- * by more than the differences being compared, not that any particular one was wrong.
- * Nothing in the derivation turns on the precise value — the cap is fixed by the compiler
- * gate, not by this reading. But be exact about what the reading does NOT say. ADR 0005
- * budgets a worst-case `step()` at < 2 ms mid-range and < 5 ms low-end; the 50 ms tick is
- * what that budget sits comfortably INSIDE, not the budget itself. So 4.1 ms ON A FAST DEV
- * MACHINE is 2× over the mid-range figure. Nominally it is under the `< 5 ms` low-end one —
- * but DO NOT read that as compliance. `dot-bench` is the unthrottled headless harness, and
- * ADR 0005 (d) lists "`step()` under real device CPU" among what emulation-only leaves
- * unvalidated, saying such a figure "speaks to neither device budget directly". A reading
- * from fast hardware is a LOWER BOUND on device cost: it can prove a breach, never
- * compliance. That asymmetry is the whole of the difference between the two sizes here —
- * 20,000's 7.13 ms fails both figures on fast hardware, so it fails a fortiori on anything
- * slower and is rejected at any reachability; 9,000's 4.1 ms proves the mid-range breach the
- * same way, and proves NOTHING either way about low-end. Its low-end standing is simply
- * UNMEASURED, and stays that way until a real device is measured (S5b's browser re-measure,
- * S11's catalog-scale gate).
- *
- * So be exact about what holds up the cap, because it is not this number. The rail is fixed
- * by the compiler gate FIRST — `(RATIO + 1) × MAX_TOWERS`, an exact bound on what content
- * can ask for. The measurement's remaining job is only to show the derived rail is not
- * catastrophic on the one machine available, which it does. It ranked candidates back when
- * the cap was still being CHOSEN, which is how the first draft's 20,000 came to be rejected;
- * it no longer picks the number, because the gate does. Two grounds that were tried here and
- * do NOT work, both caught in review: "it is not a play state" is equally true of 20,000 and
- * would exempt anything; and quoting the 50 ms tick as the budget collapses every rejection
- * this block makes.
- *
- * The sweep table above is single-sample per size and carries
- * the same caveat — it is sound for the order-of-magnitude call it was used for (rejecting
- * 20,000 at 7.13 ms) and should not be read to a tenth of a millisecond. It also predates
- * the per-phase `buildDotIndex` pass, which trades an unbounded
- * `O(impacts × affected creeps × records)` path for a flat `O(records)` map build. That
- * trade stands on COMPLEXITY grounds; the measurement cannot speak to it either way, and
- * an earlier revision of this note over-claimed that it could. It read "9,000 now costs
- * what the old table showed at 10,000, so that trade looks free" — a ~5% cross-session
- * difference, and round 3 established that the cross-session spread on UNCHANGED code is
- * ~2.7-4.1 ms. A method that cannot separate 2.7 from 4.1 cannot resolve 2.75 from 2.9.
- * Settling it would take a same-machine, same-session A/B, of the kind round 3 ran for the
- * cursor rewrite; none was ever run for `buildDotIndex`.
- *
- * A few ms is a hostile-state ceiling, not a play cost: reaching it needs ~1,000 DoT
- * sources in sustained contact, against ~150 towers on the whole stress scene. Real
- * tables sit in the hundreds. The asymmetry still holds — too high costs only DoS
- * resistance, since real play never nears the rail, while too low silently no-ops real
- * applications — but the rail is now bounded by what the compiler admits rather than by
- * judgement.
- *
- * NOTE the per-source bound is analytic, not measured on a DoT-bearing scene: no such
- * scene exists yet. `stress-40x40.json` carries `direct` and `slow` only, and
- * `dot-bench.ts` seeds SYNTHETIC filler records to reach the cap rather than simulating
- * towers that produce them. S5b adds the DoT-bearing stress twin and measures the real
- * peak — until then, do not cite a measured concurrency figure here.
- *
- * Like `AOE_SCAN_CEILING` this is capability-shaped — once sv9 ships, moving it is a
- * behaviour change owing its own `simVersion` bump. If S5b's stress scene lands
- * anywhere near it, that is a finding to raise, not a constant to nudge.
+ * Capability-shaped like `AOE_SCAN_CEILING`: once sv9 ships, moving this is a behaviour
+ * change owing its own `simVersion` bump. If S5b's stress scene lands anywhere near it, that
+ * is a finding to raise, not a constant to nudge.
  */
 export const MAX_DOT_RECORDS = (MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWERS;
 
@@ -841,10 +753,19 @@ function applySlow(
  *
  * Order, LOAD-BEARING (M2-S5a P3 spec):
  *   1. Look the pair up FIRST (linear scan, mirrors `findLiveCreep`'s style).
- *   2. FOUND → refresh: adopt the new `amount`, extend `untilTick` to
- *      `satAdd(tick, effect.durationTicks)`, and leave `nextTickTick` UNTOUCHED.
- *      That single omission IS the rule that the tick cadence stays anchored to the
- *      record's first application — a refresh never resets or suppresses it.
+ *   2. FOUND and still LIVE (`untilTick >= tick`) → refresh: adopt the new `amount`,
+ *      extend `untilTick` to `satAdd(tick, effect.durationTicks)`, and leave
+ *      `nextTickTick` UNTOUCHED. That single omission IS the rule that the tick cadence
+ *      stays anchored to the record's first application — a refresh never resets or
+ *      suppresses it. Note the boundary is INCLUSIVE, matching expiry everywhere else:
+ *      a resident whose `untilTick` IS this tick is LIVE here, so its final due tick is
+ *      never suppressed by a landing that coincides with it.
+ *   2b. FOUND but already EXPIRED (`untilTick < tick` — forged/restored only; step (6)
+ *      sweeps every phase) → NOT a refresh. It restarts on the incoming effect's own
+ *      terms, identical to item 4 minus the append. Anchoring it instead was a hole
+ *      through the tick step's expiry guard: extending `untilTick` past `tick` while
+ *      keeping a stale overdue `nextTickTick` made the guard see a live, overdue record
+ *      and fire it immediately (Codex P2, PR #78).
  *   3. NOT found, capacity full (`dots.length >= MAX_DOT_RECORDS`) → drop the
  *      insertion and count it (`events?.dotDropped`). The impact's direct damage
  *      (PASS 1, already applied before `applyImpactToCreep` ever calls here) still
@@ -922,12 +843,28 @@ export function applyDot(
   const at = index.get(key);
   if (at !== undefined) {
     const rec = dots[at] as DotRecord;
+    // An ALREADY-EXPIRED resident is not a refresh target. It is a FRESH application that
+    // happens to find the pair's slot still occupied, so it restarts on the incoming
+    // effect's own terms — identical to the append below, minus the append (Codex P2).
+    //
+    // Anchoring an expired row was a hole straight through the tick step's expiry guard.
+    // That guard skips `untilTick < tick`, but this branch runs FIRST (impacts resolve
+    // before DoT ticks) and pushed `untilTick` out to `tick + durationTicks` while leaving
+    // the stale, long-overdue `nextTickTick` in place — so the due-check that was meant to
+    // reject the record instead saw it live with a tick overdue and fired it IMMEDIATELY,
+    // for armor-bypassing damage a fresh application would not deal until a full cadence
+    // later. Same forged/restored reachability as the guard it defeats: the sim never
+    // leaves an expired record resident, because step (6) sweeps every phase.
+    const expired = rec.untilTick < tick;
     dots[at] = {
       targetId,
       sourceId,
       amount: effect.amount,
-      cadenceTicks: rec.cadenceTicks,
-      nextTickTick: rec.nextTickTick, // UNTOUCHED — the cadence stays anchored
+      // A LIVE row keeps its own cadence and schedule — that is the anchoring rule, and a
+      // refresh must never reset or suppress a tick already due. An expired row has no
+      // schedule left to anchor to.
+      cadenceTicks: expired ? effect.cadenceTicks : rec.cadenceTicks,
+      nextTickTick: expired ? satAdd(tick, effect.cadenceTicks) : rec.nextTickTick,
       untilTick: satAdd(tick, effect.durationTicks),
     };
     return;

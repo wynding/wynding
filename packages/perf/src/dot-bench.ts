@@ -1,8 +1,15 @@
 #!/usr/bin/env -S tsx
-// dot-bench.ts — the DoT resident-table cost measurement (PLAN step 21). Its whole
-// purpose is to set `MAX_DOT_RECORDS` (`@wynding/sim`'s `combat.ts`) on evidence,
-// before sv9 ships: once shipped, moving it is a behaviour change owing its own
-// `simVersion` bump (the `AOE_SCAN_CEILING` rule), so this is the only chance.
+// dot-bench.ts — the DoT resident-table cost measurement (PLAN step 21). It exists to put
+// `MAX_DOT_RECORDS` (`@wynding/sim`'s `combat.ts`) on evidence before sv9 ships: once
+// shipped, moving it is a behaviour change owing its own `simVersion` bump (the
+// `AOE_SCAN_CEILING` rule), so this is the only chance to measure it cheaply.
+//
+// READ "CHOOSE A CONSTANT" BELOW HISTORICALLY. This tool ranked candidate sizes while the
+// cap was still being chosen — which is how the first draft's 20,000 came to be rejected.
+// It no longer picks the number: PR #78's review derived the rail from the compile-time
+// duration:cadence gate as `(RATIO + 1) × MAX_TOWERS`, and `combat.ts` now states it as
+// DERIVED, not chosen. What remains here is confirmation that the derived rail is not
+// catastrophic — never the justification for its value.
 //
 // A CLI task, not a Vitest test (`run.ts`'s precedent). `packages/perf`'s `test`
 // script runs `vitest run --coverage`, and `scenario.test.ts` already documents why
@@ -17,6 +24,34 @@
 // it excludes `run.ts`/`generate.ts`: its correctness is exercised by actually
 // running it, and `dot-bench.test.ts` covers only the pure, structural helpers
 // below (`topUpDotRecords`/`makeFillerDotRecord`) — never a wall-clock assertion.
+//
+// WHAT THIS TOOL MEASURED, AND WHAT THAT EVIDENCE CAN AND CANNOT SETTLE. `step()` p99
+// against table size, this scene, table held AT the stated size on every sampled tick
+// (empty-table baseline p99 ~0.27 ms). SINGLE-SAMPLE PER SIZE — sound for an
+// order-of-magnitude call, not to a tenth of a millisecond:
+//
+//       500 -> 0.50 ms   2,000 -> 0.83 ms    5,000 -> 1.52 ms
+//     1,000 -> 0.60 ms   4,000 -> 1.24 ms   10,000 -> 2.75 ms   20,000 -> 7.13 ms
+//
+// Reproducing it takes one edit: this file measures at whatever `MAX_DOT_RECORDS` currently
+// is, so the sweep was taken by re-running against each size in turn. The committed tool
+// reports only the at-cap/empty pair, not the curve. Roughly linear at ~0.25 ms per 1,000
+// until it turns superlinear near 20,000 (the per-tick rebuild's allocation pressure).
+//
+// ONE YARDSTICK, ADR 0005's `step()` budget: `< 2 ms` mid-range, `< 5 ms` low-end. The 50 ms
+// tick is what that budget sits comfortably INSIDE — it is not the budget, and quoting it as
+// one collapses every rejection made here. 20,000 at 7.13 ms fails BOTH figures, which is
+// why it was rejected.
+//
+// THE LIMIT THAT MATTERS: this harness is unthrottled by design, and ADR 0005 (d) lists
+// "`step()` under real device CPU" among what emulation-only leaves unvalidated — such a
+// figure "speaks to neither device budget directly". A reading from fast hardware is a LOWER
+// BOUND on device cost: it can prove a breach, NEVER compliance. So 20,000's breach holds a
+// fortiori on anything slower, while the shipped cap's low-end standing is simply UNMEASURED
+// until a real device is measured (S5b's browser re-measure, S11's catalog-scale gate).
+// Readings at the cap have ranged ~2.7-4.1 ms across sessions on UNCHANGED code (a
+// same-machine, same-minute A/B read 4.059 vs 4.054 ms across a rewrite), so treat this as
+// "a few ms on a dev laptop", never as a constant, and never compare figures across sessions.
 //
 // Reports p95 and p99, never a mean (`gate.ts`'s own case: a mean hides exactly the
 // GC/scheduler tails a sustained run exists to expose). Relative, not an absolute
@@ -45,8 +80,10 @@
 // `nextTickTick`/`untilTick` far past the sampled window, so nothing a filler
 // record itself does can drain the table), the table is topped back up to exactly
 // `MAX_DOT_RECORDS` OUTSIDE the timed region whenever the scene's own deaths/leaks
-// shrink it, and `runArm` asserts the exact expected count BEFORE, and a residency floor AFTER, every timed `step()` (`MAX_DOT_RECORDS` or
-// `0`) immediately before every timed `step()`. A run that cannot hold the table at
+// shrink it. `runArm` asserts the exact expected count (`MAX_DOT_RECORDS` or `0`)
+// BEFORE every timed `step()`, and a residency floor AFTER it — the floor catches an
+// arm that starts at the cap and then drains mid-sample, which the pre-check alone
+// cannot see. A run that cannot hold the table at
 // the cap (the scene has zero live creeps to seed against) throws loudly rather
 // than reporting a smaller-table number as though it were the cap.
 
@@ -294,9 +331,10 @@ function main(): void {
   );
   console.log('');
   console.log(
-    'This is a MEASUREMENT — read once, by a human, to choose MAX_DOT_RECORDS in this ' +
-      "story's PR. Nothing in CI depends on it: not wired into `pnpm run perf`, `verify`, " +
-      'or any workflow (PLAN step 21).',
+    'This is a MEASUREMENT — read once, by a human, to confirm the DERIVED MAX_DOT_RECORDS ' +
+      'is not catastrophic. It does not choose the value: that is fixed by the compile-time ' +
+      'duration:cadence gate as (RATIO + 1) x MAX_TOWERS. Nothing in CI depends on this: ' +
+      'not wired into `pnpm run perf`, `verify`, or any workflow (PLAN step 21).',
   );
 
   const report = {

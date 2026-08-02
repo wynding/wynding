@@ -522,11 +522,11 @@ export function createController(seed: number, content?: ControllerContent): Con
     // pair each animation frame).
     // `dotDropped` is collected here (M2-S5a, QC round 1) even though nothing renders
     // it. `applyDot` silently discards a new DoT record once the table hits
-    // `MAX_DOT_RECORDS`, and that rail is the one failure mode the constant's own doc
-    // calls dangerous — "set too low, real DoT applications silently become no-ops".
+    // `MAX_DOT_RECORDS`, which is the rail's one dangerous direction: set too low, real
+    // DoT applications silently become no-ops.
     // Shipping the only instrument for detecting it switched off would mean the first
     // report is a player saying poison sometimes stops working, with nothing to look at.
-    // Unreachable today (the cap is 4,000 against real peaks in the low hundreds), so
+    // Unreachable today (the cap is 9,000 against real peaks in the low hundreds), so
     // this is a tripwire for a future story that widens a DoT duration, not a live
     // concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
     // costs an increment only on the drop path.

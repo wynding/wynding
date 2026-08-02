@@ -2231,3 +2231,104 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
     expect(Object.keys(events)).toEqual(['impactPoints', 'fired']); // no new keys appeared
   });
 });
+
+// M2-S5a QC round 4 (Codex P2) — an EXPIRED pair is a FRESH application, not a refresh.
+// The expiry guard added earlier this PR stops an already-expired record from ticking, but
+// `applyDot`'s refresh branch could walk straight around it: it extended `untilTick` past
+// `tick` while leaving the stale, overdue `nextTickTick` anchored, so the very next due-check
+// saw a live record with a tick long overdue and fired IMMEDIATELY. A genuinely fresh
+// application schedules its first tick a full cadence out.
+describe('applyDot — refreshing an EXPIRED pair restarts it (M2-S5a QC round 4, Codex P2)', () => {
+  it('adopts the new cadence and schedules the first tick a cadence out, not immediately', () => {
+    const TICK = 100;
+    const dots: DotRecord[] = [
+      {
+        targetId: 1,
+        sourceId: 100,
+        amount: 5,
+        cadenceTicks: 10,
+        nextTickTick: 40, // long overdue
+        untilTick: 50, // EXPIRED well before TICK
+      },
+    ];
+    applyDot(
+      dots,
+      buildDotIndex(dots),
+      1,
+      100,
+      { kind: 'dot', amount: 7, cadenceTicks: 20, durationTicks: 60 },
+      TICK,
+    );
+    expect(dots).toHaveLength(1); // still the same pair's row, not a duplicate
+    expect(dots[0]).toMatchObject({
+      amount: 7,
+      cadenceTicks: 20, // the NEW cadence, as a fresh application would carry
+      nextTickTick: TICK + 20, // a full cadence out — NOT the stale 40
+      untilTick: TICK + 60,
+    });
+  });
+
+  it('a LIVE pair still anchors its cadence (the refresh rule is unchanged)', () => {
+    const TICK = 100;
+    const dots: DotRecord[] = [
+      {
+        targetId: 1,
+        sourceId: 100,
+        amount: 5,
+        cadenceTicks: 10,
+        nextTickTick: 105,
+        untilTick: 150,
+      },
+    ];
+    applyDot(
+      dots,
+      buildDotIndex(dots),
+      1,
+      100,
+      { kind: 'dot', amount: 7, cadenceTicks: 20, durationTicks: 60 },
+      TICK,
+    );
+    expect(dots[0]).toMatchObject({
+      amount: 7, // adopted
+      cadenceTicks: 10, // ANCHORED — the live record keeps its own cadence
+      nextTickTick: 105, // ANCHORED — untouched by the refresh
+      untilTick: TICK + 60, // extended
+    });
+  });
+
+  // THE BOUNDARY ITSELF. `untilTick === tick` is LIVE — the same inclusive rule the tick
+  // step and step (6) already use. This is the one case the rest of the suite never
+  // exercises (every other refresh test uses a comfortably-live resident), and the fix
+  // above is what INTRODUCED a boundary here at all: refresh used to anchor
+  // unconditionally, so there was nothing to get wrong. A drift to `<=` would read this
+  // landing as expired, SUPPRESS the final tick due exactly now, and re-phase the lattice
+  // onto the incoming cadence — reachable from ordinary content (a tower whose shot lands
+  // on its own DoT's last tick), not just forged state, and it moves the world hash.
+  it('a resident expiring EXACTLY this tick is live: the landing anchors, it does not restart', () => {
+    const TICK = 100;
+    const dots: DotRecord[] = [
+      {
+        targetId: 1,
+        sourceId: 100,
+        amount: 5,
+        cadenceTicks: 10,
+        nextTickTick: TICK, // a tick due RIGHT NOW, which a restart would suppress
+        untilTick: TICK, // expiring exactly this tick — still live, inclusively
+      },
+    ];
+    applyDot(
+      dots,
+      buildDotIndex(dots),
+      1,
+      100,
+      { kind: 'dot', amount: 7, cadenceTicks: 20, durationTicks: 60 },
+      TICK,
+    );
+    expect(dots[0]).toMatchObject({
+      amount: 7, // adopted, as any refresh does
+      cadenceTicks: 10, // ANCHORED — not the incoming 20
+      nextTickTick: TICK, // still due NOW — the final tick survives the landing
+      untilTick: TICK + 60,
+    });
+  });
+});
