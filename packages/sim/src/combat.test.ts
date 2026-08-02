@@ -960,8 +960,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       ARMOR_RULESET.balance.slowFloorDen,
     );
     expect(result.creeps.hp[0]).toBe(1000); // fully blanked
-    expect(result.creeps.hp[0]).toBeGreaterThan(0); // provably alive
-    expect(result.creeps.id).toContain(1); // present among survivors, not swept
+    expect(result.creeps.id).toContain(1); // provably alive: present among survivors, not swept
   });
 
   it('armor 0 leaves the existing unarmored path byte-identical to today', () => {
@@ -1639,6 +1638,14 @@ describe('applyDot — append, refresh, drop (M2-S5a P3)', () => {
     );
     expect(dots).toHaveLength(MAX_DOT_RECORDS);
     expect(events.dotDropped).toBe(1);
+    // WHICH record was dropped, not merely HOW MANY (QC round 3). Length plus the counter
+    // are equally satisfied by an implementation that evicts a RESIDENT record and admits
+    // the newcomer — the exact opposite of the stated rule, and a drop-the-last-record
+    // mutant survived all three dedicated cap tests, dying only incidentally in an
+    // unrelated `StepEvents` test via a damage side-effect.
+    expect(dots.some((r) => r.sourceId === MAX_DOT_RECORDS + 1)).toBe(false); // refused, not admitted
+    expect(dots[0]).toMatchObject({ sourceId: 1, amount: 1 }); // ...and no resident evicted
+    expect(dots[MAX_DOT_RECORDS - 1]).toMatchObject({ sourceId: MAX_DOT_RECORDS, amount: 1 });
 
     // A refresh of an EXISTING pair (sourceId 1, already in the table) at the same
     // full table still succeeds — the capacity check runs AFTER the lookup, so a
@@ -1949,7 +1956,8 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
     expect(result.dots).toEqual([]); // then expired and removed in this same call (step 6)
   });
 
-  // M2-S5a QC round 1 regression guard — the bug `tickedRecords` fixes: several LIVE
+  // M2-S5a QC round 1 regression guard — the bug record-identity bounding fixes (a
+  // `tickedRecords` Set then; the per-bucket cursor now, QC round 3): several LIVE
   // rows sharing one creep id used to each re-enter the SAME bucket and re-read the
   // record the previous row had already advanced, so a single far-backdated record
   // fired once PER ROW (a "catch-up burst" proportional to row count, not to elapsed
@@ -2047,6 +2055,109 @@ describe('runCombat — a corpse stops ticking (M2-S5a QC round 1)', () => {
     expect(result.creeps.id).toHaveLength(0); // killed by the first record, swept
     expect(result.dots).toEqual([]); // both records die with the creep (survivor filter)
     expect(events.dotTicks).toBe(1); // only the FIRST (lethal) record counted a tick
+  });
+});
+
+// M2-S5a QC round 3 regression guard — the ABANDONED-BUCKET rule, which had no witness.
+// The tick step walks each target's bucket under a per-bucket cursor; when a record kills
+// its row, the liveness `break` leaves the cursor ON the record it did not consume, and
+// the next live row sharing that creep id resumes THERE. Deleting the bucket on that path
+// instead (the tempting O(1) "this bucket is spent" shortcut) is not equivalent: it
+// silently strips every unvisited record's tick, which changes damage, `nextTickTick` and
+// therefore the world hash. Reviewers proved the whole 440-test sim suite stayed green
+// with the rule removed — every existing duplicate-id test uses either a single row or a
+// non-lethal record, so none of them puts a corpse MID-bucket. This one does.
+describe('runCombat — an abandoned bucket is resumed by the next row sharing the id (M2-S5a QC round 3)', () => {
+  it('a record that kills its row does not consume the records behind it', () => {
+    // Two live rows share creep id 1 (forged/restored state — `coerceSoa` does not
+    // de-duplicate ids). Row 0 dies to record A; record B is still owed to row 1.
+    const creeps = restingCreeps([
+      { id: 1, col: 7, row: 6, hp: 5 }, // exactly lethal to A
+      { id: 1, col: 7, row: 6, hp: 1000 },
+    ]);
+    const records: DotRecord[] = [
+      { targetId: 1, sourceId: 100, amount: 5, cadenceTicks: 10, nextTickTick: 0, untilTick: 1000 },
+      { targetId: 1, sourceId: 200, amount: 7, cadenceTicks: 10, nextTickTick: 0, untilTick: 1000 },
+    ];
+    const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
+    const result = runCombat(
+      creeps,
+      emptyTowers(),
+      [],
+      records,
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      events,
+    );
+
+    // Row 0 took A and died; row 1 survived and took B. Dropping the abandoned bucket
+    // leaves the survivor at a full 1000 instead — the single most direct witness.
+    expect(result.creeps.id).toHaveLength(1);
+    expect(result.creeps.hp[0]).toBe(1000 - 7);
+    expect(events.dotTicks).toBe(2); // both records ticked, once each
+
+    // B advanced by exactly one cadence. A stripped bucket leaves it at 0, which is the
+    // half of the divergence that reaches the world hash even when no damage is visible.
+    const b = result.dots.find((r) => r.sourceId === 200);
+    expect(b).toMatchObject({ nextTickTick: 10 });
+    // ...and A advanced too, so the cursor is not merely skipping the whole bucket.
+    expect(result.dots.find((r) => r.sourceId === 100)).toMatchObject({ nextTickTick: 10 });
+  });
+});
+
+// M2-S5a QC round 3 — `SimState.dots` stays CLOSED UNDER ITS OWN CANONICAL FORM on the id
+// axis. Every other `applyDot` operand is proved by `validImpact` before the call, but the
+// target id is read straight off the creep SoA, which nothing validates. Un-screened, a
+// forged row with a non-positive id minted a record `canonicalDotRecords` then REJECTS:
+// resident and world-hashed for exactly one tick, gone by the next phase — so the creep was
+// permanently DoT-immune while still burning a `MAX_DOT_RECORDS` slot on every shot.
+describe('runCombat — a forged non-positive creep id mints no DoT record (M2-S5a QC round 3)', () => {
+  const DOT_IMPACT = (targetId: number): Impact => ({
+    kind: 'targeted',
+    impactTick: 0,
+    targetId,
+    sourceId: 100,
+    effects: [
+      { kind: 'direct', amount: 4 },
+      { kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 },
+    ],
+  });
+  const run = (id: number) =>
+    runCombat(
+      restingCreeps([{ id, col: 7, row: 6, hp: 100 }]),
+      emptyTowers(),
+      [DOT_IMPACT(id)],
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.creepById,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      { impactPoints: [], fired: [], dotTicks: 0 },
+    );
+
+  it('id 0: the impact still lands its direct damage, but no record is created', () => {
+    const result = run(0);
+    // The direct half proves the impact RESOLVED — without this the test would pass just
+    // as well if the impact had missed entirely, and would witness nothing.
+    expect(result.creeps.hp[0]).toBe(100 - 4);
+    expect(result.dots).toEqual([]);
+  });
+
+  it('id 1 (the control): the identical impact on a legitimate id DOES create one', () => {
+    const result = run(1);
+    expect(result.creeps.hp[0]).toBe(100 - 4);
+    expect(result.dots).toHaveLength(1);
+    expect(result.dots[0]).toMatchObject({ targetId: 1, sourceId: 100, amount: 3 });
   });
 });
 

@@ -83,7 +83,7 @@ export const EN = {
   "panel.fireRate": "Fire rate: {rate}/s",
   "panel.targets": "Targets: {targets}",
   "panel.blastRadius": "Blast radius: {tiles} tiles",
-  "panel.dot": "Poison: {damage}/tick every {cadence}s for {duration}s",
+  "panel.dot": "Poison: {damage} damage every {cadence}s for {duration}s",
   "panel.close": "Close panel",
   "panel.sell": "Sell (refund {refund})",
   "panel.upgrade": "Max level",

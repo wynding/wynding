@@ -171,10 +171,14 @@ export interface DotRecord {
  * size in turn. The committed tool reports the single at-cap/empty pair, not the curve.
  *
  * Linear at ≈0.25 ms per 1,000 records until it turns superlinear near 20,000 (the
- * per-tick rebuild's allocation pressure). At 20,000 a single `step()` costs 7.13 ms
- * — 43% of a 60 Hz frame ON A FAST DEV MACHINE, so a certain dropped frame on ADR
- * 0005's mid-range target. A rail whose whole promise is "never bites real play"
- * must not hand forged state a deterministic way to make the game unplayable.
+ * per-tick rebuild's allocation pressure). At 20,000 a single `step()` costs 7.13 ms ON A
+ * FAST DEV MACHINE — 3.6× ADR 0005's `< 2 ms` mid-range `step()` budget, and past its
+ * `< 5 ms` low-end one as well. (An earlier revision judged this line against a 60 Hz
+ * frame instead — "43% of a frame" — which is a rendering budget, not the ADR's step
+ * budget; the whole block now uses the step budget throughout, because mixing the two let
+ * it read strict where it wanted "unplayable" and lenient where it wanted "affordable".)
+ * A rail whose whole promise is "never bites real play" must not hand forged state a
+ * deterministic way to make the game unplayable.
  *
  * THE RAIL IS DERIVED, not chosen — `(RATIO + 1) × MAX_TOWERS`. Both halves matter and
  * both were wrong in earlier drafts, so the derivation is spelled out rather than
@@ -205,23 +209,63 @@ export interface DotRecord {
  *
  * Worst legitimate table at a capacity test is therefore `(RATIO+1)*S - 1 = 8,999`, just
  * under the rail: compiled content driven by an accepted replay can REACH it but never
- * EXCEED it. `4 × MAX_TOWERS` budgeted four records per source while the gate admitted
- * eight, so schema-valid content lost applications; `capability.test.ts` now pins the gate
- * and the rail together.
+ * EXCEED it. `4 × MAX_TOWERS` budgeted four records per source while the gate admits NINE
+ * — `RATIO` prior residents plus the landing being applied, per the derivation above — so
+ * schema-valid content lost applications; `capability.test.ts` now pins the gate and the
+ * rail together. (This sentence read "eight" until QC round 4: it was written when the rail
+ * was `RATIO × MAX_TOWERS` and counted records per TOWER, and survived the `(RATIO+1)`
+ * correction with its old number.)
  *
- * Cost at 9,000: p99 2.69 / 2.72 / 2.88 ms over three runs — call it ~2.9 ms, the top of
- * the range, since a ceiling should not be quoted from its cheapest sample. An earlier
- * single reading at 8,000 said 3.53 ms; it was never re-run, so the honest statement is
- * that single samples here vary by more than the differences being compared, not that any
- * particular one was wrong. The sweep table above is single-sample per size and carries
+ * Cost at 9,000: p99 2.69 / 2.72 / 2.88 ms over three runs in one session — call it
+ * ~2.9 ms, the top of that range, since a ceiling should not be quoted from its cheapest
+ * sample. QC round 3 re-ran the same benchmark against unchanged code and got 4.05 /
+ * 4.11 ms: not a regression (an A/B of this function's round-3 rewrite against its
+ * predecessor on the same machine, same minute, read 4.059 vs 4.054 ms) but a different
+ * MACHINE STATE. So the spread ACROSS sessions is ~2.7-4.1 ms, wider than the spread
+ * within any one of them, and this number must be read as "a few milliseconds on a
+ * developer laptop", never as a constant. An earlier single reading at 8,000 said
+ * 3.53 ms; it was never re-run, so the honest statement is that single samples here vary
+ * by more than the differences being compared, not that any particular one was wrong.
+ * Nothing in the derivation turns on the precise value — the cap is fixed by the compiler
+ * gate, not by this reading. But be exact about what the reading does NOT say. ADR 0005
+ * budgets a worst-case `step()` at < 2 ms mid-range and < 5 ms low-end; the 50 ms tick is
+ * what that budget sits comfortably INSIDE, not the budget itself. So 4.1 ms ON A FAST DEV
+ * MACHINE is 2× over the mid-range figure. Nominally it is under the `< 5 ms` low-end one —
+ * but DO NOT read that as compliance. `dot-bench` is the unthrottled headless harness, and
+ * ADR 0005 (d) lists "`step()` under real device CPU" among what emulation-only leaves
+ * unvalidated, saying such a figure "speaks to neither device budget directly". A reading
+ * from fast hardware is a LOWER BOUND on device cost: it can prove a breach, never
+ * compliance. That asymmetry is the whole of the difference between the two sizes here —
+ * 20,000's 7.13 ms fails both figures on fast hardware, so it fails a fortiori on anything
+ * slower and is rejected at any reachability; 9,000's 4.1 ms proves the mid-range breach the
+ * same way, and proves NOTHING either way about low-end. Its low-end standing is simply
+ * UNMEASURED, and stays that way until a real device is measured (S5b's browser re-measure,
+ * S11's catalog-scale gate).
+ *
+ * So be exact about what holds up the cap, because it is not this number. The rail is fixed
+ * by the compiler gate FIRST — `(RATIO + 1) × MAX_TOWERS`, an exact bound on what content
+ * can ask for. The measurement's remaining job is only to show the derived rail is not
+ * catastrophic on the one machine available, which it does. It ranked candidates back when
+ * the cap was still being CHOSEN, which is how the first draft's 20,000 came to be rejected;
+ * it no longer picks the number, because the gate does. Two grounds that were tried here and
+ * do NOT work, both caught in review: "it is not a play state" is equally true of 20,000 and
+ * would exempt anything; and quoting the 50 ms tick as the budget collapses every rejection
+ * this block makes.
+ *
+ * The sweep table above is single-sample per size and carries
  * the same caveat — it is sound for the order-of-magnitude call it was used for (rejecting
  * 20,000 at 7.13 ms) and should not be read to a tenth of a millisecond. It also predates
  * the per-phase `buildDotIndex` pass, which trades an unbounded
- * `O(impacts × affected creeps × records)` path for a flat `O(records)` map build; the
- * post-change readings show no measurable penalty at the cap (9,000 now costs what the old
- * table showed at 10,000), so that trade looks free at this scale.
+ * `O(impacts × affected creeps × records)` path for a flat `O(records)` map build. That
+ * trade stands on COMPLEXITY grounds; the measurement cannot speak to it either way, and
+ * an earlier revision of this note over-claimed that it could. It read "9,000 now costs
+ * what the old table showed at 10,000, so that trade looks free" — a ~5% cross-session
+ * difference, and round 3 established that the cross-session spread on UNCHANGED code is
+ * ~2.7-4.1 ms. A method that cannot separate 2.7 from 4.1 cannot resolve 2.75 from 2.9.
+ * Settling it would take a same-machine, same-session A/B, of the kind round 3 ran for the
+ * cursor rewrite; none was ever run for `buildDotIndex`.
  *
- * ~2.9 ms is a hostile-state ceiling, not a play cost: reaching it needs ~1,000 DoT
+ * A few ms is a hostile-state ceiling, not a play cost: reaching it needs ~1,000 DoT
  * sources in sustained contact, against ~150 towers on the whole stress scene. Real
  * tables sit in the hundreds. The asymmetry still holds — too high costs only DoS
  * resistance, since real play never nears the rail, while too low silently no-ops real
@@ -860,6 +904,20 @@ export function applyDot(
   tick: number,
   events?: StepEvents,
 ): void {
+  // `SimState.dots` STAYS CLOSED UNDER `canonicalDotRecords` — this is the third of the
+  // three closure rules, and it lives here beside the other two (dedup via `index`, the
+  // `MAX_DOT_RECORDS` cap below) rather than at the call site, so the set is symmetric and
+  // a second caller cannot reopen the hole this function is `export`ed into (QC round 3).
+  // The predicate is `validDotRecord`'s own `targetId` conjunction, verbatim. Every OTHER
+  // operand arrives already proved — `validImpact` establishes `sourceId > 0`,
+  // `validEffectPrimitive` the effect's magnitudes, `step()`'s entry guard `tick >= 0` —
+  // but the target id is read straight off the creep SoA, which nothing validates:
+  // `coerceSoa`'s row filter narrows only on `wave`/`creepId`. Unscreened, a forged row
+  // with `id <= 0` (or a non-safe id) minted a record `canonicalDotRecords` then REJECTS:
+  // resident and world-hashed for one tick, gone by the next phase — so that creep was
+  // permanently DoT-immune while still burning a cap slot on every shot. Not a `dotDropped`
+  // event: nothing was dropped at capacity, the application was never admissible.
+  if (!Number.isSafeInteger(targetId) || targetId <= 0) return;
   const key = dotIndexKey(targetId, sourceId);
   const at = index.get(key);
   if (at !== undefined) {
@@ -1012,6 +1070,8 @@ export function applyImpactToCreep(
     for (const effect of effects) {
       if (effect.kind === 'slow') applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
       if (effect.kind === 'dot') {
+        // A forged non-positive/non-safe `creeps.id` is screened INSIDE `applyDot`, beside
+        // the dedup and cap rules it already owns — see its own note.
         applyDot(dots, dotIndex, creeps.id[idx] as number, sourceId, effect, tick, events);
       }
     }
@@ -1339,47 +1399,63 @@ export function runCombat(
     liveOrder.push({ id: creeps.id[i] as number, idx: i });
   }
   liveOrder.sort((a, b) => a.id - b.id || a.idx - b.idx);
-  // AT MOST ONE TICK PER RECORD PER SIM TICK, enforced by RECORD IDENTITY rather than
-  // by the `if` below alone (QC round 1). `dotsByTarget` is keyed by creep id, so when
+  // AT MOST ONE TICK PER RECORD PER SIM TICK, enforced STRUCTURALLY by a per-bucket
+  // CURSOR rather than by a membership test. `dotsByTarget` is keyed by creep id, so when
   // several live rows share one id — forged/restored state; `coerceSoa` does not
-  // de-duplicate `creeps.id` — every such row re-enters the SAME bucket and re-reads a
-  // record the previous row already advanced. With the `if` as the only bound, a
-  // backdated record fired once PER ROW, so `tick - nextTickTick > cadenceTicks × (rows
-  // - 1)` produced a burst: the invariant, its "totality proof" prose, and
-  // `StepEvents.dotTicks` were all wrong together. Bounding on the record's own index
-  // restores the stated rule exactly, and costs nothing in genuine play, where ids are
-  // unique and the set is touched once per record.
-  const tickedRecords = new Set<number>();
+  // de-duplicate `creeps.id` — every such row re-enters the SAME bucket. Three QC rounds
+  // landed on this shape, each closing a defect the previous one left:
+  //
+  //   * With the due-check as the only bound, a backdated record fired once PER ROW, so
+  //     `tick - nextTickTick > cadenceTicks × (rows - 1)` produced a burst: the
+  //     invariant, its "totality proof" prose, and `StepEvents.dotTicks` were all wrong
+  //     together (round 1).
+  //   * A `tickedRecords` Set fixed the burst, but bounded only the WORK a duplicate row
+  //     could redo — not the ITERATIONS it spent discovering there was none. Each row
+  //     still re-walked the bucket from index 0, so the traversal stayed O(rows ×
+  //     records): 2,000 forged same-id rows against a full table measured 46 ms in one
+  //     `step()` (round 2).
+  //   * Deleting a fully-walked bucket fixed that only where the row SURVIVES the walk. A
+  //     record that KILLS its row leaves by the liveness `break` below, and every later
+  //     row sharing the id re-scanned from zero, advancing the frontier by one record
+  //     each — Σk ≈ records²/2, ~40M iterations in a single `step()` at the cap (round 3).
+  //
+  // Always deleting the bucket instead is NOT the fix, and the difference is observable:
+  // a bucket abandoned mid-walk still owes its unvisited records to the next live row
+  // sharing this id, and dropping them changes damage, `nextTickTick`, and the world hash
+  // (witnessed by `an abandoned bucket is resumed by the next row sharing the id`).
+  //
+  // A cursor satisfies both constraints at once. It advances monotonically per bucket and
+  // is never rewound, so each record is examined at most once per sim tick across ALL
+  // rows sharing its target id: at-most-one-tick now falls out of the traversal rather
+  // than being re-checked, every path is O(creeps + records), and a `tickedRecords`
+  // membership test alongside it would be provably dead code.
+  //
+  // THE PREMISE THAT CARRIES THAT PROOF is the bucket build above: each record index is
+  // pushed EXACTLY ONCE, into exactly one bucket (keyed by its own `targetId`). A Set was
+  // robust to that failing; a cursor is not — a bucket holding a duplicated index (`[5,
+  // 5]`) would tick record 5 twice within a SINGLE row, resurrecting the round-1 burst.
+  // Nothing may filter, re-order or re-enter that build without re-deriving this.
+  const bucketCursor = new Map<number, number>();
   for (const { id, idx } of liveOrder) {
     const bucket = dotsByTarget.get(id);
     if (bucket === undefined) continue;
-    // Whether this row walked the whole bucket. It matters because `tickedRecords` bounds
-    // the WORK a duplicate row can redo, not the ITERATIONS it spends discovering there is
-    // none (QC round 2): with N rows sharing one id, each still re-walked the same
-    // M-record bucket, so the traversal was O(rows × records) after all — 2,000 forged
-    // same-id rows against a full table measured 46 ms in one `step()`, six times the
-    // 7.13 ms this file's own `MAX_DOT_RECORDS` note rejects as unplayable. A bucket that
-    // completed is spent for this tick: every record in it either ticked (and is in
-    // `tickedRecords`) or was not due, and not-due cannot become due within one tick. So
-    // drop it and let later duplicate rows miss in O(1). A bucket abandoned by the
-    // liveness `break` is deliberately KEPT — its unvisited records are still owed to the
-    // next live row sharing this id.
-    let walkedWholeBucket = true;
-    for (const ri of bucket) {
-      if (tickedRecords.has(ri)) continue;
+    let cursor = bucketCursor.get(id) ?? 0;
+    // `continue` below runs the `cursor++`, consuming a not-due record deliberately: not
+    // due cannot become due within one tick, so no later row owes it a second look.
+    for (; cursor < bucket.length; cursor++) {
       // Re-checked EVERY iteration, not just when `liveOrder` was built: an earlier
       // record in this same bucket may already have killed this row, and a corpse must
       // not keep ticking. Without this, `applyDirect` was a no-op at hp 0 but
-      // `dotTicks` still counted the phantom and `nextTickTick` still advanced.
-      if (!isLiveHp(creeps.hp[idx])) {
-        walkedWholeBucket = false;
-        break;
-      }
+      // `dotTicks` still counted the phantom and `nextTickTick` still advanced. The
+      // `break` leaves `cursor` ON the record it did not consume — precisely what the
+      // next live row sharing this id is owed.
+      if (!isLiveHp(creeps.hp[idx])) break;
+      const ri = bucket[cursor] as number;
       const record = canonicalDots[ri] as DotRecord;
       // No catch-up loop: even a forged backdated `nextTickTick` (far behind `tick`)
       // ticks exactly once and advances by exactly one `cadenceTicks`, never a burst.
-      // This single `if` (not a `while`), together with `tickedRecords` above, is the
-      // totality proof against a spinning/catch-up record.
+      // This single `if` (not a `while`), together with the monotonic cursor above, is
+      // the totality proof against a spinning/catch-up record.
       //
       // `untilTick < tick` skips a record that ALREADY EXPIRED before this tick (Codex
       // P2, PR #78). Note the strict `<`: inclusive expiry is preserved, so a record
@@ -1390,7 +1466,6 @@ export function runCombat(
       // guard a hand-edited save got one free tick of armor-bypassing damage, able to
       // kill and award bounty, from a DoT that had already ended.
       if (record.nextTickTick > tick || record.untilTick < tick) continue;
-      tickedRecords.add(ri);
       // The literal `0` here is INTENTIONAL — armor bypass, not a forgotten/
       // placeholder argument: a DoT tick deals its `amount` bypassing armor
       // entirely, reusing `applyDirect`'s already-reviewed branch-saturating
@@ -1415,7 +1490,7 @@ export function runCombat(
       };
       if ((creeps.hp[idx] as number) <= 0) killedThisPhase.add(idx);
     }
-    if (walkedWholeBucket) dotsByTarget.delete(id);
+    bucketCursor.set(id, cursor);
   }
 
   // (3) SWEEP dead (hp ≤ 0 or non-safe) into a fresh SoA; credit kills from step (1)

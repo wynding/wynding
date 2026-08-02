@@ -167,4 +167,44 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
     const [pip] = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, R, true, POISONED, 0);
     expect(pipDistance(pip!, 0, 0) - slowRing!.r).toBeGreaterThanOrEqual(1);
   });
+
+  // QC round 3 — the three assertions below pin fixes that landed in earlier rounds with
+  // NO regression guard: reviewers reverted each one and the whole 116-test render suite
+  // stayed green. Every pre-existing positional assertion measures DISTANCE from the
+  // centre, which is rotation-invariant and so cannot see an orientation regression at
+  // all; the narrow-floor test measures ring SEPARATION, never a pip's own drawn radius.
+
+  it('puts the lone pip at the TOP (apex-up, matching the triangle silhouette and the hexagon) — not the bottom', () => {
+    const pips = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, R, true, POISONED, 0);
+    // Canvas y grows DOWNWARD, so "above the centre" is y < 0. The first draft's
+    // [90, 210, 330] inverts this exactly — one pip BELOW and two above — and is
+    // indistinguishable from the correct set by distance alone.
+    const above = pips.filter((p) => p.y < 0);
+    expect(above).toHaveLength(1);
+    expect(above[0]!.x).toBeCloseTo(0, 6); // horizontally centred: straight up, not off-axis
+    expect(above[0]!.y).toBeCloseTo(-R * 1.8, 6);
+  });
+
+  it('holds a pip at the DOT_PIP_MIN_PX floor at the narrow cell, where the proportional radius alone would be sub-pixel', () => {
+    const [pip] = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, R, true, POISONED, 0);
+    // R here IS the narrow floor's silhouette radius (3.5). Proportionally the pip would
+    // be 3.5 × 0.18 = 0.63 → a 1.26px dot, the essential shape cue effectively invisible
+    // exactly where legibility is tightest. The floor is what makes it 1.5.
+    expect(R * 0.18).toBeLessThan(1.5); // the floor is genuinely load-bearing at this size
+    expect(pip!.r).toBeCloseTo(1.5, 6);
+  });
+
+  it('pins the drift cue MAGNITUDE — a period stretched far past 900ms would leave it imperceptible', () => {
+    const drift = (t: number) =>
+      dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, R, false, POISONED, t)[3]!;
+    // Half a period: the sawtooth is at phase 0.5, so the pip sits half-way across its
+    // 0.6r outward span and is half-faded. Asserting only "moved a bit / faded a bit"
+    // (the pre-existing test above) survives a 100× period, which is the exact hazard
+    // scene.ts warns about for the slow pulse.
+    expect(pipDistance(drift(450), 0, 0)).toBeCloseTo(R * (1.8 + 0.6 * 0.5), 6);
+    expect(drift(450).alpha).toBeCloseTo(0.25, 6);
+    // The drift's alpha CEILING is what the palette contrast gate relies on when it
+    // treats the drift as the non-essential motion cue and `poisoned` as opaque.
+    expect(drift(0).alpha).toBe(0.5);
+  });
 });

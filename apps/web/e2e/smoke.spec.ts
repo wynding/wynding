@@ -409,7 +409,7 @@ test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels 
   // The DoT is labelled as TEXT, alongside the range stat every tower already shows —
   // never telegraph-only (PLAN.md step 31/32's a11y obligation): magnitude, cadence, and
   // duration all read out (`panel.dot`, mirrored exactly from `overlay.test.ts`).
-  await expect(panel).toContainText('Poison: 2/tick every 0.5s for 3.0s');
+  await expect(panel).toContainText('Poison: 2 damage every 0.5s for 3.0s');
   await expect(panel).toContainText('Range:');
   await expect(board).toBeFocused();
 
@@ -433,7 +433,7 @@ test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels 
 
   await expect(venomCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
   await expect(panel).toContainText('Venom Tower'); // now selected
-  await expect(panel).toContainText('Poison: 2/tick every 0.5s for 3.0s');
+  await expect(panel).toContainText('Poison: 2 damage every 0.5s for 3.0s');
 
   const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
