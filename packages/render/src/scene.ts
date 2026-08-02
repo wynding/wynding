@@ -13,8 +13,7 @@ import { resolvePalette, type Palette } from './palette';
 import { boardPaintOps, type BoardPaintOp } from './board-cells';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
-import { creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
-import { towerFootprintMarkFor } from './tower-paint';
+import { drawTowers, drawCreeps, drawCrosshair } from './board-draw';
 import type { RenderVM, RenderOverlay, RenderHandle, ColourMode, SparkPoint } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -32,6 +31,15 @@ const SPARK_MS = 180;
 interface Spark extends SparkPoint {
   readonly bornAt: number;
 }
+
+// `drawTowers`/`drawCreeps` (plus their `drawCrosshair`/`drawDroplet` helpers) now
+// live in `./board-draw` (M2-S5a QC round): they never actually needed Phaser's real
+// `Graphics` type (only a handful of drawing methods on it), and `scene.ts` importing
+// `Phaser` at module scope means it can NEVER be imported by a plain Vitest test —
+// Phaser's device/canvas-feature detection runs at import time and crashes even under
+// jsdom. Moving them to a Phaser-free module (a structural `GraphicsLike` interface
+// stands in for `Phaser.GameObjects.Graphics`, which satisfies it for free) is what
+// makes `scene.test.ts` possible at all. No drawing behaviour changed.
 
 /** Mount the Phaser board renderer into `el`. The returned handle is fed the last two
  *  render view-models + an alpha + the transient overlay each animation frame. */
@@ -215,131 +223,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     }
   };
 
-  // Four short spokes radiating from `(cx,cy)` out to `spoke`, with a gap at the centre
-  // (never touching it) — the `'crosshair'` footprint mark AND the ghost's blast-radius
-  // preview share this exact motif (drawn at different scales: the footprint mark at
-  // `size * 0.22`, the ghost preview at the full blast radius) so "area effect" reads as
-  // one consistent shape language, always distinct from the closed `'ringed'` circle and
-  // the smooth range ring (never colour alone — ADR 0003).
-  const drawCrosshair = (
-    g: Phaser.GameObjects.Graphics,
-    cx: number,
-    cy: number,
-    spoke: number,
-  ): void => {
-    const gap = spoke * 0.4;
-    g.lineBetween(cx, cy - spoke, cx, cy - gap);
-    g.lineBetween(cx, cy + gap, cx, cy + spoke);
-    g.lineBetween(cx - spoke, cy, cx - gap, cy);
-    g.lineBetween(cx + gap, cy, cx + spoke, cy);
-  };
-
-  const drawTowers = (
-    g: Phaser.GameObjects.Graphics,
-    pal: Palette,
-    vm: RenderVM,
-    o: RenderOverlay,
-  ): void => {
-    // A committed tower whose sell is pending (paused planning, #37+#27) is hidden
-    // immediately — presented as already gone, not merely "about to sell".
-    const pendingSellKeys =
-      o.pendingSells.length === 0 ? null : new Set(o.pendingSells.map((p) => `${p.col},${p.row}`));
-    for (const t of vm.towers) {
-      if (pendingSellKeys !== null && pendingSellKeys.has(`${t.col},${t.row}`)) continue;
-      const p = projection.cellToPixel(t.col, t.row);
-      const size = projection.cellPx * 2; // 2×2 footprint
-      g.fillStyle(pal.tower, 1);
-      g.fillRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
-      // `slow`/`splash` vs `basic` footprint mark (M2-S3, extended M2-S4a): all bodies
-      // share `pal.tower` — a palette decision (S3 mints no second tower colour), with
-      // the per-tower distinction carried by SHAPE — an inner concentric ring for
-      // `'ringed'` (slow), four short radiating spokes for `'crosshair'` (splash — the
-      // same "area effect" motif the ghost's blast-radius preview below draws at cell
-      // scale, per ADR 0003's redundant-encoding rule), nothing extra for `'plain'`
-      // (basic). The committed marks stroke `pal.floor` so they read against the solid
-      // `pal.tower` fill; the pending branch below strokes `pal.tower` instead — its
-      // body is an unfilled outline, so there is no fill to contrast against and the
-      // mark keeps the pending cue's own colour + alpha (CodeRabbit #73: the two
-      // branches differ on purpose).
-      const mark = towerFootprintMarkFor(t.towerId);
-      if (mark === 'ringed') {
-        g.lineStyle(2, pal.floor, 1);
-        g.strokeCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-      } else if (mark === 'crosshair') {
-        g.lineStyle(2, pal.floor, 1);
-        drawCrosshair(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-      }
-    }
-    // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
-    // the dual shape+alpha cue distinguishing "pending" from a committed tower — carries
-    // its own footprint mark too, so a slow tower queued while paused keeps its
-    // shape-distinct identity (Codex R1-7).
-    for (const p of o.pendingAdds) {
-      const pt = projection.cellToPixel(p.col, p.row);
-      const size = projection.cellPx * 2;
-      g.lineStyle(3, pal.tower, 0.6);
-      g.strokeRoundedRect(pt.x + 2, pt.y + 2, size - 4, size - 4, 6);
-      const pendingMark = towerFootprintMarkFor(p.towerId);
-      if (pendingMark === 'ringed') {
-        g.lineStyle(1, pal.tower, 0.6);
-        g.strokeCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-      } else if (pendingMark === 'crosshair') {
-        g.lineStyle(1, pal.tower, 0.6);
-        drawCrosshair(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-      }
-    }
-    if (o.selection !== null) {
-      const c = projection.cellToPixel(o.selection.col, o.selection.row);
-      const cx = c.x + projection.cellPx; // centre of the 2×2
-      const cy = c.y + projection.cellPx;
-      g.lineStyle(2, pal.range, 0.9);
-      g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));
-    }
-  };
-
-  const drawCreeps = (
-    g: Phaser.GameObjects.Graphics,
-    pal: Palette,
-    interpolated: readonly {
-      x: number;
-      y: number;
-      hpFrac: number;
-      creepId: string;
-      slowed: boolean;
-    }[],
-    reducedMotion: boolean,
-    renderTimeMs: number, // MILLISECONDS — the unit lives in the name (QC r3), the tick→ms conversion happens at the call site
-  ): void => {
-    for (const c of interpolated) {
-      const p = projection.fpToPixel(c.x, c.y);
-      const r = Math.max(3, projection.cellPx * 0.35);
-      const hpColour = c.hpFrac < 0.34 ? pal.creepLowHp : pal.creep;
-      const op = creepSilhouettePaintOp(c.creepId, p.x, p.y, r, hpColour, c.hpFrac);
-      g.fillStyle(op.colour, 1); // set once — used for both the silhouette and the pip
-      // Silhouette keyed on `creepId`'s shape (M2-S3, extended M2-S4a): `normal` keeps
-      // the triangle (a shape cue distinct from the tower's rounded square); `fast`
-      // draws a diamond; `swarm` draws a small square (fragile/numerous, distinct from
-      // both at cell scale); an unknown id falls back to the triangle (total).
-      if (op.shape === 'diamond') {
-        g.fillTriangle(op.x, op.y - r, op.x + r, op.y, op.x, op.y + r);
-        g.fillTriangle(op.x, op.y - r, op.x - r, op.y, op.x, op.y + r);
-      } else if (op.shape === 'square') {
-        g.fillRect(op.x - r, op.y - r, r * 2, r * 2);
-      } else {
-        g.fillTriangle(op.x, op.y - r, op.x + r, op.y + r, op.x - r, op.y + r);
-      }
-      // health pip: length AND colour encode HP (dual cue) — warning tint only when low.
-      // hpFrac is already clamped to [0,1] by deriveViewModel (CreepVM invariant).
-      g.fillRect(op.x - r, op.y - r - 4, r * 2 * op.hpFrac, 3);
-      // Slowed telegraph (M2-S3): a shape cue (ring, opaque) ALWAYS accompanies a live
-      // slow; the motion cue (pulse, radius driven by render time) yields to reduced
-      // motion (WCAG 2.3.3 / GAG §2). Alphas live in the plan, not here.
-      for (const tel of slowTelegraphPaintOps(c, r, reducedMotion, pal.slowed, renderTimeMs)) {
-        g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.alpha);
-        g.strokeCircle(tel.x, tel.y, tel.r);
-      }
-    }
-  };
+  // `drawCrosshair`/`drawDroplet`/`drawTowers`/`drawCreeps` are now MODULE-LEVEL
+  // functions (above `mount()`), taking `projection` as an explicit parameter instead
+  // of a captured closure — see the comment at their definition for why (M2-S5a QC
+  // round). The calls below pass this scope's `projection` local explicitly.
 
   // A thin executor of `tracerPaintOps`' plan (#32/P6) — the ordering/content gate lives
   // in `tracers.test.ts` against the plan itself, not here.
@@ -454,7 +341,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     const interpolatedById = new Map(interpolated.map((c) => [c.id, { x: c.x, y: c.y }]));
     gfx.clear();
     drawBoard(gfx, overlay.colourMode);
-    drawTowers(gfx, pal, curVm, overlay);
+    drawTowers(gfx, pal, curVm, overlay, projection);
     // ONE render-time derivation per frame, shared by tracers and the telegraph pulse
     // (CodeRabbit #73) — the "one clock" invariant is structural, not two calls that
     // happen to agree.
@@ -464,7 +351,14 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     // `renderTimeOf(vm(5), vm(6), 0.5) === 5.5`); the paint-plan's pulse period is
     // MILLISECONDS (`renderTimeMs`) — convert here, or the 900ms breath becomes a
     // 900-TICK (45s) one and the motion cue is imperceptible inside a 40-tick slow.
-    drawCreeps(gfx, pal, interpolated, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
+    drawCreeps(
+      gfx,
+      pal,
+      interpolated,
+      overlay.reducedMotion,
+      renderTimeTicks * MS_PER_TICK,
+      projection,
+    );
     drawGhost(gfx, pal, overlay);
     drawSparks(gfx, pal, overlay);
   };

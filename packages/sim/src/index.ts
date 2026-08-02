@@ -18,6 +18,7 @@ import {
   satAdd,
   satMul,
   type Impact,
+  type DotRecord,
   type EffectPrimitive,
   type StepEvents,
 } from './combat';
@@ -148,6 +149,7 @@ export interface SimState {
   creeps: CreepArrays;
   towers: TowerArrays;
   impacts: Impact[]; // in-flight scheduled combat impacts (Story 4)
+  dots: DotRecord[]; // resident DoT records, one per (targetId, sourceId) pair (M2-S5a)
 }
 
 /** Per-tick inputs (the replayable command log). Creep spawns come from the ruleset
@@ -394,6 +396,7 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   }
 
   if (!Array.isArray(state.impacts)) state.impacts = [];
+  if (!Array.isArray(state.dots)) state.dots = [];
 
   // Lifecycle fields — coerce a pre-v6 / forged snapshot to safe defaults.
   if (state.phase !== 'running' && state.phase !== 'won' && state.phase !== 'lost') {
@@ -617,6 +620,7 @@ export function createInitialState(seed: Seed | number, ruleset: CompiledRuleset
     creeps: emptyCreeps(),
     towers: emptyTowers(),
     impacts: [],
+    dots: [],
   };
 }
 
@@ -963,17 +967,20 @@ export function step(
     state.creeps,
     state.towers,
     state.impacts,
+    state.dots,
     state.tick,
     state.bounty,
     field,
     grid,
     towerById,
+    creepById,
     balance.slowFloorNum,
     balance.slowFloorDen,
     events,
   );
   state.creeps = combat.creeps;
   state.impacts = combat.impacts;
+  state.dots = combat.dots;
   state.bounty = combat.bounty;
   state.cumulativeKillBounty = satAdd(state.cumulativeKillBounty, combat.killBounty);
 
@@ -1129,6 +1136,7 @@ export interface PreviewState {
   readonly creeps: ReadonlyCreepArrays;
   readonly towers: ReadonlyTowerArrays;
   readonly impacts: readonly ReadonlyImpact[];
+  readonly dots: readonly DotRecord[];
 }
 
 /** Build the mutable working clone `previewInputs` runs `applyInputPhase` against.
@@ -1140,17 +1148,19 @@ export interface PreviewState {
  *  container object, never onto the source's, while the column arrays themselves are
  *  never written to by the input phase and so are safely shared, not copied.
  *  `impacts` is a shared reference for the same reason (the input phase never touches
- *  it). The four wave-lifecycle arrays (`waveLaunchTick`/`waveSpawnCursor`/
- *  `waveLeaked`/`waveResolved`) are likewise SHARED by this `{...state}` spread
- *  (a scalar-level copy of the array REFERENCE, not its contents) — `coerceSoa`'s
- *  own copy-on-write discipline is what keeps a preview repair from mutating the
- *  live state's array through that shared reference (see its doc comment).
+ *  it) — `dots` (M2-S5a) is a shared reference for the identical reason: the input
+ *  phase never touches DoT state either. The four wave-lifecycle arrays
+ *  (`waveLaunchTick`/`waveSpawnCursor`/`waveLeaked`/`waveResolved`) are likewise
+ *  SHARED by this `{...state}` spread (a scalar-level copy of the array REFERENCE,
+ *  not its contents) — `coerceSoa`'s own copy-on-write discipline is what keeps a
+ *  preview repair from mutating the live state's array through that shared
+ *  reference (see its doc comment).
  *
  *  Guarantee scope: today a forged state with a non-cloneable value (function/symbol)
  *  ANYWHERE throws from a blanket `structuredClone`; after this only the towers
- *  container keeps that rejection — non-cloneable garbage in creeps/impacts now flows
- *  through untouched (coerceSoa's shape guards still apply to it; the hash invariant
- *  holds trivially since those arrays are shared, not copied). */
+ *  container keeps that rejection — non-cloneable garbage in creeps/impacts/dots now
+ *  flows through untouched (coerceSoa's shape guards still apply to it; the hash
+ *  invariant holds trivially since those arrays are shared, not copied). */
 function partialCloneForPreview(state: SimState | PreviewState): SimState {
   const s = state as SimState;
   return {
@@ -1158,6 +1168,7 @@ function partialCloneForPreview(state: SimState | PreviewState): SimState {
     towers: structuredClone(s.towers) as TowerArrays,
     creeps: { ...s.creeps } as CreepArrays,
     impacts: s.impacts as Impact[],
+    dots: s.dots as DotRecord[],
   };
 }
 
@@ -1239,6 +1250,19 @@ export type { BoardContext } from './context';
 // Landed-impact events (M1 Story 8, #31): an optional out-param on `step()` — never
 // part of `SimState`, never hash-relevant.
 export type { StepEvents } from './combat';
+// DoT records + the resident-queue caps (M2-S5a, #77): `packages/perf` consumes
+// both through this barrel (P4's `dot-bench.ts`). `MAX_IN_FLIGHT_IMPACTS` was not
+// previously re-exported — added here alongside its DoT analogue.
+// The ONE fixed-point diagonal edge length. Shared so `compileRuleset`'s traversal
+// bound and actual movement can never disagree (CodeRabbit, PR #78 — they were two
+// private copies of 362, with nothing enforcing that they matched).
+export { DIAG_LEN } from './movement';
+export {
+  type DotRecord,
+  MAX_DOT_RECORDS,
+  MAX_DOT_CADENCE_TICKS,
+  MAX_IN_FLIGHT_IMPACTS,
+} from './combat';
 // Ruleset bundle (M1 Story 5, re-encoded to v2 in M2-S1): compilation, the content
 // digest, and the boundary guard.
 export {

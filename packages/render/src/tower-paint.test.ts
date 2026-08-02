@@ -17,6 +17,9 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
     // comparison added no independent assertion.
     expect(towerFootprintMarkFor('splash')).toBe('crosshair');
   });
+  it('draws venom with a distinct droplet mark (M2-S5a) — never reuses plain/ringed/crosshair', () => {
+    expect(towerFootprintMarkFor('venom')).toBe('droplet');
+  });
   it('falls back to plain for an unknown id — never throws', () => {
     expect(towerFootprintMarkFor('__proto__')).toBe('plain');
     expect(towerFootprintMarkFor('')).toBe('plain');

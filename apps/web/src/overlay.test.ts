@@ -668,9 +668,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('the second of three Cards (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
+  it('the second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    expect(shell.cards).toHaveLength(3);
+    // One Card per catalog tower: 4 since M2-S5a added `venom` (was 3 at M2-S4a).
+    // The slot WIRING for card 4 — its hotkey badge, rebind entry and label — is
+    // P6's; this assertion tracks the catalog's size, which is content, not wiring.
+    expect(shell.cards).toHaveLength(4);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
@@ -690,15 +693,11 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(splashCard.root.getAttribute('aria-keyshortcuts')).toBe('3');
   });
 
-  it('a card at catalog index ≥ 3 gets NO hotkey badge/aria-keyshortcuts at all (Codex R2-2, widened M2-S4a)', () => {
-    // Four-tower descriptor list — index 3 has no ARM_HOTKEY_ACTIONS slot.
-    const fourTowerRuleset = ruleset;
-    const shell = createShell(document, [
-      { towerId: 'basic' },
-      { towerId: 'slow' },
-      { towerId: 'splash' },
-      { towerId: 'basic' }, // a synthetic fourth slot — id doesn't matter, only the index does
-    ]);
+  it('a card at catalog index ≥ 9 gets NO hotkey badge/aria-keyshortcuts at all (Codex R2-2, widened M2-S4a, generalized to nine slots PLAN.md P6)', () => {
+    // Ten-tower descriptor list — index 9 (the 10th card) has no ARM_HOTKEY_ACTIONS slot,
+    // the new ceiling now that slots go 1..9 (was 1..3 pre-P6).
+    const tenTowerDescriptors = Array.from({ length: 10 }, () => ({ towerId: 'basic' }));
+    const shell = createShell(document, tenTowerDescriptors);
     document.body.appendChild(shell.root);
     const overlay = createOverlay(
       document,
@@ -707,7 +706,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       createSettings(),
       createKeymap(),
       shell,
-      fourTowerRuleset,
+      ruleset,
       () => {},
       defaultInstall(),
     );
@@ -717,9 +716,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       overlay.instructionsEl,
       overlay.leaveEl,
     );
-    const fourthCard = shell.cards[3]!;
-    expect(fourthCard.hotkey.textContent).toBe('');
-    expect(fourthCard.root.hasAttribute('aria-keyshortcuts')).toBe(false);
+    const ninthCard = shell.cards[8]!; // armTower9 — last real slot, still wired
+    expect(ninthCard.hotkey.textContent).toBe('9');
+    expect(ninthCard.root.getAttribute('aria-keyshortcuts')).toBe('9');
+    const tenthCard = shell.cards[9]!; // catalog index 9 — beyond the nine-slot ceiling
+    expect(tenthCard.hotkey.textContent).toBe('');
+    expect(tenthCard.root.hasAttribute('aria-keyshortcuts')).toBe(false);
     overlay.destroy();
   });
 
@@ -786,6 +788,39 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.hasAttribute('aria-keyshortcuts')).toBe(false);
   });
 
+  // PLAN.md P6, M2-S5a: the slot-wiring generalization. `setup()`'s bundled ruleset has
+  // four catalog towers (basic/slow/splash/venom, M2-S5a's P5), so card 4 (index 3,
+  // `armTower4`/Digit4) is now wired for real — not a synthetic fixture.
+  it('Digit4 arms the fourth Card with the four-tower bundle (PLAN.md P6)', () => {
+    const { actions, shell } = setup();
+    const venomCard = shell.cards[3]!;
+    expect(venomCard.towerId).toBe('venom');
+    expect(venomCard.hotkey.textContent).toBe('4'); // Digit4 default
+    expect(venomCard.root.getAttribute('aria-keyshortcuts')).toBe('4');
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit4' }));
+    expect(actions).toContainEqual({ type: 'armTower', tower: 'venom' });
+  });
+
+  it('slots 5-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a four-tower bundle (PLAN.md P6)', () => {
+    const { actions, overlay, shell, settingsBtn } = setup();
+    // Only four Cards exist — no badge/aria-keyshortcuts beyond index 3.
+    expect(shell.cards).toHaveLength(4);
+    // No phantom rebindable action for slots 5..9.
+    settingsBtn.click();
+    const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
+      (el) => el.textContent,
+    );
+    for (let n = 5; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
+    overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!.click();
+    // The document hotkeys for those slots no-op too — cards[4..8] don't exist. (Settings
+    // is closed here — an open settings dialog makes the shell `inert`, which would mask
+    // this on its own and defeat the assertion.)
+    for (let n = 5; n <= 9; n++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: `Digit${n}` }));
+    }
+    expect(actions).toEqual([]);
+  });
+
   it('the Panel shows armed type info (cost/damage/range/fire-rate/targets) and closes on Close (disarm)', () => {
     const { overlay, panel, actions } = setup();
     overlay.update({
@@ -832,6 +867,39 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(text).toContain('Range: 4.0 tiles');
     expect(text).toContain('Fire rate: 0.3/s'); // (1000/50) / 60 cadenceTicks
     expect(text).toContain('Blast radius: 1.5 tiles'); // radiusFp 384 / FP_ONE 256
+  });
+
+  // M2-S5a P7: `venom`'s `dot` effect surfaces as its own text row (magnitude/cadence/
+  // duration, never ring/colour-only) — the direct effect's damage (2) is the Panel's
+  // "Damage:" row same as any other tower; the DoT's own per-tick amount is separate.
+  it("the Panel shows the VENOM tower's DoT stat row (magnitude/cadence/duration)", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'venom' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Venom Tower');
+    expect(text).toContain('Cost: 9');
+    expect(text).toContain('Damage: 2'); // the direct effect's amount only
+    expect(text).toContain('Poison: 2 damage every 0.5s for 3.0s'); // dot: 2/10cadence/60duration ticks
+  });
+
+  it('the Panel shows no DoT row for the BASIC tower (no `dot` effect)', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    expect(panel.root.textContent).not.toContain('Poison');
   });
 
   // QC round 1: the wrong-stats regression guard PLAN step 21 named (G18's bug — a

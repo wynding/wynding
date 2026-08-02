@@ -151,8 +151,8 @@ describe('compileRuleset — creep catalog domains', () => {
     rejects((b) => (b.creepCatalog[0]!.domain = 'air'));
   });
 
-  it('rejects nonzero armor / any immunity / role — all capability-gated to 0/none at simVersion 5', () => {
-    rejects((b) => (b.creepCatalog[0]!.armor = 1));
+  it('rejects armor past the capability ceiling, and any immunity / role — capability-gated (M2-S5a widened maxArmor 0 → 16)', () => {
+    rejects((b) => (b.creepCatalog[0]!.armor = 17)); // one past the live profile's maxArmor ceiling
     rejects((b) => (b.creepCatalog[0]!.immunities = ['slow']));
     rejects((b) => (b.creepCatalog[0]!.role = 'boss'));
   });
@@ -190,6 +190,38 @@ describe('compileRuleset — tower catalog domains', () => {
     expect(compiled.towerById['basic']!.effects).toEqual([
       { kind: 'aoe', amount: 10, radiusFp: 300 },
     ]);
+  });
+
+  it('compiles a dot direct effect (capability: allowedEffectKinds widens to include dot at sv9)', () => {
+    const b = base();
+    b.towerCatalog[0]!.effects = [
+      { kind: 'direct', form: 'single', damage: 10 },
+      { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
+    ];
+    const compiled = compileRuleset(b as Ruleset, 'test');
+    expect(compiled.towerById['basic']!.effects).toEqual([
+      { kind: 'direct', amount: 10 },
+      { kind: 'dot', amount: 5, cadenceTicks: 10, durationTicks: 60 },
+    ]);
+  });
+
+  it('rejects a dot durationTicks past the capability ceiling (M2-S5a maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected)', () => {
+    // Fire cadence 20,000 so the duration:cadence RATIO gate (8x -> 160,000, Codex P2 on
+    // PR #78) sits clear of the ABSOLUTE ceiling this test isolates.
+    const b = base();
+    b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
+    b.towerCatalog[0]!.effects = [
+      { kind: 'direct', form: 'single', damage: 10 },
+      { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_000 },
+    ];
+    expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
+    rejects((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
+      ];
+    });
   });
 
   it('compiles a multi-tower catalog (capability: maxTowerCatalogSize widens to 64 at sv8) — every entry compiled independently', () => {

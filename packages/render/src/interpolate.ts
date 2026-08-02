@@ -31,6 +31,7 @@ export function interpolateCreeps(prev: RenderVM | null, cur: RenderVM, alpha: n
         y: p.y + (c.y - p.y) * a,
         hpFrac: c.hpFrac, // health snaps to current (no visual value in blending it)
         slowed: c.slowed, // status snaps to current, like hpFrac (no visual value blending it)
+        poisoned: c.poisoned, // status snaps to current, like slowed (no visual value blending it)
       });
     }
   }

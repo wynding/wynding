@@ -44,6 +44,7 @@ import type { EffectDef, Ruleset, RulesetBoard, TowerDef, TowerTargetDomain } fr
 import { loadBoard, type BoardContext } from './context';
 import { RulesetError, canonicalImmunities, effectiveSpeedFp, SIM_VERSION } from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
+import { DIAG_LEN } from './movement';
 import { capabilityProfile, type CapabilityProfile } from './capability';
 import { MAX_TOWERS } from './tower';
 
@@ -119,7 +120,13 @@ export interface CompiledScoring {
 export type CompiledEffect =
   | { readonly kind: 'direct'; readonly amount: number }
   | { readonly kind: 'aoe'; readonly amount: number; readonly radiusFp: number }
-  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number };
+  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number }
+  | {
+      readonly kind: 'dot';
+      readonly amount: number;
+      readonly cadenceTicks: number;
+      readonly durationTicks: number;
+    };
 
 /** Sim-owned compile-time projection of `TowerDef` — `kind` renamed `id` (decision
  *  4). `effects` REPLACES v1's flat `damage` (G3): the fire-time snapshot needs the
@@ -203,11 +210,6 @@ const MAX_SCHEDULED_SPAWNS = 10_000;
  *  ceiling — so replay imports THIS constant (rather than duplicating the literal) and
  *  the two can never drift into a compiles-but-times-out gap. */
 export const MAX_MATCH_TICKS = 36_000;
-
-/** Fixed-point diagonal step length (≈ √2 × 256); the generous per-cell route-length
- *  unit used for the worst-case traversal bound (mirrors replay's re-simulation
- *  ceiling, `MAX_MATCH_TICKS` above). */
-const FP_DIAG_LEN = 362;
 
 /**
  * Compile-time ceiling on AoE scan-work (M2-S4a, step 7 — Codex R1-4/R1-5): per-tick
@@ -423,6 +425,53 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
       ) {
         throw new RulesetError(`effect form '${effect.form}' unsupported at simVersion ${v}`);
       }
+      // maxDotDurationTicks bounds the tick-scheduling operand the schema's own
+      // `durationTicks >= cadenceTicks` rule doesn't: together the two rules bound
+      // both a DoT's cadence and its duration, so tick scheduling can never
+      // saturate at any bundle that compiles.
+      // An `aoe` direct effect plus a `dot` on ONE tower is rejected at sv9 (Codex P2,
+      // PR #78). The sim could simulate it, but `MAX_DOT_RECORDS` was sized on the
+      // single-target application model — about `durationTicks / fire cadence` records
+      // per tower, since each shot lands on one creep. A blast applies the DoT to EVERY
+      // member it catches, so ~41 such towers over 100 creeps in radius needs 4,100
+      // distinct (targetId, sourceId) records and silently starts dropping applications
+      // at a rail that compiled clean. No tower in M2's catalog combines the two, so
+      // rather than inflate a capability-shaped constant for content that does not
+      // exist, reject the combination LOUDLY at compile time until a story needs it and
+      // re-derives the bound. Same posture as S4a's form-uniform/radius-uniform gates,
+      // which exist to stop exactly this kind of unvalidated composition.
+      // Bound how many live records ONE source can hold, by tying a DoT's duration to
+      // its tower's own fire cadence (Codex P2, PR #78). `maxDotDurationTicks` bounds
+      // the absolute number but not the RATIO, and the ratio is what sets record count:
+      // ~`durationTicks / fire cadence` shots land inside a duration window, each able
+      // to seed a different creep. At the profile's 100,000 ticks against a 2-tick
+      // cadence that is ~50,000 records from a single tower, an order of magnitude past
+      // `MAX_DOT_RECORDS` — reachable by a bundle that compiles clean.
+      if (effect.kind === 'dot' && tower.attack !== undefined) {
+        const fireCadence = tower.attack.cadenceTicks ?? 0;
+        const ratioCeiling = profile.maxDotDurationCadenceRatio * fireCadence;
+        // `?? 0` keeps this total on a pre-schema-validation shape; a 0 cadence makes the
+        // ceiling 0, so any positive duration is rejected — the safe direction.
+        if (effect.durationTicks > ratioCeiling) {
+          throw new RulesetError(
+            `tower '${tower.id}' dot durationTicks ${effect.durationTicks} exceeds ${ratioCeiling} ` +
+              `(${profile.maxDotDurationCadenceRatio}× its ${fireCadence}-tick attack cadence) at simVersion ${v}`,
+          );
+        }
+      }
+      if (
+        effect.kind === 'dot' &&
+        tower.effects.some((e) => e.kind === 'direct' && e.form === 'aoe')
+      ) {
+        throw new RulesetError(
+          `tower '${tower.id}' combines an aoe direct effect with a dot effect, unsupported at simVersion ${v}`,
+        );
+      }
+      if (effect.kind === 'dot' && effect.durationTicks > profile.maxDotDurationTicks) {
+        throw new RulesetError(
+          `tower '${tower.id}' dot durationTicks ${effect.durationTicks} exceeds ${profile.maxDotDurationTicks} at simVersion ${v}`,
+        );
+      }
     }
     if (tower.attack !== undefined && !profile.allowedTowerDomains.includes(tower.attack.domain)) {
       throw new RulesetError(
@@ -581,7 +630,15 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       return { kind: 'aoe', amount: e.damage, radiusFp: e.radiusFp };
     }
     if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
-    // Unreachable at sv8: `allowedEffectKinds`/`allowedDirectForms` already rejected
+    if (e.kind === 'dot') {
+      return {
+        kind: 'dot',
+        amount: e.damagePerTick,
+        cadenceTicks: e.cadenceTicks,
+        durationTicks: e.durationTicks,
+      };
+    }
+    // Unreachable at sv9: `allowedEffectKinds`/`allowedDirectForms` already rejected
     // anything else in `checkCapabilityGlobal`, above. Defensive, not load-bearing.
     throw new RulesetError(
       `tower '${towerId}' has an effect this sim build cannot compile at simVersion ${SIM_VERSION}`,
@@ -755,7 +812,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     if (last > latestSpawnTick) latestSpawnTick = last;
   });
   const cells = boardCtx.grid.width * boardCtx.grid.height;
-  const maxTraversalTicks = Math.ceil((cells * FP_DIAG_LEN) / minEffSpeedFp);
+  const maxTraversalTicks = Math.ceil((cells * DIAG_LEN) / minEffSpeedFp);
   if (latestSpawnTick + maxTraversalTicks > MAX_MATCH_TICKS) {
     throw new RulesetError('ruleset cannot reach a terminal state within the tick budget');
   }

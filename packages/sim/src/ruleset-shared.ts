@@ -29,8 +29,12 @@ export class RulesetError extends Error {
  *  status columns) bumped 6 → 7; M2 Story 4a (AoE: `Impact` becomes a
  *  `targeted`/`blast` discriminated union — hash-breaking even for single-target
  *  play — plus the `aoe` direct form and the form-uniform/radius-uniform
- *  compile-time gates) bumps 7 → 8. */
-export const SIM_VERSION = 8;
+ *  compile-time gates) bumped 7 → 8; M2 Story 5a bumps 8 → 9 — THREE
+ *  determinism-affecting changes, not one: flat armor arithmetic on the `direct`
+ *  primitive (resolved per creep row via the `creepById` combat seam), a REQUIRED
+ *  `sourceId` on both `Impact` variants (hash-breaking for single-target play too),
+ *  and the per-source DoT model (`SimState.dots`, the tick step, inclusive expiry). */
+export const SIM_VERSION = 9;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;
@@ -80,3 +84,16 @@ export function effectiveSpeedFp(
     ceilDiv(baseSpeedFp * slowFloorNum, slowFloorDen),
   );
 }
+
+/** The DoT duration:fire-cadence ratio the capability profile admits, and the basis the
+ *  record rail is derived from — as `RATIO + 1` per source, NOT `RATIO`; see
+ *  `MAX_DOT_RECORDS` in `combat.ts` for why the extra one is real and where it is spent. A tower lands `floor((durationTicks - 1) / fire cadence) + 1` shots
+ *  inside a duration window, each able to seed a different creep (a re-hit refreshes
+ *  rather than adds), so when the capability profile admits `durationTicks` up to
+ *  `N × fire cadence` that expression is exactly `N`. Cross-checked against the shipped
+ *  `venom` (60/30): `floor(59/30) + 1 = 2`, which is what it actually holds.
+ *
+ *  `capability.ts`'s `maxDotDurationCadenceRatio` MUST equal this — that gate is what
+ *  makes the derivation true rather than aspirational, and `capability.test.ts` pins the
+ *  gate and the rail together. */
+export const MAX_DOT_DURATION_CADENCE_RATIO = 8;

@@ -4,6 +4,14 @@
 // another action moves it, never leaving two actions on one key). Persistence of a
 // custom layout waits for the ADR 0008 storage seam; here it lives for the session.
 
+/** The arm-tower hotkey slots, catalog index 0..8 (`armTower1` = index 0). Nine is a
+ *  ceiling, not a promise every slot is wired to a Card — `overlay.ts` and `input.ts`
+ *  both no-op past `cards.length` (Codex R3-1's `towers[n]`/`cards[n]` guard). One list
+ *  feeds the `GameAction` union below AND `DEFAULTS`' `Digit1`..`Digit9` bindings, so
+ *  S5–S10 add a slot in one place instead of five files (PLAN.md P6, M2-S5a) — the
+ *  chronic miss (S4a needed six coordinated edits and Codex caught one that was missed). */
+export type ArmTowerAction = `armTower${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`;
+
 /** The bindable game actions (each has a catalog label under `action.*`). */
 export type GameAction =
   | 'up'
@@ -15,11 +23,17 @@ export type GameAction =
   | 'start'
   | 'pause'
   | 'speed'
-  | 'armTower1'
-  | 'armTower2'
-  | 'armTower3';
+  | ArmTowerAction;
 
-const DEFAULTS: Readonly<Record<GameAction, string>> = {
+/** The nine slot actions in catalog-index order, `overlay.ts`/`input.ts`'s single source
+ *  for the arm-hotkey wiring (`ARM_HOTKEY_ACTIONS`, the rebind filter, the membership
+ *  test in the keyboard switch) — see their own comments for what each does with it. */
+export const ARM_TOWER_ACTIONS: readonly ArmTowerAction[] = Array.from(
+  { length: 9 },
+  (_, i) => `armTower${i + 1}` as ArmTowerAction,
+);
+
+const NON_SLOT_DEFAULTS: Readonly<Record<Exclude<GameAction, ArmTowerAction>, string>> = {
   up: 'ArrowUp',
   down: 'ArrowDown',
   left: 'ArrowLeft',
@@ -33,16 +47,20 @@ const DEFAULTS: Readonly<Record<GameAction, string>> = {
   start: 'KeyC',
   pause: 'Space',
   speed: 'KeyF',
-  // Arms the Card at catalog index 0/1/2 for placement (PLAN.md P2, M2-S3; `armTower3`
-  // M2-S4a). Handled at document scope (overlay.ts), not the board's own keydown
-  // switch, so it works regardless of which element currently has focus (a Card, the
-  // board, or neither) — "any state" per the P2 table. `armTower2`/`armTower3` are
-  // inserted right after `armTower1` in slot order (settings-list adjacency;
-  // `GAME_ACTIONS` derives from insertion order) — each a no-op on a bundle without
-  // that many towers (Codex R3-1's `towers[n]`/`cards[n]` guard, overlay.ts).
-  armTower1: 'Digit1',
-  armTower2: 'Digit2',
-  armTower3: 'Digit3',
+};
+
+// Object-spread order is insertion order: the non-slot actions first, then
+// `armTower1`..`armTower9` bound to `Digit1`..`Digit9` — preserving today's adjacency
+// (the settings list renders in `GAME_ACTIONS`' order) and today's armTower1..3 →
+// Digit1..3 bindings unchanged. Arming works at document scope (overlay.ts), not the
+// board's own keydown switch, so it fires regardless of which element currently has
+// focus (a Card, the board, or neither) — "any state" per the P2 table.
+const DEFAULTS: Readonly<Record<GameAction, string>> = {
+  ...NON_SLOT_DEFAULTS,
+  ...(Object.fromEntries(ARM_TOWER_ACTIONS.map((action, i) => [action, `Digit${i + 1}`])) as Record<
+    ArmTowerAction,
+    string
+  >),
 };
 
 // Derived from DEFAULTS (insertion order) so the action list, the union, and the default

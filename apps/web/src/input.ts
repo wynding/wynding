@@ -14,7 +14,7 @@
 
 import { createProjection, type Projection } from '@wynding/render';
 import type { Controller } from './controller';
-import type { Keymap } from './keymap';
+import { ARM_TOWER_ACTIONS, type GameAction, type Keymap } from './keymap';
 
 export interface InputHandle {
   destroy(): void;
@@ -461,6 +461,22 @@ export function attachInput(
   const onKeyDown = (e: KeyboardEvent): void => {
     const action = keymap.actionFor(e.code);
     if (action === null) return;
+    // Slot actions (`armTower1`..`armTower9`) are intentionally NOT handled here: arming
+    // must work from "any state" (PLAN.md P2 table) regardless of whether the board
+    // currently has focus (e.g. focus on a Card, or nowhere at all), so it's a
+    // document-scope listener in overlay.ts. One membership test against `keymap.ts`'s
+    // `ARM_TOWER_ACTIONS` (PLAN.md P6, generalized from the old `armTower1`/`armTower2`/
+    // `armTower3` case ladder) covers every slot action.
+    //
+    // This returns BEFORE `preventDefault()` (QC round 1). Generalizing to nine slots
+    // made `DEFAULTS` bind Digit1..Digit9 unconditionally, so with the shipped four-tower
+    // catalog `Digit5`..`Digit9` resolve to real actions with no Card behind them. With
+    // the consume above this test, those keys were swallowed here — no arm, no feedback,
+    // and no Settings row either, since `REBINDABLE_ACTIONS` filters slots past
+    // `cards.length` out of the list. The UI said the key was free while the keymap held
+    // it. Backed slots are unaffected: overlay.ts's document-scope handler consumes them,
+    // and it already checks the Card exists before doing so.
+    if ((ARM_TOWER_ACTIONS as readonly GameAction[]).includes(action)) return;
     e.preventDefault();
     // Auto-repeat only drives cursor movement (held arrow keeps moving); discrete actions
     // (confirm/sell/start/pause/speed) are edge-triggered — a held key must not repeat
@@ -495,15 +511,6 @@ export function attachInput(
         break;
       case 'speed':
         controller.cycleSpeed();
-        break;
-      case 'armTower1':
-      case 'armTower2':
-      case 'armTower3':
-        // Intentionally NOT handled here: arming must work from "any state" (PLAN.md P2
-        // table) regardless of whether the board currently has focus (e.g. focus on a
-        // Card, or nowhere at all), so it's a document-scope listener in overlay.ts. This
-        // case only exists so the switch stays exhaustive over `GameAction` — the
-        // preventDefault() above still consumes the key here when the board IS focused.
         break;
     }
   };

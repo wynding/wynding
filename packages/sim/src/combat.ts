@@ -50,9 +50,9 @@ import {
   cellOf,
   type CreepGeometry,
 } from './movement';
-import { effectiveSpeedFp } from './ruleset-shared';
+import { effectiveSpeedFp, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
-import type { CompiledEffect, CompiledTower } from './ruleset';
+import type { CompiledCreep, CompiledEffect, CompiledTower } from './ruleset';
 
 // Combat tuning (range, per-hit damage, fire cadence, projectile travel) is NO
 // LONGER a hardcoded constant here — Story 5 migrated it into the ruleset bundle
@@ -76,10 +76,20 @@ export const MAX_IN_FLIGHT_IMPACTS = MAX_TOWERS;
 export const MAX_IMPACT_EFFECTS = 8;
 
 /** One effect primitive an impact applies, snapshotted fresh per fire from the
- *  tower's `CompiledEffect[]` (M2-S3 generalizes M1's `direct`-only shape). */
+ *  tower's `CompiledEffect[]` (M2-S3 generalizes M1's `direct`-only shape).
+ *  `dot` (M2-S5a P2 shaped the state; P3 wires it up) carries the same three
+ *  fields the DoT record adopts on first application — `amount` per tick,
+ *  `cadenceTicks` between ticks, `durationTicks` the record's total lifetime;
+ *  `applyImpactToCreep`'s PASS 2 hands a `dot` primitive to `applyDot`. */
 export type EffectPrimitive =
   | { readonly kind: 'direct'; readonly amount: number }
-  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number };
+  | { readonly kind: 'slow'; readonly mulFp: number; readonly durationTicks: number }
+  | {
+      readonly kind: 'dot';
+      readonly amount: number;
+      readonly cadenceTicks: number;
+      readonly durationTicks: number;
+    };
 
 /**
  * A scheduled impact, resolving at `impactTick` (M2-S4a: a discriminated union —
@@ -92,12 +102,20 @@ export type EffectPrimitive =
  * Both carry the same `effects` shape — the impact's `kind` is what distinguishes
  * "one creep" from "every creep in a radius"; the per-creep effect application
  * (`applyImpactToCreep`) is identical either way.
+ *
+ * `sourceId` (M2-S5a P2) is the firing tower's entity id, snapshotted at fire time
+ * on BOTH variants: a DoT record's refresh rule (P3) is keyed on source identity,
+ * and the impact is the only carrier between fire time and impact time — by the
+ * time an impact resolves, the firing tower may have sold or been replaced, so this
+ * is the sole surviving record of who fired it. This DOES change the world-hash,
+ * even for single-target play, hence the golden re-pin in this packet.
  */
 export type Impact =
   | {
       readonly kind: 'targeted';
       readonly impactTick: number;
       readonly targetId: number;
+      readonly sourceId: number;
       readonly effects: EffectPrimitive[];
     }
   | {
@@ -106,15 +124,89 @@ export type Impact =
       readonly x: number;
       readonly y: number;
       readonly radiusFp: number;
+      readonly sourceId: number;
       readonly effects: EffectPrimitive[];
     };
 
 /**
+ * A per-source, per-target damage-over-time record (M2-S5a P2 shaped this state; P3
+ * is `applyDot` and the tick step below that append/refresh/tick/expire one). Lives
+ * in a flat `SimState.dots` array mirroring `impacts` — a per-source DoT is a
+ * creep↔tower RELATION, not a creep attribute (unlike slow, which collapses to one
+ * column pair because strongest-wins means at most one live slow per creep; two
+ * `venom` towers keep independently-ticking records on the same creep, per
+ * `docs/CONTEXT.md`'s Status effect entry).
+ */
+export interface DotRecord {
+  readonly targetId: number; // creep ENTITY id (matches Impact.targetId)
+  readonly sourceId: number; // firing tower's entity id — source identity
+  readonly amount: number; // per-tick damage, re-adopted on refresh
+  readonly cadenceTicks: number; // fixed for the record's life
+  readonly nextTickTick: number; // the tick this record next deals damage
+  readonly untilTick: number; // INCLUSIVE final tick
+}
+
+/**
+ * Forged-state / DoS backstop on the resident DoT-record table — the analogue of
+ * {@link MAX_IN_FLIGHT_IMPACTS}, expressed the same structural way (a multiple of
+ * {@link MAX_TOWERS}, not a bare literal): `applyDot` deterministically drops a NEW-PAIR
+ * application once the table is full. Deliberately NOT a per-creep source cap, which would
+ * contradict `docs/CONTEXT.md`'s Status effect entry ("each source's DoT coexists").
+ *
+ * DERIVED, not chosen. One source holds at most `RATIO + 1` records: `RATIO` prior
+ * residents — bounded by the compile-time duration:cadence gate in `checkCapabilityGlobal`,
+ * which is what makes this rail derived rather than judged — plus the landing being applied,
+ * which still sees the oldest record because impacts resolve in step (1) while expiry runs
+ * in step (6), and that is exactly when `applyDot` tests capacity. A re-hit refreshes rather
+ * than appends, so it can never add a target. Across sources the count `S` is
+ * `min(MAX_TOWERS, MAX_TOTAL_TOWER_COMMANDS)` = 1,000 (see the HAZARD below — sources are
+ * minted tower ids, not live towers, since a sold tower's records keep ticking). So the
+ * worst legitimate table at a capacity test is `(RATIO+1)*S - 1 = 8,999`, just under the
+ * rail: compiled content driven by an accepted replay can REACH it, never EXCEED it.
+ *
+ * Do not widen the duration:cadence gate — nor the aoe-plus-dot rejection beside it, whose
+ * blast fan-out breaks the per-source bound — without re-deriving this;
+ * `capability.test.ts` pins gate and rail together. The dangerous direction is DOWN: set
+ * too low, real DoT applications silently become no-ops (`controller.ts`'s `dotDropped`
+ * counter is the tripwire). Too high costs only DoS resistance, since real play never
+ * nears the rail.
+ *
+ * HAZARD (issue #77): only the duration:cadence half is compiler-visible. `packages/sim`
+ * does not bound tower-id minting — its placement gate is a live-count check, and
+ * build/sell/build mints fresh ids indefinitely — so the SOURCE COUNT rests on
+ * `packages/replay`'s `MAX_TOTAL_TOWER_COMMANDS` (1,000). That equals `MAX_TOWERS` by
+ * COINCIDENCE, not by binding: it is motivated there as a pathfinding-CPU budget and says
+ * nothing about DoT. Raise it to allow longer matches — a change touching nothing in this
+ * package — and a replay could mint that many sources and silently drop applications, with
+ * no test failing. It cannot be imported here without the layering back-edge AGENTS.md
+ * blocks, the same caveat issue #77 records.
+ *
+ * Cost evidence, and the limits of that evidence: `packages/perf/src/dot-bench.ts`.
+ *
+ * Reaching the rail is a hostile state, not a play cost — it needs ~1,000 DoT sources in
+ * sustained contact, against ~150 towers on the whole stress scene, and real tables sit in
+ * the hundreds. The per-source bound is analytic, not measured on a DoT-bearing scene: none
+ * exists yet (`stress-40x40.json` carries `direct` and `slow` only, and `dot-bench.ts` seeds
+ * SYNTHETIC filler to reach the cap). S5b adds the DoT-bearing stress twin; until then, do
+ * not cite a measured concurrency figure here.
+ *
+ * Capability-shaped like `AOE_SCAN_CEILING`: once sv9 ships, moving this is a behaviour
+ * change owing its own `simVersion` bump. If S5b's stress scene lands anywhere near it, that
+ * is a finding to raise, not a constant to nudge.
+ */
+export const MAX_DOT_RECORDS = (MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWERS;
+
+/**
  * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,
  * never hash-relevant) and NOT a `RenderVM` field — a transient out-param the caller
- * owns. `step()`/`runCombat()` only ever APPEND to it; the caller owns clearing and
- * lifetime. A terminal or no-op early-return `step()` path appends nothing, so a
- * pre-populated collector passed through either early return is left unchanged.
+ * owns. The contract: presentational, never hash-relevant, never serialized —
+ * append-only ARRAYS plus two MUTABLE COUNTERS (M2-S5a P3 adds `dotTicks`/
+ * `dotDropped`, below — the first fields on this interface that are not append-only,
+ * so this doc comment's older "only ever APPEND" wording no longer holds and is
+ * revised here rather than left standing beside a contradiction). The caller owns
+ * clearing and lifetime for both shapes. A terminal or no-op early-return `step()`
+ * path touches neither arrays nor counters, so a pre-populated collector passed
+ * through either early return is left unchanged.
  */
 export interface StepEvents {
   /** Resolution points of impacts that RESOLVED this tick, in queue-resolution
@@ -159,6 +251,17 @@ export interface StepEvents {
         readonly impactTick: number;
       }
   )[];
+  /** Count of DoT ticks actually applied this step (M2-S5a P3) — a SCALAR, not an
+   *  array, so the timed region allocates nothing extra for it. Incremented only
+   *  when the collector supplies it (`if (events?.dotTicks !== undefined)
+   *  events.dotTicks++;`, the same optional-collector idiom `impactPoints`/`fired`
+   *  use for their own guard), so every pre-existing `{ impactPoints: [], fired: [] }`
+   *  construction site elsewhere in the codebase compiles unchanged. */
+  dotTicks?: number;
+  /** Count of DoT-record applications DROPPED this step for want of table capacity
+   *  (`applyDot`'s drop branch, {@link MAX_DOT_RECORDS}) — a SCALAR, same optional-
+   *  collector idiom and rationale as {@link StepEvents.dotTicks} above. */
+  dotDropped?: number;
 }
 
 /** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it).
@@ -207,10 +310,21 @@ export const emptyCreeps = (): CombatCreeps => ({
 
 /** True iff `e` is a valid `EffectPrimitive`: `direct` — a positive safe-integer
  *  `amount`; `slow` — `mulFp` 1..255 and `durationTicks` a positive safe integer
- *  ≤ 1,000,000 (the schema's `GENERIC_MAX`). Any other shape is invalid. */
+ *  ≤ 1,000,000 (the schema's `GENERIC_MAX`); `dot` — `amount` and `cadenceTicks`
+ *  positive safe integers, `durationTicks` a positive safe integer ≤ 1,000,000 (the
+ *  same `GENERIC_MAX` bound `slow` already uses) AND `≥ cadenceTicks`, mirroring the
+ *  schema's own pair rule. That pair rule is the load-bearing one: without it a forged
+ *  impact mints a record whose first tick is already past its expiry. Any other shape
+ *  is invalid. */
 function validEffectPrimitive(e: unknown): e is EffectPrimitive {
   if (e === null || typeof e !== 'object') return false;
-  const rec = e as { kind?: unknown; amount?: unknown; mulFp?: unknown; durationTicks?: unknown };
+  const rec = e as {
+    kind?: unknown;
+    amount?: unknown;
+    mulFp?: unknown;
+    cadenceTicks?: unknown;
+    durationTicks?: unknown;
+  };
   if (rec.kind === 'direct') {
     return Number.isSafeInteger(rec.amount) && (rec.amount as number) > 0;
   }
@@ -224,16 +338,56 @@ function validEffectPrimitive(e: unknown): e is EffectPrimitive {
       (rec.durationTicks as number) <= 1_000_000
     );
   }
+  if (rec.kind === 'dot') {
+    // The pair rule `durationTicks >= cadenceTicks` mirrors the schema's own
+    // (`ruleset-schema.ts`), and bounds `cadenceTicks` transitively via `durationTicks`'
+    // own ceiling — so no separate cadence ceiling is needed here (QC round 2 proved a
+    // standalone one was dead code). The pair rule itself is load-bearing (QC round 1):
+    // `applyDot` derives `nextTickTick = satAdd(tick, cadenceTicks)` and
+    // `untilTick = satAdd(tick, durationTicks)`, so without them a forged impact with a
+    // huge `cadenceTicks` minted a record with `untilTick < nextTickTick` — exactly the
+    // shape `validDotRecord` calls structurally forged. That record was world-hashed on
+    // the tick it landed and silently dropped by `canonicalDotRecords` on the next,
+    // leaving `SimState.dots` not closed under its own canonical form. Deterministic
+    // either way, but it made "structurally forged ⇒ dropped" depend on which door the
+    // record came through.
+    return (
+      Number.isSafeInteger(rec.amount) &&
+      (rec.amount as number) > 0 &&
+      Number.isSafeInteger(rec.cadenceTicks) &&
+      (rec.cadenceTicks as number) > 0 &&
+      Number.isSafeInteger(rec.durationTicks) &&
+      (rec.durationTicks as number) > 0 &&
+      (rec.durationTicks as number) <= 1_000_000 &&
+      (rec.durationTicks as number) >= (rec.cadenceTicks as number)
+    );
+  }
   return false;
 }
 
 /** Rebuild one validated effect primitive to its exact canonical shape (never a
  *  spread — an unknown extra property on a forged effect must not leak into the
- *  world-hash). */
+ *  world-hash), per variant. */
 function canonicalEffectPrimitive(e: EffectPrimitive): EffectPrimitive {
-  return e.kind === 'direct'
-    ? { kind: 'direct', amount: e.amount }
-    : { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+  if (e.kind === 'direct') return { kind: 'direct', amount: e.amount };
+  if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+  // EXHAUSTIVE on purpose — `dot` is matched, never a fallthrough (CodeRabbit, PR #78).
+  // A trailing `return {kind:'dot', ...}` would rebuild any future fourth variant AS a
+  // dot, reading `amount`/`cadenceTicks`/`durationTicks` off an object that has none of
+  // them, and that result goes straight into the world-hash. That is precisely the defect
+  // `snapshotEffects` carried in the other direction (collapsing everything non-`slow`
+  // into `direct`), documented at its own definition. The `never` check below makes
+  // adding a variant a COMPILE error here instead.
+  if (e.kind === 'dot') {
+    return {
+      kind: 'dot',
+      amount: e.amount,
+      cadenceTicks: e.cadenceTicks,
+      durationTicks: e.durationTicks,
+    };
+  }
+  const unreachable: never = e;
+  return unreachable;
 }
 
 /** Structural cap on a blast's radius — DELIBERATELY a SEPARATE constant from the
@@ -260,13 +414,22 @@ export const MAX_BLAST_RADIUS_FP = 2048;
  * (`Math.abs(dx) > range`) already keeps the membership arithmetic bounded to
  * `|dx| ≤ MAX_BLAST_RADIUS_FP` regardless
  * of how far `x`/`y` sit from a creep — so no separate coordinate ceiling is needed)
- * AND `radiusFp` under {@link MAX_BLAST_RADIUS_FP}. Any other shape, or an
- * unrecognized `kind`, is dropped.
+ * AND `radiusFp` under {@link MAX_BLAST_RADIUS_FP}. **`sourceId`** (M2-S5a P2) is
+ * REQUIRED on both variants — a safe positive integer, rejected otherwise: adding a
+ * field to the union does nothing on its own, and a malformed `sourceId` would
+ * otherwise flow into the world-hash and then (P3) into DoT state. Any other shape,
+ * or an unrecognized `kind`, is dropped.
  */
 function validImpact(imp: unknown, grid: Grid): imp is Impact {
   if (imp === null || typeof imp !== 'object') return false;
-  const rec = imp as { kind?: unknown; impactTick?: unknown; effects?: unknown };
+  const rec = imp as {
+    kind?: unknown;
+    impactTick?: unknown;
+    effects?: unknown;
+    sourceId?: unknown;
+  };
   if (!Number.isSafeInteger(rec.impactTick)) return false;
+  if (!Number.isSafeInteger(rec.sourceId) || (rec.sourceId as number) <= 0) return false;
   if (
     !Array.isArray(rec.effects) ||
     rec.effects.length < 1 ||
@@ -302,15 +465,27 @@ function validImpact(imp: unknown, grid: Grid): imp is Impact {
  * Canonicalize the restored impact queue: keep only valid entries (on-board for a
  * `blast`, per `validImpact`'s `grid` bound), each rebuilt PER-VARIANT to its exact
  * canonical shape (never a spread — an unknown extra property on a forged impact
- * must not leak into the world-hash; `canonicalEffectPrimitive` precedent above),
- * in array order, capped at {@link MAX_IN_FLIGHT_IMPACTS}. Excess or malformed
- * entries drop in array order — a mixed queue of well-formed and forged/malformed
- * `targeted`/`blast` entries resolves only its valid members.
+ * must not leak into the world-hash; `canonicalEffectPrimitive` precedent above,
+ * `sourceId` rebuilt explicitly like every other field), in array order, capped at
+ * {@link MAX_IN_FLIGHT_IMPACTS}. Excess or malformed entries drop in array order —
+ * a mixed queue of well-formed and forged/malformed `targeted`/`blast` entries
+ * resolves only its valid members.
+ *
+ * The walk itself is ALSO capped at `4 ×` {@link MAX_IN_FLIGHT_IMPACTS} RAW entries
+ * inspected (M2-S5a P2 — a pre-existing latent defect, closed here alongside
+ * `canonicalDotRecords`'s twin below): breaking only on `out.length >=
+ * MAX_IN_FLIGHT_IMPACTS` bounds the walk only when entries are VALID — a forged
+ * array of any length whose entries are all invalid would otherwise still be
+ * walked in full.
  */
 function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
   const out: Impact[] = [];
+  const maxRawScan = 4 * MAX_IN_FLIGHT_IMPACTS;
+  let scanned = 0;
   for (const imp of impacts) {
     if (out.length >= MAX_IN_FLIGHT_IMPACTS) break;
+    if (scanned >= maxRawScan) break;
+    scanned++;
     if (!validImpact(imp, grid)) continue;
     out.push(
       imp.kind === 'targeted'
@@ -318,6 +493,7 @@ function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
             kind: 'targeted',
             impactTick: imp.impactTick,
             targetId: imp.targetId,
+            sourceId: imp.sourceId,
             effects: imp.effects.map(canonicalEffectPrimitive),
           }
         : {
@@ -326,9 +502,103 @@ function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
             x: imp.x,
             y: imp.y,
             radiusFp: imp.radiusFp,
+            sourceId: imp.sourceId,
             effects: imp.effects.map(canonicalEffectPrimitive),
           },
     );
+  }
+  return out;
+}
+
+/**
+ * True iff `rec` is a valid `DotRecord`: `targetId`/`sourceId` positive safe
+ * integers (entity ids; `0` is not one, mirroring `Impact.sourceId` above),
+ * `amount ≥ 1`, `1 ≤ cadenceTicks ≤ 1,000,000`, `nextTickTick`/`untilTick`
+ * non-negative safe integers. Any other shape is invalid.
+ *
+ * There is deliberately NO `untilTick ≥ nextTickTick` rule (QC round 2). The first
+ * draft had one, calling the opposite shape "structurally forged" — but the SIM ITSELF
+ * produces it on the ordinary gameplay path: the tick step advances `nextTickTick` by
+ * one cadence without regard to `untilTick`, so any record whose remaining duration is
+ * not a whole number of cadences ends its life with its next tick scheduled past its
+ * expiry. That is a perfectly well-formed record meaning "no further ticks are due, but
+ * the effect has not expired yet". With the rule in place, `canonicalDotRecords` deleted
+ * such records on the very next tick — several ticks early — so the poisoned telegraph
+ * blinked off before the DoT actually ended, and `SimState.dots` was not closed under
+ * its own canonical form on the shipped `venom`'s normal path.
+ *
+ * The `cadenceTicks` ceiling moved HERE from `validEffectPrimitive`, where it was dead
+ * code (that conjunction already implied it via `durationTicks`). Here it is the only
+ * thing bounding the operand `satAdd(nextTickTick, cadenceTicks)` reads on a restored
+ * table, so it is load-bearing rather than decorative.
+ */
+/** The largest `cadenceTicks` a restored `DotRecord` may carry. Exported (CodeRabbit,
+ *  PR #78) so `packages/perf`'s DoT benchmark BINDS to the real bound instead of
+ *  restating the literal in its own package — a restated copy would drift silently, and
+ *  a filler that violates this is dropped by `canonicalDotRecords` mid-`step()`, which
+ *  is exactly how the benchmark came to be timing an empty table. */
+export const MAX_DOT_CADENCE_TICKS = 1_000_000;
+
+function validDotRecord(rec: unknown): rec is DotRecord {
+  if (rec === null || typeof rec !== 'object') return false;
+  const r = rec as {
+    targetId?: unknown;
+    sourceId?: unknown;
+    amount?: unknown;
+    cadenceTicks?: unknown;
+    nextTickTick?: unknown;
+    untilTick?: unknown;
+  };
+  return (
+    Number.isSafeInteger(r.targetId) &&
+    (r.targetId as number) > 0 &&
+    Number.isSafeInteger(r.sourceId) &&
+    (r.sourceId as number) > 0 &&
+    Number.isSafeInteger(r.amount) &&
+    (r.amount as number) >= 1 &&
+    Number.isSafeInteger(r.cadenceTicks) &&
+    (r.cadenceTicks as number) >= 1 &&
+    (r.cadenceTicks as number) <= MAX_DOT_CADENCE_TICKS &&
+    Number.isSafeInteger(r.nextTickTick) &&
+    (r.nextTickTick as number) >= 0 &&
+    Number.isSafeInteger(r.untilTick) &&
+    (r.untilTick as number) >= 0
+  );
+}
+
+/**
+ * Canonicalize the restored DoT-record table: keep only valid entries (per
+ * `validDotRecord`), each rebuilt to its exact canonical shape (never a spread —
+ * mirrors `canonicalImpacts`), in array order, DEDUPLICATED on `(targetId,
+ * sourceId)` keeping the FIRST occurrence — two individually-valid duplicates would
+ * both tick for one source and make P3's refresh rule depend on which one it
+ * happened to find, so the pair is a canonical-form invariant enforced here, not in
+ * `applyDot`. Capped at {@link MAX_DOT_RECORDS} valid records kept, and at `4 ×`
+ * {@link MAX_DOT_RECORDS} RAW entries inspected (same rationale as
+ * `canonicalImpacts`'s raw-scan bound above — a long all-invalid array must not be
+ * walked in full).
+ */
+function canonicalDotRecords(records: readonly unknown[]): DotRecord[] {
+  const out: DotRecord[] = [];
+  const seen = new Set<string>();
+  const maxRawScan = 4 * MAX_DOT_RECORDS;
+  let scanned = 0;
+  for (const rec of records) {
+    if (out.length >= MAX_DOT_RECORDS) break;
+    if (scanned >= maxRawScan) break;
+    scanned++;
+    if (!validDotRecord(rec)) continue;
+    const key = `${rec.targetId}:${rec.sourceId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      targetId: rec.targetId,
+      sourceId: rec.sourceId,
+      amount: rec.amount,
+      cadenceTicks: rec.cadenceTicks,
+      nextTickTick: rec.nextTickTick,
+      untilTick: rec.untilTick,
+    });
   }
   return out;
 }
@@ -435,12 +705,17 @@ function findLiveCreep(creeps: CombatCreeps, targetId: number, grid: Grid): Live
   return null;
 }
 
-/** Apply one `direct` effect to a creep row; branch-saturating (no underflow). */
-function applyDirect(creeps: CombatCreeps, idx: number, amount: number): void {
+/** Apply one `direct` effect to a creep row, net of flat `armor` (M2-S5a):
+ *  `max(0, amount - armor)` blanks a hit at or under the creep's armor entirely.
+ *  Still branch-saturating (no underflow) on the ARMORED amount — armor can only
+ *  shrink the damage applied here, never change the no-underflow discipline
+ *  itself, so a `0`-armor call is byte-identical to the pre-armor subtraction. */
+function applyDirect(creeps: CombatCreeps, idx: number, amount: number, armor: number): void {
   const hp = creeps.hp[idx] as number;
-  // Subtraction runs only when amount < hp, so the result is always a positive
+  const armored = amount > armor ? amount - armor : 0;
+  // Subtraction runs only when armored < hp, so the result is always a positive
   // safe integer — never a raw subtraction that could pass MIN_SAFE_INTEGER.
-  creeps.hp[idx] = amount >= hp ? 0 : hp - amount;
+  creeps.hp[idx] = armored >= hp ? 0 : hp - armored;
 }
 
 /**
@@ -468,6 +743,145 @@ function applySlow(
     creeps.slowUntilTick[idx] = satAdd(tick, durationTicks);
   }
   // else: mulFp > active (weaker) — no write.
+}
+
+/**
+ * Apply one `dot` effect to the `(targetId, sourceId)` pair, mutating `dots` IN
+ * PLACE (a refresh reassigns an existing array element — `DotRecord`'s fields are
+ * `readonly`, so the element itself must be a fresh object, but the ARRAY is the
+ * same reference throughout; append/drop use `push`/no-op on that same array).
+ *
+ * Order, LOAD-BEARING (M2-S5a P3 spec):
+ *   1. Look the pair up FIRST (linear scan, mirrors `findLiveCreep`'s style).
+ *   2. FOUND and still LIVE (`untilTick >= tick`) → refresh: adopt the new `amount`,
+ *      extend `untilTick` to `satAdd(tick, effect.durationTicks)`, and leave
+ *      `nextTickTick` UNTOUCHED. That single omission IS the rule that the tick cadence
+ *      stays anchored to the record's first application — a refresh never resets or
+ *      suppresses it. Note the boundary is INCLUSIVE, matching expiry everywhere else:
+ *      a resident whose `untilTick` IS this tick is LIVE here, so its final due tick is
+ *      never suppressed by a landing that coincides with it.
+ *   2b. FOUND but already EXPIRED (`untilTick < tick` — forged/restored only; step (6)
+ *      sweeps every phase) → NOT a refresh. It restarts on the incoming effect's own
+ *      terms, identical to item 4 minus the append. Anchoring it instead was a hole
+ *      through the tick step's expiry guard: extending `untilTick` past `tick` while
+ *      keeping a stale overdue `nextTickTick` made the guard see a live, overdue record
+ *      and fire it immediately (Codex P2, PR #78).
+ *   3. NOT found, capacity full (`dots.length >= MAX_DOT_RECORDS`) → drop the
+ *      insertion and count it (`events?.dotDropped`). The impact's direct damage
+ *      (PASS 1, already applied before `applyImpactToCreep` ever calls here) still
+ *      landed regardless — only the new DoT record is dropped.
+ *   4. NOT found, capacity available → append a fresh record.
+ *
+ * The capacity check runs AFTER the lookup, deliberately: an early guard at the top
+ * of this function would wrongly freeze every live DoT at the cap once the table is
+ * full, because a REFRESH of an EXISTING pair would then also read as "at capacity"
+ * and get wrongly rejected — but a refresh writes no new record (it replaces one
+ * that is already there), so it must always succeed, capacity or not. Ordering the
+ * lookup first is what keeps "the table is full" meaning "no more DISTINCT pairs",
+ * not "no more DoT activity at all".
+ *
+ * `satAdd`, never `+`, for both `nextTickTick`/`untilTick`: the capability ceiling
+ * makes overflow unreachable for compiled content, but forged state (tests
+ * construct `DotRecord`s directly, and `runCombat` accepts `dots: readonly
+ * unknown[]` from potentially-forged callers) reaches this function too.
+ *
+ * SOLD-SOURCE RULE — owner ruling (Rob, 2026-07-31): an impact fired before its
+ * tower was sold still applies, and still REFRESHES, when it lands. The fire-time
+ * snapshot — the impact carries its own `sourceId`, captured at fire time — is the
+ * single authority here, exactly as it already is for damage and AoE lead points
+ * elsewhere in this file. "A sold source can no longer refresh" (a phrase used
+ * elsewhere in project docs) means the sold tower fires no NEW shots — it does NOT
+ * mean an already-in-flight impact's refresh is suppressed. No code is needed to
+ * make this true: it is emergent from the impact carrying its own `sourceId`, never
+ * re-derived from currently-alive towers, so a later reader should not "fix" this by
+ * adding a check against `towers` here.
+ */
+export function dotIndexKey(targetId: number, sourceId: number): string {
+  return `${targetId}:${sourceId}`;
+}
+
+/** Build the `(targetId, sourceId) → row` index `applyDot` consults, ONCE per combat
+ *  phase. Without it `applyDot` linear-scanned the whole table per application, so a
+ *  restored state resolving up to `MAX_IN_FLIGHT_IMPACTS` due impacts — blast impacts
+ *  visiting many creeps each — cost `O(impacts × affected creeps × records)`
+ *  (CodeRabbit, PR #78). Same defect class as the duplicate-id traversal blow-up fixed
+ *  in the tick step, and the same remedy: pay `O(records)` once, then `O(1)` per lookup.
+ *  `canonicalDotRecords` has already deduped the pair, so one row per key is exact. */
+export function buildDotIndex(dots: readonly DotRecord[]): Map<string, number> {
+  const index = new Map<string, number>();
+  for (let i = 0; i < dots.length; i++) {
+    const rec = dots[i] as DotRecord;
+    index.set(dotIndexKey(rec.targetId, rec.sourceId), i);
+  }
+  return index;
+}
+
+export function applyDot(
+  dots: DotRecord[],
+  index: Map<string, number>,
+  targetId: number,
+  sourceId: number,
+  effect: Extract<EffectPrimitive, { kind: 'dot' }>,
+  tick: number,
+  events?: StepEvents,
+): void {
+  // `SimState.dots` STAYS CLOSED UNDER `canonicalDotRecords` — this is the third of the
+  // three closure rules, and it lives here beside the other two (dedup via `index`, the
+  // `MAX_DOT_RECORDS` cap below) rather than at the call site, so the set is symmetric and
+  // a second caller cannot reopen the hole this function is `export`ed into (QC round 3).
+  // The predicate is `validDotRecord`'s own `targetId` conjunction, verbatim. Every OTHER
+  // operand arrives already proved — `validImpact` establishes `sourceId > 0`,
+  // `validEffectPrimitive` the effect's magnitudes, `step()`'s entry guard `tick >= 0` —
+  // but the target id is read straight off the creep SoA, which nothing validates:
+  // `coerceSoa`'s row filter narrows only on `wave`/`creepId`. Unscreened, a forged row
+  // with `id <= 0` (or a non-safe id) minted a record `canonicalDotRecords` then REJECTS:
+  // resident and world-hashed for one tick, gone by the next phase — so that creep was
+  // permanently DoT-immune while still burning a cap slot on every shot. Not a `dotDropped`
+  // event: nothing was dropped at capacity, the application was never admissible.
+  if (!Number.isSafeInteger(targetId) || targetId <= 0) return;
+  const key = dotIndexKey(targetId, sourceId);
+  const at = index.get(key);
+  if (at !== undefined) {
+    const rec = dots[at] as DotRecord;
+    // An ALREADY-EXPIRED resident is not a refresh target. It is a FRESH application that
+    // happens to find the pair's slot still occupied, so it restarts on the incoming
+    // effect's own terms — identical to the append below, minus the append (Codex P2).
+    //
+    // Anchoring an expired row was a hole straight through the tick step's expiry guard.
+    // That guard skips `untilTick < tick`, but this branch runs FIRST (impacts resolve
+    // before DoT ticks) and pushed `untilTick` out to `tick + durationTicks` while leaving
+    // the stale, long-overdue `nextTickTick` in place — so the due-check that was meant to
+    // reject the record instead saw it live with a tick overdue and fired it IMMEDIATELY,
+    // for armor-bypassing damage a fresh application would not deal until a full cadence
+    // later. Same forged/restored reachability as the guard it defeats: the sim never
+    // leaves an expired record resident, because step (6) sweeps every phase.
+    const expired = rec.untilTick < tick;
+    dots[at] = {
+      targetId,
+      sourceId,
+      amount: effect.amount,
+      // A LIVE row keeps its own cadence and schedule — that is the anchoring rule, and a
+      // refresh must never reset or suppress a tick already due. An expired row has no
+      // schedule left to anchor to.
+      cadenceTicks: expired ? effect.cadenceTicks : rec.cadenceTicks,
+      nextTickTick: expired ? satAdd(tick, effect.cadenceTicks) : rec.nextTickTick,
+      untilTick: satAdd(tick, effect.durationTicks),
+    };
+    return;
+  }
+  if (dots.length >= MAX_DOT_RECORDS) {
+    if (events?.dotDropped !== undefined) events.dotDropped++;
+    return;
+  }
+  index.set(key, dots.length);
+  dots.push({
+    targetId,
+    sourceId,
+    amount: effect.amount,
+    cadenceTicks: effect.cadenceTicks,
+    nextTickTick: satAdd(tick, effect.cadenceTicks),
+    untilTick: satAdd(tick, effect.durationTicks),
+  });
 }
 
 /** True iff a creep point is within `range` of a tower centre (inclusive, no sqrt). */
@@ -513,10 +927,22 @@ export function satMul(a: number, b: number): number {
  *  compiled effect collapses to the same `direct` {@link EffectPrimitive} a
  *  single-target effect would — the impact's OWN `kind` (`targeted` vs `blast`)
  *  already carries "this direct damage applies over an area"; the per-creep
- *  primitive list stays exactly the shape `applyImpactToCreep` already knows. */
+ *  primitive list stays exactly the shape `applyImpactToCreep` already knows.
+ *  `slow` and `dot` each map to their OWN explicit primitive — critically, `dot`
+ *  is NOT allowed to fall through to the `direct`/`aoe` collapse above: a compiled
+ *  `dot` that fell through would fire as raw direct damage, silently dropping its
+ *  cadence/duration and never reaching `applyDot`. */
 function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] {
   return effects.map((e) => {
     if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+    if (e.kind === 'dot') {
+      return {
+        kind: 'dot',
+        amount: e.amount,
+        cadenceTicks: e.cadenceTicks,
+        durationTicks: e.durationTicks,
+      };
+    }
     return { kind: 'direct', amount: e.amount }; // 'direct' or 'aoe' — same primitive
   });
 }
@@ -538,26 +964,53 @@ function blastRadiusOf(effects: readonly CompiledEffect[]): number | null {
 /**
  * Apply one impact's effects to a single creep row: PASS 1 every `direct` effect
  * in AUTHORED order → death check → PASS 2 (only if the creep survived) every
- * `slow` effect in authored order (the M2-S3 STATUS-EFFECT ORDER, file header).
- * Shared by `targeted` and `blast` resolution: m2.md's "per creep" nesting is
- * IDENTICAL for both — a blast's outer loop over its radius membership is the only
- * difference from a targeted impact's trivial one-creep "loop".
+ * `slow`/`dot` effect in authored order (the M2-S3 STATUS-EFFECT ORDER, file
+ * header — `dot` slots in as a second status kind alongside `slow` without
+ * reordering, exactly as that header predicted). Shared by `targeted` and `blast`
+ * resolution: m2.md's "per creep" nesting is IDENTICAL for both — a blast's outer
+ * loop over its radius membership is the only difference from a targeted impact's
+ * trivial one-creep "loop".
+ *
+ * `creepById` (M2-S5a P1) resolves this row's armor ONCE — a single lookup reused
+ * for every `direct` effect in PASS 1, never re-resolved per effect. The `?? 0` is a
+ * TOTALITY RAIL, not a balance choice: an unresolved `creepId` (forged state, or a
+ * row whose catalog entry the caller never compiled) takes unarmored damage rather
+ * than throwing — the same never-throw discipline every other lookup in this file
+ * already carries.
+ *
+ * `dots`/`sourceId`/`events` (M2-S5a P3) thread PASS 2's `dot` effects to
+ * `applyDot`, mutating the caller's `dots` table in place: `sourceId` is THIS
+ * impact's fire-time source (never re-derived), and a lethal hit reaching PASS 1's
+ * death check applies no `dot` either — the same "a lethal hit applies no statuses"
+ * rule `slow` already gets, falling out for free since PASS 2 (both effect kinds)
+ * only runs when the creep survived PASS 1.
  */
 export function applyImpactToCreep(
   creeps: CombatCreeps,
   idx: number,
   effects: readonly EffectPrimitive[],
   tick: number,
-  killedByImpact: Set<number>,
+  killedThisPhase: Set<number>,
+  creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
+  dots: DotRecord[],
+  dotIndex: Map<string, number>,
+  sourceId: number,
+  events?: StepEvents,
 ): void {
+  const armor = creepById[creeps.creepId[idx] as string]?.armor ?? 0;
   for (const effect of effects) {
-    if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount);
+    if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount, armor);
   }
   if ((creeps.hp[idx] as number) <= 0) {
-    killedByImpact.add(idx);
+    killedThisPhase.add(idx);
   } else {
     for (const effect of effects) {
       if (effect.kind === 'slow') applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
+      if (effect.kind === 'dot') {
+        // A forged non-positive/non-safe `creeps.id` is screened INSIDE `applyDot`, beside
+        // the dedup and cap rules it already owns — see its own note.
+        applyDot(dots, dotIndex, creeps.id[idx] as number, sourceId, effect, tick, events);
+      }
     }
   }
 }
@@ -709,35 +1162,67 @@ export function blastMembers(
 
 /**
  * Run the combat phase for one tick over the POST-MOVE world. Returns the new creep
- * SoA (dead creeps swept), the surviving impact queue, and the updated bounty;
- * mutates `towers.targetId`/`towers.nextFireTick` in place (by source row) and
- * `creeps.hp`/`slowMulFp`/`slowUntilTick` during resolution. `tick` is the
- * pre-increment `state.tick`. `slowFloorNum`/`slowFloorDen` (M2-S4a) are the
+ * SoA (dead creeps swept), the surviving impact queue, the DoT-record table, and the
+ * updated bounty; mutates `towers.targetId`/`towers.nextFireTick` in place (by
+ * source row) and `creeps.hp`/`slowMulFp`/`slowUntilTick` during resolution. `tick`
+ * is the pre-increment `state.tick`. `slowFloorNum`/`slowFloorDen` (M2-S4a) are the
  * ruleset's slow floor — needed here (not just by movement) because a blast's
  * fire-time lead prediction reads the SAME `effectiveSpeedFp` formula.
  *
  * Order (PLAN §13, extended M2-S3 with the status-effect close, M2-S4a with blast
- * resolution): resolve due impacts (direct → death check → slow, per impact; a
- * `blast` impact's "per impact" loop runs over every creep in its radius, in
- * creep-id order) → sweep dead + credit bounty → per-tower target + fire (a
- * `targeted` or `blast` impact, per the tower's compiled effects) → EXPIRY SWEEP.
- * Impacts with `impactTick <= tick` resolve (draining forged overdue entries too)
- * in queue array-iteration order — a deterministic total order.
+ * resolution, M2-S5a P3 with the DoT tick step): (1) resolve due impacts (direct →
+ * death check → slow/dot, per impact; a `blast` impact's "per impact" loop runs
+ * over every creep in its radius, in creep-id order) → (2) DoT TICK every surviving
+ * creep's due records, in creep-id order → (3) sweep dead + credit bounty (crediting
+ * BOTH impact kills from step 1 and DoT kills from step 2 through the same
+ * `killedThisPhase` set) → (4) precompute targetable live creeps → (5) per-tower
+ * target + fire (a `targeted` or `blast` impact, per the tower's compiled effects)
+ * → (6) EXPIRY SWEEP. Impacts with `impactTick <= tick` resolve (draining forged
+ * overdue entries too) in queue array-iteration order — a deterministic total order.
+ *
+ * Step (2) runs BEFORE step (3)'s sweep, over the ORIGINAL `creeps` SoA (not yet
+ * compacted into survivors) filtered to `isLiveHp` rows — this is what "inserted
+ * between (1) and (2)" means literally: it slots between the OLD step (1) [resolve
+ * impacts] and the OLD step (2) [sweep dead], reading the same live/dead state step
+ * (1) just left behind, so a creep an impact killed THIS tick correctly does not
+ * tick (its row already reads non-live) and a creep a DoT tick kills THIS tick is
+ * swept by step (3) exactly like an impact kill, crediting bounty the same way.
+ *
+ * `creepById` (M2-S5a P1) is REQUIRED, symmetric with `towerById` above it: it is
+ * the armor lookup `applyImpactToCreep` resolves once per creep row for every
+ * `direct` effect. Required rather than optional-with-a-`{}`-default deliberately —
+ * a forgotten call site must fail to compile, not silently simulate unarmored,
+ * which is exactly the class of bug this parameter exists to prevent.
+ *
+ * `dots` (M2-S5a P2 shaped the state; P3 wires it up) is canonicalized, then
+ * mutated by `applyDot` calls inside step (1)'s `applyImpactToCreep`, then ticked
+ * by step (2), then filtered by step (6) to drop both non-surviving targets' records
+ * and expired (`untilTick <= tick`) records — the table this function returns is the
+ * fully closed-out phase result, never the unchanged canonicalization P2 returned.
  */
 export function runCombat(
   creeps: CombatCreeps,
   towers: TowerArrays,
   impacts: readonly unknown[],
+  dots: readonly unknown[],
   tick: number,
   bounty: number,
   field: DistanceField,
   grid: Grid,
   towerById: Readonly<Partial<Record<string, CompiledTower>>>,
+  creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
   slowFloorNum: number,
   slowFloorDen: number,
   events?: StepEvents,
-): { creeps: CombatCreeps; impacts: Impact[]; bounty: number; killBounty: number } {
+): {
+  creeps: CombatCreeps;
+  impacts: Impact[];
+  dots: DotRecord[];
+  bounty: number;
+  killBounty: number;
+} {
   const canonical = canonicalImpacts(impacts, grid);
+  let canonicalDots = canonicalDotRecords(dots);
 
   // (1) RESOLVE due impacts; keep the rest. Per impact, the nesting is: outer loop
   //     = affected creeps (a `targeted` impact's single creep, or a `blast`'s
@@ -745,12 +1230,16 @@ export function runCombat(
   //     an EXPLICIT SORT, never spawn/array order, since forged state can carry any
   //     order or duplicate ids); per creep, PASS 1 applies every `direct` effect in
   //     authored order, THEN a death check, THEN — only if the creep survived —
-  //     PASS 2 applies every `slow` effect in authored order via the stacking rule
-  //     (a lethal hit applies no statuses — G7/decision; `applyImpactToCreep`).
+  //     PASS 2 applies every `slow`/`dot` effect in authored order via the stacking
+  //     rule (a lethal hit applies no statuses — G7/decision; `applyImpactToCreep`).
   //     Track creeps an impact kills THIS tick (positive hp → 0) so only those earn
-  //     bounty — a forged non-positive-hp row is swept with no bounty.
+  //     bounty — a forged non-positive-hp row is swept with no bounty. `killedThisPhase`
+  //     (renamed from `killedByImpact`, M2-S5a P3) also collects step (2)'s DoT kills
+  //     below — one death-tracking set for the whole phase, one sweep credits both.
   const kept: Impact[] = [];
-  const killedByImpact = new Set<number>();
+  const killedThisPhase = new Set<number>();
+  // Built ONCE per phase and mutated by `applyDot` on append — see `buildDotIndex`.
+  const dotIndex = buildDotIndex(canonicalDots);
   for (const imp of canonical) {
     if (imp.impactTick > tick) {
       kept.push(imp);
@@ -761,7 +1250,18 @@ export function runCombat(
       if (found === null) continue;
       const { index: idx, point } = found;
       events?.impactPoints.push({ x: point.x, y: point.y, radiusFp: 0 }); // BEFORE damage
-      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact);
+      applyImpactToCreep(
+        creeps,
+        idx,
+        imp.effects,
+        tick,
+        killedThisPhase,
+        creepById,
+        canonicalDots,
+        dotIndex,
+        imp.sourceId,
+        events,
+      );
       continue;
     }
     // BLAST — the presentation event is emitted UNCONDITIONALLY, before membership
@@ -771,21 +1271,180 @@ export function runCombat(
     // membership, never by the fire-time target's id.
     events?.impactPoints.push({ x: imp.x, y: imp.y, radiusFp: imp.radiusFp });
     for (const idx of blastMembers(creeps, grid, imp)) {
-      applyImpactToCreep(creeps, idx, imp.effects, tick, killedByImpact);
+      applyImpactToCreep(
+        creeps,
+        idx,
+        imp.effects,
+        tick,
+        killedThisPhase,
+        creepById,
+        canonicalDots,
+        dotIndex,
+        imp.sourceId,
+        events,
+      );
     }
   }
 
-  // (2) SWEEP dead (hp ≤ 0 or non-safe) into a fresh SoA; credit only impact kills,
-  //     from each killed creep's own bounty column. `killBounty` is the total kill
-  //     income this tick (the sim adds it to the monotonic score accumulator).
-  //     `creepId`/`slowMulFp`/`slowUntilTick` thread through by source row like any
-  //     other column.
+  // (2) DoT TICK — every SURVIVING creep's due DoT records, traversed CREEP-ID
+  //     ASCENDING with a row-index tiebreak (the same idiom `blastMembers` already
+  //     uses: `a.id - b.id || a.idx - b.idx`), applied in ARRAY ORDER per creep
+  //     (application order, since `applyDot` appends). Runs over the ORIGINAL
+  //     `creeps` SoA — not yet swept into `survivors` — filtered to `isLiveHp` rows,
+  //     which is exactly what makes this "between (1) and (2)" in the file's step
+  //     numbering: a row an impact just killed this tick already reads non-live here
+  //     and correctly does not tick.
+  //
+  //     THE ID KEY IS CURRENTLY UNOBSERVABLE, and is kept deliberately (QC round 1
+  //     tried hard to witness it and could not, so no test pretends to). `liveOrder` is
+  //     built by an ascending row scan, so it is already idx-ascending before the sort;
+  //     the idx tiebreak alone therefore reproduces the relative order of same-id rows
+  //     whatever the id key does, and because `dotsByTarget` buckets BY id, the order
+  //     in which distinct ids are visited cannot affect any bucket's outcome. It is
+  //     canonical-form belt-and-braces: it stops mattering only while nothing inside
+  //     this traversal consumes shared state. S6 changes that — the stun roll draws
+  //     from the sim RNG in here, at which point visit order becomes replay-load-
+  //     bearing and this key is what makes it deterministic. Do not "simplify" it away.
+  //
+  //     O(creeps + records), NEVER O(creeps × records): one pass over `canonicalDots`
+  //     (mutated by step (1)'s `applyDot` calls above) buckets record INDICES by
+  //     `targetId`, preserving array order; then one pass over the id-sorted live
+  //     rows looks each bucket up by id. A per-creep `dots.filter(...)` would be
+  //     O(creeps × records) — deliberately not written.
+  const dotsByTarget = new Map<number, number[]>();
+  for (let i = 0; i < canonicalDots.length; i++) {
+    const targetId = (canonicalDots[i] as DotRecord).targetId;
+    const bucket = dotsByTarget.get(targetId);
+    if (bucket === undefined) dotsByTarget.set(targetId, [i]);
+    else bucket.push(i);
+  }
+  const liveOrder: { readonly id: number; readonly idx: number }[] = [];
+  for (let i = 0; i < creeps.id.length; i++) {
+    if (!isLiveHp(creeps.hp[i])) continue;
+    // `Number.isSafeInteger` guard, matching `blastMembers`' identical sort (see its
+    // own note): `liveOrder` is gated on hp, never on `id`, and the push below casts.
+    // A non-safe `id` would make the comparator return `NaN`, and an inconsistent
+    // comparator yields an IMPLEMENTATION-DEFINED permutation — which for a project
+    // whose server re-sims in Node while clients run browser engines is a determinism
+    // hazard, not a tidiness one. Unreachable through `step()` (movement drops such
+    // rows first) but reachable when `runCombat` is called directly, as the sim tests
+    // do — the same reachability `blastMembers` already guards. Like the id key below,
+    // it has no independent test witness and no test pretends otherwise: a non-safe id
+    // matches no record's `targetId`, so removing the guard changes no output — it
+    // changes only whether a `NaN` can reach the comparator.
+    if (!Number.isSafeInteger(creeps.id[i])) continue;
+    liveOrder.push({ id: creeps.id[i] as number, idx: i });
+  }
+  liveOrder.sort((a, b) => a.id - b.id || a.idx - b.idx);
+  // AT MOST ONE TICK PER RECORD PER SIM TICK, enforced STRUCTURALLY by a per-bucket
+  // CURSOR rather than by a membership test. `dotsByTarget` is keyed by creep id, so when
+  // several live rows share one id — forged/restored state; `coerceSoa` does not
+  // de-duplicate `creeps.id` — every such row re-enters the SAME bucket. Three QC rounds
+  // landed on this shape, each closing a defect the previous one left:
+  //
+  //   * With the due-check as the only bound, a backdated record fired once PER ROW, so
+  //     `tick - nextTickTick > cadenceTicks × (rows - 1)` produced a burst: the
+  //     invariant, its "totality proof" prose, and `StepEvents.dotTicks` were all wrong
+  //     together (round 1).
+  //   * A `tickedRecords` Set fixed the burst, but bounded only the WORK a duplicate row
+  //     could redo — not the ITERATIONS it spent discovering there was none. Each row
+  //     still re-walked the bucket from index 0, so the traversal stayed O(rows ×
+  //     records): 2,000 forged same-id rows against a full table measured 46 ms in one
+  //     `step()` (round 2).
+  //   * Deleting a fully-walked bucket fixed that only where the row SURVIVES the walk. A
+  //     record that KILLS its row leaves by the liveness `break` below, and every later
+  //     row sharing the id re-scanned from zero, advancing the frontier by one record
+  //     each — Σk ≈ records²/2, ~40M iterations in a single `step()` at the cap (round 3).
+  //
+  // Always deleting the bucket instead is NOT the fix, and the difference is observable:
+  // a bucket abandoned mid-walk still owes its unvisited records to the next live row
+  // sharing this id, and dropping them changes damage, `nextTickTick`, and the world hash
+  // (witnessed by `an abandoned bucket is resumed by the next row sharing the id`).
+  //
+  // A cursor satisfies both constraints at once. It advances monotonically per bucket and
+  // is never rewound, so each record is examined at most once per sim tick across ALL
+  // rows sharing its target id: at-most-one-tick now falls out of the traversal rather
+  // than being re-checked, every path is O(creeps + records), and a `tickedRecords`
+  // membership test alongside it would be provably dead code.
+  //
+  // THE PREMISE THAT CARRIES THAT PROOF is the bucket build above: each record index is
+  // pushed EXACTLY ONCE, into exactly one bucket (keyed by its own `targetId`). A Set was
+  // robust to that failing; a cursor is not — a bucket holding a duplicated index (`[5,
+  // 5]`) would tick record 5 twice within a SINGLE row, resurrecting the round-1 burst.
+  // Nothing may filter, re-order or re-enter that build without re-deriving this.
+  const bucketCursor = new Map<number, number>();
+  for (const { id, idx } of liveOrder) {
+    const bucket = dotsByTarget.get(id);
+    if (bucket === undefined) continue;
+    let cursor = bucketCursor.get(id) ?? 0;
+    // `continue` below runs the `cursor++`, consuming a not-due record deliberately: not
+    // due cannot become due within one tick, so no later row owes it a second look.
+    for (; cursor < bucket.length; cursor++) {
+      // Re-checked EVERY iteration, not just when `liveOrder` was built: an earlier
+      // record in this same bucket may already have killed this row, and a corpse must
+      // not keep ticking. Without this, `applyDirect` was a no-op at hp 0 but
+      // `dotTicks` still counted the phantom and `nextTickTick` still advanced. The
+      // `break` leaves `cursor` ON the record it did not consume — precisely what the
+      // next live row sharing this id is owed.
+      if (!isLiveHp(creeps.hp[idx])) break;
+      const ri = bucket[cursor] as number;
+      const record = canonicalDots[ri] as DotRecord;
+      // No catch-up loop: even a forged backdated `nextTickTick` (far behind `tick`)
+      // ticks exactly once and advances by exactly one `cadenceTicks`, never a burst.
+      // This single `if` (not a `while`), together with the monotonic cursor above, is
+      // the totality proof against a spinning/catch-up record.
+      //
+      // `untilTick < tick` skips a record that ALREADY EXPIRED before this tick (Codex
+      // P2, PR #78). Note the strict `<`: inclusive expiry is preserved, so a record
+      // whose `untilTick` IS this tick still ticks — that is the documented rule, and
+      // step (6) removes it afterwards. Only a restored state reaches this: the sim
+      // never leaves an expired record resident, because step (6) runs every phase. But
+      // `canonicalDotRecords` cannot filter it — it never sees `tick` — so without this
+      // guard a hand-edited save got one free tick of armor-bypassing damage, able to
+      // kill and award bounty, from a DoT that had already ended.
+      if (record.nextTickTick > tick || record.untilTick < tick) continue;
+      // The literal `0` here is INTENTIONAL — armor bypass, not a forgotten/
+      // placeholder argument: a DoT tick deals its `amount` bypassing armor
+      // entirely, reusing `applyDirect`'s already-reviewed branch-saturating
+      // no-underflow path rather than a second damage-application code path.
+      applyDirect(creeps, idx, record.amount, 0);
+      if (events?.dotTicks !== undefined) events.dotTicks++;
+      // `DotRecord`'s fields are `readonly` — advancing `nextTickTick` builds a new
+      // record object, written back to the same array slot (never mutated in place).
+      // Rebuilt FIELD-BY-FIELD, never a spread, matching the discipline every other
+      // hash-serialized rebuild in this file follows (`canonicalEffectPrimitive`,
+      // `canonicalImpacts`, `canonicalDotRecords`, `applyDot`). Safe either way here
+      // — every element of `canonicalDots` was itself built explicitly — but the
+      // rule is kept uniform so this line can never be copied into a canonicalizer,
+      // where a spread WOULD leak a forged property into the world-hash.
+      canonicalDots[ri] = {
+        targetId: record.targetId,
+        sourceId: record.sourceId,
+        amount: record.amount,
+        cadenceTicks: record.cadenceTicks,
+        nextTickTick: satAdd(record.nextTickTick, record.cadenceTicks),
+        untilTick: record.untilTick,
+      };
+      if ((creeps.hp[idx] as number) <= 0) killedThisPhase.add(idx);
+    }
+    bucketCursor.set(id, cursor);
+  }
+
+  // (3) SWEEP dead (hp ≤ 0 or non-safe) into a fresh SoA; credit kills from step (1)
+  //     AND step (2) alike (both tracked in `killedThisPhase`), from each killed
+  //     creep's own bounty column. `killBounty` is the total kill income this tick
+  //     (the sim adds it to the monotonic score accumulator). `creepId`/`slowMulFp`/
+  //     `slowUntilTick` thread through by source row like any other column.
+  //     `survivorIds` (M2-S5a P3) collects the surviving id set alongside the
+  //     compaction itself — reused by step (6)'s DoT-record cleanup below so that
+  //     pass never has to re-derive it from `survivors.id`.
   let nextBounty = bounty;
   let killBounty = 0;
   const survivors = emptyCreeps();
+  const survivorIds = new Set<number>();
   for (let i = 0; i < creeps.id.length; i++) {
     if (!isLiveHp(creeps.hp[i])) {
-      if (killedByImpact.has(i)) {
+      if (killedThisPhase.has(i)) {
         const amount = Number.isSafeInteger(creeps.bounty[i]) ? (creeps.bounty[i] as number) : 0;
         nextBounty = satAdd(nextBounty, amount);
         killBounty += amount >= 0 ? amount : 0;
@@ -793,6 +1452,7 @@ export function runCombat(
       continue;
     }
     survivors.id.push(creeps.id[i] as number);
+    survivorIds.add(creeps.id[i] as number);
     survivors.hp.push(creeps.hp[i] as number);
     survivors.bounty.push(
       Number.isSafeInteger(creeps.bounty[i]) ? (creeps.bounty[i] as number) : 0,
@@ -811,7 +1471,7 @@ export function runCombat(
     survivors.slowUntilTick.push(safeSlowColumn(creeps.slowUntilTick[i]));
   }
 
-  // (3) Precompute the targetable live creeps once (position-valid + reachable).
+  // (4) Precompute the targetable live creeps once (position-valid + reachable).
   const live: LiveCreep[] = [];
   for (let i = 0; i < survivors.id.length; i++) {
     const geom = deriveValidCreepPosition(
@@ -836,11 +1496,11 @@ export function runCombat(
     live.push({ id: survivors.id[i] as number, index: i, x: geom.point.x, y: geom.point.y, dist });
   }
 
-  // (4) Per valid tower: hold-or-acquire the sticky "first" target, then fire.
+  // (5) Per valid tower: hold-or-acquire the sticky "first" target, then fire.
   //     `towerById[towers.towerId[i]]` resolves this row's per-kind stats — the SAME
   //     resolution `forEachValidTower` itself used to canonicalize the row, so a
   //     valid row always resolves here too.
-  forEachValidTower(grid, towers, towerById, (i, _id, col, row) => {
+  forEachValidTower(grid, towers, towerById, (i, id, col, row) => {
     const def = towerById[towers.towerId[i] as string];
     if (def === undefined) return; // unreachable: forEachValidTower already proved this row valid
     const range = def.rangeFp;
@@ -897,6 +1557,7 @@ export function runCombat(
         kind: 'targeted',
         impactTick,
         targetId: target,
+        sourceId: id,
         effects: snapshotEffects(def.effects), // fresh objects per fire (Codex — hash-serialized)
       });
       events?.fired.push({
@@ -927,6 +1588,7 @@ export function runCombat(
         x: point.x,
         y: point.y,
         radiusFp,
+        sourceId: id,
         effects: snapshotEffects(def.effects),
       });
       events?.fired.push({
@@ -943,17 +1605,26 @@ export function runCombat(
     towers.nextFireTick[i] = nextFire;
   });
 
-  // (5) EXPIRY SWEEP — closes the combat phase (M2-S3, G8): every creep whose
-  //     `slowUntilTick` has reached this tick resets to `(0, 0)`. Durations end
-  //     INCLUSIVELY (a slow applied at T for D ticks is observed through movement/
-  //     firing at T+D, then cleared here so no expired record survives into the
-  //     next tick's movement).
+  // (6) EXPIRY SWEEP — closes the combat phase (M2-S3, G8, extended M2-S5a P3 to
+  //     `dots`): every creep whose `slowUntilTick` has reached this tick resets to
+  //     `(0, 0)`. Durations end INCLUSIVELY (a slow applied at T for D ticks is
+  //     observed through movement/firing at T+D, then cleared here so no expired
+  //     record survives into the next tick's movement).
   for (let i = 0; i < survivors.id.length; i++) {
     if (survivors.slowMulFp[i] !== 0 && (survivors.slowUntilTick[i] as number) <= tick) {
       survivors.slowMulFp[i] = 0;
       survivors.slowUntilTick[i] = 0;
     }
   }
+  // `dots` cleanup (M2-S5a P3), combined into one filter pass — both are simply
+  // predicates on the same array, no perf requirement forces two passes:
+  //   - a record's `targetId` not among `survivorIds` (point 5 — a creep's records
+  //     die with it, whether killed this phase or leaked/removed some other way);
+  //   - `untilTick <= tick` (point 6 — INCLUSIVE expiry: a DoT tick due exactly on
+  //     `untilTick` still applied in step (2) above, which ran BEFORE this expiry
+  //     step in the same phase, then the record is removed here before the next
+  //     tick boundary).
+  canonicalDots = canonicalDots.filter((r) => survivorIds.has(r.targetId) && r.untilTick > tick);
 
-  return { creeps: survivors, impacts: kept, bounty: nextBounty, killBounty };
+  return { creeps: survivors, impacts: kept, dots: canonicalDots, bounty: nextBounty, killBounty };
 }

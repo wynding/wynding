@@ -1,35 +1,37 @@
 // capability.test.ts — the per-simVersion capability profile (M2-S1, widened at
-// M2-S2 to sv6, M2-S3 to sv7, M2-S4a to sv8): the simVersion-8 profile's exact
-// shape, an unknown-simVersion throw, and — since the profile itself is inert data
-// gated only inside `compileRuleset` — accept-at-boundary / reject-beyond-boundary
-// coverage for every dimension still narrower than the schema, exercised through
-// `compileRuleset` against `test-support`'s bundle. Every rejection pins the gate's
-// own message: several mutations are rejectable by more than one path (a 'stun'
-// effect trips `allowedEffectKinds` AND the later direct/single-effect requirement
-// would trip too, were `allowedEffectKinds` not there first), and this file's whole
-// premise is per-dimension coverage — removing a capability check must turn a case
-// red, not shift it to a different throw.
+// M2-S2 to sv6, M2-S3 to sv7, M2-S4a to sv8, M2-S5a to sv9): the simVersion-9
+// profile's exact shape, an unknown-simVersion throw, and — since the profile
+// itself is inert data gated only inside `compileRuleset` — accept-at-boundary /
+// reject-beyond-boundary coverage for every dimension still narrower than the
+// schema, exercised through `compileRuleset` against `test-support`'s bundle.
+// Every rejection pins the gate's own message: several mutations are rejectable by
+// more than one path (a 'stun' effect trips `allowedEffectKinds` AND the later
+// direct/single-effect requirement would trip too, were `allowedEffectKinds` not
+// there first), and this file's whole premise is per-dimension coverage — removing
+// a capability check must turn a case red, not shift it to a different throw.
 //
-// sv8 DEFERS TO THE SCHEMA on waves/entries/offsets/clearBonus/both early-call
+// sv9 DEFERS TO THE SCHEMA on waves/entries/offsets/clearBonus/both early-call
 // divisors (unchanged from sv6) AND NOW ALSO on `maxTowerCatalogSize`/
 // `maxEffectsPerBundle` (capability.ts's header comment) — those dimensions no
 // longer have a capability-layer rejection boundary distinct from the schema's own
 // ceiling, so this file instead asserts they compile at (or near) the SCHEMA's
 // boundary rather than testing a capability-specific reject.
 //
-// `allowedDirectForms` (QC round-1 #12) joins this deferred-to-schema list at sv8,
+// `allowedDirectForms` (QC round-1 #12) joins this deferred-to-schema list,
 // UNAVOIDABLY: the v2 schema's own `form` field is an enum of exactly `'single'` /
 // `'aoe'` (ruleset-schema.ts), so there is no schema-legal way to author a THIRD
 // form value that could reach `allowedDirectForms` and be rejected BY IT — the
 // schema wall trips first, every time. `allowedDirectForms`'s "'single' accepted,
-// 'aoe' now ALSO accepted" test below therefore has no reject case of its own
+// 'aoe' also accepted" test below therefore has no reject case of its own
 // (deleting the gate entirely still leaves every test green, since both legal
 // forms pass regardless) — recorded here rather than left silently missing.
 
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { capabilityProfile } from './capability';
-import { MAX_IMPACT_EFFECTS, MAX_BLAST_RADIUS_FP } from './combat';
+import { MAX_IMPACT_EFFECTS, MAX_BLAST_RADIUS_FP, MAX_DOT_RECORDS } from './combat';
+import { MAX_TOWERS } from './tower';
+import { MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 import { compileRuleset, RulesetError } from './ruleset';
 import { SIM_VERSION } from './index';
 import { testBundle } from './test-support';
@@ -68,9 +70,11 @@ describe('capabilityProfile', () => {
     expect(() => capabilityProfile(SIM_VERSION)).not.toThrow();
     expect(() => capabilityProfile(0)).toThrow(RulesetError);
     expect(() => capabilityProfile(999)).toThrow(RulesetError);
-    // sv6 is deleted with the bump (G11) — a live sv6 entry would misdescribe v7
-    // tick code, so it must throw exactly like any other unknown version.
+    // Every prior version is deleted with each bump (G11) — a live entry would
+    // misdescribe the current build's tick code, so each throws exactly like any
+    // other unknown version.
     expect(() => capabilityProfile(6)).toThrow(RulesetError);
+    expect(() => capabilityProfile(8)).toThrow(RulesetError);
   });
 
   // The profile's per-bundle ceiling and combat's `MAX_IMPACT_EFFECTS` are DELIBERATELY
@@ -92,25 +96,27 @@ describe('capabilityProfile', () => {
     expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
   });
 
-  it('simVersion 8 is the AoE + one-shot-one-shape profile, deferring wave/economy/catalog-size axes to the schema', () => {
-    expect(capabilityProfile(8)).toEqual({
+  it('simVersion 9 is the armored-creep-and-DoT profile, deferring wave/economy/catalog-size axes to the schema', () => {
+    expect(capabilityProfile(9)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
       maxEntriesPerWave: 16,
       maxOffsetTicks: 1_000_000,
       maxEffectsPerBundle: 8,
-      allowedEffectKinds: ['direct', 'slow'],
+      allowedEffectKinds: ['direct', 'slow', 'dot'],
       allowedDirectForms: ['single', 'aoe'],
       allowedTowerDomains: ['ground'],
       allowedCreepDomains: ['ground'],
       allowedImmunities: [],
       allowedRoles: [],
-      maxArmor: 0,
+      maxArmor: 16,
       requiredLeakCost: 1,
       maxClearBonus: 1_000_000,
       maxEarlyCallBountyDivisor: 1_000_000,
       maxEarlyCallScoreDivisor: 1_000_000,
       maxAoeRadiusFp: 2048,
+      maxDotDurationTicks: 100_000,
+      maxDotDurationCadenceRatio: 8,
     });
   });
 
@@ -125,7 +131,7 @@ describe('capabilityProfile', () => {
 });
 
 describe('capability gate — accept at boundary, reject beyond, per dimension', () => {
-  it('maxTowerCatalogSize defers to the schema ceiling (64) at sv8 — a multi-tower catalog compiles', () => {
+  it('maxTowerCatalogSize defers to the schema ceiling (64) — a multi-tower catalog compiles', () => {
     compiles(() => {});
     compiles((b) =>
       b.towerCatalog.push({
@@ -164,7 +170,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.boards[0]!.waves[0]!.entries[0]!.offsetTicks = 30));
   });
 
-  it('maxEffectsPerBundle defers to the schema ceiling (8) at sv8 — a maximal direct+slow bundle compiles', () => {
+  it('maxEffectsPerBundle defers to the schema ceiling (8) — a maximal direct+slow bundle compiles', () => {
     compiles(() => {});
     compiles((b) => {
       b.towerCatalog[0]!.effects = [
@@ -180,7 +186,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     });
   });
 
-  it("allowedEffectKinds: 'direct'+'slow' accepted, 'stun' rejected", () => {
+  it("allowedEffectKinds: 'direct'+'slow'+'dot' accepted, 'stun' rejected", () => {
     compiles(() => {});
     compiles((b) => {
       b.towerCatalog[0]!.effects = [
@@ -188,15 +194,101 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'slow', mulFp: 128, durationTicks: 40 },
       ];
     });
+    compiles((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
+      ];
+    });
     rejects((b) => {
       b.towerCatalog[0]!.effects = [
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'stun', chanceNum: 64, durationTicks: 30 },
       ];
-    }, "effect kind 'stun' unsupported at simVersion 8");
+    }, "effect kind 'stun' unsupported at simVersion 9");
   });
 
-  it("allowedDirectForms: 'single' accepted, 'aoe' now ALSO accepted (sv8) — no reject case exists (see header comment)", () => {
+  it('maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected', () => {
+    compiles((b) => {
+      // Fire cadence 20,000 so the duration:cadence RATIO gate (8x -> 160,000) sits
+      // clear of the ABSOLUTE ceiling this test isolates. At 12,500 the two coincide
+      // exactly at 100,000 and the ratio message fires instead.
+      b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_000 },
+      ];
+    });
+    rejects((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 20_000;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
+      ];
+    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 9");
+  });
+
+  it('MAX_DOT_RECORDS budgets (ratio + 1) per source, so compiled content can reach the rail but never exceed it', () => {
+    // The property both reviewers found missing (Codex P2 + CodeRabbit, PR #78): the gate
+    // admitted 8 records per source while the rail budgeted 4, so schema-valid content
+    // could silently lose applications. A source's PEAK is `ratio + 1`, not `ratio`:
+    // impacts resolve in step (1) while expiry runs in step (6), so the shot landing on
+    // the tick a record expires still sees it — and that is when capacity is tested.
+    expect(capabilityProfile(SIM_VERSION).maxDotDurationCadenceRatio).toBe(
+      MAX_DOT_DURATION_CADENCE_RATIO,
+    );
+    // `+ 1`: impacts resolve in step (1) but expiry runs in step (6), so on the tick a
+    // source's oldest record expires, the newly-landing shot still sees it — the peak is
+    // `ratio + 1` for that one tick, and that is when capacity is tested (Codex P2).
+    expect(MAX_DOT_RECORDS).toBe((MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWERS);
+  });
+
+  it('maxDotDurationCadenceRatio: a DoT may last 8x its tower fire cadence, not 9x (Codex P2, PR #78)', () => {
+    // The absolute ceiling above bounds the NUMBER; this bounds the RATIO, which is what
+    // actually sets how many live records one source can hold (~duration / fire cadence
+    // shots land inside a duration window, each able to seed a different creep). Without
+    // it, 100,000 ticks against a 2-tick cadence admits ~50,000 records from ONE tower —
+    // an order of magnitude past MAX_DOT_RECORDS, on a bundle that compiles clean.
+    compiles((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 30;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 240 }, // 8 x 30
+      ];
+    });
+    rejects((b) => {
+      b.towerCatalog[0]!.attack!.cadenceTicks = 30;
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 241 },
+      ];
+    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 9");
+  });
+
+  // M2-S5a P8 (CodeRabbit, PR #78) — not a `capabilityProfile` field (the profile has
+  // no data dimension for this), but a hardcoded compile-time gate in `compileRuleset`
+  // living right beside the `maxDotDurationTicks` check above: `MAX_DOT_RECORDS` was
+  // sized on the single-target application model (one shot lands on one creep), and a
+  // blast applying a DoT to every member it catches can blow that table out at a
+  // bundle that would otherwise compile clean. Recorded here, next to the sibling
+  // dot-duration gate, rather than in ruleset.test.ts's structural-rejection block,
+  // since this file's `rejects` helper is what pins the gate's own message text.
+  it('rejects a tower combining an aoe direct effect with a dot effect, naming both in the message; a dot on a single-target tower still compiles', () => {
+    compiles((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'single', damage: 10 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
+      ];
+    });
+    rejects((b) => {
+      b.towerCatalog[0]!.effects = [
+        { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
+        { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
+      ];
+    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 9");
+  });
+
+  it("allowedDirectForms: 'single' accepted, 'aoe' also accepted — no reject case exists (see header comment)", () => {
     compiles(() => {});
     compiles((b) => {
       b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 10, radiusFp: 300 }];
@@ -207,7 +299,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles(() => {});
     rejects(
       (b) => (b.towerCatalog[0]!.attack!.domain = 'both'),
-      "tower attack domain 'both' unsupported at simVersion 8",
+      "tower attack domain 'both' unsupported at simVersion 9",
     );
   });
 
@@ -215,7 +307,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles(() => {});
     rejects(
       (b) => (b.creepCatalog[0]!.domain = 'air'),
-      "creep domain 'air' unsupported at simVersion 8",
+      "creep domain 'air' unsupported at simVersion 9",
     );
   });
 
@@ -223,7 +315,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.immunities = []));
     rejects(
       (b) => (b.creepCatalog[0]!.immunities = ['slow']),
-      "creep immunity 'slow' unsupported at simVersion 8",
+      "creep immunity 'slow' unsupported at simVersion 9",
     );
   });
 
@@ -231,15 +323,16 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles(() => {});
     rejects(
       (b) => (b.creepCatalog[0]!.role = 'boss'),
-      "creep role 'boss' unsupported at simVersion 8",
+      "creep role 'boss' unsupported at simVersion 9",
     );
   });
 
-  it('maxArmor: 0 accepted, 1 rejected', () => {
+  it('maxArmor: 0 accepted, at the ceiling (16) accepted, one past it (17) rejected', () => {
     compiles((b) => (b.creepCatalog[0]!.armor = 0));
+    compiles((b) => (b.creepCatalog[0]!.armor = 16)); // exactly the ceiling — accepted
     rejects(
-      (b) => (b.creepCatalog[0]!.armor = 1),
-      "creep 'normal' armor 1 exceeds 0 at simVersion 8",
+      (b) => (b.creepCatalog[0]!.armor = 17),
+      "creep 'normal' armor 17 exceeds 16 at simVersion 9",
     );
   });
 
@@ -247,13 +340,13 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 1 }));
     rejects(
       (b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 }),
-      "creep 'other' leakCost 2 unsupported at simVersion 8 (must be 1)",
+      "creep 'other' leakCost 2 unsupported at simVersion 9 (must be 1)",
     );
     // Uniform-but-nonzero must ALSO reject — m2.md pins "leakCost = 1 until S10";
     // a whole catalog at 2 is still content this sim build cannot simulate.
     rejects(
       (b) => (b.creepCatalog[0]!.leakCost = 2),
-      "creep 'normal' leakCost 2 unsupported at simVersion 8 (must be 1)",
+      "creep 'normal' leakCost 2 unsupported at simVersion 9 (must be 1)",
     );
   });
 

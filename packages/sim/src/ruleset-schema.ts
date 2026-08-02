@@ -273,6 +273,7 @@ function validateTowerDef(raw: unknown, index: number): TowerDef {
   const effects = effectsArr.map((e, i) => validateEffectDef(e, i, where));
   const supportCount = effects.filter((e) => e.kind === 'support').length;
   const burstCount = effects.filter((e) => e.kind === 'burst').length;
+  const dotCount = effects.filter((e) => e.kind === 'dot').length;
 
   // `support` is exclusive: the bundle's only effect, and carries no `attack`.
   if (supportCount > 0 && (effects.length !== 1 || rec.attack !== undefined)) {
@@ -282,6 +283,18 @@ function validateTowerDef(raw: unknown, index: number): TowerDef {
   }
   if (burstCount > 1) {
     throw new RulesetError(`${where} a bundle may have at most one burst effect`);
+  }
+  // At most one `dot`, for the same reason `burst` is capped (M2-S5a, QC round 1).
+  // `applyDot` keys a record on `(targetId, sourceId)` — the FIRING TOWER's entity id —
+  // so a bundle with two `dot` effects sends both through one key: the second call takes
+  // the REFRESH branch and yields a record that is neither authored effect, adopting
+  // dot #2's `amount` and `durationTicks` while keeping dot #1's `cadenceTicks` and tick
+  // anchor. It would compile clean, run at roughly triple the intended damage rate, and
+  // show only the first DoT in the Panel. This is the same class the AoE story closed
+  // with its form-uniform/radius-uniform gates, and the sibling hole `snapshotEffects`'
+  // own comment warns about.
+  if (dotCount > 1) {
+    throw new RulesetError(`${where} a bundle may have at most one dot effect`);
   }
 
   if (supportCount > 0) {
