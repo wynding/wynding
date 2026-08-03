@@ -10,6 +10,11 @@ import {
   isQualifyingSample,
   MEDIAN_LIVE_CREEPS_THRESHOLD,
   ROUTE_LENGTH_FLOOR,
+  PEAK_DOT_RECORDS_THRESHOLD,
+  DOT_RECORD_DEPTH_THRESHOLD,
+  DOT_ACTIVE_SAMPLES_THRESHOLD,
+  PEAK_ARMORED_LIVE_THRESHOLD,
+  DOT_DROPPED_THRESHOLD,
   KNOWN_OPEN_ASSERTIONS,
   type OracleInput,
 } from './oracle';
@@ -17,7 +22,10 @@ import type { SampledTick } from './harness';
 
 /** A single "everything comfortably passes" sample, reused as the base for every test
  *  below via spread-overrides — keeps each test's diff from the passing baseline
- *  legible instead of re-stating every field. */
+ *  legible instead of re-stating every field. The DoT/armor figures echo the real
+ *  scene's measured stress-arm figures (175 records / 19 carriers, PLAN.md step 17's
+ *  reference table), not round numbers, so a passing baseline stays representative of
+ *  what the real run reports. */
 function baseSample(overrides: Partial<SampledTick> = {}): SampledTick {
   return {
     tick: 0,
@@ -26,6 +34,11 @@ function baseSample(overrides: Partial<SampledTick> = {}): SampledTick {
     liveCreeps: 300,
     slowedCreeps: 120,
     phase: 'running',
+    dotTicks: 5,
+    dotDropped: 0,
+    dotRecords: 175,
+    dotCarriers: 19,
+    armoredLive: 60,
     ...overrides,
   };
 }
@@ -45,6 +58,7 @@ function passingInput(overrides: Partial<OracleInput> = {}): OracleInput {
     towersPlacedAfterBuild: 150,
     leftoverBountyAfterBuild: 0,
     routeLength: 700,
+    dotDroppedTotal: 0,
     ...overrides,
   };
 }
@@ -258,7 +272,7 @@ describe('median live creeps (sustained load) is a pinned boundary', () => {
   });
 });
 
-describe('peak concurrent live creeps and peak active status are pinned boundaries', () => {
+describe('peak concurrent live creeps and peak active slow status are pinned boundaries', () => {
   it('a peak of 279 live creeps fails, 280 passes', () => {
     const failSamples = passingWindow(2_500).map((s, i) =>
       i === 0 ? { ...s, liveCreeps: 279 } : { ...s, liveCreeps: 100 },
@@ -277,13 +291,14 @@ describe('peak concurrent live creeps and peak active status are pinned boundari
     );
   });
 
-  it('a peak of 99 active-status creeps fails, 100 passes', () => {
+  it('a peak of 99 active-slow-status creeps fails, 100 passes', () => {
     const failSamples = passingWindow(2_500).map((s, i) =>
       i === 0 ? { ...s, slowedCreeps: 99 } : { ...s, slowedCreeps: 10 },
     );
     const failResult = runOracle(passingInput({ samples: failSamples }));
     expect(
-      failResult.assertions.find((a) => a.name === 'creeps with an active status, at peak')?.pass,
+      failResult.assertions.find((a) => a.name === 'creeps with an active slow status, at peak')
+        ?.pass,
     ).toBe(false);
 
     const passSamples = passingWindow(2_500).map((s, i) =>
@@ -291,8 +306,172 @@ describe('peak concurrent live creeps and peak active status are pinned boundari
     );
     const passResult = runOracle(passingInput({ samples: passSamples }));
     expect(
-      passResult.assertions.find((a) => a.name === 'creeps with an active status, at peak')?.pass,
+      passResult.assertions.find((a) => a.name === 'creeps with an active slow status, at peak')
+        ?.pass,
     ).toBe(true);
+  });
+});
+
+describe('DoT/armor assertions (M2-S5b P10)', () => {
+  it('peak concurrent DoT records is a pinned boundary', () => {
+    // EVERY sample, not just index 0 — `baseSample`'s own default `dotRecords: 175`
+    // would otherwise still supply the window's peak from the untouched samples.
+    const failSamples = passingWindow(2_500).map((s) => ({
+      ...s,
+      dotRecords: PEAK_DOT_RECORDS_THRESHOLD - 1,
+    }));
+    const failResult = runOracle(passingInput({ samples: failSamples }));
+    const failAssertion = failResult.assertions.find(
+      (a) => a.name === 'peak concurrent DoT records',
+    );
+    expect(failAssertion?.measured).toBe(PEAK_DOT_RECORDS_THRESHOLD - 1);
+    expect(failAssertion?.pass).toBe(false);
+    expect(failResult.pass).toBe(false);
+
+    const passSamples = passingWindow(2_500).map((s) => ({
+      ...s,
+      dotRecords: PEAK_DOT_RECORDS_THRESHOLD,
+    }));
+    const passResult = runOracle(passingInput({ samples: passSamples }));
+    const passAssertion = passResult.assertions.find(
+      (a) => a.name === 'peak concurrent DoT records',
+    );
+    expect(passAssertion?.measured).toBe(PEAK_DOT_RECORDS_THRESHOLD);
+    expect(passAssertion?.pass).toBe(true);
+  });
+
+  it('DoT record depth is measured AT THE TICK WITH PEAK dotRecords, not the peak dotCarriers tick', () => {
+    // A tick with MORE carriers but FEWER records must not be selected over the tick
+    // that actually carries peak dotRecords — otherwise the depth computed would not
+    // be the depth PLAN.md step 17's owner amendment actually pins.
+    const samples = passingWindow(3).map((s, i) => {
+      if (i === 0) return { ...s, dotRecords: 100, dotCarriers: 50 }; // depth 2, high carriers
+      if (i === 1) return { ...s, dotRecords: 175, dotCarriers: 19 }; // peak records, depth ~9.2
+      return { ...s, dotRecords: 50, dotCarriers: 10 };
+    });
+    const result = runOracle(passingInput({ samples }));
+    const assertion = result.assertions.find(
+      (a) => a.name === 'DoT record depth per carrier, at the tick with peak dotRecords',
+    );
+    expect(assertion?.measured).toBeCloseTo(175 / 19, 5);
+    expect(assertion?.pass).toBe(true);
+  });
+
+  it('DoT record depth is a pinned boundary', () => {
+    // EVERY sample uniform, so the peak-dotRecords tick the assertion selects is
+    // provably one of these, not a leftover from `baseSample`'s own defaults.
+    const failSamples = passingWindow(2_500).map((s) => ({
+      ...s,
+      dotRecords: 100,
+      dotCarriers: 17, // 100/17 < 6
+    }));
+    const failResult = runOracle(passingInput({ samples: failSamples }));
+    const failAssertion = failResult.assertions.find(
+      (a) => a.name === 'DoT record depth per carrier, at the tick with peak dotRecords',
+    );
+    expect(failAssertion?.pass).toBe(false);
+
+    const passSamples = passingWindow(2_500).map((s) => ({
+      ...s,
+      dotRecords: 120,
+      dotCarriers: 20, // exactly 6
+    }));
+    const passResult = runOracle(passingInput({ samples: passSamples }));
+    const passAssertion = passResult.assertions.find(
+      (a) => a.name === 'DoT record depth per carrier, at the tick with peak dotRecords',
+    );
+    expect(passAssertion?.measured).toBe(DOT_RECORD_DEPTH_THRESHOLD);
+    expect(passAssertion?.pass).toBe(true);
+  });
+
+  it('a window with zero DoT records anywhere reports depth 0 rather than NaN or throwing', () => {
+    const samples = passingWindow(2_500).map((s) => ({ ...s, dotRecords: 0, dotCarriers: 0 }));
+    const result = runOracle(passingInput({ samples }));
+    const assertion = result.assertions.find(
+      (a) => a.name === 'DoT record depth per carrier, at the tick with peak dotRecords',
+    );
+    expect(assertion?.measured).toBe(0);
+    expect(assertion?.pass).toBe(false);
+  });
+
+  it('samples with >= 1 DoT tick applied is a pinned boundary', () => {
+    const failSamples = passingWindow(2_500).map((s, i) =>
+      i < DOT_ACTIVE_SAMPLES_THRESHOLD - 1 ? s : { ...s, dotTicks: 0 },
+    );
+    const failResult = runOracle(passingInput({ samples: failSamples }));
+    const failAssertion = failResult.assertions.find(
+      (a) => a.name === 'samples with >= 1 DoT tick applied',
+    );
+    expect(failAssertion?.measured).toBe(DOT_ACTIVE_SAMPLES_THRESHOLD - 1);
+    expect(failAssertion?.pass).toBe(false);
+
+    const passSamples = passingWindow(2_500).map((s, i) =>
+      i < DOT_ACTIVE_SAMPLES_THRESHOLD ? s : { ...s, dotTicks: 0 },
+    );
+    const passResult = runOracle(passingInput({ samples: passSamples }));
+    const passAssertion = passResult.assertions.find(
+      (a) => a.name === 'samples with >= 1 DoT tick applied',
+    );
+    expect(passAssertion?.measured).toBe(DOT_ACTIVE_SAMPLES_THRESHOLD);
+    expect(passAssertion?.pass).toBe(true);
+  });
+
+  it('peak concurrent armored live creeps is a pinned boundary', () => {
+    const failSamples = passingWindow(2_500).map((s, i) =>
+      i === 0 ? { ...s, armoredLive: PEAK_ARMORED_LIVE_THRESHOLD - 1 } : { ...s, armoredLive: 0 },
+    );
+    const failResult = runOracle(passingInput({ samples: failSamples }));
+    const failAssertion = failResult.assertions.find(
+      (a) => a.name === 'peak concurrent live creeps with nonzero armor',
+    );
+    expect(failAssertion?.measured).toBe(PEAK_ARMORED_LIVE_THRESHOLD - 1);
+    expect(failAssertion?.pass).toBe(false);
+
+    const passSamples = passingWindow(2_500).map((s, i) =>
+      i === 0 ? { ...s, armoredLive: PEAK_ARMORED_LIVE_THRESHOLD } : { ...s, armoredLive: 0 },
+    );
+    const passResult = runOracle(passingInput({ samples: passSamples }));
+    const passAssertion = passResult.assertions.find(
+      (a) => a.name === 'peak concurrent live creeps with nonzero armor',
+    );
+    expect(passAssertion?.measured).toBe(PEAK_ARMORED_LIVE_THRESHOLD);
+    expect(passAssertion?.pass).toBe(true);
+  });
+
+  it('dropped DoT applications is exactly 0 — a single whole-run drop fails, even with samples otherwise pristine', () => {
+    const result = runOracle(passingInput({ dotDroppedTotal: 1 }));
+    const assertion = result.assertions.find(
+      (a) => a.name === 'dropped DoT applications, whole run (stress arm)',
+    );
+    expect(assertion?.measured).toBe(1);
+    expect(assertion?.threshold).toBe(DOT_DROPPED_THRESHOLD);
+    expect(assertion?.pass).toBe(false);
+    expect(result.pass).toBe(false);
+  });
+
+  it('dropped DoT applications of exactly 0 passes', () => {
+    const result = runOracle(passingInput({ dotDroppedTotal: 0 }));
+    const assertion = result.assertions.find(
+      (a) => a.name === 'dropped DoT applications, whole run (stress arm)',
+    );
+    expect(assertion?.pass).toBe(true);
+  });
+
+  it('the MAX_DOT_RECORDS headroom row is reported, not gated — it passes even at an absurd measured value', () => {
+    const samples = passingWindow(2_500).map((s, i) =>
+      i === 0 ? { ...s, dotRecords: 999_999 } : s,
+    );
+    const result = runOracle(passingInput({ samples }));
+    const assertion = result.assertions.find((a) =>
+      a.name.startsWith('peak DoT records vs MAX_DOT_RECORDS'),
+    );
+    expect(assertion?.measured).toBe(999_999);
+    expect(assertion?.pass).toBe(true);
+    // The gated floor above it still reads the same peak and does not get fooled by
+    // the headroom row's unconditional pass.
+    const floorAssertion = result.assertions.find((a) => a.name === 'peak concurrent DoT records');
+    expect(floorAssertion?.measured).toBe(999_999);
+    expect(floorAssertion?.pass).toBe(true);
   });
 });
 

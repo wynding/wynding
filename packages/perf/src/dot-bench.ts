@@ -257,9 +257,17 @@ function runArm(replay: Replay, ruleset: CompiledRuleset, atCap: boolean): RunAr
       }
     }
 
-    // Allocated OUTSIDE the timed region, matching `harness.ts`'s `runSampled`:
-    // `StepEvents`'s arrays are a per-tick presentational out-param, unrelated to
-    // `step()`'s own cost.
+    // Allocated OUTSIDE the timed region — the PLACEMENT still matches `harness.ts`'s
+    // `runSampled` (`StepEvents`'s arrays are a per-tick presentational out-param,
+    // unrelated to `step()`'s own cost), but the CONTENTS no longer do (packet §4):
+    // `runSampled`'s timed collector is now `{ impactPoints, fired, dotDropped }`
+    // (M2-S5b P10), while this one stays `{ impactPoints, fired }`. That matters
+    // specifically here: this bench's `atCap` arm holds `dots` AT `MAX_DOT_RECORDS`
+    // on every sampled tick, where `applyDot`'s drop branch fires constantly, so a
+    // collector that supplied `dotDropped` would pay `events.dotDropped++` on every
+    // one of those drops. This timed `step()` never supplies the field, so its timed
+    // region omits a cost `runSampled`'s timed pass now pays on the real
+    // stress/control runs.
     const events: StepEvents = { impactPoints: [], fired: [] };
     const start = performance.now();
     state = step(state, ruleset, inputs, events);

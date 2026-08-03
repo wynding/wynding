@@ -76,8 +76,10 @@ jobs:
   # both terms and cancels out.
   #
   # Its own job, NOT part of `verify` (PLAN M2-S4b step 20) — though not for the reason
-  # the plan assumed: the full two-scenario run measures ~2.3s, not the "minutes" the
-  # plan predicted, so cost is not what keeps it out. What keeps it out is that a timing
+  # the plan assumed: the full two-scenario run measures ~4.6s (each arm now traverses
+  # the sim TWICE, `harness.ts`'s timed/untimed split from M2-S5b P10 — this figure was
+  # ~2.3s before that split), not the "minutes" the plan predicted, so cost is not what
+  # keeps it out. What keeps it out is that a timing
   # measurement inside `verify` would be run on whatever the developer's machine happens
   # to be doing, and a gate that flaps locally is a gate people learn to ignore. Anyone
   # can still run it directly: `pnpm run perf`.

@@ -5,9 +5,12 @@
 // (`pnpm run perf`), not by `turbo run test`
 // (PLAN step 20: a sustained stress run does not belong in the local `verify` loop).
 // This test exists only so `harness.ts`'s plumbing (warmup/sample split, build-tick
-// snapshot, per-tick field derivation) is covered and proven not to throw — one
-// ~2,700-tick run of the lighter control scenario, not the full two-scenario,
-// oracle-and-gate pipeline `run.ts` runs.
+// snapshot, per-tick field derivation) is covered and proven not to throw — each
+// `runSampled` call here is now TWO ~2,700-tick passes (M2-S5b P10's timed/untimed
+// split, `runSampled`'s own doc), and this file calls it 3x (this describe block,
+// the STRESS describe block below, and the terminal-phase describe block at the
+// bottom), so the suite as a whole traverses the sim 6 times — still not the full
+// two-scenario, oracle-and-gate pipeline `run.ts` runs.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -63,8 +66,10 @@ describe('runSampled() against the committed control replay', () => {
 
 // QC: the control-only suite above is blast-free (and — before matching the chill
 // pair's slow effect — was also slow-free), so `harness.ts`'s `dueBlasts++` and
-// `slowedCreeps++` increments (inside `runSampled`'s per-tick loop) never executed
-// under any test, and the package's own coverage report named both lines uncovered.
+// `slowedCreeps++` increments (inside `runSampled`'s TIMED per-tick loop
+// specifically — the UNTIMED loop that collects `dotTicks`/`dotRecords`/
+// `dotCarriers`/`armoredLive` touches neither counter) never executed under any
+// test, and the package's own coverage report named both lines uncovered.
 // Surviving mutants included
 // `radiusFp > 0` -> `false`, `slowedCreeps` never incremented, `liveCreeps` hard-coded
 // to `999`, `phase` hard-coded to `'running'`, `ms` hard-coded to `0`, `WARMUP_TICKS`
@@ -91,7 +96,7 @@ describe('runSampled() against the committed STRESS replay — real due-blast/st
     expect(peak).toBe(304);
   });
 
-  it('peak slowed creeps reaches 304 — the chill towers keep the whole live population under an active status at peak', () => {
+  it('peak slowed creeps reaches 304 — the chill towers keep the whole live population under an active slow status at peak', () => {
     const peak = result.samples.reduce((max, s) => Math.max(max, s.slowedCreeps), 0);
     expect(peak).toBe(304);
   });

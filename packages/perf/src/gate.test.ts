@@ -8,7 +8,19 @@ import { controlStat, stressStat, evaluateGate, TOLERANCE, R0 } from './gate';
 import type { SampledTick } from './harness';
 
 function sample(ms: number): SampledTick {
-  return { tick: 0, ms, dueBlasts: 1, liveCreeps: 300, slowedCreeps: 100, phase: 'running' };
+  return {
+    tick: 0,
+    ms,
+    dueBlasts: 1,
+    liveCreeps: 300,
+    slowedCreeps: 100,
+    phase: 'running',
+    dotTicks: 0,
+    dotDropped: 0,
+    dotRecords: 0,
+    dotCarriers: 0,
+    armoredLive: 0,
+  };
 }
 
 describe('controlStat() — p50 over the control samples', () => {
