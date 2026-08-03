@@ -91,14 +91,18 @@ the scene before believing any timing (`packages/perf/src/oracle.ts`), and the b
 carries the same checks (150 towers, 0 leftover bounty, ≥ 280 creeps live, phase still
 `running`, and the sim tick genuinely advancing across the window).
 
-Nine assertions on the stress run — thresholds **committed before measurement**, except two
-regression tripwires deliberately pinned to a measured value (the 329 route floor and the 200
-median-creep floor, both named as such in `oracle.ts`) — plus six on the
+**16** assertions on the stress run (15 gated + reported) — thresholds **committed before
+measurement**, except two regression tripwires deliberately pinned to a measured value (the 329
+route floor and the 200 median-creep floor, both named as such in `oracle.ts`) — plus **8** on the
 CONTROL run — phase, 150 towers, zero leftover bounty, zero due blasts, median live creeps within
-a band of the recorded 181, and non-zero peak slow coverage. Two more assert that the real replay
-validator accepts each committed replay. The gate's _denominator_ needs guarding too: a control
-that silently got heavier or lighter would move `R` and mask a real blast regression, and
-"blast-free" was a comment before it was a checked fact.
+a band of the recorded 181, non-zero peak slow coverage, zero dropped DoT applications, and peak
+DoT carriers (reported, not gated). Two more assert that the real replay validator accepts each
+committed replay. The gate's _denominator_ needs guarding too: a control that silently got heavier
+or lighter would move `R` and mask a real blast regression, and "blast-free" was a comment before
+it was a checked fact. **M2-S5b P9/P10 grew both counts** (the DoT arm and armored population
+added five new gated stress-arm rows — peak DoT records, DoT record depth per carrier, samples
+with a DoT tick applied, peak armored live creeps, and dropped DoT applications — plus the two
+control-arm DoT rows above); an earlier "nine … plus six" count here predates those stories.
 
 Route length is **one** un-waivable assertion at the measured 329, since the owner ruling of
 2026-07-31 re-pinned the floor (finding 2). The story shipped two — a waived 600 and a floor
@@ -158,13 +162,13 @@ Phaser bet ADR 0005 exists to validate.
 
 ### `step()` time — headless, unthrottled
 
-2,500 sustained samples; 1,671 of them had at least one blast landing.
+2,500 sustained samples; 1,427 of them had at least one blast landing.
 
 | Statistic                          | p50   | p95   | p99       | max   |
 | ---------------------------------- | ----- | ----- | --------- | ----- |
 | Control scenario (blast-free)      | 0.183 | 0.287 | 0.393     | 1.193 |
 | Stress — all samples               | 0.191 | 0.263 | 0.309     | 0.486 |
-| Stress — due-blast ticks (n=1,671) | 0.207 | 0.271 | **0.323** | 0.486 |
+| Stress — due-blast ticks (n=1,427) | 0.207 | 0.271 | **0.323** | 0.486 |
 
 _(milliseconds)_
 
@@ -187,6 +191,12 @@ variance. So the gate is a **ratio**, computed in one process:
 R = p99(step() over the stress run's due-blast ticks) / p50(step() over the control run)
 CI fails when R > R0 × 1.25
 ```
+
+_(SUPERSEDED 2026-08-03, M2-S5b P11 — the numerator moved to p95 and `R0` was re-recorded to
+1.42 on the post-P9 workload. This definition, and everything below it through the end of this
+section, describes the pre-P9, p99-statistic, `R0 = 2.49` era; it is kept as the runner-variance
+record it still is. See [Finding 3](#finding-3--the-relative-ci-gate-is-noisier-than-its-own-tolerance)'s
+amendment below and `packages/perf/src/gate.ts`'s `R0` doc for the current definition and value.)_
 
 The control is the **same scenario with every tower swapped for its single-form twin** —
 same board, same anchors, same wave schedule, same slow effect — so the axis that changes is
@@ -215,7 +225,8 @@ machines, while `controlStat` — which is _expected_ to scale with machine spee
 to be scale-invariant moved almost as much as the raw statistic it was built to normalise.
 
 The cause is the limitation the gate already carried but had not measured: a p99 numerator over a
-p50 denominator cancels **scale** but not **tail variance**, and a hosted runner has a much fatter
+p50 denominator (p95 as of M2-S5b P11 — this diagnosis is restated, not retested, below) cancels
+**scale** but not **tail variance**, and a hosted runner has a much fatter
 tail than a quiet workstation. "Hosted", not "shared": each job gets its own VM (below) — what it
 shares is the **physical host**, with tenants it cannot see, and that is where the tail comes from.
 The median denominator barely moves with tail noise by construction; the numerator absorbs all of
@@ -273,7 +284,10 @@ verdict. The tolerance is not being widened either: the worst sample sits **30.4
 (3.2478 / 2.49), so absorbing it needs `TOLERANCE ≥ 1.31` — a gate that permits a 31% regression
 in blast cost before complaining is not worth the CI minutes. (The 37.7% above is max/min, the
 right measure of runner noise but not the one to compare against a tolerance that multiplies a
-median.) **Left OPEN for an owner ruling.**
+median.) **Ruled 2026-07-31: accept the flake, with the rate on record** (Finding 3, below) —
+stale text here previously read "Left OPEN for an owner ruling"; the ruling is CLOSED, not open,
+and the p95 statistic change amended into Finding 3 below is a dated _revisit_ of it, not a
+reopening.
 
 Two costs follow, and they are real. **A local `pnpm run perf` cannot reliably preflight the CI
 result** — it runs the same gate and is still a useful local regression check, it simply cannot
@@ -283,11 +297,12 @@ back to back, never against the ceiling. And **R0 must be re-recorded when the r
 changes** — against the resolved image recorded above, not the `ubuntu-latest` alias — not only
 when blast cost does.
 
-The statistic is p99 rather than p99.9, over a floor of ≥ 500 due-blast samples, so a single
-preempted tick cannot fail CI while a systematic regression in blast cost still does. The ratio
-cancels **CPU-speed scale** — a uniformly slower runner moves both terms together — but it does
-**not** cancel tail variance, because the numerator is a p99 and the denominator a median. That
-is the design's known limit, and the table above is what it costs in practice.
+The statistic was p99 rather than p99.9, over a floor of ≥ 500 due-blast samples, so a single
+preempted tick could not fail CI while a systematic regression in blast cost still could. The
+ratio cancels **CPU-speed scale** — a uniformly slower runner moves both terms together — but it
+does **not** cancel tail variance, because the numerator was a p99 (now p95, M2-S5b P11) and the
+denominator a median. That is the design's known limit, and the table above is what it cost in
+practice under the p99 era; the same ≥ 500-sample floor still applies to p95, unchanged.
 
 ### Frame time, heap and input latency — browser, emulated
 
@@ -409,9 +424,9 @@ on the runner (1.69 → 2.49), and the branch then produced **eight CI samples s
 `R0` creates.
 
 **Ruled 2026-07-31: ship as-is and live with the flake**, with the rate on record. A dedicated
-runner costs infrastructure for a job that is not required, and the p99/p99 alternative rests on
-three local runs never measured on CI — adopting it would repeat the reasoning that produced the
-untransferable `R0 = 1.69`. Revisit if it flakes in practice; expect roughly 1 run in 8.
+runner costs infrastructure for a job that is not required. The declined "switching to p99/p99"
+alternative below is superseded, not revived, by the amendment that follows. Revisit if it
+flakes in practice; expect roughly 1 run in 8.
 
 Widening the tolerance is not the fix: absorbing that sample needs `TOLERANCE ≥ 1.31`, and a gate
 that permits a 31% regression in blast cost before complaining is not worth running. Re-recording
@@ -422,6 +437,32 @@ denominator carry tail alike.
 The full eight-sample record, the runner provenance, and why the obvious explanations do not hold
 are in [The CI regression gate](#the-ci-regression-gate) above and in
 `packages/perf/src/gate.ts`'s `R0` doc.
+
+**AMENDED 2026-08-03 (M2-S5b P11).** The numerator moved from p99 to p95, and `R0` was
+re-recorded to **1.42** — the median of five CI samples on the POST-P9 workload (GitHub Actions
+run 30851346335, attempts 1–5, `ubuntu-24.04`), ceiling **1.7750**. This is not the "revisit if
+it flakes in practice" trigger above firing: the job has not flaked since the 2026-07-31 ruling.
+It is different in kind — M2-S5b P9 changed the stress workload itself (a DoT arm and an armored
+population joined the scene; the AoE-producing tower count fell 150 → 100), so the workload the
+old `R0 = 2.49` described no longer exists, and moving `R0` for a **changed workload** is not the
+same act as moving it to chase noise on an **unchanged** one — this note does not conflate them.
+The declined "p99/p99" alternative above is superseded rather than revived: what was actually
+adopted is p95 on the numerator, on the strength of a pinned injected-regression fixture
+(`packages/perf/src/gate-fixture.test.ts`) — p95 caught a broad blast-cost regression at
+`k = 0.020` at every legal subset size while p99 caught it at none — not the three-local-runs
+reasoning this finding rightly rejected.
+
+**A finding from that same five-sample cohort belongs on record here, plainly, because it cuts
+against the diagnosis two paragraphs above this one.** Over the five re-recorded samples, p95's
+spread is nearly DOUBLE p99's: `(max − min) / min` is **20.2%** for the five R(p95) values against
+**11.1%** for the five R(p99) values, computed on the exact same five runs. The diagnosis that a
+numerator discarding more tail should be quieter predicts the opposite of this. **The
+noise-suppression half of the original rationale is not supported by this cohort**, and the switch
+to p95 does not rest on it — it rests on the fixture result above. This does not identify the
+cause of the spread, which remains unknown; five samples of a different (post-P9) workload on one
+re-run runner are also not a controlled comparison against the historical eight-job, pre-P9
+population, so this neither vindicates nor condemns p95 on noise — it is what was measured. Full
+record in `packages/perf/src/gate.ts`'s `R0` doc and ADR 0005's amended Finding 3.
 
 ## The escalation trigger
 
@@ -450,8 +491,45 @@ speaks to neither device budget directly, so "clear" there means "nowhere near t
 One caveat on the rule itself: the **mid-range fps trigger is degenerate**. `1.25 × 60 = 75`
 fps, and `requestAnimationFrame` on a vsync-capped display cannot exceed ~60 — so that metric
 triggers unconditionally and its margin logic carries no information beyond the outright
-breach. The low-end trigger (≤ 37.5 against a 30 floor) is well-formed. Worth fixing in the
-rule the next time ADR 0005 is amended; recorded here rather than silently worked around.
+breach. The low-end trigger (≤ 37.5 against a 30 floor) is well-formed.
+
+**Replaced, not open.** ADR 0005 pinned a replacement mid-range trigger on 2026-08-03
+(M2-S5b P11), before the browser re-run below that measures against it: two independent
+signals — a missed-refresh proportion (share of frames exceeding 1.5× the nominal refresh
+interval, firing above 2%) and an outright p95 frame-time breach (> 16.7 ms) — either of which
+trips the trigger. See ADR 0005's amendment for the full derivation, the cadence-calibration
+guard, and why the generic `0.75 × limit` margin rule cannot be reused for a vsync-quantized
+metric. The re-run below reports both signals per profile.
+
+## Re-run, 2026-08-03 (M2-S5b P11) — Chrome 149, the replacement mid-range trigger evaluated
+
+**No new diagnosis in S5b.** The p95 breach below is consistent with ADR 0005's already-recorded
+Finding 1 (frame time over budget, the sim is not why); no analysis is added here beyond what
+that finding already states.
+
+Measured against the pinned profiles above, both Chrome **149.0.7827.55**, WebGL renderer
+`ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)`:
+
+|                                 | low-end              | mid-range            |
+| ------------------------------- | -------------------- | -------------------- |
+| frame time p50 / p95 / p99 (ms) | 66.7 / 74.9 / 75.6   | 24.1 / 25.8 / 25.9   |
+| p95-breach budget               | 33.3 ms              | 16.7 ms              |
+| p95 breach signal               | **FIRED** (2.25×)    | **FIRED** (1.54×)    |
+| calibrated rAF cadence          | 8.30 ms              | 8.30 ms              |
+| cadence in `[15.0, 18.5]` band? | **no — out-of-band** | **no — out-of-band** |
+| missed-refresh signal           | **NOT EVALUATED**    | **NOT EVALUATED**    |
+| JS heap                         | 24.5 MB              | 60.3 MB              |
+| input latency p50 / max (ms)    | 5.8 / 37.7           | 1.0 / 18.9           |
+| setup                           | 3095 ms              | 1066 ms              |
+
+**Why the missed-refresh signal is not evaluated.** The measuring machine calibrates at ~120 Hz
+(8.30 ms median rAF delta), outside the pinned 60 Hz band (`[15.0, 18.5]` ms) that ADR 0005's
+replacement trigger requires. Applying a 60 Hz-derived 1.5×-interval cutoff to a ~120 Hz cadence
+would be meaningless, so the trigger reports `cadenceCalibration: "out-of-band"` and stands
+down rather than silently misapplying a 60 Hz constant. That is the calibration guard working as
+designed, not a failure of the run — and it means **this trigger is inert on any display faster
+than ~65 Hz**, worth stating plainly as a limitation of the design rather than a gap in this
+measurement. The p95 breach signal has no such dependency and fired on both profiles regardless.
 
 ## What emulation cannot tell us
 
@@ -515,7 +593,11 @@ pnpm -C apps/web run perf:e2e              # browser: both emulation profiles
 
 Both print a machine-readable report line (`PERF-REPORT:` / `PERF-BROWSER-REPORT:`) carrying
 every number in the two results tables above, so a re-measurement can be diffed against them
-rather than eyeballed. The initial-JS figure comes from `pnpm run size` instead. Regenerate the
+rather than eyeballed — plus fields those tables don't show: `PERF-REPORT` carries each arm's
+`dotPreflight` and `dotDroppedTotal` (M2-S5b P10's DoT-oracle additions), and
+`PERF-BROWSER-REPORT` carries `frameTimeTrigger` (ADR 0005's replacement mid-range trigger,
+M2-S5b P11) alongside the missed-refresh cadence-calibration fields. The initial-JS figure
+comes from `pnpm run size` instead. Regenerate the
 committed scenario after any `simVersion` bump — the replay envelope stamps `simVersion` and
 `rulesetHash`, and S5–S10 are six more bumps:
 

@@ -69,8 +69,8 @@ describe('R0 — the committed CI-runner baseline', () => {
   // it forces the edit to be deliberate, and it puts the justification PLAN step 21
   // requires ("an explicit committed edit with justification in the PR") in front of
   // whoever is doing the nudging. Update it only alongside gate.ts's provenance doc.
-  it('is the 2.49 recorded on the CI runner, not an inferred or rebaselined value', () => {
-    expect(R0).toBe(2.49);
+  it('is the 1.42 recorded on the CI runner (M2-S5b P11, post-P9 workload, p95), not an inferred or rebaselined value', () => {
+    expect(R0).toBe(1.42);
   });
 });
 

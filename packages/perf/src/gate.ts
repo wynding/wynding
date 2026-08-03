@@ -171,7 +171,96 @@ export function stressStatP99(dueBlastSamples: readonly SampledTick[]): number {
 export const TOLERANCE = 1.25;
 
 /**
- * `R0` — the baseline ratio: **2.49**, recorded on `ubuntu-latest`.
+ * `R0` — the baseline ratio: **1.42**, re-recorded 2026-08-03 (M2-S5b P11) on the POST-P9
+ * stress workload, with the p95 statistic, on the runner the gate actually runs on: image
+ * **ubuntu-24.04**, GitHub Actions run **30851346335**, attempts **1-5** — five distinct
+ * attempts with five distinct job ids (a first collection pass returned one run read four
+ * times; re-verified before this table was written).
+ *
+ *   | attempt | job         | controlStat p50 | stressStat p95 | audit p99 | R (p95) | R (p99) |
+ *   | ------- | ----------- | ---------------- | --------------- | --------- | ------- | ------- |
+ *   | 1       | 91811842462 | 0.378234          | 0.540021         | 0.713615  | 1.4277  | 1.8867  |
+ *   | 2       | 91815000367 | 0.394437          | 0.571298         | 0.719074  | 1.4484  | 1.8230  |
+ *   | 3       | 91815560758 | 0.374028          | 0.494694         | 0.699456  | 1.3226  | 1.8701  |
+ *   | 4       | 91816459609 | 0.376357          | 0.594722         | 0.756914  | 1.5802  | 2.0112  |
+ *   | 5       | 91817201212 | 0.390022          | 0.512714         | 0.705933  | 1.3146  | 1.8100  |
+ *
+ * MEDIAN of the five R(p95) values, in the order taken (1.4277, 1.4484, 1.3226, 1.5802,
+ * 1.3146), sorted (1.3146, 1.3226, 1.4277, 1.4484, 1.5802): median **1.427743**, rounded
+ * DOWN to the nearer hundredth -> **R0 = 1.42**. Down, not to-nearest, for the same reason
+ * as the earlier 2.49-era record below: a lower R0 makes the ceiling stricter, so the
+ * rounding can only ever cost a false alarm, never hide a regression. Ceiling = 1.42 x
+ * 1.25 = **1.7750** — the max sample, 1.5802, sits inside it. Span (max/min) = 1.5802 /
+ * 1.3146 = **1.2021**, within `TOLERANCE`, so the pre-committed "if the five span more than
+ * `TOLERANCE`" escalation is NOT triggered. Fixed cohort: exactly five samples, no sixth
+ * sample and no widened tolerance.
+ *
+ * THE FINDING THAT MUST NOT BE SOFTENED. On this same cohort, p95's spread is nearly
+ * DOUBLE p99's: `(max - min) / min` over the five R(p95) values is **20.2%** (1.5802 vs
+ * 1.3146), against **11.1%** for the five R(p99) values in the audit column above (2.0112
+ * vs 1.8100) — computed on the exact same five runs, same attempts, same job. This file's
+ * own diagnosis, a few paragraphs below, is that the denominator is a median and barely
+ * moves with tail noise BY CONSTRUCTION, so the numerator absorbs all of it — which
+ * predicts that a numerator statistic discarding MORE of the tail (p95 drops the top ~5%,
+ * p99 the top ~1%) should be QUIETER. **This data does not support that. It contradicts
+ * it.**
+ *
+ * The switch to p95 still stands, but on a narrower footing than "it's quieter": it is
+ * justified by REGRESSION SENSITIVITY, not noise reduction. The pinned fixture
+ * (`gate-fixture.test.ts`) measured p95 catching a broad blast-cost regression at
+ * `k = 0.020` at every legal subset size while p99 caught it at none — THAT was the
+ * pre-committed reversal condition, and it passed decisively. The NOISE-SUPPRESSION half
+ * of the original rationale is NOT supported by this five-sample cohort, and this doc says
+ * so plainly rather than hedging it into invisibility. This does not resolve the cause of
+ * the spread, which remains unknown — and there is now positive evidence AGAINST the
+ * tail-noise hypothesis that motivated the statistic choice in the first place.
+ *
+ * Comparability caveats on that finding, stated rather than used as an escape hatch: five
+ * samples here against the historical eight below; a DIFFERENT workload (P9 changed the
+ * stress scene, so this cohort and the 2.49-era one below are not measuring the same
+ * thing); and the historical 37.7% spread was measured across distinct runner instances
+ * (eight distinct `runner_name`s, eight separate Actions jobs) while these five are
+ * re-runs of ONE run on ONE runner (five attempts of job 30851346335). So this is NOT a
+ * controlled comparison in either direction — it neither vindicates nor condemns p95 on
+ * noise. It is what was measured.
+ *
+ * WHY R0 MOVED — MEASUREMENT ONLY, NO MODEL. An earlier draft of this doc modelled the
+ * move as `R' = (S - b + c_s)/(C + c_c)`. That is INVALID and does not appear here: `S`
+ * and `C` are percentiles of two different distributions, percentiles are not additive,
+ * and no such expression can establish causation or predict a direction for `R0`. What
+ * goes on record instead is measured, never derived:
+ *
+ * - The five samples in the table above, absolute operands as well as the ratio.
+ * - PR A's pre-change baselines, on the UNCHANGED workload with the OLD scene (run
+ *   30828066588, job 91734721525, `ubuntu-24.04` image 20260720.247.2):
+ *
+ *   |          | controlStat p50 | due-blast p99 | due-blast p95 | R (p99) | R (p95) |
+ *   | -------- | ---------------- | -------------- | -------------- | ------- | ------- |
+ *   | before-1 | 0.286896          | 0.718915        | 0.495136        | 2.5058  | 1.7258  |
+ *   | before-2 | 0.282686          | 0.703900        | 0.488650        | 2.4900  | 1.7286  |
+ *
+ *   Both statistics recorded on both sides, so a p99-before is never compared against a
+ *   p95-after.
+ * - Both arms' DoT activity, measured: stress 175 peak resident records / 19 peak DoT
+ *   carriers; control 368 / 127 — the numbers behind the file-top comment's "DoT activity
+ *   is HEAVIER in the control arm" finding, which is what makes the arms' differing DoT
+ *   workload visible rather than merely asserted.
+ *
+ * And two qualitative facts, stated as what they are — not derived, not modelled, not a
+ * prediction of direction: the AoE-producing tower population fell **150 -> 100** (P9's
+ * three-way split), and `R` is now a COMPOSITE of AoE cost and a DIFFERENTIAL DoT
+ * workload — the two arms carry different creep populations (median 181 control vs 224
+ * stress), so an identical `stress-venom` definition does not do identical work on each
+ * side. The file-top comment already says this; this doc does not contradict it.
+ *
+ * ==========================================================================================
+ * HISTORICAL RECORD — the pre-P9, p99-statistic era, `R0 = 2.49`. SUPERSEDED by the
+ * re-record above (both the workload and the statistic changed), kept in full because the
+ * runner-variance finding it documents is still true and still the reason this gate is a
+ * ratio with a 25% tolerance rather than a tight absolute number.
+ * ==========================================================================================
+ *
+ * `R0` was **2.49**, recorded on `ubuntu-latest`.
  *
  * The MEDIAN of the first 3 CI samples — in the order they were taken, 2.3585, 2.5129,
  * 2.4978, so the median is 2.4978 — rounded DOWN to the nearer hundredth. Down, not
@@ -208,7 +297,7 @@ export const TOLERANCE = 1.25;
  * tail noise by construction; the numerator absorbs all of it. So R is not machine-portable,
  * and R0 is only meaningful for the machine class it was taken on.
  *
- * THE CEILING HAS ALREADY BEEN EXCEEDED ON UNCHANGED CODE. R0 was chosen from the first
+ * THE CEILING HAD ALREADY BEEN EXCEEDED ON UNCHANGED CODE. R0 was chosen from the first
  * three samples; S4b's branch went on to produce eight in total, and the full record is
  * the honest one to read this gate against:
  *
@@ -237,21 +326,24 @@ export const TOLERANCE = 1.25;
  * show. Treat the 37.7% as unexplained runner variance, and do not let a plausible story
  * stand in for a measurement.
  *
- * So the gate's flake rate is not "comfortable". Stated precisely, because the two
- * readings differ: the shipped ceiling has been EVALUATED three times (samples 5, 7, 8)
+ * So the gate's flake rate was not "comfortable". Stated precisely, because the two
+ * readings differ: the shipped 2.49 ceiling was EVALUATED three times (samples 5, 7, 8)
  * and passed all three; but of the eight samples measured on this runner class, ONE would
  * have failed it. "Roughly 1-in-8" is that counterfactual, not an observed failure rate.
  * `perf` is NOT a required check on `main` (branch protection requires `verify` and
  * `codex-freshness` only), so a flake is noise rather than something that stops a merge —
- * but it is noise people learn to ignore, and that is this gate's real risk. Left OPEN for
- * an owner ruling; see `docs/milestones/m2.md`'s S4 flags.
+ * but it is noise people learn to ignore, and that was this gate's real risk. Ruled
+ * 2026-07-31 (`docs/milestones/m2.md`'s S4 flags): accept the flake, with the rate on
+ * record. The p95 move above is a DATED REVISIT of that ruling's substance, not a reopening
+ * of it — see `stressStat`'s doc for what changed and why.
  *
- * WHY R0 IS NOT BEING MOVED AGAIN. This doc's own pre-declared response to flake is "more
- * samples and a re-recorded median, never a wider tolerance". Applying it: the median of
- * all eight is 2.5533 -> R0 2.55, ceiling 3.1875 — which still would not have accommodated
- * sample 6. It changes no observed sample's verdict, so re-recording buys nothing but a
- * second threshold edit under pressure on one branch, which is the pattern this file warns
- * against. The value stays at 2.49 and the finding is escalated instead.
+ * WHY R0 WAS NOT MOVED AGAIN AT THE TIME. This doc's own pre-declared response to flake is
+ * "more samples and a re-recorded median, never a wider tolerance". Applying it then: the
+ * median of all eight was 2.5533 -> R0 2.55, ceiling 3.1875 — which still would not have
+ * accommodated sample 6. It changed no observed sample's verdict, so re-recording bought
+ * nothing but a second threshold edit under pressure on one branch, which is the pattern
+ * this file warns against. The value stayed at 2.49 and the finding was escalated instead
+ * — until P9 changed the workload and forced the re-record above regardless.
  *
  * TWO CONSEQUENCES, both real costs of this design, stated rather than papered over:
  *   1. A LOCAL `pnpm run perf` CANNOT PREDICT THE GATE — and, measured, cannot even
@@ -261,7 +353,7 @@ export const TOLERANCE = 1.25;
  *      series on that machine spanned 1.638-2.560, **56%** (an uncommitted review harness,
  *      both arms of an ordering A/B pooled). So a local R is only
  *      comparable to other local runs taken back to back, and never to this gate's
- *      ceiling.
+ *      ceiling — this still holds under the 1.42 baseline above.
  *   2. R0 must be re-recorded whenever the RUNNER class changes (a GitHub image bump, a
  *      move to larger runners), not only when blast cost changes — against the resolved
  *      image recorded under PROVENANCE above, not against the `ubuntu-latest` alias. That
@@ -269,19 +361,18 @@ export const TOLERANCE = 1.25;
  *
  * What was pre-declared before any measurement is unchanged, and is what matters
  * methodologically: both statistics, the >= 500 due-blast sample floor, and the 25%
- * tolerance. Only R0 — explicitly defined as "the ratio this scene records" — moved, and
- * it moved to the machine the gate actually runs on. TOLERANCE was NOT widened to fit, and
- * should not be: the worst sample sits 30.4% above R0 (3.2478 / 2.49), so absorbing it
- * needs TOLERANCE >= 1.31. A gate that permits a 31% regression in blast cost before it
- * complains is not worth the CI minutes. (The 37.7% figure above is max/min across the
- * eight — the right measure of how noisy the runner is, but NOT the number to compare
- * against a tolerance that multiplies a median.)
+ * tolerance. TOLERANCE has never been widened to fit a bad sample — at the 2.49-era ceiling
+ * the worst sample sat 30.4% above R0 (3.2478 / 2.49), needing TOLERANCE >= 1.31 to absorb,
+ * and a gate that permits a 31% regression in blast cost before it complains is not worth
+ * the CI minutes. (The 37.7% figure above is max/min across the eight — the right measure
+ * of how noisy the runner is, but NOT the number to compare against a tolerance that
+ * multiplies a median.)
  *
  * Changing this value at all requires an explicit, reviewed commit with justification in
  * the PR. It is never inferred and never auto-updated by a later run: a gate that
  * rebaselines itself measures nothing.
  */
-export const R0: number | null = 2.49;
+export const R0: number | null = 1.42;
 
 /** One of two outcomes: `'unset'` (R0 has not been committed yet — this run only
  *  records `R`, the gate cannot enforce anything) or `'evaluated'` (R0 is committed,

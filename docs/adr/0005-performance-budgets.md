@@ -285,17 +285,44 @@ reproducible from the artifact rather than recomputed by hand.
 
    **This is not ADR 0005's own "revisit if the job flakes in practice" trigger firing.** The
    job has not flaked since the 2026-07-31 ruling. The reason is different and should not be
-   dressed up as that: M2-S5b P9 changed the stress workload (the scene gained a DoT arm and
-   an armored population, and the AoE-producing tower population fell 150 → 100), which
-   forces an `R0` re-record regardless. That makes this the one moment the statistic can
+   dressed up as that: M2-S5b P9 changed the stress workload — the scene gained a DoT arm
+   (50 of the 150 tower anchors now run `stress-venom`) and an armored population (114 of the
+   304 scheduled spawns, armor 6), and the AoE-producing tower population fell 150 → 100 —
+   which forces an `R0` re-record regardless. That makes this the one moment the statistic can
    change without paying a second re-record. Owner ruling of 2026-08-02: this class of
    decision — a statistic swap justified by a workload rebaseline rather than by a fired
-   trigger — is technical and Claude's to take.
+   trigger — is technical and Claude's to take. **Moving `R0` for a changed workload is a
+   different act from moving it to chase noise on an unchanged one** (dated 2026-08-03): the
+   2026-07-31 ruling explicitly declined to re-record `R0` from all eight same-workload
+   samples because doing so changed no sample's verdict — that was chasing noise. P9 changing
+   the scene is not that; the workload the old `R0 = 2.49` was measured against no longer
+   exists, so re-recording here is not a reopening of the earlier ruling under a different
+   name.
+
+   **`R0` re-recorded at 1.42** — five CI samples on the post-P9 workload with the p95
+   statistic (GitHub Actions run 30851346335, attempts 1–5, `ubuntu-24.04`), median
+   1.427743 rounded down. Ceiling 1.7750. Full table, provenance, and the comparison against
+   PR A's pre-P9 baselines are in `packages/perf/src/gate.ts`'s `R0` doc.
+
+   **A finding from that same five-sample cohort belongs on record here, plainly: p95's
+   spread is nearly DOUBLE p99's.** `(max − min) / min` over the five R(p95) values is
+   **20.2%**; over the five R(p99) values, computed on the exact same five runs, it is
+   **11.1%**. This finding's own diagnosis — the denominator is a median and barely moves
+   with tail noise, so the numerator absorbs it — predicts a statistic that discards _more_
+   tail (p95) should be _quieter_ than one that discards less (p99). **This data does not
+   support that; it contradicts it.** The switch to p95 does not rest on that prediction
+   holding: it rests on the pinned fixture below, which is a regression-sensitivity result,
+   not a noise result. The noise-suppression half of the original rationale is not supported
+   by this cohort, the cause of the 37.7%/20.2% spread remains unidentified, and five samples
+   of a different (post-P9) workload on one re-run runner are not a controlled comparison
+   against the historical eight-job, pre-P9 population — this neither vindicates nor condemns
+   p95 on noise, it is what was measured.
 
    **The substance of the 2026-07-31 ruling is untouched**: `perf` stays non-required, a
    flake still does not block a merge, and nothing here claims the cause of the 37.7% spread
    has been identified. It has not. p95 was preselected because this finding's own diagnosis
-   names the numerator's tail as where the noise lives — not because the cause is known.
+   names the numerator's tail as where the noise lives — not because the cause is known, and
+   the paragraph above is exactly why that diagnosis is not itself confirmed.
 
    The declined alternative "switching to p99/p99" above is likewise superseded rather than
    revived: the change adopted is p95 on the numerator, on the strength of a pinned
