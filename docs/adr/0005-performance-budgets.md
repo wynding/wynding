@@ -163,6 +163,66 @@ re-cutting a threshold after seeing the results it fired on is exactly what this
 and the spike forbid everywhere else. Recorded now, changed by a later story that pins its
 replacement before measuring again.
 
+**Replacement mid-range trigger, pinned 2026-08-03 (M2-S5b), before the browser run that
+measures against it.** Two independent signals replace the degenerate fps trigger:
+
+| Signal                                                                                                                    | Fires when    |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| **Missed-refresh proportion** — share of sampled frames exceeding **1.5 × the nominal refresh interval** (25 ms at 60 Hz) | **> 2%**      |
+| **Outright breach** — p95 frame time                                                                                      | **> 16.7 ms** |
+
+**They are independent, not ordered.** 6% of frames at 20 ms breaches `p95 > 16.7` while
+producing no frames above 25 ms, so neither implies the other. Either firing is a trigger.
+
+**Why 1.5× the interval and not the budget itself:** a healthy 60 Hz interval is ~16.667 ms
+and ordinary scheduling jitter crosses 16.7 constantly, so counting frames above the budget
+measures noise. 1.5× is the midpoint to the next refresh, so a frame above it genuinely
+missed one.
+
+**The 2% is a judgement, pinned before measuring — not derived.** Its basis: at 60 Hz over a
+~10 s window, 2% is on the order of a dozen missed refreshes — few enough that a user would
+not call it stuttering, many enough that it is not one unlucky GC pause.
+
+**The generic `measured ≥ 0.75 × limit` margin rule (this ADR's own escalation trigger,
+above) cannot be reused here.** Frame time under vsync is quantized, so a healthy profile
+sits _at_ the budget and a 0.75 margin fires unconditionally — the same degeneracy this
+replaces.
+
+**It is normalized, not machine-independent.** A fixed 25 ms cutoff only separates the
+16.7/33.3 ms buckets on a 60 Hz display; at 90 or 120 Hz it means something else entirely,
+and the emulation profiles (`apps/web/e2e-perf/profiles.ts`) do not currently validate
+refresh rate. This trigger is read against a 60 Hz assumption, not a measured one — the
+calibration below only confirms the assumption holds; it does not generalize the trigger to
+other refresh rates.
+
+**Cadence calibration — every parameter pinned here, before measuring.**
+
+| Parameter        | Value                                                                                                                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ordering         | calibrated **before** `Emulation.setCPUThrottlingRate` is called (`apps/web/e2e-perf/stress.perf.spec.ts`), at CDP's default (unthrottled) rate                                                                                                    |
+| Estimator        | **median** rAF delta, discarding the **first 5** frames (startup transient)                                                                                                                                                                        |
+| Page             | a **blank page** (`about:blank`), navigated and sampled **before** the perf page is ever loaded                                                                                                                                                    |
+| Window           | **2.0 s** of idle rAF sampling                                                                                                                                                                                                                     |
+| Acceptable band  | median in **[15.0, 18.5] ms** → nominal 60 Hz, cutoff = **1.5 × measured median**                                                                                                                                                                  |
+| Outside the band | the run reports `cadenceCalibration: "out-of-band"` with the measured median, and the missed-refresh signal is reported as **NOT EVALUATED** — never silently applied with a 60 Hz constant. The p95 breach signal is unaffected and still applies |
+
+**Calibrated on an idle, unthrottled page — never from the stressed frame deltas.** A profile
+that is missing refreshes _because the app is slow_ would, calibrated from its own stressed
+deltas, be read as a display with a slow native cadence; the cutoff would scale up with the
+regression, and the regression would normalize itself away — worst on the low-end profile,
+which is exactly where it matters. CDP CPU throttling slows JS execution, not the
+compositor's vsync cadence, so an unthrottled calibration measures the same nominal refresh
+the throttled run is judged against.
+
+`about:blank`, not `apps/web/perf/index.html` at rate 1: that page loads `main-perf.ts` as a
+module, which builds the scene and fast-forwards on import — there is no pre-scene seam on
+it, and adding one would put a test-only branch in the measured path.
+
+The browser spec emits, per profile, into its machine-readable report: the cutoff actually
+used, the observed rAF cadence (the calibrated median), the long-frame count, the
+denominator (frames sampled), the proportion, and `cadenceCalibration` — so the trigger is
+reproducible from the artifact rather than recomputed by hand.
+
 ### Findings from the spike — all three ruled on 2026-07-31
 
 1. **Frame time is over budget on both profiles, and the sim is not why.** Measured **95th-percentile
@@ -215,6 +275,36 @@ replacement before measuring again.
    CI** — adopting it as the fix would repeat the exact reasoning that produced the untransferable
    `R0 = 1.69`. Revisit if the job flakes in practice; the honest expectation, from the only
    population measured, is roughly 1 run in 8.
+
+   **AMENDED 2026-08-03 (M2-S5b P11) — the numerator statistic moved to p95, and `R0` was
+   re-recorded.** The definition above is superseded: `R` is now
+   `p95(stress due-blast ticks) / p50(control)`. Everything the original finding says about
+   the ratio's structure still holds — the cancellation is still real for scale and absent
+   for tail, and the denominator is still a median — but the numerator now discards the top
+   ~5% of the due-blast subset rather than the top ~1%.
+
+   **This is not ADR 0005's own "revisit if the job flakes in practice" trigger firing.** The
+   job has not flaked since the 2026-07-31 ruling. The reason is different and should not be
+   dressed up as that: M2-S5b P9 changed the stress workload (the scene gained a DoT arm and
+   an armored population, and the AoE-producing tower population fell 150 → 100), which
+   forces an `R0` re-record regardless. That makes this the one moment the statistic can
+   change without paying a second re-record. Owner ruling of 2026-08-02: this class of
+   decision — a statistic swap justified by a workload rebaseline rather than by a fired
+   trigger — is technical and Claude's to take.
+
+   **The substance of the 2026-07-31 ruling is untouched**: `perf` stays non-required, a
+   flake still does not block a merge, and nothing here claims the cause of the 37.7% spread
+   has been identified. It has not. p95 was preselected because this finding's own diagnosis
+   names the numerator's tail as where the noise lives — not because the cause is known.
+
+   The declined alternative "switching to p99/p99" above is likewise superseded rather than
+   revived: the change adopted is p95 on the numerator, on the strength of a pinned
+   injected-regression fixture (`packages/perf/src/gate-fixture.test.ts`) rather than the
+   three-local-runs reasoning this finding rightly rejected. That fixture measured p95
+   catching a broad blast-cost regression at `k = 0.020` at every legal subset size while
+   p99 caught it at none — so the switch is more sensitive to the regression the gate exists
+   to catch, not less. Its declared blind spot, also measured, is cost concentrated in the
+   top ~2% _by duration_, where p95 is unchanged by construction. See `gate.ts`.
 
 Everything else measured clear, with margin: JS heap **42.1 MB** on the low-end profile (the one
 the ~256 MB budget is written for), worst-of-20 input latency **34.4 ms** against 100 ms, and

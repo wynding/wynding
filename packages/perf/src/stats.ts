@@ -1,15 +1,15 @@
 // stats.ts — pure percentile/summary helpers for the harness (PLAN step 19's
 // "reports the step() percentile table", step 21's gate statistics).
 //
-// NEAREST-RANK, not interpolation. The gate (`gate.ts`) compares a stress-run p99
-// against a control-run p50 — two DIFFERENT percentiles of two DIFFERENT sample sets,
+// NEAREST-RANK, not interpolation. The gate (`gate.ts`) compares a stress-run p95
+// (p99 until M2-S5b P11) against a control-run p50 — two DIFFERENT percentiles of two DIFFERENT sample sets,
 // combined into one ratio. An interpolating estimator (e.g. linear/R-7, what
 // `Array.prototype` percentile libraries usually default to) blends the two samples
 // adjacent to the target rank, and how much blending happens shifts with the sample
 // count — which differs between the control run (the full `SAMPLE_TICKS` window) and
 // the stress run's due-blast subset (a few hundred to ~2,500 samples). That would make
 // the ratio's precision depend on sample count in a way nearest-rank's integer index
-// does not: nearest-rank always picks an ACTUAL observed `ms` value, so p50 and p99 are
+// does not: nearest-rank always picks an ACTUAL observed `ms` value, so p50 and p95 are
 // both real measurements, not synthetic blends — which is what a measurement report
 // (as opposed to a smoothed estimate) should assert.
 

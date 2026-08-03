@@ -41,17 +41,17 @@ describe('percentile()', () => {
     expect(percentile(xs, 99)).toBe(99);
   });
 
-  it('p99 of a count that is NOT a multiple of 100 distinguishes ceil from floor (QC: the ceil-vs-floor blind spot at exact multiples of 100)', () => {
+  it('p95 at the real due-blast subset size distinguishes ceil from floor (QC: the ceil-vs-floor blind spot at exact multiples of 100)', () => {
     // Every prior test above uses counts where `Math.ceil` and `Math.floor` agree on
     // the rank, so a `Math.ceil -> Math.floor` mutant in `percentile()` survived
-    // unnoticed — including at the SIZE the real gate actually runs `p99` over (the
-    // stress run's due-blast subset is ~1,671 samples in a genuine run, not a round
-    // number). 1,671 samples: ceil(99/100 * 1671) - 1 = ceil(1654.29) - 1 = 1655 - 1 =
-    // 1654 -> index 1654 -> value 1655. `Math.floor` instead would give
-    // floor(1654.29) - 1 = 1653 -> value 1654, a DIFFERENT answer, so this case kills
-    // that mutant.
-    const xs = Array.from({ length: 1_671 }, (_, i) => i + 1); // 1..1671
-    expect(percentile(xs, 99)).toBe(1655);
+    // unnoticed — including at the SIZE and PERCENTILE the real gate actually runs (the
+    // stress run's due-blast subset, 1,427 samples as measured post-M2-S5b-P9, and p95
+    // since P11 moved `stressStat` off p99; both were 1,671/p99 before those packets).
+    // 1,427 samples: ceil(95/100 * 1427) - 1 = ceil(1355.65) - 1 = 1356 - 1 = 1355 ->
+    // index 1355 -> value 1356. `Math.floor` instead would give floor(1355.65) - 1 =
+    // 1354 -> value 1355, a DIFFERENT answer, so this case kills that mutant.
+    const xs = Array.from({ length: 1_427 }, (_, i) => i + 1); // 1..1427
+    expect(percentile(xs, 95)).toBe(1356);
   });
 
   it('does not mutate its input', () => {

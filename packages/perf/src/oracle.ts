@@ -47,8 +47,8 @@ export const PEAK_LIVE_CREEPS_THRESHOLD = 280;
  *  passes every other assertion in this file, including "qualifying sustained samples"
  *  (which only asks `liveCreeps > 0`). That was verified against a synthetic window —
  *  all eight assertions PASSED over a board that was 99.96% empty. The gate would pass
- *  too, and in the worst way: `stressStat` would be a p99 over near-empty ticks, so R
- *  would FALL and read as an improvement.
+ *  too, and in the worst way: `stressStat` would be a percentile over near-empty ticks, so
+ *  R would FALL and read as an improvement.
  *
  *  Nothing exploits it today (the real run measures a median of 224), but S5–S10 each
  *  make towers stronger, and any change that kills creeps faster or shortens the ramp
@@ -119,9 +119,9 @@ export const KNOWN_OPEN_ASSERTIONS: readonly string[] = [];
 
 /** At least 500 samples (an ABSOLUTE count, not a ratio of the window) must have at
  *  least one due blast. This is deliberately a count, not a percentage: it is ALSO the
- *  sample size the gate's p99 (`gate.ts`, PLAN step 21) is computed over, and a
- *  percentage floor could pass while leaving that subset too small for a p99 to mean
- *  anything (e.g. a 20% floor over a short window could still be a handful of
+ *  sample size the gate's p95 (`gate.ts`, PLAN step 21 — p99 until M2-S5b P11) is
+ *  computed over, and a percentage floor could pass while leaving that subset too small
+ *  for that percentile to mean anything (e.g. a 20% floor over a short window could still be a handful of
  *  samples). ~150 blast towers at cadence 60, staggered across the build ticks, put a
  *  due blast on the large majority of ticks — this floor is comfortably reachable if
  *  the scene is tuned as ADR 0005 intends. */
@@ -272,9 +272,9 @@ export const QUALIFYING_SAMPLES_THRESHOLD = 2_000;
 export const LEFTOVER_BOUNTY_THRESHOLD = 0;
 
 /** A sample where at least one blast landed. Exported so `run.ts`'s gate subset and this
- *  file's `DUE_BLAST_SAMPLES_THRESHOLD` count are provably THE SAME SET — `gate.ts`'s p99
- *  reasoning leans on that ("with the oracle's >= 500-sample due-blast floor, p99 discards
- *  roughly the top 5 observations"), which is only true if the floor counts what the
+ *  file's `DUE_BLAST_SAMPLES_THRESHOLD` count are provably THE SAME SET — `gate.ts`'s
+ *  numerator reasoning leans on that (it now reads "with the oracle's >= 500-sample
+ *  due-blast floor, p95 discards the top ~5%"; it said p99 until M2-S5b P11), which is only true if the floor counts what the
  *  statistic is computed over. It was a hand-copied `s.dueBlasts >= 1` in both files; this
  *  repo has already removed three other copies of exactly this kind. */
 export function isDueBlastSample(sample: SampledTick): boolean {

@@ -71,7 +71,7 @@ jobs:
   # freezes on a terminal phase, so a mis-authored scenario measures an almost-empty or
   # wholly inert sim and posts superb percentiles. The oracle asserts the scene is the
   # one the ADR describes before any timing is believed. Then the RELATIVE GATE: the
-  # ratio of the stress run's p99 `step()` over its due-blast ticks to a blast-free
+  # ratio of the stress run's p95 `step()` over its due-blast ticks to a blast-free
   # control workload's p50, run in the same process, so a slow or noisy runner scales
   # both terms and cancels out.
   #

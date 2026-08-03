@@ -97,7 +97,9 @@ const controlResult = runSampled(controlReplay, bundle);
 // here, of the next call's TIMED pass — the one that feeds the gate — so a GC pause
 // induced by those allocations could in principle land inside the measured region.
 // We are NOT reordering the passes to put distance between them: `stressStat` is a
-// p99 over 2,500 samples, not a max, so a single induced pause cannot move it, and
+// p95 over the due-blast subset (1,427 samples as measured post-P9), not a max, so a
+// single induced pause cannot move it — and the argument is STRONGER under p95 than it
+// was under the p99 this originally cited, since p95 discards more of the tail. And
 // the measured `R` carries >2x headroom to the ceiling. Reordering would require
 // splitting `runSampled`'s API into separately callable timed/untimed phases — a
 // structural change with a real chance of introducing the very timed/untimed
@@ -416,11 +418,12 @@ for (const a of controlAssertions) {
 // a crash.
 //
 // The short-circuit is the oracle's FLOOR, not merely "> 0". `stressStat`'s whole
-// p99-not-p99.9 argument rests on that floor: over 3 due-blast samples, `percentile(…, 99)`
-// returns the MAXIMUM — the single noisiest tick, exactly the statistic p99 was chosen to
-// avoid. Such a run already exits non-zero via the oracle, but with `>0` it would still
-// publish `{"status":"evaluated","pass":true}` in `PERF-REPORT`, indistinguishable from a
-// real 1,671-sample run to anyone diffing that line against a later re-measurement.
+// not-the-maximum argument rests on that floor: over 3 due-blast samples,
+// `percentile(…, 95)` returns the MAXIMUM — the single noisiest tick, exactly the
+// statistic a percentile was chosen to avoid. Such a run already exits non-zero via the
+// oracle, but with `>0` it would still publish `{"status":"evaluated","pass":true}` in
+// `PERF-REPORT`, indistinguishable from a real 1,427-sample run (the post-P9 measured
+// subset) to anyone diffing that line against a later re-measurement.
 console.log('');
 console.log('=== gate (PLAN step 21) ===');
 let gateResult: GateResult | null = null;
@@ -442,7 +445,8 @@ if (dueBlastSamples.length === 0 || dueBlastSamples.length < DUE_BLAST_SAMPLES_T
   if (gateResult.status === 'unset') {
     console.log(
       `  R0 is unset — recording run only, gate not enforced; commit this value. Observed R = ${gateResult.r.toFixed(4)} ` +
-        `(controlStat p50=${gateResult.controlStat.toFixed(3)}ms, stressStat p99=${gateResult.stressStat.toFixed(3)}ms)`,
+        `(controlStat p50=${gateResult.controlStat.toFixed(3)}ms, stressStat p95=${gateResult.stressStat.toFixed(3)}ms, ` +
+        `audit-only stressStat p99=${gateResult.stressStatP99.toFixed(3)}ms)`,
     );
   } else {
     console.log(

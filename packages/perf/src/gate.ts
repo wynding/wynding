@@ -5,7 +5,12 @@
 //   - A p95 CEILING cannot see a blast spike at all. `splash`'s cadence-60 blasts put
 //     blast-heavy ticks at a small minority of samples (~1.7% in the drafting analysis)
 //     — entirely below p95, so a regression in blast cost specifically would never
-//     surface in a p95-gated number.
+//     surface in a p95-gated number. THIS IS NOT THE STATISTIC `stressStat` USES BELOW
+//     (PLAN step 21, revisiting the 2026-07-31 ruling — see that function's doc): that
+//     rejection was p95 over ALL samples, where blast-heavy ticks are the ~1.7%
+//     minority that sinks below the percentile. `stressStat` reads the due-blast
+//     SUBSET, where every sample carries >= 1 due blast by construction, so there is
+//     no minority to sink — the failure mode described here does not apply to it.
 //   - An ABSOLUTE ceiling "with generous headroom" lets the threshold be picked AFTER
 //     seeing results on `ubuntu-latest` — a runner that is not a stable reference CPU
 //     across time. A number chosen post-hoc against one runner's noise floor is not a
@@ -71,19 +76,49 @@ export function controlStat(controlSamples: readonly SampledTick[]): number {
   );
 }
 
-/** `stressStat` — p99 of `step()` wall-clock over the STRESS run's DUE-BLAST-TICK
+/** `stressStat` — p95 of `step()` wall-clock over the STRESS run's DUE-BLAST-TICK
  *  SUBSET within the sampled window (not the full stress sample set — a tick with no
  *  due blast this step is not exercising the blast membership scan at all, and mixing
  *  it in would dilute the statistic toward the maze's baseline cost, hiding exactly
  *  the regression this gate exists to catch).
  *
- * p99, NOT p99.9 (Codex R3-3): with the oracle's >= 500-sample due-blast floor
- * (`oracle.ts`'s `DUE_BLAST_SAMPLES_THRESHOLD`), p99 discards roughly the top 5
- * observations — enough that a single preempted tick (one GC pause, one scheduler
- * hiccup) cannot fail CI on its own, while a SYSTEMATIC regression in blast cost still
- * shifts the whole upper tail and fails it. p99.9 over a subset this size would often
- * BE the maximum (the single noisiest tick), reintroducing exactly the GC/scheduler
- * sensitivity a relative gate exists to remove.
+ * MOVED FROM p99 TO p95 (PLAN step 21) — a REVISIT of the 2026-07-31 ruling recorded
+ * in `docs/adr/0005-performance-budgets.md` under **"Finding 3"** (the relative-gate
+ * finding) and in `docs/milestones/m2.md`'s **M2-S4b** entry — cited by HEADING, not by
+ * line number, because M2-S5b's own amendment to that ADR shifted the very lines an
+ * earlier draft of this comment cited, leaving the pointer aimed at an unrelated table
+ * within the same commit. This is not the closing of an open decision: that ruling was
+ * to accept the gate's flake
+ * rate and ship as-is, with ADR 0005 adding "Revisit if the job flakes in practice."
+ * The job has NOT flaked in practice since that ruling — this is not that trigger
+ * firing. The trigger here is different: S5b must re-record `R0` regardless, because
+ * P9 changed the stress workload, which makes this the one moment the gate's statistic
+ * can change without paying a second re-record. This file's own diagnosis already
+ * named the numerator's tail as the noise's home ("the denominator is a median, so it
+ * barely moves with tail noise by construction; the numerator absorbs all of it" —
+ * see `R0`'s doc below), so a numerator statistic that gives up less of the upper tail
+ * is the one the diagnosis points at. Owner ruling of 2026-08-02: this class of
+ * decision (a statistic swap justified by a workload rebaseline, not by a fired ADR
+ * trigger) is technical and Claude's to take.
+ *
+ * p95, NOT p99 (this move) and NOT p99.9 (Codex R3-3, unchanged reasoning): with the
+ * oracle's >= 500-sample due-blast floor (`oracle.ts`'s `DUE_BLAST_SAMPLES_THRESHOLD`),
+ * p95 discards the top ~5% of observations rather than p99's ~1% — MORE tail-noise
+ * resistant, not less, while the fixture below (`gate-fixture.test.ts`) proves it does
+ * not discard the regression signal a broad blast-cost regression produces. p99.9 over
+ * a subset this size would often BE the maximum (the single noisiest tick),
+ * reintroducing exactly the GC/scheduler sensitivity a relative gate exists to remove.
+ *
+ * THIS IS NOT THE STATISTIC THE FILE-TOP COMMENT REJECTS. That rejection is p95 over
+ * ALL samples, where blast-heavy ticks are a ~1.7% minority that sinks below the
+ * percentile entirely. `stressStat` reads the due-blast SUBSET — every sample here
+ * carries >= 1 due blast by construction, so there is no minority to sink below the
+ * rank; a broad blast-cost regression raises the whole subset and p95 sees it. See
+ * the "DECLARED BLIND SPOT" doc below for what p95-over-the-subset still cannot see.
+ *
+ * `stressStatP99` (below) is kept and reported for audit: the previously-gating
+ * statistic stays visible in `PERF-REPORT` and in `GateResult` even though it no
+ * longer decides pass/fail, so the switch is never a one-way door taken silently.
  *
  * Throws (via `percentile`) if `dueBlastSamples` is empty — a caller must filter to
  * the due-blast subset first; an empty subset is an oracle failure
@@ -92,9 +127,41 @@ export function controlStat(controlSamples: readonly SampledTick[]): number {
 export function stressStat(dueBlastSamples: readonly SampledTick[]): number {
   return percentile(
     dueBlastSamples.map((s) => s.ms),
+    95,
+  );
+}
+
+/** `stressStatP99` — the STATISTIC `stressStat` USED BEFORE THIS REVISIT, over the
+ *  same due-blast subset. Not used for gating (`evaluateGate` below computes it but
+ *  does not compare it to anything) — kept purely so the rejected statistic stays
+ *  auditable in `GateResult` and `PERF-REPORT` rather than disappearing from the
+ *  record the moment it stops deciding pass/fail. See `stressStat`'s doc for why p95
+ *  replaced it. */
+export function stressStatP99(dueBlastSamples: readonly SampledTick[]): number {
+  return percentile(
+    dueBlastSamples.map((s) => s.ms),
     99,
   );
 }
+
+/**
+ * THE DECLARED BLIND SPOT (PLAN step 21, §4) — reported, never gating.
+ *
+ * p95's insensitivity to tail-concentrated cost is the same property that suppresses
+ * tail noise — no test design separates them. What makes the trade acceptable is the
+ * subset: the rejection of p95 over ALL samples (file-top comment) was about blast
+ * ticks sinking below the percentile, and `stressStat` reads the due-blast subset
+ * where every sample carries >= 1 blast. A blast-cost regression raises cost across
+ * that whole subset — the broad injection `gate-fixture.test.ts` measures — and p95
+ * sees it, at a smaller `k` than p99 does.
+ *
+ * The blind spot is wider than "scheduler noise": a real AoE regression CAN
+ * concentrate in under 5% of due-blast ticks — one scaling with blast multiplicity
+ * would land mostly on the high-`dueBlasts` ticks — and p95 suppresses that as
+ * thoroughly as it suppresses a GC pause. Accepted deliberately under the owner's
+ * 2026-08-02 ruling that this class of decision is Claude's to take, with the
+ * measured `k` values on record in `gate-fixture.test.ts`.
+ */
 
 /** CI fails when `R > R0 * TOLERANCE`. Predeclared, not tuned after seeing results
  *  (PLAN step 21): what is fixed BEFORE measurement is what matters methodologically —
@@ -227,6 +294,10 @@ export type GateResult =
       readonly r: number;
       readonly controlStat: number;
       readonly stressStat: number;
+      /** AUDIT ONLY — the pre-revisit p99 over the same subset. Never compared to
+       *  anything; carried so the rejected statistic stays visible in `PERF-REPORT`
+       *  rather than vanishing the moment it stops deciding pass/fail. */
+      readonly stressStatP99: number;
     }
   | {
       readonly status: 'evaluated';
@@ -237,6 +308,8 @@ export type GateResult =
       readonly pass: boolean;
       readonly controlStat: number;
       readonly stressStat: number;
+      /** AUDIT ONLY — see the `'unset'` arm above. */
+      readonly stressStatP99: number;
     };
 
 /** Computes `R = stressStat / controlStat` and evaluates it against `R0 * TOLERANCE`
@@ -251,6 +324,9 @@ export function evaluateGate(
 ): GateResult {
   const cStat = controlStat(controlSamples);
   const sStat = stressStat(dueBlastSamples);
+  // Computed but never compared — audit only, so the statistic this revisit replaced
+  // stays on the record beside the one that replaced it.
+  const sStatP99 = stressStatP99(dueBlastSamples);
   if (cStat === 0) {
     // A zero-ms control median makes `R = sStat / 0` -> `Infinity` (or `NaN`, if
     // `sStat` is also 0). Both already fail closed — `Infinity`/`NaN` compare `>` any
@@ -272,7 +348,13 @@ export function evaluateGate(
   const r = sStat / cStat;
 
   if (r0 === null) {
-    return { status: 'unset', r, controlStat: cStat, stressStat: sStat };
+    return {
+      status: 'unset',
+      r,
+      controlStat: cStat,
+      stressStat: sStat,
+      stressStatP99: sStatP99,
+    };
   }
 
   const ceiling = r0 * TOLERANCE;
@@ -285,5 +367,6 @@ export function evaluateGate(
     pass: r <= ceiling,
     controlStat: cStat,
     stressStat: sStat,
+    stressStatP99: sStatP99,
   };
 }

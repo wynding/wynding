@@ -68,5 +68,15 @@ export {
   type OracleResult,
   type OracleInput,
 } from './oracle';
-export { controlStat, stressStat, evaluateGate, TOLERANCE, R0, type GateResult } from './gate';
+export {
+  controlStat,
+  stressStat,
+  // The pre-M2-S5b-P11 statistic, kept for audit — exported alongside the statistic it
+  // audits so a consumer can render both, not just the one that gates.
+  stressStatP99,
+  evaluateGate,
+  TOLERANCE,
+  R0,
+  type GateResult,
+} from './gate';
 export { evaluateEscalation, type EscalationResult } from './escalation';

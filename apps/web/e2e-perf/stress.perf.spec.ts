@@ -89,6 +89,97 @@ const MIN_FRAME_SAMPLES = 10;
  *  advancement" failure it exists to catch. */
 const MIN_TICKS_ADVANCED = 50;
 
+// ADR 0005's replacement mid-range trigger (PLAN steps 19/20, this packet). The old
+// trigger — `measured fps <= 1.25 x 60` — is degenerate: 75 fps is unreachable on a
+// vsync-capped display, so it fired unconditionally. Both signals below are pinned
+// HERE, before any run, and neither is a threshold to move if it fires — a fired
+// signal is a result to report.
+//
+// Signal 1 — MISSED-REFRESH PROPORTION: the share of sampled frames exceeding 1.5x the
+// nominal refresh interval. 1.5x (not the 16.7ms budget itself) is the midpoint to the
+// next refresh: a healthy 60Hz interval is ~16.667ms and ordinary scheduling jitter
+// crosses 16.7 constantly, so counting frames above the BUDGET measures noise, while a
+// frame above the midpoint genuinely missed one. Fires when the proportion exceeds 2% —
+// a judgement, not a derivation: at 60Hz over a ~10s window, 2% is on the order of a
+// dozen missed refreshes, few enough that a user would not call it stuttering, many
+// enough that it is not one unlucky GC pause.
+//
+// Signal 2 — OUTRIGHT BREACH: p95 frame time above the 16.7ms budget itself. The two
+// signals are INDEPENDENT, not ordered — 6% of frames at 20ms breaches p95 > 16.7 while
+// producing no frame above 25ms, so neither implies the other. Either firing is a
+// trigger.
+//
+// The generic `measured >= 0.75 x limit` margin rule (this ADR's escalation trigger,
+// used everywhere else) CANNOT be reused for either signal: frame time under vsync is
+// quantized, so a healthy profile sits AT the budget and a 0.75 margin fires
+// unconditionally, the same degeneracy this replaces.
+//
+// It is normalized, not machine-independent: a fixed 25ms cutoff only separates the
+// 16.7/33.3ms buckets on a 60Hz display; at 90 or 120Hz it means something else
+// entirely, and the emulation profiles do not currently validate refresh rate.
+const MISSED_REFRESH_INTERVAL_MULTIPLIER = 1.5;
+const MISSED_REFRESH_PROPORTION_THRESHOLD = 0.02;
+const P95_BREACH_FRAME_TIME_MS = 16.7;
+/** The low-end profile's frame-time budget — ADR 0005 §Budgets sets **60 fps on mid-range**
+ *  (16.7 ms) and a **>= 30 fps floor on low-end** (33.3 ms), which are different numbers.
+ *
+ *  QC round 1: the first draft of this trigger applied `P95_BREACH_FRAME_TIME_MS` (16.7) to
+ *  BOTH projects with no reference to `profile.name`, so the low-end run would have emitted
+ *  a breach against a budget the ADR never gave it — and the next packet lifts this
+ *  artifact verbatim into the spike doc, so the wrong number would have been recorded as a
+ *  measured breach. The p95-breach signal is now judged per profile. */
+const P95_BREACH_FRAME_TIME_MS_LOW_END = 33.3;
+
+/** The frame-time budget this profile is actually judged against. */
+function p95BreachBudgetMs(profileName: 'low-end' | 'mid-range'): number {
+  return profileName === 'low-end' ? P95_BREACH_FRAME_TIME_MS_LOW_END : P95_BREACH_FRAME_TIME_MS;
+}
+
+// Cadence calibration — every parameter pinned here, before implementation. Calibrated
+// on an idle, UNTHROTTLED `about:blank` page, navigated and sampled BEFORE the perf
+// page is ever loaded and BEFORE `Emulation.setCPUThrottlingRate` is called (at CDP's
+// default rate 1). This is the single most important constraint in this file: a
+// profile that is missing refreshes BECAUSE THE APP IS SLOW would, if calibrated from
+// the stressed frame deltas, be read as a display with a slow native cadence — the
+// cutoff would scale up with the regression, and the regression would normalize itself
+// away. Worst on the low-end profile, which is exactly where it matters. CDP CPU
+// throttling slows JS execution, not the compositor's vsync cadence (see the
+// `Emulation.setCPUThrottlingRate` call below), so an unthrottled calibration measures
+// the same nominal refresh the throttled run will be judged against.
+//
+// `about:blank`, not `apps/web/perf/index.html` at rate 1: that page loads
+// `main-perf.ts` as a module, which builds the scene and fast-forwards ON IMPORT — there
+// is no pre-scene seam on it, and adding one would put a test-only branch in the
+// measured path.
+const CALIBRATION_WINDOW_MS = 2_000;
+/** Startup transient — discarded before the median is taken. */
+const CALIBRATION_DISCARD_FRAMES = 5;
+/** A calibrated median inside this band is read as a nominal 60Hz display. Outside it,
+ *  the missed-refresh signal is reported as NOT EVALUATED rather than silently applied
+ *  with a 60Hz constant — the p95 breach signal is unaffected and still applies. */
+const CALIBRATION_BAND_MS: { readonly low: number; readonly high: number } = {
+  low: 15.0,
+  high: 18.5,
+};
+
+/** Samples raw rAF deltas (ms) for `windowMs` on whatever page is currently loaded —
+ *  the calibration twin of `main-perf.ts`'s `startSampling`, but standalone: it must
+ *  run on `about:blank`, which never has `window.wyndingPerf`. */
+function sampleRafDeltas(windowMs: number): Promise<number[]> {
+  return new Promise((resolve) => {
+    const deltas: number[] = [];
+    let last = performance.now();
+    const start = last;
+    const step = (now: number): void => {
+      deltas.push(now - last);
+      last = now;
+      if (now - start < windowMs) requestAnimationFrame(step);
+      else resolve(deltas);
+    };
+    requestAnimationFrame(step);
+  });
+}
+
 function summarizeFrameTimes(msValues: readonly number[]): {
   p50: number;
   p95: number;
@@ -132,9 +223,46 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
     if (msg.type() === 'error') consoleErrors.push(msg.text());
   });
 
-  // Playwright has no built-in CPU-throttle option — DevTools throttling via CDP is the
-  // only way to emulate a low-end device's execution speed (PLAN step 22).
   const cdp = await page.context().newCDPSession(page);
+
+  // Cadence calibration — BEFORE the CPU throttle is applied and before the perf page
+  // is ever loaded (ADR 0005's replacement mid-range trigger, PLAN steps 19/20; see the
+  // constants above for why the ordering and the page are both load-bearing).
+  await page.goto('about:blank');
+  const calibrationDeltas = await page.evaluate(sampleRafDeltas, CALIBRATION_WINDOW_MS);
+  const calibrationSample = calibrationDeltas.slice(CALIBRATION_DISCARD_FRAMES);
+  // FAIL SAFE on a short calibration window, do NOT throw (QC round 1). `percentile`
+  // throws on an empty series, so fewer than `CALIBRATION_DISCARD_FRAMES + 1` rAF
+  // callbacks in the window would abort the whole test before `PERF-BROWSER-REPORT` is
+  // ever printed — taking the p95 breach signal, heap, input latency and every frame-time
+  // percentile down with the cadence. That inverts the contract ADR 0005 pins: an
+  // unmeasurable cadence must degrade the missed-refresh signal to NOT EVALUATED while
+  // leaving every other measurement intact. An occluded or backgrounded window on a headed
+  // runner is enough to trigger it, so this is a real path, not a theoretical one. The
+  // measured window already carries this guard (`MIN_FRAME_SAMPLES`); the calibration
+  // window had none.
+  const observedCadenceMs: number | null =
+    calibrationSample.length > 0 ? percentile(calibrationSample, 50) : null;
+  const cadenceCalibration: 'ok' | 'out-of-band' =
+    observedCadenceMs !== null &&
+    observedCadenceMs >= CALIBRATION_BAND_MS.low &&
+    observedCadenceMs <= CALIBRATION_BAND_MS.high
+      ? 'ok'
+      : 'out-of-band';
+  // `null` when out-of-band: never silently applied with a 60Hz constant. The explicit
+  // `observedCadenceMs !== null` is not redundant with `cadenceCalibration === 'ok'` to the
+  // compiler — and keeping it explicit means the unmeasurable-cadence path above cannot
+  // reach this multiplication even if the classification is later restructured.
+  const missedRefreshCutoffMs =
+    cadenceCalibration === 'ok' && observedCadenceMs !== null
+      ? MISSED_REFRESH_INTERVAL_MULTIPLIER * observedCadenceMs
+      : null;
+
+  // Playwright has no built-in CPU-throttle option — DevTools throttling via CDP is the
+  // only way to emulate a low-end device's execution speed (PLAN step 22). CDP CPU
+  // throttling slows JS execution, not the compositor's vsync cadence, which is exactly
+  // why the calibration above — taken before this call — measures the same nominal
+  // refresh this throttled run will be judged against.
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: profile.cpuThrottleRate });
 
   await page.goto('/perf/index.html');
@@ -240,6 +368,42 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
     p99: fpsAtFrameTimeMs(frameTimeMs.p99),
   };
 
+  // ADR 0005's replacement mid-range trigger (PLAN steps 19/20; see the constants and
+  // calibration above). The missed-refresh signal is computed against the CALIBRATED
+  // cutoff, never a hardcoded 60Hz constant — when calibration landed out-of-band,
+  // `missedRefreshCutoffMs` is `null` and the signal is reported as NOT EVALUATED. The
+  // p95 breach signal is unaffected by calibration and always evaluates.
+  const missedRefreshDenominator = frameTimesMs.length;
+  const missedRefreshLongFrameCount =
+    missedRefreshCutoffMs === null
+      ? null
+      : frameTimesMs.filter((ms) => ms > missedRefreshCutoffMs).length;
+  const missedRefreshProportion =
+    missedRefreshLongFrameCount === null
+      ? null
+      : missedRefreshLongFrameCount / missedRefreshDenominator;
+  // §3's five required fields — cutoff, observed cadence, long-frame count,
+  // denominator, proportion, and cadenceCalibration — so the trigger is reproducible
+  // from the artifact rather than recomputed by hand. The two `*SignalFired` booleans
+  // apply the pinned thresholds directly against those numbers, so a reader of the
+  // artifact never has to re-derive "did it fire" from the raw figures either — and if
+  // a signal fires, that is a RESULT to report, never a threshold to move.
+  const frameTimeTrigger = {
+    cadenceCalibration,
+    observedCadenceMs,
+    cutoffMs: missedRefreshCutoffMs,
+    longFrameCount: missedRefreshLongFrameCount,
+    denominator: missedRefreshDenominator,
+    proportion: missedRefreshProportion,
+    missedRefreshSignalFired:
+      missedRefreshProportion === null
+        ? null
+        : missedRefreshProportion > MISSED_REFRESH_PROPORTION_THRESHOLD,
+    // Judged against THIS profile's budget, not a single hardcoded one.
+    p95BreachBudgetMs: p95BreachBudgetMs(profile.name),
+    p95BreachSignalFired: frameTimeMs.p95 > p95BreachBudgetMs(profile.name),
+  };
+
   // The frozen-sim-loop guard, second half: re-read `liveCreepCount()` after the sampling
   // window and the latency clicks, not just before them — a run that lost creeps to kills
   // (or even resolved, though `endPhase` below would catch that) over that stretch would
@@ -307,6 +471,9 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
     // percentile, purely for readability against the ADR's fps-shaped budget language.
     frameTimeMs,
     fpsAtFrameTimePercentile,
+    // ADR 0005's replacement mid-range trigger (PLAN steps 19/20) — see the constants
+    // above for both formulas and every calibration parameter, pinned before this run.
+    frameTimeTrigger,
     heapBytes,
     inputLatencySampleCount: inputLatencies.length,
     // QC (frame-TIME, not frame-rate, percentiles, second half): with n = 20, a "p99" is just the maximum — label
