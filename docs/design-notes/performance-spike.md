@@ -48,21 +48,32 @@ need **600**. The specced 10-wave arc — authored at S11, not shipped today —
 purpose, validating the Phaser bet at a genuine ceiling before five more effect stories pile
 on, at the cost that **these numbers are a ceiling, not a description of real M2 play.**
 
-| Knob (authored)  | Value                                                 |
-| ---------------- | ----------------------------------------------------- |
-| Board            | 40 × 40 (1,444 buildable interior cells)              |
-| Towers placed    | **exactly 150** (100 blast, 50 blast-plus-slow)       |
-| Creeps scheduled | 16 entries × 19 = **304**                             |
-| Creep speed      | 60 fp/tick; slowed to 41 under the catalog's 30% slow |
-| Seed             | 1234                                                  |
+| Knob (authored)  | Value                                                  |
+| ---------------- | ------------------------------------------------------ |
+| Board            | 40 × 40 (1,444 buildable interior cells)               |
+| Towers placed    | **exactly 150** (50 blast, 50 blast-plus-slow, 50 DoT) |
+| Creeps scheduled | 16 entries × 19 = **304**                              |
+| Creep speed      | 60 fp/tick; slowed to 41 under the catalog's 30% slow  |
+| Seed             | 1234                                                   |
 
 | Property (measured) | Value                                     |
 | ------------------- | ----------------------------------------- |
 | Live creeps         | median **224**, peak **304** (min 32)     |
 | Creeps under status | median **224**, peak **304**              |
-| Due blasts per tick | median **1**, peak **8**                  |
+| Due blasts per tick | median **1**, peak **7**                  |
 | Route length        | **329 cells** — see finding 2             |
 | Leftover bounty     | **0** (the maze consumes the whole purse) |
+
+> **2026-08-03, M2-S5b P9.** The scene changed: the tower split moved from 100
+> `stress-blast` + 50 `stress-chill` to a three-way 50 `stress-blast` + 50 `stress-chill` +
+> 50 `stress-venom` (DoT), and the wave gained a `stress-armored` population — 114 of the
+> 304 scheduled spawns, armor 6, blanking every stress tower's direct damage to 0 so it
+> stresses only the DoT/status path. The due-blast peak moved with it: fewer
+> AoE-producing towers (100, down from 150) means fewer can come due on the same tick, so
+> the sampled window's busiest tick now carries 7 due blasts instead of 8, and the mean
+> moved 1.51 → 1.068 (`harness.test.ts`). This table describes the scene's AUTHORED
+> knobs, not a dated measurement, so it tracks the scene as it stands today rather than
+> recording P9 as a historical delta.
 
 Creeps carry 1,000,000 hp and the board starts with 1,000,000 lives, both **on purpose**: a
 creep that dies is a creep the scene is no longer stressing, and `step()` freezes on a

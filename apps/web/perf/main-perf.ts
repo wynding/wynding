@@ -257,8 +257,13 @@ async function main(): Promise<void> {
         throw new Error(`stress layout has fewer than ${index + 1} anchors`);
       }
       // QC (the arm-toggle double-click artifact): `armTower` is a TOGGLE (`controller.ts`: `if (armed ===
-      // towerId) { armed = null; return; }`), and `towerIdAt` repeats the same id
-      // across consecutive anchors (`blast, blast, chill, …`) — the common case. Arming
+      // towerId) { armed = null; return; }`). This guard was written for when
+      // `towerIdAt` repeated the same id across consecutive anchors (`blast, blast,
+      // chill, …`) — the common case at the time. Since M2-S5b P9's three-way split
+      // (`blast, venom, chill, blast, venom, chill, …`), consecutive anchors NEVER
+      // repeat, so the arm-toggle path below is unreachable and `armed !== towerId` is
+      // always true. Behaviour is unaffected — do not delete the guard; a future
+      // layout could reintroduce repeats. Arming
       // unconditionally meant a REJECTED placement (which leaves `armed` unchanged)
       // followed by the next same-id anchor's `armTower` call actually DISARMED,
       // turning one rejection into two: the second anchor's `clickAt` then placed

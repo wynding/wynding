@@ -49,11 +49,13 @@ describe('runSampled() against the committed control replay', () => {
   });
 
   it('snapshots towersPlacedAfterBuild/leftoverBountyAfterBuild after the build-tick prefix', () => {
-    // The control replay places all 150 anchors with the blast-free single-form twins
-    // — 100 `stress-single` + 50 `stress-chill-single` (`scenario.ts`'s
-    // `buildControlReplay`) — same cost (12) as the stress replay's towers either way,
-    // so the same "150 × 12 == startingBounty" identity (`layout.ts`'s `towerIdAt`
-    // doc) applies here too.
+    // The control replay places all 150 anchors as a three-way 50/50/50 split
+    // (`scenario.ts`'s `buildControlReplay`): 50 `stress-single` + 50
+    // `stress-chill-single` are blast-free single-form TWINS of their stress-side
+    // counterpart, but the third 50 is `stress-venom` mapped to ITSELF — blast-free
+    // already, so it has no single-form twin to map to, but NOT a twin in the sense
+    // the other two are. All three still cost 12, so the same "150 × 12 ==
+    // startingBounty" identity (`layout.ts`'s `towerIdAt` doc) applies here too.
     expect(result.towersPlacedAfterBuild).toBe(150);
     expect(result.leftoverBountyAfterBuild).toBe(0);
   });
@@ -94,7 +96,23 @@ describe('runSampled() against the committed STRESS replay — real due-blast/st
     expect(peak).toBe(304);
   });
 
-  it('due blasts per sample: max 8, median 1', () => {
+  // Re-pinned at M2-S5b P9, 8 -> 7. This is a MEASURED consequence of the scene change,
+  // not a tuning decision: P9 took the AoE-producing tower population from 150 (100
+  // `stress-blast` at cadence 60 + 50 `stress-chill` at cadence 45) down to 100 (50 + 50),
+  // giving the third of the anchors to the new blast-free `stress-venom`. Fewer AoE towers
+  // means fewer of them can come due on the same tick, so the busiest tick in the sampled
+  // window now carries 7 due blasts instead of 8. The median is unmoved at 1.
+  //
+  // This literal is load-bearing beyond this file: P11's injected-regression fixture is
+  // specified against "the real scene's measured mean 1.51, max 8" (PLAN.md step 21). That
+  // reference must be re-stated against the post-P9 scene when P11 builds the fixture —
+  // it is the scene this gate actually measures, and a fixture shaped to the OLD scene
+  // would be modelling a workload that no longer exists. BOTH halves of that reference
+  // have now moved, not just the max pinned above: an instrumented probe measured the
+  // post-P9 scene's due-blast mean at 1.068, down from 1.51. Carrying that forward
+  // explicitly here (rather than leaving it to be rediscovered) is what P11 needs: max
+  // 1.51/8 -> 1.068/7.
+  it('due blasts per sample: max 7, median 1', () => {
     const dueBlasts = result.samples.map((s) => s.dueBlasts);
     const measuredMax = dueBlasts.reduce((m, n) => Math.max(m, n), 0);
     const sorted = [...dueBlasts].sort((a, b) => a - b);
@@ -102,7 +120,7 @@ describe('runSampled() against the committed STRESS replay — real due-blast/st
       sorted.length - 1,
       Math.max(0, Math.ceil(0.5 * sorted.length) - 1),
     );
-    expect(measuredMax).toBe(8);
+    expect(measuredMax).toBe(7);
     expect(sorted[medianIndex]).toBe(1);
   });
 

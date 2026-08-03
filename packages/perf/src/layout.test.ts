@@ -102,23 +102,30 @@ describe('stressAnchors()', () => {
 });
 
 describe('towerIdAt()', () => {
-  it('yields 100 stress-blast and 50 stress-chill over the 150 indices', () => {
-    const counts: Record<string, number> = { 'stress-blast': 0, 'stress-chill': 0 };
+  it('yields 50 stress-blast, 50 stress-chill, and 50 stress-venom over the 150 indices', () => {
+    const counts: Record<string, number> = {
+      'stress-blast': 0,
+      'stress-chill': 0,
+      'stress-venom': 0,
+    };
     for (let i = 0; i < 150; i++) {
       const id = towerIdAt(i);
       counts[id] = (counts[id] ?? 0) + 1;
     }
-    expect(counts['stress-blast']).toBe(100);
+    expect(counts['stress-blast']).toBe(50);
     expect(counts['stress-chill']).toBe(50);
+    expect(counts['stress-venom']).toBe(50);
   });
 
-  it('150 x 12 (both towers cost 12) === the bundle’s startingBounty', () => {
+  it('150 x 12 (all three towers cost 12) === the bundle’s startingBounty', () => {
     const text = readFileSync(STRESS_RULESET_URL, 'utf8');
     const bundle = parseRulesetJson(text);
     const blast = bundle.towerCatalog.find((t) => t.id === 'stress-blast');
     const chill = bundle.towerCatalog.find((t) => t.id === 'stress-chill');
+    const venom = bundle.towerCatalog.find((t) => t.id === 'stress-venom');
     expect(blast?.cost).toBe(12);
     expect(chill?.cost).toBe(12);
+    expect(venom?.cost).toBe(12);
     expect(150 * 12).toBe(bundle.balance.startingBounty);
   });
 });

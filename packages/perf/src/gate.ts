@@ -15,17 +15,36 @@
 //     it moves), so an absolute ceiling on it would fail CI on noise alone.
 //
 // The fix: an IN-JOB CONTROL WORKLOAD. Every run executes a fixed control scenario —
-// every tower swapped for its blast-free single-form twin, `stress-blast` ->
-// `stress-single`, `stress-chill` -> `stress-chill-single` — in the SAME process, then
-// the stress scenario, and gates the RATIO `R = stressStat / controlStat` — not either
-// statistic alone. This control is NOT a genuine one-dimension twin of the stress
-// scenario: the twins also match the chill pair's `slow` effect definition (an
-// earlier draft dropped it entirely), but a single-form tower cannot reproduce an
-// area effect's slow COVERAGE, so the control unavoidably carries a lighter creep
-// population too (measured median 181 vs the stress run's 224, peak slowed creeps 109
-// vs 304 — see `scenario.ts`'s `buildControlReplay` doc and this file's `R0` doc below
-// for the full accounting). `R` therefore isolates blast cost plus blast-borne slow
-// coverage together, not blast cost alone.
+// every AoE tower swapped for its blast-free single-form twin, `stress-blast` ->
+// `stress-single`, `stress-chill` -> `stress-chill-single`; `stress-venom` maps to
+// ITSELF, unchanged, since it is already blast-free and so has no single-form twin to
+// map to — in the SAME process, then the stress scenario, and gates the RATIO `R =
+// stressStat / controlStat` — not either statistic alone. This control is NOT a
+// genuine one-dimension twin of the stress scenario: the twins also match the chill
+// pair's `slow` effect definition (an earlier draft dropped it entirely), but a
+// single-form tower cannot reproduce an area effect's slow COVERAGE, so the control
+// unavoidably carries a lighter creep population too (measured median 181 vs the
+// stress run's 224, peak slowed creeps 109 vs 304 — see `scenario.ts`'s
+// `buildControlReplay` doc and this file's `R0` doc below for the full accounting).
+// `R` therefore isolates blast cost plus blast-borne slow coverage together, not
+// blast cost alone.
+//
+// A FINDING FROM THE VENOM ARM'S MEASUREMENT, AND WHY IT INVERTS THE HAZARD THAT
+// MOTIVATED KEEPING `stress-venom` IN THE CONTROL AT ALL: the DoT workload is
+// HEAVIER in the control arm than in the stress arm — 368 peak resident records
+// against 175, and 127 peak DoT carriers against 19. `stress-chill`'s AoE slow
+// bunches creeps in the stress arm, so its 50 venom towers re-hit the same small
+// leading cohort (a refresh, not a new record) under sticky nearest-exit targeting;
+// in the control, `stress-chill-single`'s thin coverage lets creeps stream past, so
+// each shot seeds a fresh `(targetId, sourceId)` pair instead. So DoT-table cost
+// sits predominantly in `R`'s DENOMINATOR, biasing `R` DOWNWARD — the opposite
+// direction from the "DoT exclusively in the numerator" hazard that motivated giving
+// the control a venom arm in the first place. Both facts are true and both belong on
+// record: the venom arm is still correct (a DoT-free control would put DoT
+// exclusively in the numerator, which is worse), and the residual asymmetry runs the
+// other way. Magnitude caveat: `dot-bench`'s own curve is roughly 0.25ms per 1,000
+// resident records, so a ~190-record gap is small in absolute terms — the DIRECTION
+// is what needs stating here, not an alarm.
 //
 // A slow or noisy runner scales both terms together, which cancels CPU-SPEED SCALE: a
 // machine that is uniformly 2x slower moves both `controlStat` and `stressStat` by

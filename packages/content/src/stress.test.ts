@@ -227,6 +227,13 @@ describe('the two idle-benchmark guards, read from the bundle (PLAN step 16)', (
   // decay into an idle benchmark that still "passes" (PLAN step 18's whole point).
   // No prior test in this file actually READ either knob off the bundle, so
   // `startingLives` 1e6->1000 and `hp` 1e6->100 both survived unnoticed.
+  // Only `stress-runner.hp` is read below, but immortality is pinned for BOTH creeps
+  // in the scene: `stress-armored.hp` (M2-S5b P9) is asserted separately, in the
+  // 'stress-armored (PLAN step 7 / packet P9 §1)' describe above ("hp 1,000,000,
+  // armor 6, ..."). That coverage exists; this prose is naming it so the case for
+  // why immortality matters — an idle benchmark that still "passes" — reads as
+  // covering the scene as it now stands, not just the creep this block happens to
+  // assert directly.
   const text = readFileSync(STRESS_RULESET_URL, 'utf8');
   const bundle = parseRulesetJson(text);
 
@@ -343,6 +350,178 @@ describe('the control twins are pairwise identical to their stress counterpart e
 
   it("stress-chill-single is stress-chill's single-form twin, slow effect included", () => {
     expectSingleFormTwin('stress-chill', 'stress-chill-single');
+  });
+});
+
+describe('stress-venom (PLAN step 7 / packet P9 §1)', () => {
+  const text = readFileSync(STRESS_RULESET_URL, 'utf8');
+  const bundle = parseRulesetJson(text);
+
+  function towerById(id: string) {
+    const tower = bundle.towerCatalog.find((t) => t.id === id);
+    if (tower === undefined) throw new Error(`no tower catalog entry for '${id}'`);
+    return tower;
+  }
+
+  function directEffect(tower: ReturnType<typeof towerById>) {
+    const effect = tower.effects.find((e) => e.kind === 'direct');
+    if (effect === undefined) throw new Error(`tower '${tower.id}' has no direct effect`);
+    return effect;
+  }
+
+  function dotEffect(tower: ReturnType<typeof towerById>) {
+    const effect = tower.effects.find((e) => e.kind === 'dot');
+    if (effect === undefined) throw new Error(`tower '${tower.id}' has no dot effect`);
+    return effect;
+  }
+
+  it('catalog fields: cost 12, attack block, both effects in authored order (direct then dot)', () => {
+    const venom = towerById('stress-venom');
+    expect(venom.cost).toBe(12);
+    if (venom.attack === undefined) throw new Error("'stress-venom' has no attack block");
+    expect(venom.attack).toEqual({
+      domain: 'ground',
+      rangeFp: 1024,
+      cadenceTicks: 30,
+      travelTicks: 2,
+    });
+    expect(venom.effects).toHaveLength(2);
+    expect(venom.effects[0]!.kind).toBe('direct');
+    expect(venom.effects[1]!.kind).toBe('dot');
+    const direct = directEffect(venom);
+    expect(direct).toEqual({ kind: 'direct', form: 'single', damage: 1 });
+    const dot = dotEffect(venom);
+    expect(dot).toEqual({ kind: 'dot', damagePerTick: 1, cadenceTicks: 10, durationTicks: 240 });
+  });
+
+  it('is blast-free: direct form is single, no radiusFp — protects controlNoBlasts', () => {
+    const venom = towerById('stress-venom');
+    const direct = directEffect(venom);
+    expect(direct.form).toBe('single');
+    if (direct.form !== 'single') throw new Error('unreachable — asserted immediately above');
+    expect('radiusFp' in direct).toBe(false);
+  });
+
+  it('the ratio-gate arithmetic, pinned as named numbers: durationTicks sits exactly on the ceiling', () => {
+    const venom = towerById('stress-venom');
+    const dot = dotEffect(venom);
+    const durationTicks = dot.durationTicks;
+    if (venom.attack === undefined) throw new Error("'stress-venom' has no attack block");
+    const cadenceTicks = venom.attack.cadenceTicks;
+    if (cadenceTicks === undefined) {
+      throw new Error("'stress-venom's attack has no cadenceTicks");
+    }
+    // MAX_DOT_DURATION_CADENCE_RATIO is not exported through @wynding/sim's public
+    // barrel (only `packages/sim/src/ruleset-shared.ts:99` defines it, and
+    // `capability.ts`/`combat.ts` consume it internally) — per packet P9 §5, hardcoded
+    // here with the source line named rather than widening sim's exports for a test.
+    // Because it is hardcoded, THIS test is not the real gate on that ratio: if the
+    // constant moved (8 -> 6, say), this file's own literal would move with it by hand
+    // and the assertions below would still pass on an otherwise-broken bundle. The real
+    // gate is the separate `compileRuleset` test above ("compiles cleanly given the
+    // bound holds") — if the ratio constant changed under an unchanged bundle, THAT is
+    // what would start throwing. And 240 sits EXACTLY on the `>` boundary
+    // (`durationTicks > MAX_DOT_DURATION_CADENCE_RATIO * cadenceTicks` is the compiler's
+    // rejection condition, so 240 === 8 * 30 passes with zero slack in the direction
+    // that would reject it — one more tick and the bundle stops compiling).
+    const maxDotDurationCadenceRatio = 8; // ruleset-shared.ts:99, MAX_DOT_DURATION_CADENCE_RATIO
+    expect(durationTicks).toBe(240);
+    expect(cadenceTicks).toBe(30);
+    expect(durationTicks).toBe(maxDotDurationCadenceRatio * cadenceTicks);
+    // Residency per source: floor((durationTicks - 1) / cadenceTicks) + 1 = 8, the
+    // maximum the ratio gate allows (7 would be the residency at durationTicks 239).
+    const residencyPerSource = Math.floor((durationTicks - 1) / cadenceTicks) + 1;
+    expect(residencyPerSource).toBe(8);
+  });
+});
+
+describe('stress-armored (PLAN step 7 / packet P9 §1)', () => {
+  const text = readFileSync(STRESS_RULESET_URL, 'utf8');
+  const bundle = parseRulesetJson(text);
+
+  function creepById(id: string) {
+    const creep = bundle.creepCatalog.find((c) => c.id === id);
+    if (creep === undefined) throw new Error(`no creep catalog entry for '${id}'`);
+    return creep;
+  }
+
+  it('catalog fields: hp 1,000,000, armor 6, bounty/domain/immunities/leakCost match stress-runner’s convention', () => {
+    const armored = creepById('stress-armored');
+    expect(armored.hp).toBe(1_000_000);
+    expect(armored.armor).toBe(6);
+    expect(armored.domain).toBe('ground');
+    expect(armored.immunities).toEqual([]);
+    expect(armored.leakCost).toBe(1);
+    expect(armored.bounty).toBe(1);
+  });
+
+  it('speedFp equals stress-runner’s EXACTLY, asserted between the two parsed creeps — keeps the compile-time traversal bound true by construction', () => {
+    const armored = creepById('stress-armored');
+    const runner = creepById('stress-runner');
+    expect(armored.speedFp).toBe(runner.speedFp);
+  });
+
+  it('armor blanks every catalog tower’s direct damage to 0 — iterates the whole catalog, not a hand-picked list, so a fourth stress tower added later (or stress-single/stress-chill-single, the towers that actually fire at armored creeps in the control arm) is checked automatically', () => {
+    const armored = creepById('stress-armored');
+    const armor = armored.armor;
+    for (const tower of bundle.towerCatalog) {
+      const direct = tower.effects.find((e) => e.kind === 'direct');
+      if (direct === undefined) continue; // no direct effect to blank — nothing to check
+      if (direct.kind !== 'direct') throw new Error('unreachable — filtered above');
+      expect(Math.max(0, direct.damage - armor)).toBe(0);
+    }
+  });
+});
+
+describe('the wave composition after the one-for-one stress-armored swap (PLAN step 7 / packet P9 §1)', () => {
+  const text = readFileSync(STRESS_RULESET_URL, 'utf8');
+  const bundle = parseRulesetJson(text);
+  const board = bundle.boards.find((b) => b.id === STRESS_BOARD_ID);
+  if (board === undefined) throw new Error(`no board '${STRESS_BOARD_ID}' in the stress bundle`);
+  const wave = board.waves[0]!;
+
+  it('still exactly 16 entries, still 304 total spawns', () => {
+    expect(wave.entries).toHaveLength(16);
+    const total = wave.entries.reduce((sum, e) => sum + e.count, 0);
+    expect(total).toBe(304);
+  });
+
+  it('entries 0, 3, 6, 9, 12, 15 are stress-armored (114 total); the other ten are stress-runner (190 total) — order asserted, not just counts, since spawn order drives id assignment', () => {
+    const armoredIndices = new Set([0, 3, 6, 9, 12, 15]);
+    let armoredCount = 0;
+    let runnerCount = 0;
+    wave.entries.forEach((entry, i) => {
+      if (armoredIndices.has(i)) {
+        expect(entry.creepId).toBe('stress-armored');
+        armoredCount += entry.count;
+      } else {
+        expect(entry.creepId).toBe('stress-runner');
+        runnerCount += entry.count;
+      }
+    });
+    expect(armoredCount).toBe(114);
+    expect(runnerCount).toBe(190);
+  });
+});
+
+describe('the identity-mapped control twin: stress-venom is deliberately NOT an expectSingleFormTwin pair', () => {
+  // stress-venom maps to itself in `buildControlReplay` (`packages/perf/src/scenario.ts`)
+  // rather than to a single-form twin — it is already blast-free, so there is no twin to
+  // compare. This assertion covers only that no such twin exists in the catalog; it is
+  // TAUTOLOGICAL for guarding `buildControlReplay`'s own mapper — it fails only if a
+  // tower named `stress-venom-single` is ever added, never if the mapper's explicit
+  // `stress-venom` arm is deleted (falling through to the `stress-single` `else`), which
+  // is the actual failure `scenario.ts`'s own warning comment exists to guard against.
+  // `packages/perf/src/scenario.test.ts`'s "buildControlReplay keeps stress-venom, at the
+  // same placements as the stress arm" describe is the one that actually guards the
+  // mapper (packet P9 §2) — it is derived from the built replays, not from this catalog
+  // fact.
+  const text = readFileSync(STRESS_RULESET_URL, 'utf8');
+  const bundle = parseRulesetJson(text);
+
+  it('no tower catalog entry named stress-venom-single exists', () => {
+    const twin = bundle.towerCatalog.find((t) => t.id === 'stress-venom-single');
+    expect(twin).toBeUndefined();
   });
 });
 

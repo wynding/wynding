@@ -75,9 +75,10 @@ export function stressAnchors(): readonly { col: number; row: number }[] {
   return anchors;
 }
 
-/** The tower catalog id to place at a given index in `stressAnchors()`'s order. Every
- *  third anchor (index 2, 5, 8, …) is `stress-chill`; the rest are `stress-blast` — 100
- *  blast + 50 chill over 150 anchors. Both towers cost 12, so 150 × 12 = 1800 exactly
+/** The tower catalog id to place at a given index in `stressAnchors()`'s order. A
+ *  three-way split over the 150 anchors: index % 3 === 2 is `stress-chill`, index % 3
+ *  === 1 is `stress-venom`, and everything else (index % 3 === 0) is `stress-blast` —
+ *  50 chill + 50 venom + 50 blast. All three towers cost 12, so 150 × 12 = 1800 exactly
  *  matches the bundle's `startingBounty` (`stress-40x40.json`'s `balance.startingBounty`).
  *  That equality is a second, independent oracle beyond "the compiler accepted the
  *  bundle": if the leftover bounty after all 150 placements is exactly 0, every single
@@ -85,7 +86,9 @@ export function stressAnchors(): readonly { col: number; row: number }[] {
  *  deterministic no-op per PLAN step 18 — it would silently leave bounty unspent
  *  instead of throwing), so a non-zero leftover would be the tell. */
 export function towerIdAt(index: number): string {
-  return index % 3 === 2 ? 'stress-chill' : 'stress-blast';
+  if (index % 3 === 2) return 'stress-chill';
+  if (index % 3 === 1) return 'stress-venom';
+  return 'stress-blast';
 }
 
 /**
