@@ -92,7 +92,7 @@
       },
       "effects": [
         { "kind": "direct", "form": "single", "damage": 2 },
-        { "kind": "dot", "damagePerTick": 2, "cadenceTicks": 10, "durationTicks": 60 }
+        { "kind": "dot", "damagePerTick": 4, "cadenceTicks": 10, "durationTicks": 60 }
       ]
     }
   ],

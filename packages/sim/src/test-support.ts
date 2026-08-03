@@ -44,9 +44,18 @@ export const TEST_FAST_CREEP: CreepDef = {
 };
 
 /** The M2-S5a `venom` tower stat block — ground-scoped, direct-then-dot authored
- *  order (mirrors the shipped `wynding-core` bundle's `venom` tower, step 22):
- *  cost 9, damage 2, DoT 2/tick every 10 ticks for 60 ticks, range 1024, cadence
- *  30, travel 2. */
+ *  order: cost 9, damage 2, DoT 2/tick every 10 ticks for 60 ticks, range 1024,
+ *  cadence 30, travel 2. A **mechanics fixture, deliberately independent of the
+ *  shipped catalog** — `packages/sim` cannot import `@wynding/content` under this
+ *  file's own header (lines 3-5), so sim tests build rulesets inline instead of
+ *  reading the shipped bundle. It was seeded from the shipped `venom`'s shape but
+ *  no longer tracks its magnitude: the shipped tower went to DoT 4 per tick in
+ *  M2-S5b PR A while this fixture stays at 2, and that divergence is deliberate.
+ *  Before syncing it, note it has TWO dependents, both of which a change moves:
+ *  `determinism.test.ts`'s world-hash golden (which must not move when content
+ *  balance changes), and `story-dot.test.ts` — the sim's whole DoT behavioural
+ *  suite, which derives its `AMOUNT`/`CADENCE`/`DURATION` from this block rather
+ *  than hardcoding them. */
 export const TEST_DOT_TOWER: TowerDef = {
   id: 'venom',
   cost: 9,

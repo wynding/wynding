@@ -203,7 +203,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // A change here means the shipped artifact's CONTENT changed (or its normalized
 // encoding did) — not a behavior change per se, but every deployed replay/leaderboard
 // entry binds to this exact digest (ADR 0007 §3), so a change is never silent.
-const SHIPPED_RULESET_HASH = 'ddc8a09422082fece31a8b19a97233ee6725099bdce97143e45ba29065917468';
+const SHIPPED_RULESET_HASH = '76f635a096599696f9ba14a5ef05029b06c6799df8305750e50bf3b241e88f68';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {
