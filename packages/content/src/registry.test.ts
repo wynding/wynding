@@ -117,7 +117,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
         attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
         effects: [
           { kind: 'direct', form: 'single', damage: 2 },
-          { kind: 'dot', damagePerTick: 2, cadenceTicks: 10, durationTicks: 60 },
+          { kind: 'dot', damagePerTick: 4, cadenceTicks: 10, durationTicks: 60 },
         ],
       },
     ]);

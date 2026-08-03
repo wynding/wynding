@@ -386,10 +386,13 @@ test('the Splash Tower ghost + blast-radius preview stay functional and axe-clea
 
 // M2-S5a step 31/33: `venom` adds a `dot` effect (armor-bypassing damage-over-time) and a
 // footprint mark distinct from `basic`/`slow`/`splash`. The DoT telegraph (three pips +
-// drift, on a poisoned creep) and the footprint's droplet mark are DECORATIVE canvas-only
-// cues (outcomes stay carried by HP pips, per the Tracer glossary entry — PLAN.md step
-// 32 makes the telegraph ESSENTIAL to draw, not essential for axe, since the underlying
-// scheduled-damage FACT is also readable as the Panel's `panel.dot` text row below), so
+// drift, on a poisoned creep) and the footprint's droplet mark are canvas-only cues that
+// are AXE-INVISIBLE, which is not the same as decorative: `docs/accessibility-checklist.md`
+// records that the decorative-by-analogy reading was reviewed and REJECTED (PLAN.md step 32
+// corrected it) — HP pips show damage already taken, a DoT record is damage already
+// SCHEDULED, so the shape cue carries information no other canvas surface does. It is
+// ESSENTIAL to draw, and merely not essential for axe, because the underlying
+// scheduled-damage FACT is also readable as the Panel's `panel.dot` text row below, so
 // axe cannot see the canvas cues at all — same posture the blast ring/crosshair preview
 // already established (M2-S4a). This e2e proves the DOM-visible half: the Card/Panel/
 // hotkey surface stays fully functional and axe-clean for valid + invalid placement.
@@ -409,7 +412,7 @@ test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels 
   // The DoT is labelled as TEXT, alongside the range stat every tower already shows —
   // never telegraph-only (PLAN.md step 31/32's a11y obligation): magnitude, cadence, and
   // duration all read out (`panel.dot`, mirrored exactly from `overlay.test.ts`).
-  await expect(panel).toContainText('Poison: 2 damage every 0.5s for 3.0s');
+  await expect(panel).toContainText('Poison: 4 damage every 0.5s for 3.0s');
   await expect(panel).toContainText('Range:');
   await expect(board).toBeFocused();
 
@@ -433,7 +436,7 @@ test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels 
 
   await expect(venomCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
   await expect(panel).toContainText('Venom Tower'); // now selected
-  await expect(panel).toContainText('Poison: 2 damage every 0.5s for 3.0s');
+  await expect(panel).toContainText('Poison: 4 damage every 0.5s for 3.0s');
 
   const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
@@ -493,7 +496,7 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(previewAudit.violations, JSON.stringify(previewAudit.violations, null, 2)).toEqual([]);
 
-  // Call wave 4 and let the (reduced-motion, decorative) poisoned telegraph + hexagon
+  // Call wave 4 and let the (reduced-motion, axe-invisible) poisoned telegraph + hexagon
   // silhouette actually render for a moment on canvas — proving the live-run DOM stays
   // axe-clean with an armored, poisoned creep on the board, not merely the wave preview.
   await callWave.click();

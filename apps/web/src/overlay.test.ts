@@ -886,7 +886,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(text).toContain('Venom Tower');
     expect(text).toContain('Cost: 9');
     expect(text).toContain('Damage: 2'); // the direct effect's amount only
-    expect(text).toContain('Poison: 2 damage every 0.5s for 3.0s'); // dot: 2/10cadence/60duration ticks
+    expect(text).toContain('Poison: 4 damage every 0.5s for 3.0s'); // dot: 4/10cadence/60duration ticks
   });
 
   it('the Panel shows no DoT row for the BASIC tower (no `dot` effect)', () => {
