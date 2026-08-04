@@ -195,7 +195,37 @@ export const TOLERANCE = 1.25;
  * `TOLERANCE`" escalation is NOT triggered. Fixed cohort: exactly five samples, no sixth
  * sample and no widened tolerance.
  *
- * THE FINDING THAT MUST NOT BE SOFTENED. On this same cohort, p95's spread is nearly
+ * THE SIXTH OBSERVATION, AND THE DIAGNOSIS IT BOUGHT (2026-08-03, owner-ruled to ship
+ * as-is). The very next CI run after this cohort was recorded — the run validating the
+ * new `R0` — came in at **R = 1.7595 against the 1.7750 ceiling: a 0.88% margin**, and
+ * 11.3% ABOVE the recorded cohort's maximum. It is NOT a sixth sample (the cohort stays
+ * fixed at five, per the plan: no re-record, no widened `TOLERANCE`), but it is on record
+ * because ignoring it would make this doc a lie by omission.
+ *
+ * Including it, the p95 spread is **33.8%** (1.3146 -> 1.7595) against the historical
+ * pre-S5b p99 population's 37.7%. So, stated without softening: **the switch to p95 did
+ * not reduce the flake.** The gate is expected to flake, and that outcome is inside the
+ * 2026-07-31 ruling, which accepted exactly this (`perf` is not a required check).
+ *
+ * But the OPERANDS explain WHY, and this is the first real diagnosis this gate has had:
+ *
+ *     quantity            cohort range        the 1.7595 run
+ *     controlStat p50     0.374 - 0.394       0.3876   <- NORMAL
+ *     stressStat  p95     0.495 - 0.595       0.6819   <- 15% above cohort max
+ *
+ * The denominator barely moved. **The whole stress-arm distribution shifted UP — a
+ * LOCATION shift, not a heavier tail.** That is why no percentile choice helps: p95 and
+ * p99 are both location statistics of the same shifted distribution, and under p99 this
+ * run would sit at R = 2.2951 against a p99-derived ceiling of 2.3375 — a 1.8% margin,
+ * equally marginal. Choosing a different rank cannot fix a shift in the whole
+ * distribution's level.
+ *
+ * So the "the numerator absorbs the tail noise" framing below, which motivated the
+ * statistic swap, was aiming at the wrong thing. Whatever eventually fixes this gate has
+ * to target the stress arm's RUN-TO-RUN LEVEL, not the shape of its upper tail. Recorded
+ * here for whichever story picks up the perf diagnosis (unassigned as of S5b, S6-S10).
+ *
+ * THE FINDING THAT MUST NOT BE SOFTENED. On the recorded cohort, p95's spread is nearly
  * DOUBLE p99's: `(max - min) / min` over the five R(p95) values is **20.2%** (1.5802 vs
  * 1.3146), against **11.1%** for the five R(p99) values in the audit column above (2.0112
  * vs 1.8100) — computed on the exact same five runs, same attempts, same job. This file's

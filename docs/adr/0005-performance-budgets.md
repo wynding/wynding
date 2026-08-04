@@ -333,6 +333,22 @@ reproducible from the artifact rather than recomputed by hand.
    to catch, not less. Its declared blind spot, also measured, is cost concentrated in the
    top ~2% _by duration_, where p95 is unchanged by construction. See `gate.ts`.
 
+   **And the switch did not reduce the flake — recorded 2026-08-03, shipped as-is by
+   ruling.** The first CI run after `R0 = 1.42` was recorded came in at **R = 1.7595
+   against the 1.7750 ceiling, a 0.88% margin** — above the five-sample cohort's maximum.
+   Including it, the p95 spread is **33.8%**, against the 37.7% this finding originally
+   recorded for p99. The cohort stays fixed at five: no re-record, no widened `TOLERANCE`.
+
+   That run bought the first real diagnosis, and it is the durable result of this exercise:
+   `controlStat` was normal (0.3876 against a cohort range of 0.374–0.394) while
+   `stressStat` sat 15% above the cohort maximum (0.6819 against 0.495–0.595). **The stress
+   arm's whole distribution shifts run to run — a location shift, not a heavier tail.** No
+   percentile choice can fix that: under p99 the same run would have sat 1.8% under its own
+   ceiling, equally marginal. So this finding's original "the numerator absorbs the tail
+   noise" reasoning was aiming at the wrong thing, and whatever eventually fixes this gate
+   must target the stress arm's run-to-run **level**. The perf diagnosis remains unassigned
+   (S6–S10).
+
 Everything else measured clear, with margin: JS heap **42.1 MB** on the low-end profile (the one
 the ~256 MB budget is written for), worst-of-20 input latency **34.4 ms** against 100 ms, and
 initial JS **0.36 MB** gzipped against 3 MB — **JS only, and that is the whole payload:
