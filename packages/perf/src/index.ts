@@ -32,6 +32,7 @@
 // guarantee that is wrong is worse than no guarantee, because a reader trusts it.
 
 export { BAND_COLS, TAIL_BAFFLES, stressAnchors, towerIdAt, stressRouteLength } from './layout';
+export type { StressTowerId } from './layout';
 export {
   buildStressReplay,
   buildControlReplay,
@@ -55,7 +56,12 @@ export {
   ROUTE_LENGTH_FLOOR,
   REQUIRE_ALL_RUNNING,
   DUE_BLAST_SAMPLES_THRESHOLD,
-  PEAK_ACTIVE_STATUS_THRESHOLD,
+  PEAK_SLOWED_CREEPS_THRESHOLD,
+  PEAK_DOT_RECORDS_THRESHOLD,
+  DOT_RECORD_DEPTH_THRESHOLD,
+  DOT_ACTIVE_SAMPLES_THRESHOLD,
+  PEAK_ARMORED_LIVE_THRESHOLD,
+  DOT_DROPPED_THRESHOLD,
   QUALIFYING_SAMPLES_THRESHOLD,
   LEFTOVER_BOUNTY_THRESHOLD,
   KNOWN_OPEN_ASSERTIONS,
@@ -63,5 +69,15 @@ export {
   type OracleResult,
   type OracleInput,
 } from './oracle';
-export { controlStat, stressStat, evaluateGate, TOLERANCE, R0, type GateResult } from './gate';
+export {
+  controlStat,
+  stressStat,
+  // The pre-M2-S5b-P11 statistic, kept for audit — exported alongside the statistic it
+  // audits so a consumer can render both, not just the one that gates.
+  stressStatP99,
+  evaluateGate,
+  TOLERANCE,
+  R0,
+  type GateResult,
+} from './gate';
 export { evaluateEscalation, type EscalationResult } from './escalation';

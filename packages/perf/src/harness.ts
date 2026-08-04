@@ -17,6 +17,7 @@ import {
   createInitialState,
   step,
   countValidTowers,
+  hashSimState,
   type CompiledRuleset,
   type SimPhase,
   type SimState,
@@ -57,6 +58,34 @@ export interface SampledTick {
    *  "status effects live, per the active mix" requirement made countable. */
   readonly slowedCreeps: number;
   readonly phase: SimPhase;
+  /** `StepEvents.dotTicks` read back for this tick — count of DoT ticks actually
+   *  APPLIED this step (M2-S5b P10). Sourced from the UNTIMED pass's collector
+   *  (see `runSampled` below): the timed pass's collector deliberately omits
+   *  `dotTicks`, so this field is never available from the region whose wall-clock
+   *  feeds the gate. */
+  readonly dotTicks: number;
+  /** `StepEvents.dotDropped` read back for this tick — count of DoT applications
+   *  dropped this step for want of table capacity (`combat.ts`'s `applyDot`,
+   *  `MAX_DOT_RECORDS`). Sourced from the TIMED pass's collector: production's real
+   *  controller does supply `dotDropped` (unlike `dotTicks`), so carrying it there
+   *  costs nothing beyond what a real run already pays. */
+  readonly dotDropped: number;
+  /** `state.dots.length` taken POST-`step()` — the count of resident DoT records
+   *  this tick. Deliberately NOT sampled pre-step: a pre-step count would include
+   *  records that are merely DUE, not ticks that actually happened (a creep can be
+   *  killed by an impact earlier in the same combat phase), which overstates in
+   *  exactly the way an oracle floor exists to catch. */
+  readonly dotRecords: number;
+  /** Distinct `targetId`s across `state.dots` POST-`step()`, counted in one pass
+   *  (a `Set`) — the number of creeps CARRYING at least one DoT record this tick,
+   *  as opposed to `dotRecords`, which counts the records themselves and can
+   *  exceed it (several sources' records stacked on the same creep). */
+  readonly dotCarriers: number;
+  /** Count of live creeps whose CATALOG armor (`CompiledRuleset.creepById`) is
+   *  nonzero, taken POST-`step()`. Resolved against an id -> armor lookup built
+   *  ONCE outside the tick loop (see `runSampled`'s `armorByCreepId`), not
+   *  re-derived per creep per tick. */
+  readonly armoredLive: number;
 }
 
 /** The post-build facts the oracle needs beyond the sampled-tick series (PLAN step
@@ -78,7 +107,38 @@ export interface RunSampledResult {
    *  placements × cost 12 exactly matches `startingBounty`, so any non-zero leftover
    *  means at least one placement was silently rejected). */
   readonly leftoverBountyAfterBuild: number;
+  /** `StepEvents.dotDropped`, summed across EVERY tick of the run — warm-up AND
+   *  sampled (M2-S5b P10). DoT activity begins inside `WARMUP_TICKS`, so a total
+   *  computed only over `samples` would be blind to a drop during warm-up, which
+   *  is the one thing this counter exists to make impossible. This is the field
+   *  `oracle.ts`'s "dropped DoT applications" assertion gates — not any per-tick
+   *  `SampledTick.dotDropped` value. */
+  readonly dotDroppedTotal: number;
 }
+
+/** The `SampledTick` fields the TIMED pass collects, and the ones the UNTIMED pass
+ *  collects — derived from `SampledTick` with `Pick` rather than restated as inline
+ *  literals, so the split between the two passes is declared exactly ONCE. The old inline
+ *  literal types listed the same field names a third and fourth time; they were not
+ *  UNSAFE (the merge is annotated `const record: SampledTick`, so a newly-required field
+ *  failed to compile there under either shape) — they were redundant, and the timed half
+ *  now propagates into the merge through a spread instead of being retyped field by field.
+ *
+ *  Declared ABOVE `runSampled`'s doc comment, not between it and the function: TypeScript
+ *  attaches EVERY JSDoc block in a declaration's leading trivia to that declaration, so
+ *  sitting between the two would silently make `runSampled`'s rationale the documentation
+ *  of a type alias. Same hazard `gate.ts`'s blind-spot `//` block avoids.
+ *
+ *  `dotDropped` deliberately appears in BOTH: each pass collects it independently, and the
+ *  two totals are cross-checked below. The merge sources it from the timed pass. */
+type TimedFields = Pick<
+  SampledTick,
+  'tick' | 'ms' | 'dueBlasts' | 'liveCreeps' | 'slowedCreeps' | 'phase' | 'dotDropped'
+>;
+type UntimedFields = Pick<
+  SampledTick,
+  'dotTicks' | 'dotDropped' | 'dotRecords' | 'dotCarriers' | 'armoredLive'
+>;
 
 /**
  * Runs `replay.tickInputs` against `bundle` for `WARMUP_TICKS + SAMPLE_TICKS` ticks,
@@ -96,14 +156,46 @@ export interface RunSampledResult {
  * replays are shorter than `WARMUP_TICKS + SAMPLE_TICKS`, so almost the entire run
  * plays no further commands, exactly like the real replay path treats a log shorter
  * than the ticks it re-simulates.
+ *
+ * TWO PASSES over the same replay and bundle (M2-S5b P10), unconditionally — no
+ * condition, no judgement call on whether instrumentation overhead is "big enough" to
+ * bother splitting. The extra pass costs ~2.3s and deletes the whole question:
+ *   - The TIMED pass feeds the gate and carries the MINIMAL gate collector:
+ *     `impactPoints` (due-blast identification), `fired: []` (REQUIRED on
+ *     `StepEvents` — no `?` — so a `{ impactPoints, dotDropped }` literal would not
+ *     compile), and `dotDropped` (which production DOES supply). `dotTicks` is
+ *     OMITTED, and that is the entire point: `combat.ts` only pays the
+ *     `events.dotTicks++` cost when the field is present, so leaving it out of this
+ *     pass's collector keeps that cost out of the wall-clock the gate reads. This is
+ *     deliberately NOT called "production-shaped" — the gate needs `impactPoints`,
+ *     which the production controller never supplies either, so that label would be
+ *     false.
+ *   - The UNTIMED pass re-runs the identical replay and collects every remaining
+ *     oracle field — `dotTicks`, `dotRecords`, `dotCarriers`, `armoredLive` (plus a
+ *     second `dotDropped`, carried so its total can be cross-checked against the
+ *     timed pass's — see below). Its wall-clock is NEVER read.
+ *   - Both passes traverse the same replay against the same bundle, so their sim
+ *     state is byte-identical BY CONSTRUCTION — asserted here with a STATE-DERIVED
+ *     comparison (the final world hash, `hashSimState`, plus terminal tick and
+ *     phase), NOT `dotDropped`: that counter reads 0 in both passes on a healthy run,
+ *     so it would agree even while the states had diverged. The two passes' summed
+ *     `dotDropped` are compared too, but as an event result in its own right, never
+ *     as the equality proof.
  */
 export function runSampled(replay: Replay, bundle: Ruleset): RunSampledResult {
   const ruleset: CompiledRuleset = compileRuleset(bundle, replay.boardId);
-  let state: SimState = createInitialState(replay.seed, ruleset);
-
   const totalTicks = WARMUP_TICKS + SAMPLE_TICKS;
-  const warmup: SampledTick[] = [];
-  const samples: SampledTick[] = [];
+
+  // id -> catalog armor, resolved ONCE here (`armoredLive`'s doc on `SampledTick`) —
+  // not re-derived per creep per tick inside the untimed pass's loop below.
+  const armorByCreepId = new Map<string, number>();
+  for (const [id, creep] of Object.entries(ruleset.creepById)) {
+    if (creep !== undefined) armorByCreepId.set(id, creep.armor);
+  }
+
+  // --- Pass 1: TIMED, minimal gate collector (dotTicks omitted). --------------
+  let timedState: SimState = createInitialState(replay.seed, ruleset);
+  const timedRecords: TimedFields[] = [];
   let towersPlacedAfterBuild = 0;
   // -1, NOT 0 (QC round 1). `LEFTOVER_BOUNTY_THRESHOLD` is 0 — the maze consumes the
   // bundle's entire starting bounty — so initialising this to 0 made the snapshot's own
@@ -112,25 +204,26 @@ export function runSampled(replay: Replay, bundle: Ruleset): RunSampledResult {
   // Verified: an empty-`tickInputs` replay failed the tower-count assertion (correctly)
   // while passing the bounty one. A sentinel no real bounty can take fails closed.
   let leftoverBountyAfterBuild = -1;
+  let timedDotDroppedTotal = 0;
 
   for (let tick = 0; tick < totalTicks; tick++) {
     const inputs = replay.tickInputs[tick] ?? [];
-    // Allocated OUTSIDE the timed region (below): `StepEvents`'s two arrays are
+    // Allocated OUTSIDE the timed region (below): `StepEvents`'s arrays/counters are
     // per-tick presentational out-params (`@wynding/sim`'s combat.ts), unrelated to
     // `step()`'s own cost — timing their allocation would measure this harness's
     // bookkeeping, not the workload ADR 0005 budgets.
-    const events: StepEvents = { impactPoints: [], fired: [] };
+    const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
     const start = performance.now();
-    state = step(state, ruleset, inputs, events);
+    timedState = step(timedState, ruleset, inputs, events);
     const ms = performance.now() - start;
 
     if (tick === replay.tickInputs.length - 1) {
       towersPlacedAfterBuild = countValidTowers(
         ruleset.board.grid,
-        state.towers,
+        timedState.towers,
         ruleset.towerById,
       );
-      leftoverBountyAfterBuild = state.bounty;
+      leftoverBountyAfterBuild = timedState.bounty;
     }
 
     let dueBlasts = 0;
@@ -138,16 +231,93 @@ export function runSampled(replay: Replay, bundle: Ruleset): RunSampledResult {
       if (point.radiusFp > 0) dueBlasts++;
     }
     let slowedCreeps = 0;
-    for (const mul of state.creeps.slowMulFp) {
+    for (const mul of timedState.creeps.slowMulFp) {
       if (mul !== 0) slowedCreeps++;
     }
-    const record: SampledTick = {
+    const dotDropped = events.dotDropped ?? 0;
+    timedDotDroppedTotal += dotDropped;
+    timedRecords.push({
       tick,
       ms,
       dueBlasts,
-      liveCreeps: state.creeps.id.length,
+      liveCreeps: timedState.creeps.id.length,
       slowedCreeps,
-      phase: state.phase,
+      phase: timedState.phase,
+      dotDropped,
+    });
+  }
+
+  // --- Pass 2: UNTIMED, full DoT/armor collector. Wall-clock never read. ------
+  let untimedState: SimState = createInitialState(replay.seed, ruleset);
+  const untimedRecords: UntimedFields[] = [];
+  let untimedDotDroppedTotal = 0;
+
+  for (let tick = 0; tick < totalTicks; tick++) {
+    const inputs = replay.tickInputs[tick] ?? [];
+    const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
+    untimedState = step(untimedState, ruleset, inputs, events);
+
+    const dotTicks = events.dotTicks ?? 0;
+    const dotDropped = events.dotDropped ?? 0;
+    untimedDotDroppedTotal += dotDropped;
+
+    // `state.dots.length` taken POST-step — see `dotRecords`'s doc on `SampledTick`
+    // for why a pre-step count would overstate.
+    const dotRecords = untimedState.dots.length;
+    // Distinct `targetId`s, one pass over `state.dots`.
+    const carrierIds = new Set<number>();
+    for (const dot of untimedState.dots) carrierIds.add(dot.targetId);
+    const dotCarriers = carrierIds.size;
+
+    let armoredLive = 0;
+    for (const creepId of untimedState.creeps.creepId) {
+      if ((armorByCreepId.get(creepId) ?? 0) !== 0) armoredLive++;
+    }
+
+    untimedRecords.push({ dotTicks, dotDropped, dotRecords, dotCarriers, armoredLive });
+  }
+
+  // --- Both passes traversed identical sim state: assert it, state-derived. ---
+  const timedHash = hashSimState(timedState);
+  const untimedHash = hashSimState(untimedState);
+  if (
+    timedHash !== untimedHash ||
+    timedState.tick !== untimedState.tick ||
+    timedState.phase !== untimedState.phase
+  ) {
+    throw new Error(
+      `runSampled: the timed and untimed passes diverged — ` +
+        `timed{hash=${timedHash}, tick=${timedState.tick}, phase=${timedState.phase}} vs ` +
+        `untimed{hash=${untimedHash}, tick=${untimedState.tick}, phase=${untimedState.phase}}. ` +
+        `Both passes run the identical replay against the identical bundle, so this can only ` +
+        `mean the two collectors' differing shape changed sim behaviour — a StepEvents ` +
+        `contract violation, not a measurement artifact.`,
+    );
+  }
+  // Compared as an event result in its own right, NOT as the equality proof above —
+  // `dotDropped` reads 0 in both passes on a healthy run and would agree even if the
+  // states had diverged (this function's doc comment).
+  if (timedDotDroppedTotal !== untimedDotDroppedTotal) {
+    throw new Error(
+      `runSampled: the timed pass's dotDropped total (${timedDotDroppedTotal}) does not match ` +
+        `the untimed pass's (${untimedDotDroppedTotal}) despite identical final sim state.`,
+    );
+  }
+
+  // --- Merge, index-aligned: both loops ran the identical `totalTicks` ticks. -
+  const warmup: SampledTick[] = [];
+  const samples: SampledTick[] = [];
+  for (let tick = 0; tick < totalTicks; tick++) {
+    const t = timedRecords[tick]!;
+    const u = untimedRecords[tick]!;
+    // Spread the timed record (which carries `dotDropped`), then name the untimed-only
+    // fields. A `SampledTick` field claimed by neither `Pick` above fails HERE.
+    const record: SampledTick = {
+      ...t,
+      dotTicks: u.dotTicks,
+      dotRecords: u.dotRecords,
+      dotCarriers: u.dotCarriers,
+      armoredLive: u.armoredLive,
     };
     if (tick < WARMUP_TICKS) {
       warmup.push(record);
@@ -156,5 +326,11 @@ export function runSampled(replay: Replay, bundle: Ruleset): RunSampledResult {
     }
   }
 
-  return { warmup, samples, towersPlacedAfterBuild, leftoverBountyAfterBuild };
+  return {
+    warmup,
+    samples,
+    towersPlacedAfterBuild,
+    leftoverBountyAfterBuild,
+    dotDroppedTotal: timedDotDroppedTotal,
+  };
 }

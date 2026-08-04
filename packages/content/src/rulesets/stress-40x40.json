@@ -12,6 +12,16 @@
       "immunities": [],
       "leakCost": 1,
       "bounty": 1
+    },
+    {
+      "id": "stress-armored",
+      "hp": 1000000,
+      "speedFp": 60,
+      "armor": 6,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 1
     }
   ],
   "towerCatalog": [
@@ -44,6 +54,15 @@
         { "kind": "direct", "form": "single", "damage": 1 },
         { "kind": "slow", "mulFp": 179, "durationTicks": 200 }
       ]
+    },
+    {
+      "id": "stress-venom",
+      "cost": 12,
+      "attack": { "domain": "ground", "rangeFp": 1024, "cadenceTicks": 30, "travelTicks": 2 },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 1 },
+        { "kind": "dot", "damagePerTick": 1, "cadenceTicks": 10, "durationTicks": 240 }
+      ]
     }
   ],
   "balance": {
@@ -69,22 +88,22 @@
           "countdownTicks": 100,
           "clearBonus": 1,
           "entries": [
+            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
             { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 }
+            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 }
           ]
         }
       ]

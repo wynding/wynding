@@ -61,11 +61,14 @@
 // table held AT the cap, once with `dots: []`, and this file reports both
 // percentiles for each arm plus their ratio.
 //
-// The scene is `scenario.ts`'s CONTROL replay — reused, not reinvented
-// (`buildControlReplay`, blast-free): this bench is isolating the cost of a full
-// `dots` table, and `gate.ts` already established that a blast-bearing scenario
-// mixes in AoE membership-scan cost that would dilute exactly the signal this file
-// exists to isolate. `MAX_DOT_RECORDS` synthetic filler records are seeded against
+// The scene is `scenario.ts`'s `buildDotFreeReplay` — reused, not reinvented: this
+// bench is isolating the cost of a full `dots` table, and `gate.ts` already
+// established that a blast-bearing scenario mixes in AoE membership-scan cost that
+// would dilute exactly the signal this file exists to isolate. `buildDotFreeReplay`
+// is `dot-bench`'s own scene, not `buildControlReplay` (the ratio gate's control arm,
+// which deliberately keeps `stress-venom` so DoT is not numerator-only) — see
+// `scenario.ts` for why the two diverged at M2-S5b P9. `MAX_DOT_RECORDS` synthetic
+// filler records are seeded against
 // the scene's OWN live creep ids (never a fabricated id) so the per-tick bucket
 // lookup (`combat.ts`'s `runCombat`, `dotsByTarget`) resolves against real SoA
 // rows, not phantom targets the sweep would silently never match — exercising the
@@ -103,7 +106,7 @@ import {
 } from '@wynding/sim';
 import type { Replay } from '@wynding/replay';
 import { STRESS_RULESET_URL } from '@wynding/content/stress';
-import { buildControlReplay } from './scenario';
+import { buildDotFreeReplay } from './scenario';
 import { WARMUP_TICKS, SAMPLE_TICKS } from './harness';
 import { percentile } from './stats';
 
@@ -123,7 +126,9 @@ const FILLER_SOURCE_ID_BASE = 1_000_000_000;
  *  records through `canonicalDotRecords`, the per-tick bucketing pass, and the
  *  live-creep bucket lookup (`combat.ts`'s `runCombat`), never the cost of a real
  *  firing record's damage/death cascade — that path is already exercised by
- *  `combat.test.ts`. */
+ *  `combat.test.ts`. This depends on the scene itself carrying zero real DoT
+ *  sources, which is exactly what `buildDotFreeReplay` (not `buildControlReplay`,
+ *  which now carries 50 `stress-venom` towers) guarantees. */
 const FILLER_HORIZON_TICKS = 10_000_000;
 
 /** Returns a closure handing out a strictly increasing, never-repeating source id
@@ -220,8 +225,8 @@ interface RunArmResult {
  * `atCap` is true, every sampled tick's `dots` table is topped back up to exactly
  * `MAX_DOT_RECORDS` — using the CURRENT live creep ids, i.e. whatever the previous
  * tick's `step()` left behind — outside the timed region, then asserted before the
- * timed `step()` call; when false, `dots` is asserted empty (this scene's towers
- * carry no `dot` effect, so it never grows on its own — the assertion is a
+ * timed `step()` call; when false, `dots` is asserted empty (`buildDotFreeReplay`'s
+ * towers carry no `dot` effect, so it never grows on its own — the assertion is a
  * cross-check against silent drift, not a tautology this file relies on).
  */
 function runArm(replay: Replay, ruleset: CompiledRuleset, atCap: boolean): RunArmResult {
@@ -252,9 +257,17 @@ function runArm(replay: Replay, ruleset: CompiledRuleset, atCap: boolean): RunAr
       }
     }
 
-    // Allocated OUTSIDE the timed region, matching `harness.ts`'s `runSampled`:
-    // `StepEvents`'s arrays are a per-tick presentational out-param, unrelated to
-    // `step()`'s own cost.
+    // Allocated OUTSIDE the timed region — the PLACEMENT still matches `harness.ts`'s
+    // `runSampled` (`StepEvents`'s arrays are a per-tick presentational out-param,
+    // unrelated to `step()`'s own cost), but the CONTENTS no longer do (packet §4):
+    // `runSampled`'s timed collector is now `{ impactPoints, fired, dotDropped }`
+    // (M2-S5b P10), while this one stays `{ impactPoints, fired }`. That matters
+    // specifically here: this bench's `atCap` arm holds `dots` AT `MAX_DOT_RECORDS`
+    // on every sampled tick, where `applyDot`'s drop branch fires constantly, so a
+    // collector that supplied `dotDropped` would pay `events.dotDropped++` on every
+    // one of those drops. This timed `step()` never supplies the field, so its timed
+    // region omits a cost `runSampled`'s timed pass now pays on the real
+    // stress/control runs.
     const events: StepEvents = { impactPoints: [], fired: [] };
     const start = performance.now();
     state = step(state, ruleset, inputs, events);
@@ -298,10 +311,12 @@ function percentileTable(samples: readonly DotBenchSample[]): PercentileTable {
 function main(): void {
   const bundleText = readFileSync(STRESS_RULESET_URL, 'utf8');
   const bundle = parseRulesetJson(bundleText);
-  // The CONTROL scenario, not the stress one: blast-free, so this bench isolates
-  // the DoT-table cost from the AoE membership-scan cost `gate.ts` already
-  // measures separately.
-  const replay = buildControlReplay(bundle);
+  // `buildDotFreeReplay`, NOT `buildControlReplay`: blast-free AND DoT-free, so this
+  // bench isolates the DoT-table cost from both the AoE membership-scan cost
+  // `gate.ts` already measures separately, and from the ratio gate's own control
+  // arm's 50 real `stress-venom` towers (which would otherwise seed real resident
+  // records this bench does not control).
+  const replay = buildDotFreeReplay(bundle);
   const ruleset = compileRuleset(bundle, replay.boardId);
 
   console.log(`Running dot-bench: dots at cap (MAX_DOT_RECORDS=${MAX_DOT_RECORDS})...`);

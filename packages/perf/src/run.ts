@@ -20,9 +20,13 @@
 // agree: it holds for every DECIDED outcome, not for a THROW. `evaluateGate` throws on a
 // zero-millisecond control median, `compileRuleset` throws on an unbuildable bundle, and
 // `stats.ts` throws on an empty series — any of those exits non-zero from a bare stack
-// trace with no `PERF-REPORT:` line emitted at all. That is the intended behaviour (a
-// broken measurement must not publish numbers), but a consumer parsing for the report
-// line must treat "absent" as a third outcome, not as success.
+// trace with no `PERF-REPORT:` line emitted at all. `runSampled` (M2-S5b P10) adds two
+// more: the pass-divergence throw (the timed and untimed passes' final sim state
+// disagreeing) and the `dotDropped`-mismatch throw (the two passes' summed
+// `dotDropped` disagreeing despite identical final state) — see `harness.ts`'s
+// `runSampled` doc for both. That is the intended behaviour (a broken measurement
+// must not publish numbers), but a consumer parsing for the report line must treat
+// "absent" as a third outcome, not as success.
 //
 // Phase 4 wired this into a root `perf` script (`pnpm run perf` -> `pnpm -C
 // packages/perf run perf` -> this file) and a dedicated CI job (`.github/workflows/
@@ -49,6 +53,12 @@ import {
   DUE_BLAST_SAMPLES_THRESHOLD,
   type OracleAssertion,
   isDueBlastSample,
+  peakDotRecords,
+  dotCarriersAtPeakDotRecords,
+  dotRecordDepthAtPeak,
+  peakDotCarriers,
+  dotActiveSampleCount,
+  peakArmoredLive,
 } from './oracle';
 import { evaluateGate, TOLERANCE, R0, type GateResult } from './gate';
 import {
@@ -81,6 +91,20 @@ const stressReplay = readReplay('stress-40x40.replay.json');
 // `WARMUP_TICKS`-tick in-scenario warm-up on top of this cross-scenario JIT warm-up).
 console.log('Running control scenario (blast-free calibration workload)...');
 const controlResult = runSampled(controlReplay, bundle);
+// DECLINED, on record (packet M2-S5b P10 §7) — do not "fix" this by reordering.
+// A review noted that the control run's own UNTIMED pass (`harness.ts`'s Pass 2,
+// ~2,700 `Set` allocations for `dotCarriers`) lands immediately upstream, right
+// here, of the next call's TIMED pass — the one that feeds the gate — so a GC pause
+// induced by those allocations could in principle land inside the measured region.
+// We are NOT reordering the passes to put distance between them: `stressStat` is a
+// p95 over the due-blast subset (1,427 samples as measured post-P9), not a max, so a
+// single induced pause cannot move it — and the argument is STRONGER under p95 than it
+// was under the p99 this originally cited, since p95 discards more of the tail. And
+// the measured `R` carries >2x headroom to the ceiling. Reordering would require
+// splitting `runSampled`'s API into separately callable timed/untimed phases — a
+// structural change with a real chance of introducing the very timed/untimed
+// divergence its own post-pass equality proof (`harness.ts`'s hash/tick/phase
+// check) exists to catch. Considered and declined, 2026-08-03.
 console.log('Running stress scenario...');
 const stressResult = runSampled(stressReplay, bundle);
 
@@ -93,6 +117,7 @@ const oracleResult = runOracle({
   towersPlacedAfterBuild: stressResult.towersPlacedAfterBuild,
   leftoverBountyAfterBuild: stressResult.leftoverBountyAfterBuild,
   routeLength,
+  dotDroppedTotal: stressResult.dotDroppedTotal,
 });
 
 // 5) The control-window sanity checks. Nothing previously checked the control run at
@@ -145,6 +170,12 @@ const controlPeakSlowedCreeps = controlResult.samples.reduce(
   0,
 );
 const controlHasSlowedCreeps = controlPeakSlowedCreeps > 0;
+// The control's own copy of the stress arm's "dropped DoT applications, whole run"
+// oracle assertion (`oracle.ts`'s `DOT_DROPPED_THRESHOLD`) — the control now carries
+// `stress-venom` too (`scenario.ts`'s `buildControlReplay`), and it supplies the
+// ratio gate's DENOMINATOR, so a silent DoT truncation there would corrupt `R` even
+// with the stress arm clean.
+const controlDotDropped = controlResult.dotDroppedTotal === 0;
 const controlAssertions: OracleAssertion[] = [
   controlAssertion(
     'control: phase === running for every sample',
@@ -181,6 +212,22 @@ const controlAssertions: OracleAssertion[] = [
     controlPeakSlowedCreeps,
     0,
     controlHasSlowedCreeps,
+  ),
+  controlAssertion(
+    'control: dropped DoT applications, whole run',
+    controlResult.dotDroppedTotal,
+    0,
+    controlDotDropped,
+  ),
+  // REPORTED, NOT GATED (packet §2, owner ruling 2026-08-03) — the control arm's
+  // copy of `oracle.ts`'s "peak DoT carriers (dispersion, reported not gated)" row.
+  // Shares that file's `peakDotCarriers` reduction rather than hand-deriving it
+  // again here.
+  controlAssertion(
+    'control: peak DoT carriers (dispersion, reported not gated)',
+    peakDotCarriers(controlResult.samples),
+    true,
+    true,
   ),
 ];
 
@@ -220,6 +267,36 @@ function fmtSummary(label: string, xs: readonly number[]): void {
 
 const dueBlastSamples = stressResult.samples.filter(isDueBlastSample);
 
+// DoT/armor preflight (PLAN step 13, packet §6) — computed for BOTH arms, reported
+// BEFORE the oracle table below asserts anything against it. The four reductions
+// (plus `peakDotCarriers`/`dotCarriersAtPeakDotRecords`) are now IMPORTED from
+// `oracle.ts` (packet §3) rather than hand-derived here a second time — `oracle.ts`'s
+// own `runOracle` calls the identical functions, so the stress arm's gated figures
+// and this preflight's copy of them are, by construction, the same derivation, not
+// two that currently happen to agree.
+function dotPreflight(samples: readonly SampledTick[]): {
+  peakDotRecords: number;
+  carriersAtPeakRecords: number;
+  recordDepthAtPeak: number;
+  dotActiveSampleCount: number;
+  peakArmoredLive: number;
+} {
+  return {
+    peakDotRecords: peakDotRecords(samples),
+    // The value the depth ratio below was actually computed from — NOT the
+    // window-wide peak of `dotCarriers` (see `fmtPreflight`'s label and packet §5:
+    // the two need not land on the same tick, and printing the wrong one under a
+    // label that looks like the depth ratio's denominator is exactly the ambiguity
+    // this field exists to remove).
+    carriersAtPeakRecords: dotCarriersAtPeakDotRecords(samples),
+    recordDepthAtPeak: dotRecordDepthAtPeak(samples),
+    dotActiveSampleCount: dotActiveSampleCount(samples),
+    peakArmoredLive: peakArmoredLive(samples),
+  };
+}
+const controlDotPreflight = dotPreflight(controlResult.samples);
+const stressDotPreflight = dotPreflight(stressResult.samples);
+
 console.log('');
 console.log(
   `=== step() ms percentile tables (WARMUP_TICKS=${WARMUP_TICKS}, SAMPLE_TICKS=${SAMPLE_TICKS}) ===`,
@@ -257,6 +334,63 @@ fmtSummary(
   'slowed creeps (control)',
   controlResult.samples.map((s) => s.slowedCreeps),
 );
+fmtSummary(
+  'dot records',
+  stressResult.samples.map((s) => s.dotRecords),
+);
+fmtSummary(
+  'dot records (control)',
+  controlResult.samples.map((s) => s.dotRecords),
+);
+fmtSummary(
+  'dot carriers',
+  stressResult.samples.map((s) => s.dotCarriers),
+);
+fmtSummary(
+  'dot carriers (control)',
+  controlResult.samples.map((s) => s.dotCarriers),
+);
+fmtSummary(
+  'armored live',
+  stressResult.samples.map((s) => s.armoredLive),
+);
+fmtSummary(
+  'armored live (control)',
+  controlResult.samples.map((s) => s.armoredLive),
+);
+
+console.log('');
+console.log('=== DoT/armor preflight (PLAN step 13, packet §6 — both arms) ===');
+function fmtPreflight(
+  label: string,
+  p: {
+    peakDotRecords: number;
+    carriersAtPeakRecords: number;
+    recordDepthAtPeak: number;
+    dotActiveSampleCount: number;
+    peakArmoredLive: number;
+  },
+): void {
+  // `carriers@peakRecords=` (packet §5), NOT `peak dotCarriers=`: the old label
+  // printed the window-wide peak of `dotCarriers`, which happens to equal the
+  // record-depth ratio's actual denominator on the stress arm but NOT on the
+  // control arm (127 window-wide peak vs 126 at the peak-dotRecords tick) — a
+  // reader dividing the first two printed numbers would get the right answer on one
+  // arm and the wrong one on the other. This field is now the exact denominator the
+  // ratio was computed from, so the label matches what it prints. The window-wide
+  // peak is still available in the "dot carriers" per-sample summary line above
+  // (its `max=`) and in the oracle/control-sanity tables' dispersion row below.
+  console.log(
+    `  ${label.padEnd(10)} peak dotRecords=${p.peakDotRecords} carriers@peakRecords=${p.carriersAtPeakRecords} ` +
+      `record depth @peak=${p.recordDepthAtPeak.toFixed(3)} dotTicks-active samples=${p.dotActiveSampleCount} ` +
+      `peak armoredLive=${p.peakArmoredLive}`,
+  );
+}
+fmtPreflight('stress', stressDotPreflight);
+fmtPreflight('control', controlDotPreflight);
+console.log(
+  `  dotDropped whole run — stress=${stressResult.dotDroppedTotal} control=${controlResult.dotDroppedTotal}`,
+);
 
 console.log('');
 console.log('=== workload oracle (PLAN step 18) ===');
@@ -284,11 +418,12 @@ for (const a of controlAssertions) {
 // a crash.
 //
 // The short-circuit is the oracle's FLOOR, not merely "> 0". `stressStat`'s whole
-// p99-not-p99.9 argument rests on that floor: over 3 due-blast samples, `percentile(…, 99)`
-// returns the MAXIMUM — the single noisiest tick, exactly the statistic p99 was chosen to
-// avoid. Such a run already exits non-zero via the oracle, but with `>0` it would still
-// publish `{"status":"evaluated","pass":true}` in `PERF-REPORT`, indistinguishable from a
-// real 1,671-sample run to anyone diffing that line against a later re-measurement.
+// not-the-maximum argument rests on that floor: over 3 due-blast samples,
+// `percentile(…, 95)` returns the MAXIMUM — the single noisiest tick, exactly the
+// statistic a percentile was chosen to avoid. Such a run already exits non-zero via the
+// oracle, but with `>0` it would still publish `{"status":"evaluated","pass":true}` in
+// `PERF-REPORT`, indistinguishable from a real 1,427-sample run (the post-P9 measured
+// subset) to anyone diffing that line against a later re-measurement.
 console.log('');
 console.log('=== gate (PLAN step 21) ===');
 let gateResult: GateResult | null = null;
@@ -310,7 +445,8 @@ if (dueBlastSamples.length === 0 || dueBlastSamples.length < DUE_BLAST_SAMPLES_T
   if (gateResult.status === 'unset') {
     console.log(
       `  R0 is unset — recording run only, gate not enforced; commit this value. Observed R = ${gateResult.r.toFixed(4)} ` +
-        `(controlStat p50=${gateResult.controlStat.toFixed(3)}ms, stressStat p99=${gateResult.stressStat.toFixed(3)}ms)`,
+        `(controlStat p50=${gateResult.controlStat.toFixed(3)}ms, stressStat p95=${gateResult.stressStat.toFixed(3)}ms, ` +
+        `audit-only stressStat p99=${gateResult.stressStatP99.toFixed(3)}ms)`,
     );
   } else {
     console.log(
@@ -476,6 +612,8 @@ const report = {
       max: max(controlResult.samples.map((s) => s.slowedCreeps)),
       mean: mean(controlResult.samples.map((s) => s.slowedCreeps)),
     },
+    dotPreflight: controlDotPreflight,
+    dotDroppedTotal: controlResult.dotDroppedTotal,
     towersPlacedAfterBuild: controlResult.towersPlacedAfterBuild,
     leftoverBountyAfterBuild: controlResult.leftoverBountyAfterBuild,
     assertions: controlAssertions,
@@ -506,6 +644,8 @@ const report = {
       max: max(stressResult.samples.map((s) => s.slowedCreeps)),
       mean: mean(stressResult.samples.map((s) => s.slowedCreeps)),
     },
+    dotPreflight: stressDotPreflight,
+    dotDroppedTotal: stressResult.dotDroppedTotal,
     towersPlacedAfterBuild: stressResult.towersPlacedAfterBuild,
     leftoverBountyAfterBuild: stressResult.leftoverBountyAfterBuild,
     routeLength,
