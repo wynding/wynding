@@ -2,7 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-18
-- **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below)
+- **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below); 2026-08-04
+  (M2-S6 — the stress scene is not extended for the stun story; see the Amendment below)
 - **Rulings:** 2026-07-31 (all three findings answered; see Findings from the spike)
 
 ## Context
@@ -375,6 +376,47 @@ bytes. If a wasm module ever lands, `scripts/size-limit.mjs` must be widened bef
 is quoted against the budget again. `step()` measured 0.32 ms against the tighter 2 ms
 budget, but that figure is **indicative only** — the headless harness is unthrottled by design,
 so it speaks to neither device budget directly, per (d) above.
+
+## Amendment — 2026-08-04 (M2-S6, the stun story) — the stress scene is NOT extended, and `R0` is NOT re-recorded
+
+m2.md's S4 entry commits the stress scene to being "extended and re-measured by every
+subsequent effect story." S6 takes an explicit, dated exception (Rob's ratification, ahead
+of the packet sequence that depends on it), because on this story the obligation's usual
+justification inverts:
+
+1. **The change that could move perf is measured better by the UNCHANGED scene.** Stun's only
+   hot-path costs are one new SoA column (`stunUntilTick`) pushed and read for every creep on
+   every tick, and one widened catalog lookup per impacted creep — both paid whether or not any
+   stun tower exists, and the existing chill/venom arms exercise the widened lookup and its
+   `includes('slow')` test directly. Re-running the _existing_ scene against the new sim is a
+   controlled comparison: same workload, same anchors, same seed, one variable changed. Adding
+   a stun arm would change the workload at the same time as the code, confounding exactly the
+   measurement wanted.
+2. **A fourth arm would break the scene's own second oracle.** `towerIdAt` splits 150 anchors
+   three ways (50/50/50), and all three towers cost 12 so that `150 × 12 = 1800` exactly equals
+   `startingBounty` — an equality `layout.ts` documents as an independent proof that every
+   placement was accepted. A fourth arm forces re-deriving the split, the costs, and that
+   invariant, for a mechanic whose marginal cost is ~1.25 applications per tick.
+3. **S11 is the pinned catch-all.** m2.md already owns a "final catalog-scale ADR 0005 stress
+   gate" at S11, over the finished catalog.
+
+**What the exception does NOT claim.** The unchanged scene contains no stun tower, so it
+executes **none** of the new stun paths — no RNG draw, no `applyStun`, no active-stun write, no
+zero-budget movement. It measures the three costs paid unconditionally — the column, the widened
+catalog lookup, and the per-tick `new Rng(state.rngState)` construction plus writeback on
+**every advancing tick, stun tower or not** — which is the bulk of what could regress; it is
+silent on the stun-specific cost, which is bounded by roughly 1.25 applications per tick against
+150 towers and ~200 creeps. That is a judgment about magnitude, not a proof, and it should be
+read as one.
+
+**What S6 does instead:** re-run `pnpm run perf` on the unchanged scene. A **local `R` is not
+comparable to the CI-recorded `R0`** (S5b measured local runs landing far below CI), so the
+local number is smoke evidence only, not a gate: it can show an outright collapse, but no
+local baseline is recorded to compare it against. The real gate is the
+CI perf job on the PR, against `R0 = 1.42` / ceiling `1.7750` (unchanged from the S5b re-record
+above — S6 does not touch the scene, so it does not move `R0` either). Escalate, do not
+improvise: if CI breaches the ceiling, stop and report; do not re-record `R0`, do not widen the
+ceiling.
 
 ## Consequences
 

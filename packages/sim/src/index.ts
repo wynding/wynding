@@ -9,7 +9,7 @@
 // a hardcoded constant — and NEVER imports `@wynding/content`: the caller compiles a
 // bundle with `compileRuleset` and threads the branded `CompiledRuleset` into `step`.
 
-import { hashState } from '@wynding/engine';
+import { hashState, Rng } from '@wynding/engine';
 import type { Seed } from '@wynding/types';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
 import {
@@ -87,7 +87,10 @@ export function isTerminalPhase(phase: SimPhase): boolean {
  * NOT `kind`, which M2-S1 deliberately renamed away); the render VM's per-creep max
  * HP and silhouette both join on it. `slowMulFp`/`slowUntilTick` are the per-creep
  * slow-status column pair (`slowMulFp === 0` ⟺ no active slow, the full model —
- * strongest-wins non-stacking means at most one live slow per creep).
+ * strongest-wins non-stacking means at most one live slow per creep). `stunUntilTick`
+ * (M2-S6) is appended immediately AFTER `slowUntilTick` (same hash-load-bearing
+ * position rule) — `0` means not stunned, with no paired magnitude column (stun is
+ * binary; the `slowMulFp === 0 ⟺ slowUntilTick === 0` biconditional has no analogue).
  */
 export interface CreepArrays {
   id: number[];
@@ -103,6 +106,7 @@ export interface CreepArrays {
   creepId: string[]; // catalog id, resolved at spawn (M2-S3)
   slowMulFp: number[]; // 0 = no active slow (M2-S3)
   slowUntilTick: number[]; // 0 = no active slow, paired with slowMulFp (M2-S3)
+  stunUntilTick: number[]; // 0 = not stunned (M2-S6, no paired magnitude column)
 }
 
 /**
@@ -244,6 +248,7 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   if (!Array.isArray(c.creepId)) c.creepId = [];
   if (!Array.isArray(c.slowMulFp)) c.slowMulFp = [];
   if (!Array.isArray(c.slowUntilTick)) c.slowUntilTick = [];
+  if (!Array.isArray(c.stunUntilTick)) c.stunUntilTick = [];
 
   const waveCount = ruleset.waves.length;
   const { creepById } = ruleset;
@@ -267,7 +272,8 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
     c.wave.length > c.id.length ||
     c.creepId.length > c.id.length ||
     c.slowMulFp.length > c.id.length ||
-    c.slowUntilTick.length > c.id.length;
+    c.slowUntilTick.length > c.id.length ||
+    c.stunUntilTick.length > c.id.length;
   for (let i = 0; i < c.id.length && !sawInvalidRow; i++) {
     const w = c.wave[i];
     const cid = c.creepId[i];
@@ -306,10 +312,12 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       filtered.progress.push(c.progress[i] as number);
       filtered.wave.push(w as number);
       filtered.creepId.push(cid);
-      // Slow-pair VALUE repair runs below, on the (now row-clean) filtered result —
-      // carry the raw values through here; the value repair pass normalizes them.
+      // Slow-pair/stun VALUE repair runs below, on the (now row-clean) filtered
+      // result — carry the raw values through here; the value repair passes
+      // normalize them.
       filtered.slowMulFp.push(c.slowMulFp[i] as number);
       filtered.slowUntilTick.push(c.slowUntilTick[i] as number);
+      filtered.stunUntilTick.push(c.stunUntilTick[i] as number);
     }
     state.creeps = filtered;
   }
@@ -356,6 +364,48 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
     }
     if (mulOwned !== null) cc.slowMulFp = mulOwned;
     if (untilOwned !== null) cc.slowUntilTick = untilOwned;
+  }
+
+  // Stun VALUE repair (M2-S6), mirroring the slow-pair repair above exactly —
+  // including its copy-on-write discipline (a third `owned` cell beside `mulOwned`/
+  // `untilOwned`, since the preview clone SHARES creep column arrays and an
+  // in-place write would mutate live state through that reference). Valid iff
+  // `stunUntilTick` is a non-negative safe integer AND the record is not already
+  // EXPIRED (`stunUntilTick !== 0 && stunUntilTick < repairTick` is cleared too — a
+  // restored expired stun must not halt the entry tick's movement, since movement
+  // runs before this tick's own expiry sweep). There is no paired magnitude column
+  // to cross-check against — stun is binary. Any violation resets the value to `0`.
+  {
+    const repairTick = Number.isSafeInteger(state.tick) && state.tick >= 0 ? state.tick : 0;
+    const cc = state.creeps;
+    let stunOwned: number[] | null = null;
+    const ownStun = (): number[] => {
+      if (stunOwned === null) stunOwned = cc.stunUntilTick.slice();
+      return stunOwned;
+    };
+    for (let i = 0; i < cc.id.length; i++) {
+      const rawStun = cc.stunUntilTick[i];
+      const stunValid = Number.isSafeInteger(rawStun) && (rawStun as number) >= 0;
+      const expired = stunValid && rawStun !== 0 && (rawStun as number) < repairTick;
+      if (!stunValid || expired) {
+        if (cc.stunUntilTick[i] !== 0) ownStun()[i] = 0;
+      }
+    }
+    if (stunOwned !== null) cc.stunUntilTick = stunOwned;
+  }
+
+  // `rngState` TYPE repair (M2-S6, Codex P2). `Rng`'s constructor self-heals any NUMBER
+  // via `>>> 0` — that is ADR 0010's documented posture and has its own test — but a
+  // forged state carrying a NON-number (a BigInt or Symbol from a hand-built or
+  // deserialized `SimState`) makes `>>>` THROW, and `step()` now constructs an `Rng`
+  // unconditionally. Before M2-S6 the field was inert, so nothing dereferenced it and the
+  // sim's "forged state degrades deterministically, never throws" posture held for free.
+  // Activating the RNG is what put that at risk, so the repair belongs with the
+  // activation. Deliberately narrow: only non-numbers and non-finite values are reset,
+  // leaving every numeric value to `Rng`'s own coercion so the documented `>>> 0`
+  // behaviour stays the single source of truth for numbers.
+  if (typeof state.rngState !== 'number' || !Number.isFinite(state.rngState)) {
+    state.rngState = 0;
   }
 
   if (state.towers == null || typeof state.towers !== 'object') {
@@ -878,6 +928,7 @@ export function step(
           state.creeps.creepId.push(entry.creepId);
           state.creeps.slowMulFp.push(0); // fresh spawn — never slowed yet
           state.creeps.slowUntilTick.push(0);
+          state.creeps.stunUntilTick.push(0); // fresh spawn — never stunned yet
         }
       }
       state.waveSpawnCursor[k] = cursor + 1;
@@ -911,7 +962,17 @@ export function step(
     const slowUntilTick = Number.isSafeInteger(src.slowUntilTick[i])
       ? (src.slowUntilTick[i] as number)
       : 0;
-    const effSpeed = effectiveSpeedFp(speed, slowMulFp, balance.slowFloorNum, balance.slowFloorDen);
+    const stunUntilTick = Number.isSafeInteger(src.stunUntilTick[i])
+      ? (src.stunUntilTick[i] as number)
+      : 0;
+    // Inclusive boundary, matching the expiry sweep's `<= tick`: a stun applied
+    // through tick T (stunUntilTick === T) still holds movement at tick T; the
+    // sweep at the close of THIS tick's combat phase then clears it, so movement
+    // resumes at T+1.
+    const stunned = stunUntilTick !== 0 && stunUntilTick >= state.tick;
+    const effSpeed = stunned
+      ? 0
+      : effectiveSpeedFp(speed, slowMulFp, balance.slowFloorNum, balance.slowFloorDen);
     const outcome = advanceCreep(
       field,
       src.id[i],
@@ -954,15 +1015,22 @@ export function step(
     next.creepId.push(creepId);
     next.slowMulFp.push(slowMulFp);
     next.slowUntilTick.push(slowUntilTick);
+    next.stunUntilTick.push(stunUntilTick);
   }
   state.creeps = next;
 
-  // 5) COMBAT PHASE (Story 4 + M2-S3's status framework) — over the POST-MOVE
-  //    world: resolve due impacts (direct → death check → slow), sweep dead
-  //    creeps and credit per-creep bounty, then hold/acquire + fire, then the
-  //    expiry sweep. The kill bounty this tick also feeds the monotonic score
-  //    accumulator. `wave`/`creepId`/`slowMulFp`/`slowUntilTick` thread through
-  //    the combat survivor compaction like any other column (combat.ts).
+  // 5) COMBAT PHASE (Story 4 + M2-S3's status framework, M2-S6 the RNG seam) — over
+  //    the POST-MOVE world: resolve due impacts (direct → death check → slow/stun/
+  //    dot), sweep dead creeps and credit per-creep bounty, then hold/acquire + fire,
+  //    then the expiry sweep. The kill bounty this tick also feeds the monotonic
+  //    score accumulator. `wave`/`creepId`/`slowMulFp`/`slowUntilTick`/`stunUntilTick`
+  //    thread through the combat survivor compaction like any other column
+  //    (combat.ts). `rng` is constructed fresh from `state.rngState` ONCE per tick
+  //    (never a module-level singleton, never lazy — `rng.ts`'s header is normative)
+  //    and its post-combat state written back UNCONDITIONALLY below, whether or not
+  //    anything drew this tick — that write, paid on every advancing tick, is exactly
+  //    what makes a stun-free run's `rngState` still round-trip byte-identically.
+  const rng = new Rng(state.rngState);
   const combat = runCombat(
     state.creeps,
     state.towers,
@@ -976,6 +1044,7 @@ export function step(
     creepById,
     balance.slowFloorNum,
     balance.slowFloorDen,
+    rng,
     events,
   );
   state.creeps = combat.creeps;
@@ -983,6 +1052,7 @@ export function step(
   state.dots = combat.dots;
   state.bounty = combat.bounty;
   state.cumulativeKillBounty = satAdd(state.cumulativeKillBounty, combat.killBounty);
+  state.rngState = rng.getState();
 
   // 6) RESOLUTION (G8) — settlement precedes terminal, UNIFORMLY: a wave completing
   //    on the final tick pays, win or loss. Per-wave alive counts are DERIVED from
@@ -1070,6 +1140,7 @@ export interface ReadonlyCreepArrays {
   readonly creepId: readonly string[];
   readonly slowMulFp: readonly number[];
   readonly slowUntilTick: readonly number[];
+  readonly stunUntilTick: readonly number[];
 }
 
 /** Deep-readonly view of `TowerArrays` — see `ReadonlyCreepArrays`. */

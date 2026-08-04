@@ -25,6 +25,7 @@ export const EN = {
   "creep.fast.name": "Fast Creep",
   "creep.swarm.name": "Swarm Creep",
   "creep.armored.name": "Armored Creep",
+  "creep.resolute.name": "Resolute Creep",
   "creep.unknown.name": "Unknown creep ({id})",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -75,6 +76,7 @@ export const EN = {
   "tower.slow.name": "Slow Tower",
   "tower.splash.name": "Splash Tower",
   "tower.venom.name": "Venom Tower",
+  "tower.stun.name": "Stun Tower",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
   "panel.cost": "Cost: {cost}",
@@ -84,6 +86,7 @@ export const EN = {
   "panel.targets": "Targets: {targets}",
   "panel.blastRadius": "Blast radius: {tiles} tiles",
   "panel.dot": "Poison: {damage} damage every {cadence}s for {duration}s",
+  "panel.stun": "Stun: {chance}% for {duration}s",
   "panel.close": "Close panel",
   "panel.sell": "Sell (refund {refund})",
   "panel.upgrade": "Max level",
@@ -141,6 +144,7 @@ export interface MessageParams {
   "creep.fast.name": Record<never, never>;
   "creep.swarm.name": Record<never, never>;
   "creep.armored.name": Record<never, never>;
+  "creep.resolute.name": Record<never, never>;
   "creep.unknown.name": { "id": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
@@ -191,6 +195,7 @@ export interface MessageParams {
   "tower.slow.name": Record<never, never>;
   "tower.splash.name": Record<never, never>;
   "tower.venom.name": Record<never, never>;
+  "tower.stun.name": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
   "panel.cost": { "cost": string | number };
@@ -200,6 +205,7 @@ export interface MessageParams {
   "panel.targets": { "targets": string | number };
   "panel.blastRadius": { "tiles": string | number };
   "panel.dot": { "damage": string | number; "cadence": string | number; "duration": string | number };
+  "panel.stun": { "chance": string | number; "duration": string | number };
   "panel.close": Record<never, never>;
   "panel.sell": { "refund": string | number };
   "panel.upgrade": Record<never, never>;

@@ -137,6 +137,16 @@ describe('effectiveSpeedFp — the ONE effective-speed formula (ruleset-shared.t
     expect(effectiveSpeedFp(26, 0, 1, 4)).toBe(26);
   });
 
+  // The un-slowed branch is floored at 1 (M2-S6). This is the witness for an invariant
+  // `movement.ts` now leans on: budget 0 reaches `advanceCreep` ONLY from a stunned row.
+  // Unreachable for compiled content (the schema gates `speedFp` through `isPosInt`), so
+  // it is hash-neutral — but without the floor a forged/restored `speed: 0` row yields
+  // budget 0 while un-stunned, and P3's re-path guard would then hold it forever: never
+  // moving, never leaking, never dying, so its wave never resolves.
+  it('floors the un-slowed branch at 1, so a forged speed-0 row cannot reach budget 0', () => {
+    expect(effectiveSpeedFp(0, 0, 1, 4)).toBe(1);
+  });
+
   it('floors the multiplier term and ceils the slow-floor term', () => {
     // base 26, mulFp 128 (half): floor(26*128/256) = 13; slowFloor 1/4: ceil(26/4) = 7.
     // max(1, 13, 7) = 13.
@@ -202,6 +212,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       creepId: ['normal'],
       slowMulFp: [0],
       slowUntilTick: [0],
+      stunUntilTick: [0],
     };
   }
 
@@ -364,6 +375,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       creepId: ['normal', 'normal'],
       slowMulFp: [0, 0],
       slowUntilTick: [0, 0],
+      stunUntilTick: [0, 0],
     };
     const impacts: Impact[] = [
       {
@@ -507,6 +519,7 @@ describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
       creepId: ['normal'],
       slowMulFp: [128],
       slowUntilTick: [slowUntilTick],
+      stunUntilTick: [0],
     };
   }
 

@@ -20,6 +20,9 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
   it('draws venom with a distinct droplet mark (M2-S5a) — never reuses plain/ringed/crosshair', () => {
     expect(towerFootprintMarkFor('venom')).toBe('droplet');
   });
+  it('draws stun with a distinct bolt mark (M2-S6) — never reuses plain/ringed/crosshair/droplet', () => {
+    expect(towerFootprintMarkFor('stun')).toBe('bolt');
+  });
   it('falls back to plain for an unknown id — never throws', () => {
     expect(towerFootprintMarkFor('__proto__')).toBe('plain');
     expect(towerFootprintMarkFor('')).toBe('plain');

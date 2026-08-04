@@ -13,7 +13,13 @@
 // green). No drawing behaviour changed — this is a pure relocation + a de-Phasered
 // parameter type.
 
-import { creepSilhouettePaintOp, slowTelegraphPaintOps, dotTelegraphPaintOps } from './creep-paint';
+import {
+  creepSilhouettePaintOp,
+  slowTelegraphPaintOps,
+  dotTelegraphPaintOps,
+  stunTelegraphPaintOps,
+  wardPaintOps,
+} from './creep-paint';
 import { towerFootprintMarkFor } from './tower-paint';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
@@ -63,6 +69,26 @@ function drawDroplet(g: GraphicsLike, cx: number, cy: number, spoke: number): vo
   g.lineBetween(cx + bulbR * 0.7, bulbCy - bulbR * 0.6, cx, cy - spoke);
 }
 
+/** A three-segment zigzag polyline through `(cx,cy)`, evoking a lightning bolt — the
+ *  `'bolt'` footprint mark (M2-S6, `stun`). `halfSize` is the footprint's HALF-SIZE
+ *  (unlike `drawCrosshair`/`drawDroplet`'s `spoke`, which is `size * 0.22`): the
+ *  vertices are pinned in the plan as fractions of the footprint half-size, so this
+ *  reads at roughly cell scale rather than the other marks' smaller motif. Distinct
+ *  from `'crosshair'`'s spokes by not being radial — never colour alone (ADR 0003). */
+function drawBolt(g: GraphicsLike, cx: number, cy: number, halfSize: number): void {
+  const verts: readonly (readonly [number, number])[] = [
+    [-0.35, -0.5],
+    [0.15, -0.1],
+    [-0.15, 0.1],
+    [0.35, 0.5],
+  ];
+  for (let i = 0; i < verts.length - 1; i++) {
+    const [x0, y0] = verts[i]!;
+    const [x1, y1] = verts[i + 1]!;
+    g.lineBetween(cx + x0 * halfSize, cy + y0 * halfSize, cx + x1 * halfSize, cy + y1 * halfSize);
+  }
+}
+
 /** A thin executor over `vm.towers`/`overlay.pendingAdds`/`overlay.selection` — see the
  *  inline comments below for the per-mark rationale. `projection` is an explicit
  *  parameter (not a captured closure) so this is callable outside `mount()`. */
@@ -105,6 +131,9 @@ export function drawTowers(
     } else if (mark === 'droplet') {
       g.lineStyle(2, pal.floor, 1);
       drawDroplet(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+    } else if (mark === 'bolt') {
+      g.lineStyle(2, pal.floor, 1);
+      drawBolt(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.5);
     }
   }
   // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
@@ -126,6 +155,9 @@ export function drawTowers(
     } else if (pendingMark === 'droplet') {
       g.lineStyle(1, pal.tower, 0.6);
       drawDroplet(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+    } else if (pendingMark === 'bolt') {
+      g.lineStyle(1, pal.tower, 0.6);
+      drawBolt(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.5);
     }
   }
   if (o.selection !== null) {
@@ -150,6 +182,8 @@ export function drawCreeps(
     creepId: string;
     slowed: boolean;
     poisoned: boolean;
+    stunned: boolean;
+    warded: boolean;
   }[],
   reducedMotion: boolean,
   renderTimeMs: number, // MILLISECONDS — the unit lives in the name (QC r3), the tick→ms conversion happens at the call site
@@ -176,6 +210,15 @@ export function drawCreeps(
       const pts: { x: number; y: number }[] = [];
       for (let i = 0; i < 6; i++) {
         const angle = (Math.PI / 3) * i - Math.PI / 2; // apex up, like the other shapes
+        pts.push({ x: op.x + r * Math.cos(angle), y: op.y + r * Math.sin(angle) });
+      }
+      g.fillPoints(pts, true);
+    } else if (op.shape === 'pentagon') {
+      // Regular pentagon (M2-S6, `resolute`): vertex k at angle -90° + k×72°, apex up
+      // like every other shape, generated the way the hexagon loop above already is.
+      const pts: { x: number; y: number }[] = [];
+      for (let i = 0; i < 5; i++) {
+        const angle = ((2 * Math.PI) / 5) * i - Math.PI / 2;
         pts.push({ x: op.x + r * Math.cos(angle), y: op.y + r * Math.sin(angle) });
       }
       g.fillPoints(pts, true);
@@ -224,6 +267,33 @@ export function drawCreeps(
     )) {
       g.fillStyle(tel.colour, tel.alpha);
       g.fillCircle(tel.x, tel.y, tel.r);
+    }
+    // Stun telegraph (M2-S6): a thick OUTER ring (`'jolt'`, r×1.15, ALWAYS accompanies a
+    // live stun) plus a SMALLER alpha-animated inner ring (`'flicker'`, r×0.85, motion-cue,
+    // yields to reduced motion) — mirrors the slow/DoT telegraphs' shape+motion posture.
+    // The guaranteed cue is the outer one so its contrast partner is the board floor
+    // rather than the creep fill; see `creep-paint.ts`'s builder for why that is
+    // load-bearing rather than cosmetic.
+    // BOTH take the PROJECTED pixel centre `p`, never the raw `c` — same rationale as
+    // the two loops above.
+    for (const tel of stunTelegraphPaintOps(
+      { ...p, stunned: c.stunned },
+      r,
+      reducedMotion,
+      pal.stunned,
+      renderTimeMs,
+    )) {
+      g.lineStyle(tel.kind === 'jolt' ? 4 : 2, tel.colour, tel.alpha);
+      g.strokeCircle(tel.x, tel.y, tel.r);
+    }
+    // Ward cue (M2-S6): a single opaque outer ring for a creep whose catalog
+    // definition carries an immunity — NOT a timed status, so no motion cue and no
+    // reduced-motion branch (`wardPaintOps` takes no `renderTimeMs`). Sits at r×2.2,
+    // outside every other cue here, so a warded+slowed+stunned creep still reads as
+    // three distinct concentric rings.
+    for (const tel of wardPaintOps({ ...p, warded: c.warded }, r, pal.warded)) {
+      g.lineStyle(2, tel.colour, tel.alpha);
+      g.strokeCircle(tel.x, tel.y, tel.r);
     }
   }
 }

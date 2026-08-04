@@ -70,7 +70,18 @@ describe('drawCreeps — the hexagon silhouette (armored, M2-S5a)', () => {
     drawCreeps(
       g,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'armored', slowed: false, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'armored',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false,
       0,
       PROJECTION,
@@ -85,12 +96,52 @@ describe('drawCreeps — the hexagon silhouette (armored, M2-S5a)', () => {
     drawCreeps(
       g2,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'normal', slowed: false, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'normal',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false,
       0,
       PROJECTION,
     );
     expect(g2.calls.some((c) => c.method === 'fillPoints')).toBe(false);
+  });
+});
+
+describe('drawCreeps — the pentagon silhouette (resolute, M2-S6)', () => {
+  it('a resolute creep draws fillPoints with exactly 5 points (the pentagon branch) — fails if that branch is deleted', () => {
+    const g = fakeGraphics();
+    drawCreeps(
+      g,
+      PAL,
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'resolute',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
+      false,
+      0,
+      PROJECTION,
+    );
+    const fillPointsCalls = g.calls.filter((c) => c.method === 'fillPoints');
+    expect(fillPointsCalls).toHaveLength(1);
+    const pts = fillPointsCalls[0]!.args[0] as unknown[];
+    expect(pts).toHaveLength(5);
   });
 });
 
@@ -100,7 +151,18 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
     drawCreeps(
       reduced,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'normal', slowed: false, poisoned: true }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'normal',
+          slowed: false,
+          poisoned: true,
+          stunned: false,
+          warded: false,
+        },
+      ],
       true, // reducedMotion
       0,
       PROJECTION,
@@ -111,7 +173,18 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
     drawCreeps(
       full,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'normal', slowed: false, poisoned: true }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'normal',
+          slowed: false,
+          poisoned: true,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false, // motion allowed
       0,
       PROJECTION,
@@ -124,7 +197,18 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
     drawCreeps(
       none,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'normal', slowed: false, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'normal',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false,
       0,
       PROJECTION,
@@ -161,6 +245,23 @@ describe('drawTowers — the venom droplet mark (M2-S5a)', () => {
     drawTowers(g2, PAL, vmBasic, EMPTY_OVERLAY, PROJECTION);
     expect(g2.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
     expect(g2.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(0);
+  });
+});
+
+describe('drawTowers — the stun bolt mark (M2-S6)', () => {
+  it('a stun tower draws its bolt mark (3 lineBetween calls, no strokeCircle) — fails if the bolt branch is deleted', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'stun' }],
+    };
+    drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
+    // The bolt's 3-segment zigzag is 3 `lineBetween` calls — distinct from `'crosshair'`'s
+    // 4 (radiating spokes) and `'droplet'`'s 2 (converging lines) + 1 strokeCircle.
+    expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(3);
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
   });
 });
 
@@ -207,11 +308,12 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
     expect(g.calls.filter((c) => c.method === 'fillRoundedRect')).toHaveLength(0);
   });
 
-  it('a pending (queued, not yet committed) build draws its own footprint mark: ringed, crosshair, and droplet', () => {
+  it('a pending (queued, not yet committed) build draws its own footprint mark: ringed, crosshair, droplet, and bolt', () => {
     for (const [towerId, expectStroke, expectLines] of [
       ['slow', 1, 0],
       ['splash', 0, 4],
       ['venom', 1, 2],
+      ['stun', 0, 3],
     ] as const) {
       const g = fakeGraphics();
       const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
@@ -244,7 +346,18 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
     drawCreeps(
       diamond,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'fast', slowed: false, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'fast',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false,
       0,
       PROJECTION,
@@ -255,7 +368,18 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
     drawCreeps(
       square,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'swarm', slowed: false, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'swarm',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false,
       0,
       PROJECTION,
@@ -275,6 +399,8 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           creepId: 'unknown-id',
           slowed: false,
           poisoned: false,
+          stunned: false,
+          warded: false,
         },
       ],
       false,
@@ -289,7 +415,18 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
     drawCreeps(
       g,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 0.1, creepId: 'normal', slowed: false, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 0.1,
+          creepId: 'normal',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false,
       0,
       PROJECTION,
@@ -303,7 +440,18 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
     drawCreeps(
       full,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'normal', slowed: true, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'normal',
+          slowed: true,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       false,
       0,
       PROJECTION,
@@ -314,12 +462,71 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
     drawCreeps(
       reduced,
       PAL,
-      [{ x: 5 * 256, y: 5 * 256, hpFrac: 1, creepId: 'normal', slowed: true, poisoned: false }],
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'normal',
+          slowed: true,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+        },
+      ],
       true,
       0,
       PROJECTION,
     );
     expect(reduced.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1); // ring only
+  });
+
+  it('a stunned creep draws the jolt (always) + flicker (motion allowed) or just the jolt (reduced motion)', () => {
+    const creep = (stunned: boolean) => ({
+      x: 5 * 256,
+      y: 5 * 256,
+      hpFrac: 1,
+      creepId: 'normal',
+      slowed: false,
+      poisoned: false,
+      stunned,
+      warded: false,
+    });
+    const full = fakeGraphics();
+    drawCreeps(full, PAL, [creep(true)], false, 0, PROJECTION);
+    expect(full.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(2); // jolt + flicker
+
+    const reduced = fakeGraphics();
+    drawCreeps(reduced, PAL, [creep(true)], true, 0, PROJECTION);
+    expect(reduced.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1); // jolt only
+
+    const none = fakeGraphics();
+    drawCreeps(none, PAL, [creep(false)], false, 0, PROJECTION);
+    expect(none.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
+  });
+
+  it('a warded creep draws a single opaque ring, regardless of reducedMotion (not a timed status)', () => {
+    const creep = (warded: boolean) => ({
+      x: 5 * 256,
+      y: 5 * 256,
+      hpFrac: 1,
+      creepId: 'normal',
+      slowed: false,
+      poisoned: false,
+      stunned: false,
+      warded,
+    });
+    const full = fakeGraphics();
+    drawCreeps(full, PAL, [creep(true)], false, 0, PROJECTION);
+    expect(full.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1);
+
+    const reduced = fakeGraphics();
+    drawCreeps(reduced, PAL, [creep(true)], true, 0, PROJECTION);
+    expect(reduced.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1); // unchanged
+
+    const none = fakeGraphics();
+    drawCreeps(none, PAL, [creep(false)], false, 0, PROJECTION);
+    expect(none.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
   });
 });
 
@@ -337,6 +544,8 @@ describe('drawCreeps — both telegraphs draw at the PROJECTED centre, not fixed
     creepId: 'normal',
     slowed: true,
     poisoned: true,
+    stunned: false,
+    warded: false,
   };
 
   it('the slowed ring and the poison pips are centred within a cell of the silhouette', () => {
@@ -357,6 +566,45 @@ describe('drawCreeps — both telegraphs draw at the PROJECTED centre, not fixed
       const [px, py] = pip.args as [number, number, number];
       // Pips sit at r*1.8 from centre, well inside one cell at this scale.
       expect(Math.hypot(px - p.x, py - p.y)).toBeLessThan(PROJECTION.cellPx * 2);
+    }
+  });
+
+  // M2-S6: the same PR #78 mistake, guarded for the two NEW telegraphs. Isolated from
+  // `CREEP` above (slowed/poisoned false here) so the strokeCircle calls this test reads
+  // are unambiguously the stun/ward cues, not the slow ring.
+  const STUN_WARD_CREEP = {
+    x: 5 * 256,
+    y: 5 * 256,
+    hpFrac: 1,
+    creepId: 'normal',
+    slowed: false,
+    poisoned: false,
+    stunned: true,
+    warded: true,
+  };
+
+  it('the stun jolt and the ward ring are centred EXACTLY on the projected silhouette centre', () => {
+    const g = fakeGraphics();
+    drawCreeps(g, PAL, [STUN_WARD_CREEP], true, 0, PROJECTION);
+    const p = PROJECTION.fpToPixel(STUN_WARD_CREEP.x, STUN_WARD_CREEP.y);
+    expect(Math.hypot(p.x - STUN_WARD_CREEP.x, p.y - STUN_WARD_CREEP.y)).toBeGreaterThan(
+      PROJECTION.cellPx,
+    );
+
+    // Reduced motion drops the flicker, so exactly 2 strokeCircle calls remain: jolt,
+    // then ward (board-draw's draw order) — both must land on the projected centre.
+    const strokes = g.calls.filter((c) => c.method === 'strokeCircle');
+    expect(strokes).toHaveLength(2);
+    for (const s of strokes) {
+      const [sx, sy] = s.args as [number, number, number];
+      // EXACT, not a tolerance. `strokeCircle` takes its centre directly, so every one of
+      // these ops must be centred on the projected point — the radius is a separate
+      // argument and cannot move the centre. A distance bound (this was `< cellPx * 3`)
+      // would happily accept a cue drawn a cell or two off, which is precisely the defect
+      // class this test exists for: passing the raw `CreepVM` instead of the projected
+      // centre silently drew these cues off-canvas for two milestones.
+      expect(sx).toBe(p.x);
+      expect(sy).toBe(p.y);
     }
   });
 });

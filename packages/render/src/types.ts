@@ -50,6 +50,16 @@ export interface CreepVM {
    *  records on the same creep (independent `venom` sources) still read as one
    *  poisoned cue, drives the poisoned telegraph (`creep-paint.ts`). */
   readonly poisoned: boolean;
+  /** Whether an active stun holds this creep right now (`stunUntilTick !== 0 &&
+   *  stunUntilTick >= tick`, M2-S6, the same inclusive-expiry rule the sim's own
+   *  movement derivation uses) — sim state, drives the stun telegraph's shape+motion
+   *  cues (`creep-paint.ts`). */
+  readonly stunned: boolean;
+  /** Whether `creepId`'s catalog definition carries any immunity (M2-S6) — a catalog
+   *  JOIN, like `hpFrac`'s max-HP denominator, NOT sim state: this never changes
+   *  tick-to-tick for a given creep. `false` for a forged/unresolved `creepId` (the
+   *  same total-over-absent-definition posture `hpFrac`'s join already takes). */
+  readonly warded: boolean;
 }
 
 /** One tower as the renderer sees it: its 2×2 anchor cell. */

@@ -3,6 +3,7 @@
 // fire cadence with no warm-up, per-kill bounty, and sell-preserves-cooldown.
 
 import { describe, it, expect } from 'vitest';
+import { Rng } from '@wynding/engine';
 import { createInitialState, step, type SimInput } from './index';
 import { emptyTowers, type TowerArrays } from './tower';
 import {
@@ -37,7 +38,7 @@ function countedArray<T>(arr: readonly T[]): { proxy: readonly T[]; accessCount:
   return { proxy, accessCount: () => count };
 }
 import type { CompiledEffect, CompiledTower } from './ruleset';
-import { testRuleset, runCombatT } from './test-support';
+import { testRuleset, runCombatT, TEST_RNG_SEED } from './test-support';
 import type { CreepDef } from '@wynding/types';
 
 // A large open board so targeting geometry is clean; exit on the right at row 6.
@@ -114,6 +115,7 @@ function restingCreeps(
     creepId: rows.map(() => 'normal'),
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
+    stunUntilTick: rows.map(() => 0),
   };
 }
 
@@ -137,6 +139,7 @@ function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCre
     creepId: ['normal'],
     slowMulFp: [0],
     slowUntilTick: [0],
+    stunUntilTick: [0],
   };
 }
 
@@ -218,6 +221,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       creepId: ['normal'],
       slowMulFp: [0],
       slowUntilTick: [0],
+      stunUntilTick: [0],
     };
     const t4 = runCombatT(
       withoutTarget,
@@ -355,6 +359,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       creepId: ['normal'],
       slowMulFp: [0],
       slowUntilTick: [0],
+      stunUntilTick: [0],
     };
     const impact: Impact = {
       kind: 'targeted',
@@ -703,6 +708,7 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
     creepId: rows.map(() => 'normal'),
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
+    stunUntilTick: rows.map(() => 0),
   });
 
   it('targets the creep further along a shared cell over a lower-id trailing creep', () => {
@@ -835,6 +841,7 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
   it('a hit that kills the row leaves its slow columns untouched, even though the impact carries a slow effect', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 8 }]);
     const killedThisPhase = new Set<number>();
+    const rng = new Rng(TEST_RNG_SEED);
     applyImpactToCreep(
       creeps,
       0,
@@ -848,6 +855,7 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
       [],
       buildDotIndex([]),
       100,
+      rng,
     );
     expect(creeps.hp[0]).toBeLessThanOrEqual(0);
     expect(killedThisPhase.has(0)).toBe(true);
@@ -858,6 +866,7 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
   it('a NON-lethal hit still applies its slow — the guard is death-gated, not a blanket status skip', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
     const killedThisPhase = new Set<number>();
+    const rng = new Rng(TEST_RNG_SEED);
     applyImpactToCreep(
       creeps,
       0,
@@ -871,6 +880,7 @@ describe('applyImpactToCreep — a lethal hit applies no statuses (pinned before
       [],
       buildDotIndex([]),
       100,
+      rng,
     );
     expect(creeps.hp[0]).toBeGreaterThan(0);
     expect(killedThisPhase.has(0)).toBe(false);
@@ -914,6 +924,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -927,6 +938,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       ARMOR_RULESET.creepById,
       ARMOR_RULESET.balance.slowFloorNum,
       ARMOR_RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000 - 4); // 10 - 6 armor = 4
   });
@@ -945,6 +957,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -958,6 +971,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       ARMOR_RULESET.creepById,
       ARMOR_RULESET.balance.slowFloorNum,
       ARMOR_RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000); // fully blanked
     expect(result.creeps.id).toContain(1); // provably alive: present among survivors, not swept
@@ -972,6 +986,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -985,6 +1000,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // unarmored — no change
   });
@@ -1006,6 +1022,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       sourceId: 100,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10, same as a splash's per-creep amount
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1019,6 +1036,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       ARMOR_RULESET.creepById,
       ARMOR_RULESET.balance.slowFloorNum,
       ARMOR_RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000 - 4); // armored identically to a targeted hit
   });
@@ -1035,6 +1053,7 @@ describe('runCombat — armor (M2-S5a)', () => {
     };
     let result: ReturnType<typeof runCombat> | undefined;
     expect(() => {
+      const rng = new Rng(TEST_RNG_SEED);
       result = runCombat(
         creeps,
         emptyTowers(),
@@ -1048,6 +1067,7 @@ describe('runCombat — armor (M2-S5a)', () => {
         RULESET.creepById,
         RULESET.balance.slowFloorNum,
         RULESET.balance.slowFloorDen,
+        rng,
       );
     }).not.toThrow();
     expect(result?.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // unarmored — the `?? 0` rail
@@ -1074,6 +1094,7 @@ describe('DoT tick step — an already-expired record does not tick (Codex P2, P
       {},
       1,
       4,
+      new Rng(TEST_RNG_SEED),
     );
 
   it('a record whose untilTick is BEFORE this tick is skipped — it deals no damage and is swept', () => {
@@ -1098,6 +1119,7 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
   /** Run `runCombat` against a fixed one-creep world with no impacts — isolates
    *  the `dots` canonicalization rail under test from targeting/firing. */
   function runWithDots(dots: readonly unknown[]): ReturnType<typeof runCombat> {
+    const rng = new Rng(TEST_RNG_SEED);
     return runCombat(
       restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
       noTowers,
@@ -1111,6 +1133,7 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
   }
 
@@ -1214,6 +1237,7 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
       effects: [],
     });
     const { proxy, accessCount } = countedArray(allInvalidImpacts);
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
       emptyTowers(),
@@ -1227,6 +1251,7 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toEqual([]);
     expect(accessCount()).toBeLessThanOrEqual(4 * MAX_IN_FLIGHT_IMPACTS + 1); // same +1, see the twin test above
@@ -1252,6 +1277,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       sourceId: 0, // malformed — 0 is not an entity id
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1265,6 +1291,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(0);
     expect(result.creeps.hp[0]).toBe(1000); // dropped whole — the effect never applied
@@ -1279,6 +1306,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       sourceId: -1,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1292,6 +1320,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(0);
     expect(result.creeps.hp[0]).toBe(1000);
@@ -1308,6 +1337,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       sourceId: 0, // malformed
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1321,6 +1351,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(0);
     expect(result.creeps.hp[0]).toBe(1000);
@@ -1337,6 +1368,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       sourceId: -5,
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1350,6 +1382,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(0);
     expect(result.creeps.hp[0]).toBe(1000);
@@ -1384,6 +1417,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       sourceId: 100,
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60, forged: 'nope' }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1397,6 +1431,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(1);
     expect(result.impacts[0]!.effects).toEqual([
@@ -1413,6 +1448,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       sourceId: 100,
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1426,6 +1462,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000); // no damage yet — 'dot' is neither 'direct' nor 'slow',
     // and the fresh record's nextTickTick (10) is not yet due at tick 0.
@@ -1444,6 +1481,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       sourceId: 100,
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 0 }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1457,6 +1495,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(0);
   });
@@ -1476,6 +1515,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       sourceId: 100,
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 1_000_001, durationTicks: 1_000_001 }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1489,6 +1529,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(0);
   });
@@ -1502,6 +1543,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       sourceId: 100,
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 60, durationTicks: 59 }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1515,6 +1557,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.impacts).toHaveLength(0);
   });
@@ -1691,6 +1734,7 @@ describe('runCombat — DoT applyDot integration at capacity (M2-S5a P3)', () =>
       ],
     };
     const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1704,6 +1748,7 @@ describe('runCombat — DoT applyDot integration at capacity (M2-S5a P3)', () =>
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
       events,
     );
     expect(result.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // direct damage still landed
@@ -1726,6 +1771,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
 
     // tick 9 — not yet due, no damage, no tick counted.
+    const rng = new Rng(TEST_RNG_SEED);
     const before = runCombat(
       creeps,
       emptyTowers(),
@@ -1739,6 +1785,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
       events,
     );
     expect(before.creeps.hp[0]).toBe(1000);
@@ -1758,6 +1805,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
       events,
     );
     expect(at.creeps.hp[0]).toBe(1000 - 7);
@@ -1790,6 +1838,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       nextTickTick: 0,
       untilTick: 1000,
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1803,6 +1852,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       ARMOR_RULESET.creepById,
       ARMOR_RULESET.balance.slowFloorNum,
       ARMOR_RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000 - 9); // full magnitude — armor (6) never subtracted
   });
@@ -1818,6 +1868,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       nextTickTick: tick - 1000, // forged far behind — a catch-up loop would fire ~100 times
       untilTick: tick + 100,
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1831,6 +1882,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000 - 5); // exactly one tick's damage
     expect(result.dots[0]).toMatchObject({ nextTickTick: tick - 1000 + 10 }); // advanced by exactly one cadenceTicks
@@ -1881,6 +1933,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
         untilTick: 1000,
       },
     ];
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1894,6 +1947,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     // Survivor order mirrors the original (nothing died): idx0=30, idx1=10, idx2=10, idx3=20.
     expect(result.creeps.hp).toEqual([1000 - 3, 1000 - 5, 1000, 1000 - 7]);
@@ -1909,6 +1963,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       nextTickTick: 0,
       untilTick: 1000,
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1922,6 +1977,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.id).toHaveLength(0); // killed by the DoT tick, swept
     expect(result.dots).toEqual([]); // its own record dies with it
@@ -1938,6 +1994,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       nextTickTick: tick,
       untilTick: tick,
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -1951,6 +2008,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(1000 - 4); // ticked THIS tick (step 2, before the expiry sweep)
     expect(result.dots).toEqual([]); // then expired and removed in this same call (step 6)
@@ -1982,6 +2040,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       creepId: Array.from({ length: ROWS }, () => 'normal'),
       slowMulFp: Array.from({ length: ROWS }, () => 0),
       slowUntilTick: Array.from({ length: ROWS }, () => 0),
+      stunUntilTick: Array.from({ length: ROWS }, () => 0),
     };
     s.tick = 2000;
     const preStepTick = s.tick; // step() advances s.tick — runCombat itself sees the PRE-increment value
@@ -2037,6 +2096,7 @@ describe('runCombat — a corpse stops ticking (M2-S5a QC round 1)', () => {
       },
     ];
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -2050,6 +2110,7 @@ describe('runCombat — a corpse stops ticking (M2-S5a QC round 1)', () => {
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
       events,
     );
     expect(result.creeps.id).toHaveLength(0); // killed by the first record, swept
@@ -2080,6 +2141,7 @@ describe('runCombat — an abandoned bucket is resumed by the next row sharing t
       { targetId: 1, sourceId: 200, amount: 7, cadenceTicks: 10, nextTickTick: 0, untilTick: 1000 },
     ];
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -2093,6 +2155,7 @@ describe('runCombat — an abandoned bucket is resumed by the next row sharing t
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
       events,
     );
 
@@ -2142,6 +2205,7 @@ describe('runCombat — a forged non-positive creep id mints no DoT record (M2-S
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      new Rng(TEST_RNG_SEED),
       { impactPoints: [], fired: [], dotTicks: 0 },
     );
 
@@ -2180,6 +2244,7 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 }],
     };
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -2193,6 +2258,7 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
       RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      rng,
       events,
     );
     expect(events.dotTicks).toBe(MAX_DOT_RECORDS); // every filler record was due and ticked
@@ -2212,6 +2278,7 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
     expect(() => {
+      const rng = new Rng(TEST_RNG_SEED);
       runCombat(
         creeps,
         emptyTowers(),
@@ -2225,6 +2292,7 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
         RULESET.creepById,
         RULESET.balance.slowFloorNum,
         RULESET.balance.slowFloorDen,
+        rng,
         events,
       );
     }).not.toThrow();

@@ -50,6 +50,17 @@ per the accessibility standard: a shape cue always (never color alone), plus a
 motion cue that yields to reduced-motion — shape is the guaranteed channel.
 _Avoid_: indicator, status icon.
 
+**Ward**:
+The on-board visual cue that a creep is **immune** to an effect. Distinct from a
+Telegraph: a telegraph shows a timed status that is currently active, a ward shows
+a permanent property of the creep kind — so it is present from spawn, never
+expires, and is derived from the catalog rather than from sim state. Shape-cued
+like a telegraph, but — unlike a telegraph — carries **no motion cue**: a ward is
+not a timed status, so there is nothing for motion to communicate, and it renders
+as one opaque ring regardless of `reducedMotion`.
+_Avoid_: shield (reserved — in this genre it reads as a regenerating second health
+pool, a mechanic we may yet want the word for), forcefield, badge, buff.
+
 **Maze**:
 The walkable route left over after towers are placed. The player builds the maze
 out of towers to lengthen the creeps' path.

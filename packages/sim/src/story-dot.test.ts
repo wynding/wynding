@@ -12,6 +12,7 @@
 // slow-stacking tests.
 
 import { describe, it, expect } from 'vitest';
+import { Rng } from '@wynding/engine';
 import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
 import {
   runCombat,
@@ -21,7 +22,7 @@ import {
   type Impact,
 } from './combat';
 import { emptyTowers } from './tower';
-import { testRuleset, pushCreep, TEST_DOT_TOWER } from './test-support';
+import { testRuleset, pushCreep, TEST_DOT_TOWER, TEST_RNG_SEED } from './test-support';
 import type { CreepDef } from '@wynding/types';
 
 const LANE = {
@@ -70,6 +71,7 @@ function restingCreeps(
     creepId: rows.map(() => 'normal'),
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
+    stunUntilTick: rows.map(() => 0),
   };
 }
 
@@ -87,6 +89,7 @@ describe('the schedule — applied at T, ticks at T+10, T+20 … T+60, never at 
     };
     // T — applied. Application itself deals no damage: the record's first tick is
     // due at T + cadenceTicks, never at T.
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -100,6 +103,7 @@ describe('the schedule — applied at T, ticks at T+10, T+20 … T+60, never at 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(startHp);
     expect(result.dots).toHaveLength(1);
@@ -121,6 +125,7 @@ describe('the schedule — applied at T, ticks at T+10, T+20 … T+60, never at 
         RULESET.creepById,
         FLOOR_NUM,
         FLOOR_DEN,
+        rng,
       );
       const due = (t - T) % CADENCE === 0;
       if (due) hp -= AMOUNT;
@@ -160,6 +165,7 @@ describe('armor bypass — the same schedule against an armored creep', () => {
         { kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION },
       ],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const applied = runCombat(
       creeps,
       emptyTowers(),
@@ -173,6 +179,7 @@ describe('armor bypass — the same schedule against an armored creep', () => {
       ruleset.creepById,
       ruleset.balance.slowFloorNum,
       ruleset.balance.slowFloorDen,
+      rng,
     );
     expect(applied.creeps.hp[0]).toBe(1_000_000); // direct blanked to 0 by armor — untouched
 
@@ -191,6 +198,7 @@ describe('armor bypass — the same schedule against an armored creep', () => {
         ruleset.creepById,
         ruleset.balance.slowFloorNum,
         ruleset.balance.slowFloorDen,
+        rng,
       );
     }
     // The first DoT tick (T+10) landed at FULL magnitude — armor never subtracted.
@@ -208,6 +216,7 @@ describe('per-source independence — two sources on one creep, both ticking, ne
       sourceId: 100,
       effects: [{ kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     let r = runCombat(
       creeps,
       emptyTowers(),
@@ -221,6 +230,7 @@ describe('per-source independence — two sources on one creep, both ticking, ne
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.dots).toHaveLength(1);
 
@@ -248,6 +258,7 @@ describe('per-source independence — two sources on one creep, both ticking, ne
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.dots).toHaveLength(2); // source A's own record is untouched by source B's application
     expect(r.dots.find((d) => d.sourceId === 100)).toMatchObject({
@@ -273,6 +284,7 @@ describe('per-source independence — two sources on one creep, both ticking, ne
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.creeps.hp[0]).toBe(1_000_000 - AMOUNT);
 
@@ -290,6 +302,7 @@ describe('per-source independence — two sources on one creep, both ticking, ne
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.creeps.hp[0]).toBe(1_000_000 - AMOUNT - (AMOUNT + 3));
   });
@@ -305,6 +318,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       sourceId: 100,
       effects: [{ kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     let r = runCombat(
       creeps,
       emptyTowers(),
@@ -318,6 +332,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     // Run through the first two due ticks (T+10, T+20) uneventfully.
     r = runCombat(
@@ -333,6 +348,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     r = runCombat(
       r.creeps,
@@ -347,6 +363,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.dots[0]).toMatchObject({ nextTickTick: CADENCE * 3 }); // 30 — next due tick on the lattice
 
@@ -377,6 +394,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.dots).toHaveLength(1); // still one record — a refresh, not a second source
     expect(r.dots[0]).toMatchObject({ amount: NEW_AMOUNT, nextTickTick: CADENCE * 3 }); // lattice untouched (30, not 35)
@@ -397,6 +415,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.creeps.hp[0]).toBe(1_000_000 - AMOUNT * 2 - NEW_AMOUNT);
   });
@@ -410,6 +429,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       sourceId: 100,
       effects: [{ kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION }],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     let r = runCombat(
       creeps,
       emptyTowers(),
@@ -423,6 +443,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     r = runCombat(
       r.creeps,
@@ -437,6 +458,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(r.dots[0]).toMatchObject({ nextTickTick: CADENCE * 2 }); // 20 — due next
 
@@ -465,6 +487,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     // The tick still fired THIS SAME call, at the NEW magnitude, on top of the one
     // earlier tick (T+10) already landed at the ORIGINAL magnitude — if the DoT
@@ -533,6 +556,7 @@ describe('a lethal hit applies no DoT', () => {
         { kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION },
       ],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -546,6 +570,7 @@ describe('a lethal hit applies no DoT', () => {
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(result.creeps.id).toHaveLength(0); // dead, swept
     expect(result.dots).toEqual([]); // PASS 2 (statuses) never ran — no record created
@@ -564,6 +589,7 @@ describe('DoT kills credit kill bounty, and the creep is swept in the same phase
       untilTick: 1000,
     };
     const startingBounty = 50;
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -577,6 +603,7 @@ describe('DoT kills credit kill bounty, and the creep is swept in the same phase
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(result.creeps.id).toHaveLength(0); // swept THIS phase
     expect(result.bounty).toBe(startingBounty + 7); // kill bounty credited
@@ -607,6 +634,7 @@ describe('the record cap — a table at MAX_DOT_RECORDS drops the application an
         { kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION },
       ],
     };
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -620,6 +648,7 @@ describe('the record cap — a table at MAX_DOT_RECORDS drops the application an
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     expect(result.creeps.hp[0]).toBe(startHp - AMOUNT); // direct damage still landed
     expect(result.dots).toHaveLength(MAX_DOT_RECORDS); // the new record dropped — table size unchanged
@@ -667,6 +696,7 @@ describe('traversal order — a deliberately shuffled SoA with a duplicate id', 
         untilTick: 1000,
       },
     ];
+    const rng = new Rng(TEST_RNG_SEED);
     const result = runCombat(
       creeps,
       emptyTowers(),
@@ -680,6 +710,7 @@ describe('traversal order — a deliberately shuffled SoA with a duplicate id', 
       RULESET.creepById,
       FLOOR_NUM,
       FLOOR_DEN,
+      rng,
     );
     // Survivor order mirrors the original (nothing died): idx0=30, idx1=10, idx2=10, idx3=20.
     expect(result.creeps.hp).toEqual([1_000_000 - 3, 1_000_000 - 5, 1_000_000, 1_000_000 - 7]);

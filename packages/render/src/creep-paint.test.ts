@@ -8,6 +8,8 @@ import {
   creepSilhouettePaintOp,
   slowTelegraphPaintOps,
   dotTelegraphPaintOps,
+  stunTelegraphPaintOps,
+  wardPaintOps,
 } from './creep-paint';
 import { resolvePalette } from './palette';
 
@@ -28,6 +30,9 @@ describe('creepShapeFor — id-keyed silhouette (total over any string)', () => 
   });
   it('gives armored a visibly distinct hexagon (M2-S5a)', () => {
     expect(creepShapeFor('armored')).toBe('hexagon');
+  });
+  it('gives resolute a visibly distinct pentagon (M2-S6)', () => {
+    expect(creepShapeFor('resolute')).toBe('pentagon');
   });
   it('falls back to the default triangle for an unknown id — never throws', () => {
     expect(creepShapeFor('__proto__')).toBe('triangle');
@@ -206,5 +211,117 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
     // The drift's alpha CEILING is what the palette contrast gate relies on when it
     // treats the drift as the non-essential motion cue and `poisoned` as opaque.
     expect(drift(0).alpha).toBe(0.5);
+  });
+});
+
+// Driven from the REAL palette, like `POISONED` above.
+const STUNNED = resolvePalette('default').stunned;
+const WARDED = resolvePalette('default').warded;
+
+describe('stunTelegraphPaintOps (M2-S6) — the stun telegraph', () => {
+  it('is empty when the creep is not stunned', () => {
+    expect(stunTelegraphPaintOps({ x: 0, y: 0, stunned: false }, R, false, STUNNED, 0)).toEqual([]);
+  });
+
+  it('pins the full op array for a representative creep — motion allowed and reduced', () => {
+    const ops = stunTelegraphPaintOps({ x: 5, y: 6, stunned: true }, R, false, STUNNED, 0);
+    expect(ops).toEqual([
+      { kind: 'jolt', x: 5, y: 6, r: R * 1.15, colour: STUNNED, alpha: 1 },
+      { kind: 'flicker', x: 5, y: 6, r: R * 0.85, colour: STUNNED, alpha: 0.15 },
+    ]);
+    const reduced = stunTelegraphPaintOps({ x: 5, y: 6, stunned: true }, R, true, STUNNED, 0);
+    expect(reduced).toEqual([{ kind: 'jolt', x: 5, y: 6, r: R * 1.15, colour: STUNNED, alpha: 1 }]);
+  });
+
+  it('the jolt is a thick, ALWAYS-opaque ring outside the silhouette — the GUARANTEED shape cue', () => {
+    const [jolt] = stunTelegraphPaintOps({ x: 0, y: 0, stunned: true }, R, true, STUNNED, 999);
+    expect(jolt!.alpha).toBe(1); // opaque regardless of render time — keeps the palette
+    // gate's opaque treatment of `stunned` honest, same posture as `slowed`/`poisoned`.
+  });
+
+  it('the jolt and flicker radii MUST differ — an alpha-animated ring at the same radius as an opaque one is invisible', () => {
+    const [jolt, flicker] = stunTelegraphPaintOps(
+      { x: 0, y: 0, stunned: true },
+      R,
+      false,
+      STUNNED,
+      0,
+    );
+    expect(jolt!.r).not.toBe(flicker!.r);
+    // The GUARANTEED cue sits OUTSIDE the silhouette (r>1) so its contrast partner is the
+    // board floor, never the creep fill — see the builder's comment. The flicker stays
+    // inside as a redundant motion cue.
+    expect(jolt!.r).toBeGreaterThan(flicker!.r);
+    expect(jolt!.r).toBeGreaterThan(R);
+    // AND it must stay INSIDE the slowed ring's radius (r×1.4). The band between the
+    // silhouette and that ring is narrow, and the jolt is stroked at weight 4, so this is
+    // the one direction the radius must never drift: past 1.4 it stops reading as its own
+    // cue and starts reading as a thick slow ring. A slowed creep is also the commonest
+    // thing for a stun to land on, so the two co-occur constantly.
+    //
+    // KNOWN, and deliberately not fixed here: at small cell sizes the two already touch.
+    // With r = max(3, cellPx × 0.35), a 1000×700 viewport on `field-01` gives cellPx ≈ 29
+    // and r ≈ 10.2, where the jolt's outer edge (13.7px) passes the slow ring's inner edge
+    // (13.2px) and the pair reads as one band. Strokes are centred, so clearance needs
+    // `jolt_r < 1.4 − 3/r` — a bound that TIGHTENS as cells shrink and reaches 0.4 at the
+    // r = 3 clamp, below the 1.0 an outside ring must exceed. The band is empty at small
+    // sizes, so no size-independent radius exists and the fix is a cue-radius layout pass
+    // across all four telegraph families, which `warded`'s own note already defers. Pinned
+    // here so the ordering cannot silently degrade further.
+    expect(jolt!.r).toBeLessThan(1.4 * R);
+  });
+
+  it('the flicker genuinely animates on the SAME triangle wave slowTelegraphPaintOps uses', () => {
+    const at = (t: number) =>
+      stunTelegraphPaintOps({ x: 0, y: 0, stunned: true }, R, false, STUNNED, t)[1]!;
+    const a0 = at(0).alpha; // wave trough: 0.15 + 0.7*0
+    const aMid = at(450).alpha; // wave crest: 0.15 + 0.7*1
+    const aWrap = at(900).alpha; // full period — back to the trough
+    expect(a0).toBeCloseTo(0.15, 6);
+    expect(aMid).toBeCloseTo(0.85, 6);
+    expect(aWrap).toBeCloseTo(a0, 10); // periodic, not drifting
+    expect(at(0).r).toBe(at(450).r); // the flicker's RADIUS never moves — only alpha does
+  });
+
+  it('a non-finite render time is total: the telegraph still renders, un-animated', () => {
+    const ops = stunTelegraphPaintOps({ x: 0, y: 0, stunned: true }, R, false, STUNNED, NaN);
+    expect(ops.map((o) => o.kind)).toEqual(['jolt', 'flicker']);
+    expect(ops[1]!.alpha).toBe(
+      stunTelegraphPaintOps({ x: 0, y: 0, stunned: true }, R, false, STUNNED, 0)[1]!.alpha,
+    );
+  });
+
+  it('keeps the jolt but drops the flicker under reduced motion (WCAG 2.3.3 / GAG §2)', () => {
+    const opsA = stunTelegraphPaintOps({ x: 0, y: 0, stunned: true }, R, true, STUNNED, 0);
+    const opsB = stunTelegraphPaintOps({ x: 0, y: 0, stunned: true }, R, true, STUNNED, 450);
+    expect(opsA.map((o) => o.kind)).toEqual(['jolt']);
+    expect(opsB).toEqual(opsA); // the remaining cue does not move
+  });
+});
+
+describe('wardPaintOps (M2-S6) — the ward cue', () => {
+  it('is empty when the creep is not warded', () => {
+    expect(wardPaintOps({ x: 0, y: 0, warded: false }, R, WARDED)).toEqual([]);
+  });
+
+  it('pins the full op array for a representative creep — a single opaque outer ring', () => {
+    expect(wardPaintOps({ x: 5, y: 6, warded: true }, R, WARDED)).toEqual([
+      { kind: 'ward', x: 5, y: 6, r: R * 2.2, colour: WARDED, alpha: 1 },
+    ]);
+  });
+
+  it("sits OUTSIDE the slow pulse's r×2.0 ceiling, so it is never mistaken for an active slow", () => {
+    const [ward] = wardPaintOps({ x: 0, y: 0, warded: true }, R, WARDED);
+    const [, pulse] = slowTelegraphPaintOps({ x: 0, y: 0, slowed: true }, R, false, 0x56b4e9, 450); // wave crest: r×2.0
+    expect(ward!.r).toBeGreaterThan(pulse!.r);
+  });
+
+  it('takes no renderTimeMs and has no reduced-motion branch — a ward is not a timed status', () => {
+    // Calling the builder with only its documented 3 parameters (creep, r, colour) is
+    // itself the assertion: a 4th (renderTimeMs) or 5th (reducedMotion) parameter would
+    // fail to compile if this builder ever grew one by mistake.
+    const a = wardPaintOps({ x: 1, y: 2, warded: true }, R, WARDED);
+    const b = wardPaintOps({ x: 1, y: 2, warded: true }, R, WARDED);
+    expect(a).toEqual(b); // deterministic, no hidden time dependency
   });
 });

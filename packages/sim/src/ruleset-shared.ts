@@ -34,7 +34,7 @@ export class RulesetError extends Error {
  *  primitive (resolved per creep row via the `creepById` combat seam), a REQUIRED
  *  `sourceId` on both `Impact` variants (hash-breaking for single-target play too),
  *  and the per-source DoT model (`SimState.dots`, the tick step, inclusive expiry). */
-export const SIM_VERSION = 9;
+export const SIM_VERSION = 10;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;
@@ -77,7 +77,7 @@ export function effectiveSpeedFp(
   slowFloorNum: number,
   slowFloorDen: number,
 ): number {
-  if (mulFp === 0) return baseSpeedFp;
+  if (mulFp === 0) return Math.max(1, baseSpeedFp);
   return Math.max(
     1,
     Math.floor((baseSpeedFp * mulFp) / 256),

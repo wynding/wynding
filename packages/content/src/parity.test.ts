@@ -93,8 +93,13 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // prefixCountdown 1,400 — this hands-off run loses at tick 946, well before
     // that wave ever spawns, so every OTHER assertion in this test is unchanged
     // from M2-S5a P2 and this is once again a hash-only move.
-    expect(hashSimState(state)).toBe('2a1bde14');
-    expect(fnv1a(trace.join(':'))).toBe('5fd167a8');
+    // Re-pinned M2-S6 P5: the new `stunUntilTick` creep column (P1) widens every
+    // creep's serialized shape, and the appended wave index 4 (`resolute`+`fast`)
+    // launches even later than wave index 3 — this hands-off run still loses at
+    // tick 946, before either new wave ever spawns, so this is again a hash-only
+    // move; every other assertion in this test is unchanged.
+    expect(hashSimState(state)).toBe('9f0b400a');
+    expect(fnv1a(trace.join(':'))).toBe('81e95832');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
@@ -112,9 +117,14 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // undecremented 500-tick countdown); wave 1 launches naturally at tick 300
     // (its countdown, not an early call, so it pays no credit — `rem` is 0 at
     // natural expiry); wave 2 is early-called at tick 550 (50 ticks before its
-    // natural expiry, paying a small bounty/credit); the tick-1050 call is a
-    // deliberate no-op — every wave has already launched by then, exercising
-    // `!launchPending`'s already-launched-cursor branch.
+    // natural expiry, paying a small bounty/credit); the tick-1050 call WAS a
+    // deliberate no-op through M2-S5a — every wave had already launched by then,
+    // exercising `!launchPending`'s already-launched-cursor branch.
+    // M2-S6 P5: the bundle now carries a FIFTH wave (index 4, `resolute`+`fast`),
+    // whose own countdown only starts once wave index 3 launches (naturally
+    // landing around tick 1150) — so at tick 1050 it has NOT yet launched, and
+    // this same call now LAUNCHES it early instead of no-opping. See the
+    // re-pinned golden below for the measured before/after this produces.
     const anchors: { col: number; row: number }[] = [];
     for (let col = 1; col <= 26; col += 3) {
       anchors.push({ col, row: 10 });
@@ -142,7 +152,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
       }
       if (tick === 0) out.push({ kind: 'callWaveEarly' }); // wave 0
       if (tick === 550) out.push({ kind: 'callWaveEarly' }); // wave 2
-      if (tick === 1050) out.push({ kind: 'callWaveEarly' }); // no-op: nothing left to launch
+      if (tick === 1050) out.push({ kind: 'callWaveEarly' }); // M2-S6: launches wave index 4 early (was a no-op through M2-S5a)
       return out;
     }
 
@@ -166,34 +176,53 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // is now part of "every wave cleared" — the `basic` wall's DPS also clears it
     // (armor 6 against `basic`'s 10 still nets 4/hit, per P1), so the scenario
     // still WINS, just later (the wall must also grind through wave 3's armor).
-    expect(hashSimState(state)).toBe('77238645');
-    expect(fnv1a(trace.join(':'))).toBe('a7e35aec');
+    //
+    // Re-pinned M2-S6 P5 — a SEMANTIC move, not a hash-only one. The bundle gains
+    // a fifth wave (index 4: 6 × `resolute` + 6 × `fast`, clearBonus 7), and the
+    // tick-1050 `callWaveEarly` above now launches it early instead of no-opping
+    // (see the comment there). The `basic` wall also clears this wave (`resolute`
+    // and `fast` both carry 0 armor, like `normal`/`fast`/`swarm` — `armored` is the
+    // one pre-S6 exception, at armor 6), so
+    // the scenario still WINS. Measured before (M2-S5a P5) → after (M2-S6 P5):
+    //   tick                       1168 → 1198
+    //   waveResolved.length           4 → 5   (both all-`true`)
+    //   waveCursor                    4 → 5
+    //   cumulativeKillBounty          60 → 84  (+24: wave index 4's 6×`resolute` + 6×`fast`, bounty 2 each)
+    //   cumulativeEarlyCallCredit     11 → 13  (+2: the tick-1050 call's early-call credit, ⌊rem/50⌋)
+    //   bounty                        73 → 106 (+24 kill bounty, +7 wave index 4's clearBonus, +2 early-call bounty)
+    //   score                        421 → 447
+    //   lives (unchanged)             10 → 10
+    //   stars (unchanged)              3 → 3
+    expect(hashSimState(state)).toBe('e65312bd');
+    expect(fnv1a(trace.join(':'))).toBe('76979d8d');
     expect(state.phase).toBe('won');
     expect(state.lives).toBe(10);
-    expect(state.tick).toBe(1168);
+    expect(state.tick).toBe(1198);
     // Every wave cleared, and the game recognizes it: waveResolved is exhaustive,
-    // waveCursor ran past the last wave (now four, not three).
-    expect(state.waveResolved).toEqual([true, true, true, true]);
-    expect(state.waveCursor).toBe(4);
-    // Per-wave clear bonuses (4/4/5/5 across the four waves), kill bounty (wave 1's
+    // waveCursor ran past the last wave (now five, not four).
+    expect(state.waveResolved).toEqual([true, true, true, true, true]);
+    expect(state.waveCursor).toBe(5);
+    // Per-wave clear bonuses (4/4/5/5/7 across the five waves), kill bounty (wave 1's
     // re-composition to 16 × `swarm` — M2-S4a step 9 — adds 6 more 1-bounty kills over
     // the old 10 × `normal`; waves are 0-based throughout this file, so this is the
-    // SECOND wave, distinct from `:6`'s S3-era "wave 2" which names the THIRD; the
-    // appended wave 3's `6 × armored` at bounty 3 each adds 18 more), and the two
-    // early-call credits (⌊500/50⌋ at tick 0, ⌊51/50⌋ at tick 550 (the call tick
-    // skips its own decrement, so the sampled remainder is 51) — wave 1's natural
-    // launch pays nothing, its countdown having already reached 0; wave 3 also
-    // launches naturally, so it too pays no credit) all landed: cumulativeKillBounty
-    // is the SCORED kill-bounty channel (clear bonus pays into `bounty`, the
-    // spendable economy, not the score) — 42 from the three pre-S5a waves plus 18 for
-    // wave 3's six `armored` at bounty 3 = 60 — while the credit channel is exactly the
-    // two early-call payouts, 11.
-    expect(state.cumulativeKillBounty).toBe(60);
-    expect(state.cumulativeEarlyCallCredit).toBe(11);
-    expect(state.bounty).toBe(73);
+    // SECOND wave, distinct from `:6`'s S3-era "wave 2" which names the THIRD; wave
+    // index 3's `6 × armored` at bounty 3 each adds 18 more; wave index 4's 6 ×
+    // `resolute` + 6 × `fast`, bounty 2 each, adds 24 more), and the three early-call
+    // credits (⌊500/50⌋ at tick 0, ⌊51/50⌋ at tick 550 (the call tick skips its own
+    // decrement, so the sampled remainder is 51), ⌊rem/50⌋ at tick 1050 for wave
+    // index 4 — wave 1's natural launch pays nothing, its countdown having already
+    // reached 0; wave 3 also launches naturally, so it too pays no credit) all
+    // landed: cumulativeKillBounty is the SCORED kill-bounty channel (clear bonus
+    // pays into `bounty`, the spendable economy, not the score) — 42 from the three
+    // pre-S5a waves plus 18 for wave index 3's six `armored` at bounty 3, plus 24 for
+    // wave index 4's twelve creeps at bounty 2 = 84 — while the credit channel is
+    // exactly the three early-call payouts, 13.
+    expect(state.cumulativeKillBounty).toBe(84);
+    expect(state.cumulativeEarlyCallCredit).toBe(13);
+    expect(state.bounty).toBe(106);
     // Win score formula: kill-bounty + early-call credit + lives × survivalMul.
-    expect(deriveScore(state, ruleset)).toBe(60 + 11 + 10 * ruleset.scoring.survivalMul);
-    expect(deriveScore(state, ruleset)).toBe(421);
+    expect(deriveScore(state, ruleset)).toBe(84 + 13 + 10 * ruleset.scoring.survivalMul);
+    expect(deriveScore(state, ruleset)).toBe(447);
     expect(deriveStars(state, ruleset)).toBe(3);
   });
 });
@@ -203,7 +232,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // A change here means the shipped artifact's CONTENT changed (or its normalized
 // encoding did) — not a behavior change per se, but every deployed replay/leaderboard
 // entry binds to this exact digest (ADR 0007 §3), so a change is never silent.
-const SHIPPED_RULESET_HASH = '76f635a096599696f9ba14a5ef05029b06c6799df8305750e50bf3b241e88f68';
+const SHIPPED_RULESET_HASH = '34e25911bd474a0c1bd973a13b8e935e5ab65c26ef7e714dfe5c177c06c74e8b';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {

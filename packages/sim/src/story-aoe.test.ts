@@ -66,6 +66,7 @@ function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCre
     creepId: ['normal'],
     slowMulFp: [0],
     slowUntilTick: [0],
+    stunUntilTick: [0],
   };
 }
 
@@ -89,6 +90,7 @@ function restingCreeps(
     creepId: rows.map(() => 'normal'),
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
+    stunUntilTick: rows.map(() => 0),
   };
 }
 
@@ -914,6 +916,9 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
     // measured values above. Re-pinned M2-S5a P2: `Impact.sourceId` enters the
     // world-hash; the three measured values above are UNCHANGED, so this is a
     // hash-only move, not a behavior change.
-    expect(hashSimState(state)).toBe('4546bf54');
+    // Re-pinned M2-S6 P5: the new `stunUntilTick` creep column (P1) widens every
+    // creep's serialized shape; this scenario carries no `stun` tower, so the
+    // three measured values above are again UNCHANGED — another hash-only move.
+    expect(hashSimState(state)).toBe('34ee3f5f');
   });
 });

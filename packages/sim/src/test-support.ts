@@ -5,11 +5,17 @@
 // numbers mirror the M1 content but tests may override the board/wave/economy.
 
 import type { CreepDef, Ruleset, TowerDef } from '@wynding/types';
+import { Rng } from '@wynding/engine';
 import type { GridSpec } from './board';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 import { cellCenterX, cellCenterY } from './movement';
 import type { SimState } from './index';
 import { runCombat } from './combat';
+
+/** A fixed seed for `runCombatT`'s default `Rng` (M2-S6) — any fixed uint32 works,
+ *  since a stun-free run never draws from it; pinned rather than random so a test
+ *  failure is reproducible. */
+export const TEST_RNG_SEED = 0x5eed;
 
 /** The standard M1 single-target tower stat block. */
 export const TEST_TOWER: TowerDef = {
@@ -219,7 +225,8 @@ export function testRuleset(spec: GridSpec, opts: TestBundleOpts = {}): Compiled
  *  from the origin and progress is nonzero). `creepId` defaults to `'normal'` (the
  *  default bundle's catalog id — override to `'fast'`/a test-bundle `extraCreeps` id
  *  when the ruleset under test carries a different catalog); `slowMulFp`/
- *  `slowUntilTick` default to `(0, 0)` — no active slow (M2-S3). */
+ *  `slowUntilTick` default to `(0, 0)` — no active slow (M2-S3); `stunUntilTick`
+ *  defaults to `0` — not stunned (M2-S6). */
 export function pushCreep(
   state: SimState,
   args: {
@@ -233,6 +240,7 @@ export function pushCreep(
     readonly creepId?: string;
     readonly slowMulFp?: number;
     readonly slowUntilTick?: number;
+    readonly stunUntilTick?: number;
     /** A committed mid-edge row: head differs from (col,row) and progress is nonzero
      *  (CodeRabbit #73 — `tower.test.ts`'s `committedCreep` delegates here so new SoA
      *  columns thread through ONE helper). Defaults keep the at-rest sentinel shape. */
@@ -254,6 +262,7 @@ export function pushCreep(
   state.creeps.creepId.push(args.creepId ?? 'normal');
   state.creeps.slowMulFp.push(args.slowMulFp ?? 0);
   state.creeps.slowUntilTick.push(args.slowUntilTick ?? 0);
+  state.creeps.stunUntilTick.push(args.stunUntilTick ?? 0);
 }
 
 // `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
@@ -274,13 +283,30 @@ export function pushCreep(
 // slot without a type error. The clean fix would be to reference each parameter BY
 // NAME instead of by tuple index, but `runCombat`'s own signature (production code,
 // off-limits for this packet) has no named-parameters form to reference — it takes
-// 13 bare positional arguments, and the ambiguous pairs above have no more specific
+// 14 bare positional arguments, and the ambiguous pairs above have no more specific
 // type to import that `runCombat` itself doesn't already erase (its `impacts`/`dots`
 // parameters are typed `readonly unknown[]`, not `Impact[]`/`DotRecord[]`, so a
 // narrower import wouldn't be enforced by `runCombat`'s own type and wouldn't catch a
 // positional swap either). So this packet takes the acceptable fallback the plan
 // allows: centralize the ONE `Parameters<...>[N]`-indexed definition here instead of
 // three independent copies, so the hazard exists in exactly one place.
+//
+// M2-S6 inserted `rng` into `runCombat` as a REQUIRED parameter before `events` —
+// `rng` is now index 12 and `events` index 13 (was 12). That shift is the reason
+// `events` below reads `RunCombatParams[13]`, not `[12]`: leaving it at `[12]` would
+// have silently retyped this wrapper's last parameter from `StepEvents` to `Rng` and
+// kept compiling. `runCombatT`'s OWN `rng` is, deliberately, the opposite of
+// `runCombat`'s — OPTIONAL with a default — because this wrapper has ~50 callers of
+// its own and a stun-free fixture never draws from it, so making it required would
+// migrate every one of those call sites for no behavioural benefit. It is appended
+// AFTER `events` in the wrapper's OWN signature (not re-slotted to `runCombat`'s
+// position) because this wrapper still drops `dots`, so its parameter
+// order need not track `runCombat`'s, and inserting before `events` would re-slot
+// every existing positional `runCombatT(..., events)` call regardless of the
+// default. The default `new Rng(TEST_RNG_SEED)` is evaluated fresh per call, which
+// is safe precisely because a stun-free run never advances it — stun tests inject
+// their own `Rng` explicitly. `runCombat` itself stays required: a forgotten
+// production call site must fail to compile.
 type RunCombatParams = Parameters<typeof runCombat>;
 export function runCombatT(
   creeps: RunCombatParams[0],
@@ -293,7 +319,8 @@ export function runCombatT(
   towerById: RunCombatParams[8],
   slowFloorNum: RunCombatParams[10],
   slowFloorDen: RunCombatParams[11],
-  events?: RunCombatParams[12],
+  events?: RunCombatParams[13],
+  rng: RunCombatParams[12] = new Rng(TEST_RNG_SEED),
 ): ReturnType<typeof runCombat> {
   return runCombat(
     creeps,
@@ -305,9 +332,17 @@ export function runCombatT(
     field,
     grid,
     towerById,
+    // `creepById` is hardcoded EMPTY, and this wrapper deliberately offers no override.
+    // Every creep run through it therefore has `immunities: []` and armor 0. An immunity
+    // test written against this wrapper would pass whether or not the production filter
+    // exists — a silent false negative — so immunity tests call `runCombat` DIRECTLY with
+    // a real `creepById` (see `story-stun.test.ts`). A parameter here was tried and removed
+    // at M2-S6 QC: no call site used it, and its presence was an invitation to write exactly
+    // that vacuous test. Removing the affordance is the fix; a comment warning about it is not.
     {},
     slowFloorNum,
     slowFloorDen,
+    rng,
     events,
   );
 }

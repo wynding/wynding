@@ -38,7 +38,7 @@
 // fire is a deterministic no-op that retries next tick (total and reproducible for
 // every `step()` caller).
 
-import { FP_ONE } from '@wynding/engine';
+import { FP_ONE, type Rng } from '@wynding/engine';
 import { ORTHO_COST, DIAG_COST, type Grid } from './board';
 import type { DistanceField } from './pathfinding';
 import { distAt } from './field-access';
@@ -89,7 +89,8 @@ export type EffectPrimitive =
       readonly amount: number;
       readonly cadenceTicks: number;
       readonly durationTicks: number;
-    };
+    }
+  | { readonly kind: 'stun'; readonly chanceNum: number; readonly durationTicks: number };
 
 /**
  * A scheduled impact, resolving at `impactTick` (M2-S4a: a discriminated union —
@@ -274,7 +275,11 @@ export interface StepEvents {
  *  id language, matching `ScheduledSpawn.creepId`); `slowMulFp`/`slowUntilTick` are
  *  the per-creep slow status pair — `slowMulFp === 0` means no active slow (the
  *  full model, G6: strongest-wins non-stacking means at most one live slow per
- *  creep, so a column pair is exactly right, not a shortcut). */
+ *  creep, so a column pair is exactly right, not a shortcut). `stunUntilTick` (M2-S6)
+ *  is appended immediately AFTER `slowUntilTick` (same hash-load-bearing position
+ *  rule) — `0` means not stunned. There is no paired magnitude column: stun is
+ *  binary, so the `slowMulFp === 0 ⟺ slowUntilTick === 0` biconditional has no
+ *  analogue here. */
 export interface CombatCreeps {
   id: number[];
   hp: number[];
@@ -289,9 +294,10 @@ export interface CombatCreeps {
   creepId: string[]; // catalog id, resolved at spawn
   slowMulFp: number[]; // 0 = no active slow
   slowUntilTick: number[]; // 0 = no active slow (paired with slowMulFp)
+  stunUntilTick: number[]; // 0 = not stunned (M2-S6, no paired magnitude column)
 }
 
-/** The empty 13-column creep SoA — the single factory, reused by the sim barrel. */
+/** The empty 14-column creep SoA — the single factory, reused by the sim barrel. */
 export const emptyCreeps = (): CombatCreeps => ({
   id: [],
   hp: [],
@@ -306,6 +312,7 @@ export const emptyCreeps = (): CombatCreeps => ({
   creepId: [],
   slowMulFp: [],
   slowUntilTick: [],
+  stunUntilTick: [],
 });
 
 /** True iff `e` is a valid `EffectPrimitive`: `direct` — a positive safe-integer
@@ -314,14 +321,16 @@ export const emptyCreeps = (): CombatCreeps => ({
  *  positive safe integers, `durationTicks` a positive safe integer ≤ 1,000,000 (the
  *  same `GENERIC_MAX` bound `slow` already uses) AND `≥ cadenceTicks`, mirroring the
  *  schema's own pair rule. That pair rule is the load-bearing one: without it a forged
- *  impact mints a record whose first tick is already past its expiry. Any other shape
- *  is invalid. */
+ *  impact mints a record whose first tick is already past its expiry. `stun` (M2-S6)
+ *  — `chanceNum` a positive safe integer ≤ 256 and `durationTicks` a positive safe
+ *  integer ≤ 1,000,000 (the same `slow`-arm ceiling). Any other shape is invalid. */
 function validEffectPrimitive(e: unknown): e is EffectPrimitive {
   if (e === null || typeof e !== 'object') return false;
   const rec = e as {
     kind?: unknown;
     amount?: unknown;
     mulFp?: unknown;
+    chanceNum?: unknown;
     cadenceTicks?: unknown;
     durationTicks?: unknown;
   };
@@ -362,6 +371,16 @@ function validEffectPrimitive(e: unknown): e is EffectPrimitive {
       (rec.durationTicks as number) >= (rec.cadenceTicks as number)
     );
   }
+  if (rec.kind === 'stun') {
+    return (
+      Number.isSafeInteger(rec.chanceNum) &&
+      (rec.chanceNum as number) > 0 &&
+      (rec.chanceNum as number) <= 256 &&
+      Number.isSafeInteger(rec.durationTicks) &&
+      (rec.durationTicks as number) > 0 &&
+      (rec.durationTicks as number) <= 1_000_000
+    );
+  }
   return false;
 }
 
@@ -385,6 +404,9 @@ function canonicalEffectPrimitive(e: EffectPrimitive): EffectPrimitive {
       cadenceTicks: e.cadenceTicks,
       durationTicks: e.durationTicks,
     };
+  }
+  if (e.kind === 'stun') {
+    return { kind: 'stun', chanceNum: e.chanceNum, durationTicks: e.durationTicks };
   }
   const unreachable: never = e;
   return unreachable;
@@ -639,8 +661,11 @@ const DIST_SCALE = 1 << 16;
  * by one edge cost (≤ `DIAG_COST`), strictly finer than the old whole-cell quantum,
  * deterministic, and transient (it converges the instant the creep reaches its head).
  *
- * Returns `null` when the next waypoint is unreachable (a forged row that can never be
- * a valid "first" target) — the same total, never-throw contract as the rest of combat.
+ * Returns `null` only when the next waypoint AND the from-cell are both unreachable — a
+ * genuinely stranded row that can never be a valid "first" target. An unreachable head
+ * alone falls back to the from-cell (M2-S6: a stunned creep cannot re-path, so a tower
+ * built on its head cell must not make it unshootable — see the body). Same total,
+ * never-throw contract as the rest of combat.
  */
 function remainingRouteDist(
   field: DistanceField,
@@ -652,7 +677,25 @@ function remainingRouteDist(
   progress: number,
 ): number | null {
   const headDist = distAt(field, headCol, headRow);
-  if (headDist < 0) return null; // unreachable waypoint ⇒ not targetable
+  if (headDist < 0) {
+    // The next waypoint is unreachable — normally impossible, because movement re-paths
+    // before combat runs, so a moving creep's head is always valid by the time we get
+    // here. A STUNNED creep (M2-S6) is the exception: it does not move, so it cannot
+    // re-path, and a tower built on the cell it was heading into leaves that head blocked
+    // for the whole stun. Returning `null` here would drop it from the live list and make
+    // it UNTARGETABLE until the stun expired — a stunned creep that no tower can shoot is
+    // the opposite of the mechanic (Codex P2).
+    //
+    // Fall back to the cell the creep is standing on. That is the same metric the at-rest
+    // branch below uses, it is a sound lower bound on what remains (the creep must still
+    // traverse from here), and it keeps the creep targetable until it re-paths on its
+    // first moving tick. Only `null` if the FROM cell is unreachable too, which means a
+    // genuinely stranded row rather than a stale waypoint.
+    const strandedCol = cellOf(fromX);
+    const strandedRow = cellOf(fromY);
+    const fromDist = distAt(field, strandedCol, strandedRow);
+    return fromDist < 0 ? null : fromDist * DIST_SCALE;
+  }
   const fromCol = cellOf(fromX);
   const fromRow = cellOf(fromY);
   // At rest the head IS the from-cell (movement's rest sentinel): no edge remains, so
@@ -743,6 +786,24 @@ function applySlow(
     creeps.slowUntilTick[idx] = satAdd(tick, durationTicks);
   }
   // else: mulFp > active (weaker) — no write.
+}
+
+/**
+ * Apply one `stun` effect to a creep row (M2-S6): takes the LATER of the active
+ * expiry and the new one, `Math.max(active, satAdd(tick, durationTicks))` — longest-
+ * remaining wins, never a plain refresh. A stun effect carries no magnitude
+ * (`chanceNum` only gates whether it applies at all, at the call site, before this
+ * is reached), but `durationTicks` IS a perfectly good ordering key: a fresh 1-tick
+ * stun landing on a creep with 19 ticks already banked must not shorten it to 1.
+ * Equal durations still land on the same expiry either way, so refresh-on-equal
+ * (and therefore chain-lock, decision 5) is unaffected — this only changes the
+ * outcome when the new expiry would be EARLIER than the active one.
+ */
+function applyStun(creeps: CombatCreeps, idx: number, durationTicks: number, tick: number): void {
+  creeps.stunUntilTick[idx] = Math.max(
+    creeps.stunUntilTick[idx] as number,
+    satAdd(tick, durationTicks),
+  );
 }
 
 /**
@@ -943,6 +1004,9 @@ function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] 
         durationTicks: e.durationTicks,
       };
     }
+    if (e.kind === 'stun') {
+      return { kind: 'stun', chanceNum: e.chanceNum, durationTicks: e.durationTicks };
+    }
     return { kind: 'direct', amount: e.amount }; // 'direct' or 'aoe' — same primitive
   });
 }
@@ -981,9 +1045,15 @@ function blastRadiusOf(effects: readonly CompiledEffect[]): number | null {
  * `dots`/`sourceId`/`events` (M2-S5a P3) thread PASS 2's `dot` effects to
  * `applyDot`, mutating the caller's `dots` table in place: `sourceId` is THIS
  * impact's fire-time source (never re-derived), and a lethal hit reaching PASS 1's
- * death check applies no `dot` either — the same "a lethal hit applies no statuses"
- * rule `slow` already gets, falling out for free since PASS 2 (both effect kinds)
- * only runs when the creep survived PASS 1.
+ * death check applies no `dot` (or `slow`/`stun`) either — the same "a lethal hit
+ * consumes no draw" rule falls out for free since PASS 2 (every effect kind) only
+ * runs when the creep survived PASS 1.
+ *
+ * `rng` (M2-S6) is the ONE draw source for PASS 2's `stun` roll — required, not
+ * optional, for the same reason `creepById` above it is: a forgotten call site must
+ * fail to compile, not silently simulate without stun. An immune target consumes no
+ * draw either (the immunity check short-circuits before `rng.nextInt` is ever
+ * called), so `rngState` only advances on a genuine, non-immune stun attempt.
  */
 export function applyImpactToCreep(
   creeps: CombatCreeps,
@@ -995,9 +1065,12 @@ export function applyImpactToCreep(
   dots: DotRecord[],
   dotIndex: Map<string, number>,
   sourceId: number,
+  rng: Rng,
   events?: StepEvents,
 ): void {
-  const armor = creepById[creeps.creepId[idx] as string]?.armor ?? 0;
+  const def = creepById[creeps.creepId[idx] as string];
+  const armor = def?.armor ?? 0;
+  const immunities = def?.immunities ?? [];
   for (const effect of effects) {
     if (effect.kind === 'direct') applyDirect(creeps, idx, effect.amount, armor);
   }
@@ -1005,7 +1078,20 @@ export function applyImpactToCreep(
     killedThisPhase.add(idx);
   } else {
     for (const effect of effects) {
-      if (effect.kind === 'slow') applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
+      // `slow`'s immunity filter is NEW here (M2-S6) — `applySlow` itself has no
+      // immunity check; `resolute`'s whole mechanic is this filter, kept at the call
+      // site alongside stun's so both immunity kinds read as one rule.
+      if (effect.kind === 'slow' && !immunities.includes('slow')) {
+        applySlow(creeps, idx, effect.mulFp, effect.durationTicks, tick);
+      }
+      // Stun (M2-S6): an immune target short-circuits before `rng.nextInt` is ever
+      // called, so it consumes no draw. Otherwise, one draw per attempt; every
+      // stun is equal-strength, so a landed roll just calls `applyStun`.
+      if (effect.kind === 'stun' && !immunities.includes('stun')) {
+        if (rng.nextInt(256) < effect.chanceNum) {
+          applyStun(creeps, idx, effect.durationTicks, tick);
+        }
+      }
       if (effect.kind === 'dot') {
         // A forged non-positive/non-safe `creeps.id` is screened INSIDE `applyDot`, beside
         // the dedup and cap rules it already owns — see its own note.
@@ -1057,6 +1143,14 @@ export function applyImpactToCreep(
  * `advanceCreep`'s own existing termination proof (movement.ts), which already
  * covers budgets far larger than one tick's worth — a blast's one-shot budget adds
  * nothing new to that argument.
+ *
+ * DELIBERATELY DOES NOT READ STUN (M2-S6): the lead below runs through
+ * `effectiveSpeedFp` exactly as movement does, un-stunned, so a blast fired at a
+ * creep that is stunned before the shot lands leads ahead of a target that will not
+ * move — and can miss. PRD 0001 §4 pins this: "only a state change in flight
+ * (re-path, slow, stun, death, leak) makes a lead miss, and that is the counterplay,
+ * not a bug." Folding stun into this prediction would be more "accurate" and would
+ * contradict that spec.
  */
 function predictBlastPoint(
   field: DistanceField,
@@ -1164,10 +1258,10 @@ export function blastMembers(
  * Run the combat phase for one tick over the POST-MOVE world. Returns the new creep
  * SoA (dead creeps swept), the surviving impact queue, the DoT-record table, and the
  * updated bounty; mutates `towers.targetId`/`towers.nextFireTick` in place (by
- * source row) and `creeps.hp`/`slowMulFp`/`slowUntilTick` during resolution. `tick`
- * is the pre-increment `state.tick`. `slowFloorNum`/`slowFloorDen` (M2-S4a) are the
- * ruleset's slow floor — needed here (not just by movement) because a blast's
- * fire-time lead prediction reads the SAME `effectiveSpeedFp` formula.
+ * source row) and `creeps.hp`/`slowMulFp`/`slowUntilTick`/`stunUntilTick` during
+ * resolution. `tick` is the pre-increment `state.tick`. `slowFloorNum`/`slowFloorDen`
+ * (M2-S4a) are the ruleset's slow floor — needed here (not just by movement) because
+ * a blast's fire-time lead prediction reads the SAME `effectiveSpeedFp` formula.
  *
  * Order (PLAN §13, extended M2-S3 with the status-effect close, M2-S4a with blast
  * resolution, M2-S5a P3 with the DoT tick step): (1) resolve due impacts (direct →
@@ -1199,6 +1293,13 @@ export function blastMembers(
  * by step (2), then filtered by step (6) to drop both non-surviving targets' records
  * and expired (`untilTick <= tick`) records — the table this function returns is the
  * fully closed-out phase result, never the unchanged canonicalization P2 returned.
+ *
+ * `rng` (M2-S6) is REQUIRED, placed after the last existing required parameter and
+ * before the optional `events` — the same reasoning as `creepById` above it: a
+ * forgotten call site must fail to compile, not silently simulate without stun. The
+ * caller (`index.ts`'s `step()`) constructs it fresh from `state.rngState` once per
+ * tick and writes the post-combat state back unconditionally; this function never
+ * constructs or persists an `Rng` itself, only draws from the one it is handed.
  */
 export function runCombat(
   creeps: CombatCreeps,
@@ -1213,6 +1314,7 @@ export function runCombat(
   creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
   slowFloorNum: number,
   slowFloorDen: number,
+  rng: Rng,
   events?: StepEvents,
 ): {
   creeps: CombatCreeps;
@@ -1260,6 +1362,7 @@ export function runCombat(
         canonicalDots,
         dotIndex,
         imp.sourceId,
+        rng,
         events,
       );
       continue;
@@ -1281,6 +1384,7 @@ export function runCombat(
         canonicalDots,
         dotIndex,
         imp.sourceId,
+        rng,
         events,
       );
     }
@@ -1301,10 +1405,14 @@ export function runCombat(
   //     the idx tiebreak alone therefore reproduces the relative order of same-id rows
   //     whatever the id key does, and because `dotsByTarget` buckets BY id, the order
   //     in which distinct ids are visited cannot affect any bucket's outcome. It is
-  //     canonical-form belt-and-braces: it stops mattering only while nothing inside
-  //     this traversal consumes shared state. S6 changes that — the stun roll draws
-  //     from the sim RNG in here, at which point visit order becomes replay-load-
-  //     bearing and this key is what makes it deterministic. Do not "simplify" it away.
+  //     canonical-form belt-and-braces: nothing inside THIS traversal consumes shared
+  //     state, so the id key never becomes load-bearing here. (An earlier draft of this
+  //     comment predicted S6's stun roll would draw from the sim RNG inside the DoT
+  //     tick — it does not. The draw happens only in impact resolution, over
+  //     `blastMembers`' creep-id-ascending order (`applyImpactToCreep`'s PASS 2), which
+  //     runs before this traversal. That IS replay-load-bearing, and is where the id
+  //     key earns its keep; this one stays belt-and-braces for canonical form alone.)
+  //     Do not "simplify" it away.
   //
   //     O(creeps + records), NEVER O(creeps × records): one pass over `canonicalDots`
   //     (mutated by step (1)'s `applyDot` calls above) buckets record INDICES by
@@ -1469,6 +1577,7 @@ export function runCombat(
     );
     survivors.slowMulFp.push(safeSlowColumn(creeps.slowMulFp[i]));
     survivors.slowUntilTick.push(safeSlowColumn(creeps.slowUntilTick[i]));
+    survivors.stunUntilTick.push(safeSlowColumn(creeps.stunUntilTick[i]));
   }
 
   // (4) Precompute the targetable live creeps once (position-valid + reachable).
@@ -1492,7 +1601,7 @@ export function runCombat(
       survivors.headRow[i] as number,
       survivors.progress[i] as number,
     );
-    if (dist === null) continue; // unreachable next waypoint ⇒ not the "first" target
+    if (dist === null) continue; // stranded (neither waypoint nor from-cell reachable)
     live.push({ id: survivors.id[i] as number, index: i, x: geom.point.x, y: geom.point.y, dist });
   }
 
@@ -1614,6 +1723,9 @@ export function runCombat(
     if (survivors.slowMulFp[i] !== 0 && (survivors.slowUntilTick[i] as number) <= tick) {
       survivors.slowMulFp[i] = 0;
       survivors.slowUntilTick[i] = 0;
+    }
+    if (survivors.stunUntilTick[i] !== 0 && (survivors.stunUntilTick[i] as number) <= tick) {
+      survivors.stunUntilTick[i] = 0;
     }
   }
   // `dots` cleanup (M2-S5a P3), combined into one filter pass — both are simply
