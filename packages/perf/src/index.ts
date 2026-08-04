@@ -32,6 +32,7 @@
 // guarantee that is wrong is worse than no guarantee, because a reader trusts it.
 
 export { BAND_COLS, TAIL_BAFFLES, stressAnchors, towerIdAt, stressRouteLength } from './layout';
+export type { StressTowerId } from './layout';
 export {
   buildStressReplay,
   buildControlReplay,

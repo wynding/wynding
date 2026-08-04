@@ -513,16 +513,17 @@ Measured against the pinned profiles above, both Chrome **149.0.7827.55**, WebGL
 |                                 | low-end              | mid-range            |
 | ------------------------------- | -------------------- | -------------------- |
 | frame time p50 / p95 / p99 (ms) | 66.7 / 74.9 / 75.6   | 24.1 / 25.8 / 25.9   |
-| p95-breach budget               | 33.3 ms              | 16.7 ms              |
+| p95-breach budget               | 33.33 ms (`1000/30`) | 16.7 ms              |
 | p95 breach signal               | **FIRED** (2.25×)    | **FIRED** (1.54×)    |
 | calibrated rAF cadence          | 8.30 ms              | 8.30 ms              |
 | cadence in `[15.0, 18.5]` band? | **no — out-of-band** | **no — out-of-band** |
-| missed-refresh signal           | **NOT EVALUATED**    | **NOT EVALUATED**    |
+| missed-refresh signal           | **NOT APPLICABLE**   | **NOT EVALUATED**    |
 | JS heap                         | 24.5 MB              | 60.3 MB              |
 | input latency p50 / max (ms)    | 5.8 / 37.7           | 1.0 / 18.9           |
 | setup                           | 3095 ms              | 1066 ms              |
 
-**Why the missed-refresh signal is not evaluated.** The measuring machine calibrates at ~120 Hz
+**Why the missed-refresh signal is not evaluated on mid-range** (low-end has its own, prior
+reason — see correction 2 below)**.** The measuring machine calibrates at ~120 Hz
 (8.30 ms median rAF delta), outside the pinned 60 Hz band (`[15.0, 18.5]` ms) that ADR 0005's
 replacement trigger requires. Applying a 60 Hz-derived 1.5×-interval cutoff to a ~120 Hz cadence
 would be meaningless, so the trigger reports `cadenceCalibration: "out-of-band"` and stands
@@ -530,6 +531,26 @@ down rather than silently misapplying a 60 Hz constant. That is the calibration 
 designed, not a failure of the run — and it means **this trigger is inert on any display faster
 than ~65 Hz**, worth stating plainly as a limitation of the design rather than a gap in this
 measurement. The p95 breach signal has no such dependency and fired on both profiles regardless.
+
+**Two corrections to the trigger, after this run, that do not change the numbers above.** Both
+were review findings on the same defect — a mid-range budget applied to low-end — and are
+recorded here because a reader comparing this table against the current code would otherwise see
+a discrepancy:
+
+1. **The low-end p95-breach budget is `1000/30` ≈ 33.33 ms, not the rounded 33.3 ms** the prose
+   above and ADR 0005 both write. 30 fps is 33.333… ms/frame and the comparison is a strict `>`,
+   so the rounded constant would report a run sitting exactly on the floor as a breach. The
+   measured 74.9 ms clears either number, so the **FIRED (2.25×)** result is unaffected.
+2. **The missed-refresh signal does not apply to low-end at all** — ADR 0005 defines it as the
+   replacement _mid-range_ trigger. As executed, this run reported NOT EVALUATED for _both_
+   profiles, because the cadence was out of band on both; the low-end row above has been
+   restated as **NOT APPLICABLE**, which is what the current code emits. The two are not
+   interchangeable and the ordering is why: applicability is now checked **before**
+   calibration, so on low-end the signal stands down whatever the cadence did — NOT APPLICABLE
+   _supersedes_ NOT EVALUATED there rather than sitting alongside it. Nothing measured changed;
+   only which of the two reasons the artifact gives. Had the signal been applied, a low-end run
+   _meeting_ its 30 fps floor would have fired it on nearly every frame — the same degeneracy
+   the replacement trigger exists to remove.
 
 ## What emulation cannot tell us
 
@@ -596,7 +617,9 @@ every number in the two results tables above, so a re-measurement can be diffed 
 rather than eyeballed — plus fields those tables don't show: `PERF-REPORT` carries each arm's
 `dotPreflight` and `dotDroppedTotal` (M2-S5b P10's DoT-oracle additions), and
 `PERF-BROWSER-REPORT` carries `frameTimeTrigger` (ADR 0005's replacement mid-range trigger,
-M2-S5b P11) alongside the missed-refresh cadence-calibration fields. The initial-JS figure
+M2-S5b P11) — the cadence-calibration fields, plus `missedRefreshStatus`, which records
+whether the missed-refresh signal was evaluated, not applicable to the profile, or
+unevaluable because the cadence fell outside the 60 Hz band. The initial-JS figure
 comes from `pnpm run size` instead. Regenerate the
 committed scenario after any `simVersion` bump — the replay envelope stamps `simVersion` and
 `rulesetHash`, and S5–S10 are six more bumps:

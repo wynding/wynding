@@ -73,14 +73,49 @@ interface Fixture {
 }
 
 /**
+ * The `u1` thresholds that shape `dueBlasts`, as PINNED DECIMAL LITERALS.
+ *
+ * The shape is `1 + floor(-ln(u1) * 0.9)` clamped to 1..8. That map is monotone
+ * decreasing and piecewise constant, so it is exactly equivalent to comparing `u1`
+ * against its own step boundaries: the value is `m` iff `exp(-m/0.9) < u1 <=
+ * exp(-(m-1)/0.9)`, and 8 iff `u1 <= exp(-7/0.9)`. These are those seven boundaries,
+ * `exp(-m/0.9)` for m = 1..7.
+ *
+ * WHY LITERALS AND NOT THE FORMULA. ECMA-262 specifies both `Math.log` and `Math.exp` as
+ * implementation-APPROXIMATED — their last bits are not portable across engines or engine
+ * versions. `Math.floor` then quantises that value, so a one-ulp difference could move a
+ * sample across an integer boundary and shift the counts this file pins by value
+ * (`mean` `'1.4976'`, `selected` 4, `selected` 270, and every `ratio` pin, since the
+ * injection is `k * dueBlasts[i]`). Decimal-literal-to-double conversion, by contrast, IS
+ * exactly specified, and the comparison below is a plain `>`. So computing these cuts here
+ * would reintroduce exactly the portability hole it exists to close: they are pinned.
+ *
+ * Verified equivalent to the `Math.log` form it replaces, not assumed: both constructions
+ * agree on every one of this fixture's own 2,500 draws and across a 3,000,000-sample
+ * independent sweep. The distribution is therefore unchanged and no pinned figure moved —
+ * this is a portability fix, not a retune. (The distribution SHAPE is not what this file
+ * asserts; reproducibility is. But changing it would have invalidated the pins, so it was
+ * held fixed deliberately.)
+ */
+const DUE_BLAST_CUTS = [
+  0.32919298780790557, // exp(-1/0.9)
+  0.10836802322189587, // exp(-2/0.9)
+  0.03567399334725241, // exp(-3/0.9)
+  0.01174362845702136, // exp(-4/0.9)
+  0.0038659201394728076, // exp(-5/0.9)
+  0.0012726338013398092, // exp(-6/0.9)
+  0.0004189421234483841, // exp(-7/0.9)
+] as const;
+
+/**
  * Builds `n` samples. TWO INDEPENDENT DRAWS PER SAMPLE, in the order `u1` then `u2` —
  * sharing one draw would correlate `dueBlasts` with `ms`, which changes the broad-injection
  * outcome (a correlated fixture makes the injection land preferentially on already-slow
  * samples, flattering whichever statistic sits higher).
  *
- * `dueBlasts` is an exponential-ish shape clamped to 1..8, chosen to resemble the real
- * scene's per-tick blast count rather than a uniform draw. Base `ms` is uniform on
- * [0.100, 0.160).
+ * `dueBlasts` is an exponential-ish shape clamped to 1..8 (`DUE_BLAST_CUTS`), chosen to
+ * resemble the real scene's per-tick blast count rather than a uniform draw. Base `ms` is
+ * uniform on [0.100, 0.160).
  *
  * The HEAVY TAIL is the last 2% of samples generated, multiplied by 3.0 — standing in for
  * the GC/scheduler noise that `gate.ts`'s diagnosis names as the numerator's problem.
@@ -98,8 +133,19 @@ function buildFixture(n: number): Fixture {
   for (let i = 0; i < n; i++) {
     const u1 = rand();
     const u2 = rand();
-    const raw = 1 + Math.floor(-Math.log(Math.max(u1, 1e-9)) * 0.9);
-    dueBlasts.push(Math.max(1, Math.min(8, raw)));
+    // Exact arithmetic only — see `DUE_BLAST_CUTS`. `ms` is safe as written: `0.1 + u2 *
+    // 0.06` uses IEEE add and multiply, both exactly specified.
+    let blasts = 8;
+    for (let m = 1; m <= DUE_BLAST_CUTS.length; m++) {
+      // Non-null assertion, not a bug: `m` runs 1..length, but `noUncheckedIndexedAccess`
+      // widens every computed index to `| undefined` regardless — `as const` pins the
+      // tuple's values and length, it does not narrow a computed lookup.
+      if (u1 > DUE_BLAST_CUTS[m - 1]!) {
+        blasts = m;
+        break;
+      }
+    }
+    dueBlasts.push(blasts);
     ms.push(0.1 + u2 * 0.06);
   }
   const tailCount = Math.round(0.02 * n);

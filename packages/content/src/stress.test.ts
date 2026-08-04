@@ -229,7 +229,7 @@ describe('the two idle-benchmark guards, read from the bundle (PLAN step 16)', (
   // `startingLives` 1e6->1000 and `hp` 1e6->100 both survived unnoticed.
   // Only `stress-runner.hp` is read below, but immortality is pinned for BOTH creeps
   // in the scene: `stress-armored.hp` (M2-S5b P9) is asserted separately, in the
-  // 'stress-armored (PLAN step 7 / packet P9 §1)' describe above ("hp 1,000,000,
+  // `stress-armored` describe below ("hp 1,000,000,
   // armor 6, ..."). That coverage exists; this prose is naming it so the case for
   // why immortality matters — an idle benchmark that still "passes" — reads as
   // covering the scene as it now stands, not just the creep this block happens to
@@ -353,7 +353,7 @@ describe('the control twins are pairwise identical to their stress counterpart e
   });
 });
 
-describe('stress-venom (PLAN step 7 / packet P9 §1)', () => {
+describe('stress-venom', () => {
   const text = readFileSync(STRESS_RULESET_URL, 'utf8');
   const bundle = parseRulesetJson(text);
 
@@ -413,7 +413,7 @@ describe('stress-venom (PLAN step 7 / packet P9 §1)', () => {
     }
     // MAX_DOT_DURATION_CADENCE_RATIO is not exported through @wynding/sim's public
     // barrel (only `packages/sim/src/ruleset-shared.ts:99` defines it, and
-    // `capability.ts`/`combat.ts` consume it internally) — per packet P9 §5, hardcoded
+    // `capability.ts`/`combat.ts` consume it internally) — so it is hardcoded
     // here with the source line named rather than widening sim's exports for a test.
     // Because it is hardcoded, THIS test is not the real gate on that ratio: if the
     // constant moved (8 -> 6, say), this file's own literal would move with it by hand
@@ -435,7 +435,7 @@ describe('stress-venom (PLAN step 7 / packet P9 §1)', () => {
   });
 });
 
-describe('stress-armored (PLAN step 7 / packet P9 §1)', () => {
+describe('stress-armored', () => {
   const text = readFileSync(STRESS_RULESET_URL, 'utf8');
   const bundle = parseRulesetJson(text);
 
@@ -473,7 +473,7 @@ describe('stress-armored (PLAN step 7 / packet P9 §1)', () => {
   });
 });
 
-describe('the wave composition after the one-for-one stress-armored swap (PLAN step 7 / packet P9 §1)', () => {
+describe('the wave composition after the one-for-one stress-armored swap', () => {
   const text = readFileSync(STRESS_RULESET_URL, 'utf8');
   const bundle = parseRulesetJson(text);
   const board = bundle.boards.find((b) => b.id === STRESS_BOARD_ID);
@@ -514,8 +514,8 @@ describe('the identity-mapped control twin: stress-venom is deliberately NOT an 
   // is the actual failure `scenario.ts`'s own warning comment exists to guard against.
   // `packages/perf/src/scenario.test.ts`'s "buildControlReplay keeps stress-venom, at the
   // same placements as the stress arm" describe is the one that actually guards the
-  // mapper (packet P9 §2) — it is derived from the built replays, not from this catalog
-  // fact.
+  // mapper (`packages/perf/src/scenario.ts`) — it is derived from the built replays,
+  // not from this catalog fact.
   const text = readFileSync(STRESS_RULESET_URL, 'utf8');
   const bundle = parseRulesetJson(text);
 

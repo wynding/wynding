@@ -171,8 +171,22 @@ measures against it.** Two independent signals replace the degenerate fps trigge
 | **Missed-refresh proportion** — share of sampled frames exceeding **1.5 × the nominal refresh interval** (25 ms at 60 Hz) | **> 2%**      |
 | **Outright breach** — p95 frame time                                                                                      | **> 16.7 ms** |
 
+Both figures in that table are the **mid-range** ones, this being the mid-range trigger. See
+Scope below for what carries over to low-end and what does not.
+
 **They are independent, not ordered.** 6% of frames at 20 ms breaches `p95 > 16.7` while
 producing no frames above 25 ms, so neither implies the other. Either firing is a trigger.
+
+**Scope, stated because the first implementation got it wrong.** The missed-refresh signal
+is the **mid-range** trigger and has no low-end definition — the low-end 30 fps floor is a
+separate budget this replacement never touched. Applying the 60 Hz-derived ~25 ms cutoff to
+low-end reproduces the exact degeneracy being replaced: a low-end run _meeting_ its 30 fps
+floor produces ~33.3 ms frames, every one of which clears 25 ms, so the signal fires on a
+passing run. `stress.perf.spec.ts` reports it as **not applicable** on low-end, distinctly
+from **not evaluated** (cadence out of band). The outright-breach signal _does_ apply to
+both profiles, each against its own budget: `> 16.7 ms` on mid-range, and `> 1000/30 ms` on
+low-end — expressed exactly, because 30 fps is 33.333… ms and a constant rounded _down_ to
+33.3 puts the boundary inside the passing region under the strict `>`.
 
 **Why 1.5× the interval and not the budget itself:** a healthy 60 Hz interval is ~16.667 ms
 and ordinary scheduling jitter crosses 16.7 constantly, so counting frames above the budget
@@ -197,14 +211,14 @@ other refresh rates.
 
 **Cadence calibration — every parameter pinned here, before measuring.**
 
-| Parameter        | Value                                                                                                                                                                                                                                              |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ordering         | calibrated **before** `Emulation.setCPUThrottlingRate` is called (`apps/web/e2e-perf/stress.perf.spec.ts`), at CDP's default (unthrottled) rate                                                                                                    |
-| Estimator        | **median** rAF delta, discarding the **first 5** frames (startup transient)                                                                                                                                                                        |
-| Page             | a **blank page** (`about:blank`), navigated and sampled **before** the perf page is ever loaded                                                                                                                                                    |
-| Window           | **2.0 s** of idle rAF sampling                                                                                                                                                                                                                     |
-| Acceptable band  | median in **[15.0, 18.5] ms** → nominal 60 Hz, cutoff = **1.5 × measured median**                                                                                                                                                                  |
-| Outside the band | the run reports `cadenceCalibration: "out-of-band"` with the measured median, and the missed-refresh signal is reported as **NOT EVALUATED** — never silently applied with a 60 Hz constant. The p95 breach signal is unaffected and still applies |
+| Parameter        | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ordering         | calibrated **before** `Emulation.setCPUThrottlingRate` is called (`apps/web/e2e-perf/stress.perf.spec.ts`), at CDP's default (unthrottled) rate                                                                                                                                                                                                                                                                                                                             |
+| Estimator        | **median** rAF delta, discarding the **first 5** frames (startup transient)                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Page             | a **blank page** (`about:blank`), navigated and sampled **before** the perf page is ever loaded                                                                                                                                                                                                                                                                                                                                                                             |
+| Window           | **2.0 s** of idle rAF sampling                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Acceptable band  | median in **[15.0, 18.5] ms** → nominal 60 Hz, cutoff = **1.5 × measured median**                                                                                                                                                                                                                                                                                                                                                                                           |
+| Outside the band | the run reports `cadenceCalibration: "out-of-band"` with the measured median, and the missed-refresh signal is reported as **NOT EVALUATED** — never silently applied with a 60 Hz constant. The p95 breach signal is unaffected and still applies. Calibration is only consulted **for this signal's status** on the profile the signal applies to (see Scope above) — it is still performed and reported on both: on low-end it reports **NOT APPLICABLE** at any cadence |
 
 **Calibrated on an idle, unthrottled page — never from the stressed frame deltas.** A profile
 that is missing refreshes _because the app is slow_ would, calibrated from its own stressed
@@ -220,8 +234,12 @@ it, and adding one would put a test-only branch in the measured path.
 
 The browser spec emits, per profile, into its machine-readable report: the cutoff actually
 used, the observed rAF cadence (the calibrated median), the long-frame count, the
-denominator (frames sampled), the proportion, and `cadenceCalibration` — so the trigger is
-reproducible from the artifact rather than recomputed by hand.
+denominator (frames sampled), the proportion, `cadenceCalibration`, and
+`missedRefreshStatus` — so the trigger is reproducible from the artifact rather than
+recomputed by hand. `missedRefreshStatus` is the one that says _why_ a signal stood down:
+`not-applicable-for-profile` (low-end, per Scope above) reads differently from
+`not-evaluated` (cadence out of band), and collapsing them would leave a reader unable to
+tell a budget that does not exist from one that could not be measured.
 
 ### Findings from the spike — all three ruled on 2026-07-31
 

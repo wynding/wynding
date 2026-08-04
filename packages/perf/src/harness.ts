@@ -116,6 +116,30 @@ export interface RunSampledResult {
   readonly dotDroppedTotal: number;
 }
 
+/** The `SampledTick` fields the TIMED pass collects, and the ones the UNTIMED pass
+ *  collects — derived from `SampledTick` with `Pick` rather than restated as inline
+ *  literals, so the split between the two passes is declared exactly ONCE. The old inline
+ *  literal types listed the same field names a third and fourth time; they were not
+ *  UNSAFE (the merge is annotated `const record: SampledTick`, so a newly-required field
+ *  failed to compile there under either shape) — they were redundant, and the timed half
+ *  now propagates into the merge through a spread instead of being retyped field by field.
+ *
+ *  Declared ABOVE `runSampled`'s doc comment, not between it and the function: TypeScript
+ *  attaches EVERY JSDoc block in a declaration's leading trivia to that declaration, so
+ *  sitting between the two would silently make `runSampled`'s rationale the documentation
+ *  of a type alias. Same hazard `gate.ts`'s blind-spot `//` block avoids.
+ *
+ *  `dotDropped` deliberately appears in BOTH: each pass collects it independently, and the
+ *  two totals are cross-checked below. The merge sources it from the timed pass. */
+type TimedFields = Pick<
+  SampledTick,
+  'tick' | 'ms' | 'dueBlasts' | 'liveCreeps' | 'slowedCreeps' | 'phase' | 'dotDropped'
+>;
+type UntimedFields = Pick<
+  SampledTick,
+  'dotTicks' | 'dotDropped' | 'dotRecords' | 'dotCarriers' | 'armoredLive'
+>;
+
 /**
  * Runs `replay.tickInputs` against `bundle` for `WARMUP_TICKS + SAMPLE_TICKS` ticks,
  * UNCONDITIONALLY — never stopping early at a terminal phase. This is the entire
@@ -171,15 +195,7 @@ export function runSampled(replay: Replay, bundle: Ruleset): RunSampledResult {
 
   // --- Pass 1: TIMED, minimal gate collector (dotTicks omitted). --------------
   let timedState: SimState = createInitialState(replay.seed, ruleset);
-  const timedRecords: {
-    tick: number;
-    ms: number;
-    dueBlasts: number;
-    liveCreeps: number;
-    slowedCreeps: number;
-    phase: SimPhase;
-    dotDropped: number;
-  }[] = [];
+  const timedRecords: TimedFields[] = [];
   let towersPlacedAfterBuild = 0;
   // -1, NOT 0 (QC round 1). `LEFTOVER_BOUNTY_THRESHOLD` is 0 — the maze consumes the
   // bundle's entire starting bounty — so initialising this to 0 made the snapshot's own
@@ -233,13 +249,7 @@ export function runSampled(replay: Replay, bundle: Ruleset): RunSampledResult {
 
   // --- Pass 2: UNTIMED, full DoT/armor collector. Wall-clock never read. ------
   let untimedState: SimState = createInitialState(replay.seed, ruleset);
-  const untimedRecords: {
-    dotTicks: number;
-    dotDropped: number;
-    dotRecords: number;
-    dotCarriers: number;
-    armoredLive: number;
-  }[] = [];
+  const untimedRecords: UntimedFields[] = [];
   let untimedDotDroppedTotal = 0;
 
   for (let tick = 0; tick < totalTicks; tick++) {
@@ -300,15 +310,11 @@ export function runSampled(replay: Replay, bundle: Ruleset): RunSampledResult {
   for (let tick = 0; tick < totalTicks; tick++) {
     const t = timedRecords[tick]!;
     const u = untimedRecords[tick]!;
+    // Spread the timed record (which carries `dotDropped`), then name the untimed-only
+    // fields. A `SampledTick` field claimed by neither `Pick` above fails HERE.
     const record: SampledTick = {
-      tick: t.tick,
-      ms: t.ms,
-      dueBlasts: t.dueBlasts,
-      liveCreeps: t.liveCreeps,
-      slowedCreeps: t.slowedCreeps,
-      phase: t.phase,
+      ...t,
       dotTicks: u.dotTicks,
-      dotDropped: t.dotDropped,
       dotRecords: u.dotRecords,
       dotCarriers: u.dotCarriers,
       armoredLive: u.armoredLive,

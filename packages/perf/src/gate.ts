@@ -144,24 +144,24 @@ export function stressStatP99(dueBlastSamples: readonly SampledTick[]): number {
   );
 }
 
-/**
- * THE DECLARED BLIND SPOT (PLAN step 21, §4) — reported, never gating.
- *
- * p95's insensitivity to tail-concentrated cost is the same property that suppresses
- * tail noise — no test design separates them. What makes the trade acceptable is the
- * subset: the rejection of p95 over ALL samples (file-top comment) was about blast
- * ticks sinking below the percentile, and `stressStat` reads the due-blast subset
- * where every sample carries >= 1 blast. A blast-cost regression raises cost across
- * that whole subset — the broad injection `gate-fixture.test.ts` measures — and p95
- * sees it, at a smaller `k` than p99 does.
- *
- * The blind spot is wider than "scheduler noise": a real AoE regression CAN
- * concentrate in under 5% of due-blast ticks — one scaling with blast multiplicity
- * would land mostly on the high-`dueBlasts` ticks — and p95 suppresses that as
- * thoroughly as it suppresses a GC pause. Accepted deliberately under the owner's
- * 2026-08-02 ruling that this class of decision is Claude's to take, with the
- * measured `k` values on record in `gate-fixture.test.ts`.
- */
+// `stressStat`'s DECLARED BLIND SPOT (PLAN step 21, §4) — reported, never gating. A `//`
+// block on purpose: this is free-standing prose about the function above, not the doc of
+// the declaration below, and a `/** */` here would attach itself to `TOLERANCE`.
+//
+// p95's insensitivity to tail-concentrated cost is the same property that suppresses
+// tail noise — no test design separates them. What makes the trade acceptable is the
+// subset: the rejection of p95 over ALL samples (file-top comment) was about blast
+// ticks sinking below the percentile, and `stressStat` reads the due-blast subset
+// where every sample carries >= 1 blast. A blast-cost regression raises cost across
+// that whole subset — the broad injection `gate-fixture.test.ts` measures — and p95
+// sees it, at a smaller `k` than p99 does.
+//
+// The blind spot is wider than "scheduler noise": a real AoE regression CAN
+// concentrate in under 5% of due-blast ticks — one scaling with blast multiplicity
+// would land mostly on the high-`dueBlasts` ticks — and p95 suppresses that as
+// thoroughly as it suppresses a GC pause. Accepted deliberately under the owner's
+// 2026-08-02 ruling that this class of decision is Claude's to take, with the
+// measured `k` values on record in `gate-fixture.test.ts`.
 
 /** CI fails when `R > R0 * TOLERANCE`. Predeclared, not tuned after seeing results
  *  (PLAN step 21): what is fixed BEFORE measurement is what matters methodologically —

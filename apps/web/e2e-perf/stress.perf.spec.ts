@@ -119,6 +119,24 @@ const MIN_TICKS_ADVANCED = 50;
 // entirely, and the emulation profiles do not currently validate refresh rate.
 const MISSED_REFRESH_INTERVAL_MULTIPLIER = 1.5;
 const MISSED_REFRESH_PROPORTION_THRESHOLD = 0.02;
+
+/** Signal 1 is the replacement **MID-RANGE** trigger, and only that. ADR 0005 replaced the
+ *  degenerate mid-range fps trigger and left the low-end 30 fps floor standing as its own,
+ *  separate budget — so the missed-refresh signal has no low-end definition to apply.
+ *
+ *  Applying it there anyway is not merely out of scope, it is the SAME degeneracy this
+ *  trigger replaced, in the other direction: the cutoff is 1.5x the ~16.7ms display
+ *  cadence (~25ms), while a low-end run MEETING its 30 fps floor produces ~33.3ms frames.
+ *  Every one of them clears the cutoff, so the proportion is ~1.0, and a profile hitting
+ *  its target exactly would report `missedRefreshSignalFired: true` — the artifact this
+ *  story lifts verbatim into the spike doc. A trigger that fires on a passing run carries
+ *  no information, which is precisely why the old one was thrown out.
+ *
+ *  Reported as NOT APPLICABLE rather than silently omitted: `missedRefreshStatus` below
+ *  distinguishes it from the separate NOT EVALUATED case (cadence out of band), so a reader
+ *  of the artifact can tell "this profile has no such budget" from "we could not measure
+ *  the display". */
+const MISSED_REFRESH_PROFILE = 'mid-range';
 const P95_BREACH_FRAME_TIME_MS = 16.7;
 /** The low-end profile's frame-time budget — ADR 0005 §Budgets sets **60 fps on mid-range**
  *  (16.7 ms) and a **>= 30 fps floor on low-end** (33.3 ms), which are different numbers.
@@ -127,8 +145,24 @@ const P95_BREACH_FRAME_TIME_MS = 16.7;
  *  BOTH projects with no reference to `profile.name`, so the low-end run would have emitted
  *  a breach against a budget the ADR never gave it — and the next packet lifts this
  *  artifact verbatim into the spike doc, so the wrong number would have been recorded as a
- *  measured breach. The p95-breach signal is now judged per profile. */
-const P95_BREACH_FRAME_TIME_MS_LOW_END = 33.3;
+ *  measured breach. The p95-breach signal is now judged per profile.
+ *
+ *  `1000 / 30`, NOT the rounded `33.3` the ADR and the spike doc write in prose. 30 fps is
+ *  33.333... ms/frame, so a run sitting EXACTLY on the low-end floor produces intervals
+ *  ABOVE 33.3 — and the comparison is a strict `>`, so the rounded constant reports a
+ *  profile that met its target as a breach. The direction of the rounding is what makes
+ *  this wrong rather than imprecise: rounding a floor DOWN moves the boundary inside the
+ *  passing region.
+ *
+ *  Mid-range keeps the literal `16.7` above deliberately, and the asymmetry is not an
+ *  oversight: the two constants round in OPPOSITE directions relative to their budgets.
+ *  60 fps is 16.667 ms, so `16.7` sits just ABOVE the exact budget and a run meeting the
+ *  target still passes — the same leniency `1000/30` restores on low-end. Both constants
+ *  now round away from the passing region, which is the property that matters; making
+ *  16.7 exact as well would move a pre-pinned trigger value (ADR 0005: "Outright breach —
+ *  p95 frame time > 16.7 ms") in the STRICTER direction for no defect, which is exactly
+ *  the re-cutting that ADR forbids everywhere else. */
+const P95_BREACH_FRAME_TIME_MS_LOW_END = 1000 / 30;
 
 /** The frame-time budget this profile is actually judged against. */
 function p95BreachBudgetMs(profileName: 'low-end' | 'mid-range'): number {
@@ -249,12 +283,22 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
     observedCadenceMs <= CALIBRATION_BAND_MS.high
       ? 'ok'
       : 'out-of-band';
-  // `null` when out-of-band: never silently applied with a 60Hz constant. The explicit
-  // `observedCadenceMs !== null` is not redundant with `cadenceCalibration === 'ok'` to the
-  // compiler — and keeping it explicit means the unmeasurable-cadence path above cannot
-  // reach this multiplication even if the classification is later restructured.
+  // Why the signal is or is not evaluated, as one field. Profile applicability is checked
+  // FIRST: on low-end the signal has no definition at all (`MISSED_REFRESH_PROFILE`), so
+  // whether the cadence happened to calibrate is beside the point.
+  const missedRefreshStatus: 'evaluated' | 'not-applicable-for-profile' | 'not-evaluated' =
+    profile.name !== MISSED_REFRESH_PROFILE
+      ? 'not-applicable-for-profile'
+      : cadenceCalibration === 'ok'
+        ? 'evaluated'
+        : 'not-evaluated';
+  // `null` unless evaluated: never silently applied with a 60Hz constant, and never applied
+  // to a profile the ADR gave no such trigger. The explicit `observedCadenceMs !== null` is
+  // not redundant with `missedRefreshStatus === 'evaluated'` to the compiler — and keeping
+  // it explicit means the unmeasurable-cadence path above cannot reach this multiplication
+  // even if the classification is later restructured.
   const missedRefreshCutoffMs =
-    cadenceCalibration === 'ok' && observedCadenceMs !== null
+    missedRefreshStatus === 'evaluated' && observedCadenceMs !== null
       ? MISSED_REFRESH_INTERVAL_MULTIPLIER * observedCadenceMs
       : null;
 
@@ -370,9 +414,11 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
 
   // ADR 0005's replacement mid-range trigger (PLAN steps 19/20; see the constants and
   // calibration above). The missed-refresh signal is computed against the CALIBRATED
-  // cutoff, never a hardcoded 60Hz constant — when calibration landed out-of-band,
-  // `missedRefreshCutoffMs` is `null` and the signal is reported as NOT EVALUATED. The
-  // p95 breach signal is unaffected by calibration and always evaluates.
+  // cutoff, never a hardcoded 60Hz constant — when calibration landed out-of-band, or when
+  // the profile has no such trigger at all, `missedRefreshCutoffMs` is `null` and the
+  // signal is not reported as fired (see `missedRefreshStatus` for which of the two it
+  // was). The p95 breach signal is unaffected by both and always evaluates, against THIS
+  // profile's own budget.
   const missedRefreshDenominator = frameTimesMs.length;
   const missedRefreshLongFrameCount =
     missedRefreshCutoffMs === null
@@ -382,13 +428,14 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
     missedRefreshLongFrameCount === null
       ? null
       : missedRefreshLongFrameCount / missedRefreshDenominator;
-  // §3's five required fields — cutoff, observed cadence, long-frame count,
-  // denominator, proportion, and cadenceCalibration — so the trigger is reproducible
-  // from the artifact rather than recomputed by hand. The two `*SignalFired` booleans
-  // apply the pinned thresholds directly against those numbers, so a reader of the
+  // §3's required fields — cutoff, observed cadence, long-frame count, denominator and
+  // proportion, plus `cadenceCalibration` and `missedRefreshStatus` — so the trigger is
+  // reproducible from the artifact rather than recomputed by hand. The two `*SignalFired`
+  // booleans apply the pinned thresholds directly against those numbers, so a reader of the
   // artifact never has to re-derive "did it fire" from the raw figures either — and if
   // a signal fires, that is a RESULT to report, never a threshold to move.
   const frameTimeTrigger = {
+    missedRefreshStatus,
     cadenceCalibration,
     observedCadenceMs,
     cutoffMs: missedRefreshCutoffMs,

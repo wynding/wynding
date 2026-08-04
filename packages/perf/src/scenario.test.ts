@@ -111,7 +111,7 @@ describe('tickInputs shape', () => {
   });
 });
 
-describe('buildControlReplay keeps stress-venom, at the same placements as the stress arm (packet P9 §2)', () => {
+describe('buildControlReplay keeps stress-venom, at the same placements as the stress arm', () => {
   // `stress.test.ts`'s `stress-venom-single` non-existence check is tautological
   // for this purpose — it fails only if a tower with that exact id is ever added,
   // never if `buildControlReplay`'s explicit `stress-venom` arm is simply deleted
