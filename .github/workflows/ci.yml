@@ -136,14 +136,49 @@ jobs:
       # self-retires the moment the baseline is recorded. Considered and rejected in favour
       # of this: registering the unset state on `KNOWN_OPEN_ASSERTIONS`, which would fire on
       # restore rather than on forgetting, and needs its own cleanup commit.
+      #
+      # PARSED, not grepped, and it FAILS CLOSED. A `grep '"r0":null'` was the first draft and
+      # had two holes: it depends on `JSON.stringify`'s exact spacing (`"r0": null` would slip
+      # through), and a missing or truncated log makes `grep` exit non-zero, which reads as
+      # "no null found" and passes the guard silently — a false PASS in the one place that
+      # must not have one. Parsing the report and treating an absent line as a failure closes
+      # both. Do not revert this to a grep.
+      #
+      # NOTE ON QUOTING, since it is load-bearing and invisible: the script is delimited by
+      # single quotes, so it must contain NONE. That is why the message below says
+      # "gate.ts R0 doc" and not "gate.ts's R0 doc" — one apostrophe would terminate the
+      # argument and change what runs. The backticks and `${r0}` are a JS template literal;
+      # bash does not expand inside single quotes and `${` is not GitHub's `${{`, so both
+      # reach Node intact. Re-check all three if you edit this script.
       - name: the gate must be ENFORCED on main (R0 recorded, not null)
         if: github.event_name == 'push'
+        env:
+          PERF_LOG: ${{ runner.temp }}/perf.log
         run: |
-          if grep -q '"r0":null' "$RUNNER_TEMP/perf.log"; then
-            echo "::error::R0 is null on main — the perf gate is REPORTING, not enforcing."
-            echo "Record a baseline (five CI samples, median rounded down) per gate.ts's R0 doc."
-            exit 1
-          fi
+          node -e '
+            const line = require("fs")
+              .readFileSync(process.env.PERF_LOG, "utf8")
+              .split("\n")
+              .find((l) => l.startsWith("PERF-REPORT: "));
+            if (!line) {
+              console.log("::error::no PERF-REPORT line in the perf log — cannot confirm the gate is enforced.");
+              process.exit(1);
+            }
+            let r0;
+            try {
+              ({ r0 } = JSON.parse(line.slice("PERF-REPORT: ".length)));
+            } catch (e) {
+              console.log("::error::PERF-REPORT line is not valid JSON — cannot confirm the gate is enforced.");
+              console.log(String(e && e.message));
+              process.exit(1);
+            }
+            if (typeof r0 !== "number" || !Number.isFinite(r0) || r0 <= 0) {
+              console.log("::error::R0 is not a usable baseline on main — the perf gate is REPORTING, not enforcing.");
+              console.log("Saw: " + JSON.stringify(r0) + ". Record a baseline (five CI samples, median rounded down) per gate.ts R0 doc.");
+              process.exit(1);
+            }
+            console.log(`perf gate is enforced on main: R0 = ${r0}`);
+          '
 
   # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
   # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is

@@ -65,10 +65,12 @@
 // runs whose workload oracles are byte-identical, p99/p99 swings ±11.7% and p95/p95
 // ±16.4%, against p50/p50's ±2.8%.
 //
-// THE MECHANISM, corrected — a third draft of this paragraph claimed the tails "are
-// independent draws that compound rather than cancel", and the data does not support that
-// either. Across those four runs the two arms' p95s correlate +0.88, so tail noise also
-// largely cancels in the ratio. What separates the statistics is how MUCH is left:
+// THE MECHANISM. A tempting story is that the tails "are independent draws that compound
+// rather than cancel"; these four runs do not support it. Across them the two arms' p95s
+// correlate +0.88, which is consistent with tail
+// noise also largely cancelling rather than compounding (that correlation is not separable
+// at n = 4 — see below — so read it as the direction the data leans, not as established).
+// What separates the statistics is how MUCH is left:
 //
 //   - the arms' MEDIANS co-move almost perfectly (+0.99) and carry small per-arm spread,
 //     so the ratio is left with close to pure workload;
@@ -87,12 +89,13 @@
 // (An illustration, not a check, and it is a selected one: within the CONTROL arm across
 // the four jobs, p50 and p95 correlate only +0.64 — lower than the cross-arm p95
 // correlation. The same quantity in the STRESS arm is +0.36, weaker still. Tail behaviour
-// is simply not well predicted by the level a run executes at. A previous wording said
-// "within a single arm and a single job", which is not a thing that can be computed.)
+// is simply not well predicted by the level a run executes at.)
 //
 // The conclusion is unchanged and is what the design rests on: a ratio of two ROBUST
-// statistics is the stable one. Both arms are medians over >= 500 samples, so neither can
-// be moved by a single GC pause or scheduler preemption. That is the design as of M2-S6,
+// statistics is the stable one. Both arms are medians over >= 500 samples, so neither can be
+// moved MATERIALLY by a single GC pause or scheduler preemption — stated with that qualifier
+// because the unqualified form is false: changing one sample shifts a median to an adjacent
+// order statistic — a real but negligible move, not no move. That is the design as of M2-S6,
 // and it is what makes the tolerance below affordable at 10%.
 
 import { percentile } from './stats';
@@ -100,8 +103,10 @@ import type { SampledTick } from './harness';
 
 /** `controlStat` — p50 of `step()` wall-clock over the CONTROL scenario's sampled
  *  ticks. A median over a blast-free run: robust to runner noise BY CONSTRUCTION (a
- *  single slow tick from GC/scheduler preemption cannot move a median computed over
- *  2,500 samples), and blast-free so it measures the maze's baseline busy-board cost
+ *  single slow tick from GC/scheduler preemption can shift a median computed over 2,500
+ *  samples by at most one order statistic, which is negligible — not literally zero, and the
+ *  claim is worth stating in the bounded form), and blast-free so it measures the maze's
+ *  baseline busy-board cost
  *  with no AoE membership-scan cost mixed in.
  *
  *  Since M2-S6 this robustness is the gate's DESIGN PRINCIPLE rather than a property of
@@ -143,9 +148,7 @@ export function controlStat(controlSamples: readonly SampledTick[]): number {
  * "Half-spread" throughout this file and ADR 0005's ratio tables means `(max - min) / 2`
  * divided by the MEDIAN of the four values. Stating it matters, because on a MEAN basis the
  * four rows below read 15.4 / 16.1 / 11.7 / 2.7 — three of them differ in the first decimal,
- * including the headline 2.8, so a reader recomputing any of them could think it wrong. (An
- * earlier version of this paragraph asserted only the p95/p95 row moved. It was wrong, in
- * exactly the way it existed to prevent.)
+ * including the headline 2.8, so a reader recomputing any of them could think it wrong.
  *
  *   | ratio statistic                   | R across the four runs        | half-spread |
  *   | --------------------------------- | ----------------------------- | ----------- |
@@ -244,8 +247,8 @@ export function controlStat(controlSamples: readonly SampledTick[]): number {
  *
  * p95 CANNOT be run at 1.10: its own run-to-run spread exceeds that threshold, so it
  * would fail on quiet runners rather than on regressions. So the chain is — p50 cuts the
- * noise 5.6x (15.5 / 2.8, computed from the unrounded 15.452 / 2.758; dividing the rounded
- * figures is what produced an earlier "~5.5x"), the lower noise makes 1.10 affordable, and
+ * noise 5.6x (from the unrounded 15.452 / 2.758 — dividing the rounded figures gives 5.5),
+ * the lower noise makes 1.10 affordable, and
  * the tighter tolerance is what converts that into an end-to-end sensitivity gain
  * (k = 0.01536 -> 0.00922, 1.67x) the old pairing could not reach. The sensitivity belongs
  * to the tolerance; the tolerance is only available because of the statistic. It is a 1.67x
@@ -311,9 +314,8 @@ export function stressStatP95(dueBlastSamples: readonly SampledTick[]): number {
  *  does not compare it to anything) — kept purely so the rejected statistic stays
  *  auditable in `GateResult` and `PERF-REPORT` rather than disappearing from the
  *  record the moment it stops deciding pass/fail. See `stressStat`'s doc for the full
- *  p99 -> p95 -> p50 history. (This doc previously said "before this revisit" and
- *  "why p95 replaced it", written when p95 was the replacement; there have since been
- *  two revisits, and a relative reference cannot survive the second one.) */
+ *  p99 -> p95 -> p50 history. Named absolutely, not as "the previous revisit": there have
+ *  been two, and a relative reference does not survive the second. */
 export function stressStatP99(dueBlastSamples: readonly SampledTick[]): number {
   return percentile(
     dueBlastSamples.map((s) => s.ms),
@@ -336,9 +338,8 @@ export function stressStatP99(dueBlastSamples: readonly SampledTick[]): number {
 // shift in full. Precisely: a MULTIPLICATIVE 10% shift applied to every sample moves every
 // percentile by exactly 10%, medians included. The fixture's injection is ADDITIVE and
 // scaled by `dueBlasts` rather than multiplicative, so it does not land on that identity —
-// at k = 0.010 it moves p50 by +10.82%. An earlier version of this line wrote "a 10% broad
-// regression moves p50 by 10.00%", which is true of the identity and false of the fixture
-// the sentence points at; the exact-looking figure was describing a different injection.
+// at k = 0.010 it moves p50 by +10.82%. Do not quote the identity's exact 10.00% against this
+// fixture — they are different injection shapes.
 //
 // THE BLIND SPOT, AT FULL STRENGTH — this move buys its noise immunity with real
 // coverage, and the price is not small. On `gate-fixture.test.ts`'s workload-correlated
@@ -654,8 +655,10 @@ export const TOLERANCE = 1.1;
  *
  * While `R0` is null the gate REPORTS and does not enforce, which is a green state that no
  * test goes red for. `ci.yml` carries an alarm for it, and the alarm's limits are worth
- * stating exactly: the `perf` job fails on any DEFAULT-BRANCH run whose report has a null
- * `r0`. That trigger is `push`, which fires AFTER a merge lands, and `perf` is not a
+ * stating exactly: the `perf` job fails on any DEFAULT-BRANCH run whose report does not
+ * carry a usable baseline — `r0` absent, null, non-numeric, or not a positive finite
+ * number — or that carries no report line at all, since an absent report cannot prove
+ * enforcement. That trigger is `push`, which fires AFTER a merge lands, and `perf` is not a
  * required check (branch protection requires `verify` and `codex-freshness` only — see the
  * 2026-07-31 flake ruling below) — so it DETECTS an unenforced gate
  * on `main` and makes it loudly red; it cannot prevent one from getting there. Prevention

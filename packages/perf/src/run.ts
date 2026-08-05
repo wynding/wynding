@@ -98,7 +98,8 @@ const controlResult = runSampled(controlReplay, bundle);
 // induced by those allocations could in principle land inside the measured region.
 // We are NOT reordering the passes to put distance between them: `stressStat` is a
 // p50 over the due-blast subset (1,427 samples as measured post-P9), not a max, so a
-// single induced pause cannot move it — and the argument is STRONGEST under the p50
+// single induced pause moves it by at most one order statistic, which is negligible at that
+// sample count — and the argument is STRONGEST under the p50
 // M2-S6 moved to, stronger than under the p95 and p99 this originally cited in turn,
 // since a median over >500 samples is the most pause-immune of the three. Reordering would require
 // splitting `runSampled`'s API into separately callable timed/untimed phases — a
@@ -423,8 +424,9 @@ for (const a of controlAssertions) {
 // single noisiest tick — exactly the statistic a percentile was chosen to avoid. A median
 // of 3 is not the maximum, so that sentence no longer applies to the GATING statistic. Two
 // reasons survive and are why the floor stays where it is. First, `stressStat`'s entire
-// noise argument is "no single GC pause or preemption can move a median over hundreds of
-// samples", which is a claim about SAMPLE COUNT and is simply false at 3. Second, the
+// noise argument is "no single GC pause or preemption moves a median over hundreds of samples
+// by more than one order statistic", which is a claim about SAMPLE COUNT and is worthless at
+// 3, where one order statistic IS the whole distribution. Second, the
 // audit `stressStatP95` IS still the maximum at that size, and it rides in every
 // `PERF-REPORT` beside the gating figure. Such a run already exits non-zero via the
 // oracle, but with `>0` it would still publish `{"status":"evaluated","pass":true}` in
@@ -613,8 +615,11 @@ if (gateResult !== null && gateResult.status === 'evaluated' && !gateResult.pass
 //
 // A banner is not a tripwire, though, and QC round 1 was right to say so: this state exits
 // ZERO and no test goes red for it, so nothing here would stop a merge-and-forget. The
-// guard lives in `ci.yml` — the `perf` job fails when a run on the DEFAULT BRANCH reports a
-// null `r0`. An ALARM rather than a block, and the distinction is kept everywhere this is
+// guard lives in `ci.yml` — the `perf` job parses this report and fails when a run on the
+// DEFAULT BRANCH does not carry a usable baseline — `r0` absent, null, or not a positive
+// finite number — or carries no `PERF-REPORT` line at all (it fails closed: an absent or
+// unparseable report cannot prove the gate is enforced). An ALARM rather than a
+// block, and the distinction is kept everywhere this is
 // described: that trigger is `push`, which fires after a merge lands, and `perf` is not a
 // required check, so it turns an unenforced gate on `main` loudly red without being able to
 // stop one arriving. That placement is deliberate: "the gate may be off on a PR but never

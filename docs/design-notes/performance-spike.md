@@ -197,8 +197,12 @@ to 1.42 on the post-P9 workload. Then 2026-08-05, M2-S6 QC: the numerator moved 
 making both arms medians, `TOLERANCE` tightened **1.25 → 1.10**, and `R0` is **`null` pending a
 re-record**. So NEITHER the statistic nor the tolerance in the block above is current — the gate
 is now `p50(stress due-blast ticks) / p50(control)`, failing when `R > R0 × 1.10`. This
-definition, and everything below it through the end of this section, describes the pre-P9,
-p99-statistic, `R0 = 2.49` era; it is kept as the runner-variance record it still is. See
+definition, and everything below it to the end of **this section** — EXCEPT the dated 2026-08-05
+note at the section's end, which states the current gate — describes the pre-P9, p99-statistic,
+`R0 = 2.49` era; it is kept as the runner-variance record it still is. The scope stops at this
+section's end on purpose: nothing after this section is p99-era history — the browser results
+and every Finding that follows stand on their own, and Finding 3 carries its own dated
+amendments. See
 [Finding 3](#finding-3--the-relative-ci-gate-is-noisier-than-its-own-tolerance)'s amendments below
 and `packages/perf/src/gate.ts`'s `R0` doc for the current definition and value.)_
 
@@ -311,8 +315,10 @@ practice under the p99 era; the same ≥ 500-sample floor applies throughout.
 
 _(SUPERSEDED 2026-08-05, M2-S6 QC — the numerator is now a **p50** over the same subset, making
 both arms medians, with `TOLERANCE` 1.10. This paragraph's "does not cancel tail variance" is
-exactly the limit that move removes: measured over four byte-identical CI runs, `R` swings ±15.5%
-with a tail numerator and ±2.8% with matched medians. The MAGNITUDE of the spreads left
+the limit that move REDUCES — not removes, and the difference is the point: measured over four
+byte-identical CI runs, `R` swings ±15.5% with a tail numerator and ±2.8% with matched medians.
+±2.8% is a much smaller residue, not zero — which is why `TOLERANCE` is 1.10 and not
+tighter. The MAGNITUDE of the spreads left
 unexplained below is accounted for by ADR 0005's 2026-08-05 amendment; the p95-vs-p99 ordering
 within them is not, and remains unattributed.)_
 

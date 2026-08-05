@@ -359,6 +359,18 @@ describe('GATED — a broad blast-cost regression must not be discarded by the g
       expect(k99).toBe(n === N_SUBSET_FLOOR ? 0.02 : Infinity);
       expect(kGating).toBeLessThanOrEqual(k99);
 
+      // THE PRECONDITION THE ORDERING PINS DEPEND ON, asserted BEFORE them so a `TOLERANCE`
+      // edit fails at its cause instead of somewhere downstream. The grid can only separate
+      // p50 from p95 while p95's ratio at k = 0.0075 still exceeds `TOLERANCE` — a margin of
+      // 0.12% at n = 2,500 (`KS`'s header records all three). Raise `TOLERANCE` and this line
+      // goes red saying "the grid no longer separates the statistics"; without it the first
+      // failure would be `expected 0.0075, received 0.01`, which reads as though the
+      // STATISTIC changed when what changed was the tolerance. Raised by CodeRabbit, which
+      // also agreed the fix is NOT to nudge the grid point to 0.008 — that would retune an
+      // outcome-bearing parameter to buy margin. If this fails, re-derive the grid
+      // deliberately and re-record the pins.
+      expect(ratio(broad(0.0075), ms, STATS.auditP95)).toBeGreaterThan(TOLERANCE);
+
       // THE PRICE, PINNED AS A TESTED FACT rather than left in prose: at equal tolerance
       // the superseded p95 fires STRICTLY EARLIER than the gating median. The `>` is the
       // assertion; the two `toBe`s below pin WHICH grid points, so a future change that
