@@ -243,6 +243,31 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     expect(items[0]!.textContent).toBe('10 × Creep — ground, armor 0, no immunities');
   });
 
+  // M2-S6 P7: verify (add nothing) that `resolute`'s slow immunity actually renders
+  // through the existing IMMUNITY_NAME/CREEP_NAME path — the localized creep name AND the
+  // localized immunity name both resolve, not merely that the plumbing compiles.
+  it("renders resolute's localized name and its slow immunity in the preview row", () => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 5,
+          waveCount: 5,
+          entries: [
+            { creepId: 'resolute', count: 6, domain: 'ground', armor: 0, immunities: ['slow'] },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    const text = shell.preview.list.querySelector('li')!.textContent;
+    expect(text).toBe('6 × Resolute Creep — ground, armor 0, slow');
+  });
+
   it('an unchanged preview never rebuilds its rows — node identity survives repeated updates (the SR-stability memo)', () => {
     // The memo guard is an a11y contract (a screen-reader virtual cursor or
     // braille display parked on a row must not have its node torn down every
@@ -670,10 +695,11 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('the second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    // One Card per catalog tower: 4 since M2-S5a added `venom` (was 3 at M2-S4a).
-    // The slot WIRING for card 4 — its hotkey badge, rebind entry and label — is
-    // P6's; this assertion tracks the catalog's size, which is content, not wiring.
-    expect(shell.cards).toHaveLength(4);
+    // One Card per catalog tower: 5 since M2-S6 added `stun` (was 4 at M2-S5a, 3 at
+    // M2-S4a). The slot WIRING for cards 4/5 — their hotkey badges, rebind entries and
+    // labels — is P6's/M2-S6's; this assertion tracks the catalog's size, which is
+    // content, not wiring.
+    expect(shell.cards).toHaveLength(5);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
@@ -801,21 +827,35 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions).toContainEqual({ type: 'armTower', tower: 'venom' });
   });
 
-  it('slots 5-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a four-tower bundle (PLAN.md P6)', () => {
+  // M2-S6 P5: `setup()`'s bundled ruleset gains a fifth catalog tower (`stun`), so
+  // card 5 (index 4, `armTower5`/Digit5) is now wired for real too — mirrors the
+  // Digit4 test above, one slot over.
+  it('Digit5 arms the fifth Card with the five-tower bundle (M2-S6 P5)', () => {
+    const { actions, shell } = setup();
+    const stunCard = shell.cards[4]!;
+    expect(stunCard.towerId).toBe('stun');
+    expect(stunCard.name.textContent).toBe('Stun Tower'); // TOWER_NAME wiring, M2-S6 P7
+    expect(stunCard.hotkey.textContent).toBe('5'); // Digit5 default
+    expect(stunCard.root.getAttribute('aria-keyshortcuts')).toBe('5');
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit5' }));
+    expect(actions).toContainEqual({ type: 'armTower', tower: 'stun' });
+  });
+
+  it('slots 6-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a five-tower bundle (PLAN.md P6, widened M2-S6 P5)', () => {
     const { actions, overlay, shell, settingsBtn } = setup();
-    // Only four Cards exist — no badge/aria-keyshortcuts beyond index 3.
-    expect(shell.cards).toHaveLength(4);
-    // No phantom rebindable action for slots 5..9.
+    // Only five Cards exist — no badge/aria-keyshortcuts beyond index 4.
+    expect(shell.cards).toHaveLength(5);
+    // No phantom rebindable action for slots 6..9.
     settingsBtn.click();
     const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
       (el) => el.textContent,
     );
-    for (let n = 5; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
+    for (let n = 6; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
     overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!.click();
-    // The document hotkeys for those slots no-op too — cards[4..8] don't exist. (Settings
+    // The document hotkeys for those slots no-op too — cards[5..8] don't exist. (Settings
     // is closed here — an open settings dialog makes the shell `inert`, which would mask
     // this on its own and defeat the assertion.)
-    for (let n = 5; n <= 9; n++) {
+    for (let n = 6; n <= 9; n++) {
       document.dispatchEvent(new KeyboardEvent('keydown', { code: `Digit${n}` }));
     }
     expect(actions).toEqual([]);
@@ -900,6 +940,66 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     });
     expect(panel.root.hidden).toBe(false);
     expect(panel.root.textContent).not.toContain('Poison');
+  });
+
+  // M2-S6 P7: `stun`'s `stun` effect surfaces as its own text row (chance/duration, never
+  // ring/colour-only) — mirrors `panel.dot`'s posture exactly. The direct effect's damage
+  // (4) is the Panel's ordinary "Damage:" row; the stun's own chance/duration are separate.
+  it("the Panel shows the STUN tower's stun stat row (chance/duration), armed", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'stun' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Stun Tower');
+    expect(text).toContain('Cost: 10');
+    expect(text).toContain('Damage: 4'); // the direct effect's amount only
+    // "25.0%", not "25%" (QC fix pass): the chance is now routed through
+    // `formatNumber`, like every sibling stat — `oneDecimal` always renders exactly
+    // one fraction digit, which the un-formatted `(chanceNum/256)*100` this pin used
+    // to encode never did. Un-formatted, `chanceNum: 65` renders "25.390625%",
+    // locale-blind — this pin's own point.
+    expect(text).toContain('Stun: 25.0% for 1.0s'); // chanceNum 64/256, durationTicks 20/20 ticks-per-sec
+  });
+
+  // Mirrors the SELECTED slow-tower regression pin above: the stun row must render on the
+  // SELECTED branch too, not only the armed one.
+  it("the Panel shows a SELECTED stun tower's stun stat row (chance/duration)", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'stun' } }),
+      refund: 6,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Stun Tower');
+    // "25.0%", not "25%" (QC fix pass): the chance is now routed through
+    // `formatNumber`, like every sibling stat — `oneDecimal` always renders exactly
+    // one fraction digit, which the un-formatted `(chanceNum/256)*100` this pin used
+    // to encode never did. Un-formatted, `chanceNum: 65` renders "25.390625%",
+    // locale-blind — this pin's own point.
+    expect(text).toContain('Stun: 25.0% for 1.0s');
+  });
+
+  it('the Panel shows no stun row for the BASIC tower (no `stun` effect)', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    expect(panel.root.textContent).not.toContain('Stun');
   });
 
   // QC round 1: the wrong-stats regression guard PLAN step 21 named (G18's bug — a
@@ -1121,6 +1221,11 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       'Slow Tower armed. Place it on the board.',
     );
     expect(render({ kind: 'placed', towerId: 'slow' })).toBe('Slow Tower placed.');
+    // M2-S6 P7: TOWER_NAME wiring for `stun`, armed + placed paths.
+    expect(render({ kind: 'armed', towerId: 'stun' })).toBe(
+      'Stun Tower armed. Place it on the board.',
+    );
+    expect(render({ kind: 'placed', towerId: 'stun' })).toBe('Stun Tower placed.');
     expect(render({ kind: 'disarmed', towerId: 'basic' })).toBe('Placement cancelled.');
     expect(render({ kind: 'placed', towerId: 'basic' })).toBe('Basic Tower placed.');
     expect(render({ kind: 'rejected', reason: 'bounty' })).toBe('Not enough Bounty.');

@@ -10,15 +10,18 @@
  *  reusing `'ringed'`, since `slow` already owns that mark). `'droplet'` is `venom`'s
  *  (M2-S5a) — a small teardrop shape at the footprint centre, evoking "applies a
  *  lingering effect" — again a NEW value rather than reusing any of the above, so no two
- *  towers ever share a footprint mark. An unrecognized id draws `'plain'` (total, never
- *  throw). */
-export type TowerFootprintMark = 'plain' | 'ringed' | 'crosshair' | 'droplet';
+ *  towers ever share a footprint mark. `'bolt'` is `stun`'s (M2-S6) — a three-segment
+ *  zigzag polyline through the footprint centre, evoking "shocks" — distinct from
+ *  `'crosshair'`'s spokes by not being radial. An unrecognized id draws `'plain'`
+ *  (total, never throw). */
+export type TowerFootprintMark = 'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt';
 
 const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   basic: 'plain',
   slow: 'ringed',
   splash: 'crosshair',
   venom: 'droplet',
+  stun: 'bolt',
 };
 
 /** The footprint mark for `towerId` — total over any string, `hasOwnProperty`-guarded

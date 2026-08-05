@@ -151,9 +151,11 @@ describe('compileRuleset — creep catalog domains', () => {
     rejects((b) => (b.creepCatalog[0]!.domain = 'air'));
   });
 
-  it('rejects armor past the capability ceiling, and any immunity / role — capability-gated (M2-S5a widened maxArmor 0 → 16)', () => {
+  it('rejects armor past the capability ceiling, and any role — capability-gated (M2-S5a widened maxArmor 0 → 16)', () => {
     rejects((b) => (b.creepCatalog[0]!.armor = 17)); // one past the live profile's maxArmor ceiling
-    rejects((b) => (b.creepCatalog[0]!.immunities = ['slow']));
+    // `immunities` is no longer a reject case here (M2-S6 P4): `allowedImmunities`
+    // widens to `['slow','stun']`, exactly the v2 schema's own enum — see
+    // capability.test.ts's `allowedImmunities` case and header comment.
     rejects((b) => (b.creepCatalog[0]!.role = 'boss'));
   });
 
@@ -172,14 +174,12 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects an effect kind unsupported at simVersion 8 (valid schema, capability-gated)', () => {
-    // 'slow' is allowed (M2-S3), 'aoe' is now ALSO allowed (M2-S4a) — 'stun' still
-    // isn't (still S6's job).
+  it('rejects an effect kind unsupported at simVersion 10 (valid schema, capability-gated)', () => {
+    // 'slow' (M2-S3), 'dot' (M2-S5a), and 'stun' (M2-S6) are all allowed now —
+    // 'burst' still isn't (no story has widened it).
     rejects(
       (b) =>
-        (b.towerCatalog[0]!.effects = [
-          { kind: 'stun', chanceNum: 64, durationTicks: 30 } as never,
-        ]),
+        (b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 } as never]),
     );
   });
 

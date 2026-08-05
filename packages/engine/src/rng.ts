@@ -1,14 +1,22 @@
-// rng.ts — Mulberry32 seeded PRNG. RESERVED FOR FUTURE use: `SimState.rngState` is
-// currently inert (nothing in the sim draws from an `Rng` instance — `Rng` is exercised
-// only by `engine.test.ts`) but IS part of the hash-serialized world state (world-hash
-// identity, not free to delete). A future consumer must carry the state through the tick
-// boundary exactly as `getState()`/`setState()` below are shaped for — those are NOT an
-// already-wired save path today, just the seam a future consumer will use.
+// rng.ts — Mulberry32 seeded PRNG. LIVE since M2-S6 (ADR 0010): `SimState.rngState` is
+// part of the hash-serialized world state, and `step()` (`packages/sim/src/index.ts`)
+// constructs one `Rng` from it at the top of the combat phase, threads it into
+// `runCombat`/`applyImpactToCreep` for the `stun` effect's `nextInt(256) < chanceNum`
+// roll, and snapshots it back with `getState()` UNCONDITIONALLY at tick end — whether or
+// not anything drew — so a stun-free run's `rngState` still round-trips byte-identically.
+// `Rng` is exercised directly by `engine.test.ts` and indirectly by every stun-carrying
+// sim test.
 //
 // This API is normative for byte-identity determinism: do not rename methods,
-// add a `nextFloat()`, or create module-level singleton instances. Once wired, the sim
-// RNG would be reconstructed from serialized state at tick start and snapshotted at tick
-// end, keeping randomness a pure function of the seed and the input log.
+// add a `nextFloat()`, or create module-level singleton instances. The sim RNG is
+// reconstructed from serialized state at tick start and snapshotted at tick end, keeping
+// randomness a pure function of `(seed, ruleset, boardId, inputs)` — ADR 0007's tuple. The
+// RULESET and BOARD belong in it, not just the seed and the input log: draws happen only
+// for surviving, non-immune `stun` effects, so the compiled-per-board catalog determines
+// the draw SCHEDULE, not merely each draw's outcome. See ADR 0010 for why the
+// generator and the `nextInt` mapping are frozen as of this wiring — this was the last
+// free moment to change them, and both documented weaknesses below were measured against
+// this exact use rather than argued about.
 //
 // Cosmetic (render-only) randomness must use a SEPARATE generator — never draw
 // from this one, or replays diverge.
@@ -45,7 +53,11 @@ export class Rng {
    * bias itself introduces, not repair the underlying non-equidistribution `nextU32`
    * already has. Changing the generator and/or this mapping to reduce bias would change
    * the RNG output stream — a determinism-affecting change (`simVersion` bump) — and is
-   * out of scope here; `Rng` currently has no production consumer to migrate anyway.
+   * out of scope here. This caveat is general; it does NOT bite at the live consumer's
+   * `max = 256` (`stun`'s `nextInt(256)`, `packages/sim/src/combat.ts`), where 256
+   * divides 2^32 exactly and bias is zero — see ADR 0010, which measured rather than
+   * argued this. A future consumer picking a non-power-of-two `max` inherits the caveat,
+   * not that clearance.
    */
   nextInt(max: number): number {
     return this.nextU32() % max;
@@ -59,14 +71,17 @@ export class Rng {
     return min + (this.nextU32() % (max - min + 1));
   }
 
-  /** Snapshot PRNG state — shaped for a future caller to persist alongside the world
-   *  state at tick end; no current caller does this (see the header). */
+  /** Snapshot PRNG state — `step()` calls this unconditionally at tick end to persist
+   *  it alongside the rest of `SimState` (see the header). */
   getState(): number {
     return this.state;
   }
 
-  /** Restore PRNG from serialized state — shaped for a future save/load or replay
-   *  consumer; no current caller does this (see the header). */
+  /** Restore PRNG from serialized state — no production caller today; `step()` instead
+   *  reconstructs via `new Rng(state.rngState)` each tick (equivalent, since the
+   *  constructor's `>>> 0` coercion matches this method's). Exercised directly by
+   *  `engine.test.ts`, and shaped for a future save/load or replay consumer that wants
+   *  to mutate an existing instance rather than build a new one. */
   setState(state: number): void {
     this.state = state >>> 0;
   }

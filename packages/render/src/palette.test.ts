@@ -44,7 +44,7 @@ function compositeOver(fg: number, bg: number, a: number): number {
   return (mix(fr, br) << 16) | (mix(fgc, bg2) << 8) | mix(fb, bb);
 }
 
-// The nine cues the scene draws OPAQUE against the floor (source colour, no compositing) —
+// The eleven cues the scene draws OPAQUE against the floor (source colour, no compositing) —
 // `slowed`'s essential ring is drawn at alpha 1 (the pulse, alpha 0.4, is the non-essential
 // motion cue), so gating it as opaque is exact, not an approximation. `poisoned` (M2-S5a)
 // is the same essential-cue category: its three guaranteed pips are also alpha 1 (the
@@ -59,6 +59,8 @@ const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'ghostInvalid',
   'slowed',
   'poisoned',
+  'stunned',
+  'warded',
 ];
 
 // `range`'s weakest essential draw: the ghost-preview stroke at alpha 0.7 (scene.ts:174).
@@ -124,12 +126,110 @@ const POISONED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'floor',
 ];
 
+// `stunned` is gated against `creep` as well as the floor, and the history is worth keeping
+// because it is why the GEOMETRY is what it is.
+//
+// The guaranteed `jolt` ring was first drawn INSIDE the silhouette at r×0.55, which made its
+// contrast partner the creep fill rather than the board floor. That fill takes two values:
+// `creep`, and `creepLowHp` below `hpFrac` 0.34 (`board-draw.ts`'s `hpColour`) — and no
+// colour clears both plus the floor. WCAG contrast is a pure function of relative luminance,
+// so clearing ≥3:1 against the floor (L≈0.014) forces L ≥ 0.141 and clearing `creep` forces
+// L ≤ 0.215, while `creepLowHp` demands L ≤ 0.041 or L ≥ 0.766. Those ranges are disjoint; an
+// exhaustive scan confirms NO colour satisfies all three in the DEFAULT or PROTAN/DEUTAN
+// tables. A luminance sandwich, not a bad swatch — so a stunned creep near death carried no
+// perceivable cue at all, in either channel, since the flicker draws inside too.
+//
+// SCOPE, corrected: this does NOT hold in tritan, whose `creep` is a dark magenta rather
+// than yellow. There the band is open — ~210 of 10,001 sampled luminances qualify, and the
+// shipped `0xfffff5` is one of them, clearing `creepLowHp` at 3.84. An earlier draft
+// claimed the sandwich for all three tables on the strength of a scan that had been handed
+// protan/deutan's `creepLowHp` for tritan. The geometry move is driven by the two tables
+// where the sandwich is real; tritan inherits it so there is ONE cue layout rather than a
+// per-mode one.
+//
+// The fix was geometric: the jolt now draws OUTSIDE the silhouette at r×1.15, partnered
+// against the floor at 3.87:1, exactly like the slow ring (r×1.4) and the DoT pips (r×1.8).
+// An essential cue must not depend on the health of the thing it is drawn on. The gate below
+// stays as belt-and-braces for the `flicker`, which is still inside but is the non-essential
+// motion cue. `warded`'s ring is drawn over `tower` at 2.37:1 in the default and tritan
+// tables (protan/deutan clears it at 3.59, since that mode's `tower` is a darker blue) —
+// gated by byte-distinctness instead, the same posture `poisoned`'s pips carry. The ward
+// ring is opaque and drawn well outside the silhouette at r×2.2, but a tower footprint
+// under it is the same kind of "cue drawn over a body this gate doesn't reach" as this
+// one.
+const STUNNED_MUST_CONTRAST: ReadonlyArray<keyof Palette> = ['creep'];
+
+describe('stunned — the jolt ring vs the creep fill it is drawn over (M2-S6)', () => {
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": stunned clears ${MIN_CUE_CONTRAST}:1 against creep`, () => {
+      const pal = resolvePalette(mode);
+      for (const key of STUNNED_MUST_CONTRAST) {
+        expect(contrast(pal.stunned, pal[key])).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      }
+    });
+  }
+});
+
 describe('poisoned — pairwise distinctness from every cue a pip can be drawn over (M2-S5a)', () => {
   for (const mode of COLOUR_MODES) {
     it(`mode "${mode}": poisoned differs from tower/ghostValid/creep/creepLowHp/floor`, () => {
       const pal = resolvePalette(mode);
       for (const key of POISONED_MUST_DIFFER_FROM) {
         expect(pal.poisoned).not.toBe(pal[key]);
+      }
+    });
+  }
+});
+
+// PAIRWISE DISTINCTNESS, not just contrast — the lesson `poisoned` already paid for above:
+// `poisoned` once shipped byte-identical to `tower`/`ghostValid` and its pips vanished into
+// the body they were drawn over, even though nothing checked CONTRAST failed (byte-identical
+// colours are maximally "in contrast" with themselves — a contrast gate cannot catch this
+// class of bug at all, only a distinctness gate can). `stunned` and `warded` shipped in this
+// same story with only a contrast gate (`STUNNED_MUST_CONTRAST` above) and no distinctness
+// gate — which is exactly how the tritan `stunned === spark` collision (both `0xffffff`)
+// passed green: a cue can clear ≥3:1 against its own reflection. Scoped to the cues each is
+// actually drawn over or beside: the flicker ring draws inside the silhouette and the jolt
+// just outside it at r×1.15, over the same backgrounds a creep can path across (`spark`,
+// `creep`, `creepLowHp`) and can appear on a build over a tower footprint or floor (`tower`,
+// `floor`); the ward ring draws outside the silhouette at r×2.2, over the same set of
+// backgrounds a creep can path across. Each is also checked against the OTHER new cue, since a
+// `resolute` under stun and a warded creep are both reachable states.
+const STUNNED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
+  'spark',
+  'creep',
+  'creepLowHp',
+  'tower',
+  'floor',
+  'warded',
+];
+
+const WARDED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
+  'spark',
+  'creep',
+  'creepLowHp',
+  'tower',
+  'floor',
+  'stunned',
+];
+
+describe('stunned — pairwise distinctness from every cue it can be drawn over or beside (M2-S6)', () => {
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": stunned differs from spark/creep/creepLowHp/tower/floor/warded`, () => {
+      const pal = resolvePalette(mode);
+      for (const key of STUNNED_MUST_DIFFER_FROM) {
+        expect(pal.stunned).not.toBe(pal[key]);
+      }
+    });
+  }
+});
+
+describe('warded — pairwise distinctness from every cue it can be drawn over or beside (M2-S6)', () => {
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": warded differs from spark/creep/creepLowHp/tower/floor/stunned`, () => {
+      const pal = resolvePalette(mode);
+      for (const key of WARDED_MUST_DIFFER_FROM) {
+        expect(pal.warded).not.toBe(pal[key]);
       }
     });
   }

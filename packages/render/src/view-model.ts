@@ -40,6 +40,15 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       def !== undefined ? def.hp : Math.max(1, Number.isSafeInteger(hp) ? (hp as number) : 1);
     const hpFrac = Number.isSafeInteger(hp) ? clamp01((hp as number) / denom) : 0;
     const slowMulFp = state.creeps.slowMulFp[i];
+    const stunUntilTick = state.creeps.stunUntilTick[i];
+    // Same inclusive-expiry rule the sim's own movement derivation uses
+    // (`index.ts`: `stunUntilTick !== 0 && stunUntilTick >= state.tick`) — a stun
+    // applied through tick T still holds at tick T, so the render VM must agree with
+    // the sim about whether "right now" is stunned, not merely echo a stale column.
+    const stunned =
+      Number.isSafeInteger(stunUntilTick) &&
+      (stunUntilTick as number) !== 0 &&
+      (stunUntilTick as number) >= state.tick;
     creeps.push({
       id: state.creeps.id[i] as number,
       creepId,
@@ -48,6 +57,12 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       hpFrac,
       slowed: Number.isSafeInteger(slowMulFp) && (slowMulFp as number) !== 0,
       poisoned: poisonedIds.has(state.creeps.id[i] as number),
+      stunned,
+      // Catalog join, like `hpFrac`'s denominator above — NOT sim state. `def` is
+      // already resolved above; the optional chain is what keeps an absent
+      // definition (a forged/unresolved `creepId`) from throwing, matching the
+      // adjacent HP join's own posture.
+      warded: (def?.immunities.length ?? 0) > 0,
     });
   }
 

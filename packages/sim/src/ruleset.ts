@@ -126,7 +126,8 @@ export type CompiledEffect =
       readonly amount: number;
       readonly cadenceTicks: number;
       readonly durationTicks: number;
-    };
+    }
+  | { readonly kind: 'stun'; readonly chanceNum: number; readonly durationTicks: number };
 
 /** Sim-owned compile-time projection of `TowerDef` — `kind` renamed `id` (decision
  *  4). `effects` REPLACES v1's flat `damage` (G3): the fire-time snapshot needs the
@@ -638,7 +639,10 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
         durationTicks: e.durationTicks,
       };
     }
-    // Unreachable at sv9: `allowedEffectKinds`/`allowedDirectForms` already rejected
+    if (e.kind === 'stun') {
+      return { kind: 'stun', chanceNum: e.chanceNum, durationTicks: e.durationTicks };
+    }
+    // Unreachable at sv10: `allowedEffectKinds`/`allowedDirectForms` already rejected
     // anything else in `checkCapabilityGlobal`, above. Defensive, not load-bearing.
     throw new RulesetError(
       `tower '${towerId}' has an effect this sim build cannot compile at simVersion ${SIM_VERSION}`,
@@ -748,9 +752,19 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     tails.push(spawns[spawns.length - 1]!.offsetTicks); // sorted ascending ⇒ last is max
     for (const s of spawns) {
       const def = creepById[s.creepId]!; // resolved above
+      // A SLOW-IMMUNE creep is never slowed, so modelling it under `strongestMulFp`
+      // is not conservatism — it is a wrong number in the rejecting direction (M2-S6,
+      // Codex P2). A lower `minEffSpeedFp` yields a LARGER `maxTraversalTicks`, so a
+      // bundle whose waves spawn only slow-immune creeps could be rejected as unable
+      // to terminate, even though at their real speed they comfortably do. Newly
+      // reachable at sv10: before this story `allowedImmunities` was `[]`, so no
+      // compilable bundle could carry an immune creep at all. Widening only — this
+      // can accept bundles previously rejected, never the reverse — and hash-neutral,
+      // since `maxTraversalTicks` is a local gate value that never enters the digest.
+      const slowable = !def.immunities.includes('slow');
       const eff = effectiveSpeedFp(
         def.speedFp,
-        strongestMulFp,
+        slowable ? strongestMulFp : 0,
         normalized.balance.slowFloorNum,
         normalized.balance.slowFloorDen,
       );
@@ -804,6 +818,16 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // creep's full traversal (max route length ÷ min speed, over every creep any wave
   // spawns). Only the baseline must fit; adversarial build/sell juggling beyond it
   // is caught by the validator's timeout.
+  // `minEffSpeedFp` deliberately never accounts for stun (M2-S6): `effectiveSpeedFp`
+  // is shared verbatim with movement, but movement's `stunned` branch (index.ts)
+  // passes a synthetic 0 budget straight to `advanceCreep` rather than threading a
+  // `stunned` parameter through this function — the honest value here would make
+  // the gate see speed 0 for any catalog carrying a stun effect, `maxTraversalTicks`
+  // infinite, and every such bundle rejected. Unlike slow, stun has no floor by
+  // design (chain-lock is permitted, decision 5), so there is no bounded worst case
+  // to model. Stun-induced overrun therefore sits on the same side of the line this
+  // comment already draws for build/sell juggling: caught by the replay validator's
+  // `MAX_TICKS` timeout, not this compile-time gate.
   let prefixCountdown = 0;
   let latestSpawnTick = 0;
   waves.forEach((w, k) => {

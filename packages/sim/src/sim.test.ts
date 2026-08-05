@@ -116,6 +116,7 @@ describe('sim smoke', () => {
         creepId: ['normal'],
         slowMulFp: [0],
         slowUntilTick: [0],
+        stunUntilTick: [0],
       };
       corrupt(s.creeps);
       const out = step(s, RULESET, []);
@@ -147,8 +148,16 @@ describe('sim determinism', () => {
   });
 });
 
-describe('rngState — anchors "inert" (#45)', () => {
-  it('is carried through the tick boundary byte-identical — step() never touches it', () => {
+describe('rngState — byte-identical under a STUN-FREE ruleset (#45, M2-S6 P8 test 3)', () => {
+  // M2-S6 P2 wires `step()` to construct `new Rng(state.rngState)` and write its
+  // `getState()` back EVERY tick, unconditionally (index.ts) — so this describe's
+  // original claim ("step() never touches it") is now false. What survives is the
+  // narrower, still-true half: this module's `RULESET` carries no `stun` effect
+  // anywhere in its catalog (only `TEST_TOWER`'s plain `direct` effect), so PASS 2's
+  // stun arm never runs and `rng.nextInt`/`nextU32` are never called — the
+  // reconstructed `Rng`'s `getState()` after a stun-free tick is always exactly the
+  // value it was constructed with, so `rngState` round-trips byte-identical.
+  it('rngState is byte-identical after many ticks, because this ruleset never draws (no stun effect in its catalog)', () => {
     const s = createInitialState(12345, RULESET);
     const before = s.rngState;
     step(s, RULESET, callEarly);

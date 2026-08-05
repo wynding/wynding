@@ -63,6 +63,16 @@
 // scenario's two long-standing witnesses — `lives === 0` and a single surviving
 // `slow` tower — are preserved EXACTLY; see `canonicalInputs`' own note for the
 // measured reason.
+//
+// M2-S6 P5 (SIM_VERSION 9 → 10) re-pins BOTH values again, shape-only: this
+// scenario's bundle carries no `stun` tower and never advances `state.rngState`
+// past its seed, so nothing about the scenario's BEHAVIOR changed. The move is
+// driven purely by the new `stunUntilTick` creep column (P1) joining every
+// creep's serialized shape — `hashSimState` is `fnv1a(JSON.stringify(state))`,
+// so a shape-only addition still moves every hash in the trace. `phase`,
+// `lives` and `tick` (454) are unchanged; see the `v7-continuity witnesses`
+// block below, which pins exactly those observables rather than a hash for
+// this same reason.
 
 import { describe, it, expect } from 'vitest';
 import { createFixedLoop, DEFAULT_MS_PER_TICK, fnv1a } from '@wynding/engine';
@@ -207,8 +217,8 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: 'a82d533f', // re-pinned M2-S5a P3: the scenario itself gained a `venom` tower.
-  traceDigest: 'ddcb9dc0', // fnv1a(trace.join(':')) — re-pinned M2-S5a P3, same reason.
+  finalHash: '31e0a94c', // re-pinned M2-S6 P5: the `stunUntilTick` column widens every creep's shape.
+  traceDigest: '631be81b', // fnv1a(trace.join(':')) — re-pinned M2-S6 P5, same reason.
 } as const;
 // -------------------------------------------------------------------------------
 

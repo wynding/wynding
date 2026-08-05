@@ -236,6 +236,43 @@ describe('view-model + hud derivation', () => {
     expect(c?.slowed).toBe(true);
   });
 
+  it('projects `stunned` from a live stunUntilTick column value, inclusive of the expiry tick (M2-S6)', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    s.creeps.stunUntilTick[0] = s.tick; // inclusive boundary: still stunned THIS tick
+    let vm = deriveViewModel(s, ruleset);
+    let c = vm.creeps.find((v) => v.id === s.creeps.id[0]);
+    expect(c?.stunned).toBe(true);
+
+    s.creeps.stunUntilTick[0] = s.tick - 1; // expired the tick before
+    vm = deriveViewModel(s, ruleset);
+    c = vm.creeps.find((v) => v.id === s.creeps.id[0]);
+    expect(c?.stunned).toBe(false);
+
+    s.creeps.stunUntilTick[0] = 0; // 0 means never stunned
+    vm = deriveViewModel(s, ruleset);
+    c = vm.creeps.find((v) => v.id === s.creeps.id[0]);
+    expect(c?.stunned).toBe(false);
+  });
+
+  it('projects `warded` as a catalog join (M2-S6): true for a creep whose def carries an immunity, false otherwise — never sim state', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    expect(s.creeps.creepId[0]).toBe('normal'); // no immunities in the shipped catalog
+    let vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.warded).toBe(false);
+
+    s.creeps.creepId[0] = 'resolute'; // shipped with immunities: ['slow']
+    vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.warded).toBe(true);
+
+    // A forged/unresolved creepId must not throw — falls back to `false`, mirroring
+    // the adjacent hpFrac join's own posture on an absent definition.
+    s.creeps.creepId[0] = 'nonexistent';
+    vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.warded).toBe(false);
+  });
+
   it('projects `poisoned` from live DoT records, many-to-many-ish (M2-S5a P7)', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
@@ -478,14 +515,23 @@ describe('hud score — earned components while live, authoritative once termina
     let s = createInitialState(1, ruleset);
     // M2-S4a widened wave 2 to 16 × `swarm` @ spacing 5 (was 10 × `normal` @ spacing 20)
     // — the old 2-tower defense (content story #68's fixture) now loses to that faster
-    // pressure, so the fixed defense grows to 5 `basic` towers, still well inside the
-    // starting bounty (5 × cost 5 = 25 of 80), to clear all three waves with margin.
+    // pressure, so the fixed defense grew to 5 `basic` towers, still well inside the
+    // starting bounty (5 × cost 5 = 25 of 80), to clear all three (then four) waves with
+    // margin. M2-S6 P5 appends wave index 4 (`resolute`+`fast`, both speed 44) — the
+    // 5-tower wall left only 1 life of margin against the four-wave bundle (measured), so
+    // the fifth wave alone lost the run outright. Grown to 8 `basic` towers (40 of 80
+    // bounty, still well inside starting bounty) to restore a clear-with-margin win
+    // (measured: 6 lives remaining) — this fixture only needs SOME win, not a tuned one;
+    // `deriveScore`'s formula is what's under test, not this wall's exact composition.
     for (const anchor of [
       { col: 3, row: 9 },
       { col: 3, row: 12 },
       { col: 6, row: 9 },
       { col: 6, row: 12 },
       { col: 9, row: 9 },
+      { col: 9, row: 12 },
+      { col: 12, row: 9 },
+      { col: 12, row: 12 },
     ] as const) {
       s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'basic' }]);
     }
@@ -536,56 +582,219 @@ describe('interpolation — by entity id', () => {
 
   it('blends a creep present in both snapshots by its id', () => {
     const prev = vm(0, [
-      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 0,
+        y: 0,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const cur = vm(1, [
-      { id: 1, creepId: 'normal', x: 100, y: 40, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 100,
+        y: 40,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const out = interpolateCreeps(prev, cur, 0.5);
     expect(out).toEqual([
-      { id: 1, creepId: 'normal', x: 50, y: 20, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 50,
+        y: 20,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
   });
 
   it('the blend path snaps NON-DEFAULT creepId/slowed from the CURRENT snapshot (QC round 1 — a rebuild that dropped or defaulted the new fields would pass the all-defaults case above)', () => {
     const prev = vm(0, [
-      { id: 1, creepId: 'fast', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'fast',
+        x: 0,
+        y: 0,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const cur = vm(1, [
-      { id: 1, creepId: 'fast', x: 100, y: 40, hpFrac: 0.5, slowed: true, poisoned: false },
+      {
+        id: 1,
+        creepId: 'fast',
+        x: 100,
+        y: 40,
+        hpFrac: 0.5,
+        slowed: true,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const out = interpolateCreeps(prev, cur, 0.5);
     expect(out).toEqual([
-      { id: 1, creepId: 'fast', x: 50, y: 20, hpFrac: 0.5, slowed: true, poisoned: false },
+      {
+        id: 1,
+        creepId: 'fast',
+        x: 50,
+        y: 20,
+        hpFrac: 0.5,
+        slowed: true,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
   });
 
   it('snaps `poisoned` from the CURRENT snapshot on a genuinely-interpolated frame (M2-S5a P7 — guards a field-by-field rebuild silently dropping it)', () => {
     const prev = vm(0, [
-      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 0,
+        y: 0,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const cur = vm(1, [
-      { id: 1, creepId: 'normal', x: 100, y: 40, hpFrac: 1, slowed: false, poisoned: true },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 100,
+        y: 40,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: true,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const out = interpolateCreeps(prev, cur, 0.5);
     expect(out).toEqual([
-      { id: 1, creepId: 'normal', x: 50, y: 20, hpFrac: 1, slowed: false, poisoned: true },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 50,
+        y: 20,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: true,
+        stunned: false,
+        warded: false,
+      },
+    ]);
+  });
+
+  it('snaps `stunned`/`warded` from the CURRENT snapshot on a genuinely-interpolated frame (M2-S6 — guards a field-by-field rebuild silently dropping either)', () => {
+    const prev = vm(0, [
+      {
+        id: 1,
+        creepId: 'resolute',
+        x: 0,
+        y: 0,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: true,
+      },
+    ]);
+    const cur = vm(1, [
+      {
+        id: 1,
+        creepId: 'resolute',
+        x: 100,
+        y: 40,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: true,
+        warded: true,
+      },
+    ]);
+    const out = interpolateCreeps(prev, cur, 0.5);
+    expect(out).toEqual([
+      {
+        id: 1,
+        creepId: 'resolute',
+        x: 50,
+        y: 20,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: true,
+        warded: true,
+      },
     ]);
   });
 
   it('shows a just-spawned creep (only in current) at its current point, no blend', () => {
     const prev = vm(0, []);
     const cur = vm(1, [
-      { id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 7,
+        creepId: 'normal',
+        x: 12,
+        y: 34,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     expect(interpolateCreeps(prev, cur, 0.5)).toEqual([
-      { id: 7, creepId: 'normal', x: 12, y: 34, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 7,
+        creepId: 'normal',
+        x: 12,
+        y: 34,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
   });
 
   it('does not resurrect a creep that left the world (only in previous)', () => {
     const prev = vm(0, [
-      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 0,
+        y: 0,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const cur = vm(1, []);
     expect(interpolateCreeps(prev, cur, 0.5)).toEqual([]);
@@ -593,10 +802,30 @@ describe('interpolation — by entity id', () => {
 
   it('clamps a stale/overshooting alpha to [0,1]', () => {
     const prev = vm(0, [
-      { id: 1, creepId: 'normal', x: 0, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 0,
+        y: 0,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     const cur = vm(1, [
-      { id: 1, creepId: 'normal', x: 100, y: 0, hpFrac: 1, slowed: false, poisoned: false },
+      {
+        id: 1,
+        creepId: 'normal',
+        x: 100,
+        y: 0,
+        hpFrac: 1,
+        slowed: false,
+        poisoned: false,
+        stunned: false,
+        warded: false,
+      },
     ]);
     expect(interpolateCreeps(prev, cur, 2).at(0)?.x).toBe(100);
     expect(interpolateCreeps(prev, cur, -1).at(0)?.x).toBe(0);

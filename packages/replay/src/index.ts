@@ -335,9 +335,14 @@ export function validate(
   // (3c) If the log ended before terminal, drive empty ticks to terminal or the ceiling.
   // `compileRuleset` already guarantees a bundle's BASELINE run (launch + spawn +
   // slowest full traversal) reaches a terminal state within MAX_TICKS, so a legitimate
-  // replay always terminates below it; the same constant then bounds any adversarial
-  // build/sell juggling (a finite but pathological extension) and, with it, the
-  // validator's CPU per request.
+  // replay always terminates below it. Not every adversarial extension is finite,
+  // though: build/sell juggling is (bounded and pathological), but a permitted stun
+  // chain-lock (M2-S6 — two towers holding one creep indefinitely is intended
+  // counterplay, not a bug) is a genuinely nonterminal state — the held creep neither
+  // dies nor leaks, so nothing in `step()` ever flips the phase to terminal on its
+  // own. MAX_TICKS is what turns that case into a definite, bounded TIMEOUT rather
+  // than an unbounded loop, and is also what bounds the validator's CPU per request
+  // either way.
   if (!terminalReached) {
     while (state.tick < MAX_TICKS && !isTerminalPhase(state.phase)) {
       state = step(state, ruleset, EMPTY_INPUTS);

@@ -42,6 +42,16 @@
       "immunities": [],
       "leakCost": 1,
       "bounty": 3
+    },
+    {
+      "id": "resolute",
+      "hp": 20,
+      "speedFp": 44,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": ["slow"],
+      "leakCost": 1,
+      "bounty": 2
     }
   ],
   "towerCatalog": [
@@ -94,6 +104,20 @@
         { "kind": "direct", "form": "single", "damage": 2 },
         { "kind": "dot", "damagePerTick": 4, "cadenceTicks": 10, "durationTicks": 60 }
       ]
+    },
+    {
+      "id": "stun",
+      "cost": 10,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 768,
+        "cadenceTicks": 40,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 4 },
+        { "kind": "stun", "chanceNum": 64, "durationTicks": 20 }
+      ]
     }
   ],
   "balance": {
@@ -141,6 +165,15 @@
           "countdownTicks": 300,
           "clearBonus": 5,
           "entries": [{ "creepId": "armored", "count": 6, "spacingTicks": 25 }]
+        },
+        {
+          "index": 4,
+          "countdownTicks": 300,
+          "clearBonus": 7,
+          "entries": [
+            { "creepId": "resolute", "count": 6, "spacingTicks": 15 },
+            { "creepId": "fast", "count": 6, "spacingTicks": 15 }
+          ]
         }
       ]
     }

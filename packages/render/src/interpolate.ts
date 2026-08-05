@@ -32,6 +32,8 @@ export function interpolateCreeps(prev: RenderVM | null, cur: RenderVM, alpha: n
         hpFrac: c.hpFrac, // health snaps to current (no visual value in blending it)
         slowed: c.slowed, // status snaps to current, like hpFrac (no visual value blending it)
         poisoned: c.poisoned, // status snaps to current, like slowed (no visual value blending it)
+        stunned: c.stunned, // status snaps to current, like slowed/poisoned (no visual value blending it)
+        warded: c.warded, // catalog join, invariant for a given creepId — carried through unchanged
       });
     }
   }

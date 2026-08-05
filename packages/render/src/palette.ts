@@ -39,6 +39,18 @@ export interface Palette {
    *  (PLAN.md step 32, same posture as `slowed`), gated ≥ 3:1 like every other opaque
    *  cue (`palette.test.ts`). */
   readonly poisoned: number;
+  /** Stun telegraph cue (M2-S6) — the redundant colour channel behind the `'jolt'`
+   *  shape cue the telegraph ALWAYS draws (`creep-paint.ts`); an essential cue, gated
+   *  ≥ 3:1 like every other opaque cue (`palette.test.ts`). The jolt ring draws OUTSIDE
+   *  the silhouette (r×1.15), so its contrast partner is the board FLOOR, like the slow
+   *  ring and the DoT pips. The additional gate against `creep` is belt-and-braces for
+   *  the `flicker`, which does still draw inside at r×0.85. */
+  readonly stunned: number;
+  /** Ward cue (M2-S6) — the redundant colour channel behind the always-on outer ring
+   *  `wardPaintOps` draws for a creep whose catalog definition carries an immunity. Not
+   *  a timed status (see CONTEXT.md's Ward term), so gated ≥ 3:1 like every other
+   *  opaque cue (`palette.test.ts`) with no motion-cue caveat. */
+  readonly warded: number;
 }
 
 // Base palette: high-contrast, colourblind-safe hues (Okabe–Ito). Valid/invalid also
@@ -64,6 +76,24 @@ const DEFAULT: Palette = {
   // a value with `range` is deliberate and safe — that is a thin selection ring drawn
   // only while a tower is selected, never a filled body under a creep.
   poisoned: 0xcc79a7,
+  // Electric violet (M2-S6) — distinct from every other cue in this table and clears the
+  // ≥3:1 floor gate at 3.87. The floor is the right partner: the GUARANTEED `jolt` ring
+  // draws OUTSIDE the silhouette (r×1.15), like the slow ring and the DoT pips. An earlier
+  // draft drew it inside at r×0.55, which made the creep fill the partner and left the cue
+  // at 1.10 against `creepLowHp` — unfixable by any colour IN THIS TABLE AND IN
+  // PROTAN/DEUTAN (a luminance sandwich; see `STUNNED_MUST_CONTRAST` in palette.test.ts),
+  // so the geometry moved instead. Tritan escapes the sandwich (its `creep` is dark) but
+  // takes the same geometry — one cue layout, not a per-mode one.
+  stunned: 0x8a5cf6,
+  // Warm gold (M2-S6) — reads as "protected". Gated against the floor and by pairwise
+  // distinctness (`palette.test.ts`), not by contrast against the creep fill: the ward
+  // ring draws OUTSIDE the silhouette at r×2.2 and so is never over the creep body.
+  // It IS drawn over `tower` at 2.37:1 when a warded creep paths across a footprint (the
+  // ring spans ~1.54 cells). That is the same posture every sibling cue already has —
+  // `poisoned`'s pips at r×1.8 overlap footprints too, and are gated against `tower` by
+  // byte-DISTINCTNESS, not contrast — so it is consistent rather than a new hole, but the
+  // cue-radius layout as a whole is owed a pass.
+  warded: 0xffd23f,
 };
 
 // Deutan/protan (red–green) shift the green/red pair toward blue/orange separation.
@@ -96,6 +126,20 @@ const TRITAN: Palette = {
   // so it cannot see perceptual distance — a real CVD-distance gate is worth having and
   // is not in this story.
   poisoned: 0xf0e442,
+  // DEFAULT's electric-violet `stunned` fails this mode's `creep` (magenta 0xcc79a7 sits
+  // at a very different luminance than DEFAULT's yellow), so this mode overrides it.
+  // Near-white is the only band clearing both floor and `creep` here — ≈[0.9795, 1.0],
+  // verified by exhaustive scan, not eyeballed. NOTE this mode is the one that does NOT
+  // need the carve-out: its `creep` is a dark magenta, so the luminance sandwich opens and
+  // `0xfffff5` clears `creepLowHp` too, at 3.84. The geometry move is driven by the
+  // default and protan/deutan tables; tritan simply inherits it.
+  // NOT pure white 0xffffff — that is byte-identical to `spark` (the impact-spark FX
+  // colour, DEFAULT and unoverridden here), and a single-target impact draws a
+  // shrinking white disc straight through the jolt ring's radius, so the guaranteed
+  // stun cue vanished on exactly the tick the stun lands. 0xfffff5 sits inside the
+  // verified near-white band (clears `creep` at 3.04 and `floor` at 16.36) and is
+  // byte-distinct from `spark`.
+  stunned: 0xfffff5,
 };
 
 const PALETTES: Record<ColourMode, Palette> = {

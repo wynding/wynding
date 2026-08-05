@@ -9,17 +9,20 @@
  *  (M2-S4a) — a small, blocky silhouette that reads as fragile/numerous rather than fast,
  *  visibly distinct from both at cell scale. `'hexagon'` is `armored`'s (M2-S5a) — a
  *  six-sided plated outline that reads as armoured/tanky, distinct from the triangle's
- *  point, the diamond's pinch, and the square's blockiness at cell scale. An id this
- *  build's catalog doesn't recognize draws `'triangle'` too (TOTAL — never throw; a
+ *  point, the diamond's pinch, and the square's blockiness at cell scale. `'pentagon'`
+ *  is `resolute`'s (M2-S6) — a regular five-sided outline, generated the way
+ *  `'hexagon'` already is, distinct from all four at cell scale. An id this build's
+ *  catalog doesn't recognize draws `'triangle'` too (TOTAL — never throw; a
  *  forged/future content id must still render something, per the `tower.unknown.name`
  *  precedent). */
-export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon';
+export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
 
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
   normal: 'triangle',
   fast: 'diamond',
   swarm: 'square',
   armored: 'hexagon',
+  resolute: 'pentagon',
 };
 
 /** The shape to draw for `creepId` — total over any string, including a JSON id like
@@ -242,4 +245,126 @@ export function dotTelegraphPaintOps(
     }
   }
   return ops;
+}
+
+/** One step of the stun telegraph's paint plan (M2-S6). `'jolt'` is the GUARANTEED
+ *  shape cue: a thick ring at `r×1.15` — drawn regardless of `reducedMotion`, alpha 1
+ *  — sitting OUTSIDE the silhouette so the board floor is its contrast partner (see
+ *  the builder below for why that is load-bearing, not cosmetic), and reading as
+ *  distinct from the slowed ring at r×1.4 by both radius and weight (4 vs 2).
+ *  `'flicker'` is the motion cue — a SMALLER ring at `r×0.85`, inside the silhouette,
+ *  weight 2, its alpha driven by `renderTimeMs` on the same
+ *  triangle wave `slowTelegraphPaintOps` already uses — omitted entirely under reduced
+ *  motion (WCAG 2.3.3 / GAG §2), same posture as every other telegraph here. The two
+ *  radii MUST differ: an alpha-animated ring at the same radius/colour/width as an
+ *  opaque one beneath it is invisible — the animation has nothing to modulate. */
+export type StunTelegraphOpKind = 'jolt' | 'flicker';
+
+export interface StunTelegraphPaintOp {
+  readonly kind: StunTelegraphOpKind;
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+  readonly colour: number;
+  readonly alpha: number;
+}
+
+/**
+ * The stun telegraph's paint plan for one creep this frame: empty when `stunned` is
+ * false. A shape cue (`'jolt'`, a thick ring in `palette.stunned`, alpha 1) ALWAYS
+ * accompanies a live stun.
+ *
+ * The jolt sits at r×1.15 — OUTSIDE the silhouette, deliberately, and this is the one
+ * geometric decision in this builder that is load-bearing rather than aesthetic. It was
+ * first drawn INSIDE at r×0.55, which made its contrast partner the creep fill; below
+ * `hpFrac` 0.34 that fill is `palette.creepLowHp`, against which `stunned` measures
+ * 1.10:1 — and no colour can fix it (the luminance sandwich derived in
+ * `palette.test.ts`), so a stunned creep near death carried no perceivable cue at all.
+ * Outside the silhouette the partner is the board floor, exactly like the slow ring
+ * (r×1.4) and the DoT pips (r×1.8), and the existing colour clears 3.87:1 there. An
+ * essential cue must not depend on the health of the thing it is drawn on.
+ *
+ * The cost of sitting outside, recorded rather than left to be discovered: r×1.15 is close
+ * to the slowed ring at r×1.4, and at small cell sizes the two merge. At cellPx ~= 29 (a
+ * 1000x700 viewport on `field-01`, r ~= 10.2) the jolt's outer edge lands past the slow
+ * ring's inner edge, so a slowed+stunned creep reads as one band rather than two rings —
+ * and that pair co-occurs constantly, since a slowed creep is the commonest thing for a
+ * stun to land on.
+ *
+ * NO SIZE-INDEPENDENT RADIUS FIXES THIS. Strokes are centred, so clearance needs
+ * `jolt_r * r + 4/2 < 1.4 * r - 2/2`, i.e. `jolt_r < 1.4 - 3/r`. That bound TIGHTENS as
+ * cells shrink, and `r = max(3, cellPx * 0.35)` floors at 3 — where it is `1.4 - 1 = 0.4`,
+ * below the 1.0 an outside ring must exceed by definition, so the band is empty there. (At
+ * r ~= 10.2 the bound is 1.104, so r×1.10 would technically clear — by 0.045px, which is
+ * sub-pixel and still reads as merged. A coincidence at one size, not a fix.) A real fix
+ * moves the slowed ring's 1.4 or the stroke weights, which is exactly the cue-radius
+ * layout pass `wardPaintOps`' own note already defers. It is the lesser of the
+ * two defects: the low-HP invisibility this replaced applied to EVERY stunned creep below
+ * 34% HP at every cell size, and stun towers deal damage, so their targets trend that way.
+ *
+ * The motion cue (`'flicker'`) stays INSIDE at r×0.85 and is additionally present
+ * only when `reducedMotion` is false, its alpha a triangle-wave function of
+ * `renderTimeMs` (the SAME `PULSE_PERIOD_MS`/double-mod-guard `slowTelegraphPaintOps`
+ * uses). A non-finite `renderTimeMs` is treated as 0 (total; still renders,
+ * un-animated for that frame) — same posture as `slowTelegraphPaintOps`.
+ */
+/** Units as `slowTelegraphPaintOps`/`dotTelegraphPaintOps` above: `creep.x`/`y` are
+ *  PIXELS, not fixed-point — the same mistake `board-draw.ts`'s comment records as
+ *  having silently broken two milestones' worth of cues. */
+export function stunTelegraphPaintOps(
+  creep: { readonly x: number; readonly y: number; readonly stunned: boolean },
+  r: number,
+  reducedMotion: boolean,
+  stunnedColour: number,
+  renderTimeMs: number,
+): readonly StunTelegraphPaintOp[] {
+  if (!creep.stunned) return [];
+  const ops: StunTelegraphPaintOp[] = [
+    { kind: 'jolt', x: creep.x, y: creep.y, r: r * 1.15, colour: stunnedColour, alpha: 1 },
+  ];
+  if (!reducedMotion) {
+    const t = Number.isFinite(renderTimeMs) ? renderTimeMs : 0;
+    // Triangle wave in [0, 1], identical shape to the slow pulse's own.
+    const phase = (((t % PULSE_PERIOD_MS) + PULSE_PERIOD_MS) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
+    const wave = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+    ops.push({
+      kind: 'flicker',
+      x: creep.x,
+      y: creep.y,
+      r: r * 0.85,
+      colour: stunnedColour,
+      alpha: 0.15 + 0.7 * wave,
+    });
+  }
+  return ops;
+}
+
+/** One step of the ward cue's paint plan (M2-S6): a single opaque stroked ring at
+ *  `r×2.2`, deliberately OUTSIDE the slow pulse's r×2.0 ceiling so a warded creep's
+ *  cue never gets mistaken for an active slow. A ward is NOT a timed status (see
+ *  CONTEXT.md's Ward term) — it is a catalog-derived, always-on fact about the creep
+ *  (`CreepVM.warded`), so unlike every other telegraph here it carries no motion cue,
+ *  takes no `renderTimeMs`, and has no reduced-motion branch. Drawn opaque
+ *  deliberately: `palette.test.ts`'s contrast gate checks the SOURCE colour, which
+ *  proves the rendered ratio only when nothing composites it. */
+export type WardOpKind = 'ward';
+
+export interface WardPaintOp {
+  readonly kind: WardOpKind;
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+  readonly colour: number;
+  readonly alpha: number;
+}
+
+/** Units as every other builder above: `creep.x`/`y` are PIXELS (the projected
+ *  centre), never fixed-point. */
+export function wardPaintOps(
+  creep: { readonly x: number; readonly y: number; readonly warded: boolean },
+  r: number,
+  wardedColour: number,
+): readonly WardPaintOp[] {
+  if (!creep.warded) return [];
+  return [{ kind: 'ward', x: creep.x, y: creep.y, r: r * 2.2, colour: wardedColour, alpha: 1 }];
 }

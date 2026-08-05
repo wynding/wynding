@@ -350,9 +350,29 @@ export function advanceCreep(
   } else if (occ.col !== hCol || occ.row !== hRow) {
     // (3) RE-PATH — still on the from side of the boundary. If the maze changed the
     //     descent from the occupied cell, turn from the ACTUAL point P (Codex/#17).
+    //     Guarded on `budget > 0` (M2-S6): the turn sets `fx`/`fy` to the mid-edge
+    //     point `geom.point` (not a cell centre) and `prog = 0`; at budget 0 the MOVE
+    //     loop below never runs, so `prog` would still be 0 at the sentinel
+    //     normalization, which snaps `head` to `cellOf(fx)` — reproducing the rest
+    //     sentinel shape (`head === from-cell`, `progress === 0`) with a non-centre
+    //     `fx`/`fy`, exactly what `deriveValidCreepPosition` rejects as corrupt. A
+    //     stunned creep would then be silently DROPped the following tick. A creep
+    //     that cannot move cannot round a corner, so deferring the turn until budget
+    //     is positive is behaviourally inert for every mover — it only matters at
+    //     budget 0, which is now genuinely stun-only as an ENFORCED invariant, not
+    //     merely an observation: `effectiveSpeedFp` floors every un-slowed base speed
+    //     at 1 (M2-S6), so the movement rebuild's `stunned ? 0 : effectiveSpeedFp(...)`
+    //     is the only remaining source of a zero budget. This buys the invariant that
+    //     a stunned creep's movement row is byte-identical to its input for every
+    //     GENUINE row — narrowly: at `progress === 0` with `head !== from-cell`, the
+    //     sentinel normalization below still rewrites `head` to `cellOf(fx)`, which is
+    //     unreachable for a genuine row (progress 0 with a non-canonical head is not a
+    //     shape `advanceCreep` itself produces) but not for a forged one restored
+    //     directly into that shape. The stranded-field DROP below still runs at
+    //     budget 0 — only the turn's assignment defers.
     const next = firstDescentNeighbor(field, occ.col, occ.row);
     if (next === null) return DROP; // stranded on a forged field
-    if (next.col !== hCol || next.row !== hRow) {
+    if (budget > 0 && (next.col !== hCol || next.row !== hRow)) {
       fx = geom.point.x;
       fy = geom.point.y;
       hCol = next.col;

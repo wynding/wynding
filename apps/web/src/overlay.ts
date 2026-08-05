@@ -135,6 +135,7 @@ const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assig
     slow: () => t('tower.slow.name'),
     splash: () => t('tower.splash.name'),
     venom: () => t('tower.venom.name'),
+    stun: () => t('tower.stun.name'),
   } satisfies Record<string, () => string>,
 );
 
@@ -256,7 +257,7 @@ export function createOverlay(
   });
 
   // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), wired in a loop ---
-  // The catalog-index → hotkey ACTION map: a card at index ≥ 9 (a modded bundle; sv9's
+  // The catalog-index → hotkey ACTION map: a card at index ≥ 9 (a modded bundle; sv10's
   // `maxTowerCatalogSize` allows 64 CATALOG entries — `MAX_TOWERS` (1,000) is the
   // separate cap on PLACED towers) has NO hotkey at all (Codex R2-2, widened M2-S4a,
   // generalized to nine slots PLAN.md P6) — scaling the hotkey model past nine slots is
@@ -857,6 +858,14 @@ export function createOverlay(
       readonly cadence: string;
       readonly duration: string;
     } | null;
+    /** The stun's chance (out of the effect's `chanceNum`/256, as a whole percent) and
+     *  duration (in seconds, matching `fireRate`/`dot`'s own tick→second conversion) —
+     *  `null` for a tower with no `stun` effect, so the Panel row is omitted rather than
+     *  reading zeros (M2-S6 P7, mirrors `dot`'s posture). */
+    readonly stun: {
+      readonly chance: string;
+      readonly duration: string;
+    } | null;
   }
 
   /** Data-driven from the armed/selected `CompiledTower` (M2-S3 retires the closed-union
@@ -880,6 +889,7 @@ export function createOverlay(
           );
     const aoeEffect = def?.effects.find((e) => e.kind === 'aoe');
     const dotEffect = def?.effects.find((e) => e.kind === 'dot');
+    const stunEffect = def?.effects.find((e) => e.kind === 'stun');
     return {
       name: towerName(towerId),
       cost: def?.cost ?? 0,
@@ -897,6 +907,17 @@ export function createOverlay(
               damage: dotEffect.amount,
               cadence: formatNumber(dotEffect.cadenceTicks / TICKS_PER_SECOND),
               duration: formatNumber(dotEffect.durationTicks / TICKS_PER_SECOND),
+            },
+      stun:
+        stunEffect === undefined
+          ? null
+          : {
+              // 256 here is the RNG DRAW RANGE (`rng.nextInt(256) < chanceNum`, the sim's
+              // pinned stun roll), NOT `FP_ONE`. The two constants happen to share a value;
+              // coupling this to `FP_ONE` would tie the probability denominator to the
+              // fixed-point scale, so a change to either would silently corrupt the other.
+              chance: formatNumber((stunEffect.chanceNum / 256) * 100),
+              duration: formatNumber(stunEffect.durationTicks / TICKS_PER_SECOND),
             },
     };
   }
@@ -918,6 +939,14 @@ export function createOverlay(
               damage: stats.dot.damage,
               cadence: stats.dot.cadence,
               duration: stats.dot.duration,
+            }),
+          ]),
+      ...(stats.stun === null
+        ? []
+        : [
+            t('panel.stun', {
+              chance: stats.stun.chance,
+              duration: stats.stun.duration,
             }),
           ]),
     ];
@@ -1073,6 +1102,7 @@ export function createOverlay(
       fast: () => t('creep.fast.name'),
       swarm: () => t('creep.swarm.name'),
       armored: () => t('creep.armored.name'),
+      resolute: () => t('creep.resolute.name'),
     } satisfies Record<string, () => string>, // QC r3: same rationale as `TOWER_NAME`
   );
   // PURE name derivation — no side effects: the render-skip sentinel calls this
