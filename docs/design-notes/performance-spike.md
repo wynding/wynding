@@ -192,11 +192,15 @@ R = p99(step() over the stress run's due-blast ticks) / p50(step() over the cont
 CI fails when R > R0 × 1.25
 ```
 
-_(SUPERSEDED 2026-08-03, M2-S5b P11 — the numerator moved to p95 and `R0` was re-recorded to
-1.42 on the post-P9 workload. This definition, and everything below it through the end of this
-section, describes the pre-P9, p99-statistic, `R0 = 2.49` era; it is kept as the runner-variance
-record it still is. See [Finding 3](#finding-3--the-relative-ci-gate-is-noisier-than-its-own-tolerance)'s
-amendment below and `packages/perf/src/gate.ts`'s `R0` doc for the current definition and value.)_
+_(SUPERSEDED TWICE — 2026-08-03, M2-S5b P11: the numerator moved to p95 and `R0` was re-recorded
+to 1.42 on the post-P9 workload. Then 2026-08-05, M2-S6 QC: the numerator moved again to **p50**,
+making both arms medians, `TOLERANCE` tightened **1.25 → 1.10**, and `R0` is **`null` pending a
+re-record**. So NEITHER the statistic nor the tolerance in the block above is current — the gate
+is now `p50(stress due-blast ticks) / p50(control)`, failing when `R > R0 × 1.10`. This
+definition, and everything below it through the end of this section, describes the pre-P9,
+p99-statistic, `R0 = 2.49` era; it is kept as the runner-variance record it still is. See
+[Finding 3](#finding-3--the-relative-ci-gate-is-noisier-than-its-own-tolerance)'s amendments below
+and `packages/perf/src/gate.ts`'s `R0` doc for the current definition and value.)_
 
 The control is the **same scenario with every tower swapped for its single-form twin** —
 same board, same anchors, same wave schedule, same slow effect — so the axis that changes is
@@ -225,7 +229,8 @@ machines, while `controlStat` — which is _expected_ to scale with machine spee
 to be scale-invariant moved almost as much as the raw statistic it was built to normalise.
 
 The cause is the limitation the gate already carried but had not measured: a p99 numerator over a
-p50 denominator (p95 as of M2-S5b P11 — this diagnosis is restated, not retested, below) cancels
+p50 denominator (p95 at M2-S5b P11, p50 as of M2-S6 — this diagnosis is restated, not retested,
+below) cancels
 **scale** but not **tail variance**, and a hosted runner has a much fatter
 tail than a quiet workstation. "Hosted", not "shared": each job gets its own VM (below) — what it
 shares is the **physical host**, with tenants it cannot see, and that is where the tail comes from.
@@ -300,9 +305,16 @@ when blast cost does.
 The statistic was p99 rather than p99.9, over a floor of ≥ 500 due-blast samples, so a single
 preempted tick could not fail CI while a systematic regression in blast cost still could. The
 ratio cancels **CPU-speed scale** — a uniformly slower runner moves both terms together — but it
-does **not** cancel tail variance, because the numerator was a p99 (now p95, M2-S5b P11) and the
+does **not** cancel tail variance, because the numerator was a p99 (then p95, M2-S5b P11) and the
 denominator a median. That is the design's known limit, and the table above is what it cost in
-practice under the p99 era; the same ≥ 500-sample floor still applies to p95, unchanged.
+practice under the p99 era; the same ≥ 500-sample floor applies throughout.
+
+_(SUPERSEDED 2026-08-05, M2-S6 QC — the numerator is now a **p50** over the same subset, making
+both arms medians, with `TOLERANCE` 1.10. This paragraph's "does not cancel tail variance" is
+exactly the limit that move removes: measured over four byte-identical CI runs, `R` swings ±15.5%
+with a tail numerator and ±2.8% with matched medians. The MAGNITUDE of the spreads left
+unexplained below is accounted for by ADR 0005's 2026-08-05 amendment; the p95-vs-p99 ordering
+within them is not, and remains unattributed.)_
 
 ### Frame time, heap and input latency — browser, emulated
 
@@ -459,10 +471,30 @@ spread is nearly DOUBLE p99's: `(max − min) / min` is **20.2%** for the five R
 numerator discarding more tail should be quieter predicts the opposite of this. **The
 noise-suppression half of the original rationale is not supported by this cohort**, and the switch
 to p95 does not rest on it — it rests on the fixture result above. This does not identify the
-cause of the spread, which remains unknown; five samples of a different (post-P9) workload on one
+cause of the spread. As recorded at the time, five samples of a different (post-P9) workload on one
 re-run runner are also not a controlled comparison against the historical eight-job, pre-P9
 population, so this neither vindicates nor condemns p95 on noise — it is what was measured. Full
 record in `packages/perf/src/gate.ts`'s `R0` doc and ADR 0005's amended Finding 3.
+
+**AMENDED 2026-08-05 (M2-S6 QC).** The numerator moved again, from p95 to a **p50** over the same
+due-blast subset, `TOLERANCE` tightened 1.25 → 1.10, and `R0` is `null` pending a re-record. The
+trigger was ADR 0005's 2026-08-04 escalation rule firing ("if CI breaches the ceiling, stop and
+report; do not re-record `R0`, do not widen the ceiling" — that rule lives in the ADR, not in this
+document): CI returned `R = 1.8348` against the `1.7750`
+ceiling on a commit whose only delta was a compile-time function outside the measured loop, with
+byte-identical workload oracles, the numerator unmoved (0.5753 → 0.5739) and the DENOMINATOR 23%
+faster. Measured over four consecutive byte-identical CI runs, `R` swings ±15.5% with a tail
+numerator and ±2.8% with matched medians.
+
+What that identifies, and what it does not. It identifies the **magnitude** of tail-ratio spread —
+the arms' medians co-move (+0.99) and cancel almost entirely, while the tails are 1.65×–2.55× noisier
+per arm and correlate only +0.88, so a tail numerator leaves several times more residue in the
+ratio. It does **not** resolve the p95-vs-p99 anomaly recorded two paragraphs above, and does not
+re-test it: that anomaly compares p95/p50 against p99/p50 — mixed pairings over one denominator —
+whereas the new cohort's nearest offering, p95/p95 against p99/p99 (16.4% vs 11.7%), varies both
+terms. No p99/p50 row was recorded. Even at face value that 1.41× gap is not separable at n = 4, so
+the anomaly stands as measured with its cause unattributed. Full record in ADR 0005's 2026-08-05
+amendment and `packages/perf/src/gate.ts`.
 
 ## The escalation trigger
 

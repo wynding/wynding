@@ -71,9 +71,11 @@ jobs:
   # freezes on a terminal phase, so a mis-authored scenario measures an almost-empty or
   # wholly inert sim and posts superb percentiles. The oracle asserts the scene is the
   # one the ADR describes before any timing is believed. Then the RELATIVE GATE: the
-  # ratio of the stress run's p95 `step()` over its due-blast ticks to a blast-free
+  # ratio of the stress run's p50 `step()` over its due-blast ticks to a blast-free
   # control workload's p50, run in the same process, so a slow or noisy runner scales
-  # both terms and cancels out.
+  # both terms and cancels out. BOTH ARMS ARE MEDIANS as of M2-S6 (the numerator was p99
+  # until M2-S5b P11, then p95 until M2-S6) — the cancellation only works when the two
+  # terms are alike in robustness; see `packages/perf/src/gate.ts`'s `stressStat`.
   #
   # Its own job, NOT part of `verify` (PLAN M2-S4b step 20) — though not for the reason
   # the plan assumed: the full two-scenario run measures ~4.6s (each arm now traverses
@@ -111,7 +113,37 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run perf
+      # `set -o pipefail` is REQUIRED: GitHub's default shell here is `bash -e {0}`, which
+      # does NOT set pipefail, so piping `perf` into `tee` would discard its exit code and
+      # turn every gate failure green. The log is teed rather than re-run because the guard
+      # below must read the SAME run's report, not a second measurement of it.
+      - name: perf (oracle + ratio gate)
+        run: set -o pipefail && pnpm run perf | tee "$RUNNER_TEMP/perf.log"
+      # AN UNENFORCED GATE ON `main` MUST BE LOUD. Read this as an alarm, not a block: the
+      # `push` trigger fires AFTER a merge lands, and this job is not a required check, so
+      # what follows detects the state and turns it red — it cannot prevent it. Blocking
+      # would mean failing the pull request, which would fail the very PR collecting the
+      # baseline samples. `R0 = null` is a legitimate, deliberate state
+      # while a statistic change is being re-baselined: `gate.ts`'s `'unset'` arm REPORTS R
+      # and exits zero, so the PR collecting the samples is not blocked by the gate it is
+      # collecting them for. The hazard is that this state is GREEN — nothing in the test
+      # suite goes red for it (see `gate.test.ts`'s `R0` block) — so a merge-and-forget
+      # would leave the perf gate permanently unenforced with no signal anywhere.
+      #
+      # This job runs on `push` only for `main` (see `on:` at the top), so gating the check
+      # on the event is exactly "is this the default branch". It costs nothing while `R0` is
+      # a number, and it cannot rot: there is no waiver list to remember to empty, and it
+      # self-retires the moment the baseline is recorded. Considered and rejected in favour
+      # of this: registering the unset state on `KNOWN_OPEN_ASSERTIONS`, which would fire on
+      # restore rather than on forgetting, and needs its own cleanup commit.
+      - name: the gate must be ENFORCED on main (R0 recorded, not null)
+        if: github.event_name == 'push'
+        run: |
+          if grep -q '"r0":null' "$RUNNER_TEMP/perf.log"; then
+            echo "::error::R0 is null on main — the perf gate is REPORTING, not enforcing."
+            echo "Record a baseline (five CI samples, median rounded down) per gate.ts's R0 doc."
+            exit 1
+          fi
 
   # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
   # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is
