@@ -1307,20 +1307,21 @@ describe('Impact.domain — REQUIRED on both variants (M2-S7 P3)', () => {
         ...(domain === undefined ? {} : { domain }),
         effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
       };
-      const result = runCombat(
+      // `runCombatT` rather than a 13-argument positional call (CodeRabbit, PR #87):
+      // four consecutive numbers would let a later signature change remap them with no
+      // type error. Safe here specifically because `creepById` is NOT load-bearing —
+      // the impact is rejected by `validImpact` before any catalog lookup happens.
+      const result = runCombatT(
         creeps,
         emptyTowers(),
         [impact],
-        [],
         0,
         0,
         FIELD,
         GRID,
         TOWER_BY_ID,
-        RULESET.creepById,
         RULESET.balance.slowFloorNum,
         RULESET.balance.slowFloorDen,
-        new Rng(TEST_RNG_SEED),
       );
       expect(result.impacts).toHaveLength(0);
       expect(result.creeps.hp[0]).toBe(1000);
@@ -1338,20 +1339,21 @@ describe('Impact.domain — REQUIRED on both variants (M2-S7 P3)', () => {
         ...(domain === undefined ? {} : { domain }),
         effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
       };
-      const result = runCombat(
+      // `runCombatT` rather than a 13-argument positional call (CodeRabbit, PR #87):
+      // four consecutive numbers would let a later signature change remap them with no
+      // type error. Safe here specifically because `creepById` is NOT load-bearing —
+      // the impact is rejected by `validImpact` before any catalog lookup happens.
+      const result = runCombatT(
         creeps,
         emptyTowers(),
         [impact],
-        [],
         0,
         0,
         FIELD,
         GRID,
         TOWER_BY_ID,
-        RULESET.creepById,
         RULESET.balance.slowFloorNum,
         RULESET.balance.slowFloorDen,
-        new Rng(TEST_RNG_SEED),
       );
       expect(result.impacts).toHaveLength(0);
       expect(result.creeps.hp[0]).toBe(1000);

@@ -162,10 +162,12 @@ describe('firstDescentNeighbor', () => {
 });
 
 // airLineFollowNeighbor — the AIR line-follow heading rule (M2-S7 P2), replacing
-// `firstDescentNeighbor` for the `air` domain. P1's board gate makes the flight
-// line axis-aligned on every ADMISSIBLE board, so a non-axis-aligned occupied-cell
-// → exit-cell ray has no board witness — this exercises the helper DIRECTLY,
-// against a bare `Bounds`-shaped object, exactly as the plan requires.
+// `firstDescentNeighbor` for the `air` domain. P1's axis-alignment gate covers only
+// boards whose OWN WAVE SCHEDULE references an air creep (CodeRabbit, PR #87) — sv11
+// still admits a non-axis-aligned board whose waves never fly, and a forged or restored
+// flyer on one of those reaches this helper on a genuinely non-axis-aligned ray. So the
+// case below is not merely hypothetical; it simply has no SCHEDULED witness, which is
+// why it exercises the helper DIRECTLY against a bare `Bounds`-shaped object.
 describe('airLineFollowNeighbor — the air line-follow heading rule', () => {
   const BOUNDS = { width: 10, height: 10 };
 
@@ -177,7 +179,7 @@ describe('airLineFollowNeighbor — the air line-follow heading rule', () => {
     // N/NE/SW/W/NW are all off-board from the (0,0) corner. SE wins on the smallest
     // absolute cross product — a genuinely diagonal step toward a non-axis-aligned
     // exit, which `firstDescentNeighbor` (flow-field descent) could never select on
-    // an admissible board because no admissible board has one.
+    // a board that schedules flight, since the gate requires those to be axis-aligned.
     expect(airLineFollowNeighbor(BOUNDS, 0, 0, 5, 3)).toEqual({ col: 1, row: 1, diagonal: true });
   });
 

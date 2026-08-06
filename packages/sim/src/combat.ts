@@ -726,6 +726,14 @@ function remainingRouteDist(
     const dx = geom.point.x - exitX;
     const dy = geom.point.y - exitY;
     const airDistanceFp = isqrt(dx * dx + dy * dy);
+    // The `Math.floor` is m2.md's pinned formula written verbatim, and at TODAY'S
+    // constants it is a NO-OP: `DIST_SCALE / FP_ONE = 65536 / 256 = 256`, so the whole
+    // expression is exactly `airDistanceFp * 2560`. Kept rather than simplified away, so
+    // the code and the spec read identically — but do not mistake it for a live rounding
+    // rule. The only truncation in this metric is `isqrt`'s own, above. If a later story
+    // moves `ORTHO_COST` or `DIST_SCALE` to a pair that is not a whole multiple of
+    // `FP_ONE`, this floor starts discarding a fraction and air-vs-ground ordering shifts
+    // at ties — re-derive the metric then, do not assume the floor was always absorbing it.
     return Math.floor((airDistanceFp * ORTHO_COST * DIST_SCALE) / FP_ONE);
   }
   const headDist = distAt(field, headCol, headRow);

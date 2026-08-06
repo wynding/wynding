@@ -140,8 +140,11 @@ export type CompiledEffect =
  *  4). `effects` REPLACES v1's flat `damage` (G3): the fire-time snapshot needs the
  *  whole authored-order bundle (a parallel `damage` field would be a second source
  *  of truth), projected from the bundle's `effects` array in authored order.
- *  `domain` (from `attack.domain`) is projected AHEAD of the story that lets it
- *  vary (`'ground'` at sv7 — the `CompiledCreep.armor` precedent). */
+ *  `domain` (from `attack.domain`) was projected ahead of the story that lets it
+ *  vary; that story has LANDED (M2-S7, sv11), so it is now a live value — the sv11
+ *  profile admits `'ground'`/`'air'`/`'both'`, the shipped catalog compiles `antiair`
+ *  as `'air'` and `slow` as `'both'`, and `runCombat` reads it as a targeting filter
+ *  on both the hold and acquire paths. Never assume it is `'ground'`. */
 export interface CompiledTower {
   readonly id: string;
   readonly cost: number;

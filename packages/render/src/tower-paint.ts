@@ -13,8 +13,9 @@
  *  towers ever share a footprint mark. `'bolt'` is `stun`'s (M2-S6) — a three-segment
  *  zigzag polyline through the footprint centre, evoking "shocks" — distinct from
  *  `'crosshair'`'s spokes by not being radial. `'arrow'` is `antiair`'s (M2-S7) — an
- *  upward arrow (a full-height shaft through the footprint centre plus two barbs at its
- *  tip) evoking "shoots skyward" — distinct from `'crosshair'`'s four spokes (a shaft
+ *  upward arrow (a shaft through the footprint centre plus two barbs at its tip,
+ *  drawn at the same `size * 0.22` half-size as `'crosshair'`/`'droplet'` — NOT
+ *  full-height; `drawArrow`'s own comment carries the derivation) evoking "shoots skyward" — distinct from `'crosshair'`'s four spokes (a shaft
  *  and two barbs, not four radial strokes with a centre gap) and `'bolt'`'s zigzag (a
  *  straight shaft, not a three-segment stagger), so `antiair` is never visually
  *  conflated with `basic`'s plain body. It is deliberately NOT a bare "^": the airborne
