@@ -147,8 +147,10 @@ describe('compileRuleset — creep catalog domains', () => {
     rejects((b) => (b.creepCatalog[0]!.leakCost = 1001));
   });
 
-  it('rejects a creep domain unsupported at simVersion 5 (valid type, capability-gated)', () => {
-    rejects((b) => (b.creepCatalog[0]!.domain = 'air'));
+  it("compiles an 'air' creep domain — no reject case exists (M2-S7: allowedCreepDomains widens to ['ground','air'], exactly the v2 schema's own CreepDomain enum; see capability.test.ts's header comment)", () => {
+    const b = base();
+    b.creepCatalog[0]!.domain = 'air';
+    expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
   });
 
   it('rejects armor past the capability ceiling, and any role — capability-gated (M2-S5a widened maxArmor 0 → 16)', () => {
@@ -238,8 +240,10 @@ describe('compileRuleset — tower catalog domains', () => {
     expect(compiled.towerById['basic']!.cost).toBe(5);
   });
 
-  it('rejects a tower attack domain unsupported at simVersion 8', () => {
-    rejects((b) => (b.towerCatalog[0]!.attack!.domain = 'both'));
+  it("compiles a 'both' tower attack domain — no reject case exists (M2-S7: allowedTowerDomains widens to ['ground','air','both'], exactly the v2 schema's own TowerTargetDomain enum; see capability.test.ts's header comment)", () => {
+    const b = base();
+    b.towerCatalog[0]!.attack!.domain = 'both';
+    expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
   });
 
   it('rejects a tower mixing single and aoe direct forms (form-uniform, M2-S4a)', () => {

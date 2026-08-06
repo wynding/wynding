@@ -273,6 +273,25 @@ describe('view-model + hud derivation', () => {
     expect(vm.creeps[0]?.warded).toBe(false);
   });
 
+  it('projects `domain` as a catalog join (M2-S7): `ground` for the shipped `normal` creep, `air` for `flying`, never sim state', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    expect(s.creeps.creepId[0]).toBe('normal');
+    let vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.domain).toBe('ground');
+
+    s.creeps.creepId[0] = 'flying'; // shipped air creep (M2-S7)
+    vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.domain).toBe('air');
+
+    // A forged/unresolved creepId must not throw — falls back to `'ground'`, the same
+    // totality rail `warded`'s absent-definition fallback and `hpFrac`'s denominator
+    // already take.
+    s.creeps.creepId[0] = 'nonexistent';
+    vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.domain).toBe('ground');
+  });
+
   it('projects `poisoned` from live DoT records, many-to-many-ish (M2-S5a P7)', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
@@ -535,6 +554,22 @@ describe('hud score — earned components while live, authoritative once termina
     ] as const) {
       s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'basic' }]);
     }
+    // M2-S7 appends wave index 5 (8 × `flying`). This is the first wave that GROWING the
+    // wall cannot answer: `basic` is ground-domain, so no number of them can ever touch a
+    // flyer, and all 8 leak — 8 lives against this fixture's measured 6 of margin, which
+    // turned the win into a loss and left `stepUntil` burning its whole budget looking for
+    // a `won` that could never arrive. The fix is the counterplay the story actually
+    // ships, not a bigger wall: `antiair` (cost 7, range 5) flanking the row-11 flight
+    // line. THREE, measured — one kills roughly half the wave (lost, 0 lives) and two win
+    // by a single life, too thin to be a stable fixture; three restores the same 6-life
+    // margin this fixture has always had. 61 of 80 starting bounty, still inside.
+    for (const anchor of [
+      { col: 15, row: 9 },
+      { col: 15, row: 12 },
+      { col: 18, row: 9 },
+    ] as const) {
+      s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'antiair' }]);
+    }
     // Early-call only wave 1 — the later waves auto-launch on their own countdown
     // (300 ticks each, chained off the prior wave's LAUNCH per PLAN.md's flip-tick rule),
     // which the fixed defense clears within the `stepUntil` budget below.
@@ -585,6 +620,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 0,
         y: 0,
         hpFrac: 1,
@@ -598,6 +634,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 100,
         y: 40,
         hpFrac: 1,
@@ -612,6 +649,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 50,
         y: 20,
         hpFrac: 1,
@@ -628,6 +666,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'fast',
+        domain: 'ground',
         x: 0,
         y: 0,
         hpFrac: 1,
@@ -641,6 +680,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'fast',
+        domain: 'ground',
         x: 100,
         y: 40,
         hpFrac: 0.5,
@@ -655,6 +695,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'fast',
+        domain: 'ground',
         x: 50,
         y: 20,
         hpFrac: 0.5,
@@ -671,6 +712,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 0,
         y: 0,
         hpFrac: 1,
@@ -684,6 +726,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 100,
         y: 40,
         hpFrac: 1,
@@ -698,6 +741,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 50,
         y: 20,
         hpFrac: 1,
@@ -714,6 +758,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'resolute',
+        domain: 'ground',
         x: 0,
         y: 0,
         hpFrac: 1,
@@ -727,6 +772,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'resolute',
+        domain: 'ground',
         x: 100,
         y: 40,
         hpFrac: 1,
@@ -741,6 +787,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'resolute',
+        domain: 'ground',
         x: 50,
         y: 20,
         hpFrac: 1,
@@ -758,6 +805,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 7,
         creepId: 'normal',
+        domain: 'ground',
         x: 12,
         y: 34,
         hpFrac: 1,
@@ -771,6 +819,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 7,
         creepId: 'normal',
+        domain: 'ground',
         x: 12,
         y: 34,
         hpFrac: 1,
@@ -787,6 +836,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 0,
         y: 0,
         hpFrac: 1,
@@ -805,6 +855,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 0,
         y: 0,
         hpFrac: 1,
@@ -818,6 +869,7 @@ describe('interpolation — by entity id', () => {
       {
         id: 1,
         creepId: 'normal',
+        domain: 'ground',
         x: 100,
         y: 0,
         hpFrac: 1,

@@ -27,6 +27,7 @@ export function interpolateCreeps(prev: RenderVM | null, cur: RenderVM, alpha: n
       out.push({
         id: c.id,
         creepId: c.creepId,
+        domain: c.domain, // catalog join, invariant for a given creepId — carried through unchanged
         x: p.x + (c.x - p.x) * a,
         y: p.y + (c.y - p.y) * a,
         hpFrac: c.hpFrac, // health snaps to current (no visual value in blending it)

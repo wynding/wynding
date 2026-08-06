@@ -72,7 +72,7 @@ describe('field-01 compiles for the sim as the single source of truth', () => {
     expect(s.lives).toBe(ruleset.balance.startingLives);
     expect(s.bounty).toBe(ruleset.balance.startingBounty);
     expect(s.phase).toBe('running');
-    expect(compiled.waves).toHaveLength(5); // five waves (M2-S6 appends wave index 4)
+    expect(compiled.waves).toHaveLength(6); // six waves (M2-S7 appends wave index 5)
     expect(compiled.waves[0]!.spawns).toHaveLength(10); // 10 creeps per wave
   });
 });

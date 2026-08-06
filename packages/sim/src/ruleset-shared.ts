@@ -33,8 +33,21 @@ export class RulesetError extends Error {
  *  determinism-affecting changes, not one: flat armor arithmetic on the `direct`
  *  primitive (resolved per creep row via the `creepById` combat seam), a REQUIRED
  *  `sourceId` on both `Impact` variants (hash-breaking for single-target play too),
- *  and the per-source DoT model (`SimState.dots`, the tick step, inclusive expiry). */
-export const SIM_VERSION = 10;
+ *  and the per-source DoT model (`SimState.dots`, the tick step, inclusive expiry);
+ *  M2 Story 6 bumps 9 → 10 — a tower may carry a chance-based `stun` effect, and a
+ *  creep's `immunities` may gate out `slow` and/or `stun`; M2 Story 7 (Air) bumps
+ *  10 → 11 — the domain axis activates, in three parts: air creeps fly a straight line
+ *  to the exit, re-aimed each step from the occupied cell; an attacking tower's mask
+ *  may target `ground`/`air`/`both`; and the impact snapshot carries a domain
+ *  (hash-breaking even for ground-only play, since the `Impact` shape itself changes).
+ *
+ *  On the first of those, the ray is `occupancyCell → exit`, NOT a fixed
+ *  entrance→exit ray. The two coincide on every board that SCHEDULES an air creep —
+ *  the only scope the axis-alignment gate covers. sv11 still admits a non-axis-aligned
+ *  board whose own waves never fly (`capability.test.ts` pins that cell of the matrix
+ *  deliberately), and on one of those a forged or restored flyer — exactly what the
+ *  wider-scoped size gate beside it exists for — walks a staircase rather than a ray. */
+export const SIM_VERSION = 11;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

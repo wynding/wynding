@@ -43,7 +43,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(getBundledRuleset('wynding-core')).toBe(ruleset);
   });
 
-  it('carries the creep catalog: `normal`, the S3 `fast` creep, the S4a `swarm` creep, the S5a `armored` creep, and the S6 `resolute` creep', () => {
+  it('carries the creep catalog: `normal`, the S3 `fast` creep, the S4a `swarm` creep, the S5a `armored` creep, the S6 `resolute` creep, and the S7 `flying` creep', () => {
     expect(ruleset.creepCatalog).toEqual([
       {
         id: 'normal',
@@ -95,10 +95,20 @@ describe('getBundledRuleset (happy path + authored values)', () => {
         leakCost: 1,
         bounty: 2,
       },
+      {
+        id: 'flying',
+        hp: 18,
+        speedFp: 30,
+        armor: 0,
+        domain: 'air',
+        immunities: [],
+        leakCost: 1,
+        bounty: 2,
+      },
     ]);
   });
 
-  it('carries the tower catalog: `basic`, the S3 `slow` tower, the S4a `splash` tower, the S5a `venom` tower, and the S6 `stun` tower (all ground-scoped)', () => {
+  it('carries the tower catalog: `basic`, the S3 `slow` tower (S7: attack domain widens ground → both), the S4a `splash` tower, the S5a `venom` tower, the S6 `stun` tower, and the S7 `antiair` tower', () => {
     expect(ruleset.towerCatalog).toEqual([
       {
         id: 'basic',
@@ -109,7 +119,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       {
         id: 'slow',
         cost: 8,
-        attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
+        attack: { domain: 'both', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
         effects: [
           { kind: 'direct', form: 'single', damage: 2 },
           { kind: 'slow', mulFp: 128, durationTicks: 40 },
@@ -138,6 +148,12 @@ describe('getBundledRuleset (happy path + authored values)', () => {
           { kind: 'direct', form: 'single', damage: 4 },
           { kind: 'stun', chanceNum: 64, durationTicks: 20 },
         ],
+      },
+      {
+        id: 'antiair',
+        cost: 7,
+        attack: { domain: 'air', rangeFp: 1280, cadenceTicks: 20, travelTicks: 2 },
+        effects: [{ kind: 'direct', form: 'single', damage: 8 }],
       },
     ]);
   });
@@ -171,7 +187,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(board.exit).toEqual({ col: 27, row: 11 });
   });
 
-  it("carries the five waves: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase)", () => {
+  it("carries the six waves: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase), then wave index 5's 8 × flying @ spacing 15 (the S7 air showcase)", () => {
     const normalEntries = [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }];
     const swarmEntries = [{ creepId: 'swarm', count: 16, spacingTicks: 5, offsetTicks: 0 }];
     const fastEntries = [{ creepId: 'fast', count: 8, spacingTicks: 15, offsetTicks: 0 }];
@@ -180,12 +196,14 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       { creepId: 'resolute', count: 6, spacingTicks: 15, offsetTicks: 0 },
       { creepId: 'fast', count: 6, spacingTicks: 15, offsetTicks: 0 },
     ];
+    const flyingEntries = [{ creepId: 'flying', count: 8, spacingTicks: 15, offsetTicks: 0 }];
     expect(board.waves).toEqual([
       { index: 0, countdownTicks: 500, clearBonus: 4, entries: normalEntries },
       { index: 1, countdownTicks: 300, clearBonus: 4, entries: swarmEntries },
       { index: 2, countdownTicks: 300, clearBonus: 5, entries: fastEntries },
       { index: 3, countdownTicks: 300, clearBonus: 5, entries: armoredEntries },
       { index: 4, countdownTicks: 300, clearBonus: 7, entries: resoluteFastEntries },
+      { index: 5, countdownTicks: 300, clearBonus: 6, entries: flyingEntries },
     ]);
   });
 
@@ -237,10 +255,10 @@ describe('artifact fidelity (the two-loaders invariant, ADR 0007 §2)', () => {
 describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirrors stress.test.ts)', () => {
   // Same idiom as stress.test.ts's own compile-bound pin: read the knobs off the
   // parsed bundle rather than hand-typing them, so a bundle edit changes what this
-  // test computes, not just what it happens to match. This bundle now carries FIVE
+  // test computes, not just what it happens to match. This bundle now carries SIX
   // waves (the S5a `armored` wave at index 3, the S6 `resolute`+`fast` wave at index
-  // 4), so the prefix-sum form is load-bearing here in a way stress.test.ts's
-  // single-wave bundle doesn't exercise.
+  // 4, the S7 `flying` wave at index 5), so the prefix-sum form is load-bearing here
+  // in a way stress.test.ts's single-wave bundle doesn't exercise.
   const text = readFileSync(BUNDLED_ARTIFACT_URL, 'utf8');
   const bundle = parseRulesetJson(text);
   const board = bundle.boards.find((b) => b.id === 'field-01');
@@ -296,16 +314,20 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
     latestSpawnTick = Math.max(latestSpawnTick, prefixCountdown + tailOf(w));
   }
 
-  it("latestSpawnTick = 1775 (wave index 4 launches at prefix 1700, tail 75 on its 6x15 entries — its 1775 beats wave index 3's prefix 1400 + tail 125 = 1525 on launch tick, despite the shorter tail)", () => {
-    expect(waves).toHaveLength(5);
-    expect(latestSpawnTick).toBe(1_775);
+  // Re-pinned M2-S7 P6: the bundle gains a SIXTH wave (index 5, 8x `flying`, spacing
+  // 15). Its prefix countdown is 2000 (500+300+300+300+300+300) and its tail is
+  // (8-1)*15 = 105, so its launch-tick spawn lands at 2105 — the new max, beating
+  // wave index 4's 1775 by 330 ticks.
+  it("latestSpawnTick = 2105 (wave index 5 launches at prefix 2000, tail 105 on its 8x15 entries — its 2105 beats wave index 4's prefix 1700 + tail 75 = 1775 on launch tick)", () => {
+    expect(waves).toHaveLength(6);
+    expect(latestSpawnTick).toBe(2_105);
   });
 
-  it('total bound = latestSpawnTick + traversal = 23890, comfortably under MAX_MATCH_TICKS (36000)', () => {
+  it('total bound = latestSpawnTick + traversal = 24220, comfortably under MAX_MATCH_TICKS (36000)', () => {
     // Derived from the same bundle-read terms the tests above pin, not re-typed as
-    // `1775 + 22115` — the same reason stress.test.ts's own pin does this.
+    // `2105 + 22115` — the same reason stress.test.ts's own pin does this.
     const total = latestSpawnTick + traversal;
-    expect(total).toBe(23_890);
+    expect(total).toBe(24_220);
     expect(MAX_MATCH_TICKS).toBe(36_000);
     expect(total).toBeLessThan(MAX_MATCH_TICKS);
   });

@@ -61,6 +61,7 @@ const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'poisoned',
   'stunned',
   'warded',
+  'airborne',
 ];
 
 // `range`'s weakest essential draw: the ghost-preview stroke at alpha 0.7 (scene.ts:174).
@@ -90,6 +91,16 @@ describe('contrast gate — canvas cues vs the board floor (WCAG 1.4.11 non-text
       // Distinctness: the valid/invalid dual encoding keeps a distinct colour channel in
       // every mode (shape also differs in the scene — this is the redundant colour cue).
       expect(pal.ghostValid).not.toBe(pal.ghostInvalid);
+
+      // `airborne` is gated against `tower` as well as the floor (M2-S7, ship-review).
+      // Unlike every other cue here, the wingspan is drawn a full cell ABOVE its creep,
+      // and on the shipped board creeps walk the row-11 lane between tower footprints on
+      // rows 10 and 12 — so a tower is a surface it lands on as the ordinary case, not an
+      // incidental one. The first colour tried (electric cyan 0x33ccff) measured 1.83:1
+      // here and passed every gate that existed at the time, which is why this one exists.
+      const airborneOverTower = contrast(pal.airborne, pal.tower);
+      minima['airborne@tower'] = airborneOverTower;
+      expect(airborneOverTower).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
 
       // `spark` is EXEMPT: transient fading FX (alpha → 0 by design), non-essential
       // (kill outcome carried by creep/HP-pip state), reduced-motion governed — no gate.
@@ -195,6 +206,13 @@ describe('poisoned — pairwise distinctness from every cue a pip can be drawn o
 // `floor`); the ward ring draws outside the silhouette at r×2.2, over the same set of
 // backgrounds a creep can path across. Each is also checked against the OTHER new cue, since a
 // `resolute` under stun and a warded creep are both reachable states.
+// `slowed`/`poisoned` are in ALL THREE lists (M2-S7, ship-review). They were added to
+// `airborne`'s first, with a co-occurrence rationale that applies verbatim here: a stunned
+// creep under a `slow` tower, and a `resolute` warded creep under `venom`, are exactly as
+// reachable — and the stun jolt at r×1.15 sits immediately inside the slow ring at r×1.40.
+// No collision exists today in any mode; this closes the regression net, and leaving two
+// of three lists narrower than the third would have been an asymmetry with no argument
+// behind it.
 const STUNNED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'spark',
   'creep',
@@ -202,6 +220,9 @@ const STUNNED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'tower',
   'floor',
   'warded',
+  'airborne',
+  'slowed',
+  'poisoned',
 ];
 
 const WARDED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
@@ -211,6 +232,29 @@ const WARDED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'tower',
   'floor',
   'stunned',
+  'airborne',
+  'slowed',
+  'poisoned',
+];
+
+// `airborne` (M2-S7) draws entirely outside the silhouette, over the same backgrounds a
+// creep can path across or be built under — the same scope `stunned`/`warded` are
+// gated against, plus those two cues themselves (a warded or stunned flyer is a
+// perfectly reachable state).
+const AIRBORNE_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
+  'spark',
+  'creep',
+  'creepLowHp',
+  'tower',
+  'floor',
+  'stunned',
+  'warded',
+  // `slowed` and `poisoned` were missing (ship-review, M2-S7) — and `slowed` is the one
+  // this cue co-occurs with MOST, not least: S7 widened `slow` to both-domain precisely
+  // so it can land on flyers, and `story-flying-wave.test.ts` pins a slowed flyer. A
+  // both-domain `slow` plus a `venom` in range makes all three concurrent on one creep.
+  'slowed',
+  'poisoned',
 ];
 
 describe('stunned — pairwise distinctness from every cue it can be drawn over or beside (M2-S6)', () => {
@@ -226,10 +270,21 @@ describe('stunned — pairwise distinctness from every cue it can be drawn over 
 
 describe('warded — pairwise distinctness from every cue it can be drawn over or beside (M2-S6)', () => {
   for (const mode of COLOUR_MODES) {
-    it(`mode "${mode}": warded differs from spark/creep/creepLowHp/tower/floor/stunned`, () => {
+    it(`mode "${mode}": warded differs from spark/creep/creepLowHp/tower/floor/stunned/airborne`, () => {
       const pal = resolvePalette(mode);
       for (const key of WARDED_MUST_DIFFER_FROM) {
         expect(pal.warded).not.toBe(pal[key]);
+      }
+    });
+  }
+});
+
+describe('airborne — pairwise distinctness from every cue it can be drawn over or beside (M2-S7)', () => {
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": airborne differs from spark/creep/creepLowHp/tower/floor/stunned/warded/slowed/poisoned`, () => {
+      const pal = resolvePalette(mode);
+      for (const key of AIRBORNE_MUST_DIFFER_FROM) {
+        expect(pal.airborne).not.toBe(pal[key]);
       }
     });
   }

@@ -14,17 +14,21 @@
 // `formatVersion` never bumps for this; only `simVersion` does, and each story that
 // adds behavior widens its own dimension(s) here alongside its `SIM_VERSION` bump.
 //
-// DIMENSIONS THAT DEFER TO THE SCHEMA at sv10 (a profile field wider than or equal
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv11 (a profile field wider than or equal
 // to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
 // and this profile's own gate has no rejection witness of its own —
 // `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
 // both early-call divisors, `maxTowerCatalogSize`, `maxEffectsPerBundle`, (M2-
 // S4a QC round-1 #12) `allowedDirectForms` — the schema's `form` field is a
-// `'single' | 'aoe'` enum with no third legal value to test a reject against — and
+// `'single' | 'aoe'` enum with no third legal value to test a reject against —
 // (M2-S6 P4) `allowedImmunities`, now `['slow','stun']`, exactly the v2 schema's own
 // immunity enum: no third legal value exists to test a reject against, deliberately
 // (see the sv10 profile's own doc comment for why the widening goes past what S6
-// ships).
+// ships) — and (M2-S7 P1) `allowedTowerDomains`/`allowedCreepDomains`, now
+// `['ground','air','both']`/`['ground','air']`, exactly the v2 schema's own
+// `TowerTargetDomain`/`CreepDomain` enums: no third legal value exists on either
+// axis to test a reject against (see the sv11 profile's own doc comment for why the
+// widening isn't a narrower ceiling instead).
 
 import { RulesetError, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 
@@ -75,33 +79,32 @@ export interface CapabilityProfile {
   readonly maxDotDurationCadenceRatio: number;
 }
 
-/** `SIM_VERSION` 10 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  sv9's armor-and-DoT model plus (M2-S6) a tower may also carry a `stun` effect —
- *  chance-based (`chanceNum` out of 256), duration-based, applied and drawn from the
- *  sim RNG by this same sim build — and a creep's `immunities` may now be non-empty,
- *  gating out `slow` and/or `stun` per creep. Every other axis is untouched from sv9.
+/** `SIM_VERSION` 11 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  sv10's stun-and-immunity model plus (M2-S7) the domain axis activates — a tower's
+ *  `attack.domain` may be `ground`, `air`, or `both`, and a creep's `domain` may be
+ *  `ground` or `air`. Every other axis is untouched from sv10.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv9 profile is deleted with this bump —
- *  a live sv9 entry would misdescribe v10 tick code (it could no longer compile
- *  stun/immunity content correctly, since v10 widens the effect-kind and immunity
- *  gates combat.ts now reads), and replay's strict version equality already owns
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv10 profile is deleted with this bump —
+ *  a live sv10 entry would misdescribe v11 tick code (it could no longer compile
+ *  air-domain content correctly, since v11 widens the domain gates movement.ts/
+ *  combat.ts now read), and replay's strict version equality already owns
  *  cross-version rejection, so there is nothing for a stale profile to serve.
  *
- *  `allowedEffectKinds` widens `['direct', 'slow', 'dot'] → [..., 'stun']` in the
- *  same packet (M2-S6 P1/P2) that implements stun application — a bundle can never
- *  compile an effect this sim build cannot apply.
- *
- *  `allowedImmunities` widens `[] → ['slow', 'stun']` — DELIBERATELY WIDER than what
- *  S6 ships (only `resolute`'s `['slow']`). This is the one axis on this bump that is
- *  not a tight ceiling: with `['slow']` alone, no compilable bundle could ever carry
- *  a stun-immune creep, and m2.md pins "an immune target consumes no draw" as a
- *  stun-specific rule that then has no production witness to test against. The cost,
- *  paid on record: content could ship a stun-immune creep before S10 authors one
- *  (its `boss`), and — since `['slow','stun']` now equals the v2 schema's own
- *  immunity enum exactly — this axis has no rejection witness of its own; see the
- *  "DIMENSIONS THAT DEFER TO THE SCHEMA" note above. (M2-S6, Key decision #2.) */
+ *  `allowedTowerDomains` widens `['ground'] → ['ground', 'air', 'both']` and
+ *  `allowedCreepDomains` widens `['ground'] → ['ground', 'air']` in the same
+ *  packet (M2-S7 P1) that implements the board gates protecting the arithmetic
+ *  those domains newly reach (movement's line-follow, combat's air metric). Unlike
+ *  `allowedImmunities` at S6 — which widened DELIBERATELY PAST what S6 ships, to
+ *  give a schema-valid stun-immune creep a compile target before S10 authors one —
+ *  both of these axes widen to EXACTLY what the shipped catalog uses: `flying`/
+ *  `antiair` exhaust `air`, and `slow` going both-domain exhausts `both`, so there
+ *  is no narrower ceiling a real bundle would immediately saturate anyway. The
+ *  effect is the same as `allowedImmunities`'s, though: `['ground','air','both']`
+ *  and `['ground','air']` now equal the v2 schema's own `TowerTargetDomain`/
+ *  `CreepDomain` enums exactly, so neither axis retains a rejection witness of its
+ *  own; see the "DIMENSIONS THAT DEFER TO THE SCHEMA" note above. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  10: {
+  11: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,
@@ -109,8 +112,8 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxEffectsPerBundle: 8,
     allowedEffectKinds: ['direct', 'slow', 'dot', 'stun'],
     allowedDirectForms: ['single', 'aoe'],
-    allowedTowerDomains: ['ground'],
-    allowedCreepDomains: ['ground'],
+    allowedTowerDomains: ['ground', 'air', 'both'],
+    allowedCreepDomains: ['ground', 'air'],
     allowedImmunities: ['slow', 'stun'],
     allowedRoles: [],
     maxArmor: 16,

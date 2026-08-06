@@ -127,6 +127,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
       y: CENTER.y,
       radiusFp: RADIUS,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: 10 }],
     };
     const onResult = runCombatT(
@@ -177,6 +178,7 @@ describe('blast resolution — inclusive-boundary radius membership', () => {
       y: CENTER.y,
       radiusFp: RADIUS,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: 10 }],
     };
 
@@ -231,6 +233,7 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       y: cy(6),
       radiusFp: 50,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: 15 }],
     };
     const result = runCombatT(
@@ -265,6 +268,7 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       y: cy(6),
       radiusFp: 50,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: 15 }],
     };
     const resultA = runCombatT(
@@ -332,17 +336,17 @@ describe('blast resolution — creep-id ascending traversal order, row-index tie
       { id: 30, col: 7, row: 6, hp: 100 },
     ];
     const rowsB = [rowsA[2]!, rowsA[0]!, rowsA[3]!, rowsA[1]!]; // same multiset, shuffled
-    const imp = { x: cx(7), y: cy(6), radiusFp: 50 };
+    const imp = { x: cx(7), y: cy(6), radiusFp: 50, domain: 'both' as const };
 
     // rowsA array order: [id50@0, id10@1, id10@2, id30@3] — sorted by (id, idx):
     // id10@1, id10@2, id30@3, id50@0.
-    expect(blastMembers(restingCreeps(rowsA), GRID, imp)).toEqual([1, 2, 3, 0]);
+    expect(blastMembers(restingCreeps(rowsA), GRID, {}, imp)).toEqual([1, 2, 3, 0]);
     // rowsB array order: [id10@0, id50@1, id30@2, id10@3] — sorted by (id, idx):
     // id10@0, id10@3, id30@2, id50@1. The duplicate id's own two rows keep their
     // ORIGINAL relative order (row-index tiebreak), even though the array as a
     // whole was shuffled — proof the tiebreak is row index, not e.g. array order
     // reversed or first-occurrence-only.
-    expect(blastMembers(restingCreeps(rowsB), GRID, imp)).toEqual([0, 3, 2, 1]);
+    expect(blastMembers(restingCreeps(rowsB), GRID, {}, imp)).toEqual([0, 3, 2, 1]);
   });
 });
 
@@ -365,6 +369,7 @@ describe('blastMembers — eligibility guards (membership, not ordering)', () =>
       y: cy(6),
       radiusFp: 50,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: 15 }],
     };
     const result = runCombatT(
@@ -394,8 +399,8 @@ describe('blastMembers — eligibility guards (membership, not ordering)', () =>
     // engine-dependent, which is precisely what the determinism contract forbids.
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
     creeps.id[0] = NaN;
-    const imp = { x: cx(7), y: cy(6), radiusFp: 50 };
-    expect(blastMembers(creeps, GRID, imp)).toEqual([]);
+    const imp = { x: cx(7), y: cy(6), radiusFp: 50, domain: 'both' as const };
+    expect(blastMembers(creeps, GRID, {}, imp)).toEqual([]);
   });
 
   it('a live row whose headCol sits 3 cells from fromCol — deriveValidCreepPosition returns null — is excluded from membership', () => {
@@ -403,8 +408,8 @@ describe('blastMembers — eligibility guards (membership, not ordering)', () =>
     // of skipping a row whose position cannot be derived.
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 100 }]);
     creeps.headCol[0] = 10; // |10 − 7| = 3 > 1, so deriveValidCreepPosition rejects it
-    const imp = { x: cx(7), y: cy(6), radiusFp: 50 };
-    expect(blastMembers(creeps, GRID, imp)).toEqual([]);
+    const imp = { x: cx(7), y: cy(6), radiusFp: 50, domain: 'both' as const };
+    expect(blastMembers(creeps, GRID, {}, imp)).toEqual([]);
   });
 });
 
@@ -476,7 +481,7 @@ describe('blast resolution — lead-and-clamp (fire-time prediction reuses advan
     const slowedSpeed = effectiveSpeedFp(640, 64, SF_NUM, SF_DEN);
     expect(slowedSpeed).toBeLessThan(640); // sanity: the slow actually reduced speed
     const budget = TEST_AOE_TOWER.attack!.travelTicks * slowedSpeed;
-    const outcome = advanceCreep(FIELD, 1, 10_000, cx(7), cy(6), 8, 6, 0, budget);
+    const outcome = advanceCreep(FIELD, 1, 10_000, cx(7), cy(6), 8, 6, 0, budget, 'ground');
     let expectedX: number;
     let expectedY: number;
     if (outcome.kind === 'leak') {
@@ -627,6 +632,7 @@ describe('blast resolution — dead-target-in-flight still blasts; zero-member s
       y: cy(6),
       radiusFp: 50,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: 10 }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -668,6 +674,7 @@ describe('blast resolution — a lethal blast still kills and sweeps; a survivin
       y: cy(6),
       radiusFp: 50,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: 8 },
         { kind: 'slow', mulFp: 128, durationTicks: 30 },

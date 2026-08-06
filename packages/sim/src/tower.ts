@@ -25,6 +25,7 @@ import type { Cell } from '@wynding/types';
 import type { Grid } from './board';
 import { computeDistanceField, isReachable } from './pathfinding';
 import { deriveValidCreepPosition } from './movement';
+import { resolveCreepDomain, type CreepDomainLookup } from './domain';
 
 /**
  * Structure-of-arrays tower storage (mirrors `CreepArrays`). `(col,row)` is the
@@ -236,6 +237,7 @@ export interface CreepPlacementView {
   readonly headCol: number[];
   readonly headRow: number[];
   readonly progress: number[];
+  readonly creepId: string[];
 }
 
 /**
@@ -272,16 +274,25 @@ function creepOccupiedCell(
  *   2. BUILDABLE — the 2×2 footprint is in-bounds, every cell buildable-open base
  *      terrain AND free in the current tower mask (the mask check is what
  *      prevents tower overlap; `classAt` describes base terrain only).
- *   3. UNOCCUPIED — no footprint cell is the cell a live creep currently occupies
- *      (PRD 0001 §3: you may build *adjacent* to a creep, only never on the cell
- *      containing its point — the cell it is heading toward stays buildable until
- *      it crosses in; a creep on the near side of the boundary then re-routes off
- *      the new field rather than entering the wall).
+ *   3. UNOCCUPIED — no footprint cell is the cell a live GROUND creep currently
+ *      occupies (PRD 0001 §3: you may build *adjacent* to a creep, only never on
+ *      the cell containing its point — the cell it is heading toward stays
+ *      buildable until it crosses in; a creep on the near side of the boundary
+ *      then re-routes off the new field rather than entering the wall). A flyer
+ *      (M2-S7 P4) never blocks placement — it is airborne, so its cell is buildable
+ *      even while it is passing over.
  *   4. AFFORDABLE — `bounty` is a nonnegative safe integer ≥ the tower `cost`, so a
  *      corrupt restored bounty can never flow through the spend arithmetic.
  *   5. MAZE INVARIANT — in the candidate field (current mask + footprint) the exit
- *      remains reachable from the entrance and from every live creep's occupied
- *      cell (PRD 0001 §1), so no build can strand a creep.
+ *      remains reachable from the entrance and from every live GROUND creep's
+ *      occupied cell (PRD 0001 §1), so no build can strand a creep. A flyer never
+ *      constrains this — it does not path the maze, so nothing it stands over can
+ *      strand it.
+ *
+ * `creepById` resolves each row's domain via {@link resolveCreepDomain} — the same
+ * totality rail combat and movement use: an unresolved `creepId` falls back to
+ * `ground`, so it still constrains clauses 3 and 5 (the conservative direction,
+ * byte-identical to pre-S7 behavior for every existing row).
  *
  * The candidate field is validation-scoped and discarded; `step` derives the
  * post-input field once, separately, for movement.
@@ -293,6 +304,7 @@ export function canPlaceTower(
   creeps: CreepPlacementView,
   bounty: number,
   cost: number,
+  creepById: Readonly<Partial<Record<string, CreepDomainLookup>>>,
 ): boolean {
   // 1) structural
   if (anchor === null || typeof anchor !== 'object') return false;
@@ -307,10 +319,12 @@ export function canPlaceTower(
     if (towerMask[(r + dr) * grid.width + (c + dc)] !== 0) return false;
   }
 
-  // 3) unoccupied — the footprint may not cover any creep's occupied cell.
+  // 3) unoccupied — the footprint may not cover any live GROUND creep's occupied
+  //    cell. A flyer (M2-S7 P4) never blocks placement.
   const inFootprint = (cc: number, rr: number): boolean =>
     cc >= c && cc <= c + 1 && rr >= r && rr <= r + 1;
   for (let i = 0; i < creeps.id.length; i++) {
+    if (resolveCreepDomain(creepById, creeps.creepId[i]) === 'air') continue;
     const occ = creepOccupiedCell(grid, creeps, i);
     if (occ !== null && inFootprint(occ.col, occ.row)) return false;
   }
@@ -326,6 +340,7 @@ export function canPlaceTower(
   const candidate = computeDistanceField(grid, candidateMask);
   if (!isReachable(candidate, grid.entrance)) return false;
   for (let i = 0; i < creeps.id.length; i++) {
+    if (resolveCreepDomain(creepById, creeps.creepId[i]) === 'air') continue;
     const occ = creepOccupiedCell(grid, creeps, i);
     if (occ !== null && !isReachable(candidate, occ)) return false;
   }

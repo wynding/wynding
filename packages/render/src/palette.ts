@@ -51,6 +51,18 @@ export interface Palette {
    *  a timed status (see CONTEXT.md's Ward term), so gated ≥ 3:1 like every other
    *  opaque cue (`palette.test.ts`) with no motion-cue caveat. */
   readonly warded: number;
+  /** Airborne cue (M2-S7) — the redundant colour channel behind the always-on wingspan
+   *  shape cue `airborneCuePaintOps` draws for a creep whose catalog `domain` is `'air'`.
+   *  Not a timed status (see CONTEXT.md's Domain entry), so gated ≥ 3:1 like every
+   *  other opaque cue (`palette.test.ts`) with no motion-cue caveat — same posture as
+   *  `warded`. The wingspan draws entirely OUTSIDE the silhouette and outside every
+   *  other cue's radius — apex at r×2.9, tips at ≈ r×2.75 — so its contrast partner is
+   *  the board floor. Radii are NOT restated beyond that: the authoritative ordering,
+   *  and the reason it must stay outside the ward, is derived at `creep-paint.ts`'s
+   *  CUE-RADIUS ORDERING block. (An earlier version of this comment quoted r×1.1/r×1.3,
+   *  the draft ship-review rejected for sitting on the slow ring — a reader auditing
+   *  collisions from here would have reconstructed the exact bug that was fixed.) */
+  readonly airborne: number;
 }
 
 // Base palette: high-contrast, colourblind-safe hues (Okabe–Ito). Valid/invalid also
@@ -94,6 +106,31 @@ const DEFAULT: Palette = {
   // byte-DISTINCTNESS, not contrast — so it is consistent rather than a new hole, but the
   // cue-radius layout as a whole is owed a pass.
   warded: 0xffd23f,
+  // Pale ice-blue (M2-S7) — distinct from every other cue in this table, and gated on
+  // contrast against BOTH surfaces it is actually drawn over: the floor (14.82:1) and
+  // `tower` (3.08:1 default, 4.67:1 protan/deutan) — see `palette.test.ts`.
+  //
+  // WHY IT IS NOT THE ELECTRIC CYAN THIS SHIPPED AS FIRST (0x33ccff): that measured
+  // 1.83:1 against `tower` 0x009e73 and 2.77:1 against 0x0072b2, both under this repo's
+  // own MIN_CUE_CONTRAST of 3.0 (ship-review, M2-S7). The wingspan sits a cell above its
+  // creep, so on the shipped board — where every creep walks the row-11 lane past
+  // tower footprints on rows 10 and 12 — being drawn over a tower is the NORMAL case,
+  // not an incidental one. `warded`'s 2.37:1 note below was the precedent invoked for
+  // accepting it; a precedent for tolerating a miss is not a reason to add one when a
+  // compliant colour exists. Lightening also widens the gap from `slowed`'s sky blue
+  // under tritanopia, where cyan-vs-sky-blue sat on exactly the axis that palette
+  // avoids.
+  //
+  // TRITAN RESIDUAL, measured and deliberately ACCEPTED (not overlooked): in tritan
+  // `stunned` is 0xfffff5, so airborne-vs-stunned is ~1.10:1 — perceptually one
+  // near-white. There is no override that fixes it: clearing the ENFORCED ≥3:1 gate
+  // against `tower` needs a very light colour, and every candidate that separates from
+  // `stunned` falls under it (measured: 0x9ad0ff → 2.09 vs tower, 0xb0d8ff → 2.30,
+  // 0x8fb8f0 → 1.68). Choosing separation here would trade an enforced gate for an
+  // unenforced one. Shape carries the distinction instead, decisively and per ADR 0003's
+  // primary channel: a stun jolt is a RING at r×1.15; the airborne cue is two line
+  // strokes at r×2.6–2.9, a cell away. Same posture as `poisoned`'s own tritan note.
+  airborne: 0xdcf8ff,
 };
 
 // Deutan/protan (red–green) shift the green/red pair toward blue/orange separation.

@@ -11,6 +11,7 @@ import { createInitialState, step, hashSimState, type SimInput, type SimState } 
 import { testRuleset, pushCreep } from './test-support';
 import {
   advanceCreep,
+  airLineFollowNeighbor,
   deriveValidCreepPosition,
   firstDescentNeighbor,
   isqrt,
@@ -74,7 +75,7 @@ function ticksToLeak(field: DistanceField, col: number, row: number, budget: num
   let hr = row;
   let p = 0;
   for (let t = 1; t <= 100000; t++) {
-    const o: AdvanceOutcome = advanceCreep(field, 1, 5, fromX, fromY, hc, hr, p, budget);
+    const o: AdvanceOutcome = advanceCreep(field, 1, 5, fromX, fromY, hc, hr, p, budget, 'ground');
     if (o.kind === 'leak') return t;
     if (o.kind === 'drop') throw new Error(`unexpected drop at tick ${t}`);
     fromX = o.fromX;
@@ -160,9 +161,63 @@ describe('firstDescentNeighbor', () => {
   });
 });
 
+// airLineFollowNeighbor — the AIR line-follow heading rule (M2-S7 P2), replacing
+// `firstDescentNeighbor` for the `air` domain. P1's axis-alignment gate covers only
+// boards whose OWN WAVE SCHEDULE references an air creep (CodeRabbit, PR #87) — sv11
+// still admits a non-axis-aligned board whose waves never fly, and a forged or restored
+// flyer on one of those reaches this helper on a genuinely non-axis-aligned ray. So the
+// case below is not merely hypothetical; it simply has no SCHEDULED witness, which is
+// why it exercises the helper DIRECTLY against a bare `Bounds`-shaped object.
+describe('airLineFollowNeighbor — the air line-follow heading rule', () => {
+  const BOUNDS = { width: 10, height: 10 };
+
+  it('on a non-axis-aligned line, selects the neighbour of least perpendicular deviation from the ray', () => {
+    // Ray (0,0) → (5,3): curSq = 25+9 = 34. Candidates strictly closer (< 34):
+    //   E  (1,0): distSq 16+9=25, |cross| = |5·0 − 3·1| = 3
+    //   SE (1,1): distSq 16+4=20, |cross| = |5·1 − 3·1| = 2  ← minimal
+    //   S  (0,1): distSq 25+4=29, |cross| = |5·1 − 3·0| = 5
+    // N/NE/SW/W/NW are all off-board from the (0,0) corner. SE wins on the smallest
+    // absolute cross product — a genuinely diagonal step toward a non-axis-aligned
+    // exit, which `firstDescentNeighbor` (flow-field descent) could never select on
+    // a board that schedules flight, since the gate requires those to be axis-aligned.
+    expect(airLineFollowNeighbor(BOUNDS, 0, 0, 5, 3)).toEqual({ col: 1, row: 1, diagonal: true });
+  });
+
+  // NOTE ON WHAT IS *NOT* TESTED HERE (ship-review, M2-S7). An earlier version of this
+  // block claimed to witness the bounds half of the neighbour predicate, asserting the
+  // returned step was on-board from a board-edge cell. That test could not fail: the
+  // strict-closeness filter discards every off-board neighbour before the predicate is
+  // consulted, so it passed identically with the predicate replaced by an always-open
+  // one. Its stated justification was wrong too — it said "the minimal-cross candidate
+  // at row −1 is off-board", but row −1 is not adjacent to row 4 and is never
+  // enumerated. An exhaustive sweep over every (col, row, exitCol, exitRow) on a 12×12
+  // board — tie-ordering included — finds ZERO cases where the bounds predicate changes
+  // the result. It is unreachable defensive hardening, documented as such at the
+  // function, and no test here pretends to cover it.
+  //
+  // What IS worth pinning from a board-edge cell is the real behaviour: the walk still
+  // returns a strictly-closer, on-board, cross-minimal step rather than stalling.
+  it('from a board-edge cell, still returns the strictly-closer cross-minimal step', () => {
+    // From (0,4) toward exit (9,0), ray (9,−4). Of the strictly-closer in-board
+    // neighbours, (1,4) carries |cross| = |9·0 − (−4)·1| = 4 and the diagonal (1,3)
+    // carries |9·(−1) − (−4)·1| = 5 — so the ORTHOGONAL step wins here, even though the
+    // ray slopes. That is the rule working: on a shallow ray the flat step deviates less
+    // than the diagonal.
+    expect(airLineFollowNeighbor(BOUNDS, 0, 4, 9, 0)).toEqual({
+      col: 1,
+      row: 4,
+      diagonal: false,
+    });
+  });
+
+  it('returns null once the occupied cell already IS the exit cell (no candidate is strictly closer)', () => {
+    expect(airLineFollowNeighbor(BOUNDS, 5, 3, 5, 3)).toBeNull();
+  });
+});
+
 describe('advanceCreep — normal movement', () => {
   it('advances one budget along the first edge, from-point unchanged until arrival', () => {
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, 0, 26)).toEqual({
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, 0, 26, 'ground')).toEqual({
       kind: 'move',
       fromX: cx(0),
       fromY: cy(2),
@@ -173,7 +228,7 @@ describe('advanceCreep — normal movement', () => {
   });
 
   it('snaps the from-point to the next centre when progress reaches the edge (sentinel head)', () => {
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, 0, ORTHO_LEN)).toEqual({
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, 0, ORTHO_LEN, 'ground')).toEqual({
       kind: 'move',
       fromX: cx(1), // from snapped onto the (1,2) centre
       fromY: cy(2),
@@ -186,7 +241,7 @@ describe('advanceCreep — normal movement', () => {
   it('carries the remainder onto the next edge after crossing a boundary', () => {
     // 250 into the (0,2)→(1,2) edge, budget 26: 6 finishes it, 20 carry onto the
     // freshly-derived (1,2)→(2,2) edge with the from-point snapped to the (1,2) centre.
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 1, 2, 250, 26)).toEqual({
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 1, 2, 250, 26, 'ground')).toEqual({
       kind: 'move',
       fromX: cx(1),
       fromY: cy(2),
@@ -197,7 +252,7 @@ describe('advanceCreep — normal movement', () => {
   });
 
   it('crosses multiple boundaries in one tick when the budget allows', () => {
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, 0, 600)).toEqual({
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, 0, 600, 'ground')).toEqual({
       kind: 'move',
       fromX: cx(2),
       fromY: cy(2),
@@ -208,7 +263,7 @@ describe('advanceCreep — normal movement', () => {
   });
 
   it('crosses a diagonal edge of length 362, not 256', () => {
-    expect(advanceCreep(DIAGONAL, 1, 5, cx(2), cy(2), 2, 2, 0, DIAG_LEN)).toEqual({
+    expect(advanceCreep(DIAGONAL, 1, 5, cx(2), cy(2), 2, 2, 0, DIAG_LEN, 'ground')).toEqual({
       kind: 'move',
       fromX: cx(3),
       fromY: cy(1),
@@ -216,7 +271,7 @@ describe('advanceCreep — normal movement', () => {
       headRow: 1,
       progress: 0,
     });
-    expect(advanceCreep(DIAGONAL, 1, 5, cx(2), cy(2), 2, 2, 0, DIAG_LEN - 1)).toEqual({
+    expect(advanceCreep(DIAGONAL, 1, 5, cx(2), cy(2), 2, 2, 0, DIAG_LEN - 1, 'ground')).toEqual({
       kind: 'move',
       fromX: cx(2),
       fromY: cy(2),
@@ -243,7 +298,7 @@ describe('advanceCreep — point-authoritative re-path (closes #17)', () => {
     expect(newHead).not.toBeNull();
     expect(newHead?.col === 3 && newHead?.row === 2).toBe(false); // genuinely re-routed
 
-    const out = advanceCreep(WIDE_WALLED, 1, 5, cx(2), cy(2), 3, 2, 100, 26);
+    const out = advanceCreep(WIDE_WALLED, 1, 5, cx(2), cy(2), 3, 2, 100, 26, 'ground');
     expect(out.kind).toBe('move');
     if (out.kind !== 'move') return;
     expect(out.fromX).toBe(cx(2) + 100); // turned from P = 740, an interior point…
@@ -256,7 +311,7 @@ describe('advanceCreep — point-authoritative re-path (closes #17)', () => {
     // Two consecutive re-paths must both stay valid moves (never a drop/crash): first
     // under the walled field, then feed the transitional result back under the OPEN
     // field (descent changes again) and confirm it re-routes onto a fresh segment.
-    const first = advanceCreep(WIDE_WALLED, 1, 5, cx(2), cy(2), 3, 2, 100, 26);
+    const first = advanceCreep(WIDE_WALLED, 1, 5, cx(2), cy(2), 3, 2, 100, 26, 'ground');
     expect(first.kind).toBe('move');
     if (first.kind !== 'move') return;
     const second = advanceCreep(
@@ -269,6 +324,7 @@ describe('advanceCreep — point-authoritative re-path (closes #17)', () => {
       first.headRow,
       first.progress,
       26,
+      'ground',
     );
     expect(second.kind).toBe('move');
   });
@@ -279,7 +335,7 @@ describe('advanceCreep — point-authoritative re-path (closes #17)', () => {
     // continues on a normal edge — the from-point ends on a cell centre, proving the
     // lattice was re-established.
     const interiorX = cx(2) + 120; // 760: inside cell 2, near the (3,2) boundary
-    const out = advanceCreep(WIDE_FIELD, 1, 5, interiorX, cy(2), 3, 2, 0, 600);
+    const out = advanceCreep(WIDE_FIELD, 1, 5, interiorX, cy(2), 3, 2, 0, 600, 'ground');
     expect(out.kind).toBe('move');
     if (out.kind !== 'move') return;
     expect(out.fromX % 256).toBe(128); // snapped onto a centre after the transitional seg
@@ -289,58 +345,123 @@ describe('advanceCreep — point-authoritative re-path (closes #17)', () => {
 
 describe('advanceCreep — leak policy', () => {
   it('leaks a creep resting on the exit', () => {
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(4), cy(2), 4, 2, 0, 26)).toEqual({ kind: 'leak' });
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(4), cy(2), 4, 2, 0, 26, 'ground')).toEqual({
+      kind: 'leak',
+    });
   });
 
   it('leaks a resting-on-exit creep independent of its head columns (head-agnostic arrival)', () => {
     // At progress 0 the point IS the from-point, so a creep centred on the exit has
     // arrived and leaks even if its (unused) head sentinel is non-canonical/forged.
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(4), cy(2), 0, 0, 0, 26)).toEqual({ kind: 'leak' });
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(4), cy(2), 0, 0, 0, 26, 'ground')).toEqual({
+      kind: 'leak',
+    });
   });
 
   it('leaks the tick it arrives, discarding remaining budget', () => {
-    expect(advanceCreep(ADJACENT, 1, 5, cx(0), cy(1), 1, 1, 230, 100000)).toEqual({ kind: 'leak' });
+    expect(advanceCreep(ADJACENT, 1, 5, cx(0), cy(1), 1, 1, 230, 100000, 'ground')).toEqual({
+      kind: 'leak',
+    });
   });
 
   it('leaks only when the point reaches the exit centre, not when it enters the exit cell', () => {
     // 130 into the (0,1)→(1,1) edge: the point (x=258) is already inside the exit cell
     // (floor 258/256 = 1) but NOT on its centre, so the creep advances rather than leaks.
-    const mid = advanceCreep(ADJACENT, 1, 5, cx(0), cy(1), 1, 1, 130, 1);
+    const mid = advanceCreep(ADJACENT, 1, 5, cx(0), cy(1), 1, 1, 130, 1, 'ground');
     expect(mid.kind).toBe('move');
+  });
+});
+
+describe('advanceCreep — air domain (M2-S7 P2)', () => {
+  it('a flyer crosses a cell occupied by a tower WITHOUT being dropped (the R1-1 regression) — a ground row at the identical cell IS dropped', () => {
+    // (2,2) is BLOCKED (a tower stands there) and marked UNREACHABLE by the field —
+    // exactly the shape `blockedAt`/`distAt` exist to catch on a forged GROUND row
+    // (movement.ts's occupied-cell validation). A GENUINE flyer resting on that same
+    // cell the instant a tower is built under it must survive: air skips both
+    // terrain checks entirely (M2-S7 P2a).
+    const width = 5;
+    const height = 5;
+    const blockedMask = new Uint8Array(width * height);
+    blockedMask[2 * width + 2] = 1; // (2,2) — the tower footprint
+    const dist = new Int32Array(width * height).fill(-1);
+    dist[2 * width + 4] = 0; // (4,2) exit
+    const field: DistanceField = { width, height, exit: { col: 4, row: 2 }, dist, blockedMask };
+
+    // Control: the identical row, as a GROUND creep, is dropped.
+    expect(advanceCreep(field, 1, 5, cx(2), cy(2), 2, 2, 0, 26, 'ground')).toEqual({
+      kind: 'drop',
+    });
+
+    // The flyer survives and keeps moving.
+    const air = advanceCreep(field, 1, 5, cx(2), cy(2), 2, 2, 0, 26, 'air');
+    expect(air.kind).not.toBe('drop');
   });
 });
 
 describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)', () => {
   const cases: ReadonlyArray<[string, AdvanceOutcome]> = [
-    ['id undefined', advanceCreep(STRAIGHT_FIELD, undefined, 5, cx(0), cy(2), 0, 2, 0, 26)],
-    ['hp undefined', advanceCreep(STRAIGHT_FIELD, 1, undefined, cx(0), cy(2), 0, 2, 0, 26)],
-    ['fromX undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, undefined, cy(2), 0, 2, 0, 26)],
-    ['fromY undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), undefined, 0, 2, 0, 26)],
-    ['headCol undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), undefined, 2, 0, 26)],
-    ['headRow undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, undefined, 0, 26)],
-    ['progress undefined', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, undefined, 26)],
-    ['fromX non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 128.5, cy(2), 0, 2, 0, 26)],
-    ['headCol non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 1.5, 2, 10, 26)],
-    ['progress non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 2, 2, 1.5, 26)],
-    ['from-point out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(99), cy(2), 99, 2, 0, 26)],
-    ['head out of bounds', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 99, 0, 26)],
-    ['negative progress', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 2, 2, -1, 26)],
+    [
+      'id undefined',
+      advanceCreep(STRAIGHT_FIELD, undefined, 5, cx(0), cy(2), 0, 2, 0, 26, 'ground'),
+    ],
+    [
+      'hp undefined',
+      advanceCreep(STRAIGHT_FIELD, 1, undefined, cx(0), cy(2), 0, 2, 0, 26, 'ground'),
+    ],
+    [
+      'fromX undefined',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, undefined, cy(2), 0, 2, 0, 26, 'ground'),
+    ],
+    [
+      'fromY undefined',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), undefined, 0, 2, 0, 26, 'ground'),
+    ],
+    [
+      'headCol undefined',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), undefined, 2, 0, 26, 'ground'),
+    ],
+    [
+      'headRow undefined',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, undefined, 0, 26, 'ground'),
+    ],
+    [
+      'progress undefined',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 2, undefined, 26, 'ground'),
+    ],
+    ['fromX non-integer', advanceCreep(STRAIGHT_FIELD, 1, 5, 128.5, cy(2), 0, 2, 0, 26, 'ground')],
+    [
+      'headCol non-integer',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 1.5, 2, 10, 26, 'ground'),
+    ],
+    [
+      'progress non-integer',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 2, 2, 1.5, 26, 'ground'),
+    ],
+    [
+      'from-point out of bounds',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(99), cy(2), 99, 2, 0, 26, 'ground'),
+    ],
+    [
+      'head out of bounds',
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 0, 99, 0, 26, 'ground'),
+    ],
+    ['negative progress', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 2, 2, -1, 26, 'ground')],
     [
       'resting on a blocked border cell',
-      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(0), 0, 0, 0, 26),
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(0), 0, 0, 0, 26, 'ground'),
     ],
-    ['non-adjacent head', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 2, 2, 10, 26)],
+    ['non-adjacent head', advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 2, 2, 10, 26, 'ground')],
     [
       'progress past the edge',
-      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 1, 2, ORTHO_LEN + 44, 26),
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 1, 2, ORTHO_LEN + 44, 26, 'ground'),
     ],
     [
       'progress at exactly the edge',
-      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 1, 2, ORTHO_LEN, 26),
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(0), cy(2), 1, 2, ORTHO_LEN, 26, 'ground'),
     ],
     [
       'zero-length step with progress',
-      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 1, 2, 10, 26),
+      advanceCreep(STRAIGHT_FIELD, 1, 5, cx(1), cy(2), 1, 2, 10, 26, 'ground'),
     ],
   ];
   for (const [label, outcome] of cases) {
@@ -368,7 +489,7 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
       ]),
     };
     // from=(2,2) centre, head (3,2), progress 200 (past half of 256) ⇒ occupies (3,2).
-    const out = advanceCreep(walledBehind, 1, 5, cx(2), cy(2), 3, 2, 200, 26);
+    const out = advanceCreep(walledBehind, 1, 5, cx(2), cy(2), 3, 2, 200, 26, 'ground');
     expect(out.kind).toBe('move'); // survives — the walled from cell is behind it
     if (out.kind === 'move') expect([out.headCol, out.headRow]).toEqual([3, 2]);
   });
@@ -377,7 +498,7 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
     // A genuine creep leaks the instant its point reaches the exit centre and never
     // departs; a forged row sitting at the exit centre but heading to an adjacent
     // cell is corrupt. It must DROP, not walk back into the exit and cost a life.
-    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(4), cy(2), 3, 2, 200, 26)).toEqual({
+    expect(advanceCreep(STRAIGHT_FIELD, 1, 5, cx(4), cy(2), 3, 2, 200, 26, 'ground')).toEqual({
       kind: 'drop',
     });
   });
@@ -390,7 +511,9 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
       dist: Int32Array.from([-1, 0]), // (0,0) open but stranded, (1,0) exit
       blockedMask: new Uint8Array([0, 0]),
     };
-    expect(advanceCreep(walledOpen, 1, 5, cx(0), cy(0), 0, 0, 0, 26)).toEqual({ kind: 'drop' });
+    expect(advanceCreep(walledOpen, 1, 5, cx(0), cy(0), 0, 0, 0, 26, 'ground')).toEqual({
+      kind: 'drop',
+    });
   });
 
   it('drops (does not crash) on a forged field where a live cell has no exact descent', () => {
@@ -401,7 +524,9 @@ describe('advanceCreep — corrupt-row drop policy (never crashes, no life lost)
       dist: new Int32Array(9), // all zero — no descent anywhere
       blockedMask: new Uint8Array(9),
     };
-    expect(advanceCreep(forged, 1, 5, cx(0), cy(1), 0, 1, 0, 26)).toEqual({ kind: 'drop' });
+    expect(advanceCreep(forged, 1, 5, cx(0), cy(1), 0, 1, 0, 26, 'ground')).toEqual({
+      kind: 'drop',
+    });
   });
 });
 

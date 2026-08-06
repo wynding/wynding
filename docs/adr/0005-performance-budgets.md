@@ -5,7 +5,9 @@
 - **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below); 2026-08-03
   (M2-S5b P11 — numerator p99 → p95, `R0` 1.42); 2026-08-04 (M2-S6 — the stress scene is
   not extended for the stun story; see the Amendment below); 2026-08-05 (M2-S6 QC —
-  numerator p95 → p50, `TOLERANCE` 1.10, `R0` re-recorded 1.42 → 1.00, **provisional**)
+  numerator p95 → p50, `TOLERANCE` 1.10, `R0` re-recorded 1.42 → 1.00, **provisional**);
+  2026-08-06 (M2-S7 — the stress scene is not extended for the air story; see the
+  Amendment below)
 - **Rulings:** 2026-07-31 (all three findings answered; see Findings from the spike)
 
 ## Context
@@ -696,6 +698,64 @@ against the `1.7750` ceiling on work whose oracles were byte-identical. It was r
 than improvised around, and the outcome is Finding 3's 2026-08-05 amendment above: the numerator
 is now p50, `TOLERANCE` is 1.10, and `R0` is 1.00 (ceiling 1.1000, provisional). The `1.42` / `1.7750`
 pair recorded here is what S6's own PR ran against, not the live gate.)_
+
+## Amendment — 2026-08-06 (M2-S7, the air story) — the stress scene is NOT extended
+
+S7 takes the same dated exception S6 took, on the same reasoning and with one addition S6 did
+not have available: **evidence that the workload is provably unchanged**, rather than an argument
+that it should be.
+
+1. **The change that could move perf is measured better by the UNCHANGED scene.** The domain
+   check is a per-candidate test in the targeting loop (`covered = def.domain === 'both' ||
+def.domain === c.domain`), paid unconditionally on every tower's acquisition scan whether or
+   not any flyer exists. The existing scene runs that loop 150 towers deep against ~200 creeps,
+   so it exercises the new cost directly. Adding an air arm would change the workload at the same
+   time as the code — the confound S6's entry above already describes.
+2. **`R0` is provisional, and extending the scene would restart its clock.** It was re-recorded
+   at 1.00 on 2026-08-05 with a stated discharge criterion (a second per-image baseline agreeing
+   within 0.02, plus one out-of-sample application of the escalation rule). Neither has been
+   satisfied yet. A workload change invalidates the in-flight calibration and buys nothing S11
+   does not already own.
+3. **A fourth arm still breaks the scene's second oracle** — the `150 × 12 = 1800 ==
+startingBounty` equality `layout.ts` documents as an independent proof that every placement
+   was accepted. Unchanged from S6's entry.
+
+**A rejected middle option, recorded because it looks reasonable and is not.** An earlier draft
+of S7's plan proposed extending the scene but leaving the new rows _reported, not gated_ — the
+oracle already distinguishes the two. That does not work: adding creeps to the stress arm moves
+`step()` cost on the **measured** arms, so `R0` is invalidated whether the new rows are gated or
+not. It would need a separate third arm, which is new gate machinery, not the existing
+reported-row mechanism.
+
+**What the exception does NOT claim.** The unchanged scene contains no air creep and no
+air-targeting tower, so it executes none of the air-specific paths: no `airLineFollowNeighbor`
+step, no `isqrt` in the air metric branch, no terrain-independent occupancy skip, no domain
+rejection at impact time. It measures the cost paid unconditionally — the per-candidate domain
+comparison and the widened `Impact` record — and is silent on the air-specific cost. As with S6,
+that is a judgment about magnitude, not a proof.
+
+**What is NOT a judgment: the workload is byte-identical.** Regenerating the committed stress and
+control replays after the `simVersion` bump moved **exactly two lines** — `"simVersion": 10 → 11`,
+one per file. Every placement, the seed, and the stress board's own `rulesetHash`
+(`99a45084c1cedecb49dbb95f12dac13bd39d11a1273d63e4de59720f3167c046`) are unchanged. The stress
+bundle is separate from `wynding-core`, so S7's catalog additions (`flying`, `antiair`, `slow`
+going both-domain) and its new wave index 5 do not reach it. So `R0` describes the same workload
+it described before this story.
+
+**What S7 does instead:** re-run `pnpm run perf` on the unchanged scene as smoke evidence, and
+let the CI perf job on the PR be the real gate, against `R0 = 1.00` / ceiling `1.1000`. A local
+`R` is not comparable to the CI-recorded `R0` (S5b measured local runs landing far below CI), so
+the local number can show an outright collapse and nothing finer.
+
+**The smoke run, 2026-08-06, local:** `R = 0.9675` against the 1.1000 ceiling (control p50
+0.439 ms, stress due-blast p50 0.425 ms; audit-only p95 0.568 ms, p99 0.726 ms). All 16 stress-arm
+oracle assertions and all 8 control-arm assertions pass, the scripted route is still exactly
+**329** cells, dropped DoT applications are **0** on both arms, and both committed replays are
+accepted by the real replay validator. Read this as "nothing collapsed", not as a gate result —
+the local/CI gap is exactly why `R0` lives on the runner. **Escalate, do not improvise:**
+if CI breaches the ceiling, stop and report — do not re-record `R0`, do not widen the ceiling.
+That rule fired once already, at S6, and reporting it rather than improvising is what produced
+the p50 re-baseline.
 
 ## Consequences
 

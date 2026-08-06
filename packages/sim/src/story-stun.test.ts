@@ -263,6 +263,7 @@ describe('1. draw determinism (m2.md: "stun chains are deterministic per seed")'
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: 4 },
         { kind: 'stun', chanceNum: chance.chanceNum, durationTicks: chance.durationTicks },
@@ -400,6 +401,7 @@ describe('2. rngState draw-consumption rules (PASS 2 gating)', () => {
       impactTick: 0,
       targetId,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: 4 },
         { kind: 'stun', chanceNum: eff.chanceNum, durationTicks: eff.durationTicks },
@@ -420,6 +422,7 @@ describe('2. rngState draw-consumption rules (PASS 2 gating)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'stun', chanceNum: 256, durationTicks }],
     });
     const result = runCombat(
@@ -693,6 +696,7 @@ describe('8. resolute-shape slow immunity: applySlow never writes, speed unchang
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: directEff.damage },
         { kind: 'slow', mulFp: slowEff.mulFp, durationTicks: slowEff.durationTicks },
@@ -844,6 +848,7 @@ describe("10. blast draw order follows blastMembers' creep-id ascending order â€
       y: CENTER.y,
       radiusFp: direct.radiusFp,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: direct.damage },
         { kind: 'stun', chanceNum: stun.chanceNum, durationTicks: stun.durationTicks },

@@ -26,6 +26,7 @@ export const EN = {
   "creep.swarm.name": "Swarm Creep",
   "creep.armored.name": "Armored Creep",
   "creep.resolute.name": "Resolute Creep",
+  "creep.flying.name": "Flying Creep",
   "creep.unknown.name": "Unknown creep ({id})",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -77,8 +78,11 @@ export const EN = {
   "tower.splash.name": "Splash Tower",
   "tower.venom.name": "Venom Tower",
   "tower.stun.name": "Stun Tower",
+  "tower.antiair.name": "Anti-Air Tower",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
+  "tower.targets.air": "Air",
+  "tower.targets.both": "Ground + Air",
   "panel.cost": "Cost: {cost}",
   "panel.damage": "Damage: {damage}",
   "panel.range": "Range: {tiles} tiles",
@@ -145,6 +149,7 @@ export interface MessageParams {
   "creep.swarm.name": Record<never, never>;
   "creep.armored.name": Record<never, never>;
   "creep.resolute.name": Record<never, never>;
+  "creep.flying.name": Record<never, never>;
   "creep.unknown.name": { "id": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
@@ -196,8 +201,11 @@ export interface MessageParams {
   "tower.splash.name": Record<never, never>;
   "tower.venom.name": Record<never, never>;
   "tower.stun.name": Record<never, never>;
+  "tower.antiair.name": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
+  "tower.targets.air": Record<never, never>;
+  "tower.targets.both": Record<never, never>;
   "panel.cost": { "cost": string | number };
   "panel.damage": { "damage": string | number };
   "panel.range": { "tiles": string | number };

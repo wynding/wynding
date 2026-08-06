@@ -218,7 +218,13 @@ function runCanonical(
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
   finalHash: '31e0a94c', // re-pinned M2-S6 P5: the `stunUntilTick` column widens every creep's shape.
-  traceDigest: '631be81b', // fnv1a(trace.join(':')) — re-pinned M2-S6 P5, same reason.
+  // Re-pinned M2-S7 P6 (SIM_VERSION 10 → 11): `Impact` gained a `domain` mask, so every tick
+  // with an impact IN FLIGHT hashes differently. `finalHash` above is deliberately UNCHANGED
+  // and was not re-pinned — no impact is in flight at the terminal tick, so the end state is
+  // byte-identical. That asymmetry is the evidence this bump changed the impact record's SHAPE
+  // and not the scenario's behaviour; if `finalHash` had moved too, that would have warranted
+  // investigation rather than a re-pin.
+  traceDigest: '7c83bc85', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 

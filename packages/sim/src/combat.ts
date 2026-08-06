@@ -39,6 +39,7 @@
 // every `step()` caller).
 
 import { FP_ONE, type Rng } from '@wynding/engine';
+import type { TowerTargetDomain } from '@wynding/types';
 import { ORTHO_COST, DIAG_COST, type Grid } from './board';
 import type { DistanceField } from './pathfinding';
 import { distAt } from './field-access';
@@ -48,10 +49,15 @@ import {
   cellCenterY,
   deriveValidCreepPosition,
   cellOf,
+  isqrt,
   type CreepGeometry,
 } from './movement';
 import { effectiveSpeedFp, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
+// The single domain resolver lives in the leaf `domain.ts`, not here — `tower.ts`
+// needs it too and already exports into this file, so defining it here would be
+// circular. Rationale and call sites are documented at its definition.
+import { resolveCreepDomain } from './domain';
 import type { CompiledCreep, CompiledEffect, CompiledTower } from './ruleset';
 
 // Combat tuning (range, per-hit damage, fire cadence, projectile travel) is NO
@@ -110,6 +116,15 @@ export type EffectPrimitive =
  * time an impact resolves, the firing tower may have sold or been replaced, so this
  * is the sole surviving record of who fired it. This DOES change the world-hash,
  * even for single-target play, hence the golden re-pin in this packet.
+ *
+ * `domain` (M2-S7 P3) is the firing tower's target-domain MASK, snapshotted at
+ * fire time on both variants for the same reason `sourceId` is: by the time an
+ * impact resolves, the firing tower may have been sold, so the fire-time snapshot
+ * is the sole surviving record of which domain(s) it was allowed to hit. Enforced
+ * again at impact — `blastMembers` filters its radius-membership scan by it, and a
+ * `targeted` impact re-checks it before applying any effect — so a tower sold
+ * between fire and impact still cannot land on a domain it never covered. This
+ * changes the world-hash, exactly as `sourceId` did at M2-S5a.
  */
 export type Impact =
   | {
@@ -117,6 +132,7 @@ export type Impact =
       readonly impactTick: number;
       readonly targetId: number;
       readonly sourceId: number;
+      readonly domain: TowerTargetDomain;
       readonly effects: EffectPrimitive[];
     }
   | {
@@ -126,6 +142,7 @@ export type Impact =
       readonly y: number;
       readonly radiusFp: number;
       readonly sourceId: number;
+      readonly domain: TowerTargetDomain;
       readonly effects: EffectPrimitive[];
     };
 
@@ -439,8 +456,13 @@ export const MAX_BLAST_RADIUS_FP = 2048;
  * AND `radiusFp` under {@link MAX_BLAST_RADIUS_FP}. **`sourceId`** (M2-S5a P2) is
  * REQUIRED on both variants — a safe positive integer, rejected otherwise: adding a
  * field to the union does nothing on its own, and a malformed `sourceId` would
- * otherwise flow into the world-hash and then (P3) into DoT state. Any other shape,
- * or an unrecognized `kind`, is dropped.
+ * otherwise flow into the world-hash and then (P3) into DoT state. **`domain`**
+ * (M2-S7 P3) is likewise REQUIRED on both variants — one of `'ground'`/`'air'`/
+ * `'both'`, rejected otherwise (a missing or invalid mask is dropped, never
+ * defaulted): the mask is enforced again at impact time (`blastMembers`, and the
+ * targeted re-check in `runCombat`), so a malformed value here would silently
+ * widen or narrow what a sold tower's in-flight shot can still hit. Any other
+ * shape, or an unrecognized `kind`, is dropped.
  */
 function validImpact(imp: unknown, grid: Grid): imp is Impact {
   if (imp === null || typeof imp !== 'object') return false;
@@ -449,9 +471,11 @@ function validImpact(imp: unknown, grid: Grid): imp is Impact {
     impactTick?: unknown;
     effects?: unknown;
     sourceId?: unknown;
+    domain?: unknown;
   };
   if (!Number.isSafeInteger(rec.impactTick)) return false;
   if (!Number.isSafeInteger(rec.sourceId) || (rec.sourceId as number) <= 0) return false;
+  if (rec.domain !== 'ground' && rec.domain !== 'air' && rec.domain !== 'both') return false;
   if (
     !Array.isArray(rec.effects) ||
     rec.effects.length < 1 ||
@@ -516,6 +540,7 @@ function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
             impactTick: imp.impactTick,
             targetId: imp.targetId,
             sourceId: imp.sourceId,
+            domain: imp.domain,
             effects: imp.effects.map(canonicalEffectPrimitive),
           }
         : {
@@ -525,6 +550,7 @@ function canonicalImpacts(impacts: readonly unknown[], grid: Grid): Impact[] {
             y: imp.y,
             radiusFp: imp.radiusFp,
             sourceId: imp.sourceId,
+            domain: imp.domain,
             effects: imp.effects.map(canonicalEffectPrimitive),
           },
     );
@@ -634,6 +660,10 @@ interface LiveCreep {
   readonly x: number;
   readonly y: number;
   readonly dist: number;
+  /** Resolved once, at precompute time, via {@link resolveCreepDomain} (M2-S7 P3) —
+   *  the tower loop filters acquisition (both the sticky-hold check and the fresh
+   *  acquire candidate) by comparing this against each tower's own mask. */
+  readonly domain: 'ground' | 'air';
 }
 
 /**
@@ -666,9 +696,23 @@ const DIST_SCALE = 1 << 16;
  * alone falls back to the from-cell (M2-S6: a stunned creep cannot re-path, so a tower
  * built on its head cell must not make it unshootable — see the body). Same total,
  * never-throw contract as the rest of combat.
+ *
+ * `domain` (M2-S7 P3) branches the whole metric. GROUND is every rule above,
+ * unchanged. AIR is the straight-line remaining distance to the EXIT CENTRE from
+ * the creep's own derived point, `isqrt(dx² + dy²)`, converted into the same
+ * shared unit as the ground metric by the pinned formula `⌊airDistanceFp ×
+ * ORTHO_COST × DIST_SCALE / FP_ONE⌋` — air never consults the distance field, so
+ * it has no stranded/`null` case.
+ *
+ * SAFE-INTEGER BOUND (P1-gated: every admissible board is ≤ 1024 cells/side, so
+ * `dx_fp, dy_fp ≤ 2¹⁸`): `dx² + dy² ≤ 2³⁷` (the `isqrt` operand); `airDistanceFp
+ * ≤ 2¹⁸·√2 < 370,728`; the pre-division product `airDistanceFp × ORTHO_COST ×
+ * DIST_SCALE < 2.5e11`. Every intermediate is under 2⁵³ by more than four orders
+ * of magnitude.
  */
 function remainingRouteDist(
   field: DistanceField,
+  domain: 'ground' | 'air',
   geom: CreepGeometry,
   fromX: number,
   fromY: number,
@@ -676,6 +720,22 @@ function remainingRouteDist(
   headRow: number,
   progress: number,
 ): number | null {
+  if (domain === 'air') {
+    const exitX = cellCenterX(field.exit.col);
+    const exitY = cellCenterY(field.exit.row);
+    const dx = geom.point.x - exitX;
+    const dy = geom.point.y - exitY;
+    const airDistanceFp = isqrt(dx * dx + dy * dy);
+    // The `Math.floor` is m2.md's pinned formula written verbatim, and at TODAY'S
+    // constants it is a NO-OP: `DIST_SCALE / FP_ONE = 65536 / 256 = 256`, so the whole
+    // expression is exactly `airDistanceFp * 2560`. Kept rather than simplified away, so
+    // the code and the spec read identically — but do not mistake it for a live rounding
+    // rule. The only truncation in this metric is `isqrt`'s own, above. If a later story
+    // moves `ORTHO_COST` or `DIST_SCALE` to a pair that is not a whole multiple of
+    // `FP_ONE`, this floor starts discarding a fraction and air-vs-ground ordering shifts
+    // at ties — re-derive the metric then, do not assume the floor was always absorbing it.
+    return Math.floor((airDistanceFp * ORTHO_COST * DIST_SCALE) / FP_ONE);
+  }
   const headDist = distAt(field, headCol, headRow);
   if (headDist < 0) {
     // The next waypoint is unreachable — normally impossible, because movement re-paths
@@ -1151,12 +1211,18 @@ export function applyImpactToCreep(
  * (re-path, slow, stun, death, leak) makes a lead miss, and that is the counterplay,
  * not a bug." Folding stun into this prediction would be more "accurate" and would
  * contradict that spec.
+ *
+ * `domain` (M2-S7 P2) is threaded straight into `advanceCreep` — the target's own
+ * `LiveCreep.domain`, resolved once by the caller. Left unthreaded, an AoE aimed
+ * at a flyer would lead it along the GROUND flow field instead of straight at the
+ * exit, the same hazard `advanceCreep`'s own header warns both callers about.
  */
 function predictBlastPoint(
   field: DistanceField,
   grid: Grid,
   survivors: CombatCreeps,
   idx: number,
+  domain: 'ground' | 'air',
   currentPoint: { readonly x: number; readonly y: number },
   travelTicks: number,
   slowFloorNum: number,
@@ -1180,6 +1246,7 @@ function predictBlastPoint(
     survivors.headRow[idx],
     survivors.progress[idx],
     budget,
+    domain,
   );
   if (outcome.kind === 'leak') {
     return { x: cellCenterX(field.exit.col), y: cellCenterY(field.exit.row) };
@@ -1219,11 +1286,22 @@ function predictBlastPoint(
  * shape ahead of the stories that need it. Extracting this as its own exported
  * function is what makes the order itself — not just its irrelevance to today's
  * outcome — directly assertable.
+ *
+ * `creepById`/`imp.domain` (M2-S7 P3): the impact's fire-time domain mask is
+ * enforced HERE, per member, not just at acquisition — a ground blast must not
+ * catch a flyer inside its radius even under forged state. `resolveCreepDomain`
+ * is the shared totality rail (an unresolved `creepId` defaults to ground).
  */
 export function blastMembers(
   creeps: CombatCreeps,
   grid: Grid,
-  imp: { readonly x: number; readonly y: number; readonly radiusFp: number },
+  creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
+  imp: {
+    readonly x: number;
+    readonly y: number;
+    readonly radiusFp: number;
+    readonly domain: TowerTargetDomain;
+  },
 ): readonly number[] {
   const members: { readonly idx: number; readonly id: number }[] = [];
   for (let i = 0; i < creeps.id.length; i++) {
@@ -1238,6 +1316,9 @@ export function blastMembers(
     );
     if (geom === null) continue;
     if (!inRange(geom.point.x, geom.point.y, imp.x, imp.y, imp.radiusFp)) continue;
+    if (imp.domain !== 'both' && imp.domain !== resolveCreepDomain(creepById, creeps.creepId[i])) {
+      continue;
+    }
     const id = creeps.id[i];
     // NOT dead, but narrower than QC round-1 #9's comment claimed (corrected round 3):
     // the restore path (`coerceSoa`, index.ts) validates only `wave`/`creepId` per row,
@@ -1351,6 +1432,17 @@ export function runCombat(
       const found = findLiveCreep(creeps, imp.targetId, grid); // null ⇒ wasted shot
       if (found === null) continue;
       const { index: idx, point } = found;
+      // DOMAIN RE-CHECK (M2-S7 P3): resolved BEFORE the event or any effect/RNG draw —
+      // a domain-rejected impact is a wasted shot in every observable way (no event,
+      // no effect, no RNG draw), the same as a dead/gone target above. A tower sold
+      // between fire and impact still cannot land on a domain its fire-time mask
+      // never covered.
+      if (
+        imp.domain !== 'both' &&
+        imp.domain !== resolveCreepDomain(creepById, creeps.creepId[idx])
+      ) {
+        continue;
+      }
       events?.impactPoints.push({ x: point.x, y: point.y, radiusFp: 0 }); // BEFORE damage
       applyImpactToCreep(
         creeps,
@@ -1373,7 +1465,7 @@ export function runCombat(
     // dead-target early-out is a `targeted`-only rule — a blast scans by radius
     // membership, never by the fire-time target's id.
     events?.impactPoints.push({ x: imp.x, y: imp.y, radiusFp: imp.radiusFp });
-    for (const idx of blastMembers(creeps, grid, imp)) {
+    for (const idx of blastMembers(creeps, grid, creepById, imp)) {
       applyImpactToCreep(
         creeps,
         idx,
@@ -1592,8 +1684,10 @@ export function runCombat(
       grid,
     );
     if (geom === null) continue;
+    const domain = resolveCreepDomain(creepById, survivors.creepId[i]);
     const dist = remainingRouteDist(
       field,
+      domain,
       geom,
       survivors.fromX[i] as number,
       survivors.fromY[i] as number,
@@ -1602,7 +1696,14 @@ export function runCombat(
       survivors.progress[i] as number,
     );
     if (dist === null) continue; // stranded (neither waypoint nor from-cell reachable)
-    live.push({ id: survivors.id[i] as number, index: i, x: geom.point.x, y: geom.point.y, dist });
+    live.push({
+      id: survivors.id[i] as number,
+      index: i,
+      x: geom.point.x,
+      y: geom.point.y,
+      dist,
+      domain,
+    });
   }
 
   // (5) Per valid tower: hold-or-acquire the sticky "first" target, then fire.
@@ -1629,7 +1730,11 @@ export function runCombat(
     let heldLive: LiveCreep | null = null;
     let best: LiveCreep | null = null;
     for (const c of live) {
-      const within = inRange(c.x, c.y, towerX, towerY, range);
+      // DOMAIN FILTER (M2-S7 P3): a creep the tower's mask does not cover is skipped
+      // for BOTH the sticky-hold check and the acquire candidate — the two must agree
+      // or a tower could hold a target it may not fire on.
+      const covered = def.domain === 'both' || def.domain === c.domain;
+      const within = covered && inRange(c.x, c.y, towerX, towerY, range);
       if (held !== 0 && !heldSeen && c.id === held) {
         heldSeen = true;
         heldInRange = within;
@@ -1667,6 +1772,7 @@ export function runCombat(
         impactTick,
         targetId: target,
         sourceId: id,
+        domain: def.domain,
         effects: snapshotEffects(def.effects), // fresh objects per fire (Codex — hash-serialized)
       });
       events?.fired.push({
@@ -1686,6 +1792,7 @@ export function runCombat(
         grid,
         survivors,
         targetLive.index,
+        targetLive.domain,
         { x: targetLive.x, y: targetLive.y },
         def.travelTicks,
         slowFloorNum,
@@ -1698,6 +1805,7 @@ export function runCombat(
         y: point.y,
         radiusFp,
         sourceId: id,
+        domain: def.domain,
         effects: snapshotEffects(def.effects),
       });
       events?.fired.push({

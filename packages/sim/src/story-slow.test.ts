@@ -222,6 +222,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'slow', mulFp: 150, durationTicks: 20 },
         { kind: 'slow', mulFp: 100, durationTicks: 5 }, // stronger — replaces
@@ -249,6 +250,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'slow', mulFp: 100, durationTicks: 20 },
         { kind: 'slow', mulFp: 200, durationTicks: 5 }, // weaker — no-op
@@ -279,6 +281,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'slow', mulFp: 128, durationTicks: 50 },
         { kind: 'slow', mulFp: 128, durationTicks: 10 }, // equal strength — refreshes
@@ -306,6 +309,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: 10 },
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
@@ -335,6 +339,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         { kind: 'slow', mulFp: 128, durationTicks: 30 },
         { kind: 'direct', amount: 999 },
@@ -383,6 +388,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         impactTick: 0,
         targetId: 1,
         sourceId: 1,
+        domain: 'ground',
         effects: [
           { kind: 'direct', amount: 10 },
           { kind: 'slow', mulFp: 128, durationTicks: 30 },
@@ -393,6 +399,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
         impactTick: 0,
         targetId: 2,
         sourceId: 1,
+        domain: 'ground',
         effects: [
           { kind: 'direct', amount: 10 },
           { kind: 'slow', mulFp: 128, durationTicks: 30 },
@@ -421,6 +428,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [
         ...Array.from({ length: MAX_IMPACT_EFFECTS - 1 }, (): EffectPrimitive => ({
           kind: 'direct',
@@ -450,6 +458,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: Array.from({ length: MAX_IMPACT_EFFECTS + 1 }, (): EffectPrimitive => ({
         kind: 'direct',
         amount: 1,
@@ -480,6 +489,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       impactTick: 0,
       targetId: 1,
       sourceId: 1,
+      domain: 'ground',
       effects: [{ kind: 'slow', mulFp: 128, durationTicks: 40 }],
     };
     const result = runCombatT(

@@ -366,6 +366,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       impactTick: TRAVEL_TICKS,
       targetId: 1, // no row with this id — the target already left
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -392,6 +393,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -419,6 +421,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const events: StepEvents = { impactPoints: [], fired: [] };
@@ -447,6 +450,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
         impactTick: 0,
         targetId: 1,
         sourceId: 100,
+        domain: 'ground',
         effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
       },
       {
@@ -454,6 +458,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
         impactTick: 0,
         targetId: 1,
         sourceId: 100,
+        domain: 'ground',
         effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
       },
     ];
@@ -922,6 +927,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -955,6 +961,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -984,6 +991,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1020,6 +1028,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       y: point.y,
       radiusFp: 300,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }], // 10, same as a splash's per-creep amount
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1049,6 +1058,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     let result: ReturnType<typeof runCombat> | undefined;
@@ -1234,6 +1244,7 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [],
     });
     const { proxy, accessCount } = countedArray(allInvalidImpacts);
@@ -1267,6 +1278,89 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
   });
 });
 
+describe('Impact.domain — REQUIRED on both variants (M2-S7 P3)', () => {
+  // The twin of the `sourceId` block below, and added for the same reason (ship-review,
+  // M2-S7): `validImpact`'s domain guard had NO rejection test, so deleting the line
+  // `if (rec.domain !== 'ground' && ... ) return false;` turned nothing red. That matters
+  // for determinism, not just tidiness — without it `canonicalImpacts` copies an
+  // `undefined` domain into the canonical impact, so a forged or restored record survives
+  // into `state.impacts` and therefore into the WORLD HASH for every tick until it
+  // resolves. Exactly the leak the `sourceId` guard has four tests for.
+  const cases: ReadonlyArray<readonly [string, unknown]> = [
+    ['missing', undefined],
+    ['a bogus string', 'skyward'],
+    ['a non-string', 7],
+  ];
+
+  for (const [label, domain] of cases) {
+    it(`a targeted impact with ${label} domain is REJECTED, never kept in state.impacts`, () => {
+      const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+      // impactTick in the FUTURE: a due impact is consumed this tick and leaves
+      // `impacts` empty whether or not it was valid, so a due one cannot witness this
+      // guard at all. An UNDUE impact is kept iff `validImpact` accepts it — which is
+      // exactly the survival-into-the-world-hash the guard exists to prevent.
+      const impact = {
+        kind: 'targeted',
+        impactTick: 5,
+        targetId: 1,
+        sourceId: 100,
+        ...(domain === undefined ? {} : { domain }),
+        effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+      };
+      // `runCombatT` rather than a 13-argument positional call (CodeRabbit, PR #87):
+      // four consecutive numbers would let a later signature change remap them with no
+      // type error. Safe here specifically because `creepById` is NOT load-bearing —
+      // the impact is rejected by `validImpact` before any catalog lookup happens.
+      const result = runCombatT(
+        creeps,
+        emptyTowers(),
+        [impact],
+        0,
+        0,
+        FIELD,
+        GRID,
+        TOWER_BY_ID,
+        RULESET.balance.slowFloorNum,
+        RULESET.balance.slowFloorDen,
+      );
+      expect(result.impacts).toHaveLength(0);
+      expect(result.creeps.hp[0]).toBe(1000);
+    });
+
+    it(`a BLAST impact with ${label} domain is REJECTED, never kept in state.impacts`, () => {
+      const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
+      const impact = {
+        kind: 'blast',
+        impactTick: 5,
+        x: 7 * 256 + 128,
+        y: 6 * 256 + 128,
+        radiusFp: 384,
+        sourceId: 100,
+        ...(domain === undefined ? {} : { domain }),
+        effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
+      };
+      // `runCombatT` rather than a 13-argument positional call (CodeRabbit, PR #87):
+      // four consecutive numbers would let a later signature change remap them with no
+      // type error. Safe here specifically because `creepById` is NOT load-bearing —
+      // the impact is rejected by `validImpact` before any catalog lookup happens.
+      const result = runCombatT(
+        creeps,
+        emptyTowers(),
+        [impact],
+        0,
+        0,
+        FIELD,
+        GRID,
+        TOWER_BY_ID,
+        RULESET.balance.slowFloorNum,
+        RULESET.balance.slowFloorDen,
+      );
+      expect(result.impacts).toHaveLength(0);
+      expect(result.creeps.hp[0]).toBe(1000);
+    });
+  }
+});
+
 describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
   it('a targeted impact with a malformed sourceId (zero) is dropped whole — no damage, not kept', () => {
     const creeps = restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]);
@@ -1275,6 +1369,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 0, // malformed — 0 is not an entity id
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1304,6 +1399,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: -1,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1335,6 +1431,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       y: cy(6),
       radiusFp: 50,
       sourceId: 0, // malformed
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1366,6 +1463,7 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       y: cy(6),
       radiusFp: 50,
       sourceId: -5,
+      domain: 'ground',
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1415,6 +1513,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       impactTick: 100, // future — stays in the kept queue unresolved, so its effects stay inspectable
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60, forged: 'nope' }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1446,6 +1545,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       impactTick: 0, // resolves THIS tick
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1479,6 +1579,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       impactTick: 100,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 0 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1513,6 +1614,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       impactTick: 100,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 1_000_001, durationTicks: 1_000_001 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1541,6 +1643,7 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       impactTick: 100,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 60, durationTicks: 59 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -1728,6 +1831,7 @@ describe('runCombat — DoT applyDot integration at capacity (M2-S5a P3)', () =>
       impactTick: 0,
       targetId: 1,
       sourceId: 999_999, // distinct from every filler sourceId (1..MAX_DOT_RECORDS)
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: DIRECT_DAMAGE },
         { kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 },
@@ -2186,6 +2290,7 @@ describe('runCombat — a forged non-positive creep id mints no DoT record (M2-S
     impactTick: 0,
     targetId,
     sourceId: 100,
+    domain: 'ground',
     effects: [
       { kind: 'direct', amount: 4 },
       { kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 },
@@ -2241,6 +2346,7 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
       impactTick: 0,
       targetId: 1,
       sourceId: 999_999, // distinct from every filler sourceId — a genuinely new pair
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 }],
     };
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };

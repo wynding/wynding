@@ -136,6 +136,7 @@ const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assig
     splash: () => t('tower.splash.name'),
     venom: () => t('tower.venom.name'),
     stun: () => t('tower.stun.name'),
+    antiair: () => t('tower.antiair.name'),
   } satisfies Record<string, () => string>,
 );
 
@@ -868,6 +869,20 @@ export function createOverlay(
     } | null;
   }
 
+  /** The Panel's Targets row text for a tower's `attack.domain` (M2-S7): `'ground'`,
+   *  `'air'`, or `'both'` (the widened `TowerTargetDomain` axis, PLAN.md P3) each get
+   *  their own localized key (ADR 0004) — `undefined` (a forged/unresolved towerId, the
+   *  same defensive posture `towerStats` already takes on an absent `def`) falls back
+   *  to `'ground'`, matching every other unresolved-domain totality rail in this story
+   *  (placement's clauses 3/5, the render VM's `warded`-style join). Each branch calls
+   *  `t()` with its own literal key (rather than resolving a `MessageKey` value and
+   *  calling `t()` once) so every call site stays a concrete, per-key-typed lookup. */
+  function targetsFor(domain: 'ground' | 'air' | 'both' | undefined): string {
+    if (domain === 'air') return t('tower.targets.air');
+    if (domain === 'both') return t('tower.targets.both');
+    return t('tower.targets.ground');
+  }
+
   /** Data-driven from the armed/selected `CompiledTower` (M2-S3 retires the closed-union
    *  `exhaustive: never` throw — catalog ids are OPEN, so a legitimate modded bundle's
    *  tower must render real stats, never crash the Panel). `damage` is Σ of the tower's
@@ -896,9 +911,14 @@ export function createOverlay(
       damage,
       rangeTiles: formatNumber((def?.rangeFp ?? 0) / FP_ONE),
       fireRate: formatNumber(TICKS_PER_SECOND / (def?.cadenceTicks ?? 1)),
-      // sv7's capability profile only ever compiles `domain: 'ground'` — literal-keyed
-      // to the one domain the catalog can produce; a future capability bump adds its own.
-      targets: t('tower.targets.ground'),
+      // M2-S7: the capability profile compiles `attack.domain` as `'ground'`/`'air'`/
+      // `'both'` (the widened `TowerTargetDomain` axis) — sv7's `antiair` is the first
+      // catalog entry to compile anything other than `'ground'`, so this row must
+      // actually READ the def's domain instead of the old literal `'ground'`, or
+      // `antiair` would honestly-falsely display "Targets: Ground". `def === undefined`
+      // (a forged/unresolved towerId) falls back to `'ground'`, the same totality rail
+      // every other field in this function already takes on an absent definition.
+      targets: targetsFor(def?.domain),
       blastRadiusTiles: aoeEffect === undefined ? null : formatNumber(aoeEffect.radiusFp / FP_ONE),
       dot:
         dotEffect === undefined
@@ -1103,6 +1123,7 @@ export function createOverlay(
       swarm: () => t('creep.swarm.name'),
       armored: () => t('creep.armored.name'),
       resolute: () => t('creep.resolute.name'),
+      flying: () => t('creep.flying.name'),
     } satisfies Record<string, () => string>, // QC r3: same rationale as `TOWER_NAME`
   );
   // PURE name derivation — no side effects: the render-skip sentinel calls this

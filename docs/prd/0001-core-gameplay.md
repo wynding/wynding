@@ -194,12 +194,14 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 - **Creeps vary along axes** (content picks specific creeps per milestone):
   - **speed** (e.g. normal / fast),
   - **durability** — hit points plus optional **armor**,
-  - **domain** — **ground** or **flying**,
+  - **domain** — **ground** or **air**,
   - **effect-immunity flags** (e.g. immune to slow, immune to stun),
   - **role** — e.g. a **boss** (high durability; may cost more than one life on a leak).
-- **Flying creeps ignore board geometry:** they travel in a **straight line** from entrance to
-  exit, passing over towers, walls, **and blocked cells alike** — no ground cell class affects
-  them. Air is the deliberate counter to over-investing in geometry, answered only by air
+- **Flying creeps ignore board geometry:** they travel in a **straight line toward the exit**,
+  re-aimed from wherever they currently are rather than along a fixed entrance→exit ray (the two
+  coincide on any board whose entrance and exit are axis-aligned, which is the only kind that may
+  schedule flight), passing over towers, walls, **and blocked cells alike** — no ground cell class
+  affects them. Air is the deliberate counter to over-investing in geometry, answered only by air
   coverage (below).
 - **Damage & defense model — armor + immunity flags, no elements:**
   - Damage is a single kind; there are **no damage types / elemental matrix.**
@@ -215,7 +217,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
     redesign. It is not built.)_
 - **Domain engagement:** each **attacking tower targets ground, air, or both** (a support-only
   tower attacks nothing and has no target domain); each creep is ground or
-  flying. A tower can only hit creeps in a domain it targets — so some creeps are simply ignored
+  air (an air creep is colloquially a **flyer**; `flying` is a catalog creep id, never a domain
+  value). A tower can only hit creeps in a domain it targets — so some creeps are simply ignored
   by some towers. Status effects obey the same rule (an air-targeting slow can slow flyers). Which
   towers and creeps sit where is content/tuning; a **dedicated anti-air** tower is just the
   air-only case.

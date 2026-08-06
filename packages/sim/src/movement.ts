@@ -69,7 +69,16 @@ export function cellOf(v: number): number {
  * constant seed `2²⁷ ≥ √n` for every safe integer (`√(2⁵³−1) < 2²⁷`), so the
  * iteration descends monotonically to the floor in O(1) bounded steps; the final
  * ±1 clamp makes the RESULT exact despite any division rounding — byte-identical
- * on every platform. Operands here are tiny (adjacency keeps `dx²+dy² ≤ ~8·10⁵`).
+ * on every platform.
+ *
+ * OPERAND RANGE, by caller — this is the comment a new caller will consult before
+ * deciding its own operands are safe, so it must stay current (M2-S7):
+ *   - `segmentLength` (below): adjacency bounds `dx²+dy²` to `~8·10⁵`.
+ *   - `remainingRouteDist`'s AIR branch (`combat.ts`, M2-S7): the full creep-to-exit
+ *     delta, bounded by the sv11 capability gate at ≤1024 cells/side to `dx²+dy² ≤ 2³⁷`.
+ * Both are correct here for the same reason: the `1 << 27` seed exceeds `√n` for EVERY
+ * safe integer, so this is exact across the whole safe-integer domain, not merely over
+ * the small operands its first caller happened to pass.
  */
 export function isqrt(n: number): number {
   if (!Number.isSafeInteger(n) || n <= 0) return 0;
@@ -141,6 +150,73 @@ export function firstDescentNeighbor(
     },
   );
   return result;
+}
+
+/**
+ * The line-follow heading rule for AIR creeps (M2-S7 P2), replacing
+ * {@link firstDescentNeighbor} for the `air` domain. The ray is `occupancyCell →
+ * exitCell`, entirely in CELL coordinates (not entrance → exit — `DistanceField`
+ * carries no entrance, and a flyer simply re-aims from where it is; not the
+ * derived point — a mid-segment point and its occupied-cell centre are different
+ * origins that can select different headings). Air never consults `blockedAt` or
+ * the distance field; walls and towers are not its business.
+ *
+ * Candidate filter: strictly closer to the exit in SQUARED Euclidean cell
+ * distance (a strict integer comparison, no sqrt) — Euclidean, Manhattan and
+ * Chebyshev admit different candidate sets, and this filter alone proves
+ * termination (every step strictly reduces distance to the exit). Selection:
+ * minimise the ABSOLUTE CROSS PRODUCT of the ray direction with the step — least
+ * perpendicular deviation from the line — ties broken by the canonical
+ * {@link forEachPassableNeighbor} order, so it agrees with every other ordering
+ * rule in the sim.
+ *
+ * All arithmetic is in CELL coordinates, not fixed-point: with sides bounded to
+ * 1024 by the capability profile's board-size gate, deltas stay under 2¹⁰ and
+ * cross products under 2²¹ — no overflow argument needed at all.
+ *
+ * The neighbour predicate is bounds-aware but TERRAIN-BLIND: it rejects only
+ * out-of-bounds cells — never terrain, never the tower mask — so the diagonal
+ * corner-cut check passes automatically (a flyer has no corners to cut).
+ *
+ * ITS BOUNDS HALF IS DEFENSIVE, NOT LOAD-BEARING — stated precisely because an
+ * earlier draft of this comment claimed the opposite (that without it an
+ * off-board head could be written) and that claim is false. The exit is always
+ * on-board, and the strict-closeness filter below admits only cells nearer to it,
+ * so the |cross|-minimal candidate is always on-board already. Verified by
+ * exhaustive sweep over every (col, row, exitCol, exitRow) on a 12×12 board,
+ * including tie-ordering: replacing the predicate with an always-open one changes
+ * the result in ZERO cases, and an off-board neighbour wins in zero cases. It is
+ * kept because correctness should not rest on that emergent property holding for
+ * every future edit to the filter — but no test can witness it, and none claims to.
+ *
+ * Returns `null` when no candidate is strictly closer (the exit cell itself, or
+ * a from-cell already equal to it).
+ */
+export function airLineFollowNeighbor(
+  bounds: Bounds,
+  col: number,
+  row: number,
+  exitCol: number,
+  exitRow: number,
+): DescentStep | null {
+  const curSq = (exitCol - col) * (exitCol - col) + (exitRow - row) * (exitRow - row);
+  let best: DescentStep | null = null;
+  let bestCross = 0; // overwritten before first use — `best` gates every read
+  forEachPassableNeighbor(
+    col,
+    row,
+    (c, r) => !inBounds(c, r, bounds),
+    (nc, nr, diagonal) => {
+      const distSq = (exitCol - nc) * (exitCol - nc) + (exitRow - nr) * (exitRow - nr);
+      if (distSq >= curSq) return; // not strictly closer — not a candidate
+      const cross = Math.abs((exitCol - col) * (nr - row) - (exitRow - row) * (nc - col));
+      if (best === null || cross < bestCross) {
+        best = { col: nc, row: nr, diagonal };
+        bestCross = cross;
+      }
+    },
+  );
+  return best;
 }
 
 /** The derived geometry of a valid creep row: its point, occupied cell, edge length. */
@@ -264,6 +340,20 @@ export type AdvanceOutcome =
 const DROP: AdvanceOutcome = { kind: 'drop' };
 const LEAK: AdvanceOutcome = { kind: 'leak' };
 
+/** The domain-dispatched heading rule `advanceCreep` derives from at every
+ *  waypoint boundary: {@link firstDescentNeighbor} (flow-field descent) for
+ *  `ground`, {@link airLineFollowNeighbor} (straight at the exit cell) for `air`. */
+function nextHeading(
+  field: DistanceField,
+  domain: 'ground' | 'air',
+  col: number,
+  row: number,
+): DescentStep | null {
+  return domain === 'air'
+    ? airLineFollowNeighbor(field, col, row, field.exit.col, field.exit.row)
+    : firstDescentNeighbor(field, col, row);
+}
+
 /**
  * Advance a single creep one tick over `field`, spending `budget` fixed-point
  * units toward the exit. The creep's columns are passed raw (possibly `undefined`,
@@ -287,6 +377,20 @@ const LEAK: AdvanceOutcome = { kind: 'leak' };
  * so `stepDist ≥ 1` and `budget` strictly decreases. A `move` outcome with
  * `progress === 0` reports the canonical rest sentinel (`head == cell`, `from ==
  * its centre`).
+ *
+ * `domain` (M2-S7 P2) selects the heading rule and the occupied-cell terrain
+ * checks below — TWO things differ for `air`, not one:
+ *   (a) OCCUPIED-CELL VALIDATION skips `blockedAt`/`distAt` entirely: those two
+ *       checks exist to drop a forged GROUND row standing on a wall, and they
+ *       would delete a flyer the instant it crossed a tower. Nothing else in the
+ *       validation chain relaxes.
+ *   (b) the heading — every {@link firstDescentNeighbor} call below is
+ *       {@link airLineFollowNeighbor} instead, a stateless line-follow step from
+ *       the occupied cell straight at the exit cell, consulting neither
+ *       `blockedAt` nor the distance field. Both callers (the movement phase and
+ *       `predictBlastPoint`'s blast-lead reuse of this function) supply the
+ *       creep's own domain — an AoE aimed at a flyer must not lead it along the
+ *       ground flow field.
  */
 export function advanceCreep(
   field: DistanceField,
@@ -298,6 +402,7 @@ export function advanceCreep(
   headRow: number | undefined,
   progress: number | undefined,
   budget: number,
+  domain: 'ground' | 'air',
 ): AdvanceOutcome {
   // (1) ROW VALIDATION.
   if (!Number.isSafeInteger(id) || !Number.isSafeInteger(hp)) return DROP;
@@ -331,18 +436,23 @@ export function advanceCreep(
   if (cellOf(fx) === field.exit.col && cellOf(fy) === field.exit.row) return DROP;
 
   // OCCUPIED-CELL VALIDATION — the cell placement protects must be on-board, open,
-  // and reachable. Genuine states always satisfy this (the maze invariant keeps
-  // every creep's occupied cell reachable and un-buildable); a forged creep sitting
-  // on a wall or a stranded cell is dropped, never advanced onto it.
+  // and reachable. Genuine GROUND states always satisfy this (the maze invariant
+  // keeps every creep's occupied cell reachable and un-buildable); a forged
+  // ground creep sitting on a wall or a stranded cell is dropped, never advanced
+  // onto it. AIR skips both terrain checks (M2-S7 P2a) — a flyer's occupied cell
+  // is terrain-independent by design, and these two checks exist only to catch a
+  // forged ground row.
   const occ = geom.occupancyCell;
-  if (blockedAt(field, occ.col, occ.row)) return DROP;
-  if (distAt(field, occ.col, occ.row) < 0) return DROP;
+  if (domain === 'ground') {
+    if (blockedAt(field, occ.col, occ.row)) return DROP;
+    if (distAt(field, occ.col, occ.row) < 0) return DROP;
+  }
 
   const atRest = prog === 0 && hCol === occ.col && hRow === occ.row;
 
   if (atRest) {
     // Derive a fresh head from the resting cell.
-    const next = firstDescentNeighbor(field, occ.col, occ.row);
+    const next = nextHeading(field, domain, occ.col, occ.row);
     if (next === null) return DROP; // stranded on a forged field
     hCol = next.col;
     hRow = next.row;
@@ -370,7 +480,7 @@ export function advanceCreep(
     //     shape `advanceCreep` itself produces) but not for a forged one restored
     //     directly into that shape. The stranded-field DROP below still runs at
     //     budget 0 — only the turn's assignment defers.
-    const next = firstDescentNeighbor(field, occ.col, occ.row);
+    const next = nextHeading(field, domain, occ.col, occ.row);
     if (next === null) return DROP; // stranded on a forged field
     if (budget > 0 && (next.col !== hCol || next.row !== hRow)) {
       fx = geom.point.x;
@@ -398,7 +508,7 @@ export function advanceCreep(
     fy = By;
     prog = 0;
     if (hCol === field.exit.col && hRow === field.exit.row) return LEAK; // remaining discarded
-    const next = firstDescentNeighbor(field, hCol, hRow);
+    const next = nextHeading(field, domain, hCol, hRow);
     if (next === null) return DROP; // forged-field backstop — no exact descent
     hCol = next.col;
     hRow = next.row;
