@@ -71,9 +71,11 @@ jobs:
   # freezes on a terminal phase, so a mis-authored scenario measures an almost-empty or
   # wholly inert sim and posts superb percentiles. The oracle asserts the scene is the
   # one the ADR describes before any timing is believed. Then the RELATIVE GATE: the
-  # ratio of the stress run's p95 `step()` over its due-blast ticks to a blast-free
+  # ratio of the stress run's p50 `step()` over its due-blast ticks to a blast-free
   # control workload's p50, run in the same process, so a slow or noisy runner scales
-  # both terms and cancels out.
+  # both terms and cancels out. BOTH ARMS ARE MEDIANS as of M2-S6 (the numerator was p99
+  # until M2-S5b P11, then p95 until M2-S6) — the cancellation only works when the two
+  # terms are alike in robustness; see `packages/perf/src/gate.ts`'s `stressStat`.
   #
   # Its own job, NOT part of `verify` (PLAN M2-S4b step 20) — though not for the reason
   # the plan assumed: the full two-scenario run measures ~4.6s (each arm now traverses
@@ -111,7 +113,72 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run perf
+      # `set -o pipefail` is REQUIRED: GitHub's default shell here is `bash -e {0}`, which
+      # does NOT set pipefail, so piping `perf` into `tee` would discard its exit code and
+      # turn every gate failure green. The log is teed rather than re-run because the guard
+      # below must read the SAME run's report, not a second measurement of it.
+      - name: perf (oracle + ratio gate)
+        run: set -o pipefail && pnpm run perf | tee "$RUNNER_TEMP/perf.log"
+      # AN UNENFORCED GATE ON `main` MUST BE LOUD. Read this as an alarm, not a block: the
+      # `push` trigger fires AFTER a merge lands, and this job is not a required check, so
+      # what follows detects the state and turns it red — it cannot prevent it. Blocking
+      # would mean failing the pull request, which would fail the very PR collecting the
+      # baseline samples. `R0 = null` is a legitimate, deliberate state
+      # while a statistic change is being re-baselined: `gate.ts`'s `'unset'` arm REPORTS R
+      # and exits zero, so the PR collecting the samples is not blocked by the gate it is
+      # collecting them for. The hazard is that this state is GREEN — nothing in the test
+      # suite goes red for it (see `gate.test.ts`'s `R0` block) — so a merge-and-forget
+      # would leave the perf gate permanently unenforced with no signal anywhere.
+      #
+      # This job runs on `push` only for `main` (see `on:` at the top), so gating the check
+      # on the event is exactly "is this the default branch". It costs nothing while `R0` is
+      # a number, and it cannot rot: there is no waiver list to remember to empty, and it
+      # self-retires the moment the baseline is recorded. Considered and rejected in favour
+      # of this: registering the unset state on `KNOWN_OPEN_ASSERTIONS`, which would fire on
+      # restore rather than on forgetting, and needs its own cleanup commit.
+      #
+      # PARSED, not grepped, and it FAILS CLOSED. A `grep '"r0":null'` was the first draft and
+      # had two holes: it depends on `JSON.stringify`'s exact spacing (`"r0": null` would slip
+      # through), and a missing or truncated log makes `grep` exit non-zero, which reads as
+      # "no null found" and passes the guard silently — a false PASS in the one place that
+      # must not have one. Parsing the report and treating an absent line as a failure closes
+      # both. Do not revert this to a grep.
+      #
+      # NOTE ON QUOTING, since it is load-bearing and invisible: the script is delimited by
+      # single quotes, so it must contain NONE. That is why the message below says
+      # "gate.ts R0 doc" and not "gate.ts's R0 doc" — one apostrophe would terminate the
+      # argument and change what runs. The backticks and `${r0}` are a JS template literal;
+      # bash does not expand inside single quotes and `${` is not GitHub's `${{`, so both
+      # reach Node intact. Re-check all three if you edit this script.
+      - name: the gate must be ENFORCED on main (R0 recorded, not null)
+        if: github.event_name == 'push'
+        env:
+          PERF_LOG: ${{ runner.temp }}/perf.log
+        run: |
+          node -e '
+            const line = require("fs")
+              .readFileSync(process.env.PERF_LOG, "utf8")
+              .split("\n")
+              .find((l) => l.startsWith("PERF-REPORT: "));
+            if (!line) {
+              console.log("::error::no PERF-REPORT line in the perf log — cannot confirm the gate is enforced.");
+              process.exit(1);
+            }
+            let r0;
+            try {
+              ({ r0 } = JSON.parse(line.slice("PERF-REPORT: ".length)));
+            } catch (e) {
+              console.log("::error::PERF-REPORT line is not valid JSON — cannot confirm the gate is enforced.");
+              console.log(String(e && e.message));
+              process.exit(1);
+            }
+            if (typeof r0 !== "number" || !Number.isFinite(r0) || r0 <= 0) {
+              console.log("::error::R0 is not a usable baseline on main — the perf gate is REPORTING, not enforcing.");
+              console.log("Saw: " + JSON.stringify(r0) + ". Record a baseline per the procedure in gate.ts R0 doc.");
+              process.exit(1);
+            }
+            console.log(`perf gate is enforced on main: R0 = ${r0}`);
+          '
 
   # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
   # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is

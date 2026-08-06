@@ -119,9 +119,10 @@ export const KNOWN_OPEN_ASSERTIONS: readonly string[] = [];
 
 /** At least 500 samples (an ABSOLUTE count, not a ratio of the window) must have at
  *  least one due blast. This is deliberately a count, not a percentage: it is ALSO the
- *  sample size the gate's p95 (`gate.ts`, PLAN step 21 — p99 until M2-S5b P11) is
- *  computed over, and a percentage floor could pass while leaving that subset too small
- *  for that percentile to mean anything (e.g. a 20% floor over a short window could still be a handful of
+ *  sample size the gate's numerator (`gate.ts`, PLAN step 21 — p50 as of M2-S6; p95 from
+ *  M2-S5b P11, p99 before that) is computed over, and a percentage floor could pass while
+ *  leaving that subset too small for any percentile of it to mean anything (e.g. a 20%
+ *  floor over a short window could still be a handful of
  *  samples). ~150 blast towers at cadence 60, staggered across the build ticks, put a
  *  due blast on the large majority of ticks — this floor is comfortably reachable if
  *  the scene is tuned as ADR 0005 intends. */
@@ -273,8 +274,9 @@ export const LEFTOVER_BOUNTY_THRESHOLD = 0;
 
 /** A sample where at least one blast landed. Exported so `run.ts`'s gate subset and this
  *  file's `DUE_BLAST_SAMPLES_THRESHOLD` count are provably THE SAME SET — `gate.ts`'s
- *  numerator reasoning leans on that (it now reads "with the oracle's >= 500-sample
- *  due-blast floor, p95 discards the top ~5%"; it said p99 until M2-S5b P11), which is only true if the floor counts what the
+ *  numerator reasoning leans on that at every statistic it has used (p50 as of M2-S6, p95
+ *  from M2-S5b P11, p99 before that): each argument is about where a rank falls within the
+ *  due-blast population, which is only meaningful if the floor counts the samples the
  *  statistic is computed over. It was a hand-copied `s.dueBlasts >= 1` in both files; this
  *  repo has already removed three other copies of exactly this kind. */
 export function isDueBlastSample(sample: SampledTick): boolean {

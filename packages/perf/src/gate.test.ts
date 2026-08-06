@@ -4,7 +4,15 @@
 // gate.ts's "R = R0 * TOLERANCE itself PASSES" contract.
 
 import { describe, it, expect } from 'vitest';
-import { controlStat, stressStat, stressStatP99, evaluateGate, TOLERANCE, R0 } from './gate';
+import {
+  controlStat,
+  stressStat,
+  stressStatP95,
+  stressStatP99,
+  evaluateGate,
+  TOLERANCE,
+  R0,
+} from './gate';
 import type { SampledTick } from './harness';
 
 function sample(ms: number): SampledTick {
@@ -30,35 +38,44 @@ describe('controlStat() — p50 over the control samples', () => {
   });
 });
 
-describe('stressStat() — p95 over the due-blast subset (M2-S5b P11, moved from p99)', () => {
-  it('matches percentile(ms, 95)', () => {
+describe('stressStat() — p50 over the due-blast subset (M2-S6, moved from p95)', () => {
+  it('matches percentile(ms, 50)', () => {
     const samples = Array.from({ length: 100 }, (_, i) => sample(i + 1)); // 1..100
-    expect(stressStat(samples)).toBe(95);
+    expect(stressStat(samples)).toBe(50);
   });
 
   it('throws on an empty due-blast subset (an oracle failure, not a silent NaN)', () => {
     expect(() => stressStat([])).toThrow();
   });
 
-  // The statistic this revisit REPLACED. It is computed and reported but never compared
-  // to anything, so nothing else in the suite would notice if it silently stopped being
-  // p99 — which would quietly destroy the audit trail the switch was allowed to rely on.
-  it('stressStatP99() still reports the pre-revisit statistic, for audit', () => {
+  // The two statistics this gate has REPLACED. Both are computed and reported but never
+  // compared to anything, so nothing else in the suite would notice if either silently
+  // stopped being what it claims — which would quietly destroy the audit trail each
+  // switch was allowed to rely on.
+  it('stressStatP95()/stressStatP99() still report the superseded statistics, for audit', () => {
     const samples = Array.from({ length: 100 }, (_, i) => sample(i + 1));
+    expect(stressStatP95(samples)).toBe(95);
     expect(stressStatP99(samples)).toBe(99);
+    expect(stressStatP95(samples)).not.toBe(stressStat(samples));
     expect(stressStatP99(samples)).not.toBe(stressStat(samples));
   });
 
-  // The gate must carry BOTH statistics out to the report. A `GateResult` that dropped
-  // `stressStatP99` would still pass every assertion above.
-  it('evaluateGate carries both the gating p95 and the audit p99 into its result', () => {
-    const control = Array.from({ length: 100 }, (_, i) => sample(i + 1));
-    const dueBlast = Array.from({ length: 100 }, (_, i) => sample(i + 1));
+  // The gate must carry ALL THREE statistics out to the report. A `GateResult` that
+  // dropped an audit field would still pass every assertion above.
+  it('evaluateGate carries the gating p50 and both audit statistics into its result', () => {
+    // The two series are deliberately DIFFERENT. With both arms on the same statistic
+    // since M2-S6, feeding both the same series makes `r === 1` and lets a mutated
+    // `r = controlStat / controlStat` pass — the numerator would go untested. Offsetting
+    // the stress series by 100 keeps every expectation exact while forcing `r != 1`.
+    const control = Array.from({ length: 100 }, (_, i) => sample(i + 1)); // 1..100
+    const dueBlast = Array.from({ length: 100 }, (_, i) => sample(i + 101)); // 101..200
     const result = evaluateGate(control, dueBlast);
-    expect(result.stressStat).toBe(95);
-    expect(result.stressStatP99).toBe(99);
-    // And `r` is derived from the GATING statistic, not the audit one.
-    expect(result.r).toBe(95 / result.controlStat);
+    expect(result.controlStat).toBe(50);
+    expect(result.stressStat).toBe(150);
+    expect(result.stressStatP95).toBe(195);
+    expect(result.stressStatP99).toBe(199);
+    // And `r` is derived from the GATING statistic, not either audit one — and is not 1.
+    expect(result.r).toBe(150 / 50);
   });
 });
 
@@ -69,8 +86,36 @@ describe('R0 — the committed CI-runner baseline', () => {
   // it forces the edit to be deliberate, and it puts the justification PLAN step 21
   // requires ("an explicit committed edit with justification in the PR") in front of
   // whoever is doing the nudging. Update it only alongside gate.ts's provenance doc.
-  it('is the 1.42 recorded on the CI runner (M2-S5b P11, post-P9 workload, p95), not an inferred or rebaselined value', () => {
-    expect(R0).toBe(1.42);
+  //
+  // RE-RECORDED at 1.00 (M2-S6 QC), and PROVISIONAL: the 17 samples are attempts of ONE
+  // workflow run on ONE image, so this is not a runner-class calibration, and the escalation
+  // rule that blesses it was selected against the same 17. `gate.ts`'s `R0` doc states all
+  // three limits and the discharge plan. This test pins the VALUE regardless — provisional
+  // does not mean editable without review.
+  //
+  // The median of 17 CI samples — run 31041932972,
+  // attempts 1-17, head a1600c9, `ubuntu-24.04` — rounded DOWN to the nearer hundredth,
+  // against the p50/p50 statistic at `TOLERANCE` 1.10. The superseded 1.42 baselined
+  // p95/p50 and does not describe this statistic. `gate.ts`'s `R0` doc carries the full
+  // cohort, the sigma analysis, and why the recording took 17 samples rather than 5.
+  //
+  // The `null` window this replaced was the interesting state and is worth remembering
+  // rather than deleting: a null `R0` is GREEN. `run.ts` counts `'unset'` as `gatePass`,
+  // escalation does not fire, `perf` exits 0, and this suite passes — so a forgotten null
+  // would have left the gate permanently unenforced with every check green. Nothing in
+  // this file could have caught that; `ci.yml`'s default-branch alarm exists for it, and
+  // even that only fires AFTER a merge. That is why the baseline is recorded here, in the
+  // PR that changed the statistic, rather than left for a follow-up.
+  it('is the re-recorded 1.00, not the stale 1.42 from the superseded p95/p50 statistic', () => {
+    expect(R0).toBe(1.0);
+  });
+
+  // The ceiling the committed pair implies, asserted so `R0` and `TOLERANCE` cannot drift
+  // apart silently — a reader checking "what does this gate actually permit?" gets one
+  // number, and a change to EITHER constant has to come past it.
+  it('with TOLERANCE, yields the 1.1000 ceiling the provenance doc records', () => {
+    expect(R0).not.toBeNull();
+    expect((R0 as number) * TOLERANCE).toBeCloseTo(1.1, 10);
   });
 });
 
@@ -86,9 +131,9 @@ describe('evaluateGate() — the unset-R0 path', () => {
 });
 
 describe('evaluateGate() — the evaluated path, boundary pinned exactly', () => {
-  // controlStat = 0.1 (p50 of five identical values), stressStat = 0.2 (p95 of five
-  // identical values — every percentile of a constant series is that constant, so this
-  // boundary case is unaffected by the p99 -> p95 move at M2-S5b P11)
+  // controlStat = 0.1 and stressStat = 0.2, each a percentile of five IDENTICAL values —
+  // every percentile of a constant series is that constant, so this boundary case is
+  // unaffected by any statistic move (p99 -> p95 at M2-S5b P11, p95 -> p50 at M2-S6)
   // -> R = 2. With r0 = 2 / TOLERANCE, R0 * TOLERANCE = 2 exactly:
   // R === ceiling, which must PASS (the gate fails on strictly `R > ceiling`).
   const control = new Array(5).fill(0.1).map(sample);
@@ -115,7 +160,7 @@ describe('evaluateGate() — the evaluated path, boundary pinned exactly', () =>
   });
 
   it('R comfortably below R0 * TOLERANCE passes', () => {
-    const r0 = 10; // ceiling 12.5, R = 2
+    const r0 = 10; // ceiling 11 (10 × TOLERANCE 1.10), R = 2
     const result = evaluateGate(control, dueBlast, r0);
     expect(result.status).toBe('evaluated');
     if (result.status !== 'evaluated') throw new Error('unreachable');
@@ -124,8 +169,11 @@ describe('evaluateGate() — the evaluated path, boundary pinned exactly', () =>
 });
 
 describe('TOLERANCE', () => {
-  it('is pinned at 1.25', () => {
-    expect(TOLERANCE).toBe(1.25);
+  // Tightened 1.25 -> 1.10 at M2-S6 alongside the p95 -> p50 statistic move, and
+  // DECLARED BEFORE the new R0 was recorded. Pinned by value so a future widening has
+  // to be a deliberate, reviewed edit to this line rather than a quiet drift.
+  it('is pinned at 1.10', () => {
+    expect(TOLERANCE).toBe(1.1);
   });
 });
 
@@ -141,12 +189,34 @@ describe('evaluateGate() — the default r0 parameter', () => {
   // Every other test above passes `r0` explicitly, so the default-parameter path
   // (`r0: number | null = R0`) was never exercised by this suite. Calling with only
   // two arguments is the one thing that actually runs that default.
+  //
+  // Written so BOTH states are meaningful: the branch tracks the COMMITTED constant rather
+  // than restating it, so this test kept working across the `null` -> 1.00 re-record without
+  // needing an edit on the day the baseline landed. `R0` is now a number, so the `else`
+  // branch is the live one.
   it('reads the committed R0 constant when r0 is omitted', () => {
     const control = new Array(5).fill(0.1).map(sample);
     const dueBlast = new Array(5).fill(0.2).map(sample);
     const result = evaluateGate(control, dueBlast);
-    expect(result.status).toBe('evaluated');
-    if (result.status !== 'evaluated') throw new Error('unreachable');
-    expect(result.r0).toBe(R0);
+    // Tie the default to the CONSTANT in either state: passing `R0` explicitly must
+    // produce the identical result.
+    //
+    // THIS LINE IS NOW LOAD-BEARING, and it was not always. While `R0` was null it was
+    // degenerate — both sides passed `null`, so a mutant default of a hardcoded `= null`
+    // satisfied it and it discriminated nothing. It was written in that state anyway, so it
+    // would already be in place the day the baseline landed. That day has come: with `R0` a
+    // number, a hardcoded `= null` default returns `'unset'` against an `'evaluated'`
+    // right-hand side and fails here.
+    expect(result).toEqual(evaluateGate(control, dueBlast, R0));
+    if (R0 === null) {
+      // A null baseline must surface as a RECORDING run and must never carry a `pass`
+      // — the one way an un-baselined gate could be mistaken for a green one.
+      expect(result.status).toBe('unset');
+      expect(result).not.toHaveProperty('pass');
+    } else {
+      expect(result.status).toBe('evaluated');
+      if (result.status !== 'evaluated') throw new Error('unreachable');
+      expect(result.r0).toBe(R0);
+    }
   });
 });

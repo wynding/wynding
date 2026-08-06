@@ -1,10 +1,13 @@
-// gate-fixture.test.ts — the injected-regression fixture behind M2-S5b P11's switch of
-// `stressStat` from p99 to p95 over the due-blast subset (PLAN.md step 21).
+// gate-fixture.test.ts — the injected-regression fixture behind the gate's numerator
+// statistic. Originally M2-S5b P11's p99 -> p95 switch (PLAN.md step 21); extended at
+// M2-S6 for the p95 -> p50 switch, which it validates the same way.
 //
 // WHAT THIS FILE IS FOR. Switching the gate's numerator statistic is only defensible if the
-// new statistic still catches the regression the gate exists to catch. p95 discards more of
-// the upper tail than p99 does, and "discards more tail" and "discards more signal" are the
-// same operation viewed from two sides — so the switch needs evidence, not an argument.
+// new statistic still catches the regression the gate exists to catch. Each move discards
+// more of the upper tail than the last, and "discards more tail" and "discards more signal"
+// are the same operation viewed from two sides — so a switch needs evidence, not an
+// argument. The M2-S6 move is the sharpest case: a median is the statistic a reader most
+// expects to be blind, which is precisely why it is measured here rather than asserted.
 // This fixture is that evidence: a pure, synthetic sample set with a KNOWN injected
 // regression, run through both candidate statistics, with the comparison between them
 // gated.
@@ -21,7 +24,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { percentile } from './stats';
-import { TOLERANCE, stressStat, stressStatP99 } from './gate';
+import { TOLERANCE, stressStat, stressStatP95, stressStatP99 } from './gate';
 import type { SampledTick } from './harness';
 
 // --- The generator -----------------------------------------------------------------
@@ -124,7 +127,13 @@ const DUE_BLAST_CUTS = [
  * n = 2500 p99 selects `ceil(0.99 * 2500) - 1` = index 2474. A 1% (25-sample) tail occupies
  * indices 2475..2499 — entirely ABOVE p99's rank, so p99 would never see the tail this
  * fixture exists to model. At 2% the tail spans 2450..2499: p99 lands INSIDE it and p95
- * (index 2374) sits BELOW it, which is exactly the contrast under test.
+ * (index 2374) sits BELOW it.
+ *
+ * That p99-versus-p95 placement is the M2-S5b rationale, INHERITED not restated: the
+ * contrast under test at M2-S6 is p50 versus p95, and the gating median (index 1249) sits
+ * far below the tail under either 1% or 2%. The 2% choice is kept because the fixture still
+ * reports p99 for audit and the tail must remain visible to it — changing it now would
+ * invalidate every pin in this file for no gain.
  */
 function buildFixture(n: number): Fixture {
   const rand = mulberry32(FIXTURE_SEED);
@@ -154,7 +163,7 @@ function buildFixture(n: number): Fixture {
 }
 
 /** Wraps a bare `ms` series as the `SampledTick[]` the SHIPPED gate functions take. Only
- *  `ms` is read by `stressStat`/`stressStatP99`; the rest is inert filler. */
+ *  `ms` is read by `stressStat`/`stressStatP95`/`stressStatP99`; the rest is inert filler. */
 function asSamples(ms: readonly number[]): SampledTick[] {
   return ms.map((m, i) => ({
     tick: i,
@@ -171,21 +180,31 @@ function asSamples(ms: readonly number[]): SampledTick[] {
   }));
 }
 
-/** The two statistics under comparison, called THROUGH `gate.ts`'s real exports rather
- *  than recomputed here.
+/** The statistics under comparison, called THROUGH `gate.ts`'s real exports rather than
+ *  recomputed here.
  *
  *  This indirection is the whole reason this fixture can gate anything (QC round 1 — an
- *  earlier draft of this file called `percentile(xs, 95)` directly and was PROVEN
- *  vacuous: replacing `stressStat`'s body with a MEDIAN — the statistic maximally blind
- *  to any tail regression, which would destroy the gate outright — left all ten tests in
- *  this file green. A fixture that re-declares the statistic it is meant to validate is
- *  testing its own arithmetic, not the shipped gate).
+ *  earlier draft called `percentile(xs, 95)` directly and was PROVEN vacuous: the shipped
+ *  statistic could be replaced wholesale and all ten tests stayed green. A fixture that
+ *  re-declares the statistic it is meant to validate is testing its own arithmetic, not
+ *  the shipped gate).
+ *
+ *  THE WITNESS FOR THAT CLAIM HAD TO BE REPLACED AT M2-S6, and the reason is worth stating
+ *  rather than quietly swapping. The original witness was "replace `stressStat`'s body with
+ *  a MEDIAN — the statistic maximally blind to any tail regression, which would destroy the
+ *  gate outright". A median is now exactly what ships, so that mutation proves nothing; and
+ *  the parenthetical was wrong on its own terms, since the regression this fixture injects
+ *  is BROAD, not tail-concentrated, and a median sees a broad shift in full (the pinned
+ *  ratios below: p50 moves 1.0550 / 1.1082 / 1.2140 across the three injection sizes).
+ *  The live witness is `gating: p99` — restoring the pre-S5b statistic makes `kGating`
+ *  `Infinity` at n = 2,500 and the GATED block fails. Verified by mutation, not assumed.
  *
  *  Every ratio below therefore measures the SENSITIVITY OF THE FUNCTION THAT SHIPS. Change
  *  `stressStat` to any statistic that discards this regression and the GATED block fails. */
 const STATS = {
   gating: (ms: readonly number[]): number => stressStat(asSamples(ms)),
-  audit: (ms: readonly number[]): number => stressStatP99(asSamples(ms)),
+  auditP95: (ms: readonly number[]): number => stressStatP95(asSamples(ms)),
+  auditP99: (ms: readonly number[]): number => stressStatP99(asSamples(ms)),
 } as const;
 
 /** `injected / baseline` for one of the two shipped statistics — the factor a regression
@@ -215,7 +234,30 @@ function firingK(ks: readonly number[], ratioAt: (k: number) => number): number 
   return Infinity;
 }
 
-const KS = [0.005, 0.01, 0.02] as const;
+// REFINED at M2-S6 from [0.005, 0.01, 0.02]. The coarse grid was not neutral: on a
+// continuous sweep (step 1e-5, n = 2,500) p50 fires at 0.00922 and p95 at 0.00745, which the
+// old grid rounded into the SAME bucket, making the two statistics look equally sensitive
+// when they are not. A comparison grid that cannot separate the things being compared
+// reports a tie by construction, so the extra points exist to make the gap visible rather
+// than to move it.
+//
+// THE ADDED 0.0075 POINT SITS CLOSE TO ITS CROSSING, and that is disclosed rather than
+// tuned away: p95's ratio there is 1.1013 against `TOLERANCE` 1.10, a 0.12% margin (0.21% at
+// n = 1,427, 0.37% at n = 500). So `expect(k95).toBe(0.0075)` below, and with it the
+// `kGating > k95` price assertion, would flip if `TOLERANCE` moved even slightly upward.
+// That is a real fragility and the honest response is to say so. It is NOT resolved by
+// nudging the point to 0.008, which would be retuning an outcome-bearing parameter to buy
+// margin — the thing this file's header forbids. If `TOLERANCE` changes, re-derive the grid
+// deliberately and re-record these pins; do not adjust them to keep the test green.
+//
+// WHAT A GRID READING IS AND IS NOT. `firingK` returns the smallest GRID POINT at which a
+// statistic fires, so it is an upper bound on the true threshold, not the threshold — p50's
+// 0.0100 below is the grid's nearest point above a true 0.0092. That is the right shape for
+// an ORDERING assertion (which is all this file gates on) and the wrong shape for a
+// magnitude: quoting these buckets as thresholds is exactly how `gate.ts` briefly came to
+// claim a 2.00x end-to-end gain for what is 1.67x. Magnitudes live in `gate.ts`'s
+// `stressStat` doc and are swept, not gridded.
+const KS = [0.005, 0.0075, 0.01, 0.015, 0.02] as const;
 
 // --- The generator is what we think it is ------------------------------------------
 
@@ -272,28 +314,74 @@ describe('the generator itself, before anything is measured with it', () => {
 
 // --- GATED: the broad injection, the sole reversal condition -------------------------
 
-describe('GATED — a broad blast-cost regression must not be discarded by p95', () => {
-  // This is the ONLY condition that can reverse the p95 switch. A blast-cost regression is
-  // broad by nature: it raises the cost of every tick that carries a due blast, which is
-  // every sample in this subset by construction. `ms += k * dueBlasts` is that shape — cost
-  // proportional to how much blast work the tick actually did.
+describe('GATED — a broad blast-cost regression must not be discarded by the gating statistic', () => {
+  // A NECESSARY SCREEN, NOT THE DECIDING TEST — and the distinction is the whole reason
+  // the M2-S6 switch needed evidence this file structurally cannot provide.
+  //
+  // What this block does decide: the gating statistic must not be one that discards a
+  // broad blast-cost regression. It rejects p99, a constant, and `Math.min` outright.
+  // A blast-cost regression is broad by nature — it raises the cost of every tick
+  // carrying a due blast, which is every sample in this subset by construction, and
+  // `ms += k * dueBlasts` is that shape.
+  //
+  // What it CANNOT decide is p50 versus p95, and an earlier draft of this comment claimed
+  // otherwise ("the ONLY condition that can reverse a statistic switch"). At equal
+  // tolerance p95 is the MORE sensitive of the two — it fires at a strictly smaller k, as
+  // the assertion below now pins — so on this test alone the switch would be REJECTED.
+  // The switch rests instead on run-to-run CI variance (`gate.ts`'s table: +/-2.8% for
+  // p50/p50 against +/-15.5% for the previously shipped p95/p50), which a deliberately sim-free
+  // fixture has no way to see. The causal chain is: p50's low noise makes `TOLERANCE`
+  // 1.10 affordable, and the tighter tolerance is what buys back sensitivity — p95 cannot
+  // run at 1.10, because its own noise exceeds that threshold and it would false-alarm.
+  //
+  // These `k` values are read at the CURRENT `TOLERANCE`, imported and never restated.
   for (const n of [N_FULL, N_SUBSET_MEASURED, N_SUBSET_FLOOR]) {
-    it(`n=${n}: p95 fires at the same k as p99 or smaller`, () => {
+    it(`n=${n}: the gating p50 fires at the same k as the superseded statistics or smaller`, () => {
       const { dueBlasts, ms } = buildFixture(n);
       const broad = (k: number): number[] => ms.map((m, i) => m + k * dueBlasts[i]!);
 
-      const k95 = firingK(KS, (k) => ratio(broad(k), ms, STATS.gating));
-      const k99 = firingK(KS, (k) => ratio(broad(k), ms, STATS.audit));
+      const kGating = firingK(KS, (k) => ratio(broad(k), ms, STATS.gating));
+      const k95 = firingK(KS, (k) => ratio(broad(k), ms, STATS.auditP95));
+      const k99 = firingK(KS, (k) => ratio(broad(k), ms, STATS.auditP99));
 
-      // THE REVERSAL CONDITION. If this fails, the switch is rejected and `stressStat`
-      // stays p99 — it is not a threshold to relax.
-      expect(k95).toBeLessThanOrEqual(k99);
+      // THE SCREEN — AND ITS LIMIT, MEASURED. The gating statistic must catch this
+      // regression no later than the p99 that gated before M2-S5b. But at `TOLERANCE` 1.10
+      // p99 does not fire ANYWHERE on this grid at the two larger sample counts (its ratio
+      // maxes at 1.0651 / 1.0765), so `k99` is `Infinity` there and `kGating <= k99` is
+      // `x <= Infinity` — vacuously true. Pinning `k99` makes that visible instead of
+      // letting the comparison read as though it were doing work. QC round 1 proved the
+      // point: mutating `stressStat` to p99 produces six failures and NOT ONE of them is
+      // this line — the `toBe` pins below are what actually reject a bad statistic.
+      //
+      // The screen is kept anyway, and only because it stops being vacuous at n = 500,
+      // where p99 does fire and the comparison has content. Read it as the floor it is,
+      // not as the test that decided the statistic.
+      expect(k99).toBe(n === N_SUBSET_FLOOR ? 0.02 : Infinity);
+      expect(kGating).toBeLessThanOrEqual(k99);
 
-      // And the measured outcome, pinned: p95 fires at k = 0.020 at EVERY subset size,
-      // while p99 fires at NO tested k at ANY size. p95 is strictly MORE sensitive to this
-      // regression, not less.
-      expect(k95).toBe(0.02);
-      expect(k99).toBe(Infinity);
+      // THE PRECONDITION THE ORDERING PINS DEPEND ON, asserted BEFORE them so a `TOLERANCE`
+      // edit fails at its cause instead of somewhere downstream. The grid can only separate
+      // p50 from p95 while p95's ratio at k = 0.0075 still exceeds `TOLERANCE` — a margin of
+      // 0.12% at n = 2,500 (`KS`'s header records all three). Raise `TOLERANCE` and this line
+      // goes red saying "the grid no longer separates the statistics"; without it the first
+      // failure would be `expected 0.0075, received 0.01`, which reads as though the
+      // STATISTIC changed when what changed was the tolerance. Raised by CodeRabbit, which
+      // also agreed the fix is NOT to nudge the grid point to 0.008 — that would retune an
+      // outcome-bearing parameter to buy margin. If this fails, re-derive the grid
+      // deliberately and re-record the pins.
+      expect(ratio(broad(0.0075), ms, STATS.auditP95)).toBeGreaterThan(TOLERANCE);
+
+      // THE PRICE, PINNED AS A TESTED FACT rather than left in prose: at equal tolerance
+      // the superseded p95 fires STRICTLY EARLIER than the gating median. The `>` is the
+      // assertion; the two `toBe`s below pin WHICH grid points, so a future change that
+      // moves either statistic's sensitivity fails here rather than drifting. The swept
+      // magnitude of the gap is ~24% (0.00745 vs 0.00922, `KS`'s header) — NOT the ~33% the
+      // grid points alone would suggest, which is why the number belongs in `gate.ts` and
+      // only the ordering belongs here. See this block's header for why the switch is still
+      // correct despite the cost (in one line: p95 cannot be run at this tolerance).
+      expect(kGating).toBeGreaterThan(k95);
+      expect(kGating).toBe(0.01);
+      expect(k95).toBe(0.0075);
     });
   }
 
@@ -305,25 +393,28 @@ describe('GATED — a broad blast-cost regression must not be discarded by p95',
     // small relative move. p95 sits at ~0.158ms BELOW the tail, where the same absolute
     // cost is a much larger relative one. The tail does not just add noise to p99 — it
     // desensitises it.
-    expect(ratio(broad(0.005), ms, STATS.gating).toFixed(4)).toBe('1.0583');
-    expect(ratio(broad(0.01), ms, STATS.gating).toFixed(4)).toBe('1.1377');
-    expect(ratio(broad(0.02), ms, STATS.gating).toFixed(4)).toBe('1.3553');
-    expect(ratio(broad(0.005), ms, STATS.audit).toFixed(4)).toBe('1.0129');
-    expect(ratio(broad(0.01), ms, STATS.audit).toFixed(4)).toBe('1.0329');
-    expect(ratio(broad(0.02), ms, STATS.audit).toFixed(4)).toBe('1.0651');
+    expect(ratio(broad(0.005), ms, STATS.gating).toFixed(4)).toBe('1.0550');
+    expect(ratio(broad(0.01), ms, STATS.gating).toFixed(4)).toBe('1.1082');
+    expect(ratio(broad(0.02), ms, STATS.gating).toFixed(4)).toBe('1.2140');
+    expect(ratio(broad(0.005), ms, STATS.auditP95).toFixed(4)).toBe('1.0583');
+    expect(ratio(broad(0.01), ms, STATS.auditP95).toFixed(4)).toBe('1.1377');
+    expect(ratio(broad(0.02), ms, STATS.auditP95).toFixed(4)).toBe('1.3553');
+    expect(ratio(broad(0.005), ms, STATS.auditP99).toFixed(4)).toBe('1.0129');
+    expect(ratio(broad(0.01), ms, STATS.auditP99).toFixed(4)).toBe('1.0329');
+    expect(ratio(broad(0.02), ms, STATS.auditP99).toFixed(4)).toBe('1.0651');
   });
 });
 
 // --- REPORTED, never gating: the declared blind spot ---------------------------------
 
-describe('REPORTED, not gated — what p95 gives up, measured rather than described', () => {
+describe('REPORTED, not gated — what the gating median gives up, measured rather than described', () => {
   // These cases are deliberately NOT gating. An earlier draft made a tail-only case a
   // rejection rule, and that rule was self-fulfilling: a top-2%-by-ms injection leaves p95
   // unchanged BY CONSTRUCTION (every injected sample already sits above p95's rank), so
   // "p99 fires and p95 does not" was guaranteed for any large enough injection. The rule
   // could only ever confirm itself. It is replaced by measurement.
 
-  it('tail-only (top 2% by ms): p95 is EXACTLY unchanged — the blind spot, stated numerically', () => {
+  it('tail-only (top 2% by ms): the gating p50 is EXACTLY unchanged — the blind spot, stated numerically', () => {
     const { dueBlasts, ms } = buildFixture(N_FULL);
     const order = [...ms.keys()].sort((a, b) => ms[a]! - ms[b]!);
     const top = new Set(order.slice(Math.floor(N_FULL * 0.98)));
@@ -333,12 +424,17 @@ describe('REPORTED, not gated — what p95 gives up, measured rather than descri
       ms.map((m, i) => (top.has(i) ? m + k * dueBlasts[i]! : m));
 
     for (const k of KS) {
-      // Exactly 1.0000 — not "approximately". The injection lands entirely above p95's
-      // rank, so p95 cannot move by any amount of it. This is the honest shape of the
-      // trade: p95's insensitivity to tail-concentrated cost IS the property that
+      // Exactly 1.0000 — not "approximately". The injection lands entirely above the
+      // gating rank, so the statistic cannot move by any amount of it. This is the honest
+      // shape of the trade: insensitivity to tail-concentrated cost IS the property that
       // suppresses tail noise. No test design separates the two.
+      //
+      // Unchanged by the M2-S6 move, and that is the point worth pinning: p95 was ALREADY
+      // exactly 1.0000 here, so a median gives up nothing on this case that p95 had not
+      // already given up. The blind spot is inherited, not introduced.
       expect(ratio(tailOnly(k), ms, STATS.gating)).toBe(1);
-      expect(fires(ratio(tailOnly(k), ms, STATS.audit))).toBe(false);
+      expect(ratio(tailOnly(k), ms, STATS.auditP95)).toBe(1);
+      expect(fires(ratio(tailOnly(k), ms, STATS.auditP99))).toBe(false);
     }
   });
 
@@ -355,28 +451,52 @@ describe('REPORTED, not gated — what p95 gives up, measured rather than descri
       ms.map((m, i) => (dueBlasts[i]! >= 7 ? m + k * dueBlasts[i]! : m));
     for (const k of KS) {
       expect(fires(ratio(hi(k), ms, STATS.gating))).toBe(false);
-      expect(fires(ratio(hi(k), ms, STATS.audit))).toBe(false);
+      expect(fires(ratio(hi(k), ms, STATS.auditP95))).toBe(false);
+      expect(fires(ratio(hi(k), ms, STATS.auditP99))).toBe(false);
     }
   });
 
-  it('workload-correlated at dueBlasts >= 3: p95 CATCHES it, p99 does not', () => {
-    // PLAN DEVIATION, and it is the most consequential finding in this file. The plan
-    // specifies only the `>= 7` variant above, which selects 4 samples and therefore
-    // demonstrates nothing. This variant carries real mass (~11% of samples) and inverts
-    // the plan's expectation: a workload-correlated regression concentrated on the
-    // blast-heaviest ticks IS caught by p95, at k = 0.020, while p99 barely moves.
+  it('workload-correlated at dueBlasts >= 3: THE PRICE OF THE M2-S6 MOVE — p95 catches it, the gating p50 does not', () => {
+    // PLAN DEVIATION, and it is the most consequential finding in this file — now doubly
+    // so, because it is the one case where the M2-S6 switch to a median LOSES real
+    // coverage. It is pinned rather than softened so the loss can never be discovered by
+    // accident later.
     //
-    // So p95's blind spot is NARROWER than the plan assumed. It is specific to cost
-    // concentrated in the top ~2% BY DURATION — i.e. co-located with the noise tail — and
-    // not to workload-correlated regressions in general.
+    // The `>= 7` variant above selects 4 samples and demonstrates nothing. This variant
+    // carries real mass (270 of 2,500, ~11%) and models a regression scaling with blast
+    // MULTIPLICITY — an O(n^2) in blast membership scanning would look like this.
+    //
+    // Measured at k = 0.020: p95 moves +35.5%, the gating p50 moves +2.2%, p99 +1.9%.
+    // Against each statistic's own measured CI noise (see `gate.ts`'s table: +/-16.4% for
+    // p95, +/-2.8% for p50) that is a signal-to-noise of 2.2 for p95 and 0.8 for p50 — so
+    // p95 can detect this and the gating median genuinely cannot.
+    //
+    // WHY THE TRADE WAS STILL TAKEN, in one line: on the BROAD regression this gate
+    // primarily exists to catch, the ratio reverses — at k = 0.010 p50's signal-to-noise
+    // is 3.9 and p95's is 0.8, i.e. the statistic that catches THIS case cannot reliably
+    // catch the main one, and false-alarms on quiet runners besides (the M2-S6 CI failure
+    // at R = 1.8348 on byte-identical work). A gate that reliably catches the common case
+    // beats one that unreliably catches both. The uncovered case stays REPORTED —
+    // `stressStatP95` rides in every `PERF-REPORT` — so it is visible to a human reading a
+    // suspicious run even though it no longer decides pass/fail.
     const { dueBlasts, ms } = buildFixture(N_FULL);
     const selected = dueBlasts.filter((d) => d >= 3).length;
     expect(selected).toBe(270);
     const hi = (k: number): number[] =>
       ms.map((m, i) => (dueBlasts[i]! >= 3 ? m + k * dueBlasts[i]! : m));
-    expect(ratio(hi(0.02), ms, STATS.gating).toFixed(4)).toBe('1.3553');
-    expect(ratio(hi(0.02), ms, STATS.audit).toFixed(4)).toBe('1.0192');
-    expect(fires(ratio(hi(0.02), ms, STATS.gating))).toBe(true);
-    expect(fires(ratio(hi(0.02), ms, STATS.audit))).toBe(false);
+    // The p95 figure here is BIT-IDENTICAL to the broad injection's p95 at the same k
+    // (`1.355343307084382`, pinned above) — not a copy-paste slip. The element at p95's
+    // rank carries `dueBlasts >= 3` under either injection, so at THAT rank the two are
+    // the same measurement. It follows that this case is not an independent demonstration
+    // of p95 detecting concentration; what it independently shows is the GATING statistic
+    // failing to, which is the point being pinned.
+    expect(ratio(hi(0.02), ms, STATS.gating).toFixed(4)).toBe('1.0222');
+    expect(ratio(hi(0.02), ms, STATS.auditP95).toFixed(4)).toBe('1.3553');
+    expect(ratio(hi(0.02), ms, STATS.auditP99).toFixed(4)).toBe('1.0192');
+    // The blind spot, asserted as an OUTCOME rather than described: the gate does not
+    // fire, the superseded p95 would have. If a future change makes the gating statistic
+    // catch this again, this line fails and the trade gets re-examined deliberately.
+    expect(fires(ratio(hi(0.02), ms, STATS.gating))).toBe(false);
+    expect(ratio(hi(0.02), ms, STATS.auditP95)).toBeGreaterThan(TOLERANCE);
   });
 });

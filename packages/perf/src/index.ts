@@ -72,8 +72,10 @@ export {
 export {
   controlStat,
   stressStat,
-  // The pre-M2-S5b-P11 statistic, kept for audit — exported alongside the statistic it
-  // audits so a consumer can render both, not just the one that gates.
+  // The two superseded gating statistics, kept for audit — `stressStatP95` gated between
+  // M2-S5b P11 and M2-S6, `stressStatP99` before that. Exported alongside the statistic
+  // that replaced them so a consumer can render all three, not just the one that gates.
+  stressStatP95,
   stressStatP99,
   evaluateGate,
   TOLERANCE,

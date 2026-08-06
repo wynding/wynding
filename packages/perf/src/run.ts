@@ -97,10 +97,11 @@ const controlResult = runSampled(controlReplay, bundle);
 // here, of the next call's TIMED pass — the one that feeds the gate — so a GC pause
 // induced by those allocations could in principle land inside the measured region.
 // We are NOT reordering the passes to put distance between them: `stressStat` is a
-// p95 over the due-blast subset (1,427 samples as measured post-P9), not a max, so a
-// single induced pause cannot move it — and the argument is STRONGER under p95 than it
-// was under the p99 this originally cited, since p95 discards more of the tail. And
-// the measured `R` carries >2x headroom to the ceiling. Reordering would require
+// p50 over the due-blast subset (1,427 samples as measured post-P9), not a max, so a
+// single induced pause moves it by at most one order statistic, which is negligible at that
+// sample count — and the argument is STRONGEST under the p50
+// M2-S6 moved to, stronger than under the p95 and p99 this originally cited in turn,
+// since a median over >500 samples is the most pause-immune of the three. Reordering would require
 // splitting `runSampled`'s API into separately callable timed/untimed phases — a
 // structural change with a real chance of introducing the very timed/untimed
 // divergence its own post-pass equality proof (`harness.ts`'s hash/tick/phase
@@ -417,10 +418,17 @@ for (const a of controlAssertions) {
 // oracle's own "samples with >= 1 due blast" assertion already covers it above), not
 // a crash.
 //
-// The short-circuit is the oracle's FLOOR, not merely "> 0". `stressStat`'s whole
-// not-the-maximum argument rests on that floor: over 3 due-blast samples,
-// `percentile(…, 95)` returns the MAXIMUM — the single noisiest tick, exactly the
-// statistic a percentile was chosen to avoid. Such a run already exits non-zero via the
+// The short-circuit is the oracle's FLOOR, not merely "> 0", and M2-S6's move to a median
+// numerator narrows the argument rather than retiring it. Under the superseded p95 the
+// point was blunt: over 3 due-blast samples `percentile(…, 95)` returns the MAXIMUM, the
+// single noisiest tick — exactly the statistic a percentile was chosen to avoid. A median
+// of 3 is not the maximum, so that sentence no longer applies to the GATING statistic. Two
+// reasons survive and are why the floor stays where it is. First, `stressStat`'s entire
+// noise argument is "no single GC pause or preemption moves a median over hundreds of samples
+// by more than one order statistic", which is a claim about SAMPLE COUNT and is worthless at
+// 3, where one order statistic IS the whole distribution. Second, the
+// audit `stressStatP95` IS still the maximum at that size, and it rides in every
+// `PERF-REPORT` beside the gating figure. Such a run already exits non-zero via the
 // oracle, but with `>0` it would still publish `{"status":"evaluated","pass":true}` in
 // `PERF-REPORT`, indistinguishable from a real 1,427-sample run (the post-P9 measured
 // subset) to anyone diffing that line against a later re-measurement.
@@ -445,13 +453,20 @@ if (dueBlastSamples.length === 0 || dueBlastSamples.length < DUE_BLAST_SAMPLES_T
   if (gateResult.status === 'unset') {
     console.log(
       `  R0 is unset — recording run only, gate not enforced; commit this value. Observed R = ${gateResult.r.toFixed(4)} ` +
-        `(controlStat p50=${gateResult.controlStat.toFixed(3)}ms, stressStat p95=${gateResult.stressStat.toFixed(3)}ms, ` +
-        `audit-only stressStat p99=${gateResult.stressStatP99.toFixed(3)}ms)`,
+        `(controlStat p50=${gateResult.controlStat.toFixed(3)}ms, stressStat p50=${gateResult.stressStat.toFixed(3)}ms, ` +
+        `audit-only stressStat p95=${gateResult.stressStatP95.toFixed(3)}ms p99=${gateResult.stressStatP99.toFixed(3)}ms)`,
     );
   } else {
+    // The audit statistics ride on the EVALUATED line too, not only the unset one.
+    // `gate.ts`'s blind-spot block and `gate-fixture.test.ts` both justify the p50 move
+    // partly on "`stressStatP95` rides in every `PERF-REPORT`" — which was true of the JSON
+    // but not of this operator-facing line, in precisely the state the gate is meant to run
+    // in. A human scanning a suspicious green run is the reader that argument is about.
     console.log(
       `  R = ${gateResult.r.toFixed(4)} vs ceiling ${gateResult.ceiling.toFixed(4)} ` +
-        `(R0=${gateResult.r0} × TOLERANCE=${TOLERANCE}) — ${gateResult.pass ? 'PASS' : 'FAIL'}`,
+        `(R0=${gateResult.r0} × TOLERANCE=${TOLERANCE}) — ${gateResult.pass ? 'PASS' : 'FAIL'} ` +
+        `(controlStat p50=${gateResult.controlStat.toFixed(3)}ms, stressStat p50=${gateResult.stressStat.toFixed(3)}ms, ` +
+        `audit-only stressStat p95=${gateResult.stressStatP95.toFixed(3)}ms p99=${gateResult.stressStatP99.toFixed(3)}ms)`,
     );
   }
 }
@@ -590,6 +605,35 @@ if (escalation.staleKnownOpen.length > 0) {
 if (gateResult !== null && gateResult.status === 'evaluated' && !gateResult.pass) {
   console.log('');
   console.log('=== GATE FAILURE: R exceeds R0 × TOLERANCE ===');
+}
+
+// The gate-off window gets a banner as loud as the failure one. `'unset'` exits ZERO by
+// design (`gatePass` above) — a recording run must not block the very PR that is
+// collecting the samples — which is exactly why it needs to be impossible to skim past in
+// a green log. Without this the only thing standing between a deliberate, hours-long
+// window and a permanently unenforced gate is a sentence in an ADR.
+//
+// A banner is not a tripwire, though, and QC round 1 was right to say so: this state exits
+// ZERO and no test goes red for it, so nothing here would stop a merge-and-forget. The
+// guard lives in `ci.yml` — the `perf` job parses this report and fails when a run on the
+// DEFAULT BRANCH does not carry a usable baseline — `r0` absent, null, or not a positive
+// finite number — or carries no `PERF-REPORT` line at all (it fails closed: an absent or
+// unparseable report cannot prove the gate is enforced). An ALARM rather than a
+// block, and the distinction is kept everywhere this is
+// described: that trigger is `push`, which fires after a merge lands, and `perf` is not a
+// required check, so it turns an unenforced gate on `main` loudly red without being able to
+// stop one arriving. That placement is deliberate: "the gate may be off on a PR but never
+// on `main`" is a branch policy, and expressing it here would mean `run.ts` reading CI
+// environment variables and behaving differently under them.
+//
+// Registering the state on `KNOWN_OPEN_ASSERTIONS` was the other candidate and was rejected:
+// its stale-waiver rule fires when `R0` is RESTORED, which is the direction already covered
+// by `gate.test.ts`'s value pin on `R0`, and it would leave a waiver entry someone has
+// to remember to remove. The branch check has no such residue.
+if (gateResult !== null && gateResult.status === 'unset') {
+  console.log('');
+  console.log('=== GATE NOT ENFORCED: R0 is unset — this run RECORDS, it does not gate ===');
+  console.log('    Commit an R0 before merging — see the procedure in gate.ts R0 doc.');
 }
 
 // 10) Machine-readable report — a single JSON line, prefixed `PERF-REPORT: `, so Phase 6

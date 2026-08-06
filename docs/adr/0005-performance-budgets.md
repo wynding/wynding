@@ -2,8 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-18
-- **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below); 2026-08-04
-  (M2-S6 — the stress scene is not extended for the stun story; see the Amendment below)
+- **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below); 2026-08-03
+  (M2-S5b P11 — numerator p99 → p95, `R0` 1.42); 2026-08-04 (M2-S6 — the stress scene is
+  not extended for the stun story; see the Amendment below); 2026-08-05 (M2-S6 QC —
+  numerator p95 → p50, `TOLERANCE` 1.10, `R0` re-recorded 1.42 → 1.00, **provisional**)
 - **Rulings:** 2026-07-31 (all three findings answered; see Findings from the spike)
 
 ## Context
@@ -368,6 +370,270 @@ tell a budget that does not exist from one that could not be measured.
    must target the stress arm's run-to-run **level**. The perf diagnosis remains unassigned
    (S6–S10).
 
+   **AMENDED 2026-08-05 (M2-S6 QC) — the numerator moved to p50, `TOLERANCE` tightened to
+   1.10, and the MAGNITUDE of the spread left unexplained above is now accounted for**
+   (the p95-vs-p99 ordering within it is not — see "What this does and does not explain"
+   below). The gate is `p50(stress due-blast ticks) / p50(control)`.
+
+   The trigger was a CI failure, not a preference: `R = 1.8348` against the 1.7750 ceiling
+   on a commit whose only delta from the previous PASSING head was a compile-time function
+   that never runs inside the measured loop. Every workload oracle was byte-identical across
+   the two runs (304 peak creeps, 224 median, 1,427 due-blast samples, 175 DoT records,
+   route length 329), and the numerator barely moved (0.5753 → 0.5739). What moved was the
+   DENOMINATOR: the control arm ran 23% faster, and since `R` divides by it, a faster
+   control fails the build.
+
+   **The mechanism, measured over four consecutive CI runs on byte-identical work:**
+
+   | series (spread here is `(max−min)/min`, NOT the half-spread used for ratios above — the two differ by 2.2×–2.5× row by row, so do not read 31.1% against ±2.8%; per-run values are in `gate.ts`'s `stressStat` table) | range           | spread |
+   | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ------ |
+   | control p50                                                                                                                                                                                                           | 0.3128 – 0.4102 | 31.1%  |
+   | stress p50                                                                                                                                                                                                            | 0.3282 – 0.4114 | 25.3%  |
+   | control p95                                                                                                                                                                                                           | 0.6824 – 1.1747 | 72.1%  |
+   | stress p95                                                                                                                                                                                                            | 0.5193 – 0.7188 | 38.4%  |
+
+   Both arms' MEDIANS shift together, by similar amounts — that is the runner's speed
+   varying between jobs, and it is **common-mode**, which is exactly what a ratio cancels
+   (cross-arm correlation **+0.99**). The tails are much noisier, and the tempting story is
+   that they are independent per arm and therefore compound rather than cancel. **These four
+   runs do not support that story** (they do not refute it either — see "How much n = 4
+   settles" below): the two arms' p95s correlate **+0.88**, so tail noise also largely
+   cancels. What differs is how much is LEFT: the tails are both
+   noisier per arm and less well correlated, so more survives the division — **1.65×–2.55×**
+   the per-arm half-spread (control p95 31.41% against control p50 12.31%; stress p95 17.35%
+   against stress p50 10.50%), on top of the +0.88-versus-+0.99 correlation drop.
+
+   Two corrections to how this was first written, both worth keeping because the second one
+   is the reusable lesson. An earlier draft compressed the per-arm term into "roughly 2.5×
+   larger per-arm variance"; a QC pass then deleted that as unreproducible and replaced it
+   with 26.5/13.5/16.1/11.3 — figures computed on a **midpoint** basis, a third convention
+   neither document declares, while `gate.ts` declares a **median** basis two paragraphs
+   from where they were quoted. Under the declared convention the numbers are the ones above
+   and the multiplier reaches 2.55×, so the original "~2.5×" was reproducible all along. The
+   underlying defect was neither number: this table records only min/max, so no reader could
+   apply either convention to it. That is fixed at the source — `gate.ts`'s `stressStat` doc
+   now carries the **per-run** values for all four arms, and every figure here is derivable
+   from them to within the last printed digit. Two caveats stated there and not repeated in
+   full: the reconstruction misses one endpoint (this table's control-p95 max, 1.1747, comes
+   out 1.17462), and the derived figures are computed from unrounded scales, so recomputing
+   from the printed 4 dp cells can move a last digit.
+
+   An illustration, not a check, and a selected one: within the CONTROL arm across the four
+   jobs, p50 and p95 correlate only **+0.64** — lower than the cross-arm p95 correlation. The
+   same quantity in the STRESS arm is **+0.36**. Tail behaviour is not well predicted by the
+   level a run executes at.
+
+   **How much n = 4 settles here.** Only the +0.99 excludes zero (95% CI [0.68, 1.00]); the
+   +0.88 carries a CI of roughly [−0.52, 0.998] and is not separable from the others. So
+   these four runs do **not support** the "tails are independent draws that compound" story —
+   they do not refute it, and an earlier wording of this paragraph said "refutes", which is
+   the same over-reading this amendment corrects elsewhere. The design rests on the R table's
+   4.2×–5.9× advantage, not on the correlations, which are mechanism rather than evidence.
+
+   **What this does and does not explain.** It explains the MAGNITUDE of the 37.7% / 20.2% /
+   33.8% spreads this finding recorded and could not account for: they are all ratios with a
+   tail numerator, and a tail numerator leaves several times more residue than a median one.
+   It does **not** explain the p95-versus-p99 ORDERING inside those figures — the
+   20.2%-against-11.1% anomaly recorded below, where the statistic discarding MORE tail came
+   out noisier — and it does not even re-test it. That anomaly compares **p95/p50 against
+   p99/p50**: mixed pairings sharing one denominator. The closest thing the new cohort offers
+   is **p95/p95 against p99/p99** (16.4% vs 11.7%), which agrees on sign but varies both
+   terms; no p99/p50 row was recorded, so the like-for-like comparison does not exist here.
+   Even taken at face value that gap is 1.41× at n = 4, which the paragraph above places
+   inside a four-sample estimate's own error. The anomaly stands as recorded, with its cause
+   unattributed.
+
+   **What four samples do and do not establish.** The gap between the median ratio and
+   every tail ratio is 4.2×–5.9× and the four runs are paired, so that ordering is
+   solid. The gaps _among_ the tail ratios are not — p95/p95 versus p99/p99 is 1.41×,
+   versus p95/p50 is 1.06× — so nothing here should be read as "matching percentiles is
+   worse than mixing them". The defensible claim is narrower and sufficient: **the median
+   ratio is decisively quieter than any tail ratio.**
+
+   It follows that the prior diagnosis is **half right and half wrong**, and the wrong half
+   matters. There is a run-to-run location shift — but it is in BOTH arms, not "the stress
+   arm's whole distribution", which is precisely why a ratio can work at all. And "no
+   percentile choice can fix that" is refuted by measurement: matched medians give
+   `R` a **±2.8%** half-spread (0.9938 – 1.0493) over the same four runs, against ±15.5%
+   for the previously shipped p95/p50 and ±16.4% for a like-for-like p95/p95.
+
+   **`TOLERANCE` 1.25 → 1.10, declared before the new `R0` was recorded.** A tolerance is a
+   statement about admitted noise, so it is set from the statistic's variance, never from
+   the baseline's value. This is a deliberate CHANGE of posture: headroom goes from 1.6×
+   the half-spread to 3.6×.
+
+   **The causal order matters and is easy to state backwards.** The statistic does not buy
+   sensitivity — at equal tolerance the median is the LESS sensitive of the two, firing at
+   k = 0.00922 on `gate-fixture.test.ts`'s broad injection where p95 fires at 0.00745, a ~24%
+   larger regression needed. What it buys is noise, and the low noise makes a tolerance
+   available that was previously unaffordable: p95 cannot be run at 1.10, because its own
+   ±16.4% spread exceeds that threshold and it would fail on quiet runners. The end-to-end
+   gain — old gate k = 0.01536, new gate k = 0.00922, **1.67×** — belongs to the tolerance;
+   the tolerance is only available because of the statistic.
+
+   **Those `k` figures are swept, not read off the fixture's grid, and they are quoted
+   unrounded deliberately.** `gate-fixture.test.ts` evaluates a five-point `KS` grid, so its
+   pinned 0.0075 and 0.0100 are the nearest grid points above each true threshold — right for
+   the ORDERING it asserts, wrong as magnitudes. Quoting them as thresholds is what produced
+   this amendment's original "k = 0.020 → 0.010", a claimed 2.00× where the swept answer
+   (step 1e-5, n = 2,500) is 1.67×; and the first attempt to correct that quoted the sweep by
+   name while still printing the grid's 0.0075, which turns the ~24% gap into 23%. Rounding a
+   swept value to the grid's precision reintroduces the error at one decimal place lower.
+
+   **A unit caveat, since these are percentages.** `R` is now near 1.00, so both arms are
+   dominated by the same baseline per-tick cost. A 10% move in `R` is therefore **not** a
+   10% blast-cost regression — it is ~10% of total tick cost. Nor should the two tolerances
+   be converted into an "N× tighter in absolute milliseconds" claim (this amendment said
+   ~3.4×): 1.25 bounded a **p95** of the due-blast subset and 1.10 bounds a **median** of
+   it, so those are headrooms on different statistics and their ratio compares nothing.
+   Reason about the `k` values, which are read off one common injection.
+
+   **The price, stated plainly.** A regression concentrated on the blast-heaviest ticks —
+   the shape an O(n²) in blast membership scanning would take — is now invisible to the
+   gate. On the fixture's `dueBlasts >= 3` injection (~11% of samples) p95 moves +35.5%
+   where the gating median moves +2.2%; against each statistic's own noise that is a
+   signal-to-noise of 2.2 versus 0.8. p95 detects it and the median cannot. The trade is
+   taken because the ordering REVERSES on the broad regression the gate primarily exists to
+   catch (p50 scores 3.9, p95 scores 0.8): the statistic that catches the concentrated case
+   cannot reliably catch the common one, and false-alarms besides. A gate that reliably
+   catches the common case beats one that unreliably catches both. `stressStatP95` is still
+   computed and reported in every `PERF-REPORT`, and the blind spot is pinned as an
+   assertion in `gate-fixture.test.ts` so it cannot be rediscovered by accident.
+
+   **`R0` was set to `null` at this amendment and RE-RECORDED at 1.00 before it shipped** —
+   see the record immediately below, which is the current state. 1.42 baselines p95/p50 and
+   says nothing about p50/p50, so the gate reported `R` without enforcing it for the length
+   of the recording window (that is what the `'unset'` status exists for) and no longer does.
+   The procedure written here asked for five samples with each run's ID and RESOLVED runner
+   image recorded, since `ci.yml` says `ubuntu-latest` and nothing here pins an image; the
+   record below explains why it took seventeen and replaces the span-based escalation rule.
+
+   **RECORDED 2026-08-05: `R0` = 1.00 (PROVISIONAL)**, ceiling **1.1000** — the median of **17** CI samples
+   (run 31041932972, attempts 1–17, head `a1600c9`, `ubuntu-24.04`) rounded DOWN. The null
+   window is closed, and it closed inside this PR rather than in a follow-up, which was the
+   commitment.
+
+   **Provisional, for three reasons, all raised in review and none declined.** (1) It is not a
+   runner-class calibration: every sample is an attempt of one workflow run on one
+   `ubuntu-24.04` image within a few hours. The only other reading is the four diagnostic runs
+   of 2026-08-03/05 (median 1.0063 against 1.0065), but their provenance was never captured —
+   no run or job ids — so whether they are four separate runs or four attempts of one is
+   UNKNOWN, and if the latter they carry the identical defect. They are not cross-occasion
+   evidence. (2) The flake-rate figures
+   below are model outputs, not measured rates — a Student-t predictive tail assumes i.i.d.
+   normal sampling around a mean, while `R0` is a floored median and this cohort is clustered
+   and left-skewed; they are illustrative and are **not** part of the acceptance rationale.
+   (3) The escalation rule was selected in-sample: drafts 1 and 2 were rejected for failing
+   against these 17 samples and draft 3's pass is reported on the same 17, which is fitting
+   rather than validation. **What the baseline rests on instead** — an argument that needs no
+   distributional assumption anywhere in it, because the cohort cannot support one. First,
+   **`perf` is advisory**: branch protection requires `verify` and `codex-freshness` only (as
+   configured at the time of writing — this repo cannot assert that, and if `perf` is ever made
+   required this argument voids silently), so a wrong baseline costs a red non-blocking job and
+   a human look. Second, a **purely descriptive margin**: the largest `R` ever observed under
+   this statistic, across BOTH readings on record, is **1.0493** (from the four diagnostic runs;
+   this cohort's own max is 1.0362) against a **1.1000** ceiling — a **4.8%** gap in the raw
+   measurement, offered as a fact and not as a flake rate. An earlier draft quoted 1.0362 /
+   6.2%, which dropped the four-run cohort from the max while the next clause cites its median. Third, the **median reproduces**
+   across the two readings on record (1.0063, 1.0065) — medians only; the sd agreement is
+   dropped, being a coincidence at n = 4 (95% CI 1.45–9.51%), and the earlier "3.61 sample-sds
+   with nothing near it" is dropped too, being a tail claim from an estimated σ, which is what
+   limit 2 says this cohort cannot support. Enough to enforce a gate that currently enforces
+   nothing; not enough to call it calibrated.
+
+   **Discharging the provisional status.** Dispersion and fleet-representativeness are
+   different measurements and need different cohorts, so do not pool. For dispersion, the
+   escalation rule stands as written (one head, one image, ≥10 samples) — pooling across heads
+   mixes workload drift into `sd(R)`, which would _loosen_ the rule. For fleet coverage, the
+   standing "re-record when the runner class changes" rule already yields one baseline per
+   image; agreement between per-image baselines is the evidence, disagreement is the finding.
+   PROVISIONAL retires when both limit 1 and limit 3 clear: a second image has its own baseline
+   and the two agree, and the rule has been applied once to a cohort that did not select it.
+   Limit 2 never clears — the flake figures are model outputs permanently, whatever the sample
+   size. An earlier draft of this plan asked for "≥30 runs spanning ≥10 workflow runs and ≥2
+   images", which the escalation rule's own precondition forbids; it is recorded here so it is
+   not proposed again. **The weaknesses of the plan that replaced it, stated rather than left
+   to `gate.ts`:** it has no owner and no date; the raw `R` values live only in CI logs under a
+   90-day retention with no artifact upload, so the data expires; a second runner image arrives
+   on GitHub's schedule, not this project's, so the timing is outside our control; and nothing
+   in CI represents the provisional status — `ci.yml`'s alarm checks only that `r0` is a
+   positive finite number, which a provisional baseline satisfies exactly as a calibrated one
+   would. Treat the next runner image bump as the trigger.
+
+   Closing the window inside this PR mattered because a null `R0` is a GREEN state: the gate reports, `perf`
+   exits 0, and every check passes while nothing is enforced. `ci.yml`'s default-branch alarm
+   is the backstop and it only fires AFTER a merge — detection, not prevention.
+
+   **The escalation rule fired at n = 5.** It was escalated to the owner rather than
+   reinterpreted, which was right, and the owner authorised more samples. The rule specified
+   a FIXED cohort of five, and at that n it is a coarse screen (~7% false-alarm rate against
+   this noise level) — crude, not ill-formed. Extending the cohort is what introduced the
+   n-dependence, and that was an authorised deviation from the protocol, not a discovery
+   about the rule. The n-dependence is nonetheless real and disqualifies a bare span
+   threshold for the REPLACEMENT: simulated here, P(span > 1.10) is 4.5% at n = 4, 6.8% at
+   n = 5, 21% at n = 10 and 42% at n = 17. The threshold is also coupled to `TOLERANCE`,
+   which this same change tightened 1.25 → 1.10 — at 1.25 neither this cohort (1.1058) nor
+   S5b's (1.2021) would have fired, so the firing owes as much to the tightening as to n.
+
+   **A second cohort is consistent with the baseline — but do not over-read it.** The four
+   diagnostic runs' own sample sd is **2.55%** of their median against these seventeen runs'
+   **2.57%**, and their medians are **1.0063** and **1.0065**. The n = 4 sd carries a 95% CI
+   of 1.45%–9.51%, so agreement to 0.02 percentage points is coincidence rather than
+   confirmation; and the two cohorts are days apart on the same image, not independent
+   samples of the runner fleet over time. Read it as "consistent with", not "settles it".
+   (The d2 conversion — n = 4 → 2.68%, n = 17 → 2.74% — explains the n = 5
+   excursion rather than establishing anything; the n = 4 figure must be derived from the
+   unrounded 2.758%, not the published 2.8%.)
+
+   **Headroom, stated without flattering itself.** The margin is measured from the
+   distribution's centre, not from `R0` — `R0` is the median FLOORED, deliberately below
+   centre, so "a 10% margin" claims the conservatism and spends it. Real headroom is
+   **3.61σ** from the median (3.75σ from the mean). And σ is estimated from 17 points, so the
+   predictive tail is Student-t, not normal: **~1 noise-only failure in 690 runs** (1 in 910
+   mean-centred). An earlier draft claimed 1 in 18,000, which needed BOTH the normal
+   approximation and the floored-`R0` margin. As probabilities: 5.6e-5 → 1.5e-4 (the
+   centring, ×2.7) → 1.4e-3 (the t, ×9.6), so the t step is 93% of the increase.
+   **The pessimistic branch, quantified:** at the σ CI's upper bound (3.93%) the margin is
+   **2.37σ** — 1 in 114 normal, **1 in 58** under the same t treatment. At 700–1,400 gated runs a year, using
+   the t figure on BOTH branches: **1–2 failures a year** near the point estimate, **12–24 —
+   monthly to twice monthly** near the upper bound. (An earlier draft said "every other
+   month", reachable only by using the normal 1-in-114 and the low end of the run rate — the
+   same substitution this paragraph indicts one sentence earlier.) **Illustrative only** — both figures assume i.i.d. normal
+   sampling around a mean, and this cohort is clustered, left-skewed and summarised by a
+   floored median. They are not the acceptance argument; see the provisional paragraph above
+   for what is. These
+   seventeen are also attempts of ONE workflow run, clustered in time, and the cohort is
+   left-skewed (g1 = −1.36), which the χ² bound above assumes away.
+
+   **Replacement rule, third draft — the first two failed against this cohort.** Draft 1 used
+   `TOLERANCE − 1`, which is not the margin (flooring `R0` discards up to 0.01 before the gate
+   exists, 0.25σ here). Draft 2 tested against the σ upper bound, which this very cohort fails
+   at 2.37 and which is unsatisfiable below n ≈ 68. **What ships: ≥10 samples on one head and
+   image; compute both `(R0 × TOLERANCE − median) / sd ≥ 3` and the same margin against the
+   97.5% two-sided χ² upper bound ≥ 2, and escalate if EITHER fails.** Here: 3.61 and 2.37, both pass —
+   IN-SAMPLE, on the same 17 that rejected drafts 1 and 2, so this is the rule's arithmetic on
+   the data that selected it, not a validation of it. The bound test is the stricter one below n = 18 — it implies a point margin of
+   3.65 at n = 10 and 3.04 at n = 17 — so both are tests, not a test plus a disclosure. It is
+   also curable by adding samples, since the bound tightens with n. It remains blind to image-bump drift,
+   constrains dispersion but not location creep, and has 50% power against a 9.3% regression
+   needing 13.6% for 95% power. **Note also that the original span condition is still met at
+   n = 17 (1.1058 > 1.10); the baseline ships on the acceptance argument above — advisory blast
+   radius, a raw 4.8% margin, a reproducing median — with the owner informed, **not** on the σ
+   argument (limit 2 retracts it) and not
+   because the trigger stopped firing.**
+
+   On cancellation, scoped honestly: raw control p50 spanned **63%** across the cohort while
+   `R` spanned **10.6%** — but that 63% rests on two fast runners; drop them and the other
+   fifteen span 14.7%. `corr(R, control p50)` is **+0.14** (n = 17, not significant). Read it
+   as "no residual speed dependence detected", not as a demonstration — a ratio cancels any
+   multiplicative machine factor by construction. "0 of 17 exceed the ceiling" is weak,
+   in-sample evidence: the ceiling was fitted to those same 17, so agreement is expected —
+   though not _forced_, since any sample above 1.1000 would have exceeded it, as one did in
+   the 2.49 era.
+
+**The substance of the 2026-07-31 ruling is still untouched**: `perf` stays non-required
+and a flake does not block a merge.
+
 Everything else measured clear, with margin: JS heap **42.1 MB** on the low-end profile (the one
 the ~256 MB budget is written for), worst-of-20 input latency **34.4 ms** against 100 ms, and
 initial JS **0.36 MB** gzipped against 3 MB — **JS only, and that is the whole payload:
@@ -378,6 +644,13 @@ budget, but that figure is **indicative only** — the headless harness is unthr
 so it speaks to neither device budget directly, per (d) above.
 
 ## Amendment — 2026-08-04 (M2-S6, the stun story) — the stress scene is NOT extended, and `R0` is NOT re-recorded
+
+> **The `R0` half of this heading was overtaken the next day.** The scene-extension exception
+> below stands unchanged. The "`R0` is not re-recorded" half did not survive: the CI run this
+> amendment authorised came back over the ceiling, and Finding 3's **2026-08-05** amendment
+> moved the numerator to p50, `TOLERANCE` to 1.10, and re-recorded `R0` at 1.00 (ceiling 1.1000).
+> Read everything below about `R0`, the ceiling, and "do not re-record" as the state S6's own
+> PR ran under, not as instructions.
 
 m2.md's S4 entry commits the stress scene to being "extended and re-measured by every
 subsequent effect story." S6 takes an explicit, dated exception (Rob's ratification, ahead
@@ -417,6 +690,12 @@ CI perf job on the PR, against `R0 = 1.42` / ceiling `1.7750` (unchanged from th
 above — S6 does not touch the scene, so it does not move `R0` either). Escalate, do not
 improvise: if CI breaches the ceiling, stop and report; do not re-record `R0`, do not widen the
 ceiling.
+
+_(SUPERSEDED 2026-08-05, M2-S6 QC — that escalation rule fired: CI came in at `R = 1.8348`
+against the `1.7750` ceiling on work whose oracles were byte-identical. It was reported rather
+than improvised around, and the outcome is Finding 3's 2026-08-05 amendment above: the numerator
+is now p50, `TOLERANCE` is 1.10, and `R0` is 1.00 (ceiling 1.1000, provisional). The `1.42` / `1.7750`
+pair recorded here is what S6's own PR ran against, not the live gate.)_
 
 ## Consequences
 

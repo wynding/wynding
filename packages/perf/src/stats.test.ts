@@ -45,8 +45,11 @@ describe('percentile()', () => {
     // Every prior test above uses counts where `Math.ceil` and `Math.floor` agree on
     // the rank, so a `Math.ceil -> Math.floor` mutant in `percentile()` survived
     // unnoticed — including at the SIZE and PERCENTILE the real gate actually runs (the
-    // stress run's due-blast subset, 1,427 samples as measured post-M2-S5b-P9, and p95
-    // since P11 moved `stressStat` off p99; both were 1,671/p99 before those packets).
+    // stress run's due-blast subset, 1,427 samples as measured post-M2-S5b-P9). NOTE the
+    // percentile below is p95, which the GATE no longer uses — M2-S6 moved `stressStat` to
+    // p50 (p95 was P11's, p99 before that) — but p95 is still SHIPPED as `stressStatP95`
+    // for audit, and this case exists to pin `percentile`'s nearest-rank arithmetic at a
+    // realistic size, which it does regardless of which rank the gate reads.
     // 1,427 samples: ceil(95/100 * 1427) - 1 = ceil(1355.65) - 1 = 1356 - 1 = 1355 ->
     // index 1355 -> value 1356. `Math.floor` instead would give floor(1355.65) - 1 =
     // 1354 -> value 1355, a DIFFERENT answer, so this case kills that mutant.
