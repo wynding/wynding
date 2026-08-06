@@ -390,6 +390,34 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     expect(op!.rightX).toBeGreaterThan(0);
   });
 
+  it('flips BELOW the creep when the upward cue would leave the viewport (Codex P2, PR #87)', () => {
+    // A flyer near the canvas top — the row-0-openings board, which P1's axis-alignment
+    // gate admits because entrance and exit share a row. Without the flip the whole
+    // wingspan draws at negative y and is never seen, and since `flying` shares
+    // `normal`'s silhouette that removes the ONLY air-vs-ground channel.
+    const nearTop = airborneCuePaintOps({ x: 100, y: R * 0.5, airborne: true }, R, AIRBORNE, 0);
+    const [flipped] = nearTop;
+    expect(flipped!.apexY).toBeGreaterThan(R * 0.5); // below the creep centre, not above
+    expect(flipped!.leftY).toBeGreaterThan(R * 0.5);
+    for (const y of [flipped!.apexY, flipped!.leftY, flipped!.rightY]) {
+      expect(y).toBeGreaterThanOrEqual(0); // and on-canvas
+    }
+
+    // Mirroring only changes the SIGN — every radius, and so every clearance derived in
+    // the CUE-RADIUS ORDERING block, is preserved.
+    const centre = { x: 0, y: 0 };
+    const up = airborneCuePaintOps({ ...centre, airborne: true }, R, AIRBORNE, -Infinity)[0]!;
+    const down = airborneCuePaintOps({ ...centre, airborne: true }, R, AIRBORNE, 0)[0]!;
+    expect(Math.abs(down.apexY)).toBeCloseTo(Math.abs(up.apexY), 10);
+    expect(Math.abs(down.leftY)).toBeCloseTo(Math.abs(up.leftY), 10);
+    expect(down.leftX).toBe(up.leftX); // horizontal span untouched
+  });
+
+  it('does NOT flip when there is room above — the default stays upward', () => {
+    const [op] = airborneCuePaintOps({ x: 100, y: 500, airborne: true }, R, AIRBORNE, 0);
+    expect(op!.apexY).toBeLessThan(500);
+  });
+
   it('takes no renderTimeMs and has no reduced-motion branch — a domain is not a timed status', () => {
     // Same posture as `wardPaintOps`'s own test above: calling the builder with only
     // its documented 3 parameters (creep, r, colour) is itself the assertion.

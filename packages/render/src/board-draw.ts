@@ -331,10 +331,13 @@ export function drawCreeps(
     // `armored-flyer` (S10) reads as armored (the hexagon above) AND airborne (this) at
     // once. Catalog-derived (`CreepVM.domain === 'air'`), so — like the ward cue right
     // above — it takes no `renderTimeMs` and has no reduced-motion branch.
+    // The `0` is the canvas top: the cue mirrors below the creep rather than drawing
+    // off-screen, for a flyer on a board whose openings sit on row 0 (Codex P2, PR #87).
     for (const tel of airborneCuePaintOps(
       { ...p, airborne: c.domain === 'air' },
       r,
       pal.airborne,
+      0,
     )) {
       g.lineStyle(2, tel.colour, tel.alpha);
       g.lineBetween(tel.apexX, tel.apexY, tel.leftX, tel.leftY);

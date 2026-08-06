@@ -24,8 +24,10 @@
  *  read as armored AND airborne, which it does by keeping `'hexagon'` and gaining the
  *  wingspan. A per-domain base shape would make that combination unrepresentable.
  *  The consequence, stated because it is a real one (ship-review, M2-S7): at the
- *  silhouette itself `flying` and `normal` are identical, and the wingspan that
- *  separates them draws a cell above the creep rather than on it. */
+ *  silhouette itself `flying` and `normal` are identical, so the wingspan is the ONLY
+ *  channel separating them — which is exactly why `airborneCuePaintOps` mirrors the cue
+ *  below the creep rather than letting it leave the viewport (Codex P2, PR #87). It
+ *  draws a cell away from the creep, above by default and below at the top edge. */
 export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
 
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
@@ -475,10 +477,22 @@ export function airborneCuePaintOps(
   creep: { readonly x: number; readonly y: number; readonly airborne: boolean },
   r: number,
   airborneColour: number,
+  minY = Number.NEGATIVE_INFINITY,
 ): readonly AirborneCuePaintOp[] {
   if (!creep.airborne) return [];
-  const apexY = creep.y - r * AIRBORNE_APEX_R_MUL;
-  const wingY = creep.y - r * AIRBORNE_WING_Y_MUL;
+  // FLIP BELOW WHEN THE CUE WOULD LEAVE THE VIEWPORT (Codex P2, PR #87). The offsets
+  // here are upward, and a board may legally put BOTH openings on row 0 — entrance
+  // (x,0) → exit (y,0) is equal-row, so P1's axis-alignment gate admits it — which puts
+  // a flyer's centre half a cell below the top edge and the whole wingspan off-canvas
+  // for its entire route. Not cosmetic: `flying` deliberately shares `normal`'s base
+  // silhouette (see `CreepShape` above), so this cue is the ONLY channel telling air
+  // from ground, and ADR 0003 requires the shape cue to be PRESENT, not merely
+  // specified. Mirroring preserves every radius — and so every clearance derived in the
+  // CUE-RADIUS ORDERING block — because only the sign changes.
+  const flip = creep.y - r * AIRBORNE_APEX_R_MUL < minY;
+  const sign = flip ? 1 : -1;
+  const apexY = creep.y + sign * r * AIRBORNE_APEX_R_MUL;
+  const wingY = creep.y + sign * r * AIRBORNE_WING_Y_MUL;
   return [
     {
       kind: 'wingspan',
