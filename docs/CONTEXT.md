@@ -19,7 +19,7 @@ _Avoid_: map, field, level.
 **Creep**:
 An enemy unit that travels the board from an entrance toward the exit. Creeps vary
 along **axes** — speed, durability (hit points + **armor**), **domain**
-(ground/flying), effect-immunities, and role (e.g. a `boss`) — composed freely
+(ground/air), effect-immunities, and role (e.g. a `boss`) — composed freely
 rather than as fixed kinds.
 _Avoid_: enemy, mob, monster, minion.
 
@@ -133,8 +133,10 @@ _Avoid_: defense, resistance (armor is flat and direct-hit-only).
 
 **Domain**:
 Whether a unit acts on the ground or in the air. Each creep has a domain
-(ground/flying); each **attacking** tower targets ground, air, or both, and only
+(ground/air); each **attacking** tower targets ground, air, or both, and only
 hits creeps in a domain it targets. A support-only tower has no target domain.
+An air creep is colloquially a _flyer_ — but `flying` is a catalog **creep id**,
+not a domain value; the domain is `air`.
 _Avoid_: layer, plane, type.
 
 **Boss**:

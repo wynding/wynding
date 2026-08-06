@@ -10,6 +10,7 @@ import {
   dotTelegraphPaintOps,
   stunTelegraphPaintOps,
   wardPaintOps,
+  airborneCuePaintOps,
 } from './creep-paint';
 import { resolvePalette } from './palette';
 
@@ -217,6 +218,7 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
 // Driven from the REAL palette, like `POISONED` above.
 const STUNNED = resolvePalette('default').stunned;
 const WARDED = resolvePalette('default').warded;
+const AIRBORNE = resolvePalette('default').airborne;
 
 describe('stunTelegraphPaintOps (M2-S6) — the stun telegraph', () => {
   it('is empty when the creep is not stunned', () => {
@@ -322,6 +324,77 @@ describe('wardPaintOps (M2-S6) — the ward cue', () => {
     // fail to compile if this builder ever grew one by mistake.
     const a = wardPaintOps({ x: 1, y: 2, warded: true }, R, WARDED);
     const b = wardPaintOps({ x: 1, y: 2, warded: true }, R, WARDED);
+    expect(a).toEqual(b); // deterministic, no hidden time dependency
+  });
+});
+
+describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
+  it('is empty for a ground creep (not emitted)', () => {
+    expect(airborneCuePaintOps({ x: 0, y: 0, airborne: false }, R, AIRBORNE)).toEqual([]);
+  });
+
+  it('is emitted for an air creep — a single wingspan op', () => {
+    expect(airborneCuePaintOps({ x: 5, y: 6, airborne: true }, R, AIRBORNE)).toEqual([
+      {
+        kind: 'wingspan',
+        apexX: 5,
+        apexY: 6 - R * 2.9,
+        leftX: 5 - R * 0.9,
+        leftY: 6 - R * 2.6,
+        rightX: 5 + R * 0.9,
+        rightY: 6 - R * 2.6,
+        colour: AIRBORNE,
+        alpha: 1,
+      },
+    ]);
+  });
+
+  it("composes over the base silhouette rather than replacing it — creepShapeFor is untouched by domain, and the cue is an independent, ADDITIONAL paint plan (armored-flyer's S10 requirement)", () => {
+    // The shape a creep draws is keyed ONLY on `creepId` (`creepShapeFor`) — domain is
+    // never consulted, so an armored id keeps its hexagon regardless of whether it is
+    // also airborne.
+    expect(creepShapeFor('armored')).toBe('hexagon');
+    // The airborne cue is a SEPARATE paint plan (its own function, its own op list) —
+    // both fire independently for a creep that is both armored (shape) and airborne
+    // (this cue), so the scene draws both, never one instead of the other.
+    const silhouette = creepSilhouettePaintOp('armored', 5, 6, R, 0xffffff, 1);
+    const airborne = airborneCuePaintOps({ x: 5, y: 6, airborne: true }, R, AIRBORNE);
+    expect(silhouette.shape).toBe('hexagon');
+    expect(airborne).toHaveLength(1);
+    expect(airborne[0]!.kind).toBe('wingspan');
+  });
+
+  it('clears the silhouette AND every timed telegraph ring AND the ward — every point at radius ≥ r×2.6', () => {
+    // The original version of this test only checked the SILHOUETTE (|y| > r, |x| > r),
+    // which the old r×1.393 wingtips satisfied while sitting exactly on the slow ring at
+    // r×1.4 and crossing the stun jolt at r×1.15 (ship-review, M2-S7). Radius from the
+    // creep centre is what decides collision — every other cue here is a circle centred
+    // on it — so that is what this asserts now, mirroring the dot-pip and ward
+    // clearance tests above.
+    const [op] = airborneCuePaintOps({ x: 0, y: 0, airborne: true }, R, AIRBORNE);
+    const radius = (x: number, y: number): number => Math.hypot(x, y) / R;
+    const points: ReadonlyArray<readonly [number, number]> = [
+      [op!.apexX, op!.apexY],
+      [op!.leftX, op!.leftY],
+      [op!.rightX, op!.rightY],
+    ];
+    for (const [x, y] of points) {
+      expect(radius(x, y)).toBeGreaterThan(1.15); // stun jolt
+      expect(radius(x, y)).toBeGreaterThan(1.4); // slow ring
+      expect(radius(x, y)).toBeGreaterThan(1.8); // dot pips
+      expect(radius(x, y)).toBeGreaterThan(2.0); // slow pulse ceiling
+      expect(radius(x, y)).toBeGreaterThan(2.2); // ward — the outermost prior cue
+      expect(y).toBeLessThan(0); // and it floats ABOVE the creep, not around it
+    }
+    expect(op!.leftX).toBeLessThan(0); // still a chevron: tips either side of the apex
+    expect(op!.rightX).toBeGreaterThan(0);
+  });
+
+  it('takes no renderTimeMs and has no reduced-motion branch — a domain is not a timed status', () => {
+    // Same posture as `wardPaintOps`'s own test above: calling the builder with only
+    // its documented 3 parameters (creep, r, colour) is itself the assertion.
+    const a = airborneCuePaintOps({ x: 1, y: 2, airborne: true }, R, AIRBORNE);
+    const b = airborneCuePaintOps({ x: 1, y: 2, airborne: true }, R, AIRBORNE);
     expect(a).toEqual(b); // deterministic, no hidden time dependency
   });
 });

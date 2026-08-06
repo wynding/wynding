@@ -37,6 +37,14 @@ export interface CreepVM {
   /** Catalog id (M2-S3) — keys the silhouette shape (`creep-paint.ts`) and the per-creep
    *  max-HP join (`creepById[creepId].hp`) `hpFrac` is now derived against. */
   readonly creepId: string;
+  /** Catalog domain (M2-S7) — a straight join like `warded`'s, NOT sim state (it never
+   *  changes tick-to-tick for a given creep). Drives the airborne cue (`creep-paint.ts`):
+   *  an independent shape+colour cue layered over whichever base silhouette `creepId`
+   *  already draws, so an id that is both armored AND airborne (`armored-flyer`, S10)
+   *  reads as both — a single id-keyed `CreepShape` could never express that (ADR 0003:
+   *  never colour alone). `'ground'` for a forged/unresolved `creepId` (the same
+   *  total-over-absent-definition posture `warded`'s join already takes). */
+  readonly domain: 'ground' | 'air';
   /** Fixed-point sim point (256 units = 1 cell) — projected to pixels by `projection`. */
   readonly x: number;
   readonly y: number;

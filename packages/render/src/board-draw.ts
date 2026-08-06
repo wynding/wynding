@@ -19,6 +19,7 @@ import {
   dotTelegraphPaintOps,
   stunTelegraphPaintOps,
   wardPaintOps,
+  airborneCuePaintOps,
 } from './creep-paint';
 import { towerFootprintMarkFor } from './tower-paint';
 import type { Projection } from './projection';
@@ -89,6 +90,29 @@ function drawBolt(g: GraphicsLike, cx: number, cy: number, halfSize: number): vo
   }
 }
 
+/** An upward arrow at `(cx,cy)` — a vertical shaft with two barbs at its tip — the
+ *  `'arrow'` footprint mark (M2-S7, `antiair`), evoking "shoots skyward". `halfSize`
+ *  plays the same role as `'crosshair'`/`'droplet'`'s — both call sites pass
+ *  `size * 0.22`, NOT `drawBolt`'s `size * 0.5`, which an earlier version of this line
+ *  named and which would produce a mark twice the size of every other footprint mark.
+ *  Distinct in shape from `'crosshair'`'s four radiating spokes (this is a single
+ *  unbroken shaft through the centre plus two barbs, not four strokes around a centre
+ *  gap), `'bolt'`'s zigzag (straight, not staggered), `'ringed'`'s closed circle, and
+ *  `'droplet'`'s teardrop — never colour alone (ADR 0003).
+ *
+ *  The shaft and the barbs' downward fan are BOTH load-bearing, which is why this is not
+ *  the bare "^" it started as: `airborneCuePaintOps` (`creep-paint.ts`) draws the
+ *  airborne creep cue as exactly that apex-plus-two-strokes glyph, and its r×2.9 offset
+ *  puts it ≈1 cell ABOVE the creep — so a flyer on the shipped board's row-11 lane paints
+ *  its cue over a row-10 footprint, a tenth of a cell from this mark. An `antiair` tower
+ *  plus a flying wave is the normal case, not a corner one, so two upward chevrons would
+ *  have left `pal.floor` vs `pal.airborne` as the only channel telling tower from creep. */
+function drawArrow(g: GraphicsLike, cx: number, cy: number, halfSize: number): void {
+  g.lineBetween(cx, cy + halfSize, cx, cy - halfSize); // shaft, tip up
+  g.lineBetween(cx - halfSize * 0.55, cy - halfSize * 0.35, cx, cy - halfSize);
+  g.lineBetween(cx + halfSize * 0.55, cy - halfSize * 0.35, cx, cy - halfSize);
+}
+
 /** A thin executor over `vm.towers`/`overlay.pendingAdds`/`overlay.selection` — see the
  *  inline comments below for the per-mark rationale. `projection` is an explicit
  *  parameter (not a captured closure) so this is callable outside `mount()`. */
@@ -134,6 +158,9 @@ export function drawTowers(
     } else if (mark === 'bolt') {
       g.lineStyle(2, pal.floor, 1);
       drawBolt(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.5);
+    } else if (mark === 'arrow') {
+      g.lineStyle(2, pal.floor, 1);
+      drawArrow(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
     }
   }
   // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
@@ -158,6 +185,9 @@ export function drawTowers(
     } else if (pendingMark === 'bolt') {
       g.lineStyle(1, pal.tower, 0.6);
       drawBolt(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.5);
+    } else if (pendingMark === 'arrow') {
+      g.lineStyle(1, pal.tower, 0.6);
+      drawArrow(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
     }
   }
   if (o.selection !== null) {
@@ -180,6 +210,7 @@ export function drawCreeps(
     y: number;
     hpFrac: number;
     creepId: string;
+    domain: 'ground' | 'air';
     slowed: boolean;
     poisoned: boolean;
     stunned: boolean;
@@ -294,6 +325,20 @@ export function drawCreeps(
     for (const tel of wardPaintOps({ ...p, warded: c.warded }, r, pal.warded)) {
       g.lineStyle(2, tel.colour, tel.alpha);
       g.strokeCircle(tel.x, tel.y, tel.r);
+    }
+    // Airborne cue (M2-S7): a wing chevron layered OVER whatever base silhouette was
+    // just drawn above — an independent paint plan, not a fourth `CreepShape`, so
+    // `armored-flyer` (S10) reads as armored (the hexagon above) AND airborne (this) at
+    // once. Catalog-derived (`CreepVM.domain === 'air'`), so — like the ward cue right
+    // above — it takes no `renderTimeMs` and has no reduced-motion branch.
+    for (const tel of airborneCuePaintOps(
+      { ...p, airborne: c.domain === 'air' },
+      r,
+      pal.airborne,
+    )) {
+      g.lineStyle(2, tel.colour, tel.alpha);
+      g.lineBetween(tel.apexX, tel.apexY, tel.leftX, tel.leftY);
+      g.lineBetween(tel.apexX, tel.apexY, tel.rightX, tel.rightY);
     }
   }
 }

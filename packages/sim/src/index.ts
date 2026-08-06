@@ -22,6 +22,7 @@ import {
   type EffectPrimitive,
   type StepEvents,
 } from './combat';
+import { resolveCreepDomain } from './domain';
 import type { Grid } from './board';
 import { computeDistanceField, type DistanceField } from './pathfinding';
 import {
@@ -691,7 +692,7 @@ function applyInputPhase(
   ruleset: CompiledRuleset,
   inputs: readonly SimInput[],
 ): boolean[] {
-  const { board, towerById, balance } = ruleset;
+  const { board, towerById, balance, creepById } = ruleset;
   const { grid } = board;
   const accepted: boolean[] = [];
 
@@ -727,7 +728,9 @@ function applyInputPhase(
         continue;
       }
       const towerMask = materializeTowerMask(grid, state.towers, towerById);
-      if (!canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty, def.cost)) {
+      if (
+        !canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty, def.cost, creepById)
+      ) {
         accepted.push(false);
         continue;
       }
@@ -973,6 +976,11 @@ export function step(
     const effSpeed = stunned
       ? 0
       : effectiveSpeedFp(speed, slowMulFp, balance.slowFloorNum, balance.slowFloorDen);
+    // Domain (M2-S7 P2) — the shared resolver (domain.ts), same `?? 'ground'`
+    // totality rail every other call site uses: an unresolved `creepId` never
+    // reaches this loop (coerceSoa already dropped it), but the resolver is used
+    // uniformly regardless.
+    const domain = resolveCreepDomain(creepById, creepId);
     const outcome = advanceCreep(
       field,
       src.id[i],
@@ -983,6 +991,7 @@ export function step(
       src.headRow[i],
       src.progress[i],
       effSpeed,
+      domain,
     );
     if (outcome.kind === 'drop') continue;
     if (outcome.kind === 'leak') {

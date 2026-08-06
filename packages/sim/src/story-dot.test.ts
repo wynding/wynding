@@ -85,6 +85,7 @@ describe('the schedule — applied at T, ticks at T+10, T+20 … T+60, never at 
       impactTick: T,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION }],
     };
     // T — applied. Application itself deals no damage: the record's first tick is
@@ -159,6 +160,7 @@ describe('armor bypass — the same schedule against an armored creep', () => {
       impactTick: T,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       // Authored order mirrors the venom-shaped tower: direct, then dot.
       effects: [
         { kind: 'direct', amount: AMOUNT },
@@ -214,6 +216,7 @@ describe('per-source independence — two sources on one creep, both ticking, ne
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -241,6 +244,7 @@ describe('per-source independence — two sources on one creep, both ticking, ne
       impactTick: 5,
       targetId: 1,
       sourceId: 200,
+      domain: 'ground',
       effects: [
         { kind: 'dot', amount: AMOUNT + 3, cadenceTicks: CADENCE, durationTicks: DURATION },
       ],
@@ -316,6 +320,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -377,6 +382,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       impactTick: refreshTick,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [
         { kind: 'dot', amount: NEW_AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION },
       ],
@@ -427,6 +433,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [{ kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION }],
     };
     const rng = new Rng(TEST_RNG_SEED);
@@ -470,6 +477,7 @@ describe('the refresh rule — reapplication keeps the T+10 lattice, adopts the 
       impactTick: dueTick,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [
         { kind: 'dot', amount: NEW_AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION },
       ],
@@ -551,6 +559,7 @@ describe('a lethal hit applies no DoT', () => {
       impactTick: 0,
       targetId: 1,
       sourceId: 100,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: 999 }, // lethal
         { kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION },
@@ -629,6 +638,7 @@ describe('the record cap — a table at MAX_DOT_RECORDS drops the application an
       impactTick: 0,
       targetId: 1,
       sourceId: 999_999,
+      domain: 'ground',
       effects: [
         { kind: 'direct', amount: AMOUNT },
         { kind: 'dot', amount: AMOUNT, cadenceTicks: CADENCE, durationTicks: DURATION },

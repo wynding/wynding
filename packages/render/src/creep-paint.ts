@@ -14,7 +14,18 @@
  *  `'hexagon'` already is, distinct from all four at cell scale. An id this build's
  *  catalog doesn't recognize draws `'triangle'` too (TOTAL — never throw; a
  *  forged/future content id must still render something, per the `tower.unknown.name`
- *  precedent). */
+ *  precedent).
+ *
+ *  `flying` (M2-S7) is DELIBERATELY ABSENT from the table below, and is the first
+ *  shipped creep that is. Its distinguishing axis is DOMAIN, not kind, and domain has
+ *  its own always-on shape cue — `airborneCuePaintOps`' wingspan — so giving it a sixth
+ *  base silhouette would encode the same fact twice and spend the shape vocabulary on
+ *  it. That is the same composability argument S10 depends on: `armored-flyer` must
+ *  read as armored AND airborne, which it does by keeping `'hexagon'` and gaining the
+ *  wingspan. A per-domain base shape would make that combination unrepresentable.
+ *  The consequence, stated because it is a real one (ship-review, M2-S7): at the
+ *  silhouette itself `flying` and `normal` are identical, and the wingspan that
+ *  separates them draws a cell above the creep rather than on it. */
 export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
 
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
@@ -367,4 +378,118 @@ export function wardPaintOps(
 ): readonly WardPaintOp[] {
   if (!creep.warded) return [];
   return [{ kind: 'ward', x: creep.x, y: creep.y, r: r * 2.2, colour: wardedColour, alpha: 1 }];
+}
+
+/** The airborne cue's only op kind — a wing chevron. See {@link airborneCuePaintOps}. */
+export type AirborneOpKind = 'wingspan';
+
+export interface AirborneCuePaintOp {
+  readonly kind: AirborneOpKind;
+  readonly apexX: number;
+  readonly apexY: number;
+  readonly leftX: number;
+  readonly leftY: number;
+  readonly rightX: number;
+  readonly rightY: number;
+  readonly colour: number;
+  readonly alpha: number;
+}
+
+// THE CUE-RADIUS ORDERING (read before changing any number here). Every other cue in
+// this file is a circle centred on the creep, so a cue's radius BAND is what decides
+// whether it collides, regardless of which angular sector it occupies:
+//   jolt (stun)   r×1.15   timed
+//   ring (slow)   r×1.40   timed
+//   pulse (slow)  r×2.00   timed, motion
+//   ward          r×2.20   CATALOG-derived — deliberately outside the timed band
+//   airborne      r×2.60+  CATALOG-derived — outside the ward, for the same reason
+//
+// An earlier draft placed the apex at r×1.10 and the wingtips at (±1.3r, −0.5r), i.e.
+// radius r×1.393 — sitting ON the slow ring (1.4) and crossing the jolt ring (1.15),
+// the exact annulus this file's stun note derives a clearance rule for (ship-review,
+// M2-S7). That is reachable on this story's own headline path: S7 widened `slow` to
+// both-domain SO slow can land on flyers, and `story-flying-wave.test.ts` asserts a
+// slowed flyer — which would have drawn cyan wingtips tangent to a sky-blue slow ring,
+// the two nearest hues in the palette.
+//
+// `wardPaintOps` set the precedent: a catalog-derived, non-timed cue sits OUTSIDE the
+// timed band so it can never be misread as an active status. The airborne cue is the
+// same class, so it goes outside the ward in turn. Every point below is at radius
+// ≥ r×2.60, clearing the ward's outer stroke edge.
+//
+// TWO RESIDUALS, stated rather than hidden — both belong to the deferred cue-radius
+// layout pass the stun note names, not to a fourth cue inventing its own scheme:
+//
+// (1) The clearance is a RATIO and `r` floors at 3px, so at that floor the gap above the
+//     ward is ~1.2px — tight rather than clean. No size-independent radius fixes it.
+// (2) THIS ANALYSIS COVERS SAME-CREEP COLLISIONS ONLY. With `r = cellPx × 0.35`
+//     (`board-draw.ts`), an apex at r×2.9 sits ≈1.02 × cellPx above the creep centre —
+//     i.e. the chevron renders in the cell to the NORTH, where ANOTHER creep's
+//     silhouette, HP pip or telegraph rings may already be. On the shipped board every
+//     creep walks the row-11 lane, so a flyer's cue lands across row 10. That is a real
+//     trade, not an oversight: the ward already occupies r×2.2, so no radius both clears
+//     every same-creep cue AND stays inside the cell. SHAPE still carries the load there,
+//     not colour: the cell it lands in is usually a tower footprint, so no footprint mark
+//     may be this glyph — `antiair` (the tower that co-occurs with flyers by definition)
+//     therefore draws the `'arrow'` mark, a shafted arrow, rather than the bare "^" it
+//     first shipped as (see `drawArrow` in `board-draw.ts`). The airborne colour is
+//     additionally contrast-gated against `tower` as well as the floor
+//     (`palette.test.ts`) so the two remain separable once overlaid.
+//     The same offset puts the chevron OFF-BOARD for a flyer on row 0, on a board whose
+//     opening sits on the top border — legal in principle, unreachable on the shipped
+//     board (every creep walks the row-11 lane), and called out here because an earlier
+//     draft of this block claimed to have enumerated the adjacent-cell cases and had
+//     only enumerated the interior ones.
+const AIRBORNE_APEX_R_MUL = 2.9; // straight above centre — beyond every ring, timed or not
+const AIRBORNE_WING_Y_MUL = 2.6; // tips sit lower than the apex, so the chevron reads as wings
+const AIRBORNE_WING_SPAN_MUL = 0.9; // half-span; tip radius = √(0.9² + 2.6²) ≈ r×2.75
+
+/**
+ * The airborne cue's paint plan (M2-S7): a wing chevron — two strokes fanning out from
+ * an apex above the silhouette's top vertex to tips beyond its sides — layered OVER
+ * whichever base silhouette `creepShapeFor` already draws (`creepId` is untouched by
+ * this module; the airborne cue is a wholly independent paint plan, composed alongside
+ * it, never a fourth mutually-exclusive `CreepShape`). That independence is exactly why
+ * it composes: `armored-flyer` (S10) draws the hexagon from `creepSilhouettePaintOp`
+ * AND this wingspan, so it reads as armored *and* airborne at once, which a single
+ * id-keyed shape could never express.
+ *
+ * Like `wardPaintOps`, this is a CATALOG-derived cue (`CreepVM.domain === 'air'`), NOT a
+ * timed status (see CONTEXT.md's Domain entry) — so it takes no `renderTimeMs`, has no
+ * reduced-motion branch, and carries no motion cue at all. It floats clear ABOVE the
+ * creep, every point at radius ≥ `r×2.6` — outside the silhouette, outside all three
+ * timed telegraph rings, and outside the ward. See the cue-radius ordering derived at
+ * the constants below; that clearance is the load-bearing part, not the glyph. It keeps
+ * the same posture `wardPaintOps`' own note explains (an essential cue must not depend
+ * on the health of the thing it is drawn on) and adds the one this file's stun note
+ * shows matters just as much: it must not be drawn through another cue either. A
+ * genuinely different SHAPE from every ring/pip telegraph above (line strokes, not a
+ * circle) AND from every tower footprint mark it can land on top of (`tower-paint.ts` —
+ * `antiair` owns `'arrow'`, a shafted arrow, precisely so this bare "^" stays unique),
+ * never colour alone (ADR 0003).
+ *
+ * Units as every other builder above: `creep.x`/`y` are PIXELS (the projected centre),
+ * never fixed-point.
+ */
+export function airborneCuePaintOps(
+  creep: { readonly x: number; readonly y: number; readonly airborne: boolean },
+  r: number,
+  airborneColour: number,
+): readonly AirborneCuePaintOp[] {
+  if (!creep.airborne) return [];
+  const apexY = creep.y - r * AIRBORNE_APEX_R_MUL;
+  const wingY = creep.y - r * AIRBORNE_WING_Y_MUL;
+  return [
+    {
+      kind: 'wingspan',
+      apexX: creep.x,
+      apexY,
+      leftX: creep.x - r * AIRBORNE_WING_SPAN_MUL,
+      leftY: wingY,
+      rightX: creep.x + r * AIRBORNE_WING_SPAN_MUL,
+      rightY: wingY,
+      colour: airborneColour,
+      alpha: 1,
+    },
+  ];
 }

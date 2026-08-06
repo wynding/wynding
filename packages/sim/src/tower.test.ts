@@ -4,13 +4,32 @@
 // totality across corrupt/forged restored states.
 
 import { describe, it, expect } from 'vitest';
+import type { CreepDef } from '@wynding/types';
 import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
-import { findValidTowerIndex, materializeTowerMask, refundFor } from './tower';
+import {
+  canPlaceTower,
+  findValidTowerIndex,
+  materializeTowerMask,
+  refundFor,
+  type CreepPlacementView,
+} from './tower';
 import { deriveValidCreepPosition } from './movement';
 import { testRuleset, pushCreep } from './test-support';
 
 /** The M1 tower cost (was an exported const; now ruleset content). */
 const TOWER_COST = 5;
+
+/** An air catalog creep (M2-S7 P4), for the flyer-vs-placement tests below. */
+const FLYER_DEF: CreepDef = {
+  id: 'flyer',
+  hp: 20,
+  speedFp: 26,
+  armor: 0,
+  domain: 'air',
+  immunities: [],
+  leakCost: 1,
+  bounty: 1,
+};
 
 /** The cell a creep row currently occupies (derived), or null if its state is corrupt. */
 function occ(s: SimState, k: number, grid: Parameters<typeof deriveValidCreepPosition>[5]) {
@@ -33,6 +52,21 @@ const RULESET_LANE = testRuleset({
   exit: { col: 8, row: 2 },
 });
 const LANE_GRID = RULESET_LANE.board.grid;
+
+// The same LANE geometry, catalog-extended with an air creep (M2-S7 P4) — no wave
+// schedules a flyer here (rows are pushed directly into the SoA), so P1's
+// axis-alignment gate (scoped to a board whose wave schedule references an air
+// creep) does not apply.
+const RULESET_LANE_AIR = testRuleset(
+  { widthTiles: 9, heightTiles: 6, entrance: { col: 0, row: 2 }, exit: { col: 8, row: 2 } },
+  { extraCreeps: [FLYER_DEF] },
+);
+
+// The same POCKET geometry, catalog-extended with an air creep (M2-S7 P4).
+const RULESET_POCKET_AIR = testRuleset(
+  { widthTiles: 9, heightTiles: 7, entrance: { col: 0, row: 1 }, exit: { col: 8, row: 2 } },
+  { extraCreeps: [FLYER_DEF] },
+);
 
 // A 9×7 board with the entrance at (0,1), leaving a bottom-left pocket that two
 // legal towers can seal WITHOUT cutting entrance→exit.
@@ -255,6 +289,99 @@ describe('placeTower — every rejection is a deterministic no-op (never a throw
     step(empty, RULESET_POCKET, [place(1, 2)]);
     expect(empty.towers.id).toHaveLength(2);
     expect(empty.bounty).toBe(70);
+  });
+});
+
+describe('domain-aware placement (M2-S7 P4) — flyers never block, never constrain the invariant', () => {
+  it("mixed placement: a build on a flyer's cell succeeds; the SAME build on a ground creep's cell still blocks", () => {
+    // Footprint (3,1)-(4,2) — the same known-legal footprint the accept-path
+    // tests above already build on (it walls rows 1-2 at cols 3-4, detouring via
+    // rows 3-4, so the maze invariant is untroubled either way).
+    const withFlyer = createInitialState(1, RULESET_LANE_AIR);
+    pushCreep(withFlyer, { id: 9, hp: 20, col: 3, row: 1, creepId: 'flyer' }); // airborne, IN the footprint
+    step(withFlyer, RULESET_LANE_AIR, [place(3, 1)]);
+    expect(withFlyer.towers.id).toHaveLength(1); // accepted — a flyer never blocks placement (clause 3)
+
+    const withGround = createInitialState(1, RULESET_LANE_AIR);
+    pushCreep(withGround, { id: 9, hp: 5, col: 3, row: 1, creepId: 'normal' }); // same cell, ground
+    step(withGround, RULESET_LANE_AIR, [place(3, 1)]);
+    expect(withGround.towers.id).toHaveLength(0); // rejected — a ground creep still blocks its own cell
+  });
+
+  it('a flyer never constrains the maze invariant; a ground creep in the same cell still does', () => {
+    // On POCKET_AIR, towers at (2,4) and (1,2) seal the bottom-left pocket
+    // {(1,4),(1,5)} while entrance (0,1) → exit (8,2) remains open (mirrors the
+    // plain-POCKET stranding test above).
+    const withGround = createInitialState(1, RULESET_POCKET_AIR);
+    pushCreep(withGround, { id: 9, hp: 5, col: 1, row: 5, creepId: 'normal' });
+    step(withGround, RULESET_POCKET_AIR, [place(2, 4)]);
+    expect(withGround.towers.id).toHaveLength(1);
+    step(withGround, RULESET_POCKET_AIR, [place(1, 2)]);
+    expect(withGround.towers.id).toHaveLength(1); // rejected — would strand the ground creep (clause 5)
+
+    const withFlyer = createInitialState(1, RULESET_POCKET_AIR);
+    pushCreep(withFlyer, { id: 9, hp: 20, col: 1, row: 5, creepId: 'flyer' });
+    step(withFlyer, RULESET_POCKET_AIR, [place(2, 4)]);
+    expect(withFlyer.towers.id).toHaveLength(1);
+    step(withFlyer, RULESET_POCKET_AIR, [place(1, 2)]);
+    expect(withFlyer.towers.id).toHaveLength(2); // accepted — the flyer never constrains the invariant
+  });
+
+  it('an unresolved creepId still blocks placement — the ground fallback, asserted against canPlaceTower directly', () => {
+    // WHY THIS CALLS `canPlaceTower` DIRECTLY (ship-review, M2-S7). The earlier version
+    // drove this through `step()` and could not fail, for two independent reasons:
+    //   1. its footprint (1,1)-(2,2) on LANE_AIR is rejected with NO creep on the board at
+    //      all — it seals the entrance's only non-corner-cut neighbour — so the assertion
+    //      held regardless of any domain resolution; and
+    //   2. `coerceSoa` drops a row whose `creepId` does not resolve BEFORE the input phase
+    //      runs, so the forged row never reached `canPlaceTower` in the first place.
+    // Mutating `resolveCreepDomain` to `?? 'air'` left all 40 tests in this file green,
+    // which meant clause 3/5's ground fallback — the thing `canPlaceTower`'s own doc block
+    // promises keeps behaviour "byte-identical to pre-S7" for corrupt/restored rows — had
+    // no coverage anywhere in the repo.
+    //
+    // So: the known-legal (3,1) footprint the sibling tests use, both arms on the SAME
+    // anchor, called directly so the row survives to the function under test.
+    const grid = RULESET_LANE_AIR.board.grid;
+    const mask = new Uint8Array(grid.width * grid.height);
+    const creepById = RULESET_LANE_AIR.creepById;
+    const anchor = { col: 3, row: 1 };
+    const at = (creepId: string): CreepPlacementView => ({
+      id: [9],
+      creepId: [creepId],
+      fromX: [3 * 256 + 128],
+      fromY: [1 * 256 + 128],
+      headCol: [3],
+      headRow: [1],
+      progress: [0],
+    });
+
+    // Control: the anchor is genuinely legal when nothing stands there — without this the
+    // rejection below could again be the footprint's own fault rather than the fallback's.
+    expect(
+      canPlaceTower(
+        grid,
+        mask,
+        anchor,
+        { id: [], creepId: [], fromX: [], fromY: [], headCol: [], headRow: [], progress: [] },
+        80,
+        TOWER_COST,
+        creepById,
+      ),
+    ).toBe(true);
+
+    // A resolved AIR creep never blocks — the accept arm.
+    expect(canPlaceTower(grid, mask, anchor, at('flyer'), 80, TOWER_COST, creepById)).toBe(true);
+
+    // An UNRESOLVED id falls back to ground, so it blocks exactly like one. This is the
+    // assertion the `?? 'air'` mutation must turn red.
+    expect(canPlaceTower(grid, mask, anchor, at('ghost-creep-id'), 80, TOWER_COST, creepById)).toBe(
+      false,
+    );
+
+    // And a genuinely resolved ground creep blocks too — pinning that the fallback lands
+    // on the same behaviour, not merely on *a* rejection.
+    expect(canPlaceTower(grid, mask, anchor, at('normal'), 80, TOWER_COST, creepById)).toBe(false);
   });
 });
 

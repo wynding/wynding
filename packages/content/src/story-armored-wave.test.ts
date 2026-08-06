@@ -180,7 +180,17 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     let wave3ResolvedTick: number | null = null;
     let dotTicksAtWave3Resolve = 0;
     let dotDroppedAtWave3Resolve = 0;
-    for (let t = 0; t < 1900; t++) {
+    // M2-S7 P6: the loop bound widens 1900 -> 2400. The bundle now carries a SIXTH
+    // wave (index 5, 8x `flying`, appended by S7), and `phase` only reaches a
+    // terminal value once every wave has resolved (index.ts's `waveResolved.every`
+    // check) — this build places no `antiair`, so wave index 5's flyers cross the
+    // whole board untouched by every standing ground tower and leak out, which
+    // this file's terminal measurement below now has to actually witness rather
+    // than truncate before it happens. 2400 comfortably clears the measured
+    // settlement tick (2336) with room to spare; it does not change anything about
+    // the wave-3-scoped snapshot logic above, which is guarded by
+    // `wave3ResolvedTick === null` and fires long before either extension matters.
+    for (let t = 0; t < 2400; t++) {
       events.impactPoints.length = 0;
       events.fired.length = 0;
       state = step(state, ruleset, inputs(t), events);
@@ -238,29 +248,47 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
 
     // --- THE MEASUREMENT (PLAN.md step 38) ---
     //
-    // Wave 4 (index 3, `armored`) is CLEARABLE with this sane build: every wave resolves
-    // with zero leaks, and the game is won outright with every starting life intact.
-    // M2-S6 P5: the bundle now also carries a fifth wave (index 4, `resolute`+`fast`),
-    // which crosses the same standing basic wall and venom pair and ALSO resolves clean —
-    // this file does not build anything new for it (that is P8's job), the same six
-    // `basic` plus the venom pair happen to carry it too. The terminal figures below are
-    // re-measured, not invented, and now legitimately include it.
+    // Wave 4 (index 3, `armored`) is CLEARABLE with this sane build: every wave through
+    // index 4 resolves with zero leaks. M2-S6 P5: the bundle carries a fifth wave (index
+    // 4, `resolute`+`fast`), which crosses the same standing basic wall and venom pair
+    // and ALSO resolves clean — this file does not build anything new for it (that is
+    // P8's job), the same six `basic` plus the venom pair happen to carry it too.
+    //
+    // M2-S7 P6, and this is a REAL measured outcome, not a truncation artifact: the
+    // bundle now also carries a sixth wave (index 5, 8x `flying`), and this build has
+    // no `antiair` — a ground-only wall, by construction (this is the wave-4 armored
+    // measurement, not the flying one). Every flyer in wave index 5 crosses the entire
+    // board untouched (S7's own done-criterion, witnessed here as a side effect: a
+    // ground-only build cannot touch it) and leaks, costing 8 of the 10 starting lives.
+    // The game still WINS (every wave resolves, `phase` only reads `lost` at lives <= 0),
+    // but on far fewer lives and a correspondingly lower score/star grade. The dedicated
+    // S7 story test (`story-flying-wave.test.ts`) is where the flying wave's own build
+    // (with `antiair`) is measured; this file's job is only to re-pin what its own
+    // pre-existing, unrelated build now produces once the wave exists in the bundle.
     expect(state.phase).toBe('won');
-    expect(state.tick).toBe(1884);
-    expect(state.lives).toBe(10);
-    expect(state.leakedCount).toBe(0);
-    expect(state.waveResolved).toEqual([true, true, true, true, true]);
-    expect(state.waveLeaked).toEqual([false, false, false, false, false]);
-    expect(state.waveCursor).toBe(5);
-    // Kill-bounty proof every creep across all five waves was killed, not leaked: 10 ×
-    // `normal` (1) + 16 × `swarm` (1) + 8 × `fast` (2) + 6 × `armored` (3) + 6 ×
-    // `resolute` (2) + 6 × `fast` (2) = 84, matching a zero-leak run exactly
-    // (10 + 16 + 16 + 18 + 12 + 12).
+    expect(state.tick).toBe(2336);
+    expect(state.lives).toBe(2);
+    expect(state.leakedCount).toBe(8);
+    expect(state.waveResolved).toEqual([true, true, true, true, true, true]);
+    expect(state.waveLeaked).toEqual([false, false, false, false, false, true]);
+    expect(state.waveCursor).toBe(6);
+    // Kill-bounty proof every creep across waves 0-4 was killed, not leaked, and wave
+    // index 5's 8 `flying` were leaked, not killed (0 contribution): 10 × `normal` (1) +
+    // 16 × `swarm` (1) + 8 × `fast` (2) + 6 × `armored` (3) + 6 × `resolute` (2) + 6 ×
+    // `fast` (2) = 84, UNCHANGED from the pre-S7 figure (10 + 16 + 16 + 18 + 12 + 12) —
+    // wave index 5 contributes nothing to this channel either way.
     expect(state.cumulativeKillBounty).toBe(84);
+    // `bounty` is also UNCHANGED at 141: wave index 5's clear bonus is paid only on a
+    // non-leaked wave (`if (!state.waveLeaked[k])` in index.ts), and this wave leaked, so
+    // it adds zero kill bounty and zero clear bonus — the pre-S7 economy carries through
+    // exactly.
     expect(state.bounty).toBe(141);
-    expect(hashSimState(state)).toBe('fc1e3f73');
-    expect(deriveScore(state, ruleset)).toBe(434);
-    expect(deriveStars(state, ruleset)).toBe(3);
+    expect(hashSimState(state)).toBe('5c4dd782');
+    // Score: cumulativeKillBounty (84) + cumulativeEarlyCallCredit (0, no early calls in
+    // this build) + lives (2) × survivalMul (35) = 84 + 70 = 154, down from 434 — the
+    // score channel is dominated by the 8 lives lost to the untouched flying wave.
+    expect(deriveScore(state, ruleset)).toBe(154);
+    expect(deriveStars(state, ruleset)).toBe(1);
 
     // --- REPORTED, NOT GATED (PLAN.md step 3): DoT's share of the damage
     // dealt to the armored wave. Valid ONLY because the precondition above holds — every
@@ -331,8 +359,14 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     // `fast`, resolves clean against the same basic wall — both carry 0 armor, like
     // `normal`/`fast`/`swarm`; `armored` is the one pre-S6 exception at armor 6 — so
     // `leakedCount`/`lives` are unaffected by its addition).
+    // M2-S7 P6: `waveLeaked` widens to length 6 (the appended wave index 5, `flying`) —
+    // still trailing `false` at this same tick-1900 sample. This test's loop bound is
+    // NOT extended to settlement (unlike the two `phase`-asserting tests in this file):
+    // wave index 5 only starts counting down once wave index 4 launches (~tick 1700) and
+    // launches itself ~300 ticks later, so at tick 1900 it has not yet spawned — this
+    // snapshot is unaffected by its existence, only by its bare presence in the array.
     expect(state.leakedCount).toBe(4);
-    expect(state.waveLeaked).toEqual([false, false, false, true, false]);
+    expect(state.waveLeaked).toEqual([false, false, false, true, false, false]);
     expect(state.lives).toBe(6);
   });
 });
@@ -461,7 +495,10 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
-    for (let t = 0; t < 1900; t++) {
+    // M2-S7 P6: loop bound widens 1900 -> 2400, same reason as the first test above —
+    // `phase` only reaches a terminal value once the appended sixth wave (index 5,
+    // `flying`) has resolved too, and this build has no `antiair` to touch it.
+    for (let t = 0; t < 2400; t++) {
       events.impactPoints.length = 0;
       events.fired.length = 0;
       state = step(state, ruleset, inputs(t), events);
@@ -505,22 +542,36 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
     // below are re-measured to include it, and the wave-1 leak (this test's whole point)
     // is unaffected.
     //
+    // M2-S7 P6, same story as the first test in this file: the bundle now also carries
+    // wave index 5 (8x `flying`), and this build has no `antiair` — every flyer crosses
+    // the board untouched and leaks, on top of the one already-pinned wave-1 `swarm`
+    // leak. The wave-1 comparison this test exists for (six `basic` vs six `venom` on
+    // identical geometry) is unaffected — that leak is still exactly one creep, still
+    // wave index 1 — the terminal figures below simply now legitimately include wave
+    // index 5's own, unrelated, unengaged leak.
+    //
     // The build stays pinned in full (PLAN.md step 3, Codex R2-8) — a balance-sensitive test
     // whose script can be re-cut is trivially riggable. Re-pinning the OUTCOME to what the
     // sim produced is the repo's normal golden discipline; re-cutting the BUILD to flatter
     // the number is what is forbidden, and was not done.
     expect(state.phase).toBe('won');
-    expect(state.lives).toBe(9);
-    expect(state.leakedCount).toBe(1);
-    expect(state.waveResolved).toEqual([true, true, true, true, true]);
-    expect(state.waveLeaked).toEqual([false, true, false, false, false]);
-    expect(state.waveCursor).toBe(5);
-    expect(state.tick).toBe(1869);
+    expect(state.lives).toBe(1);
+    expect(state.leakedCount).toBe(9);
+    expect(state.waveResolved).toEqual([true, true, true, true, true, true]);
+    expect(state.waveLeaked).toEqual([false, true, false, false, false, true]);
+    expect(state.waveCursor).toBe(6);
+    expect(state.tick).toBe(2336);
+    // cumulativeKillBounty UNCHANGED at 83 — wave index 5's 8 `flying` are leaked, not
+    // killed, so they contribute nothing to this channel (same reasoning as test 1).
     expect(state.cumulativeKillBounty).toBe(83);
+    // `bounty` UNCHANGED at 120 — wave index 5 leaked, so its clear bonus is withheld too.
     expect(state.bounty).toBe(120);
-    expect(hashSimState(state)).toBe('814e2fbc');
-    expect(deriveScore(state, ruleset)).toBe(398);
-    expect(deriveStars(state, ruleset)).toBe(3);
+    expect(hashSimState(state)).toBe('72428fc9');
+    // Score: 83 + 0 (no early calls) + 1 life × 35 survivalMul = 118, down from 398 — the
+    // wave-1 swarm leak (this test's whole point) now shares the lives channel with 8
+    // more lives lost to the untouched flying wave.
+    expect(deriveScore(state, ruleset)).toBe(118);
+    expect(deriveStars(state, ruleset)).toBe(1);
   });
 });
 
@@ -574,7 +625,10 @@ describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of i
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     const rngStateAtStart = state.rngState;
     let sawLiveResoluteStun = false;
-    for (let t = 0; t < 1900; t++) {
+    // M2-S7 P6: loop bound widens 1900 -> 2400, same reason as the other `phase`-asserting
+    // tests in this file — the appended sixth wave (index 5, `flying`) has no `antiair`
+    // in this build and leaks untouched, and `phase` only settles once it resolves too.
+    for (let t = 0; t < 2400; t++) {
       state = step(state, ruleset, inputs(t));
       for (let i = 0; i < state.creeps.id.length; i++) {
         const stunUntilTick = state.creeps.stunUntilTick[i] as number;
@@ -618,21 +672,31 @@ describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of i
     // --- THE MEASUREMENT (M2-S6 P8 test 17) — measured, not invented. The fifth wave
     // clears: the stun towers hold `resolute`s on the approach, and the pre-existing
     // wall does the killing. Stun's contribution here is counterplay, not damage.
+    //
+    // M2-S7 P6, same story as every other test in this file: the bundle now also carries
+    // wave index 5 (8x `flying`), and this build has no `antiair` (`stun` is ground-scoped
+    // too, per its own catalog entry — untouched by this story) — every flyer crosses the
+    // board untouched and leaks. The stun-holding proof above (`sawLiveResoluteStun`) is
+    // unaffected; only the terminal figures below now legitimately include wave index 5.
     console.log(
       `[story-armored-wave #17] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
         `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
         `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
     );
     expect(state.phase).toBe('won');
-    expect(state.tick).toBe(1856);
-    expect(state.lives).toBe(10);
-    expect(state.leakedCount).toBe(0);
-    expect(state.waveResolved).toEqual([true, true, true, true, true]);
-    expect(state.waveLeaked).toEqual([false, false, false, false, false]);
-    expect(state.waveCursor).toBe(5);
+    expect(state.tick).toBe(2336);
+    expect(state.lives).toBe(2);
+    expect(state.leakedCount).toBe(8);
+    expect(state.waveResolved).toEqual([true, true, true, true, true, true]);
+    expect(state.waveLeaked).toEqual([false, false, false, false, false, true]);
+    expect(state.waveCursor).toBe(6);
+    // `bounty` UNCHANGED at 101 — wave index 5 leaked, so it pays neither kill bounty nor
+    // clear bonus (same reasoning as the other three tests in this file).
     expect(state.bounty).toBe(101);
-    expect(hashSimState(state)).toBe('cebbc08f');
-    expect(deriveScore(state, ruleset)).toBe(434);
-    expect(deriveStars(state, ruleset)).toBe(3);
+    expect(hashSimState(state)).toBe('1565440e');
+    // Score: cumulativeKillBounty (unchanged) + 0 early-call credit + 2 lives × 35
+    // survivalMul = 154, down from 434 — the 8 lives lost to the untouched flying wave.
+    expect(deriveScore(state, ruleset)).toBe(154);
+    expect(deriveStars(state, ruleset)).toBe(1);
   });
 });

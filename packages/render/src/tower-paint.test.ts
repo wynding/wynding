@@ -23,6 +23,9 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
   it('draws stun with a distinct bolt mark (M2-S6) — never reuses plain/ringed/crosshair/droplet', () => {
     expect(towerFootprintMarkFor('stun')).toBe('bolt');
   });
+  it('draws antiair with a distinct arrow mark (M2-S7) — never reuses plain/ringed/crosshair/droplet/bolt, so it is never conflated with basic', () => {
+    expect(towerFootprintMarkFor('antiair')).toBe('arrow');
+  });
   it('falls back to plain for an unknown id — never throws', () => {
     expect(towerFootprintMarkFor('__proto__')).toBe('plain');
     expect(towerFootprintMarkFor('')).toBe('plain');

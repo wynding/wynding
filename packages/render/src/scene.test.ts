@@ -76,6 +76,7 @@ describe('drawCreeps — the hexagon silhouette (armored, M2-S5a)', () => {
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'armored',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -102,6 +103,7 @@ describe('drawCreeps — the hexagon silhouette (armored, M2-S5a)', () => {
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'normal',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -128,6 +130,7 @@ describe('drawCreeps — the pentagon silhouette (resolute, M2-S6)', () => {
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'resolute',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -157,6 +160,7 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'normal',
+          domain: 'ground',
           slowed: false,
           poisoned: true,
           stunned: false,
@@ -179,6 +183,7 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'normal',
+          domain: 'ground',
           slowed: false,
           poisoned: true,
           stunned: false,
@@ -203,6 +208,7 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'normal',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -265,6 +271,39 @@ describe('drawTowers — the stun bolt mark (M2-S6)', () => {
   });
 });
 
+describe('drawTowers — the antiair arrow mark (M2-S7)', () => {
+  it('an antiair tower draws its arrow mark (3 lineBetween calls incl. a vertical shaft, no strokeCircle) — fails if the arrow branch is deleted, and is not conflated with basic or with the airborne creep cue', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'antiair' }],
+    };
+    drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
+    // The arrow is 3 `lineBetween` calls — distinct from `'crosshair'`'s 4 (radiating
+    // spokes). `'bolt'`'s zigzag is also 3, so the count alone would not key on this
+    // branch: exactly one of the three strokes is VERTICAL (the shaft), which the bolt's
+    // staggered polyline never is.
+    const lines = g.calls.filter((c) => c.method === 'lineBetween');
+    expect(lines).toHaveLength(3);
+    expect(lines.filter((c) => c.args[0] === c.args[2])).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
+
+    // A `basic` tower (mark 'plain') draws neither — proves the assertions above are
+    // actually keyed on the arrow branch, not just "some tower was drawn".
+    const g2 = fakeGraphics();
+    const vmBasic: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic' }],
+    };
+    drawTowers(g2, PAL, vmBasic, EMPTY_OVERLAY, PROJECTION);
+    expect(g2.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(0);
+  });
+});
+
 // The rest of `board-draw.ts`'s branches, exercised so the module (no longer
 // coverage-excluded now that it lives outside `scene.ts`) clears the package's normal
 // 90% branch bar — not new QC witnesses, just the remaining plain coverage.
@@ -308,12 +347,13 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
     expect(g.calls.filter((c) => c.method === 'fillRoundedRect')).toHaveLength(0);
   });
 
-  it('a pending (queued, not yet committed) build draws its own footprint mark: ringed, crosshair, droplet, and bolt', () => {
+  it('a pending (queued, not yet committed) build draws its own footprint mark: ringed, crosshair, droplet, bolt, and arrow', () => {
     for (const [towerId, expectStroke, expectLines] of [
       ['slow', 1, 0],
       ['splash', 0, 4],
       ['venom', 1, 2],
       ['stun', 0, 3],
+      ['antiair', 0, 3],
     ] as const) {
       const g = fakeGraphics();
       const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
@@ -352,6 +392,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'fast',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -374,6 +415,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'swarm',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -397,6 +439,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'unknown-id',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -421,6 +464,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           y: 5 * 256,
           hpFrac: 0.1,
           creepId: 'normal',
+          domain: 'ground',
           slowed: false,
           poisoned: false,
           stunned: false,
@@ -446,6 +490,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'normal',
+          domain: 'ground',
           slowed: true,
           poisoned: false,
           stunned: false,
@@ -468,6 +513,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           y: 5 * 256,
           hpFrac: 1,
           creepId: 'normal',
+          domain: 'ground',
           slowed: true,
           poisoned: false,
           stunned: false,
@@ -487,6 +533,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
       y: 5 * 256,
       hpFrac: 1,
       creepId: 'normal',
+      domain: 'ground' as const,
       slowed: false,
       poisoned: false,
       stunned,
@@ -511,6 +558,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
       y: 5 * 256,
       hpFrac: 1,
       creepId: 'normal',
+      domain: 'ground' as const,
       slowed: false,
       poisoned: false,
       stunned: false,
@@ -528,6 +576,43 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
     drawCreeps(none, PAL, [creep(false)], false, 0, PROJECTION);
     expect(none.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
   });
+
+  it("an air creep's wingspan COMPOSES over the base silhouette (M2-S7) — both draw, regardless of reducedMotion (not a timed status)", () => {
+    // `armored` (hexagon, 6-point fillPoints) rather than `normal`, so this proves the
+    // airborne cue doesn't merely coexist with the DEFAULT triangle — it composes with
+    // whatever base shape the id already draws, exactly the armored-flyer (S10)
+    // requirement PLAN.md calls out.
+    const creep = (domain: 'ground' | 'air') => ({
+      x: 5 * 256,
+      y: 5 * 256,
+      hpFrac: 1,
+      creepId: 'armored',
+      domain,
+      slowed: false,
+      poisoned: false,
+      stunned: false,
+      warded: false,
+    });
+    const air = fakeGraphics();
+    drawCreeps(air, PAL, [creep('air')], false, 0, PROJECTION);
+    const fillPointsCalls = air.calls.filter((c) => c.method === 'fillPoints');
+    expect(fillPointsCalls).toHaveLength(1); // the hexagon silhouette — still drawn
+    expect((fillPointsCalls[0]!.args[0] as unknown[]).length).toBe(6);
+    // The wingspan is 2 `lineBetween` calls (apex→left, apex→right) — ADDITIONAL to
+    // the silhouette, never a replacement for it.
+    expect(air.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(2);
+
+    // Reduced motion changes nothing — the airborne cue carries no motion component.
+    const reduced = fakeGraphics();
+    drawCreeps(reduced, PAL, [creep('air')], true, 0, PROJECTION);
+    expect(reduced.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(2);
+
+    // A ground creep of the same id draws the hexagon with no wingspan at all.
+    const ground = fakeGraphics();
+    drawCreeps(ground, PAL, [creep('ground')], false, 0, PROJECTION);
+    expect(ground.calls.filter((c) => c.method === 'fillPoints')).toHaveLength(1);
+    expect(ground.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(0);
+  });
 });
 
 // The regression Codex caught on PR #78. `CreepVM.x`/`y` are FIXED-POINT sim units (256
@@ -542,6 +627,7 @@ describe('drawCreeps — both telegraphs draw at the PROJECTED centre, not fixed
     y: 5 * 256,
     hpFrac: 1,
     creepId: 'normal',
+    domain: 'ground' as const,
     slowed: true,
     poisoned: true,
     stunned: false,
@@ -577,6 +663,7 @@ describe('drawCreeps — both telegraphs draw at the PROJECTED centre, not fixed
     y: 5 * 256,
     hpFrac: 1,
     creepId: 'normal',
+    domain: 'ground' as const,
     slowed: false,
     poisoned: false,
     stunned: true,

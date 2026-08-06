@@ -52,6 +52,11 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
     creeps.push({
       id: state.creeps.id[i] as number,
       creepId,
+      // Catalog join, like `warded`'s below — NOT sim state. `def` is already resolved
+      // above; a forged/unresolved `creepId` (absent `def`) falls back to `'ground'`,
+      // the same totality rail `warded`'s `?? 0`-style fallback and `hpFrac`'s
+      // denominator already take.
+      domain: def?.domain ?? 'ground',
       x: p.x,
       y: p.y,
       hpFrac,

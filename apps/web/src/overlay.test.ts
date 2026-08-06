@@ -695,11 +695,11 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('the second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    // One Card per catalog tower: 5 since M2-S6 added `stun` (was 4 at M2-S5a, 3 at
-    // M2-S4a). The slot WIRING for cards 4/5 — their hotkey badges, rebind entries and
-    // labels — is P6's/M2-S6's; this assertion tracks the catalog's size, which is
-    // content, not wiring.
-    expect(shell.cards).toHaveLength(5);
+    // One Card per catalog tower: 6 since M2-S7 added `antiair` (was 5 at M2-S6, 4 at
+    // M2-S5a, 3 at M2-S4a). The slot WIRING for cards 4-6 — their hotkey badges, rebind
+    // entries and labels — is P6's/M2-S6's/M2-S7's; this assertion tracks the catalog's
+    // size, which is content, not wiring.
+    expect(shell.cards).toHaveLength(6);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
@@ -841,21 +841,37 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions).toContainEqual({ type: 'armTower', tower: 'stun' });
   });
 
-  it('slots 6-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a five-tower bundle (PLAN.md P6, widened M2-S6 P5)', () => {
+  // M2-S7: `setup()`'s bundled ruleset gains a sixth catalog tower (`antiair`), so card
+  // 6 (index 5, `armTower6`/Digit6) is now wired for real too — mirrors the Digit4/5
+  // tests above, one slot over. The bundle is now six towers, so the absent-beyond-
+  // bundle-size range this test asserts narrows to 7-9, preserving exactly the same
+  // contract (slots beyond the bundle stay absent) at the new size.
+  it('Digit6 arms the sixth Card with the six-tower bundle (M2-S7 P5)', () => {
+    const { actions, shell } = setup();
+    const antiairCard = shell.cards[5]!;
+    expect(antiairCard.towerId).toBe('antiair');
+    expect(antiairCard.name.textContent).toBe('Anti-Air Tower');
+    expect(antiairCard.hotkey.textContent).toBe('6'); // Digit6 default
+    expect(antiairCard.root.getAttribute('aria-keyshortcuts')).toBe('6');
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit6' }));
+    expect(actions).toContainEqual({ type: 'armTower', tower: 'antiair' });
+  });
+
+  it('slots 7-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a six-tower bundle (PLAN.md P6, widened M2-S6 P5, M2-S7 P5)', () => {
     const { actions, overlay, shell, settingsBtn } = setup();
-    // Only five Cards exist — no badge/aria-keyshortcuts beyond index 4.
-    expect(shell.cards).toHaveLength(5);
-    // No phantom rebindable action for slots 6..9.
+    // Only six Cards exist — no badge/aria-keyshortcuts beyond index 5.
+    expect(shell.cards).toHaveLength(6);
+    // No phantom rebindable action for slots 7..9.
     settingsBtn.click();
     const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
       (el) => el.textContent,
     );
-    for (let n = 6; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
+    for (let n = 7; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
     overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!.click();
-    // The document hotkeys for those slots no-op too — cards[5..8] don't exist. (Settings
+    // The document hotkeys for those slots no-op too — cards[6..8] don't exist. (Settings
     // is closed here — an open settings dialog makes the shell `inert`, which would mask
     // this on its own and defeat the assertion.)
-    for (let n = 6; n <= 9; n++) {
+    for (let n = 7; n <= 9; n++) {
       document.dispatchEvent(new KeyboardEvent('keydown', { code: `Digit${n}` }));
     }
     expect(actions).toEqual([]);
@@ -884,6 +900,31 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     const closeBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;
     closeBtn.click();
     expect(actions.map((a) => a.type)).toEqual(['closePanel']);
+  });
+
+  // M2-S7: the Targets row must actually READ the tower's compiled `attack.domain`
+  // rather than the old literal `'ground'` (`overlay.ts:901`'s prior hardcoding, which
+  // would otherwise display "Targets: Ground" on `antiair` — actively false). `antiair`
+  // compiles `domain: 'air'`; `slow` was widened to `domain: 'both'` (P1-P3).
+  it("the Panel's Targets row reads Air for antiair and Ground + Air for the both-domain slow tower", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'antiair' }),
+      refund: 0,
+    });
+    expect(panel.root.textContent).toContain('Targets: Air');
+
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'slow' }),
+      refund: 0,
+    });
+    expect(panel.root.textContent).toContain('Targets: Ground + Air');
   });
 
   // M2-S4a: `splash`'s damage is carried by its `aoe` effect (kind 'aoe', not 'direct')

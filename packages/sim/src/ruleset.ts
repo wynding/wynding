@@ -40,7 +40,14 @@
 // this module and `index.ts`'s public re-export can never drift apart.
 
 import { canonicalJson, sha256Hex } from '@wynding/engine';
-import type { EffectDef, Ruleset, RulesetBoard, TowerDef, TowerTargetDomain } from '@wynding/types';
+import type {
+  CreepDef,
+  EffectDef,
+  Ruleset,
+  RulesetBoard,
+  TowerDef,
+  TowerTargetDomain,
+} from '@wynding/types';
 import { loadBoard, type BoardContext } from './context';
 import { RulesetError, canonicalImmunities, effectiveSpeedFp, SIM_VERSION } from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
@@ -373,8 +380,12 @@ export function rulesetDigest(bundle: Ruleset): string {
  *  cardinality, creep/tower per-entry domains, armor, immunities, roles, effect
  *  kinds/forms, leak-cost uniformity, the early-call divisors). Board/wave-scoped
  *  dimensions (`maxWavesPerBoard`, `maxEntriesPerWave`, `maxOffsetTicks`,
- *  `maxClearBonus`) are checked separately, only against the board actually being
- *  compiled — mirroring v1's board-scoped wave validation. */
+ *  `maxClearBonus`, and — M2-S7 P1 — the air-domain size and axis-alignment gates)
+ *  are checked separately, only against the board actually being compiled —
+ *  mirroring v1's board-scoped wave validation. The size gate's TRIGGER is
+ *  catalog-wide (any air creep at all) even though the OBJECT it bounds is one
+ *  board's dimensions; see `checkCapabilityBoard`'s own comment for why it still
+ *  lives there. */
 function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): void {
   const v = SIM_VERSION;
   if (bundle.towerCatalog.length > profile.maxTowerCatalogSize) {
@@ -530,10 +541,28 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
   }
 }
 
+/** Ceiling on a board's `widthTiles`/`heightTiles` (M2-S7 P1), enforced only when
+ *  the CATALOG contains an air creep at all — see `checkCapabilityBoard`'s air-gate
+ *  block for why that scope is deliberately wider than the axis-alignment gate
+ *  beside it. `CELL_CAP = 1 << 20` (board.ts) bounds cell COUNT, not per-side
+ *  dimensions — a legal 1,048,576 × 1 board is otherwise admissible and drives
+ *  `dx_fp²` (the air metric's `isqrt` operand, combat.ts) to ≈2⁵⁶, past the safe-
+ *  integer range. At ≤1024 cells per side, `dx_fp ≤ 2¹⁸`, so `dx_fp² + dy_fp² ≤
+ *  2³⁷` — safe with enormous margin, on ANY admissible board rather than only the
+ *  one M2 ships. */
+export const MAX_AIR_BOARD_SIDE_TILES = 1024;
+
 /** Gate the board/wave-scoped capability dimensions against the board actually
  *  being compiled (v1 only ever validated the chosen board's wave, not every
- *  board in the catalog). */
-function checkCapabilityBoard(board: RulesetBoard, profile: CapabilityProfile): void {
+ *  board in the catalog). `creepCatalog` is threaded through (M2-S7 P1) so the two
+ *  air-domain board gates below can resolve a wave entry's `creepId` to its domain —
+ *  the same lookup shape `checkCapabilityGlobal` already uses elsewhere in this
+ *  file, not a new one. */
+function checkCapabilityBoard(
+  board: RulesetBoard,
+  profile: CapabilityProfile,
+  creepCatalog: readonly CreepDef[],
+): void {
   const v = SIM_VERSION;
   if (board.waves.length > profile.maxWavesPerBoard) {
     throw new RulesetError(
@@ -560,6 +589,56 @@ function checkCapabilityBoard(board: RulesetBoard, profile: CapabilityProfile): 
       }
     }
   }
+
+  // SIZE CEILING (M2-S7 P1) — triggered by the CATALOG containing an air creep AT
+  // ALL, scheduled or not, deliberately wider than the axis-alignment gate below.
+  // It protects safe-integer ARITHMETIC (`MAX_AIR_BOARD_SIDE_TILES`'s doc comment),
+  // and `coerceSoa` accepts any catalog-resolved `creepId` — so a forged or restored
+  // air row on a large ground-only-scheduled board would reach the air metric with
+  // no scheduled flyer anywhere on this board, or any board, to have tripped a
+  // narrower gate. Checked HERE, against the one board actually being compiled,
+  // because a match only ever compiles one board (`compileRuleset`'s `boardId`) —
+  // there is no separate "whole catalog" object to bound width/height against.
+  if (creepCatalog.some((c) => c.domain === 'air')) {
+    if (board.widthTiles > MAX_AIR_BOARD_SIDE_TILES) {
+      throw new RulesetError(
+        `board '${board.id}' widthTiles ${board.widthTiles} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion ${v} (the catalog contains an air creep)`,
+      );
+    }
+    if (board.heightTiles > MAX_AIR_BOARD_SIDE_TILES) {
+      throw new RulesetError(
+        `board '${board.id}' heightTiles ${board.heightTiles} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion ${v} (the catalog contains an air creep)`,
+      );
+    }
+  }
+
+  // AXIS-ALIGNMENT (M2-S7 P1) — triggered ONLY when THIS board's own wave schedule
+  // references an air-domain creep, deliberately NARROWER than the size gate above:
+  // it protects measurement FIDELITY (the straight-line metric movement.ts/
+  // combat.ts assume for a flyer), which only genuinely scheduled flight can reach
+  // — a catalog-wide test here would reject an unrelated ground-only board just
+  // because some OTHER board in the same catalog schedules a flyer. Fidelity has no
+  // meaning under forged state (the size gate's concern); overflow does — the two
+  // gates cannot share a scope. An entry referencing an unresolved `creepId` is NOT
+  // treated as air (same `?? 'ground'`-shaped fallback as every other totality rail
+  // in the sim) — a schema-valid-but-unknown id is rejected later, by wave
+  // compilation, not here.
+  const boardFliesAir = board.waves.some((wave) =>
+    wave.entries.some(
+      (entry) => creepCatalog.find((c) => c.id === entry.creepId)?.domain === 'air',
+    ),
+  );
+  if (boardFliesAir) {
+    const axisAligned =
+      board.entrance.col === board.exit.col || board.entrance.row === board.exit.row;
+    if (!axisAligned) {
+      throw new RulesetError(
+        `board '${board.id}' entrance (${board.entrance.col},${board.entrance.row}) -> exit ` +
+          `(${board.exit.col},${board.exit.row}) is not axis-aligned at simVersion ${v} ` +
+          `(its wave schedule flies an air creep)`,
+      );
+    }
+  }
 }
 
 /**
@@ -577,7 +656,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
 
   const board = normalized.boards.find((b) => b.id === boardId);
   if (board === undefined) throw new RulesetError(`unknown boardId '${boardId}'`);
-  checkCapabilityBoard(board, profile);
+  checkCapabilityBoard(board, profile, normalized.creepCatalog);
 
   // Build the grid + exit distance field; loadBoard rejects an unplayable board. Its
   // failure (a GridError — non-border opening, bad dims, over-cap cells) is re-thrown

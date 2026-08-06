@@ -12,9 +12,18 @@
  *  lingering effect" — again a NEW value rather than reusing any of the above, so no two
  *  towers ever share a footprint mark. `'bolt'` is `stun`'s (M2-S6) — a three-segment
  *  zigzag polyline through the footprint centre, evoking "shocks" — distinct from
- *  `'crosshair'`'s spokes by not being radial. An unrecognized id draws `'plain'`
- *  (total, never throw). */
-export type TowerFootprintMark = 'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt';
+ *  `'crosshair'`'s spokes by not being radial. `'arrow'` is `antiair`'s (M2-S7) — an
+ *  upward arrow (a full-height shaft through the footprint centre plus two barbs at its
+ *  tip) evoking "shoots skyward" — distinct from `'crosshair'`'s four spokes (a shaft
+ *  and two barbs, not four radial strokes with a centre gap) and `'bolt'`'s zigzag (a
+ *  straight shaft, not a three-segment stagger), so `antiair` is never visually
+ *  conflated with `basic`'s plain body. It is deliberately NOT a bare "^": the airborne
+ *  creep cue (`airborneCuePaintOps`) is exactly that glyph, and a flyer's cue lands in
+ *  the cell to its north — i.e. on top of a tower footprint — so a bare chevron here
+ *  would put two same-shaped marks a tenth of a cell apart with only colour separating
+ *  them (ADR 0003 forbids leaning on colour for essential cues). An unrecognized id
+ *  draws `'plain'` (total, never throw). */
+export type TowerFootprintMark = 'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt' | 'arrow';
 
 const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   basic: 'plain',
@@ -22,6 +31,7 @@ const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   splash: 'crosshair',
   venom: 'droplet',
   stun: 'bolt',
+  antiair: 'arrow',
 };
 
 /** The footprint mark for `towerId` — total over any string, `hasOwnProperty`-guarded
