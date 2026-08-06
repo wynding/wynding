@@ -87,7 +87,13 @@ describe('R0 — the committed CI-runner baseline', () => {
   // requires ("an explicit committed edit with justification in the PR") in front of
   // whoever is doing the nudging. Update it only alongside gate.ts's provenance doc.
   //
-  // RE-RECORDED at 1.00 (M2-S6 QC): the median of 17 CI samples — run 31041932972,
+  // RE-RECORDED at 1.00 (M2-S6 QC), and PROVISIONAL: the 17 samples are attempts of ONE
+  // workflow run on ONE image, so this is not a runner-class calibration, and the escalation
+  // rule that blesses it was selected against the same 17. `gate.ts`'s `R0` doc states all
+  // three limits and the discharge plan. This test pins the VALUE regardless — provisional
+  // does not mean editable without review.
+  //
+  // The median of 17 CI samples — run 31041932972,
   // attempts 1-17, head a1600c9, `ubuntu-24.04` — rounded DOWN to the nearer hundredth,
   // against the p50/p50 statistic at `TOLERANCE` 1.10. The superseded 1.42 baselined
   // p95/p50 and does not describe this statistic. `gate.ts`'s `R0` doc carries the full

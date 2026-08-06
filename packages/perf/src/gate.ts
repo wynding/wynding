@@ -151,8 +151,9 @@ export function controlStat(controlSamples: readonly SampledTick[]): number {
  * figures are comparable to each other (all four rows are n = 4) and NOT to a cohort of a
  * different size. Comparing the 2.8% below against a 17-run cohort's 4.92% produced a false
  * alarm during the `R0` re-record; converted to sigma the two agree at ~2.7%. When comparing
- * across cohort sizes use sigma — see `R0`'s doc, which also gives the stronger check: the
- * two cohorts' DIRECT sample sds agree at 2.55% and 2.57% with no range statistic involved. Stating it matters, because on a MEAN basis the
+ * across cohort sizes use sigma — see `R0`'s doc. (It used to offer the two cohorts' direct
+ * sample sds, 2.55% and 2.57%, as a stronger check; it no longer does — at n = 4 the sd
+ * carries a 95% CI of 1.45%-9.51%, so that agreement is coincidence.) Stating it matters, because on a MEAN basis the
  * four rows below read 15.4 / 16.1 / 11.7 / 2.7 — three of them differ in the first decimal,
  * including the headline 2.8, so a reader recomputing any of them could think it wrong.
  *
@@ -400,7 +401,9 @@ export function stressStatP99(dueBlastSamples: readonly SampledTick[]): number {
  *  so a 4-run figure and a 17-run figure are not comparable. And they are measured against
  *  `TOLERANCE - 1` rather than against the real margin from the distribution's centre,
  *  which the floored `R0` shrinks. The properly computed headroom at the committed baseline
- *  is **3.61 sigma** on the point estimate and 2.37 at the sigma upper bound. Do not read the
+ *  is **3.61 sigma** on the point estimate and 2.37 at the sigma upper bound — both in-sample
+ *  on the cohort that selected the rule, and both tail statements from an estimated sigma, so
+ *  read them as the rule's arithmetic rather than as safety margins (see `R0`'s three limits). Do not read the
  *  numerical closeness of "3.6x" and "3.61 sigma" as confirmation — the 1.6x/3.6x pair was
  *  never a sigma comparison. Recomputed on the sigma basis, the old gate scores 0.78 on the
  *  SAME four diagnostic runs the 1.6x came from (the like-for-like pairing, 0.78 -> 3.61)
@@ -648,7 +651,114 @@ export const TOLERANCE = 1.1;
  */
 /**
  * RE-RECORDED 2026-08-05 (M2-S6 QC) at **1.00**, for the p50/p50 statistic at
- * `TOLERANCE` 1.10 — ceiling **1.1000**. The superseded 1.42 baselined p95/p50 and was
+ * `TOLERANCE` 1.10 — ceiling **1.1000**. **PROVISIONAL**, and the three reasons are stated
+ * up front rather than buried, because each of them limits what this number can be used to
+ * claim (all three raised by CodeRabbit on PR #85 and none of them declined):
+ *
+ *   1. THIS IS NOT A RUNNER-CLASS CALIBRATION. Every sample is an attempt of ONE workflow
+ *      run on ONE `ubuntu-24.04` image, inside a few hours. `R0` is applied to every future
+ *      job on whatever the fleet allocates, so it is being used beyond the population it was
+ *      measured on. The only other evidence is the four diagnostic runs of 2026-08-03/05,
+ *      whose median is 1.0063 against this cohort's 1.0065 — but their own provenance was
+ *      never captured (no run or job ids; see the PROVENANCE note below), so whether they are
+ *      four separate runs or four attempts of one is UNKNOWN. If the latter, they carry the
+ *      same defect as these 17 and are not an independent occasion at all. Do not lean on
+ *      them as cross-workflow evidence; they are a second reading, of unknown structure,
+ *      taken within days on the same image.
+ *   2. THE FLAKE-RATE FIGURES BELOW ARE MODEL OUTPUTS, NOT MEASURED RATES. The Student-t
+ *      predictive tail assumes i.i.d. normal sampling and is centred on a MEAN; `R0` is a
+ *      floored MEDIAN, and this same record documents temporal clustering and left skew
+ *      (g1 = -1.36). Read "1 in 690" and "12-24 a year" as illustrative arithmetic under
+ *      assumptions this cohort violates. They are NOT part of the acceptance rationale.
+ *   3. THE ESCALATION RULE WAS SELECTED IN-SAMPLE. Drafts 1 and 2 were rejected because they
+ *      failed against THESE 17 samples, and draft 3's 3.61/2.37 are then reported as passing
+ *      on the same 17. That is fitting, not validation. Draft 3's first out-of-sample test is
+ *      the next re-record.
+ *
+ * WHY THIS SHIPS ANYWAY, argued from what survives the three limits rather than from what
+ * was left over after deleting the model. An earlier version of this paragraph gave three
+ * reasons and two of them did not hold: it cited the two cohorts' sd agreement to 0.02
+ * percentage points, which this same block calls coincidence further down; and it cited the
+ * ceiling sitting "3.61 sample-sds above the median with nothing near it", which is a TAIL
+ * claim from a sigma estimate — precisely what limit 2 says this cohort cannot support.
+ *
+ * The argument that does not need the cohort to be anything it isn't:
+ *
+ *   - **`perf` is ADVISORY.** Branch protection requires `verify` and `codex-freshness` only
+ *     as configured at the time of writing,
+ *     so a baseline that is wrong in either direction costs a red non-blocking job and a
+ *     human look. This is the whole of the risk case, and it does not depend on the sample
+ *     being representative, i.i.d., or normally distributed. (It DOES depend on repository
+ *     config this repo cannot see or assert: if `perf` is ever added to the required checks,
+ *     this argument voids silently. Anyone making that change must re-read this block first.)
+ *   - **A purely descriptive margin**, with no distributional assumption anywhere in it: the
+ *     largest `R` ever observed under this statistic, across BOTH readings on record, is
+ *     **1.0493** (from the four diagnostic runs; this cohort's own max is 1.0362), against a
+ *     ceiling of **1.1000** — a **4.8%** gap in the raw measurement. An earlier version of
+ *     this bullet quoted 1.0362 / 6.2%, which silently dropped the four-run cohort while the
+ *     bullet below cites that same cohort's median. Do not take the max from one cohort and
+ *     the centre from two. It says nothing about the tail and is not a flake-rate estimate.
+ *   - **The central value reproduces on a second cohort**: medians 1.0063 (2026-08-03/05) and
+ *     1.0065 (this one). Only the MEDIANS are offered here — the sd pair is dropped for the
+ *     reason given above. And see limit 1 for how little separation those two cohorts have.
+ *
+ * That is enough to enforce a gate that currently enforces nothing. It is not enough to call
+ * the gate calibrated, and nothing above should be read as a probability.
+ *
+ * HOW THE PROVISIONAL STATUS GETS DISCHARGED. A first draft of this plan said "re-record from
+ * >= 30 gated runs spanning >= 10 workflow runs and at least two runner images", which is
+ * INCOHERENT with the escalation rule shipped in this same block and is recorded here so it is
+ * not proposed again. That rule requires ONE head and ONE image, because pooling across heads
+ * mixes workload drift into `sd(R)` — this file's own history is the argument (P9 changed the
+ * workload and forced a re-record; the S6 failure was the DENOMINATOR moving 23%) — and a
+ * dispersion estimate inflated by workload drift LOOSENS branch (a). A cohort that violates
+ * the rule's precondition cannot be judged by the rule's thresholds, and would bias the result
+ * permissive.
+ *
+ * Dispersion and fleet-representativeness are different measurements and need different
+ * cohorts. So:
+ *
+ *   - FOR DISPERSION, keep the rule as written: one head, one image, >= 10 samples. That is
+ *     what draft 3's thresholds are for, and its first OUT-of-sample application is the next
+ *     time this is run — the current 3.61/2.37 are in-sample.
+ *   - FOR FLEET REPRESENTATIVENESS, do not pool images into one cohort. The standing rule
+ *     above already requires a re-record when the runner class changes, which yields one
+ *     baseline PER image. Agreement BETWEEN those per-image baselines is the fleet evidence,
+ *     and disagreement is the finding. That is a comparison across cohorts, never a merge of
+ *     them. ONE HONEST WEAKNESS: two per-image baselines are necessarily separated in time and
+ *     a workload change can force a re-record in between, so a disagreement is confounded by
+ *     workload drift and cannot be attributed to the image alone. The dispersion leg refuses
+ *     pooling precisely to keep workload drift out; this leg cannot fully do the same. Read a
+ *     disagreement as "something changed", then find out what.
+ *   - Production supplies the raw material for the first of these but not the second: every
+ *     completed run prints its `R` in `PERF-REPORT`, so `R` values accumulate on their own —
+ *     though not from runs that throw before reporting (see `run.ts`'s header for the five
+ *     paths that emit no report line, which are exactly the anomalous runs a cohort would
+ *     want). A SECOND IMAGE, by contrast, arrives only when GitHub bumps `ubuntu-latest`, on
+ *     their schedule and not this project's — and when it does, the standing rule fires and
+ *     the new image gets its own baseline rather than joining this one.
+ *
+ * WHAT ACTUALLY RETIRES THE WORD "PROVISIONAL", since a plan without a completion criterion
+ * is a wish. Take the three limits one at a time: limit 3 (in-sample rule selection) clears
+ * the first time the rule is applied to a cohort that did not select it, i.e. the next
+ * re-record. Limit 1 (not a runner-class calibration) clears when a SECOND image has its own
+ * baseline under the same rule and their MEDIANS agree to within |median_A - median_B| <= 0.02
+ * (~1 sigma at the spread measured here). Compare MEDIANS, not the committed `R0` values:
+ * `R0` is floored to a hundredth, so two baselines would both read 1.00 across a band far
+ * wider than any difference worth detecting, and comparing them would pass by construction.
+ * A larger disagreement does NOT clear limit 1 — it is a real finding about the fleet AND a
+ * delay, and an earlier draft calling it "a finding, not a delay" had it wrong.
+ * Limit 2 NEVER clears: the flake figures are model outputs at any sample size, so it is a
+ * permanent statement about how to read them rather than a condition to discharge. So:
+ * provisional retires on limits 1 and 3 together, and a re-record alone is not sufficient —
+ * a re-record under the one-head/one-image rule reproduces limit 1 exactly.
+ *
+ * Until then this number is a working baseline, and the "re-record when the runner class
+ * changes" rule — stated in the SUPERSEDED provenance block above and still live in
+ * `docs/design-notes/performance-spike.md` — is the binding one. THIS PLAN HAS NO OWNER OR
+ * DATE, which is a real weakness: the data lives in CI logs under a 90-day retention with no
+ * artifact upload, and nothing triggers the re-record automatically. Treat the next runner
+ * image bump as the trigger. The superseded 1.42 baselined p95/p50 and was
  * meaningless for the new statistic; the `null` window between the statistic change and
  * this record is closed.
  *
@@ -766,9 +876,12 @@ export const TOLERANCE = 1.1;
  * the optimistic one, and do not round a downside toward comfort. So, at 700-1,400 gated runs a year and using the t figure on BOTH branches: **1-2 failures
  * a year** if sigma is near the point estimate, and **12-24 a year — monthly to twice
  * monthly** if it is near the upper bound. ("Every other month" would be the answer from the
- * normal 1-in-114 at the low end of the run rate; both substitutions flatter.) Acceptable
- * because `perf` is not a required check — and that verdict has to hold on the pessimistic
- * branch, where twice-monthly is a real cost, not a rounding error.
+ * normal 1-in-114 at the low end of the run rate; both substitutions flatter.) ILLUSTRATIVE ONLY — see
+ * limit 2 at the top of this block: both figures assume i.i.d. normal sampling around a mean,
+ * and this cohort is clustered, skewed, and summarised by a floored median. They bound the
+ * arithmetic, not the gate. The acceptance rationale is the "WHY THIS SHIPS ANYWAY"
+ * paragraph at the top of this block, which does not use them; what carries the risk is that `perf`
+ * is not a required check, so being wrong costs a red advisory job.
  *
  * Two more caveats that do not resolve: these 17 are attempts of ONE workflow run, clustered
  * in time, not an i.i.d. draw from the population the gate faces over months; and the cohort
@@ -809,7 +922,9 @@ export const TOLERANCE = 1.1;
  *         (b) the same margin against the 97.5% two-sided chi-square upper bound on
  *             sigma                                        >= 2      -- and publish it.
  *
- * At this record: (a) **3.61**, (b) **2.37**. Both pass.
+ * At this record: (a) **3.61**, (b) **2.37**. Both pass — IN-SAMPLE, on the 17 samples that
+ * rejected drafts 1 and 2. That is not validation of the rule (limit 3 at the top); it is the
+ * arithmetic of the rule on the data that produced it.
  *
  * WHICH BRANCH ACTUALLY BINDS — (b), for every n below 18, so it is a test and not a
  * formality. It implies a point margin of 2 * sigma_hi/
@@ -838,12 +953,18 @@ export const TOLERANCE = 1.1;
  * whole change diagnosed.
  *
  * ONE THING THIS RECORD DOES NOT HIDE: the ORIGINAL span condition is still met at n = 17
- * (1.1058 > 1.10). The baseline ships anyway, on the sigma argument above and with the owner
- * informed — not because the trigger stopped firing.
+ * (1.1058 > 1.10). The baseline ships anyway on the "WHY THIS SHIPS ANYWAY" argument at the
+ * top of this block — advisory blast radius, a raw 4.8% margin to the largest observation, a
+ * reproducing median — and with the owner informed. NOT on the sigma argument, which limit 2
+ * retracts, and not because the trigger stopped firing.
  *
  * `ci.yml`'s null-`r0` alarm is now dormant by design: it fires only on a DEFAULT-BRANCH
- * run whose report carries no usable baseline. With a number committed there is nothing
- * for it to catch, which is the state it exists to restore. See `run.ts`.
+ * run whose report carries no usable baseline. With a number committed there is nothing for
+ * it to catch, which is the state it exists to restore. Note what that alarm CANNOT see: it
+ * checks only that `r0` is a positive finite number, so a PROVISIONAL baseline satisfies it
+ * exactly as a calibrated one would. Nothing in CI distinguishes the two — the provisional
+ * status lives in this doc and nowhere else, which is why the discharge trigger above is
+ * written down rather than left to memory. See `run.ts`.
  */
 export const R0: number | null = 1.0;
 

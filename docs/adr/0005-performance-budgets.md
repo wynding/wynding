@@ -5,7 +5,7 @@
 - **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below); 2026-08-03
   (M2-S5b P11 — numerator p99 → p95, `R0` 1.42); 2026-08-04 (M2-S6 — the stress scene is
   not extended for the stun story; see the Amendment below); 2026-08-05 (M2-S6 QC —
-  numerator p95 → p50, `TOLERANCE` 1.10, `R0` re-recorded 1.42 → 1.00)
+  numerator p95 → p50, `TOLERANCE` 1.10, `R0` re-recorded 1.42 → 1.00, **provisional**)
 - **Rulings:** 2026-07-31 (all three findings answered; see Findings from the spike)
 
 ## Context
@@ -508,10 +508,59 @@ tell a budget that does not exist from one that could not be measured.
    image recorded, since `ci.yml` says `ubuntu-latest` and nothing here pins an image; the
    record below explains why it took seventeen and replaces the span-based escalation rule.
 
-   **RECORDED 2026-08-05: `R0` = 1.00**, ceiling **1.1000** — the median of **17** CI samples
+   **RECORDED 2026-08-05: `R0` = 1.00 (PROVISIONAL)**, ceiling **1.1000** — the median of **17** CI samples
    (run 31041932972, attempts 1–17, head `a1600c9`, `ubuntu-24.04`) rounded DOWN. The null
    window is closed, and it closed inside this PR rather than in a follow-up, which was the
-   commitment. That mattered because a null `R0` is a GREEN state: the gate reports, `perf`
+   commitment.
+
+   **Provisional, for three reasons, all raised in review and none declined.** (1) It is not a
+   runner-class calibration: every sample is an attempt of one workflow run on one
+   `ubuntu-24.04` image within a few hours. The only other reading is the four diagnostic runs
+   of 2026-08-03/05 (median 1.0063 against 1.0065), but their provenance was never captured —
+   no run or job ids — so whether they are four separate runs or four attempts of one is
+   UNKNOWN, and if the latter they carry the identical defect. They are not cross-occasion
+   evidence. (2) The flake-rate figures
+   below are model outputs, not measured rates — a Student-t predictive tail assumes i.i.d.
+   normal sampling around a mean, while `R0` is a floored median and this cohort is clustered
+   and left-skewed; they are illustrative and are **not** part of the acceptance rationale.
+   (3) The escalation rule was selected in-sample: drafts 1 and 2 were rejected for failing
+   against these 17 samples and draft 3's pass is reported on the same 17, which is fitting
+   rather than validation. **What the baseline rests on instead** — an argument that needs no
+   distributional assumption anywhere in it, because the cohort cannot support one. First,
+   **`perf` is advisory**: branch protection requires `verify` and `codex-freshness` only (as
+   configured at the time of writing — this repo cannot assert that, and if `perf` is ever made
+   required this argument voids silently), so a wrong baseline costs a red non-blocking job and
+   a human look. Second, a **purely descriptive margin**: the largest `R` ever observed under
+   this statistic, across BOTH readings on record, is **1.0493** (from the four diagnostic runs;
+   this cohort's own max is 1.0362) against a **1.1000** ceiling — a **4.8%** gap in the raw
+   measurement, offered as a fact and not as a flake rate. An earlier draft quoted 1.0362 /
+   6.2%, which dropped the four-run cohort from the max while the next clause cites its median. Third, the **median reproduces**
+   across the two readings on record (1.0063, 1.0065) — medians only; the sd agreement is
+   dropped, being a coincidence at n = 4 (95% CI 1.45–9.51%), and the earlier "3.61 sample-sds
+   with nothing near it" is dropped too, being a tail claim from an estimated σ, which is what
+   limit 2 says this cohort cannot support. Enough to enforce a gate that currently enforces
+   nothing; not enough to call it calibrated.
+
+   **Discharging the provisional status.** Dispersion and fleet-representativeness are
+   different measurements and need different cohorts, so do not pool. For dispersion, the
+   escalation rule stands as written (one head, one image, ≥10 samples) — pooling across heads
+   mixes workload drift into `sd(R)`, which would _loosen_ the rule. For fleet coverage, the
+   standing "re-record when the runner class changes" rule already yields one baseline per
+   image; agreement between per-image baselines is the evidence, disagreement is the finding.
+   PROVISIONAL retires when both limit 1 and limit 3 clear: a second image has its own baseline
+   and the two agree, and the rule has been applied once to a cohort that did not select it.
+   Limit 2 never clears — the flake figures are model outputs permanently, whatever the sample
+   size. An earlier draft of this plan asked for "≥30 runs spanning ≥10 workflow runs and ≥2
+   images", which the escalation rule's own precondition forbids; it is recorded here so it is
+   not proposed again. **The weaknesses of the plan that replaced it, stated rather than left
+   to `gate.ts`:** it has no owner and no date; the raw `R` values live only in CI logs under a
+   90-day retention with no artifact upload, so the data expires; a second runner image arrives
+   on GitHub's schedule, not this project's, so the timing is outside our control; and nothing
+   in CI represents the provisional status — `ci.yml`'s alarm checks only that `r0` is a
+   positive finite number, which a provisional baseline satisfies exactly as a calibrated one
+   would. Treat the next runner image bump as the trigger.
+
+   Closing the window inside this PR mattered because a null `R0` is a GREEN state: the gate reports, `perf`
    exits 0, and every check passes while nothing is enforced. `ci.yml`'s default-branch alarm
    is the backstop and it only fires AFTER a merge — detection, not prevention.
 
@@ -549,8 +598,10 @@ tell a budget that does not exist from one that could not be measured.
    the t figure on BOTH branches: **1–2 failures a year** near the point estimate, **12–24 —
    monthly to twice monthly** near the upper bound. (An earlier draft said "every other
    month", reachable only by using the normal 1-in-114 and the low end of the run rate — the
-   same substitution this paragraph indicts one sentence earlier.) Acceptable because `perf`
-   is not required, and that verdict has to hold on the pessimistic branch. These
+   same substitution this paragraph indicts one sentence earlier.) **Illustrative only** — both figures assume i.i.d. normal
+   sampling around a mean, and this cohort is clustered, left-skewed and summarised by a
+   floored median. They are not the acceptance argument; see the provisional paragraph above
+   for what is. These
    seventeen are also attempts of ONE workflow run, clustered in time, and the cohort is
    left-skewed (g1 = −1.36), which the χ² bound above assumes away.
 
@@ -559,13 +610,16 @@ tell a budget that does not exist from one that could not be measured.
    exists, 0.25σ here). Draft 2 tested against the σ upper bound, which this very cohort fails
    at 2.37 and which is unsatisfiable below n ≈ 68. **What ships: ≥10 samples on one head and
    image; compute both `(R0 × TOLERANCE − median) / sd ≥ 3` and the same margin against the
-   97.5% two-sided χ² upper bound ≥ 2, and escalate if EITHER fails.** Here: 3.61 and 2.37,
-   both pass. The bound test is the stricter one below n = 18 — it implies a point margin of
+   97.5% two-sided χ² upper bound ≥ 2, and escalate if EITHER fails.** Here: 3.61 and 2.37, both pass —
+   IN-SAMPLE, on the same 17 that rejected drafts 1 and 2, so this is the rule's arithmetic on
+   the data that selected it, not a validation of it. The bound test is the stricter one below n = 18 — it implies a point margin of
    3.65 at n = 10 and 3.04 at n = 17 — so both are tests, not a test plus a disclosure. It is
    also curable by adding samples, since the bound tightens with n. It remains blind to image-bump drift,
    constrains dispersion but not location creep, and has 50% power against a 9.3% regression
    needing 13.6% for 95% power. **Note also that the original span condition is still met at
-   n = 17 (1.1058 > 1.10); the baseline ships on the σ argument with the owner informed, not
+   n = 17 (1.1058 > 1.10); the baseline ships on the acceptance argument above — advisory blast
+   radius, a raw 4.8% margin, a reproducing median — with the owner informed, **not** on the σ
+   argument (limit 2 retracts it) and not
    because the trigger stopped firing.**
 
    On cancellation, scoped honestly: raw control p50 spanned **63%** across the cohort while
@@ -640,7 +694,7 @@ ceiling.
 _(SUPERSEDED 2026-08-05, M2-S6 QC — that escalation rule fired: CI came in at `R = 1.8348`
 against the `1.7750` ceiling on work whose oracles were byte-identical. It was reported rather
 than improvised around, and the outcome is Finding 3's 2026-08-05 amendment above: the numerator
-is now p50, `TOLERANCE` is 1.10, and `R0` is 1.00 (ceiling 1.1000). The `1.42` / `1.7750`
+is now p50, `TOLERANCE` is 1.10, and `R0` is 1.00 (ceiling 1.1000, provisional). The `1.42` / `1.7750`
 pair recorded here is what S6's own PR ran against, not the live gate.)_
 
 ## Consequences
