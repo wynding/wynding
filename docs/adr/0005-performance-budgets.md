@@ -5,7 +5,7 @@
 - **Amended:** 2026-07-30 (M2-S4b — the spike ran; see the Amendment below); 2026-08-03
   (M2-S5b P11 — numerator p99 → p95, `R0` 1.42); 2026-08-04 (M2-S6 — the stress scene is
   not extended for the stun story; see the Amendment below); 2026-08-05 (M2-S6 QC —
-  numerator p95 → p50, `TOLERANCE` 1.10, `R0` pending re-record)
+  numerator p95 → p50, `TOLERANCE` 1.10, `R0` re-recorded 1.42 → 1.00)
 - **Rulings:** 2026-07-31 (all three findings answered; see Findings from the spike)
 
 ## Context
@@ -500,23 +500,85 @@ tell a budget that does not exist from one that could not be measured.
    computed and reported in every `PERF-REPORT`, and the blind spot is pinned as an
    assertion in `gate-fixture.test.ts` so it cannot be rediscovered by accident.
 
-   **`R0` is `null` until re-recorded**, deliberately: 1.42 baselines p95/p50 and says
-   nothing about p50/p50. The gate REPORTS `R` and does not enforce it in that window,
-   which is what the `'unset'` status exists for. Restoring enforcement takes five CI
-   samples from the `perf` job — each run's ID and RESOLVED runner image recorded, since
-   `ci.yml` says `ubuntu-latest` and nothing here pins an image (see `gate.ts`'s `R0` doc) —
-   median rounded DOWN to the nearer hundredth, with the pre-committed escalation unchanged:
-   if the five span more than `TOLERANCE`, stop and escalate rather than widening anything.
+   **`R0` was set to `null` at this amendment and RE-RECORDED at 1.00 before it shipped** —
+   see the record immediately below, which is the current state. 1.42 baselines p95/p50 and
+   says nothing about p50/p50, so the gate reported `R` without enforcing it for the length
+   of the recording window (that is what the `'unset'` status exists for) and no longer does.
+   The procedure written here asked for five samples with each run's ID and RESOLVED runner
+   image recorded, since `ci.yml` says `ubuntu-latest` and nothing here pins an image; the
+   record below explains why it took seventeen and replaces the span-based escalation rule.
 
-   **This PR does not merge with `R0` null**, and that is a commitment rather than an
-   enforced rule: nothing can block the merge pre-emptively, because `perf` is not a required
-   check and the recording run must be allowed to stay green while it collects the samples.
-   What the repo does provide is an alarm behind it — `ci.yml`'s `perf` job fails on any
-   default-branch run whose report carries a null `r0`, so an unenforced gate on `main` is
-   loudly red instead of quietly green. That is detection after the fact, not prevention.
+   **RECORDED 2026-08-05: `R0` = 1.00**, ceiling **1.1000** — the median of **17** CI samples
+   (run 31041932972, attempts 1–17, head `a1600c9`, `ubuntu-24.04`) rounded DOWN. The null
+   window is closed, and it closed inside this PR rather than in a follow-up, which was the
+   commitment. That mattered because a null `R0` is a GREEN state: the gate reports, `perf`
+   exits 0, and every check passes while nothing is enforced. `ci.yml`'s default-branch alarm
+   is the backstop and it only fires AFTER a merge — detection, not prevention.
 
-   **The substance of the 2026-07-31 ruling is still untouched**: `perf` stays non-required
-   and a flake does not block a merge.
+   **The escalation rule fired at n = 5.** It was escalated to the owner rather than
+   reinterpreted, which was right, and the owner authorised more samples. The rule specified
+   a FIXED cohort of five, and at that n it is a coarse screen (~7% false-alarm rate against
+   this noise level) — crude, not ill-formed. Extending the cohort is what introduced the
+   n-dependence, and that was an authorised deviation from the protocol, not a discovery
+   about the rule. The n-dependence is nonetheless real and disqualifies a bare span
+   threshold for the REPLACEMENT: simulated here, P(span > 1.10) is 4.5% at n = 4, 6.8% at
+   n = 5, 21% at n = 10 and 42% at n = 17. The threshold is also coupled to `TOLERANCE`,
+   which this same change tightened 1.25 → 1.10 — at 1.25 neither this cohort (1.1058) nor
+   S5b's (1.2021) would have fired, so the firing owes as much to the tightening as to n.
+
+   **A second cohort is consistent with the baseline — but do not over-read it.** The four
+   diagnostic runs' own sample sd is **2.55%** of their median against these seventeen runs'
+   **2.57%**, and their medians are **1.0063** and **1.0065**. The n = 4 sd carries a 95% CI
+   of 1.45%–9.51%, so agreement to 0.02 percentage points is coincidence rather than
+   confirmation; and the two cohorts are days apart on the same image, not independent
+   samples of the runner fleet over time. Read it as "consistent with", not "settles it".
+   (The d2 conversion — n = 4 → 2.68%, n = 17 → 2.74% — explains the n = 5
+   excursion rather than establishing anything; the n = 4 figure must be derived from the
+   unrounded 2.758%, not the published 2.8%.)
+
+   **Headroom, stated without flattering itself.** The margin is measured from the
+   distribution's centre, not from `R0` — `R0` is the median FLOORED, deliberately below
+   centre, so "a 10% margin" claims the conservatism and spends it. Real headroom is
+   **3.61σ** from the median (3.75σ from the mean). And σ is estimated from 17 points, so the
+   predictive tail is Student-t, not normal: **~1 noise-only failure in 690 runs** (1 in 910
+   mean-centred). An earlier draft claimed 1 in 18,000, which needed BOTH the normal
+   approximation and the floored-`R0` margin. As probabilities: 5.6e-5 → 1.5e-4 (the
+   centring, ×2.7) → 1.4e-3 (the t, ×9.6), so the t step is 93% of the increase.
+   **The pessimistic branch, quantified:** at the σ CI's upper bound (3.93%) the margin is
+   **2.37σ** — 1 in 114 normal, **1 in 58** under the same t treatment. At 700–1,400 gated runs a year, using
+   the t figure on BOTH branches: **1–2 failures a year** near the point estimate, **12–24 —
+   monthly to twice monthly** near the upper bound. (An earlier draft said "every other
+   month", reachable only by using the normal 1-in-114 and the low end of the run rate — the
+   same substitution this paragraph indicts one sentence earlier.) Acceptable because `perf`
+   is not required, and that verdict has to hold on the pessimistic branch. These
+   seventeen are also attempts of ONE workflow run, clustered in time, and the cohort is
+   left-skewed (g1 = −1.36), which the χ² bound above assumes away.
+
+   **Replacement rule, third draft — the first two failed against this cohort.** Draft 1 used
+   `TOLERANCE − 1`, which is not the margin (flooring `R0` discards up to 0.01 before the gate
+   exists, 0.25σ here). Draft 2 tested against the σ upper bound, which this very cohort fails
+   at 2.37 and which is unsatisfiable below n ≈ 68. **What ships: ≥10 samples on one head and
+   image; compute both `(R0 × TOLERANCE − median) / sd ≥ 3` and the same margin against the
+   97.5% two-sided χ² upper bound ≥ 2, and escalate if EITHER fails.** Here: 3.61 and 2.37,
+   both pass. The bound test is the stricter one below n = 18 — it implies a point margin of
+   3.65 at n = 10 and 3.04 at n = 17 — so both are tests, not a test plus a disclosure. It is
+   also curable by adding samples, since the bound tightens with n. It remains blind to image-bump drift,
+   constrains dispersion but not location creep, and has 50% power against a 9.3% regression
+   needing 13.6% for 95% power. **Note also that the original span condition is still met at
+   n = 17 (1.1058 > 1.10); the baseline ships on the σ argument with the owner informed, not
+   because the trigger stopped firing.**
+
+   On cancellation, scoped honestly: raw control p50 spanned **63%** across the cohort while
+   `R` spanned **10.6%** — but that 63% rests on two fast runners; drop them and the other
+   fifteen span 14.7%. `corr(R, control p50)` is **+0.14** (n = 17, not significant). Read it
+   as "no residual speed dependence detected", not as a demonstration — a ratio cancels any
+   multiplicative machine factor by construction. "0 of 17 exceed the ceiling" is weak,
+   in-sample evidence: the ceiling was fitted to those same 17, so agreement is expected —
+   though not _forced_, since any sample above 1.1000 would have exceeded it, as one did in
+   the 2.49 era.
+
+**The substance of the 2026-07-31 ruling is still untouched**: `perf` stays non-required
+and a flake does not block a merge.
 
 Everything else measured clear, with margin: JS heap **42.1 MB** on the low-end profile (the one
 the ~256 MB budget is written for), worst-of-20 input latency **34.4 ms** against 100 ms, and
@@ -532,7 +594,7 @@ so it speaks to neither device budget directly, per (d) above.
 > **The `R0` half of this heading was overtaken the next day.** The scene-extension exception
 > below stands unchanged. The "`R0` is not re-recorded" half did not survive: the CI run this
 > amendment authorised came back over the ceiling, and Finding 3's **2026-08-05** amendment
-> moved the numerator to p50, `TOLERANCE` to 1.10, and `R0` to `null` pending a re-record.
+> moved the numerator to p50, `TOLERANCE` to 1.10, and re-recorded `R0` at 1.00 (ceiling 1.1000).
 > Read everything below about `R0`, the ceiling, and "do not re-record" as the state S6's own
 > PR ran under, not as instructions.
 
@@ -578,7 +640,7 @@ ceiling.
 _(SUPERSEDED 2026-08-05, M2-S6 QC — that escalation rule fired: CI came in at `R = 1.8348`
 against the `1.7750` ceiling on work whose oracles were byte-identical. It was reported rather
 than improvised around, and the outcome is Finding 3's 2026-08-05 amendment above: the numerator
-is now p50, `TOLERANCE` is 1.10, and `R0` is `null` pending a re-record. The `1.42` / `1.7750`
+is now p50, `TOLERANCE` is 1.10, and `R0` is 1.00 (ceiling 1.1000). The `1.42` / `1.7750`
 pair recorded here is what S6's own PR ran against, not the live gate.)_
 
 ## Consequences

@@ -146,7 +146,13 @@ export function controlStat(controlSamples: readonly SampledTick[]): number {
  * noise, not workload):
  *
  * "Half-spread" throughout this file and ADR 0005's ratio tables means `(max - min) / 2`
- * divided by the MEDIAN of the four values. Stating it matters, because on a MEAN basis the
+ * divided by the MEDIAN of the four values. IT IS A RANGE STATISTIC AND THEREFORE DEPENDS
+ * ON n: the expected range of a fixed distribution grows with the sample count, so these
+ * figures are comparable to each other (all four rows are n = 4) and NOT to a cohort of a
+ * different size. Comparing the 2.8% below against a 17-run cohort's 4.92% produced a false
+ * alarm during the `R0` re-record; converted to sigma the two agree at ~2.7%. When comparing
+ * across cohort sizes use sigma — see `R0`'s doc, which also gives the stronger check: the
+ * two cohorts' DIRECT sample sds agree at 2.55% and 2.57% with no range statistic involved. Stating it matters, because on a MEAN basis the
  * four rows below read 15.4 / 16.1 / 11.7 / 2.7 — three of them differ in the first decimal,
  * including the headline 2.8, so a reader recomputing any of them could think it wrong.
  *
@@ -382,18 +388,31 @@ export function stressStatP99(dueBlastSamples: readonly SampledTick[]): number {
  *  same four CI runs, see `stressStat`).
  *
  *  This is a deliberate CHANGE of posture, not a preservation of one: headroom goes from
- *  1.6x the half-spread to 3.6x. The gate becomes both stricter in what it permits and
- *  more reliable about when it fires, and it is the statistic's low noise that makes the
- *  combination possible — 1.10 would be unusable under p95. Not tighter than 1.10: at
- *  3.6x the noise the false-alarm rate is already the binding constraint, and this gate's
- *  whole history is of a ceiling sitting too close to its own error bar. */
+ *  roughly 1.6x the noise to roughly 3.6x. The gate becomes both stricter in what it
+ *  permits and more reliable about when it fires, and it is the statistic's low noise that
+ *  makes the combination possible — 1.10 would be unusable under p95. Not tighter than
+ *  1.10: at that headroom the false-alarm rate is already the binding constraint, and this
+ *  gate's whole history is of a ceiling sitting too close to its own error bar.
+ *
+ *  TWO CAVEATS ON THOSE HEADROOM FIGURES, both established by the `R0` re-record below and
+ *  recorded here so this paragraph is not read as more precise than it is. They are
+ *  half-spread ratios, and half-spread is a RANGE statistic that grows with sample count,
+ *  so a 4-run figure and a 17-run figure are not comparable. And they are measured against
+ *  `TOLERANCE - 1` rather than against the real margin from the distribution's centre,
+ *  which the floored `R0` shrinks. The properly computed headroom at the committed baseline
+ *  is **3.61 sigma** on the point estimate and 2.37 at the sigma upper bound. Do not read the
+ *  numerical closeness of "3.6x" and "3.61 sigma" as confirmation — the 1.6x/3.6x pair was
+ *  never a sigma comparison. Recomputed on the sigma basis, the old gate scores 0.78 on the
+ *  SAME four diagnostic runs the 1.6x came from (the like-for-like pairing, 0.78 -> 3.61)
+ *  and 3.20 on S5b's five-sample cohort. Each pair is internally consistent; do not mix a
+ *  member of one with a member of the other. */
 export const TOLERANCE = 1.1;
 
 /**
  * SUPERSEDED 2026-08-05 (M2-S6 QC) — the whole record below describes the **p95/p50**
  * era and is kept verbatim as provenance, not as the current baseline. It does not
  * apply to the p50/p50 statistic now shipping, and its 1.42 must not be restored: see
- * the live `R0` declaration further down for the pending re-record and its procedure.
+ * the live `R0` declaration further down for the re-recorded value and its provenance.
  *
  * `R0` — the baseline ratio: **1.42**, re-recorded 2026-08-03 (M2-S5b P11) on the POST-P9
  * stress workload, with the p95 statistic, on the runner the gate actually runs on: image
@@ -628,44 +647,205 @@ export const TOLERANCE = 1.1;
  * rebaselines itself measures nothing.
  */
 /**
- * PENDING RE-RECORD (M2-S6 QC, 2026-08-05). Deliberately `null` — the gate REPORTS `R`
- * and does not enforce it — because `stressStat` moved from p95 to p50 and `TOLERANCE`
- * from 1.25 to 1.10 in this same change. `R0 = 1.42` was recorded against p95/p50 and
- * is meaningless for the new statistic (the four diagnostic CI runs put the p50/p50
- * ratio near 1.00, not 1.42), and carrying it forward would have been the one thing
- * this gate's own doc forbids: a baseline that does not correspond to the statistic it
- * baselines.
+ * RE-RECORDED 2026-08-05 (M2-S6 QC) at **1.00**, for the p50/p50 statistic at
+ * `TOLERANCE` 1.10 — ceiling **1.1000**. The superseded 1.42 baselined p95/p50 and was
+ * meaningless for the new statistic; the `null` window between the statistic change and
+ * this record is closed.
  *
- * `null` is the honest state between a statistic change and its re-record, and it is
- * why the `'unset'` arm exists. Restore enforcement by collecting FIVE CI samples from
- * the `perf` job and committing their MEDIAN rounded DOWN to the nearer hundredth —
- * the identical procedure the superseded table below records, including the
- * pre-committed escalation: if the five span more than `TOLERANCE`, stop and escalate
- * rather than widening anything.
+ * PROVENANCE, in the form the four diagnostic runs above could not supply: GitHub Actions
+ * run **31041932972**, **attempts 1-17**, head **a1600c9**, runner image **ubuntu-24.04**
+ * (resolved from `ubuntu-latest`, read out of each job's own setup log). All 17 R values,
+ * sorted:
  *
- * RECORD THE RUN IDS AND THE RESOLVED RUNNER IMAGE. `ci.yml`'s `perf` job says
- * `runs-on: ubuntu-latest`, which is an ALIAS — the cohorts above are labelled
- * `ubuntu-24.04` because that is what the alias resolved to on the day, and a procedure
- * that asks for "five samples on ubuntu-24.04" cannot be satisfied as written, since
- * nothing in this repo pins it. Take the image from each run's own log ("Runner Image"
- * in the job's setup step) and record it alongside the run ID, so a future reader can
- * tell a genuine baseline shift from an image bump. The four M2-S6 diagnostic runs in
- * `stressStat`'s table were recorded without run IDs and cannot be traced; do not repeat
- * that here, where the number actually gates.
+ *   0.9371 0.9525 0.9842 0.9925 1.0017 1.0029 1.0029 1.0039 1.0065
+ *   1.0094 1.0135 1.0149 1.0151 1.0168 1.0265 1.0355 1.0362
  *
- * While `R0` is null the gate REPORTS and does not enforce, which is a green state that no
- * test goes red for. `ci.yml` carries an alarm for it, and the alarm's limits are worth
- * stating exactly: the `perf` job fails on any DEFAULT-BRANCH run whose report does not
- * carry a usable baseline — `r0` absent, null, non-numeric, or not a positive finite
- * number — or that carries no report line at all, since an absent report cannot prove
- * enforcement. That trigger is `push`, which fires AFTER a merge lands, and `perf` is not a
- * required check (branch protection requires `verify` and `codex-freshness` only — see the
- * 2026-07-31 flake ruling below) — so it DETECTS an unenforced gate
- * on `main` and makes it loudly red; it cannot prevent one from getting there. Prevention
- * would mean failing the pull request, which would fail the very PR collecting the samples.
- * See `run.ts`.
+ * PER-ARM OPERANDS, in attempt order, so every derived figure below is checkable — the
+ * cancellation numbers in particular need `controlStat`, and publishing only `R` would
+ * repeat the provenance failure this same doc records against the four diagnostic runs
+ * (attempts 1-5 are the cohort on which the escalation rule fired). Each cell is the
+ * reported 4 dp value and `R` was computed from unrounded milliseconds, so recomputing
+ * `stress / control` from the printed operands differs by up to 2e-4 — within the 3.9e-4
+ * that rounding two operands permits, and not an inconsistency:
+ *
+ *   | att | control p50 | stress p50 |   R    |
+ *   | --- | ----------- | ---------- | ------ |
+ *   |  1  |   0.3855    |   0.3992    |  1.0355  |
+ *   |  2  |   0.3642    |   0.3413    |  0.9371  |
+ *   |  3  |   0.3855    |   0.3862    |  1.0017  |
+ *   |  4  |   0.4025    |   0.4085    |  1.0151  |
+ *   |  5  |   0.3970    |   0.4007    |  1.0094  |
+ *   |  6  |   0.3928    |   0.3943    |  1.0039  |
+ *   |  7  |   0.4041    |   0.4053    |  1.0029  |
+ *   |  8  |   0.3963    |   0.4016    |  1.0135  |
+ *   |  9  |   0.4177    |   0.4204    |  1.0065  |
+ *   | 10  |   0.3775    |   0.3875    |  1.0265  |
+ *   | 11  |   0.3966    |   0.4110    |  1.0362  |
+ *   | 12  |   0.3983    |   0.3953    |  0.9925  |
+ *   | 13  |   0.4016    |   0.3826    |  0.9525  |
+ *   | 14  |   0.2990    |   0.3035    |  1.0149  |
+ *   | 15  |   0.3852    |   0.3863    |  1.0029  |
+ *   | 16  |   0.3758    |   0.3821    |  1.0168  |
+ *   | 17  |   0.2556    |   0.2516    |  0.9842  |
+ *
+ * Median **1.0065**, rounded DOWN to the nearer hundredth per the procedure = **1.00**.
+ * Rounding down is the conservative direction: it lowers the ceiling, so the recorded
+ * baseline can only make the gate stricter than the measurement requires.
+ *
+ * SEVENTEEN SAMPLES, NOT THE FIVE THE PROCEDURE ASKED FOR. At n = 5 the span was 1.1050
+ * against a `TOLERANCE` of 1.10, so the pre-committed escalation rule fired. It was
+ * escalated to the owner rather than reinterpreted — that part was right — and the owner
+ * authorised collecting more. Stating the rest carefully, because the convenient story is
+ * available and wrong:
+ *
+ *   - the rule specified a FIXED COHORT of exactly five (see the superseded record above).
+ *     At its own n it is a coarse screen with roughly a 7% false-alarm rate against this
+ *     noise level — crude, but not ill-formed. Extending the cohort is what introduced the
+ *     n-dependence, and that extension was an authorised deviation from the protocol, not a
+ *     discovery about the rule.
+ *   - the n-dependence is real and matters for the REPLACEMENT: span is a range statistic,
+ *     and expected range grows with sample count, so any fixed span threshold gets easier
+ *     to trip the more evidence is gathered. Simulated at this noise level, P(span > 1.10)
+ *     is 4.5% at n = 4, 6.8% at n = 5, 21% at n = 10 and 42% at n = 17. A rule to be applied
+ *     at a chosen n must not be a bare span threshold.
+ *   - the threshold is also COUPLED to `TOLERANCE`, which this same change tightened
+ *     1.25 -> 1.10. At 1.25 neither this cohort (1.1058) nor S5b's (1.2021) would have
+ *     fired. So the firing owes at least as much to the tightening as to the sample count,
+ *     and the replacement below inherits that coupling — tighten `TOLERANCE` again and the
+ *     escalation trigger silently tightens with it.
+ *   - the same n-dependence applies to the "half-spread" figures throughout this file.
+ *     They are comparable only BETWEEN COHORTS OF EQUAL SIZE. `stressStat`'s table is a
+ *     valid comparison (four rows, all n = 4); comparing its 2.8% against this cohort's
+ *     range-based 4.92% is not, and doing exactly that produced a false alarm.
+ *
+ * A SECOND COHORT IS CONSISTENT WITH THIS BASELINE, by a direct comparison rather than the
+ * range conversion below: the four diagnostic runs' own SAMPLE SD is **2.55%** of their
+ * median against these seventeen runs' **2.57%**, with no range statistic involved at all;
+ * and the two cohorts' medians are **1.0063** and **1.0065**.
+ *
+ * DO NOT OVER-READ THAT. The diagnostic runs are from 2026-08-03/05 — DAYS apart on the same
+ * image, triggered by the same failure that caused this amendment — so there is no
+ * months-apart corroboration on record. And the n = 4 sd carries a 95% CI of 1.45%-9.51%, so
+ * agreement to 0.02 percentage points is coincidence, not confirmation. What the two cohorts
+ * support is "consistent with the same centre and spread, from a second sample of the same
+ * runner population over a few days" — worth having, not decisive.
+ *
+ * The range conversion is kept because it explains the n = 5 excursion rather than
+ * establishing the baseline (`E[range] = d2(n) * sigma`; d2 = 2.059 / 2.326 / 3.588):
+ *
+ *   | cohort | range-based half-spread | implied sigma |
+ *   | ------ | ----------------------- | ------------- |
+ *   | n = 4  | 2.758%                  | 2.68%         |
+ *   | n = 5  | 4.874%                  | 4.19%         |
+ *   | n = 17 | 4.923%                  | 2.74%         |
+ *
+ * (The n = 4 row is computed from the UNROUNDED 2.758%, not the 2.8% published in
+ * `stressStat`'s table; feeding the rounded figure in gives 2.72% and violates this file's
+ * own rule about deriving from unrounded inputs.) Direct sample sd over the 17 is **2.58%**
+ * of the mean, 95% CI **1.92%-3.93%**. The n = 5 excursion was an early-arriving extreme:
+ * those five captured 99.3% of the eventual 17-run range.
+ *
+ * HEADROOM. Two things that are easy to get wrong, and were:
+ *
+ *   - the margin is measured from the DISTRIBUTION'S CENTRE, not from `R0`. `R0` is the
+ *     median FLOORED to a hundredth, deliberately below centre, so "a 10% margin" claims
+ *     the conservatism and spends it. Real margin: **3.61 sigma** from the median (3.75
+ *     from the mean), not the 3.86 that floor produces.
+ *   - sigma is ESTIMATED from 17 points, not known, so the tail is Student-t, not normal.
+ *     Predictive tail for a new run: t = 3.51 on 16 df, **P ~ 1 in 690** (1 in 910 centred
+ *     on the mean).
+ *
+ * Get BOTH of those wrong together and the answer is 1 in 18,000. Decomposed as
+ * probabilities, which is what a failure RATE is: floored-margin-and-normal 5.6e-5 ->
+ * centred-and-normal 1.5e-4 (the centring, x2.7) -> centred-and-t 1.4e-3 (the t, x9.6). The
+ * t step is 93% of the increase; the centring is the remaining 7%.
+ *
+ * THE PESSIMISTIC BRANCH, quantified rather than gestured at. At the sigma CI's upper bound
+ * (3.93%) the margin is **2.37 sigma**, which is **1 in 114** normal and **1 in 58** under
+ * the same t treatment insisted on above — use t on the pessimistic branch too, not just
+ * the optimistic one, and do not round a downside toward comfort. So, at 700-1,400 gated runs a year and using the t figure on BOTH branches: **1-2 failures
+ * a year** if sigma is near the point estimate, and **12-24 a year — monthly to twice
+ * monthly** if it is near the upper bound. ("Every other month" would be the answer from the
+ * normal 1-in-114 at the low end of the run rate; both substitutions flatter.) Acceptable
+ * because `perf` is not a required check — and that verdict has to hold on the pessimistic
+ * branch, where twice-monthly is a real cost, not a rounding error.
+ *
+ * Two more caveats that do not resolve: these 17 are attempts of ONE workflow run, clustered
+ * in time, not an i.i.d. draw from the population the gate faces over months; and the cohort
+ * is left-skewed (g1 = -1.36, max z = +1.28), which thins the upper tail in our favour, but
+ * n = 17 cannot establish tail shape and the chi-square sigma bound above assumes the
+ * normality the skew questions.
+ *
+ * WHAT THE 17 RUNS SHOW ABOUT CANCELLATION, scoped honestly. Raw control p50 spanned 63%
+ * across the cohort while `R` spanned 10.6% — but that 63% rests on TWO fast runners; drop
+ * them and the remaining fifteen span 14.7%. The direct test, `corr(R, control p50)`, is
+ * **+0.14** (n = 17, not significant): consistent with cancellation, and badly underpowered.
+ * Note also that `R = stress / control` cancels any MULTIPLICATIVE machine factor by
+ * construction, so this measurement can only ever fail to show cancellation if the machine
+ * effect is non-multiplicative. Read it as "no residual speed dependence detected", not as
+ * a demonstration. (On "0 of 17 samples exceed the ceiling": the ceiling was fitted to these
+ * points, so in-sample agreement is expected and says little about the next run. It is weak
+ * evidence, not none — a sample above 1.1000 would have exceeded it, as one did in the
+ * 2.49 era.)
+ *
+ * THE REPLACEMENT RULE, third draft. The two earlier drafts are recorded because each failed
+ * against this cohort's own data, which is the test any such rule has to survive:
+ *
+ *   - draft 1: "escalate if `TOLERANCE - 1` is under 3 sigma". Wrong quantity. `R0` is
+ *     FLOORED, so up to 0.01 of margin is discarded before the gate exists (0.25 sigma here),
+ *     and that phrasing reports 3.86 where the truth is 3.61.
+ *   - draft 2 fixed the quantity but tested it against the 97.5% two-sided UPPER BOUND on sigma. Applied
+ *     to this very cohort that gives **2.37** and demands escalation — the rule failed the
+ *     baseline it was written to bless, and the draft did not notice. It is also
+ *     unsatisfiable in practice: clearing 3 sigma on the upper bound at this noise needs
+ *     sigma_hi/sigma_hat <= 1.20, i.e. n around 68 (~49 one-sided). A rule whose own stated
+ *     floor of ">= 10 samples" can never satisfy it is not a rule.
+ *
+ * What ships:
+ *
+ *     take >= 10 samples, all on one head and one runner image;
+ *     compute BOTH, and escalate if EITHER fails:
+ *         (a) (R0 * TOLERANCE - median(R)) / sd(R)        >= 3
+ *         (b) the same margin against the 97.5% two-sided chi-square upper bound on
+ *             sigma                                        >= 2      -- and publish it.
+ *
+ * At this record: (a) **3.61**, (b) **2.37**. Both pass.
+ *
+ * WHICH BRANCH ACTUALLY BINDS — (b), for every n below 18, so it is a test and not a
+ * formality. It implies a point margin of 2 * sigma_hi/
+ * sigma_hat, which is 3.65 at the rule's own floor of n = 10 and 3.04 at n = 17 — so the
+ * operative threshold there is not the advertised 3. They cross at n = 18. Both are tests;
+ * neither is decoration.
+ *
+ * Naming the quantile matters: sigma_hi/sigma_hat is 1.826 at n = 10 on the 97.5%
+ * TWO-SIDED bound (which is what the 3.65 above uses) and 1.645 on a literal one-sided 95%
+ * bound. A rule that does not say which it means is two rules.
+ *
+ * WHAT THIS RULE STILL DOES NOT DO, recorded so it is not mistaken for covered. It measures
+ * within-session variance on ONE image, so it is blind to image-bump and fleet drift — which
+ * this file's own history names as the dominant risk. It constrains dispersion only, so
+ * nothing in it stops the median creeping upward with the ceiling following on each
+ * re-record. It fixes a flake rate without fixing detection power: at this sigma and margin
+ * the gate has 50% power against a **9.3%** p50 regression and needs **13.6%** for 95% power
+ * — quote the second when asking what this gate can actually catch. And branch (b) is
+ * CURABLE BY COLLECTING MORE SAMPLES: sigma_hi/sigma_hat shrinks with n, so a cohort failing
+ * it at n = 10 can be brought into compliance by adding attempts with no change in the
+ * underlying noise. That is statistically principled where the old span rule's n-dependence
+ * was not — a confidence bound SHOULD tighten with evidence — but given that this record's
+ * own provenance is "the rule fired at n = 5, so we collected 17", it must be named rather
+ * than discovered later. If a future
+ * cohort fails either test, escalate; do not widen `TOLERANCE`, which is the failure this
+ * whole change diagnosed.
+ *
+ * ONE THING THIS RECORD DOES NOT HIDE: the ORIGINAL span condition is still met at n = 17
+ * (1.1058 > 1.10). The baseline ships anyway, on the sigma argument above and with the owner
+ * informed — not because the trigger stopped firing.
+ *
+ * `ci.yml`'s null-`r0` alarm is now dormant by design: it fires only on a DEFAULT-BRANCH
+ * run whose report carries no usable baseline. With a number committed there is nothing
+ * for it to catch, which is the state it exists to restore. See `run.ts`.
  */
-export const R0: number | null = null;
+export const R0: number | null = 1.0;
 
 /** One of two outcomes: `'unset'` (R0 has not been committed yet — this run only
  *  records `R`, the gate cannot enforce anything) or `'evaluated'` (R0 is committed,

@@ -194,8 +194,8 @@ CI fails when R > R0 × 1.25
 
 _(SUPERSEDED TWICE — 2026-08-03, M2-S5b P11: the numerator moved to p95 and `R0` was re-recorded
 to 1.42 on the post-P9 workload. Then 2026-08-05, M2-S6 QC: the numerator moved again to **p50**,
-making both arms medians, `TOLERANCE` tightened **1.25 → 1.10**, and `R0` is **`null` pending a
-re-record**. So NEITHER the statistic nor the tolerance in the block above is current — the gate
+making both arms medians, `TOLERANCE` tightened **1.25 → 1.10**, and `R0` re-recorded at
+**1.00** (ceiling **1.1000**, the median of 17 CI samples). So NEITHER the statistic nor the tolerance in the block above is current — the gate
 is now `p50(stress due-blast ticks) / p50(control)`, failing when `R > R0 × 1.10`. This
 definition, and everything below it to the end of **this section** — EXCEPT the dated 2026-08-05
 note at the section's end, which states the current gate — describes the pre-P9, p99-statistic,
@@ -483,7 +483,8 @@ population, so this neither vindicates nor condemns p95 on noise — it is what 
 record in `packages/perf/src/gate.ts`'s `R0` doc and ADR 0005's amended Finding 3.
 
 **AMENDED 2026-08-05 (M2-S6 QC).** The numerator moved again, from p95 to a **p50** over the same
-due-blast subset, `TOLERANCE` tightened 1.25 → 1.10, and `R0` is `null` pending a re-record. The
+due-blast subset, `TOLERANCE` tightened 1.25 → 1.10, and `R0` was re-recorded at **1.00** (ceiling
+1.1000) from 17 CI samples — run 31041932972, attempts 1–17, `ubuntu-24.04`. The
 trigger was ADR 0005's 2026-08-04 escalation rule firing ("if CI breaches the ceiling, stop and
 report; do not re-record `R0`, do not widen the ceiling" — that rule lives in the ADR, not in this
 document): CI returned `R = 1.8348` against the `1.7750`

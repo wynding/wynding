@@ -174,7 +174,7 @@ jobs:
             }
             if (typeof r0 !== "number" || !Number.isFinite(r0) || r0 <= 0) {
               console.log("::error::R0 is not a usable baseline on main — the perf gate is REPORTING, not enforcing.");
-              console.log("Saw: " + JSON.stringify(r0) + ". Record a baseline (five CI samples, median rounded down) per gate.ts R0 doc.");
+              console.log("Saw: " + JSON.stringify(r0) + ". Record a baseline per the procedure in gate.ts R0 doc.");
               process.exit(1);
             }
             console.log(`perf gate is enforced on main: R0 = ${r0}`);

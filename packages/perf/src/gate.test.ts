@@ -87,23 +87,29 @@ describe('R0 — the committed CI-runner baseline', () => {
   // requires ("an explicit committed edit with justification in the PR") in front of
   // whoever is doing the nudging. Update it only alongside gate.ts's provenance doc.
   //
-  // Currently NULL, deliberately: M2-S6 moved `stressStat` from p95 to p50, and the
-  // 1.42 recorded against p95/p50 does not baseline the new statistic (the diagnostic
-  // CI runs put p50/p50 near 1.00). `null` is the honest state between a statistic
-  // change and its re-record — the gate REPORTS R and does not enforce it.
+  // RE-RECORDED at 1.00 (M2-S6 QC): the median of 17 CI samples — run 31041932972,
+  // attempts 1-17, head a1600c9, `ubuntu-24.04` — rounded DOWN to the nearer hundredth,
+  // against the p50/p50 statistic at `TOLERANCE` 1.10. The superseded 1.42 baselined
+  // p95/p50 and does not describe this statistic. `gate.ts`'s `R0` doc carries the full
+  // cohort, the sigma analysis, and why the recording took 17 samples rather than 5.
   //
-  // WHAT THIS ASSERTION DOES AND DOES NOT DO. It fails the moment someone restores a
-  // number without also updating this line and gate.ts's provenance, which makes the
-  // restoring commit DELIBERATE. It does NOT stop the window being forgotten, and an
-  // earlier version of this comment claimed it did. Null is the GREEN state: `run.ts`
-  // treats `'unset'` as `gatePass`, escalation does not fire, and this suite is green —
-  // so nothing here would go red if the null shipped to `main` and stayed. The alarm for
-  // THAT is in `ci.yml`, which fails the `perf` job when a run on the default branch
-  // reports a null `r0` — an alarm and not a block, since that trigger fires after the
-  // merge and `perf` is not a required check. This assertion and that job cover opposite
-  // directions: this one fires when the baseline is RESTORED, that one when it is FORGOTTEN.
-  it('is null pending the M2-S6 re-record, not a stale 1.42 carried across a statistic change', () => {
-    expect(R0).toBeNull();
+  // The `null` window this replaced was the interesting state and is worth remembering
+  // rather than deleting: a null `R0` is GREEN. `run.ts` counts `'unset'` as `gatePass`,
+  // escalation does not fire, `perf` exits 0, and this suite passes — so a forgotten null
+  // would have left the gate permanently unenforced with every check green. Nothing in
+  // this file could have caught that; `ci.yml`'s default-branch alarm exists for it, and
+  // even that only fires AFTER a merge. That is why the baseline is recorded here, in the
+  // PR that changed the statistic, rather than left for a follow-up.
+  it('is the re-recorded 1.00, not the stale 1.42 from the superseded p95/p50 statistic', () => {
+    expect(R0).toBe(1.0);
+  });
+
+  // The ceiling the committed pair implies, asserted so `R0` and `TOLERANCE` cannot drift
+  // apart silently — a reader checking "what does this gate actually permit?" gets one
+  // number, and a change to EITHER constant has to come past it.
+  it('with TOLERANCE, yields the 1.1000 ceiling the provenance doc records', () => {
+    expect(R0).not.toBeNull();
+    expect((R0 as number) * TOLERANCE).toBeCloseTo(1.1, 10);
   });
 });
 
@@ -178,10 +184,10 @@ describe('evaluateGate() — the default r0 parameter', () => {
   // (`r0: number | null = R0`) was never exercised by this suite. Calling with only
   // two arguments is the one thing that actually runs that default.
   //
-  // Written so BOTH states are meaningful, because `R0` is null during the M2-S6
-  // re-record window and will be a number after it: the branch tracks the COMMITTED
-  // constant rather than restating it, so this test keeps testing the default-parameter
-  // path either way instead of needing an edit the day the baseline lands.
+  // Written so BOTH states are meaningful: the branch tracks the COMMITTED constant rather
+  // than restating it, so this test kept working across the `null` -> 1.00 re-record without
+  // needing an edit on the day the baseline landed. `R0` is now a number, so the `else`
+  // branch is the live one.
   it('reads the committed R0 constant when r0 is omitted', () => {
     const control = new Array(5).fill(0.1).map(sample);
     const dueBlast = new Array(5).fill(0.2).map(sample);
@@ -189,13 +195,12 @@ describe('evaluateGate() — the default r0 parameter', () => {
     // Tie the default to the CONSTANT in either state: passing `R0` explicitly must
     // produce the identical result.
     //
-    // BE HONEST ABOUT WHAT THIS CATCHES TODAY: while `R0` is null this line is degenerate.
-    // Both sides pass `null`, so a mutant default of a hardcoded `= null` satisfies it just
-    // as well, and the assertion discriminates nothing. It is written now, in the state
-    // where it cannot work, precisely so that it is already in place the day `R0` becomes a
-    // number — at which point it does the real job (a hardcoded `= null` default would then
-    // return `'unset'` against an `'evaluated'` right-hand side and fail). The lines below
-    // are what actually carries the null window.
+    // THIS LINE IS NOW LOAD-BEARING, and it was not always. While `R0` was null it was
+    // degenerate — both sides passed `null`, so a mutant default of a hardcoded `= null`
+    // satisfied it and it discriminated nothing. It was written in that state anyway, so it
+    // would already be in place the day the baseline landed. That day has come: with `R0` a
+    // number, a hardcoded `= null` default returns `'unset'` against an `'evaluated'`
+    // right-hand side and fails here.
     expect(result).toEqual(evaluateGate(control, dueBlast, R0));
     if (R0 === null) {
       // A null baseline must surface as a RECORDING run and must never carry a `pass`

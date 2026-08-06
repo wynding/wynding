@@ -628,12 +628,12 @@ if (gateResult !== null && gateResult.status === 'evaluated' && !gateResult.pass
 //
 // Registering the state on `KNOWN_OPEN_ASSERTIONS` was the other candidate and was rejected:
 // its stale-waiver rule fires when `R0` is RESTORED, which is the direction already covered
-// by `gate.test.ts`'s `expect(R0).toBeNull()`, and it would leave a waiver entry someone has
+// by `gate.test.ts`'s value pin on `R0`, and it would leave a waiver entry someone has
 // to remember to remove. The branch check has no such residue.
 if (gateResult !== null && gateResult.status === 'unset') {
   console.log('');
   console.log('=== GATE NOT ENFORCED: R0 is unset — this run RECORDS, it does not gate ===');
-  console.log('    Commit an R0 (five CI samples, median rounded down) before merging.');
+  console.log('    Commit an R0 before merging — see the procedure in gate.ts R0 doc.');
 }
 
 // 10) Machine-readable report — a single JSON line, prefixed `PERF-REPORT: `, so Phase 6
