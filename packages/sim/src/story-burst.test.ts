@@ -207,7 +207,9 @@ describe('the blast is centred on the mine, not on the creep', () => {
     // same public seam it is documented to use (effectiveSpeedFp then advanceCreep) —
     // mirrors story-aoe.test.ts's slowed-lead-point test.
     const budget = TRAVEL_TICKS * effectiveSpeedFp(SPEED, 0, SF_NUM, SF_DEN);
-    const outcome = advanceCreep(FIELD, 1, 10_000, cx(6), cy(6), 7, 6, 0, budget, 'ground');
+    // headCol/headRow are the fixture's OWN (`restingCreeps` sets them to the creep's
+    // cell), so this advances from the same row `predictBlastPoint` would read.
+    const outcome = advanceCreep(FIELD, 1, 10_000, cx(6), cy(6), 6, 6, 0, budget, 'ground');
     let leadX: number;
     let leadY: number;
     if (outcome.kind === 'move') {
@@ -228,7 +230,7 @@ describe('the blast is centred on the mine, not on the creep', () => {
     } else {
       throw new Error('expected a move or leak outcome, not drop');
     }
-    console.log('mine footprint centre:', mineCenter, 'independently recomputed lead point:', {
+    console.log('[story-burst] mine footprint centre:', mineCenter, 'recomputed lead point:', {
       x: leadX,
       y: leadY,
     });
@@ -237,6 +239,57 @@ describe('the blast is centred on the mine, not on the creep', () => {
     expect(imp.x).toBe(mineCenter.x);
     expect(imp.y).toBe(mineCenter.y);
     expect(imp.x).not.toBe(leadX);
+  });
+});
+
+describe('a forged mine row carrying a nonzero nextFireTick is not permanently inert', () => {
+  it('the meaningless column is normalized rather than read — the mine still fires and is still consumed', () => {
+    // `nextFireTick` has no meaning for a burst tower: it never fires twice, so nothing
+    // legitimate writes the column for one (`placeTower` pushes 0). But `coerceSoa`'s
+    // `safeCombatColumn` admits ANY safe integer, and `step()` is exported with forged
+    // state in scope (ADR 0006 §4). Before this was normalized, such a row failed the
+    // fireability test forever — a mine that could neither fire NOR be consumed, an inert
+    // wall, with the meaningless value resident in the world hash for the whole match.
+    // Same class the support arm closes by zeroing both of its columns; burst is the
+    // second discipline for which this one is meaningless. (ship-review, M2-S9.)
+    const FORGED = 1_000_000_000;
+    const towers = buildTowers([
+      { id: 100, col: 1, row: 1, towerId: 'mine', nextFireTick: FORGED },
+    ]);
+    const creeps = restingCreeps([{ id: 1, col: 2, row: 2, hp: 100 }]);
+    const result = runCombatT(
+      creeps,
+      towers,
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      RULESET.towerById,
+      SF_NUM,
+      SF_DEN,
+    );
+    expect(result.towers.id).toHaveLength(0); // consumed, not stuck armed forever
+    expect(result.impacts).toHaveLength(1); // and it really did fire
+    // A CADENCED tower's cooldown is still honoured — the normalization is scoped to the
+    // discipline that has no use for the column, not applied to every tower.
+    const cadenced = buildTowers([
+      { id: 200, col: 5, row: 5, towerId: 'basic', nextFireTick: FORGED },
+    ]);
+    const cadencedResult = runCombatT(
+      restingCreeps([{ id: 1, col: 6, row: 6, hp: 100 }]),
+      cadenced,
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      RULESET.towerById,
+      SF_NUM,
+      SF_DEN,
+    );
+    expect(cadencedResult.impacts).toHaveLength(0); // still on cooldown
+    expect(cadencedResult.towers.nextFireTick).toEqual([FORGED]); // and untouched
   });
 });
 
@@ -431,7 +484,7 @@ describe('one routing snapshot per tick — a tower firing LATER in the same com
 describe('the inRange trigger boundary is inclusive', () => {
   it('a creep at exactly rangeFp trips it; one fp unit further does not', () => {
     const center = footprintCenter(1, 1);
-    console.log('mine centre:', center, 'rangeFp:', RANGE_FP);
+    console.log('[story-burst] mine centre:', center, 'rangeFp:', RANGE_FP);
 
     const towersOn = buildTowers([{ id: 500, col: 1, row: 1, towerId: 'mine' }]);
     const onBoundary = creepAtPoint(1, center.x + RANGE_FP, center.y, 100);

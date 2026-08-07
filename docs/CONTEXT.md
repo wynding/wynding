@@ -116,8 +116,10 @@ The effect primitive of a tower that holds exactly one discharge: it waits, arme
 until a creep it can hit enters its **trigger range**, fires its single blast, and is
 **consumed** in the same instant — the tower ceases to exist, leaving a gap in the
 maze. Trigger range is what sets it off and is not a firing range; the blast that
-follows reaches further than the trigger and is centred on the tower, not on the creep
-that tripped it. A burst tower has no cadence, because it never fires twice. Sold
+follows is centred on the tower, not on the creep that tripped it. Whether that blast
+reaches further than the trigger is a matter of a given tower's tuning, not a rule of
+the primitive — the shipped `mine` is deliberately tuned that way so the creep that
+trips it is always inside the kill zone. A burst tower has no cadence, because it never fires twice. Sold
 before it triggers, it refunds like any tower; once triggered there is nothing left to
 sell. Creeps re-route around the gap from the next movement step onward.
 _Avoid_: bomb, trap, one-shot, proximity mine.

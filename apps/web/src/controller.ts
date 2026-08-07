@@ -591,7 +591,9 @@ export function createController(seed: number, content?: ControllerContent): Con
       // never be true, and inert code that reads as load-bearing protection is worse than
       // none — so the reasoning lives here instead of in a branch nothing can take.
       selection = null;
-      bumpUiRev(); // the Panel must close if a tick destroyed the selected tower
+      // `setOutcome` ends in `bumpUiRev()`, so the Panel closes on this write alone —
+      // no separate bump (this branch carried one before M2-S9, when it had no outcome
+      // to record; every other branch in this file reaches `setOutcome` unaccompanied).
       setOutcome({ kind: 'destroyed' });
     }
     if (isTerminalPhase(state.phase)) {

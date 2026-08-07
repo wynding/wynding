@@ -338,6 +338,41 @@ describe('compileRuleset — burst (M2-S9 P2: the guard surgery + the two widene
     expect(() => compileRuleset(b, 'test')).not.toThrow();
   });
 
+  it('radius-matched direct/aoe + burst/aoe compiles, and the whole tower takes BURST discipline — a recorded decision, not a discovery', () => {
+    // Both effects are `aoe` and share one radius, so form-uniform and radius-uniform
+    // both pass, and there is no dot, so the burst+dot gate passes too. Nothing rejects
+    // it — which means the compiler makes a semantic CHOICE here, and an unpinned choice
+    // is exactly what this file's own doctrine calls a silent one: `burstEffect !==
+    // undefined` selects `mode: 'burst'` unconditionally, so the `direct` payload rides
+    // the burst tower's single-discharge-then-consume discipline rather than a cadence.
+    //
+    // Allowed and PINNED rather than rejected (ship-review, CodeRabbit on PR #90): it is
+    // the same posture `direct/aoe + slow` already has at sv12, both amounts land on the
+    // one blast the tower ever fires, and nothing about the composition is unsafe — it is
+    // simply a shape no shipped content uses. If a later story wants it rejected instead,
+    // this test is the thing that has to change, which is the point of writing it down.
+    const b = testBundle(OPEN, {
+      towers: [
+        {
+          ...TEST_BURST_TOWER,
+          effects: [
+            { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 640 },
+            { kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 },
+          ],
+        },
+      ],
+    });
+    const compiled = compileRuleset(b, 'test');
+    const mine = compiled.towerById['mine']!;
+    // BURST discipline for the whole tower — no `cadenceTicks` key at all.
+    expect(mine.attack).toEqual({ mode: 'burst', domain: 'ground', rangeFp: 576, travelTicks: 1 });
+    // Both payloads survive, in authored order, on the one blast it ever fires.
+    expect(mine.effects).toEqual([
+      { kind: 'aoe', amount: 8, radiusFp: 640 },
+      { kind: 'aoe', amount: 45, radiusFp: 640 },
+    ]);
+  });
+
   it("rejects direct/single + burst/aoe on one tower — blind gate #1's witness (form-uniform)", () => {
     // Before the S9 widening this bundle compiled clean: `directForms` only ever
     // looked at `kind === 'direct'`, so `directForms.size === 1` (just 'single') —

@@ -1776,12 +1776,16 @@ export function runCombat(
   //     board (see `buildAuraIndex`'s pre-scan note).
   const auraIndex = buildAuraIndex(grid, towers, towerById);
   // M2-S9: rows CONSUMED this phase — a burst tower's firing discipline, recorded by
-  // ROW INDEX, not by entity id. Row index, not id, for the same reason `sellTower`'s
-  // own compaction (`index.ts`) drops `if (i === index) return;` by row index rather
-  // than trusting `forEachValidTower`'s duplicate-id filter: a forged duplicate-id row
-  // must not take a second, unrelated row with it when this set is consulted after the
-  // walk. Rows are stable across this walk (nothing mid-walk mutates `towers`' length),
-  // so an index recorded now is still exact when the compaction below reads it.
+  // ROW INDEX, not by entity id, matching `sellTower`'s own compaction (`index.ts`,
+  // `if (i === index) return;`). The reason is that an index is UNAMBIGUOUS: it names
+  // the one row that actually fired, with no lookup and no possibility of matching a
+  // second row. (An earlier draft of this comment justified it as protection against a
+  // forged duplicate-id row taking an unrelated row with it — ship-review traced that
+  // and it does not hold: `forEachValidTower`'s own `seenIds` filter drops the shadowed
+  // row before the callback ever runs, in this walk AND in the compaction below, so an
+  // id-keyed set would behave identically. Row index is still the right choice; that
+  // was simply not the reason.) Rows are stable across this walk — nothing mid-walk
+  // mutates `towers`' length — so an index recorded now is still exact below.
   //
   // Constructed eagerly, and the "no added cost without a mine" claim below is scoped
   // to the SoA REBUILD, not to this (ship-review, M2-S9 — an earlier draft of that
@@ -1850,6 +1854,16 @@ export function runCombat(
     towers.targetId[i] = target;
 
     if (targetLive === null) return;
+    // M2-S9: `nextFireTick` is MEANINGLESS for a burst tower — it never fires twice, so
+    // there is no next fire to schedule and nothing legitimate ever writes the column for
+    // one. Normalize it to 0 rather than reading it, for exactly the reason the support
+    // arm above zeroes both of its columns: `coerceSoa`'s `safeCombatColumn` admits any
+    // safe integer, so a forged or restored mine row carrying e.g. `nextFireTick: 1e9`
+    // would otherwise fail the fireability test below forever — an inert wall that can
+    // never fire AND can never be consumed — while the meaningless value stayed resident
+    // in the world hash for the whole match. Burst is the second firing discipline for
+    // which this column has no meaning; it gets the same treatment as the first.
+    if (attack.mode === 'burst') towers.nextFireTick[i] = 0;
     const nft = towers.nextFireTick[i];
     const fireable = !Number.isSafeInteger(nft) || tick >= (nft as number);
     if (!fireable) return;
