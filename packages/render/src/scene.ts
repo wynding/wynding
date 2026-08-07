@@ -254,7 +254,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       g.strokeRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
       const cx = p.x + projection.cellPx;
       const cy = p.y + projection.cellPx;
-      // M2-S8: an attackless tower (`beacon`) previews no range ring — this is the path
+      // M2-S8: a support tower (`beacon`) does not attack, so it previews no range ring —
+      // this is the path
       // that bites FIRST, since arming a tower to place it is the first thing a player
       // does with it, and this call used to stroke unconditionally for every valid ghost.
       if (o.ghost.rangeFp !== null) {

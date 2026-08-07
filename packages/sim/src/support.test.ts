@@ -121,6 +121,12 @@ describe('buildAuraIndex — the stamp', () => {
     // keeps a future open-border board from aliasing SILENTLY instead of failing.
     const g = grid();
     const index = buildAuraIndex(g, towersOf([['beacon', 1, 1]]), CATALOG)!;
+    // The loop below asserts nothing if the index is empty, and an anchor at (1,1) sits
+    // one cell off the permanently blocked border — so a future `footprintBuildable`
+    // that rejected it would silently turn this whole test into a no-op (CodeRabbit,
+    // PR #88). Pinned to the exact ring count rather than `> 0`, matching the discipline
+    // the `auraMulFor` bounds test below already applies.
+    expect(index.size).toBe(8);
     for (const k of index.keys()) {
       expect(k).toBeGreaterThanOrEqual(0);
       expect(k).toBeLessThan(g.width * g.height);

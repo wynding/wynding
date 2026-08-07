@@ -168,7 +168,8 @@ export interface GhostVM {
 export interface SelectionVM {
   readonly col: number;
   readonly row: number;
-  /** `null` for an attackless tower (M2-S8) — same reason as `GhostVM.rangeFp`. The
+  /** `null` for a support tower, which does not attack (M2-S8) — same reason as
+   *  `GhostVM.rangeFp`. The
    *  live support multiplier the Panel needs to show buffed damage is deliberately NOT
    *  here: the scene draws no number, so a field with no render consumer would be dead
    *  weight on the per-frame surface. It rides on `UiState.selection` instead, where the

@@ -342,7 +342,8 @@ export function drawTowers(
     const c = projection.cellToPixel(o.selection.col, o.selection.row);
     const cx = c.x + projection.cellPx; // centre of the 2×2
     const cy = c.y + projection.cellPx;
-    // M2-S8: an attackless tower (`beacon`) has no range, so there is no ring to draw —
+    // M2-S8: a support tower (`beacon`) does not attack, so it has no range and there is
+    // no ring to draw —
     // but the ring is the ONLY board-side rendering of `selection`, so simply skipping it
     // left a selected beacon with no on-board cue whatsoever. Two beacons side by side
     // draw identically whether selected or not, and Sell would then remove a tower the

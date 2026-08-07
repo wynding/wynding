@@ -147,9 +147,15 @@ const DEFAULT: Palette = {
   // primary channel: a stun jolt is a RING at r×1.15; the airborne cue is two line
   // strokes at r×2.6–2.9, a cell away. Same posture as `poisoned`'s own tritan note.
   airborne: 0xdcf8ff,
-  // Pale lavender (M2-S8) — byte-distinct from every other cue in all three tables
-  // (nearest neighbours: DEFAULT `range` 0xcc79a7, TRITAN `range` 0x56b4e9), and
-  // clearing the floor at 7.64:1 composited at `AURA_SHELL_ALPHA`. The floor is
+  // Pale lavender (M2-S8) — clearing the floor at 7.64:1 composited at
+  // `AURA_SHELL_ALPHA`, and byte-distinct from every cue the shell can share a surface
+  // with (nearest neighbours: DEFAULT `range` 0xcc79a7, TRITAN `range` 0x56b4e9). That
+  // scoped list — not "every cue in the table" as an earlier version of this line
+  // claimed — is exactly what `AURA_MUST_DIFFER_FROM` in `palette.test.ts` enforces, and
+  // the comment is written to the gate rather than past it. The shell CAN also cross the
+  // `entrance`/`exit` glyphs at the board edge, where it clears neither gate; that is the
+  // contrast residual recorded in docs/accessibility-checklist.md, deliberately not
+  // papered over by widening a byte-distinctness list that would not measure it. The floor is
   // un-overridden across all three modes, so that figure holds in every mode and this
   // key needs no per-mode override.
   aura: 0xc9b6ff,
