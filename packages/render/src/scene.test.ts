@@ -15,7 +15,7 @@
 // thing below, so these tests run under plain Vitest with no Phaser/WebGL involved.
 
 import { describe, it, expect } from 'vitest';
-import { drawTowers, drawCreeps, type GraphicsLike } from './board-draw';
+import { drawTowers, drawCreeps, SPARKLE_STROKE_PX, type GraphicsLike } from './board-draw';
 import { createProjection } from './projection';
 import { resolvePalette } from './palette';
 import type { RenderVM, RenderOverlay } from './types';
@@ -230,7 +230,7 @@ describe('drawTowers — the venom droplet mark (M2-S5a)', () => {
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'venom' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'venom', support: false, buffed: false }],
     };
     drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
     // drawDroplet's own signature: one strokeCircle (the bulb) + two lineBetween calls
@@ -246,7 +246,7 @@ describe('drawTowers — the venom droplet mark (M2-S5a)', () => {
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic', support: false, buffed: false }],
     };
     drawTowers(g2, PAL, vmBasic, EMPTY_OVERLAY, PROJECTION);
     expect(g2.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
@@ -261,7 +261,7 @@ describe('drawTowers — the stun bolt mark (M2-S6)', () => {
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'stun' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'stun', support: false, buffed: false }],
     };
     drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
     // The bolt's 3-segment zigzag is 3 `lineBetween` calls — distinct from `'crosshair'`'s
@@ -278,7 +278,7 @@ describe('drawTowers — the antiair arrow mark (M2-S7)', () => {
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'antiair' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'antiair', support: false, buffed: false }],
     };
     drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
     // The arrow is 3 `lineBetween` calls — distinct from `'crosshair'`'s 4 (radiating
@@ -297,7 +297,7 @@ describe('drawTowers — the antiair arrow mark (M2-S7)', () => {
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic', support: false, buffed: false }],
     };
     drawTowers(g2, PAL, vmBasic, EMPTY_OVERLAY, PROJECTION);
     expect(g2.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(0);
@@ -314,7 +314,7 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'slow' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'slow', support: false, buffed: false }],
     };
     drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
     expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1);
@@ -327,7 +327,7 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'splash' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'splash', support: false, buffed: false }],
     };
     drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
     expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(4);
@@ -340,7 +340,7 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
       tick: 0,
       phase: 'running',
       creeps: [],
-      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic' }],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic', support: false, buffed: false }],
     };
     const overlay: RenderOverlay = { ...EMPTY_OVERLAY, pendingSells: [{ col: 2, row: 2 }] };
     drawTowers(g, PAL, vm, overlay, PROJECTION);
@@ -366,6 +366,191 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
       expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(expectStroke);
       expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(expectLines);
     }
+  });
+
+  // M2-S8 — the beacon's two aura cues, plus the recipient mark.
+  it('a beacon draws its pylon mark AND the adjacency shell (a rounded RECT, never a second circle)', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'beacon', support: true, buffed: false }],
+    };
+    drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
+    // The shell is the ONLY strokeRoundedRect here (a committed tower's body is FILLED,
+    // `fillRoundedRect`), and there is NO strokeCircle: drawing the aura as a second
+    // concentric circle on a footprint is the ambiguity Codex R1-15 rejected, and the
+    // buff rule is a square edge-share a circle would misdraw regardless.
+    expect(g.calls.filter((c) => c.method === 'strokeRoundedRect')).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
+    // drawPylon's own signature: mast + crossbar + base = three lineBetween calls.
+    expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(3);
+  });
+
+  it('a buffed recipient draws the four-stroke ✦ on top of its own footprint mark', () => {
+    const plain = fakeGraphics();
+    const vmPlain: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic', support: false, buffed: false }],
+    };
+    drawTowers(plain, PAL, vmPlain, EMPTY_OVERLAY, PROJECTION);
+    // `basic`'s mark is `'plain'` — no strokes at all — so the ✦'s four are unambiguous.
+    expect(plain.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(0);
+
+    const buffed = fakeGraphics();
+    const vmBuffed: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic', support: false, buffed: true }],
+    };
+    drawTowers(buffed, PAL, vmBuffed, EMPTY_OVERLAY, PROJECTION);
+    expect(buffed.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(4);
+    // No shell — this tower receives an aura, it does not project one.
+    expect(buffed.calls.filter((c) => c.method === 'strokeRoundedRect')).toHaveLength(0);
+  });
+
+  it('the buffed ✦ stays inside the tower body at the SMALLEST supported cell (M2-S8)', () => {
+    // The ✦ strokes `pal.floor` over the solid `pal.tower` fill, so any part of it that
+    // lands outside the body renders floor-on-floor and is simply not there. Containment
+    // is therefore a correctness property, not polish — and it BINDS at the narrow floor,
+    // where the 6px corner radius eats most of a 16px-wide body.
+    //
+    // MEASURED FROM THE ACTUAL DRAW CALLS, not re-derived from the constants. An earlier
+    // version of this test recomputed the tip set from `SPARKLE_*_FRAC` plus a local copy
+    // of `drawSparkle`'s `r * 0.45` arm ratio and never invoked `drawTowers` at all, so it
+    // pinned the two constants and nothing else: change the arm ratio, the tip formula, or
+    // add a fifth stroke, and the mark could clip while the test stayed green. This file
+    // has already shipped that failure once (a centreline-only version passed while the
+    // stroke clipped), which is why it now reads the endpoints the renderer really emits.
+    expect(PROJECTION.cellPx).toBe(10); // apps/web/e2e/compact.spec.ts's 568×320 floor
+    const g = fakeGraphics();
+    const vm: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      // `basic`'s footprint mark is `'plain'` — no strokes of its own — so every
+      // `lineBetween` below belongs to the ✦.
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'basic', support: false, buffed: true }],
+    };
+    drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
+
+    const RADIUS = 6; // the body's corner radius, `fillRoundedRect(..., 6)`
+    const inset = 2; // the body's inset, `p + 2` / `size - 4`
+    const span = PROJECTION.cellPx * 2 - inset * 2;
+    // The mark is STROKED, so each endpoint carries half the line width beyond the
+    // centreline and it is the outer edge that must clear the body.
+    const halfStroke = SPARKLE_STROKE_PX / 2;
+    const origin = PROJECTION.cellToPixel(2, 2);
+    /** Is `(x, y)` — absolute pixels — inside the body by at least `halfStroke`? */
+    const insideBody = (x: number, y: number): boolean => {
+      const lx = x - origin.x;
+      const ly = y - origin.y;
+      const cx = Math.min(Math.max(lx, inset + RADIUS), inset + span - RADIUS);
+      const cy = Math.min(Math.max(ly, inset + RADIUS), inset + span - RADIUS);
+      return (lx - cx) ** 2 + (ly - cy) ** 2 <= (RADIUS - halfStroke) ** 2 + 1e-9;
+    };
+
+    const strokes = g.calls.filter((c) => c.method === 'lineBetween');
+    expect(strokes).toHaveLength(4); // the ✦ drew at all — guards a vacuous pass below
+    for (const call of strokes) {
+      const [x0, y0, x1, y1] = call.args as number[];
+      expect(insideBody(x0!, y0!)).toBe(true);
+      expect(insideBody(x1!, y1!)).toBe(true);
+    }
+    // ... and the whole mark stays inside the footprint's TOP-LEFT CELL, so it never
+    // reaches the footprint centre where every `TowerFootprintMark` is anchored. This is
+    // the real, tested property — deliberately NOT "the two marks never touch", which is
+    // false: a `size * 0.22` mark reaches 0.56 × cell and `'bolt'` spans the whole
+    // footprint by design. Overlap at the narrow floor is a recorded legibility residual.
+    for (const call of strokes) {
+      for (const [x, y] of [
+        [call.args[0], call.args[1]],
+        [call.args[2], call.args[3]],
+      ] as [number, number][]) {
+        expect(x - origin.x + halfStroke).toBeLessThanOrEqual(PROJECTION.cellPx);
+        expect(y - origin.y + halfStroke).toBeLessThanOrEqual(PROJECTION.cellPx);
+      }
+    }
+  });
+
+  it('draws every aura shell BEFORE any tower body, so the result is build-order independent', () => {
+    // The shell's edge lands exactly on the boundary between an edge-adjacent recipient's
+    // two footprint columns — down the middle of the tower it points at. Drawn inside the
+    // body loop, whether that segment survived depended on SoA (placement) order. These
+    // two view-models are the same board built in opposite orders; the call SEQUENCE must
+    // match, not merely the call counts.
+    const beacon = { id: 1, col: 2, row: 2, towerId: 'beacon', support: true, buffed: false };
+    const basic = { id: 2, col: 4, row: 2, towerId: 'basic', support: false, buffed: true };
+    const methodsFor = (towers: RenderVM['towers']): string[] => {
+      const g = fakeGraphics();
+      drawTowers(
+        g,
+        PAL,
+        { tick: 0, phase: 'running', creeps: [], towers },
+        EMPTY_OVERLAY,
+        PROJECTION,
+      );
+      return g.calls.map((call) => call.method);
+    };
+    // The property is NOT that the two call sequences are identical — each tower draws
+    // its own marks, and `beacon`'s pylon (3 strokes) and the recipient's ✦ (4) legitimately
+    // swap places with the towers. What must hold in BOTH orders is the layering: every
+    // shell is stroked before any body is filled, so a body can never be painted under a
+    // shell in one build order and over it in the other.
+    for (const methods of [methodsFor([beacon, basic]), methodsFor([basic, beacon])]) {
+      const lastShell = methods.lastIndexOf('strokeRoundedRect');
+      const firstBody = methods.indexOf('fillRoundedRect');
+      expect(lastShell).toBeGreaterThanOrEqual(0); // the shell was drawn at all
+      expect(firstBody).toBeGreaterThanOrEqual(0); // ... and so was a body
+      expect(lastShell).toBeLessThan(firstBody);
+    }
+  });
+
+  it('a pending-sold tower is hidden from BOTH passes — no body and no shell (M2-S8)', () => {
+    // The two-pass split has to honour the pending-sell skip in each pass independently;
+    // hoisting the shells out of the body loop is exactly the kind of change that drops a
+    // guard on one side. A sold beacon must take its shell with it.
+    const g = fakeGraphics();
+    const vm: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'beacon', support: true, buffed: false }],
+    };
+    drawTowers(g, PAL, vm, { ...EMPTY_OVERLAY, pendingSells: [{ col: 2, row: 2 }] }, PROJECTION);
+    expect(g.calls.filter((c) => c.method === 'fillRoundedRect')).toHaveLength(0);
+    expect(g.calls.filter((c) => c.method === 'strokeRoundedRect')).toHaveLength(0);
+  });
+
+  it('a selected ATTACKLESS tower draws no range ring at all (M2-S8)', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
+    const overlay: RenderOverlay = {
+      ...EMPTY_OVERLAY,
+      selection: { col: 2, row: 2, rangeFp: null, towerId: 'beacon' },
+    };
+    drawTowers(g, PAL, vm, overlay, PROJECTION);
+    // No ring — but NOT nothing. The range ring is the only board-side rendering of
+    // `selection`, so an empty branch would leave a selected beacon indistinguishable
+    // from an unselected one, and Sell would act on a tower the board never identified.
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
+    const outlines = g.calls.filter((c) => c.method === 'strokeRoundedRect');
+    expect(outlines).toHaveLength(1);
+    // ... and it must sit OUTSIDE the body rect, not on it. A stroke is centred on its
+    // path, so tracing the body's own `p + 2 / size - 4` geometry would bury the inner
+    // half of the line in the `pal.tower` fill it cannot contrast against. Asserted
+    // against the body's own inset rather than a bare number.
+    const BODY_INSET = 2; // `drawTowers`' own `fillRoundedRect(p + 2, size - 4)`
+    const origin = PROJECTION.cellToPixel(2, 2);
+    const [x, y, w, h] = outlines[0]!.args as number[];
+    expect(x! - origin.x).toBeLessThan(BODY_INSET);
+    expect(y! - origin.y).toBeLessThan(BODY_INSET);
+    expect(w).toBeGreaterThan(PROJECTION.cellPx * 2 - BODY_INSET * 2);
+    expect(h).toBeGreaterThan(PROJECTION.cellPx * 2 - BODY_INSET * 2);
   });
 
   it('a selected tower draws the range-ring strokeCircle', () => {

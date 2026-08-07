@@ -134,7 +134,8 @@ export type CompiledEffect =
       readonly cadenceTicks: number;
       readonly durationTicks: number;
     }
-  | { readonly kind: 'stun'; readonly chanceNum: number; readonly durationTicks: number };
+  | { readonly kind: 'stun'; readonly chanceNum: number; readonly durationTicks: number }
+  | { readonly kind: 'support'; readonly damageMulFp: number };
 
 /** Sim-owned compile-time projection of `TowerDef` — `kind` renamed `id` (decision
  *  4). `effects` REPLACES v1's flat `damage` (G3): the fire-time snapshot needs the
@@ -149,10 +150,24 @@ export interface CompiledTower {
   readonly id: string;
   readonly cost: number;
   readonly effects: readonly CompiledEffect[];
-  readonly domain: TowerTargetDomain;
-  readonly rangeFp: number;
-  readonly cadenceTicks: number;
-  readonly travelTicks: number;
+  /** Present IFF this bundle attacks, mirroring `TowerDef.attack` exactly (M2-S8,
+   *  sv12). A `support` bundle carries no attack, and modelling that as an optional
+   *  NESTED object rather than flat fields guarded with `?? 0` is deliberate: the
+   *  `?? 0` form makes "a beacon has range 0 and fires every tick" representable and
+   *  merely wrong at runtime, where the optional makes it a compile error at every
+   *  one of the ~dozen sites that read an attack field. Same ruling as the Panel's
+   *  omit-rather-than-zero rows. */
+  readonly attack?: {
+    readonly domain: TowerTargetDomain;
+    readonly rangeFp: number;
+    readonly cadenceTicks: number;
+    readonly travelTicks: number;
+  };
+  /** Present IFF this bundle carries a `support` effect (M2-S8, sv12) — hoisted out
+   *  of `effects` so the aura walk (`support.ts`) can test one field rather than
+   *  re-scanning the bundle per tower per combat phase. `ruleset-schema.ts` already
+   *  enforces support-exclusivity, so `attack` and `support` are never both present. */
+  readonly support?: { readonly damageMulFp: number };
 }
 
 /** Sim-owned compile-time projection of `CreepDef` — v1 field set, `kind`
@@ -487,6 +502,16 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
           `tower '${tower.id}' dot durationTicks ${effect.durationTicks} exceeds ${profile.maxDotDurationTicks} at simVersion ${v}`,
         );
       }
+      // M2-S8: the profile's support ceiling needs an ENFORCEMENT SITE, or it is dead
+      // code — the v2 schema admits `damageMulFp` up to 1e6, so without this a
+      // schema-legal ×3906 beacon would compile. Value ceilings live here alongside
+      // `maxArmor`, `maxAoeRadiusFp` and the dot ceilings; the field and its check
+      // land together or not at all.
+      if (effect.kind === 'support' && effect.damageMulFp > profile.maxSupportDamageMulFp) {
+        throw new RulesetError(
+          `tower '${tower.id}' support damageMulFp ${effect.damageMulFp} exceeds ${profile.maxSupportDamageMulFp} at simVersion ${v}`,
+        );
+      }
     }
     if (tower.attack !== undefined && !profile.allowedTowerDomains.includes(tower.attack.domain)) {
       throw new RulesetError(
@@ -724,13 +749,33 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     if (e.kind === 'stun') {
       return { kind: 'stun', chanceNum: e.chanceNum, durationTicks: e.durationTicks };
     }
-    // Unreachable at sv10: `allowedEffectKinds`/`allowedDirectForms` already rejected
-    // anything else in `checkCapabilityGlobal`, above. Defensive, not load-bearing.
+    if (e.kind === 'support') return { kind: 'support', damageMulFp: e.damageMulFp };
+    // Unreachable at the LIVE profile, whatever its version: `allowedEffectKinds`/
+    // `allowedDirectForms` already rejected anything else in `checkCapabilityGlobal`,
+    // above. Defensive, not load-bearing. Deliberately not naming a version — this line
+    // said "sv10" two bumps after it stopped being true, which is what a version number
+    // in a sentence that does not depend on the version buys you.
     throw new RulesetError(
       `tower '${towerId}' has an effect this sim build cannot compile at simVersion ${SIM_VERSION}`,
     );
   }
   const towers: CompiledTower[] = normalized.towerCatalog.map((towerDef: TowerDef) => {
+    // M2-S8 (sv12): the three attack-shaped guards below hold for ATTACKING bundles
+    // only. A `support` bundle legitimately carries no direct effect, no attack, and
+    // therefore no cadence — `ruleset-schema.ts` already enforces that a support
+    // effect is EXCLUSIVE (a bundle is support or it attacks, never both), so this
+    // one predicate splits the catalog cleanly and no bundle escapes both branches.
+    const supportEffect = towerDef.effects.find(
+      (e): e is Extract<EffectDef, { kind: 'support' }> => e.kind === 'support',
+    );
+    if (supportEffect !== undefined) {
+      return {
+        id: towerDef.id,
+        cost: towerDef.cost,
+        effects: towerDef.effects.map((e) => compileEffect(e, towerDef.id)),
+        support: { damageMulFp: supportEffect.damageMulFp },
+      };
+    }
     const directEffect = towerDef.effects.find(
       (e): e is Extract<EffectDef, { kind: 'direct' }> => e.kind === 'direct',
     );
@@ -752,11 +797,20 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     return {
       id: towerDef.id,
       cost: towerDef.cost,
+      // Mapped HERE, after the three guards above, not hoisted before the support branch:
+      // `compileEffect` can throw its own "cannot compile" error, so evaluating it early
+      // would change which diagnostic a doubly-malformed bundle reports (an uncompilable
+      // effect AND no direct effect used to surface as "must have a direct effect").
+      // Both are `RulesetError` and the capability gate rejects such bundles earlier in
+      // practice, but a content author's error message is not a thing to change as a side
+      // effect of adding a branch.
       effects: towerDef.effects.map((e) => compileEffect(e, towerDef.id)),
-      domain: towerDef.attack.domain,
-      rangeFp: towerDef.attack.rangeFp,
-      cadenceTicks: towerDef.attack.cadenceTicks,
-      travelTicks: towerDef.attack.travelTicks,
+      attack: {
+        domain: towerDef.attack.domain,
+        rangeFp: towerDef.attack.rangeFp,
+        cadenceTicks: towerDef.attack.cadenceTicks,
+        travelTicks: towerDef.attack.travelTicks,
+      },
     };
   });
   // Null-prototype record — see `creepById`'s doc for why (`__proto__` catalog ids).

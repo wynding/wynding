@@ -113,6 +113,72 @@ function drawArrow(g: GraphicsLike, cx: number, cy: number, halfSize: number): v
   g.lineBetween(cx + halfSize * 0.55, cy - halfSize * 0.35, cx, cy - halfSize);
 }
 
+/** An upright post through `(cx,cy)` with a short crossbar near its top and a wider bar
+ *  at its base — the `'pylon'` footprint mark (M2-S8, `beacon`), evoking a broadcasting
+ *  mast. `halfSize` plays the same role as `drawArrow`'s. Distinct from `'arrow'` (no
+ *  convergent tip; the bars are horizontal and the base one is the WIDEST feature, where
+ *  an arrow's widest point is at its tip) and from `'bolt'` (a straight post, not a
+ *  three-segment stagger) — never colour alone (ADR 0003). */
+function drawPylon(g: GraphicsLike, cx: number, cy: number, halfSize: number): void {
+  g.lineBetween(cx, cy - halfSize, cx, cy + halfSize); // mast
+  g.lineBetween(
+    cx - halfSize * 0.45,
+    cy - halfSize * 0.55,
+    cx + halfSize * 0.45,
+    cy - halfSize * 0.55,
+  ); // crossbar
+  g.lineBetween(cx - halfSize * 0.8, cy + halfSize, cx + halfSize * 0.8, cy + halfSize); // base
+}
+
+/** A four-pointed star (✦) at `(cx,cy)`: two axial strokes crossed by two shorter
+ *  diagonals — the BUFFED-RECIPIENT mark (M2-S8), drawn in the footprint's top-left
+ *  QUADRANT so it never overlaps the tower's own centred `TowerFootprintMark`. Its own
+ *  shape carries the state; the colour channel is redundant (ADR 0003). */
+function drawSparkle(g: GraphicsLike, cx: number, cy: number, r: number): void {
+  g.lineBetween(cx, cy - r, cx, cy + r);
+  g.lineBetween(cx - r, cy, cx + r, cy);
+  const d = r * 0.45;
+  g.lineBetween(cx - d, cy - d, cx + d, cy + d);
+  g.lineBetween(cx + d, cy - d, cx - d, cy + d);
+}
+
+/** The alpha the support-aura shell strokes at — pinned here rather than inlined
+ *  because `palette.test.ts` gates `aura` COMPOSITED at exactly this value, and a
+ *  change at this one draw site must move the gate with it (the same discipline
+ *  `RANGE_GHOST_PREVIEW_ALPHA` already carries for `range`). */
+export const AURA_SHELL_ALPHA = 0.9;
+
+/** The buffed-recipient ✦'s centre and radius, both as fractions of ONE cell — pinned
+ *  here because they are a CONTAINMENT constraint, not a taste choice, and the test that
+ *  proves it reads these same two numbers.
+ *
+ *  The mark strokes `pal.floor` against the solid `pal.tower` fill, so any part of it
+ *  that lands outside the body is floor-on-floor and simply vanishes. The body is
+ *  `fillRoundedRect(p+2, size-4, radius 6)`, and at the smallest supported cell
+ *  (`CELL_PX_MIN_NARROW` = 10, the 568×320 compact floor) that rect is only 16px across
+ *  with a 6px corner radius — so the corner arc, not the straight edge, is what binds.
+ *  The first version of this mark sat at 0.42 with r = 0.26, which put its top and left
+ *  tips 1.6px from the anchor against a body starting at 2px: most of the ✦ rendered
+ *  invisibly and what survived read as an asymmetric half-mark. These values keep all
+ *  four tips inside the rounded body at that floor, with margin, and — being fractions
+ *  of the cell — keep the same relationship at every larger size.
+ *
+ *  THE STROKE WIDTH IS PART OF THE CONSTRAINT, not a detail: the mark is drawn with a 2px
+ *  line, so every tip carries 1px of half-width beyond its centreline, and it is the OUTER
+ *  EDGE that has to clear the arc. A prior pair (0.5 / 0.15) satisfied a centreline-only
+ *  test and still clipped — the axial tips sat 5.41 from the corner arc centre against a
+ *  6px radius, leaving 0.59px for a 1px half-width. That is the same disappearing-mark
+ *  failure these constants exist to prevent, reintroduced by a test measuring the wrong
+ *  thing; `scene.test.ts` now measures the endpoints `drawSparkle` actually emits and
+ *  subtracts {@link SPARKLE_STROKE_PX} / 2 before checking, so it pins the DRAWING rather
+ *  than these two numbers — which is why they are module-private: the test no longer needs
+ *  them, and an export with no consumer is surface without a reason. */
+const SPARKLE_CENTRE_FRAC = 0.55;
+const SPARKLE_RADIUS_FRAC = 0.13;
+/** The ✦'s stroke width, exported so the containment test reasons about the OUTER EDGE
+ *  rather than the centreline, and cannot drift from the draw site. */
+export const SPARKLE_STROKE_PX = 2;
+
 /** A thin executor over `vm.towers`/`overlay.pendingAdds`/`overlay.selection` — see the
  *  inline comments below for the per-mark rationale. `projection` is an explicit
  *  parameter (not a captured closure) so this is callable outside `mount()`. */
@@ -127,8 +193,57 @@ export function drawTowers(
   // immediately — presented as already gone, not merely "about to sell".
   const pendingSellKeys =
     o.pendingSells.length === 0 ? null : new Set(o.pendingSells.map((p) => `${p.col},${p.row}`));
+  /** A committed tower whose sell is queued is presented as already gone — checked inline
+   *  in both passes rather than materialized into a filtered array.
+   *
+   *  Honest accounting, since the two-pass split changed the arithmetic this choice was
+   *  originally argued on: with a sell queued this now builds a key string twice per
+   *  tower per frame (once per pass), which is MORE transient allocation than the single
+   *  array it replaces, not less. It is kept because `pendingSellKeys !== null`
+   *  short-circuits first, so the ordinary frame — no queued sell — allocates nothing at
+   *  all, where the filtered array would allocate on every frame regardless. The trade is
+   *  "free in the common case, slightly worse in the rare one", not "cheaper always". */
+  const hidden = (t: RenderVM['towers'][number]): boolean =>
+    pendingSellKeys !== null && pendingSellKeys.has(`${t.col},${t.row}`);
+  // PASS 1 — every support shell, BEFORE any tower body (M2-S8).
+  //
+  // The shell is an OVER-APPROXIMATION of the region it marks, and the difference matters
+  // at exactly the case the rule turns on: the stamped aura is a plus-shaped ring of 8
+  // cells, because the four DIAGONAL corners are excluded (corner-only touch never buffs),
+  // while a rounded rect encloses all twelve cells of the surrounding block. A corner-only
+  // neighbour therefore sits partly inside a boundary that does not reach it. The
+  // authoritative signal is the recipient mark below — derived from the sim's own rule and
+  // drawn only on towers genuinely being buffed; the shell is the coarser "roughly here"
+  // cue. Drawing the true plus outline instead would change the aura's approved visual
+  // shape, so it is a product decision rather than a refactor (docs/accessibility-
+  // checklist.md carries it as a recorded residual).
+  //
+  // WHY IT IS ITS OWN PASS: the shell extends one cell out from its beacon, so its edge
+  // falls exactly on the boundary between an edge-adjacent recipient's two footprint
+  // columns — straight down the middle of the very tower it points at. Drawn inside the
+  // body loop, whether that segment was visible depended on SoA order: build the beacon
+  // first and the recipient's opaque fill paints over it, build it second and the shell
+  // stripes across the tower. Same board, two renderings. Hoisting every shell into its
+  // own earlier pass makes bodies always win,
+  // so the result is order-independent and the shell never crosses a tower body — which
+  // also keeps `pal.aura` off `pal.tower`, a pairing it does not clear 3:1 against and
+  // which `palette.test.ts` therefore does not gate.
   for (const t of vm.towers) {
-    if (pendingSellKeys !== null && pendingSellKeys.has(`${t.col},${t.row}`)) continue;
+    if (!t.support || hidden(t)) continue;
+    const p = projection.cellToPixel(t.col, t.row);
+    const size = projection.cellPx * 2; // 2×2 footprint
+    g.lineStyle(2, pal.aura, AURA_SHELL_ALPHA);
+    g.strokeRoundedRect(
+      p.x - projection.cellPx + 2,
+      p.y - projection.cellPx + 2,
+      size + projection.cellPx * 2 - 4,
+      size + projection.cellPx * 2 - 4,
+      6,
+    );
+  }
+  // PASS 2 — bodies, footprint marks, and the buffed-recipient ✦.
+  for (const t of vm.towers) {
+    if (hidden(t)) continue;
     const p = projection.cellToPixel(t.col, t.row);
     const size = projection.cellPx * 2; // 2×2 footprint
     g.fillStyle(pal.tower, 1);
@@ -161,6 +276,36 @@ export function drawTowers(
     } else if (mark === 'arrow') {
       g.lineStyle(2, pal.floor, 1);
       drawArrow(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+    } else if (mark === 'pylon') {
+      g.lineStyle(2, pal.floor, 1);
+      drawPylon(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+    }
+    // The recipient ✦ sits in the footprint's top-left CELL, while every
+    // `TowerFootprintMark` is anchored at the footprint CENTRE — separated by position,
+    // which is what keeps both readable in one 2×2 body.
+    //
+    // Separation is positional, NOT a guarantee that the two never touch, and the
+    // difference is worth stating because an earlier version of this comment claimed the
+    // stronger thing: a `size * 0.22` mark reaches 0.56 × cell from the anchor while the ✦
+    // reaches 0.68, so they overlap slightly before stroke width is even counted, and
+    // `'bolt'` is drawn at `size * 0.5` — deliberately spanning the WHOLE footprint, so it
+    // crosses this cell by design and no placement inside the body could avoid it. What is
+    // actually guaranteed, and tested, is that the ✦ stays inside the body and inside the
+    // top-left cell; legibility where the two marks abut at the narrow floor is a recorded
+    // residual (docs/accessibility-checklist.md), not a solved problem.
+    //
+    // It strokes `pal.floor` for the same reason every footprint mark above does: it is
+    // drawn over the solid `pal.tower` fill — which is also exactly why its containment
+    // inside that fill is a correctness constraint rather than polish (see
+    // `SPARKLE_CENTRE_FRAC`).
+    if (t.buffed) {
+      g.lineStyle(SPARKLE_STROKE_PX, pal.floor, 1);
+      drawSparkle(
+        g,
+        p.x + projection.cellPx * SPARKLE_CENTRE_FRAC,
+        p.y + projection.cellPx * SPARKLE_CENTRE_FRAC,
+        projection.cellPx * SPARKLE_RADIUS_FRAC,
+      );
     }
   }
   // A queued-but-not-yet-committed build: a translucent OUTLINE (never a filled solid),
@@ -188,14 +333,39 @@ export function drawTowers(
     } else if (pendingMark === 'arrow') {
       g.lineStyle(1, pal.tower, 0.6);
       drawArrow(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+    } else if (pendingMark === 'pylon') {
+      g.lineStyle(1, pal.tower, 0.6);
+      drawPylon(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
     }
   }
   if (o.selection !== null) {
     const c = projection.cellToPixel(o.selection.col, o.selection.row);
     const cx = c.x + projection.cellPx; // centre of the 2×2
     const cy = c.y + projection.cellPx;
+    // M2-S8: an attackless tower (`beacon`) has no range, so there is no ring to draw —
+    // but the ring is the ONLY board-side rendering of `selection`, so simply skipping it
+    // left a selected beacon with no on-board cue whatsoever. Two beacons side by side
+    // draw identically whether selected or not, and Sell would then remove a tower the
+    // board never identified. It gets a footprint outline instead: same `pal.range`
+    // colour and weight so it reads as the same "this is selected" channel, a different
+    // SHAPE because the thing it marks is different (no radius to communicate). Drawn at
+    // the body's own inset so it traces the tower rather than floating around it, and
+    // never at radius 0 — a dot at the footprint centre would be a cue the player has to
+    // decode, and it would collide with the tower's own centred mark.
     g.lineStyle(2, pal.range, 0.9);
-    g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));
+    if (o.selection.rangeFp === null) {
+      const size = projection.cellPx * 2;
+      // Inset 1, NOT 2. A canvas stroke is centred on its path, so tracing the body's own
+      // `fillRoundedRect(p + 2, size - 4)` geometry would put the inner half of a 2px
+      // stroke on the solid `pal.tower` fill — where `range` measures 1.06:1 (default;
+      // 1.55 protan/deutan, 1.42 tritan) and is simply not there — leaving 1px of cue at
+      // the narrow floor. At inset 1 the whole 2px stroke sits in the 2px margin between
+      // the body edge and the cell boundary, i.e. entirely on `floor`, where `range`
+      // clears 4.61:1. Neighbouring footprints are 4px apart, so it cannot reach one.
+      g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);
+    } else {
+      g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));
+    }
   }
 }
 

@@ -695,11 +695,11 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('the second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    // One Card per catalog tower: 6 since M2-S7 added `antiair` (was 5 at M2-S6, 4 at
-    // M2-S5a, 3 at M2-S4a). The slot WIRING for cards 4-6 — their hotkey badges, rebind
-    // entries and labels — is P6's/M2-S6's/M2-S7's; this assertion tracks the catalog's
-    // size, which is content, not wiring.
-    expect(shell.cards).toHaveLength(6);
+    // One Card per catalog tower: 7 since M2-S8 added `beacon` (was 6 at M2-S7, 5 at
+    // M2-S6, 4 at M2-S5a, 3 at M2-S4a). The slot WIRING for cards 4-7 — their hotkey
+    // badges, rebind entries and labels — is P6's/M2-S6's/M2-S7's/M2-S8's; this
+    // assertion tracks the catalog's size, which is content, not wiring.
+    expect(shell.cards).toHaveLength(7);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
@@ -857,24 +857,140 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions).toContainEqual({ type: 'armTower', tower: 'antiair' });
   });
 
-  it('slots 7-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a six-tower bundle (PLAN.md P6, widened M2-S6 P5, M2-S7 P5)', () => {
+  it('slots 8-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a seven-tower bundle (PLAN.md P6, widened M2-S6 P5, M2-S7 P5, M2-S8 P6)', () => {
     const { actions, overlay, shell, settingsBtn } = setup();
-    // Only six Cards exist — no badge/aria-keyshortcuts beyond index 5.
-    expect(shell.cards).toHaveLength(6);
-    // No phantom rebindable action for slots 7..9.
+    // Only seven Cards exist — no badge/aria-keyshortcuts beyond index 6. The window
+    // narrows by one with each tower the catalog gains; `action.armTower1..9` already
+    // existed, so M2-S8's `beacon` consumed slot 7 with no new keymap entry.
+    expect(shell.cards).toHaveLength(7);
+    expect(shell.cards[6]!.towerId).toBe('beacon');
+    expect(shell.cards[6]!.hotkey.textContent).toBe('7');
+    // No phantom rebindable action for slots 8..9.
     settingsBtn.click();
     const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
       (el) => el.textContent,
     );
-    for (let n = 7; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
+    for (let n = 8; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
     overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!.click();
-    // The document hotkeys for those slots no-op too — cards[6..8] don't exist. (Settings
+    // The document hotkeys for those slots no-op too — cards[7..8] don't exist. (Settings
     // is closed here — an open settings dialog makes the shell `inert`, which would mask
     // this on its own and defeat the assertion.)
-    for (let n = 7; n <= 9; n++) {
+    for (let n = 8; n <= 9; n++) {
       document.dispatchEvent(new KeyboardEvent('keydown', { code: `Digit${n}` }));
     }
     expect(actions).toEqual([]);
+  });
+
+  // M2-S8 — the beacon Panel. These are the rows a screen-reader user has INSTEAD of the
+  // canvas cues, so "the aura is drawn" is not a substitute for any of them.
+  it('an armed beacon shows Cost + Support and OMITS Damage/Range/Fire rate/Targets entirely', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'beacon' }),
+      refund: 0,
+    });
+    const text = panel.root.textContent!;
+    expect(text).toContain('Beacon');
+    expect(text).toContain('Cost: 15');
+    // Derived from the def's own `damageMulFp` (384) — NOT a hardcoded "+50%", so a
+    // modded bundle's Panel cannot lie. (384 - 256) / 256 = 50%.
+    expect(text).toContain('Support: +50.0% damage to towers sharing a full edge'); // formatNumber's 1dp, as every other row
+    // The four attack rows are ABSENT, not zeroed. Asserted on the row LABELS: a beacon
+    // shown as "Damage: 0 / Range: 0.0 tiles / Fire rate: 20.0/s / Targets: Ground" would
+    // be four false statements about a tower that has none of those properties.
+    expect(text).not.toContain('Damage');
+    expect(text).not.toContain('Range');
+    expect(text).not.toContain('Fire rate');
+    expect(text).not.toContain('Targets');
+  });
+
+  it('a selected BUFFED tower shows its real damage under the boosted label — including the DoT row', () => {
+    const { overlay, panel } = setup();
+    // `venom` is the tower that exercises both halves at once: direct 2 -> 3 AND
+    // dot 4 -> 6, matching `story-support.test.ts` case 3's measured sim behaviour.
+    // A Panel that buffed only the Damage row would misreport half this tower's output.
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({
+        selection: { col: 1, row: 1, id: 7, towerId: 'venom', buffMulFp: 384 },
+      }),
+      refund: 4,
+    });
+    const buffedText = panel.root.textContent!;
+    expect(buffedText).toContain('Damage: 3 (boosted)');
+    expect(buffedText).toContain('Poison: 6 damage every');
+    // The Poison row carries its OWN boosted label — it is buffed independently of the
+    // Damage row, and a bundle whose direct amount floors unchanged while its DoT does
+    // not would otherwise print a silently-raised number.
+    expect(buffedText).toContain('(boosted)');
+    expect(buffedText.match(/\(boosted\)/g)).toHaveLength(2);
+    // Cadence and duration are NOT buffed (m2.md: non-damage magnitudes and durations are
+    // never buffed) — so the same row must still read the catalog's own timings.
+    expect(buffedText).toContain('every 0.5s for 3.0s');
+
+    // The unbuffed control, so the assertions above cannot pass on a Panel that simply
+    // always prints 3/6 regardless of the multiplier.
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({
+        selection: { col: 3, row: 3, id: 8, towerId: 'venom', buffMulFp: 256 },
+      }),
+      refund: 4,
+    });
+    const plainText = panel.root.textContent!;
+    expect(plainText).toContain('Damage: 2');
+    expect(plainText).not.toContain('(boosted)');
+    expect(plainText).toContain('Poison: 4 damage every');
+    expect(plainText.match(/\(boosted\)/g)).toBeNull();
+  });
+
+  it('a buff that changes while the SAME tower stays selected reaches the screen (M2-S8)', () => {
+    // The Panel memoizes its subtree on a key and early-returns when the key is unchanged,
+    // patching only the Sell label — so keying on the tower id alone froze the stat rows at
+    // whatever the aura was when the tower was selected. Build a beacon beside an
+    // already-selected tower and the sim fired 15 while the Panel went on reading 10, until
+    // the player deselected and reselected.
+    //
+    // The SAME `id` in both updates is the whole point: the earlier buffed/unbuffed pair
+    // uses two different ids, which forces a rebuild and cannot see this.
+    const { overlay, panel } = setup();
+    const select = (buffMulFp: number): void =>
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic', buffMulFp } }),
+        refund: 2,
+      });
+
+    select(256);
+    expect(panel.root.textContent!).toContain('Damage: 10');
+    expect(panel.root.textContent!).not.toContain('(boosted)');
+
+    // Focus is on a Panel control before the aura moves — the rows must re-render
+    // WITHOUT tearing the subtree down, or a keyboard user loses focus to the board while
+    // the Panel is still open on the same selection. (Folding `buffMulFp` into the memo
+    // key fixes the staleness but fails exactly this.)
+    const sellBtn = [...panel.root.querySelectorAll('button')].find((b) =>
+      b.textContent!.startsWith('Sell'),
+    )!;
+    sellBtn.focus();
+    expect(document.activeElement).toBe(sellBtn);
+
+    select(384); // a beacon was built edge-adjacent; same tower still selected
+    expect(panel.root.textContent!).toContain('Damage: 15 (boosted)');
+    expect(document.activeElement).toBe(sellBtn);
+
+    select(256); // ... and sold again
+    expect(panel.root.textContent!).toContain('Damage: 10');
+    expect(panel.root.textContent!).not.toContain('(boosted)');
   });
 
   it('the Panel shows armed type info (cost/damage/range/fire-rate/targets) and closes on Close (disarm)', () => {
@@ -1016,7 +1132,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'stun' } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'stun', buffMulFp: 256 } }),
       refund: 6,
     });
     expect(panel.root.hidden).toBe(false);
@@ -1075,7 +1191,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'slow' } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'slow', buffMulFp: 256 } }),
       refund: 6,
     });
     expect(panel.root.hidden).toBe(false);
@@ -1092,7 +1208,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic' } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic', buffMulFp: 256 } }),
       refund: 3,
     });
     expect(panel.root.hidden).toBe(false);
@@ -1111,7 +1227,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('a refund change on the SAME selection updates the Sell label in place, preserving the button element (no re-creation)', () => {
     const { overlay, panel } = setup();
-    const selection = { col: 1, row: 1, id: 7, towerId: 'basic' };
+    const selection = { col: 1, row: 1, id: 7, towerId: 'basic', buffMulFp: 256 };
     overlay.update({
       hud: hud(),
       paused: false,
@@ -1198,7 +1314,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       hud: hud(),
       paused: false,
       speed: 1,
-      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic' } }),
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic', buffMulFp: 256 } }),
       refund: 3,
     });
     const panelBtn = panel.root.querySelector<HTMLButtonElement>('.wy-btn')!;

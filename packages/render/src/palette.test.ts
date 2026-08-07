@@ -3,7 +3,8 @@
 // or DOM); every cue the scene draws OPAQUE is gated at source colour, and `range` (the
 // only cue ever drawn at partial alpha for essential information — the ghost-preview
 // stroke, `scene.ts:174`; the selected-tower stroke at 0.9, `scene.ts:142`, is strictly
-// stronger and so not the binding case) is gated at its weakest composited alpha. `spark`
+// stronger and so not the binding case) and `aura` (M2-S8's adjacency shell, at
+// `AURA_SHELL_ALPHA`) are gated at their composited alpha. `spark`
 // is exempt (transient fading FX, alpha → 0 by design, non-essential — the kill outcome
 // is carried by the creep/HP-pip state, and it is reduced-motion governed). `border` is
 // excluded (a quiet structural fill — now an actually-drawn blocked-border ring with a
@@ -14,6 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { COLOUR_MODES, resolvePalette } from './palette';
+import { AURA_SHELL_ALPHA } from './board-draw';
 import type { Palette } from './palette';
 
 function channels(hex: number): [number, number, number] {
@@ -44,7 +46,7 @@ function compositeOver(fg: number, bg: number, a: number): number {
   return (mix(fr, br) << 16) | (mix(fgc, bg2) << 8) | mix(fb, bb);
 }
 
-// The eleven cues the scene draws OPAQUE against the floor (source colour, no compositing) —
+// The cues the scene draws OPAQUE against the floor (source colour, no compositing) —
 // `slowed`'s essential ring is drawn at alpha 1 (the pulse, alpha 0.4, is the non-essential
 // motion cue), so gating it as opaque is exact, not an approximation. `poisoned` (M2-S5a)
 // is the same essential-cue category: its three guaranteed pips are also alpha 1 (the
@@ -69,6 +71,12 @@ const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
 // A future alpha change at either draw site should update this constant.
 const RANGE_GHOST_PREVIEW_ALPHA = 0.7;
 
+// `aura`'s only essential draw: the support-adjacency shell, stroked over the board FLOOR
+// one cell out from a `beacon`'s footprint. Imported from the draw site rather than
+// re-declared, so the gate below can never drift from the alpha actually drawn (the
+// `RANGE_GHOST_PREVIEW_ALPHA` literal above is the older, hand-synced form of the same
+// idea). Composited rather than added to OPAQUE_CUES because the stroke is not alpha 1.
+
 const MIN_CUE_CONTRAST = 3.0;
 
 describe('contrast gate — canvas cues vs the board floor (WCAG 1.4.11 non-text, ≥ 3:1)', () => {
@@ -87,6 +95,11 @@ describe('contrast gate — canvas cues vs the board floor (WCAG 1.4.11 non-text
       const rangeRatio = contrast(rangeComposited, pal.floor);
       minima['range@0.7'] = rangeRatio;
       expect(rangeRatio).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+
+      const auraComposited = compositeOver(pal.aura, pal.floor, AURA_SHELL_ALPHA);
+      const auraRatio = contrast(auraComposited, pal.floor);
+      minima[`aura@${AURA_SHELL_ALPHA}`] = auraRatio;
+      expect(auraRatio).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
 
       // Distinctness: the valid/invalid dual encoding keeps a distinct colour channel in
       // every mode (shape also differs in the scene — this is the redundant colour cue).
@@ -176,6 +189,44 @@ describe('stunned — the jolt ring vs the creep fill it is drawn over (M2-S6)',
       const pal = resolvePalette(mode);
       for (const key of STUNNED_MUST_CONTRAST) {
         expect(contrast(pal.stunned, pal[key])).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      }
+    });
+  }
+});
+
+// `aura`'s shell is stroked on the board FLOOR, one cell out from a beacon's footprint —
+// so the cues it can share a surface with are the ones also drawn on or across floor cells:
+// the floor itself, the `range` ring (a selected neighbour's ring crosses the shell), the
+// `ghostValid`/`ghostInvalid` outlines (a ghost aimed at a shell cell sits on top of it),
+// and the status/ward/airborne cues a creep pathing through a shell cell carries. NOT
+// `tower`: pass 1 of `drawTowers` guarantees no body is ever painted under a shell, which
+// is why that pairing needs no gate here (it would not clear 3:1 if it did — see
+// `palette.ts`'s own note). Scoped deliberately, on `POISONED_MUST_DIFFER_FROM`'s
+// precedent ("do not widen this gate"), rather than blanket.
+//
+// This exists because `palette.ts`'s comment on `aura` CLAIMS byte-distinctness from every
+// other cue in all three tables. An unasserted claim in a comment is how a future palette
+// edit silently makes it false.
+const AURA_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
+  'floor',
+  'range',
+  'ghostValid',
+  'ghostInvalid',
+  'slowed',
+  'poisoned',
+  'stunned',
+  'warded',
+  'airborne',
+  'creep',
+  'creepLowHp',
+];
+
+describe('aura — pairwise distinctness from every cue its shell can share a surface with (M2-S8)', () => {
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": aura differs from every cue drawn on or across a floor cell`, () => {
+      const pal = resolvePalette(mode);
+      for (const key of AURA_MUST_DIFFER_FROM) {
+        expect(pal.aura).not.toBe(pal[key]);
       }
     });
   }

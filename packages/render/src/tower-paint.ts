@@ -22,9 +22,14 @@
  *  creep cue (`airborneCuePaintOps`) is exactly that glyph, and a flyer's cue lands in
  *  the cell to its north — i.e. on top of a tower footprint — so a bare chevron here
  *  would put two same-shaped marks a tenth of a cell apart with only colour separating
- *  them (ADR 0003 forbids leaning on colour for essential cues). An unrecognized id
- *  draws `'plain'` (total, never throw). */
-export type TowerFootprintMark = 'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt' | 'arrow';
+ *  them (ADR 0003 forbids leaning on colour for essential cues). `'pylon'` is `beacon`'s
+ *  (M2-S8) — an upright post through the footprint centre with a short crossbar near its
+ *  top and a wider base bar, evoking "a broadcasting mast": a NEW value, never a reuse,
+ *  so no two towers share a mark. Distinct from `'arrow'` (which converges to a point
+ *  with two barbs at the TIP and no base) and from `'bolt'` (a staggered zigzag, not a
+ *  straight post). An unrecognized id draws `'plain'` (total, never throw). */
+export type TowerFootprintMark =
+  'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt' | 'arrow' | 'pylon';
 
 const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   basic: 'plain',
@@ -33,6 +38,7 @@ const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   venom: 'droplet',
   stun: 'bolt',
   antiair: 'arrow',
+  beacon: 'pylon',
 };
 
 /** The footprint mark for `towerId` — total over any string, `hasOwnProperty`-guarded

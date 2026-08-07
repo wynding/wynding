@@ -14,7 +14,7 @@
 // `formatVersion` never bumps for this; only `simVersion` does, and each story that
 // adds behavior widens its own dimension(s) here alongside its `SIM_VERSION` bump.
 //
-// DIMENSIONS THAT DEFER TO THE SCHEMA at sv11 (a profile field wider than or equal
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv12 (a profile field wider than or equal
 // to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
 // and this profile's own gate has no rejection witness of its own —
 // `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
@@ -27,7 +27,7 @@
 // ships) — and (M2-S7 P1) `allowedTowerDomains`/`allowedCreepDomains`, now
 // `['ground','air','both']`/`['ground','air']`, exactly the v2 schema's own
 // `TowerTargetDomain`/`CreepDomain` enums: no third legal value exists on either
-// axis to test a reject against (see the sv11 profile's own doc comment for why the
+// axis to test a reject against (see the sv11 profile's own doc comment — in this file's git history, not above; G11 deletes each profile at its bump — for why the
 // widening isn't a narrower ceiling instead).
 
 import { RulesetError, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
@@ -77,40 +77,43 @@ export interface CapabilityProfile {
    *  resident when the next shot lands — see `MAX_DOT_RECORDS`). Checked per `dot` effect in
    *  `checkCapabilityGlobal`, against the tower's OWN attack cadence. */
   readonly maxDotDurationCadenceRatio: number;
+  /** Ceiling on a `support` effect's `damageMulFp` (M2-S8) — 1024 (×4) at sv12. The
+   *  v2 schema admits 257..1e6, which is a ×3906 beacon; the profile is where value
+   *  ceilings live (`maxArmor: 16`, `maxAoeRadiusFp: 2048` set the precedent). ×4 is
+   *  generous against the shipped `beacon`'s ×1.5 while keeping every buffed amount a
+   *  compiling bundle can produce far inside the safe-integer domain. Checked per
+   *  `support` effect in `checkCapabilityGlobal`. */
+  readonly maxSupportDamageMulFp: number;
 }
 
-/** `SIM_VERSION` 11 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  sv10's stun-and-immunity model plus (M2-S7) the domain axis activates — a tower's
- *  `attack.domain` may be `ground`, `air`, or `both`, and a creep's `domain` may be
- *  `ground` or `air`. Every other axis is untouched from sv10.
+/** `SIM_VERSION` 12 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  sv11's domain axis plus (M2-S8) the SUPPORT axis activates — a tower's bundle may
+ *  carry a `support` effect instead of an attack, raising the damage amounts of the
+ *  attacking towers whose footprint shares a full cell edge with its own. Every other
+ *  axis is untouched from sv11.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv10 profile is deleted with this bump —
- *  a live sv10 entry would misdescribe v11 tick code (it could no longer compile
- *  air-domain content correctly, since v11 widens the domain gates movement.ts/
- *  combat.ts now read), and replay's strict version equality already owns
- *  cross-version rejection, so there is nothing for a stale profile to serve.
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv11 profile is deleted with this bump —
+ *  a live sv11 entry would misdescribe v12 tick code (it could not compile an
+ *  attackless bundle, which v12's `compileRuleset` now admits and whose aura
+ *  `combat.ts` now reads every phase), and replay's strict version equality already
+ *  owns cross-version rejection, so there is nothing for a stale profile to serve.
  *
- *  `allowedTowerDomains` widens `['ground'] → ['ground', 'air', 'both']` and
- *  `allowedCreepDomains` widens `['ground'] → ['ground', 'air']` in the same
- *  packet (M2-S7 P1) that implements the board gates protecting the arithmetic
- *  those domains newly reach (movement's line-follow, combat's air metric). Unlike
- *  `allowedImmunities` at S6 — which widened DELIBERATELY PAST what S6 ships, to
- *  give a schema-valid stun-immune creep a compile target before S10 authors one —
- *  both of these axes widen to EXACTLY what the shipped catalog uses: `flying`/
- *  `antiair` exhaust `air`, and `slow` going both-domain exhausts `both`, so there
- *  is no narrower ceiling a real bundle would immediately saturate anyway. The
- *  effect is the same as `allowedImmunities`'s, though: `['ground','air','both']`
- *  and `['ground','air']` now equal the v2 schema's own `TowerTargetDomain`/
- *  `CreepDomain` enums exactly, so neither axis retains a rejection witness of its
- *  own; see the "DIMENSIONS THAT DEFER TO THE SCHEMA" note above. */
+ *  `allowedEffectKinds` widens `[...] → [..., 'support']` in the same packet (M2-S8
+ *  P3) that implements the compile, aura and combat paths the kind newly reaches.
+ *  Unlike the S7 domain axes — which widened to exactly the v2 schema's own enums and
+ *  so kept no rejection witness — this widening leaves `'burst'` still excluded, so
+ *  `allowedEffectKinds` RETAINS a live reject witness of its own (S9 owns `burst`);
+ *  `capability.test.ts`'s witness does not have to move. The NEW ceiling
+ *  `maxSupportDamageMulFp` is genuinely narrower than the schema's own 1e6 wall, so
+ *  it too has a rejection witness rather than deferring to the schema. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  11: {
+  12: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,
     maxOffsetTicks: 1_000_000,
     maxEffectsPerBundle: 8,
-    allowedEffectKinds: ['direct', 'slow', 'dot', 'stun'],
+    allowedEffectKinds: ['direct', 'slow', 'dot', 'stun', 'support'],
     allowedDirectForms: ['single', 'aoe'],
     allowedTowerDomains: ['ground', 'air', 'both'],
     allowedCreepDomains: ['ground', 'air'],
@@ -124,6 +127,7 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxAoeRadiusFp: 2048,
     maxDotDurationTicks: 100_000,
     maxDotDurationCadenceRatio: MAX_DOT_DURATION_CADENCE_RATIO,
+    maxSupportDamageMulFp: 1024,
   },
 };
 

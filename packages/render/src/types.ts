@@ -78,6 +78,16 @@ export interface TowerVM {
   /** Catalog id (M2-S3) — keys the footprint mark distinguishing `slow` from `basic`
    *  (`tower-paint.ts`); both share `palette.tower` (shape carries the distinction). */
   readonly towerId: string;
+  /** This tower is a SUPPORT tower (M2-S8, `beacon`) — it does not attack, and the
+   *  scene draws its adjacency shell one cell out from the footprint. A catalog join,
+   *  not sim state. */
+  readonly support: boolean;
+  /** A support aura is currently reaching this tower AND it can actually use one
+   *  (M2-S8). Gated on the tower having an attack: a beacon's shell stamps a
+   *  neighbouring beacon's cells, so an ungated flag would mark beacon-beside-beacon
+   *  as buffed — a visual chaining lie the sim never enacts (support effects are
+   *  dropped from the fire-time snapshot, and a support tower never fires at all). */
+  readonly buffed: boolean;
 }
 
 /** The compact per-tick render snapshot (the "view-model"). Two of these + an alpha
@@ -138,8 +148,11 @@ export interface GhostVM {
   readonly col: number;
   readonly row: number;
   readonly valid: boolean;
-  /** Tower attack range in fixed-point sim units, for the preview range ring. */
-  readonly rangeFp: number;
+  /** Tower attack range in fixed-point sim units, for the preview range ring — `null`
+   *  for an ATTACKLESS tower (M2-S8's `beacon`), where the scene skips the ring
+   *  entirely. Nullable rather than `0`: a zero-radius circle is a dot the player must
+   *  interpret, and arming the beacon is the very first thing they do with it. */
+  readonly rangeFp: number | null;
   /** The armed tower's AoE blast radius (fixed-point sim units), `null` for a
    *  single-target tower (M2-S4a step 14). A 12-bounty `splash` is an informed
    *  purchase, matching the wave-preview philosophy — so this previews the blast
@@ -155,7 +168,12 @@ export interface GhostVM {
 export interface SelectionVM {
   readonly col: number;
   readonly row: number;
-  readonly rangeFp: number;
+  /** `null` for an attackless tower (M2-S8) — same reason as `GhostVM.rangeFp`. The
+   *  live support multiplier the Panel needs to show buffed damage is deliberately NOT
+   *  here: the scene draws no number, so a field with no render consumer would be dead
+   *  weight on the per-frame surface. It rides on `UiState.selection` instead, where the
+   *  Panel actually reads it. */
+  readonly rangeFp: number | null;
   /** The selected tower's catalog id (M2-S3) — keys the Panel's per-id stats. */
   readonly towerId: string;
 }

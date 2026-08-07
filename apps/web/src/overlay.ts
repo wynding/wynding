@@ -19,7 +19,13 @@ import {
   type PreviewEntryVM,
   type ColourMode,
 } from '@wynding/render';
-import { MS_PER_TICK, isTerminalPhase, type CompiledRuleset } from '@wynding/sim';
+import {
+  MS_PER_TICK,
+  isTerminalPhase,
+  buffAmount,
+  SUPPORT_MUL_IDENTITY,
+  type CompiledRuleset,
+} from '@wynding/sim';
 import { t } from './i18n/t';
 import { formatNumber } from './i18n/number';
 import type { SettingsStore } from './settings';
@@ -137,6 +143,7 @@ const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assig
     venom: () => t('tower.venom.name'),
     stun: () => t('tower.stun.name'),
     antiair: () => t('tower.antiair.name'),
+    beacon: () => t('tower.beacon.name'),
   } satisfies Record<string, () => string>,
 );
 
@@ -204,8 +211,14 @@ function button(doc: Document, className: string, label: string): HTMLButtonElem
  * in-flight placement gesture on settings-open, exactly as `rotate.ts` does via the input
  * manager's `abort()` — threaded as a callback (not the input manager itself) because
  * `main.ts` creates the input manager AFTER the overlay, the same forward-reference wiring
- * the hoisted `onAction` uses. `ruleset` is read-only (M1's single `basic` tower's stats
- * for the Panel — cost/damage/rangeFp/cadenceTicks never change at runtime).
+ * the hoisted `onAction` uses. `ruleset` is never MUTATED here, but M2-S8 falsified the
+ * stronger claim this line used to make ("cost/damage/rangeFp/cadenceTicks never change at
+ * runtime"), in both halves: the Panel's Damage and Poison rows are now recomputed from
+ * `ui.selection.buffMulFp` whenever the support aura reaching the selected tower moves —
+ * which is exactly why `renderPanel` patches those rows in place — and `rangeFp`/
+ * `cadenceTicks` are no longer flat `CompiledTower` fields at all (they live under the
+ * optional `attack`, absent on a support bundle). Catalog stats are static; the rows
+ * derived from them are not, so they must not be cached per `towerId`.
  */
 export function createOverlay(
   doc: Document,
@@ -842,10 +855,23 @@ export function createOverlay(
   interface TowerStats {
     readonly name: string;
     readonly cost: number;
-    readonly damage: number;
-    readonly rangeTiles: string;
-    readonly fireRate: string;
-    readonly targets: string;
+    /** M2-S8: `null` for a SUPPORT tower, whose bundle carries no attack at all — the
+     *  Damage/Range/Fire rate/Targets rows are OMITTED rather than shown as zeros, the
+     *  same omit-rather-than-lie posture `blastRadiusTiles`/`dot`/`stun` already take.
+     *  A beacon has no damage, not zero damage. */
+    readonly damage: number | null;
+    readonly rangeTiles: string | null;
+    readonly fireRate: string | null;
+    readonly targets: string | null;
+    /** Whether a support aura is currently raising `damage` above the catalog's base
+     *  (M2-S8) — the Panel labels the row differently so the buffed number is never
+     *  mistaken for the tower's own printed stat. */
+    readonly buffed: boolean;
+    /** The percentage a SUPPORT tower adds to adjacent attackers, derived from the def's
+     *  own `damageMulFp` — `null` for an attacking tower. Derived, never the hardcoded
+     *  "+50%" the shipped beacon happens to have: every other row here is data-driven,
+     *  and a modded bundle's Panel must not lie. */
+    readonly supportPercent: string | null;
     /** The AoE blast radius, in tiles — `null` for a tower with no `aoe` effect (the
      *  shipped `basic`/`slow`), so the Panel row is omitted rather than reading "0"
      *  (M2-S4a). Text, not ring-only (PLAN.md step 14/15's a11y obligation). */
@@ -858,6 +884,12 @@ export function createOverlay(
       readonly damage: number;
       readonly cadence: string;
       readonly duration: string;
+      /** Whether THIS row's number was raised by an aura (M2-S8) — tracked separately
+       *  from `buffed`, which describes the Damage row. A bundle whose direct amount
+       *  floors unchanged while its DoT does not (direct 1 → 1, dot 4 → 6) would
+       *  otherwise print a silently-buffed Poison row under an unlabelled Damage row:
+       *  the mirror of the "(boosted)" lie this file is otherwise careful about. */
+      readonly buffed: boolean;
     } | null;
     /** The stun's chance (out of the effect's `chanceNum`/256, as a whole percent) and
      *  duration (in seconds, matching `fireRate`/`dot`'s own tick→second conversion) —
@@ -889,15 +921,39 @@ export function createOverlay(
    *  `direct` AND `aoe` effect amounts, in authored order (both are direct damage's two
    *  forms — CONTEXT.md's Effect primitive entry — so `splash`'s blast damage must count here just
    *  as `basic`'s single-target damage does; the shipped `slow` tower's row reads its
-   *  own direct total, 2 — a hypothetical pure-support bundle would honestly read 0; QC
-   *  round 2 corrected this line's earlier zero-direct-effects claim). A `towerId` this
-   *  build's catalog doesn't resolve (defensive — the armed/selection state machine only
-   *  ever holds a validated id) falls back to all-zero stats rather than throwing. */
-  function towerStats(towerId: string): TowerStats {
+   *  own direct total, 2; QC round 2 corrected this line's earlier zero-direct-effects
+   *  claim). M2-S8: a pure-support bundle no longer "reads 0" — `damage`/`rangeTiles`/
+   *  `fireRate`/`targets` are all `null` for a tower with no `attack`, and their rows are
+   *  OMITTED rather than printed as zeros, which is this story's headline a11y claim. The
+   *  same now holds for a `towerId` this build's catalog doesn't resolve (defensive — the
+   *  armed/selection state machine only ever holds a validated id): those four rows are
+   *  omitted rather than zeroed, and `cost` still falls back to 0 rather than throwing. */
+  function towerStats(towerId: string, buffMulFp: number = SUPPORT_MUL_IDENTITY): TowerStats {
     const def = ruleset.towerById[towerId];
+    // Buffed PER EFFECT, then summed — never `buffAmount(Σ)`. The two differ under
+    // floor-rounding (amounts 3 + 3 at ×1.5 are a real 4 + 4 = 8, but `floor(6 · 1.5)`
+    // is 9), and the sim buffs each snapshotted effect independently. Unobservable in
+    // the shipped catalog, which has no two-direct-effect tower; wrong the moment one
+    // exists, which is exactly when nobody would be looking.
     const damage =
-      def === undefined
-        ? 0
+      def === undefined || def.attack === undefined
+        ? null
+        : def.effects.reduce(
+            (sum, e) =>
+              e.kind === 'direct' || e.kind === 'aoe' ? sum + buffAmount(e.amount, buffMulFp) : sum,
+            0,
+          );
+    // The UNBUFFED total, kept so the "(boosted)" label can be keyed on the number
+    // actually changing rather than on the multiplier being > 1. `buffAmount` FLOORS, so
+    // a weak multiplier is a no-op on small amounts — the schema admits `damageMulFp`
+    // 257 (×1.004), which floors away for every amount below 256 — and labelling an
+    // unchanged number "boosted" is the same kind of lie as the zeroed rows this
+    // function omits. Not reachable with the shipped catalog (its smallest direct amount
+    // is `venom`'s 2, and ×1.5 moves it), so this is about what the Panel promises, not
+    // about a bug a player can see today.
+    const baseDamage =
+      def === undefined || def.attack === undefined
+        ? null
         : def.effects.reduce(
             (sum, e) => (e.kind === 'direct' || e.kind === 'aoe' ? sum + e.amount : sum),
             0,
@@ -909,8 +965,16 @@ export function createOverlay(
       name: towerName(towerId),
       cost: def?.cost ?? 0,
       damage,
-      rangeTiles: formatNumber((def?.rangeFp ?? 0) / FP_ONE),
-      fireRate: formatNumber(TICKS_PER_SECOND / (def?.cadenceTicks ?? 1)),
+      buffed: damage !== null && baseDamage !== null && damage > baseDamage,
+      supportPercent:
+        def?.support === undefined
+          ? null
+          : formatNumber(
+              ((def.support.damageMulFp - SUPPORT_MUL_IDENTITY) / SUPPORT_MUL_IDENTITY) * 100,
+            ),
+      rangeTiles: def?.attack === undefined ? null : formatNumber(def.attack.rangeFp / FP_ONE),
+      fireRate:
+        def?.attack === undefined ? null : formatNumber(TICKS_PER_SECOND / def.attack.cadenceTicks),
       // M2-S7: the capability profile compiles `attack.domain` as `'ground'`/`'air'`/
       // `'both'` (the widened `TowerTargetDomain` axis) — sv7's `antiair` is the first
       // catalog entry to compile anything other than `'ground'`, so this row must
@@ -918,15 +982,24 @@ export function createOverlay(
       // `antiair` would honestly-falsely display "Targets: Ground". `def === undefined`
       // (a forged/unresolved towerId) falls back to `'ground'`, the same totality rail
       // every other field in this function already takes on an absent definition.
-      targets: targetsFor(def?.domain),
+      targets: def?.attack === undefined ? null : targetsFor(def.attack.domain),
       blastRadiusTiles: aoeEffect === undefined ? null : formatNumber(aoeEffect.radiusFp / FP_ONE),
       dot:
         dotEffect === undefined
           ? null
           : {
-              damage: dotEffect.amount,
+              // Buffed like the direct/aoe amounts above, and for the same reason: the sim
+              // buffs a `dot`'s per-tick amount at FIRE time (`snapshotEffects`), so a
+              // `venom` beside a beacon really does apply 6/tick, not 4. Showing the raw
+              // catalog number here would misreport half of that tower's damage output —
+              // on precisely the pairing this story exists to showcase — and the Panel is
+              // the only non-canvas carrier of it. Cadence and duration are NOT buffed
+              // (m2.md: "Non-damage magnitudes and durations ... are never buffed"), so
+              // they stay raw, which is also what makes this line's asymmetry deliberate.
+              damage: buffAmount(dotEffect.amount, buffMulFp),
               cadence: formatNumber(dotEffect.cadenceTicks / TICKS_PER_SECOND),
               duration: formatNumber(dotEffect.durationTicks / TICKS_PER_SECOND),
+              buffed: buffAmount(dotEffect.amount, buffMulFp) > dotEffect.amount,
             },
       stun:
         stunEffect === undefined
@@ -945,21 +1018,39 @@ export function createOverlay(
   function appendStatRows(container: HTMLElement, stats: TowerStats): void {
     const rows = [
       t('panel.cost', { cost: stats.cost }),
-      t('panel.damage', { damage: stats.damage }),
-      t('panel.range', { tiles: stats.rangeTiles }),
-      t('panel.fireRate', { rate: stats.fireRate }),
-      t('panel.targets', { targets: stats.targets }),
+      // M2-S8: each attack-derived row is present iff the tower actually attacks. A
+      // support tower shows the Support row in their place — the same omit-rather-than-
+      // zero rule the DoT/stun rows already follow, applied to the base stats.
+      ...(stats.damage === null
+        ? []
+        : [
+            stats.buffed
+              ? t('panel.damageBuffed', { damage: stats.damage })
+              : t('panel.damage', { damage: stats.damage }),
+          ]),
+      ...(stats.rangeTiles === null ? [] : [t('panel.range', { tiles: stats.rangeTiles })]),
+      ...(stats.fireRate === null ? [] : [t('panel.fireRate', { rate: stats.fireRate })]),
+      ...(stats.targets === null ? [] : [t('panel.targets', { targets: stats.targets })]),
+      ...(stats.supportPercent === null
+        ? []
+        : [t('panel.support', { percent: stats.supportPercent })]),
       ...(stats.blastRadiusTiles === null
         ? []
         : [t('panel.blastRadius', { tiles: stats.blastRadiusTiles })]),
       ...(stats.dot === null
         ? []
         : [
-            t('panel.dot', {
-              damage: stats.dot.damage,
-              cadence: stats.dot.cadence,
-              duration: stats.dot.duration,
-            }),
+            stats.dot.buffed
+              ? t('panel.dotBuffed', {
+                  damage: stats.dot.damage,
+                  cadence: stats.dot.cadence,
+                  duration: stats.dot.duration,
+                })
+              : t('panel.dot', {
+                  damage: stats.dot.damage,
+                  cadence: stats.dot.cadence,
+                  duration: stats.dot.duration,
+                }),
           ]),
       ...(stats.stun === null
         ? []
@@ -1023,6 +1114,13 @@ export function createOverlay(
   // selection can be patched in place (recreating the subtree would drop focus). `null`
   // whenever the Panel isn't showing a selection.
   let panelSellBtn: HTMLButtonElement | null = null;
+  /** The stat-rows container, tracked so a live aura change can re-render just those rows
+   *  without tearing down the Panel subtree (and its focus) — M2-S8, mirroring
+   *  `panelSellBtn`'s in-place patching. `null` whenever the Panel isn't showing stats. */
+  let panelStatsEl: HTMLElement | null = null;
+  /** The multiplier `panelStatsEl`'s rows were last rendered at, so the patch above is a
+   *  no-op on the overwhelmingly common frame where the aura has not moved. */
+  let panelStatsBuffMulFp = SUPPORT_MUL_IDENTITY;
   // The live region's last-announced outcome sequence (Fix A) — `null` so the very first
   // `update()` call always announces, even when the initial outcome is `null` (message '').
   let lastAnnouncedSeq: number | null = null;
@@ -1047,6 +1145,26 @@ export function createOverlay(
       // pending queue changed). Patch the existing button's label in place rather than
       // re-keying/recreating the Panel on `refund`.
       if (panelSellBtn !== null) panelSellBtn.textContent = t('panel.sell', { refund });
+      // The support aura reaching an already-selected tower can change too (M2-S8) — a
+      // beacon built or sold beside it — and the stat rows are built ONCE on the rebuild
+      // path below, so without this the Damage/(boosted)/Poison rows froze at whatever
+      // the aura was when the tower was selected: the sim fired 15 while the Panel went
+      // on reading 10, until the player deselected and reselected.
+      //
+      // Patched IN PLACE rather than folded into `key`. Putting it in the key does fix
+      // the staleness, but it also fails the early return and runs the full teardown —
+      // `clearChildren` plus the focus re-home at the end of this function — so a
+      // keyboard user with focus on Sell or Close would lose it to the board while the
+      // Panel stayed open on the same selection. That is exactly the trap the refund
+      // label above is patched in place to avoid; the buff must not reintroduce it.
+      if (panelStatsEl !== null && ui.armed === null && ui.selection !== null) {
+        const nextBuff = ui.selection.buffMulFp;
+        if (nextBuff !== panelStatsBuffMulFp) {
+          panelStatsBuffMulFp = nextBuff;
+          clearChildren(panelStatsEl);
+          appendStatRows(panelStatsEl, towerStats(ui.selection.towerId, nextBuff));
+        }
+      }
       return;
     }
     // Focus re-homing seam (PLAN.md P2 Focus rules): renderPanel is the ONE place the Panel
@@ -1062,6 +1180,8 @@ export function createOverlay(
     const hadPanelFocus = panel.root.contains(doc.activeElement);
     lastPanelKey = key;
     panelSellBtn = null;
+    panelStatsEl = null;
+    panelStatsBuffMulFp = SUPPORT_MUL_IDENTITY;
     clearChildren(panel.root);
     if (ui.armed !== null) {
       const stats = towerStats(ui.armed);
@@ -1069,16 +1189,21 @@ export function createOverlay(
       heading.className = 'wy-panel-name';
       heading.textContent = stats.name;
       panel.root.appendChild(heading);
-      appendStatRows(panel.root, stats);
+      panelStatsEl = doc.createElement('div');
+      panel.root.appendChild(panelStatsEl);
+      appendStatRows(panelStatsEl, stats);
       appendCloseButton(panel.root);
       panel.root.hidden = false;
     } else if (ui.selection !== null) {
-      const stats = towerStats(ui.selection.towerId);
+      const stats = towerStats(ui.selection.towerId, ui.selection.buffMulFp);
       const heading = doc.createElement('p');
       heading.className = 'wy-panel-name';
       heading.textContent = stats.name;
       panel.root.appendChild(heading);
-      appendStatRows(panel.root, stats);
+      panelStatsEl = doc.createElement('div');
+      panel.root.appendChild(panelStatsEl);
+      appendStatRows(panelStatsEl, stats);
+      panelStatsBuffMulFp = ui.selection.buffMulFp;
       appendActionRow(panel.root, refund);
       appendCloseButton(panel.root);
       panel.root.hidden = false;

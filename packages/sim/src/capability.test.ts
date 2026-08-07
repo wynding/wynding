@@ -1,6 +1,6 @@
 // capability.test.ts — the per-simVersion capability profile (M2-S1, widened at
 // M2-S2 to sv6, M2-S3 to sv7, M2-S4a to sv8, M2-S5a to sv9, M2-S6 to sv10, M2-S7 to
-// sv11): the simVersion-11 profile's exact shape, an unknown-simVersion throw, and
+// sv11, M2-S8 to sv12): the simVersion-12 profile's exact shape, an unknown-simVersion throw, and
 // — since the profile itself is inert data gated only inside `compileRuleset` —
 // accept-at-boundary / reject-beyond-boundary coverage for every dimension still
 // narrower than the schema, exercised through `compileRuleset` against
@@ -113,14 +113,14 @@ describe('capabilityProfile', () => {
     expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
   });
 
-  it('simVersion 11 is the domain-axis profile, deferring wave/economy/catalog-size/immunity/domain axes to the schema', () => {
-    expect(capabilityProfile(11)).toEqual({
+  it('simVersion 12 is the support-axis profile, deferring wave/economy/catalog-size/immunity/domain axes to the schema', () => {
+    expect(capabilityProfile(12)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
       maxEntriesPerWave: 16,
       maxOffsetTicks: 1_000_000,
       maxEffectsPerBundle: 8,
-      allowedEffectKinds: ['direct', 'slow', 'dot', 'stun'],
+      allowedEffectKinds: ['direct', 'slow', 'dot', 'stun', 'support'],
       allowedDirectForms: ['single', 'aoe'],
       allowedTowerDomains: ['ground', 'air', 'both'],
       allowedCreepDomains: ['ground', 'air'],
@@ -134,11 +134,12 @@ describe('capabilityProfile', () => {
       maxAoeRadiusFp: 2048,
       maxDotDurationTicks: 100_000,
       maxDotDurationCadenceRatio: 8,
+      maxSupportDamageMulFp: 1024,
     });
     // Every prior version is deleted with each bump (G11, capability.ts's header) —
-    // sv10 misdescribes v11 tick code now, so it throws exactly like any other
-    // unknown version.
-    expect(() => capabilityProfile(10)).toThrow(RulesetError);
+    // sv11 misdescribes v12 tick code now (it could not compile an attackless bundle),
+    // so it throws exactly like any other unknown version.
+    expect(() => capabilityProfile(11)).toThrow(RulesetError);
   });
 
   it('the returned profile is deeply frozen (a mutation cannot widen the gate)', () => {
@@ -207,7 +208,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     });
   });
 
-  it("allowedEffectKinds: 'direct'+'slow'+'dot'+'stun' accepted, 'burst' rejected", () => {
+  it("allowedEffectKinds: 'direct'+'slow'+'dot'+'stun'+'support' accepted, 'burst' rejected", () => {
     compiles(() => {});
     compiles((b) => {
       b.towerCatalog[0]!.effects = [
@@ -223,12 +224,20 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     });
     // (M2-S6) stun joins the accepted set — the schema still carries 'burst' and
     // 'support' kinds this profile does not, so the reject case moves to 'burst'
-    // rather than disappearing.
+    // rather than disappearing. (M2-S8) 'support' joins too, so 'burst' is now the
+    // ONLY schema kind this profile excludes — the reject witness below is the last
+    // one this axis has, and S9 (burst/`mine`) is the story that retires it.
     compiles((b) => {
       b.towerCatalog[0]!.effects = [
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'stun', chanceNum: 64, durationTicks: 30 },
       ];
+    });
+    // A support bundle is EXCLUSIVE (ruleset-schema.ts) and attackless — the whole
+    // `attack` key must go, or the schema rejects before the capability gate is reached.
+    compiles((b) => {
+      delete b.towerCatalog[0]!.attack;
+      b.towerCatalog[0]!.effects = [{ kind: 'support', damageMulFp: 384 }];
     });
     rejects((b) => {
       // A burst effect requires `cadenceTicks` omitted (single-use) — schema
@@ -236,7 +245,22 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
       // schema-valid on its own for the capability gate to be what fires.
       delete b.towerCatalog[0]!.attack!.cadenceTicks;
       b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
-    }, "effect kind 'burst' unsupported at simVersion 11");
+    }, "effect kind 'burst' unsupported at simVersion 12");
+  });
+
+  it('maxSupportDamageMulFp: exactly 1024 accepted, 1025 rejected (M2-S8)', () => {
+    // A profile ceiling with no enforcement site is dead code — the v2 schema admits
+    // `damageMulFp` up to 1e6, so without `checkCapabilityGlobal`'s clause a ×3906
+    // beacon would compile clean. Unlike the domain axes, this ceiling is genuinely
+    // narrower than the schema's own wall, so it keeps a real reject witness.
+    compiles((b) => {
+      delete b.towerCatalog[0]!.attack;
+      b.towerCatalog[0]!.effects = [{ kind: 'support', damageMulFp: 1024 }];
+    });
+    rejects((b) => {
+      delete b.towerCatalog[0]!.attack;
+      b.towerCatalog[0]!.effects = [{ kind: 'support', damageMulFp: 1025 }];
+    }, "tower 'basic' support damageMulFp 1025 exceeds 1024 at simVersion 12");
   });
 
   it('maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected', () => {
@@ -256,7 +280,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
       ];
-    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 11");
+    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 12");
   });
 
   it('MAX_DOT_RECORDS budgets (ratio + 1) per source, so compiled content can reach the rail but never exceed it', () => {
@@ -293,7 +317,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 241 },
       ];
-    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 11");
+    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 12");
   });
 
   // M2-S5a P8 (CodeRabbit, PR #78) — not a `capabilityProfile` field (the profile has
@@ -316,7 +340,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
       ];
-    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 11");
+    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 12");
   });
 
   it("allowedDirectForms: 'single' accepted, 'aoe' also accepted — no reject case exists (see header comment)", () => {
@@ -348,7 +372,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles(() => {});
     rejects(
       (b) => (b.creepCatalog[0]!.role = 'boss'),
-      "creep role 'boss' unsupported at simVersion 11",
+      "creep role 'boss' unsupported at simVersion 12",
     );
   });
 
@@ -357,7 +381,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.armor = 16)); // exactly the ceiling — accepted
     rejects(
       (b) => (b.creepCatalog[0]!.armor = 17),
-      "creep 'normal' armor 17 exceeds 16 at simVersion 11",
+      "creep 'normal' armor 17 exceeds 16 at simVersion 12",
     );
   });
 
@@ -365,13 +389,13 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 1 }));
     rejects(
       (b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 }),
-      "creep 'other' leakCost 2 unsupported at simVersion 11 (must be 1)",
+      "creep 'other' leakCost 2 unsupported at simVersion 12 (must be 1)",
     );
     // Uniform-but-nonzero must ALSO reject — m2.md pins "leakCost = 1 until S10";
     // a whole catalog at 2 is still content this sim build cannot simulate.
     rejects(
       (b) => (b.creepCatalog[0]!.leakCost = 2),
-      "creep 'normal' leakCost 2 unsupported at simVersion 11 (must be 1)",
+      "creep 'normal' leakCost 2 unsupported at simVersion 12 (must be 1)",
     );
   });
 
@@ -471,7 +495,7 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     const b = bundleWithSpec(OVERSIZED, { withAirCreep: true, flies: false, creepSpeedFp: 1000 });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 11 (the catalog contains an air creep)`,
+      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 12 (the catalog contains an air creep)`,
     );
   });
 
@@ -493,7 +517,7 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 11 (the catalog contains an air creep)`,
+      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 12 (the catalog contains an air creep)`,
     );
   });
 

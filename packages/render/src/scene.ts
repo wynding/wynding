@@ -254,8 +254,13 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       g.strokeRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
       const cx = p.x + projection.cellPx;
       const cy = p.y + projection.cellPx;
-      g.lineStyle(1, pal.range, 0.7);
-      g.strokeCircle(cx, cy, projection.fpLenToPixel(o.ghost.rangeFp));
+      // M2-S8: an attackless tower (`beacon`) previews no range ring — this is the path
+      // that bites FIRST, since arming a tower to place it is the first thing a player
+      // does with it, and this call used to stroke unconditionally for every valid ghost.
+      if (o.ghost.rangeFp !== null) {
+        g.lineStyle(1, pal.range, 0.7);
+        g.strokeCircle(cx, cy, projection.fpLenToPixel(o.ghost.rangeFp));
+      }
       // Armed-splash blast-radius preview (M2-S4a step 14): a 12-bounty long-lob is an
       // informed purchase, matching the wave-preview philosophy. The ghost already draws
       // the range ring above — a SECOND plain circle at the same footprint would be

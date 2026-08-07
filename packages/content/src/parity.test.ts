@@ -277,12 +277,14 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // A change here means the shipped artifact's CONTENT changed (or its normalized
 // encoding did) — not a behavior change per se, but every deployed replay/leaderboard
 // entry binds to this exact digest (ADR 0007 §3), so a change is never silent.
-// Re-pinned M2-S7 P6: the shipped catalog gained the `flying` creep and the `antiair` tower,
-// `slow`'s attack domain went ground → both, AND the board's wave schedule gained a sixth
-// entry (index 5, 8 × `flying`) — closing the gap where the catalog carried air content
-// that no wave ever spawned. A content-identity digest, so it moves whenever the bundle
-// intentionally changes — independent of the world-hash goldens above.
-const SHIPPED_RULESET_HASH = '8c7402ed701f6a0c242a60ebb1c01238ccaf4c1f7a7687f382903e7d9b6e46ed';
+// Re-pinned M2-S8 P5: the shipped catalog gained the `beacon` — a SUPPORT tower, the first
+// catalog entry with no `attack` key at all. That is the ONLY bundle change in this story:
+// no creep, wave or balance edit rides with it, and the beacon is player-built so (unlike
+// `antiair` at S7) it cannot ship dark without a wave to justify it. A content-identity
+// digest, so it moves whenever the bundle intentionally changes — independent of the
+// world-hash goldens above, which do NOT move here (nothing in `SimState` or `Impact`
+// changed shape at sv12).
+const SHIPPED_RULESET_HASH = '03c2a9e5af6d83d1120ed1b7feb1dcfd383865e76c5be33800cf2c0dafcf55ed';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {

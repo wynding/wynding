@@ -63,6 +63,22 @@ export interface Palette {
    *  the draft ship-review rejected for sitting on the slow ring — a reader auditing
    *  collisions from here would have reconstructed the exact bug that was fixed.) */
   readonly airborne: number;
+  /** Support-aura cue (M2-S8) — the colour channel behind the adjacency SHELL
+   *  `drawTowers` strokes one cell out from a `beacon`'s footprint. Drawn on the board
+   *  FLOOR (the shell bounds, and slightly over-approximates, the cells a recipient must
+   *  occupy — see `board-draw.ts` PASS 1 for the corner-cell caveat), at
+   *  `AURA_SHELL_ALPHA`, so it is gated COMPOSITED against the floor exactly like
+   *  `range`'s ghost-preview stroke rather than dropped into the opaque set
+   *  (`palette.test.ts`).
+   *
+   *  It is deliberately NOT the colour of the buffed-recipient ✦. That mark is drawn
+   *  ON a tower body, and near-white is the only band clearing 3:1 against `tower` in
+   *  the default table (measured — pale lavender is 1.89:1 there) — a luminance
+   *  sandwich of exactly the kind `stunned`'s comment documents. So the ✦ follows the
+   *  footprint-mark precedent instead and strokes `floor` against the solid `tower`
+   *  fill, the way `'ringed'`/`'crosshair'`/`'droplet'` already do; shape and position
+   *  carry the distinction, per ADR 0003's primary channel. */
+  readonly aura: number;
 }
 
 // Base palette: high-contrast, colourblind-safe hues (Okabe–Ito). Valid/invalid also
@@ -131,6 +147,12 @@ const DEFAULT: Palette = {
   // primary channel: a stun jolt is a RING at r×1.15; the airborne cue is two line
   // strokes at r×2.6–2.9, a cell away. Same posture as `poisoned`'s own tritan note.
   airborne: 0xdcf8ff,
+  // Pale lavender (M2-S8) — byte-distinct from every other cue in all three tables
+  // (nearest neighbours: DEFAULT `range` 0xcc79a7, TRITAN `range` 0x56b4e9), and
+  // clearing the floor at 7.64:1 composited at `AURA_SHELL_ALPHA`. The floor is
+  // un-overridden across all three modes, so that figure holds in every mode and this
+  // key needs no per-mode override.
+  aura: 0xc9b6ff,
 };
 
 // Deutan/protan (red–green) shift the green/red pair toward blue/orange separation.
