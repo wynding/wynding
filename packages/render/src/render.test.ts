@@ -196,6 +196,54 @@ describe('view-model + hud derivation', () => {
     expect(vm.towers[0]).toMatchObject({ col: 3, row: 3, towerId: 'basic' });
   });
 
+  // M2-S8. The view model must classify support/buffed by calling the SIM's own aura
+  // rule, so the ✦ can never mark a tower `runCombat` is not actually buffing.
+  it('marks a support tower and the attackers its aura reaches (M2-S8)', () => {
+    let s = createInitialState(1, ruleset);
+    // `beacon` at (4,12) occupies cols 4-5, rows 12-13; its ring includes (6,12), so the
+    // `basic` anchored there shares a full cell edge with it and is buffed. The `basic`
+    // at (10,12) is three columns clear of the ring and is not.
+    s = step(s, ruleset, [
+      { kind: 'placeTower', anchor: { col: 4, row: 12 }, towerId: 'beacon' },
+      { kind: 'placeTower', anchor: { col: 6, row: 12 }, towerId: 'basic' },
+      { kind: 'placeTower', anchor: { col: 10, row: 12 }, towerId: 'basic' },
+    ]);
+    const byCol = new Map(deriveViewModel(s, ruleset).towers.map((t) => [t.col, t]));
+    expect(byCol.get(4)).toMatchObject({ towerId: 'beacon', support: true, buffed: false });
+    expect(byCol.get(6)).toMatchObject({ towerId: 'basic', support: false, buffed: true });
+    expect(byCol.get(10)).toMatchObject({ towerId: 'basic', support: false, buffed: false });
+  });
+
+  it('never marks a beacon beside a beacon as buffed — the sim enacts no chaining (M2-S8)', () => {
+    // A beacon IS inside its neighbour's stamped ring, so `buffed` is only false here
+    // because it is gated on the tower having an attack. Without that gate the scene
+    // would draw a ✦ on both — a visual chaining lie the sim never enacts (support
+    // towers are skipped in the fire step and never look the aura up at all).
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [
+      { kind: 'placeTower', anchor: { col: 4, row: 12 }, towerId: 'beacon' },
+      { kind: 'placeTower', anchor: { col: 6, row: 12 }, towerId: 'beacon' },
+    ]);
+    const towers = deriveViewModel(s, ruleset).towers;
+    expect(towers).toHaveLength(2);
+    expect(towers.every((t) => t.support)).toBe(true);
+    expect(towers.every((t) => !t.buffed)).toBe(true);
+  });
+
+  it('excludes corner-only touch from the aura — a diagonal neighbour is not buffed (M2-S8)', () => {
+    // The aura is a full-cell-EDGE share, not a radius. `beacon` at (4,12) covers cols
+    // 4-5 / rows 12-13; a `basic` at (6,14) covers cols 6-7 / rows 14-15, touching only
+    // at the corner point (6,14)↔(5,13). Excluded (m2.md).
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [
+      { kind: 'placeTower', anchor: { col: 4, row: 12 }, towerId: 'beacon' },
+      { kind: 'placeTower', anchor: { col: 6, row: 14 }, towerId: 'basic' },
+    ]);
+    const basic = deriveViewModel(s, ruleset).towers.find((t) => t.towerId === 'basic');
+    expect(basic).toBeDefined();
+    expect(basic!.buffed).toBe(false);
+  });
+
   it('projects each creep’s catalog id and the true per-creep hpFrac denominator (M2-S3)', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);

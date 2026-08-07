@@ -26,6 +26,17 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
   it('draws antiair with a distinct arrow mark (M2-S7) — never reuses plain/ringed/crosshair/droplet/bolt, so it is never conflated with basic', () => {
     expect(towerFootprintMarkFor('antiair')).toBe('arrow');
   });
+  it('draws beacon with a distinct pylon mark (M2-S8) — never reuses any prior mark', () => {
+    expect(towerFootprintMarkFor('beacon')).toBe('pylon');
+  });
+  it('assigns every shipped tower a DISTINCT mark — no two towers ever share one', () => {
+    // The per-story `not.toBe` chains above only ever compare against the marks that
+    // existed at the time; this asserts the invariant itself, so a future story that
+    // reuses an existing mark fails here rather than in a reader's eye.
+    const ids = ['basic', 'slow', 'splash', 'venom', 'stun', 'antiair', 'beacon'];
+    const marks = ids.map(towerFootprintMarkFor);
+    expect(new Set(marks).size).toBe(ids.length);
+  });
   it('falls back to plain for an unknown id — never throws', () => {
     expect(towerFootprintMarkFor('__proto__')).toBe('plain');
     expect(towerFootprintMarkFor('')).toBe('plain');

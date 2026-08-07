@@ -7,6 +7,9 @@ import {
   deriveScore,
   deriveStars,
   forEachValidTower,
+  buildAuraIndex,
+  auraMulFor,
+  SUPPORT_MUL_IDENTITY,
   MS_PER_TICK,
   type SimState,
   type PreviewState,
@@ -75,9 +78,38 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
   // by iterating raw SoA rows: a forged/restored row the sim itself classifies invalid
   // (unknown `towerId`, spend↔towerId mismatch) must not be drawn — presentation can never
   // disagree with the sim about which rows exist.
+  //
+  // `support`/`buffed` are CATALOG + GEOMETRY joins, not sim state — derived here by
+  // calling the sim's OWN `buildAuraIndex`/`auraMulFor` (M2-S8), never a second copy of
+  // the adjacency rule living in the render package. One implementation means the ✦ can
+  // never mark a tower `runCombat` is not actually buffing.
+  const auraIndex = buildAuraIndex(grid, state.towers, ruleset.towerById);
   const towers: TowerVM[] = [];
   forEachValidTower(grid, state.towers, ruleset.towerById, (i, id, col, row) => {
-    towers.push({ id, col, row, towerId: state.towers.towerId[i] as string });
+    const def = ruleset.towerById[state.towers.towerId[i] as string];
+    towers.push({
+      id,
+      col,
+      row,
+      towerId: state.towers.towerId[i] as string,
+      support: def?.support !== undefined,
+      // The `def?.attack !== undefined` gate is load-bearing, not defensive: a beacon
+      // beside a beacon IS inside the other's stamped ring, so without it the scene
+      // would draw a chaining buff the sim never applies.
+      //
+      // WHAT THIS FLAG CLAIMS, stated because the Panel's "(boosted)" label deliberately
+      // claims something else: the ✦ means "an aura REACHES this tower", keyed on the
+      // multiplier. `panel.damageBuffed` means "the damage NUMBER changed", keyed on the
+      // number, because `buffAmount` floors and the schema admits a multiplier (257,
+      // ×1.004) that floors away on small amounts. On such a modded bundle the board
+      // shows the ✦ while the Panel declines to say "boosted" — and both are telling the
+      // truth about different things. Not reachable with the shipped catalog (the beacon
+      // is 384 and the smallest direct amount is `venom`'s 2). Deliberately NOT unified
+      // by recomputing per-effect amounts here: that would put floor arithmetic on the
+      // per-tower render path to change a cue nothing in the shipped game can observe.
+      buffed:
+        def?.attack !== undefined && auraMulFor(auraIndex, grid, col, row) > SUPPORT_MUL_IDENTITY,
+    });
   });
 
   return { tick: state.tick, phase: state.phase, creeps, towers };

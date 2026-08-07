@@ -60,9 +60,12 @@ const GRID = RULESET.board.grid;
 // call site below passes.
 const TEST_TOWER = RULESET.towerById['basic']!;
 const TOWER_BY_ID = RULESET.towerById;
-const RANGE = TEST_TOWER.rangeFp;
-const TRAVEL_TICKS = TEST_TOWER.travelTicks;
-const FIRE_INTERVAL = TEST_TOWER.cadenceTicks;
+// M2-S8 (sv12): `CompiledTower.attack` is an optional NESTED object — `basic` is an
+// attacking tower, so this non-null assertion is a fact of the fixture, not a guess.
+const TEST_ATTACK = TEST_TOWER.attack!;
+const RANGE = TEST_ATTACK.rangeFp;
+const TRAVEL_TICKS = TEST_ATTACK.travelTicks;
+const FIRE_INTERVAL = TEST_ATTACK.cadenceTicks;
 // A type predicate rather than a cast (CodeRabbit #73): if `basic` ever loses its
 // direct effect this throws a NAMED error at module load, not an opaque TypeError.
 const DIRECT_EFFECT = TEST_TOWER.effects.find(
@@ -257,10 +260,12 @@ const VENOM_TOWER: CompiledTower = {
     { kind: 'direct', amount: 5 },
     { kind: 'dot', amount: 2, cadenceTicks: 10, durationTicks: 60 },
   ],
-  domain: 'ground',
-  rangeFp: RANGE,
-  cadenceTicks: FIRE_INTERVAL,
-  travelTicks: TRAVEL_TICKS,
+  attack: {
+    domain: 'ground',
+    rangeFp: RANGE,
+    cadenceTicks: FIRE_INTERVAL,
+    travelTicks: TRAVEL_TICKS,
+  },
 };
 const VENOM_BY_ID = { ...TOWER_BY_ID, venom: VENOM_TOWER };
 

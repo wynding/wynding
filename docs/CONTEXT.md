@@ -50,6 +50,17 @@ per the accessibility standard: a shape cue always (never color alone), plus a
 motion cue that yields to reduced-motion — shape is the guaranteed channel.
 _Avoid_: indicator, status icon.
 
+**Aura**:
+The region of effect a **support** tower projects onto its neighbours: the cells whose
+occupant it strengthens, and the rule that decides them. The beacon's aura reaches every
+attacking tower whose 2×2 footprint shares at least one full cell edge with its own —
+corner-only touch is outside it. An aura is a property of the maze, not of any
+creep: it is re-derived from tower positions every combat phase, so it can never be
+stale, and it has no duration to expire. Where two auras overlap, the strongest single
+aura applies; they never sum. A support tower does not attack, and no tower is ever
+inside its own aura, so auras cannot chain.
+_Avoid_: buff radius, boost zone, aura range.
+
 **Ward**:
 The on-board visual cue that a creep is **immune** to an effect. Distinct from a
 Telegraph: a telegraph shows a timed status that is currently active, a ward shows

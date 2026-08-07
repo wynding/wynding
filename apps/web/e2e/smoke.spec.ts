@@ -35,7 +35,7 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-rail')).toBeVisible();
   // The Rail's Cards (PLAN.md P2, M2-S3/M2-S4a/M2-S6: one per catalog tower) — unarmed at load.
-  await expect(page.locator('.wy-card')).toHaveCount(6);
+  await expect(page.locator('.wy-card')).toHaveCount(7); // M2-S8 appends `beacon`
   for (const c of await page.locator('.wy-card').all()) {
     await expect(c).toBeVisible();
     await expect(c).toHaveAttribute('aria-pressed', 'false');
@@ -447,6 +447,78 @@ test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels 
   await page.keyboard.press('Digit4');
   await page.keyboard.press('Enter');
   await expect(venomCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
+
+  const invalidAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(invalidAudit.violations, JSON.stringify(invalidAudit.violations, null, 2)).toEqual([]);
+});
+
+test('the seventh Card (M2-S8): arms Beacon by click AND by Digit7, OMITS the four attack stat rows entirely, states its Support row as TEXT, and stays axe-clean', async ({
+  page,
+}) => {
+  // Every prior tower shipped its own spec here; the beacon needs one more than most,
+  // because its Panel is the first in this app's history to OMIT rows rather than add
+  // them — the story's headline a11y claim — and an omitted-region shape is exactly what
+  // can satisfy a jsdom `textContent` assertion while producing an empty or mis-labelled
+  // node in a real accessibility tree. `overlay.test.ts` covers the strings; only this
+  // covers them in a real browser, through axe.
+  await page.goto('/');
+  const beaconCard = page.getByRole('button', { name: /Beacon/ });
+  const board = page.locator('.wy-board');
+  const panel = page.locator('.wy-panel');
+
+  // Click-arm.
+  await expect(panel).toBeHidden();
+  await beaconCard.click();
+  await expect(beaconCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel).toContainText('Beacon');
+  await expect(panel).toContainText('Cost: 15');
+  // The aura's magnitude is TEXT, and it is the ONLY non-canvas carrier of what this
+  // tower does — the shell and the recipient mark are both canvas-only.
+  await expect(panel).toContainText('Support: +50.0% damage to towers sharing a full edge');
+  // ... and the four attack rows are ABSENT, not zeroed. Asserted on the LABELS: a beacon
+  // rendered as "Damage: 0 / Range: 0.0 tiles / Fire rate: 20.0/s / Targets: Ground" would
+  // be four false statements about a tower with none of those properties, and would still
+  // satisfy a "contains Support" check.
+  await expect(panel).not.toContainText('Damage');
+  await expect(panel).not.toContainText('Range');
+  await expect(panel).not.toContainText('Fire rate');
+  await expect(panel).not.toContainText('Targets');
+  await expect(board).toBeFocused();
+
+  // axe with the 7-card Rail, the seventh Card armed — the omitted-row Panel is the new
+  // DOM shape being audited here.
+  const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
+
+  await beaconCard.click(); // disarm — clean slate for the hotkey path
+  await expect(beaconCard).toHaveAttribute('aria-pressed', 'false');
+
+  // Digit7 (armTower7's default binding) arms from document scope, exactly like Digit1-6
+  // arm the first six Cards. No keymap change was needed — nine slots already existed.
+  await page.keyboard.press('Digit7');
+  await expect(beaconCard).toHaveAttribute('aria-pressed', 'true');
+  await expect(board).toBeFocused();
+
+  // VALID placement via the keyboard cursor — the same route the fourth-Card spec walks.
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+
+  await expect(beaconCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  await expect(panel).toContainText('Beacon'); // now selected
+  await expect(panel).toContainText('Support: +50.0% damage to towers sharing a full edge');
+  // A SELECTED beacon still omits the four rows — the selection path builds its stats
+  // through the same `towerStats` call, and this is the path a player reaches by clicking
+  // a tower they already own.
+  await expect(panel).not.toContainText('Fire rate');
+
+  const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
+
+  // INVALID placement: re-arm and aim at the SAME (now-occupied) cell.
+  await page.keyboard.press('Digit7');
+  await page.keyboard.press('Enter');
+  await expect(beaconCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
 
   const invalidAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(invalidAudit.violations, JSON.stringify(invalidAudit.violations, null, 2)).toEqual([]);

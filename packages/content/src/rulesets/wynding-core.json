@@ -139,6 +139,11 @@
         "travelTicks": 2
       },
       "effects": [{ "kind": "direct", "form": "single", "damage": 8 }]
+    },
+    {
+      "id": "beacon",
+      "cost": 15,
+      "effects": [{ "kind": "support", "damageMulFp": 384 }]
     }
   ],
   "balance": {

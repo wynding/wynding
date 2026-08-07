@@ -46,8 +46,16 @@ export class RulesetError extends Error {
  *  the only scope the axis-alignment gate covers. sv11 still admits a non-axis-aligned
  *  board whose own waves never fly (`capability.test.ts` pins that cell of the matrix
  *  deliberately), and on one of those a forged or restored flyer — exactly what the
- *  wider-scoped size gate beside it exists for — walks a staircase rather than a ray. */
-export const SIM_VERSION = 11;
+ *  wider-scoped size gate beside it exists for — walks a staircase rather than a ray.
+ *
+ *  M2 Story 8 (Support) bumps 11 → 12 — the support axis activates: a tower bundle may
+ *  carry a `support` effect INSTEAD of an attack (so `compileRuleset` now admits an
+ *  attackless, rangeless, cadenceless tower), and such a tower raises the damage
+ *  amounts of the attacking towers whose 2×2 footprint shares a full cell edge with
+ *  its own. The buff enters at the fire-time snapshot and lands in the EXISTING
+ *  `effects[].amount`, so unlike S7 the `Impact` shape does not change — a board with
+ *  no beacon placed simulates bit-for-bit as it did at sv11. */
+export const SIM_VERSION = 12;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

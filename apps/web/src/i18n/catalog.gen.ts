@@ -79,18 +79,22 @@ export const EN = {
   "tower.venom.name": "Venom Tower",
   "tower.stun.name": "Stun Tower",
   "tower.antiair.name": "Anti-Air Tower",
+  "tower.beacon.name": "Beacon",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
   "tower.targets.air": "Air",
   "tower.targets.both": "Ground + Air",
   "panel.cost": "Cost: {cost}",
   "panel.damage": "Damage: {damage}",
+  "panel.damageBuffed": "Damage: {damage} (boosted)",
   "panel.range": "Range: {tiles} tiles",
   "panel.fireRate": "Fire rate: {rate}/s",
   "panel.targets": "Targets: {targets}",
   "panel.blastRadius": "Blast radius: {tiles} tiles",
   "panel.dot": "Poison: {damage} damage every {cadence}s for {duration}s",
+  "panel.dotBuffed": "Poison: {damage} damage every {cadence}s for {duration}s (boosted)",
   "panel.stun": "Stun: {chance}% for {duration}s",
+  "panel.support": "Support: +{percent}% damage to towers sharing a full edge",
   "panel.close": "Close panel",
   "panel.sell": "Sell (refund {refund})",
   "panel.upgrade": "Max level",
@@ -202,18 +206,22 @@ export interface MessageParams {
   "tower.venom.name": Record<never, never>;
   "tower.stun.name": Record<never, never>;
   "tower.antiair.name": Record<never, never>;
+  "tower.beacon.name": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
   "tower.targets.air": Record<never, never>;
   "tower.targets.both": Record<never, never>;
   "panel.cost": { "cost": string | number };
   "panel.damage": { "damage": string | number };
+  "panel.damageBuffed": { "damage": string | number };
   "panel.range": { "tiles": string | number };
   "panel.fireRate": { "rate": string | number };
   "panel.targets": { "targets": string | number };
   "panel.blastRadius": { "tiles": string | number };
   "panel.dot": { "damage": string | number; "cadence": string | number; "duration": string | number };
+  "panel.dotBuffed": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.stun": { "chance": string | number; "duration": string | number };
+  "panel.support": { "percent": string | number };
   "panel.close": Record<never, never>;
   "panel.sell": { "refund": string | number };
   "panel.upgrade": Record<never, never>;

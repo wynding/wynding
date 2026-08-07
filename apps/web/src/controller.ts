@@ -14,6 +14,8 @@
 
 import { createFixedLoop, type FixedLoop } from '@wynding/engine';
 import {
+  buildAuraIndex,
+  auraMulFor,
   createInitialState,
   compileRuleset,
   step,
@@ -94,6 +96,10 @@ export interface UiState {
     readonly row: number;
     readonly id: number;
     readonly towerId: string;
+    /** The support multiplier currently reaching this tower (×/256; 256 = unbuffed) —
+     *  M2-S8, so the Panel shows the tower's REAL damage rather than the catalog's base
+     *  (ruling 3: "omit lies, show the live buffed value"). */
+    readonly buffMulFp: number;
   } | null;
   readonly lastOutcome: PlacementOutcome | null;
   /** Bumped every time an outcome is RECORDED — even when it's identical in content to the
@@ -234,10 +240,14 @@ export interface Controller {
 /** A tower's attack range (fixed-point sim units), by catalog id (M2-S3 — replaces the
  *  M1-era single-tower `ruleset.tower.rangeFp`). RANGE_FP-consuming sites re-key on the
  *  ACTING id: the armed id for the aim/build ghost, the selection's own id for its range
- *  ring — never a single ruleset-wide constant. `0` for an unresolved id (defensive; a
- *  validated armed/selection id always resolves). */
-const RANGE_FP = (r: CompiledRuleset, towerId: string): number =>
-  r.towerById[towerId]?.rangeFp ?? 0;
+ *  ring — never a single ruleset-wide constant. `null` for an unresolved id (defensive; a
+ *  validated armed/selection id always resolves) AND for an ATTACKLESS tower — M2-S8's
+ *  `beacon` has no attack at all, so it has no range. `null` rather than `0` because
+ *  every consumer is a ring draw: a zero-radius circle is a dot the player must decode,
+ *  and the GHOST path is the one that bites first (arming the beacon to place it is the
+ *  very first thing anyone does with it). */
+const RANGE_FP = (r: CompiledRuleset, towerId: string): number | null =>
+  r.towerById[towerId]?.attack?.rangeFp ?? null;
 
 /** A tower's cost, by catalog id — the affordability comparisons' single source (M2-S3
  *  replaces `ruleset.tower.cost`). `Number.MAX_SAFE_INTEGER` for an unresolved id, so an
@@ -466,6 +476,12 @@ export function createController(seed: number, content?: ControllerContent): Con
   // readers and must never derive it separately (deriveHud runs deriveScore/deriveStars/
   // derivePreview, and main.ts's refreshHud() calls both back-to-back on every refresh).
   let hudMemo: { tick: number; rev: number; vm: HudVM } | null = null;
+  /** The support-aura index for the current `(tick, bufferRev)` (M2-S8) — see
+   *  `selectionBuffMulFp` below for why it is memoized. Declared HERE, with its sibling
+   *  memos, rather than beside its reader: `reset()` clears all four, and `reset()` runs
+   *  during `createController`, so a declaration below that point is in the temporal dead
+   *  zone and throws on the very first construction. */
+  let auraMemo: { tick: number; rev: number; index: Map<number, number> | null } | null = null;
   // The valid-tower hit-test index behind `towerAt` (CodeRabbit #73): `forEachValidTower`
   // allocates scratch (a Set + a grid-sized Uint8Array) per walk, and `towerAt` sits on
   // the pointermove hot path — so the walk runs once per (tick, bufferRev) and hit-tests
@@ -584,6 +600,7 @@ export function createController(seed: number, content?: ControllerContent): Con
     previewMemo = null;
     hudMemo = null;
     towerIndexMemo = null;
+    auraMemo = null; // M2-S8, same `(tick, bufferRev)` key as its three siblings above
     // Clear the per-run memo/caches — the next run reuses tick indices from 0, so a stale
     // (col,row,bufferLen,tick) verdict must never carry across a Play-again.
     aimMemoKey = '';
@@ -666,6 +683,25 @@ export function createController(seed: number, content?: ControllerContent): Con
     towerIndexMemo = { tick: state.tick, rev: bufferRev, entries };
     return entries;
   };
+  // The support multiplier reaching the tower anchored at `(col,row)` (M2-S8), memoized
+  // on `(state.tick, bufferRev)` like every other derived value in this file
+  // (`previewMemo`, `hudMemo`, `towerIndexMemo`, `refundCache`). Without the memo,
+  // `uiState()` — called once per frame from `refreshHud` plus several times per input
+  // gesture — re-walked the tower SoA and allocated both a `Map` and, inside
+  // `forEachValidTower`, a fresh `Uint8Array(width · height)` every time, to read ONE
+  // cell. `buildAuraIndex` short-circuits to `null` on a beacon-free board, so the memo
+  // matters exactly when a beacon is placed, which is when the Panel is most likely open.
+  const selectionBuffMulFp = (col: number, row: number): number => {
+    if (auraMemo === null || auraMemo.tick !== state.tick || auraMemo.rev !== bufferRev) {
+      auraMemo = {
+        tick: state.tick,
+        rev: bufferRev,
+        index: buildAuraIndex(ruleset.board.grid, state.towers, ruleset.towerById),
+      };
+    }
+    return auraMulFor(auraMemo.index, ruleset.board.grid, col, row);
+  };
+
   // The RETURN is a shared cached entry (pre-memo each call minted a fresh object).
   // The `readonly` typing makes a DIRECT write through it a compile error — not a
   // runtime guarantee (a widening assignment or `Object.assign` still compiles); no
@@ -1178,6 +1214,41 @@ export function createController(seed: number, content?: ControllerContent): Con
                 row: selection.row,
                 id: selection.id,
                 towerId: selection.towerId,
+                // Read LIVE, never captured at selection time (M2-S8): a beacon built or
+                // sold beside this tower while it stays selected must move the Panel's
+                // damage row. Making that true ON SCREEN is `overlay.ts`'s job and it
+                // does NOT do it by keying the Panel on this value — it re-renders the
+                // stat rows in place, deliberately, because re-keying would tear the
+                // subtree down and move keyboard focus off the open Panel. Stated here
+                // because an earlier version of this comment claimed the opposite, and a
+                // reader who "restored" the key-based form would reintroduce that
+                // regression. `buildAuraIndex` short-circuits to `null` on a board with
+                // no support tower placed, so this costs a `towerId`-column scan in the
+                // ordinary case.
+                //
+                // Sourced from COMMITTED `state.towers`, deliberately NOT the pending
+                // projection that `towerAt` and the refund read — and the asymmetry is
+                // the point, not an oversight. Those two answer questions about the
+                // PLAN ("which tower is under this cell", "what would selling return"),
+                // where a queued build is part of the answer. This row answers a
+                // question about the SIM ("what damage does this tower deal"), and a
+                // queued beacon deals nothing yet: the sim still fires 10, and
+                // `deriveViewModel` draws neither its shell nor the recipient's ✦ from
+                // committed state. Projecting it here made the Panel the only surface of
+                // three claiming otherwise — for as long as the command sat in the
+                // buffer, which before Start is unbounded.
+                //
+                // THE MIRROR CASE IS DELIBERATELY LEFT ALONE, since the two directions
+                // are not symmetric in truth-value. `selection` comes from `towerAt`,
+                // which DOES read the projection, so a just-queued tower can be selected
+                // and — if a COMMITTED beacon is edge-adjacent — its Panel reads
+                // "(boosted)". That is a forward-looking statement about a tower which is
+                // itself entirely forward-looking (it does not exist in the sim yet, and
+                // every other row shown for it is likewise what it WILL be), and it comes
+                // true on the commit tick. The case rejected above is different: there,
+                // the recipient exists and is firing its base damage right now, so
+                // projecting a queued beacon onto it would misdescribe a live tower.
+                buffMulFp: selectionBuffMulFp(selection.col, selection.row),
               },
         lastOutcome,
         outcomeSeq,

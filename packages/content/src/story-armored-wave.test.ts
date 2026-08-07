@@ -404,6 +404,13 @@ describe('`venom` is a specialist, not a strict upgrade — exact per-bounty ari
     if (!basic) throw new Error("expected a compiled 'basic' tower");
     if (!venom) throw new Error("expected a compiled 'venom' tower");
     if (!armored) throw new Error("expected a compiled 'armored' creep");
+    // M2-S8 (sv12): `CompiledTower.attack` is optional — a support bundle carries
+    // none. Both of these attack, so a missing attack is a broken fixture; name it
+    // rather than let a non-null assertion turn it into an opaque TypeError later.
+    const basicAttack = basic.attack;
+    const venomAttack = venom.attack;
+    if (!basicAttack) throw new Error("expected the compiled 'basic' tower to attack");
+    if (!venomAttack) throw new Error("expected the compiled 'venom' tower to attack");
 
     const basicDirect = basic.effects.find((e) => e.kind === 'direct');
     const venomDirect = venom.effects.find((e) => e.kind === 'direct');
@@ -422,8 +429,8 @@ describe('`venom` is a specialist, not a strict upgrade — exact per-bounty ari
     // below silently truncate into the wrong ratio instead of failing loudly — a future
     // cadence change must break THIS assertion, not silently corrupt the ones after it.
     const WINDOW = 60;
-    expect(WINDOW % basic.cadenceTicks).toBe(0);
-    expect(WINDOW % venom.cadenceTicks).toBe(0);
+    expect(WINDOW % basicAttack.cadenceTicks).toBe(0);
+    expect(WINDOW % venomAttack.cadenceTicks).toBe(0);
     expect(WINDOW % venomDot.cadenceTicks).toBe(0);
 
     // AND the residency assumption itself must be guarded, not just the cadences (QC round
@@ -440,10 +447,10 @@ describe('`venom` is a specialist, not a strict upgrade — exact per-bounty ari
     // goal inverts. Without this line the test still computed 60/10 = 6 ticks, still
     // asserted 24, and still passed, while three sim goldens went red — the precise
     // inversion of this test's purpose, which is to be the one that needs no simulation.
-    expect(venomDot.durationTicks).toBeGreaterThanOrEqual(venom.cadenceTicks);
+    expect(venomDot.durationTicks).toBeGreaterThanOrEqual(venomAttack.cadenceTicks);
 
-    const basicShots = WINDOW / basic.cadenceTicks;
-    const venomShots = WINDOW / venom.cadenceTicks;
+    const basicShots = WINDOW / basicAttack.cadenceTicks;
+    const venomShots = WINDOW / venomAttack.cadenceTicks;
     const venomDotTicks = WINDOW / venomDot.cadenceTicks;
 
     const armor = armored.armor; // derived from the compiled catalog, not hardcoded

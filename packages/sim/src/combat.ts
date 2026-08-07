@@ -58,6 +58,7 @@ import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
 // needs it too and already exports into this file, so defining it here would be
 // circular. Rationale and call sites are documented at its definition.
 import { resolveCreepDomain } from './domain';
+import { buildAuraIndex, auraMulFor, buffAmount } from './support';
 import type { CompiledCreep, CompiledEffect, CompiledTower } from './ruleset';
 
 // Combat tuning (range, per-hit damage, fire cadence, projectile travel) is NO
@@ -1053,21 +1054,34 @@ export function satMul(a: number, b: number): number {
  *  is NOT allowed to fall through to the `direct`/`aoe` collapse above: a compiled
  *  `dot` that fell through would fire as raw direct damage, silently dropping its
  *  cadence/duration and never reaching `applyDot`. */
-function snapshotEffects(effects: readonly CompiledEffect[]): EffectPrimitive[] {
-  return effects.map((e) => {
-    if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
+function snapshotEffects(effects: readonly CompiledEffect[], mulFp: number): EffectPrimitive[] {
+  return effects.flatMap((e): EffectPrimitive[] => {
+    if (e.kind === 'slow') {
+      return [{ kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks }];
+    }
     if (e.kind === 'dot') {
-      return {
-        kind: 'dot',
-        amount: e.amount,
-        cadenceTicks: e.cadenceTicks,
-        durationTicks: e.durationTicks,
-      };
+      return [
+        {
+          kind: 'dot',
+          amount: buffAmount(e.amount, mulFp),
+          cadenceTicks: e.cadenceTicks,
+          durationTicks: e.durationTicks,
+        },
+      ];
     }
     if (e.kind === 'stun') {
-      return { kind: 'stun', chanceNum: e.chanceNum, durationTicks: e.durationTicks };
+      return [{ kind: 'stun', chanceNum: e.chanceNum, durationTicks: e.durationTicks }];
     }
-    return { kind: 'direct', amount: e.amount }; // 'direct' or 'aoe' — same primitive
+    // A `support` effect is the AURA ITSELF, not something the bearer fires — and a
+    // support bundle never reaches this function anyway (the fire step skips attackless
+    // rows). Dropping it keeps `EffectPrimitive` — the hash-serialized shape — exactly
+    // what it was at sv11.
+    if (e.kind === 'support') return [];
+    // 'direct' or 'aoe' — same primitive. BOTH are buffed: `aoe` is a DISTINCT compiled
+    // kind that only collapses here, so keying the buff on `'direct'` alone would ship an
+    // unbuffed `splash` — precisely the boss-armor lever this story exists to prove
+    // (m2.md).
+    return [{ kind: 'direct', amount: buffAmount(e.amount, mulFp) }];
   });
 }
 
@@ -1710,10 +1724,27 @@ export function runCombat(
   //     `towerById[towers.towerId[i]]` resolves this row's per-kind stats — the SAME
   //     resolution `forEachValidTower` itself used to canonicalize the row, so a
   //     valid row always resolves here too.
+  //     M2-S8: the support aura is derived ONCE per combat phase, here, and never
+  //     stored — a forged or restored `SimState` structurally cannot carry a stale buff.
+  //     `null` when no support tower is placed, which is the whole cost on a beacon-free
+  //     board (see `buildAuraIndex`'s pre-scan note).
+  const auraIndex = buildAuraIndex(grid, towers, towerById);
   forEachValidTower(grid, towers, towerById, (i, id, col, row) => {
     const def = towerById[towers.towerId[i] as string];
     if (def === undefined) return; // unreachable: forEachValidTower already proved this row valid
-    const range = def.rangeFp;
+    const attack = def.attack;
+    // M2-S8: a support tower has no attack at all, so it never targets and never fires.
+    // Skipped BEFORE any attack field is read. Both combat columns are zeroed rather than
+    // left untouched: `coerceSoa`'s `safeCombatColumn` admits a forged or restored beacon
+    // row carrying nonzero `targetId` AND `nextFireTick`, and an untouched skip would
+    // leave either resident in the world hash forever. Zeroing only one of two equally
+    // forgeable columns would be an asymmetry with no reason behind it.
+    if (attack === undefined) {
+      towers.targetId[i] = 0;
+      towers.nextFireTick[i] = 0;
+      return;
+    }
+    const range = attack.rangeFp;
     // 2×2 footprint centre = the shared corner of its four cells (units-per-tile FP_ONE).
     const towerX = (col + 1) * FP_ONE;
     const towerY = (row + 1) * FP_ONE;
@@ -1733,7 +1764,7 @@ export function runCombat(
       // DOMAIN FILTER (M2-S7 P3): a creep the tower's mask does not cover is skipped
       // for BOTH the sticky-hold check and the acquire candidate — the two must agree
       // or a tower could hold a target it may not fire on.
-      const covered = def.domain === 'both' || def.domain === c.domain;
+      const covered = attack.domain === 'both' || attack.domain === c.domain;
       const within = covered && inRange(c.x, c.y, towerX, towerY, range);
       if (held !== 0 && !heldSeen && c.id === held) {
         heldSeen = true;
@@ -1760,10 +1791,15 @@ export function runCombat(
     const fireable = !Number.isSafeInteger(nft) || tick >= (nft as number);
     if (!fireable) return;
     if (kept.length >= MAX_IN_FLIGHT_IMPACTS) return; // cap full — retry next tick, no advance
-    const impactTick = tick + def.travelTicks;
-    const nextFire = tick + def.cadenceTicks;
+    const impactTick = tick + attack.travelTicks;
+    const nextFire = tick + attack.cadenceTicks;
     if (!Number.isSafeInteger(impactTick) || !Number.isSafeInteger(nextFire)) return; // overflow no-op
 
+    // M2-S8: the buff is read at FIRE TIME and baked into the snapshot, so an impact
+    // already in flight keeps the multiplier that was live when it launched — the same
+    // fire-time-snapshot authority the rest of the effect bundle already has. Selling the
+    // beacon returns the recipient to base damage on its NEXT fire, not this one.
+    const mulFp = auraMulFor(auraIndex, grid, col, row);
     const radiusFp = blastRadiusOf(def.effects);
     if (radiusFp === null) {
       // Single-target tower — unchanged pre-M2-S4a shape.
@@ -1772,8 +1808,8 @@ export function runCombat(
         impactTick,
         targetId: target,
         sourceId: id,
-        domain: def.domain,
-        effects: snapshotEffects(def.effects), // fresh objects per fire (Codex — hash-serialized)
+        domain: attack.domain,
+        effects: snapshotEffects(def.effects, mulFp), // fresh objects per fire (Codex — hash-serialized)
       });
       events?.fired.push({
         kind: 'targeted',
@@ -1794,7 +1830,7 @@ export function runCombat(
         targetLive.index,
         targetLive.domain,
         { x: targetLive.x, y: targetLive.y },
-        def.travelTicks,
+        attack.travelTicks,
         slowFloorNum,
         slowFloorDen,
       );
@@ -1805,8 +1841,8 @@ export function runCombat(
         y: point.y,
         radiusFp,
         sourceId: id,
-        domain: def.domain,
-        effects: snapshotEffects(def.effects),
+        domain: attack.domain,
+        effects: snapshotEffects(def.effects, mulFp),
       });
       events?.fired.push({
         kind: 'blast',
