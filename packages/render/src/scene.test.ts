@@ -531,7 +531,7 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
     const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
     const overlay: RenderOverlay = {
       ...EMPTY_OVERLAY,
-      selection: { col: 2, row: 2, rangeFp: null, towerId: 'beacon' },
+      selection: { col: 2, row: 2, rangeFp: null, blastRadiusFp: null, towerId: 'beacon' },
     };
     drawTowers(g, PAL, vm, overlay, PROJECTION);
     // No ring — but NOT nothing. The range ring is the only board-side rendering of
@@ -558,10 +558,108 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
     const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
     const overlay: RenderOverlay = {
       ...EMPTY_OVERLAY,
-      selection: { col: 2, row: 2, rangeFp: 512, towerId: 'basic' },
+      selection: { col: 2, row: 2, rangeFp: 512, blastRadiusFp: null, towerId: 'basic' },
     };
     drawTowers(g, PAL, vm, overlay, PROJECTION);
     expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1);
+  });
+
+  it('a mine tower draws its charge mark: a single fillCircle, no strokeCircle/lineBetween — and no other tower draws fillCircle', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'mine', support: false, buffed: false }],
+    };
+    drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
+    // `'charge'` is the only FILLED mark in the vocabulary — a fillCircle, not a
+    // strokeCircle (`'ringed'`) or any lineBetween-built shape.
+    expect(g.calls.filter((c) => c.method === 'fillCircle')).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
+    expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(0);
+
+    // No other shipped tower draws a fillCircle for its footprint mark — proves the
+    // fillCircle above is `'charge'`-specific, not a shared side effect of drawing a body.
+    for (const towerId of ['basic', 'slow', 'splash', 'venom', 'stun', 'antiair', 'beacon']) {
+      const g2 = fakeGraphics();
+      drawTowers(
+        g2,
+        PAL,
+        {
+          tick: 0,
+          phase: 'running',
+          creeps: [],
+          towers: [
+            { id: 1, col: 2, row: 2, towerId, support: towerId === 'beacon', buffed: false },
+          ],
+        },
+        EMPTY_OVERLAY,
+        PROJECTION,
+      );
+      expect(g2.calls.filter((c) => c.method === 'fillCircle')).toHaveLength(0);
+    }
+  });
+
+  it('a pending (queued) mine draws its charge mark as a fillCircle too', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
+    const overlay: RenderOverlay = {
+      ...EMPTY_OVERLAY,
+      pendingAdds: [{ col: 2, row: 2, towerId: 'mine' }],
+    };
+    drawTowers(g, PAL, vm, overlay, PROJECTION);
+    expect(g.calls.filter((c) => c.method === 'fillCircle')).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(0);
+  });
+
+  it('a selected mine draws the range ring PLUS its blast spokes — the blast reaches past the ring', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
+    // Mine-shaped numbers: rangeFp 576 (trigger, 2.25 tiles), blastRadiusFp 640 (blast,
+    // 2.5 tiles) — the case that forced the cue to exist at all.
+    const overlay: RenderOverlay = {
+      ...EMPTY_OVERLAY,
+      selection: { col: 2, row: 2, rangeFp: 576, blastRadiusFp: 640, towerId: 'mine' },
+    };
+    drawTowers(g, PAL, vm, overlay, PROJECTION);
+    // The range ring itself (1 strokeCircle) PLUS the crosshair spokes (4 lineBetween).
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(4);
+  });
+
+  it('a selected splash-shaped tower ALSO draws its blast spokes, matching the ghost preview (Rob, 2026-08-07)', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
+    // splash-shaped numbers: rangeFp 4 tiles' worth, blastRadiusFp 1.5 tiles' worth — the
+    // blast sits INSIDE the range. M2-S9 first shipped a gate that suppressed the spokes
+    // in exactly this case so only `mine` drew them; the consequence was that arming a
+    // `splash` previewed spokes and selecting that same `splash` showed none. Ruled the
+    // other way: selection matches the ghost, so this case draws them. Flipping this back
+    // to `toHaveLength(0)` is what a re-narrowed gate would look like.
+    const overlay: RenderOverlay = {
+      ...EMPTY_OVERLAY,
+      selection: { col: 2, row: 2, rangeFp: 1024, blastRadiusFp: 384, towerId: 'splash' },
+    };
+    drawTowers(g, PAL, vm, overlay, PROJECTION);
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(4);
+  });
+
+  // The remaining negative control, and now the only one: a tower with no blast draws no
+  // spokes. (The splash case above used to serve as the data-vs-id control; with the gate
+  // reduced to "has a blast at all" there is no id/data distinction left to prove, so
+  // `blastRadiusFp === null` is what keeps `drawCrosshair` from being unconditional.)
+  it('a selected tower with no blast at all draws no spokes (blastRadiusFp null)', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
+    const overlay: RenderOverlay = {
+      ...EMPTY_OVERLAY,
+      selection: { col: 2, row: 2, rangeFp: 512, blastRadiusFp: null, towerId: 'basic' },
+    };
+    drawTowers(g, PAL, vm, overlay, PROJECTION);
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(0);
   });
 });
 

@@ -1057,6 +1057,12 @@ export function step(
     events,
   );
   state.creeps = combat.creeps;
+  // M2-S9: a burst tower consumed this phase has already had its row dropped from
+  // `combat.towers` (combat.ts) — assigning it back here means the row is gone from
+  // THIS point on, so step 3 of the NEXT tick (the field derivation above, which runs
+  // before movement) sees the post-consumption maze and re-routes creeps starting at
+  // that next movement step.
+  state.towers = combat.towers;
   state.impacts = combat.impacts;
   state.dots = combat.dots;
   state.bounty = combat.bounty;

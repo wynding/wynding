@@ -28,15 +28,42 @@
 // A malformed impact is dropped; the queue is capped at `MAX_IN_FLIGHT_IMPACTS`; new
 // counters are safe-integer-guarded with a deterministic no-op on overflow. The cap
 // is a forged-state / DoS backstop, NOT a genuine-play limit: each valid tower holds
-// ≤1 impact in flight (`travelTicks < cadenceTicks`, the schema's own rule) and
-// placement enforces `MAX_TOWERS`, so in-flight ≈ live towers, with a bounded slack —
-// a tower sold within the last `travelTicks` still has its impact resident until it
-// resolves. On any budget-conforming board that slack stays far under the
+// ≤1 impact in flight (`travelTicks < cadenceTicks`, the schema's own rule, for a
+// cadenced tower; a burst tower fires exactly once ever, so it too contributes at
+// most one) and placement enforces `MAX_TOWERS`, so in-flight ≈ live towers, with a
+// bounded slack from TWO sources (M2-S9 adds the second): a tower sold within the
+// last `travelTicks` still has its impact resident until it resolves, and — the same
+// shape — a burst tower CONSUMED (its row deleted at the fire tick) still has its
+// one discharge resident for `travelTicks` after the row is gone.
+//
+// The per-tower count is not what makes this safe, and it is worth being exact about
+// why (ship-review, M2-S9): both slack sources free their SoA row while keeping the
+// impact, so the residency stops tracking live towers — place→trigger→place churn
+// recycles the tower slot and accumulates burst discharges that belong to no live
+// row. What actually bounds it is the residency WINDOW: `travelTicks`. For a cadenced
+// tower the schema's `travelTicks < cadenceTicks` bounds it; a burst bundle has no
+// cadence, so `capability.ts`'s `maxBurstTravelTicks` (8 at sv13) is what bounds it
+// instead, and that ceiling is load-bearing here rather than merely tidy — without it
+// a schema-legal `travelTicks: 1_000_000` mine would drive the queue to the cap and
+// turn every tower's fire into a no-op. Note what that ceiling does NOT do: it bounds
+// the residency WINDOW, not the total, since per-tick consumptions are limited only by
+// live mine count — so `MAX_IN_FLIGHT_IMPACTS` stays the hard backstop and the ceiling
+// only makes reaching it cost a placement apiece (see `maxBurstTravelTicks`' own doc).
+//
+// HAZARD, for the next story that touches either budget: a burst consumption changes
+// the tower mask with NO tower command spent, which `MAX_TOTAL_TOWER_COMMANDS` (the
+// replay layer's pathfinding-CPU budget, motivated below) did not previously have to
+// account for. `effectiveField` recomputes a full-board BFS whenever the mask differs,
+// so N `placeTower` commands for `mine` can now force up to 2N recomputes — N at
+// placement, N at detonation. Still bounded (≤1 per tick against `MAX_MATCH_TICKS`, and
+// the server compiles its own board rather than the request's), so it is a budget
+// accounting note rather than a live concern — but the next widening must count
+// detonations. On any budget-conforming board the in-flight slack stays far under the
 // `MAX_TOWERS` (1000) cap vs the physical tower capacity, so the cap never bites
 // genuine play; a caller that drives the queue to the cap by abusive sell/rebuild
-// churn is exactly the forged/DoS case the backstop exists for, where a queue-full
-// fire is a deterministic no-op that retries next tick (total and reproducible for
-// every `step()` caller).
+// (or place/trigger/place) churn is exactly the forged/DoS case the backstop exists
+// for, where a queue-full fire is a deterministic no-op that retries next tick
+// (total and reproducible for every `step()` caller).
 
 import { FP_ONE, type Rng } from '@wynding/engine';
 import type { TowerTargetDomain } from '@wynding/types';
@@ -53,7 +80,13 @@ import {
   type CreepGeometry,
 } from './movement';
 import { effectiveSpeedFp, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
-import { MAX_TOWERS, forEachValidTower, type TowerArrays } from './tower';
+import {
+  MAX_TOWERS,
+  forEachValidTower,
+  emptyTowers,
+  safeCombatColumn,
+  type TowerArrays,
+} from './tower';
 // The single domain resolver lives in the leaf `domain.ts`, not here — `tower.ts`
 // needs it too and already exports into this file, so defining it here would be
 // circular. Rationale and call sites are documented at its definition.
@@ -1351,9 +1384,10 @@ export function blastMembers(
 
 /**
  * Run the combat phase for one tick over the POST-MOVE world. Returns the new creep
- * SoA (dead creeps swept), the surviving impact queue, the DoT-record table, and the
- * updated bounty; mutates `towers.targetId`/`towers.nextFireTick` in place (by
- * source row) and `creeps.hp`/`slowMulFp`/`slowUntilTick`/`stunUntilTick` during
+ * SoA (dead creeps swept), the (possibly rebuilt — see below) tower SoA, the
+ * surviving impact queue, the DoT-record table, and the updated bounty; mutates
+ * `towers.targetId`/`towers.nextFireTick` in place (by source row, for a surviving
+ * cadenced tower) and `creeps.hp`/`slowMulFp`/`slowUntilTick`/`stunUntilTick` during
  * resolution. `tick` is the pre-increment `state.tick`. `slowFloorNum`/`slowFloorDen`
  * (M2-S4a) are the ruleset's slow floor — needed here (not just by movement) because
  * a blast's fire-time lead prediction reads the SAME `effectiveSpeedFp` formula.
@@ -1395,6 +1429,17 @@ export function blastMembers(
  * caller (`index.ts`'s `step()`) constructs it fresh from `state.rngState` once per
  * tick and writes the post-combat state back unconditionally; this function never
  * constructs or persists an `Rng` itself, only draws from the one it is handed.
+ *
+ * `towers` on the RETURN (M2-S9), symmetric with `creeps`: a `'burst'`-mode tower
+ * fires exactly once, and step (5) records its row for deletion the same tick it
+ * fires — the SoA is rebuilt AFTER the fire walk to drop every such row, carrying
+ * the surviving rows' combat columns by SOURCE ROW (the `sellTower` precedent,
+ * index.ts). When no burst tower fired this phase, the returned reference is the
+ * SAME object passed in — no rebuild, no added cost on a mine-free board. The
+ * caller (`index.ts`'s `step()`) assigns it back to `state.towers` unconditionally,
+ * mirroring `state.creeps = combat.creeps` immediately beside it: a consumed row is
+ * gone from the very next tick's field derivation, which runs before movement, so
+ * the maze re-routes starting at the next movement step.
  */
 export function runCombat(
   creeps: CombatCreeps,
@@ -1413,6 +1458,7 @@ export function runCombat(
   events?: StepEvents,
 ): {
   creeps: CombatCreeps;
+  towers: TowerArrays;
   impacts: Impact[];
   dots: DotRecord[];
   bounty: number;
@@ -1729,6 +1775,23 @@ export function runCombat(
   //     `null` when no support tower is placed, which is the whole cost on a beacon-free
   //     board (see `buildAuraIndex`'s pre-scan note).
   const auraIndex = buildAuraIndex(grid, towers, towerById);
+  // M2-S9: rows CONSUMED this phase — a burst tower's firing discipline, recorded by
+  // ROW INDEX, not by entity id. Row index, not id, for the same reason `sellTower`'s
+  // own compaction (`index.ts`) drops `if (i === index) return;` by row index rather
+  // than trusting `forEachValidTower`'s duplicate-id filter: a forged duplicate-id row
+  // must not take a second, unrelated row with it when this set is consulted after the
+  // walk. Rows are stable across this walk (nothing mid-walk mutates `towers`' length),
+  // so an index recorded now is still exact when the compaction below reads it.
+  //
+  // Constructed eagerly, and the "no added cost without a mine" claim below is scoped
+  // to the SoA REBUILD, not to this (ship-review, M2-S9 — an earlier draft of that
+  // comment blurred the two). One empty `Set` per combat phase is not the S8 aura
+  // pre-scan's problem: that pre-scan existed to skip a grid-sized `Uint8Array` AND a
+  // full validity walk, which is three orders of magnitude more work than this. A lazy
+  // `Set | null` was tried and rejected — TypeScript cannot narrow a `let` assigned
+  // inside the `forEachValidTower` callback, so it costs either a cast or a holder
+  // object, and neither is worth paying to dodge an empty-Set allocation.
+  const consumed = new Set<number>();
   forEachValidTower(grid, towers, towerById, (i, id, col, row) => {
     const def = towerById[towers.towerId[i] as string];
     if (def === undefined) return; // unreachable: forEachValidTower already proved this row valid
@@ -1790,9 +1853,17 @@ export function runCombat(
     const nft = towers.nextFireTick[i];
     const fireable = !Number.isSafeInteger(nft) || tick >= (nft as number);
     if (!fireable) return;
+    // M2-S9: the `MAX_IN_FLIGHT_IMPACTS`-full case is DELIBERATE and TOTAL for a
+    // burst tower too — this check sits BEFORE both the impact build and the
+    // consumption below, so a mine that cannot fire this tick is neither fired NOR
+    // consumed. It retries next tick, exactly like a cadenced tower whose shot was
+    // dropped for the same reason — a mine is never silently spent for nothing.
     if (kept.length >= MAX_IN_FLIGHT_IMPACTS) return; // cap full — retry next tick, no advance
     const impactTick = tick + attack.travelTicks;
-    const nextFire = tick + attack.cadenceTicks;
+    // A burst tower fires exactly once, so it has no next-fire tick to schedule —
+    // `0` is a placeholder value never read back: `attack.mode === 'burst'` below
+    // records the row for deletion instead of writing `nextFireTick` at all.
+    const nextFire = attack.mode === 'cadenced' ? tick + attack.cadenceTicks : 0;
     if (!Number.isSafeInteger(impactTick) || !Number.isSafeInteger(nextFire)) return; // overflow no-op
 
     // M2-S8: the buff is read at FIRE TIME and baked into the snapshot, so an impact
@@ -1823,17 +1894,27 @@ export function runCombat(
       // Blast tower (M2-S4a step 2): lead the target along its route at fire-time
       // effective speed, from the SAME `LiveCreep` row the selection pass above
       // already matched (`targetLive`, non-null here — checked above) — no re-scan.
-      const point = predictBlastPoint(
-        field,
-        grid,
-        survivors,
-        targetLive.index,
-        targetLive.domain,
-        { x: targetLive.x, y: targetLive.y },
-        attack.travelTicks,
-        slowFloorNum,
-        slowFloorDen,
-      );
+      //
+      // M2-S9: a burst tower detonates IN PLACE — its blast is anchored to the maze,
+      // not to a creep, so it never leads its target. `towerX`/`towerY` are the 2×2
+      // footprint centre already computed above. `predictBlastPoint` is skipped
+      // entirely rather than called-and-discarded: the lead prediction reads the
+      // creep's route and effective speed, and none of that is an input to where a
+      // mine goes off.
+      const point =
+        attack.mode === 'burst'
+          ? { x: towerX, y: towerY }
+          : predictBlastPoint(
+              field,
+              grid,
+              survivors,
+              targetLive.index,
+              targetLive.domain,
+              { x: targetLive.x, y: targetLive.y },
+              attack.travelTicks,
+              slowFloorNum,
+              slowFloorDen,
+            );
       kept.push({
         kind: 'blast',
         impactTick,
@@ -1855,8 +1936,39 @@ export function runCombat(
         impactTick,
       });
     }
-    towers.nextFireTick[i] = nextFire;
+    // M2-S9: the consumption is about the tower's FIRING DISCIPLINE, not the impact
+    // shape — recorded once, here, after the if/else above builds either a `targeted`
+    // or a `blast` impact, so it applies regardless of which arm ran (`burst/single`
+    // is unreachable at sv13's `allowedBurstForms`, but this must not depend on that
+    // to stay correct). A cadenced tower instead schedules its next fire tick, as
+    // before.
+    if (attack.mode === 'burst') {
+      consumed.add(i);
+    } else {
+      towers.nextFireTick[i] = nextFire;
+    }
   });
+
+  // M2-S9: rebuild the tower SoA to drop every consumed row — AFTER the walk, never
+  // mid-walk, which would invalidate the row indices the callback itself recorded.
+  // Same canonical `forEachValidTower` compaction `sellTower` uses (index.ts), carrying
+  // combat columns BY SOURCE ROW. When nothing was consumed the IDENTICAL reference is
+  // returned: zero added cost on every board without a mine, the S8 aura pre-scan lesson.
+  let survivingTowers = towers;
+  if (consumed.size > 0) {
+    const compacted: TowerArrays = emptyTowers();
+    forEachValidTower(grid, towers, towerById, (i, id, col, row) => {
+      if (consumed.has(i)) return;
+      compacted.id.push(id);
+      compacted.col.push(col);
+      compacted.row.push(row);
+      compacted.spend.push(towers.spend[i] as number);
+      compacted.targetId.push(safeCombatColumn(towers.targetId[i]));
+      compacted.nextFireTick.push(safeCombatColumn(towers.nextFireTick[i]));
+      compacted.towerId.push(towers.towerId[i] as string);
+    });
+    survivingTowers = compacted;
+  }
 
   // (6) EXPIRY SWEEP — closes the combat phase (M2-S3, G8, extended M2-S5a P3 to
   //     `dots`): every creep whose `slowUntilTick` has reached this tick resets to
@@ -1882,5 +1994,12 @@ export function runCombat(
   //     tick boundary).
   canonicalDots = canonicalDots.filter((r) => survivorIds.has(r.targetId) && r.untilTick > tick);
 
-  return { creeps: survivors, impacts: kept, dots: canonicalDots, bounty: nextBounty, killBounty };
+  return {
+    creeps: survivors,
+    towers: survivingTowers,
+    impacts: kept,
+    dots: canonicalDots,
+    bounty: nextBounty,
+    killBounty,
+  };
 }

@@ -248,18 +248,22 @@ export function drawTowers(
     const size = projection.cellPx * 2; // 2×2 footprint
     g.fillStyle(pal.tower, 1);
     g.fillRoundedRect(p.x + 2, p.y + 2, size - 4, size - 4, 6);
-    // `slow`/`splash`/`venom` vs `basic` footprint mark (M2-S3, extended M2-S4a,
-    // M2-S5a): all bodies share `pal.tower` — a palette decision (S3 mints no second
-    // tower colour), with the per-tower distinction carried by SHAPE — an inner
-    // concentric ring for `'ringed'` (slow), four short radiating spokes for
-    // `'crosshair'` (splash — the same "area effect" motif the ghost's blast-radius
-    // preview below draws at cell scale, per ADR 0003's redundant-encoding rule), a
-    // small teardrop for `'droplet'` (venom), nothing extra for `'plain'` (basic). The
-    // committed marks stroke `pal.floor` so they read against the solid `pal.tower`
-    // fill; the pending branch below strokes `pal.tower` instead — its body is an
-    // unfilled outline, so there is no fill to contrast against and the mark keeps the
-    // pending cue's own colour + alpha (CodeRabbit #73: the two branches differ on
-    // purpose).
+    // `slow`/`splash`/`venom`/`stun`/`antiair`/`beacon`/`mine` vs `basic` footprint mark
+    // (M2-S3, extended M2-S4a, M2-S5a, M2-S6, M2-S7, M2-S8, M2-S9): all bodies share
+    // `pal.tower` — a palette decision (S3 mints no second tower colour), with the
+    // per-tower distinction carried by SHAPE — an inner concentric ring for `'ringed'`
+    // (slow), four short radiating spokes for `'crosshair'` (splash — the same "area
+    // effect" motif the ghost's blast-radius preview below draws at cell scale, per ADR
+    // 0003's redundant-encoding rule), a small teardrop for `'droplet'` (venom), a
+    // three-segment zigzag for `'bolt'` (stun), an upward arrow for `'arrow'`
+    // (antiair), an upright mast for `'pylon'` (beacon), a FILLED disc for `'charge'`
+    // (mine — M2-S9, the only filled mark in the vocabulary, so it survives at the
+    // narrow floor where every other mark's fine detail has collapsed), nothing extra
+    // for `'plain'` (basic). The committed marks stroke (or, for `'charge'` alone,
+    // FILL) `pal.floor` so they read against the solid `pal.tower` fill; the pending
+    // branch below uses `pal.tower` instead — its body is an unfilled outline, so
+    // there is no fill to contrast against and the mark keeps the pending cue's own
+    // colour + alpha (CodeRabbit #73: the two branches differ on purpose).
     const mark = towerFootprintMarkFor(t.towerId);
     if (mark === 'ringed') {
       g.lineStyle(2, pal.floor, 1);
@@ -279,6 +283,9 @@ export function drawTowers(
     } else if (mark === 'pylon') {
       g.lineStyle(2, pal.floor, 1);
       drawPylon(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+    } else if (mark === 'charge') {
+      g.fillStyle(pal.floor, 1);
+      g.fillCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
     }
     // The recipient ✦ sits in the footprint's top-left CELL, while every
     // `TowerFootprintMark` is anchored at the footprint CENTRE — separated by position,
@@ -336,6 +343,9 @@ export function drawTowers(
     } else if (pendingMark === 'pylon') {
       g.lineStyle(1, pal.tower, 0.6);
       drawPylon(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+    } else if (pendingMark === 'charge') {
+      g.fillStyle(pal.tower, 0.6);
+      g.fillCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
     }
   }
   if (o.selection !== null) {
@@ -366,6 +376,27 @@ export function drawTowers(
       g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);
     } else {
       g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));
+      // M2-S9: a selected AoE tower draws its blast too — the SAME condition and the
+      // SAME `drawCrosshair` motif the ghost preview uses (`scene.ts`), so arming a
+      // tower and selecting that same tower answer "where does my blast land" the same
+      // way. The mine is what forced the question: it is the only tower whose blast
+      // (2.5 tiles) reaches PAST its own ring (2.25), so a selected mine drawing the
+      // ring alone would actively understate it.
+      //
+      // Gated on `blastRadiusFp !== null` — has a blast at all — and nothing more.
+      // An earlier revision gated on `blastRadiusFp > rangeFp` so that only the mine
+      // qualified and `splash` was left untouched; ship-review flagged the consequence
+      // (arming a `splash` previewed spokes, selecting it did not — same tower, two
+      // pictures), and Rob ruled for consistency over leaving `splash` alone (2026-08-07,
+      // superseding the narrower gate in that story's own plan). `splash` and S10's
+      // `frost-splash` therefore DO gain a cue on selection that they did not draw
+      // before. That is a deliberate, ruled change, not a side effect.
+      //
+      // Shape-distinct from the smooth range circle rather than a second concentric
+      // circle — the Codex R1-15 ruling this project already made and has not reopened.
+      if (o.selection.blastRadiusFp !== null) {
+        drawCrosshair(g, cx, cy, projection.fpLenToPixel(o.selection.blastRadiusFp));
+      }
     }
   }
 }

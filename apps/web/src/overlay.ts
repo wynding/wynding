@@ -144,6 +144,7 @@ const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assig
     stun: () => t('tower.stun.name'),
     antiair: () => t('tower.antiair.name'),
     beacon: () => t('tower.beacon.name'),
+    mine: () => t('tower.mine.name'),
   } satisfies Record<string, () => string>,
 );
 
@@ -899,6 +900,15 @@ export function createOverlay(
       readonly chance: string;
       readonly duration: string;
     } | null;
+    /** The tower's firing discipline (M2-S9), `null` when it does not attack at all
+     *  (the `beacon` support case, same posture `damage`/`rangeTiles`/`fireRate`/
+     *  `targets` already take). ONE field rather than two booleans (a "is trigger
+     *  range" flag plus an "is single-use" flag) because both the range row's LABEL
+     *  and the single-use row below are asking the exact same question — is this
+     *  tower's firing discipline burst? — so a single field keeps them from ever
+     *  disagreeing; two independently-set booleans could drift out of sync in a way a
+     *  single derived value structurally cannot. */
+    readonly attackMode: 'cadenced' | 'burst' | null;
   }
 
   /** The Panel's Targets row text for a tower's `attack.domain` (M2-S7): `'ground'`,
@@ -973,8 +983,13 @@ export function createOverlay(
               ((def.support.damageMulFp - SUPPORT_MUL_IDENTITY) / SUPPORT_MUL_IDENTITY) * 100,
             ),
       rangeTiles: def?.attack === undefined ? null : formatNumber(def.attack.rangeFp / FP_ONE),
+      // M2-S9: a burst tower has no cadence, so there is no fire rate to report — the
+      // omit-rather-than-zero precedent the `beacon` and the `dot`/`stun` rows already
+      // set. `attack.mode` makes this a compile error rather than a `?? 0` lie.
       fireRate:
-        def?.attack === undefined ? null : formatNumber(TICKS_PER_SECOND / def.attack.cadenceTicks),
+        def?.attack === undefined || def.attack.mode !== 'cadenced'
+          ? null
+          : formatNumber(TICKS_PER_SECOND / def.attack.cadenceTicks),
       // M2-S7: the capability profile compiles `attack.domain` as `'ground'`/`'air'`/
       // `'both'` (the widened `TowerTargetDomain` axis) — sv7's `antiair` is the first
       // catalog entry to compile anything other than `'ground'`, so this row must
@@ -1012,6 +1027,7 @@ export function createOverlay(
               chance: formatNumber((stunEffect.chanceNum / 256) * 100),
               duration: formatNumber(stunEffect.durationTicks / TICKS_PER_SECOND),
             },
+      attackMode: def?.attack?.mode ?? null,
     };
   }
 
@@ -1028,7 +1044,16 @@ export function createOverlay(
               ? t('panel.damageBuffed', { damage: stats.damage })
               : t('panel.damage', { damage: stats.damage }),
           ]),
-      ...(stats.rangeTiles === null ? [] : [t('panel.range', { tiles: stats.rangeTiles })]),
+      // M2-S9: a burst tower's range is a TRIGGER range, not a firing range — the mine
+      // sits idle until a creep enters this ring, it does not shoot at it — so the row
+      // takes a distinct label rather than reusing `panel.range`'s "fires within" framing.
+      ...(stats.rangeTiles === null
+        ? []
+        : [
+            stats.attackMode === 'burst'
+              ? t('panel.triggerRange', { tiles: stats.rangeTiles })
+              : t('panel.range', { tiles: stats.rangeTiles }),
+          ]),
       ...(stats.fireRate === null ? [] : [t('panel.fireRate', { rate: stats.fireRate })]),
       ...(stats.targets === null ? [] : [t('panel.targets', { targets: stats.targets })]),
       ...(stats.supportPercent === null
@@ -1037,6 +1062,10 @@ export function createOverlay(
       ...(stats.blastRadiusTiles === null
         ? []
         : [t('panel.blastRadius', { tiles: stats.blastRadiusTiles })]),
+      // The single most important fact about a burst tower — it is CONSUMED when it
+      // fires — and nothing else on screen conveys it: the board draws no "used up" cue,
+      // and every other row here describes what the tower does while it's still there.
+      ...(stats.attackMode === 'burst' ? [t('panel.singleUse')] : []),
       ...(stats.dot === null
         ? []
         : [
@@ -1412,6 +1441,8 @@ export function createOverlay(
         return t('live.rejected.generic');
       case 'sold':
         return t('live.sold', { refund: outcome.refund });
+      case 'destroyed':
+        return t('live.destroyed');
     }
   }
 

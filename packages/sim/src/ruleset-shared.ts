@@ -54,8 +54,16 @@ export class RulesetError extends Error {
  *  amounts of the attacking towers whose 2×2 footprint shares a full cell edge with
  *  its own. The buff enters at the fire-time snapshot and lands in the EXISTING
  *  `effects[].amount`, so unlike S7 the `Impact` shape does not change — a board with
- *  no beacon placed simulates bit-for-bit as it did at sv11. */
-export const SIM_VERSION = 12;
+ *  no beacon placed simulates bit-for-bit as it did at sv11.
+ *
+ *  M2 Story 9 (Burst) bumps 12 → 13 — the burst axis activates, the sixth and last
+ *  effect primitive: a tower bundle may carry a `burst` effect (an AoE discharge with
+ *  no attack cadence), and such a tower fires exactly once, centring its blast on its
+ *  own footprint, and is CONSUMED at its fire tick — the row is deleted, so the maze
+ *  re-routes from the next movement step. Like S8 and unlike S7, the `Impact` shape
+ *  does not change (a burst discharge is an ordinary `blast` impact), so a board with
+ *  no mine placed simulates bit-for-bit as it did at sv12. */
+export const SIM_VERSION = 13;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

@@ -695,11 +695,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('the second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    // One Card per catalog tower: 7 since M2-S8 added `beacon` (was 6 at M2-S7, 5 at
-    // M2-S6, 4 at M2-S5a, 3 at M2-S4a). The slot WIRING for cards 4-7 — their hotkey
-    // badges, rebind entries and labels — is P6's/M2-S6's/M2-S7's/M2-S8's; this
-    // assertion tracks the catalog's size, which is content, not wiring.
-    expect(shell.cards).toHaveLength(7);
+    // One Card per catalog tower: 8 since M2-S9 added `mine` (was 7 at M2-S8, 6 at
+    // M2-S7, 5 at M2-S6, 4 at M2-S5a, 3 at M2-S4a). The slot WIRING for cards 4-8 —
+    // their hotkey badges, rebind entries and labels — is P6's/M2-S6's/M2-S7's/
+    // M2-S8's/M2-S9's; this assertion tracks the catalog's size, which is content, not
+    // wiring.
+    expect(shell.cards).toHaveLength(8);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
@@ -857,27 +858,39 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions).toContainEqual({ type: 'armTower', tower: 'antiair' });
   });
 
-  it('slots 8-9 are absent from the rebind list, the hotkey badges, and aria-keyshortcuts at a seven-tower bundle (PLAN.md P6, widened M2-S6 P5, M2-S7 P5, M2-S8 P6)', () => {
+  // M2-S9: `setup()`'s bundled ruleset gains an eighth catalog tower (`mine`), so card
+  // 8 (index 7, `armTower8`/Digit8) is now wired for real too — mirrors the Digit4/5/6
+  // tests above, one slot over.
+  it('Digit8 arms the eighth Card with the eight-tower bundle (M2-S9)', () => {
+    const { actions, shell } = setup();
+    const mineCard = shell.cards[7]!;
+    expect(mineCard.towerId).toBe('mine');
+    expect(mineCard.name.textContent).toBe('Mine');
+    expect(mineCard.hotkey.textContent).toBe('8'); // Digit8 default
+    expect(mineCard.root.getAttribute('aria-keyshortcuts')).toBe('8');
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit8' }));
+    expect(actions).toContainEqual({ type: 'armTower', tower: 'mine' });
+  });
+
+  it('slot 9 is absent from the rebind list, the hotkey badges, and aria-keyshortcuts at an eight-tower bundle (PLAN.md P6, widened M2-S6 P5, M2-S7 P5, M2-S8 P6, M2-S9 P5)', () => {
     const { actions, overlay, shell, settingsBtn } = setup();
-    // Only seven Cards exist — no badge/aria-keyshortcuts beyond index 6. The window
+    // Only eight Cards exist — no badge/aria-keyshortcuts beyond index 7. The window
     // narrows by one with each tower the catalog gains; `action.armTower1..9` already
-    // existed, so M2-S8's `beacon` consumed slot 7 with no new keymap entry.
-    expect(shell.cards).toHaveLength(7);
-    expect(shell.cards[6]!.towerId).toBe('beacon');
-    expect(shell.cards[6]!.hotkey.textContent).toBe('7');
-    // No phantom rebindable action for slots 8..9.
+    // existed, so M2-S9's `mine` consumed slot 8 with no new keymap entry.
+    expect(shell.cards).toHaveLength(8);
+    expect(shell.cards[7]!.towerId).toBe('mine');
+    expect(shell.cards[7]!.hotkey.textContent).toBe('8');
+    // No phantom rebindable action for slot 9.
     settingsBtn.click();
     const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
       (el) => el.textContent,
     );
-    for (let n = 8; n <= 9; n++) expect(rebindNames).not.toContain(`Arm tower ${n}`);
+    expect(rebindNames).not.toContain('Arm tower 9');
     overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!.click();
-    // The document hotkeys for those slots no-op too — cards[7..8] don't exist. (Settings
-    // is closed here — an open settings dialog makes the shell `inert`, which would mask
+    // The document hotkey for that slot no-ops too — cards[8] doesn't exist. (Settings is
+    // closed here — an open settings dialog makes the shell `inert`, which would mask
     // this on its own and defeat the assertion.)
-    for (let n = 8; n <= 9; n++) {
-      document.dispatchEvent(new KeyboardEvent('keydown', { code: `Digit${n}` }));
-    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit9' }));
     expect(actions).toEqual([]);
   });
 
@@ -1064,6 +1077,53 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(text).toContain('Range: 4.0 tiles');
     expect(text).toContain('Fire rate: 0.3/s'); // (1000/50) / 60 cadenceTicks
     expect(text).toContain('Blast radius: 1.5 tiles'); // radiusFp 384 / FP_ONE 256
+  });
+
+  // M2-S9: `mine` is the game's first BURST tower — its range row is a TRIGGER range,
+  // not a firing range (it sits idle until a creep enters it), it keeps the ordinary
+  // Blast radius row (the `aoe` effect's radius reaches FURTHER than the trigger ring —
+  // 2.5 tiles vs 2.3 — which is exactly why the board needs the spoke cue too), it has
+  // no Fire rate row at all (a burst tower has no cadence to report), and it gains the
+  // single-use row: the single most important fact about it, that nothing else on
+  // screen conveys.
+  it("the Panel shows the MINE tower's trigger range, blast radius, and single-use rows — and no Fire rate", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'mine' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Mine');
+    expect(text).toContain('Cost: 6');
+    expect(text).toContain('Damage: 45'); // the aoe effect's amount
+    expect(text).toContain('Trigger range: 2.3 tiles'); // rangeFp 576 / FP_ONE 256
+    expect(text).not.toContain('Range:'); // never the ordinary firing-range label too
+    expect(text).toContain('Blast radius: 2.5 tiles'); // radiusFp 640 / FP_ONE 256 — kept, unlike Range
+    expect(text).not.toContain('Fire rate'); // a burst tower has no cadence
+    expect(text).toContain('Destroyed when it fires');
+  });
+
+  // A CADENCED tower's Panel must stay exactly as it was: no trigger-range relabelling
+  // and no single-use row, proving `attackMode` genuinely gates on the tower's own
+  // discipline rather than always firing the M2-S9 rows.
+  it('a CADENCED tower keeps the ordinary Range label, a Fire rate row, and no single-use row', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    const text = panel.root.textContent!;
+    expect(text).toContain('Range: 4.0 tiles'); // rangeFp 1024 / FP_ONE 256
+    expect(text).not.toContain('Trigger range');
+    expect(text).toMatch(/Fire rate: [\d.]+\/s/);
+    expect(text).not.toContain('Destroyed when it fires');
   });
 
   // M2-S5a P7: `venom`'s `dot` effect surfaces as its own text row (magnitude/cadence/
@@ -1389,6 +1449,11 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(render({ kind: 'rejected', reason: 'occupied' })).toBe('That cell is already occupied.');
     expect(render({ kind: 'rejected', reason: 'other' })).toBe("Can't build there.");
     expect(render({ kind: 'sold', refund: 12 })).toBe('Tower sold. Refunded 12 Bounty.');
+    // M2-S9: the `destroyed` arm. Distinct from `sold` on purpose — a sell is something
+    // the player just did and already knows about, a destruction is something that
+    // happened TO them (a `mine` deletes its own row at its fire tick), and it is the
+    // only signal a screen-reader user gets that the Panel closed on its own.
+    expect(render({ kind: 'destroyed' })).toBe('The selected tower was destroyed.');
   });
 
   it('the live region is NOT re-written when the outcome message is unchanged (no stale re-announcement every tick)', () => {

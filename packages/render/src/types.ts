@@ -175,6 +175,20 @@ export interface SelectionVM {
    *  weight on the per-frame surface. It rides on `UiState.selection` instead, where the
    *  Panel actually reads it. */
   readonly rangeFp: number | null;
+  /** The selected tower's AoE blast radius (fixed-point sim units), `null` for a
+   *  single-target tower — same derivation `GhostVM.blastRadiusFp` uses (M2-S9). Most
+   *  towers' blast sits inside their own range ring, where this field is redundant with
+   *  the ring already drawn; `mine` (M2-S9) is the exception the field exists for — its
+   *  blast REACHES FURTHER than its own trigger range, so a selected mine showing only
+   *  the range ring would have the player reasonably (and wrongly) conclude the blast
+   *  stops there. Drawn whenever it is non-null — the SAME condition
+   *  `GhostVM.blastRadiusFp` uses for the preview, so arming a tower and selecting that
+   *  same tower answer "where does my blast land" identically. M2-S9 first shipped a
+   *  narrower gate here (`blastRadiusFp > rangeFp`, which only the mine satisfies) to
+   *  leave `splash` untouched; that made arming a `splash` show spokes and selecting it
+   *  show none, and Rob ruled for consistency instead (2026-08-07). `splash` and
+   *  `frost-splash` therefore gain a selection cue they did not previously draw. */
+  readonly blastRadiusFp: number | null;
   /** The selected tower's catalog id (M2-S3) — keys the Panel's per-id stats. */
   readonly towerId: string;
 }

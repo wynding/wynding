@@ -270,6 +270,11 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       // `'crosshair'` footprint mark uses, at the full blast radius: shape-distinct from
       // the smooth range circle, never colour alone. Text carries the exact number
       // regardless (`panel.blastRadius`, Panel) — the ring itself stays decorative.
+      // Gated on "has a blast at all" — the SAME condition the committed selection uses
+      // (`board-draw.ts`), so arming a tower and selecting that same tower show the same
+      // thing. They briefly diverged during M2-S9 (selection additionally required the
+      // blast to overreach the range ring, which only the mine does); Rob ruled for
+      // consistency, 2026-08-07. Change both sites together or neither.
       if (o.ghost.blastRadiusFp !== null) {
         g.lineStyle(2, pal.range, 0.9);
         drawCrosshair(g, cx, cy, projection.fpLenToPixel(o.ghost.blastRadiusFp));

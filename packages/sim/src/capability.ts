@@ -14,7 +14,7 @@
 // `formatVersion` never bumps for this; only `simVersion` does, and each story that
 // adds behavior widens its own dimension(s) here alongside its `SIM_VERSION` bump.
 //
-// DIMENSIONS THAT DEFER TO THE SCHEMA at sv12 (a profile field wider than or equal
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv13 (a profile field wider than or equal
 // to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
 // and this profile's own gate has no rejection witness of its own —
 // `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
@@ -24,11 +24,14 @@
 // (M2-S6 P4) `allowedImmunities`, now `['slow','stun']`, exactly the v2 schema's own
 // immunity enum: no third legal value exists to test a reject against, deliberately
 // (see the sv10 profile's own doc comment for why the widening goes past what S6
-// ships) — and (M2-S7 P1) `allowedTowerDomains`/`allowedCreepDomains`, now
+// ships) — (M2-S7 P1) `allowedTowerDomains`/`allowedCreepDomains`, now
 // `['ground','air','both']`/`['ground','air']`, exactly the v2 schema's own
 // `TowerTargetDomain`/`CreepDomain` enums: no third legal value exists on either
 // axis to test a reject against (see the sv11 profile's own doc comment — in this file's git history, not above; G11 deletes each profile at its bump — for why the
-// widening isn't a narrower ceiling instead).
+// widening isn't a narrower ceiling instead) — and (M2-S9 P1) `allowedEffectKinds`,
+// now all six kinds, exactly the v2 schema's own `EffectDef` enum: no seventh legal
+// value exists to test a reject against; `allowedBurstForms` is the narrower axis
+// that carries the replacement witness.
 
 import { RulesetError, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 
@@ -77,43 +80,94 @@ export interface CapabilityProfile {
    *  resident when the next shot lands — see `MAX_DOT_RECORDS`). Checked per `dot` effect in
    *  `checkCapabilityGlobal`, against the tower's OWN attack cadence. */
   readonly maxDotDurationCadenceRatio: number;
-  /** Ceiling on a `support` effect's `damageMulFp` (M2-S8) — 1024 (×4) at sv12. The
+  /** Ceiling on a `support` effect's `damageMulFp` (M2-S8) — 1024 (×4) at sv13. The
    *  v2 schema admits 257..1e6, which is a ×3906 beacon; the profile is where value
    *  ceilings live (`maxArmor: 16`, `maxAoeRadiusFp: 2048` set the precedent). ×4 is
    *  generous against the shipped `beacon`'s ×1.5 while keeping every buffed amount a
    *  compiling bundle can produce far inside the safe-integer domain. Checked per
    *  `support` effect in `checkCapabilityGlobal`. */
   readonly maxSupportDamageMulFp: number;
+  /** The complete legal set of `form` values a `burst` effect may carry (M2-S9) —
+   *  `['aoe']` at sv13. The v2 schema admits `burst/single` too; nothing ships it,
+   *  and supporting it would mean wiring the sticky-target path into the consumption
+   *  branch — real code with zero shipped content. This is the `maxSupportDamageMulFp`
+   *  pattern: a profile genuinely narrower than the schema, so it keeps a live
+   *  rejection witness — and it is the one that REPLACES the witness
+   *  `allowedEffectKinds` loses at this bump. Enforced per burst effect in
+   *  `checkCapabilityGlobal`, split out from `allowedDirectForms` (which now covers
+   *  only `direct`). */
+  readonly allowedBurstForms: readonly string[];
+  /** Ceiling on a BURST tower's `attack.travelTicks` (M2-S9) — 8 at sv13. This one
+   *  exists because activating the burst axis makes a schema path live that skips the
+   *  only bound `travelTicks` ever had. For a CADENCED tower the schema enforces
+   *  `travelTicks < cadenceTicks` (`ruleset-schema.ts`), and that is precisely what
+   *  makes `combat.ts`'s `MAX_IN_FLIGHT_IMPACTS` sizing work: each live tower holds ≤1
+   *  impact in flight, so in-flight ≤ live towers ≤ `MAX_TOWERS`, which IS the cap. A
+   *  burst bundle carries no cadence, so that rule does not run and the only remaining
+   *  bound is the schema's generic 1..1e6.
+   *
+   *  The per-tower framing is what breaks, not the per-tower count: a consumed mine
+   *  keeps its one discharge resident for `travelTicks` while its tower slot is FREED
+   *  for a rebuild, so place→trigger→place churn accumulates resident impacts that no
+   *  longer correspond to any live tower. At a schema-legal `travelTicks: 1_000_000`
+   *  every discharge of a whole match stays resident, the queue reaches the cap, and
+   *  the cap-full branch then makes EVERY tower's fire a no-op — a bundle that compiles
+   *  clean and silently stops the game. Shipped content is nowhere near it (`mine` has
+   *  `travelTicks: 1`), but rulesets are moddable data (ADR 0007) and the profile is
+   *  exactly where "content this sim build cannot correctly simulate" gets rejected.
+   *
+   *  8 is the longest travel any shipped tower uses (`splash`/`frost-splash`), so it
+   *  constrains nothing a real bundle wants while keeping a burst discharge a SHOT
+   *  rather than a resident.
+   *
+   *  WHAT THIS CEILING DOES AND DOES NOT BOUND (ship-review corrected an earlier draft
+   *  that claimed the residue sits "far inside" the cap — it does not, and the number
+   *  mattered because this is the derivation a future widening would lean on). It bounds
+   *  the residency WINDOW, not the total: per-tick consumptions are limited only by how
+   *  many mines are live (≤ `MAX_TOWERS`), so an 8-tick window admits far more than
+   *  `MAX_IN_FLIGHT_IMPACTS` in the worst case. `MAX_IN_FLIGHT_IMPACTS` remains the hard
+   *  backstop, exactly as it was before this ceiling existed. What the ceiling buys is
+   *  that reaching the backstop now costs a placement per resident impact — 6 bounty and
+   *  a free 2×2 anchor each, against ~143 anchors on the shipped board — instead of
+   *  being handed to any bundle that authors a large `travelTicks`. That is the same
+   *  posture every other value ceiling here takes: make the bad case cost something
+   *  proportional, and leave the absolute rail to the runtime bound.
+   *
+   *  Genuinely narrower than the schema's own 1e6, so like `allowedBurstForms` it carries
+   *  a real rejection witness. Checked per tower (burst bundles only) in
+   *  `checkCapabilityGlobal`. */
+  readonly maxBurstTravelTicks: number;
 }
 
-/** `SIM_VERSION` 12 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  sv11's domain axis plus (M2-S8) the SUPPORT axis activates — a tower's bundle may
- *  carry a `support` effect instead of an attack, raising the damage amounts of the
- *  attacking towers whose footprint shares a full cell edge with its own. Every other
- *  axis is untouched from sv11.
+/** `SIM_VERSION` 13 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  sv12's support axis plus (M2-S9) the BURST axis activates — a tower's bundle may
+ *  carry a `burst` effect: one AoE discharge, no cadence, centred on its own
+ *  footprint, and the tower is CONSUMED at its fire tick. Every other axis is
+ *  untouched from sv12.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv11 profile is deleted with this bump —
- *  a live sv11 entry would misdescribe v12 tick code (it could not compile an
- *  attackless bundle, which v12's `compileRuleset` now admits and whose aura
- *  `combat.ts` now reads every phase), and replay's strict version equality already
- *  owns cross-version rejection, so there is nothing for a stale profile to serve.
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv12 profile is deleted with this bump —
+ *  a live sv12 entry would misdescribe v13 tick code (it could not compile a burst
+ *  bundle, which v13's `compileRuleset` now admits and whose consumption
+ *  `combat.ts` now performs every phase), and replay's strict version equality
+ *  already owns cross-version rejection, so there is nothing for a stale profile to
+ *  serve.
  *
- *  `allowedEffectKinds` widens `[...] → [..., 'support']` in the same packet (M2-S8
- *  P3) that implements the compile, aura and combat paths the kind newly reaches.
- *  Unlike the S7 domain axes — which widened to exactly the v2 schema's own enums and
- *  so kept no rejection witness — this widening leaves `'burst'` still excluded, so
- *  `allowedEffectKinds` RETAINS a live reject witness of its own (S9 owns `burst`);
- *  `capability.test.ts`'s witness does not have to move. The NEW ceiling
- *  `maxSupportDamageMulFp` is genuinely narrower than the schema's own 1e6 wall, so
- *  it too has a rejection witness rather than deferring to the schema. */
+ *  THE WITNESS HANDOVER: `allowedEffectKinds` widens to all six kinds — exactly the
+ *  v2 schema's own `EffectDef` enum — so it LOSES its last rejection witness and
+ *  joins the defer-to-the-schema list, the same shape S7's domain axes hit. The two
+ *  NEW ceilings are both genuinely narrower than the schema, so each carries a real
+ *  rejection witness of its own: `allowedBurstForms: ['aoe']` against the schema's
+ *  `single | aoe`, and `maxBurstTravelTicks: 8` against its generic 1..1e6 — the
+ *  latter closing a bound that only the cadence rule was holding up, and that the
+ *  burst axis removes. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  12: {
+  13: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,
     maxOffsetTicks: 1_000_000,
     maxEffectsPerBundle: 8,
-    allowedEffectKinds: ['direct', 'slow', 'dot', 'stun', 'support'],
+    allowedEffectKinds: ['direct', 'slow', 'dot', 'stun', 'support', 'burst'],
     allowedDirectForms: ['single', 'aoe'],
     allowedTowerDomains: ['ground', 'air', 'both'],
     allowedCreepDomains: ['ground', 'air'],
@@ -128,6 +182,8 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxDotDurationTicks: 100_000,
     maxDotDurationCadenceRatio: MAX_DOT_DURATION_CADENCE_RATIO,
     maxSupportDamageMulFp: 1024,
+    allowedBurstForms: ['aoe'],
+    maxBurstTravelTicks: 8,
   },
 };
 

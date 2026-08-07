@@ -80,6 +80,7 @@ export const EN = {
   "tower.stun.name": "Stun Tower",
   "tower.antiair.name": "Anti-Air Tower",
   "tower.beacon.name": "Beacon",
+  "tower.mine.name": "Mine",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
   "tower.targets.air": "Air",
@@ -88,9 +89,11 @@ export const EN = {
   "panel.damage": "Damage: {damage}",
   "panel.damageBuffed": "Damage: {damage} (boosted)",
   "panel.range": "Range: {tiles} tiles",
+  "panel.triggerRange": "Trigger range: {tiles} tiles",
   "panel.fireRate": "Fire rate: {rate}/s",
   "panel.targets": "Targets: {targets}",
   "panel.blastRadius": "Blast radius: {tiles} tiles",
+  "panel.singleUse": "Destroyed when it fires",
   "panel.dot": "Poison: {damage} damage every {cadence}s for {duration}s",
   "panel.dotBuffed": "Poison: {damage} damage every {cadence}s for {duration}s (boosted)",
   "panel.stun": "Stun: {chance}% for {duration}s",
@@ -108,6 +111,7 @@ export const EN = {
   "live.rejected.generic": "Can't build there.",
   "live.rejected.pendingCap": "Too many pending actions.",
   "live.sold": "Tower sold. Refunded {refund} Bounty.",
+  "live.destroyed": "The selected tower was destroyed.",
   "leave.title": "Leave this run?",
   "leave.body": "Leaving now discards this run — your towers and progress will not be kept.",
   "leave.confirm": "Leave the run",
@@ -207,6 +211,7 @@ export interface MessageParams {
   "tower.stun.name": Record<never, never>;
   "tower.antiair.name": Record<never, never>;
   "tower.beacon.name": Record<never, never>;
+  "tower.mine.name": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
   "tower.targets.air": Record<never, never>;
@@ -215,9 +220,11 @@ export interface MessageParams {
   "panel.damage": { "damage": string | number };
   "panel.damageBuffed": { "damage": string | number };
   "panel.range": { "tiles": string | number };
+  "panel.triggerRange": { "tiles": string | number };
   "panel.fireRate": { "rate": string | number };
   "panel.targets": { "targets": string | number };
   "panel.blastRadius": { "tiles": string | number };
+  "panel.singleUse": Record<never, never>;
   "panel.dot": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.dotBuffed": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.stun": { "chance": string | number; "duration": string | number };
@@ -235,6 +242,7 @@ export interface MessageParams {
   "live.rejected.generic": Record<never, never>;
   "live.rejected.pendingCap": Record<never, never>;
   "live.sold": { "refund": string | number };
+  "live.destroyed": Record<never, never>;
   "leave.title": Record<never, never>;
   "leave.body": Record<never, never>;
   "leave.confirm": Record<never, never>;

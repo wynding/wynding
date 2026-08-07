@@ -122,9 +122,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(page.locator('.wy-wordmark')).toBeHidden();
     // Every Card's hotkey badge (M2-S3: card-hotkey-hidden ×2, widened to ×3 at M2-S4a's
     // third Card, ×4 at M2-S5a's fourth, ×5 at M2-S6's fifth, ×6 at M2-S7's sixth, ×7 at
-    // M2-S8's seventh) — count pinned
+    // M2-S8's seventh, ×8 at M2-S9's eighth) — count pinned
     // first, so a renamed/removed badge class cannot pass this loop vacuously (QC round 1).
-    await expect(page.locator('.wy-card-hotkey')).toHaveCount(7);
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(8);
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeHidden();
 
@@ -401,7 +401,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     expect(stage.y).toBeGreaterThanOrEqual(status.y + status.height - 1);
 
     await expect(page.locator('.wy-wordmark')).toBeVisible();
-    await expect(page.locator('.wy-card-hotkey')).toHaveCount(7); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now seven at M2-S8)
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(8); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now eight at M2-S9)
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeVisible();
 
@@ -467,7 +467,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const status = (await regionRect(page, 'status')) as Rect;
     expect(status.height).toBeGreaterThanOrEqual(SHORT_DESKTOP.height * 0.9);
     // The badge is Compact-gated, NOT pointer-gated: a fine pointer does not bring it back.
-    await expect(page.locator('.wy-card-hotkey')).toHaveCount(7); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now seven at M2-S8)
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(8); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now eight at M2-S9)
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeHidden();
     await expect(page.locator('.wy-wordmark')).toBeHidden();
