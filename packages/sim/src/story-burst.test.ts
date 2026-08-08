@@ -291,6 +291,33 @@ describe('a forged mine row carrying a nonzero nextFireTick is not permanently i
     expect(cadencedResult.impacts).toHaveLength(0); // still on cooldown
     expect(cadencedResult.towers.nextFireTick).toEqual([FORGED]); // and untouched
   });
+
+  it('the column is cleared even when NO creep is in range — the hash-residency half', () => {
+    // The normalization is unconditional, above target selection, so a mine standing on a
+    // lane nothing ever approaches still has its meaningless column cleared. Gating it
+    // behind "a creep is in the trigger ring" would fix the inert-wall half and leave the
+    // forged value resident in every tick's world hash for the whole match — the exact
+    // residency the support arm zeroes unconditionally to avoid. (Fable stand-in review,
+    // PR #90: the normalization originally sat below the `targetLive === null` return.)
+    const towers = buildTowers([
+      { id: 100, col: 1, row: 1, towerId: 'mine', nextFireTick: 1_000_000_000 },
+    ]);
+    const result = runCombatT(
+      restingCreeps([{ id: 1, col: 11, row: 11, hp: 100 }]), // far outside the 576 fp trigger
+      towers,
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      RULESET.towerById,
+      SF_NUM,
+      SF_DEN,
+    );
+    expect(result.impacts).toHaveLength(0); // nothing in range — it did NOT fire
+    expect(result.towers.id).toEqual([100]); // still standing, still armed
+    expect(result.towers.nextFireTick).toEqual([0]); // but the dead value is gone
+  });
 });
 
 describe('no mine placed ⇒ the identical towers reference is returned', () => {

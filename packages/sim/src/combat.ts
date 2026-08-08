@@ -1811,6 +1811,23 @@ export function runCombat(
       towers.nextFireTick[i] = 0;
       return;
     }
+    // M2-S9: `nextFireTick` is MEANINGLESS for a burst tower — it never fires twice, so
+    // there is no next fire to schedule and nothing legitimate ever writes the column for
+    // one (`placeTower` pushes 0). Normalized UNCONDITIONALLY here, before any targeting,
+    // for exactly the reason the support arm above zeroes both of its columns:
+    // `coerceSoa`'s `safeCombatColumn` admits any safe integer, so a forged or restored
+    // mine row carrying e.g. `nextFireTick: 1e9` would otherwise fail the fireability test
+    // below forever — an inert wall that can never fire AND can never be consumed — while
+    // the meaningless value stayed resident in the world hash for the whole match.
+    //
+    // Unconditional is the operative word, and it is why this sits ABOVE the target
+    // selection rather than beside the fireability read (ship-review): a mine on a lane no
+    // creep ever approaches never reaches the fire path at all, so a normalization gated
+    // behind `targetLive !== null` would close the inert-wall half and leave the
+    // hash-residency half open — while claiming parity with the support arm, which zeroes
+    // on every phase regardless of what is in range. `targetId` is deliberately NOT zeroed
+    // here: unlike cadence, a target lock IS meaningful for an armed mine.
+    if (attack.mode === 'burst') towers.nextFireTick[i] = 0;
     const range = attack.rangeFp;
     // 2×2 footprint centre = the shared corner of its four cells (units-per-tile FP_ONE).
     const towerX = (col + 1) * FP_ONE;
@@ -1854,16 +1871,8 @@ export function runCombat(
     towers.targetId[i] = target;
 
     if (targetLive === null) return;
-    // M2-S9: `nextFireTick` is MEANINGLESS for a burst tower — it never fires twice, so
-    // there is no next fire to schedule and nothing legitimate ever writes the column for
-    // one. Normalize it to 0 rather than reading it, for exactly the reason the support
-    // arm above zeroes both of its columns: `coerceSoa`'s `safeCombatColumn` admits any
-    // safe integer, so a forged or restored mine row carrying e.g. `nextFireTick: 1e9`
-    // would otherwise fail the fireability test below forever — an inert wall that can
-    // never fire AND can never be consumed — while the meaningless value stayed resident
-    // in the world hash for the whole match. Burst is the second firing discipline for
-    // which this column has no meaning; it gets the same treatment as the first.
-    if (attack.mode === 'burst') towers.nextFireTick[i] = 0;
+    // A burst row's `nextFireTick` was already normalized to 0 above, so this read is
+    // always fireable for one — the column is meaningless for that discipline.
     const nft = towers.nextFireTick[i];
     const fireable = !Number.isSafeInteger(nft) || tick >= (nft as number);
     if (!fireable) return;
