@@ -230,10 +230,6 @@ describe('the blast is centred on the mine, not on the creep', () => {
     } else {
       throw new Error('expected a move or leak outcome, not drop');
     }
-    console.log('[story-burst] mine footprint centre:', mineCenter, 'recomputed lead point:', {
-      x: leadX,
-      y: leadY,
-    });
     // The scenario is vacuous unless these two points genuinely differ.
     expect(leadX !== mineCenter.x || leadY !== mineCenter.y).toBe(true);
     expect(imp.x).toBe(mineCenter.x);
@@ -469,9 +465,6 @@ describe('one routing snapshot per tick — a tower firing LATER in the same com
     const nearPost = distAtCell(consumedSoa, NEAR_DOOR);
     const longPre = distAtCell(standing, LONG_WAY);
     const longPost = distAtCell(consumedSoa, LONG_WAY);
-    console.log(
-      `[story-burst] route distances near-door ${nearPre}→${nearPost}, long-way ${longPre}→${longPost}`,
-    );
     // The scene is VACUOUS unless the order genuinely inverts — assert that first, so a
     // future board tweak that flattens the difference fails here loudly rather than
     // leaving a green test that can no longer tell the two fields apart.
@@ -511,7 +504,6 @@ describe('one routing snapshot per tick — a tower firing LATER in the same com
 describe('the inRange trigger boundary is inclusive', () => {
   it('a creep at exactly rangeFp trips it; one fp unit further does not', () => {
     const center = footprintCenter(1, 1);
-    console.log('[story-burst] mine centre:', center, 'rangeFp:', RANGE_FP);
 
     const towersOn = buildTowers([{ id: 500, col: 1, row: 1, towerId: 'mine' }]);
     const onBoundary = creepAtPoint(1, center.x + RANGE_FP, center.y, 100);

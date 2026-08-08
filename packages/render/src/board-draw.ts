@@ -378,8 +378,14 @@ export function drawTowers(
       g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));
       // M2-S9: a selected AoE tower draws its blast too — the SAME condition and the
       // SAME `drawCrosshair` motif the ghost preview uses (`scene.ts`), so arming a
-      // tower and selecting that same tower answer "where does my blast land" the same
-      // way. The mine is what forced the question: it is the only tower whose blast
+      // tower and selecting that same tower both answer "where does my blast land".
+      //
+      // The CONDITION is identical; the painted result is not quite, and the difference is
+      // worth stating rather than implying parity the pixels do not have (ship-review).
+      // `drawCrosshair` leaves a centre gap of `spoke * 0.4`, and the committed body is a FILLED rounded rect whose edge sits ~`cellPx` from the footprint centre. For the mine (blast 2.5 tiles) the gap lands at `1.0 * cellPx` — exactly the body edge — so its spokes are wholly on `floor`. For `splash`/`frost-splash` (blast 1.5 tiles) the gap is `0.6 * cellPx`, so each spoke's inner ~22-44% is painted over `pal.tower`, where `pal.range` measures 1.06:1 (the same surface the attackless-selection branch above rejects an inset-2 stroke over). The ghost has no such band because its body is an OUTLINE, not a fill.
+      // The spoke TIP — which is what marks the radius — is always on `floor` in both
+      // surfaces, so the cue reads either way; a small-blast tower simply shows a shorter
+      // visible spoke when committed than when previewed. The mine is what forced the question: it is the only tower whose blast
       // (2.5 tiles) reaches PAST its own ring (2.25), so a selected mine drawing the
       // ring alone would actively understate it.
       //

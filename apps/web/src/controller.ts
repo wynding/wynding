@@ -261,8 +261,11 @@ const COST_FP = (r: CompiledRuleset, towerId: string): number =>
 
 /** A tower's AoE blast radius (fixed-point sim units), by catalog id — `null` for a
  *  single-target tower (no `aoe` effect) or an unresolved id (M2-S4a step 14). Feeds
- *  `GhostVM.blastRadiusFp` so the armed-`splash` ghost can preview its blast alongside
- *  its range ring. The radius-uniform gate — `checkCapabilityGlobal` in
+ *  BOTH `GhostVM.blastRadiusFp`, so an armed ghost previews its blast alongside its range
+ *  ring, and (M2-S9) `SelectionVM.blastRadiusFp`, which is what makes `board-draw.ts`
+ *  draw the committed tower's blast spokes. The two draw on the SAME condition by ruling
+ *  (Rob, 2026-08-07) — narrowing or moving this derivation moves both surfaces, so change
+ *  them together or neither. The radius-uniform gate — `checkCapabilityGlobal` in
  *  `packages/sim/src/ruleset.ts`, NOT `capability.ts`'s profile, which only supplies the
  *  allow-lists it reads — guarantees at most one radius among a tower's `aoe` effects, so
  *  the first match is unambiguous. (`combat.ts`'s twin of this comment was corrected in QC

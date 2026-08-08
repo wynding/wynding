@@ -523,21 +523,35 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
       );
       expect(lastTickCreeps.length).toBeGreaterThan(0);
 
-      // Confirm the construction: the CLOSEST any live creep ever gets is >= 640 fp — the
-      // trigger boundary is never even approached, let alone crossed.
+      // Confirm the construction: the CLOSEST any GROUND creep ever gets is >= 640 fp, so
+      // the trigger boundary is never even approached, let alone crossed.
+      //
+      // Ground only, and the scoping is load-bearing rather than tidy (ship-review): the
+      // mine's mask is `ground`, so `runCombat`'s domain filter means an AIR creep INSIDE
+      // the 576 fp ring correctly does not trip it either. Measuring flyers here would
+      // constrain a distance the behaviour under test does not depend on — and it passes
+      // today only because `RUN_TICKS` stops short of the `flying` wave. A wave retune, a
+      // longer window, or an air entry in an earlier wave would then turn this red for a
+      // non-bug, reading as "the trigger boundary broke" while the sim behaved correctly.
+      const bundle = getBundledRuleset();
+      const catalog = compileRuleset(bundle, defaultBoardId(bundle)).creepById;
+      const isGround = (creepId: string): boolean => catalog[creepId]?.domain === 'ground';
       let minDistFp = Infinity;
+      let groundSamples = 0;
       for (let t = 0; t < RUN_TICKS; t++) {
         for (const row of scene.creepsByTick.get(t)!) {
-          if (row.point === null) continue;
+          if (row.point === null || !isGround(row.creepId)) continue;
+          groundSamples++;
           const dx = row.point.x - center.x;
           const dy = row.point.y - center.y;
           minDistFp = Math.min(minDistFp, Math.sqrt(dx * dx + dy * dy));
         }
       }
       console.log(
-        `[story-mine] ring-2 scene: closest any creep ever got: ${minDistFp.toFixed(2)} fp ` +
-          `(trigger 576 fp)`,
+        `[story-mine] ring-2 scene: closest any GROUND creep ever got: ` +
+          `${minDistFp.toFixed(2)} fp over ${groundSamples} samples (trigger 576 fp)`,
       );
+      expect(groundSamples).toBeGreaterThan(0); // a ground-creep measurement really happened
       expect(Number.isFinite(minDistFp)).toBe(true); // a real measurement, not the Infinity seed
       expect(minDistFp).toBeGreaterThanOrEqual(640);
 

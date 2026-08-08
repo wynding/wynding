@@ -183,7 +183,9 @@ export interface SelectionVM {
    *  the range ring would have the player reasonably (and wrongly) conclude the blast
    *  stops there. Drawn whenever it is non-null — the SAME condition
    *  `GhostVM.blastRadiusFp` uses for the preview, so arming a tower and selecting that
-   *  same tower answer "where does my blast land" identically. M2-S9 first shipped a
+   *  same tower both answer "where does my blast land". (Same condition and same motif;
+   *  the painted spoke is slightly shorter on a committed small-blast tower, whose filled
+   *  body the inner segment crosses — `board-draw.ts` carries that geometry.) M2-S9 first shipped a
    *  narrower gate here (`blastRadiusFp > rangeFp`, which only the mine satisfies) to
    *  leave `splash` untouched; that made arming a `splash` show spokes and selecting it
    *  show none, and Rob ruled for consistency instead (2026-08-07). `splash` and
