@@ -11,7 +11,8 @@ import { FP_ONE } from '@wynding/engine';
 import { MAX_IN_FLIGHT_IMPACTS, type CombatCreeps, type Impact } from './combat';
 import { emptyTowers, materializeTowerMask, type TowerArrays } from './tower';
 import { computeDistanceField } from './pathfinding';
-import { testRuleset, runCombatT, TEST_BURST_TOWER, TEST_TOWER } from './test-support';
+import { testRuleset, runCombatT, pushCreep, TEST_BURST_TOWER, TEST_TOWER } from './test-support';
+import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
 import { advanceCreep, deriveValidCreepPosition } from './movement';
 import { effectiveSpeedFp } from './ruleset-shared';
 
@@ -538,5 +539,80 @@ describe('the inRange trigger boundary is inclusive', () => {
     );
     expect(beyondResult.towers.id).toEqual([500]); // never triggered, row intact
     expect(beyondResult.impacts).toHaveLength(0);
+  });
+});
+
+describe('a consumption survives a cold serialize/restore', () => {
+  // The project's standing determinism contract is that everything derived from the SoA
+  // is recomputed on demand, "so a cold serialize/restore reproduces identical behavior
+  // with no ambient/cache state" (`tower.ts`'s header). Burst is the first mechanic since
+  // DoT that REWRITES the tower SoA mid-run, and the tick where it does is structurally
+  // novel: the row is gone while its discharge is still in flight, so the state carries a
+  // resident impact whose source tower no longer exists.
+  //
+  // Nothing witnessed a restore straddling that tick. `determinism.test.ts`'s round-trip
+  // runs the canonical scenario, which places no mine (deliberately — its GOLDEN must stay
+  // byte-identical across this story, which is the evidence that sv13 changed nothing for
+  // existing content), and every other burst test stops at `runCombat`. Found by the Fable
+  // stand-in review of PR #90; fixed here rather than by widening the canonical scenario,
+  // which would have moved the GOLDEN for a reason unrelated to behaviour (Rob's call,
+  // 2026-08-07).
+  const SEED = 0x5eed;
+  const MINE_ANCHOR = { col: 1, row: 1 } as const;
+  const TICKS = 40;
+
+  /** Drive the full `step()` path with a mine placed at tick 0 and one ground creep set
+   *  down inside its trigger ring, returning the per-tick world hashes and end state.
+   *  `roundTripAt` JSON round-trips the state after that tick's step — the resume seam
+   *  `determinism.test.ts` exercises, here made to straddle the consumption. */
+  function run(roundTripAt: number | null): { trace: string[]; state: SimState } {
+    let state = createInitialState(SEED, RULESET);
+    const trace: string[] = [];
+    for (let t = 0; t < TICKS; t++) {
+      const inputs: SimInput[] =
+        t === 0 ? [{ kind: 'placeTower', anchor: { ...MINE_ANCHOR }, towerId: 'mine' }] : [];
+      state = step(state, RULESET, inputs);
+      // Set the creep down AFTER tick 0's step, so the mine is standing first (placement
+      // refuses a footprint a ground creep occupies), and inside the trigger ring, so the
+      // trip tick is deterministic without waiting on the wave schedule. Cell (3,3) sits
+      // OUTSIDE the mine's own 2×2 footprint — anchor (1,1) covers cells (1,1)..(2,2), and
+      // a creep standing on a tower's blocked cell is simply dropped by movement — while
+      // still inside it: 543 fp from the footprint centre against a 576 fp trigger.
+      if (t === 0) pushCreep(state, { id: 9001, hp: 100, col: 3, row: 3 });
+      if (t === roundTripAt) state = JSON.parse(JSON.stringify(state)) as SimState;
+      trace.push(hashSimState(state));
+    }
+    return { trace, state };
+  }
+
+  it('restoring at the fire tick — row gone, discharge still in flight — resumes byte-identically', () => {
+    const ref = run(null);
+
+    // Mid-trace proof the scenario reaches the state under test, BEFORE comparing tails:
+    // find the tick the mine's row actually disappears by replaying the same script.
+    let probe = createInitialState(SEED, RULESET);
+    let fireTick = -1;
+    let hadRow = false;
+    for (let t = 0; t < TICKS && fireTick === -1; t++) {
+      const inputs: SimInput[] =
+        t === 0 ? [{ kind: 'placeTower', anchor: { ...MINE_ANCHOR }, towerId: 'mine' }] : [];
+      probe = step(probe, RULESET, inputs);
+      if (t === 0) pushCreep(probe, { id: 9001, hp: 100, col: 3, row: 3 });
+      const hasRow = probe.towers.id.length > 0;
+      if (hadRow && !hasRow) fireTick = t;
+      hadRow = hasRow;
+    }
+    expect(fireTick).toBeGreaterThan(0); // it really was consumed, not merely never placed
+    // …and at that tick the discharge is resident with no tower behind it — the shape
+    // that makes this round-trip worth pinning rather than an ordinary resume.
+    expect(probe.towers.id).toHaveLength(0);
+    expect(probe.impacts.length).toBeGreaterThan(0);
+
+    const resumed = run(fireTick);
+    // The WHOLE tail, not just the final hash — a matching end state could otherwise mask
+    // a diverge-then-reconverge, the same reasoning `determinism.test.ts`'s resume test
+    // gives for comparing traces rather than endpoints.
+    expect(resumed.trace).toEqual(ref.trace);
+    expect(JSON.stringify(resumed.state)).toBe(JSON.stringify(ref.state));
   });
 });
