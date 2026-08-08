@@ -82,7 +82,11 @@ export type PlacementOutcome =
       readonly kind: 'rejected';
       readonly reason: 'bounty' | 'occupied' | 'other' | 'pendingCap';
     }
-  | { readonly kind: 'sold'; readonly refund: number };
+  | { readonly kind: 'sold'; readonly refund: number }
+  /** The selected tower stopped existing without the player asking (M2-S9: a `mine`
+   *  detonates and deletes its own row at its fire tick). Carries no id — the Panel is
+   *  already closing, and the announcement's job is to say the thing happened at all. */
+  | { readonly kind: 'destroyed' };
 
 /** The observation path for the DOM overlay (Card/Panel/Dock, PLAN.md P2/P4): a plain
  *  snapshot of state that isn't already covered by `frame()`/`hud()`, read once per
@@ -257,8 +261,11 @@ const COST_FP = (r: CompiledRuleset, towerId: string): number =>
 
 /** A tower's AoE blast radius (fixed-point sim units), by catalog id — `null` for a
  *  single-target tower (no `aoe` effect) or an unresolved id (M2-S4a step 14). Feeds
- *  `GhostVM.blastRadiusFp` so the armed-`splash` ghost can preview its blast alongside
- *  its range ring. The radius-uniform gate — `checkCapabilityGlobal` in
+ *  BOTH `GhostVM.blastRadiusFp`, so an armed ghost previews its blast alongside its range
+ *  ring, and (M2-S9) `SelectionVM.blastRadiusFp`, which is what makes `board-draw.ts`
+ *  draw the committed tower's blast spokes. The two draw on the SAME condition by ruling
+ *  (Rob, 2026-08-07) — narrowing or moving this derivation moves both surfaces, so change
+ *  them together or neither. The radius-uniform gate — `checkCapabilityGlobal` in
  *  `packages/sim/src/ruleset.ts`, NOT `capability.ts`'s profile, which only supplies the
  *  allow-lists it reads — guarantees at most one radius among a tower's `aoe` effects, so
  *  the first match is unambiguous. (`combat.ts`'s twin of this comment was corrected in QC
@@ -487,10 +494,14 @@ export function createController(seed: number, content?: ControllerContent): Con
   // the pointermove hot path — so the walk runs once per (tick, bufferRev) and hit-tests
   // scan the cached entries. Same key as `previewMemo`/`hudMemo`, and the same Play-again
   // rule: tick indices restart at 0 across `reset()`, so the index clears there too.
-  // The `tick` leg is defense-in-depth (QC r3): towers change only through buffered
-  // inputs today, so `rev` (including `onTick`'s commit bump) covers every reachable
-  // change and no current test can falsify the `tick` comparison — it exists for the
-  // first mechanic that mutates towers OUTSIDE the input phase (destruction, upgrades).
+  // The `tick` leg WAS defense-in-depth (QC r3), written for "the first mechanic that
+  // mutates towers OUTSIDE the input phase (destruction, upgrades)". M2-S9 is that
+  // mechanic and the leg is now load-bearing: `bufferRev` only advances when the
+  // committed buffer was non-empty, so on a tick where a `mine` detonates with no
+  // player input `rev` does not move and `tick` is the ONLY thing invalidating this
+  // memo. `onTick`'s own selection reconciliation reads `towerAt` through it, so
+  // without the `tick` leg a player whose selected mine just detonated would keep a
+  // phantom Panel and range ring, and Sell would target an id that no longer exists.
   let towerIndexMemo: {
     tick: number;
     rev: number;
@@ -568,8 +579,25 @@ export function createController(seed: number, content?: ControllerContent): Con
     // destroyed this tick, drop the selection so the scene stops drawing a phantom range
     // ring and the Sell control disables (rather than selling a nonexistent id).
     if (selection !== null && towerAt(selection.col, selection.row)?.id !== selection.id) {
+      // M2-S9: DESTRUCTION is now reachable — a `mine` deletes its own row at its fire
+      // tick, entirely outside the input phase. It announced nothing at all before this,
+      // which left a screen-reader user's Panel silently vanishing with no signal that
+      // anything had happened — the one event that most needs saying, since the board's
+      // own cue for it is "a tower is no longer drawn".
+      //
+      // Unconditional, deliberately: this branch can ONLY be a destruction. `sellSelected`
+      // is the sole path that queues a `sellTower`, and it re-aims at the sold anchor
+      // immediately (its own comment: "the Panel closes immediately, no tick required"),
+      // so a sell has already nulled `selection` synchronously and never reaches here.
+      // An earlier revision guarded this with a `soldThisTick` check against the committed
+      // buffer to avoid double-announcing a sell; ship-review proved that predicate can
+      // never be true, and inert code that reads as load-bearing protection is worse than
+      // none — so the reasoning lives here instead of in a branch nothing can take.
       selection = null;
-      bumpUiRev(); // the Panel must close if a tick sold/destroyed the selected tower
+      // `setOutcome` ends in `bumpUiRev()`, so the Panel closes on this write alone —
+      // no separate bump (this branch carried one before M2-S9, when it had no outcome
+      // to record; every other branch in this file reaches `setOutcome` unaccompanied).
+      setOutcome({ kind: 'destroyed' });
     }
     if (isTerminalPhase(state.phase)) {
       frozen = true;
@@ -772,6 +800,7 @@ export function createController(seed: number, content?: ControllerContent): Con
         col: existing.col,
         row: existing.row,
         rangeFp: RANGE_FP(ruleset, existing.towerId),
+        blastRadiusFp: BLAST_RADIUS_FP(ruleset, existing.towerId),
         id: existing.id,
         towerId: existing.towerId,
       };
@@ -924,6 +953,7 @@ export function createController(seed: number, content?: ControllerContent): Con
             col: existing.col,
             row: existing.row,
             rangeFp: RANGE_FP(ruleset, existing.towerId),
+            blastRadiusFp: BLAST_RADIUS_FP(ruleset, existing.towerId),
             id: existing.id,
             towerId: existing.towerId,
           };
@@ -1303,6 +1333,7 @@ export function createController(seed: number, content?: ControllerContent): Con
               col: selection.col,
               row: selection.row,
               rangeFp: selection.rangeFp,
+              blastRadiusFp: selection.blastRadiusFp,
               towerId: selection.towerId,
             };
     }

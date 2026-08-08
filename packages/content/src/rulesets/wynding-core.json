@@ -144,6 +144,12 @@
       "id": "beacon",
       "cost": 15,
       "effects": [{ "kind": "support", "damageMulFp": 384 }]
+    },
+    {
+      "id": "mine",
+      "cost": 6,
+      "attack": { "domain": "ground", "rangeFp": 576, "travelTicks": 1 },
+      "effects": [{ "kind": "burst", "form": "aoe", "damage": 45, "radiusFp": 640 }]
     }
   ],
   "balance": {

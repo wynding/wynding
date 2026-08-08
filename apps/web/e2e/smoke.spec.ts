@@ -35,7 +35,7 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-rail')).toBeVisible();
   // The Rail's Cards (PLAN.md P2, M2-S3/M2-S4a/M2-S6: one per catalog tower) — unarmed at load.
-  await expect(page.locator('.wy-card')).toHaveCount(7); // M2-S8 appends `beacon`
+  await expect(page.locator('.wy-card')).toHaveCount(8); // M2-S9 appends `mine`
   for (const c of await page.locator('.wy-card').all()) {
     await expect(c).toBeVisible();
     await expect(c).toHaveAttribute('aria-pressed', 'false');

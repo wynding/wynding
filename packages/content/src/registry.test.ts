@@ -108,7 +108,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     ]);
   });
 
-  it('carries the tower catalog: `basic`, the S3 `slow` tower (S7: attack domain widens ground → both), the S4a `splash` tower, the S5a `venom` tower, the S6 `stun` tower, the S7 `antiair` tower, and the S8 `beacon` (attackless — a support bundle carries no `attack` key at all)', () => {
+  it('carries the tower catalog: `basic`, the S3 `slow` tower (S7: attack domain widens ground → both), the S4a `splash` tower, the S5a `venom` tower, the S6 `stun` tower, the S7 `antiair` tower, the S8 `beacon` (attackless — a support bundle carries no `attack` key at all), and the S9 `mine` (a burst bundle: its `attack` carries a trigger range, not a firing cadence — it never fires twice)', () => {
     expect(ruleset.towerCatalog).toEqual([
       {
         id: 'basic',
@@ -159,6 +159,12 @@ describe('getBundledRuleset (happy path + authored values)', () => {
         id: 'beacon',
         cost: 15,
         effects: [{ kind: 'support', damageMulFp: 384 }],
+      },
+      {
+        id: 'mine',
+        cost: 6,
+        attack: { domain: 'ground', rangeFp: 576, travelTicks: 1 },
+        effects: [{ kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 }],
       },
     ]);
   });

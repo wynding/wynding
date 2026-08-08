@@ -103,14 +103,29 @@ creep, wasted if that creep dies or leaks in flight) or a **blast**.
 _Avoid_: damage event.
 
 **Blast**:
-A point-locked impact: it lands at a point that led the target along the creep's
-path at fire-time speed, and affects every creep within its radius, whether or not
-the original target is still alive. AoE names the effect form a tower authors; a
-blast is one landing of it.
+A point-locked impact: it lands at a fixed point and affects every creep within its
+radius, whether or not the creep that prompted it is still alive. Where that point
+sits depends on the tower that fired it — a cadenced AoE tower leads its target along
+the creep's path at fire-time speed, while a **burst** tower detonates on its own
+footprint, so its blast is anchored to the maze rather than to a creep. AoE names the
+effect form a tower authors; a blast is one landing of it.
 _Avoid_: explosion, area hit.
 
+**Burst**:
+The effect primitive of a tower that holds exactly one discharge: it waits, armed,
+until a creep it can hit enters its **trigger range**, fires its single blast, and is
+**consumed** in the same instant — the tower ceases to exist, leaving a gap in the
+maze. Trigger range is what sets it off and is not a firing range; the blast that
+follows is centred on the tower, not on the creep that tripped it. Whether that blast
+reaches further than the trigger is a matter of a given tower's tuning, not a rule of
+the primitive — the shipped `mine` is deliberately tuned that way so the creep that
+trips it is always inside the kill zone. A burst tower has no cadence, because it never fires twice. Sold
+before it triggers, it refunds like any tower; once triggered there is nothing left to
+sell. Creeps re-route around the gap from the next movement step onward.
+_Avoid_: bomb, trap, one-shot, proximity mine.
+
 **Wave**:
-A scheduled burst of creeps the player must survive. Waves come in a finite,
+A scheduled group of creeps the player must survive. Waves come in a finite,
 ordered sequence — a board's **wave schedule**.
 _Avoid_: round, level, round-number.
 

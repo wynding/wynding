@@ -27,9 +27,20 @@
  *  top and a wider base bar, evoking "a broadcasting mast": a NEW value, never a reuse,
  *  so no two towers share a mark. Distinct from `'arrow'` (which converges to a point
  *  with two barbs at the TIP and no base) and from `'bolt'` (a staggered zigzag, not a
- *  straight post). An unrecognized id draws `'plain'` (total, never throw). */
+ *  straight post). `'charge'` is `mine`'s (M2-S9) — a FILLED disc at the footprint
+ *  centre, at the same `size * 0.22` half-size `'ringed'`/`'crosshair'`/`'droplet'`/
+ *  `'arrow'`/`'pylon'` already use. It is the only FILLED mark in a vocabulary of
+ *  otherwise six strokes (`'plain'`, the eighth value, draws nothing at all — `basic`
+ *  is body-only), which is the whole distinctness argument and not a
+ *  decorative one: at the `CELL_PX_MIN_NARROW = 10` compact-layout floor `size * 0.22`
+ *  is a ~4.4 px RADIUS, so the disc spans ~8.8 px, and at that size fine detail (a
+ *  ring's thin stroke, a bolt's stagger) is gone —
+ *  but "filled" vs "stroked" survives at any size — a solid disc
+ *  reads as a dense charge where `'ringed'`'s stroked circle of the same radius reads
+ *  as a thin ring, so the two are never confused even when every other shape cue has
+ *  collapsed to a blur. An unrecognized id draws `'plain'` (total, never throw). */
 export type TowerFootprintMark =
-  'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt' | 'arrow' | 'pylon';
+  'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt' | 'arrow' | 'pylon' | 'charge';
 
 const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   basic: 'plain',
@@ -39,6 +50,7 @@ const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   stun: 'bolt',
   antiair: 'arrow',
   beacon: 'pylon',
+  mine: 'charge',
 };
 
 /** The footprint mark for `towerId` — total over any string, `hasOwnProperty`-guarded

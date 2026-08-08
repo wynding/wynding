@@ -65,6 +65,10 @@ const TOWER_BY_ID = RULESET.towerById;
 const TEST_ATTACK = TEST_TOWER.attack!;
 const RANGE = TEST_ATTACK.rangeFp;
 const TRAVEL_TICKS = TEST_ATTACK.travelTicks;
+// M2-S9: `attack` is now a `mode`-discriminated union — `basic` is a cadenced
+// tower, so this narrows before reading `cadenceTicks`, a fact of the fixture
+// (mirrors the `DIRECT_EFFECT` named-error pattern below), not a guess.
+if (TEST_ATTACK.mode !== 'cadenced') throw new Error('`basic` must be a cadenced tower');
 const FIRE_INTERVAL = TEST_ATTACK.cadenceTicks;
 // A type predicate rather than a cast (CodeRabbit #73): if `basic` ever loses its
 // direct effect this throws a NAMED error at module load, not an opaque TypeError.
@@ -261,6 +265,7 @@ const VENOM_TOWER: CompiledTower = {
     { kind: 'dot', amount: 2, cadenceTicks: 10, durationTicks: 60 },
   ],
   attack: {
+    mode: 'cadenced',
     domain: 'ground',
     rangeFp: RANGE,
     cadenceTicks: FIRE_INTERVAL,

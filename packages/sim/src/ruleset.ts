@@ -123,7 +123,13 @@ export interface CompiledScoring {
  *  tower's fire into a `blast` impact (`combat.ts`'s firing logic keys on it). Only
  *  the kinds the LIVE capability profile allows (`allowedEffectKinds`/
  *  `allowedDirectForms`) ever appear here; a future story widens this union
- *  alongside its own capability bump. */
+ *  alongside its own capability bump.
+ *
+ *  M2-S9: at sv13 kind `'aoe'` is reached by BOTH a `direct/aoe` effect AND a
+ *  `burst/aoe` effect — burst-ness is the tower's FIRING DISCIPLINE (`attack.mode`),
+ *  not a property of the damage payload, so it does not get its own compiled kind. A
+ *  reader of a compiled bundle therefore cannot tell burst-ness from the effect
+ *  alone; it lives on `CompiledTower.attack.mode`. */
 export type CompiledEffect =
   | { readonly kind: 'direct'; readonly amount: number }
   | { readonly kind: 'aoe'; readonly amount: number; readonly radiusFp: number }
@@ -156,13 +162,29 @@ export interface CompiledTower {
    *  `?? 0` form makes "a beacon has range 0 and fires every tick" representable and
    *  merely wrong at runtime, where the optional makes it a compile error at every
    *  one of the ~dozen sites that read an attack field. Same ruling as the Panel's
-   *  omit-rather-than-zero rows. */
-  readonly attack?: {
-    readonly domain: TowerTargetDomain;
-    readonly rangeFp: number;
-    readonly cadenceTicks: number;
-    readonly travelTicks: number;
-  };
+   *  omit-rather-than-zero rows.
+   *
+   *  M2-S9 splits it on `mode`. A BURST tower has an attack — that is where its
+   *  **trigger range** lives — but no cadence, because it never fires twice. One
+   *  optional `cadenceTicks?: number` would have invited `?? 0` again, the exact lie
+   *  the S8 Panel ruling rejected; the union makes "a burst tower has a cadence"
+   *  **unrepresentable**. Both variants carry `domain`/`rangeFp`/`travelTicks`, so
+   *  every consumer of those is untouched — the churn is one fire-path read and one
+   *  Panel row. */
+  readonly attack?:
+    | {
+        readonly mode: 'cadenced';
+        readonly domain: TowerTargetDomain;
+        readonly rangeFp: number;
+        readonly cadenceTicks: number;
+        readonly travelTicks: number;
+      }
+    | {
+        readonly mode: 'burst';
+        readonly domain: TowerTargetDomain;
+        readonly rangeFp: number;
+        readonly travelTicks: number;
+      };
   /** Present IFF this bundle carries a `support` effect (M2-S8, sv12) — hoisted out
    *  of `effects` so the aura walk (`support.ts`) can test one field rather than
    *  re-scanning the bundle per tower per combat phase. `ruleset-schema.ts` already
@@ -449,11 +471,29 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
       if (!profile.allowedEffectKinds.includes(effect.kind)) {
         throw new RulesetError(`effect kind '${effect.kind}' unsupported at simVersion ${v}`);
       }
-      if (
-        (effect.kind === 'direct' || effect.kind === 'burst') &&
-        !profile.allowedDirectForms.includes(effect.form)
-      ) {
+      if (effect.kind === 'direct' && !profile.allowedDirectForms.includes(effect.form)) {
         throw new RulesetError(`effect form '${effect.form}' unsupported at simVersion ${v}`);
+      }
+      // M2-S9: burst forms get their OWN allow-list, split out of `allowedDirectForms`.
+      // Before this split the two kinds shared `['single','aoe']`, so the instant
+      // `'burst'` joined `allowedEffectKinds` a `burst/single` bundle would have
+      // compiled into a live untested mechanic and `allowedBurstForms` would have been
+      // dead code — the exact failure this file's ceilings exist to prevent.
+      if (effect.kind === 'burst' && !profile.allowedBurstForms.includes(effect.form)) {
+        throw new RulesetError(`burst effect form '${effect.form}' unsupported at simVersion ${v}`);
+      }
+      // M2-S9: a burst tower fires exactly once, so the ratio gate below — whose whole
+      // rationale is bounding live records per SOURCE by how many shots land inside a
+      // duration window — has no derived bound to check against. Before this clause the
+      // combination was still rejected, but ACCIDENTALLY: `cadenceTicks ?? 0` made the
+      // ceiling 0 and the message named "its 0-tick attack cadence", a sentence that is
+      // simply false. Reject deliberately, and for the real reason. Same posture as the
+      // aoe+dot rejection below: unvalidated content is rejected LOUDLY at compile time
+      // until a story needs it and re-derives the bound.
+      if (effect.kind === 'dot' && tower.effects.some((e) => e.kind === 'burst')) {
+        throw new RulesetError(
+          `tower '${tower.id}' combines a burst effect with a dot effect, unsupported at simVersion ${v}`,
+        );
       }
       // maxDotDurationTicks bounds the tick-scheduling operand the schema's own
       // `durationTicks >= cadenceTicks` rule doesn't: together the two rules bound
@@ -481,7 +521,9 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
         const fireCadence = tower.attack.cadenceTicks ?? 0;
         const ratioCeiling = profile.maxDotDurationCadenceRatio * fireCadence;
         // `?? 0` keeps this total on a pre-schema-validation shape; a 0 cadence makes the
-        // ceiling 0, so any positive duration is rejected — the safe direction.
+        // ceiling 0, so any positive duration is rejected — the safe direction. M2-S9's
+        // explicit burst+dot rejection above now covers the one case (a burst bundle,
+        // which carries no `cadenceTicks`) that used to make this ceiling of 0 fire.
         if (effect.durationTicks > ratioCeiling) {
           throw new RulesetError(
             `tower '${tower.id}' dot durationTicks ${effect.durationTicks} exceeds ${ratioCeiling} ` +
@@ -489,6 +531,10 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
           );
         }
       }
+      // Scoped to `direct` only, deliberately not widened to `burst` (M2-S9): a
+      // burst+dot bundle is already rejected WHOLESALE by the clause above, so a
+      // `burst/aoe` + `dot` case can never reach this check — widening it here would
+      // be unreachable.
       if (
         effect.kind === 'dot' &&
         tower.effects.some((e) => e.kind === 'direct' && e.form === 'aoe')
@@ -518,17 +564,40 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
         `tower attack domain '${tower.attack.domain}' unsupported at simVersion ${v}`,
       );
     }
-    // FORM-UNIFORM (sv8, "one-shot-one-shape"): a tower's `direct` effects must be
-    // ALL single-target or ALL aoe, never mixed — one fire produces exactly one
-    // impact SHAPE (`combat.ts` builds either a `targeted` or a `blast` impact per
-    // tower, never both). Scoped to `kind === 'direct'` only (`burst`'s own form
-    // isn't reachable at sv8 — `allowedEffectKinds` already excludes it).
-    const directForms = new Set(
-      tower.effects.filter((e) => e.kind === 'direct').map((e) => e.form),
-    );
-    if (directForms.size > 1) {
+    // M2-S9: the enforcement site for `maxBurstTravelTicks`. A CADENCED tower's
+    // `travelTicks` is bounded by the schema's own `travelTicks < cadenceTicks` rule —
+    // which is what makes `MAX_IN_FLIGHT_IMPACTS` sizing hold (≤1 impact in flight per
+    // live tower). A burst bundle has no cadence, so that rule never runs and nothing
+    // else bounds the field; worse, a CONSUMED mine keeps its discharge resident while
+    // freeing its tower slot, so the residency no longer tracks live towers at all. See
+    // `capability.ts`'s own doc for the full derivation. Without this clause the profile
+    // field is dead code and a schema-legal `travelTicks: 1_000_000` burst tower compiles.
+    if (
+      tower.attack !== undefined &&
+      tower.effects.some((e) => e.kind === 'burst') &&
+      tower.attack.travelTicks > profile.maxBurstTravelTicks
+    ) {
       throw new RulesetError(
-        `tower '${tower.id}' mixes direct effect forms (single + aoe) — must be form-uniform at simVersion ${v}`,
+        `tower '${tower.id}' burst travelTicks ${tower.attack.travelTicks} exceeds ${profile.maxBurstTravelTicks} at simVersion ${v}`,
+      );
+    }
+    // FORM-UNIFORM (sv8, "one-shot-one-shape"): a tower's damage-carrying effects
+    // must be ALL single-target or ALL aoe, never mixed — one fire produces exactly
+    // one impact SHAPE (`combat.ts` builds either a `targeted` or a `blast` impact
+    // per tower, never both). Originally scoped to `kind === 'direct'` only, on the
+    // claim that "`burst`'s own form isn't reachable at sv8 — `allowedEffectKinds`
+    // already excludes it". That tripwire stops being true at sv13: `allowedEffectKinds`
+    // now admits `burst`, so a bundle of `direct/single` + `burst/aoe` used to slip
+    // through with `directForms.size === 1` — then `blastRadiusOf` found the aoe and
+    // built a blast, silently applying the `single` effect to every creep in the
+    // radius. M2-S9 widens the set to union `direct` AND `burst` forms, so one fire
+    // still produces exactly one impact shape regardless of which kind carries it.
+    const damageForms = new Set(
+      tower.effects.filter((e) => e.kind === 'direct' || e.kind === 'burst').map((e) => e.form),
+    );
+    if (damageForms.size > 1) {
+      throw new RulesetError(
+        `tower '${tower.id}' mixes damage effect forms (single + aoe) across its direct/burst effects — must be form-uniform at simVersion ${v}`,
       );
     }
     // RADIUS-UNIFORM: every `aoe` effect ON ONE TOWER (QC round-1 #10 — a prior
@@ -538,10 +607,15 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
     // exactly one radius, so the blast's radius is unambiguous (`frost-splash`,
     // S10, rides its `slow` on the SAME blast as its `aoe` damage — there must be
     // exactly one radius to draw that tower's blast from). Also enforces the
-    // profile's own radius ceiling per aoe effect (`maxAoeRadiusFp`).
+    // profile's own radius ceiling per aoe effect (`maxAoeRadiusFp`). Originally
+    // scoped to `direct/aoe` only — before the M2-S9 widening, a `burst/aoe`
+    // effect's `radiusFp` was never checked against the profile ceiling AT ALL, so a
+    // bundle could author `radiusFp: 1_000_000` (≈3906 tiles) and compile clean.
+    // Widened to cover `direct/aoe` AND `burst/aoe`, so both the radius-uniform set
+    // and the per-effect ceiling loop below now cover burst.
     const aoeEffects = tower.effects.filter(
-      (e): e is Extract<EffectDef, { kind: 'direct'; form: 'aoe' }> =>
-        e.kind === 'direct' && e.form === 'aoe',
+      (e): e is Extract<EffectDef, { kind: 'direct' | 'burst'; form: 'aoe' }> =>
+        (e.kind === 'direct' || e.kind === 'burst') && e.form === 'aoe',
     );
     const aoeRadii = new Set(aoeEffects.map((e) => e.radiusFp));
     if (aoeRadii.size > 1) {
@@ -737,6 +811,18 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     if (e.kind === 'direct' && e.form === 'aoe') {
       return { kind: 'aoe', amount: e.damage, radiusFp: e.radiusFp };
     }
+    // M2-S9: burst-ness is the tower's firing DISCIPLINE, not a property of the
+    // damage payload, so `CompiledEffect` gains NO new variant — this collapses
+    // `burst/aoe` into the SAME compiled `'aoe'` kind `direct/aoe` already produces,
+    // the identical transformation two lines up. The dividend: `blastRadiusOf`,
+    // `snapshotEffects`, the beacon buff, `BLAST_RADIUS_FP` and the ghost's blast
+    // preview all work on a burst tower unchanged. The `burst/single` arm below is
+    // UNREACHABLE under sv13's `allowedBurstForms: ['aoe']` — kept only so this
+    // function stays total, exactly like the defensive throw at its bottom.
+    if (e.kind === 'burst' && e.form === 'aoe') {
+      return { kind: 'aoe', amount: e.damage, radiusFp: e.radiusFp };
+    }
+    if (e.kind === 'burst' && e.form === 'single') return { kind: 'direct', amount: e.damage };
     if (e.kind === 'slow') return { kind: 'slow', mulFp: e.mulFp, durationTicks: e.durationTicks };
     if (e.kind === 'dot') {
       return {
@@ -776,23 +862,60 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
         support: { damageMulFp: supportEffect.damageMulFp },
       };
     }
-    const directEffect = towerDef.effects.find(
-      (e): e is Extract<EffectDef, { kind: 'direct' }> => e.kind === 'direct',
+    // M2-S9: `burst` is a damage payload too, so a burst-only bundle (the `mine`)
+    // legitimately carries no `direct` effect. Widened rather than exempted: the
+    // invariant this guard defends is "an attacking bundle deals damage", and burst
+    // satisfies it. Miss this and the shipped catalog stops compiling — a runtime
+    // RulesetError taking registry, parity and app boot with it.
+    const burstEffect = towerDef.effects.find(
+      (e): e is Extract<EffectDef, { kind: 'burst' }> => e.kind === 'burst',
     );
-    if (directEffect === undefined) {
+    const damageEffect =
+      towerDef.effects.find(
+        (e): e is Extract<EffectDef, { kind: 'direct' }> => e.kind === 'direct',
+      ) ?? burstEffect;
+    if (damageEffect === undefined) {
       throw new RulesetError(
-        `tower '${towerDef.id}' must have a direct effect (single or aoe) at simVersion ${SIM_VERSION}`,
+        `tower '${towerDef.id}' must have a direct or burst effect (single or aoe) at simVersion ${SIM_VERSION}`,
       );
     }
+    // NOT exempted for burst, deliberately: a burst bundle DOES carry an `attack` —
+    // that is where its trigger range lives — and `ruleset-schema.ts`'s
+    // `validateTowerDef` already requires it for every non-support bundle,
+    // burst included.
     if (towerDef.attack === undefined) {
       throw new RulesetError(
         `tower '${towerDef.id}' must have an attack at simVersion ${SIM_VERSION}`,
       );
     }
-    if (towerDef.attack.cadenceTicks === undefined) {
-      throw new RulesetError(
-        `tower '${towerDef.id}' attack.cadenceTicks is required at simVersion ${SIM_VERSION}`,
-      );
+    // The only one of these three guards that DOES get a burst exemption:
+    // `ruleset-schema.ts`'s `validateAttack` already rejects a burst bundle that
+    // CARRIES `cadenceTicks` (single-use, never fires twice), so the two rules meet
+    // exactly — burst ⇒ absent, cadenced ⇒ present. Written as an if/else (not a
+    // compound `burstEffect === undefined && cadenceTicks === undefined` guard) so
+    // TypeScript narrows `cadenceTicks` honestly in the branch below, with no `!`
+    // and no `as` on the value.
+    let attack: NonNullable<CompiledTower['attack']>;
+    if (burstEffect !== undefined) {
+      attack = {
+        mode: 'burst',
+        domain: towerDef.attack.domain,
+        rangeFp: towerDef.attack.rangeFp,
+        travelTicks: towerDef.attack.travelTicks,
+      };
+    } else {
+      if (towerDef.attack.cadenceTicks === undefined) {
+        throw new RulesetError(
+          `tower '${towerDef.id}' attack.cadenceTicks is required at simVersion ${SIM_VERSION}`,
+        );
+      }
+      attack = {
+        mode: 'cadenced',
+        domain: towerDef.attack.domain,
+        rangeFp: towerDef.attack.rangeFp,
+        cadenceTicks: towerDef.attack.cadenceTicks,
+        travelTicks: towerDef.attack.travelTicks,
+      };
     }
     return {
       id: towerDef.id,
@@ -805,12 +928,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       // practice, but a content author's error message is not a thing to change as a side
       // effect of adding a branch.
       effects: towerDef.effects.map((e) => compileEffect(e, towerDef.id)),
-      attack: {
-        domain: towerDef.attack.domain,
-        rangeFp: towerDef.attack.rangeFp,
-        cadenceTicks: towerDef.attack.cadenceTicks,
-        travelTicks: towerDef.attack.travelTicks,
-      },
+      attack,
     };
   });
   // Null-prototype record — see `creepById`'s doc for why (`__proto__` catalog ids).

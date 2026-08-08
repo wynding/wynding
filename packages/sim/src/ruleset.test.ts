@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { compileRuleset, RulesetError } from './ruleset';
-import { testBundle } from './test-support';
+import { testBundle, TEST_BURST_TOWER } from './test-support';
 
 const OPEN = {
   widthTiles: 9,
@@ -176,12 +176,25 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects an effect kind unsupported at simVersion 10 (valid schema, capability-gated)', () => {
-    // 'slow' (M2-S3), 'dot' (M2-S5a), and 'stun' (M2-S6) are all allowed now —
-    // 'burst' still isn't (no story has widened it).
-    rejects(
-      (b) =>
-        (b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 } as never]),
+  it('rejects a burst effect form unsupported at simVersion 13 (valid schema, capability-gated: allowedBurstForms)', () => {
+    // Before M2-S9, 'burst' wasn't in `allowedEffectKinds` at all, so ANY burst
+    // bundle tripped that gate first. At sv13 'burst' joins `allowedEffectKinds`
+    // (capability.ts's header comment — it now defers to the schema, exactly the
+    // v2 schema's own `EffectDef` enum), so the rejection witness moves to the
+    // narrower `allowedBurstForms: ['aoe']` ceiling. This mirrors
+    // capability.test.ts's own exhaustive boundary coverage of that gate — kept
+    // here too as an integration witness that the schema-wall-then-capability-wall
+    // wiring this file's header describes is actually live for the burst kind.
+    const b = base();
+    // A burst effect requires `cadenceTicks` omitted (single-use) — schema
+    // validation runs BEFORE the capability check, so the fixture must be
+    // schema-valid on its own for the capability gate to be what fires.
+    delete b.towerCatalog[0]!.attack!.cadenceTicks;
+    // No cast needed: `burst/single` is a legal `EffectDef` in the v2 schema — that is
+    // precisely why the profile's own `allowedBurstForms` ceiling has to reject it.
+    b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
+    expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
+      "burst effect form 'single' unsupported at simVersion 13",
     );
   });
 
@@ -281,6 +294,149 @@ describe('compileRuleset — tower catalog domains', () => {
     const b = base();
     b.towerCatalog[0]!.effects = [{ kind: 'direct', form: 'aoe', damage: 8, radiusFp: 2048 }];
     expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
+  });
+});
+
+describe('compileRuleset — burst (M2-S9 P2: the guard surgery + the two widened blind gates)', () => {
+  it('compiles a burst/aoe-only bundle: attack.mode is "burst" with no cadenceTicks key, and the effect collapses to the compiled "aoe" kind', () => {
+    const compiled = compileRuleset(testBundle(OPEN, { towers: [TEST_BURST_TOWER] }), 'test');
+    const mine = compiled.towerById['mine']!;
+    expect(mine.attack).toEqual({ mode: 'burst', domain: 'ground', rangeFp: 576, travelTicks: 1 });
+    expect('cadenceTicks' in mine.attack!).toBe(false);
+    expect(mine.effects).toEqual([{ kind: 'aoe', amount: 45, radiusFp: 640 }]);
+  });
+
+  it('a cadenced tower still compiles with attack.mode "cadenced" and its cadenceTicks intact — the negative control for the union', () => {
+    const compiled = compileRuleset(base() as Ruleset, 'test');
+    expect(compiled.towerById['basic']!.attack).toEqual({
+      mode: 'cadenced',
+      domain: 'ground',
+      rangeFp: 1024,
+      cadenceTicks: 30,
+      travelTicks: 4,
+    });
+  });
+
+  it('burst/aoe + slow compiles — a recorded decision, not a discovery', () => {
+    // Nothing in the widened form-uniform/radius-uniform gates rejects this: `slow`
+    // carries no form/radius of its own, `snapshotEffects` and the blast's status
+    // pass handle a `slow` member totally, and this is the IDENTICAL posture
+    // `direct/aoe + slow` already has at sv12 (which `frost-splash` makes shipped
+    // content at S10). The doctrine is this file's own: reject or record, never
+    // leave silent.
+    const b = testBundle(OPEN, {
+      towers: [
+        {
+          ...TEST_BURST_TOWER,
+          effects: [
+            { kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 },
+            { kind: 'slow', mulFp: 128, durationTicks: 40 },
+          ],
+        },
+      ],
+    });
+    expect(() => compileRuleset(b, 'test')).not.toThrow();
+  });
+
+  it('radius-matched direct/aoe + burst/aoe compiles, and the whole tower takes BURST discipline — a recorded decision, not a discovery', () => {
+    // Both effects are `aoe` and share one radius, so form-uniform and radius-uniform
+    // both pass, and there is no dot, so the burst+dot gate passes too. Nothing rejects
+    // it — which means the compiler makes a semantic CHOICE here, and an unpinned choice
+    // is exactly what this file's own doctrine calls a silent one: `burstEffect !==
+    // undefined` selects `mode: 'burst'` unconditionally, so the `direct` payload rides
+    // the burst tower's single-discharge-then-consume discipline rather than a cadence.
+    //
+    // Allowed and PINNED rather than rejected (ship-review, CodeRabbit on PR #90): it is
+    // the same posture `direct/aoe + slow` already has at sv12, both amounts land on the
+    // one blast the tower ever fires, and nothing about the composition is unsafe — it is
+    // simply a shape no shipped content uses. If a later story wants it rejected instead,
+    // this test is the thing that has to change, which is the point of writing it down.
+    const b = testBundle(OPEN, {
+      towers: [
+        {
+          ...TEST_BURST_TOWER,
+          effects: [
+            { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 640 },
+            { kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 },
+          ],
+        },
+      ],
+    });
+    const compiled = compileRuleset(b, 'test');
+    const mine = compiled.towerById['mine']!;
+    // BURST discipline for the whole tower — no `cadenceTicks` key at all.
+    expect(mine.attack).toEqual({ mode: 'burst', domain: 'ground', rangeFp: 576, travelTicks: 1 });
+    // Both payloads survive, in authored order, on the one blast it ever fires.
+    expect(mine.effects).toEqual([
+      { kind: 'aoe', amount: 8, radiusFp: 640 },
+      { kind: 'aoe', amount: 45, radiusFp: 640 },
+    ]);
+  });
+
+  it("rejects direct/single + burst/aoe on one tower — blind gate #1's witness (form-uniform)", () => {
+    // Before the S9 widening this bundle compiled clean: `directForms` only ever
+    // looked at `kind === 'direct'`, so `directForms.size === 1` (just 'single') —
+    // then `blastRadiusOf` found the `burst/aoe` effect and built a blast, silently
+    // applying the `single` effect's damage to every creep in the radius.
+    const b = testBundle(OPEN, {
+      towers: [
+        {
+          ...TEST_BURST_TOWER,
+          effects: [
+            { kind: 'direct', form: 'single', damage: 10 },
+            { kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 },
+          ],
+        },
+      ],
+    });
+    expect(() => compileRuleset(b, 'test')).toThrow('form-uniform');
+  });
+
+  it("rejects a burst/aoe radiusFp past maxAoeRadiusFp — blind gate #2's witness", () => {
+    // Before the S9 widening a burst radius was never checked against the profile
+    // ceiling at all — `aoeEffects` only ever looked at `direct/aoe`.
+    const b = testBundle(OPEN, {
+      towers: [
+        {
+          ...TEST_BURST_TOWER,
+          effects: [{ kind: 'burst', form: 'aoe', damage: 45, radiusFp: 2049 }],
+        },
+      ],
+    });
+    expect(() => compileRuleset(b, 'test')).toThrow('exceeds 2048');
+  });
+
+  it('rejects direct/aoe (radius 300) + burst/aoe (radius 301) on one tower — radius-uniform now spans both kinds', () => {
+    const b = testBundle(OPEN, {
+      towers: [
+        {
+          ...TEST_BURST_TOWER,
+          effects: [
+            { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
+            { kind: 'burst', form: 'aoe', damage: 45, radiusFp: 301 },
+          ],
+        },
+      ],
+    });
+    expect(() => compileRuleset(b, 'test')).toThrow('radii');
+  });
+
+  it('rejects burst/aoe + dot — the deliberate rejection, replacing the old accidental one', () => {
+    // Previously this rejected too, but ACCIDENTALLY: `cadenceTicks ?? 0` made the
+    // ratio ceiling 0 and the message named "its 0-tick attack cadence" — a false
+    // sentence, since a burst tower's cadence isn't 0, it doesn't have one.
+    const b = testBundle(OPEN, {
+      towers: [
+        {
+          ...TEST_BURST_TOWER,
+          effects: [
+            { kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 },
+            { kind: 'dot', damagePerTick: 2, cadenceTicks: 10, durationTicks: 60 },
+          ],
+        },
+      ],
+    });
+    expect(() => compileRuleset(b, 'test')).toThrow('combines a burst effect with a dot effect');
   });
 });
 

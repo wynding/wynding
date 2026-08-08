@@ -97,6 +97,20 @@ export const TEST_SWARM_CREEP: CreepDef = {
   bounty: 1,
 };
 
+/** The M2-S9 `burst` (`mine`) tower stat block — ground-scoped, a single `burst`
+ *  aoe effect and NO `cadenceTicks` (single-use), mirroring the shipped `mine` P4
+ *  will author. Trigger range 576 fp (2.25 tiles); blast radius 640 fp (2.5 tiles)
+ *  **centred on the tower's own footprint**, not on a target — the blast
+ *  deliberately reaches FURTHER than the trigger, so a creep that steps within
+ *  range and sets it off is still caught by the discharge even after it advances a
+ *  little before the blast lands. */
+export const TEST_BURST_TOWER: TowerDef = {
+  id: 'mine',
+  cost: 6,
+  attack: { domain: 'ground', rangeFp: 576, travelTicks: 1 }, // no cadenceTicks — single-use
+  effects: [{ kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 }],
+};
+
 /** Overrides for a test bundle (all optional). `waveCount`/`waveSpacing` name the
  *  ENTRY inside each wave (kept from M1 for call-site continuity — an unfortunate
  *  but pre-existing name collision with the new multi-wave `waves` option below);

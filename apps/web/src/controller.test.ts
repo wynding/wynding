@@ -162,6 +162,35 @@ describe('controller — input → command mapping', () => {
     tick(c); // step removes the tower; onTick reconciles the selection
     expect(c.frame().selection).toBeNull();
     expect(c.refundForSelection()).toBe(0);
+    // M2-S9: a SELL still announces `sold`, never `destroyed` — `sellSelected` clears the
+    // selection synchronously (it re-aims at the sold anchor), so the tick-time
+    // reconciliation branch that emits `destroyed` is never reached on this path. The
+    // negative control for the test below.
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'sold', refund: 3 });
+  });
+
+  it('a mine detonating under the selection announces `destroyed` — the only signal a non-sighted player gets (M2-S9)', () => {
+    const c = createController(1);
+    c.start();
+    // Off the lane but inside the mine's 2.25-tile trigger ring of it (the shipped board
+    // runs entrance (0,11) → exit (27,11)), so a wave-0 creep walking past trips it with
+    // no detour and no reliance on the mine being an obstacle.
+    c.armTower('mine');
+    c.aimAt(10, 9);
+    expect(c.confirm()).toBe(true);
+    tick(c);
+    expect(c.aimAt(10, 9).kind).toBe('tower'); // it stands, and it is SELECTED
+    expect(c.frame().selection).not.toBeNull();
+    // Advance until it detonates. Bounded, and asserted rather than assumed: a scenario
+    // where the mine never fires would otherwise pass this test vacuously.
+    let fired = 0;
+    while (c.frame().selection !== null && fired < 600) {
+      tick(c);
+      fired++;
+    }
+    expect(fired).toBeLessThan(600);
+    expect(c.frame().selection).toBeNull(); // the Panel closed on its own
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'destroyed' });
   });
 
   it('a first keyboard confirm (no prior hover, unarmed) is a silent no-op — nothing to confirm', () => {

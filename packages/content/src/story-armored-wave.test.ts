@@ -407,10 +407,19 @@ describe('`venom` is a specialist, not a strict upgrade — exact per-bounty ari
     // M2-S8 (sv12): `CompiledTower.attack` is optional — a support bundle carries
     // none. Both of these attack, so a missing attack is a broken fixture; name it
     // rather than let a non-null assertion turn it into an opaque TypeError later.
+    // M2-S9 (sv13): it is also a UNION on `mode` — a burst bundle carries a trigger
+    // range but no cadence at all. This whole test is shots-per-window arithmetic, so
+    // it is meaningful only for a CADENCED tower; narrow on `mode` for the same reason
+    // and in the same shape, so a catalog edit that turned `basic` or `venom` into a
+    // burst tower would fail loudly here instead of quietly dividing by `undefined`.
     const basicAttack = basic.attack;
     const venomAttack = venom.attack;
-    if (!basicAttack) throw new Error("expected the compiled 'basic' tower to attack");
-    if (!venomAttack) throw new Error("expected the compiled 'venom' tower to attack");
+    if (basicAttack?.mode !== 'cadenced') {
+      throw new Error("expected the compiled 'basic' tower to attack on a cadence");
+    }
+    if (venomAttack?.mode !== 'cadenced') {
+      throw new Error("expected the compiled 'venom' tower to attack on a cadence");
+    }
 
     const basicDirect = basic.effects.find((e) => e.kind === 'direct');
     const venomDirect = venom.effects.find((e) => e.kind === 'direct');
