@@ -71,6 +71,10 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       // definition (a forged/unresolved `creepId`) from throwing, matching the
       // adjacent HP join's own posture.
       warded: (def?.immunities.length ?? 0) > 0,
+      // Catalog join, like `warded` above — NOT sim state (M2-S10). `def` is already
+      // resolved above; the optional chain keeps an absent definition falling back to
+      // `false`, the same totality rail `warded`/`domain` already take.
+      boss: def?.role === 'boss',
     });
   }
 
@@ -139,6 +143,11 @@ function previewEntries(
       count,
       domain: def?.domain ?? 'ground',
       armor: def?.armor ?? 0,
+      // `?? 1` is unreachable from a genuinely compiled ruleset (mirrors
+      // `resolveCreepLeakCost`'s posture in `packages/sim/src/index.ts`) — kept as the
+      // safe fallback for the same forged/hand-built-ruleset defensiveness this join
+      // already takes on `domain`/`armor`/`immunities`.
+      leakCost: def?.leakCost ?? 1,
       immunities: def?.immunities ?? [],
     };
   });

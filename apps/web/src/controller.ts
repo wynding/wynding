@@ -423,11 +423,32 @@ export interface ControllerContent {
   readonly boardId: string;
 }
 
+/**
+ * PERF-ONLY instrumentation seam (M2-S10 P8, the ADR 0005 frame-time diagnosis). The
+ * controller's public surface is `advance()`; `step` and `deriveViewModel` are private
+ * inside `onTick`, so a wrapper around the returned `Controller` cannot bracket them —
+ * this optional hook pair is the only way to time the two spans without exposing them.
+ * Same spirit as {@link ControllerContent} and `AppDeps.sceneFactory`: an injectable
+ * seam that production code never supplies (`main.ts`'s `boot()` passes nothing, so
+ * production pays 4 optional-chain checks per tick and nothing else). The perf harness
+ * (`apps/web/perf/main-perf.ts`) passes `performance.mark`/`measure`-emitting hooks so
+ * a DevTools trace carries `wy:step`/`wy:derive` spans via `blink.user_timing`.
+ */
+export interface ControllerHooks {
+  begin(span: 'step' | 'derive'): void;
+  end(span: 'step' | 'derive'): void;
+}
+
 /** Create the game controller for `seed`. Content/ruleset are fixed (M1 single board)
  *  UNLESS `content` is supplied (perf-only, see {@link ControllerContent}) — omitting
  *  it is byte-identical in behaviour to before this seam existed:
- *  `getBundledRuleset()` then `defaultBoardId(bundle)`. */
-export function createController(seed: number, content?: ControllerContent): Controller {
+ *  `getBundledRuleset()` then `defaultBoardId(bundle)`. `hooks` is a second perf-only
+ *  seam (see {@link ControllerHooks}); production passes neither. */
+export function createController(
+  seed: number,
+  content?: ControllerContent,
+  hooks?: ControllerHooks,
+): Controller {
   const bundle = content?.bundle ?? getBundledRuleset();
   const boardId = content?.boardId ?? defaultBoardId(bundle);
   const ruleset = compileRuleset(bundle, boardId);
@@ -558,7 +579,9 @@ export function createController(seed: number, content?: ControllerContent): Con
     // concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
     // costs an increment only on the drop path.
     const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
+    hooks?.begin('step');
     state = step(state, ruleset, inputs, events);
+    hooks?.end('step');
     if (import.meta.env.DEV && (events.dotDropped ?? 0) > 0) {
       console.warn(
         `sim: ${String(events.dotDropped)} DoT application(s) dropped this tick — the ` +
@@ -572,7 +595,9 @@ export function createController(seed: number, content?: ControllerContent): Con
     // longer depend on `step` always advancing the tick.
     if (inputs.length > 0) bufferRev += 1;
     prevVm = curVm;
+    hooks?.begin('derive');
     curVm = deriveViewModel(state, ruleset);
+    hooks?.end('derive');
     for (const pt of events.impactPoints) pendingSparks.push(pt);
     for (const f of events.fired) tracers.push(f);
     // Reconcile the selection with the post-step world: if the selected tower was sold or

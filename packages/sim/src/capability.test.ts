@@ -50,6 +50,13 @@
 // exists to test a reject against — the witness this axis carried through sv12 is
 // retired here, and `allowedBurstForms` (genuinely narrower than the schema's
 // `single | aoe`) carries the replacement.
+//
+// `allowedRoles` (M2-S10 P1) joins this list too: it widens to `['boss']`, exactly
+// the v2 schema's own role enum (`CreepDef.role?: 'boss'`), so no second legal role
+// value exists to test a reject against. `requiredLeakCost` is deleted at the same
+// bump (a second lost witness — the "must be exactly 1" reject); `maxLeakCost`
+// (genuinely narrower than the schema's own 1..1000) carries the replacement for
+// both.
 
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
@@ -121,8 +128,8 @@ describe('capabilityProfile', () => {
     expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
   });
 
-  it('simVersion 13 is the burst-axis profile, deferring wave/economy/catalog-size/immunity/domain axes to the schema', () => {
-    expect(capabilityProfile(13)).toEqual({
+  it('simVersion 14 is the multi-life-leak profile, deferring wave/economy/catalog-size/immunity/domain/role axes to the schema', () => {
+    expect(capabilityProfile(14)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
       maxEntriesPerWave: 16,
@@ -133,9 +140,9 @@ describe('capabilityProfile', () => {
       allowedTowerDomains: ['ground', 'air', 'both'],
       allowedCreepDomains: ['ground', 'air'],
       allowedImmunities: ['slow', 'stun'],
-      allowedRoles: [],
+      allowedRoles: ['boss'],
       maxArmor: 16,
-      requiredLeakCost: 1,
+      maxLeakCost: 16,
       maxClearBonus: 1_000_000,
       maxEarlyCallBountyDivisor: 1_000_000,
       maxEarlyCallScoreDivisor: 1_000_000,
@@ -147,9 +154,10 @@ describe('capabilityProfile', () => {
       maxBurstTravelTicks: 8,
     });
     // Every prior version is deleted with each bump (G11, capability.ts's header) —
-    // sv12 misdescribes v13 tick code now (it could not compile a burst bundle),
-    // so it throws exactly like any other unknown version.
-    expect(() => capabilityProfile(12)).toThrow(RulesetError);
+    // sv13 misdescribes v14 tick code now (it could not compile a non-uniform-
+    // leakCost catalog or a 'boss' creep), so it throws exactly like any other
+    // unknown version.
+    expect(() => capabilityProfile(13)).toThrow(RulesetError);
   });
 
   it('the returned profile is deeply frozen (a mutation cannot widen the gate)', () => {
@@ -276,7 +284,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
       // schema-valid on its own for the capability gate to be what fires.
       delete b.towerCatalog[0]!.attack!.cadenceTicks;
       b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
-    }, "burst effect form 'single' unsupported at simVersion 13");
+    }, "burst effect form 'single' unsupported at simVersion 14");
   });
 
   it('maxBurstTravelTicks: exactly 8 accepted, 9 rejected (M2-S9)', () => {
@@ -294,7 +302,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
       b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 }];
     };
     compiles(burstBundle(8));
-    rejects(burstBundle(9), "tower 'basic' burst travelTicks 9 exceeds 8 at simVersion 13");
+    rejects(burstBundle(9), "tower 'basic' burst travelTicks 9 exceeds 8 at simVersion 14");
     // Scoped to BURST bundles only: a cadenced tower may still travel further, bounded
     // by its own cadence exactly as before. Deleting the `e.kind === 'burst'` leg of the
     // enforcement site would turn this case red.
@@ -316,7 +324,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     rejects((b) => {
       delete b.towerCatalog[0]!.attack;
       b.towerCatalog[0]!.effects = [{ kind: 'support', damageMulFp: 1025 }];
-    }, "tower 'basic' support damageMulFp 1025 exceeds 1024 at simVersion 13");
+    }, "tower 'basic' support damageMulFp 1025 exceeds 1024 at simVersion 14");
   });
 
   it('maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected', () => {
@@ -336,7 +344,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
       ];
-    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 13");
+    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 14");
   });
 
   it('MAX_DOT_RECORDS budgets (ratio + 1) per source, so compiled content can reach the rail but never exceed it', () => {
@@ -373,7 +381,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 241 },
       ];
-    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 13");
+    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 14");
   });
 
   // M2-S5a P8 (CodeRabbit, PR #78) — not a `capabilityProfile` field (the profile has
@@ -396,7 +404,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
       ];
-    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 13");
+    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 14");
   });
 
   it("allowedDirectForms: 'single' accepted, 'aoe' also accepted — no reject case exists (see header comment)", () => {
@@ -424,12 +432,9 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.immunities = ['slow', 'stun']));
   });
 
-  it("allowedRoles: [] — no role accepted, 'boss' rejected", () => {
+  it("allowedRoles: no role accepted, 'boss' also accepted — no reject case exists (M2-S10: allowedRoles widens to ['boss'], exactly the v2 schema's own role enum; see header comment)", () => {
     compiles(() => {});
-    rejects(
-      (b) => (b.creepCatalog[0]!.role = 'boss'),
-      "creep role 'boss' unsupported at simVersion 13",
-    );
+    compiles((b) => (b.creepCatalog[0]!.role = 'boss'));
   });
 
   it('maxArmor: 0 accepted, at the ceiling (16) accepted, one past it (17) rejected', () => {
@@ -437,21 +442,19 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.armor = 16)); // exactly the ceiling — accepted
     rejects(
       (b) => (b.creepCatalog[0]!.armor = 17),
-      "creep 'normal' armor 17 exceeds 16 at simVersion 13",
+      "creep 'normal' armor 17 exceeds 16 at simVersion 14",
     );
   });
 
-  it('requiredLeakCost: pins the VALUE (1), not merely uniformity', () => {
-    compiles((b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 1 }));
+  it('maxLeakCost: a mixed-cost catalog compiles, at the ceiling (16) accepted, one past it (17) rejected (M2-S10)', () => {
+    // A profile ceiling with no enforcement site is dead code — sv13's
+    // `requiredLeakCost` pinned every creep to exactly 1; sv14 lifts that to a
+    // per-creep ceiling, so a NON-uniform catalog within it is the new accept case.
+    compiles((b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 }));
+    compiles((b) => (b.creepCatalog[0]!.leakCost = 16)); // exactly the ceiling — accepted
     rejects(
-      (b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 }),
-      "creep 'other' leakCost 2 unsupported at simVersion 13 (must be 1)",
-    );
-    // Uniform-but-nonzero must ALSO reject — m2.md pins "leakCost = 1 until S10";
-    // a whole catalog at 2 is still content this sim build cannot simulate.
-    rejects(
-      (b) => (b.creepCatalog[0]!.leakCost = 2),
-      "creep 'normal' leakCost 2 unsupported at simVersion 13 (must be 1)",
+      (b) => (b.creepCatalog[0]!.leakCost = 17),
+      "creep 'normal' leakCost 17 exceeds 16 at simVersion 14",
     );
   });
 
@@ -551,7 +554,7 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     const b = bundleWithSpec(OVERSIZED, { withAirCreep: true, flies: false, creepSpeedFp: 1000 });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 13 (the catalog contains an air creep)`,
+      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 14 (the catalog contains an air creep)`,
     );
   });
 
@@ -573,7 +576,7 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 13 (the catalog contains an air creep)`,
+      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 14 (the catalog contains an air creep)`,
     );
   });
 

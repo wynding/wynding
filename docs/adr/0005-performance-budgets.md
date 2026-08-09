@@ -7,7 +7,8 @@
   not extended for the stun story; see the Amendment below); 2026-08-05 (M2-S6 QC —
   numerator p95 → p50, `TOLERANCE` 1.10, `R0` re-recorded 1.42 → 1.00, **provisional**);
   2026-08-06 (M2-S7 — the stress scene is not extended for the air story; see the
-  Amendment below)
+  Amendment below); 2026-08-08 (M2-S10 P8 — the frame-time diagnosis the 2026-07-31
+  ruling ordered ran; see the Finding at the end of this document)
 - **Rulings:** 2026-07-31 (all three findings answered; see Findings from the spike)
 
 ## Context
@@ -369,8 +370,10 @@ tell a budget that does not exist from one that could not be measured.
    percentile choice can fix that: under p99 the same run would have sat 1.8% under its own
    ceiling, equally marginal. So this finding's original "the numerator absorbs the tail
    noise" reasoning was aiming at the wrong thing, and whatever eventually fixes this gate
-   must target the stress arm's run-to-run **level**. The perf diagnosis remains unassigned
-   (S6–S10).
+   must target the stress arm's run-to-run **level**. ~~The perf diagnosis remains unassigned
+   (S6–S10).~~ **The frame-time diagnosis ran at S10 (M2-S10 P8, 2026-08-08) — see the
+   Finding at the end of this document.** (The run-to-run level shift in THIS finding
+   remains unexplained and was explicitly out of the diagnosis's scope.)
 
    **AMENDED 2026-08-05 (M2-S6 QC) — the numerator moved to p50, `TOLERANCE` tightened to
    1.10, and the MAGNITUDE of the spread left unexplained above is now accounted for**
@@ -771,3 +774,173 @@ the p50 re-baseline.
   finalized with the spike. — **Corrected 2026-07-30 (M2-S4b): the harness is
   finalized; the reference device is NOT. It is provisional emulation until S11's
   real-device pass (Amendment, (b) and (c)).**
+
+## Finding — 2026-08-08 (M2-S10 P8): where the frame time actually goes
+
+The diagnosis the 2026-07-31 ruling ordered ("establishing where the frame time actually
+goes", before S11) ran at S10, the last story in its window. It is a MEASUREMENT, not an
+optimisation: nothing found here was acted on, per the ruling's own sequencing — S11's
+real-device pass is where action belongs.
+
+**Scope, narrowed on purpose.** This diagnosis covers **the renderer's hot path on the
+unchanged controlled stress scene** — `stress-runner`/`stress-armored` and five
+`stress-*` towers at 150 towers / ~300 creeps — which is what this ADR's budget has
+always been about. The stress bundle contains **no `boss` and no `frost-splash`**, and it
+was deliberately not extended: changing the scene changes the perf workload, and `R0` is
+a pinned baseline that is never re-recorded for a diagnosis. S10's own render additions
+(one boolean catalog join, one size scale factor, one footprint-mark arm — all O(1) per
+entity) are therefore **not measured here**.
+
+**Method (reproducible).** `WY_TRACE=1 pnpm -C apps/web run perf:e2e` records a DevTools
+trace per pinned emulation profile via CDP (`Tracing.start`, `transferMode:
+'ReturnAsStream'`), started during warm-up ≥ 1s before the 10s sampling window;
+`node scripts/analyze-trace.mjs test-results/wy-trace-<profile>.json` (in `apps/web`)
+post-processes it. Environment for the recorded runs: Chrome 149.0.7827.55, ANGLE Metal
+(Apple M4 Pro), the two pinned profiles (6× / 2× CPU throttle), display cadence 8.3 ms
+(120 Hz — both profiles' cadence calibration out-of-band, which affects only the
+missed-refresh signal, not this diagnosis). Method rules, all validated against these
+traces:
+
+- **Trace categories:** `devtools.timeline` (the not-disabled-by-default one — without
+  it `Layout`/`Paint`/`FunctionCall`/`FireAnimationFrame`/`MinorGC` come back empty),
+  `disabled-by-default-devtools.timeline`, `disabled-by-default-devtools.timeline.frame`,
+  `blink.user_timing`, `disabled-by-default-v8.gc`, `gpu`, and
+  `disabled-by-default-v8.cpu_profiler` (ruling 7 — name functions, not just the lump).
+  `toplevel` is deliberately excluded: `ThreadControllerImpl::RunTask` nests around
+  `RunTask` and double-counts under name-based bucketing.
+- **Attribution window ≠ trace window:** all attribution is clipped to the
+  `wy:window:start`/`wy:window:end` marks the harness emits around the sampling window;
+  warm-up (including `cpu_profiler`'s one-off V8 attach storm on the first traced
+  `step`) and teardown are discarded, not bucketed.
+- **Markers:** `wy:step`/`wy:derive` via `createController`'s perf-only `ControllerHooks`
+  seam, `wy:draw` by wrapping the `RenderHandle` in `main-perf.ts`'s `sceneFactory`;
+  surfaced as `blink.user_timing` `ph:'b'`/`'e'` async pairs and synthesized by FIFO
+  matching per name (0 unmatched pairs in both traces). They are never `X` events with
+  `dur`.
+- **Bucketing on SELF (exclusive) time** by event name, on `CrRendererMain` (identified
+  via `TracingStartedInBrowser`'s `frames[]` url match — `process_labels` metadata was
+  again absent). `RunTask` `ph:'I'` zero-duration variants are skipped; trailing
+  unmatched `ph:'B'` events at trace end are closed at trace end and counted (3 in each
+  trace).
+- **Shares, not absolute times:** a traced run is perturbed by definition (frame times
+  under tracing are worse than the untraced S4b figures), so everything below is a share
+  of main-thread busy time — never a traced absolute against an untraced budget.
+
+**Event-name → bucket table** (the reproducibility record; `analyze-trace.mjs` is its
+executable form):
+
+| bucket          | event names (self time)                                                                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| script          | `FireAnimationFrame`, `FunctionCall`, `RunMicrotasks`, `EvaluateScript`, `v8.callFunction`, `TimerFire`, `EventDispatch`                                                          |
+| layout          | `Layout`, `UpdateLayoutTree`, `PrePaint`, `Layerize`, `HitTest`                                                                                                                   |
+| paint           | `Paint`, `UpdateLayer`                                                                                                                                                            |
+| compositing     | `Commit`, `BeginCommitCompositorFrame`, `BeginMainThreadFrame`                                                                                                                    |
+| gc              | `MinorGC`, `MajorGC`, `V8.GC_*` (dominated by `V8.GC_SCAVENGER`)                                                                                                                  |
+| task-overhead   | `RunTask` self time                                                                                                                                                               |
+| instrumentation | `UserTiming::Measure` / `UserTiming::Mark` — the marker CALL cost, not the span. Observed to carry cat `devtools.timeline`, NOT `blink.user_timing`, so they are bucketed by name |
+| unclassified    | everything else, reported by name, never dropped                                                                                                                                  |
+
+**Results (2026-08-08, one recorded run per profile).** `CrRendererMain` is essentially
+saturated on both profiles: busy **99.97%** of the window (mid-range) / **99.92%**
+(low-end). Buckets, as shares of main-thread busy time:
+
+| bucket (self time)             | mid-range | low-end |
+| ------------------------------ | --------- | ------- |
+| script                         | 95.58%    | 93.08%  |
+| gc                             | 1.69%     | 2.17%   |
+| layout                         | 1.48%     | 2.70%   |
+| task-overhead (`RunTask` self) | 0.51%     | 0.88%   |
+| paint                          | 0.40%     | 0.60%   |
+| compositing                    | 0.19%     | 0.23%   |
+| instrumentation                | 0.05%     | 0.15%   |
+| unclassified                   | 0.10%     | 0.19%   |
+
+**Signed residual (buckets + unclassified vs main-thread busy time): +0.000% on both
+profiles**, within the pinned ±2% tolerance. Honesty note on what that figure can and
+cannot say in this implementation: self times telescope to the top-level task sum by
+construction, so the residual here detects **top-level double-counting or overlap**
+(exactly the failure `toplevel`'s nesting wrapper would cause) rather than mis-nesting
+inside a task. The 2026-08-08 pilot's post-processor read 100.4% / 101.2% on the same
+check; this implementation's cleaner closure is a divergence recorded below, not a
+superior result.
+
+**The `FireAnimationFrame` split — the answer.** Three rAF chains run per display frame
+(equal counts per chain in-window: 269 each on mid-range, 81 each on low-end). Inclusive
+time per chain, as a share of main-thread busy time:
+
+| rAF chain                                    | mid-range  | low-end    |
+| -------------------------------------------- | ---------- | ---------- |
+| Phaser's internal loop (no `wy:draw` inside) | **92.09%** | **85.02%** |
+| the app's loop (`wy:draw` nests inside)      | 5.27%      | 10.51%     |
+| the sampler's loop                           | 0.08%      | 0.09%      |
+
+**Classification rule, stated in full so the split is reproducible.** Only the APP's chain
+is identified by the documented nesting rule (a `wy:draw` measure falls inside the
+`FireAnimationFrame`). The two chains with no `wy:draw` inside them — Phaser's and the
+sampler's — are separated from each other by a **duration threshold of 2 ms**
+(`apps/web/scripts/analyze-trace.mjs`): the sampler's callback only reads counters and
+runs ~0.01 ms, while Phaser's renders the scene graph. The headline 92.09% / 0.08% split
+depends on that constant, so it is recorded here rather than left in the script. The three
+chains' equal in-window counts (269/269/269, 81/81/81) are the independent check that the
+partition is clean.
+
+The app's own three spans confirm the split from the other side: `wy:step` 2.37% of busy
+(p50 1.124 ms), `wy:draw` 1.90% (p50 0.686 ms), `wy:derive` 0.23% (p50 0.058 ms) on
+mid-range — **4.50% combined** (9.12% on low-end: 6.38% / 2.05% / 0.69%, `wy:step` p50
+3.084 ms under the 6× throttle). The S4b spike's conclusion sharpens rather than moves:
+the sim is not where the frame time goes, and neither is the app's draw call —
+`RenderHandle.draw` only re-records Graphics command lists; `Phaser.Game` then renders
+the scene graph in its own rAF loop, and that loop is where ~9 of every 10 busy
+milliseconds are spent.
+
+**Named functions (ruling 7, `cpu_profiler` self time, mid-range).** Phaser's method
+names survive minification: `batchLine` 11.27%, `batchQuad` 9.17%, `batchFillPath`
+8.15%, `batchStrokePath` 3.59%, `bufferSubData` 1.04%, `bufferData` 0.99%, `render`
+1.00% — ~35% of main-thread busy time in named Phaser WebGL batching/upload methods
+alone, i.e. **CPU-side tessellation of Graphics geometry and vertex-buffer upload**. The
+largest frames are minified (`c` 22.14%, `r` 13.45%, `i` 11.88%, `T` 6.18%); they sit
+under the same Phaser-internal rAF chain per the split above, but this finding does not
+name what it cannot read. Low-end ranks the same names in the same order. Not sim, not
+GC (1.7–2.2%), not layout (1.5–2.7%), not paint (0.4–0.6%), not compositing (~0.2%), not
+the GPU process (2.93% mid-range — the workstation GPU is nowhere near saturated).
+
+**Non-additive side measures** (reported separately, never summed with the buckets):
+renderer `Compositor` thread 0.72% / 0.39% of the window; GPU process `CrGpuMain` 2.93%
+/ 1.24%; main-thread idle 0.03% / 0.08%. `ThreadPoolForegroundWorker` (parallel GC,
+`RasterTask`) observed and excluded, as in the pilot.
+
+**Divergences from the 2026-08-08 pilot's pins, each corrected against these traces:**
+
+1. **Signed residual +0.000% both profiles vs the pilot's +0.4% / +1.2%.** Same sign
+   family (non-negative), both within ±2%; the difference is implementation — see the
+   honesty note above. Recorded, not reconciled away.
+2. **GPU process busy 1.24% on low-end vs the pilot's 2.6–3.2% band** (mid-range's
+   2.93% reproduces the band). Corrected to the observed value; plausibly the smaller
+   low-end viewport (740×360) at work, but no cause is claimed.
+3. **Low-end three-span share 9.12% vs the pilot's 8.8%**; mid-range 4.50% vs 4.4%.
+   Own-trace values recorded.
+4. **Phaser-internal chain 85.02% on low-end** against the pilot's "~92%" (which these
+   traces reproduce exactly on mid-range, 92.09%): under the 6× throttle the app chain
+   grows to 10.51% because `wy:step` costs 3.08 ms p50 there. Recorded as measured.
+5. **Instrumentation cost is visible at this throttle**: the sampled profiler attributes
+   0.99% (mid) / 1.56% (low-end) of busy self time to the `measure` function — well
+   above the pilot's ~5.6 µs per traced measure, and well above the timeline's own
+   `UserTiming::Measure` X events (0.05% / 0.15%), which cover only part of the call.
+   The markers are perf-build-only, so nothing ships; recorded so a future reader does
+   not mistake `measure` in a profile for app work.
+6. **Trailing unmatched `ph:'B'`: 3 per trace** vs the pilot's "a trailing unmatched
+   `ph:'B'`" (singular). Handled identically (closed at trace end), count recorded.
+
+**The cross-ADR tension, recorded and NOT acted on.** The answer lands where the pilot
+pointed: the frame budget is spent CPU-tessellating stroked/filled Graphics and
+uploading WebGL batches inside Phaser's own render loop. That sits directly against ADR
+0003's cue architecture, which is stroked Graphics almost throughout — seven concentric
+cue rings, eight footprint marks, chevrons, wingspans, wards — and whose accessibility
+vocabulary chose shape and stroke over colour deliberately. The frame budget may be
+paying for that choice. **This finding proposes nothing**: weighing an accessibility
+architecture against a performance budget is an owner decision on S11's real-device
+evidence, not a content story's to pre-empt.
+
+**Out of scope, per the packet:** optimising anything named here, and Finding 3's
+still-unexplained run-to-run level shift (see the 2026-08-05 amendment above), which
+this diagnosis did not touch.

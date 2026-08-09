@@ -145,6 +145,7 @@ const TOWER_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assig
     antiair: () => t('tower.antiair.name'),
     beacon: () => t('tower.beacon.name'),
     mine: () => t('tower.mine.name'),
+    'frost-splash': () => t('tower.frost-splash.name'),
   } satisfies Record<string, () => string>,
 );
 
@@ -900,6 +901,18 @@ export function createOverlay(
       readonly chance: string;
       readonly duration: string;
     } | null;
+    /** The slow's speed reduction (derived from the effect's own `mulFp`, `(256 −
+     *  mulFp) / 256`, as a percent — NEVER hardcoded, so `frost-splash` prints the true
+     *  30.1%, not a rounded "30%": 0.7 × 256 = 179.2 is not an integer, and the catalog
+     *  stores 179) and duration (seconds, matching `fireRate`/`dot`/`stun`'s own
+     *  tick→second conversion) — `null` for a tower with no `slow` effect. Fixes a
+     *  pre-existing gap: `slow`'s own tower shipped since M2-S3 with no Panel row at all
+     *  (m2.md ruling 5, M2-S10). NOT buff-aware, matching `stun`'s own posture above and
+     *  m2.md:101 ("non-damage magnitudes and durations … are never buffed"). */
+    readonly slow: {
+      readonly percent: string;
+      readonly duration: string;
+    } | null;
     /** The tower's firing discipline (M2-S9), `null` when it does not attack at all
      *  (the `beacon` support case, same posture `damage`/`rangeTiles`/`fireRate`/
      *  `targets` already take). ONE field rather than two booleans (a "is trigger
@@ -971,6 +984,7 @@ export function createOverlay(
     const aoeEffect = def?.effects.find((e) => e.kind === 'aoe');
     const dotEffect = def?.effects.find((e) => e.kind === 'dot');
     const stunEffect = def?.effects.find((e) => e.kind === 'stun');
+    const slowEffect = def?.effects.find((e) => e.kind === 'slow');
     return {
       name: towerName(towerId),
       cost: def?.cost ?? 0,
@@ -1026,6 +1040,17 @@ export function createOverlay(
               // fixed-point scale, so a change to either would silently corrupt the other.
               chance: formatNumber((stunEffect.chanceNum / 256) * 100),
               duration: formatNumber(stunEffect.durationTicks / TICKS_PER_SECOND),
+            },
+      slow:
+        slowEffect === undefined
+          ? null
+          : {
+              // 256 here is the same fixed-point base `effectiveSpeedFp` divides by
+              // (ruleset-shared.ts) — NOT buffed, matching `stun`'s posture above: this is
+              // a derivation off the catalog's own `mulFp`, never a hardcoded round number,
+              // so `frost-splash`'s 179 (not a clean 179.2) prints 30.1%, not 30%.
+              percent: formatNumber(((256 - slowEffect.mulFp) / 256) * 100),
+              duration: formatNumber(slowEffect.durationTicks / TICKS_PER_SECOND),
             },
       attackMode: def?.attack?.mode ?? null,
     };
@@ -1087,6 +1112,14 @@ export function createOverlay(
             t('panel.stun', {
               chance: stats.stun.chance,
               duration: stats.stun.duration,
+            }),
+          ]),
+      ...(stats.slow === null
+        ? []
+        : [
+            t('panel.slow', {
+              percent: stats.slow.percent,
+              duration: stats.slow.duration,
             }),
           ]),
     ];
@@ -1278,6 +1311,8 @@ export function createOverlay(
       armored: () => t('creep.armored.name'),
       resolute: () => t('creep.resolute.name'),
       flying: () => t('creep.flying.name'),
+      boss: () => t('creep.boss.name'),
+      'armored-flyer': () => t('creep.armored-flyer.name'),
     } satisfies Record<string, () => string>, // QC r3: same rationale as `TOWER_NAME`
   );
   // PURE name derivation — no side effects: the render-skip sentinel calls this
@@ -1317,8 +1352,10 @@ export function createOverlay(
     stun: () => t('hud.preview.immunity.stun'),
   };
 
-  /** "{count} × {name} — {domain}, armor {n}, {immunities}" (PLAN.md P3 step 17), never
-   *  colour/icon-only. */
+  /** "{count} × {name} — {domain}, armor {n}, leak cost {n}, {immunities}" (M2-S10 ruling
+   *  3), never colour/icon-only. Leak cost is an ALWAYS-PRESENT stat slot, mirroring
+   *  `armor` — not conditional on being > 1 — following the `hud.preview.immunities.none`
+   *  precedent (name the zero case, i.e. the boring value, rather than omit the slot). */
   function previewEntryText(entry: PreviewEntryVM): string {
     const domain = DOMAIN_NAME[entry.domain]();
     const immunities =
@@ -1330,6 +1367,7 @@ export function createOverlay(
       name: creepName(entry.creepId),
       domain,
       armor: t('hud.preview.armor', { armor: entry.armor }),
+      leakCost: t('hud.preview.leakCost', { leakCost: entry.leakCost }),
       immunities,
     });
   }
@@ -1351,7 +1389,10 @@ export function createOverlay(
       preview.kind === 'lastWave'
         ? 'last'
         : `${preview.waveNumber}/${preview.waveCount}:${preview.entries
-            .map((e) => `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.immunities.join('+')}`)
+            .map(
+              (e) =>
+                `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.leakCost}:${e.immunities.join('+')}`,
+            )
             .join('|')}`;
     // Locale self-heal: the key is CONTENT-only, so a runtime
     // locale/catalog change would otherwise leave stale-language DOM until the wave

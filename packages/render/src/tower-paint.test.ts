@@ -32,11 +32,24 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
   it('draws mine with a distinct charge mark (M2-S9) — never reuses any prior mark', () => {
     expect(towerFootprintMarkFor('mine')).toBe('charge');
   });
+  it('draws frost-splash with a distinct ringed-crosshair mark (M2-S10) — never reuses any prior mark', () => {
+    expect(towerFootprintMarkFor('frost-splash')).toBe('ringed-crosshair');
+  });
   it('assigns every shipped tower a DISTINCT mark — no two towers ever share one', () => {
     // The per-story `not.toBe` chains above only ever compare against the marks that
     // existed at the time; this asserts the invariant itself, so a future story that
     // reuses an existing mark fails here rather than in a reader's eye.
-    const ids = ['basic', 'slow', 'splash', 'venom', 'stun', 'antiair', 'beacon', 'mine'];
+    const ids = [
+      'basic',
+      'slow',
+      'splash',
+      'venom',
+      'stun',
+      'antiair',
+      'beacon',
+      'mine',
+      'frost-splash',
+    ];
     const marks = ids.map(towerFootprintMarkFor);
     expect(new Set(marks).size).toBe(ids.length);
   });

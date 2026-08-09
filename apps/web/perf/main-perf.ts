@@ -26,7 +26,34 @@ import { STRESS_RULESET_URL, STRESS_BOARD_ID } from '@wynding/content/stress';
 import { stressAnchors, towerIdAt, BUILD_TICKS, PLACEMENTS_PER_TICK } from '@wynding/perf';
 import { mount as mountScene } from '@wynding/render/scene';
 import { createApp } from '../src/main';
-import { createController, type Controller } from '../src/controller';
+import { createController, type Controller, type ControllerHooks } from '../src/controller';
+
+// ---- M2-S10 P8: semantic trace markers (perf-build only — this module never ships) ----
+//
+// The ADR 0005 frame-time diagnosis reads a minified bundle's DevTools trace, which
+// cannot be read by function name. `performance.mark`/`measure` pairs bracket the three
+// spans that matter — `wy:step`, `wy:derive` (via `ControllerHooks`, the seam
+// `controller.ts` documents) and `wy:draw` (by wrapping the `RenderHandle` the scene
+// factory returns — `draw` is public on the handle, so wrapping alone is enough there).
+// They surface in a trace via the `blink.user_timing` category as `ph:'b'`/`'e'` async
+// pairs. Also emitted: `wy:window:start`/`wy:window:end` marks bracketing the sampling
+// window, so the trace post-processor clips attribution to the measured interval and
+// discards warm-up (including the one-off V8 attach storm `cpu_profiler` causes) and
+// teardown. Cost when no trace is recording: one mark + one measure call per span per
+// tick/frame, measured at ~2µs/frame in the pilot — negligible against a 16.7ms budget.
+const SPAN_MARK_PREFIX = 'wy:';
+
+function beginSpan(name: string): void {
+  performance.mark(`${SPAN_MARK_PREFIX}${name}:b`);
+}
+function endSpan(name: string): void {
+  performance.measure(`${SPAN_MARK_PREFIX}${name}`, `${SPAN_MARK_PREFIX}${name}:b`);
+}
+
+const controllerHooks: ControllerHooks = {
+  begin: (span) => beginSpan(span),
+  end: (span) => endSpan(span),
+};
 
 /**
  * The perf-only measurement surface, read by `e2e-perf/stress.perf.spec.ts` via
@@ -156,7 +183,25 @@ async function main(): Promise<void> {
   // below completes.
   let controller!: Controller;
   createApp(document, root, {
-    sceneFactory: mountScene,
+    // P8: a delegating wrapper around the real Phaser mount, bracketing `draw` with the
+    // `wy:draw` measure. `RenderHandle` is `{draw, reset, destroy}`; only `draw` is
+    // timed — `reset`/`destroy` never run inside the sampled window.
+    sceneFactory: (el, geometry) => {
+      const handle = mountScene(el, geometry);
+      return {
+        draw: (prevVm, curVm, alpha, overlay): void => {
+          beginSpan('draw');
+          handle.draw(prevVm, curVm, alpha, overlay);
+          endSpan('draw');
+        },
+        reset: (): void => {
+          handle.reset();
+        },
+        destroy: (): void => {
+          handle.destroy();
+        },
+      };
+    },
     schedule: (onFrame: (nowMs: number) => void) => {
       let id = 0;
       const loop = (now: number): void => {
@@ -169,7 +214,7 @@ async function main(): Promise<void> {
     now: () => performance.now(),
     seed: 1234,
     controllerFactory: () => {
-      controller = createController(1234, { bundle, boardId: STRESS_BOARD_ID });
+      controller = createController(1234, { bundle, boardId: STRESS_BOARD_ID }, controllerHooks);
       return controller;
     },
   });
@@ -201,6 +246,10 @@ async function main(): Promise<void> {
     inputLatencies: [],
     startSampling(ms: number): Promise<void> {
       perf.frameDeltas = [];
+      // P8: sample-boundary marks. The trace post-processor clips ALL attribution to
+      // the [wy:window:start, wy:window:end] interval — tracing itself starts earlier
+      // (during warm-up), so the V8 attach storm lands outside anything attributed.
+      performance.mark('wy:window:start');
       return new Promise((resolve) => {
         let last = performance.now();
         const start = last;
@@ -208,7 +257,10 @@ async function main(): Promise<void> {
           perf.frameDeltas.push(now - last);
           last = now;
           if (now - start < ms) requestAnimationFrame(step);
-          else resolve();
+          else {
+            performance.mark('wy:window:end');
+            resolve();
+          }
         };
         requestAnimationFrame(step);
       });

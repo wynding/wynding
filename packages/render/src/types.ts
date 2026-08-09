@@ -12,6 +12,10 @@ export interface PreviewEntryVM {
   readonly count: number;
   readonly domain: 'ground' | 'air';
   readonly armor: number;
+  /** The creep's per-leak lives cost (M2-S10 ruling 3) — an ALWAYS-PRESENT stat slot
+   *  mirroring `armor`, never conditional on being > 1. `?? 1` at the join site is the
+   *  safe fallback for a forged/unresolved `creepId`, matching `armor`'s `?? 0` posture. */
+  readonly leakCost: number;
   readonly immunities: readonly ('slow' | 'stun')[];
 }
 
@@ -68,6 +72,14 @@ export interface CreepVM {
    *  tick-to-tick for a given creep. `false` for a forged/unresolved `creepId` (the
    *  same total-over-absent-definition posture `hpFrac`'s join already takes). */
   readonly warded: boolean;
+  /** Whether `creepId`'s catalog definition carries `role === 'boss'` (M2-S10) — a
+   *  catalog JOIN, exactly like `domain`/`warded` above, NOT sim state: this never
+   *  changes tick-to-tick for a given creep. Drives the boss size cue
+   *  (`board-draw.ts`'s `BOSS_SCALE`) — role stays a pure axis rather than a fourth
+   *  `CreepShape`, so it composes if a boss variant ever appears (ruling 2). `false`
+   *  for a forged/unresolved `creepId` (the same total-over-absent-definition posture
+   *  `warded`'s join already takes). */
+  readonly boss: boolean;
 }
 
 /** One tower as the renderer sees it: its 2×2 anchor cell. */

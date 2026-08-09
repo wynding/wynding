@@ -35,6 +35,7 @@ export function interpolateCreeps(prev: RenderVM | null, cur: RenderVM, alpha: n
         poisoned: c.poisoned, // status snaps to current, like slowed (no visual value blending it)
         stunned: c.stunned, // status snaps to current, like slowed/poisoned (no visual value blending it)
         warded: c.warded, // catalog join, invariant for a given creepId — carried through unchanged
+        boss: c.boss, // catalog join, invariant for a given creepId — carried through unchanged
       });
     }
   }

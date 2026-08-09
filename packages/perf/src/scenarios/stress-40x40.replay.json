@@ -2,7 +2,7 @@
   "seed": 1234,
   "boardId": "stress-40x40",
   "rulesetHash": "99a45084c1cedecb49dbb95f12dac13bd39d11a1273d63e4de59720f3167c046",
-  "simVersion": 13,
+  "simVersion": 14,
   "tickInputs": [
     [
       {

@@ -183,6 +183,23 @@ describe('overlay — HUD readout', () => {
     expect(shell.hud.wave.root.isConnected).toBe(true);
   });
 
+  // M2-S10 ruling 4: the HUD shows the TRUE lives value, negatives included — a
+  // deliberate "change nothing" decision (`hud.lives` already interpolates `{count}`
+  // raw), pinned here so a later clamp or format regression would actually be caught.
+  // Existing coverage above pins only `Lives: 10`, never a negative.
+  it('renders a negative lives count raw, uncapped (M2-S10 ruling 4 — a boss single-leak overshoot)', () => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({ lives: -1 }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(shell.hud.lives.full.textContent).toBe('Lives: -1');
+    expect(shell.hud.lives.glance.textContent).toBe('♥ -1');
+  });
+
   it('reflects pause/speed state on the controls', () => {
     const { overlay, pauseBtn, speedBtn } = setup();
     overlay.update({
@@ -220,7 +237,7 @@ describe('overlay — HUD readout', () => {
 });
 
 describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19)', () => {
-  it('renders the title + one accessible-text row per entry: "{count} × {name} — {domain}, armor {n}, {immunities}", with explicit none-states', () => {
+  it('renders the title + one accessible-text row per entry: "{count} × {name} — {domain}, armor {n}, leak cost {n}, {immunities}", with explicit none-states', () => {
     const { overlay, shell } = setup();
     overlay.update({
       hud: hud({
@@ -228,7 +245,16 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming',
           waveNumber: 2,
           waveCount: 3,
-          entries: [{ creepId: 'normal', count: 10, domain: 'ground', armor: 0, immunities: [] }],
+          entries: [
+            {
+              creepId: 'normal',
+              count: 10,
+              domain: 'ground',
+              armor: 0,
+              leakCost: 1,
+              immunities: [],
+            },
+          ],
         },
       }),
       paused: false,
@@ -240,7 +266,39 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     expect(shell.preview.title.textContent).toBe('Wave 2 of 3');
     const items = [...shell.preview.list.querySelectorAll('li')];
     expect(items).toHaveLength(1);
-    expect(items[0]!.textContent).toBe('10 × Creep — ground, armor 0, no immunities');
+    expect(items[0]!.textContent).toBe('10 × Creep — ground, armor 0, leak cost 1, no immunities');
+  });
+
+  // M2-S10 ruling 3: leak cost is an ALWAYS-PRESENT stat slot, not conditional on being
+  // > 1 — pinned here against the boss's real leakCost 3, so a leak-cost-1-only test
+  // suite could not hide a "only show when > 1" regression.
+  it("renders the boss's leak cost 3, distinct from the always-1 default", () => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 8,
+          waveCount: 8,
+          entries: [
+            {
+              creepId: 'boss',
+              count: 1,
+              domain: 'ground',
+              armor: 8,
+              leakCost: 3,
+              immunities: ['stun'],
+            },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    const text = shell.preview.list.querySelector('li')!.textContent;
+    expect(text).toBe('1 × Boss — ground, armor 8, leak cost 3, stun');
   });
 
   // M2-S6 P7: verify (add nothing) that `resolute`'s slow immunity actually renders
@@ -255,7 +313,14 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           waveNumber: 5,
           waveCount: 5,
           entries: [
-            { creepId: 'resolute', count: 6, domain: 'ground', armor: 0, immunities: ['slow'] },
+            {
+              creepId: 'resolute',
+              count: 6,
+              domain: 'ground',
+              armor: 0,
+              leakCost: 1,
+              immunities: ['slow'],
+            },
           ],
         },
       }),
@@ -265,7 +330,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       refund: 0,
     });
     const text = shell.preview.list.querySelector('li')!.textContent;
-    expect(text).toBe('6 × Resolute Creep — ground, armor 0, slow');
+    expect(text).toBe('6 × Resolute Creep — ground, armor 0, leak cost 1, slow');
   });
 
   it('an unchanged preview never rebuilds its rows — node identity survives repeated updates (the SR-stability memo)', () => {
@@ -282,7 +347,16 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming' as const,
           waveNumber: 2,
           waveCount: 3,
-          entries: [{ creepId: 'normal', count: 10, domain: 'ground', armor: 0, immunities: [] }],
+          entries: [
+            {
+              creepId: 'normal',
+              count: 10,
+              domain: 'ground',
+              armor: 0,
+              leakCost: 1,
+              immunities: [],
+            },
+          ],
         },
       }),
       paused: false,
@@ -336,7 +410,14 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           // hasn't been taught a localized name for — the exact "future content, current
           // client" gap the fallback exists for.
           entries: [
-            { creepId: 'future-kind', count: 4, domain: 'ground', armor: 2, immunities: [] },
+            {
+              creepId: 'future-kind',
+              count: 4,
+              domain: 'ground',
+              armor: 2,
+              leakCost: 1,
+              immunities: [],
+            },
           ],
         },
       }),
@@ -346,7 +427,9 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       refund: 0,
     });
     const text = shell.preview.list.querySelector('li')!.textContent;
-    expect(text).toBe('4 × Unknown creep (future-kind) — ground, armor 2, no immunities');
+    expect(text).toBe(
+      '4 × Unknown creep (future-kind) — ground, armor 2, leak cost 1, no immunities',
+    );
     // The dev-only warn is asserted conditionally — Vitest defaults DEV to true, but a
     // production-mode run must not fail on a behaviour (the warn) that build mode elides.
     if (import.meta.env.DEV) expect(warnSpy).toHaveBeenCalled();
@@ -368,7 +451,14 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           waveNumber: 1,
           waveCount: 1,
           entries: [
-            { creepId: 'constructor', count: 4, domain: 'ground', armor: 2, immunities: [] },
+            {
+              creepId: 'constructor',
+              count: 4,
+              domain: 'ground',
+              armor: 2,
+              leakCost: 1,
+              immunities: [],
+            },
           ],
         },
       }),
@@ -378,7 +468,9 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       refund: 0,
     });
     const text = shell.preview.list.querySelector('li')!.textContent;
-    expect(text).toBe('4 × Unknown creep (constructor) — ground, armor 2, no immunities');
+    expect(text).toBe(
+      '4 × Unknown creep (constructor) — ground, armor 2, leak cost 1, no immunities',
+    );
     expect(text).not.toContain('[object');
     if (import.meta.env.DEV) {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("creep id 'constructor'"));
@@ -393,8 +485,22 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       waveNumber: 1,
       waveCount: 2,
       entries: [
-        { creepId: 'normal', count: 1, domain: 'ground' as const, armor: 0, immunities: [] },
-        { creepId: 'normal', count: 2, domain: 'ground' as const, armor: 0, immunities: [] },
+        {
+          creepId: 'normal',
+          count: 1,
+          domain: 'ground' as const,
+          armor: 0,
+          leakCost: 1,
+          immunities: [],
+        },
+        {
+          creepId: 'normal',
+          count: 2,
+          domain: 'ground' as const,
+          armor: 0,
+          leakCost: 1,
+          immunities: [],
+        },
       ],
     };
     overlay.update({
@@ -695,12 +801,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
 
   it('the second Card (M2-S3) shows the slow tower and carries the Digit2 hotkey badge', () => {
     const { shell } = setup();
-    // One Card per catalog tower: 8 since M2-S9 added `mine` (was 7 at M2-S8, 6 at
-    // M2-S7, 5 at M2-S6, 4 at M2-S5a, 3 at M2-S4a). The slot WIRING for cards 4-8 —
-    // their hotkey badges, rebind entries and labels — is P6's/M2-S6's/M2-S7's/
-    // M2-S8's/M2-S9's; this assertion tracks the catalog's size, which is content, not
-    // wiring.
-    expect(shell.cards).toHaveLength(8);
+    // One Card per catalog tower: 9 since M2-S10 added `frost-splash` (was 8 at M2-S9,
+    // 7 at M2-S8, 6 at M2-S7, 5 at M2-S6, 4 at M2-S5a, 3 at M2-S4a). The slot WIRING for
+    // cards 4-9 — their hotkey badges, rebind entries and labels — is P6's/M2-S6's/
+    // M2-S7's/M2-S8's/M2-S9's/M2-S10's; this assertion tracks the catalog's size, which
+    // is content, not wiring.
+    expect(shell.cards).toHaveLength(9);
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
@@ -872,26 +978,30 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(actions).toContainEqual({ type: 'armTower', tower: 'mine' });
   });
 
-  it('slot 9 is absent from the rebind list, the hotkey badges, and aria-keyshortcuts at an eight-tower bundle (PLAN.md P6, widened M2-S6 P5, M2-S7 P5, M2-S8 P6, M2-S9 P5)', () => {
+  // M2-S10: the ninth catalog tower (`frost-splash`) fills the rail — slot 9 becomes a
+  // real, wired card (was the absent-slot case through M2-S9). Dock ERGONOMICS at nine
+  // towers remain S12's; this only asserts the ninth card exists, is wired, and is
+  // announced (PLAN.md P6, widened M2-S6 P5, M2-S7 P5, M2-S8 P6, M2-S9 P5, M2-S10 P5).
+  it('slot 9 is a real, wired card at the nine-tower bundle (M2-S10)', () => {
     const { actions, overlay, shell, settingsBtn } = setup();
-    // Only eight Cards exist — no badge/aria-keyshortcuts beyond index 7. The window
-    // narrows by one with each tower the catalog gains; `action.armTower1..9` already
-    // existed, so M2-S9's `mine` consumed slot 8 with no new keymap entry.
-    expect(shell.cards).toHaveLength(8);
-    expect(shell.cards[7]!.towerId).toBe('mine');
-    expect(shell.cards[7]!.hotkey.textContent).toBe('8');
-    // No phantom rebindable action for slot 9.
+    expect(shell.cards).toHaveLength(9);
+    const frostSplashCard = shell.cards[8]!;
+    expect(frostSplashCard.towerId).toBe('frost-splash');
+    expect(frostSplashCard.name.textContent).toBe('Frost Splash Tower');
+    expect(frostSplashCard.hotkey.textContent).toBe('9'); // Digit9 default
+    expect(frostSplashCard.root.getAttribute('aria-keyshortcuts')).toBe('9');
+    // The rebind list carries a real "Arm tower 9" entry now, not a phantom absence.
     settingsBtn.click();
     const rebindNames = [...overlay.settingsEl.querySelectorAll('.wy-rebind li span')].map(
       (el) => el.textContent,
     );
-    expect(rebindNames).not.toContain('Arm tower 9');
+    expect(rebindNames).toContain('Arm tower 9');
     overlay.settingsEl.querySelector<HTMLButtonElement>('.wy-settings-close')!.click();
-    // The document hotkey for that slot no-ops too — cards[8] doesn't exist. (Settings is
+    // The document hotkey for slot 9 now arms the ninth Card for real. (Settings is
     // closed here — an open settings dialog makes the shell `inert`, which would mask
     // this on its own and defeat the assertion.)
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit9' }));
-    expect(actions).toEqual([]);
+    expect(actions).toContainEqual({ type: 'armTower', tower: 'frost-splash' });
   });
 
   // M2-S8 — the beacon Panel. These are the rows a screen-reader user has INSTEAD of the
@@ -1204,6 +1314,59 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     // to encode never did. Un-formatted, `chanceNum: 65` renders "25.390625%",
     // locale-blind — this pin's own point.
     expect(text).toContain('Stun: 25.0% for 1.0s');
+  });
+
+  // M2-S10 ruling 5: the Panel gains a slow row, derived from the effect's own `mulFp`
+  // — NEVER hardcoded. `frost-splash` carries `mulFp: 179` (0.7 × 256 = 179.2, not an
+  // integer), so the honest rendered figure is 30.1%, not a round "30%". This test dies
+  // if the slow row is removed (the named mutation check, plan Verification §6).
+  it("the Panel shows the FROST-SPLASH tower's slow stat row (percent/duration), derived from mulFp — never hardcoded", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'frost-splash' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Frost Splash Tower');
+    expect(text).toContain('Cost: 16');
+    expect(text).toContain('Damage: 6'); // the aoe effect's amount
+    // 0.7 × 256 = 179.2, not an integer — the catalog stores 179, and the derivation
+    // (256 − 179) / 256 × 100 = 30.078125…% renders as the honest 30.1%, not 30%.
+    expect(text).toContain('Slow: 30.1% for 1.5s'); // mulFp 179/256, durationTicks 30/20 ticks-per-sec
+  });
+
+  // This fixes `slow`'s own pre-existing gap (shipped since M2-S3 with no Panel row at
+  // all) as a side effect of the derivation above.
+  it("the Panel shows the SLOW tower's own slow stat row too (the pre-existing gap M2-S10 fixes)", () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'slow' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    const text = panel.root.textContent!;
+    expect(text).toContain('Slow Tower');
+    expect(text).toContain('Slow:');
+  });
+
+  it('the Panel shows no slow row for the BASIC tower (no `slow` effect)', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    expect(panel.root.hidden).toBe(false);
+    expect(panel.root.textContent).not.toContain('Slow:');
   });
 
   it('the Panel shows no stun row for the BASIC tower (no `stun` effect)', () => {

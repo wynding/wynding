@@ -38,9 +38,26 @@
  *  but "filled" vs "stroked" survives at any size — a solid disc
  *  reads as a dense charge where `'ringed'`'s stroked circle of the same radius reads
  *  as a thin ring, so the two are never confused even when every other shape cue has
- *  collapsed to a blur. An unrecognized id draws `'plain'` (total, never throw). */
+ *  collapsed to a blur. `'ringed-crosshair'` is `frost-splash`'s (M2-S10) — the
+ *  `'ringed'` circle at its existing radius plus four short spokes radiating OUTWARD
+ *  from it, evoking "slow (the ring) + area effect (the spokes)": it literally reads
+ *  as its two parent marks (m2.md:299) while staying distinct from `'ringed'` (no
+ *  spokes), `'crosshair'` (no ring, and ITS spokes radiate from the centre with a gap
+ *  rather than from a ring outward) and `'charge'` (filled, not stroked). Hyphenated
+ *  against this file's otherwise single-word convention DELIBERATELY — the value names
+ *  what it composes, the same way `armored-flyer` (a creep id, not a mark) names its
+ *  own composition. A NEW value, never a reuse, so no two towers ever share a mark. An
+ *  unrecognized id draws `'plain'` (total, never throw). */
 export type TowerFootprintMark =
-  'plain' | 'ringed' | 'crosshair' | 'droplet' | 'bolt' | 'arrow' | 'pylon' | 'charge';
+  | 'plain'
+  | 'ringed'
+  | 'crosshair'
+  | 'droplet'
+  | 'bolt'
+  | 'arrow'
+  | 'pylon'
+  | 'charge'
+  | 'ringed-crosshair';
 
 const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   basic: 'plain',
@@ -51,6 +68,7 @@ const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   antiair: 'arrow',
   beacon: 'pylon',
   mine: 'charge',
+  'frost-splash': 'ringed-crosshair',
 };
 
 /** The footprint mark for `towerId` — total over any string, `hasOwnProperty`-guarded
