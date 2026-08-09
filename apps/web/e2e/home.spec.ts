@@ -32,7 +32,26 @@ const TARGET_MIN_PX = 44;
  *  test here, so the ceiling is recalibrated to (new baseline + the same ~3.4px/nowhere-near
  *  the naive-box-model slack this test exists to catch), not tightened back to the pre-M2-S2
  *  figure. */
-const STANDARD_ROW_MAX_PX = 128;
+/*  RECALIBRATED AT M2-S10, by the same rule the paragraph above states, and the cause is
+ *  worth recording because it is a real product side-effect rather than test drift. Ruling 3
+ *  added an always-present "leak cost" slot to every wave-preview entry, taking the wave-1
+ *  line from `10 x Creep - ground, armor 0, no immunities` to `..., armor 0, leak cost 1, no
+ *  immunities`. MEASURED at 1280x720: that string grew 354.5px -> 445.8px inside a 485.8px
+ *  preview box, so its horizontal headroom fell from ~27% to ~8%. macOS font metrics still
+ *  fit it on ONE line (row 118.0px); CI's Linux metrics do not, so the entry wraps and the
+ *  row lands at 158.0px. This is NOT flakiness - it is font-stack-dependent reflow of
+ *  legitimately longer text, and it reproduces deterministically on each platform.
+ *
+ *  The ceiling therefore tracks the WIDER (wrapped) baseline plus the same ~3.4px, so the
+ *  test keeps catching what it exists to catch: a naive `min-height: 44px` flex item would
+ *  add ~19px on top of the baseline and still breach this. The honest cost: on a font stack
+ *  where the entry does NOT wrap, the ceiling carries ~44px of slack, so the guard is
+ *  blunter locally than in CI. The 40dvh contract (`.wy-hud`'s own max-height, 232px here)
+ *  is unaffected and is still asserted separately above - the row stays well inside it.
+ *  FLAGGED FOR S11/S12: if the preview ever gains a seventh field this line wraps on EVERY
+ *  platform, and the Standard status row wants a real look rather than a third
+ *  recalibration. */
+const STANDARD_ROW_MAX_PX = 162;
 
 async function gotoAt(page: Page, size: { width: number; height: number }): Promise<void> {
   await page.setViewportSize(size);
