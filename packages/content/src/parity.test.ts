@@ -61,26 +61,37 @@ function fnv1a(s: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/** Run `ticks` steps of the bundled ruleset from a fresh state, seeded and driven
- *  by `inputs`. Returns the terminal state and the per-tick world-hash trace.
- *  `probe`, if given, is called with the post-step state on every tick — used to
- *  observe transient per-tick facts (e.g. a slow status landing) that the terminal
- *  state alone cannot prove (Codex R2-3). */
+/** Run steps of the bundled ruleset from a fresh state, seeded and driven by
+ *  `inputs`, continuing while `continueWhile(tick, state)` holds. Returns the
+ *  terminal state and the per-tick world-hash trace. `probe`, if given, is called
+ *  with the post-step state on every tick — used to observe transient per-tick
+ *  facts (e.g. a slow status landing) that the terminal state alone cannot prove
+ *  (Codex R2-3). */
 function runScenario(
   inputs: (tick: number) => SimInput[],
-  ticks: number,
+  continueWhile: (tick: number, state: SimState) => boolean,
   probe?: (state: SimState) => void,
 ): { state: SimState; trace: string[] } {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state = createInitialState(SCENARIO_SEED, ruleset);
   const trace: string[] = [];
-  for (let t = 0; t < ticks; t++) {
+  for (let t = 0; continueWhile(t, state); t++) {
     state = step(state, ruleset, inputs(t));
     trace.push(hashSimState(state));
     probe?.(state);
   }
   return { state, trace };
+}
+
+/** Like `runScenario`, but runs a fixed number of `ticks` rather than a
+ *  state-dependent stop condition. */
+function runScenarioForTicks(
+  inputs: (tick: number) => SimInput[],
+  ticks: number,
+  probe?: (state: SimState) => void,
+): { state: SimState; trace: string[] } {
+  return runScenario(inputs, (t) => t < ticks, probe);
 }
 
 /** Like `runScenario`, but runs until the sim reaches a terminal phase (`'won'` or
@@ -90,16 +101,7 @@ function runScenarioUntilTerminal(
   inputs: (tick: number) => SimInput[],
   probe?: (state: SimState) => void,
 ): { state: SimState; trace: string[] } {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
-  let state = createInitialState(SCENARIO_SEED, ruleset);
-  const trace: string[] = [];
-  for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-    state = step(state, ruleset, inputs(t));
-    trace.push(hashSimState(state));
-    probe?.(state);
-  }
-  return { state, trace };
+  return runScenario(inputs, (t, state) => t < MAX_MATCH_TICKS && state.phase === 'running', probe);
 }
 
 describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', () => {
@@ -107,7 +109,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     const noInputs = (): SimInput[] => [];
-    const { state, trace } = runScenario(noInputs, 1200);
+    const { state, trace } = runScenarioForTicks(noInputs, 1200);
 
     // Re-pinned M2-S5a P5: the appended `armored` wave (index 3) launches at
     // prefixCountdown 1,400 — this hands-off run loses at tick 946, well before

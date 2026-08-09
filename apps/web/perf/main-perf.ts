@@ -47,7 +47,22 @@ function beginSpan(name: string): void {
   performance.mark(`${SPAN_MARK_PREFIX}${name}:b`);
 }
 function endSpan(name: string): void {
-  performance.measure(`${SPAN_MARK_PREFIX}${name}`, `${SPAN_MARK_PREFIX}${name}:b`);
+  const measureName = `${SPAN_MARK_PREFIX}${name}`;
+  const markName = `${measureName}:b`;
+  performance.measure(measureName, markName);
+  // DRAIN THE BUFFER AFTER EMITTING (Codex P2, PR #92). Every `mark`/`measure` entry
+  // stays resident in the page's performance timeline until explicitly cleared, and
+  // these fire on EVERY tick and EVERY frame in every perf run — including runs with
+  // `WY_TRACE` unset. The 1,950-tick fast-forward alone would retain thousands of
+  // entries before the heap sample is taken, so the harness would bias its OWN heap
+  // number and grow without bound while the page stays open.
+  //
+  // Clearing does not cost the diagnosis anything: the `blink.user_timing` trace event
+  // is emitted BY the `measure()` call above, at call time. Draining the in-page buffer
+  // afterwards does not retract an already-emitted trace event — the post-processor
+  // reads the trace, never `performance.getEntries()`.
+  performance.clearMeasures(measureName);
+  performance.clearMarks(markName);
 }
 
 const controllerHooks: ControllerHooks = {

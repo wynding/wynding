@@ -188,13 +188,19 @@ interface ProbeFire {
   readonly radiusFp?: number;
 }
 
-/** Run the `SURVIVAL_WALL` (see the GEOMETRY block above) with one extra probe
- *  tower at `PROBE_A`, capturing every impact it fires and the `boss` creep's own
+/** Run the `SURVIVAL_WALL` (see the GEOMETRY block above) with one or more extra
+ *  probe towers, placed one per tick 10 ticks apart starting at 1950 (`probes[0]`
+ *  at `PROBE_A`+1950, `probes[1]` at its own anchor+1960, ...), capturing every
+ *  impact fired by the FIRST probe (`probes[0]`) and the `boss` creep's own
  *  hp/slow/dots snapshot on every tick it is alive. This is the shared engine
  *  behind every boss-probe scenario below — `splash`, `frost-splash`, `venom`,
- *  `stun` (each isolated at column 22, per the GEOMETRY note: the only
- *  ground-domain tower anything meets from ~column 20 onward). */
-function runBossProbe(probeTowerId: string): {
+ *  `stun` (each a single probe at column 22, per the GEOMETRY note: the only
+ *  ground-domain tower anything meets from ~column 20 onward) — and the
+ *  beacon-buffed `basic` scenario, which needs a SECOND probe tower (`beacon`) to
+ *  buff the first. */
+function runBossProbe(
+  probes: readonly { readonly anchor: { col: number; row: number }; readonly towerId: string }[],
+): {
   readonly state: SimState;
   readonly fires: readonly ProbeFire[];
   readonly bossHpAt: ReadonlyMap<number, number>; // tick -> hp, every tick boss is alive
@@ -207,7 +213,15 @@ function runBossProbe(probeTowerId: string): {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-  const inputs = survivalWallInputs(anchorWallInputs([PROBE_A], probeTowerId, 1950, 10));
+  const probeInputs = (tick: number): SimInput[] => {
+    const out: SimInput[] = [];
+    probes.forEach((p, i) => {
+      if (tick === 1950 + i * 10)
+        out.push({ kind: 'placeTower', anchor: p.anchor, towerId: p.towerId });
+    });
+    return out;
+  };
+  const inputs = survivalWallInputs(probeInputs);
   let sourceId: number | undefined;
   const fires: ProbeFire[] = [];
   const seen = new Set<string>();
@@ -221,7 +235,7 @@ function runBossProbe(probeTowerId: string): {
   for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
     state = step(state, ruleset, inputs(t));
     rngStateAt[t] = state.rngState;
-    if (sourceId === undefined) sourceId = resolveTowerId(state, PROBE_A);
+    if (sourceId === undefined) sourceId = resolveTowerId(state, probes[0]!.anchor);
     for (const im of state.impacts) {
       if (im.sourceId !== sourceId) continue;
       const key = `${im.sourceId}|${im.impactTick}`;
@@ -255,6 +269,21 @@ function runBossProbe(probeTowerId: string): {
     }
   }
   return { state, fires, bossHpAt, bossPosAt, bossSlowAt, bossDotsAt, rngStateAt, bossId };
+}
+
+/** The boss can carry a DoT record ticking on it that this probe's own fire did not
+ *  cause — the survival wall's own `venom` pair (col 16) can have a resident DoT tick
+ *  on the boss at the exact same tick as a probe's own impact, by pure coincidence of
+ *  timing (this file's own diagnostic pass surfaced it empirically, documented at the
+ *  `venom` probe test below). Sums whatever OTHER dot records were already scheduled
+ *  to tick at `tick`, from the state one tick BEFORE it (so a record this probe's own
+ *  fire just created at `tick` itself is excluded). */
+function otherDotDamageAt(
+  bossDotsAt: ReadonlyMap<number, readonly SimState['dots'][number][]>,
+  tick: number,
+): number {
+  const preFireDots = bossDotsAt.get(tick - 1) ?? [];
+  return preFireDots.filter((d) => d.nextTickTick === tick).reduce((sum, d) => sum + d.amount, 0);
 }
 
 describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measured against the shipped bundle', () => {
@@ -315,7 +344,9 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
   });
 
   it("`splash` is fully negated by the boss's armor 8 — 0 net damage, deliberately (m2.md:139)", () => {
-    const { fires, bossHpAt, bossPosAt } = runBossProbe('splash');
+    const { fires, bossHpAt, bossPosAt, bossDotsAt } = runBossProbe([
+      { anchor: PROBE_A, towerId: 'splash' },
+    ]);
 
     // PROOF THE FEATURE ENGAGED: splash genuinely fired ON the boss — a blast, raw
     // (unbuffed, pre-armor) damage 8, matching the catalog exactly.
@@ -346,18 +377,24 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
       const dy = pos!.y - f.y!;
       const distSq = dx * dx + dy * dy;
       const radSq = f.radiusFp! * f.radiusFp!;
+      const otherDot = otherDotDamageAt(bossDotsAt, f.impactTick);
       console.log(
         `[story-finale] splash impactTick=${f.impactTick}: hp ${before} -> ${at}, ` +
-          `boss dist^2=${distSq} vs radius^2=${radSq} (inside=${distSq <= radSq})`,
+          `boss dist^2=${distSq} vs radius^2=${radSq} (inside=${distSq <= radSq}), otherDotDamage=${otherDot}`,
       );
       expect(before).toBeDefined();
       expect(distSq).toBeLessThanOrEqual(radSq); // the blast genuinely covered the boss
-      expect(at).toBe(before); // ...and armor 8 still absorbed all 8 of it
+      // ...and armor 8 still absorbed all 8 of it — any remaining delta is accounted
+      // for entirely by an unrelated DoT record (the survival wall's own `venom` pair)
+      // ticking on the boss this same tick by coincidence of timing, not this blast.
+      expect(before! - at!).toBe(otherDot);
     }
   });
 
   it("`frost-splash` is likewise fully negated by the boss's armor 8 (m2.md:139) — but its SLOW still lands", () => {
-    const { fires, bossHpAt, bossSlowAt } = runBossProbe('frost-splash');
+    const { fires, bossHpAt, bossSlowAt, bossDotsAt } = runBossProbe([
+      { anchor: PROBE_A, towerId: 'frost-splash' },
+    ]);
 
     console.log(`[story-finale] frost-splash fires on boss: ${JSON.stringify(fires)}`);
     expect(fires.length).toBeGreaterThan(0);
@@ -373,45 +410,22 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
       const before = bossHpAt.get(f.impactTick - 1);
       const at = bossHpAt.get(f.impactTick);
       const slowAt = bossSlowAt.get(f.impactTick);
+      const otherDot = otherDotDamageAt(bossDotsAt, f.impactTick);
       console.log(
-        `[story-finale] frost-splash impactTick=${f.impactTick}: hp ${before} -> ${at}, slowMulFp=${slowAt}`,
+        `[story-finale] frost-splash impactTick=${f.impactTick}: hp ${before} -> ${at}, slowMulFp=${slowAt}, otherDotDamage=${otherDot}`,
       );
-      expect(at).toBe(before); // damage: 0 net, same as splash
+      // damage: 0 net, same as splash — any remaining delta is an unrelated DoT record
+      // (the survival wall's own `venom` pair) ticking on the boss this same tick.
+      expect(before! - at!).toBe(otherDot);
       expect(slowAt).toBe(179); // but the slow DOES land — armor gates damage, not status
     }
   });
 
   it("a beacon-buffed `basic` gets through the boss's armor at 7/hit (10 x 1.5 = 15 nominal, 15 - 8 = 7 net)", () => {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
-    let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-    const wall = survivalWallInputs();
-    let sourceId: number | undefined;
-    const fires: ProbeFire[] = [];
-    const seen = new Set<string>();
-    const bossHpAt = new Map<number, number>();
-    for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-      const inputs = wall(t);
-      if (t === 1950) inputs.push({ kind: 'placeTower', anchor: PROBE_A, towerId: 'basic' });
-      if (t === 1960) inputs.push({ kind: 'placeTower', anchor: PROBE_B, towerId: 'beacon' });
-      state = step(state, ruleset, inputs);
-      if (sourceId === undefined) sourceId = resolveTowerId(state, PROBE_A);
-      for (const im of state.impacts) {
-        if (im.sourceId !== sourceId) continue;
-        const key = `${im.sourceId}|${im.impactTick}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        fires.push({
-          impactTick: im.impactTick,
-          targetId: (im as { targetId?: number }).targetId,
-          kind: im.kind,
-          effects: im.effects,
-        });
-      }
-      for (let i = 0; i < state.creeps.id.length; i++) {
-        if (state.creeps.creepId[i] === 'boss') bossHpAt.set(t, state.creeps.hp[i] as number);
-      }
-    }
+    const { fires, bossHpAt, bossDotsAt } = runBossProbe([
+      { anchor: PROBE_A, towerId: 'basic' },
+      { anchor: PROBE_B, towerId: 'beacon' },
+    ]);
 
     // PROOF THE FEATURE ENGAGED: the buff really applied — the SNAPSHOTTED amount is
     // 15 (buffed), not `basic`'s bare 10.
@@ -426,17 +440,23 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
     // THE MEASUREMENT: net hp loss at each impactTick is exactly 7 — armor-piercing
     // (m2.md), not the naive +50% (which alone would still be fully blocked: 10+50%
     // clipped by armor 8 nets nothing extra unless it clears the floor, which it does
-    // here specifically because the buff pushes the nominal amount past armor).
+    // here specifically because the buff pushes the nominal amount past armor) — PLUS
+    // whatever OTHER dot damage happened to tick on the boss this same tick (the
+    // survival wall's own `venom` pair, col 16, can land a DoT tick on the boss by
+    // coincidence of timing — see `otherDotDamageAt`).
     for (const f of fires) {
       const before = bossHpAt.get(f.impactTick - 1)!;
       const at = bossHpAt.get(f.impactTick)!;
-      console.log(`[story-finale] beacon-basic impactTick=${f.impactTick}: hp ${before} -> ${at}`);
-      expect(before - at).toBe(7);
+      const otherDot = otherDotDamageAt(bossDotsAt, f.impactTick);
+      console.log(
+        `[story-finale] beacon-basic impactTick=${f.impactTick}: hp ${before} -> ${at}, otherDotDamage=${otherDot}`,
+      );
+      expect(before - at).toBe(7 + otherDot);
     }
   });
 
   it("venom's DoT bypasses the boss's armor while its direct component is fully blocked", () => {
-    const { fires, bossHpAt, bossDotsAt } = runBossProbe('venom');
+    const { fires, bossHpAt, bossDotsAt } = runBossProbe([{ anchor: PROBE_A, towerId: 'venom' }]);
 
     // PROOF THE FEATURE ENGAGED: the probe fires a direct-then-dot impact on the
     // boss, snapshotted amounts matching the catalog exactly (2 direct, 4/tick dot).
@@ -461,10 +481,7 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
     // sum of whatever OTHER dot records were already scheduled to tick this exact
     // tick — leaving nothing over for the direct-2 to have contributed.
     const firstFire = fires[0]!;
-    const preFireDots = bossDotsAt.get(firstFire.impactTick - 1) ?? [];
-    const expectedOtherDotDamage = preFireDots
-      .filter((d) => d.nextTickTick === firstFire.impactTick)
-      .reduce((sum, d) => sum + d.amount, 0);
+    const expectedOtherDotDamage = otherDotDamageAt(bossDotsAt, firstFire.impactTick);
     const hpBefore = bossHpAt.get(firstFire.impactTick - 1)!;
     const hpAt = bossHpAt.get(firstFire.impactTick)!;
     console.log(
@@ -502,7 +519,7 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
   });
 
   it('the boss consumes NO RNG draw from a stun tower (stun-immune) — the same mechanic pinned at story-stun.test.ts:447, here for the shipped boss', () => {
-    const { fires, rngStateAt, bossId } = runBossProbe('stun');
+    const { fires, rngStateAt, bossId } = runBossProbe([{ anchor: PROBE_A, towerId: 'stun' }]);
 
     // PROOF THE FEATURE ENGAGED: the stun tower really fired ON the boss (a
     // direct-then-stun impact, chanceNum 64, matching the catalog).
@@ -609,7 +626,7 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
     // blast radius reliably catches several at once.
     let maxSimultaneous = 0;
     let maxSimultaneousIds: number[] = [];
-    for (let t = 0; t < 900; t++) {
+    for (let t = 0; t < 900 && state.phase === 'running'; t++) {
       const inputs: SimInput[] =
         t === 0
           ? [{ kind: 'placeTower', anchor: { col: 2, row: 10 }, towerId: 'frost-splash' }]

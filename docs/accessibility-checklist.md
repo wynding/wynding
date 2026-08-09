@@ -605,12 +605,12 @@ uses **creep** (never enemy/mob), **tower** (never turret), **lives** (never hea
 claims that would need the canonical word. No occurrence of **indicator** for a telegraph
 either.
 
-**Gap noted, deliberately NOT closed in this story: Story 7 still has no conformance
-audit — now FOUR stories overdue** (S8, S9, S10, and this section's own writing all pass
-over it). S8 first flagged it, S9 flagged it again, and it remains true here: the gap
-between `## Story 6…` and `## Story 8…` above is unchanged by this edit. Backfilling it in
-this packet would mix S7's evidence into an S10 diff and was explicitly out of scope; it is
-re-flagged, not paid down.
+**Gap noted, deliberately NOT closed in this story: Story 7 — and only Story 7 — still has
+no conformance audit. ONE audit is missing; the gap has now persisted through S8, S9 and
+S10**, each of which flagged it and moved on (earlier wording said "four stories overdue",
+which read as four missing audits — CodeRabbit, PR #92). The hole between `## Story 6…` and
+`## Story 8…` above is unchanged by this edit. Backfilling it here would mix S7's evidence
+into an S10 diff and was explicitly out of scope; it is re-flagged, not paid down.
 
 **Real-device items still deferred to #36** (nothing new beyond what Story 3/4/5/6/8/9/11
 already deferred): the boss's scaled size at the narrow cell floor and the

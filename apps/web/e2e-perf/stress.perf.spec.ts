@@ -239,25 +239,38 @@ async function collectTrace(cdp: CDPSession): Promise<string> {
   });
   await cdp.send('Tracing.end');
   const { stream, dataLossOccurred } = await complete;
-  if (dataLossOccurred) {
-    // A lossy trace cannot close its additive check — report loudly rather than bucket it.
-    console.log('WY-TRACE: dataLossOccurred=true — this trace is NOT attributable');
-  }
   if (stream === undefined) throw new Error('Tracing.tracingComplete carried no stream handle');
-  const chunks: string[] = [];
-  for (;;) {
-    const part = (await cdp.send('IO.read', { handle: stream, size: 4 * 1024 * 1024 })) as {
-      data: string;
-      base64Encoded?: boolean;
-      eof: boolean;
-    };
-    chunks.push(
-      part.base64Encoded === true ? Buffer.from(part.data, 'base64').toString('utf8') : part.data,
-    );
-    if (part.eof) break;
+  try {
+    // A LOSSY TRACE IS REJECTED, NOT REPORTED (CodeRabbit, PR #92). This used to only
+    // `console.log` the condition and hand the trace back anyway — which the caller then
+    // persisted, and which `analyze-trace.mjs` has no way to detect from the event array.
+    // The result would be an attribution computed over an incomplete event set: buckets
+    // that look plausible, a residual that closes, and no signal anywhere that events
+    // were dropped. The whole point of the ±2% residual is to catch missing time, so a
+    // trace that is missing time BY CONSTRUCTION must not reach the analyzer at all.
+    // Thrown after the handle is obtained so the `finally` below still closes the stream.
+    if (dataLossOccurred) {
+      throw new Error(
+        'Tracing reported dataLossOccurred=true — the trace is NOT attributable and is rejected. ' +
+          'Re-record (a shorter window, or fewer categories) rather than analysing a lossy trace.',
+      );
+    }
+    const chunks: string[] = [];
+    for (;;) {
+      const part = (await cdp.send('IO.read', { handle: stream, size: 4 * 1024 * 1024 })) as {
+        data: string;
+        base64Encoded?: boolean;
+        eof: boolean;
+      };
+      chunks.push(
+        part.base64Encoded === true ? Buffer.from(part.data, 'base64').toString('utf8') : part.data,
+      );
+      if (part.eof) break;
+    }
+    return chunks.join('');
+  } finally {
+    await cdp.send('IO.close', { handle: stream });
   }
-  await cdp.send('IO.close', { handle: stream });
-  return chunks.join('');
 }
 
 /** Samples raw rAF deltas (ms) for `windowMs` on whatever page is currently loaded —

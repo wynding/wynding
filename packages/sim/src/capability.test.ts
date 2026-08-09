@@ -432,8 +432,13 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.immunities = ['slow', 'stun']));
   });
 
-  it("allowedRoles: no role accepted, 'boss' also accepted — no reject case exists (M2-S10: allowedRoles widens to ['boss'], exactly the v2 schema's own role enum; see header comment)", () => {
-    compiles(() => {});
+  it("allowedRoles: 'boss' accepted, and an explicit undefined role accepted — no reject case exists (M2-S10: allowedRoles widens to ['boss'], exactly the v2 schema's own role enum; see header comment)", () => {
+    // The no-role arm SETS the field rather than calling `compiles(() => {})` (CodeRabbit,
+    // PR #92): the empty mutator only re-asserts that the untouched base bundle compiles,
+    // which every other `compiles` call in this file already establishes — a tautology
+    // dressed as one of two cases. Assigning `undefined` explicitly exercises the
+    // optional-field path this axis actually cares about.
+    compiles((b) => (b.creepCatalog[0]!.role = undefined));
     compiles((b) => (b.creepCatalog[0]!.role = 'boss'));
   });
 

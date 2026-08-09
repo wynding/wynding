@@ -77,7 +77,11 @@ export default tseslint.config(
   {
     // Node CI/tooling scripts run under the Node runtime, not the browser — allow
     // the Node globals they legitimately use.
-    files: ['scripts/**/*.mjs', 'eslint-rules/**/*.mjs'],
+    // `**/scripts/` (not `scripts/`): flat-config globs are repo-root-relative, so the
+    // bare form matched ONLY the root `scripts/` directory and silently skipped
+    // package-local ones like `apps/web/scripts/` (CodeRabbit, PR #92 — the M2-S10 trace
+    // post-processor landed there and was linted by nobody).
+    files: ['**/scripts/**/*.mjs', 'eslint-rules/**/*.mjs'],
     languageOptions: {
       // The full ESM-shaped Node set, not a hand-curated list: `lint:scripts` gates
       // every verify run, and a missing entry would fail CI on an ordinary Node global.

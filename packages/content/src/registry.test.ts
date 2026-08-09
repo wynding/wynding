@@ -438,7 +438,14 @@ describe('the win-over-loss score ordering invariant (m2.md:272-277, pinned for 
   // win can hold). Leak the highest-leakCost creep (the boss) first — it buys the most
   // bounty per life spent — then spend the remaining life budget on the highest-bounty
   // leakCost-1 creep.
-  const priciestCreep = bundle.creepCatalog.reduce((a, b) => (b.leakCost > a.leakCost ? b : a));
+  // Ties in `leakCost` break toward the HIGHER bounty, not first-wins: first-wins
+  // would understate `worstWinLeaked` (and so overstate `worstWinScore`) the day a
+  // second leakCost-3 creep lands with a higher bounty than `boss` — the opposite of
+  // the `remainingLifeBudget` clamp below, which is deliberately conservative. This
+  // keeps both non-conservative-direction risks closed the same way.
+  const priciestCreep = bundle.creepCatalog.reduce((a, b) =>
+    b.leakCost > a.leakCost || (b.leakCost === a.leakCost && b.bounty > a.bounty) ? b : a,
+  );
   // Clamped at 0 (ship-review P3): this greedy assumes the priciest creep fits inside the
   // life budget, which holds for the shipped bundle (boss 3 vs 10 starting lives) but goes
   // NEGATIVE — silently inflating `worstWinLeaked` — the day a creep's `leakCost` reaches
