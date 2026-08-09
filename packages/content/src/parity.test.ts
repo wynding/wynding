@@ -35,6 +35,7 @@ import {
   rulesetDigest,
   deriveScore,
   deriveStars,
+  MAX_MATCH_TICKS,
   type SimInput,
   type SimState,
 } from '@wynding/sim';
@@ -60,21 +61,22 @@ function fnv1a(s: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/** Run `ticks` steps of the bundled ruleset from a fresh state, seeded and driven
- *  by `inputs`. Returns the terminal state and the per-tick world-hash trace.
- *  `probe`, if given, is called with the post-step state on every tick — used to
- *  observe transient per-tick facts (e.g. a slow status landing) that the terminal
- *  state alone cannot prove (Codex R2-3). */
+/** Run steps of the bundled ruleset from a fresh state, seeded and driven by
+ *  `inputs`, continuing while `continueWhile(tick, state)` holds. Returns the
+ *  terminal state and the per-tick world-hash trace. `probe`, if given, is called
+ *  with the post-step state on every tick — used to observe transient per-tick
+ *  facts (e.g. a slow status landing) that the terminal state alone cannot prove
+ *  (Codex R2-3). */
 function runScenario(
   inputs: (tick: number) => SimInput[],
-  ticks: number,
+  continueWhile: (tick: number, state: SimState) => boolean,
   probe?: (state: SimState) => void,
 ): { state: SimState; trace: string[] } {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state = createInitialState(SCENARIO_SEED, ruleset);
   const trace: string[] = [];
-  for (let t = 0; t < ticks; t++) {
+  for (let t = 0; continueWhile(t, state); t++) {
     state = step(state, ruleset, inputs(t));
     trace.push(hashSimState(state));
     probe?.(state);
@@ -82,12 +84,32 @@ function runScenario(
   return { state, trace };
 }
 
+/** Like `runScenario`, but runs a fixed number of `ticks` rather than a
+ *  state-dependent stop condition. */
+function runScenarioForTicks(
+  inputs: (tick: number) => SimInput[],
+  ticks: number,
+  probe?: (state: SimState) => void,
+): { state: SimState; trace: string[] } {
+  return runScenario(inputs, (t) => t < ticks, probe);
+}
+
+/** Like `runScenario`, but runs until the sim reaches a terminal phase (`'won'` or
+ *  `'lost'`) rather than a fixed tick count, capped at `MAX_MATCH_TICKS` — the sim's
+ *  own compile-time bound, never a hand-picked constant. */
+function runScenarioUntilTerminal(
+  inputs: (tick: number) => SimInput[],
+  probe?: (state: SimState) => void,
+): { state: SimState; trace: string[] } {
+  return runScenario(inputs, (t, state) => t < MAX_MATCH_TICKS && state.phase === 'running', probe);
+}
+
 describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', () => {
   it('hands-off loss (no inputs, 1200 ticks) matches the pinned golden exactly', () => {
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     const noInputs = (): SimInput[] => [];
-    const { state, trace } = runScenario(noInputs, 1200);
+    const { state, trace } = runScenarioForTicks(noInputs, 1200);
 
     // Re-pinned M2-S5a P5: the appended `armored` wave (index 3) launches at
     // prefixCountdown 1,400 — this hands-off run loses at tick 946, well before
@@ -104,8 +126,15 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // wave index 5's countdown never even starts here (it only begins once wave index 4
     // launches, which itself never happens in a hands-off run). Still a hash-only move:
     // every other assertion below is unchanged.
-    expect(hashSimState(state)).toBe('048193ed');
-    expect(fnv1a(trace.join(':'))).toBe('5e600068');
+    // Re-pinned M2-S10 P3: the bundle gains a SEVENTH and EIGHTH wave (index 6
+    // `armored-flyer`, index 7 `boss`+`normal`), which widen `waveResolved`/
+    // `waveLeaked` (etc.) by two more entries from tick 0 — those arrays are sized to
+    // the total wave count, not to how many have launched. Neither new wave's
+    // countdown ever starts in a hands-off run (they chain off wave index 5, which
+    // itself never launches naturally before this run's tick-946 loss), so this is
+    // once again a hash-only move: every other assertion below is unchanged.
+    expect(hashSimState(state)).toBe('3bc72d23');
+    expect(fnv1a(trace.join(':'))).toBe('04528845');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
@@ -113,7 +142,11 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(deriveStars(state, ruleset)).toBe(0);
   });
 
-  it('winning scenario (early calls + placements, incl. two `slow` towers, 1750 ticks) matches the pinned golden exactly', () => {
+  // Retitled M2-S10 P3: this build WON at six waves and no longer does at eight (it has no
+  // `antiair`, so wave index 6's `armored-flyer` walks through it). Keeping "winning" in
+  // the title while the body asserts `phase === 'lost'` would be a title dodging its own
+  // claim — the flip is the measured, reported outcome per ruling 1, not a regression.
+  it('the early-calls + two-`slow`-towers build — no longer winning at eight waves, run to terminal under MAX_MATCH_TICKS, matches the pinned golden exactly', () => {
     // A wall of `basic` towers flanking the row-11 lane (row 10 and row 12, every
     // third column), placed one per tick as budget allows: enough total DPS to
     // clear all three waves outright. Once the wall is fully placed, two `slow`
@@ -136,9 +169,24 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // above) and runs within this scenario's window. This build has no `antiair` —
     // only the two `slow` towers (now both-domain) ever touch it, and their small
     // direct hit (2 damage) never kills one outright before it reaches the exit — so
-    // wave index 5 leaks in full. The window below widens from 1500 to 1750 ticks so
-    // the scenario actually reaches its own terminal state (measured settlement:
-    // tick 1691) rather than being sampled mid-flight.
+    // wave index 5 leaks in full.
+    // M2-S10 P3: the bundle now carries a SEVENTH wave (index 6, 6 × `armored-flyer`,
+    // air domain, armor 5) and an EIGHTH (index 7, boss + 8 × `normal`). This run's
+    // fixed 1750-tick window is no longer terminal (six countdowns' worth of ticks
+    // does not cover eight), so it now runs to terminal under `MAX_MATCH_TICKS`
+    // instead of a hand-picked constant. **Measured, not predicted**: wave index 5's
+    // leaks already drain lives to 2 (same as before), and wave index 6's
+    // `armored-flyer` is untouched by the `basic` wall (ground-only) and shrugs off
+    // the `slow` towers' 2-point hit against armor 5 (net 0 damage) — so it leaks
+    // too, and the SECOND `armored-flyer` leak (spaced 20 ticks apart, each a
+    // separate-tick leak, not a same-tick aggregate) drives lives from 1 to −1... but
+    // the freeze at `lives <= 0` catches it exactly at **0**, not negative, because
+    // `armored-flyer`'s own `leakCost` is 1: 2 lives, two 1-cost leaks, lands on 0.
+    // The scenario's outcome FLIPS 'won' → 'lost' at that point (Story 10 Risk 1
+    // ruling — reported for S11's balance pass, not tuned away): wave index 7 (the
+    // boss) never even launches. `waveCursor` reaches 7 (wave index 6 launched) but
+    // `waveResolved[6]` stays `false` — the run freezes mid-wave, before its
+    // resolution completes.
     const anchors: { col: number; row: number }[] = [];
     for (let col = 1; col <= 26; col += 3) {
       anchors.push({ col, row: 10 });
@@ -176,10 +224,36 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // the `slow` commands actually landed — this asserts some creep really carried
     // an active slow status at some tick during the run.
     let sawSlowedCreep = false;
-    const { state, trace } = runScenario(inputs, 1750, (s) => {
+    const { state, trace } = runScenarioUntilTerminal(inputs, (s) => {
       sawSlowedCreep ||= s.creeps.slowMulFp.some((mulFp) => mulFp !== 0);
     });
     expect(sawSlowedCreep).toBe(true);
+    console.log(
+      'parity.test.ts winning scenario: hash',
+      hashSimState(state),
+      'trace',
+      fnv1a(trace.join(':')),
+      'phase',
+      state.phase,
+      'tick',
+      state.tick,
+      'lives',
+      state.lives,
+      'waveResolved',
+      state.waveResolved,
+      'waveCursor',
+      state.waveCursor,
+      'cumulativeKillBounty',
+      state.cumulativeKillBounty,
+      'cumulativeEarlyCallCredit',
+      state.cumulativeEarlyCallCredit,
+      'bounty',
+      state.bounty,
+      'score',
+      deriveScore(state, ruleset),
+      'stars',
+      deriveStars(state, ruleset),
+    );
 
     // Terminal proof the `slow` placements survived (not sim-silently no-op'd):
     // two rows still carry `towerId === 'slow'`.
@@ -232,43 +306,61 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     //   lives                          10 → 2   (-8, one per leaked `flying` creep)
     //   score                         447 → 167  (84 + 13 + 2×35, down from 84+13+10×35)
     //   stars                          3 → 1
-    expect(hashSimState(state)).toBe('37805134');
-    expect(fnv1a(trace.join(':'))).toBe('78de4f21');
-    expect(state.phase).toBe('won');
-    expect(state.lives).toBe(2);
-    expect(state.tick).toBe(1691);
-    // Every wave cleared (killed OR leaked — both count as resolved), and the game
-    // recognizes it: waveResolved is exhaustive, waveCursor ran past the last wave
-    // (now six, not five).
-    expect(state.waveResolved).toEqual([true, true, true, true, true, true]);
-    expect(state.waveCursor).toBe(6);
-    // Per-wave clear bonuses (4/4/5/5/7 across waves 0-4; wave index 5's 6 withheld,
-    // it leaked), kill bounty (wave 1's re-composition to 16 × `swarm` — M2-S4a step 9
-    // — adds 6 more 1-bounty kills over the old 10 × `normal`; waves are 0-based
-    // throughout this file, so this is the SECOND wave, distinct from `:6`'s S3-era
-    // "wave 2" which names the THIRD; wave index 3's `6 × armored` at bounty 3 each
-    // adds 18 more; wave index 4's 6 × `resolute` + 6 × `fast`, bounty 2 each, adds 24
-    // more; wave index 5's 8 × `flying` adds ZERO — none were killed), and the three
-    // early-call credits (⌊500/50⌋ at tick 0, ⌊51/50⌋ at tick 550 (the call tick skips
-    // its own decrement, so the sampled remainder is 51), ⌊rem/50⌋ at tick 1050 for
-    // wave index 4 — wave 1's natural launch pays nothing, its countdown having
-    // already reached 0; wave 3 also launches naturally, so it too pays no credit; no
-    // fourth call exists to launch wave index 5, which instead launches naturally) all
-    // landed: cumulativeKillBounty is the SCORED kill-bounty channel (clear bonus
-    // pays into `bounty`, the spendable economy, not the score) — 42 from the three
-    // pre-S5a waves plus 18 for wave index 3's six `armored` at bounty 3, plus 24 for
-    // wave index 4's twelve creeps at bounty 2, plus 0 for wave index 5's eight leaked
-    // `flying` = 84 (UNCHANGED from M2-S6 P5) — while the credit channel is exactly the
-    // three early-call payouts, 13 (also unchanged — no fourth call was made).
+    // Re-pinned M2-S10 P3 — a SEMANTIC move, the outcome FLIP the packet's plan
+    // warned about (Story 10 Risk 1 ruling: reported for S11's balance pass, never
+    // tuned away). Measured, not predicted: wave index 6's `armored-flyer` — air
+    // domain, armor 5, untouched by the ground-only `basic` wall and shrugging off
+    // the `slow` towers' 2-point hit (net 0 damage against armor 5) — leaks in full,
+    // same as wave index 5's `flying` before it. Lives are already down to 2 when
+    // wave index 6 starts; its first two `armored-flyer` leaks (spaced 20 ticks
+    // apart, each a separate-tick leak) drain lives 2 → 1 → 0, and the run FREEZES at
+    // that instant (`lives <= 0` evaluated in RESOLUTION, `index.ts:1090`; every
+    // later step is a no-op, `:857`) — before wave index 6 finishes launching its
+    // remaining four `armored-flyer`, and long before wave index 7 (the boss) ever
+    // launches. `waveResolved[6]` therefore stays `false` even though `waveCursor`
+    // has advanced past it, and `waveResolved[7]` stays `false` too. `phase` flips
+    // 'won' → 'lost': `cumulativeEarlyCallCredit` is forfeited under the lost-branch
+    // score formula (kill-bounty only), so `deriveScore` drops from 167 to 84 even
+    // though `cumulativeKillBounty` itself is unchanged (wave index 6 contributed 0
+    // kills either way — it leaked, not died, under both the old 'won' outcome and
+    // this one). Measured before (M2-S7 P6, 1750-tick fixed window) → after (M2-S10
+    // P3, run to terminal under MAX_MATCH_TICKS):
+    //   phase                        won → lost
+    //   tick                        1691 → 1956
+    //   waveResolved.length            6 → 8   ([t,t,t,t,t,t,f,f])
+    //   waveCursor                     6 → 7
+    //   cumulativeKillBounty           84 → 84  (unchanged: wave index 6 is leaked, not
+    //                                             killed, so it contributes 0 kills)
+    //   cumulativeEarlyCallCredit      13 → 13  (unchanged pre-terminal, but FORFEITED
+    //                                             by the lost-branch score formula)
+    //   bounty                        106 → 106 (unchanged: no clear bonus for a
+    //                                             wave that leaked)
+    //   lives                           2 → 0   (-2, two of wave index 6's six
+    //                                             `armored-flyer` leak before freeze)
+    //   score                         167 → 84  (kill-bounty only; the lost branch
+    //                                             forfeits early-call credit and pays
+    //                                             no survival term at all)
+    //   stars                           1 → 0
+    expect(hashSimState(state)).toBe('64880500');
+    expect(fnv1a(trace.join(':'))).toBe('0437f228');
+    expect(state.phase).toBe('lost');
+    expect(state.lives).toBe(0);
+    expect(state.tick).toBe(1956);
+    // The run freezes mid-wave: wave index 6 (`armored-flyer`) launched (`waveCursor`
+    // advanced past it) but never finished resolving, and wave index 7 (the boss)
+    // never launched at all.
+    expect(state.waveResolved).toEqual([true, true, true, true, true, true, false, false]);
+    expect(state.waveCursor).toBe(7);
+    // cumulativeKillBounty is unchanged from M2-S7 P6 (84): wave index 6 leaked, not
+    // killed, same as wave index 5 before it. cumulativeEarlyCallCredit is also
+    // unchanged pre-terminal (13, the same three early calls as before), but the
+    // lost-branch score formula forfeits it entirely — see `deriveScore` below.
     expect(state.cumulativeKillBounty).toBe(84);
     expect(state.cumulativeEarlyCallCredit).toBe(13);
     expect(state.bounty).toBe(106);
-    // Win score formula: kill-bounty + early-call credit + lives × survivalMul. Lives
-    // drop 10 → 2 (wave index 5's 8 leaked `flying`), so the survival term alone falls
-    // 350 → 70.
-    expect(deriveScore(state, ruleset)).toBe(84 + 13 + 2 * ruleset.scoring.survivalMul);
-    expect(deriveScore(state, ruleset)).toBe(167);
-    expect(deriveStars(state, ruleset)).toBe(1);
+    // Lost score formula: kill-bounty ONLY — no early-call credit, no survival term.
+    expect(deriveScore(state, ruleset)).toBe(84);
+    expect(deriveStars(state, ruleset)).toBe(0);
   });
 });
 
@@ -283,7 +375,10 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // mine is player-built so it cannot ship dark. A content-identity digest, so it moves
 // whenever the bundle intentionally changes — independent of the world-hash goldens above,
 // which do NOT move here (nothing in `SimState` or `Impact` changed shape at sv13).
-const SHIPPED_RULESET_HASH = 'df7fd693d835d466d74af26da47fe6feaaa6d5ab9c7c714bf33b9bed0e5a7d55';
+// Re-pinned M2-S10 P3: the shipped catalog gains the `armored-flyer` and `boss` creeps,
+// the `frost-splash` tower, and waves index 6/7 — the finale content. Moves for the same
+// content-identity reason as every prior catalog addition.
+const SHIPPED_RULESET_HASH = '310720258d380afa8e9472d11bba90dc09e72aa49180d6d78a7a9b68e48b552e';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {

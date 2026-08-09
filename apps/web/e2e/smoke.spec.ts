@@ -35,7 +35,7 @@ test('renders the app shell (status/board/dock/rail), and settings with no axe v
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-rail')).toBeVisible();
   // The Rail's Cards (PLAN.md P2, M2-S3/M2-S4a/M2-S6: one per catalog tower) — unarmed at load.
-  await expect(page.locator('.wy-card')).toHaveCount(8); // M2-S9 appends `mine`
+  await expect(page.locator('.wy-card')).toHaveCount(9); // M2-S10 appends `frost-splash`
   for (const c of await page.locator('.wy-card').all()) {
     await expect(c).toBeVisible();
     await expect(c).toHaveAttribute('aria-pressed', 'false');
@@ -307,7 +307,9 @@ test('the third Card (M2-S4a): arms Splash Tower by click AND by Digit3, labels 
   page,
 }) => {
   await page.goto('/');
-  const splashCard = page.getByRole('button', { name: /Splash Tower/ });
+  // Anchored at the start: M2-S10's `frost-splash` Card is named "Frost Splash Tower",
+  // which an unanchored /Splash Tower/ would also match (strict-mode violation).
+  const splashCard = page.getByRole('button', { name: /^Splash Tower/ });
   const board = page.locator('.wy-board');
   const panel = page.locator('.wy-panel');
 
@@ -366,7 +368,9 @@ test('the Splash Tower ghost + blast-radius preview stay functional and axe-clea
   await page.getByLabel('Reduce motion').check();
   await page.getByRole('button', { name: 'Close' }).click();
 
-  const splashCard = page.getByRole('button', { name: /Splash Tower/ });
+  // Anchored (see the third-Card test above): unanchored /Splash Tower/ also matches
+  // M2-S10's "Frost Splash Tower" Card.
+  const splashCard = page.getByRole('button', { name: /^Splash Tower/ });
   await splashCard.click();
   await expect(splashCard).toHaveAttribute('aria-pressed', 'true');
 
@@ -560,11 +564,11 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   const callWave = page.getByRole('button', { name: 'Call wave' });
   const preview = page.locator('.wy-wave-preview');
   for (let waveNumber = 1; waveNumber <= 3; waveNumber++) await callWave.click();
-  // M2-S7 P6: the bundle now carries six waves — the armored wave is wave 4 of 6, not
+  // M2-S10: the bundle now carries eight waves — the armored wave is wave 4 of 8, not
   // wave 4 of 4.
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 6');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 8');
   await expect(preview.locator('li')).toHaveText([
-    '6 × Armored Creep — ground, armor 6, no immunities',
+    '6 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
   ]);
 
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
@@ -580,7 +584,7 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   expect(liveAudit.violations, JSON.stringify(liveAudit.violations, null, 2)).toEqual([]);
 });
 
-test('supports player-started runs, pause / speed controls, early-calls all six waves with the preview checked before each, and reaches a result', async ({
+test('supports player-started runs, pause / speed controls, early-calls all eight waves with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -598,8 +602,10 @@ test('supports player-started runs, pause / speed controls, early-calls all six 
   // 1's composition pre-start — the shipped bundle's single creep kind.
   const preview = page.locator('.wy-wave-preview');
   await expect(preview).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 6');
-  await expect(preview.locator('li')).toHaveText(['10 × Creep — ground, armor 0, no immunities']);
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 8');
+  await expect(preview.locator('li')).toHaveText([
+    '10 × Creep — ground, armor 0, leak cost 1, no immunities',
+  ]);
 
   // axe audit with the wave preview visible (PLAN.md P3 step 19) — the preview is a real
   // DOM surface (never chip-hosted), so it's in scope for the standard audit like every
@@ -636,20 +642,28 @@ test('supports player-started runs, pause / speed controls, early-calls all six 
   // numbering) — the FIRST multi-entry wave this spec exercises, so its composition is an
   // array of two `<li>` texts (authored order: `resolute` then `fast`), not a single string
   // like every wave before it. M2-S7 P6 appends wave index 5 (the sixth wave) — the first
-  // AIR wave, so its row reads `air`, not `ground`.
+  // AIR wave, so its row reads `air`, not `ground`. M2-S10 appends wave indices 6 and 7 (the
+  // seventh and eighth waves) — the seventh is the first `armored-flyer` wave, and the
+  // eighth is the boss wave, closing out the bundle with a `boss` entry ahead of a final
+  // `creep` swarm.
   const EXPECTED_COMPOSITION: Record<number, string[]> = {
-    1: ['10 × Creep — ground, armor 0, no immunities'],
-    2: ['16 × Swarm Creep — ground, armor 0, no immunities'],
-    3: ['8 × Fast Creep — ground, armor 0, no immunities'],
-    4: ['6 × Armored Creep — ground, armor 6, no immunities'],
+    1: ['10 × Creep — ground, armor 0, leak cost 1, no immunities'],
+    2: ['16 × Swarm Creep — ground, armor 0, leak cost 1, no immunities'],
+    3: ['8 × Fast Creep — ground, armor 0, leak cost 1, no immunities'],
+    4: ['6 × Armored Creep — ground, armor 6, leak cost 1, no immunities'],
     5: [
-      '6 × Resolute Creep — ground, armor 0, slow',
-      '6 × Fast Creep — ground, armor 0, no immunities',
+      '6 × Resolute Creep — ground, armor 0, leak cost 1, slow',
+      '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
     ],
-    6: ['8 × Flying Creep — air, armor 0, no immunities'],
+    6: ['8 × Flying Creep — air, armor 0, leak cost 1, no immunities'],
+    7: ['6 × Armored Flyer — air, armor 5, leak cost 1, no immunities'],
+    8: [
+      '1 × Boss — ground, armor 8, leak cost 3, stun',
+      '8 × Creep — ground, armor 0, leak cost 1, no immunities',
+    ],
   };
-  for (let waveNumber = 1; waveNumber <= 6; waveNumber++) {
-    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 6`);
+  for (let waveNumber = 1; waveNumber <= 8; waveNumber++) {
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 8`);
     await expect(preview.locator('li')).toHaveText(EXPECTED_COMPOSITION[waveNumber]!);
     await callWave.click();
   }
@@ -734,9 +748,9 @@ test('supports player-started runs, pause / speed controls, early-calls all six 
   await expect(page.locator('.wy-board')).toBeFocused();
 
   // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
-  // again — including the wave preview going back to wave 1 of 6.
+  // again — including the wave preview going back to wave 1 of 8 (M2-S10).
   await expect(waveChip).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 6');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 8');
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });

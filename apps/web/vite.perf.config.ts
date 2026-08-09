@@ -22,6 +22,11 @@ export default defineConfig({
   build: {
     target: 'es2022',
     outDir: 'dist-perf',
+    // M2-S10 P8 (ADR 0005 ruling 7): sourcemaps so the frame-time diagnosis's sampled
+    // stacks resolve to names in the minified perf bundle. PERF-ONLY, NEVER PRODUCTION —
+    // this config's module graph is unreachable from `vite.config.ts` (see header), so
+    // this flag is structurally incapable of shipping a production sourcemap.
+    sourcemap: true,
     rollupOptions: {
       input: 'perf/index.html',
     },

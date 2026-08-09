@@ -31,7 +31,12 @@
 // widening isn't a narrower ceiling instead) — and (M2-S9 P1) `allowedEffectKinds`,
 // now all six kinds, exactly the v2 schema's own `EffectDef` enum: no seventh legal
 // value exists to test a reject against; `allowedBurstForms` is the narrower axis
-// that carries the replacement witness.
+// that carries the replacement witness — and (M2-S10 P1) `allowedRoles`, now
+// `['boss']`, exactly the v2 schema's own role enum (`CreepDef.role?: 'boss'`): no
+// second legal role value exists to test a reject against. Deleting
+// `requiredLeakCost` removes a second witness (the "must be exactly 1" reject);
+// `maxLeakCost`, genuinely narrower than the schema's own 1..1000, is the
+// replacement and carries both.
 
 import { RulesetError, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
 
@@ -51,10 +56,11 @@ export interface CapabilityProfile {
   readonly allowedImmunities: readonly string[];
   readonly allowedRoles: readonly string[];
   readonly maxArmor: number;
-  /** The exact `leakCost` every creep in the catalog must carry (1 at simVersion 10 —
-   *  m2.md: "leakCost = 1 until S10"); the compiled surface exposes that single
-   *  value as `CompiledBalance.leakCost`. */
-  readonly requiredLeakCost: number;
+  /** Ceiling on a creep's `leakCost` (M2-S10) — 16 at sv14. A POLICY ceiling, not a
+   *  derived safety rail: nothing overflows at 1000 (the leak subtraction in `step`
+   *  is already `MIN_SAFE_INTEGER`-guarded), and 16 echoes `maxArmor: 16`, which is
+   *  equally soft. Checked per creep in `checkCapabilityGlobal`. */
+  readonly maxLeakCost: number;
   readonly maxClearBonus: number;
   readonly maxEarlyCallBountyDivisor: number;
   readonly maxEarlyCallScoreDivisor: number;
@@ -139,29 +145,28 @@ export interface CapabilityProfile {
   readonly maxBurstTravelTicks: number;
 }
 
-/** `SIM_VERSION` 13 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  sv12's support axis plus (M2-S9) the BURST axis activates — a tower's bundle may
- *  carry a `burst` effect: one AoE discharge, no cadence, centred on its own
- *  footprint, and the tower is CONSUMED at its fire tick. Every other axis is
- *  untouched from sv12.
+/** `SIM_VERSION` 14 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  sv13's burst axis plus (M2-S10) the multi-life leak un-collapses — a creep may
+ *  carry a `leakCost` other than 1, up to `maxLeakCost`, and role `'boss'` is
+ *  admitted. Every other axis is untouched from sv13.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv12 profile is deleted with this bump —
- *  a live sv12 entry would misdescribe v13 tick code (it could not compile a burst
- *  bundle, which v13's `compileRuleset` now admits and whose consumption
- *  `combat.ts` now performs every phase), and replay's strict version equality
- *  already owns cross-version rejection, so there is nothing for a stale profile to
- *  serve.
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv13 profile is deleted with this bump —
+ *  a live sv13 entry would misdescribe v14 tick code (it could not compile a
+ *  non-uniform-leakCost catalog or a `'boss'` creep, which v14's `compileRuleset`
+ *  now admits and whose leak `step` now resolves per creep), and replay's strict
+ *  version equality already owns cross-version rejection, so there is nothing for a
+ *  stale profile to serve.
  *
- *  THE WITNESS HANDOVER: `allowedEffectKinds` widens to all six kinds — exactly the
- *  v2 schema's own `EffectDef` enum — so it LOSES its last rejection witness and
- *  joins the defer-to-the-schema list, the same shape S7's domain axes hit. The two
- *  NEW ceilings are both genuinely narrower than the schema, so each carries a real
- *  rejection witness of its own: `allowedBurstForms: ['aoe']` against the schema's
- *  `single | aoe`, and `maxBurstTravelTicks: 8` against its generic 1..1e6 — the
- *  latter closing a bound that only the cadence rule was holding up, and that the
- *  burst axis removes. */
+ *  THE WITNESS HANDOVER: `allowedRoles` widens to `['boss']` — exactly the v2
+ *  schema's own role enum — so it LOSES its rejection witness and joins the
+ *  defer-to-the-schema list, the same shape S7's domain axes and S9's
+ *  `allowedEffectKinds` hit. Deleting `requiredLeakCost` removes a second witness
+ *  (the "must be exactly 1" reject). The one NEW ceiling, `maxLeakCost: 16`, is
+ *  genuinely narrower than the schema's own 1..1000, so it carries a real rejection
+ *  witness of its own — and since this bump loses two witnesses, it is the
+ *  replacement for both. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  13: {
+  14: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,
@@ -172,9 +177,9 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     allowedTowerDomains: ['ground', 'air', 'both'],
     allowedCreepDomains: ['ground', 'air'],
     allowedImmunities: ['slow', 'stun'],
-    allowedRoles: [],
+    allowedRoles: ['boss'],
     maxArmor: 16,
-    requiredLeakCost: 1,
+    maxLeakCost: 16,
     maxClearBonus: 1_000_000,
     maxEarlyCallBountyDivisor: 1_000_000,
     maxEarlyCallScoreDivisor: 1_000_000,

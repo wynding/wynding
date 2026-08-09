@@ -321,6 +321,33 @@ describe('view-model + hud derivation', () => {
     expect(vm.creeps[0]?.warded).toBe(false);
   });
 
+  it('projects `boss` as a catalog join (M2-S10): true for the shipped `boss` def, false for `armored` — which shares its hexagon silhouette — and false for a forged id', () => {
+    // The ONLY wiring between the shipped catalog and the boss size cue. Without this
+    // the join can be replaced by a constant `false` and every other suite stays green
+    // while the boss silently renders at every other creep's size (ship-review P2).
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    expect(s.creeps.creepId[0]).toBe('normal'); // no role in the shipped catalog
+    let vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.boss).toBe(false);
+
+    // `armored` is the discriminating case, not a plain creep: it shares the boss's
+    // `'hexagon'` silhouette, so `boss` is the only channel separating the two sizes.
+    s.creeps.creepId[0] = 'armored';
+    vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.boss).toBe(false);
+
+    s.creeps.creepId[0] = 'boss'; // shipped with role: 'boss'
+    vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.boss).toBe(true);
+
+    // Forged/unresolved id must not throw — falls back to `false`, the same totality
+    // posture `warded`/`domain` already take.
+    s.creeps.creepId[0] = 'nonexistent';
+    vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps[0]?.boss).toBe(false);
+  });
+
   it('projects `domain` as a catalog join (M2-S7): `ground` for the shipped `normal` creep, `air` for `flying`, never sim state', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
@@ -420,7 +447,9 @@ describe('hud wave preview (M2-S2, PLAN.md P3 step 16)', () => {
       kind: 'upcoming',
       waveNumber: 1,
       waveCount: ruleset.waves.length,
-      entries: [{ creepId: 'normal', count: 10, domain: 'ground', armor: 0, immunities: [] }],
+      entries: [
+        { creepId: 'normal', count: 10, domain: 'ground', armor: 0, leakCost: 1, immunities: [] },
+      ],
     });
   });
 
@@ -463,6 +492,21 @@ describe('hud wave preview (M2-S2, PLAN.md P3 step 16)', () => {
     expect(deriveHud(lost, ruleset).preview).toBeNull();
     expect(deriveHud(lost, ruleset).callable).toBe(false);
   });
+
+  it("joins each preview entry's `leakCost` from the catalog (M2-S10): the boss's wave shows 3 for the boss and 1 for its escort, in ONE preview", () => {
+    // The ONLY wiring between the shipped catalog and the preview's leak-cost slot.
+    // Every other preview assertion in this file happens to sit on a leakCost-1 wave, so
+    // without this the join can be replaced by the constant 1 and stay green while the
+    // HUD announces "leak cost 1" for the boss forever (ship-review P2). Wave index 7 is
+    // the mixed one, which also proves the join is PER ENTRY rather than per wave.
+    let s = createInitialState(1, ruleset);
+    for (let i = 0; i < 7; i++) s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    const hud = deriveHud(s, ruleset);
+    expect(hud.preview).toMatchObject({ kind: 'upcoming', waveNumber: 8 });
+    const entries = hud.preview?.kind === 'upcoming' ? hud.preview.entries : [];
+    expect(entries.find((e) => e.creepId === 'boss')?.leakCost).toBe(3);
+    expect(entries.find((e) => e.creepId === 'normal')?.leakCost).toBe(1);
+  });
 });
 
 describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 step 19: the shipped bundle’s three identical single-entry waves cannot catch aggregation/ordering bugs)', () => {
@@ -474,8 +518,8 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
       waveNumber: 1,
       waveCount: 2,
       entries: [
-        { creepId: 'armored', count: 1, domain: 'ground', armor: 0, immunities: [] },
-        { creepId: 'normal', count: 3, domain: 'ground', armor: 0, immunities: [] }, // 2 + 1
+        { creepId: 'armored', count: 1, domain: 'ground', armor: 0, leakCost: 1, immunities: [] },
+        { creepId: 'normal', count: 3, domain: 'ground', armor: 0, leakCost: 1, immunities: [] }, // 2 + 1
       ],
     });
   });
@@ -505,7 +549,9 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
       kind: 'upcoming',
       waveNumber: 2,
       waveCount: 2,
-      entries: [{ creepId: 'normal', count: 1, domain: 'ground', armor: 0, immunities: [] }],
+      entries: [
+        { creepId: 'normal', count: 1, domain: 'ground', armor: 0, leakCost: 1, immunities: [] },
+      ],
     });
   });
 
@@ -615,9 +661,22 @@ describe('hud score — earned components while live, authoritative once termina
       { col: 15, row: 9 },
       { col: 15, row: 12 },
       { col: 18, row: 9 },
+      // M2-S10 appends wave index 6 (6 × `armored-flyer`, armor 5) — the same air-domain
+      // problem `antiair` was added for, now with armor cutting the original three towers'
+      // net damage (8 − 5 = 3/hit) thin enough to cost 5 of the 6-life margin above.
+      // Measured: a FOURTH `antiair` restores the margin (armored-flyer clears clean).
+      { col: 18, row: 12 },
     ] as const) {
       s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'antiair' }]);
     }
+    // M2-S10 also appends wave index 7 (1 × `boss`, hp 400/armor 8/leakCost 3, plus 8
+    // escorting `normal`) — `basic`'s own net 2/hit (10 − 8 armor) is thin against 400 hp,
+    // and this fixture only needs SOME win, not a tuned one. One `venom` (cost 9, within
+    // the remaining bounty) closes it: its DoT bypasses armor entirely (m2.md), so it
+    // chips the boss regardless of the 8-armor gate the direct-damage towers above are
+    // fighting. 77 of 80 starting bounty, still inside. Measured: clears all 8 waves with
+    // 3 lives to spare.
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 21, row: 9 }, towerId: 'venom' }]);
     // Early-call only wave 1 — the later waves auto-launch on their own countdown
     // (300 ticks each, chained off the prior wave's LAUNCH per PLAN.md's flip-tick rule),
     // which the fixed defense clears within the `stepUntil` budget below.
@@ -676,6 +735,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const cur = vm(1, [
@@ -690,6 +750,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const out = interpolateCreeps(prev, cur, 0.5);
@@ -705,6 +766,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
   });
@@ -722,6 +784,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const cur = vm(1, [
@@ -736,6 +799,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const out = interpolateCreeps(prev, cur, 0.5);
@@ -751,6 +815,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
   });
@@ -768,6 +833,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const cur = vm(1, [
@@ -782,6 +848,7 @@ describe('interpolation — by entity id', () => {
         poisoned: true,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const out = interpolateCreeps(prev, cur, 0.5);
@@ -797,6 +864,7 @@ describe('interpolation — by entity id', () => {
         poisoned: true,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
   });
@@ -814,6 +882,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: true,
+        boss: false,
       },
     ]);
     const cur = vm(1, [
@@ -828,6 +897,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: true,
         warded: true,
+        boss: false,
       },
     ]);
     const out = interpolateCreeps(prev, cur, 0.5);
@@ -843,6 +913,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: true,
         warded: true,
+        boss: false,
       },
     ]);
   });
@@ -861,6 +932,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     expect(interpolateCreeps(prev, cur, 0.5)).toEqual([
@@ -875,6 +947,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
   });
@@ -892,6 +965,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const cur = vm(1, []);
@@ -911,6 +985,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     const cur = vm(1, [
@@ -925,6 +1000,7 @@ describe('interpolation — by entity id', () => {
         poisoned: false,
         stunned: false,
         warded: false,
+        boss: false,
       },
     ]);
     expect(interpolateCreeps(prev, cur, 2).at(0)?.x).toBe(100);

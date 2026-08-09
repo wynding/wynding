@@ -153,16 +153,23 @@ describe('compileRuleset — creep catalog domains', () => {
     expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
   });
 
-  it('rejects armor past the capability ceiling, and any role — capability-gated (M2-S5a widened maxArmor 0 → 16)', () => {
+  it('rejects armor past the capability ceiling — capability-gated (M2-S5a widened maxArmor 0 → 16)', () => {
     rejects((b) => (b.creepCatalog[0]!.armor = 17)); // one past the live profile's maxArmor ceiling
     // `immunities` is no longer a reject case here (M2-S6 P4): `allowedImmunities`
     // widens to `['slow','stun']`, exactly the v2 schema's own enum — see
     // capability.test.ts's `allowedImmunities` case and header comment.
-    rejects((b) => (b.creepCatalog[0]!.role = 'boss'));
   });
 
-  it('rejects a non-uniform leakCost across the catalog (capability: requiredLeakCost)', () => {
-    rejects((b) => b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 }));
+  it("compiles a 'boss' role — no reject case exists (M2-S10: allowedRoles widens to ['boss'], exactly the v2 schema's own role enum; see capability.test.ts's header comment)", () => {
+    const b = base();
+    b.creepCatalog[0]!.role = 'boss';
+    expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
+  });
+
+  it('compiles a mixed-cost catalog within the maxLeakCost ceiling (capability: maxLeakCost, M2-S10)', () => {
+    const b = base();
+    b.creepCatalog.push({ ...b.creepCatalog[0]!, id: 'other', leakCost: 2 });
+    expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
   });
 });
 
@@ -176,9 +183,9 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects a burst effect form unsupported at simVersion 13 (valid schema, capability-gated: allowedBurstForms)', () => {
+  it('rejects a burst effect form unsupported at simVersion 14 (valid schema, capability-gated: allowedBurstForms)', () => {
     // Before M2-S9, 'burst' wasn't in `allowedEffectKinds` at all, so ANY burst
-    // bundle tripped that gate first. At sv13 'burst' joins `allowedEffectKinds`
+    // bundle tripped that gate first. Since sv13 'burst' joins `allowedEffectKinds`
     // (capability.ts's header comment — it now defers to the schema, exactly the
     // v2 schema's own `EffectDef` enum), so the rejection witness moves to the
     // narrower `allowedBurstForms: ['aoe']` ceiling. This mirrors
@@ -194,7 +201,7 @@ describe('compileRuleset — tower catalog domains', () => {
     // precisely why the profile's own `allowedBurstForms` ceiling has to reject it.
     b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      "burst effect form 'single' unsupported at simVersion 13",
+      "burst effect form 'single' unsupported at simVersion 14",
     );
   });
 

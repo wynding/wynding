@@ -122,9 +122,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(page.locator('.wy-wordmark')).toBeHidden();
     // Every Card's hotkey badge (M2-S3: card-hotkey-hidden ×2, widened to ×3 at M2-S4a's
     // third Card, ×4 at M2-S5a's fourth, ×5 at M2-S6's fifth, ×6 at M2-S7's sixth, ×7 at
-    // M2-S8's seventh, ×8 at M2-S9's eighth) — count pinned
+    // M2-S8's seventh, ×8 at M2-S9's eighth, ×9 at M2-S10's ninth) — count pinned
     // first, so a renamed/removed badge class cannot pass this loop vacuously (QC round 1).
-    await expect(page.locator('.wy-card-hotkey')).toHaveCount(8);
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(9);
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeHidden();
 
@@ -169,10 +169,12 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await gotoAt(page, PHONE);
     const preview = page.locator('.wy-wave-preview');
     await expect(preview).toBeVisible(); // visible pre-start too (M2-S2 decouple)
-    await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 6'); // M2-S7 P6: six waves now
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 8'); // M2-S10: eight waves now
     const entries = preview.locator('li');
     await expect(entries).toHaveCount(1); // the shipped bundle's single creep kind
-    await expect(entries.first()).toHaveText('10 × Creep — ground, armor 0, no immunities');
+    await expect(entries.first()).toHaveText(
+      '10 × Creep — ground, armor 0, leak cost 1, no immunities',
+    );
 
     // Force the SAME overflow smoke.spec's 200%-zoom gate proves for the chips, and confirm
     // the preview is still present and KEYBOARD-OPERABLE inside that same scrollport — never
@@ -401,7 +403,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     expect(stage.y).toBeGreaterThanOrEqual(status.y + status.height - 1);
 
     await expect(page.locator('.wy-wordmark')).toBeVisible();
-    await expect(page.locator('.wy-card-hotkey')).toHaveCount(8); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now eight at M2-S9)
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(9); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now nine at M2-S10)
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeVisible();
 
@@ -467,7 +469,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const status = (await regionRect(page, 'status')) as Rect;
     expect(status.height).toBeGreaterThanOrEqual(SHORT_DESKTOP.height * 0.9);
     // The badge is Compact-gated, NOT pointer-gated: a fine pointer does not bring it back.
-    await expect(page.locator('.wy-card-hotkey')).toHaveCount(8); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now eight at M2-S9)
+    await expect(page.locator('.wy-card-hotkey')).toHaveCount(9); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now nine at M2-S10)
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeHidden();
     await expect(page.locator('.wy-wordmark')).toBeHidden();

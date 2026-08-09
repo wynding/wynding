@@ -79,16 +79,17 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   // (smoke.spec.ts exercises the identical flow end-to-end, with the preview + axe).
   const callWave = page.getByRole('button', { name: 'Call wave' });
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
-  // The bundle now carries six waves — M2-S6 appended index 4 (`resolute`+`fast`) and
-  // M2-S7 appended index 5 (8 × `flying`) — so this early-calls all six, not four.
-  for (let waveNumber = 1; waveNumber <= 6; waveNumber++) {
+  // The bundle now carries eight waves — M2-S6 appended index 4 (`resolute`+`fast`),
+  // M2-S7 appended index 5 (8 × `flying`), and M2-S10 appended indices 6 and 7
+  // (`armored-flyer` and the boss wave) — so this early-calls all eight, not four.
+  for (let waveNumber = 1; waveNumber <= 8; waveNumber++) {
     // Gate each press on LAUNCH-specific state, not the free-running sim heartbeat:
     // a tick boundary can fall between a tick-read and the click, so a tick-poll
     // passes even when the press itself was swallowed or same-tick-deduped (local
     // QC round 2 + CodeRabbit — the loop would silently stop testing "call every
     // wave"). The preview title only advances when the PREVIOUS call actually
     // landed, and the aria gate proves this press is genuinely accepted-able.
-    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 6`);
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 8`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await callWave.click();
   }

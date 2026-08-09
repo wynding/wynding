@@ -84,10 +84,10 @@ export interface CreepDef {
   /** Omitted = no role. Axis 5: role. */
   readonly role?: 'boss';
   /** Lives lost per leak of THIS creep — replaces v1's global `balance.leakCost`.
-   *  The M1/M2-S1 capability profile requires a uniform value across the whole
-   *  catalog (`requiredLeakCost`), so the compiled surface can still expose
-   *  one flat `CompiledBalance.leakCost` until a later story rewires `step` to
-   *  read per-creep. */
+   *  The M1/M2-S1 capability profile pinned a uniform value across the whole
+   *  catalog through sv13 (`requiredLeakCost`); M2-S10 lifts that to a per-creep
+   *  ceiling (`maxLeakCost`) and rewires `step` to resolve each leak's own cost —
+   *  `CompiledCreep.leakCost`, not one flat `CompiledBalance` field. */
   readonly leakCost: number; // int 1..1000
   /** Bounty credited on kill (feeds score + spendable bounty). */
   readonly bounty: number; // int 0..1e6

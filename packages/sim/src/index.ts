@@ -37,7 +37,7 @@ import {
   type TowerArrays,
   refundFor,
 } from './tower';
-import { assertRuleset, type CompiledRuleset } from './ruleset';
+import { assertRuleset, type CompiledRuleset, type CompiledCreep } from './ruleset';
 import { SIM_VERSION, effectiveSpeedFp } from './ruleset-shared';
 
 /** Simulation cadence: 20 Hz. Must match the render loop's tick duration. */
@@ -816,6 +816,25 @@ function applyInputPhase(
 }
 
 /**
+ * Resolve a leaking creep's own `leakCost` (M2-S10 — the multi-life leak
+ * un-collapses `CompiledBalance.leakCost` into a per-creep `CompiledCreep` field).
+ * Sibling to `resolveCreepDomain` (`domain.ts`), same totality shape: an unresolved
+ * `creepId` falls back rather than throws. `?? 1` is the safe DIRECTION (the v1
+ * default, and every shipped creep but the boss), but it is UNREACHABLE from the
+ * sim: `coerceSoa` (above) drops any row whose `creepId` doesn't resolve in
+ * `creepById` before movement ever runs, and a dropped row costs no life by
+ * explicit policy — so no leak can ever observe the fallback. Used uniformly
+ * regardless, mirroring `resolveCreepDomain`'s own posture.
+ */
+export function resolveCreepLeakCost(
+  creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
+  creepId: unknown,
+): number {
+  const def = typeof creepId === 'string' ? creepById[creepId] : undefined;
+  return def?.leakCost ?? 1;
+}
+
+/**
  * Advance the simulation by exactly one tick. Mutates and returns `state`.
  * Deterministic: identical (state, ruleset, inputs) always yield identical output.
  *
@@ -1003,11 +1022,15 @@ export function step(
         state.leakedCount += 1;
       }
       state.waveLeaked[wave] = true;
+      // Per-creep leak cost (M2-S10) — the boss is the shipped catalog's only
+      // source of a leak past 1, and the sim RULE this activates: a single leak can
+      // now overshoot `lives` below zero, not just several leaks on one tick.
+      const thisLeakCost = resolveCreepLeakCost(creepById, creepId);
       if (
         Number.isSafeInteger(state.lives) &&
-        state.lives - balance.leakCost > Number.MIN_SAFE_INTEGER
+        state.lives - thisLeakCost > Number.MIN_SAFE_INTEGER
       ) {
-        state.lives -= balance.leakCost;
+        state.lives -= thisLeakCost;
       }
       continue;
     }

@@ -57,6 +57,28 @@ export function drawCrosshair(g: GraphicsLike, cx: number, cy: number, spoke: nu
   g.lineBetween(cx + gap, cy, cx + spoke, cy);
 }
 
+/** A closed circle at `(cx,cy,halfSize)` — the `'ringed'` footprint mark's own radius —
+ *  plus four short spokes radiating OUTWARD from that ring to `halfSize * 1.5`, one per
+ *  cardinal direction — the `'ringed-crosshair'` footprint mark (M2-S10, `frost-splash`),
+ *  composing `'ringed'` (the ring, unchanged radius) and `'crosshair'` (the radiating-
+ *  spoke motif) into one shape that reads as its two parents (m2.md:299) while staying
+ *  distinct from both: unlike `'crosshair'` above, the spokes start at the ring's edge
+ *  and point away from it, not from the centre outward with a gap. `halfSize` is the
+ *  ring's radius, mirroring `drawCrosshair`'s own half-size parameter. */
+export function drawRingedCrosshair(
+  g: GraphicsLike,
+  cx: number,
+  cy: number,
+  halfSize: number,
+): void {
+  g.strokeCircle(cx, cy, halfSize);
+  const spokeOuter = halfSize * 1.5;
+  g.lineBetween(cx, cy - halfSize, cx, cy - spokeOuter);
+  g.lineBetween(cx, cy + halfSize, cx, cy + spokeOuter);
+  g.lineBetween(cx - halfSize, cy, cx - spokeOuter, cy);
+  g.lineBetween(cx + halfSize, cy, cx + spokeOuter, cy);
+}
+
 /** A small teardrop outline at `(cx,cy)`: a circular bulb offset downward, plus two
  *  lines converging to a point above it — the `'droplet'` footprint mark (M2-S5a,
  *  `venom`), evoking "applies a lingering effect". Distinct in SHAPE from both the
@@ -286,6 +308,9 @@ export function drawTowers(
     } else if (mark === 'charge') {
       g.fillStyle(pal.floor, 1);
       g.fillCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
+    } else if (mark === 'ringed-crosshair') {
+      g.lineStyle(2, pal.floor, 1);
+      drawRingedCrosshair(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
     }
     // The recipient ✦ sits in the footprint's top-left CELL, while every
     // `TowerFootprintMark` is anchored at the footprint CENTRE — separated by position,
@@ -346,6 +371,9 @@ export function drawTowers(
     } else if (pendingMark === 'charge') {
       g.fillStyle(pal.tower, 0.6);
       g.fillCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
+    } else if (pendingMark === 'ringed-crosshair') {
+      g.lineStyle(1, pal.tower, 0.6);
+      drawRingedCrosshair(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
     }
   }
   if (o.selection !== null) {
@@ -407,6 +435,17 @@ export function drawTowers(
   }
 }
 
+/** The boss's size multiplier (M2-S10, ruling 2 — size is the ONLY boss cue, no new
+ *  `CreepShape` and no new cue ring, since the concentric budget `creep-paint.ts`
+ *  documents is already exhausted). Applied AFTER `Math.max(3, cellPx * 0.35)`'s floor,
+ *  never inside it — that ordering is LOAD-BEARING, not cosmetic. Below `cellPx ≈ 8.57`
+ *  the floor binds and `r` is pinned at 3px regardless of `cellPx`; scaling inside the
+ *  floor would then multiply the ALREADY-CLAMPED 3px, giving the boss 3px too (no cue at
+ *  all) at exactly the cell size where legibility is worst. Scaling after the floor
+ *  always gives the boss 4.5px there — visibly larger than every other creep's 3px,
+ *  which is the entire point of a size-only cue. */
+const BOSS_SCALE = 1.5;
+
 /** A thin executor over the per-frame interpolated creep points — silhouette (shape
  *  keyed on `creepId`), HP pip, slowed telegraph, and DoT telegraph. `projection` is an
  *  explicit parameter for the same reason `drawTowers`' is. */
@@ -423,6 +462,7 @@ export function drawCreeps(
     poisoned: boolean;
     stunned: boolean;
     warded: boolean;
+    boss: boolean;
   }[],
   reducedMotion: boolean,
   renderTimeMs: number, // MILLISECONDS — the unit lives in the name (QC r3), the tick→ms conversion happens at the call site
@@ -430,7 +470,9 @@ export function drawCreeps(
 ): void {
   for (const c of interpolated) {
     const p = projection.fpToPixel(c.x, c.y);
-    const r = Math.max(3, projection.cellPx * 0.35);
+    // BOSS_SCALE applies AFTER the floor — see the constant's own comment for why the
+    // ordering is load-bearing.
+    const r = Math.max(3, projection.cellPx * 0.35) * (c.boss ? BOSS_SCALE : 1);
     const hpColour = c.hpFrac < 0.34 ? pal.creepLowHp : pal.creep;
     const op = creepSilhouettePaintOp(c.creepId, p.x, p.y, r, hpColour, c.hpFrac);
     g.fillStyle(op.colour, 1); // set once — used for both the silhouette and the pip

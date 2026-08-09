@@ -90,8 +90,6 @@ export interface CompiledWave {
  *  with `countdownTicks`/`waveClearBonus` now PER-WAVE (`CompiledWave`, not flat
  *  here — v2 moved them to the wave schedule) and the flat `earlyCallBonus`
  *  replaced by the real divisor the wave phase reads at launch time.
- *  `leakCost` stays DERIVED (read from the per-creep v2 schema under the
- *  capability profile's uniformity guarantee) rather than a raw bundle field.
  *  `slowFloorNum`/`slowFloorDen` (M2-S3) compile straight through from the
  *  validated bundle — the ratio `effectiveSpeedFp` (ruleset-shared.ts) floors a
  *  slowed creep's speed against, shared verbatim by the bound gate and movement. */
@@ -102,7 +100,6 @@ export interface CompiledBalance {
   readonly refundDen: number;
   readonly slowFloorNum: number;
   readonly slowFloorDen: number;
-  readonly leakCost: number;
   readonly earlyCallBountyDivisor: number;
 }
 
@@ -205,6 +202,10 @@ export interface CompiledCreep {
   readonly domain: 'ground' | 'air';
   readonly armor: number;
   readonly immunities: readonly ('slow' | 'stun')[];
+  readonly leakCost: number;
+  /** Omitted = no role, mirroring `normalizeForHash`'s posture (`ruleset.ts:352`) —
+   *  projected only when present, never `role: undefined`. */
+  readonly role?: 'boss';
 }
 
 /**
@@ -418,7 +419,7 @@ export function rulesetDigest(bundle: Ruleset): string {
 
 /** Gate every capability dimension that is NOT scoped to a single board (catalog
  *  cardinality, creep/tower per-entry domains, armor, immunities, roles, effect
- *  kinds/forms, leak-cost uniformity, the early-call divisors). Board/wave-scoped
+ *  kinds/forms, leak-cost ceiling, the early-call divisors). Board/wave-scoped
  *  dimensions (`maxWavesPerBoard`, `maxEntriesPerWave`, `maxOffsetTicks`,
  *  `maxClearBonus`, and — M2-S7 P1 — the air-domain size and axis-alignment gates)
  *  are checked separately, only against the board actually being compiled —
@@ -450,14 +451,11 @@ function checkCapabilityGlobal(bundle: Ruleset, profile: CapabilityProfile): voi
     if (creep.role !== undefined && !profile.allowedRoles.includes(creep.role)) {
       throw new RulesetError(`creep role '${creep.role}' unsupported at simVersion ${v}`);
     }
-  }
-  // The profile pins the VALUE, not just uniformity (m2.md: "leakCost = 1 until
-  // S10") — a uniform-but-nonzero catalog is still content this sim build cannot
-  // correctly simulate (multi-life leak is S10's sim rule).
-  for (const creep of bundle.creepCatalog) {
-    if (creep.leakCost !== profile.requiredLeakCost) {
+    // A POLICY ceiling, not a derived safety rail (M2-S10) — see `maxLeakCost`'s own
+    // doc comment in `capability.ts`.
+    if (creep.leakCost > profile.maxLeakCost) {
       throw new RulesetError(
-        `creep '${creep.id}' leakCost ${creep.leakCost} unsupported at simVersion ${v} (must be ${profile.requiredLeakCost})`,
+        `creep '${creep.id}' leakCost ${creep.leakCost} exceeds ${profile.maxLeakCost} at simVersion ${v}`,
       );
     }
   }
@@ -792,14 +790,11 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       domain: c.domain,
       armor: c.armor,
       immunities: c.immunities,
+      leakCost: c.leakCost,
+      // Omitted key, never `role: undefined` (mirrors `normalizeForHash`, `:352`).
+      ...(c.role !== undefined ? { role: c.role } : {}),
     };
   }
-  // Per-creep leakCost REPLACES v1's global `balance.leakCost` in the schema; the
-  // compiled surface still exposes one flat value (ADR 0007 no-balance-magic: read
-  // from content, never a code literal), safe because the capability profile's
-  // `requiredLeakCost` gate (checkCapabilityGlobal, above) already proved every
-  // catalog entry carries exactly that value.
-  const leakCost = normalized.creepCatalog[0]!.leakCost;
 
   // Compile EVERY catalog tower (sv7: `maxTowerCatalogSize` widens to the schema cap
   // 64 — step 3) — the same per-tower guards M1/sv6 ran on its lone entry (attack
@@ -1113,7 +1108,6 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     refundDen: normalized.balance.refundDen,
     slowFloorNum: normalized.balance.slowFloorNum,
     slowFloorDen: normalized.balance.slowFloorDen,
-    leakCost,
     earlyCallBountyDivisor: normalized.balance.earlyCallBountyDivisor,
   };
   const scoring: CompiledScoring = {

@@ -81,6 +81,7 @@ describe('drawCreeps — the hexagon silhouette (armored, M2-S5a)', () => {
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -108,6 +109,7 @@ describe('drawCreeps — the hexagon silhouette (armored, M2-S5a)', () => {
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -115,6 +117,78 @@ describe('drawCreeps — the hexagon silhouette (armored, M2-S5a)', () => {
       PROJECTION,
     );
     expect(g2.calls.some((c) => c.method === 'fillPoints')).toBe(false);
+  });
+});
+
+describe('drawCreeps — the boss size cue (M2-S10, ruling 2: size only, no new shape)', () => {
+  it('a boss and an armored creep share the hexagon silhouette but the boss draws it at BOSS_SCALE (1.5×) — fails if BOSS_SCALE is forced to 1', () => {
+    // Both `armored` and `boss` map to `'hexagon'` (creep-paint.ts) — the composability
+    // proof this story exercises — so size is the ONLY channel telling them apart at the
+    // silhouette itself. The hexagon's apex vertex sits at exactly `(cx, cy - r)` (angle
+    // -90°, the same "apex up" convention every other polygon builder here uses), so the
+    // vertical offset from centre IS `r` — no trig needed to recover it from the recorded
+    // `fillPoints` call.
+    const armoredG = fakeGraphics();
+    drawCreeps(
+      armoredG,
+      PAL,
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'armored',
+          domain: 'ground',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: false,
+          boss: false,
+        },
+      ],
+      false,
+      0,
+      PROJECTION,
+    );
+    const bossG = fakeGraphics();
+    drawCreeps(
+      bossG,
+      PAL,
+      [
+        {
+          x: 5 * 256,
+          y: 5 * 256,
+          hpFrac: 1,
+          creepId: 'boss',
+          domain: 'ground',
+          slowed: false,
+          poisoned: false,
+          stunned: false,
+          warded: true, // catalog fact (stun-immune) — carried for realism, not under test here
+          boss: true,
+        },
+      ],
+      false,
+      0,
+      PROJECTION,
+    );
+    const armoredPts = armoredG.calls.find((c) => c.method === 'fillPoints')!.args[0] as {
+      x: number;
+      y: number;
+    }[];
+    const bossPts = bossG.calls.find((c) => c.method === 'fillPoints')!.args[0] as {
+      x: number;
+      y: number;
+    }[];
+    expect(armoredPts).toHaveLength(6);
+    expect(bossPts).toHaveLength(6); // still the SAME shape — ruling 2, no new CreepShape
+    const centreY = PROJECTION.fpToPixel(5 * 256, 5 * 256).y;
+    const armoredR = centreY - armoredPts[0]!.y; // apex vertex: y = cy - r
+    const bossR = centreY - bossPts[0]!.y;
+    // The boss draws strictly larger — dies if `BOSS_SCALE` is forced to 1 (equal radii).
+    expect(bossR).toBeGreaterThan(armoredR);
+    // Pinned to the spec's exact multiplier, not just "bigger" — BOSS_SCALE = 1.5.
+    expect(bossR).toBeCloseTo(armoredR * 1.5, 5);
   });
 });
 
@@ -135,6 +209,7 @@ describe('drawCreeps — the pentagon silhouette (resolute, M2-S6)', () => {
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -165,6 +240,7 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
           poisoned: true,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       true, // reducedMotion
@@ -188,6 +264,7 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
           poisoned: true,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false, // motion allowed
@@ -213,6 +290,7 @@ describe('drawCreeps — the poisoned-pip telegraph (M2-S5a)', () => {
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -304,6 +382,29 @@ describe('drawTowers — the antiair arrow mark (M2-S7)', () => {
   });
 });
 
+describe('drawTowers — the frost-splash ringed-crosshair mark (M2-S10)', () => {
+  // TWO mark-draw branches in `board-draw.ts` — committed (this describe) and pending
+  // (below, in the shared-marks block) — and BOTH must gain an arm, or `'ringed-crosshair'`
+  // is a dead value that silently draws nothing (PLAN.md P4). This test pins the
+  // COMMITTED branch specifically: deleting only the pending arm must NOT turn this one
+  // red (see the pending test's own comment for the inverse).
+  it('a frost-splash tower (committed) draws its ringed-crosshair mark: 1 strokeCircle (the ring) + 4 lineBetween (the outward spokes) — fails if the committed arm is deleted', () => {
+    const g = fakeGraphics();
+    const vm: RenderVM = {
+      tick: 0,
+      phase: 'running',
+      creeps: [],
+      towers: [{ id: 1, col: 2, row: 2, towerId: 'frost-splash', support: false, buffed: false }],
+    };
+    drawTowers(g, PAL, vm, EMPTY_OVERLAY, PROJECTION);
+    // The ring is `'ringed'`'s own strokeCircle; the 4 spokes are `'crosshair'`'s own
+    // lineBetween count — reads as BOTH parents (m2.md:299), never `'ringed'` alone (which
+    // draws 0 lineBetween) or `'crosshair'` alone (which draws 0 strokeCircle).
+    expect(g.calls.filter((c) => c.method === 'strokeCircle')).toHaveLength(1);
+    expect(g.calls.filter((c) => c.method === 'lineBetween')).toHaveLength(4);
+  });
+});
+
 // The rest of `board-draw.ts`'s branches, exercised so the module (no longer
 // coverage-excluded now that it lives outside `scene.ts`) clears the package's normal
 // 90% branch bar — not new QC witnesses, just the remaining plain coverage.
@@ -347,13 +448,14 @@ describe('drawTowers — the remaining committed/pending marks + selection ring'
     expect(g.calls.filter((c) => c.method === 'fillRoundedRect')).toHaveLength(0);
   });
 
-  it('a pending (queued, not yet committed) build draws its own footprint mark: ringed, crosshair, droplet, bolt, and arrow', () => {
+  it('a pending (queued, not yet committed) build draws its own footprint mark: ringed, crosshair, droplet, bolt, arrow, and ringed-crosshair — fails if the PENDING arm of ringed-crosshair is deleted while the committed one (above) stays green (PLAN.md P4 mutation check)', () => {
     for (const [towerId, expectStroke, expectLines] of [
       ['slow', 1, 0],
       ['splash', 0, 4],
       ['venom', 1, 2],
       ['stun', 0, 3],
       ['antiair', 0, 3],
+      ['frost-splash', 1, 4],
     ] as const) {
       const g = fakeGraphics();
       const vm: RenderVM = { tick: 0, phase: 'running', creeps: [], towers: [] };
@@ -680,6 +782,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -703,6 +806,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -727,6 +831,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -752,6 +857,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -778,6 +884,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       false,
@@ -801,6 +908,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
           poisoned: false,
           stunned: false,
           warded: false,
+          boss: false,
         },
       ],
       true,
@@ -821,6 +929,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
       poisoned: false,
       stunned,
       warded: false,
+      boss: false,
     });
     const full = fakeGraphics();
     drawCreeps(full, PAL, [creep(true)], false, 0, PROJECTION);
@@ -846,6 +955,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
       poisoned: false,
       stunned: false,
       warded,
+      boss: false,
     });
     const full = fakeGraphics();
     drawCreeps(full, PAL, [creep(true)], false, 0, PROJECTION);
@@ -875,6 +985,7 @@ describe('drawCreeps — the remaining silhouette shapes + slowed telegraph', ()
       poisoned: false,
       stunned: false,
       warded: false,
+      boss: false,
     });
     const air = fakeGraphics();
     drawCreeps(air, PAL, [creep('air')], false, 0, PROJECTION);
@@ -915,6 +1026,7 @@ describe('drawCreeps — both telegraphs draw at the PROJECTED centre, not fixed
     poisoned: true,
     stunned: false,
     warded: false,
+    boss: false,
   };
 
   it('the slowed ring and the poison pips are centred within a cell of the silhouette', () => {
@@ -951,6 +1063,7 @@ describe('drawCreeps — both telegraphs draw at the PROJECTED centre, not fixed
     poisoned: false,
     stunned: true,
     warded: true,
+    boss: false,
   };
 
   it('the stun jolt and the ward ring are centred EXACTLY on the projected silhouette centre', () => {

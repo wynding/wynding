@@ -62,6 +62,27 @@
       "immunities": [],
       "leakCost": 1,
       "bounty": 2
+    },
+    {
+      "id": "armored-flyer",
+      "hp": 30,
+      "speedFp": 26,
+      "armor": 5,
+      "domain": "air",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 3
+    },
+    {
+      "id": "boss",
+      "hp": 400,
+      "speedFp": 18,
+      "armor": 8,
+      "domain": "ground",
+      "immunities": ["stun"],
+      "role": "boss",
+      "leakCost": 3,
+      "bounty": 25
     }
   ],
   "towerCatalog": [
@@ -150,6 +171,20 @@
       "cost": 6,
       "attack": { "domain": "ground", "rangeFp": 576, "travelTicks": 1 },
       "effects": [{ "kind": "burst", "form": "aoe", "damage": 45, "radiusFp": 640 }]
+    },
+    {
+      "id": "frost-splash",
+      "cost": 16,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 60,
+        "travelTicks": 8
+      },
+      "effects": [
+        { "kind": "direct", "form": "aoe", "damage": 6, "radiusFp": 384 },
+        { "kind": "slow", "mulFp": 179, "durationTicks": 30 }
+      ]
     }
   ],
   "balance": {
@@ -212,6 +247,21 @@
           "countdownTicks": 300,
           "clearBonus": 6,
           "entries": [{ "creepId": "flying", "count": 8, "spacingTicks": 15 }]
+        },
+        {
+          "index": 6,
+          "countdownTicks": 300,
+          "clearBonus": 7,
+          "entries": [{ "creepId": "armored-flyer", "count": 6, "spacingTicks": 20 }]
+        },
+        {
+          "index": 7,
+          "countdownTicks": 400,
+          "clearBonus": 12,
+          "entries": [
+            { "creepId": "boss", "count": 1, "spacingTicks": 20 },
+            { "creepId": "normal", "count": 8, "spacingTicks": 20 }
+          ]
         }
       ]
     }

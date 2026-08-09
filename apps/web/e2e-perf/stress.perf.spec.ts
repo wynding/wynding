@@ -1,4 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
+import { test, expect, type CDPSession } from '@playwright/test';
 import {
   percentile,
   max as maxOf,
@@ -196,6 +198,81 @@ const CALIBRATION_BAND_MS: { readonly low: number; readonly high: number } = {
   high: 18.5,
 };
 
+// ---- M2-S10 P8: DevTools trace capture for the ADR 0005 frame-time diagnosis ----
+//
+// OPT-IN via `WY_TRACE=1` — the default run is byte-identical in behaviour to before
+// this existed (no tracing, no extra waits), so `pnpm run perf` / CI never pay for it.
+// RECORDED-ONLY like everything else here: the trace is written to disk for the
+// offline post-processor (`scripts/analyze-trace.mjs`), never asserted on.
+//
+// The category set is the EMPIRICALLY OBSERVED one (2026-08-08 pilot): the un-prefixed
+// `devtools.timeline` is load-bearing — without it `Layout`/`Paint`/`FunctionCall`/
+// `FireAnimationFrame`/`MinorGC` all come back EMPTY. `toplevel` is deliberately
+// ABSENT: its `ThreadControllerImpl::RunTask` nests around `RunTask` and double-counts
+// under name-based bucketing. `disabled-by-default-v8.cpu_profiler` is ADR 0005
+// ruling 7 (name functions, not just the lump); it costs ~13% trace size and a one-off
+// V8 attach storm on the first `step` after `Tracing.start` — which is why tracing
+// starts during warm-up, >= 1s before the sampling window opens, and the post-processor
+// clips all attribution to the `wy:window:start`/`wy:window:end` marks.
+const TRACE_ENABLED = process.env.WY_TRACE === '1';
+const TRACE_CATEGORIES = [
+  'devtools.timeline',
+  'disabled-by-default-devtools.timeline',
+  'disabled-by-default-devtools.timeline.frame',
+  'blink.user_timing',
+  'disabled-by-default-v8.gc',
+  'gpu',
+  'disabled-by-default-v8.cpu_profiler',
+];
+/** Warm-up inside the trace, before the sampling window opens — sized above the
+ *  observed ~300ms attach storm with margin. */
+const TRACE_WARMUP_MS = 1_500;
+
+/** `Tracing.end` → await `tracingComplete` → stream the result via `IO.read` (4MB
+ *  chunks, honouring the optional `base64Encoded` flag) → `IO.close`. `ReturnAsStream`
+ *  delivered a 23.7MB 10s trace with `dataLossOccurred: false` in the pilot. */
+async function collectTrace(cdp: CDPSession): Promise<string> {
+  const complete = new Promise<{ stream?: string; dataLossOccurred: boolean }>((resolve) => {
+    cdp.once('Tracing.tracingComplete', (params) => {
+      resolve(params as { stream?: string; dataLossOccurred: boolean });
+    });
+  });
+  await cdp.send('Tracing.end');
+  const { stream, dataLossOccurred } = await complete;
+  if (stream === undefined) throw new Error('Tracing.tracingComplete carried no stream handle');
+  try {
+    // A LOSSY TRACE IS REJECTED, NOT REPORTED (CodeRabbit, PR #92). This used to only
+    // `console.log` the condition and hand the trace back anyway — which the caller then
+    // persisted, and which `analyze-trace.mjs` has no way to detect from the event array.
+    // The result would be an attribution computed over an incomplete event set: buckets
+    // that look plausible, a residual that closes, and no signal anywhere that events
+    // were dropped. The whole point of the ±2% residual is to catch missing time, so a
+    // trace that is missing time BY CONSTRUCTION must not reach the analyzer at all.
+    // Thrown after the handle is obtained so the `finally` below still closes the stream.
+    if (dataLossOccurred) {
+      throw new Error(
+        'Tracing reported dataLossOccurred=true — the trace is NOT attributable and is rejected. ' +
+          'Re-record (a shorter window, or fewer categories) rather than analysing a lossy trace.',
+      );
+    }
+    const chunks: string[] = [];
+    for (;;) {
+      const part = (await cdp.send('IO.read', { handle: stream, size: 4 * 1024 * 1024 })) as {
+        data: string;
+        base64Encoded?: boolean;
+        eof: boolean;
+      };
+      chunks.push(
+        part.base64Encoded === true ? Buffer.from(part.data, 'base64').toString('utf8') : part.data,
+      );
+      if (part.eof) break;
+    }
+    return chunks.join('');
+  } finally {
+    await cdp.send('IO.close', { handle: stream });
+  }
+}
+
 /** Samples raw rAF deltas (ms) for `windowMs` on whatever page is currently loaded —
  *  the calibration twin of `main-perf.ts`'s `startSampling`, but standalone: it must
  *  run on `about:blank`, which never has `window.wyndingPerf`. */
@@ -355,10 +432,35 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
   // the window closes, so this `evaluate` call blocks for ~`SAMPLE_WINDOW_MS`.
   // QC (the frozen-sim-loop guard): bracket the window with `tick()` reads, proving the sim actually
   // advanced while sampling was in progress — see `MIN_TICKS_ADVANCED`'s doc comment.
+  // P8 (opt-in): start tracing DURING WARM-UP, >= 1s before the sampling window opens.
+  // Trace window ≠ attribution window — the app keeps running under the throttle for
+  // `TRACE_WARMUP_MS` so the V8 attach storm (`cpu_profiler`'s one-off first-step
+  // deopt, observed at 299ms) lands inside the trace but OUTSIDE the
+  // `wy:window:start`/`wy:window:end` marks the post-processor clips to.
+  if (TRACE_ENABLED) {
+    await cdp.send('Tracing.start', {
+      transferMode: 'ReturnAsStream',
+      traceConfig: { recordMode: 'recordUntilFull', includedCategories: TRACE_CATEGORIES },
+    });
+    await page.waitForTimeout(TRACE_WARMUP_MS);
+  }
+
   const tickAtSampleStart = await page.evaluate(() => window.wyndingPerf!.tick());
   await page.evaluate((ms) => window.wyndingPerf!.startSampling(ms), SAMPLE_WINDOW_MS);
   const tickAtSampleEnd = await page.evaluate(() => window.wyndingPerf!.tick());
   expect(tickAtSampleEnd).toBeGreaterThanOrEqual(tickAtSampleStart + MIN_TICKS_ADVANCED);
+
+  // P8 (opt-in): end tracing immediately after the window closes (the `wy:window:end`
+  // mark is emitted by `startSampling`'s resolve, so it is already in the trace) and
+  // BEFORE the latency clicks below — they are not part of the attributed window.
+  if (TRACE_ENABLED) {
+    const traceJson = await collectTrace(cdp);
+    const outDir = resolvePath('test-results');
+    mkdirSync(outDir, { recursive: true });
+    const outPath = resolvePath(outDir, `wy-trace-${profile.name}.json`);
+    writeFileSync(outPath, traceJson);
+    console.log(`WY-TRACE: wrote ${String(traceJson.length)} bytes to ${outPath}`);
+  }
 
   const frameDeltas = await page.evaluate(() => window.wyndingPerf!.frameDeltas);
   const frameTimesMs = frameDeltas.filter((d) => d > 0);

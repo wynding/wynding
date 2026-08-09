@@ -62,8 +62,19 @@ export class RulesetError extends Error {
  *  own footprint, and is CONSUMED at its fire tick — the row is deleted, so the maze
  *  re-routes from the next movement step. Like S8 and unlike S7, the `Impact` shape
  *  does not change (a burst discharge is an ordinary `blast` impact), so a board with
- *  no mine placed simulates bit-for-bit as it did at sv12. */
-export const SIM_VERSION = 13;
+ *  no mine placed simulates bit-for-bit as it did at sv12.
+ *
+ *  M2 Story 10 bumps 13 → 14 — the multi-life leak un-collapses. `leakCost` has been
+ *  a per-creep v2 schema field since S1, but sv13's capability profile pinned every
+ *  creep to a uniform value (`requiredLeakCost`) and `compileRuleset` collapsed the
+ *  whole catalog into one flat `CompiledBalance.leakCost`. sv14 lifts that uniformity
+ *  pin to a per-creep ceiling (`maxLeakCost`) and widens `allowedRoles` to admit
+ *  `'boss'`: `CompiledCreep` now carries its own `leakCost` and, when present,
+ *  `role`, and `step`'s leak branch subtracts each leaking creep's own cost instead
+ *  of one collapsed value. `Impact`, `SimState` and `rulesetHash` are untouched — the
+ *  raw bundle already projected per-creep `leakCost`/`role` into the hash, so this is
+ *  a compiled-surface change only. */
+export const SIM_VERSION = 14;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

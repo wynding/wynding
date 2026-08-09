@@ -2,6 +2,7 @@
 // share `palette.tower`'s colour; shape carries the distinction.
 
 import { describe, it, expect } from 'vitest';
+import { getBundledRuleset } from '@wynding/content';
 import { towerFootprintMarkFor } from './tower-paint';
 
 describe('towerFootprintMarkFor — id-keyed footprint mark (total over any string)', () => {
@@ -32,11 +33,16 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
   it('draws mine with a distinct charge mark (M2-S9) — never reuses any prior mark', () => {
     expect(towerFootprintMarkFor('mine')).toBe('charge');
   });
+  it('draws frost-splash with a distinct ringed-crosshair mark (M2-S10) — never reuses any prior mark', () => {
+    expect(towerFootprintMarkFor('frost-splash')).toBe('ringed-crosshair');
+  });
   it('assigns every shipped tower a DISTINCT mark — no two towers ever share one', () => {
     // The per-story `not.toBe` chains above only ever compare against the marks that
     // existed at the time; this asserts the invariant itself, so a future story that
-    // reuses an existing mark fails here rather than in a reader's eye.
-    const ids = ['basic', 'slow', 'splash', 'venom', 'stun', 'antiair', 'beacon', 'mine'];
+    // reuses an existing mark fails here rather than in a reader's eye. Read straight
+    // off the bundled catalog (not a hand-listed literal) so a future catalog addition
+    // is automatically covered.
+    const ids = getBundledRuleset().towerCatalog.map((t) => t.id);
     const marks = ids.map(towerFootprintMarkFor);
     expect(new Set(marks).size).toBe(ids.length);
   });

@@ -143,8 +143,13 @@ _Avoid_: early send, rush, skip.
 
 **Lives**:
 The player's failure budget. Each creep that reaches the exit (a **leak**) costs
-at least one life — a boss may cost more; the run ends when lives reach zero or below.
+its **leak cost** in lives; the run ends when lives reach zero or below.
 _Avoid_: health, HP (that's a creep stat), hearts.
+
+**Leak cost**:
+How many Lives one creep costs when it reaches the exit — a per-creep stat, never
+less than one. A single leak may take Lives below zero.
+_Avoid_: leak penalty, life cost.
 
 **Bounty**:
 In-run currency. Earned through play — killing creeps, plus wave-clear and

@@ -13,10 +13,11 @@ export const EN = {
   "hud.wave.compact.countdown": "{s}s",
   "hud.stars": "Stars: {count} of 3",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
-  "hud.preview.entry": "{count} × {name} — {domain}, {armor}, {immunities}",
+  "hud.preview.entry": "{count} × {name} — {domain}, {armor}, {leakCost}, {immunities}",
   "hud.preview.domain.ground": "ground",
   "hud.preview.domain.air": "air",
   "hud.preview.armor": "armor {armor}",
+  "hud.preview.leakCost": "leak cost {leakCost}",
   "hud.preview.immunities.none": "no immunities",
   "hud.preview.immunity.slow": "slow",
   "hud.preview.immunity.stun": "stun",
@@ -27,6 +28,8 @@ export const EN = {
   "creep.armored.name": "Armored Creep",
   "creep.resolute.name": "Resolute Creep",
   "creep.flying.name": "Flying Creep",
+  "creep.boss.name": "Boss",
+  "creep.armored-flyer.name": "Armored Flyer",
   "creep.unknown.name": "Unknown creep ({id})",
   "controls.pause": "Pause",
   "controls.resume": "Resume",
@@ -81,6 +84,7 @@ export const EN = {
   "tower.antiair.name": "Anti-Air Tower",
   "tower.beacon.name": "Beacon",
   "tower.mine.name": "Mine",
+  "tower.frost-splash.name": "Frost Splash Tower",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.targets.ground": "Ground",
   "tower.targets.air": "Air",
@@ -97,6 +101,7 @@ export const EN = {
   "panel.dot": "Poison: {damage} damage every {cadence}s for {duration}s",
   "panel.dotBuffed": "Poison: {damage} damage every {cadence}s for {duration}s (boosted)",
   "panel.stun": "Stun: {chance}% for {duration}s",
+  "panel.slow": "Slow: {percent}% for {duration}s",
   "panel.support": "Support: +{percent}% damage to towers sharing a full edge",
   "panel.close": "Close panel",
   "panel.sell": "Sell (refund {refund})",
@@ -144,10 +149,11 @@ export interface MessageParams {
   "hud.wave.compact.countdown": { "s": string | number };
   "hud.stars": { "count": string | number };
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
-  "hud.preview.entry": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "immunities": string | number };
+  "hud.preview.entry": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
   "hud.preview.domain.ground": Record<never, never>;
   "hud.preview.domain.air": Record<never, never>;
   "hud.preview.armor": { "armor": string | number };
+  "hud.preview.leakCost": { "leakCost": string | number };
   "hud.preview.immunities.none": Record<never, never>;
   "hud.preview.immunity.slow": Record<never, never>;
   "hud.preview.immunity.stun": Record<never, never>;
@@ -158,6 +164,8 @@ export interface MessageParams {
   "creep.armored.name": Record<never, never>;
   "creep.resolute.name": Record<never, never>;
   "creep.flying.name": Record<never, never>;
+  "creep.boss.name": Record<never, never>;
+  "creep.armored-flyer.name": Record<never, never>;
   "creep.unknown.name": { "id": string | number };
   "controls.pause": Record<never, never>;
   "controls.resume": Record<never, never>;
@@ -212,6 +220,7 @@ export interface MessageParams {
   "tower.antiair.name": Record<never, never>;
   "tower.beacon.name": Record<never, never>;
   "tower.mine.name": Record<never, never>;
+  "tower.frost-splash.name": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.targets.ground": Record<never, never>;
   "tower.targets.air": Record<never, never>;
@@ -228,6 +237,7 @@ export interface MessageParams {
   "panel.dot": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.dotBuffed": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.stun": { "chance": string | number; "duration": string | number };
+  "panel.slow": { "percent": string | number; "duration": string | number };
   "panel.support": { "percent": string | number };
   "panel.close": Record<never, never>;
   "panel.sell": { "refund": string | number };

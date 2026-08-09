@@ -27,7 +27,16 @@
  *  silhouette itself `flying` and `normal` are identical, so the wingspan is the ONLY
  *  channel separating them — which is exactly why `airborneCuePaintOps` mirrors the cue
  *  below the creep rather than letting it leave the viewport (Codex P2, PR #87). It
- *  draws a cell away from the creep, above by default and below at the top edge. */
+ *  draws a cell away from the creep, above by default and below at the top edge.
+ *
+ *  `armored-flyer` and `boss` (M2-S10) are the composability proof this file's header
+ *  argues for, exercised rather than merely asserted: both reuse `'hexagon'` — no third
+ *  role/domain-driven shape value — and gain distinctness from OTHER independent axes
+ *  instead. `armored-flyer` reads as armored (the hexagon) AND airborne (the wingspan,
+ *  `airborneCuePaintOps`), the exact combination this header already names. `boss` reads
+ *  as armored (the hexagon) AND larger (`BOSS_SCALE` in `board-draw.ts`) AND warded (it
+ *  is stun-immune, `wardPaintOps`) — role stays a pure axis, so a future boss VARIANT
+ *  would compose the same way rather than needing a fourth silhouette. */
 export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
 
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
@@ -36,6 +45,8 @@ const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
   swarm: 'square',
   armored: 'hexagon',
   resolute: 'pentagon',
+  'armored-flyer': 'hexagon',
+  boss: 'hexagon',
 };
 
 /** The shape to draw for `creepId` — total over any string, including a JSON id like
