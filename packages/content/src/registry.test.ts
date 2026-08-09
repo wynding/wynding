@@ -368,9 +368,13 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   }
 
   // Re-pinned M2-S10 P3: the bundle gains an EIGHTH wave (index 7, 1x `boss` +
-  // 8x `normal`, both spacing 20). Its prefix countdown is 2700
-  // (500+300+300+300+300+300+300+400 minus the wave's own countdown, i.e. the sum of
-  // waves 0..6 = 2300... — computed here, not re-typed) and its tail is
+  // 8x `normal`, both spacing 20). Its prefix countdown is 2700 — the sum of waves
+  // 0..7's OWN countdowns, 500+300×6+400, i.e. INCLUDING wave 7's own 400, because
+  // `compileRuleset` adds wave k's countdown before computing `prefixCountdown +
+  // tails[k]`. (An earlier draft of this comment said "minus the wave's own countdown,
+  // i.e. the sum of waves 0..6 = 2300", which contradicts the 2700 in the same
+  // sentence — CodeRabbit, PR #92. The assertion was right; the parenthetical was
+  // wrong, and this file's comments are the derivation of record.) Its tail is
   // (8-1)*20 = 140 on the `normal` entry (the `boss` entry's tail is 0 at count 1), so
   // its launch-tick spawn lands at prefix 2700 + tail 140 = 2840 — the new max.
   it('latestSpawnTick = 2840 (wave index 7 launches at prefix 2700, tail 140 on its 8x20 `normal` entries)', () => {
