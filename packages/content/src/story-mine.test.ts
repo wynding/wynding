@@ -41,6 +41,7 @@ import {
   type Grid,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+import { waveIndexForCreep, anchoredWallInputs, waveLaunchTickObserved } from './wave-lookup';
 
 /** Fixed-point cell size (`FP_ONE`, `@wynding/engine`), inlined rather than imported —
  *  same reasoning as `story-flying-wave.test.ts`'s own inlined constant: pulling in the
@@ -107,9 +108,11 @@ interface SceneResult {
 }
 
 /**
- * Run the shipped bundle for `untilTick` ticks, placing `placements` on their scheduled
- * ticks, selling on `sells`, and buffering `callWaveEarly` on `earlyCallTicks` — capturing
- * every impact, and the full tower/creep/bounty state, after every tick's step.
+ * Run the shipped bundle for `untilTick` ticks (or, given a predicate, until it returns
+ * `false`), placing `placements` on their scheduled ticks, `dynamicPlacements` every tick
+ * (S11 P2 — the seam a wave-relative placement anchors through, see `wave-lookup.ts`),
+ * selling on `sells`, and buffering `callWaveEarly` on `earlyCallTicks` — capturing every
+ * impact, and the full tower/creep/bounty state, after every tick's step.
  *
  * Impacts are captured by `(sourceId, impactTick)` rather than object identity — mirrors
  * `story-support.test.ts`'s own `runScene`, same reasoning (an impact stays resident in
@@ -118,13 +121,16 @@ interface SceneResult {
  */
 function runScene(
   placements: readonly Placement[],
-  untilTick: number,
+  untilTick: number | ((tick: number, state: SimState) => boolean),
   sells: readonly Sell[] = [],
   earlyCallTicks: readonly number[] = [],
+  dynamicPlacements: (tick: number, state: SimState) => SimInput[] = () => [],
 ): SceneResult {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
+  const shouldContinue: (tick: number, state: SimState) => boolean =
+    typeof untilTick === 'number' ? (tick) => tick < untilTick : untilTick;
   const seen = new Set<string>();
   const impacts: CapturedImpact[] = [];
   const towersByTick = new Map<number, readonly TowerSnapshot[]>();
@@ -135,12 +141,13 @@ function runScene(
   // actually got — resolved by anchor after each step rather than assumed.
   const idByPlacement: (number | undefined)[] = placements.map(() => undefined);
 
-  for (let tick = 0; tick < untilTick; tick++) {
+  for (let tick = 0; shouldContinue(tick, state); tick++) {
     const inputs: SimInput[] = [];
     for (const p of placements) {
       if (p.tick === tick)
         inputs.push({ kind: 'placeTower', anchor: p.anchor, towerId: p.towerId });
     }
+    inputs.push(...dynamicPlacements(tick, state));
     for (const s of sells) {
       if (s.tick !== tick) continue;
       const id = idByPlacement[s.placementIndex];
@@ -214,10 +221,13 @@ function footprintCenter(col: number, row: number): { x: number; y: number } {
 function findConsumptionTick(
   towersByTick: SceneResult['towersByTick'],
   id: number,
-  untilTick: number,
 ): number | undefined {
+  // `towersByTick` has exactly one entry per tick `runScene` actually simulated (0..size-1
+  // by construction), so its own size is the scene's real length — never a caller-supplied
+  // bound that could drift from it (S11 P2: `runScene`'s own loop bound is now sometimes a
+  // predicate, not a static tick count).
   let wasStanding = false;
-  for (let t = 0; t < untilTick; t++) {
+  for (let t = 0; t < towersByTick.size; t++) {
     const standing = towersByTick.get(t)!.some((r) => r.id === id);
     if (wasStanding && !standing) return t;
     wasStanding = standing;
@@ -267,7 +277,7 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
   describe('1/2/3 — the lane-blocking mine: self-deletion, the reroute boundary, the discharge', () => {
     const scene = runScene([{ tick: 0, anchor: LANE_MINE, towerId: 'mine' }], RUN_TICKS, [], [0]);
     const mineId = scene.idByPlacement[0]!;
-    const fireTick = findConsumptionTick(scene.towersByTick, mineId, RUN_TICKS);
+    const fireTick = findConsumptionTick(scene.towersByTick, mineId);
 
     it('1. the triggered mine deletes its own row at the fire tick', () => {
       // Mid-trace proof the feature engaged, BEFORE the terminal claims below: the mine
@@ -383,7 +393,7 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
       [0],
     );
     const mineId = baseline.idByPlacement[0]!;
-    const fireTick = findConsumptionTick(baseline.towersByTick, mineId, RUN_TICKS)!;
+    const fireTick = findConsumptionTick(baseline.towersByTick, mineId)!;
 
     it('the baseline mine (no sell) fires on schedule — the contrast criterion 4 needs', () => {
       console.log(`[story-mine] off-lane mine fire tick: ${fireTick}`);
@@ -400,7 +410,7 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
       const soldMineId = sold.idByPlacement[0]!;
       // Mid-trace proof the sell landed on the SAME tick the trigger would have: the row
       // is gone starting exactly `fireTick`, matching the baseline's own fire tick.
-      const soldConsumptionTick = findConsumptionTick(sold.towersByTick, soldMineId, RUN_TICKS);
+      const soldConsumptionTick = findConsumptionTick(sold.towersByTick, soldMineId);
       console.log(`[story-mine] sold-arm consumption tick: ${soldConsumptionTick}`);
       expect(soldConsumptionTick).toBe(fireTick);
       // It never fired — the input phase (sells) precedes combat (triggers) in `step()`.
@@ -435,7 +445,7 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
         [0],
       );
       const mineId = scene.idByPlacement[0]!;
-      const fireTick = findConsumptionTick(scene.towersByTick, mineId, RUN_TICKS)!;
+      const fireTick = findConsumptionTick(scene.towersByTick, mineId)!;
       const mineImpact = scene.impacts.find((i) => i.sourceId === mineId)!;
       const center = footprintCenter(OFF_LANE_MINE.col, OFF_LANE_MINE.row);
 
@@ -468,7 +478,7 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
       // the ruled 2.25 correctly catches it.
       const scene = runScene([{ tick: 0, anchor: LANE_MINE, towerId: 'mine' }], RUN_TICKS, [], [0]);
       const mineId = scene.idByPlacement[0]!;
-      const fireTick = findConsumptionTick(scene.towersByTick, mineId, RUN_TICKS)!;
+      const fireTick = findConsumptionTick(scene.towersByTick, mineId)!;
       const center = footprintCenter(LANE_MINE.col, LANE_MINE.row);
       const survivorsNextTick = new Set(scene.creepsByTick.get(fireTick + 1)!.map((c) => c.id));
       const triggeringId = scene.creepsByTick
@@ -569,13 +579,15 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
     // there instead (off-lane, col 1, clear of the wall's own footprints even by column),
     // so the `armored` creep that trips it has taken NO prior fire — full 36 HP — which
     // is what isolates the mine's own 45-vs-armor-6 arithmetic from the wall's own
-    // (separately proven) damage. Its build is held until tick 1350 — MEASURED to be
-    // clear of every wave-0/1/2 creep still lingering near column 1 (the relocated wall
-    // pulls the whole route up off row 11 well before column 20, so wave 2's `fast`
-    // creeps are still passing near column 1 as late as tick ~1150; building the mine
-    // any earlier fires it on one of THEM instead, consumed before the tick-by-tick
-    // capture below ever sees it standing) and before wave 3 (armored, launching
-    // ~tick 1400) arrives — so only an `armored` creep ever enters its trigger ring.
+    // (separately proven) damage. Its build is held until 250 ticks after the `armored`
+    // wave's OWN observed countdown start (located by creep id, never a hardcoded index;
+    // S11 P2) — MEASURED to be clear of every wave-0/1/2 creep still lingering near
+    // column 1 (the relocated wall pulls the whole route up off row 11 well before
+    // column 20, so wave 2's `fast` creeps are still passing near column 1 as late as
+    // tick ~1150; building the mine any earlier fires it on one of THEM instead,
+    // consumed before the tick-by-tick capture below ever sees it standing) and before
+    // the `armored` wave itself launches — so only an `armored` creep ever enters its
+    // trigger ring.
     const basicAnchors: { col: number; row: number }[] = [
       { col: 20, row: 10 },
       { col: 20, row: 12 },
@@ -587,14 +599,45 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
     const ARMORED_MINE = { col: 1, row: 7 } as const; // off-lane, entrance side, untouched by the wall
 
     it('the mine kills the first armored creep to reach it, at full HP', () => {
-      const placements: Placement[] = [
-        { tick: 1350, anchor: ARMORED_MINE, towerId: 'mine' },
-        ...basicAnchors.map((anchor, i) => ({ tick: i * 10, anchor, towerId: 'basic' })),
-      ];
-      const RUN_TICKS_ARMORED = 2000; // past wave 3's launch and full traversal
-      const scene = runScene(placements, RUN_TICKS_ARMORED, [], []);
-      const mineId = scene.idByPlacement[0]!;
-      const fireTick = findConsumptionTick(scene.towersByTick, mineId, RUN_TICKS_ARMORED);
+      const bundle = getBundledRuleset();
+      const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+      const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
+      const placements: Placement[] = basicAnchors.map((anchor, i) => ({
+        tick: i * 10,
+        anchor,
+        towerId: 'basic',
+      }));
+      const mineWall = anchoredWallInputs(ruleset, armoredWaveIndex, [ARMORED_MINE], 'mine', 250);
+      // Run past the `armored` wave's OBSERVED launch and its full traversal — 600 ticks
+      // of margin past the OBSERVED launch transition (S11 P2), the same margin the prior
+      // static `RUN_TICKS_ARMORED = 2000` literal carried (launch 1400 + 600) under the
+      // unchanged eight-wave bundle this packet runs against.
+      const scene = runScene(
+        placements,
+        (tick, state) => {
+          const launch = waveLaunchTickObserved(state, armoredWaveIndex);
+          // Phase guard: if a future content change ends this run before the armored wave
+          // launches, stop crisply instead of spinning to the vitest timeout (the sim
+          // freezes on a terminal state, so `launch` would stay null forever).
+          return state.phase === 'running' && (launch === null || tick < launch + 600);
+        },
+        [],
+        [],
+        mineWall,
+      );
+      // The mine is a DYNAMIC placement (not in the static `placements` list `idByPlacement`
+      // resolves against), so its entity id is read off the first tick a tower row stands
+      // on its own anchor — the same anchor-resolution idiom `idByPlacement` itself uses,
+      // just walked over the captured trace instead of the live state.
+      let mineId: number | undefined;
+      for (let t = 0; t < scene.towersByTick.size && mineId === undefined; t++) {
+        const row = scene.towersByTick
+          .get(t)!
+          .find((r) => r.col === ARMORED_MINE.col && r.row === ARMORED_MINE.row);
+        if (row) mineId = row.id;
+      }
+      if (mineId === undefined) throw new Error('expected the mine placement to resolve an id');
+      const fireTick = findConsumptionTick(scene.towersByTick, mineId);
       console.log(`[story-mine] armored scene: fire tick ${fireTick}`);
       expect(fireTick).toBeDefined();
       const t = fireTick!;

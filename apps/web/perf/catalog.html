@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The CATALOG scene's perf page (M2-S11 P7). A SECOND page beside `index.html`,
+         not a query parameter on it: each scene gets its own entry module so a run of
+         one never loads the other's bundle, and so `vite.perf.config.ts` can name both
+         as rollup inputs without either scene's content reaching the other's graph.
+         Perf-only, never shipped — see `vite.perf.config.ts`'s header. -->
+    <title>Wynding perf harness — catalog scene</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main-perf-catalog.ts"></script>
+  </body>
+</html>

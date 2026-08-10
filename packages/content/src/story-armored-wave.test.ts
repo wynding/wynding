@@ -44,8 +44,10 @@ import {
   type SimInput,
   type SimState,
   type StepEvents,
+  type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+import { waveIndexForCreep, anchoredWallInputs } from './wave-lookup';
 
 /** Fixed seed — same convention as parity.test.ts. */
 const SCENARIO_SEED = 0x5eed;
@@ -115,27 +117,48 @@ function basicWallInputs(): (tick: number) => SimInput[] {
 }
 
 describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build measurement', () => {
-  it('a small basic wall for waves 0-2, plus a venom pair built ahead of wave 4, clears the whole game', () => {
+  // SHARED SCENARIO (S11 P2 completion): the small basic wall for waves 0-2, plus a venom
+  // pair built ahead of wave 4, run to terminal ONCE — the mechanism-proof test below (DoT
+  // engagement, wave 4 specifically cleared, both located/derived rather than pinned as a
+  // whole-array position) and its outcome-golden sibling (the full terminal state, which a
+  // mutation check shows is genuinely position-sensitive — an arc reorder past wave 4
+  // changes downstream ticks/hash/bounty even though wave 4 itself is untouched) both read
+  // off this SAME run's results. vitest runs `it`s in declaration order within a file (no
+  // `.concurrent` is used anywhere in this file), so the module-level memo below is filled
+  // by whichever of the two tests runs first — always this file's first `it`, by
+  // construction — and the second reads the cache; no simulation runs twice.
+  let wave4ScriptResult: {
+    ruleset: CompiledRuleset;
+    state: SimState;
+    armoredWaveIndex: number;
+    sawLiveDotRecord: boolean;
+    dotTicksAtWave3Resolve: number;
+    dotDroppedAtWave3Resolve: number;
+    wave3ResolvedTick: number | null;
+  } | null = null;
+
+  function runWave4Script() {
+    if (wave4ScriptResult) return wave4ScriptResult;
+    const bundle = getBundledRuleset();
+    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    // The `armored` wave, LOCATED by creep id in the compiled schedule (ruling 1) — never
+    // a hardcoded index, so this survives P1's renumber unedited.
+    const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
     // The `venom` PAIR (the grill's arithmetic, PLAN.md step 38) — column 16, rows 10 and
-    // 12, the same flanking geometry. Built at ticks 1300/1310, well ahead of wave 4's
-    // natural launch at tick 1400 (countdowns 500+300+300+300), so both towers have
-    // established their fire cadence before the first `armored` creep is in range.
-    // `basic`'s own 10 damage nets only 4/hit against `armored`'s armor 6 (P1's formula);
-    // `venom`'s direct 2 nets 0 — the DoT is what has to do the real work here.
+    // 12, the same flanking geometry. Anchored 200 ticks after the `armored` wave's own
+    // OBSERVED countdown start (a script-owned lead, not a static tick literal — S11 P2),
+    // well ahead of its natural launch, so both towers have established their fire
+    // cadence before the first `armored` creep is in range. `basic`'s own 10 damage nets
+    // only 4/hit against `armored`'s armor 6 (P1's formula); `venom`'s direct 2 nets 0 —
+    // the DoT is what has to do the real work here.
     const basicWall = basicWallInputs();
-    function inputs(tick: number): SimInput[] {
+    const venomWall = anchoredWallInputs(ruleset, armoredWaveIndex, column16Anchors, 'venom', 200);
+    function inputs(tick: number, state: SimState): SimInput[] {
       const out = basicWall(tick);
-      if (tick === 1300) {
-        out.push({ kind: 'placeTower', anchor: column16Anchors[0]!, towerId: 'venom' });
-      }
-      if (tick === 1310) {
-        out.push({ kind: 'placeTower', anchor: column16Anchors[1]!, towerId: 'venom' });
-      }
+      out.push(...venomWall(tick, state));
       return out;
     }
 
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     // A reused, mutable `StepEvents` collector (combat.ts's documented contract: the two
     // DoT counters are mutable and NOT reset per-call) — accumulates `dotTicks`/`dotDropped`
@@ -198,7 +221,7 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
       events.impactPoints.length = 0;
       events.fired.length = 0;
-      state = step(state, ruleset, inputs(t), events);
+      state = step(state, ruleset, inputs(t, state), events);
       sawLiveDotRecord ||= state.dots.length > 0;
       for (let i = 0; i < state.creeps.id.length; i++) {
         creepKindById.set(state.creeps.id[i]!, state.creeps.creepId[i]!);
@@ -215,7 +238,7 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
           }
           expect(kind).toBe('armored');
         }
-        if (state.waveResolved[3] || state.waveLeaked[3]) {
+        if (state.waveResolved[armoredWaveIndex] || state.waveLeaked[armoredWaveIndex]) {
           wave3ResolvedTick = t;
           // `dotTicks`/`dotDropped` are optional collector fields (StepEvents' `?:`
           // idiom); this collector literal always supplies both as `0`, so `?? 0` only
@@ -225,9 +248,39 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
         }
       }
     }
+    wave4ScriptResult = {
+      ruleset,
+      state,
+      armoredWaveIndex,
+      sawLiveDotRecord,
+      dotTicksAtWave3Resolve,
+      dotDroppedAtWave3Resolve,
+      wave3ResolvedTick,
+    };
+    return wave4ScriptResult;
+  }
+
+  it('a small basic wall for waves 0-2, plus a venom pair built ahead of wave 4, clears the whole game', () => {
+    const {
+      ruleset,
+      state,
+      armoredWaveIndex,
+      sawLiveDotRecord,
+      dotTicksAtWave3Resolve,
+      dotDroppedAtWave3Resolve,
+      wave3ResolvedTick,
+    } = runWave4Script();
+
     // wave index 3 (`armored`) must actually have resolved inside the run for the
     // snapshot above to mean anything.
     expect(wave3ResolvedTick).not.toBeNull();
+
+    // THE S11 P2 MECHANISM CLAIM, de-indexed (a mutation check — swap arc rows 6/7 — shows
+    // this holds independent of anything past wave 4, unlike the full-array terminal pins
+    // moved to the outcome-golden sibling below): wave 4 (`armored`, located by creep id)
+    // itself resolved clean, never leaked.
+    expect(state.waveResolved[armoredWaveIndex]).toBe(true);
+    expect(state.waveLeaked[armoredWaveIndex]).toBe(false);
 
     // Proof the DoT mechanic actually fired against the armored wave (not a self-consistent
     // golden alone — Codex R2-3's precedent, applied here to DoT rather than slow): the
@@ -250,59 +303,6 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     // `venom` towers still stand.
     expect(state.towers.towerId.filter((id) => id === 'basic').length).toBe(6);
     expect(state.towers.towerId.filter((id) => id === 'venom').length).toBe(2);
-
-    // --- THE MEASUREMENT (PLAN.md step 38) ---
-    //
-    // Wave 4 (index 3, `armored`) is CLEARABLE with this sane build: every wave through
-    // index 4 resolves with zero leaks. M2-S6 P5: the bundle carries a fifth wave (index
-    // 4, `resolute`+`fast`), which crosses the same standing basic wall and venom pair
-    // and ALSO resolves clean — this file does not build anything new for it (that is
-    // P8's job), the same six `basic` plus the venom pair happen to carry it too.
-    //
-    // M2-S7 P6: the bundle carried a sixth wave (index 5, 8x `flying`), and this build
-    // has no `antiair` — a ground-only wall, by construction (this is the wave-4 armored
-    // measurement, not the flying one). Every flyer in wave index 5 crossed the entire
-    // board untouched (S7's own done-criterion, witnessed here as a side effect: a
-    // ground-only build cannot touch it) and leaked, costing 8 of the 10 starting lives,
-    // but the game still WON (every wave resolved).
-    //
-    // M2-S10 P3, and this is a REAL measured outcome, not a truncation artifact — the
-    // OUTCOME FLIPS 'won' → 'lost' (Story 10 Risk 1 ruling: reported for S11's balance
-    // pass, never tuned away). This build's geometry is byte-identical to
-    // `story-flying-wave.test.ts`'s own ground-only scenario (same `basic` wall, same
-    // `venom` pair, same seed), so it produces the IDENTICAL terminal state: wave index
-    // 6's `armored-flyer` — also air, also untouched by this ground-only build — leaks
-    // too, and its first two leaks (spaced 20 ticks apart) drain lives 2 → 1 → 0. The run
-    // FREEZES there, before wave index 6 finishes and long before wave index 7 (the
-    // boss) ever launches.
-    console.log(
-      `[story-armored-wave #1] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
-        `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
-        `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
-    );
-    expect(state.phase).toBe('lost');
-    expect(state.tick).toBe(2586);
-    expect(state.lives).toBe(0);
-    expect(state.leakedCount).toBe(10);
-    expect(state.waveResolved).toEqual([true, true, true, true, true, true, false, false]);
-    expect(state.waveLeaked).toEqual([false, false, false, false, false, true, true, false]);
-    expect(state.waveCursor).toBe(7);
-    // Kill-bounty proof every creep across waves 0-4 was killed, not leaked, and wave
-    // index 5's 8 `flying` (and wave index 6's two observed `armored-flyer` leaks before
-    // the freeze) were leaked, not killed (0 contribution): 10 × `normal` (1) + 16 ×
-    // `swarm` (1) + 8 × `fast` (2) + 6 × `armored` (3) + 6 × `resolute` (2) + 6 × `fast`
-    // (2) = 84, UNCHANGED from the pre-S7 figure — neither wave index 5 nor the observed
-    // slice of wave index 6 contributes anything to this channel.
-    expect(state.cumulativeKillBounty).toBe(84);
-    // `bounty` is also UNCHANGED at 141: no wave past index 4 ever pays a clear bonus
-    // (each either leaked or never finished resolving), so the pre-S7 economy carries
-    // through exactly.
-    expect(state.bounty).toBe(141);
-    expect(hashSimState(state)).toBe('1564bb53');
-    // Lost score formula: kill-bounty only — no early-call credit and no survival term
-    // at all under the lost branch.
-    expect(deriveScore(state, ruleset)).toBe(84);
-    expect(deriveStars(state, ruleset)).toBe(0);
 
     // --- REPORTED, NOT GATED (PLAN.md step 3): DoT's share of the damage
     // dealt to the armored wave. Valid ONLY because the precondition above holds — every
@@ -328,9 +328,11 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     }
     const armoredDef = ruleset.creepById['armored'];
     if (!armoredDef) throw new Error("expected a compiled 'armored' creep");
-    const armoredWave = ruleset.waves[3];
+    const armoredWave = ruleset.waves[armoredWaveIndex];
     const armoredEntry = armoredWave?.entriesSummary.find((e) => e.creepId === 'armored');
-    if (!armoredEntry) throw new Error("expected wave 4's entriesSummary to name 'armored'");
+    if (!armoredEntry) {
+      throw new Error("expected the armored wave's entriesSummary to name 'armored'");
+    }
 
     // `dotTicksAtWave3Resolve` is a plain local — `expect(dotTicksAtWave3Resolve).toBe(13)`
     // above already proves it holds the snapshotted, armored-only-window count.
@@ -343,6 +345,103 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     );
     // Measured: 13 dotTicks x 4 damagePerTick = 52 applied, against 6 x 36 = 216 armored
     // starting HP -> 24.07%. Reported, not gated (see the derivation note above).
+  });
+
+  // OUTCOME GOLDEN (position-sensitive by nature, re-measured when the arc moves) — split
+  // out of the mechanism-proof test above at S11 P2 completion. A mutation check (swap arc
+  // rows 6/7 back) shows this whole terminal shape — tick, hash, bounty, and above all the
+  // FULL `waveResolved`/`waveLeaked` arrays — depends on the ORDER of every wave from
+  // index 5 onward, not just on wave 4 (which is what the mechanism-proof test above
+  // actually claims). Same run as that test (`runWave4Script`'s module-level memo), same
+  // literals as before this split — nothing here was re-measured, only re-homed.
+  it('a small basic wall for waves 0-2, plus a venom pair built ahead of wave 4 — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)', () => {
+    const { ruleset, state } = runWave4Script();
+
+    // --- THE MEASUREMENT (PLAN.md step 38) ---
+    //
+    // Wave 4 (index 3, `armored`) is CLEARABLE with this sane build: every wave through
+    // index 4 resolves with zero leaks. M2-S6 P5: the bundle carries a fifth wave (index
+    // 4, `resolute`+`fast`), which crosses the same standing basic wall and venom pair
+    // and ALSO resolves clean — this file does not build anything new for it (that is
+    // P8's job), the same six `basic` plus the venom pair happen to carry it too.
+    //
+    // M2-S7 P6: the bundle carried a sixth wave (index 5, 8x `flying`), and this build
+    // has no `antiair` — a ground-only wall, by construction (this is the wave-4 armored
+    // measurement, not the flying one). Every flyer in wave index 5 crossed the entire
+    // board untouched (S7's own done-criterion, witnessed here as a side effect: a
+    // ground-only build cannot touch it) and leaked, costing 8 of the 10 starting lives,
+    // but the game still WON (every wave resolved).
+    //
+    // M2-S10 P3, and this is a REAL measured outcome, not a truncation artifact — the
+    // OUTCOME FLIPS 'won' → 'lost' (Story 10 Risk 1 ruling: reported for S11's balance
+    // pass, never tuned away). This build's geometry is byte-identical to
+    // `story-flying-wave.test.ts`'s own ground-only scenario (same `basic` wall, same
+    // `venom` pair, same seed), so it produces the IDENTICAL terminal state: wave index
+    // 6's `armored-flyer` — also air, also untouched by this ground-only build — leaks
+    // too, and its first two leaks (spaced 20 ticks apart) drain lives 2 → 1 → 0. The run
+    // FREEZES there, before wave index 6 finishes and long before wave index 7 (the
+    // boss) ever launches.
+    //
+    // Re-pinned M2-S11 P3 (measured). P1's ten-wave
+    // arc inserts arc row 5 (a new wave 4, 12x`normal`+6x`swarm`) between `armored` and
+    // `flying`, and renumbers every later wave — `armored-flyer` is now wave index 7
+    // (was 6). The claim itself is unchanged: this ground-only build still clears
+    // everything through the new wave 4 and the (renumbered) `flying`/`resolute`+`fast`
+    // waves, then `armored-flyer` (now index 7) leaks in full and freezes the run at 0
+    // lives before the boss (now index 9) ever launches. Measured before (M2-S10 P3) →
+    // after (M2-S11 P3): tick 2586 → 2886; waveCursor 7 → 8; cumulativeKillBounty
+    // 84 → 102 (+18, the new wave 4's own kills); bounty 141 → 165 (+18 kill bounty,
+    // +6 new wave 4's clear bonus). Re-measured final at P4b — unchanged from P3 (arc
+    // tuning — survivalMul 50, antiair cadence 15, boss-escort offset 600 — never touches
+    // this ground-only build's path to freezing before the boss launches).
+    console.log(
+      `[story-armored-wave #1] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
+        `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
+        `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
+    );
+    expect(state.phase).toBe('lost');
+    expect(state.tick).toBe(2886);
+    expect(state.lives).toBe(0);
+    expect(state.leakedCount).toBe(10);
+    expect(state.waveResolved).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(state.waveLeaked).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+    ]);
+    expect(state.waveCursor).toBe(8);
+    // Kill-bounty proof every creep across waves 0-4 was killed, not leaked, and wave
+    // index 5's 8 `flying` (and wave index 7's two observed `armored-flyer` leaks before
+    // the freeze) were leaked, not killed (0 contribution). Re-measured at 102 (+18 over
+    // the pre-S11 84): the new wave 4 (12x`normal`+6x`swarm`) contributes its own kills.
+    expect(state.cumulativeKillBounty).toBe(102);
+    // `bounty` re-measured at 165 (+24 over the pre-S11 141: +18 kill bounty, +6 the new
+    // wave 4's own clear bonus). No wave past it ever pays a clear bonus (each either
+    // leaked or never finished resolving).
+    expect(state.bounty).toBe(165);
+    expect(hashSimState(state)).toBe('bd6516b9');
+    // Lost score formula: kill-bounty only — no early-call credit and no survival term
+    // at all under the lost branch.
+    expect(deriveScore(state, ruleset)).toBe(102);
+    expect(deriveStars(state, ruleset)).toBe(0);
   });
 
   // The COUNTERFACTUAL (QC round 1). The test above pins that the build clears wave 4,
@@ -384,8 +483,25 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     // same tick-1900 sample for the identical reason: neither's countdown has even
     // started yet this early in the run (they chain off wave index 5, which has not
     // itself launched by tick 1900).
+    // M2-S11 P3 (measured), STRUCTURAL RE-PIN: `waveLeaked` widens to length 10 (P1's
+    // ten-wave arc). Purely structural — `leakedCount`/`lives` are unaffected (the
+    // armored wave, still index 3, is unmoved and unreachable-by-later-waves at
+    // tick 1900), and the two new trailing entries are `false` for the same reason: no
+    // countdown for anything past the (renumbered) `armored-flyer`/boss waves has
+    // started this early.
     expect(state.leakedCount).toBe(4);
-    expect(state.waveLeaked).toEqual([false, false, false, true, false, false, false, false]);
+    expect(state.waveLeaked).toEqual([
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
     expect(state.lives).toBe(6);
   });
 });
@@ -513,21 +629,35 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
   // test above), so this build is exercised across ALL five waves (M2-S6 appends wave
   // index 4), not just wave 4 — and waves 0-2 are where it is under-served. See the
   // measurement below: it wins, but pays a life to the wave-1 swarm rush.
-  it('six venom plus a basic pair wins, but LEAKS one swarm on wave 1 — the specialist trade, measured', () => {
+  // SHARED SCENARIO (S11 P2 completion) — same idiom as `runWave4Script` above: the
+  // venom-heavy build run to terminal ONCE, read by both the mechanism-proof test (the
+  // wave-1 specialist trade, de-indexed) and its outcome-golden sibling (the full terminal
+  // state). vitest's declaration-order execution (no `.concurrent` in this file) means the
+  // memo is always filled by the mechanism-proof test, which is declared first.
+  let venomHeavyResult: { ruleset: CompiledRuleset; state: SimState } | null = null;
+
+  function runVenomHeavyScript() {
+    if (venomHeavyResult) return venomHeavyResult;
+    const bundle = getBundledRuleset();
+    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    // The `basic` pair, kind-swapped from the first test above, anchored the same way —
+    // 200 ticks after the `armored` wave's OWN observed countdown start (located by
+    // creep id, never a hardcoded index; S11 P2).
+    const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
     const venomWall = anchorWallInputs(basicAnchors, 'venom');
-    function inputs(tick: number): SimInput[] {
+    const basicPairWall = anchoredWallInputs(
+      ruleset,
+      armoredWaveIndex,
+      column16Anchors,
+      'basic',
+      200,
+    );
+    function inputs(tick: number, state: SimState): SimInput[] {
       const out = venomWall(tick);
-      if (tick === 1300) {
-        out.push({ kind: 'placeTower', anchor: column16Anchors[0]!, towerId: 'basic' });
-      }
-      if (tick === 1310) {
-        out.push({ kind: 'placeTower', anchor: column16Anchors[1]!, towerId: 'basic' });
-      }
+      out.push(...basicPairWall(tick, state));
       return out;
     }
 
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
     // M2-S7 P6: loop bound widened 1900 -> 2400, same reason as the first test above —
@@ -539,12 +669,47 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
     for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
       events.impactPoints.length = 0;
       events.fired.length = 0;
-      state = step(state, ruleset, inputs(t), events);
+      state = step(state, ruleset, inputs(t, state), events);
     }
+    venomHeavyResult = { ruleset, state };
+    return venomHeavyResult;
+  }
+
+  it('six venom plus a basic pair wins, but LEAKS one swarm on wave 1 — the specialist trade, measured', () => {
+    const { ruleset, state } = runVenomHeavyScript();
 
     // Terminal proof the placements survived: six `venom` and two `basic` still stand.
     expect(state.towers.towerId.filter((id) => id === 'venom').length).toBe(6);
     expect(state.towers.towerId.filter((id) => id === 'basic').length).toBe(2);
+
+    // THE S11 P2 MECHANISM CLAIM, de-indexed (a mutation check — swap arc rows 6/7 — shows
+    // this holds independent of anything past wave 3, unlike the full-array terminal pins
+    // moved to the outcome-golden sibling below): waves 0-3 (located by creep id, the
+    // waves this test's own build targets) resolve exactly as the specialist-trade claim
+    // says — wave 1 (`swarm`) is the only one of the four that leaks.
+    const normalWaveIndex = waveIndexForCreep(ruleset, 'normal');
+    const swarmWaveIndex = waveIndexForCreep(ruleset, 'swarm');
+    const fastWaveIndex = waveIndexForCreep(ruleset, 'fast');
+    const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
+    expect(state.waveResolved[normalWaveIndex]).toBe(true);
+    expect(state.waveResolved[swarmWaveIndex]).toBe(true);
+    expect(state.waveResolved[fastWaveIndex]).toBe(true);
+    expect(state.waveResolved[armoredWaveIndex]).toBe(true);
+    expect(state.waveLeaked[normalWaveIndex]).toBe(false);
+    expect(state.waveLeaked[swarmWaveIndex]).toBe(true);
+    expect(state.waveLeaked[fastWaveIndex]).toBe(false);
+    expect(state.waveLeaked[armoredWaveIndex]).toBe(false);
+  });
+
+  // OUTCOME GOLDEN (position-sensitive by nature, re-measured when the arc moves) — split
+  // out of the mechanism-proof test above at S11 P2 completion. A mutation check (swap arc
+  // rows 6/7 back) shows the full `waveResolved` array (and, by the same reasoning, the
+  // rest of this terminal shape) depends on the order of every wave from index 5 onward —
+  // the wave-1 specialist trade the mechanism-proof test above actually claims is
+  // unaffected by it. Same run as that test (`runVenomHeavyScript`'s module-level memo),
+  // same literals as before this split — nothing here was re-measured, only re-homed.
+  it('six venom plus a basic pair — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)', () => {
+    const { ruleset, state } = runVenomHeavyScript();
 
     // THE MEASUREMENT, AND IT IS NOT WHAT THE PLAN PREDICTED (M2-S5b PR A, escalated and
     // ruled 2026-08-02). PLAN.md step 3 pinned this build expecting the same terminal shape
@@ -600,6 +765,13 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
     // at column 16, neither covers `air`) — leaks its very first creep, and that single
     // 1-cost leak is enough to drain the last life. The run FREEZES there, before wave
     // index 6 finishes and long before wave index 7 (the boss) ever launches.
+    // Re-pinned M2-S11 P3 (measured). Same reason
+    // as test 1 above: P1's ten-wave arc inserts a new wave 4 before `flying`, pushing
+    // `armored-flyer` to index 7 and the boss to index 9. The specialist trade this test
+    // exists to show (one leaked `swarm` on wave 1) is unaffected — the new wave 4 sits
+    // AFTER it in the schedule. Re-measured final at P4b — unchanged from P3 (this build
+    // never touches antiair/boss-escort mechanics, and survivalMul only affects the WON
+    // score branch, which this run never reaches).
     console.log(
       `[story-armored-wave venom-heavy] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
         `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
@@ -608,19 +780,43 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.leakedCount).toBe(10);
-    expect(state.waveResolved).toEqual([true, true, true, true, true, true, false, false]);
-    expect(state.waveLeaked).toEqual([false, true, false, false, false, true, true, false]);
-    expect(state.waveCursor).toBe(7);
-    expect(state.tick).toBe(2566);
-    // cumulativeKillBounty UNCHANGED at 83 — wave index 5's 8 `flying` are leaked, not
-    // killed, and wave index 6's single observed leak before the freeze contributes
-    // nothing either (same reasoning as test 1).
-    expect(state.cumulativeKillBounty).toBe(83);
-    // `bounty` UNCHANGED at 120 — no wave past index 4 ever pays a clear bonus.
-    expect(state.bounty).toBe(120);
-    expect(hashSimState(state)).toBe('c053af47');
+    expect(state.waveResolved).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(state.waveLeaked).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+    ]);
+    expect(state.waveCursor).toBe(8);
+    expect(state.tick).toBe(2866);
+    // cumulativeKillBounty re-measured at 101 (+18 over the pre-S11 83): the new wave 4
+    // (12x`normal`+6x`swarm`) contributes its own kills; wave index 5's 8 `flying` are
+    // leaked, not killed, and wave index 7's single observed leak before the freeze
+    // contributes nothing either (same reasoning as test 1).
+    expect(state.cumulativeKillBounty).toBe(101);
+    // `bounty` re-measured at 144 (+24 over the pre-S11 120: +18 kill bounty, +6 the new
+    // wave 4's own clear bonus). No wave past it ever pays a clear bonus.
+    expect(state.bounty).toBe(144);
+    expect(hashSimState(state)).toBe('53c1dae5');
     // Lost score formula: kill-bounty only — no early-call credit, no survival term.
-    expect(deriveScore(state, ruleset)).toBe(83);
+    expect(deriveScore(state, ruleset)).toBe(101);
     expect(deriveStars(state, ruleset)).toBe(0);
   });
 });
@@ -649,29 +845,38 @@ const stunAnchors: { col: number; row: number }[] = [
 ];
 
 describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of it, measured (M2-S6 P8 test 17)', () => {
-  // Countdowns 500/300/300/300/300 (m2.md's arc): wave index k launches at the
-  // prefix sum, so index 3 launches at 1400 and index 4 at 1700 (index 4's last
-  // spawn at 1700 + 5*15 = 1775). Four `stun` towers — `resolute` at speed 44 is
-  // the fastest ground creep in the catalog and one 25%/20-tick tower cannot hold
-  // it — placed at 1500/1510/1520/1530: after wave index 3 is under way and before
-  // wave index 4 launches at 1700.
-  it('the byte-identical wave-0-to-3 build, plus four stun towers, actually engages stun — proved, then measured', () => {
+  // Four `stun` towers — `resolute` at speed 44 is the fastest ground creep in the
+  // catalog and one 25%/20-tick tower cannot hold it — anchored 100 ticks after the
+  // `resolute` wave's OWN observed countdown start (located by creep id, never a
+  // hardcoded index; S11 P2), after wave index 3 is under way and before the `resolute`
+  // wave itself launches.
+  // SHARED SCENARIO (S11 P2 completion) — same idiom as the two helpers above: the stun
+  // build run to terminal ONCE, read by both the mechanism-proof test (stun engagement,
+  // de-indexed) and its outcome-golden sibling (the full terminal state).
+  let stunScriptResult: {
+    ruleset: CompiledRuleset;
+    state: SimState;
+    resoluteWaveIndex: number;
+    rngStateAtStart: number;
+    sawLiveResoluteStun: boolean;
+  } | null = null;
+
+  function runStunScript() {
+    if (stunScriptResult) return stunScriptResult;
+    const bundle = getBundledRuleset();
+    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
+    const resoluteWaveIndex = waveIndexForCreep(ruleset, 'resolute');
     const basicWall = basicWallInputs();
-    const stunWall = anchorWallInputs(stunAnchors, 'stun', 1500, 10);
-    function inputs(tick: number): SimInput[] {
+    const venomWall = anchoredWallInputs(ruleset, armoredWaveIndex, column16Anchors, 'venom', 200);
+    const stunWall = anchoredWallInputs(ruleset, resoluteWaveIndex, stunAnchors, 'stun', 100);
+    function inputs(tick: number, state: SimState): SimInput[] {
       const out = basicWall(tick);
-      if (tick === 1300) {
-        out.push({ kind: 'placeTower', anchor: column16Anchors[0]!, towerId: 'venom' });
-      }
-      if (tick === 1310) {
-        out.push({ kind: 'placeTower', anchor: column16Anchors[1]!, towerId: 'venom' });
-      }
-      out.push(...stunWall(tick));
+      out.push(...venomWall(tick, state));
+      out.push(...stunWall(tick, state));
       return out;
     }
 
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     const rngStateAtStart = state.rngState;
     let sawLiveResoluteStun = false;
@@ -682,7 +887,7 @@ describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of i
     // carries two more waves (index 6, 7), so the loop runs until terminal, capped at
     // `MAX_MATCH_TICKS`, never a hand-picked tick constant.
     for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-      state = step(state, ruleset, inputs(t));
+      state = step(state, ruleset, inputs(t, state));
       for (let i = 0; i < state.creeps.id.length; i++) {
         const stunUntilTick = state.creeps.stunUntilTick[i] as number;
         if (
@@ -694,6 +899,13 @@ describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of i
         }
       }
     }
+    stunScriptResult = { ruleset, state, resoluteWaveIndex, rngStateAtStart, sawLiveResoluteStun };
+    return stunScriptResult;
+  }
+
+  it('the byte-identical wave-0-to-3 build, plus four stun towers, actually engages stun — proved, then measured', () => {
+    const { ruleset, state, resoluteWaveIndex, rngStateAtStart, sawLiveResoluteStun } =
+      runStunScript();
 
     // PROOF THE FEATURE ENGAGED (M2-S6 P8 test 17), before any terminal measurement:
     // all four placements accepted (tower count AND bounty spent both match the
@@ -722,6 +934,20 @@ describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of i
     // that array's comment for the anchors this replaced and why they read false.
     expect(sawLiveResoluteStun).toBe(true);
 
+    // THE S11 P2 MECHANISM CLAIM, de-indexed: wave index 4 (`resolute`+`fast`, located by
+    // creep id) itself resolved clean, never leaked — the stun wall's own done-criterion,
+    // independent of anything past it.
+    expect(state.waveResolved[resoluteWaveIndex]).toBe(true);
+    expect(state.waveLeaked[resoluteWaveIndex]).toBe(false);
+  });
+
+  // OUTCOME GOLDEN (position-sensitive by nature, re-measured when the arc moves) — split
+  // out of the mechanism-proof test above at S11 P2 completion. Same run as that test
+  // (`runStunScript`'s module-level memo), same literals as before this split — nothing
+  // here was re-measured, only re-homed.
+  it('the byte-identical wave-0-to-3 build, plus four stun towers — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)', () => {
+    const { ruleset, state } = runStunScript();
+
     // --- THE MEASUREMENT (M2-S6 P8 test 17) — measured, not invented. The fifth wave
     // clears: the stun towers hold `resolute`s on the approach, and the pre-existing
     // wall does the killing. Stun's contribution here is counterplay, not damage.
@@ -739,24 +965,54 @@ describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of i
     // wave index 6 finishes and long before wave index 7 (the boss) ever launches. The
     // stun-holding proof above (`sawLiveResoluteStun`) is unaffected — it fires long
     // before wave index 6 even starts.
+    // Re-pinned M2-S11 P3 (measured). Same reason
+    // as tests 1/3 above: P1's ten-wave arc inserts a new wave 4 before `flying`,
+    // pushing `resolute`+`fast` to index 6, `armored-flyer` to index 7, the boss to
+    // index 9. The stun-engagement proof (`sawLiveResoluteStun`) fires long before any
+    // of that and is unaffected. Re-measured final at P4b — unchanged from P3 (same
+    // ground-only, antiair-free build as tests 1/3; arc tuning does not touch it).
     console.log(
       `[story-armored-wave #17] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
         `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
         `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
     );
     expect(state.phase).toBe('lost');
-    expect(state.tick).toBe(2586);
+    expect(state.tick).toBe(2886);
     expect(state.lives).toBe(0);
     expect(state.leakedCount).toBe(10);
-    expect(state.waveResolved).toEqual([true, true, true, true, true, true, false, false]);
-    expect(state.waveLeaked).toEqual([false, false, false, false, false, true, true, false]);
-    expect(state.waveCursor).toBe(7);
-    // `bounty` UNCHANGED at 101 — no wave past index 4 ever pays a clear bonus (same
+    expect(state.waveResolved).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(state.waveLeaked).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+    ]);
+    expect(state.waveCursor).toBe(8);
+    // `bounty` re-measured at 125 (+24 over the pre-S11 101: +18 kill bounty, +6 the new
+    // wave 4's own clear bonus) — no wave past it ever pays a clear bonus (same
     // reasoning as the other three tests in this file).
-    expect(state.bounty).toBe(101);
-    expect(hashSimState(state)).toBe('189dbd6a');
+    expect(state.bounty).toBe(125);
+    expect(hashSimState(state)).toBe('95e90744');
     // Lost score formula: kill-bounty only — no early-call credit, no survival term.
-    expect(deriveScore(state, ruleset)).toBe(84);
+    // Re-measured at 102 (+18 over the pre-S11 84), same derivation as test 1.
+    expect(deriveScore(state, ruleset)).toBe(102);
     expect(deriveStars(state, ruleset)).toBe(0);
   });
 });

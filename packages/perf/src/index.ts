@@ -33,12 +33,56 @@
 
 export { BAND_COLS, TAIL_BAFFLES, stressAnchors, towerIdAt, stressRouteLength } from './layout';
 export type { StressTowerId } from './layout';
+// The catalog scene (M2-S11 P7) — additive; nothing above changes.
+export {
+  CATALOG_TOWER_ID_AT,
+  catalogTowerIdAt,
+  catalogPlacements,
+  CATALOG_MINE_PADS,
+  CATALOG_DETONATOR_PAD_COUNT,
+  CATALOG_DETONATING_MINE_INDICES,
+  CATALOG_SURVIVING_MINE_INDICES,
+  CATALOG_DETONATOR_ROUTE_INDICES,
+  CATALOG_DETONATOR_LOWER_BOUND_TICKS,
+  CATALOG_TOWER_COUNT,
+  CATALOG_TOTAL_SPEND,
+  catalogRoutePath,
+  catalogRouteLength,
+  catalogRouteCumulativeFp,
+} from './layout';
+export type { CatalogTowerId, CatalogPlacement } from './layout';
 export {
   buildStressReplay,
   buildControlReplay,
+  buildCatalogReplay,
+  CATALOG_SEED,
+  CATALOG_BUILD_TICKS,
   BUILD_TICKS,
   PLACEMENTS_PER_TICK,
 } from './scenario';
+export {
+  runCatalogScene,
+  catalogAssertions,
+  adversarialDamagePerTickMilli,
+  CATALOG_WARMUP_AFTER_BUILD_TICKS,
+  CATALOG_SAMPLE_START_TICK,
+  CATALOG_SAMPLE_TICKS,
+  CATALOG_SAMPLE_END_TICK,
+  CATALOG_LEAK_PROBE_MAX_TICK,
+  CATALOG_ATTACKER_COUNTS,
+  GROUND_FAMILY_EXACT,
+  GROUND_FAMILY_TOTAL,
+  LIVE_AIR_FLOOR,
+  LIVE_CREEPS_FLOOR,
+  LIVE_TOWERS_EXACT,
+  POST_DETONATION_TOWERS,
+  LEFTOVER_BOUNTY_EXACT,
+  CATALOG_ROUTE_LENGTH,
+  type CatalogSample,
+  type CatalogSceneResult,
+  type CatalogAssertion,
+  type LeakProbeResult,
+} from './oracle-catalog';
 export { percentile, min, max, mean } from './stats';
 export {
   runSampled,

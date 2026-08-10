@@ -45,6 +45,7 @@ import {
  *  — it IS the shape the sim stores. */
 type EffectPrimitive = SimState['impacts'][number]['effects'][number];
 import { getBundledRuleset, defaultBoardId } from './registry';
+import { waveIndexForCreep, waveLaunchTickObserved } from './wave-lookup';
 
 /** Fixed seed — same convention as parity.test.ts / story-armored-wave.test.ts. */
 const SCENARIO_SEED = 0x5eed;
@@ -68,8 +69,9 @@ interface SceneResult {
 }
 
 /**
- * Run the shipped bundle for `untilTick` ticks, placing `placements` on their scheduled
- * ticks and selling on `sells`, capturing every impact the moment it is created.
+ * Run the shipped bundle for `untilTick` ticks (or, given a predicate, until it returns
+ * `false`), placing `placements` on their scheduled ticks and selling on `sells`,
+ * capturing every impact the moment it is created.
  *
  * Impacts are captured by `(sourceId, impactTick)` rather than by object identity: an
  * impact stays resident in `SimState.impacts` for its whole flight, so a naive per-tick
@@ -79,7 +81,7 @@ interface SceneResult {
  */
 function runScene(
   placements: readonly Placement[],
-  untilTick: number,
+  untilTick: number | ((tick: number, state: SimState) => boolean),
   sells: readonly { readonly tick: number; readonly placementIndex: number }[] = [],
   /** Mutate the live state just BEFORE the step at `tick` — the only way to witness the
    *  sim's handling of a FORGED or restored `SimState`, which no sequence of legal inputs
@@ -89,13 +91,15 @@ function runScene(
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
+  const shouldContinue: (tick: number, state: SimState) => boolean =
+    typeof untilTick === 'number' ? (tick) => tick < untilTick : untilTick;
   const seen = new Set<string>();
   const impacts: CapturedImpact[] = [];
   // Entity ids are assigned by the sim, so a sell has to name the id the placement
   // actually got — resolved by anchor after each step rather than assumed.
   const idByPlacement: (number | undefined)[] = placements.map(() => undefined);
 
-  for (let tick = 0; tick < untilTick; tick++) {
+  for (let tick = 0; shouldContinue(tick, state); tick++) {
     const inputs: SimInput[] = [];
     for (const p of placements) {
       if (p.tick === tick)
@@ -413,16 +417,30 @@ describe('M2-S8 — the `beacon` support aura, measured against the shipped bund
       anchor,
       towerId: 'basic',
     }));
-    const RUN_TICKS = 2000; // past wave 3's launch (tick 1400) and its full traversal
+    const bundle = getBundledRuleset();
+    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
+    // Run 600 ticks past the `armored` wave's OWN OBSERVED launch transition (located by
+    // creep id, never a hardcoded index; S11 P2) — the same margin the prior static
+    // `RUN_TICKS = 2000` literal carried (launch 1400 + 600) under the unchanged
+    // eight-wave bundle this packet runs against, past its own launch and full traversal.
+    // Both arms observe the identical launch tick (tower placement never affects wave
+    // timing), so they run the same total number of ticks either way.
+    const runUntil = (tick: number, state: SimState): boolean => {
+      const launch = waveLaunchTickObserved(state, armoredWaveIndex);
+      // Phase guard, same reason as story-mine's armored-mine scene: a terminal state
+      // freezes, so an early loss would otherwise spin to the vitest timeout.
+      return state.phase === 'running' && (launch === null || tick < launch + 600);
+    };
 
-    const plain = runScene(wallPlacements, RUN_TICKS);
+    const plain = runScene(wallPlacements, runUntil);
     const withBeacons = runScene(
       [
         ...wallPlacements,
         { tick: 100, anchor: { col: 4, row: 10 }, towerId: 'beacon' },
         { tick: 110, anchor: { col: 4, row: 12 }, towerId: 'beacon' },
       ],
-      RUN_TICKS,
+      runUntil,
     );
 
     // Both arms reached the same point in the schedule — otherwise a lives comparison is
@@ -433,13 +451,24 @@ describe('M2-S8 — the `beacon` support aura, measured against the shipped bund
     // And the beacons are genuinely standing (8 rows: 6 basic + 2 beacon).
     expect(withBeacons.state.towers.id.length).toBe(8);
 
+    // Re-pinned M2-S11 P3 (measured). P1's
+    // ten-wave arc inserts a new wave 4 (12x`normal`+6x`swarm`) whose own countdown
+    // starts the instant the `armored` wave (still index 3) LAUNCHES — a fixed
+    // schedule, not gated on that wave's own combat resolution — so it launches at the
+    // same absolute tick as the old `resolute`+`fast` wave did, and this scene's
+    // window (`armored` wave's own launch + 600 ticks) now runs partway into the NEW
+    // wave 4 rather than the old one. Both arms clear more of it than they used to.
+    // Re-measured final at P4b — unchanged from P3 (this scene's window is scoped to
+    // the armored wave's own launch + 600 ticks, well before the arc-tuning levers —
+    // antiair cadence, boss-escort offset, survivalMul — ever come into play).
     console.log(
       `[story-support] armor piercing: lives plain=${plain.state.lives} ` +
         `withBeacons=${withBeacons.state.lives} (of 10)`,
     );
-    expect(plain.state.lives).toBe(4);
-    expect(withBeacons.state.lives).toBe(8);
-    // The headline: two beacons (30 bounty) cut the leak damage across the run in half.
+    expect(plain.state.lives).toBe(6);
+    expect(withBeacons.state.lives).toBe(10);
+    // The headline: two beacons (30 bounty) erase the run's leak damage entirely —
+    // 4 lost lives without them, 0 with (re-measured at the S11 ten-wave arc).
     expect(withBeacons.state.lives).toBeGreaterThan(plain.state.lives);
   });
 });

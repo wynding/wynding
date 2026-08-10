@@ -26,7 +26,22 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts', 'src/generate.ts', 'src/run.ts', 'src/dot-bench.ts'],
+      // M2-S11 P7 adds two more, on `dot-bench.ts`'s stated precedent: `run-catalog.ts`
+      // is the catalog scene's CLI entry point (Definition of Done: `pnpm perf:catalog`),
+      // and `oracle-catalog.ts`'s `runCatalogScene` drives a ~6,000-tick sustained run
+      // over an 800-creep board — exercised by RUNNING it, never by a unit test that
+      // would just re-mock `step()`. Its PURE parts (`catalogAssertions`,
+      // `adversarialDamagePerTickMilli`) are unit-tested directly in
+      // `oracle-catalog.test.ts` anyway; exclusion is per-FILE, so that coverage is a
+      // bonus the gate cannot see, exactly as `dot-bench.test.ts`'s is.
+      exclude: [
+        'src/**/*.test.ts',
+        'src/generate.ts',
+        'src/run.ts',
+        'src/run-catalog.ts',
+        'src/oracle-catalog.ts',
+        'src/dot-bench.ts',
+      ],
       thresholds: {
         lines: 90,
         branches: 90,

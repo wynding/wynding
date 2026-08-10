@@ -944,3 +944,83 @@ evidence, not a content story's to pre-empt.
 **Out of scope, per the packet:** optimising anything named here, and Finding 3's
 still-unexplained run-to-run level shift (see the 2026-08-05 amendment above), which
 this diagnosis did not touch.
+
+## Amendment — 2026-08-09 (M2-S11, docs close-out) — rulings 4–6, landed and pending
+
+Carries the outcomes of Act 1 rulings 4, 5, and 6 (`.claude/plan-archive/m2-s11/APPROVED-PLAN.md`)
+into this ADR. One state is still open at the end of this story; it is recorded here as a
+single bounded paragraph so a later ruling can amend it without rewriting the section.
+
+**Ruling 4 — the catalog scene (`catalog-40x40`), a fourth scene, not an extension.** S11
+authors its own bundle, board, placement mapping, replay pair, and processes, carrying the
+five primitives the stress scene's own ratio arm never exercises (stun, support, burst, air,
+immunities/`leakCost`). It shares only `catalogTowerIdAt` with the stress scene — the ratio
+harness never runs in the same process, so it cannot be warmed or contaminated by it. Its
+purpose is narrower than the ratio gate's: it emits no `R` and feeds no gate. It exists for
+the browser spike this ADR's own S10 finding (above) left unresolved — where the frame time
+actually goes under a workload that, unlike the ratio scene, actually exercises air, stun,
+burst, and support at once — via a purpose-built `perf:catalog` Node oracle and a dedicated
+Playwright page/spec. **Trace filenames, report records, and analyzer inputs are keyed by
+scene id + profile**, not profile alone — `stress.perf.spec.ts`'s existing keying (profile
+alone) would silently overwrite the catalog scene's own traces if reused unchanged, since two
+scenes now exist where one did before.
+
+**Ruling 4, continued — the pre-committed load, the geometry amendment, and the TWO open
+floor values.** The scene's schedule, board, and mine placement were fully precommitted
+before any measurement (five rounds plus a post-cap audit plus three ratification rounds of
+adversarial review, 78 findings raised and accepted, 0 rejected — full record in
+`PLAN-REVIEW-LOG.md`). Building against that precommitment surfaced **three proven
+impossibilities in the plan's mine geometry on the reused stress maze**, each pinned as a
+standing test: no anchor is out of trigger range of every route cell; every anchor is
+load-bearing (removing any one reroutes the maze); and no legal route-neutral pad exists
+within trigger range of any route cell earlier than index 290 — the early route threads
+one-cell-wide corridors. The plan's own constraints therefore force the applied amendment:
+the 15 mines stand on 15 authored **route-neutral pads** off the anchor set (the 150 anchors
+fill by the same continued round-robin), detonators sit in range of **late** route cells
+(indices 310–323), so the window's tower count strengthens to **== 165 at every sampled
+tick** and the ten detonations (165 → 155, each at a continuous-path route-cost-predicted
+tick) plus the route cell-sequence identity are witnessed during the untimed leak-probe
+extension rather than warm-up. Build 165 placements at the pinned 3/tick = 55 ticks; the
+warm-up constant holds and the window follows its stated relative semantics to
+[1055, 3554]. The scene is **landed**: 32 of 34 oracle rows green, the stress scene and both
+its replays byte-identical throughout. **The two proposed floor VALUES were re-pinned by owner ruling
+(Rob, 2026-08-09, S11 close-out)**: both measured under their estimates for a diagnosed
+reason (the ground family travels as a ~27-cell convoy on the 329-cell route, so only ~1–2
+stun and ~6 venom towers engage at any instant, where the estimates assumed all sources
+simultaneous) — stunned-samples measured 531 against the proposed ≥ 1000, peak resident DoT
+records measured 12 against the proposed ≥ 20. Per the plan's rule the scene was not retuned
+after measurement; the owner re-pinned the floors to the measurement-backed ≥ 400 and ≥ 10,
+and the oracle passes all 34 rows. Nothing in this amendment remains open.
+
+**Ruling 5 — `R0`'s out-of-sample re-record clears what `gate.ts`'s own criterion allows, and
+no more.** The re-record packet declared its statistic and cohort before taking any sample
+(one head, one image, ≥ 10 samples, both dispersion tests from `gate.ts:917-923`), then found,
+before recording, that the only machine available to it was a local development machine —
+not the documented `ubuntu-24.04` GitHub Actions runner image the file's own vocabulary keys
+"image" to throughout. `gate.ts:626-633` independently and explicitly disclaims any
+comparability between a local run and the CI ceiling it gates. No sample was recorded, and
+**limit 3 (in-sample rule selection) stays open** — this is reported as a finding, not
+absorbed as a re-record, and `TOLERANCE`/the ceiling were not widened to compensate (the move
+this repo has declined twice). What DID change: `gate.ts`'s `R0` doc comment gained an M2-S11
+FINDING paragraph recording this outcome, and an OWNER AND TRIGGER paragraph answering the
+file's own "no owner or date" complaint — **owner: Rob; limit 3's trigger: the next
+opportunity to take ≥ 10 fresh attempts of the same documented `ubuntu-24.04` image in CI**
+(this repo's own PR CI runs, since a local cohort is disqualified per the finding just
+recorded); **limit 1's trigger is unchanged** — a second runner image getting its own
+baseline under the same rule, medians agreeing within 0.02, which arrives on GitHub's
+schedule (the next `ubuntu-latest` bump), not this project's. `gate.ts`'s "provisional"
+language is narrowed by these two paragraphs, not deleted: neither limit is claimed cleared,
+and `R0`, `TOLERANCE` (1.10), and the ceiling (1.1000) are byte-identical to before this
+story.
+
+**Ruling 6 — the real low-end Android pass still does not run, and its absence is
+re-accepted, not re-litigated.** The owner re-affirms the branch this ADR and `m2.md:707`
+both already provide for: the pinned Chrome emulation profiles remain the reference device
+through M2's close-out, the S10 Finding's Phaser-vs-accessibility tension above rests on
+emulation evidence alone, and **#36 cannot close at S12** — its real-device evidence spans
+every story from S3 on, all still deferred. The architecture decision this ADR's S10 Finding
+raised (whether the cue vocabulary's stroked-Graphics cost is worth revisiting) stays outside
+S11's PR regardless of this re-acceptance; it remains an owner decision on real-device
+evidence this milestone does not yet have. See `docs/milestones/m2.md`'s Open questions and
+`docs/accessibility-checklist.md`'s Story 11 conformance audit for the same ruling recorded
+in each document's own convention.

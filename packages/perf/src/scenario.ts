@@ -10,7 +10,8 @@ import type { Ruleset } from '@wynding/types';
 import { currentRulesetHash, type Replay } from '@wynding/replay';
 import { SIM_VERSION, type SimInput } from '@wynding/sim';
 import { STRESS_BOARD_ID } from '@wynding/content/stress';
-import { stressAnchors, towerIdAt } from './layout';
+import { CATALOG_BOARD_ID } from '@wynding/content/catalog';
+import { stressAnchors, towerIdAt, catalogPlacements, CATALOG_TOWER_COUNT } from './layout';
 
 /** The fixed seed both scenarios run under — arbitrary but pinned, so the committed
  *  replays (and everything measured against them) are reproducible byte-for-byte. */
@@ -150,5 +151,65 @@ export function buildDotFreeReplay(bundle: Ruleset): Replay {
     tickInputs: buildTickInputs((index) =>
       towerIdAt(index) === 'stress-chill' ? 'stress-chill-single' : 'stress-single',
     ),
+  };
+}
+
+/** The catalog scene's own fixed seed (M2-S11 P7) — arbitrary but pinned, exactly like
+ *  `STRESS_SEED`, and DISTINCT from it so the two scenes' RNG streams are visibly
+ *  separate rather than accidentally shared. The catalog scene draws from the sim RNG
+ *  (the `stun` tower's chance roll), so its seed is genuinely load-bearing for the
+ *  committed replay's reproducibility. */
+export const CATALOG_SEED = 5678;
+
+/** The catalog scene's build-tick prefix — `CATALOG_TOWER_COUNT` (165) placements at the
+ *  SAME `PLACEMENTS_PER_TICK` (3) the stress scene uses, so the per-tick build pressure
+ *  is identical and only the prefix LENGTH differs: 165 / 3 = **55** ticks, against the
+ *  stress scene's 50. Its own constant rather than a change to `BUILD_TICKS`, which is
+ *  the stress scene's and must stay 50 (P8 depends on the committed stress replays being
+ *  byte-identical). Still comfortably inside the wave's 100-tick countdown, so the maze
+ *  is whole and static before the first creep spawns. */
+export const CATALOG_BUILD_TICKS = 55;
+
+/** The catalog scenario (M2-S11 P7): all nine REAL `wynding-core` catalog towers over 165
+ *  placements — the 150 stress anchors carrying beacons and the seven attacking kinds,
+ *  then 15 `mine` PADS — in `layout.ts`'s committed `catalogPlacements()` order. Its
+ *  `boardId` is the catalog bundle's own board, so it is unusable against the stress
+ *  bundle by construction — the two scenes share geometry, never a replay.
+ *
+ *  Placement cost sums to exactly 1,601, which IS the catalog bundle's `startingBounty`,
+ *  so the zero-leftover oracle works here for the same reason it does on the stress
+ *  scene — but derived from the real per-tower costs rather than from an equal-cost
+ *  assumption the real catalog would break. */
+export function buildCatalogReplay(bundle: Ruleset): Replay {
+  const placements = catalogPlacements();
+  if (placements.length !== CATALOG_TOWER_COUNT) {
+    throw new Error(
+      `buildCatalogReplay: expected ${CATALOG_TOWER_COUNT} placements, got ${placements.length}`,
+    );
+  }
+  const tickInputs: SimInput[][] = [];
+  for (let tick = 0; tick < CATALOG_BUILD_TICKS; tick++) {
+    const inputs: SimInput[] = [];
+    for (let i = 0; i < PLACEMENTS_PER_TICK; i++) {
+      const placement = placements[tick * PLACEMENTS_PER_TICK + i];
+      if (placement === undefined) {
+        throw new Error(
+          `buildCatalogReplay: no placement at index ${tick * PLACEMENTS_PER_TICK + i}`,
+        );
+      }
+      inputs.push({
+        kind: 'placeTower',
+        anchor: placement.anchor,
+        towerId: placement.towerId,
+      });
+    }
+    tickInputs.push(inputs);
+  }
+  return {
+    seed: CATALOG_SEED,
+    boardId: CATALOG_BOARD_ID,
+    rulesetHash: currentRulesetHash(bundle),
+    simVersion: SIM_VERSION,
+    tickInputs,
   };
 }
