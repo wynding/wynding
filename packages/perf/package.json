@@ -18,6 +18,7 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "gen:scenario": "tsx src/generate.ts",
     "perf": "tsx src/run.ts",
+    "perf:catalog": "tsx src/run-catalog.ts",
     "bench:dot": "tsx src/dot-bench.ts"
   },
   "dependencies": {

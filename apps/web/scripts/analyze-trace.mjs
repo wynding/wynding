@@ -1,8 +1,15 @@
 // analyze-trace.mjs — M2-S10 P8: the ADR 0005 frame-time attribution post-processor.
 //
-// Usage: node scripts/analyze-trace.mjs test-results/wy-trace-mid-range.json
+// Usage: node scripts/analyze-trace.mjs test-results/wy-trace-stress-mid-range.json
 //
-// Consumes a DevTools trace recorded by `e2e-perf/stress.perf.spec.ts` under
+// M2-S11 P7 re-keyed trace filenames by SCENE + PROFILE (`wy-trace-<scene>-<profile>`),
+// since a second scene under the old profile-only scheme would have silently overwritten
+// the stress traces. This script takes its path from argv and is scene-agnostic — only
+// the example above moved. (`docs/adr/0005-performance-budgets.md:797` still shows the
+// old `wy-trace-<profile>.json` form; it is a dated record, left as written.)
+//
+// Consumes a DevTools trace recorded by `e2e-perf/stress.perf.spec.ts` or
+// `e2e-perf/catalog.perf.spec.ts` under
 // `WY_TRACE=1` and prints a frame-time attribution report. Every rule here is the
 // 2026-08-08 empirical pilot's OBSERVED method, reproduced:
 //   - attribution is CLIPPED to the `wy:window:start`/`wy:window:end` marked interval;

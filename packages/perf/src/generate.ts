@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseRulesetJson } from '@wynding/sim';
 import { STRESS_RULESET_URL } from '@wynding/content/stress';
-import { buildStressReplay, buildControlReplay } from './scenario';
+import { CATALOG_RULESET_URL } from '@wynding/content/catalog';
+import { buildStressReplay, buildControlReplay, buildCatalogReplay } from './scenario';
 
 const scenariosDir = join(dirname(fileURLToPath(import.meta.url)), 'scenarios');
 
@@ -42,5 +43,18 @@ writeFileSync(
   JSON.stringify(controlReplay, null, 2) + '\n',
 );
 
+// The catalog scene (M2-S11 P7) is its OWN bundle, so it is loaded and built
+// separately — same genuine `readFileSync` + `parseRulesetJson` path, and deliberately
+// appended rather than folded into the two stress builders above: nothing about the
+// stress replays' bytes may change when this runs.
+const catalogText = readFileSync(CATALOG_RULESET_URL, 'utf8');
+const catalogBundle = parseRulesetJson(catalogText);
+const catalogReplay = buildCatalogReplay(catalogBundle);
+writeFileSync(
+  join(scenariosDir, 'catalog-40x40.replay.json'),
+  JSON.stringify(catalogReplay, null, 2) + '\n',
+);
+
 console.log(`Wrote ${join(scenariosDir, 'stress-40x40.replay.json')}`);
 console.log(`Wrote ${join(scenariosDir, 'control-40x40.replay.json')}`);
+console.log(`Wrote ${join(scenariosDir, 'catalog-40x40.replay.json')}`);

@@ -40,26 +40,12 @@ import {
   type SimState,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+// The package's ONE fnv1a copy (test-digest.ts) — m2-golden.test.ts digests through the
+// same function, so the two files cannot drift onto different digests for one trace.
+import { fnv1a } from './test-digest';
 
 /** Shared fixed seed for both pinned scenarios. */
 const SCENARIO_SEED = 0x5eed;
-
-/**
- * FNV-1a over a string — an 8-line INLINE duplicate of `@wynding/engine`'s
- * `fnv1a` (packages/engine/src/hash.ts), provenance-commented per PLAN.md P4 step
- * 12 ("import from @wynding/sim's re-exports if available, else inline"): `@wynding/sim`
- * does not re-export `fnv1a`, and importing `@wynding/engine` directly here would add
- * a runtime dependency edge this package doesn't otherwise need. Fast, deterministic,
- * NOT cryptographic — identical algorithm, identical output to the engine original.
- */
-function fnv1a(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
 
 /** Run steps of the bundled ruleset from a fresh state, seeded and driven by
  *  `inputs`, continuing while `continueWhile(tick, state)` holds. Returns the
@@ -133,8 +119,32 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // countdown ever starts in a hands-off run (they chain off wave index 5, which
     // itself never launches naturally before this run's tick-946 loss), so this is
     // once again a hash-only move: every other assertion below is unchanged.
-    expect(hashSimState(state)).toBe('3bc72d23');
-    expect(fnv1a(trace.join(':'))).toBe('04528845');
+    // Re-pinned M2-S11 P3 (measured): the arc grows 8 -> 10 waves (P1 inserts arc rows 5
+    // and 9). All the new/renumbered waves' countdowns chain off wave index 4 (never
+    // reached in this hands-off run before its tick-946 loss), so this is once again a
+    // hash-only move — every other assertion below (phase/lives/tick/score/stars) is
+    // unchanged from M2-S10.
+    // Re-measured final at P4b — unchanged (arc tuning — survivalMul, antiair cadence,
+    // boss-escort offset — never comes into play in a hands-off run that loses at
+    // tick 946, long before wave index 4 even launches).
+    console.log(
+      '[parity] hands-off loss: hash',
+      hashSimState(state),
+      'trace',
+      fnv1a(trace.join(':')),
+      'phase',
+      state.phase,
+      'lives',
+      state.lives,
+      'tick',
+      state.tick,
+      'score',
+      deriveScore(state, ruleset),
+      'stars',
+      deriveStars(state, ruleset),
+    );
+    expect(hashSimState(state)).toBe('40e08409');
+    expect(fnv1a(trace.join(':'))).toBe('ca77e5d5');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
@@ -341,25 +351,56 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     //                                             forfeits early-call credit and pays
     //                                             no survival term at all)
     //   stars                           1 → 0
-    expect(hashSimState(state)).toBe('64880500');
-    expect(fnv1a(trace.join(':'))).toBe('0437f228');
+    //
+    // Re-pinned M2-S11 P3 (measured), a SEMANTIC move again, but the LOST outcome holds.
+    // The arc grows 8 -> 10 waves (P1 inserts arc row 5 — 12x`normal`+6x`swarm` — at
+    // index 4, and arc row 9 at index 8). The tick-1050 early call now launches the NEW
+    // index-4 wave (not `resolute`+`fast`, which moves to index 6), and every wave's
+    // own countdown is a fixed schedule independent of when the PRIOR wave finishes
+    // combat — so index 4 launches at its own prefix-sum tick regardless, pulling more
+    // of the run inside this scenario's now-longer trace before the freeze. Measured
+    // before (M2-S10 P3) → after (M2-S11 P3):
+    //   tick                        1956 → 2256
+    //   waveResolved.length            8 → 10  ([t,t,t,t,t,t,t,f,f,f])
+    //   waveCursor                     7 → 9
+    //   cumulativeKillBounty           84 → 102 (+18: the new index-4 wave's own kills,
+    //                                             plus index-5 `flying`'s unchanged 0)
+    //   cumulativeEarlyCallCredit      13 → 13  (unchanged: still the same three calls)
+    //   bounty                       106 → 130  (+18 kill bounty, +6 index-4's clear
+    //                                             bonus; no other wave past it clears)
+    //   lives (unchanged)              0 → 0
+    //   score                          84 → 102 (kill-bounty only, lost branch)
+    //   stars (unchanged)               0 → 0
+    expect(hashSimState(state)).toBe('bf13755b');
+    expect(fnv1a(trace.join(':'))).toBe('0c6af742');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
-    expect(state.tick).toBe(1956);
-    // The run freezes mid-wave: wave index 6 (`armored-flyer`) launched (`waveCursor`
-    // advanced past it) but never finished resolving, and wave index 7 (the boss)
-    // never launched at all.
-    expect(state.waveResolved).toEqual([true, true, true, true, true, true, false, false]);
-    expect(state.waveCursor).toBe(7);
-    // cumulativeKillBounty is unchanged from M2-S7 P6 (84): wave index 6 leaked, not
-    // killed, same as wave index 5 before it. cumulativeEarlyCallCredit is also
-    // unchanged pre-terminal (13, the same three early calls as before), but the
-    // lost-branch score formula forfeits it entirely — see `deriveScore` below.
-    expect(state.cumulativeKillBounty).toBe(84);
+    expect(state.tick).toBe(2256);
+    // The run freezes mid-wave: `waveCursor` 9 means waves [0, 9) all LAUNCHED —
+    // including index 8's four-stream wave — with indices 7 and 8 never finishing
+    // resolving; only wave index 9 (the boss) never launched at all.
+    expect(state.waveResolved).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(state.waveCursor).toBe(9);
+    // cumulativeKillBounty is re-measured at 102 (see the derivation above).
+    // cumulativeEarlyCallCredit is unchanged pre-terminal (13, the same three early
+    // calls as before), but the lost-branch score formula forfeits it entirely — see
+    // `deriveScore` below.
+    expect(state.cumulativeKillBounty).toBe(102);
     expect(state.cumulativeEarlyCallCredit).toBe(13);
-    expect(state.bounty).toBe(106);
+    expect(state.bounty).toBe(130);
     // Lost score formula: kill-bounty ONLY — no early-call credit, no survival term.
-    expect(deriveScore(state, ruleset)).toBe(84);
+    expect(deriveScore(state, ruleset)).toBe(102);
     expect(deriveStars(state, ruleset)).toBe(0);
   });
 });
@@ -378,18 +419,27 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // Re-pinned M2-S10 P3: the shipped catalog gains the `armored-flyer` and `boss` creeps,
 // the `frost-splash` tower, and waves index 6/7 — the finale content. Moves for the same
 // content-identity reason as every prior catalog addition.
-const SHIPPED_RULESET_HASH = '310720258d380afa8e9472d11bba90dc09e72aa49180d6d78a7a9b68e48b552e';
+// Re-pinned M2-S11 P3 (measured): the arc grows 8 -> 10 waves (P1 inserts arc rows 5 and
+// 9, and renumbers every wave's `index`) — a content change, so the digest moves.
+// Re-pinned M2-S11 P4 (measured): the balance pass edits three authored values in the same
+// bundle — `antiair`'s `cadenceTicks` 20 -> 15, `scoring.survivalMul` 35 -> 50, and the
+// boss wave's `normal` escort gaining `offsetTicks` 600 — so the content-identity digest
+// moves again. No creep id, count or wave order changed (ruling 2's frozen column).
+const SHIPPED_RULESET_HASH = 'fd0dfb25fd3249493ac3af9fd294e3b601d475f20887614231646968b3b34f67';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {
   it('matches the committed rulesetHash literal', () => {
     const bundle = getBundledRuleset();
-    expect(rulesetDigest(bundle)).toBe(SHIPPED_RULESET_HASH);
+    const digest = rulesetDigest(bundle);
+    console.log(`[parity] SHIPPED_RULESET_HASH: ${digest}`);
+    expect(digest).toBe(SHIPPED_RULESET_HASH);
   });
 
   it('is stable across two independent loads of the registry', () => {
     const first = rulesetDigest(getBundledRuleset());
     const second = rulesetDigest(getBundledRuleset());
+    console.log(`[parity] rulesetDigest stability: first=${first} second=${second}`);
     expect(first).toBe(second);
     expect(first).toBe(SHIPPED_RULESET_HASH);
   });

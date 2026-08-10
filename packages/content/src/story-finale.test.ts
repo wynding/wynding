@@ -24,8 +24,10 @@ import {
   projectCreep,
   type SimInput,
   type SimState,
+  type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+import { waveIndexForCreep, anchoredWallInputs, waveLaunchTickObserved } from './wave-lookup';
 
 const SCENARIO_SEED = 0x5eed;
 
@@ -109,19 +111,24 @@ const antiairAnchors: { col: number; row: number }[] = [
 const PROBE_A = { col: 22, row: 10 } as const;
 const PROBE_B = { col: 22, row: 12 } as const;
 
+/** The `armored`/`flying` wave indices, LOCATED by creep id in the compiled schedule
+ *  (ruling 1) — never a hardcoded index, so this survives P1's renumber unedited. Shared
+ *  by `survivalWallInputs` and every boss-probe scene below, which all anchor ahead of
+ *  one or the other. */
 function survivalWallInputs(
-  extra: (tick: number) => SimInput[] = () => [],
-): (tick: number) => SimInput[] {
+  ruleset: CompiledRuleset,
+  extra: (tick: number, state: SimState) => SimInput[] = () => [],
+): (tick: number, state: SimState) => SimInput[] {
+  const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
+  const flyingWaveIndex = waveIndexForCreep(ruleset, 'flying');
   const basicWall = anchorWallInputs(basicAnchors, 'basic');
-  const antiairWall = anchorWallInputs(antiairAnchors, 'antiair', 1900, 10);
-  return (tick: number): SimInput[] => {
+  const venomWall = anchoredWallInputs(ruleset, armoredWaveIndex, column16Anchors, 'venom', 200);
+  const antiairWall = anchoredWallInputs(ruleset, flyingWaveIndex, antiairAnchors, 'antiair', 200);
+  return (tick: number, state: SimState): SimInput[] => {
     const out = basicWall(tick);
-    if (tick === 1300)
-      out.push({ kind: 'placeTower', anchor: column16Anchors[0]!, towerId: 'venom' });
-    if (tick === 1310)
-      out.push({ kind: 'placeTower', anchor: column16Anchors[1]!, towerId: 'venom' });
-    out.push(...antiairWall(tick));
-    out.push(...extra(tick));
+    out.push(...venomWall(tick, state));
+    out.push(...antiairWall(tick, state));
+    out.push(...extra(tick, state));
     return out;
   };
 }
@@ -129,17 +136,19 @@ function survivalWallInputs(
 /** Run `survivalWallInputs(extra)` end to end, capturing lives/rngState/creep rows
  *  after every tick's step — the wall itself is timer-driven, so this drives
  *  `step()` directly rather than going through a fixed placement-list shape. */
-function runSurvivalScene(extra: (tick: number) => SimInput[] = () => []): SceneResult {
+function runSurvivalScene(
+  extra: (tick: number, state: SimState) => SimInput[] = () => [],
+): SceneResult {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-  const inputs = survivalWallInputs(extra);
+  const inputs = survivalWallInputs(ruleset, extra);
   const livesByTick: number[] = [];
   const rngStateByTick: number[] = [];
   const creepsByTick = new Map<number, readonly CreepSnapshot[]>();
 
   for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-    state = step(state, ruleset, inputs(t));
+    state = step(state, ruleset, inputs(t, state));
     livesByTick[t] = state.lives;
     rngStateByTick[t] = state.rngState;
     creepsByTick.set(
@@ -213,15 +222,43 @@ function runBossProbe(
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-  const probeInputs = (tick: number): SimInput[] => {
+  // Each probe placed 10 ticks apart, anchored to the BOSS wave's OWN observed LAUNCH
+  // transition (located by creep id, never a hardcoded index; S11 P2). A per-probe
+  // closure, not `anchoredWallInputs`, because probes carry DIFFERENT tower ids
+  // (`splash`, `beacon`, ...), not one shared id over a shared anchor list.
+  //
+  // M2-S11 P4 — WHY THE BOSS WAVE'S LAUNCH, not the `flying` wave's countdown start
+  // (the anchor this harness carried through P2/P3): the GEOMETRY block's isolation
+  // premise is "the probe at PROBE_COL is the only ground-domain tower anything meets
+  // from ~column 20 onward", and P1's arc row 9 (wave index 8) broke it — that wave's
+  // stragglers reach column 22 and drew probe fire BEFORE the boss existed, which is
+  // the P3 diagnostic's (c) finding. Placing the probe at the boss wave's own launch
+  // restores the premise by CONSTRUCTION rather than by hoping the schedule cooperates:
+  // the probe does not exist while wave 8's survivors are crossing, and the boss needs
+  // several hundred ticks after its launch to walk from the entrance to column 22, so
+  // the tower is long since built by the time its only reachable target arrives. A
+  // placement anchored to an OBSERVED transition is causally sound (the launch has
+  // already happened when the command is scheduled) — the same rule `wave-lookup.ts`
+  // states for post-launch observations. The boss wave's `normal` escort is scheduled
+  // 600 ticks behind the boss (P4's `offsetTicks` lever), so it is not in play either.
+  // A small positive lead is REQUIRED, not cosmetic: `waveLaunchTick[k]` is written
+  // during the very step that launches the wave, so the earliest tick at which a script
+  // can OBSERVE it is already `launch + 1`. 50 leaves the probe built hundreds of ticks
+  // before the boss walks into its range.
+  const PROBE_LEAD_TICKS = 50;
+  const bossWaveIndex = waveIndexForCreep(ruleset, 'boss');
+  const probeInputs = (tick: number, state: SimState): SimInput[] => {
+    const launch = waveLaunchTickObserved(state, bossWaveIndex);
+    if (launch === null) return [];
     const out: SimInput[] = [];
     probes.forEach((p, i) => {
-      if (tick === 1950 + i * 10)
+      if (tick === launch + PROBE_LEAD_TICKS + i * 10) {
         out.push({ kind: 'placeTower', anchor: p.anchor, towerId: p.towerId });
+      }
     });
     return out;
   };
-  const inputs = survivalWallInputs(probeInputs);
+  const inputs = survivalWallInputs(ruleset, probeInputs);
   let sourceId: number | undefined;
   const fires: ProbeFire[] = [];
   const seen = new Set<string>();
@@ -233,7 +270,7 @@ function runBossProbe(
   let bossId: number | undefined;
 
   for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-    state = step(state, ruleset, inputs(t));
+    state = step(state, ruleset, inputs(t, state));
     rngStateAt[t] = state.rngState;
     if (sourceId === undefined) sourceId = resolveTowerId(state, probes[0]!.anchor);
     for (const im of state.impacts) {
@@ -338,10 +375,54 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
     expect(bossLeakDelta).toBe(-3);
     expect(result.ruleset.creepById['boss']?.leakCost).toBe(3);
     expect(result.state.phase).toBe('won');
-    expect(result.state.tick).toBe(3141);
-    expect(result.state.lives).toBe(3);
-    expect(result.state.waveLeaked[7]).toBe(true); // the boss's own wave
+    // Re-pinned M2-S11 P4 (measured), FINAL — this build is byte-identical to
+    // `story-flying-wave.test.ts`'s test 2, whose own comment carries the full
+    // derivation: `antiair` cadence 20 → 15 saves two lives at wave index 7, and the boss
+    // wave's `normal` escort gaining `offsetTicks` 600 lengthens the run's tail. The
+    // boss's OWN leak still costs exactly 3 lives in one clean event (`bossLeakDelta`
+    // above, unchanged) — which is the claim this test makes.
+    expect(result.state.tick).toBe(4112);
+    expect(result.state.lives).toBe(4);
+    // The boss's own wave — LOCATED by creep id (ruling 1), never a hardcoded index.
+    const bossWaveIndex = waveIndexForCreep(result.ruleset, 'boss');
+    expect(result.state.waveLeaked[bossWaveIndex]).toBe(true);
   });
+
+  // ---------------------------------------------------------------------------------
+  // M2-S11 P3 FINDING — RESOLVED BY P4. Historical diagnosis kept for context; the five
+  // `runBossProbe`-based tests below (`splash`, `frost-splash`, beacon-buffed `basic`,
+  // `venom`, `stun`) are GREEN again, not left red.
+  //
+  // The finding (P3): all five shared a broken precondition under the ten-wave arc.
+  // Their shared premise (GEOMETRY block, top of file) was "PROBE_COL (22) is chosen so
+  // a tower placed there is the ONLY ground-domain tower in range of anything passing
+  // that column" — i.e. every impact `runBossProbe`'s probe tower fires was presumed to
+  // land on the `boss`. P1's arc row 9 (wave index 8: 10x`swarm` + 6x`fast` +
+  // 4x`armored` + 4x`flying`) broke that premise: measured, that wave sent stragglers
+  // past the SURVIVAL_WALL that reached column 22 and drew the probe's fire BEFORE the
+  // boss's own wave (index 9) ever launched. Measured directly (splash probe): the probe
+  // fired 6 times, at ticks 3149/3209/3269/3603/3663/3723, while the boss's own alive
+  // window (same seed, same build) was [3300, 3739] — the first three fires landed
+  // before the boss even existed. The `stun` test confirmed it directly:
+  // `fires.every(f => f.targetId === bossId)` was `false`.
+  //
+  // THE FIX (P4): NOT a schedule change to wave 8 — composition and spacing there are
+  // load-bearing for other scenarios and wave 8's own stragglers are a legitimate part
+  // of the arc's difficulty. Instead, `runBossProbe` was re-anchored (see its own
+  // comment above) from the `flying` wave's countdown start to the BOSS WAVE's own
+  // OBSERVED LAUNCH transition, plus 50 lead ticks. This restores the isolation premise
+  // by CONSTRUCTION: the probe tower does not exist while wave 8's survivors are still
+  // crossing column 22, and the boss needs several hundred ticks to walk from the
+  // entrance to that column, so by the time it arrives the probe is long since built and
+  // nothing else is left to draw its fire. The boss wave's own `normal` escort was also
+  // given `offsetTicks: 600` so it trails well behind the boss and cannot confound the
+  // isolation either. This was not a refactor defect (P2's
+  // `waveIndexForCreep`/`anchoredWallInputs` correctly locate `armored`/`flying` by
+  // creep id throughout, and the SURVIVAL_WALL's own outcome — test 1 above — was
+  // internally consistent throughout). Composition stayed frozen (ruling 2) — the fix
+  // is entirely in the probe script's own anchoring, never in wave 8's creep kinds,
+  // counts, or order.
+  // ---------------------------------------------------------------------------------
 
   it("`splash` is fully negated by the boss's armor 8 — 0 net damage, deliberately (m2.md:139)", () => {
     const { fires, bossHpAt, bossPosAt, bossDotsAt } = runBossProbe([
@@ -559,12 +640,23 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-    const inputs = survivalWallInputs();
+    const inputs = survivalWallInputs(ruleset);
     const towerKindById = new Map<number, string>();
     const basicImpactsOnFlyer: number[] = [];
     const antiairHpTrace: { tick: number; targetId: number; hp: number }[] = [];
-    for (let t = 0; t < 2700 && state.phase === 'running'; t++) {
-      state = step(state, ruleset, inputs(t));
+    // `armored-flyer` — LOCATED by creep id (ruling 1), never a hardcoded index. Run 400
+    // ticks past its own OBSERVED launch transition (S11 P2) — the same margin the prior
+    // static `2700` literal carried (launch 2300 + 400) under the unchanged eight-wave
+    // bundle this packet runs against, deliberately stopping short of the `boss` wave so
+    // this domain-gating scenario stays scoped to `armored-flyer` alone.
+    const armoredFlyerWaveIndex = waveIndexForCreep(ruleset, 'armored-flyer');
+    // MAX_MATCH_TICKS stays in the header: the launch-relative bound only binds once
+    // the wave is observed launching, and a stalled-but-running sim must FAIL the
+    // assertion below, not hang the runner (PR #93 CodeRabbit round 1).
+    for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
+      const armoredFlyerLaunch = waveLaunchTickObserved(state, armoredFlyerWaveIndex);
+      if (armoredFlyerLaunch !== null && t >= armoredFlyerLaunch + 400) break;
+      state = step(state, ruleset, inputs(t, state));
       for (let r = 0; r < state.towers.id.length; r++) {
         towerKindById.set(state.towers.id[r] as number, state.towers.towerId[r] as string);
       }

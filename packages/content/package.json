@@ -10,7 +10,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./artifact": "./src/artifact.ts",
-    "./stress": "./src/stress.ts"
+    "./stress": "./src/stress.ts",
+    "./catalog": "./src/catalog.ts"
   },
   "scripts": {
     "build": "tsc -b && mkdir -p dist/rulesets && cp src/rulesets/*.json dist/rulesets/",

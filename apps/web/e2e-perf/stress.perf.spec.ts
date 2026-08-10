@@ -55,6 +55,21 @@ declare global {
 // over an empty or idle board would otherwise post superb fps/heap/latency numbers
 // while measuring nothing the ADR cares about.
 
+/**
+ * This spec's SCENE id (M2-S11 P7). Trace filenames, report records and every analyzer
+ * input are keyed by SCENE + PROFILE, never by profile alone.
+ *
+ * Before P7 the trace filename was `wy-trace-${profile.name}.json` and the report record
+ * carried no scene field at all — which was unambiguous while `stress` was the only
+ * scene, and silently destructive the moment a second one existed: `catalog.perf.spec.ts`
+ * runs under the SAME two profiles and would have overwritten this scene's traces
+ * file-for-file, leaving the analyzer reading catalog frames under a stress label.
+ *
+ * Nothing else about this scene's measurement changes — same replay, same thresholds,
+ * same window, same numbers. Only the KEYING moved.
+ */
+const SCENE_ID = 'stress';
+
 /** ~10s of sustained rAF sampling, per ADR 0005's methodology (a percentile over a
  *  window, never a lucky best frame). `performance.now()` keeps advancing at real wall-
  *  clock speed under CDP CPU throttling (only JS *execution* is slowed), so this
@@ -457,7 +472,7 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
     const traceJson = await collectTrace(cdp);
     const outDir = resolvePath('test-results');
     mkdirSync(outDir, { recursive: true });
-    const outPath = resolvePath(outDir, `wy-trace-${profile.name}.json`);
+    const outPath = resolvePath(outDir, `wy-trace-${SCENE_ID}-${profile.name}.json`);
     writeFileSync(outPath, traceJson);
     console.log(`WY-TRACE: wrote ${String(traceJson.length)} bytes to ${outPath}`);
   }
@@ -599,6 +614,9 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
   expect(consoleErrors).toEqual([]);
 
   const report = {
+    // Scene id FIRST, and present on every record (M2-S11 P7): the analyzer keys its
+    // inputs by scene + profile now that a second scene exists. See `SCENE_ID`.
+    scene: SCENE_ID,
     profile: profile.name,
     chromeVersion: page.context().browser()?.version() ?? null,
     webglRenderer,

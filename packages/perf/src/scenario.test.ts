@@ -9,7 +9,16 @@ import { describe, it, expect } from 'vitest';
 import { parseRulesetJson, SIM_VERSION, type SimInput } from '@wynding/sim';
 import { currentRulesetHash, type Replay } from '@wynding/replay';
 import { STRESS_RULESET_URL } from '@wynding/content/stress';
-import { buildStressReplay, buildControlReplay, PLACEMENTS_PER_TICK } from './scenario';
+import { CATALOG_RULESET_URL, CATALOG_BOARD_ID } from '@wynding/content/catalog';
+import {
+  buildStressReplay,
+  buildControlReplay,
+  buildCatalogReplay,
+  CATALOG_SEED,
+  CATALOG_BUILD_TICKS,
+  PLACEMENTS_PER_TICK,
+} from './scenario';
+import { CATALOG_TOWER_ID_AT, catalogPlacements, CATALOG_TOWER_COUNT } from './layout';
 
 /** Extracts the flat placement `index` (`tick * PLACEMENTS_PER_TICK + i` — the same
  *  indexing `layout.ts`'s `towerIdAt` uses) of every `placeTower` input in `replay`
@@ -147,3 +156,59 @@ describe('buildControlReplay keeps stress-venom, at the same placements as the s
 // What STAYS here are the cheap staleness guards, and they are the ones that actually
 // catch a forgotten regeneration: `simVersion`, `rulesetHash`, and a deep-equal against
 // the committed JSON.
+
+// ── The catalog scene's committed replay (M2-S11 P7) ──────────────────────────
+//
+// A NEW describe block, deliberately appended rather than folded into the stress blocks
+// above: the catalog scene is its own bundle, its own board and its own seed, and P8
+// depends on nothing about the stress side moving in this packet.
+describe('the committed catalog replay is not stale', () => {
+  const catalogBundle = parseRulesetJson(readFileSync(CATALOG_RULESET_URL, 'utf8'));
+  const committedCatalogReplay = JSON.parse(
+    readFileSync(join(scenariosDir, 'catalog-40x40.replay.json'), 'utf8'),
+  ) as Replay;
+
+  it('catalog-40x40.replay.json on disk deep-equals buildCatalogReplay(bundle) right now', () => {
+    expect(committedCatalogReplay).toEqual(buildCatalogReplay(catalogBundle));
+  });
+
+  it('stamps SIM_VERSION, the catalog bundle’s digest, its own board and its own seed', () => {
+    const replay = buildCatalogReplay(catalogBundle);
+    expect(replay.simVersion).toBe(SIM_VERSION);
+    expect(replay.rulesetHash).toBe(currentRulesetHash(catalogBundle));
+    expect(replay.boardId).toBe(CATALOG_BOARD_ID);
+    // A DISTINCT seed from the stress scene's 1234 — the catalog scene draws from the
+    // sim RNG (the `stun` tower's chance roll), so its seed is load-bearing for the
+    // committed replay's reproducibility and must not be shared by accident.
+    expect(replay.seed).toBe(CATALOG_SEED);
+    expect(replay.seed).not.toBe(buildStressReplay(bundle).seed);
+  });
+
+  it('places all 165 placements from the committed tables, in catalogPlacements() order', () => {
+    const replay = buildCatalogReplay(catalogBundle);
+    // 55 build ticks, not the stress scene's 50: 165 placements at the SAME
+    // `PLACEMENTS_PER_TICK` (3), so only the prefix LENGTH differs. Still inside the
+    // wave's 100-tick countdown.
+    expect(CATALOG_BUILD_TICKS).toBe(55);
+    expect(CATALOG_BUILD_TICKS * PLACEMENTS_PER_TICK).toBe(CATALOG_TOWER_COUNT);
+    expect(replay.tickInputs).toHaveLength(CATALOG_BUILD_TICKS);
+    const placed: { anchor: { col: number; row: number }; towerId: string }[] = [];
+    for (const inputs of replay.tickInputs) {
+      expect(inputs).toHaveLength(PLACEMENTS_PER_TICK);
+      for (const input of inputs) {
+        const placement = input as Extract<SimInput, { kind: 'placeTower' }>;
+        expect(placement.kind).toBe('placeTower');
+        placed.push({ anchor: placement.anchor, towerId: placement.towerId });
+      }
+    }
+    expect(placed).toEqual(
+      catalogPlacements().map((p) => ({
+        anchor: { col: p.anchor.col, row: p.anchor.row },
+        towerId: p.towerId,
+      })),
+    );
+    // The first 150 are the anchors carrying the committed table; the last 15 are mines.
+    expect(placed.slice(0, 150).map((p) => p.towerId)).toEqual([...CATALOG_TOWER_ID_AT]);
+    expect(placed.slice(150).every((p) => p.towerId === 'mine')).toBe(true);
+  });
+});

@@ -1,0 +1,193 @@
+{
+  "formatVersion": 2,
+  "rulesetId": "catalog-40x40",
+  "version": 1,
+  "creepCatalog": [
+    {
+      "id": "cat-ground",
+      "hp": 1000000,
+      "speedFp": 23,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 1
+    },
+    {
+      "id": "cat-air",
+      "hp": 1000000,
+      "speedFp": 23,
+      "armor": 0,
+      "domain": "air",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 1
+    },
+    {
+      "id": "cat-immune",
+      "hp": 1000000,
+      "speedFp": 23,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": ["slow", "stun"],
+      "leakCost": 1,
+      "bounty": 1
+    },
+    {
+      "id": "cat-heavy",
+      "hp": 1000000,
+      "speedFp": 23,
+      "armor": 6,
+      "domain": "ground",
+      "immunities": ["slow", "stun"],
+      "leakCost": 3,
+      "bounty": 1
+    }
+  ],
+  "towerCatalog": [
+    {
+      "id": "basic",
+      "cost": 5,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 4
+      },
+      "effects": [{ "kind": "direct", "form": "single", "damage": 10 }]
+    },
+    {
+      "id": "slow",
+      "cost": 8,
+      "attack": {
+        "domain": "both",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 2 },
+        { "kind": "slow", "mulFp": 128, "durationTicks": 40 }
+      ]
+    },
+    {
+      "id": "splash",
+      "cost": 12,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 60,
+        "travelTicks": 8
+      },
+      "effects": [{ "kind": "direct", "form": "aoe", "damage": 8, "radiusFp": 384 }]
+    },
+    {
+      "id": "venom",
+      "cost": 9,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 2 },
+        { "kind": "dot", "damagePerTick": 4, "cadenceTicks": 10, "durationTicks": 60 }
+      ]
+    },
+    {
+      "id": "stun",
+      "cost": 10,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 768,
+        "cadenceTicks": 40,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 4 },
+        { "kind": "stun", "chanceNum": 64, "durationTicks": 20 }
+      ]
+    },
+    {
+      "id": "antiair",
+      "cost": 7,
+      "attack": {
+        "domain": "air",
+        "rangeFp": 1280,
+        "cadenceTicks": 15,
+        "travelTicks": 2
+      },
+      "effects": [{ "kind": "direct", "form": "single", "damage": 8 }]
+    },
+    {
+      "id": "beacon",
+      "cost": 15,
+      "effects": [{ "kind": "support", "damageMulFp": 384 }]
+    },
+    {
+      "id": "mine",
+      "cost": 6,
+      "attack": { "domain": "ground", "rangeFp": 576, "travelTicks": 1 },
+      "effects": [{ "kind": "burst", "form": "aoe", "damage": 45, "radiusFp": 640 }]
+    },
+    {
+      "id": "frost-splash",
+      "cost": 16,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 60,
+        "travelTicks": 8
+      },
+      "effects": [
+        { "kind": "direct", "form": "aoe", "damage": 6, "radiusFp": 384 },
+        { "kind": "slow", "mulFp": 179, "durationTicks": 30 }
+      ]
+    }
+  ],
+  "balance": {
+    "startingLives": 1000000,
+    "startingBounty": 1601,
+    "refundNum": 3,
+    "refundDen": 4,
+    "slowFloorNum": 3,
+    "slowFloorDen": 4,
+    "earlyCallBountyDivisor": 50
+  },
+  "scoring": { "survivalMul": 35, "starThresholds": [1, 6, 9], "earlyCallScoreDivisor": 50 },
+  "boards": [
+    {
+      "id": "catalog-40x40",
+      "widthTiles": 40,
+      "heightTiles": 40,
+      "entrance": { "col": 0, "row": 20 },
+      "exit": { "col": 39, "row": 20 },
+      "waves": [
+        {
+          "index": 0,
+          "countdownTicks": 100,
+          "clearBonus": 1,
+          "entries": [
+            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 0 },
+            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 1 },
+            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 2 },
+            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 3 },
+            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 4 },
+            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 5 },
+            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 6 },
+            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 7 },
+            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 8 },
+            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 9 },
+            { "creepId": "cat-heavy", "count": 19, "spacingTicks": 16, "offsetTicks": 10 },
+            { "creepId": "cat-heavy", "count": 19, "spacingTicks": 16, "offsetTicks": 11 },
+            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 12 },
+            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 13 },
+            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 14 },
+            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 15 }
+          ]
+        }
+      ]
+    }
+  ]
+}

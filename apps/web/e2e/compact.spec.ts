@@ -169,7 +169,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await gotoAt(page, PHONE);
     const preview = page.locator('.wy-wave-preview');
     await expect(preview).toBeVisible(); // visible pre-start too (M2-S2 decouple)
-    await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 8'); // M2-S10: eight waves now
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 10'); // M2-S11: the ten-wave arc
     const entries = preview.locator('li');
     await expect(entries).toHaveCount(1); // the shipped bundle's single creep kind
     await expect(entries.first()).toHaveText(
@@ -197,6 +197,108 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       .toBeGreaterThan(0);
     await entries.first().scrollIntoViewIfNeeded();
     await expect(entries.first()).toBeInViewport();
+  });
+
+  // M2-S11 P1b: the arc's densest tick (wave index 8, "Wave 9 of 10") carries FOUR
+  // concurrent creep streams — the preview's row count grows from a maximum of 2 rows
+  // (M2-S6's `resolute`+`fast`) to 4. `home.spec.ts`'s `STANDARD_ROW_MAX_PX` flag covers
+  // the HORIZONTAL axis (a wider per-entry string); this is the first test of the
+  // VERTICAL axis. The preview already lives inside `.wy-hud`'s bounded, keyboard-scrollable
+  // box (contract §1) — the mechanism the test above proves generalizes to overflow content
+  // — so this measures whether that SAME mechanism holds up honestly with 4× the rows: no
+  // clipping, every row reachable by keyboard, and axe-clean, at the real compiled
+  // wave-index-8 composition rather than a synthetic stand-in.
+  test("658×320: the four-row wave-9 preview (M2-S11, the arc's densest tick) fits accessibly inside the bounded scrollport", async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    const preview = page.locator('.wy-wave-preview');
+    const previewTitle = preview.locator('.wy-wave-preview-title');
+    const entries = preview.locator('li');
+
+    // Early-call through waves 1..8 to bring wave 9 (index 8, the four-stream wave) into
+    // the preview slot — the same gate-each-press-on-aria pattern smoke.spec.ts /
+    // start-gate.spec.ts use, so a same-tick-deduped press cannot silently short the loop.
+    await page.getByRole('button', { name: 'Start' }).click();
+    const callWave = page.getByRole('button', { name: 'Call wave' });
+    for (let waveNumber = 1; waveNumber <= 8; waveNumber++) {
+      await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
+      await expect(callWave).toHaveAttribute('aria-disabled', 'false');
+      await callWave.click();
+    }
+    await expect(previewTitle).toHaveText('Wave 9 of 10');
+    // FREEZE the race, don't just guard it: wave 9's own 300-tick countdown keeps
+    // running under the long assertion tail below (axe + geometry + keyboard-scroll —
+    // observed flaking once the tail crossed the auto-launch boundary on a loaded
+    // machine). Pausing pins the preview on wave 9 for the whole tail; the preview
+    // reflects Pending state under pause by design, so nothing measured changes.
+    await page.getByRole('button', { name: 'Pause' }).click();
+    await expect(entries).toHaveCount(4);
+    await expect(entries).toHaveText([
+      '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
+      '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
+      '4 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
+      '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
+    ]);
+
+    // axe audit with all 4 rows showing — the standard bar every other HUD content is
+    // held to (PLAN.md P3 step 19).
+    const audit = await new AxeBuilder({ page }).include('#app').analyze();
+    expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+
+    // GUARD: wave 9's own 300-tick countdown keeps running in real time under this
+    // tail (~15 s at 1×) — if it auto-launches, the preview flips to wave 10's two-row
+    // composition and the 4 materialized entry locators go stale (boundingBox() null).
+    // Re-asserting the title here turns that race into a NAMED failure instead of a
+    // mystery null dereference on a slow runner.
+    await expect(previewTitle).toHaveText('Wave 9 of 10');
+
+    // No clipping: the preview's rendered box, and every one of its 4 rows, stays within
+    // the Compact column's own width — never spilling past it or off the viewport (a
+    // scrollport clips its OVERFLOW axis only; the cross axis must never overflow at all).
+    const status = (await regionRect(page, 'status')) as Rect;
+    const previewBox = (await preview.boundingBox())!;
+    expect(
+      previewBox.x + previewBox.width,
+      `preview right edge ${previewBox.x + previewBox.width}px exceeds the status column's own right edge ${status.x + status.width}px`,
+    ).toBeLessThanOrEqual(status.x + status.width + 1);
+    for (const entry of await entries.all()) {
+      const box = (await entry.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(status.x + status.width + 1);
+    }
+
+    // Text stays at the SAME readable size the 1-row preview uses — 4 rows never triggers
+    // a "shrink to fit" degradation. `.wy-hud`'s own base size (ui.css) is the source of
+    // truth; the preview carries no font-size rule of its own.
+    const previewFontSize = await preview.evaluate((el) => getComputedStyle(el).fontSize);
+    const hudFontSize = await page
+      .locator('.wy-hud')
+      .evaluate((el) => getComputedStyle(el).fontSize);
+    expect(previewFontSize).toBe(hudFontSize);
+
+    // Every row is reachable via the SAME keyboard scrollport path the test above proves
+    // for the 200%-zoom 1-row case — proven here at 100% zoom with all 4 real rows, the
+    // scrollport's own worst case for this wave.
+    const hud = page.locator('.wy-hud');
+    await hud.focus();
+    await expect(hud).toBeFocused();
+    // The SAME two-part keyboard proof the 200%-zoom test above and smoke.spec's
+    // chips-scrollport gate use (PR #93 CodeRabbit round 1 — `scrollIntoViewIfNeeded`
+    // alone proves nothing about the keyboard path): (a) a real arrow key moves the
+    // focused scrollport's `scrollTop` with all four rows present — keyboard-operable,
+    // not merely present in the DOM; (b) every row can then be scrolled fully into
+    // view within that same scrollport.
+    const scrollTopBefore = await hud.evaluate((el) => el.scrollTop);
+    await page.keyboard.press('ArrowDown');
+    await expect
+      .poll(async () => hud.evaluate((el) => el.scrollTop), {
+        message: 'the hud scrollport should scroll on an arrow key with 4 preview rows',
+      })
+      .toBeGreaterThan(scrollTopBefore);
+    for (const entry of await entries.all()) {
+      await entry.scrollIntoViewIfNeeded();
+      await expect(entry).toBeInViewport();
+    }
   });
 
   test('658×320: no axe violations in the Compact layout', async ({ page }) => {

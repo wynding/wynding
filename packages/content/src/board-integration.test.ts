@@ -72,7 +72,9 @@ describe('field-01 compiles for the sim as the single source of truth', () => {
     expect(s.lives).toBe(ruleset.balance.startingLives);
     expect(s.bounty).toBe(ruleset.balance.startingBounty);
     expect(s.phase).toBe('running');
-    expect(compiled.waves).toHaveLength(8); // eight waves (M2-S10 appends wave indices 6, 7)
+    // Re-pinned M2-S11 P3 (measured): the arc grows 8 -> 10 waves (P1 inserts arc rows 5
+    // and 9, and renumbers). Structural pin only — wave 0's own composition is unchanged.
+    expect(compiled.waves).toHaveLength(10);
     expect(compiled.waves[0]!.spawns).toHaveLength(10); // 10 creeps per wave
   });
 });

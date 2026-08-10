@@ -1,0 +1,1438 @@
+{
+  "seed": 5678,
+  "boardId": "catalog-40x40",
+  "rulesetHash": "43ae0bc94e4d9dcf672366e57260e2bd193a984673284616934aa8c7a43db74c",
+  "simVersion": 14,
+  "tickInputs": [
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 3
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 5
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 7
+        },
+        "towerId": "splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 9
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 11
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 13
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 15
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 17
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 19
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 21
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 23
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 25
+        },
+        "towerId": "venom"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 27
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 29
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 31
+        },
+        "towerId": "beacon"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 33
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 35
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 2,
+          "row": 37
+        },
+        "towerId": "frost-splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 1
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 3
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 5
+        },
+        "towerId": "beacon"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 7
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 9
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 11
+        },
+        "towerId": "splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 13
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 15
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 17
+        },
+        "towerId": "beacon"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 19
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 21
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 23
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 25
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 27
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 29
+        },
+        "towerId": "beacon"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 31
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 33
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 5,
+          "row": 35
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 3
+        },
+        "towerId": "beacon"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 5
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 7
+        },
+        "towerId": "beacon"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 9
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 11
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 13
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 15
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 17
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 19
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 21
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 23
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 25
+        },
+        "towerId": "stun"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 27
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 29
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 31
+        },
+        "towerId": "basic"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 33
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 35
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 8,
+          "row": 37
+        },
+        "towerId": "venom"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 1
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 3
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 5
+        },
+        "towerId": "frost-splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 7
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 9
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 11
+        },
+        "towerId": "splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 13
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 15
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 17
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 19
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 21
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 23
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 25
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 27
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 29
+        },
+        "towerId": "stun"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 31
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 33
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 11,
+          "row": 35
+        },
+        "towerId": "basic"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 3
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 5
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 7
+        },
+        "towerId": "venom"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 9
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 11
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 13
+        },
+        "towerId": "frost-splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 15
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 17
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 19
+        },
+        "towerId": "splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 21
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 23
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 25
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 27
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 29
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 31
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 33
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 35
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 14,
+          "row": 37
+        },
+        "towerId": "stun"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 1
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 3
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 5
+        },
+        "towerId": "basic"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 7
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 9
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 11
+        },
+        "towerId": "venom"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 13
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 15
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 17
+        },
+        "towerId": "frost-splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 19
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 21
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 23
+        },
+        "towerId": "splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 25
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 27
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 29
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 31
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 33
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 17,
+          "row": 35
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 3
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 5
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 7
+        },
+        "towerId": "stun"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 9
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 11
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 13
+        },
+        "towerId": "basic"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 15
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 17
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 19
+        },
+        "towerId": "venom"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 21
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 23
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 25
+        },
+        "towerId": "frost-splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 27
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 29
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 31
+        },
+        "towerId": "splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 33
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 35
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 20,
+          "row": 37
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 1
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 3
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 5
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 7
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 9
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 11
+        },
+        "towerId": "stun"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 13
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 15
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 17
+        },
+        "towerId": "basic"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 19
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 21
+        },
+        "towerId": "splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 23
+        },
+        "towerId": "venom"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 25
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 27
+        },
+        "towerId": "antiair"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 29
+        },
+        "towerId": "frost-splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 31
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 33
+        },
+        "towerId": "slow"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 23,
+          "row": 35
+        },
+        "towerId": "splash"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 25,
+          "row": 36
+        },
+        "towerId": "venom"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 37,
+          "row": 21
+        },
+        "towerId": "stun"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 35,
+          "row": 19
+        },
+        "towerId": "antiair"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 33,
+          "row": 17
+        },
+        "towerId": "frost-splash"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 31,
+          "row": 15
+        },
+        "towerId": "basic"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 29,
+          "row": 13
+        },
+        "towerId": "slow"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 26,
+          "row": 10
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 28,
+          "row": 10
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 30,
+          "row": 10
+        },
+        "towerId": "mine"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 32,
+          "row": 10
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 25,
+          "row": 12
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 34,
+          "row": 12
+        },
+        "towerId": "mine"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 25,
+          "row": 14
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 36,
+          "row": 14
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 28,
+          "row": 15
+        },
+        "towerId": "mine"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 25,
+          "row": 16
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 25,
+          "row": 1
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 27,
+          "row": 1
+        },
+        "towerId": "mine"
+      }
+    ],
+    [
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 29,
+          "row": 1
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 31,
+          "row": 1
+        },
+        "towerId": "mine"
+      },
+      {
+        "kind": "placeTower",
+        "anchor": {
+          "col": 33,
+          "row": 1
+        },
+        "towerId": "mine"
+      }
+    ]
+  ]
+}

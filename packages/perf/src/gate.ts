@@ -741,8 +741,10 @@ export const TOLERANCE = 1.1;
  * WHAT ACTUALLY RETIRES THE WORD "PROVISIONAL", since a plan without a completion criterion
  * is a wish. Take the three limits one at a time: limit 3 (in-sample rule selection) clears
  * the first time the rule is applied to a cohort that did not select it, i.e. the next
- * re-record. Limit 1 (not a runner-class calibration) clears when a SECOND image has its own
- * baseline under the same rule and their MEDIANS agree to within |median_A - median_B| <= 0.02
+ * re-record — concretely, an out-of-sample application on >= 10 FRESH attempts of the SAME
+ * documented image (`ubuntu-24.04`, run 31041932972's successor). Limit 1 (not a
+ * runner-class calibration) clears when a SECOND image has its own baseline under the same
+ * rule and their MEDIANS agree to within |median_A - median_B| <= 0.02
  * (~1 sigma at the spread measured here). Compare MEDIANS, not the committed `R0` values:
  * `R0` is floored to a hundredth, so two baselines would both read 1.00 across a band far
  * wider than any difference worth detecting, and comparing them would pass by construction.
@@ -753,14 +755,40 @@ export const TOLERANCE = 1.1;
  * provisional retires on limits 1 and 3 together, and a re-record alone is not sufficient —
  * a re-record under the one-head/one-image rule reproduces limit 1 exactly.
  *
- * Until then this number is a working baseline, and the "re-record when the runner class
- * changes" rule — stated in the SUPERSEDED provenance block above and still live in
- * `docs/design-notes/performance-spike.md` — is the binding one. THIS PLAN HAS NO OWNER OR
- * DATE, which is a real weakness: the data lives in CI logs under a 90-day retention with no
- * artifact upload, and nothing triggers the re-record automatically. Treat the next runner
- * image bump as the trigger. The superseded 1.42 baselined p95/p50 and was
- * meaningless for the new statistic; the `null` window between the statistic change and
- * this record is closed.
+ * M2-S11 FINDING (2026-08-09, P8): the milestone's own re-record packet attempted exactly
+ * this — declare the statistic and cohort per the criterion above, then take >= 10 fresh
+ * attempts. It discovered, before taking a single sample, that the machine available to
+ * that packet was a local development machine, not the documented `ubuntu-24.04` GitHub
+ * Actions image, and declined to record: per THE TWO CONSEQUENCES / §626-633 above, a local
+ * run is not merely "a different image" but is not even self-consistent across sessions (a
+ * 32-run local series spanned 56% on one machine), so a local cohort cannot be evidence for
+ * either the point-estimate or the chi-square-bound dispersion test above and would not
+ * validly clear limit 3. Recorded as a finding, not a re-record: LIMIT 3 STAYS OPEN. Neither
+ * `R0`, `TOLERANCE`, nor the ceiling moved. The re-record is deferred to the next opportunity
+ * that actually satisfies "one head, one image" against the documented image — see the
+ * OWNER AND TRIGGER paragraph immediately below.
+ *
+ * OWNER AND TRIGGER, filled in at M2-S11 (both were previously unstated — see "THIS PLAN HAS
+ * NO OWNER OR DATE" immediately below, which this paragraph answers rather than deletes).
+ * Owner: Rob. Limit 3's trigger: the next opportunity to take >= 10 fresh attempts of the
+ * SAME documented image (`ubuntu-24.04`) in CI — concretely, this repo's own PR CI runs are
+ * the first such opportunity going forward (mirroring run 31041932972's attempt-based
+ * provenance), since a local machine is disqualified for the reason recorded in the M2-S11
+ * FINDING above. Limit 1's trigger is UNCHANGED: a SECOND runner image getting its own
+ * baseline under the same rule, with medians agreeing within 0.02 — which arrives on
+ * GitHub's schedule (the next `ubuntu-latest` image bump), not this project's.
+ *
+ * Until either limit clears, this number is a working baseline, and the "re-record when the
+ * runner class changes" rule — stated in the SUPERSEDED provenance block above and still
+ * live in `docs/design-notes/performance-spike.md` — is the binding one. The original
+ * record's own complaint — "THIS PLAN HAS NO OWNER OR DATE, which is a real weakness: the
+ * data lives in CI logs under a 90-day retention with no artifact upload, and nothing
+ * triggers the re-record automatically" — is preserved here as the superseded text it now
+ * is (M2-S11 answered it; owner and both triggers are named above). Treat the next
+ * runner image bump as limit 1's trigger, and the next >= 10-fresh-attempt CI opportunity on
+ * the documented image as limit 3's — both now named above rather than left as a gap. The
+ * superseded 1.42 baselined p95/p50 and was meaningless for the new statistic; the `null`
+ * window between the statistic change and this record is closed.
  *
  * PROVENANCE, in the form the four diagnostic runs above could not supply: GitHub Actions
  * run **31041932972**, **attempts 1-17**, head **a1600c9**, runner image **ubuntu-24.04**

@@ -129,6 +129,12 @@ A scheduled group of creeps the player must survive. Waves come in a finite,
 ordered sequence — a board's **wave schedule**.
 _Avoid_: round, level, round-number.
 
+**Arc**:
+A board's complete ordered run of waves taken as one authored progression, where
+each wave builds on what the earlier ones taught. The **wave schedule** is the
+same thing as data; the arc is that sequence considered as a whole.
+_Avoid_: round list, wave sequence.
+
 **Wave preview**:
 The countdown's readout of the _next_ wave's composition — creep types and
 counts, one wave of lookahead only. What makes anti-air spend and an early call

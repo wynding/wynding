@@ -564,9 +564,9 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   const callWave = page.getByRole('button', { name: 'Call wave' });
   const preview = page.locator('.wy-wave-preview');
   for (let waveNumber = 1; waveNumber <= 3; waveNumber++) await callWave.click();
-  // M2-S10: the bundle now carries eight waves — the armored wave is wave 4 of 8, not
+  // M2-S11: the bundle now carries ten waves — the armored wave is wave 4 of 10, not
   // wave 4 of 4.
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 8');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 10');
   await expect(preview.locator('li')).toHaveText([
     '6 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
   ]);
@@ -584,7 +584,7 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   expect(liveAudit.violations, JSON.stringify(liveAudit.violations, null, 2)).toEqual([]);
 });
 
-test('supports player-started runs, pause / speed controls, early-calls all eight waves with the preview checked before each, and reaches a result', async ({
+test('supports player-started runs, pause / speed controls, early-calls all ten waves with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -602,7 +602,7 @@ test('supports player-started runs, pause / speed controls, early-calls all eigh
   // 1's composition pre-start — the shipped bundle's single creep kind.
   const preview = page.locator('.wy-wave-preview');
   await expect(preview).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 8');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 10');
   await expect(preview.locator('li')).toHaveText([
     '10 × Creep — ground, armor 0, leak cost 1, no immunities',
   ]);
@@ -638,32 +638,43 @@ test('supports player-started runs, pause / speed controls, early-calls all eigh
   // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since wave 2
   // is M2-S4a's DISTINCT swarm-creep composition and wave 3 is M2-S3's DISTINCT
   // fast-creep composition (only wave 1 stays the single normal-creep kind).
-  // M2-S6 P5 appends wave index 4 (the fifth wave, 1-based "wave 5" in this UI's own
-  // numbering) — the FIRST multi-entry wave this spec exercises, so its composition is an
-  // array of two `<li>` texts (authored order: `resolute` then `fast`), not a single string
-  // like every wave before it. M2-S7 P6 appends wave index 5 (the sixth wave) — the first
-  // AIR wave, so its row reads `air`, not `ground`. M2-S10 appends wave indices 6 and 7 (the
-  // seventh and eighth waves) — the seventh is the first `armored-flyer` wave, and the
-  // eighth is the boss wave, closing out the bundle with a `boss` entry ahead of a final
-  // `creep` swarm.
+  // M2-S6 P5 appended a `resolute`+`fast` multi-entry wave — the FIRST multi-entry wave
+  // this spec exercises, so its composition is an array of two `<li>` texts (authored
+  // order: `resolute` then `fast`), not a single string like every wave before it. M2-S7
+  // P6 appended an AIR wave, so its row reads `air`, not `ground`. M2-S10 appended an
+  // `armored-flyer` wave and the boss wave, closing out the (then eight-wave) bundle with
+  // a `boss` entry ahead of a final `creep` swarm. M2-S11 (P1) inserts two further waves —
+  // a second `normal`+`swarm` wave ahead of the air waves, and the arc's densest tick, a
+  // FOUR-entry wave (`swarm`+`fast`+`armored`+`flying`) — taking the bundle to ten waves
+  // and reordering `flying` ahead of `resolute`+`fast`.
   const EXPECTED_COMPOSITION: Record<number, string[]> = {
     1: ['10 × Creep — ground, armor 0, leak cost 1, no immunities'],
     2: ['16 × Swarm Creep — ground, armor 0, leak cost 1, no immunities'],
     3: ['8 × Fast Creep — ground, armor 0, leak cost 1, no immunities'],
     4: ['6 × Armored Creep — ground, armor 6, leak cost 1, no immunities'],
     5: [
+      '12 × Creep — ground, armor 0, leak cost 1, no immunities',
+      '6 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
+    ],
+    6: ['8 × Flying Creep — air, armor 0, leak cost 1, no immunities'],
+    7: [
       '6 × Resolute Creep — ground, armor 0, leak cost 1, slow',
       '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
     ],
-    6: ['8 × Flying Creep — air, armor 0, leak cost 1, no immunities'],
-    7: ['6 × Armored Flyer — air, armor 5, leak cost 1, no immunities'],
-    8: [
+    8: ['6 × Armored Flyer — air, armor 5, leak cost 1, no immunities'],
+    9: [
+      '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
+      '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
+      '4 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
+      '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
+    ],
+    10: [
       '1 × Boss — ground, armor 8, leak cost 3, stun',
       '8 × Creep — ground, armor 0, leak cost 1, no immunities',
     ],
   };
-  for (let waveNumber = 1; waveNumber <= 8; waveNumber++) {
-    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 8`);
+  for (let waveNumber = 1; waveNumber <= 10; waveNumber++) {
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 10`);
     await expect(preview.locator('li')).toHaveText(EXPECTED_COMPOSITION[waveNumber]!);
     await callWave.click();
   }
@@ -748,9 +759,9 @@ test('supports player-started runs, pause / speed controls, early-calls all eigh
   await expect(page.locator('.wy-board')).toBeFocused();
 
   // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
-  // again — including the wave preview going back to wave 1 of 8 (M2-S10).
+  // again — including the wave preview going back to wave 1 of 10 (M2-S11).
   await expect(waveChip).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 8');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 10');
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });

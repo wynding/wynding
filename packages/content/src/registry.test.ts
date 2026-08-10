@@ -173,7 +173,14 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       {
         id: 'antiair',
         cost: 7,
-        attack: { domain: 'air', rangeFp: 1280, cadenceTicks: 20, travelTicks: 2 },
+        // Re-pinned M2-S11 P4: `cadenceTicks` 20 → 15. The wave-8 wall (arc row 8, 6 ×
+        // `armored-flyer`: air, armor 5, so `antiair`'s 8 nets 3 a hit and nothing else in
+        // the catalog touches air for more than 2) could not be cleared at cadence 20
+        // without making `antiair` the dominant spend of every surviving build — the "you
+        // must have built antiair" gate the plan flags for escalation. 15 clears it while
+        // leaving the PER-HIT arithmetic (damage 8, minus armor) untouched, so every
+        // domain-gating and net-damage proof elsewhere keeps its claim unchanged.
+        attack: { domain: 'air', rangeFp: 1280, cadenceTicks: 15, travelTicks: 2 },
         effects: [{ kind: 'direct', form: 'single', damage: 8 }],
       },
       {
@@ -212,8 +219,11 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   });
 
   it('carries the scoring weights and early-call score divisor', () => {
+    // Re-pinned M2-S11 P4: `survivalMul` 35 → 50 — ruling 8's designated lever for the
+    // win-over-loss margin, set from the bounded-knapsack extremes at the foot of this
+    // file (worst win 218 vs best loss 201, margin 17 ≥ the pre-committed 15).
     expect(ruleset.scoring).toEqual({
-      survivalMul: 35,
+      survivalMul: 50,
       starThresholds: [1, 6, 9],
       earlyCallScoreDivisor: 50,
     });
@@ -228,32 +238,54 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(board.exit).toEqual({ col: 27, row: 11 });
   });
 
-  it("carries the eight waves: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase), then wave index 5's 8 × flying @ spacing 15 (the S7 air showcase), then wave index 6's 6 × armored-flyer @ spacing 20 (the S10 armored-air showcase), then wave index 7's 1 × boss + 8 × normal @ spacing 20/20 (the S10 boss finale)", () => {
+  // Re-pinned M2-S11 P3 (measured): P1 authors the full ten-wave arc per m2.md's spec
+  // table, inserting arc row 5 (12x`normal`+6x`swarm`) at index 4 and arc row 9
+  // (10x`swarm`+6x`fast`+4x`armored`+4x`flying`) at index 8, and renumbering every wave
+  // — `resolute`+`fast` moves from index 4 to index 6, `armored-flyer` from index 6 to
+  // index 7, and the boss finale from index 7 to index 9.
+  it("carries the ten waves: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 12 × normal + 6 × swarm @ spacing 12/5 (arc row 5), then wave index 5's 8 × flying @ spacing 15 (the S7 air showcase), then wave index 6's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase), then wave index 7's 6 × armored-flyer @ spacing 20 (the S10 armored-air showcase), then wave index 8's 10 × swarm + 6 × fast + 4 × armored + 4 × flying @ spacing 6/12/20/20 (arc row 9), then wave index 9's 1 × boss + 8 × normal @ spacing 20/20 (the S10 boss finale)", () => {
     const normalEntries = [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }];
     const swarmEntries = [{ creepId: 'swarm', count: 16, spacingTicks: 5, offsetTicks: 0 }];
     const fastEntries = [{ creepId: 'fast', count: 8, spacingTicks: 15, offsetTicks: 0 }];
     const armoredEntries = [{ creepId: 'armored', count: 6, spacingTicks: 25, offsetTicks: 0 }];
+    const normalSwarmEntries = [
+      { creepId: 'normal', count: 12, spacingTicks: 12, offsetTicks: 0 },
+      { creepId: 'swarm', count: 6, spacingTicks: 5, offsetTicks: 0 },
+    ];
+    const flyingEntries = [{ creepId: 'flying', count: 8, spacingTicks: 15, offsetTicks: 0 }];
     const resoluteFastEntries = [
       { creepId: 'resolute', count: 6, spacingTicks: 15, offsetTicks: 0 },
       { creepId: 'fast', count: 6, spacingTicks: 15, offsetTicks: 0 },
     ];
-    const flyingEntries = [{ creepId: 'flying', count: 8, spacingTicks: 15, offsetTicks: 0 }];
     const armoredFlyerEntries = [
       { creepId: 'armored-flyer', count: 6, spacingTicks: 20, offsetTicks: 0 },
     ];
+    const swarmFastArmoredFlyingEntries = [
+      { creepId: 'swarm', count: 10, spacingTicks: 6, offsetTicks: 0 },
+      { creepId: 'fast', count: 6, spacingTicks: 12, offsetTicks: 0 },
+      { creepId: 'armored', count: 4, spacingTicks: 20, offsetTicks: 0 },
+      { creepId: 'flying', count: 4, spacingTicks: 20, offsetTicks: 0 },
+    ];
     const bossEntries = [
       { creepId: 'boss', count: 1, spacingTicks: 20, offsetTicks: 0 },
-      { creepId: 'normal', count: 8, spacingTicks: 20, offsetTicks: 0 },
+      // Re-pinned M2-S11 P4: the boss's `normal` escort gains `offsetTicks` 600. At 0 the
+      // escort (speed 26) overtook the boss (speed 18) and screened it — every tower
+      // preferring the creep nearest the exit — so the finale was fought against the
+      // escort while the boss walked through behind it. Composition is untouched (ruling
+      // 2): same creep ids, same counts, same order; only the stream's start moves.
+      { creepId: 'normal', count: 8, spacingTicks: 20, offsetTicks: 600 },
     ];
     expect(board.waves).toEqual([
       { index: 0, countdownTicks: 500, clearBonus: 4, entries: normalEntries },
       { index: 1, countdownTicks: 300, clearBonus: 4, entries: swarmEntries },
       { index: 2, countdownTicks: 300, clearBonus: 5, entries: fastEntries },
       { index: 3, countdownTicks: 300, clearBonus: 5, entries: armoredEntries },
-      { index: 4, countdownTicks: 300, clearBonus: 7, entries: resoluteFastEntries },
+      { index: 4, countdownTicks: 300, clearBonus: 6, entries: normalSwarmEntries },
       { index: 5, countdownTicks: 300, clearBonus: 6, entries: flyingEntries },
-      { index: 6, countdownTicks: 300, clearBonus: 7, entries: armoredFlyerEntries },
-      { index: 7, countdownTicks: 400, clearBonus: 12, entries: bossEntries },
+      { index: 6, countdownTicks: 300, clearBonus: 7, entries: resoluteFastEntries },
+      { index: 7, countdownTicks: 300, clearBonus: 7, entries: armoredFlyerEntries },
+      { index: 8, countdownTicks: 300, clearBonus: 8, entries: swarmFastArmoredFlyingEntries },
+      { index: 9, countdownTicks: 400, clearBonus: 12, entries: bossEntries },
     ]);
   });
 
@@ -377,23 +409,34 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   // wrong, and this file's comments are the derivation of record.) Its tail is
   // (8-1)*20 = 140 on the `normal` entry (the `boss` entry's tail is 0 at count 1), so
   // its launch-tick spawn lands at prefix 2700 + tail 140 = 2840 — the new max.
-  it('latestSpawnTick = 2840 (wave index 7 launches at prefix 2700, tail 140 on its 8x20 `normal` entries)', () => {
+  // Re-pinned M2-S11 P3 (measured): P1 grows the arc 8 -> 10 waves (arc rows 5 and 9
+  // inserted, every wave renumbered). The boss finale is now wave index 9, whose own
+  // prefix countdown is 500+300×8+400 = 3300, tail (8-1)*20 = 140 on its `normal`
+  // entries — 3300 + 140 = 3440, the new max.
+  // Re-pinned M2-S11 P4 (measured): the boss wave's `normal` escort gains `offsetTicks`
+  // 600 (see the wave-schedule pin above for why). An entry's tail is
+  // `offsetTicks + (count-1) × spacingTicks` = 600 + 140 = 740, so the boss wave's last
+  // spawn lands at prefix 3300 + 740 = 4040 — the new max.
+  it('latestSpawnTick = 4040 (wave index 9 launches at prefix 3300; its 8x20 `normal` entry now starts 600 ticks in, tail 740)', () => {
     console.log(
       'registry.test.ts: waves.length =',
       waves.length,
       'latestSpawnTick =',
       latestSpawnTick,
     );
-    expect(waves).toHaveLength(8);
-    expect(latestSpawnTick).toBe(2_840);
+    expect(waves).toHaveLength(10);
+    expect(latestSpawnTick).toBe(4_040);
   });
 
-  it('total bound = latestSpawnTick + traversal = 29870, comfortably under MAX_MATCH_TICKS (36000)', () => {
+  // Re-pinned M2-S11 P4 (measured): 30470 → 31070, entirely from `latestSpawnTick`'s
+  // own +600 above; `traversal` is unmoved (P4 touched neither the board nor the slow
+  // floor nor the slowest creep's speed). Headroom under MAX_MATCH_TICKS: 4930.
+  it('total bound = latestSpawnTick + traversal = 31070, comfortably under MAX_MATCH_TICKS (36000)', () => {
     // Derived from the same bundle-read terms the tests above pin, not re-typed as
-    // `2840 + 27030` — the same reason stress.test.ts's own pin does this.
+    // `3440 + 27030` — the same reason stress.test.ts's own pin does this.
     const total = latestSpawnTick + traversal;
     console.log('registry.test.ts: total bound =', total, 'MAX_MATCH_TICKS =', MAX_MATCH_TICKS);
-    expect(total).toBe(29_870);
+    expect(total).toBe(31_070);
     expect(MAX_MATCH_TICKS).toBe(36_000);
     expect(total).toBeLessThan(MAX_MATCH_TICKS);
   });
@@ -405,73 +448,103 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   });
 });
 
-describe('the win-over-loss score ordering invariant (m2.md:272-277, pinned for the S10 eight-wave bundle)', () => {
+describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 sets the margin)', () => {
   // `deriveScore` (index.ts): running/won = cumulativeKillBounty + cumulativeEarlyCallCredit
   // (+ max(0,lives) × survivalMul when won); lost = cumulativeKillBounty only, early-call
   // credit forfeited. A leaked creep earns no kill bounty. Derived entirely from the
-  // bundle's own bounty/leakCost/lives/survivalMul terms — never typed as 141/143 — so a
-  // catalog or wave edit changes what this test computes, not just what it happens to match.
+  // COMPILED bundle's own bounty/leakCost/lives/survivalMul terms — never typed as a
+  // literal — so a catalog or wave edit changes what this test computes, not just what it
+  // happens to match.
+  //
+  // M2-S11 P4 replaces S10's PER-KIND GREEDY with the plan's own BOUNDED KNAPSACKS over
+  // the SCHEDULED CREEP MULTISET. The greedy silently assumed both extremes are reached by
+  // leaking copies of a single best kind, which is only true while the schedule happens to
+  // hold enough of it; the knapsack chooses a subset of the ACTUAL scheduled spawns, each a
+  // discrete item with its own (leakCost, bounty), so a schedule that runs out of cheap
+  // leaks changes the answer instead of being quietly rounded over.
+  //
+  // BOTH NUMBERS ARE CONSERVATIVE BOUNDS, not achievable scores: nothing here asks whether
+  // a replay exists that actually leaks exactly that subset (a leak set is constrained by
+  // what a build can physically let through, and by wave ORDER, neither of which this
+  // models). An unachievable bound is a valid guard — the invariant it protects is "no
+  // losing score can reach any winning score" — but it must never be reported as the real
+  // best loss.
   const text = readFileSync(BUNDLED_ARTIFACT_URL, 'utf8');
   const bundle = parseRulesetJson(text);
   const board = bundle.boards.find((b) => b.id === 'field-01');
   if (board === undefined) throw new Error("no board 'field-01' in the shipped bundle");
   const creepById = new Map(bundle.creepCatalog.map((c) => [c.id, c]));
-  const startingLives = bundle.balance.startingLives;
+  const L = bundle.balance.startingLives;
   const survivalMul = bundle.scoring.survivalMul;
 
-  // Total kill bounty available: every creep any wave spawns, summed count × bounty.
-  let totalBounty = 0;
+  // THE SCHEDULED CREEP MULTISET — one entry per creep the schedule actually spawns,
+  // expanded from every wave entry's own `count`, each carrying its own (leakCost, bounty).
+  const scheduled: { leakCost: number; bounty: number }[] = [];
   for (const wave of board.waves) {
     for (const entry of wave.entries) {
       const creep = creepById.get(entry.creepId);
       if (creep === undefined) throw new Error(`unknown creepId ${entry.creepId} in a wave`);
-      totalBounty += entry.count * creep.bounty;
+      for (let i = 0; i < entry.count; i++) {
+        scheduled.push({ leakCost: creep.leakCost, bounty: creep.bounty });
+      }
     }
   }
+  // B — total scheduled kill bounty (ruling 8's "today's arithmetic: 211" cross-check).
+  const B = scheduled.reduce((sum, c) => sum + c.bounty, 0);
 
-  // Best loss: reach 0 lives while forfeiting the LEAST bounty possible. Every
-  // leakCost-1 creep costs exactly 1 life to leak, so the cheapest way to spend
-  // `startingLives` lives is to leak `startingLives` copies of whichever leakCost-1
-  // creep has the lowest bounty.
-  const leakCost1Creeps = bundle.creepCatalog.filter((c) => c.leakCost === 1);
-  const cheapestBounty = Math.min(...leakCost1Creeps.map((c) => c.bounty));
-  const bestLossLeaked = startingLives * cheapestBounty;
-  const bestLossScore = totalBounty - bestLossLeaked;
+  // KNAPSACK 1 — BEST LOSS = B − min Σbounty over leak-subsets with ΣleakCost ≥ L.
+  // The life axis SATURATES at L (spending more than L lives is still just a loss), so a
+  // 0/1 knapsack over `scheduled` with the index clamped to L answers it exactly. Inner
+  // loop descends so each scheduled creep is used at most once.
+  const INF = Number.POSITIVE_INFINITY;
+  const minBounty = new Array<number>(L + 1).fill(INF);
+  minBounty[0] = 0;
+  for (const c of scheduled) {
+    for (let spent = L; spent >= 0; spent--) {
+      if (minBounty[spent] === INF) continue;
+      const next = Math.min(L, spent + c.leakCost);
+      minBounty[next] = Math.min(minBounty[next]!, minBounty[spent]! + c.bounty);
+    }
+  }
+  const bestLossScore = B - minBounty[L]!;
 
-  // Worst win: forfeit the MOST bounty possible while keeping lives at 1 (the least a
-  // win can hold). Leak the highest-leakCost creep (the boss) first — it buys the most
-  // bounty per life spent — then spend the remaining life budget on the highest-bounty
-  // leakCost-1 creep.
-  // Ties in `leakCost` break toward the HIGHER bounty, not first-wins: first-wins
-  // would understate `worstWinLeaked` (and so overstate `worstWinScore`) the day a
-  // second leakCost-3 creep lands with a higher bounty than `boss` — the opposite of
-  // the `remainingLifeBudget` clamp below, which is deliberately conservative. This
-  // keeps both non-conservative-direction risks closed the same way.
-  const priciestCreep = bundle.creepCatalog.reduce((a, b) =>
-    b.leakCost > a.leakCost || (b.leakCost === a.leakCost && b.bounty > a.bounty) ? b : a,
-  );
-  // Clamped at 0 (ship-review P3): this greedy assumes the priciest creep fits inside the
-  // life budget, which holds for the shipped bundle (boss 3 vs 10 starting lives) but goes
-  // NEGATIVE — silently inflating `worstWinLeaked` — the day a creep's `leakCost` reaches
-  // `startingLives`. The clamp keeps the invariant conservative rather than nonsensical if
-  // that ever happens; the assertion below still measures the real bundle.
-  const remainingLifeBudget = Math.max(0, startingLives - 1 - priciestCreep.leakCost);
-  const richestLeakCost1Bounty = Math.max(...leakCost1Creeps.map((c) => c.bounty));
-  const worstWinLeaked = priciestCreep.bounty + remainingLifeBudget * richestLeakCost1Bounty;
-  const worstWinScore = totalBounty - worstWinLeaked + 1 * survivalMul;
+  // KNAPSACK 2 — WORST WIN = min over leak-subsets with ΣleakCost ≤ L−1 of
+  // (B − Σbounty) + (L − ΣleakCost) × survivalMul, at zero early-call credit. Here the
+  // life axis must NOT saturate (the surviving-lives term reads it), so this is an exact
+  // 0/1 knapsack for the MAXIMUM bounty at each attainable leak total 0…L−1.
+  const maxBounty = new Array<number>(L).fill(Number.NEGATIVE_INFINITY);
+  maxBounty[0] = 0;
+  for (const c of scheduled) {
+    for (let spent = L - 1; spent >= c.leakCost; spent--) {
+      const from = maxBounty[spent - c.leakCost]!;
+      if (from === Number.NEGATIVE_INFINITY) continue;
+      maxBounty[spent] = Math.max(maxBounty[spent]!, from + c.bounty);
+    }
+  }
+  let worstWinScore = INF;
+  for (let spent = 0; spent < L; spent++) {
+    if (maxBounty[spent] === Number.NEGATIVE_INFINITY) continue;
+    worstWinScore = Math.min(worstWinScore, B - maxBounty[spent]! + (L - spent) * survivalMul);
+  }
 
-  it('best-loss score < worst-win score, derived from the bundle', () => {
+  /** The margin S11 pre-committed to (ruling 3), before any of these numbers were run. */
+  const MARGIN_FLOOR = 15;
+
+  it('worst win beats best loss by the pre-committed margin, derived from the bundle', () => {
     console.log(
-      'registry.test.ts: totalBounty =',
-      totalBounty,
-      'bestLossScore =',
-      bestLossScore,
-      'worstWinScore =',
-      worstWinScore,
+      `registry.test.ts: B=${B} bestLossScore=${bestLossScore} worstWinScore=${worstWinScore} ` +
+        `margin=${worstWinScore - bestLossScore} survivalMul=${survivalMul}`,
     );
-    expect(totalBounty).toBe(151);
-    expect(bestLossScore).toBe(141);
-    expect(worstWinScore).toBe(143);
-    expect(bestLossScore).toBeLessThan(worstWinScore);
+    // Re-pinned M2-S11 P4 (measured). `B` is unchanged from P3 at 211 — P4 moved no
+    // creep bounty and no wave composition. `bestLossScore` is unchanged at 201: the
+    // cheapest way to spend 10 lives is still ten 1-bounty leaks, and the schedule holds
+    // 62 of them, so the knapsack and the retired greedy agree here. `worstWinScore`
+    // moves 203 → 218 purely because P4 raised `survivalMul` 35 → 50 — the one lever
+    // ruling 8 assigns to this margin, because it appears only in the winning terminal
+    // and so moves worst-win without touching combat, economy or clear bonuses.
+    expect(B).toBe(211);
+    expect(bestLossScore).toBe(201);
+    expect(worstWinScore).toBe(218);
+    expect(worstWinScore - bestLossScore).toBeGreaterThanOrEqual(MARGIN_FLOOR);
   });
 });

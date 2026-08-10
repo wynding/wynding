@@ -41,6 +41,12 @@ jobs:
       # caught here rather than in a deploy. Artifacts are NOT uploaded; this is a
       # gate, not a release step.
       - run: pnpm run build
+      # Client/server ruleset artifact parity (M2-S11 P6 leg 1, Codex PR #93 P2):
+      # byte+hash-compares the client bundle's embedded ruleset against the packaged
+      # server copy, over BUILT artifacts. Deliberately not part of the turbo `test`
+      # task (test depends only on ^typecheck — it would read stale dist); it re-invokes
+      # the build itself, which is a turbo cache hit right after the step above.
+      - run: pnpm run check:artifact-parity
       # Initial-load budget gate (ADR 0005): the built app's initial JS must be
       # ≤ 3 MB gzipped. Runs after the build so the dist output exists.
       - run: pnpm run size

@@ -25,6 +25,21 @@ import * as barrel from './index';
 const bundle = getBundledRuleset();
 const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
 
+/** The first wave index, in the COMPILED schedule, that spawns at least one creep of
+ *  `creepId` — mirrors `@wynding/content`'s `wave-lookup.ts` (S11 P2's de-index ruling:
+ *  P1 renumbers every wave, so a literal wave index would silently retarget onto
+ *  whatever wave lands there after a renumber, with no test failure to flag it).
+ *  `wave-lookup.ts` is content's own test-support module, not part of its public API
+ *  (not re-exported, no `exports` map entry), so this file carries its own copy rather
+ *  than reaching across the package boundary for it. */
+function waveIndexForCreep(r: typeof ruleset, creepId: string): number {
+  const index = r.waves.findIndex((wave) => wave.spawns.some((s) => s.creepId === creepId));
+  if (index === -1) {
+    throw new Error(`no wave in the compiled schedule spawns creep id '${creepId}'`);
+  }
+  return index;
+}
+
 // A hand-built, sv6-legal SYNTHETIC bundle (M2-S2, PLAN.md P3 step 19) — the shipped
 // `wynding-core` bundle's three identical single-entry waves cannot catch an
 // aggregation/ordering bug in the preview join, so this exercises duplicate-creepId
@@ -497,12 +512,16 @@ describe('hud wave preview (M2-S2, PLAN.md P3 step 16)', () => {
     // The ONLY wiring between the shipped catalog and the preview's leak-cost slot.
     // Every other preview assertion in this file happens to sit on a leakCost-1 wave, so
     // without this the join can be replaced by the constant 1 and stay green while the
-    // HUD announces "leak cost 1" for the boss forever (ship-review P2). Wave index 7 is
-    // the mixed one, which also proves the join is PER ENTRY rather than per wave.
+    // HUD announces "leak cost 1" for the boss forever (ship-review P2). The boss's wave
+    // is the mixed one, which also proves the join is PER ENTRY rather than per wave.
+    // Located by searching the COMPILED schedule for creep id 'boss' (S11 ruling 1: the
+    // wave's INDEX moved when M2-S11 grew the bundle from 8 to 10 waves, so a hardcoded
+    // literal would silently retarget onto whatever now sits there).
+    const bossWaveIndex = waveIndexForCreep(ruleset, 'boss');
     let s = createInitialState(1, ruleset);
-    for (let i = 0; i < 7; i++) s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    for (let i = 0; i < bossWaveIndex; i++) s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
     const hud = deriveHud(s, ruleset);
-    expect(hud.preview).toMatchObject({ kind: 'upcoming', waveNumber: 8 });
+    expect(hud.preview).toMatchObject({ kind: 'upcoming', waveNumber: bossWaveIndex + 1 });
     const entries = hud.preview?.kind === 'upcoming' ? hud.preview.entries : [];
     expect(entries.find((e) => e.creepId === 'boss')?.leakCost).toBe(3);
     expect(entries.find((e) => e.creepId === 'normal')?.leakCost).toBe(1);
@@ -586,9 +605,14 @@ describe('hud score — earned components while live, authoritative once termina
   /** Step until `done`, so the fixtures key on the state they need rather than on tick
    *  numbers that balance changes would silently invalidate. Throws instead of asserting
    *  against a state that never arrived. */
-  function stepUntil(from: SimState, done: (s: SimState) => boolean, limit = 5000): SimState {
+  function stepUntil(
+    from: SimState,
+    done: (s: SimState) => boolean,
+    limit = 5000,
+    r: typeof ruleset = ruleset,
+  ): SimState {
     let s = from;
-    for (let i = 0; i < limit && !done(s); i++) s = step(s, ruleset, []);
+    for (let i = 0; i < limit && !done(s); i++) s = step(s, r, []);
     if (!done(s)) throw new Error(`fixture never reached its target state within ${limit} ticks`);
     return s;
   }
@@ -625,67 +649,35 @@ describe('hud score — earned components while live, authoritative once termina
   });
 
   it('folds the survival term in at a win, matching deriveScore exactly', () => {
-    let s = createInitialState(1, ruleset);
-    // M2-S4a widened wave 2 to 16 × `swarm` @ spacing 5 (was 10 × `normal` @ spacing 20)
-    // — the old 2-tower defense (content story #68's fixture) now loses to that faster
-    // pressure, so the fixed defense grew to 5 `basic` towers, still well inside the
-    // starting bounty (5 × cost 5 = 25 of 80), to clear all three (then four) waves with
-    // margin. M2-S6 P5 appends wave index 4 (`resolute`+`fast`, both speed 44) — the
-    // 5-tower wall left only 1 life of margin against the four-wave bundle (measured), so
-    // the fifth wave alone lost the run outright. Grown to 8 `basic` towers (40 of 80
-    // bounty, still well inside starting bounty) to restore a clear-with-margin win
-    // (measured: 6 lives remaining) — this fixture only needs SOME win, not a tuned one;
-    // `deriveScore`'s formula is what's under test, not this wall's exact composition.
+    // This fixture used to script a defense against the SHIPPED bundle. M2-S11 grew that
+    // bundle from 8 to 10 waves (retuned `antiair` cadence + `survivalMul` along the
+    // way), and the scripted wall above no longer wins the ten-wave arc within the
+    // `stepUntil` budget — chasing a fresh tuned defense against a bundle that keeps
+    // growing is exactly the kind of pin this test doesn't need: its claim
+    // ("hud score equals `deriveScore` at a win, survival term included") is
+    // bundle-agnostic. Moved onto the file's own SYNTHETIC sv6-legal bundle (the "hud
+    // wave preview — SYNTHETIC" describe block's precedent above), which wins trivially
+    // and needs no re-tuning as the shipped content grows. Board is `wave-preview-board`
+    // (9×5); `buildGrid` blocks the whole border ring except the entrance/exit openings
+    // (board.ts), so the only buildable interior is cols 1-7 × rows 1-3 — two `basic`
+    // towers there (measured-valid anchors, non-overlapping 2×2 footprints, maze
+    // invariant intact) flank the row-2 lane and clear both waves (1 `armored` + 3
+    // `normal` in wave 0, 1 `normal` in wave 1) with kills and lives to spare (measured:
+    // 8 of 10 lives remaining) — this fixture only needs SOME win with SOME kill, not a
+    // tuned one.
+    let s = createInitialState(1, syntheticRuleset);
     for (const anchor of [
-      { col: 3, row: 9 },
-      { col: 3, row: 12 },
-      { col: 6, row: 9 },
-      { col: 6, row: 12 },
-      { col: 9, row: 9 },
-      { col: 9, row: 12 },
-      { col: 12, row: 9 },
-      { col: 12, row: 12 },
+      { col: 2, row: 1 },
+      { col: 5, row: 2 },
     ] as const) {
-      s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'basic' }]);
+      s = step(s, syntheticRuleset, [{ kind: 'placeTower', anchor, towerId: 'basic' }]);
     }
-    // M2-S7 appends wave index 5 (8 × `flying`). This is the first wave that GROWING the
-    // wall cannot answer: `basic` is ground-domain, so no number of them can ever touch a
-    // flyer, and all 8 leak — 8 lives against this fixture's measured 6 of margin, which
-    // turned the win into a loss and left `stepUntil` burning its whole budget looking for
-    // a `won` that could never arrive. The fix is the counterplay the story actually
-    // ships, not a bigger wall: `antiair` (cost 7, range 5) flanking the row-11 flight
-    // line. THREE, measured — one kills roughly half the wave (lost, 0 lives) and two win
-    // by a single life, too thin to be a stable fixture; three restores the same 6-life
-    // margin this fixture has always had. 61 of 80 starting bounty, still inside.
-    for (const anchor of [
-      { col: 15, row: 9 },
-      { col: 15, row: 12 },
-      { col: 18, row: 9 },
-      // M2-S10 appends wave index 6 (6 × `armored-flyer`, armor 5) — the same air-domain
-      // problem `antiair` was added for, now with armor cutting the original three towers'
-      // net damage (8 − 5 = 3/hit) thin enough to cost 5 of the 6-life margin above.
-      // Measured: a FOURTH `antiair` restores the margin (armored-flyer clears clean).
-      { col: 18, row: 12 },
-    ] as const) {
-      s = step(s, ruleset, [{ kind: 'placeTower', anchor, towerId: 'antiair' }]);
-    }
-    // M2-S10 also appends wave index 7 (1 × `boss`, hp 400/armor 8/leakCost 3, plus 8
-    // escorting `normal`) — `basic`'s own net 2/hit (10 − 8 armor) is thin against 400 hp,
-    // and this fixture only needs SOME win, not a tuned one. One `venom` (cost 9, within
-    // the remaining bounty) closes it: its DoT bypasses armor entirely (m2.md), so it
-    // chips the boss regardless of the 8-armor gate the direct-damage towers above are
-    // fighting. 77 of 80 starting bounty, still inside. Measured: clears all 8 waves with
-    // 3 lives to spare.
-    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 21, row: 9 }, towerId: 'venom' }]);
-    // Early-call only wave 1 — the later waves auto-launch on their own countdown
-    // (300 ticks each, chained off the prior wave's LAUNCH per PLAN.md's flip-tick rule),
-    // which the fixed defense clears within the `stepUntil` budget below.
-    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
-    const won = stepUntil(s, (x) => x.phase === 'won', 10_000);
+    s = step(s, syntheticRuleset, [{ kind: 'callWaveEarly' }]);
+    const won = stepUntil(s, (x) => x.phase === 'won', 10_000, syntheticRuleset);
     expect(won.cumulativeKillBounty).toBeGreaterThan(0);
     expect(won.lives).toBeGreaterThan(0);
-    const score = deriveHud(won, ruleset).score;
-    expect(score).toBe(deriveScore(won, ruleset));
+    const score = deriveHud(won, syntheticRuleset).score;
+    expect(score).toBe(deriveScore(won, syntheticRuleset));
     // The terminal number is strictly more than the earned component — i.e. the survival
     // term really is credited here and was really excluded before.
     expect(score).toBeGreaterThan(won.cumulativeKillBounty);

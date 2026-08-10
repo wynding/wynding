@@ -28,7 +28,13 @@ export default defineConfig({
     // this flag is structurally incapable of shipping a production sourcemap.
     sourcemap: true,
     rollupOptions: {
-      input: 'perf/index.html',
+      // M2-S11 P7: TWO perf pages, one per scene. Both are inputs of THIS config only —
+      // the production `vite.config.ts` still references neither, so adding the catalog
+      // page keeps the structural guarantee in this file's header intact (no path from
+      // the production graph to either scene's bundle). Two entries rather than one page
+      // switching on a query parameter so a run of one scene never even downloads the
+      // other's ruleset JSON.
+      input: ['perf/index.html', 'perf/catalog.html'],
     },
   },
 });

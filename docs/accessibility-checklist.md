@@ -629,3 +629,42 @@ enlarged ring overlaps a neighbour's cell without hiding anything in its own), w
 why this is deferred to #36 with the other real-device items rather than treated as a
 defect. The next story to add a cue radius, or to widen a creep's scale again, is the one
 that has to look at the budget properly.
+
+## Story 11 conformance audit — the showcase run: the four-row wave preview (M2-S11)
+
+M2-S11 completes the ten-wave arc (see `docs/milestones/m2.md` item 11), and with it lands
+the arc's own densest tick — arc wave 9 (wave index 8), four concurrent creep streams —
+which is the wave preview's own worst case for row count. No new cue channel, no new
+Panel row, and no new catalog surface land in this story; it is content plus verification
+only. One new accessibility-relevant surface: the preview genuinely rendering four rows
+at once for the first time (the prior maximum, from M2-S6's `resolute`+`fast`, was two).
+
+| Surface                                                                          | Status | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The four-row preview at 658×320 — the bounded scrollport's worst case so far** | ✅     | Measured at the Galaxy-S9+-landscape floor (658×320, the same viewport every Compact audit in this file uses): the preview's existing bounded, keyboard-scrollable box (`.wy-hud`, contract §1) holds all four rows with **no clipping** — the preview's own right edge and every row's right edge stay inside the status column's right edge; **no font-size degradation** — the preview carries no font-size rule of its own and reads at `.wy-hud`'s base size at 1 row exactly as at 4; and **every row keyboard-reachable** via the same focus-and-scroll path the 1-row, 200%-zoom case already proved, now exercised against 4 real rows at 100% zoom rather than a synthetic overflow. An axe audit with all four rows visible reports **zero violations**. |
+| **New e2e regression** (`apps/web/e2e/compact.spec.ts`)                          | ✅     | Drives real early-calls through arc waves 1–8 to bring wave 9's four-stream composition into the preview slot, then asserts row count, row text (name/count/domain/armor/leak cost/immunities per entry — the full six-field accessible text `m2.md`'s Wave preview contract specifies), the axe result, the no-clipping bound, the font-size equality, and keyboard reachability for all four rows, at the real compiled composition rather than a stand-in fixture.                                                                                                                                                                                                                                                                                               |
+
+**Hand-checked against `docs/CONTEXT.md`'s `_Avoid_` lists**, following S10's own
+convention (issue #91: the glossary linter does not scan this file): this section uses
+**creep** (never enemy/mob), **wave** (never round), **arc** (never round list), **leak
+cost** (never leak penalty), and makes no health/HP claims about a tower or the player.
+
+**Gap noted, deliberately NOT closed in this story: Story 7 — and only Story 7 — still
+has no conformance audit.** The gap first flagged at S8 has now persisted through S9,
+S10, and S11 — **four stories have shipped and flagged it since S7 itself, five stories
+counting S7's own unaudited landing.** The hole between `## Story 6…` and `## Story 8…`
+above is unchanged by this edit. Backfilling it here would mix S7's evidence into an
+S11 diff and remains out of scope for this packet; it is re-flagged, not paid down.
+
+**#36 (accessibility real-device pass) cannot close at S12 (ruling 6, Rob, 2026-08-08,
+re-accepted at S11 close-out 2026-08-09).** #36's real-device evidence spans every
+story from S3 on, all still deferred to emulation; the pinned Chrome emulation profiles
+remain the reference device through M2's close-out, and the low-end Android pass named
+in ADR 0005 does not run in M2. Recorded here per this file's own convention of tracking
+#36 alongside each story's real-device deferrals; see `docs/milestones/m2.md`'s Open
+questions and ADR 0005's 2026-08-09 amendment for the full ruling.
+
+**Real-device items still deferred to #36** (nothing new beyond what Story
+3/4/5/6/8/9/10/11 already deferred): the four-row preview's legibility at the narrow cell
+floor and under real device text-scaling is asserted only by the e2e/axe evidence above,
+not a real-device capture.
