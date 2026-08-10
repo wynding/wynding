@@ -325,26 +325,42 @@ describe('the mine pads', () => {
     }
   });
 
-  it('every pad is ROUTE-NEUTRAL: the full 165-tower route is byte-identical to the 150-anchor route', () => {
-    const anchorsOnly = placements.slice(0, 150);
-    expect(routeKey(routeOver(anchorsOnly))).toBe(BASE_KEY);
-    expect(routeKey(routeOver(placements))).toBe(BASE_KEY);
-  });
+  // 120s budgets on every route-recomputation test below: real shortest-path solves over a
+  // 1,600-cell maze, ×150 for the anchor sweeps — 5s of dev-machine headroom became a
+  // 5,279ms CI timeout under coverage on PR #93's round-2 run.
+  it(
+    'every pad is ROUTE-NEUTRAL: the full 165-tower route is byte-identical to the 150-anchor route',
+    { timeout: 120_000 },
+    () => {
+      const anchorsOnly = placements.slice(0, 150);
+      expect(routeKey(routeOver(anchorsOnly))).toBe(BASE_KEY);
+      expect(routeKey(routeOver(placements))).toBe(BASE_KEY);
+    },
+  );
 
-  it('every pad is NON-LOAD-BEARING: removing its tower alone leaves the sequence byte-identical', () => {
-    for (let i = 150; i < 165; i++) {
-      const without = placements.filter((_, j) => j !== i);
-      expect(routeKey(routeOver(without)), `removing the pad at index ${i} rerouted the maze`).toBe(
-        BASE_KEY,
-      );
-    }
-  });
+  it(
+    'every pad is NON-LOAD-BEARING: removing its tower alone leaves the sequence byte-identical',
+    { timeout: 120_000 },
+    () => {
+      for (let i = 150; i < 165; i++) {
+        const without = placements.filter((_, j) => j !== i);
+        expect(
+          routeKey(routeOver(without)),
+          `removing the pad at index ${i} rerouted the maze`,
+        ).toBe(BASE_KEY);
+      }
+    },
+  );
 
-  it('the post-detonation maze (all ten detonators gone, 155 towers) is byte-identical too', () => {
-    const post = placements.filter((_, j) => j < 150 || j >= 160);
-    expect(post).toHaveLength(155);
-    expect(routeKey(routeOver(post))).toBe(BASE_KEY);
-  });
+  it(
+    'the post-detonation maze (all ten detonators gone, 155 towers) is byte-identical too',
+    { timeout: 120_000 },
+    () => {
+      const post = placements.filter((_, j) => j < 150 || j >= 160);
+      expect(post).toHaveLength(155);
+      expect(routeKey(routeOver(post))).toBe(BASE_KEY);
+    },
+  );
 
   it('every detonator is within trigger range (2.25 tiles) of a route cell, at the pinned index', () => {
     expect(MINE_TRIGGER_FP).toBe(576);
@@ -398,71 +414,83 @@ describe('the mine pads', () => {
 });
 
 describe('the impossibilities that forced the amendment (pinned, not re-argued)', () => {
-  it('ESCALATED #1: NOT ONE of the 150 anchors is out of trigger range of EVERY route cell', () => {
-    // The packet's original criterion for a surviving mine selects the EMPTY SET on this
-    // geometry. Resolution applied: the mines left the anchor set for their own pads,
-    // where 300 route-neutral never-in-range positions exist.
-    const outOfRangeOfAll = anchors.filter(
-      (a) => firstInRangeIndex(a) === Number.POSITIVE_INFINITY,
-    );
-    expect(outOfRangeOfAll).toEqual([]);
-  });
+  it(
+    'ESCALATED #1: NOT ONE of the 150 anchors is out of trigger range of EVERY route cell',
+    { timeout: 120_000 },
+    () => {
+      // The packet's original criterion for a surviving mine selects the EMPTY SET on this
+      // geometry. Resolution applied: the mines left the anchor set for their own pads,
+      // where 300 route-neutral never-in-range positions exist.
+      const outOfRangeOfAll = anchors.filter(
+        (a) => firstInRangeIndex(a) === Number.POSITIVE_INFINITY,
+      );
+      expect(outOfRangeOfAll).toEqual([]);
+    },
+  );
 
-  it('ESCALATED #2: NOT ONE of the 150 anchors is non-load-bearing for the maze', () => {
-    // Removing ANY single anchor changes the route's cell sequence — the stress maze is
-    // eight single-gap bands plus six greedy tail baffles, so every anchor is structural
-    // by construction. Resolution applied: mines stand on pads whose removal provably
-    // does not reroute (asserted above).
-    const anchorsOnly = placements.slice(0, 150);
-    const nonLoadBearing = anchorsOnly.filter(
-      (_, i) => routeKey(routeOver(anchorsOnly.filter((__, j) => j !== i))) === BASE_KEY,
-    );
-    expect(nonLoadBearing).toEqual([]);
-  });
+  it(
+    'ESCALATED #2: NOT ONE of the 150 anchors is non-load-bearing for the maze',
+    { timeout: 120_000 },
+    () => {
+      // Removing ANY single anchor changes the route's cell sequence — the stress maze is
+      // eight single-gap bands plus six greedy tail baffles, so every anchor is structural
+      // by construction. Resolution applied: mines stand on pads whose removal provably
+      // does not reroute (asserted above).
+      const anchorsOnly = placements.slice(0, 150);
+      const nonLoadBearing = anchorsOnly.filter(
+        (_, i) => routeKey(routeOver(anchorsOnly.filter((__, j) => j !== i))) === BASE_KEY,
+      );
+      expect(nonLoadBearing).toEqual([]);
+    },
+  );
 
-  it('ESCALATED #3: no route-neutral pad exists anywhere near the EARLY route', () => {
-    // Why detonation cannot happen during warm-up at ANY route-index cutoff. Route cells
-    // 1–28 run up the one-cell-wide col-1 corridor, east along row 2, then down col 4; a
-    // 2×2 pad within trigger range of them has nowhere to stand but inside a one-wide
-    // corridor, and occupying one reroutes. Resolution applied: detonation moved to the
-    // post-window leak-probe extension.
-    const anchorsOnly = placements.slice(0, 150);
-    const occupied = new Set<string>();
-    for (const p of anchorsOnly) {
-      for (const [dc, dr] of FOOTPRINT_DELTAS) {
-        occupied.add(`${p.anchor.col + dc},${p.anchor.row + dr}`);
-      }
-    }
-    let legal = 0;
-    let neutral = 0;
-    let earliestNeutralIndex = Number.POSITIVE_INFINITY;
-    let inRangeOfEarlyAndNeutral = 0;
-    for (let row = 1; row <= 37; row++) {
-      for (let col = 1; col <= 37; col++) {
-        let free = true;
+  it(
+    'ESCALATED #3: no route-neutral pad exists anywhere near the EARLY route',
+    { timeout: 120_000 },
+    () => {
+      // Why detonation cannot happen during warm-up at ANY route-index cutoff. Route cells
+      // 1–28 run up the one-cell-wide col-1 corridor, east along row 2, then down col 4; a
+      // 2×2 pad within trigger range of them has nowhere to stand but inside a one-wide
+      // corridor, and occupying one reroutes. Resolution applied: detonation moved to the
+      // post-window leak-probe extension.
+      const anchorsOnly = placements.slice(0, 150);
+      const occupied = new Set<string>();
+      for (const p of anchorsOnly) {
         for (const [dc, dr] of FOOTPRINT_DELTAS) {
-          if (occupied.has(`${col + dc},${row + dr}`)) free = false;
+          occupied.add(`${p.anchor.col + dc},${p.anchor.row + dr}`);
         }
-        if (!free) continue;
-        legal++;
-        const isNeutral =
-          routeKey(routeOver([...anchorsOnly, { anchor: { col, row }, towerId: 'mine' }])) ===
-          BASE_KEY;
-        if (!isNeutral) continue;
-        neutral++;
-        const first = firstInRangeIndex({ col, row });
-        if (first >= 1 && first < earliestNeutralIndex) earliestNeutralIndex = first;
-        if (first >= 1 && first <= 28) inRangeOfEarlyAndNeutral++;
       }
-    }
-    expect(legal).toBe(460);
-    expect(neutral).toBe(359);
-    // The headline fact: zero route-neutral pads reach the early route…
-    expect(inRangeOfEarlyAndNeutral).toBe(0);
-    // …and the earliest any route-neutral pad reaches the route AT ALL is index 290, so
-    // widening the packet's "cells 1–28" cutoff to any smaller index buys nothing.
-    expect(earliestNeutralIndex).toBe(290);
-  });
+      let legal = 0;
+      let neutral = 0;
+      let earliestNeutralIndex = Number.POSITIVE_INFINITY;
+      let inRangeOfEarlyAndNeutral = 0;
+      for (let row = 1; row <= 37; row++) {
+        for (let col = 1; col <= 37; col++) {
+          let free = true;
+          for (const [dc, dr] of FOOTPRINT_DELTAS) {
+            if (occupied.has(`${col + dc},${row + dr}`)) free = false;
+          }
+          if (!free) continue;
+          legal++;
+          const isNeutral =
+            routeKey(routeOver([...anchorsOnly, { anchor: { col, row }, towerId: 'mine' }])) ===
+            BASE_KEY;
+          if (!isNeutral) continue;
+          neutral++;
+          const first = firstInRangeIndex({ col, row });
+          if (first >= 1 && first < earliestNeutralIndex) earliestNeutralIndex = first;
+          if (first >= 1 && first <= 28) inRangeOfEarlyAndNeutral++;
+        }
+      }
+      expect(legal).toBe(460);
+      expect(neutral).toBe(359);
+      // The headline fact: zero route-neutral pads reach the early route…
+      expect(inRangeOfEarlyAndNeutral).toBe(0);
+      // …and the earliest any route-neutral pad reaches the route AT ALL is index 290, so
+      // widening the packet's "cells 1–28" cutoff to any smaller index buys nothing.
+      expect(earliestNeutralIndex).toBe(290);
+    },
+  );
 });
 
 describe('the catalog bundle’s compile-time gate arithmetic', () => {
