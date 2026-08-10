@@ -136,12 +136,15 @@ const GOLDEN = {
 // -------------------------------------------------------------------------------------
 
 describe('M2-S11 P5 — the M2 close-out determinism golden (Winner A, "the poisoner", over the finished ten-wave arc)', () => {
+  // 120s test budgets: each of these drives a full ~4,070-tick arc run (the first one
+  // twice, for the reproduction proof). Vitest's 5s default passes on a dev machine and
+  // times out on the slower CI runner under coverage — observed on PR #93's first run.
   it('reproduces a byte-identical trace from the same (seed, script)', () => {
     const a = runGolden();
     const b = runGolden();
     expect(a.trace).toEqual(b.trace);
     expect(hashSimState(a.state)).toBe(hashSimState(b.state));
-  });
+  }, 120_000);
 
   it('the MID-TRACE ENGAGEMENT PROBE, before any terminal assertion: wave 10 (index 9) is reached, the boss took damage mid-run, and the terminal is a win', () => {
     const r = runGolden();
@@ -164,7 +167,7 @@ describe('M2-S11 P5 — the M2 close-out determinism golden (Winner A, "the pois
 
     // ...AND WON.
     expect(r.state.phase).toBe('won');
-  });
+  }, 120_000);
 
   it('matches the committed golden: finalHash, traceDigest, score, stars', () => {
     const r = runGolden();
@@ -181,5 +184,5 @@ describe('M2-S11 P5 — the M2 close-out determinism golden (Winner A, "the pois
     expect(traceDigest).toBe(GOLDEN.traceDigest);
     expect(score).toBe(GOLDEN.score);
     expect(stars).toBe(GOLDEN.stars);
-  });
+  }, 120_000);
 });

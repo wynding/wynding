@@ -104,7 +104,7 @@ console.log('Burst probe — detonation ticks observed vs their route-cost lower
     const o = observed[i];
     const b = bounds[i];
     console.log(
-      `  #${String(i + 1).padStart(2)}  observed=${o === undefined ? '—' : String(o).padStart(4)}  lowerBound=${b === undefined ? '—' : String(b).padStart(4)}  ${o !== undefined && b !== undefined && o >= b ? 'ok' : 'EARLY'}`,
+      `  #${String(i + 1).padStart(2)}  observed=${o === undefined ? '—' : String(o).padStart(4)}  lowerBound=${b === undefined ? '—' : String(b).padStart(4)}  ${o === undefined || b === undefined ? 'MISSING' : o >= b ? 'ok' : 'EARLY'}`,
     );
   }
 }

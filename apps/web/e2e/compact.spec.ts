@@ -240,6 +240,13 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const audit = await new AxeBuilder({ page }).include('#app').analyze();
     expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 
+    // GUARD: wave 9's own 300-tick countdown keeps running in real time under this
+    // tail (~15 s at 1×) — if it auto-launches, the preview flips to wave 10's two-row
+    // composition and the 4 materialized entry locators go stale (boundingBox() null).
+    // Re-asserting the title here turns that race into a NAMED failure instead of a
+    // mystery null dereference on a slow runner.
+    await expect(previewTitle).toHaveText('Wave 9 of 10');
+
     // No clipping: the preview's rendered box, and every one of its 4 rows, stays within
     // the Compact column's own width — never spilling past it or off the viewport (a
     // scrollport clips its OVERFLOW axis only; the cross axis must never overflow at all).

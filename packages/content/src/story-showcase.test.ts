@@ -472,42 +472,50 @@ describe('M2-S11 P4 — the showcase run: two winners, structurally distinct, an
   report('WINNER A', a);
   report('WINNER B', b);
 
-  it('WINNER A — the poisoner reaches wave 10, kills the boss, and wins the arc outright', () => {
-    // PROVE THE FEATURE ENGAGED, before any terminal assertion: the attribution
-    // harness's own self-check passed (so every share below is exact, not estimated),
-    // a live `boss` was observed at full hp (the finale really launched), and the boss
-    // DIED rather than leaked.
-    expect(a.attributionExact).toBe(true);
-    expect(a.sawFullHpBoss).toBe(true);
-    expect(a.bossKilled).toBe(true);
-    expect(a.state.waveResolved[waveIndexForCreep(a.ruleset, 'boss')]).toBe(true);
+  it(
+    'WINNER A — the poisoner reaches wave 10, kills the boss, and wins the arc outright',
+    { timeout: 120_000 },
+    () => {
+      // PROVE THE FEATURE ENGAGED, before any terminal assertion: the attribution
+      // harness's own self-check passed (so every share below is exact, not estimated),
+      // a live `boss` was observed at full hp (the finale really launched), and the boss
+      // DIED rather than leaked.
+      expect(a.attributionExact).toBe(true);
+      expect(a.sawFullHpBoss).toBe(true);
+      expect(a.bossKilled).toBe(true);
+      expect(a.state.waveResolved[waveIndexForCreep(a.ruleset, 'boss')]).toBe(true);
 
-    // THE MEASUREMENT — every literal measured and `console.log`'d by `report` above.
-    expect(a.state.phase).toBe('won');
-    expect(a.state.lives).toBe(10); // a clean run: not one creep of the ten-wave arc leaks
-    expect(a.leaksByWave.every((n) => n === 0)).toBe(true);
-    expect(a.state.tick).toBe(4070);
-    // Every scheduled creep in the arc died: pinned at the MEASURED 117 and, beside it,
-    // DERIVED from the compiled schedule so a wave edit moves what this computes rather
-    // than only what it happens to match.
-    const scheduled = a.ruleset.waves.reduce((n, w) => n + w.spawns.length, 0);
-    expect(a.kills).toBe(117);
-    expect(a.kills).toBe(scheduled);
-  });
+      // THE MEASUREMENT — every literal measured and `console.log`'d by `report` above.
+      expect(a.state.phase).toBe('won');
+      expect(a.state.lives).toBe(10); // a clean run: not one creep of the ten-wave arc leaks
+      expect(a.leaksByWave.every((n) => n === 0)).toBe(true);
+      expect(a.state.tick).toBe(4070);
+      // Every scheduled creep in the arc died: pinned at the MEASURED 117 and, beside it,
+      // DERIVED from the compiled schedule so a wave edit moves what this computes rather
+      // than only what it happens to match.
+      const scheduled = a.ruleset.waves.reduce((n, w) => n + w.spawns.length, 0);
+      expect(a.kills).toBe(117);
+      expect(a.kills).toBe(scheduled);
+    },
+  );
 
-  it('WINNER B — the control lattice reaches wave 10 and kills the boss with no `venom` at all', () => {
-    expect(b.attributionExact).toBe(true);
-    expect(b.sawFullHpBoss).toBe(true);
-    expect(b.bossKilled).toBe(true);
-    expect(Object.keys(b.spendById)).not.toContain('venom');
+  it(
+    'WINNER B — the control lattice reaches wave 10 and kills the boss with no `venom` at all',
+    { timeout: 120_000 },
+    () => {
+      expect(b.attributionExact).toBe(true);
+      expect(b.sawFullHpBoss).toBe(true);
+      expect(b.bossKilled).toBe(true);
+      expect(Object.keys(b.spendById)).not.toContain('venom');
 
-    expect(b.state.phase).toBe('won');
-    expect(b.state.lives).toBe(10);
-    expect(b.leaksByWave.every((n) => n === 0)).toBe(true);
-    expect(b.state.tick).toBe(4062);
-    expect(b.kills).toBe(117);
-    expect(b.kills).toBe(b.ruleset.waves.reduce((n, w) => n + w.spawns.length, 0));
-  });
+      expect(b.state.phase).toBe('won');
+      expect(b.state.lives).toBe(10);
+      expect(b.leaksByWave.every((n) => n === 0)).toBe(true);
+      expect(b.state.tick).toBe(4062);
+      expect(b.kills).toBe(117);
+      expect(b.kills).toBe(b.ruleset.waves.reduce((n, w) => n + w.spawns.length, 0));
+    },
+  );
 
   it('the two winners are STRUCTURALLY DISTINCT — disjoint top-two spend, each top-two id >= 25% of its own build', () => {
     const topA = idsBySpend(a.spendById).slice(0, 2);
@@ -580,22 +588,26 @@ describe('M2-S11 P4 — the showcase run: two winners, structurally distinct, an
     expect(deriveStars(b.state, b.ruleset)).toBe(3);
   });
 
-  it('the selected LOSING build engages the arc and loses — spend, ids, kills and depth all above their floors', () => {
-    const l = runBuild(LOSER);
-    report('LOSER', l);
-    expect(l.attributionExact).toBe(true);
+  it(
+    'the selected LOSING build engages the arc and loses — spend, ids, kills and depth all above their floors',
+    { timeout: 120_000 },
+    () => {
+      const l = runBuild(LOSER);
+      report('LOSER', l);
+      expect(l.attributionExact).toBe(true);
 
-    // PROVE IT PLAYED: it reached at least wave 6 (0-indexed 5 — LOCATED by creep id,
-    // never a hardcoded index) with a real, diverse build behind it.
-    const sixthWaveIndex = waveIndexForCreep(l.ruleset, 'flying'); // arc row 6
-    expect(l.state.waveLaunchTick[sixthWaveIndex]).not.toBeNull();
-    expect(totalSpend(l.spendById)).toBeGreaterThanOrEqual(60);
-    expect(Object.keys(l.spendById).length).toBeGreaterThanOrEqual(3);
-    expect(l.kills).toBeGreaterThanOrEqual(40);
+      // PROVE IT PLAYED: it reached at least wave 6 (0-indexed 5 — LOCATED by creep id,
+      // never a hardcoded index) with a real, diverse build behind it.
+      const sixthWaveIndex = waveIndexForCreep(l.ruleset, 'flying'); // arc row 6
+      expect(l.state.waveLaunchTick[sixthWaveIndex]).not.toBeNull();
+      expect(totalSpend(l.spendById)).toBeGreaterThanOrEqual(60);
+      expect(Object.keys(l.spendById).length).toBeGreaterThanOrEqual(3);
+      expect(l.kills).toBeGreaterThanOrEqual(40);
 
-    // ...AND LOST.
-    expect(l.state.phase).toBe('lost');
-    expect(l.state.lives).toBe(0);
-    expect(deriveStars(l.state, l.ruleset)).toBe(0);
-  });
+      // ...AND LOST.
+      expect(l.state.phase).toBe('lost');
+      expect(l.state.lives).toBe(0);
+      expect(deriveStars(l.state, l.ruleset)).toBe(0);
+    },
+  );
 });

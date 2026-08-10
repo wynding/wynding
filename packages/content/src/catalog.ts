@@ -9,8 +9,9 @@
 //
 // The catalog bundle is deliberately ABSENT from `registry.ts`'s `BUNDLED_TEXT` map,
 // exactly like the stress bundle: it is a synthetic perf ceiling (1,000,000-hp creeps,
-// 1,000,000 starting lives, a starting bounty pinned to the exact cost of a 150-tower
-// maze), not shippable content, and `wynding-core`'s content hash must stay untouched
+// 1,000,000 starting lives, a starting bounty pinned to the exact cost of the 165
+// committed placements — 150 anchors plus 15 mine pads), not shippable content, and
+// `wynding-core`'s content hash must stay untouched
 // by its presence in this package.
 //
 // What makes it a DIFFERENT scene from the stress bundle rather than a variant of it:

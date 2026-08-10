@@ -26,9 +26,11 @@ import { PROFILES } from './profiles';
 // sustained ≥ 300 live creeps, the sim still advancing, the phase still `running`.
 //
 // The tower count is 165 and not 155 at every point this spec reads it: every mine pad is
-// route-neutral and the earliest detonation cannot land before tick 3,559, well past the
-// tick this scene fast-forwards to (1,055). Detonation is a post-window event that only
-// the Node oracle's leak-probe extension observes.
+// route-neutral, and the earliest detonation lands far past the tick this scene
+// fast-forwards to (1,055) — observed earliest 3,559 on the Node replay, strict
+// route-cost bound 3,553 (`layout.ts` states that distinction as load-bearing).
+// Detonation is a post-window event that only the Node oracle's leak-probe extension
+// observes.
 
 /** This spec's SCENE id. Trace filenames, report records and analyzer inputs are keyed
  *  by scene + profile — never profile alone, which before P7 would have had this scene

@@ -160,18 +160,22 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
     return groundOnlyResult;
   }
 
-  it('a ground-only wall (the proven wave-0-4 build, no `antiair`) leaves wave 5 untouched — it crosses the whole maze and leaks in full', () => {
-    const { state, flyingWaveIndex, sawAnyFlyer } = runGroundOnlyWall();
-    expect(sawAnyFlyer).toBe(true);
+  it(
+    'a ground-only wall (the proven wave-0-4 build, no `antiair`) leaves wave 5 untouched — it crosses the whole maze and leaks in full',
+    { timeout: 120_000 },
+    () => {
+      const { state, flyingWaveIndex, sawAnyFlyer } = runGroundOnlyWall();
+      expect(sawAnyFlyer).toBe(true);
 
-    // THE S11 P2 MECHANISM CLAIM, de-indexed (a mutation check — swap arc rows 6/7 — shows
-    // this holds independent of anything past wave 5, unlike the full-array terminal pins
-    // moved to the outcome-golden sibling below): wave 5 (`flying`, located by creep id)
-    // leaked — and combined with the untouched proof above (every observed flyer sat at
-    // exactly its spawn HP, so none was ever killed), every flyer that spawned left the
-    // sim via leak, i.e. "leaks in full".
-    expect(state.waveLeaked[flyingWaveIndex]).toBe(true);
-  });
+      // THE S11 P2 MECHANISM CLAIM, de-indexed (a mutation check — swap arc rows 6/7 — shows
+      // this holds independent of anything past wave 5, unlike the full-array terminal pins
+      // moved to the outcome-golden sibling below): wave 5 (`flying`, located by creep id)
+      // leaked — and combined with the untouched proof above (every observed flyer sat at
+      // exactly its spawn HP, so none was ever killed), every flyer that spawned left the
+      // sim via leak, i.e. "leaks in full".
+      expect(state.waveLeaked[flyingWaveIndex]).toBe(true);
+    },
+  );
 
   // OUTCOME GOLDEN (position-sensitive by nature, re-measured when the arc moves) — split
   // out of the mechanism-proof test above at S11 P2 completion. Same run as that test
@@ -302,25 +306,29 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
     return antiairResult;
   }
 
-  it('an `antiair` wall built ahead of wave 5 kills every `flying` creep — zero leaks ON WAVE INDEX 5', () => {
-    const { state, flyingWaveIndex, antiairCost } = runAntiairWall();
+  it(
+    'an `antiair` wall built ahead of wave 5 kills every `flying` creep — zero leaks ON WAVE INDEX 5',
+    { timeout: 120_000 },
+    () => {
+      const { state, flyingWaveIndex, antiairCost } = runAntiairWall();
 
-    // PROOF THE FEATURE ENGAGED: all four placements accepted (tower count AND spend
-    // both match the compiled catalog's cost — proving none silently no-op'd).
-    expect(state.towers.towerId.filter((id) => id === 'antiair')).toHaveLength(4);
-    const antiairSpend = state.towers.towerId.reduce(
-      (sum, id, i) => (id === 'antiair' ? sum + state.towers.spend[i]! : sum),
-      0,
-    );
-    expect(antiairSpend).toBe(4 * antiairCost);
+      // PROOF THE FEATURE ENGAGED: all four placements accepted (tower count AND spend
+      // both match the compiled catalog's cost — proving none silently no-op'd).
+      expect(state.towers.towerId.filter((id) => id === 'antiair')).toHaveLength(4);
+      const antiairSpend = state.towers.towerId.reduce(
+        (sum, id, i) => (id === 'antiair' ? sum + state.towers.spend[i]! : sum),
+        0,
+      );
+      expect(antiairSpend).toBe(4 * antiairCost);
 
-    // THE S7 DONE-CRITERION, de-indexed (a mutation check — swap arc rows 6/7 — shows
-    // this holds independent of anything past wave 5, unlike the full-array terminal pins
-    // moved to the outcome-golden sibling below): wave index 5 (`flying`, located by creep
-    // id) fully RESOLVED and never LEAKED — i.e. `antiair` killed all eight `flying`.
-    expect(state.waveResolved[flyingWaveIndex]).toBe(true);
-    expect(state.waveLeaked[flyingWaveIndex]).toBe(false);
-  });
+      // THE S7 DONE-CRITERION, de-indexed (a mutation check — swap arc rows 6/7 — shows
+      // this holds independent of anything past wave 5, unlike the full-array terminal pins
+      // moved to the outcome-golden sibling below): wave index 5 (`flying`, located by creep
+      // id) fully RESOLVED and never LEAKED — i.e. `antiair` killed all eight `flying`.
+      expect(state.waveResolved[flyingWaveIndex]).toBe(true);
+      expect(state.waveLeaked[flyingWaveIndex]).toBe(false);
+    },
+  );
 
   // OUTCOME GOLDEN (position-sensitive by nature, re-measured when the arc moves) — split
   // out of the mechanism-proof test above at S11 P2 completion. Same run as that test
@@ -444,14 +452,18 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
     return slowResult;
   }
 
-  it('`slow` towers (now both-domain) land a slow status on a `flying` creep', () => {
-    const { state, sawSlowedFlyer } = runSlowWall();
-    expect(sawSlowedFlyer).toBe(true);
+  it(
+    '`slow` towers (now both-domain) land a slow status on a `flying` creep',
+    { timeout: 120_000 },
+    () => {
+      const { state, sawSlowedFlyer } = runSlowWall();
+      expect(sawSlowedFlyer).toBe(true);
 
-    // Terminal proof the `slow` placements survived (not silently no-op'd): both
-    // still stand.
-    expect(state.towers.towerId.filter((id) => id === 'slow')).toHaveLength(2);
-  });
+      // Terminal proof the `slow` placements survived (not silently no-op'd): both
+      // still stand.
+      expect(state.towers.towerId.filter((id) => id === 'slow')).toHaveLength(2);
+    },
+  );
 
   // OUTCOME GOLDEN (position-sensitive by nature, re-measured when the arc moves) — split
   // out of the mechanism-proof test above at S11 P2 completion. Same run as that test
