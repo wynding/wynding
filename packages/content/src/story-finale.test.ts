@@ -650,13 +650,12 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
     // bundle this packet runs against, deliberately stopping short of the `boss` wave so
     // this domain-gating scenario stays scoped to `armored-flyer` alone.
     const armoredFlyerWaveIndex = waveIndexForCreep(ruleset, 'armored-flyer');
-    for (
-      let t = 0;
-      state.phase === 'running' &&
-      (waveLaunchTickObserved(state, armoredFlyerWaveIndex) === null ||
-        t < waveLaunchTickObserved(state, armoredFlyerWaveIndex)! + 400);
-      t++
-    ) {
+    // MAX_MATCH_TICKS stays in the header: the launch-relative bound only binds once
+    // the wave is observed launching, and a stalled-but-running sim must FAIL the
+    // assertion below, not hang the runner (PR #93 CodeRabbit round 1).
+    for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
+      const armoredFlyerLaunch = waveLaunchTickObserved(state, armoredFlyerWaveIndex);
+      if (armoredFlyerLaunch !== null && t >= armoredFlyerLaunch + 400) break;
       state = step(state, ruleset, inputs(t, state));
       for (let r = 0; r < state.towers.id.length; r++) {
         towerKindById.set(state.towers.id[r] as number, state.towers.towerId[r] as string);

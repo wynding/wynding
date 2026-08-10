@@ -227,6 +227,12 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       await callWave.click();
     }
     await expect(previewTitle).toHaveText('Wave 9 of 10');
+    // FREEZE the race, don't just guard it: wave 9's own 300-tick countdown keeps
+    // running under the long assertion tail below (axe + geometry + keyboard-scroll —
+    // observed flaking once the tail crossed the auto-launch boundary on a loaded
+    // machine). Pausing pins the preview on wave 9 for the whole tail; the preview
+    // reflects Pending state under pause by design, so nothing measured changes.
+    await page.getByRole('button', { name: 'Pause' }).click();
     await expect(entries).toHaveCount(4);
     await expect(entries).toHaveText([
       '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
@@ -276,6 +282,19 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const hud = page.locator('.wy-hud');
     await hud.focus();
     await expect(hud).toBeFocused();
+    // The SAME two-part keyboard proof the 200%-zoom test above and smoke.spec's
+    // chips-scrollport gate use (PR #93 CodeRabbit round 1 — `scrollIntoViewIfNeeded`
+    // alone proves nothing about the keyboard path): (a) a real arrow key moves the
+    // focused scrollport's `scrollTop` with all four rows present — keyboard-operable,
+    // not merely present in the DOM; (b) every row can then be scrolled fully into
+    // view within that same scrollport.
+    const scrollTopBefore = await hud.evaluate((el) => el.scrollTop);
+    await page.keyboard.press('ArrowDown');
+    await expect
+      .poll(async () => hud.evaluate((el) => el.scrollTop), {
+        message: 'the hud scrollport should scroll on an arrow key with 4 preview rows',
+      })
+      .toBeGreaterThan(scrollTopBefore);
     for (const entry of await entries.all()) {
       await entry.scrollIntoViewIfNeeded();
       await expect(entry).toBeInViewport();

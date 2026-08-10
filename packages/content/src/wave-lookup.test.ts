@@ -57,6 +57,11 @@ describe('anchoredWallInputs guards', () => {
     );
   });
 
+  it('throws up front on a non-positive spacingTicks (the modulo gate would never place)', () => {
+    expect(() => anchoredWallInputs(ruleset, 1, [], 'basic', 0, 0)).toThrow(/must be positive/);
+    expect(() => anchoredWallInputs(ruleset, 1, [], 'basic', 0, -5)).toThrow(/must be positive/);
+  });
+
   it('produces no inputs before the target wave’s countdown start is observed', () => {
     const inputs = anchoredWallInputs(ruleset, 1, [{ col: 2, row: 10 }], 'basic', 0);
     const state = createInitialState(SEED, ruleset);

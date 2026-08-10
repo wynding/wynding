@@ -780,9 +780,11 @@ export const TOLERANCE = 1.1;
  *
  * Until either limit clears, this number is a working baseline, and the "re-record when the
  * runner class changes" rule — stated in the SUPERSEDED provenance block above and still
- * live in `docs/design-notes/performance-spike.md` — is the binding one. THIS PLAN HAS NO
- * OWNER OR DATE, which is a real weakness: the data lives in CI logs under a 90-day retention
- * with no artifact upload, and nothing triggers the re-record automatically. Treat the next
+ * live in `docs/design-notes/performance-spike.md` — is the binding one. The original
+ * record's own complaint — "THIS PLAN HAS NO OWNER OR DATE, which is a real weakness: the
+ * data lives in CI logs under a 90-day retention with no artifact upload, and nothing
+ * triggers the re-record automatically" — is preserved here as the superseded text it now
+ * is (M2-S11 answered it; owner and both triggers are named above). Treat the next
  * runner image bump as limit 1's trigger, and the next >= 10-fresh-attempt CI opportunity on
  * the documented image as limit 3's — both now named above rather than left as a gap. The
  * superseded 1.42 baselined p95/p50 and was meaningless for the new statistic; the `null`

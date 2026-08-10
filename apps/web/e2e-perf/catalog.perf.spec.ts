@@ -190,7 +190,14 @@ test('catalog scene: fps / heap / input latency', async ({ page }, testInfo) => 
   for (let i = 0; i < INPUT_LATENCY_SAMPLES; i++) {
     await armToggle.click();
   }
+  // Every dispatched click must actually be measured before the percentiles are
+  // computed — otherwise a missed live-region mutation silently shrinks the sample
+  // and the report still passes (PR #93 CodeRabbit round 1).
+  await expect
+    .poll(async () => (await page.evaluate(() => window.wyndingPerfCatalog!.inputLatencies)).length)
+    .toBe(INPUT_LATENCY_SAMPLES);
   const inputLatencies = await page.evaluate(() => window.wyndingPerfCatalog!.inputLatencies);
+  expect(inputLatencies.length).toBe(INPUT_LATENCY_SAMPLES);
 
   const liveCreepsAtSampleEnd = await page.evaluate(() =>
     window.wyndingPerfCatalog!.liveCreepCount(),

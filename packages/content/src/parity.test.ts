@@ -40,26 +40,12 @@ import {
   type SimState,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+// The package's ONE fnv1a copy (test-digest.ts) — m2-golden.test.ts digests through the
+// same function, so the two files cannot drift onto different digests for one trace.
+import { fnv1a } from './test-digest';
 
 /** Shared fixed seed for both pinned scenarios. */
 const SCENARIO_SEED = 0x5eed;
-
-/**
- * FNV-1a over a string — an 8-line INLINE duplicate of `@wynding/engine`'s
- * `fnv1a` (packages/engine/src/hash.ts), provenance-commented per PLAN.md P4 step
- * 12 ("import from @wynding/sim's re-exports if available, else inline"): `@wynding/sim`
- * does not re-export `fnv1a`, and importing `@wynding/engine` directly here would add
- * a runtime dependency edge this package doesn't otherwise need. Fast, deterministic,
- * NOT cryptographic — identical algorithm, identical output to the engine original.
- */
-function fnv1a(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
 
 /** Run steps of the bundled ruleset from a fresh state, seeded and driven by
  *  `inputs`, continuing while `continueWhile(tick, state)` holds. Returns the
@@ -390,9 +376,9 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(2256);
-    // The run freezes mid-wave: wave index 7 (`armored-flyer`) launched (`waveCursor`
-    // advanced past it) but never finished resolving, and waves index 8/9 never
-    // launched at all.
+    // The run freezes mid-wave: `waveCursor` 9 means waves [0, 9) all LAUNCHED —
+    // including index 8's four-stream wave — with indices 7 and 8 never finishing
+    // resolving; only wave index 9 (the boss) never launched at all.
     expect(state.waveResolved).toEqual([
       true,
       true,

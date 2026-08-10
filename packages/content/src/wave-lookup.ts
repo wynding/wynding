@@ -86,6 +86,12 @@ export function anchoredWallInputs(
       `anchoredWallInputs: wave index ${waveIndex} outside the compiled schedule (0..${ruleset.waves.length - 1})`,
     );
   }
+  // Same up-front-throw philosophy as the bounds check: a non-positive spacing would
+  // make the modulo gate below unsatisfiable (or divide by zero) and the wall would
+  // silently never place — the exact quiet failure this module exists to prevent.
+  if (spacingTicks <= 0) {
+    throw new Error(`anchoredWallInputs: spacingTicks must be positive, got ${spacingTicks}`);
+  }
   let next = 0;
   let armedAt: number | null = null;
   return (tick: number, state: SimState): SimInput[] => {

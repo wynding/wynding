@@ -38,25 +38,12 @@ import {
 import { getBundledRuleset, defaultBoardId } from './registry';
 import { waveIndexForCreep } from './wave-lookup';
 import { WINNER_A } from './showcase-builds';
+// The package's ONE fnv1a copy (test-digest.ts) — parity.test.ts digests through the
+// same function; a drifted duplicate would let both files keep passing while producing
+// different digests for the same trace.
+import { fnv1a } from './test-digest';
 
 const SCENARIO_SEED = 0x5eed;
-
-/**
- * FNV-1a over a string — an 8-line INLINE duplicate of `@wynding/engine`'s `fnv1a`
- * (packages/engine/src/hash.ts), same provenance note as `parity.test.ts`'s own copy:
- * `@wynding/sim` does not re-export `fnv1a`, and importing `@wynding/engine` directly
- * here would add a runtime dependency edge this package doesn't otherwise need. Fast,
- * deterministic, NOT cryptographic — identical algorithm, identical output to the
- * engine original.
- */
-function fnv1a(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
 
 interface GoldenRun {
   readonly state: SimState;

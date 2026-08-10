@@ -69,7 +69,12 @@ function extractEmbeddedRuleset(jsText: string): string | undefined {
   if (openIdx === -1) return undefined;
   const closeIdx = jsText.indexOf('`', openIdx + 1);
   if (closeIdx === -1) return undefined;
-  return jsText.slice(openIdx + 1, closeIdx);
+  // Vite embeds `?raw` content as a template literal, escaping exactly the characters
+  // that are special inside one: backslash, backtick, and `$`. Today's ruleset contains
+  // none of them, so the raw slice happens to be byte-identical — but a future ruleset
+  // string carrying a `\` would false-fail the byte compare without any real drift
+  // (PR #93 CodeRabbit round 1). Reverse the encoding before comparing.
+  return jsText.slice(openIdx + 1, closeIdx).replace(/\\([`$\\])/g, '$1');
 }
 
 // --- Leg 1a: build the client (real production Vite build) and package the server

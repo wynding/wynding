@@ -255,7 +255,7 @@ function runBuild(plan: readonly Placement[]): BuildResult {
       postHp.set(state.creeps.id[i]!, state.creeps.hp[i]!);
     let replayedKillBounty = 0;
     const leakedIds = new Set<number>();
-    for (const [id, hpBefore] of preHp) {
+    for (const id of preHp.keys()) {
       const observed = postHp.get(id);
       const replayed = remaining.get(id)!;
       if (observed === undefined) {
@@ -273,7 +273,6 @@ function runBuild(plan: readonly Placement[]): BuildResult {
       } else if (observed !== replayed) {
         attributionExact = false;
       }
-      void hpBefore;
     }
     if (replayedKillBounty !== state.cumulativeKillBounty - preKillBounty) attributionExact = false;
 
@@ -467,10 +466,28 @@ const LOSER: readonly Placement[] = [
 ];
 
 describe('M2-S11 P4 — the showcase run: two winners, structurally distinct, and one selected loser', () => {
-  const a = runBuild(WINNER_A);
-  const b = runBuild(WINNER_B);
-  report('WINNER A', a);
-  report('WINNER B', b);
+  // LAZY module-level memos, the sibling story files' pattern: running the two full-arc
+  // sims here in the describe body would execute at vitest COLLECTION time, before any
+  // test's timeout clock starts — the `{ timeout: 120_000 }` budgets below would protect
+  // nothing, and a slow CI runner would surface an opaque collection stall instead of a
+  // named per-test timeout (PR #93 ship-review round 2). The first `it` to touch each
+  // memo pays for the run under its own budget; the rest read it warm.
+  let memoA: BuildResult | null = null;
+  let memoB: BuildResult | null = null;
+  const A = (): BuildResult => {
+    if (!memoA) {
+      memoA = runBuild(WINNER_A);
+      report('WINNER A', memoA);
+    }
+    return memoA;
+  };
+  const B = (): BuildResult => {
+    if (!memoB) {
+      memoB = runBuild(WINNER_B);
+      report('WINNER B', memoB);
+    }
+    return memoB;
+  };
 
   it(
     'WINNER A — the poisoner reaches wave 10, kills the boss, and wins the arc outright',
@@ -480,6 +497,7 @@ describe('M2-S11 P4 — the showcase run: two winners, structurally distinct, an
       // harness's own self-check passed (so every share below is exact, not estimated),
       // a live `boss` was observed at full hp (the finale really launched), and the boss
       // DIED rather than leaked.
+      const a = A();
       expect(a.attributionExact).toBe(true);
       expect(a.sawFullHpBoss).toBe(true);
       expect(a.bossKilled).toBe(true);
@@ -503,6 +521,7 @@ describe('M2-S11 P4 — the showcase run: two winners, structurally distinct, an
     'WINNER B — the control lattice reaches wave 10 and kills the boss with no `venom` at all',
     { timeout: 120_000 },
     () => {
+      const b = B();
       expect(b.attributionExact).toBe(true);
       expect(b.sawFullHpBoss).toBe(true);
       expect(b.bossKilled).toBe(true);
@@ -517,76 +536,99 @@ describe('M2-S11 P4 — the showcase run: two winners, structurally distinct, an
     },
   );
 
-  it('the two winners are STRUCTURALLY DISTINCT — disjoint top-two spend, each top-two id >= 25% of its own build', () => {
-    const topA = idsBySpend(a.spendById).slice(0, 2);
-    const topB = idsBySpend(b.spendById).slice(0, 2);
-    console.log(
-      `[story-showcase] top-two A=${JSON.stringify(topA)} (${topA.map((id) => a.spendById[id]).join('/')} of ${totalSpend(a.spendById)}) ` +
-        `top-two B=${JSON.stringify(topB)} (${topB.map((id) => b.spendById[id]).join('/')} of ${totalSpend(b.spendById)})`,
-    );
-    // Disjoint by id — computed from the runs, never restated.
-    expect(topA.filter((id) => topB.includes(id))).toEqual([]);
-    for (const [r, top] of [
-      [a, topA],
-      [b, topB],
-    ] as const) {
-      const spend = totalSpend(r.spendById);
-      for (const id of top) {
-        expect(r.spendById[id]! / spend).toBeGreaterThanOrEqual(TOP_TWO_SPEND_SHARE_FLOOR);
+  it(
+    'the two winners are STRUCTURALLY DISTINCT — disjoint top-two spend, each top-two id >= 25% of its own build',
+    { timeout: 120_000 },
+    () => {
+      const a = A();
+      const b = B();
+      const topA = idsBySpend(a.spendById).slice(0, 2);
+      const topB = idsBySpend(b.spendById).slice(0, 2);
+      console.log(
+        `[story-showcase] top-two A=${JSON.stringify(topA)} (${topA.map((id) => a.spendById[id]).join('/')} of ${totalSpend(a.spendById)}) ` +
+          `top-two B=${JSON.stringify(topB)} (${topB.map((id) => b.spendById[id]).join('/')} of ${totalSpend(b.spendById)})`,
+      );
+      // Disjoint by id — computed from the runs, never restated.
+      expect(topA.filter((id) => topB.includes(id))).toEqual([]);
+      for (const [r, top] of [
+        [a, topA],
+        [b, topB],
+      ] as const) {
+        const spend = totalSpend(r.spendById);
+        for (const id of top) {
+          expect(r.spendById[id]! / spend).toBeGreaterThanOrEqual(TOP_TWO_SPEND_SHARE_FLOOR);
+        }
       }
-    }
-  });
+    },
+  );
 
-  it('every tower id each winner uses clears the materiality floor on its PRE-MAPPED channel', () => {
-    expect(a.attributionExact).toBe(true);
-    expect(b.attributionExact).toBe(true);
-    assertChannelFloors(a);
-    assertChannelFloors(b);
+  it(
+    'every tower id each winner uses clears the materiality floor on its PRE-MAPPED channel',
+    { timeout: 120_000 },
+    () => {
+      const a = A();
+      const b = B();
+      expect(a.attributionExact).toBe(true);
+      expect(b.attributionExact).toBe(true);
+      assertChannelFloors(a);
+      assertChannelFloors(b);
 
-    // The same floors, spelled out as measured numbers so a regression names the id
-    // that moved rather than only the generic loop above.
-    expect(a.damageById['venom']! / a.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
-    expect(a.damageById['antiair']! / a.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
-    expect(a.damageById['basic']! / a.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
-    expect(b.damageById['basic']! / b.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
-    expect(b.damageById['antiair']! / b.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
-    expect(b.statusById['slow']!).toBeGreaterThanOrEqual(STATUS_APPLICATION_FLOOR);
-    expect(b.supportAdded / b.totalDamage).toBeGreaterThanOrEqual(SUPPORT_SHARE_FLOOR);
-  });
+      // The same floors, spelled out as measured numbers so a regression names the id
+      // that moved rather than only the generic loop above.
+      expect(a.damageById['venom']! / a.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
+      expect(a.damageById['antiair']! / a.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
+      expect(a.damageById['basic']! / a.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
+      expect(b.damageById['basic']! / b.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
+      expect(b.damageById['antiair']! / b.totalDamage).toBeGreaterThanOrEqual(DAMAGE_SHARE_FLOOR);
+      expect(b.statusById['slow']!).toBeGreaterThanOrEqual(STATUS_APPLICATION_FLOOR);
+      expect(b.supportAdded / b.totalDamage).toBeGreaterThanOrEqual(SUPPORT_SHARE_FLOOR);
+    },
+  );
 
-  it("WINNER B's row-15 `slow` band is arithmetically out of reach of the flight line — `antiair` is the sole source of air damage", () => {
-    // The geometric claim in WINNER B's own header, measured rather than asserted
-    // about: `slow` deals 2 direct damage and IS air-capable by domain, so if any slow
-    // tower could see the flight line this build's air damage would be split and
-    // `antiair`'s share would fall. Measured: it is not split at all.
-    const slowRange = b.ruleset.towerById['slow']?.attack?.rangeFp;
-    expect(slowRange).toBe(1024);
-    const airLineY = 11 * 256 + 128; // entrance and exit both sit on row 11
-    for (const p of WINNER_B) {
-      if (p.towerId !== 'slow') continue;
-      const towerY = (p.row + 1) * 256; // the 2x2 footprint's centre (combat.ts)
-      expect(Math.abs(towerY - airLineY)).toBeGreaterThan(slowRange!);
-    }
-  });
+  it(
+    "WINNER B's row-15 `slow` band is arithmetically out of reach of the flight line — `antiair` is the sole source of air damage",
+    { timeout: 120_000 },
+    () => {
+      // The geometric claim in WINNER B's own header, measured rather than asserted
+      // about: `slow` deals 2 direct damage and IS air-capable by domain, so if any slow
+      // tower could see the flight line this build's air damage would be split and
+      // `antiair`'s share would fall. Measured: it is not split at all.
+      const b = B();
+      const slowRange = b.ruleset.towerById['slow']?.attack?.rangeFp;
+      expect(slowRange).toBe(1024);
+      const airLineY = 11 * 256 + 128; // entrance and exit both sit on row 11
+      for (const p of WINNER_B) {
+        if (p.towerId !== 'slow') continue;
+        const towerY = (p.row + 1) * 256; // the 2x2 footprint's centre (combat.ts)
+        expect(Math.abs(towerY - airLineY)).toBeGreaterThan(slowRange!);
+      }
+    },
+  );
 
-  it('a >= 9-lives winner EXISTS — measured from a real run, before any star threshold is read', () => {
-    // ORDER IS LOAD-BEARING (ruling 3): this asserts the arc can be finished on >= 9
-    // lives BEFORE reading `starThresholds`, so a failure here is a balance finding for
-    // the owner and never an invitation to lower 3*.
-    const bestLives = Math.max(a.state.lives, b.state.lives);
-    console.log(
-      `[story-showcase] best winner lives=${bestLives} (floor ${THREE_STAR_LIVES_FLOOR})`,
-    );
-    expect(bestLives).toBeGreaterThanOrEqual(THREE_STAR_LIVES_FLOOR);
+  it(
+    'a >= 9-lives winner EXISTS — measured from a real run, before any star threshold is read',
+    { timeout: 120_000 },
+    () => {
+      // ORDER IS LOAD-BEARING (ruling 3): this asserts the arc can be finished on >= 9
+      // lives BEFORE reading `starThresholds`, so a failure here is a balance finding for
+      // the owner and never an invitation to lower 3*.
+      const a = A();
+      const b = B();
+      const bestLives = Math.max(a.state.lives, b.state.lives);
+      console.log(
+        `[story-showcase] best winner lives=${bestLives} (floor ${THREE_STAR_LIVES_FLOOR})`,
+      );
+      expect(bestLives).toBeGreaterThanOrEqual(THREE_STAR_LIVES_FLOOR);
 
-    // ...and only now: the shipped 3* threshold is still reachable, so it stands
-    // unchanged at 9 (P4 tuned neither it nor the 2*/1* thresholds below it — the
-    // winners land at 10 and the selected loser at 0, which the shipped 1/6/9 ladder
-    // already grades correctly).
-    expect(a.ruleset.scoring.starThresholds).toEqual([1, 6, 9]);
-    expect(deriveStars(a.state, a.ruleset)).toBe(3);
-    expect(deriveStars(b.state, b.ruleset)).toBe(3);
-  });
+      // ...and only now: the shipped 3* threshold is still reachable, so it stands
+      // unchanged at 9 (P4 tuned neither it nor the 2*/1* thresholds below it — the
+      // winners land at 10 and the selected loser at 0, which the shipped 1/6/9 ladder
+      // already grades correctly).
+      expect(a.ruleset.scoring.starThresholds).toEqual([1, 6, 9]);
+      expect(deriveStars(a.state, a.ruleset)).toBe(3);
+      expect(deriveStars(b.state, b.ruleset)).toBe(3);
+    },
+  );
 
   it(
     'the selected LOSING build engages the arc and loses — spend, ids, kills and depth all above their floors',

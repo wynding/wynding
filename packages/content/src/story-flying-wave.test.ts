@@ -181,79 +181,83 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
   // out of the mechanism-proof test above at S11 P2 completion. Same run as that test
   // (`runGroundOnlyWall`'s module-level memo), same literals as before this split —
   // nothing here was re-measured, only re-homed.
-  it('a ground-only wall (the proven wave-0-4 build, no `antiair`) — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)', () => {
-    const { ruleset, state } = runGroundOnlyWall();
+  it(
+    'a ground-only wall (the proven wave-0-4 build, no `antiair`) — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)',
+    { timeout: 120_000 },
+    () => {
+      const { ruleset, state } = runGroundOnlyWall();
 
-    // --- THE MEASUREMENT — measured, not invented. Re-pinned M2-S10 P3: the loop
-    // above now runs to terminal under `MAX_MATCH_TICKS` rather than a fixed 2400
-    // ticks, and the OUTCOME FLIPS 'won' → 'lost' (Story 10 Risk 1 ruling: reported
-    // for S11's balance pass, never tuned away). This build stays exactly the proven
-    // waves-0-4 wall plus nothing new — it has no answer for `air`-domain creeps at
-    // all, so after wave index 5's 8 `flying` leak in full (lives 10 → 2, as
-    // measured under M2-S7), wave index 6's `armored-flyer` (also air, and armored
-    // besides) leaks too: its first two leaks (spaced 20 ticks apart, each its own
-    // tick) drain lives 2 → 1 → 0, and the run FREEZES there — before wave index 6
-    // finishes launching its remaining four `armored-flyer`, and long before wave
-    // index 7 (the boss) ever launches. `waveResolved[6]` and `waveResolved[7]` both
-    // stay `false`; `waveLeaked[6]` is `true` (at least one leak observed) even
-    // though the wave itself never finished resolving.
-    // Re-pinned M2-S11 P3 (measured). P1's
-    // ten-wave arc inserts a new wave 4 (12x`normal`+6x`swarm`) before `flying` (which
-    // stays at index 5 — the insertion lands before it, not after), and pushes
-    // `armored-flyer` to index 7 and the boss to index 9. This build's own baseline
-    // (byte-identical to `story-armored-wave.test.ts`'s first script) now clears the
-    // new wave 4 too, so its terminal figures move by the same amount as that file's
-    // test 1 — see that test's own comment for the full before/after derivation.
-    // Re-measured final at P4b — unchanged from P3 (this ground-only build never
-    // reaches the boss/antiair/survival mechanics P4 tuned; it freezes at 0 lives
-    // before wave index 9 ever launches).
-    console.log(
-      `[story-flying-wave #1] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
-        `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
-        `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
-    );
-    expect(state.phase).toBe('lost');
-    expect(state.tick).toBe(2886);
-    expect(state.lives).toBe(0);
-    expect(state.leakedCount).toBe(10);
-    expect(state.waveResolved).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      false,
-      false,
-      false,
-    ]);
-    // Wave index 5 leaked in full (8), and wave index 7 leaked at least once (2, the
-    // pair that drove lives to 0) before the freeze cut it off mid-wave.
-    expect(state.waveLeaked).toEqual([
-      false,
-      false,
-      false,
-      false,
-      false,
-      true,
-      false,
-      true,
-      false,
-      false,
-    ]);
-    expect(state.waveCursor).toBe(8);
-    // cumulativeKillBounty re-measured at 102 (+18 over the pre-S11 84): the new wave 4
-    // contributes its own kills; wave index 5 contributes 0 kills (only leaks), and
-    // wave index 7's two observed leaks before the freeze also contribute 0 kills.
-    expect(state.cumulativeKillBounty).toBe(102);
-    expect(state.bounty).toBe(165);
-    expect(hashSimState(state)).toBe('bd6516b9');
-    // Lost score formula: kill-bounty only — no early-call credit (none was earned
-    // here), no survival term.
-    expect(deriveScore(state, ruleset)).toBe(102);
-    expect(deriveStars(state, ruleset)).toBe(0);
-  });
+      // --- THE MEASUREMENT — measured, not invented. Re-pinned M2-S10 P3: the loop
+      // above now runs to terminal under `MAX_MATCH_TICKS` rather than a fixed 2400
+      // ticks, and the OUTCOME FLIPS 'won' → 'lost' (Story 10 Risk 1 ruling: reported
+      // for S11's balance pass, never tuned away). This build stays exactly the proven
+      // waves-0-4 wall plus nothing new — it has no answer for `air`-domain creeps at
+      // all, so after wave index 5's 8 `flying` leak in full (lives 10 → 2, as
+      // measured under M2-S7), wave index 6's `armored-flyer` (also air, and armored
+      // besides) leaks too: its first two leaks (spaced 20 ticks apart, each its own
+      // tick) drain lives 2 → 1 → 0, and the run FREEZES there — before wave index 6
+      // finishes launching its remaining four `armored-flyer`, and long before wave
+      // index 7 (the boss) ever launches. `waveResolved[6]` and `waveResolved[7]` both
+      // stay `false`; `waveLeaked[6]` is `true` (at least one leak observed) even
+      // though the wave itself never finished resolving.
+      // Re-pinned M2-S11 P3 (measured). P1's
+      // ten-wave arc inserts a new wave 4 (12x`normal`+6x`swarm`) before `flying` (which
+      // stays at index 5 — the insertion lands before it, not after), and pushes
+      // `armored-flyer` to index 7 and the boss to index 9. This build's own baseline
+      // (byte-identical to `story-armored-wave.test.ts`'s first script) now clears the
+      // new wave 4 too, so its terminal figures move by the same amount as that file's
+      // test 1 — see that test's own comment for the full before/after derivation.
+      // Re-measured final at P4b — unchanged from P3 (this ground-only build never
+      // reaches the boss/antiair/survival mechanics P4 tuned; it freezes at 0 lives
+      // before wave index 9 ever launches).
+      console.log(
+        `[story-flying-wave #1] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
+          `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
+          `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
+      );
+      expect(state.phase).toBe('lost');
+      expect(state.tick).toBe(2886);
+      expect(state.lives).toBe(0);
+      expect(state.leakedCount).toBe(10);
+      expect(state.waveResolved).toEqual([
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+      ]);
+      // Wave index 5 leaked in full (8), and wave index 7 leaked at least once (2, the
+      // pair that drove lives to 0) before the freeze cut it off mid-wave.
+      expect(state.waveLeaked).toEqual([
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        true,
+        false,
+        false,
+      ]);
+      expect(state.waveCursor).toBe(8);
+      // cumulativeKillBounty re-measured at 102 (+18 over the pre-S11 84): the new wave 4
+      // contributes its own kills; wave index 5 contributes 0 kills (only leaks), and
+      // wave index 7's two observed leaks before the freeze also contribute 0 kills.
+      expect(state.cumulativeKillBounty).toBe(102);
+      expect(state.bounty).toBe(165);
+      expect(hashSimState(state)).toBe('bd6516b9');
+      // Lost score formula: kill-bounty only — no early-call credit (none was earned
+      // here), no survival term.
+      expect(deriveScore(state, ruleset)).toBe(102);
+      expect(deriveStars(state, ruleset)).toBe(0);
+    },
+  );
 
   // Title scoped at M2-S10 P3: this scenario's S7 done-criterion has always been about
   // WAVE INDEX 5 specifically, and the run no longer ends there — it now continues into
@@ -334,81 +338,85 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
   // out of the mechanism-proof test above at S11 P2 completion. Same run as that test
   // (`runAntiairWall`'s module-level memo), same literals as before this split — nothing
   // here was re-measured, only re-homed.
-  it('an `antiair` wall built ahead of wave 5 — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)', () => {
-    const { ruleset, state } = runAntiairWall();
+  it(
+    'an `antiair` wall built ahead of wave 5 — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)',
+    { timeout: 120_000 },
+    () => {
+      const { ruleset, state } = runAntiairWall();
 
-    // --- THE MEASUREMENT — measured, not invented. Re-pinned M2-S10 P3: the loop
-    // above now runs to terminal under `MAX_MATCH_TICKS` instead of a fixed 2400
-    // ticks. Wave index 5 (`flying`) still dies to `antiair` in full (0 leaks, lives
-    // still 10 at that point — unchanged from M2-S7). But this build's `antiair`
-    // towers, an AIR-only weapon, have no answer for the ground-domain `boss`/
-    // `normal` in wave index 7, and only partial answer for wave index 6's armored
-    // `armored-flyer` (armor 5 against `antiair`'s 8 nets 3/hit — enough to kill
-    // some, not all, before they cross). The scenario still WINS (this build clears
-    // enough of both remaining waves to stay above 0 lives), but on far fewer lives
-    // and with both trailing waves partially leaked.
-    // Re-pinned M2-S11 P3 (measured). P1's
-    // ten-wave arc inserts a new wave 4 before `flying` (still index 5) and a new wave 8
-    // (arc row 9) before the boss (now index 9), and pushes `resolute`+`fast` to index 6
-    // and `armored-flyer` to index 7. This build (the proven wave-0-4 wall plus an
-    // `antiair` wall ahead of `flying`) now also clears the new wave 4 and engages the
-    // new wave 8, and survives all the way to a win over the (renumbered) boss wave.
-    // Measured before (M2-S10 P3) → after (M2-S11 P3): tick 3141 → 3741; lives 3 → 2;
-    // leakedCount 5 → 6; waveCursor 8 → 10; cumulativeKillBounty 114 → 171; bounty
-    // 149 → 212; score 219 → 241; stars 1 → 1 (unchanged).
-    // Re-pinned M2-S11 P4 (measured), the balance pass. Three P4 levers reach this
-    // scenario: `antiair` cadence 20 → 15 (this build's four `antiair` towers now land
-    // a third more shots, so wave index 7's `armored-flyer` costs it two fewer lives —
-    // leakedCount 6 → 4, lives 2 → 4); the boss wave's `normal` escort gaining
-    // `offsetTicks` 600 (the run's tail lengthens by exactly that, tick 3741 → 4112);
-    // and `survivalMul` 35 → 50 (score 241 → 377 = 177 kill bounty + 4 × 50). The S7
-    // done-criterion below — wave index 5 resolved and never leaked — is untouched.
-    // Re-measured final at P4b — unchanged from P4 (this is already the P4-tuned
-    // measurement; no further change landed after it).
-    console.log(
-      `[story-flying-wave #2] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
-        `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
-        `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
-    );
-    expect(state.phase).toBe('won');
-    expect(state.tick).toBe(4112);
-    expect(state.lives).toBe(4);
-    expect(state.leakedCount).toBe(4);
-    expect(state.waveResolved).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-    ]);
-    // Wave index 5 still clean (all killed, per the load-bearing proof this scenario
-    // exists for); wave indices 7, 8 and 9 each leak at least one creep.
-    expect(state.waveLeaked).toEqual([
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      true,
-      true,
-      true,
-    ]);
-    expect(state.waveCursor).toBe(10);
-    // The S7 done-criterion itself (wave index 5 resolved, never leaked) is asserted in
-    // the mechanism-proof test above, de-indexed — not duplicated here.
-    expect(state.cumulativeKillBounty).toBe(177);
-    expect(state.bounty).toBe(218);
-    expect(hashSimState(state)).toBe('4c8de2bc');
-    expect(deriveScore(state, ruleset)).toBe(377);
-    expect(deriveStars(state, ruleset)).toBe(1);
-  });
+      // --- THE MEASUREMENT — measured, not invented. Re-pinned M2-S10 P3: the loop
+      // above now runs to terminal under `MAX_MATCH_TICKS` instead of a fixed 2400
+      // ticks. Wave index 5 (`flying`) still dies to `antiair` in full (0 leaks, lives
+      // still 10 at that point — unchanged from M2-S7). But this build's `antiair`
+      // towers, an AIR-only weapon, have no answer for the ground-domain `boss`/
+      // `normal` in wave index 7, and only partial answer for wave index 6's armored
+      // `armored-flyer` (armor 5 against `antiair`'s 8 nets 3/hit — enough to kill
+      // some, not all, before they cross). The scenario still WINS (this build clears
+      // enough of both remaining waves to stay above 0 lives), but on far fewer lives
+      // and with both trailing waves partially leaked.
+      // Re-pinned M2-S11 P3 (measured). P1's
+      // ten-wave arc inserts a new wave 4 before `flying` (still index 5) and a new wave 8
+      // (arc row 9) before the boss (now index 9), and pushes `resolute`+`fast` to index 6
+      // and `armored-flyer` to index 7. This build (the proven wave-0-4 wall plus an
+      // `antiair` wall ahead of `flying`) now also clears the new wave 4 and engages the
+      // new wave 8, and survives all the way to a win over the (renumbered) boss wave.
+      // Measured before (M2-S10 P3) → after (M2-S11 P3): tick 3141 → 3741; lives 3 → 2;
+      // leakedCount 5 → 6; waveCursor 8 → 10; cumulativeKillBounty 114 → 171; bounty
+      // 149 → 212; score 219 → 241; stars 1 → 1 (unchanged).
+      // Re-pinned M2-S11 P4 (measured), the balance pass. Three P4 levers reach this
+      // scenario: `antiair` cadence 20 → 15 (this build's four `antiair` towers now land
+      // a third more shots, so wave index 7's `armored-flyer` costs it two fewer lives —
+      // leakedCount 6 → 4, lives 2 → 4); the boss wave's `normal` escort gaining
+      // `offsetTicks` 600 (the run's tail lengthens by exactly that, tick 3741 → 4112);
+      // and `survivalMul` 35 → 50 (score 241 → 377 = 177 kill bounty + 4 × 50). The S7
+      // done-criterion below — wave index 5 resolved and never leaked — is untouched.
+      // Re-measured final at P4b — unchanged from P4 (this is already the P4-tuned
+      // measurement; no further change landed after it).
+      console.log(
+        `[story-flying-wave #2] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
+          `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
+          `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
+      );
+      expect(state.phase).toBe('won');
+      expect(state.tick).toBe(4112);
+      expect(state.lives).toBe(4);
+      expect(state.leakedCount).toBe(4);
+      expect(state.waveResolved).toEqual([
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+      ]);
+      // Wave index 5 still clean (all killed, per the load-bearing proof this scenario
+      // exists for); wave indices 7, 8 and 9 each leak at least one creep.
+      expect(state.waveLeaked).toEqual([
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+      ]);
+      expect(state.waveCursor).toBe(10);
+      // The S7 done-criterion itself (wave index 5 resolved, never leaked) is asserted in
+      // the mechanism-proof test above, de-indexed — not duplicated here.
+      expect(state.cumulativeKillBounty).toBe(177);
+      expect(state.bounty).toBe(218);
+      expect(hashSimState(state)).toBe('4c8de2bc');
+      expect(deriveScore(state, ruleset)).toBe(377);
+      expect(deriveStars(state, ruleset)).toBe(1);
+    },
+  );
 
   // SHARED SCENARIO (S11 P2 completion): the ground-only wall plus two `slow` towers
   // ahead of wave 5, run to terminal ONCE — the mechanism-proof test below (the slowed-
@@ -469,72 +477,78 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
   // out of the mechanism-proof test above at S11 P2 completion. Same run as that test
   // (`runSlowWall`'s module-level memo), same literals as before this split — nothing
   // here was re-measured, only re-homed.
-  it('`slow` towers (now both-domain) ahead of wave 5 — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)', () => {
-    const { ruleset, state } = runSlowWall();
+  it(
+    '`slow` towers (now both-domain) ahead of wave 5 — the full-game terminal state, outcome golden (position-sensitive by nature, re-measured when the arc moves)',
+    { timeout: 120_000 },
+    () => {
+      const { ruleset, state } = runSlowWall();
 
-    // --- THE MEASUREMENT — measured, not invented. Re-pinned M2-S10 P3: the loop
-    // above now runs to terminal under `MAX_MATCH_TICKS` rather than a fixed 2400
-    // ticks, and the OUTCOME FLIPS 'won' → 'lost' (Story 10 Risk 1 ruling: reported
-    // for S11's balance pass, never tuned away). `slow` also carries a small direct
-    // hit (2 damage, per the catalog), so — unlike the ground-only scenario above —
-    // this build chips one `flying` kill out of wave index 5's 8 (lives 10 → 3,
-    // unchanged from M2-S7). But the two `slow` towers have no answer for wave index
-    // 6's `armored-flyer` beyond that same small chip (armor 5 nets 0 against a
-    // 2-point hit, so it is pure leak pressure again): its first three leaks (spaced
-    // 20 ticks apart) drain lives 3 → 2 → 1 → 0, and the run FREEZES there — before
-    // wave index 6 finishes, and long before wave index 7 (the boss) ever launches.
-    // Re-pinned M2-S11 P3 (measured). Same
-    // insertion as tests 1/2 above: a new wave 4 before `flying` (still index 5), a new
-    // wave 8 before the boss (now index 9), `armored-flyer` now index 7. This build
-    // (the proven wave-0-4 wall plus two `slow` towers ahead of `flying`) clears the
-    // new wave 4 too, chips one `flying` kill from wave index 5 same as before, then
-    // `armored-flyer` (now index 7) leaks and freezes the run at 0 lives before the
-    // boss ever launches. Re-measured final at P4b — unchanged from P3 (this build
-    // freezes at 0 lives before the boss/antiair/survival mechanics P4 tuned).
-    console.log(
-      `[story-flying-wave #3] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
-        `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
-        `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
-    );
-    expect(state.phase).toBe('lost');
-    expect(state.tick).toBe(2926);
-    expect(state.lives).toBe(0);
-    expect(state.leakedCount).toBe(10);
-    expect(state.waveResolved).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      false,
-      false,
-      false,
-    ]);
-    expect(state.waveLeaked).toEqual([
-      false,
-      false,
-      false,
-      false,
-      false,
-      true,
-      false,
-      true,
-      false,
-      false,
-    ]);
-    expect(state.waveCursor).toBe(9);
-    // cumulativeKillBounty re-measured at 106 (+18 over the pre-S11 86, the new wave
-    // 4's own kills, plus the unchanged +2 for wave index 5's one `flying` kill); wave
-    // index 7's three observed leaks before the freeze contribute 0 kills.
-    expect(state.cumulativeKillBounty).toBe(106);
-    expect(state.bounty).toBe(153);
-    expect(hashSimState(state)).toBe('3471ba09');
-    // Lost score formula: kill-bounty only.
-    expect(deriveScore(state, ruleset)).toBe(106);
-    expect(deriveStars(state, ruleset)).toBe(0);
-  });
+      // --- THE MEASUREMENT — measured, not invented. Re-pinned M2-S10 P3: the loop
+      // above now runs to terminal under `MAX_MATCH_TICKS` rather than a fixed 2400
+      // ticks, and the OUTCOME FLIPS 'won' → 'lost' (Story 10 Risk 1 ruling: reported
+      // for S11's balance pass, never tuned away). `slow` also carries a small direct
+      // hit (2 damage, per the catalog), so — unlike the ground-only scenario above —
+      // this build chips one `flying` kill out of wave index 5's 8 (lives 10 → 3,
+      // unchanged from M2-S7). But the two `slow` towers have no answer for wave index
+      // 6's `armored-flyer` beyond that same small chip (armor 5 nets 0 against a
+      // 2-point hit, so it is pure leak pressure again): its first three leaks (spaced
+      // 20 ticks apart) drain lives 3 → 2 → 1 → 0, and the run FREEZES there — before
+      // wave index 6 finishes, and long before wave index 7 (the boss) ever launches.
+      // Re-pinned M2-S11 P3 (measured). Same
+      // insertion as tests 1/2 above: a new wave 4 before `flying` (still index 5), a new
+      // wave 8 before the boss (now index 9), `armored-flyer` now index 7. This build
+      // (the proven wave-0-4 wall plus two `slow` towers ahead of `flying`) clears the
+      // new wave 4 too, chips one `flying` kill from wave index 5 same as before, then
+      // `armored-flyer` (now index 7) leaks and freezes the run at 0 lives before the
+      // boss ever launches. Re-measured final at P4b — unchanged from P3 (this build
+      // freezes at 0 lives before the boss/antiair/survival mechanics P4 tuned).
+      console.log(
+        `[story-flying-wave #3] phase=${state.phase} tick=${state.tick} lives=${state.lives} ` +
+          `leaked=${state.leakedCount} bounty=${state.bounty} hash=${hashSimState(state)} ` +
+          `score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)}`,
+      );
+      expect(state.phase).toBe('lost');
+      expect(state.tick).toBe(2926);
+      expect(state.lives).toBe(0);
+      expect(state.leakedCount).toBe(10);
+      expect(state.waveResolved).toEqual([
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+      ]);
+      expect(state.waveLeaked).toEqual([
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        true,
+        false,
+        false,
+      ]);
+      expect(state.waveCursor).toBe(9);
+      // cumulativeKillBounty re-measured at 106 — stated as MEASURED, not decomposed:
+      // this run's `slow` towers also slow ground creeps and shift what dies where, so
+      // its delta from the pre-S11 value does not reduce to per-wave terms the way the
+      // wall-only run's does (see test 1's decomposition for that baseline). Wave
+      // index 7's three observed leaks before the freeze contribute 0 kills.
+      expect(state.cumulativeKillBounty).toBe(106);
+      expect(state.bounty).toBe(153);
+      expect(hashSimState(state)).toBe('3471ba09');
+      // Lost score formula: kill-bounty only.
+      expect(deriveScore(state, ruleset)).toBe(106);
+      expect(deriveStars(state, ruleset)).toBe(0);
+    },
+  );
 
   it("placement over a live `flying` creep's occupied cell succeeds", () => {
     const bundle = getBundledRuleset();
@@ -568,7 +582,7 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
     // regenerate if it ever proves too tight for a re-cut scenario.
     const OBSERVATION_MARGIN_TICKS = 500;
     let flyerCell: { col: number; row: number } | null = null;
-    for (let t = 0; state.phase === 'running' && flyerCell === null; t++) {
+    for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running' && flyerCell === null; t++) {
       const launchTick = waveLaunchTickObserved(state, flyingWaveIndex);
       if (launchTick !== null && t > launchTick + OBSERVATION_MARGIN_TICKS) break;
       state = step(state, ruleset, inputs(t, state));

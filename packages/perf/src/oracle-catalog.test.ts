@@ -150,7 +150,7 @@ function result(over: Partial<CatalogSceneResult> = {}): CatalogSceneResult {
       heavySummand: 3,
       heavyCount: 1,
     },
-    adversarialDamageCeiling: 257_513,
+    adversarialDamageCeiling: 301_063,
     creepHp: 1_000_000,
     firingTowersByKind: {},
     placedTowersByKind: {},

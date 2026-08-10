@@ -44,7 +44,11 @@ import {
   CATALOG_TOTAL_SPEND,
   type CatalogTowerId,
 } from './layout';
-import { CATALOG_SAMPLE_END_TICK, CATALOG_SAMPLE_START_TICK } from './oracle-catalog';
+import {
+  CATALOG_ATTACKER_COUNTS,
+  CATALOG_SAMPLE_END_TICK,
+  CATALOG_SAMPLE_START_TICK,
+} from './oracle-catalog';
 
 const FP_ONE = 256;
 const HALF_CELL = 128;
@@ -177,6 +181,11 @@ describe('the committed 165-placement table', () => {
     for (const p of placements) tally[p.towerId] = (tally[p.towerId] ?? 0) + 1;
     expect(tally).toEqual(expected);
     for (const id of Object.keys(expected)) expect(compiled.towerById[id]).toBeDefined();
+    // Machine-tie the DECLARED attacker counts (the adversarial damage ceiling's input,
+    // oracle-catalog.ts) to the REALIZED placement tally — without this, a coordinated
+    // re-pin could leave the "no combat deaths" proof bounding a distribution the scene
+    // no longer places (PR #93 ship-review round 2).
+    expect(tally).toEqual({ ...CATALOG_ATTACKER_COUNTS, beacon: 15, mine: 15 });
   });
 
   it('the 135 non-beacon anchors follow the uncapped round-robin, re-derived here', () => {

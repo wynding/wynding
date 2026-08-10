@@ -187,6 +187,16 @@ export function buildCatalogReplay(bundle: Ruleset): Replay {
       `buildCatalogReplay: expected ${CATALOG_TOWER_COUNT} placements, got ${placements.length}`,
     );
   }
+  // Capacity equality, asserted directly: the loop below emits exactly
+  // CATALOG_BUILD_TICKS × PLACEMENTS_PER_TICK inputs, and if the tower count ever grows
+  // without the build window, the tail would be dropped SILENTLY — the committed replay
+  // would build a smaller maze than catalogPlacements() describes (PR #93 CodeRabbit).
+  if (CATALOG_TOWER_COUNT !== CATALOG_BUILD_TICKS * PLACEMENTS_PER_TICK) {
+    throw new Error(
+      `buildCatalogReplay: ${CATALOG_TOWER_COUNT} placements do not fit ` +
+        `${CATALOG_BUILD_TICKS} build ticks × ${PLACEMENTS_PER_TICK}/tick exactly`,
+    );
+  }
   const tickInputs: SimInput[][] = [];
   for (let tick = 0; tick < CATALOG_BUILD_TICKS; tick++) {
     const inputs: SimInput[] = [];
