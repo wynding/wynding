@@ -1,7 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { PNG } from 'pngjs';
-import { intersect, projectedGrid, regionRect, type Rect } from './layout-probe';
+import {
+  FOCUS_RGB,
+  edgeColours,
+  intersect,
+  projectedGrid,
+  regionRect,
+  type Rect,
+} from './layout-probe';
 import { stubFullscreen } from './fullscreen-stub';
 import { COMPACT_QUERY } from '../src/layout';
 
@@ -153,23 +159,7 @@ async function assertUsableTarget(page: Page): Promise<Rect> {
  *  defect it claimed to have fixed, and a later Compact-only fix left Standard broken. */
 async function assertCompleteFocusRing(page: Page): Promise<void> {
   await page.locator('.wy-home').focus();
-  const box = (await page.locator('.wy-home').boundingBox()) as Rect;
-  const png = PNG.sync.read(await page.screenshot());
-  const rgb = (x: number, y: number): string => {
-    const i = (png.width * y + x) << 2;
-    return `${png.data[i]},${png.data[i + 1]},${png.data[i + 2]}`;
-  };
-
-  const FOCUS_RGB = '255,209,102'; // --wy-focus #ffd166
-  const midX = Math.round(box.x + box.width / 2);
-  const midY = Math.round(box.y + box.height / 2);
-  const edges: Record<string, string> = {
-    left: rgb(Math.round(box.x), midY),
-    right: rgb(Math.round(box.x + box.width) - 1, midY),
-    top: rgb(midX, Math.round(box.y)),
-    bottom: rgb(midX, Math.round(box.y + box.height) - 1),
-  };
-  for (const [side, colour] of Object.entries(edges)) {
+  for (const [side, colour] of Object.entries(await edgeColours(page, '.wy-home'))) {
     expect(colour, `the focus ring ${side.toUpperCase()} segment is missing or clipped`).toBe(
       FOCUS_RGB,
     );

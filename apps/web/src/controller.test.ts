@@ -1262,6 +1262,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
       selection: null,
       lastOutcome: null,
       outcomeSeq: 0,
+      inspectSeq: 0,
       callWaveReady: true, // fresh run: running, wave 1 left to call, buffer empty
     });
   });

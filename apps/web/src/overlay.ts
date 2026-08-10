@@ -1172,6 +1172,10 @@ export function createOverlay(
   }
 
   let lastPanelKey = '';
+  // The last `UiState.inspectSeq` renderPanel consumed — `null` before the first frame so
+  // boot's seq of 0 isn't mistaken for a fresh inspect (the `selection` guard covers that
+  // case anyway; the null keeps the latch semantics explicit).
+  let lastInspectSeq: number | null = null;
   // The Panel's live Sell button, tracked across renders so a refund change on the SAME
   // selection can be patched in place (recreating the subtree would drop focus). `null`
   // whenever the Panel isn't showing a selection.
@@ -1194,6 +1198,35 @@ export function createOverlay(
   // very first `update()` call already has `ui.started === true` (a resumed/host-provided
   // snapshot, not necessarily a fresh boot) must not read as "just started".
   let announcedStarted = true;
+  /** Scroll the Rail so the Panel's TOP edge lands at the top of its scrollport (#69).
+   *
+   *  Reveal is keyed on the player's deliberate inspect act ALONE (`UiState.inspectSeq` —
+   *  a pointer click that lands on a tower), never inferred from panel-state transitions:
+   *  - The keyboard cursor also SELECTS every tower it steps over (`aimAt` via
+   *    `moveCursor`), and held-arrow auto-repeat would re-yank the Rail per step —
+   *    navigation is not a request to read the Panel.
+   *  - A placement's auto-selection (armed→sel) is a build act whose next move is usually
+   *    another Card, and `touch.spec.ts` pins that a Card's cached position stays valid
+   *    across a placement.
+   *  - An ARMED Panel is opened from the Rail itself (a Card tap or its hotkey);
+   *    scrolling the Rail then yanks the tapped Card away from the pointer —
+   *    tap-again-to-disarm must keep hitting the same Card (`touch.spec.ts`).
+   *  The armed highlight, the board's focus ring, and the live region carry feedback for
+   *  every non-revealing case.
+   *
+   *  TOP-aligned, not end-aligned: in Compact the Panel is TALLER than the scrollport,
+   *  and a scroll-to-end would clip the Panel's heading off the top — "which tower is
+   *  this?" gone. Where the Panel fits (Standard), the browser clamps this to the same
+   *  end-of-Rail position a scroll-to-end reaches. `offsetTop` on both elements measures
+   *  from the shared positioned ancestor (`.wy-shell`), so the difference is the Panel's
+   *  offset within the Rail (± the Rail's own top padding — absorbed by the Panel's, so
+   *  nothing visible is clipped). `scrollTop`/`offsetTop` are inert under jsdom
+   *  (no-op / 0), so the unit environment needs no stubbing. */
+  function revealPanel(): void {
+    const rail = panel.root.parentElement;
+    if (rail === null) return;
+    rail.scrollTop = panel.root.offsetTop - rail.offsetTop;
+  }
   function renderPanel(ui: UiState, refund: number): void {
     const key =
       ui.armed !== null
@@ -1201,6 +1234,10 @@ export function createOverlay(
         : ui.selection !== null
           ? `sel:${ui.selection.id}`
           : 'closed';
+    // Read and latched BEFORE the same-key early return, so re-clicking the
+    // already-selected tower re-reveals a Panel the player has scrolled away from.
+    const inspectRequested = ui.inspectSeq !== lastInspectSeq;
+    lastInspectSeq = ui.inspectSeq;
     if (key === lastPanelKey) {
       // Same Panel identity (same armed kind / selection) — the subtree is preserved to keep
       // focus, but the Sell refund can still change while the SAME tower stays selected (the
@@ -1227,6 +1264,7 @@ export function createOverlay(
           appendStatRows(panelStatsEl, towerStats(ui.selection.towerId, nextBuff));
         }
       }
+      if (inspectRequested && ui.armed === null && ui.selection !== null) revealPanel();
       return;
     }
     // Focus re-homing seam (PLAN.md P2 Focus rules): renderPanel is the ONE place the Panel
@@ -1272,6 +1310,9 @@ export function createOverlay(
     } else {
       panel.root.hidden = true;
     }
+    // The rebuild-path half of the auto-reveal — the WHY (and the acts that must never
+    // scroll) is documented on `revealPanel` above.
+    if (inspectRequested && ui.armed === null && ui.selection !== null) revealPanel();
     // Re-home only when the torn-down subtree actually held focus AND the rebuild didn't
     // re-establish it inside the Panel (the Panel never auto-focuses, so a previously-held
     // focus always lands on document.body here). A disarm-close (was armed, now closed) →

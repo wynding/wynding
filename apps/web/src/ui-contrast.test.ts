@@ -50,7 +50,20 @@ function contrast(a: number, b: number): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-const REQUIRED_TOKENS = ['bg', 'surface', 'fg', 'accent', 'focus', 'on-accent', 'board-bg'];
+// `armed` has no contrast PAIRING (the armed border is a redundant cue over the Card's
+// gated accent-fill + on-accent flip — see its ui.css comment) but its EXISTENCE is gated
+// here: deleting the token would make `border-color: var(--wy-armed)` fall back to
+// `currentColor` (`--wy-on-accent` on the armed fill — near-invisible) with CI green.
+const REQUIRED_TOKENS = [
+  'bg',
+  'surface',
+  'fg',
+  'accent',
+  'focus',
+  'armed',
+  'on-accent',
+  'board-bg',
+];
 
 describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥ 3:1)', () => {
   const tokens = parseTokens(css);

@@ -112,6 +112,12 @@ export interface UiState {
    *  equality, so two consecutive identical outcomes still both get announced. Reset to 0
    *  on `startRun()`. */
   readonly outcomeSeq: number;
+  /** Bumped every time a POINTER click lands on a tower (`clickAt`'s unarmed selection
+   *  branch — the player's deliberate "inspect this" act), including re-clicking the
+   *  already-selected tower. The Panel's auto-reveal keys on this identity (overlay.ts);
+   *  keyboard cursor-steps also select (`aimAt` via `moveCursor`) but are navigation and
+   *  never bump it. Reset to 0 on `startRun()`. */
+  readonly inspectSeq: number;
   /** Whether pressing the morphed primary control right now (once `started`) would
    *  actually queue a `callWaveEarly` (PLAN.md P3 step 15) — folds `HudVM.callable`
    *  (sim semantics: running, a wave left to call, no call already pending) together
@@ -544,6 +550,11 @@ export function createController(
   // (including a repeat of the same one) so the live region can re-announce a repeated
   // outcome that `uiRev` alone can't distinguish from a no-op re-render.
   let outcomeSeq = 0;
+  // The deliberate-inspect counter (#69): bumped ONLY when a pointer click lands on a
+  // tower (`clickAt`'s unarmed selection). Same identity discipline as `outcomeSeq` — the
+  // Panel's auto-reveal (overlay.ts) keys on the bump, not on selection equality, so
+  // re-clicking the already-selected tower re-reveals. Reset to 0 on `startRun()`.
+  let inspectSeq = 0;
   // Player-started runs (PLAN.md P4): the real advance gate. `false` from a fresh run/
   // Play-again until `start()`'s enqueue is accepted; `advance()` is a no-op while this is
   // false, regardless of `paused`/speed — held runs never step. Never reset by anything
@@ -665,6 +676,7 @@ export function createController(
     uiRev = 0;
     lastOutcome = null;
     outcomeSeq = 0;
+    inspectSeq = 0;
     // Held at tick 0 (PLAN.md P4): every fresh run/Play-again starts unstarted — only
     // `start()` flips this.
     started = false;
@@ -971,6 +983,10 @@ export function createController(
     // Unarmed: selection-only. Clicking never places here — armed is placement-only, per
     // the table.
     const existing = towerAt(col, row);
+    // The deliberate-inspect act (#69): a pointer click that LANDS on a tower. Bumped
+    // before the assignment below so re-clicking the current selection still advances the
+    // identity (mirrors `outcomeSeq`'s recorded-not-changed discipline).
+    if (existing !== null) inspectSeq++;
     selection =
       existing === null
         ? null
@@ -1307,6 +1323,7 @@ export function createController(
               },
         lastOutcome,
         outcomeSeq,
+        inspectSeq,
         // `deriveHud`'s `callable` already reads the shared preview projection (so a
         // paused, buffered call surfaces as `launchPending` — PLAN.md P3 step 16); the
         // buffer-capacity half is web-only and folded in here, not in `@wynding/render`.
