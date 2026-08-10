@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { PNG } from 'pngjs';
 import { createProjection } from '@wynding/render';
 import {
   EXEMPT_FROM_DECLARATION,
@@ -7,14 +8,17 @@ import {
   WALKED_CONTAINERS,
 } from '../src/layout';
 
-// layout-probe.ts — shared measurement helpers for the Story 11 layout gates
-// (`compact.spec.ts` + `smoke.spec.ts`'s 200%-zoom section). Following `contrast.ts`'s
+// layout-probe.ts — shared measurement helpers for the layout gates: the Story 11 pair
+// (`compact.spec.ts` + `smoke.spec.ts`'s 200%-zoom section) plus `home.spec.ts` and
+// `arming.spec.ts`'s focus-ring pixel sampling (#69). Following `contrast.ts`'s
 // precedent: a small e2e-only helper module rather than a duplicated block per spec.
 //
 // EVERY size gate here is computed against the PROJECTED PLAYABLE GRID — the letterboxed
 // board rect `createProjection` derives from `.wy-board`'s box — never against element
 // boxes. A stage that grows while the grid inside it stays the same size is not more
-// playable space, and an element-box gate would not notice the difference.
+// playable space, and an element-box gate would not notice the difference. (`edgeColours`
+// is not a size gate: a focus ring's home IS its element's border box, so that one probe
+// deliberately samples element edges.)
 
 // M1's "Open Field" board is 28×24 — mirrored from content's boards.ts rather than imported
 // (e2e stays decoupled from content internals). This is the ONE copy of those two numbers:
@@ -26,6 +30,37 @@ export interface Rect {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+}
+
+/** The focus-ring colour every `:focus-visible` indicator resolves to (`--wy-focus:
+ *  #ffd166` in ui.css), as a screenshot-sampled `r,g,b` string. The ONE copy —
+ *  `home.spec.ts` and `arming.spec.ts` sample against it rather than each pinning their
+ *  own literal that a palette change would silently desync. */
+export const FOCUS_RGB = '255,209,102';
+
+/** The rendered colour at the midpoint of each edge of `selector`'s border box, from a
+ *  fresh full-page screenshot. Rings drawn INSIDE the box (a negative `outline-offset`, or
+ *  the board's inset `::after` border) put ring pixels exactly on the box edge, so a
+ *  complete ring reads `FOCUS_RGB` at all four midpoints and a clipped, hidden, or absent
+ *  one reads the backdrop. A rendered-pixel probe because nothing else can answer this:
+ *  the DOM exposes no ring geometry and axe does not evaluate ring clipping (the
+ *  `.wy-home` comment in ui.css records the gate that passed while the defect shipped). */
+export async function edgeColours(page: Page, selector: string): Promise<Record<string, string>> {
+  const box = (await page.locator(selector).boundingBox()) as Rect;
+  expect(box, `${selector} has no layout box`).not.toBeNull();
+  const png = PNG.sync.read(await page.screenshot());
+  const rgb = (x: number, y: number): string => {
+    const i = (png.width * y + x) << 2;
+    return `${png.data[i]},${png.data[i + 1]},${png.data[i + 2]}`;
+  };
+  const midX = Math.round(box.x + box.width / 2);
+  const midY = Math.round(box.y + box.height / 2);
+  return {
+    left: rgb(Math.round(box.x), midY),
+    right: rgb(Math.round(box.x + box.width) - 1, midY),
+    top: rgb(midX, Math.round(box.y)),
+    bottom: rgb(midX, Math.round(box.y + box.height) - 1),
+  };
 }
 
 /** The projected playable grid: where the board's cells actually are, in page coordinates,

@@ -21,6 +21,15 @@
   --wy-fg: #f4f7fb; /* ~15:1 on --wy-bg */
   --wy-accent: #4aa3ff; /* ~4.9:1 on --wy-bg */
   --wy-focus: #ffd166;
+  /* The armed Card's border (#69). The same hue as the focus ring TODAY, but deliberately
+     its own token: `--wy-focus` means "keyboard focus is here" (the destructive-button
+     comment far below leans on exactly that reading), while this means "this Card is
+     armed" — independent states that must stay re-colourable apart. No contrast PAIRING of
+     its own in `ui-contrast.test.ts`: the armed border is a redundant cue over the Card's
+     accent-fill + on-accent text flip, which is what carries the state (and is gated). Its
+     EXISTENCE is in `REQUIRED_TOKENS` there, so deleting it cannot silently fall back to
+     `currentColor`. */
+  --wy-armed: #ffd166;
   --wy-on-accent: #04121f;
   --wy-board-bg: #12141c;
   /* Dimmed foreground for aria-disabled controls — ≈ --wy-fg composited at 0.6 over
@@ -376,14 +385,44 @@ body {
   position: absolute;
   inset: 0;
   background: var(--wy-board-bg);
-  outline-offset: 2px;
+  /* The focus-ring `::after` below must beat the composited canvas WITHOUT its z-index
+     leaking into the Shell's stacking order — the Dock's documented `z-index: 1` keeps
+     winning over the whole board subtree exactly as before. */
+  isolation: isolate;
   /* A touch/pen press-adjust-release drag must not be stolen by browser scroll/gesture
      handling (PLAN.md P3). */
   touch-action: none;
 }
 
+/* The board's focus ring is its own overlay element, NOT an `outline` (#69) — both plain
+   forms are defeated here, and both defeats are measured, not theorized. OUTSIDE (the old
+   `outline-offset: 2px`): the board sits flush with the viewport's left and bottom edges,
+   so those two segments fell off-screen and keyboard users saw a top+right L that read as
+   broken chrome. INSIDE (`outline-offset: -3px`, the `.wy-home` fix): never renders at all
+   on this element — the Phaser `<canvas>` fills the board and its composited layer paints
+   over the host's own outline (probed 2026-08-10: hide the canvas and the inset outline is
+   complete on all four sides). So the ring is a bordered `::after` stacked explicitly above
+   the canvas; `pointer-events: none` keeps the 3px band from stealing board input at the
+   edges, and a real `border` (not box-shadow) is subject to forced-color-adjust, so by
+   spec the indicator survives forced-colors mode (asserted nowhere — no forced-colors
+   project exists). The `outline: none` is deliberate: the UA's default `:focus-visible`
+   auto ring would ALSO vanish under the canvas in Chromium, and render engine-dependent
+   artifacts elsewhere — one indicator, this one. The canvas probe is MANUAL (2026-08-10): no CI
+   project renders the board without its canvas, so `arming.spec.ts`'s pixel gate proves a
+   complete ring is present, not which mechanism painted it. Pinned by rendered pixels
+   there, because the DOM and axe cannot see any of this (see `.wy-home`'s comment
+   above). */
 .wy-board:focus-visible {
-  outline: 3px solid var(--wy-focus);
+  outline: none;
+}
+
+.wy-board:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 3px solid var(--wy-focus);
+  pointer-events: none;
 }
 
 .wy-dock {
@@ -439,6 +478,15 @@ body {
   gap: 0.15rem;
   width: 100%;
   min-height: 44px;
+  /* Never a flex-squash victim (#69): an explicit `min-height` (the 44px tap floor above)
+     REPLACES the flex auto-minimum, so with the default `flex-shrink: 1` the Cards
+     squashed toward 44px whenever the Rail over-filled — which the nine-Card catalog
+     already does on its own at Standard's default height, before any Panel opens — and
+     the hotkey badge rendered outside its Card's border box. The Rail is a scrollport
+     (`overflow-y: auto`) — it absorbs overflow by scrolling, never by squashing its
+     children. Pinned by `arming.spec.ts`, whose pre-arm baseline catches the no-Panel
+     case. */
+  flex-shrink: 0;
   padding: 0.5rem 0.75rem;
   font-size: 1rem;
   color: var(--wy-fg);
@@ -458,7 +506,7 @@ body {
 }
 
 .wy-card[aria-pressed='true'] {
-  border-color: var(--wy-focus);
+  border-color: var(--wy-armed);
   background: var(--wy-accent);
   color: var(--wy-on-accent);
 }
@@ -479,6 +527,8 @@ body {
 }
 
 .wy-panel {
+  /* Same rule as `.wy-card` (#69): Rail children scroll into reach, they never shrink. */
+  flex-shrink: 0;
   padding: 0.5rem 0.75rem;
   background: var(--wy-surface);
   border: 1px solid #33465f;

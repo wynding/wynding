@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { createProjection } from '@wynding/render';
 import {
+  GRID,
   assertDeclaredRegions,
   assertRegionRelations,
   intersect,
@@ -578,5 +580,84 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
 
     await assertDeclaredRegions(page);
     await assertRegionRelations(page, 'compact');
+  });
+});
+
+test.describe('Rail under the open Panel — Compact (#69)', () => {
+  test('658×320: Cards never squash, arming/placing never scrolls, a pointer inspect reveals the Panel TOP-first', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+
+    const railScrollTop = () =>
+      page.evaluate(() => (document.querySelector('.wy-rail') as HTMLElement).scrollTop);
+    // Internal overflow only: the hotkey badge is `display: none` on Compact, so a
+    // badge-position assertion here would pass vacuously on a zero rect.
+    const cardOverflows = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('.wy-card')].map((c) => c.scrollHeight - c.clientHeight),
+      );
+
+    await page.getByRole('button', { name: /Basic Tower/ }).click();
+    await expect(page.locator('.wy-panel')).toBeVisible();
+    const overflows = await cardOverflows();
+    expect(overflows).toHaveLength(9); // vacuous-pass guard — same rule as the badge counts above
+    for (const [i, overflow] of overflows.entries())
+      expect(overflow, `card ${i + 1} squashed by the open Panel`).toBeLessThanOrEqual(1);
+    expect(await railScrollTop(), 'arming must not scroll the Rail').toBe(0);
+
+    // Place at (3,3) — smoke.spec's walk; the placement's auto-selection is a build act
+    // and must not scroll either (`touch.spec.ts` pins a Card's cached position across a
+    // placement). The Sell-button await gates the rebuild frame, so the zero reads are
+    // post-frame, not not-yet.
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
+    expect(await railScrollTop(), 'a placement must not scroll the Rail').toBe(0);
+
+    // The deliberate pointer inspect. On Compact the Panel is TALLER than the scrollport —
+    // the case that separates the top-aligned reveal from a naive scroll-to-end, which
+    // would clip the heading ("which tower is this?") off the top.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.wy-panel')).toBeHidden();
+    const box = (await page.locator('.wy-board').boundingBox()) as Rect;
+    const projection = createProjection({
+      cols: GRID.cols,
+      rows: GRID.rows,
+      cssWidth: box.width,
+      cssHeight: box.height,
+      dpr: 1,
+    });
+    const cell = projection.cellToPixel(3, 3);
+    await page.mouse.click(
+      box.x + cell.x + projection.cellPx / 2,
+      box.y + cell.y + projection.cellPx / 2,
+    );
+    await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
+
+    await expect
+      .poll(railScrollTop, { message: 'a pointer inspect must scroll the Rail' })
+      .toBeGreaterThan(0);
+    const name = await page.evaluate(() => {
+      const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
+      const heading = (
+        document.querySelector('.wy-panel-name') as HTMLElement
+      ).getBoundingClientRect();
+      return {
+        railTop: rail.top,
+        railBottom: rail.bottom,
+        top: heading.top,
+        bottom: heading.bottom,
+      };
+    });
+    expect(
+      name.top,
+      "the Panel's heading must not sit above the scrollport",
+    ).toBeGreaterThanOrEqual(name.railTop - 1);
+    expect(name.bottom, "the Panel's heading must be inside the scrollport").toBeLessThanOrEqual(
+      name.railBottom + 1,
+    );
   });
 });

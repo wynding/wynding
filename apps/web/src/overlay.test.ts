@@ -65,6 +65,7 @@ function uiState(over: Partial<UiState> = {}): UiState {
     selection: null,
     lastOutcome: null,
     outcomeSeq: 0,
+    inspectSeq: 0,
     callWaveReady: true,
     ...over,
   };
@@ -2649,5 +2650,69 @@ describe('overlay — modal priority (results > settings)', () => {
     expect(overlay.resultsEl.hidden).toBe(false);
     const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-btn')!;
     expect(document.activeElement).toBe(playAgain);
+  });
+});
+
+// The Panel auto-reveal latch (#69) — pure identity semantics with no browser dependency,
+// so they are pinned HERE rather than only in `arming.spec.ts`/`compact.spec.ts` (which
+// own the rendered-scroll halves). jsdom's own `scrollTop` is a silent no-op, which is
+// exactly why a setter spy on the Rail is the one observable: coverage alone reports these
+// lines green whether or not anything asserts them.
+describe('Panel auto-reveal latch (#69)', () => {
+  const SELECTION = { col: 3, row: 3, id: 1, towerId: 'basic', buffMulFp: 256 };
+  const frameFor = (ui: Partial<UiState>) => ({
+    hud: hud(),
+    paused: false,
+    speed: 1,
+    ui: uiState(ui),
+    refund: 3,
+  });
+  const railScrollSpy = (rail: HTMLElement): ReturnType<typeof vi.fn> => {
+    const spy = vi.fn();
+    Object.defineProperty(rail, 'scrollTop', { get: () => 0, set: spy, configurable: true });
+    return spy;
+  };
+
+  it('reveals exactly on an inspectSeq bump with a selection — never on the selection alone', () => {
+    const { overlay, shell } = setup();
+    const spy = railScrollSpy(shell.rail);
+    overlay.update(frameFor({ inspectSeq: 0 })); // boot: latch absorbs 0, nothing selected
+    // A selection appearing WITHOUT a bump is navigation (a cursor-step) or a placement's
+    // auto-selection — the Rail must hold still.
+    overlay.update(frameFor({ selection: SELECTION, inspectSeq: 0 }));
+    expect(spy).not.toHaveBeenCalled();
+    overlay.update(frameFor({ selection: SELECTION, inspectSeq: 1 })); // the pointer inspect
+    expect(spy).toHaveBeenCalledTimes(1);
+    overlay.update(frameFor({ selection: SELECTION, inspectSeq: 1 })); // steady state
+    expect(spy).toHaveBeenCalledTimes(1); // no per-frame re-yank
+  });
+
+  it('a bump consumed on an armed frame is CONSUMED, not deferred to the next selection', () => {
+    const { overlay, shell } = setup();
+    const spy = railScrollSpy(shell.rail);
+    overlay.update(frameFor({ inspectSeq: 0 }));
+    // The click-then-arm-in-one-frame interleaving: the bump arrives while armed, where
+    // scrolling would move the Rail the pointer is interacting with.
+    overlay.update(frameFor({ armed: 'basic', inspectSeq: 1 }));
+    // A later selection with the SAME seq (e.g. the placement's auto-selection) must not
+    // cash in the stale bump.
+    overlay.update(frameFor({ selection: SELECTION, inspectSeq: 1 }));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('Play-again absorbs the seq reset — no stale reveal from the previous run identity', () => {
+    const { overlay, shell } = setup();
+    const spy = railScrollSpy(shell.rail);
+    overlay.update(frameFor({ inspectSeq: 0 }));
+    overlay.update(frameFor({ selection: SELECTION, inspectSeq: 2 })); // a real inspect
+    expect(spy).toHaveBeenCalledTimes(1);
+    // startRun() zeroes inspectSeq and nulls the selection in the same reset block; the
+    // first post-reset frame reflects both, so the latch re-anchors at 0 with nothing to
+    // reveal…
+    overlay.update(frameFor({ inspectSeq: 0 }));
+    // …and a post-reset selection at the SAME seq 0 (a cursor-step in the new run) stays
+    // unrevealed.
+    overlay.update(frameFor({ selection: SELECTION, inspectSeq: 0 }));
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
