@@ -159,8 +159,8 @@ export async function assertRegionRelations(
 
   // The wave preview (playtest round) — the SECOND Stage overlay, held to the Dock's
   // doctrine: a bounded corner clip, here the TOP-LEFT. Gated ONLY in its floating home
-  // (a `.wy-stage` parent): in the hud home (Compact; `main.ts`'s zoom bucket and clip
-  // ratchet on Standard) the node lives inside an `overflow-y: auto` scrollport, where
+  // (a `.wy-stage` parent): in the hud home (Compact; `main.ts`'s sub-400px width
+  // bucket on Standard) the node lives inside an `overflow-y: auto` scrollport, where
   // `boundingBox()` is a LAYOUT rect — a scrolled-out preview reports coordinates
   // anywhere, including a negative y over the grid, while occluding nothing. What governs
   // it there is `.wy-hud`'s own bounded-scroll contract (`smoke.spec.ts`'s zoom gates)

@@ -26,13 +26,23 @@ const statusHeight = (page: Page): Promise<number> =>
     Math.round(document.querySelector('.wy-status')!.getBoundingClientRect().height),
   );
 
+/** The preview's current home by CLASS MEMBERSHIP, never className equality — a modifier
+ *  class on either host must not fail (or worse, silently mis-route) these assertions. */
+const previewHome = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const parent = document.querySelector('.wy-wave-preview')!.parentElement;
+    if (parent?.classList.contains('wy-stage')) return 'stage';
+    if (parent?.classList.contains('wy-hud')) return 'hud';
+    return 'other';
+  });
+
 test('1512×854: preview growth and hiding cannot re-project the board', async ({ page }) => {
   await gotoAt(page, STANDARD);
 
   const preview = page.locator('.wy-wave-preview');
   await expect(preview).toBeVisible();
   // The float itself: a Stage child, absolutely positioned — out of every layout flow.
-  expect(await preview.evaluate((el) => el.parentElement?.className)).toBe('wy-stage');
+  expect(await previewHome(page)).toBe('stage');
   expect(await preview.evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
 
   const gridBefore = await projectedGrid(page);
@@ -85,33 +95,90 @@ test('1512×854: the floating preview is display-only — no pixel of it interce
   expect(hit.onBoard, 'the click lands on the board beneath the preview').toBe(true);
 });
 
-test('1512×854 at 200% text zoom: the preview re-homes to the chips scrollport', async ({
+test('1512×854 at 200% text zoom: the float STAYS — zoom never re-homes, content never moves the board', async ({
   page,
 }) => {
-  // The float is `pointer-events: none` — it cannot scroll — and it is px-bounded, so
-  // zoom would otherwise clip its content against the 40% Stage budget. From 150% root
-  // font, `main.ts`'s zoom bucket returns it to `.wy-hud`, the bounded scrollport whose
-  // 200%-zoom behavior the accessibility checklist certifies (smoke.spec's zoom gates).
+  // Codex #96 P1: an earlier draft re-homed the preview to the hud from 150% root font —
+  // but the hud lives in the content-sized status row, so wave changes re-projected the
+  // board for zoomed Standard users, the exact defect this round ends. The px-capped
+  // card + in-place scroll form serve every zoom level instead, so the ONLY hud homes
+  // are static (Compact; sub-400px stages).
   await gotoAt(page, STANDARD);
-  const parentClass = () =>
-    page.evaluate(() => document.querySelector('.wy-wave-preview')!.parentElement?.className);
-  expect(await parentClass()).toBe('wy-stage');
+  expect(await previewHome(page)).toBe('stage');
   await page.addStyleTag({ content: ':root { font-size: 200% }' });
+  await page.waitForTimeout(200); // let the zoom's own (legitimate) reflow settle
+  expect(await previewHome(page), 'zoom must not re-home the float').toBe('stage');
+
+  const gridBefore = await projectedGrid(page);
+  const statusBefore = await statusHeight(page);
+  await page.evaluate(() => {
+    const list = document.querySelector('.wy-wave-preview-list')!;
+    for (let i = 0; i < 3; i++) {
+      const li = document.createElement('li');
+      li.textContent = '12 × Probe — ground, armor 0, leak cost 1, no immunities';
+      list.append(li);
+    }
+  });
   await expect
-    .poll(parentClass, { message: '200% zoom must re-home the preview to the hud' })
-    .toBe('wy-hud');
-  expect(
-    await page.evaluate(
-      () => getComputedStyle(document.querySelector('.wy-wave-preview')!).position,
-    ),
-  ).toBe('static'); // the in-flow form is keyed on the hud home, not on a media query
+    .poll(
+      () =>
+        page.evaluate(() =>
+          document.querySelector('.wy-wave-preview')!.classList.contains('wy-wave-preview--scroll'),
+        ),
+      { message: 'zoomed overflow is handled by the scroll form, in place' },
+    )
+    .toBe(true);
+  expect(await previewHome(page)).toBe('stage');
+  expect(await projectedGrid(page), 'content re-projected the board at 200% zoom').toEqual(
+    gridBefore,
+  );
+  expect(await statusHeight(page), 'content resized the status row at 200% zoom').toBe(
+    statusBefore,
+  );
+});
+
+test('360×640 (portrait Standard): the hud home is content-invariant — the row reservation', async ({
+  page,
+}) => {
+  // The one Standard shape that cannot host a readable float (the width bucket): the hud
+  // hosts the preview, and ui.css's reservation pins the hud at its cap — so the wave
+  // 1→4-entry swing and the end-of-run hide, the exact changes that resized the row
+  // pre-round, cannot move the board from this home either (Codex #96 P1's second half).
+  await gotoAt(page, { width: 360, height: 640 });
+  expect(await previewHome(page)).toBe('hud');
+
+  const gridBefore = await projectedGrid(page);
+  const statusBefore = await statusHeight(page);
+  await page.evaluate(() => {
+    const list = document.querySelector('.wy-wave-preview-list')!;
+    for (let i = 0; i < 3; i++) {
+      const li = document.createElement('li');
+      li.textContent = '12 × Probe — ground, armor 0, leak cost 1, no immunities';
+      list.append(li);
+    }
+  });
+  expect(await projectedGrid(page), 'a four-entry preview re-projected the board').toEqual(
+    gridBefore,
+  );
+  expect(await statusHeight(page), 'a four-entry preview resized the reserved row').toBe(
+    statusBefore,
+  );
+  await page.evaluate(() => {
+    (document.querySelector('.wy-wave-preview') as HTMLElement).hidden = true;
+  });
+  expect(await projectedGrid(page), 'hiding the preview re-projected the board').toEqual(
+    gridBefore,
+  );
+  expect(await statusHeight(page), 'hiding the preview resized the reserved row').toBe(
+    statusBefore,
+  );
 });
 
 test('1280×720 at 140% zoom, overflowing preview: handled IN PLACE — the float scrolls, the board never moves', async ({
   page,
 }) => {
-  // UNDER the 150% coarse bucket with content the clamped card cannot hold: the card
-  // flips to its scroll form (`--scroll`: wheel/drag + a tab stop) instead of re-homing.
+  // With content the clamped card cannot hold — at any zoom level: the card flips to its
+  // scroll form (`--scroll`: wheel/drag + a tab stop) instead of re-homing.
   // A content-driven re-home is forbidden outright — the hud lives in the content-sized
   // status row, so moving there re-projects the board mid-run, the exact defect this
   // file exists to pin (measured -15%..-24% cellPx when an earlier draft re-homed here).
@@ -121,10 +188,8 @@ test('1280×720 at 140% zoom, overflowing preview: handled IN PLACE — the floa
   // on any font stack.
   await gotoAt(page, { width: 1280, height: 720 });
   await page.addStyleTag({ content: ':root { font-size: 140% }' });
-  const parentClass = () =>
-    page.evaluate(() => document.querySelector('.wy-wave-preview')!.parentElement?.className);
   // Settle after the zoom's own (user-initiated, legitimate) reflow, THEN pin.
-  await expect.poll(parentClass).toBe('wy-stage');
+  await expect.poll(() => previewHome(page)).toBe('stage');
   const gridBefore = await projectedGrid(page);
   const statusBefore = await statusHeight(page);
 
@@ -145,8 +210,8 @@ test('1280×720 at 140% zoom, overflowing preview: handled IN PLACE — the floa
       { message: 'overflowing content must flip the float to its scroll form' },
     )
     .toBe(true);
-  // The node never moved and the board never moved — the invariant, IN the 125-149% band.
-  expect(await parentClass()).toBe('wy-stage');
+  // The node never moved and the board never moved — the invariant, under zoom.
+  expect(await previewHome(page)).toBe('stage');
   expect(await projectedGrid(page), 'the scroll form re-projected the board').toEqual(gridBefore);
   expect(await statusHeight(page), 'the scroll form resized the status row').toBe(statusBefore);
   // And every line is REACHABLE (WCAG 1.4.4): the card scrolls to its end and is a tab stop.
@@ -211,14 +276,14 @@ test('the preview re-homes across the layout fork — Stage on Standard, chips c
   page,
 }) => {
   await gotoAt(page, STANDARD);
-  const parentClass = () =>
-    page.evaluate(() => document.querySelector('.wy-wave-preview')!.parentElement?.className);
-  expect(await parentClass()).toBe('wy-stage');
+  expect(await previewHome(page)).toBe('stage');
 
   // Crossing the fork fires the real matchMedia change listener (`main.ts`) — the ONE
   // node is re-homed, never duplicated (one AT surface).
   await page.setViewportSize(PHONE);
-  await expect.poll(parentClass, { message: 'Compact must re-home the preview' }).toBe('wy-hud');
+  await expect
+    .poll(() => previewHome(page), { message: 'Compact must re-home the preview' })
+    .toBe('hud');
   expect(
     await page.evaluate(
       () => getComputedStyle(document.querySelector('.wy-wave-preview')!).position,
@@ -231,6 +296,6 @@ test('the preview re-homes across the layout fork — Stage on Standard, chips c
 
   await page.setViewportSize(STANDARD);
   await expect
-    .poll(parentClass, { message: 'Standard must re-float the preview' })
-    .toBe('wy-stage');
+    .poll(() => previewHome(page), { message: 'Standard must re-float the preview' })
+    .toBe('stage');
 });

@@ -64,16 +64,19 @@ export interface ShellHud {
 /** The wave-preview surface (M2-S2, PLAN.md P3 step 17) — its OWN visible block in BOTH
  *  layouts, never chip-hosted (the Compact chip's `full` text is screen-reader-only, so
  *  entries stuffed into the wave chip would be invisible to sighted Compact users).
- *  TWO HOMES since the playtest round (`placePreview`): floating over the Stage on wide
- *  Standard — click-through display in its RESTING form (`pointer-events: none`, no tab
- *  stop, read after the board in source order), flipped by `main.ts` to a labelled,
- *  focusable scroll form IN PLACE while its content exceeds its clamp — and inside
- *  `.wy-hud`'s focusable, keyboard-scrollable chips scrollport (contract §1) on Compact,
- *  under ≥150% text zoom, and on sub-400px stages (portrait phones are Standard), where a
- *  long entry list is keyboard-reachable by the scrollport's inheritance exactly as
- *  before the round.
+ *  TWO HOMES since the playtest round (`placePreview`): floating over the Stage on
+ *  Standard stages ≥ 400px — click-through display in its RESTING form
+ *  (`pointer-events: none`, no tab stop, read after the board in source order), flipped
+ *  by `main.ts` to a labelled, focusable scroll form IN PLACE while its content exceeds
+ *  its clamp, at any zoom — and inside `.wy-hud`'s focusable, keyboard-scrollable chips
+ *  scrollport (contract §1) on Compact and on sub-400px stages (portrait phones are
+ *  Standard), where the ui.css row reservation keeps the status row content-invariant
+ *  and a long entry list stays keyboard-reachable by the scrollport's inheritance.
  *  `overlay.ts` owns all three nodes' content/visibility every frame; the Shell only
  *  builds the scaffolding and moves the one node between its homes. */
+/** The wave preview's two supported homes (playtest round) — see `placePreview`. */
+export type PreviewHome = 'stage' | 'hud';
+
 export interface ShellPreview {
   readonly root: HTMLElement;
   readonly title: HTMLElement;
@@ -157,11 +160,11 @@ export interface ShellHandle {
    *  the Stage, out of every layout flow, so the status row (the shell's content-sized
    *  first grid row) never resizes with it and the board never re-projects; `'hud'` — the
    *  bounded, keyboard-scrollable chips scrollport, used on Compact (fixed column width
-   *  already isolates the board) AND on Standard under heavy text zoom, where a
-   *  pointer-events-none float cannot scroll and would outgrow the Stage's overlay
-   *  budget. One node, one AT surface: reparented, never duplicated. `main.ts` decides
-   *  which home from its `COMPACT_QUERY` listener + root-font zoom bucket. */
-  placePreview(home: 'stage' | 'hud'): void;
+   *  already isolates the board) and on sub-400px Standard stages (with ui.css's row
+   *  reservation keeping that row content-invariant). One node, one AT surface:
+   *  reparented, never duplicated. `main.ts` decides which home from its `COMPACT_QUERY`
+   *  listener + the stage-width bucket. */
+  placePreview(home: PreviewHome): void;
   destroy(): void;
 }
 
@@ -515,7 +518,7 @@ export function createShell(
 
   shell.append(status, banner, main, live);
 
-  const placePreview = (home: 'stage' | 'hud'): void => {
+  const placePreview = (home: PreviewHome): void => {
     // CONDITIONAL moves, never unconditional re-appends: appending an already-last child
     // still performs remove-then-insert, which zeroes the node's scrollTop — and the
     // caller re-evaluates on every ResizeObserver tick, so an unconditional move would

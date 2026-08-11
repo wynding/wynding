@@ -36,6 +36,7 @@ import { mount as mountMock } from '@wynding/render/scene';
 import { paintSwatch } from './swatch';
 import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
+import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
 
 // The shared fake handle the mocked scene returns (same object every mount call).
@@ -1158,7 +1159,9 @@ describe('main — boot()', () => {
 });
 
 describe('main — the wave preview home + swatch wiring (playtest round)', () => {
-  const COMPACT = '(max-height: 500px)';
+  // The REAL trigger token, never a restated literal: a drifted copy would leave the
+  // fake matching nothing and every test here passing while asserting nothing.
+  const COMPACT = COMPACT_QUERY;
   /** A matchMedia fake whose Compact MQL is settable and whose listener registry is
    *  inspectable — every other query gets the inert stub `main.ts` itself falls back to. */
   function compactMq(initial: boolean) {
@@ -1207,16 +1210,13 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     expect(mq.listeners).toHaveLength(0);
   });
 
-  it('re-homes to the hud from 150% root font, and back when zoom retreats (the coarse bucket)', () => {
-    // jsdom lacks ResizeObserver and never re-renders on font changes, so the bucket is
-    // driven directly: an inline root font (getComputedStyle reflects it) + a minimal RO
-    // stub on the window, whose callback stands in for the real zoom-resize signal.
+  it('heavy root font does NOT re-home the float — zoom is served in place (Codex #96 P1)', () => {
+    // The earlier ≥150% zoom bucket parked the preview in the content-sized status row,
+    // where wave changes re-projected the board for zoomed Standard users — deleted. The
+    // RO stub also pins the observer lifecycle: both boxes observed, disconnected on
+    // destroy.
     const observed: Element[] = [];
-    let fire: () => void = () => {};
     (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      constructor(cb: () => void) {
-        fire = cb;
-      }
       observe(el: Element): void {
         observed.push(el);
       }
@@ -1225,15 +1225,11 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
       }
     };
     try {
-      document.documentElement.style.fontSize = '32px'; // 200% — over the 24px bucket
+      document.documentElement.style.fontSize = '32px'; // 200%
       const h = homeApp();
       const preview = h.root.querySelector('.wy-wave-preview')!;
-      expect(preview.parentElement?.className).toBe('wy-hud'); // booted straight into the hud
-      expect(observed.length).toBe(2); // the preview AND the stage (the 40% clamp's input)
-
-      document.documentElement.style.fontSize = '16px'; // zoom retreats
-      fire(); // the RO signal a real browser would deliver
-      expect(preview.parentElement?.className).toBe('wy-stage');
+      expect(preview.parentElement?.className).toBe('wy-stage'); // zoom never re-homes
+      expect(observed.length).toBe(2); // the preview AND the stage (the width bucket's input)
       h.app.destroy();
       expect(observed).toHaveLength(0); // disconnected
     } finally {
@@ -1284,15 +1280,13 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount); // one per Card at boot
 
     // A settings change that does NOT touch the mode (reduced motion) must not repaint.
-    const toggle = h.root.parentElement!.querySelector<HTMLInputElement>(
-      '.wy-settings .wy-toggle input',
-    )!;
+    const toggle = h.root.querySelector<HTMLInputElement>('.wy-settings .wy-toggle input')!;
     toggle.checked = true;
     toggle.dispatchEvent(new Event('change'));
     expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount);
 
     // A real mode change repaints the full set exactly once more, at the new mode.
-    const protan = h.root.parentElement!.querySelector<HTMLInputElement>(
+    const protan = h.root.querySelector<HTMLInputElement>(
       '.wy-settings input[name="wy-colour-mode"][value="protan"]',
     )!;
     protan.checked = true;
