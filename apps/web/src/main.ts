@@ -16,6 +16,8 @@ import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
+import { COMPACT_QUERY } from './layout';
+import { paintSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
 import {
   createInstall,
@@ -196,11 +198,94 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   let colourMode = initialSettings.colourMode;
   let reducedMotion = initialSettings.reducedMotion;
   reflectReducedMotion(reducedMotion); // initialize from the first snapshot, not just changes
+  /** The Cards' footprint-glyph tiles (playtest round, `swatch.ts`) — painted at boot and
+   *  again on a colour-mode change, never per frame. */
+  const paintSwatches = (): void => {
+    for (const c of shell.cards) paintSwatch(c.swatch, c.towerId, colourMode);
+  };
+  paintSwatches();
   const unsubscribe = settings.subscribe((s) => {
+    // The swatches' one palette input — repainted only when the mode actually moved, so a
+    // reduced-motion toggle never repaints nine canvases for nothing.
+    const modeChanged = s.colourMode !== colourMode;
     colourMode = s.colourMode;
     reducedMotion = s.reducedMotion;
     reflectReducedMotion(s.reducedMotion);
+    if (modeChanged) paintSwatches();
   });
+
+  // The wave preview's home (playtest round): floating over the Stage on Standard stages
+  // ≥ 400px wide — at EVERY zoom level (Codex #96 P1: a zoom-keyed hud fallback parked
+  // the preview in the content-sized status row, where wave changes re-projected the
+  // board for zoomed users; the px-capped card + in-place scroll form serve zoom
+  // instead) — and in the bounded chips scrollport on Compact and on sub-400px stages,
+  // both STATIC viewport properties. `shell.placePreview` owns the topology; this
+  // decides only which home — via the same injectable matchMedia seam as the rotate
+  // prompt, plus a ResizeObserver (jsdom, which lacks it, also lacks the rendering that
+  // would make its signals meaningful).
+  const compactMq = matchMediaFn(COMPACT_QUERY);
+  const previewEl = shell.preview.root;
+  /** The float's overflow remedy, IN PLACE — a re-home cannot be the remedy for
+   *  content-driven overflow: the hud lives in `.wy-status`, the shell's content-sized
+   *  first grid row, so moving there re-projects the board mid-run, the exact defect this
+   *  round exists to fix (measured: wave 9's four-entry preview arriving would have cost
+   *  cellPx 33 → 25-28). The card flips from a click-through overlay to a scrollable one
+   *  exactly while its content exceeds its clamp: pointer access to the occluded rows
+   *  yields to content completeness (WCAG 1.4.4 — hidden + pointer-none text would be
+   *  unreachable by ANY input), and the `.wy-hud` scrollport's own discipline (decision
+   *  10, shell.ts) applies to the tab stop — a scrollable region is keyboard-operable AND
+   *  named, never a bare div (axe's scrollable-region-focusable checks only the
+   *  focusability half). Stable by construction: the toggle changes no geometry (the box
+   *  is already at its clamp), so nothing feeds back into the ResizeObserver driving it.
+   *  This form serves EVERY zoom level — the card is px-capped, so zoom grows only its
+   *  internal wrapping, never its box — which is what lets Standard stages ≥ 400px keep
+   *  the float (and the board-stability invariant) at any text size. */
+  const setFloatScroll = (scrollable: boolean): void => {
+    previewEl.classList.toggle('wy-wave-preview--scroll', scrollable);
+    if (scrollable) {
+      previewEl.tabIndex = 0;
+      previewEl.setAttribute('role', 'group');
+      previewEl.setAttribute('aria-label', t('preview.label'));
+    } else {
+      previewEl.removeAttribute('tabindex');
+      previewEl.removeAttribute('role');
+      previewEl.removeAttribute('aria-label');
+    }
+  };
+  const applyPreviewHome = (): void => {
+    if (compactMq.matches) {
+      setFloatScroll(false); // the hud scrollport owns overflow in this home
+      shell.placePreview('hud');
+      return;
+    }
+    const stageW = shell.stage.getBoundingClientRect().width;
+    // ONE static bucket: a stage narrower than 400px (a portrait phone is STANDARD — the
+    // Compact trigger is height-keyed) cannot host a readable float — the 45% width arm
+    // would pencil the card below legibility and its permanent scroll form would take
+    // live cells from a touch device's board. The hud hosts it there instead, with the
+    // row RESERVATION (`ui.css`: `.wy-hud:has(> .wy-wave-preview)` fixes the hud at its
+    // cap) keeping the status row content-invariant — wave changes cannot re-project the
+    // board from that home either. Width changes re-home legitimately (a window resize is
+    // a user-initiated whole-page reflow); wave content never does. (`stageW > 0`: jsdom
+    // lays nothing out and reports 0 — no signal, not a narrow stage.)
+    if (stageW > 0 && stageW < 400) {
+      setFloatScroll(false);
+      shell.placePreview('hud');
+      return;
+    }
+    shell.placePreview('stage');
+    setFloatScroll(!previewEl.hidden && previewEl.scrollHeight > previewEl.clientHeight);
+  };
+  applyPreviewHome();
+  compactMq.addEventListener('change', applyPreviewHome);
+  // Observing BOTH boxes: content and zoom changes resize the preview (the scroll-form
+  // trigger); a window resize changes the stage (the width bucket's input) without
+  // touching the preview's own box. Reads the injected document's view, not the global —
+  // the same discipline as the dpr lookup.
+  const PreviewRO = doc.defaultView?.ResizeObserver;
+  const previewResizeObserver = PreviewRO ? new PreviewRO(() => applyPreviewHome()) : null;
+  previewResizeObserver?.observe(shell.preview.root);
+  previewResizeObserver?.observe(shell.stage);
 
   const unsubscribeInstall = install.onChange(() => {
     installRev++;
@@ -488,6 +573,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
+      compactMq.removeEventListener('change', applyPreviewHome);
+      previewResizeObserver?.disconnect();
+      setFloatScroll(false); // the preview grants this module owns, cleared by its owner
       guardListener.abort(); // the home-link exit guard
       reflectReducedMotion(false); // the attribute this module owns, cleared by its owner
       unsubscribeInstall();

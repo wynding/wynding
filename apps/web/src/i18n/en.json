@@ -7,6 +7,7 @@
   "hud.score": "Score: {count}",
   "hud.countdown": "Wave in {seconds}s",
   "hud.label": "Game status",
+  "preview.label": "Wave preview",
   "hud.wave.compact.countdown": "{s}s",
   "hud.stars": "Stars: {count} of 3",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",

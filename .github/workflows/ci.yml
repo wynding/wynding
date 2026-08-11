@@ -69,6 +69,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @wynding/web exec playwright install --with-deps chromium
       - run: pnpm --filter @wynding/web run e2e
+      # Failure forensics ONLY (the no-artifact stance in the comment above is about build
+      # outputs): Playwright's per-failure error-context page snapshots and on-first-retry
+      # traces are the difference between diagnosing a Linux-only failure from the log tail
+      # and guessing at it. Exists solely when the gate is already red.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: playwright-failure-artifacts
+          path: apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Performance gate (ADR 0005 §Validation, M2-S4b): runs the seeded stress scenario —
   # ~300 concurrent creeps, 150 towers, blasts and slows live — and fails on two things.

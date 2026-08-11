@@ -157,6 +157,54 @@ export async function assertRegionRelations(
     ).toBeNull();
   }
 
+  // The wave preview (playtest round) — the SECOND Stage overlay, held to the Dock's
+  // doctrine: a bounded corner clip, here the TOP-LEFT. Gated ONLY in its floating home
+  // (a `.wy-stage` parent): in the hud home (Compact; `main.ts`'s sub-400px width
+  // bucket on Standard) the node lives inside an `overflow-y: auto` scrollport, where
+  // `boundingBox()` is a LAYOUT rect — a scrolled-out preview reports coordinates
+  // anywhere, including a negative y over the grid, while occluding nothing. What governs
+  // it there is `.wy-hud`'s own bounded-scroll contract (`smoke.spec.ts`'s zoom gates)
+  // plus the `status` disjointness asserted above, so comparing the un-clipped rect to
+  // the grid would be meaningless in both directions. Absent / hidden (`regionRect`
+  // null) is legal: the preview hides once every wave has launched.
+  // `classList.contains`, never className equality: an extra class on `.wy-stage` must
+  // not route a genuinely floating preview into the exempt branch (a gate whose failure
+  // mode is "silently skip" is no gate).
+  const previewFloating = await page.evaluate(
+    () =>
+      document
+        .querySelector('[data-wy-region="preview"]')
+        ?.parentElement?.classList.contains('wy-stage') ?? false,
+  );
+  const preview = await regionRect(page, 'preview');
+  if (preview !== null && previewFloating) {
+    const stageR = stage as Rect;
+    expect(contains(stageR, preview), 'the floating preview must sit inside the Stage').toBe(true);
+    const previewOverlap = intersect(preview, grid);
+    if (previewOverlap !== null) {
+      // Both bounds are chosen to be FALSIFIABLE — properties the stylesheet does not
+      // already guarantee (the card's own `max-height: 40%` would make a height check
+      // tautological, so there deliberately isn't one):
+      //  - AREA: the clip may cost at most 40% of the playable grid — this is what the
+      //    card's `min(256px, 45%)` width cap exists to keep true on the tiniest
+      //    Standard stages (a 360-wide portrait window), and it fails if either cap is
+      //    loosened.
+      //  - WIDTH, end-bounded like the dock's band (a start-bound would be vacuous: the
+      //    card is anchored at the stage's left edge, so any overlap trivially STARTS in
+      //    the left half).
+      expect(
+        previewOverlap.width * previewOverlap.height,
+        `the floating preview clips ${Math.round(
+          (100 * (previewOverlap.width * previewOverlap.height)) / (grid.width * grid.height),
+        )}% of the grid (max 40%)`,
+      ).toBeLessThanOrEqual(grid.width * grid.height * 0.4);
+      expect(
+        previewOverlap.x + previewOverlap.width,
+        'the floating preview may only clip the grid inside its LEFT half',
+      ).toBeLessThanOrEqual(grid.x + grid.width / 2);
+    }
+  }
+
   const dock = await regionRect(page, 'dock');
   expect(dock, 'the dock region must be present').not.toBeNull();
   const overlap = intersect(dock as Rect, grid);

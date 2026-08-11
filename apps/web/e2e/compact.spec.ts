@@ -129,6 +129,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(page.locator('.wy-card-hotkey')).toHaveCount(9);
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeHidden();
+    // The glyph swatch is COMPACT-gated like the badge (space, not capability — its
+    // ui.css comment): count pinned first for the same vacuous-pass reason.
+    await expect(page.locator('.wy-card-swatch')).toHaveCount(9);
+    for (const swatch of await page.locator('.wy-card-swatch').all())
+      await expect(swatch).toBeHidden();
 
     // All FIVE chip slots are visible pre-start now (M2-S2, PLAN.md P3 step 15's Start
     // decouple): the wave chip is countdown-only and the sim's real `countdownRemaining`

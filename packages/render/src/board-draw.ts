@@ -21,7 +21,7 @@ import {
   wardPaintOps,
   airborneCuePaintOps,
 } from './creep-paint';
-import { towerFootprintMarkFor } from './tower-paint';
+import { towerFootprintMarkFor, type TowerFootprintMark } from './tower-paint';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
 import type { RenderVM, RenderOverlay } from './types';
@@ -168,6 +168,48 @@ function drawSparkle(g: GraphicsLike, cx: number, cy: number, r: number): void {
  *  because `palette.test.ts` gates `aura` COMPOSITED at exactly this value, and a
  *  change at this one draw site must move the gate with it (the same discipline
  *  `RANGE_GHOST_PREVIEW_ALPHA` already carries for `range`). */
+/** THE footprint-mark dispatch (#89): the committed-body chain (`2, pal.floor, 1`), the
+ *  pending-outline chain (`1, pal.tower, 0.6`), and the Card swatch (`apps/web/src/
+ *  swatch.ts`) all draw the nine-mark vocabulary through this one table, so a new mark
+ *  lands everywhere at once or nowhere. Per-mark scale stays internal: every mark draws at
+ *  `size * 0.22` except `'bolt'`, whose zigzag deliberately spans the whole footprint
+ *  (`size * 0.5` — its comment in `drawBolt` carries the reasoning). `'charge'` is the
+ *  vocabulary's ONE fill (that is its whole distinctness argument at the narrow floor), so
+ *  it consumes the (width, colour, alpha) triple as a fill — width unused — and every
+ *  other mark as a stroke. `'plain'` draws nothing: total over the union, and the reason
+ *  callers need no pre-check. */
+export function drawFootprintMark(
+  g: GraphicsLike,
+  mark: TowerFootprintMark,
+  cx: number,
+  cy: number,
+  size: number,
+  lineWidth: number,
+  color: number,
+  alpha: number,
+): void {
+  if (mark === 'plain') return;
+  if (mark === 'charge') {
+    g.fillStyle(color, alpha);
+    g.fillCircle(cx, cy, size * 0.22);
+    return;
+  }
+  g.lineStyle(lineWidth, color, alpha);
+  if (mark === 'ringed') g.strokeCircle(cx, cy, size * 0.22);
+  else if (mark === 'crosshair') drawCrosshair(g, cx, cy, size * 0.22);
+  else if (mark === 'droplet') drawDroplet(g, cx, cy, size * 0.22);
+  else if (mark === 'bolt') drawBolt(g, cx, cy, size * 0.5);
+  else if (mark === 'arrow') drawArrow(g, cx, cy, size * 0.22);
+  else if (mark === 'pylon') drawPylon(g, cx, cy, size * 0.22);
+  else if (mark === 'ringed-crosshair') drawRingedCrosshair(g, cx, cy, size * 0.22);
+  else {
+    // Exhaustiveness — the header's "everywhere at once or nowhere" made compile-time: a
+    // tenth mark must fail HERE, never silently borrow the last glyph in the chain.
+    const unreachable: never = mark;
+    void unreachable;
+  }
+}
+
 export const AURA_SHELL_ALPHA = 0.9;
 
 /** The buffed-recipient ✦'s centre and radius, both as fractions of ONE cell — pinned
@@ -286,32 +328,16 @@ export function drawTowers(
     // branch below uses `pal.tower` instead — its body is an unfilled outline, so
     // there is no fill to contrast against and the mark keeps the pending cue's own
     // colour + alpha (CodeRabbit #73: the two branches differ on purpose).
-    const mark = towerFootprintMarkFor(t.towerId);
-    if (mark === 'ringed') {
-      g.lineStyle(2, pal.floor, 1);
-      g.strokeCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-    } else if (mark === 'crosshair') {
-      g.lineStyle(2, pal.floor, 1);
-      drawCrosshair(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-    } else if (mark === 'droplet') {
-      g.lineStyle(2, pal.floor, 1);
-      drawDroplet(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-    } else if (mark === 'bolt') {
-      g.lineStyle(2, pal.floor, 1);
-      drawBolt(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.5);
-    } else if (mark === 'arrow') {
-      g.lineStyle(2, pal.floor, 1);
-      drawArrow(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-    } else if (mark === 'pylon') {
-      g.lineStyle(2, pal.floor, 1);
-      drawPylon(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-    } else if (mark === 'charge') {
-      g.fillStyle(pal.floor, 1);
-      g.fillCircle(p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-    } else if (mark === 'ringed-crosshair') {
-      g.lineStyle(2, pal.floor, 1);
-      drawRingedCrosshair(g, p.x + projection.cellPx, p.y + projection.cellPx, size * 0.22);
-    }
+    drawFootprintMark(
+      g,
+      towerFootprintMarkFor(t.towerId),
+      p.x + projection.cellPx,
+      p.y + projection.cellPx,
+      size,
+      2,
+      pal.floor,
+      1,
+    );
     // The recipient ✦ sits in the footprint's top-left CELL, while every
     // `TowerFootprintMark` is anchored at the footprint CENTRE — separated by position,
     // which is what keeps both readable in one 2×2 body.
@@ -349,32 +375,16 @@ export function drawTowers(
     const size = projection.cellPx * 2;
     g.lineStyle(3, pal.tower, 0.6);
     g.strokeRoundedRect(pt.x + 2, pt.y + 2, size - 4, size - 4, 6);
-    const pendingMark = towerFootprintMarkFor(p.towerId);
-    if (pendingMark === 'ringed') {
-      g.lineStyle(1, pal.tower, 0.6);
-      g.strokeCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-    } else if (pendingMark === 'crosshair') {
-      g.lineStyle(1, pal.tower, 0.6);
-      drawCrosshair(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-    } else if (pendingMark === 'droplet') {
-      g.lineStyle(1, pal.tower, 0.6);
-      drawDroplet(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-    } else if (pendingMark === 'bolt') {
-      g.lineStyle(1, pal.tower, 0.6);
-      drawBolt(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.5);
-    } else if (pendingMark === 'arrow') {
-      g.lineStyle(1, pal.tower, 0.6);
-      drawArrow(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-    } else if (pendingMark === 'pylon') {
-      g.lineStyle(1, pal.tower, 0.6);
-      drawPylon(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-    } else if (pendingMark === 'charge') {
-      g.fillStyle(pal.tower, 0.6);
-      g.fillCircle(pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-    } else if (pendingMark === 'ringed-crosshair') {
-      g.lineStyle(1, pal.tower, 0.6);
-      drawRingedCrosshair(g, pt.x + projection.cellPx, pt.y + projection.cellPx, size * 0.22);
-    }
+    drawFootprintMark(
+      g,
+      towerFootprintMarkFor(p.towerId),
+      pt.x + projection.cellPx,
+      pt.y + projection.cellPx,
+      size,
+      1,
+      pal.tower,
+      0.6,
+    );
   }
   if (o.selection !== null) {
     const c = projection.cellToPixel(o.selection.col, o.selection.row);

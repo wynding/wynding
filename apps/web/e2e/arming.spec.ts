@@ -62,10 +62,16 @@ test.describe('arming via hotkey — Standard layout', () => {
     }
   });
 
-  test('1280×720: the opening Panel scrolls the Rail — Cards keep their badges inside', async ({
+  test('1366×768: all nine Cards AND the open Panel fit the Rail — nothing squashes, nothing scrolls', async ({
     page,
   }) => {
-    await gotoStandard(page);
+    // The smallest mainstream laptop viewport, inside the two-column gate (aspect 1.78)
+    // with real slack: at 1280×720 the fit holds by single-digit pixels that move with
+    // the platform font stack (the home.spec recalibration saga's lesson), so the pin
+    // lives where it cannot flap.
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto('/');
+    await expect(page.locator('.wy-board')).toBeVisible();
 
     const cardGeometry = () =>
       page.evaluate(() =>
@@ -110,24 +116,84 @@ test.describe('arming via hotkey — Standard layout', () => {
       ).toBeLessThanOrEqual(0.5);
     }
 
-    // The Rail took the overflow the honest way — internal scroll…
-    const rail = await page.evaluate(() => {
-      const el = document.querySelector('.wy-rail') as HTMLElement;
-      return { scrollable: el.scrollHeight > el.clientHeight, scrollTop: el.scrollTop };
+    // The playtest-round requirement, pinned literally: with the two-column Rail active
+    // (this viewport clears the width gate) every Card AND the open Panel sit fully inside
+    // the Rail's own box — the shop never scrolls off the screen.
+    const fit = await page.evaluate(() => {
+      const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
+      const inside = (r: DOMRect): boolean => r.top >= rail.top - 1 && r.bottom <= rail.bottom + 1;
+      return {
+        cardsInside: [...document.querySelectorAll('.wy-card')].map((c) =>
+          inside(c.getBoundingClientRect()),
+        ),
+        panelInside: inside(
+          (document.querySelector('.wy-panel') as HTMLElement).getBoundingClientRect(),
+        ),
+        scrollTop: (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
+      };
     });
-    expect(rail.scrollable, 'the Rail should overflow internally with the Panel open').toBe(true);
-    // …and arming did NOT auto-scroll it: the Card the player just tapped (or hotkeyed)
-    // must stay under the pointer, so tap-again-to-disarm keeps hitting the same Card —
-    // `touch.spec.ts` pins the toggle on Compact, this pins the no-scroll at Standard. The
-    // armed Card's highlight and the board's focus ring are the armed feedback; a pointer
-    // INSPECT of a placed tower is what auto-reveals the Panel (next test).
-    expect(rail.scrollTop, 'arming must not scroll the Rail').toBe(0);
+    expect(fit.cardsInside, 'every Card fully inside the Rail with the Panel open').toEqual(
+      Array.from({ length: 9 }, () => true),
+    );
+    expect(fit.panelInside, 'the open Panel fully inside the Rail').toBe(true);
+    // And arming did not auto-scroll: the Card the player just tapped (or hotkeyed) must
+    // stay under the pointer — `touch.spec.ts` pins the toggle on Compact; here nothing
+    // overflows so nothing COULD scroll, and the single-column reveal semantics are
+    // pinned at a narrower viewport in the next test.
+    expect(fit.scrollTop, 'arming must not scroll the Rail').toBe(0);
+
+    // The swatches actually PAINTED — their unit seam is deliberately null-context inert
+    // (vitest.setup.ts), so this is the one gate that proves the real canvas path runs.
+    // Sampled on the SLOW card (index 1), whose 'ringed' mark strokes the ground colour
+    // back INSIDE the body — witnessing that the shared dispatch ran, which the mark-less
+    // basic tile could never do (its ground + body survive a dispatch deletion).
+    const swatch = await page.evaluate(() => {
+      const canvas = document.querySelectorAll('.wy-card-swatch')[1] as HTMLCanvasElement;
+      const ctx = canvas.getContext('2d');
+      if (ctx === null) return null;
+      const { width: w, height: h } = canvas;
+      const data = ctx.getImageData(0, 0, w, h).data;
+      const px = (x: number, y: number): string => {
+        const i = (y * w + x) * 4;
+        return `${data[i]},${data[i + 1]},${data[i + 2]}`;
+      };
+      const colours = new Set<string>();
+      for (let i = 0; i < data.length; i += 4)
+        colours.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
+      const ground = px(1, 1);
+      // The ring crosses the centre row at cx ± 0.22·size — scan the middle band for a
+      // ground-coloured pixel INSIDE the body (the stroke's core beats antialiasing).
+      let markPixel = false;
+      const cy = Math.floor(h / 2);
+      for (let x = Math.floor(w * 0.25); x < Math.floor(w * 0.75); x++) {
+        if (px(x, cy) === ground) {
+          markPixel = true;
+          break;
+        }
+      }
+      return { colours: colours.size, markPixel };
+    });
+    expect(swatch, 'a real browser must hand the swatch a 2D context').not.toBeNull();
+    expect(
+      swatch!.colours,
+      'the glyph swatch must be painted (ground + body at minimum)',
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      swatch!.markPixel,
+      "slow's ring must stroke the ground colour inside the body — the dispatch ran",
+    ).toBe(true);
   });
 
-  test('1280×720: ONLY a pointer inspect reveals the Panel — placement and cursor-steps never scroll', async ({
+  test('1000×720: ONLY a pointer inspect reveals the Panel — placement and cursor-steps never scroll', async ({
     page,
   }) => {
-    await gotoStandard(page);
+    // 1000px sits UNDER the two-column width gate, so this is the single-column Rail —
+    // the shape that still overflows and therefore still owns the scroll + reveal
+    // machinery this test pins. (At two-column widths everything fits and the reveal is
+    // a clamped no-op — the previous test pins that world.)
+    await page.setViewportSize({ width: 1000, height: 720 });
+    await page.goto('/');
+    await expect(page.locator('.wy-board')).toBeVisible();
 
     const railScrollTop = () =>
       page.evaluate(() => (document.querySelector('.wy-rail') as HTMLElement).scrollTop);

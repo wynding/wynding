@@ -425,6 +425,128 @@ body {
   pointer-events: none;
 }
 
+/* --- Wave preview: FLOATING over the Stage on Standard (playtest round). Living in the
+   status row made that row content-sized (the shell's first `auto` grid row), so every
+   preview change — a wave with more entry lines (1 on most waves, 4 on wave 9), a
+   font-stack-dependent wrap, the end-of-run hide — resized the row and re-projected the
+   whole board mid-run (cellPx 30 → 27 at a 1512×854 window, measured 2026-08-10).
+   Floating decouples it completely: absolutely positioned in `.wy-stage`
+   (position: relative), at the Stage's top-left — the Dock's corner-float precedent,
+   opposite corner. HONEST GEOMETRY (measured, this branch): the letterbox margin NEVER
+   hosts the card whole — margins run 46px (1280×900) to 110px (1512×854) against a
+   ~256px card, so a top-left overlap of roughly 7 columns × 3 rows of board cells is the
+   NORMAL Standard state, not a corner case. A recorded residual
+   (docs/accessibility-checklist.md, playtest round): `pointer-events: none` keeps every
+   overlapped pixel click-through and the entrance lane is mid-left so the path never
+   runs under it, but a tower built beneath is visually hidden while the preview shows.
+   The relations gate (`layout-probe.ts`) pins the float's grid clip to at most 40% of
+   the GRID'S AREA, confined to the grid's left half — and the card is PX-bounded (never
+   rem) precisely so text zoom cannot grow it into that budget — zoom grows only the
+   card's internal wrapping, and content-driven overflow at ANY zoom is handled IN PLACE
+   by the scroll form (the `--scroll` rule below), never by a re-home: the hud lives in
+   the content-sized status row, and moving there re-projects the board mid-run, the
+   exact defect this float exists to end (Codex #96 P1: the earlier ≥150% zoom bucket
+   re-homed there and reopened the bug for zoomed Standard — deleted; the float serves
+   every zoom level). Only two STATIC homes remain hud-side — Compact, and sub-400px
+   stages — and there the hud reservation below keeps the row content-invariant; the
+   `.wy-hud`-keyed rule restores the in-flow look wherever the node lives in the hud.
+   Opaque surface + border so it reads over whatever it lands on; no z-index needed — it
+   is a LATER sibling of `.wy-board` inside `.wy-stage`, so it paints above the canvas by
+   tree order (the board's `isolation` contains its own ::after ring, never its
+   siblings). --- */
+.wy-wave-preview {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  box-sizing: border-box;
+  /* px-capped against zoom growth AND %-capped against tiny Standard stages (a 360-wide
+     portrait window is still Standard): the relations gate pins the resulting grid
+     overlap to <= 40% of the grid's AREA, which the 45% arm is what keeps true there. */
+  max-width: min(256px, 45%);
+  /* The clamp the scroll form scrolls WITHIN. Truncation is never a shipped state: the
+     moment content exceeds this box (scrollHeight > clientHeight — heavy zoom, a small
+     window, a four-entry wave, in any combination), `main.ts` flips the card to its
+     `--scroll` form below, in place (WCAG 1.4.4 — hidden+pointer-none text would be
+     unreachable by any input). */
+  max-height: 40%;
+  overflow: hidden;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.95rem;
+  background: var(--wy-surface);
+  border: 1px solid #33465f;
+  border-radius: 6px;
+  pointer-events: none;
+  user-select: none; /* Shell chrome (PLAN.md P3), like the Dock it mirrors */
+}
+
+/* The float's SCROLL form (`main.ts`'s `applyPreviewHome`), on exactly while content
+   exceeds the clamp above — at any zoom level (the px-capped card never re-homes for
+   zoom): the card trades its click-through contract for scrollability —
+   wheel/drag via `pointer-events: auto`, keyboard via the tab stop main.ts sets with this
+   class (a focused scrollable div arrow-scrolls natively, like `.wy-hud`) — and trades it
+   back the moment content fits again. Toggling this class changes no geometry (the box is
+   already at its clamp), so the flip cannot feed back into the ResizeObserver that drives
+   it. The `.wy-hud`-keyed in-flow rule outranks this one on SPECIFICITY (0,2,0 vs
+   0,1,0), so it wins wherever both apply regardless of source order (main.ts also clears
+   the class on every re-home — belt and braces). Taking the pointer makes the card input
+   CHROME: input.ts's `CHROME_SELECTOR` lists `.wy-wave-preview`, so a captured board/Card
+   release delivered over the scrollable card cancels instead of placing a tower on the
+   cell behind it (Codex #96 P2 — capture routes the release here regardless of where the
+   gesture began; the resting form is hit-test-invisible, so that entry costs it nothing). */
+.wy-wave-preview--scroll {
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.wy-wave-preview--scroll:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: 2px;
+}
+
+/* The preview's IN-FLOW form, keyed on its HOME (`.wy-hud` hosts it on Compact and on
+   sub-400px Standard stages — `shell.placePreview`), never on a media query: one rule
+   serves both re-homing reasons and cannot drift from the reparent logic.
+   `pointer-events` back on so touch-dragging the scrollable chips column works over the
+   preview's own area. */
+.wy-hud .wy-wave-preview {
+  position: static;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  font-size: inherit;
+  background: none;
+  border: 0;
+  pointer-events: auto;
+}
+
+/* THE ROW RESERVATION (Codex #96 P1): while the hud HOSTS the preview node on Standard
+   (the sub-400px width bucket), the hud is pinned at its cap instead of content-sizing —
+   otherwise every wave's entry-count change (1 line on most waves, 4 on wave 9) and the
+   end-of-run hide would resize the status row and re-project the board from this home
+   too, the exact mid-run movement the playtest round exists to end. The cost is honest
+   and STATIC: the row spends its full 40dvh budget whenever this home is in use.
+   MEASURED worst case vs a content-sized row: one cellPx (~7%) on stages 391-399px wide
+   under ~560px tall, where the pin flips the board from width- to height-limited; zero
+   at every wider or taller shape probed. A static 7% beats a mid-run re-projection. Keyed on `:has` (the
+   `.wy-banner` precedent above) so it engages exactly when the node lives here — hidden
+   or not, deliberately: `[hidden]` toggling must not resize the row either. The Compact
+   fork restores content-sizing: its status COLUMN is width-fixed, so preview growth
+   there scrolls inside the hud and cannot touch the board. */
+.wy-hud:has(> .wy-wave-preview) {
+  height: max(2.5rem, calc(40dvh - 3.5rem - env(safe-area-inset-top)));
+}
+
+.wy-wave-preview-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.wy-wave-preview-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+}
+
 .wy-dock {
   /* Bottom-left floating control cluster, overlapping the board border. Anchored to
      `.wy-shell` (its containing block) rather than `.wy-stage`, since the node now lives in
@@ -472,10 +594,11 @@ body {
 /* --- Card: the single M1 tower, in the Rail (PLAN.md P2) --- */
 
 .wy-card {
+  /* [swatch][name+cost column][hotkey] since the playtest round — the stacked three-row
+     form outgrew the Rail once the catalog reached nine. */
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.15rem;
+  align-items: center;
+  gap: 0.5rem;
   width: 100%;
   min-height: 44px;
   /* Never a flex-squash victim (#69): an explicit `min-height` (the 44px tap floor above)
@@ -515,9 +638,31 @@ body {
   font-weight: 700;
 }
 
+/* The name+cost column beside the swatch (playtest round) — a text-free wrapper, so the
+   Card button's accessible name (its subtree text) is unchanged; `min-width: 0` lets a
+   long name wrap inside the two-column Rail's narrower Cards instead of overflowing. */
+.wy-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+/* The footprint-glyph tile — painted by `swatch.ts`; sized HERE and in `SWATCH_SIZE_PX`
+   (the canvas backing store), one number in each world. Fixed px, not rem, deliberately:
+   the tile is a board miniature, and board cells don't scale with text zoom either. */
+.wy-card-swatch {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+}
+
 .wy-card-hotkey {
   font-size: 0.85em;
   opacity: 0.85;
+  margin-left: auto;
+  align-self: flex-start;
 }
 
 /* --- Panel: unified tower details, opens below the Card (PLAN.md P2) --- */
@@ -819,6 +964,49 @@ body {
    200% text zoom cannot starve the board; anything that no longer fits scrolls inside
    `.wy-hud` or the Dock rather than pushing the board smaller.
    =========================================================================== */
+
+/* --- Two-column Rail (playtest round): nine Cards outgrew one column — the stack beat
+   the Rail's height at every Standard viewport (764px of Cards in a 736px Rail at
+   1512×854, measured 2026-08-10), and the open Panel guaranteed scrolling on top. Two
+   columns halve the stack so the Cards AND the open Panel fit with headroom. The extra
+   track width comes out of the Stage's letterbox margin: the board is HEIGHT-limited on
+   Standard, so the Rail widens without costing a single board pixel. Width-gated so a
+   narrow Standard window keeps the single column (whose scroll + reveal machinery,
+   `overlay.ts`, stays exactly as shipped); the min-height arm keeps this off Compact's
+   short-window territory — a 1200×480 window matches the width arm alone, and Compact
+   owns its own Rail sizing in the fork below. Deliberately NOT part of that fork: the
+   Compact query text lives in exactly one place (`layout.test.ts` pins it) and this is a
+   progressive width enhancement on the Standard side of it. --- */
+@media (min-width: 1280px) and (min-aspect-ratio: 16/10) and (min-height: 501px) {
+  /* The aspect arm is what makes "costs no board pixel" a THEOREM, not a hope: at
+     aspect ≥ 1.6 the board is height-limited, so its grid width is ≤ 28·(h−44)/24 ≤
+     0.729·w − 51, and grid + this rail (≤ 368px) ≤ w for every w ≥ 1170 — the margin
+     always covers the widening. A tall-narrow Standard window (1280×900, aspect 1.42) is
+     width-limited with ~46px of margin, where a wider Rail WOULD shrink the board — it
+     stays single-column instead. */
+  :root {
+    --wy-rail-w: min(23rem, 27vw);
+  }
+
+  .wy-rail {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-content: start;
+    /* `auto` rows COMPRESS toward min-content when the open Panel pushes the total past
+       the Rail's height — grid's own version of the #69 flex squash, measured: card 9's
+       row 112px → 81px with 8px of clipped text the moment the Panel opened.
+       `max-content` rows never compress; overflow scrolls instead, exactly the Rail's
+       scrollport contract. */
+    grid-auto-rows: max-content;
+  }
+
+  /* The Panel reads full-width under the Card grid — the stat rows and action buttons
+     need the line length two half-width columns would deny them. */
+  .wy-panel {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-height: 500px) {
   /* EXACT row order (contract §1): a single content row holding the status COLUMN and the
      main area side by side, with the banner spanning both columns beneath them. DOM order is
@@ -996,6 +1184,22 @@ body {
      keyboard guidance — space, not capability, is the constraint here. */
   .wy-card-hotkey {
     display: none;
+  }
+
+  /* The swatch is COMPACT-gated for the same reason as the hotkey badge (space, not
+     capability): the Compact Rail is ~144px wide, and a 36px tile would force every name
+     to wrap harder inside the space the board contract protects. The glyph still exists
+     where it teaches — on the board itself. (The preview's in-flow form needs no rule
+     here — it is keyed on its `.wy-hud` HOME, not on this fork.) */
+  .wy-card-swatch {
+    display: none;
+  }
+
+  /* The Standard row reservation does not apply here: the Compact status COLUMN is
+     width-fixed, so hud content growth scrolls internally and cannot move the board —
+     content-sizing is safe and the column's own budget (contract §2) governs. */
+  .wy-hud:has(> .wy-wave-preview) {
+    height: auto;
   }
 }
 

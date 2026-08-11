@@ -248,3 +248,50 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(document.body.contains(shell.root)).toBe(false);
   });
 });
+
+// The playtest round's Shell additions: the preview's two homes and the Card's glyph tile.
+describe('placePreview + Card swatches (playtest round)', () => {
+  it('re-homes the ONE preview node between its Stage and hud homes, restoring the exact slot', () => {
+    const shell = createShell(document, [{ towerId: 'basic' }]);
+    const original = [...shell.hudBox.children];
+    expect(original).toContain(shell.preview.root); // the hud slot is the boot default
+
+    shell.placePreview('stage');
+    expect(shell.preview.root.parentElement).toBe(shell.stage);
+    // MOVED, never cloned: the same node object left the chips column (one AT surface).
+    expect([...shell.hudBox.children]).not.toContain(shell.preview.root);
+
+    shell.placePreview('hud');
+    expect([...shell.hudBox.children]).toEqual(original); // byte-exact original order
+    shell.destroy();
+  });
+
+  it('every Card leads with an aria-hidden canvas swatch — presentation only, no AT surface', () => {
+    const shell = createShell(document, [{ towerId: 'basic' }, { towerId: 'slow' }]);
+    for (const card of shell.cards) {
+      expect(card.swatch.tagName).toBe('CANVAS');
+      expect(card.swatch.getAttribute('aria-hidden')).toBe('true');
+      expect(card.root.firstElementChild).toBe(card.swatch);
+    }
+    shell.destroy();
+  });
+});
+
+// The conditional reparent (playtest round 4): an unconditional re-append on an
+// already-homed preview would zero a reader's scrollTop on every ResizeObserver tick.
+describe('placePreview — no-op when already home', () => {
+  it('does not move an already-stage-homed preview (a sentinel keeps its position)', () => {
+    const shell = createShell(document, [{ towerId: 'basic' }]);
+    shell.placePreview('stage');
+    const sentinel = document.createElement('div');
+    shell.stage.append(sentinel); // now: [...board..., preview, sentinel]
+    shell.placePreview('stage'); // must NOT re-append (which would put preview last again)
+    expect(shell.stage.lastElementChild).toBe(sentinel);
+    shell.placePreview('hud');
+    shell.placePreview('hud'); // same on the hud side: the slot insert happens once
+    const idx = [...shell.hudBox.children].indexOf(shell.preview.root);
+    shell.placePreview('hud');
+    expect([...shell.hudBox.children].indexOf(shell.preview.root)).toBe(idx);
+    shell.destroy();
+  });
+});

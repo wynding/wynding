@@ -66,18 +66,20 @@ describe('layout — the one published Compact trigger (contract §3)', () => {
     expect(COMPACT_QUERY).not.toMatch(/pointer|width|hover/);
   });
 
-  it('the region registry names the P1 regions and the exempt structural container', () => {
-    expect([...LAYOUT_REGIONS]).toEqual(['status', 'stage', 'dock', 'rail', 'banner']);
+  it('the region registry names the P1 regions (+ the playtest-round preview) and the exempt structural container', () => {
+    expect([...LAYOUT_REGIONS]).toEqual(['status', 'stage', 'dock', 'rail', 'banner', 'preview']);
     expect(REGION_ATTR).toBe('data-wy-region');
     expect(EXEMPT_CONTAINER_SELECTOR).toBe('.wy-main');
   });
 
   it('centralizes the probe walk/exemption vocabulary (contract §5, consumed by layout-probe)', () => {
     // `.wy-home` (not `.wy-wordmark`): the wordmark moved INSIDE the site home anchor, so the
-    // anchor is what the `.wy-status` walk now sees as a direct child.
-    expect(EXEMPT_CONTENT_SELECTOR).toBe('.wy-home, .wy-hud');
-    expect(EXEMPT_FROM_DECLARATION).toBe('.wy-main, .wy-home, .wy-hud');
-    expect([...WALKED_CONTAINERS]).toEqual(['.wy-shell', '.wy-main', '.wy-status']);
+    // anchor is what the `.wy-status` walk now sees as a direct child. `.wy-board` joined
+    // when the Stage joined the walk (playtest round): the stage region's own content, as
+    // `.wy-hud` is the status region's.
+    expect(EXEMPT_CONTENT_SELECTOR).toBe('.wy-home, .wy-hud, .wy-board');
+    expect(EXEMPT_FROM_DECLARATION).toBe('.wy-main, .wy-home, .wy-hud, .wy-board');
+    expect([...WALKED_CONTAINERS]).toEqual(['.wy-shell', '.wy-main', '.wy-status', '.wy-stage']);
   });
 });
 

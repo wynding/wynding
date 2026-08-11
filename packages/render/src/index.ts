@@ -19,6 +19,8 @@ export { creepShapeFor, creepSilhouettePaintOp, slowTelegraphPaintOps } from './
 export type { CreepShape, CreepSilhouettePaintOp, SlowTelegraphPaintOp } from './creep-paint';
 export { towerFootprintMarkFor } from './tower-paint';
 export type { TowerFootprintMark } from './tower-paint';
+export { drawFootprintMark } from './board-draw';
+export type { GraphicsLike } from './board-draw';
 export type {
   CreepVM,
   TowerVM,
