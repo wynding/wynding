@@ -10,6 +10,7 @@ export const EN = {
   "hud.score": "Score: {count}",
   "hud.countdown": "Wave in {seconds}s",
   "hud.label": "Game status",
+  "preview.label": "Wave preview",
   "hud.wave.compact.countdown": "{s}s",
   "hud.stars": "Stars: {count} of 3",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
@@ -146,6 +147,7 @@ export interface MessageParams {
   "hud.score": { "count": string | number };
   "hud.countdown": { "seconds": string | number };
   "hud.label": Record<never, never>;
+  "preview.label": Record<never, never>;
   "hud.wave.compact.countdown": { "s": string | number };
   "hud.stars": { "count": string | number };
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };

@@ -83,6 +83,15 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     await page.goto('/');
     const board = page.locator('.wy-board');
     await expect(board).toBeVisible();
+    // The floating wave preview (playtest round) is DOM chrome over the stage's top-left —
+    // display-only and click-through, but opaque, and this tall 1280×900 viewport is
+    // width-limited (≈10px of letterbox margin), so the card sits exactly over the corner
+    // cells sampled below. Canvas backing-store alignment is this test's subject, not DOM
+    // chrome occlusion (`stage-stability.spec.ts` owns the preview), so it is hidden for
+    // the sampling.
+    await page.evaluate(() => {
+      (document.querySelector('.wy-wave-preview') as HTMLElement).hidden = true;
+    });
     const box = (await board.boundingBox()) as {
       x: number;
       y: number;

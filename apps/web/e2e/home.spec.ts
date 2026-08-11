@@ -25,39 +25,21 @@ const NARROW = { width: 568, height: 320 }; // iPhone-SE-class narrow floor
 /** ADR 0003's interactive-target floor. */
 const TARGET_MIN_PX = 44;
 
-/** The Standard status row's expected height once the link's 44px hit box is absorbed into
- *  the row's own padding (ui.css derives this exactly): 44px, up from ≈40.6px — a NET growth
- *  of ≈3.4px OVER THE ROW'S OWN BASELINE CONTENT. The ceiling is what makes this test worth
- *  having: a naive `min-height: 44px` flex item would stack ON TOP OF that growth and take a
- *  further ~19px from the board.
+/** The Standard status row's expected height: the chips line alone, exactly the link's
+ *  44px hit box absorbed into the row's own padding (ui.css derives this) — measured
+ *  44.0px at 1280×720 since the playtest round FLOATED the wave preview over the Stage
+ *  (`.wy-wave-preview`'s ui.css comment: a content-sized row re-projected the board on
+ *  every preview change, so the preview left the row entirely). That resolves the
+ *  recalibration saga that lived here through M2-S2 and M2-S10 and the S11/S12 flag that
+ *  asked for "a real look rather than a third recalibration" — the real look was removing
+ *  the variable content, and `stage-stability.spec.ts` now pins the board-never-moves
+ *  invariant directly; git carries the essays.
  *
- *  The baseline itself moved at M2-S2 (PLAN.md P3 step 17): the wave chip is now VISIBLE
- *  pre-start (the Start decouple makes its countdown meaningful before Start is ever
- *  pressed) and the wave-preview surface — its own title + entry-list block — sits beside
- *  it, both inside `.wy-hud`. Those two content rows are UNRELATED to the home link under
- *  test here, so the ceiling is recalibrated to (new baseline + the same ~3.4px/nowhere-near
- *  the naive-box-model slack this test exists to catch), not tightened back to the pre-M2-S2
- *  figure. */
-/*  RECALIBRATED AT M2-S10, by the same rule the paragraph above states, and the cause is
- *  worth recording because it is a real product side-effect rather than test drift. Ruling 3
- *  added an always-present "leak cost" slot to every wave-preview entry, taking the wave-1
- *  line from `10 x Creep - ground, armor 0, no immunities` to `..., armor 0, leak cost 1, no
- *  immunities`. MEASURED at 1280x720: that string grew 354.5px -> 445.8px inside a 485.8px
- *  preview box, so its horizontal headroom fell from ~27% to ~8%. macOS font metrics still
- *  fit it on ONE line (row 118.0px); CI's Linux metrics do not, so the entry wraps and the
- *  row lands at 158.0px. This is NOT flakiness - it is font-stack-dependent reflow of
- *  legitimately longer text, and it reproduces deterministically on each platform.
- *
- *  The ceiling therefore tracks the WIDER (wrapped) baseline plus the same ~3.4px, so the
- *  test keeps catching what it exists to catch: a naive `min-height: 44px` flex item would
- *  add ~19px on top of the baseline and still breach this. The honest cost: on a font stack
- *  where the entry does NOT wrap, the ceiling carries ~44px of slack, so the guard is
- *  blunter locally than in CI. The 40dvh contract (`.wy-hud`'s own max-height, 232px here)
- *  is unaffected and is still asserted separately above - the row stays well inside it.
- *  FLAGGED FOR S11/S12: if the preview ever gains a seventh field this line wraps on EVERY
- *  platform, and the Standard status row wants a real look rather than a third
- *  recalibration. */
-const STANDARD_ROW_MAX_PX = 162;
+ *  The ceiling still earns its keep the original way: a naive `min-height: 44px` flex
+ *  item stacking ON TOP of the row's own content — the regression class this guard has
+ *  caught since M1 — adds ~19px and breaches; re-hosting any preview-like content row
+ *  breaches by 60px+. */
+const STANDARD_ROW_MAX_PX = 56;
 
 async function gotoAt(page: Page, size: { width: number; height: number }): Promise<void> {
   await page.setViewportSize(size);

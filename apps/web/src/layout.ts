@@ -29,8 +29,12 @@ export const REGION_ATTR = 'data-wy-region';
  *  undeclared — and (b) the per-region geometric relation to the projected playable grid.
  *  `banner` is the install suggestion's reserved row (Story 11 P3); it is declared here
  *  unconditionally even though the element is usually `hidden`, because the registry
- *  describes the layout's VOCABULARY, not what happens to be on screen. */
-export const LAYOUT_REGIONS = ['status', 'stage', 'dock', 'rail', 'banner'] as const;
+ *  describes the layout's VOCABULARY, not what happens to be on screen. `preview` is the
+ *  wave-preview surface (playtest round): floating over the Stage on Standard — the
+ *  second Stage overlay after the Dock, budgeted by the same relations gate — and in-flow
+ *  inside `.wy-hud` on Compact or under heavy text zoom, where `regionRect` still finds
+ *  it but the relations rule demands grid-disjointness instead of a budget. */
+export const LAYOUT_REGIONS = ['status', 'stage', 'dock', 'rail', 'banner', 'preview'] as const;
 
 export type LayoutRegion = (typeof LAYOUT_REGIONS)[number];
 
@@ -39,14 +43,17 @@ export type LayoutRegion = (typeof LAYOUT_REGIONS)[number];
  *  child of an exempt container to be declared itself. */
 export const EXEMPT_CONTAINER_SELECTOR = '.wy-main';
 
-/** Content painted INSIDE the `status` region — the home link and the HUD chips — rather than
- *  regions the Shell places. They sit under a walked container (`.wy-status`) yet are not
- *  layout regions, so the undeclared-child gate exempts them explicitly.
+/** Content painted INSIDE a region — the home link and the HUD chips (status), and the
+ *  board mount (stage) — rather than regions the Shell places. They sit under walked
+ *  containers yet are not layout regions, so the undeclared-child gate exempts them
+ *  explicitly.
  *
  *  `.wy-home` replaced `.wy-wordmark` here when the wordmark was UPGRADED into the site home
  *  anchor: the wordmark span is now a child of that anchor, not a direct child of
- *  `.wy-status`, so it is no longer reached by the walk at all — only its new parent is. */
-export const EXEMPT_CONTENT_SELECTOR = '.wy-home, .wy-hud';
+ *  `.wy-status`, so it is no longer reached by the walk at all — only its new parent is.
+ *  `.wy-board` joined when `.wy-stage` joined the walk (playtest round): the board is the
+ *  stage region's own content, exactly as `.wy-hud` is the status region's. */
+export const EXEMPT_CONTENT_SELECTOR = '.wy-home, .wy-hud, .wy-board';
 
 /** The FULL exemption from contract §5's undeclared-child gate: the structural container plus
  *  the status content above. Nothing else may ship undeclared. `layout-probe.ts`'s
@@ -56,5 +63,13 @@ export const EXEMPT_FROM_DECLARATION = `${EXEMPT_CONTAINER_SELECTOR}, ${EXEMPT_C
 /** The containers whose VISIBLE children must each declare a region (contract §5). `.wy-status`
  *  is walked alongside `.wy-shell`/`.wy-main`: Story 11's topology amendment reparented the
  *  Dock into it, so `.wy-dock` — and anything a future packet adds beside it — is a Shell
- *  layout child in all but nesting, and would otherwise escape the gate entirely. */
-export const WALKED_CONTAINERS = ['.wy-shell', EXEMPT_CONTAINER_SELECTOR, '.wy-status'] as const;
+ *  layout child in all but nesting, and would otherwise escape the gate entirely.
+ *  `.wy-stage` joined at the playtest round for the same reason: the floating wave preview
+ *  made the Stage a host of overlay surfaces, and an undeclared overlay is exactly how the
+ *  preview's 200%-zoom growth escaped every budget until it covered the whole grid. */
+export const WALKED_CONTAINERS = [
+  '.wy-shell',
+  EXEMPT_CONTAINER_SELECTOR,
+  '.wy-status',
+  '.wy-stage',
+] as const;

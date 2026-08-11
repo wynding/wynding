@@ -64,10 +64,16 @@ export interface ShellHud {
 /** The wave-preview surface (M2-S2, PLAN.md P3 step 17) — its OWN visible block in BOTH
  *  layouts, never chip-hosted (the Compact chip's `full` text is screen-reader-only, so
  *  entries stuffed into the wave chip would be invisible to sighted Compact users).
- *  Hosted inside `.wy-hud` — the existing focusable, keyboard-scrollable HUD scrollport
- *  (contract §1) — so a long entry list is keyboard-reachable by inheritance rather than
- *  needing its own tab stop. `overlay.ts` owns all three nodes' content/visibility every
- *  frame; the Shell only builds the scaffolding. */
+ *  TWO HOMES since the playtest round (`placePreview`): floating over the Stage on wide
+ *  Standard — click-through display in its RESTING form (`pointer-events: none`, no tab
+ *  stop, read after the board in source order), flipped by `main.ts` to a labelled,
+ *  focusable scroll form IN PLACE while its content exceeds its clamp — and inside
+ *  `.wy-hud`'s focusable, keyboard-scrollable chips scrollport (contract §1) on Compact,
+ *  under ≥150% text zoom, and on sub-400px stages (portrait phones are Standard), where a
+ *  long entry list is keyboard-reachable by the scrollport's inheritance exactly as
+ *  before the round.
+ *  `overlay.ts` owns all three nodes' content/visibility every frame; the Shell only
+ *  builds the scaffolding and moves the one node between its homes. */
 export interface ShellPreview {
   readonly root: HTMLElement;
   readonly title: HTMLElement;
@@ -90,6 +96,9 @@ export interface ShellDock {
  *  targets. */
 export interface ShellCard {
   readonly root: HTMLButtonElement;
+  /** The footprint-glyph tile (playtest round) — painted by `swatch.ts` (initial +
+   *  colour-mode changes), `aria-hidden` (the Card's text is its accessible name). */
+  readonly swatch: HTMLCanvasElement;
   readonly name: HTMLSpanElement;
   readonly cost: HTMLSpanElement;
   readonly hotkey: HTMLSpanElement;
@@ -125,6 +134,9 @@ export interface ShellHandle {
    *  that intercepts its activation is owned by `main.ts`. */
   readonly home: HTMLAnchorElement;
   readonly board: HTMLElement; // .wy-board — the scene mount point
+  /** The board's positioned wrapper (`div.wy-stage`) — the containing block the floating
+   *  wave preview anchors to on Standard (playtest round). */
+  readonly stage: HTMLElement;
   readonly rail: HTMLElement; // aside.wy-rail
   /** The chips list — the labelled, keyboard-reachable scrollport (contract §1). */
   readonly hudBox: HTMLElement;
@@ -141,6 +153,15 @@ export interface ShellHandle {
    *  be heard by assistive tech, not read on-screen alongside the Panel's own text. */
   readonly live: HTMLElement;
   /** Remove the Shell from its parent. */
+  /** Re-home the wave preview (playtest round). Its two homes: `'stage'` — floating over
+   *  the Stage, out of every layout flow, so the status row (the shell's content-sized
+   *  first grid row) never resizes with it and the board never re-projects; `'hud'` — the
+   *  bounded, keyboard-scrollable chips scrollport, used on Compact (fixed column width
+   *  already isolates the board) AND on Standard under heavy text zoom, where a
+   *  pointer-events-none float cannot scroll and would outgrow the Stage's overlay
+   *  budget. One node, one AT surface: reparented, never duplicated. `main.ts` decides
+   *  which home from its `COMPACT_QUERY` listener + root-font zoom bucket. */
+  placePreview(home: 'stage' | 'hud'): void;
   destroy(): void;
 }
 
@@ -341,12 +362,18 @@ export function createShell(
   const wave = chip(doc, 'wave');
   const stars = chip(doc, 'stars');
 
-  // --- Wave preview (M2-S2): its own block, near the countdown, inside the SAME
-  // keyboard-scrollable `.wy-hud` group the chips live in — never chip-hosted (see the
-  // `ShellPreview` doc comment). `overlay.ts` fills in the title/list text and toggles
-  // `hidden`; empty/hidden here is the safe pre-first-render default. ---
+  // --- Wave preview (M2-S2; two homes since the playtest round — see the `ShellPreview`
+  // doc comment). BUILT into the `.wy-hud` slot (between the wave chip and stars, below),
+  // which stays its exact home on Compact and under heavy zoom; `placePreview` floats it
+  // over the Stage on ordinary Standard. `overlay.ts` fills in the title/list text and
+  // toggles `hidden`; empty/hidden here is the safe pre-first-render default. ---
   const preview = doc.createElement('div');
   preview.className = 'wy-wave-preview';
+  // A declared layout region (contract §5, playtest round): the preview floats over the
+  // Stage on Standard, making it the second Stage overlay after the Dock — the relations
+  // gate (`layout-probe.ts`) budgets its grid overlap, and an undeclared overlay is
+  // exactly how a surface escapes every budget.
+  preview.setAttribute(REGION_ATTR, 'preview');
   preview.hidden = true;
   const previewTitle = doc.createElement('p');
   previewTitle.className = 'wy-wave-preview-title';
@@ -443,14 +470,28 @@ export function createShell(
     root.type = 'button';
     root.className = 'wy-card';
     root.setAttribute('aria-pressed', 'false');
+    // The footprint-glyph swatch (playtest round): a mini board tile painted by
+    // `swatch.ts` with the tower's own `TowerFootprintMark` through the board's single
+    // mark dispatch (#89) — the Card teaches the exact shape the placed tower shows.
+    // Presentation only: the Card's accessible name is its text (the glyph is a redundant
+    // visual channel, never the sole one — ADR 0003), so AT skips the canvas entirely.
+    const swatch = doc.createElement('canvas');
+    swatch.className = 'wy-card-swatch';
+    swatch.setAttribute('aria-hidden', 'true');
     const name = doc.createElement('span');
     name.className = 'wy-card-name';
     const cost = doc.createElement('span');
     cost.className = 'wy-card-cost';
+    // Name + cost wrapped so the Card can lay out as [swatch][text column][hotkey] — the
+    // wrapper adds no text of its own, so the button's accessible name (its subtree text)
+    // is unchanged.
+    const text = doc.createElement('span');
+    text.className = 'wy-card-text';
+    text.append(name, cost);
     const hotkey = doc.createElement('span');
     hotkey.className = 'wy-card-hotkey';
-    root.append(name, cost, hotkey);
-    return { root, name, cost, hotkey, towerId };
+    root.append(swatch, text, hotkey);
+    return { root, swatch, name, cost, hotkey, towerId };
   });
 
   // --- Panel: opens below the Cards, inside the Rail (PLAN.md P2). Empty scaffolding —
@@ -474,11 +515,27 @@ export function createShell(
 
   shell.append(status, banner, main, live);
 
+  const placePreview = (home: 'stage' | 'hud'): void => {
+    // CONDITIONAL moves, never unconditional re-appends: appending an already-last child
+    // still performs remove-then-insert, which zeroes the node's scrollTop — and the
+    // caller re-evaluates on every ResizeObserver tick, so an unconditional move would
+    // yank a reader scrolled mid-composition back to the top on any window resize.
+    // The hud home restores the exact pre-float slot: between the wave chip and the stars
+    // chip (the `hudBox.append` order above), so the chips scrollport reads identically
+    // to the pre-playtest-round layout.
+    if (home === 'hud') {
+      if (preview.parentElement !== hudBox) hudBox.insertBefore(preview, stars.root);
+    } else if (preview.parentElement !== stage) {
+      stage.append(preview);
+    }
+  };
+
   return {
     root: shell,
     status,
     home,
     board,
+    stage,
     rail,
     hudBox,
     hud: { lives, bounty, score, wave, stars },
@@ -500,6 +557,7 @@ export function createShell(
       dismissGlyph: bannerDismissGlyph,
     },
     live,
+    placePreview,
     destroy(): void {
       shell.remove();
     },

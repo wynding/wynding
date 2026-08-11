@@ -27,7 +27,13 @@ vi.mock('./input', async (importOriginal) => {
   };
 });
 
+// The swatch painter is jsdom-inert by contract (null 2D context — vitest.setup.ts), so a
+// spy is the only observable for `main.ts`'s wiring: painted at boot, repainted ONLY on a
+// real colour-mode change.
+vi.mock('./swatch', () => ({ paintSwatch: vi.fn() }));
+
 import { mount as mountMock } from '@wynding/render/scene';
+import { paintSwatch } from './swatch';
 import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
 import { createController, type Controller } from './controller';
@@ -1148,5 +1154,151 @@ describe('main — boot()', () => {
     handle!.destroy();
     delete (window as unknown as { matchMedia?: unknown }).matchMedia;
     vi.unstubAllGlobals();
+  });
+});
+
+describe('main — the wave preview home + swatch wiring (playtest round)', () => {
+  const COMPACT = '(max-height: 500px)';
+  /** A matchMedia fake whose Compact MQL is settable and whose listener registry is
+   *  inspectable — every other query gets the inert stub `main.ts` itself falls back to. */
+  function compactMq(initial: boolean) {
+    const listeners: (() => void)[] = [];
+    let matching = initial;
+    return {
+      matchMedia: (q: string) =>
+        q === COMPACT
+          ? {
+              get matches() {
+                return matching;
+              },
+              addEventListener: (_t: 'change', l: () => void) => void listeners.push(l),
+              removeEventListener: (_t: 'change', l: () => void) => {
+                const i = listeners.indexOf(l);
+                if (i >= 0) listeners.splice(i, 1);
+              },
+            }
+          : { matches: false, addEventListener: () => {}, removeEventListener: () => {} },
+      set(v: boolean) {
+        matching = v;
+        for (const l of [...listeners]) l();
+      },
+      listeners,
+    };
+  }
+
+  it('boots the preview into the Stage on Standard, the hud on Compact, and follows the media change', () => {
+    const mq = compactMq(false);
+    const h = homeApp({ matchMedia: mq.matchMedia });
+    const preview = h.root.querySelector('.wy-wave-preview')!;
+    expect(preview.parentElement?.className).toBe('wy-stage');
+
+    mq.set(true); // the viewport shrinks under the Compact trigger
+    expect(preview.parentElement?.className).toBe('wy-hud');
+    mq.set(false);
+    expect(preview.parentElement?.className).toBe('wy-stage');
+    h.app.destroy();
+  });
+
+  it('destroy() removes the compact listener — no re-homing after teardown', () => {
+    const mq = compactMq(false);
+    const h = homeApp({ matchMedia: mq.matchMedia });
+    expect(mq.listeners.length).toBe(1);
+    h.app.destroy();
+    expect(mq.listeners).toHaveLength(0);
+  });
+
+  it('re-homes to the hud from 150% root font, and back when zoom retreats (the coarse bucket)', () => {
+    // jsdom lacks ResizeObserver and never re-renders on font changes, so the bucket is
+    // driven directly: an inline root font (getComputedStyle reflects it) + a minimal RO
+    // stub on the window, whose callback stands in for the real zoom-resize signal.
+    const observed: Element[] = [];
+    let fire: () => void = () => {};
+    (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      constructor(cb: () => void) {
+        fire = cb;
+      }
+      observe(el: Element): void {
+        observed.push(el);
+      }
+      disconnect(): void {
+        observed.length = 0;
+      }
+    };
+    try {
+      document.documentElement.style.fontSize = '32px'; // 200% — over the 24px bucket
+      const h = homeApp();
+      const preview = h.root.querySelector('.wy-wave-preview')!;
+      expect(preview.parentElement?.className).toBe('wy-hud'); // booted straight into the hud
+      expect(observed.length).toBe(2); // the preview AND the stage (the 40% clamp's input)
+
+      document.documentElement.style.fontSize = '16px'; // zoom retreats
+      fire(); // the RO signal a real browser would deliver
+      expect(preview.parentElement?.className).toBe('wy-stage');
+      h.app.destroy();
+      expect(observed).toHaveLength(0); // disconnected
+    } finally {
+      document.documentElement.style.fontSize = '';
+      delete (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+    }
+  });
+
+  it('a sub-400px stage is a hud home — the width bucket (portrait phones are Standard)', () => {
+    // jsdom lays nothing out (rect width 0 = "no signal", which the bucket ignores), so
+    // the narrow stage is driven at the prototype seam for this test only: `.wy-stage`
+    // reports the 360×640-portrait geometry, everything else passes through.
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains('wy-stage')) {
+        return {
+          width: 259,
+          height: 596,
+          top: 0,
+          left: 0,
+          right: 259,
+          bottom: 596,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return original.call(this);
+    };
+    try {
+      const h = homeApp();
+      const preview = h.root.querySelector('.wy-wave-preview')!;
+      expect(preview.parentElement?.className).toBe('wy-hud');
+      // The scroll form's grants are cleared in the hud home — no stray tab stop.
+      expect(preview.getAttribute('tabindex')).toBeNull();
+      expect(preview.getAttribute('role')).toBeNull();
+      h.app.destroy();
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it('paints every swatch at boot and repaints ONLY on a real colour-mode change', () => {
+    vi.mocked(paintSwatch).mockClear();
+    const h = homeApp();
+    const cardCount = h.root.querySelectorAll('.wy-card').length;
+    expect(cardCount).toBeGreaterThan(0);
+    expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount); // one per Card at boot
+
+    // A settings change that does NOT touch the mode (reduced motion) must not repaint.
+    const toggle = h.root.parentElement!.querySelector<HTMLInputElement>(
+      '.wy-settings .wy-toggle input',
+    )!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount);
+
+    // A real mode change repaints the full set exactly once more, at the new mode.
+    const protan = h.root.parentElement!.querySelector<HTMLInputElement>(
+      '.wy-settings input[name="wy-colour-mode"][value="protan"]',
+    )!;
+    protan.checked = true;
+    protan.dispatchEvent(new Event('change'));
+    expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount * 2);
+    expect(vi.mocked(paintSwatch).mock.calls.at(-1)?.[2]).toBe('protan');
+    h.app.destroy();
   });
 });
