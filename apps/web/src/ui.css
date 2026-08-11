@@ -488,7 +488,11 @@ body {
    already at its clamp), so the flip cannot feed back into the ResizeObserver that drives
    it. The `.wy-hud`-keyed in-flow rule outranks this one on SPECIFICITY (0,2,0 vs
    0,1,0), so it wins wherever both apply regardless of source order (main.ts also clears
-   the class on every re-home — belt and braces). */
+   the class on every re-home — belt and braces). Taking the pointer makes the card input
+   CHROME: input.ts's `CHROME_SELECTOR` lists `.wy-wave-preview`, so a captured board/Card
+   release delivered over the scrollable card cancels instead of placing a tower on the
+   cell behind it (Codex #96 P2 — capture routes the release here regardless of where the
+   gesture began; the resting form is hit-test-invisible, so that entry costs it nothing). */
 .wy-wave-preview--scroll {
   overflow-y: auto;
   pointer-events: auto;

@@ -212,6 +212,30 @@ describe('input — mouse (P2 hover/click, unchanged by P3)', () => {
     expect(c.frame().curVm.towers).toHaveLength(0); // no placement on the cell underneath the Dock
   });
 
+  // Codex #96 P2: the wave preview's overflow scroll form takes the pointer
+  // (`pointer-events: auto`, for wheel/drag scrolling), so a captured release over it must
+  // cancel exactly like the Dock. Faking `elementFromPoint` to return the preview models
+  // its pointer-active states — the scroll form (the state this selector entry changes)
+  // and the hud home (already chrome via `.wy-status`) — and ONLY those: at rest the float
+  // is pointer-inert (`pointer-events: none`), so the real hit-test can never return it
+  // (stage-stability.spec.ts pins that half in a real browser).
+  it('a mouse release over the scroll-form wave preview never places through it — stays armed', () => {
+    const preview = document.createElement('div');
+    preview.className = 'wy-wave-preview wy-wave-preview--scroll';
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [], c, createKeymap(), {
+      getRect: () => RECT,
+      elementFromPoint: () => preview,
+    });
+    c.armTower('basic');
+    board.dispatchEvent(ptr('pointerdown', 35, 35, 'mouse')); // armed press on the board
+    board.dispatchEvent(ptr('pointerup', 35, 35, 'mouse')); // released over the scrollable card
+    expect(c.uiState().armed).not.toBeNull(); // stays armed — the chrome-release contract
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0); // no tower on the cell behind the preview
+  });
+
   it('does nothing for a pointer outside the board, and detaches cleanly', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
@@ -316,6 +340,25 @@ describe.each([['touch'], ['pen']])(
       board.dispatchEvent(ptr('pointerdown', 35, 105, pointerType)); // anchor (3,8), valid
       board.dispatchEvent(ptr('pointerup', 35, 105, pointerType));
       expect(c.uiState().armed).not.toBeNull(); // stays armed — never committed
+      c.advance(50);
+      expect(c.frame().curVm.towers).toHaveLength(0);
+    });
+
+    // Codex #96 P2, the board-touch half: with this, all three release paths that consult
+    // `isOverChrome` (board-mouse, this tap-flow, Card-drag) carry a preview-specific pin.
+    it('a release over the scroll-form wave preview never commits — stays armed (tap-flow)', () => {
+      const preview = document.createElement('div');
+      preview.className = 'wy-wave-preview wy-wave-preview--scroll';
+      const c = createController(1);
+      c.start(); // PLAN.md P4: advance() no-ops while held
+      attachInput(document, board, [], c, createKeymap(), {
+        getRect: () => RECT,
+        elementFromPoint: () => preview,
+      });
+      c.armTower('basic');
+      board.dispatchEvent(ptr('pointerdown', 35, 105, pointerType)); // anchor (3,8), valid
+      board.dispatchEvent(ptr('pointerup', 35, 105, pointerType)); // released over the scrollable card
+      expect(c.uiState().armed).not.toBeNull(); // stays armed — the tap-flow chrome rule
       c.advance(50);
       expect(c.frame().curVm.towers).toHaveLength(0);
     });
@@ -551,6 +594,26 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses threshold, armed
     card.dispatchEvent(ptr('pointerup', 35, 105, 'touch'));
     expect(c.uiState().armed).toBeNull();
+  });
+
+  // Codex #96 P2, the Card-origin half: the drag release maps to a valid anchor behind the
+  // scroll-form preview (35,105 → (3,8), the same anchor the plain drag-release test above
+  // PLACES at) — the chrome rule must win over the valid cell.
+  it('a release over the scroll-form wave preview cancels a Card drag AND disarms — never places behind it', () => {
+    const preview = document.createElement('div');
+    preview.className = 'wy-wave-preview wy-wave-preview--scroll';
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
+      getRect: () => RECT,
+      elementFromPoint: () => preview,
+    });
+    card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
+    card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses threshold, armed
+    card.dispatchEvent(ptr('pointerup', 35, 105, 'touch')); // released over the scrollable card
+    expect(c.uiState().armed).toBeNull(); // cancelled AND disarmed — the drag-flow chrome rule
+    c.advance(50);
+    expect(c.frame().curVm.towers).toHaveLength(0);
   });
 
   it('a Card press cancelled BEFORE the drag threshold performs no toggle — preserves the pre-gesture armed state (initially unarmed)', () => {

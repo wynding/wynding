@@ -272,6 +272,94 @@ test('1280×720 at 140% zoom, overflowing preview: handled IN PLACE — the floa
     .toBe('board');
 });
 
+test('1280×720 at 140% zoom, scroll-form preview: a captured board release over it cancels — the card is input chrome, no tower placed behind it', async ({
+  page,
+}) => {
+  // Codex #96 P2: pointer capture delivers a board-origin release wherever it lands, and in
+  // the overflow scroll form the preview takes the pointer — so before `input.ts` listed
+  // `.wy-wave-preview` in `CHROME_SELECTOR`, the release fell through the chrome hit-test
+  // and PLACED a tower on the cell behind the card. The drag here is real (mouse down on
+  // the plain board, release over the card), so the whole chain is exercised: capture, the
+  // live `document.elementFromPoint`, and the selector against the real node. The
+  // classification itself is unit-pinned per release path in input.test.ts; this is the
+  // real-pipeline witness.
+  await gotoAt(page, { width: 1280, height: 720 });
+  await page.addStyleTag({ content: ':root { font-size: 140% }' });
+  await expect.poll(() => previewHome(page)).toBe('stage');
+  await page.evaluate(() => {
+    const list = document.querySelector('.wy-wave-preview-list')!;
+    for (let i = 0; i < 5; i++) {
+      const li = document.createElement('li');
+      li.textContent = '12 × Probe — ground, armor 0, leak cost 1, no immunities';
+      list.append(li);
+    }
+  });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          document.querySelector('.wy-wave-preview')!.classList.contains('wy-wave-preview--scroll'),
+        ),
+      { message: 'the fixture premise: the injected composition flips the scroll form on' },
+    )
+    .toBe(true);
+
+  await page.keyboard.press('1');
+  const armedCard = page.locator('.wy-card[aria-pressed="true"]');
+  await expect(armedCard).toHaveCount(1);
+  const sellButton = page.locator('.wy-panel').getByRole('button', { name: /^Sell/ });
+
+  // Press on the plain board (grid right-of-centre — clear of the float AND the Dock's
+  // bottom-left overlap), then release over the scrollable card.
+  const grid = await projectedGrid(page);
+  const previewBox = (await page.locator('.wy-wave-preview').boundingBox())!;
+  const down = { x: grid.x + grid.width * 0.75, y: grid.y + grid.height / 2 };
+  const release = {
+    x: previewBox.x + previewBox.width / 2,
+    y: previewBox.y + previewBox.height / 2,
+  };
+  expect(
+    await page.evaluate(
+      ([x, y]) => {
+        // Explicit null check so a bad point FAILS this guard — `el?.closest(...) !== null`
+        // would pass vacuously (undefined !== null) exactly when the point misses everything.
+        const el = document.elementFromPoint(x, y);
+        return el !== null && el.closest('.wy-board') !== null;
+      },
+      [down.x, down.y],
+    ),
+    'the press must start on the plain board or the drag proves nothing',
+  ).toBe(true);
+  await page.mouse.move(down.x, down.y);
+  await page.mouse.down();
+  await page.mouse.move(release.x, release.y);
+  await page.mouse.up();
+
+  // Settle two frames before asserting: `clickAt` mutates controller state synchronously,
+  // but `aria-pressed` and the Panel only update on the next frame-loop pass — an
+  // immediate assert could sample the stale DOM inside that one-frame window and wave a
+  // regression through (and the control arm below would then green-wash it by selecting
+  // the wrongly-placed tower). Two RAFs guarantee at least one full app frame ran.
+  await page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  );
+
+  // The chrome-release contract: nothing placed, and the board-origin mouse flow stays
+  // armed with everything as it was.
+  await expect(armedCard).toHaveCount(1);
+  await expect(sellButton).toBeHidden();
+
+  // The premise, proven in-test so this can never rot vacuous: the SAME release point maps
+  // to a cell a placement genuinely succeeds on. Make the card hit-test-transparent (its
+  // resting state) and click the same point — the tower now places and its Panel opens.
+  // Only the chrome classification stopped the drag above, not geometry or cell validity.
+  await page.evaluate(() => {
+    (document.querySelector('.wy-wave-preview') as HTMLElement).style.pointerEvents = 'none';
+  });
+  await page.mouse.click(release.x, release.y);
+  await expect(sellButton).toBeVisible();
+});
+
 test('the preview re-homes across the layout fork — Stage on Standard, chips column on Compact', async ({
   page,
 }) => {
