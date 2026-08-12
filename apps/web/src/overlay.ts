@@ -187,9 +187,22 @@ const ICONS = {
  *  slot has nothing to say and the whole chip hides (the wave slot pre-start and terminal)
  *  — the node itself is retained either way. */
 function setChip(chip: ShellChip, full: string, glance: string): void {
-  chip.full.textContent = full;
-  chip.glance.textContent = glance;
+  setLabel(chip.full, full);
+  setLabel(chip.glance, glance);
   chip.root.hidden = full === '';
+}
+
+/** Change-gated `textContent` write for a PERSISTENT LEAF text node that is rewritten across
+ *  refreshes (#98): a same-value `textContent` assignment still replaces the descendant Text
+ *  node, and WebKit — unlike Chromium — does not synthesize `click` for a press that straddles
+ *  such a replacement under the pointer, so an unguarded per-tick write silently kills any firm
+ *  press on that control in Safari. Scope is precise: leaves only (`pauseParts.icon`/`.text`,
+ *  not `pauseBtn` itself) — a guarded write on a composite container would flatten its element
+ *  children into one Text node — and never the outcome live region (the `outcomeSeq`-gated
+ *  write in `update()`), which deliberately FORCES a mutation on repeated messages so
+ *  assistive tech re-announces them. */
+function setLabel(el: Element, text: string): void {
+  if (el.textContent !== text) el.textContent = text;
 }
 
 function button(doc: Document, className: string, label: string): HTMLButtonElement {
@@ -760,9 +773,7 @@ export function createOverlay(
     // nothing to assistive tech and does no needless layout work.
     const actionLabel =
       state.branch === 'ios' ? t('install.banner.how') : t('install.banner.install');
-    if (showBanner && banner.action.textContent !== actionLabel) {
-      banner.action.textContent = actionLabel;
-    }
+    if (showBanner) setLabel(banner.action, actionLabel);
 
     // Settings row: permanent while the app is not installed, and never offers a button it
     // cannot honour.
@@ -773,7 +784,7 @@ export function createOverlay(
     const canAct = state.branch === 'ios' || state.canPrompt;
     if (!canAct && installAction.contains(doc.activeElement)) closeBtn.focus();
     if (installAction.hidden !== !canAct) installAction.hidden = !canAct;
-    if (installAction.textContent !== actionLabel) installAction.textContent = actionLabel;
+    setLabel(installAction, actionLabel);
     if (installExplain.hidden !== canAct) installExplain.hidden = canAct;
     // After a declined browser prompt the held event is gone, so the row falls back to the
     // explanation — but "your browser doesn't offer an install prompt" is untrue for a
@@ -782,7 +793,7 @@ export function createOverlay(
       const explainLabel = state.promptDeclined
         ? t('install.settings.declined')
         : t('install.settings.explain');
-      if (installExplain.textContent !== explainLabel) installExplain.textContent = explainLabel;
+      setLabel(installExplain, explainLabel);
     }
   }
 
@@ -1243,7 +1254,7 @@ export function createOverlay(
       // focus, but the Sell refund can still change while the SAME tower stays selected (the
       // pending queue changed). Patch the existing button's label in place rather than
       // re-keying/recreating the Panel on `refund`.
-      if (panelSellBtn !== null) panelSellBtn.textContent = t('panel.sell', { refund });
+      if (panelSellBtn !== null) setLabel(panelSellBtn, t('panel.sell', { refund }));
       // The support aura reaching an already-selected tower can change too (M2-S8) — a
       // beacon built or sold beside it — and the stat rows are built ONCE on the rebuild
       // path below, so without this the Damage/(boosted)/Poison rows froze at whatever
@@ -1496,14 +1507,12 @@ export function createOverlay(
     }
     primaryBtn.hidden = false;
     if (!ui.started) {
-      if (primaryParts.text.textContent !== t('controls.start')) {
-        primaryParts.text.textContent = t('controls.start');
-      }
+      setLabel(primaryParts.text, t('controls.start'));
       primaryBtn.setAttribute('aria-disabled', 'false');
       return;
     }
     const label = hud.launchPending ? t('controls.callWave.pending') : t('controls.callWave');
-    if (primaryParts.text.textContent !== label) primaryParts.text.textContent = label;
+    setLabel(primaryParts.text, label);
     primaryBtn.setAttribute('aria-disabled', String(!ui.callWaveReady));
   }
 
@@ -1561,11 +1570,11 @@ export function createOverlay(
       // Pause is HIDDEN (not disabled) pre-start (PLAN.md P4) — there's nothing to pause
       // yet, and a hidden control can't be tabbed to or announced as a false affordance.
       pauseBtn.hidden = !view.ui.started;
-      pauseParts.icon.textContent = view.paused ? ICONS.resume : ICONS.pause;
-      pauseParts.text.textContent = view.paused ? t('controls.resume') : t('controls.pause');
+      setLabel(pauseParts.icon, view.paused ? ICONS.resume : ICONS.pause);
+      setLabel(pauseParts.text, view.paused ? t('controls.resume') : t('controls.pause'));
       pauseBtn.setAttribute('aria-pressed', String(view.paused));
-      speedParts.icon.textContent = `${view.speed}${ICONS.speed}`;
-      speedParts.text.textContent = t('controls.speed', { factor: view.speed });
+      setLabel(speedParts.icon, `${view.speed}${ICONS.speed}`);
+      setLabel(speedParts.text, t('controls.speed', { factor: view.speed }));
       renderPrimary(hud, view.ui);
       // The Start→Call-wave morph is announced through the existing polite live region:
       // Start moves focus to the board and the HUD itself is not

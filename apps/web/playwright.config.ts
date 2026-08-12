@@ -77,6 +77,18 @@ export default defineConfig({
         deviceScaleFactor: 3,
       },
     },
+    // The WebKit regression arm for #98 (a held press straddling a mid-run HUD label
+    // refresh) — scoped to this one spec, not a whole-suite duplication: the rest of the
+    // suite is chromium-calibrated (SwiftShader timings, device profiles), and this defect
+    // class is pinned by `slow-press.spec.ts` plus the browser-agnostic unit invariant
+    // (`overlay.test.ts`). The default `chromium` project deliberately ALSO runs this spec
+    // (its `testIgnore` above doesn't exclude it) as the control arm — Chromium synthesizes
+    // `click` across mutations, so it passes even before the P1 fix lands.
+    {
+      name: 'webkit',
+      testMatch: /slow-press\.spec\.ts/,
+      use: { ...devices['Desktop Safari'] },
+    },
   ],
   webServer: {
     command: 'pnpm run build && pnpm run preview -- --port 4173 --strictPort',

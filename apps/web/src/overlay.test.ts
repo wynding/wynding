@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { HudVM } from '@wynding/render';
 import { compileRuleset } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
-import { createOverlay, type UiAction } from './overlay';
+import { createOverlay, type UiAction, type HudView } from './overlay';
 import type { ModalOverlay } from './modal';
 import { createShell, dockButtonParts } from './shell';
 import { createSettings } from './settings';
@@ -1725,6 +1725,95 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.textContent).not.toContain('[object');
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("catalog id 'constructor'"));
     warnSpy.mockRestore();
+  });
+});
+
+describe('overlay — a steady-state refresh performs zero child-node replacements (#98)', () => {
+  // WebKit does not synthesize `click` for a press that straddles a child-node
+  // replacement under the pointer, and a same-value `textContent` write still replaces
+  // the descendant Text node — so a HUD control that rewrites its label on every ~20 Hz
+  // tick, even with an unchanged value, silently eats firm Safari presses (#98). This is
+  // the class-killer: observe the ACTUAL shell root the test constructs (the `Overlay`
+  // return value exposes only modal roots — results/settings/instructions/leave — so
+  // observing those would watch nothing this defect ever touches) and prove a second,
+  // value-identical `update()` mutates NOTHING under it.
+  //
+  // Each fixture is mid-run (`started: true`, `paused: false` — the state where the
+  // per-tick churn this class lives in actually happens) and follows the same sequence:
+  // an unguarded first pass, a positive-calibration write that proves the observer is
+  // live, then a second update from a FRESH (not reused) deep-equal view object — fresh
+  // references rule out an accidental reference-identity shortcut making the assertion
+  // vacuous.
+  function expectSteadyStateIsQuiet(viewA: HudView): void {
+    const { overlay, shell } = setup();
+    overlay.update(viewA);
+
+    const observer = new MutationObserver(() => {});
+    observer.observe(shell.root, { childList: true, subtree: true });
+
+    // Positive calibration: a deliberate same-value `textContent` write on a leaf span
+    // inside the shell must register as a childList mutation — otherwise a "zero
+    // mutations" result below would prove nothing about the observer, only that it was
+    // never wired up.
+    const calibrationTarget = shell.hud.lives.full;
+    const calibrationText = calibrationTarget.textContent;
+    calibrationTarget.textContent = calibrationText;
+    const calibrationRecords = observer.takeRecords();
+    expect(calibrationRecords.length).toBeGreaterThan(0);
+
+    // Fresh, deep-equal object — same values, new references (`HudView` carries no
+    // tick, so this is exactly the realistic mid-run steady state).
+    const viewB = structuredClone(viewA);
+    overlay.update(viewB);
+    expect(observer.takeRecords()).toEqual([]);
+
+    observer.disconnect();
+  }
+
+  it('(a) no selection, with a populated wave preview in view', () => {
+    expectSteadyStateIsQuiet({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 2,
+          waveCount: 3,
+          entries: [
+            {
+              creepId: 'normal',
+              count: 10,
+              domain: 'ground',
+              armor: 0,
+              leakCost: 1,
+              immunities: [],
+            },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+  });
+
+  it('(b) a tower selected with the Panel open (nonzero refund)', () => {
+    expectSteadyStateIsQuiet({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic', buffMulFp: 256 } }),
+      refund: 3,
+    });
+  });
+
+  it('(c) a Card armed', () => {
+    expectSteadyStateIsQuiet({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
   });
 });
 
