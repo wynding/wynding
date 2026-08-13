@@ -8,7 +8,10 @@ decisions; this note is the_ how _and will be superseded by the code and its tes
 
 - Each command is a discriminated union on `kind`, carrying only **integer or enum**
   fields — no floats, no display strings.
-- Entities are referenced by stable `EntityId`; board cells by integer `Cell { col, row }`.
+- Entities are referenced by stable integer ids; board cells by integer `Cell { col, row }`.
+  _(Updated 2026-08-13, #113 — this said `EntityId`, a branded type that was declared but
+  never used and has since been deleted. The ids themselves are unchanged: plain numbers,
+  as they always were in the SoA.)_
 - Placeholder vocabulary (finalizes with the Core Gameplay PRD): `placeTower`,
   `sellTower`, `upgradeTower`, `setTargetPriority`, `startWave`.
   _(SUPERSEDED 2026-08-12 — the shipped union is `placeTower | sellTower |

@@ -1100,21 +1100,24 @@ describe('runCombat — armor (M2-S5a)', () => {
 // `combat.test.ts`'s existing forged-impact tests pin `canonicalImpacts`.
 describe('DoT tick step — an already-expired record does not tick (Codex P2, PR #78)', () => {
   const REC = { targetId: 1, sourceId: 9, amount: 40, cadenceTicks: 10 };
+  // `runCombatT` (#81) rather than a bare positional `runCombat` call: `tick`/`bounty`
+  // sit adjacent, both bare `number`, and a future inserted parameter would silently
+  // remap one into the other with no type error.
   const tickAt = (dots: unknown[], tick: number): ReturnType<typeof runCombat> =>
-    runCombat(
+    runCombatT(
       restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
       emptyTowers(),
       [],
-      dots,
       tick,
       0,
       FIELD,
       GRID,
       {},
-      {},
       1,
       4,
+      undefined,
       new Rng(TEST_RNG_SEED),
+      dots,
     );
 
   it('a record whose untilTick is BEFORE this tick is skipped — it deals no damage and is swept', () => {
@@ -1137,23 +1140,26 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
   const noTowers = emptyTowers();
 
   /** Run `runCombat` against a fixed one-creep world with no impacts — isolates
-   *  the `dots` canonicalization rail under test from targeting/firing. */
+   *  the `dots` canonicalization rail under test from targeting/firing. `runCombatT`
+   *  (#81) rather than a raw positional call — `creepById` is not load-bearing here,
+   *  the one creep is the default `'normal'` (armor 0), identical whether resolved
+   *  through `RULESET.creepById` or the wrapper's hardcoded `{}`. */
   function runWithDots(dots: readonly unknown[]): ReturnType<typeof runCombat> {
     const rng = new Rng(TEST_RNG_SEED);
-    return runCombat(
+    return runCombatT(
       restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
       noTowers,
       [],
-      dots,
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
+      dots,
     );
   }
 
@@ -1259,19 +1265,21 @@ describe('DoT records — canonicalization rails (M2-S5a P2)', () => {
     });
     const { proxy, accessCount } = countedArray(allInvalidImpacts);
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` is not load-bearing here, the creep is the
+    // default `'normal'` (armor 0), identical whether resolved through
+    // `RULESET.creepById` or the wrapper's hardcoded `{}`.
+    const result = runCombatT(
       restingCreeps([{ id: 1, col: 7, row: 6, hp: 1000 }]),
       emptyTowers(),
       proxy,
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toEqual([]);
@@ -1383,19 +1391,22 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) rather than a 13-argument positional call — safe here
+    // specifically because `creepById` is NOT load-bearing: the impact is rejected by
+    // `validImpact` before any catalog lookup happens (same reasoning as the
+    // `Impact.domain` block above, CodeRabbit PR #87).
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(0);
@@ -1413,19 +1424,19 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(0);
@@ -1445,19 +1456,19 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(0);
@@ -1477,19 +1488,19 @@ describe('Impact.sourceId — REQUIRED on both variants (M2-S5a P2)', () => {
       effects: [{ kind: 'direct', amount: DIRECT_DAMAGE }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(0);
@@ -1527,19 +1538,21 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60, forged: 'nope' }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, the creep is the default
+    // `'normal'` (armor 0), identical whether resolved through `RULESET.creepById` or
+    // the wrapper's hardcoded `{}`.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(1);
@@ -1559,19 +1572,19 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.creeps.hp[0]).toBe(1000); // no damage yet — 'dot' is neither 'direct' nor 'slow',
@@ -1593,19 +1606,19 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 0 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(0);
@@ -1628,19 +1641,19 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 1_000_001, durationTicks: 1_000_001 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(0);
@@ -1657,19 +1670,19 @@ describe("EffectPrimitive's `dot` variant (M2-S5a P3 — a `dot` primitive that 
       effects: [{ kind: 'dot', amount: 3, cadenceTicks: 60, durationTicks: 59 }],
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
     );
     expect(result.impacts).toHaveLength(0);
@@ -1849,21 +1862,23 @@ describe('runCombat — DoT applyDot integration at capacity (M2-S5a P3)', () =>
     };
     const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, the creep is the default
+    // `'normal'` (armor 0), identical whether resolved through `RULESET.creepById` or
+    // the wrapper's hardcoded `{}`.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      fullTable,
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
-      rng,
       events,
+      rng,
+      fullTable,
     );
     expect(result.creeps.hp[0]).toBe(1000 - DIRECT_DAMAGE); // direct damage still landed
     expect(result.dots).toHaveLength(MAX_DOT_RECORDS); // new record dropped — size unchanged
@@ -1886,41 +1901,42 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
 
     // tick 9 — not yet due, no damage, no tick counted.
     const rng = new Rng(TEST_RNG_SEED);
-    const before = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, the creep is the default
+    // `'normal'` (armor 0), identical whether resolved through `RULESET.creepById` or
+    // the wrapper's hardcoded `{}`.
+    const before = runCombatT(
       creeps,
       emptyTowers(),
       [],
-      [record],
       9,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
-      rng,
       events,
+      rng,
+      [record],
     );
     expect(before.creeps.hp[0]).toBe(1000);
     expect(events.dotTicks).toBe(0);
 
     // tick 10 — due, ticks exactly once.
-    const at = runCombat(
+    const at = runCombatT(
       before.creeps,
       emptyTowers(),
       [],
-      before.dots,
       10,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
-      rng,
       events,
+      rng,
+      before.dots,
     );
     expect(at.creeps.hp[0]).toBe(1000 - 7);
     expect(events.dotTicks).toBe(1);
@@ -1983,20 +1999,21 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       untilTick: tick + 100,
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [],
-      [record],
       tick,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
+      [record],
     );
     expect(result.creeps.hp[0]).toBe(1000 - 5); // exactly one tick's damage
     expect(result.dots[0]).toMatchObject({ nextTickTick: tick - 1000 + 10 }); // advanced by exactly one cadenceTicks
@@ -2048,20 +2065,21 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       },
     ];
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [],
-      records,
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
+      records,
     );
     // Survivor order mirrors the original (nothing died): idx0=30, idx1=10, idx2=10, idx3=20.
     expect(result.creeps.hp).toEqual([1000 - 3, 1000 - 5, 1000, 1000 - 7]);
@@ -2078,20 +2096,21 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       untilTick: 1000,
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [],
-      [record],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
+      [record],
     );
     expect(result.creeps.id).toHaveLength(0); // killed by the DoT tick, swept
     expect(result.dots).toEqual([]); // its own record dies with it
@@ -2109,20 +2128,21 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       untilTick: tick,
     };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [],
-      [record],
       tick,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
+      undefined,
       rng,
+      [record],
     );
     expect(result.creeps.hp[0]).toBe(1000 - 4); // ticked THIS tick (step 2, before the expiry sweep)
     expect(result.dots).toEqual([]); // then expired and removed in this same call (step 6)
@@ -2211,21 +2231,23 @@ describe('runCombat — a corpse stops ticking (M2-S5a QC round 1)', () => {
     ];
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, the creep is the default
+    // `'normal'` (armor 0), identical whether resolved through `RULESET.creepById` or
+    // the wrapper's hardcoded `{}`.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [],
-      records,
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
-      rng,
       events,
+      rng,
+      records,
     );
     expect(result.creeps.id).toHaveLength(0); // killed by the first record, swept
     expect(result.dots).toEqual([]); // both records die with the creep (survivor filter)
@@ -2256,21 +2278,23 @@ describe('runCombat — an abandoned bucket is resumed by the next row sharing t
     ];
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0 };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` is not load-bearing here, both rows are the
+    // default `'normal'` (armor 0), identical whether resolved through
+    // `RULESET.creepById` or the wrapper's hardcoded `{}`.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [],
-      records,
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
-      rng,
       events,
+      rng,
+      records,
     );
 
     // Row 0 took A and died; row 1 survived and took B. Dropping the abandoned bucket
@@ -2306,22 +2330,24 @@ describe('runCombat — a forged non-positive creep id mints no DoT record (M2-S
       { kind: 'dot', amount: 3, cadenceTicks: 10, durationTicks: 60 },
     ],
   });
+  // `runCombatT` (#81) — `creepById` is not load-bearing here, the creep is the
+  // default `'normal'` (armor 0), identical whether resolved through
+  // `RULESET.creepById` or the wrapper's hardcoded `{}`.
   const run = (id: number) =>
-    runCombat(
+    runCombatT(
       restingCreeps([{ id, col: 7, row: 6, hp: 100 }]),
       emptyTowers(),
       [DOT_IMPACT(id)],
-      [],
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
-      new Rng(TEST_RNG_SEED),
       { impactPoints: [], fired: [], dotTicks: 0 },
+      new Rng(TEST_RNG_SEED),
+      [],
     );
 
   it('id 0: the impact still lands its direct damage, but no record is created', () => {
@@ -2361,21 +2387,23 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
     };
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
     const rng = new Rng(TEST_RNG_SEED);
-    const result = runCombat(
+    // `runCombatT` (#81) — `creepById` not load-bearing, the creep is the default
+    // `'normal'` (armor 0), identical whether resolved through `RULESET.creepById` or
+    // the wrapper's hardcoded `{}`.
+    const result = runCombatT(
       creeps,
       emptyTowers(),
       [impact],
-      fullTable,
       0,
       0,
       FIELD,
       GRID,
       TOWER_BY_ID,
-      RULESET.creepById,
       RULESET.balance.slowFloorNum,
       RULESET.balance.slowFloorDen,
-      rng,
       events,
+      rng,
+      fullTable,
     );
     expect(events.dotTicks).toBe(MAX_DOT_RECORDS); // every filler record was due and ticked
     expect(events.dotDropped).toBe(1); // the impact's new record was dropped (table at cap)
@@ -2395,21 +2423,21 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
     const events: StepEvents = { impactPoints: [], fired: [] };
     expect(() => {
       const rng = new Rng(TEST_RNG_SEED);
-      runCombat(
+      // `runCombatT` (#81) — `creepById` not load-bearing, see the block above.
+      runCombatT(
         creeps,
         emptyTowers(),
         [],
-        [record],
         0,
         0,
         FIELD,
         GRID,
         TOWER_BY_ID,
-        RULESET.creepById,
         RULESET.balance.slowFloorNum,
         RULESET.balance.slowFloorDen,
-        rng,
         events,
+        rng,
+        [record],
       );
     }).not.toThrow();
     expect(Object.keys(events)).toEqual(['impactPoints', 'fired']); // no new keys appeared

@@ -10,7 +10,6 @@
 // bundle with `compileRuleset` and threads the branded `CompiledRuleset` into `step`.
 
 import { hashState, Rng } from '@wynding/engine';
-import type { Seed } from '@wynding/types';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
 import {
   runCombat,
@@ -648,7 +647,7 @@ function allocEntityId(state: SimState): number | null {
 /** Build a fresh match state for a given seed against a compiled ruleset. Sizes
  *  every per-wave lifecycle array to `ruleset.waves.length` and starts the first
  *  wave's countdown; the starting economy comes from the ruleset's balance block. */
-export function createInitialState(seed: Seed | number, ruleset: CompiledRuleset): SimState {
+export function createInitialState(seed: number, ruleset: CompiledRuleset): SimState {
   assertRuleset(ruleset);
   const waveCount = ruleset.waves.length;
   return {

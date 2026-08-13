@@ -6,13 +6,17 @@
 // guarantee, it is a hope. This test reads the SHIPPED app's source tree from disk
 // and greps it directly, rather than asserting anything about module resolution or
 // bundler output — it is intentionally simple: a grep that would catch an accidental
-// `import ... from '@wynding/perf'` (or the stress subpath) landing in
+// `import ... from '@wynding/perf'` (or the stress/catalog subpaths) landing in
 // `apps/web/src/**`, the tree that actually ships.
 //
-// What this DOES protect: a future edit accidentally wiring the stress scenario or
-// this package into the production app/controller/scene code. What it does NOT
-// protect: `apps/web/perf/**` (the perf-only entry point, which is EXPECTED to import
-// both) or any other workspace package.
+// `@wynding/content/catalog` (`packages/content/src/catalog.ts:10-11`) is the same
+// must-not-ship class as `./stress`: a synthetic perf bundle, deliberately absent from
+// the registry, that must never reach production code.
+//
+// What this DOES protect: a future edit accidentally wiring the stress/catalog
+// scenarios or this package into the production app/controller/scene code. What it
+// does NOT protect: `apps/web/perf/**` (the perf-only entry point, which is EXPECTED to
+// import all three) or any other workspace package.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -43,14 +47,18 @@ describe('apps/web/src (the SHIPPED app) never imports this package or the stres
     'src',
   );
 
-  it('no file under apps/web/src/** imports @wynding/perf or @wynding/content/stress', () => {
+  it('no file under apps/web/src/** imports @wynding/perf, @wynding/content/stress, or @wynding/content/catalog', () => {
     const files = listFilesRecursive(webSrcDir);
     expect(files.length).toBeGreaterThan(0); // sanity: the directory actually resolved
 
     const offenders: string[] = [];
     for (const file of files) {
       const text = readFileSync(file, 'utf8');
-      if (/['"]@wynding\/perf['"]/.test(text) || /['"]@wynding\/content\/stress['"]/.test(text)) {
+      if (
+        /['"]@wynding\/perf['"]/.test(text) ||
+        /['"]@wynding\/content\/stress['"]/.test(text) ||
+        /['"]@wynding\/content\/catalog['"]/.test(text)
+      ) {
         offenders.push(file);
       }
     }

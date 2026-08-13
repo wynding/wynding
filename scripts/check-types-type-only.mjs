@@ -1,0 +1,83 @@
+#!/usr/bin/env node
+// check-types-type-only.mjs — guards @wynding/types' core invariant: the package
+// stays TYPE ONLY. Its emitted `dist/index.js` must be nothing but `export {};` —
+// the moment a runtime value (a helper function, a const, anything with a value)
+// is added, this fails. Nothing else enforces that today: `--passWithNoTests`
+// keeps `vitest run` green for a package with zero test files (load-bearing, not
+// laxity — `vitest run` with no test files exits 1 on its own — see #113), so a
+// runtime addition would otherwise ship with no tests and no coverage gate,
+// silently.
+//
+// Follows the check:artifact-parity precedent (apps/server/scripts/check-artifact-parity.ts):
+// a standalone script that builds its target itself rather than trusting turbo's
+// task graph. `turbo run typecheck lint test`'s `test` task depends only on
+// `^typecheck` (see turbo.json), not `^build` — a turbo-orchestrated version of
+// this check would read a stale or absent dist/index.js. Building here, once,
+// keeps the check honest without adding a build dependency to the turbo test task.
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const PKG_DIR = join(ROOT, 'packages', 'types');
+const DIST_INDEX = join(PKG_DIR, 'dist', 'index.js');
+
+function fail(message) {
+  console.error(`❌ check:types-type-only failed: ${message}`);
+  process.exit(1);
+}
+
+const build = spawnSync('pnpm', ['-C', PKG_DIR, 'run', 'build'], { stdio: 'inherit' });
+if (build.status !== 0) {
+  fail(`packages/types build failed (exit ${String(build.status)}) — cannot check its emit.`);
+}
+
+if (!existsSync(DIST_INDEX)) {
+  fail(`${DIST_INDEX} does not exist after build.`);
+}
+
+// EVERY emitted module, not just the entry point. Checking `dist/index.js` alone would
+// announce the invariant held while a runtime `dist/sneaky.js` sat beside it — measured,
+// that is exactly what an earlier draft of this script did. The package only `exports`
+// ".", so such a module is not importable by package name today, but "not reachable
+// through the current exports map" is a much weaker promise than "this package emits no
+// runtime code", and the latter is what the header claims and what the missing coverage
+// gate makes load-bearing.
+function jsFilesUnder(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) out.push(...jsFilesUnder(full));
+    else if (entry.endsWith('.js')) out.push(full);
+  }
+  return out;
+}
+
+// Strip line comments (tsc preserves the source header and appends the sourcemap
+// comment by default) and blank lines — what's left must be exactly the one
+// runtime statement a type-only module emits.
+function runtimeBody(file) {
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '' && !line.trim().startsWith('//'))
+    .join('\n')
+    .trim();
+}
+
+const emitted = jsFilesUnder(join(PKG_DIR, 'dist'));
+const offenders = emitted
+  .map((file) => ({ file, body: runtimeBody(file) }))
+  .filter(({ body }) => body !== 'export {};');
+
+if (offenders.length > 0) {
+  fail(
+    `@wynding/types emits runtime code — it is meant to stay type-only.\n` +
+      offenders.map(({ file, body }) => `   ${file}:\n   ${body}`).join('\n'),
+  );
+}
+
+console.log(
+  `✓ @wynding/types emits nothing but \`export {};\` across all ${String(emitted.length)} emitted module(s) (still type-only).`,
+);

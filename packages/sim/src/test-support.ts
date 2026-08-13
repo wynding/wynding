@@ -286,8 +286,10 @@ export function pushCreep(
 // this packet), which this wrapper likewise defaults to `[]`. The param types are
 // DERIVED from `runCombat` itself (never duplicated) via `Parameters<typeof
 // runCombat>[N]` so this wrapper can never silently drift from the real signature.
-// Tests that exercise armor or DoT state call `runCombat`/`applyImpactToCreep`
-// directly with a real `creepById`/`dots`.
+// Tests that exercise ARMOR still call `runCombat`/`applyImpactToCreep` directly with a
+// real `creepById` (six such sites remain in `combat.test.ts`). DoT-state tests no longer
+// need to: the wrapper takes `dots` as of #81, so they route through it like everything
+// else.
 //
 // CodeRabbit (PR #78, Major) flagged the THREE verbatim-identical copies of this
 // wrapper (one per test file) as fragile: `runCombat`'s `tick`/`bounty` params are
@@ -310,17 +312,27 @@ export function pushCreep(
 // `events` below reads `RunCombatParams[13]`, not `[12]`: leaving it at `[12]` would
 // have silently retyped this wrapper's last parameter from `StepEvents` to `Rng` and
 // kept compiling. `runCombatT`'s OWN `rng` is, deliberately, the opposite of
-// `runCombat`'s — OPTIONAL with a default — because this wrapper has ~50 callers of
+// `runCombat`'s — OPTIONAL with a default — because this wrapper has ~95 callers of
 // its own and a stun-free fixture never draws from it, so making it required would
 // migrate every one of those call sites for no behavioural benefit. It is appended
 // AFTER `events` in the wrapper's OWN signature (not re-slotted to `runCombat`'s
-// position) because this wrapper still drops `dots`, so its parameter
-// order need not track `runCombat`'s, and inserting before `events` would re-slot
+// position) because this wrapper's parameter order has never tracked `runCombat`'s —
+// it exposes a curated subset in its own order, and inserting before `events` would re-slot
 // every existing positional `runCombatT(..., events)` call regardless of the
 // default. The default `new Rng(TEST_RNG_SEED)` is evaluated fresh per call, which
 // is safe precisely because a stun-free run never advances it — stun tests inject
 // their own `Rng` explicitly. `runCombat` itself stays required: a forgotten
 // production call site must fail to compile.
+//
+// #81 appended `dots`, defaulted to `[]`, LAST of all — after `rng`, not re-slotted
+// to `runCombat`'s own position — for the identical reason `rng` was appended after
+// `events` above: every existing positional `runCombatT(...)` call keeps compiling
+// unchanged. This closes the one gap that used to force `combat.test.ts`'s DoT-state
+// tests around this wrapper entirely and back onto a raw 13/14-argument `runCombat`
+// call (`tickAt`, `runWithDots`, the QC round 3 abandoned-bucket/forged-id blocks):
+// none of them touch `creepById` (every creep in those tests is the default
+// `'normal'`, armor 0 — identical whether resolved through a real ruleset map or the
+// `{}` this wrapper already hardcodes), so `dots` was the only real blocker.
 type RunCombatParams = Parameters<typeof runCombat>;
 export function runCombatT(
   creeps: RunCombatParams[0],
@@ -335,12 +347,13 @@ export function runCombatT(
   slowFloorDen: RunCombatParams[11],
   events?: RunCombatParams[13],
   rng: RunCombatParams[12] = new Rng(TEST_RNG_SEED),
+  dots: RunCombatParams[3] = [],
 ): ReturnType<typeof runCombat> {
   return runCombat(
     creeps,
     towers,
     impacts,
-    [],
+    dots,
     tick,
     bounty,
     field,

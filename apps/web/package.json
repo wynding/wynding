@@ -10,7 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src perf e2e-perf scripts",
+    "lint": "eslint src perf e2e-perf e2e scripts",
     "test": "vitest run --coverage",
     "e2e": "playwright test",
     "perf:e2e": "playwright test --config playwright.perf.config.ts",

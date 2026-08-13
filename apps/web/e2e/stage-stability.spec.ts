@@ -320,13 +320,13 @@ test('1280×720 at 140% zoom, scroll-form preview: a captured board release over
   };
   expect(
     await page.evaluate(
-      ([x, y]) => {
+      ({ x, y }) => {
         // Explicit null check so a bad point FAILS this guard — `el?.closest(...) !== null`
         // would pass vacuously (undefined !== null) exactly when the point misses everything.
         const el = document.elementFromPoint(x, y);
         return el !== null && el.closest('.wy-board') !== null;
       },
-      [down.x, down.y],
+      { x: down.x, y: down.y },
     ),
     'the press must start on the plain board or the drag proves nothing',
   ).toBe(true);

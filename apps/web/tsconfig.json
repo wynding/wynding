@@ -10,11 +10,9 @@
   },
   // `perf` joins `src` because it is APPLICATION code — Vite builds it
   // (`vite.perf.config.ts`), and Vite does not typecheck, so a type error there would
-  // surface only as a broken perf run. `e2e` (the shipped app's Playwright specs) stays
-  // out, matching this repo's existing convention: those run under Playwright's own
-  // transform and nothing outside them depends on their types.
+  // surface only as a broken perf run.
   //
-  // `e2e-perf` is the one exception (QC round-1 fix 10): `stress.perf.spec.ts` hand-
+  // `e2e-perf` was the first carve-out (QC round-1 fix 10): `stress.perf.spec.ts` hand-
   // maintains a `declare global { interface Window { wyndingPerf?: … } }` block that
   // must structurally match `perf/main-perf.ts`'s own `PerfHarness` interface (see that
   // file's header for why it is a hand-copy rather than a shared import). Nothing
@@ -23,7 +21,20 @@
   // or removed field. Pulling `@playwright/test`'s types in for this one directory did
   // not need any special handling: `stress.perf.spec.ts` imports `test`/`expect`
   // explicitly, so its types resolve the same way any other npm package's would.
-  "include": ["src", "perf", "e2e-perf"],
+  //
+  // `e2e` (#110 — supersedes the earlier "stays out, matching this repo's existing
+  // convention" note that used to live here): the old rationale was about dependency
+  // direction ("nothing outside them depends on their types"), which is true but beside
+  // the point — these specs are CI's whole functional-UI gate (the a11y e2e job), so a
+  // type error inside one should fail loud as a type error, not surface later as an
+  // assertion that silently stops asserting. Including it added no edges (nothing
+  // outside `e2e/**` imports from it), and the fallout was one call site: `stage-
+  // stability.spec.ts`'s `page.evaluate(([x, y]) => …, [down.x, down.y])` inferred `x`/
+  // `y` as `number | undefined` (array-literal argument, not a tuple) — rewritten as the
+  // `{ x, y }` object-argument form, which `layout-probe.ts` already uses for the same
+  // reason. (Most `page.evaluate` calls in this directory take no argument or a single
+  // scalar and were unaffected.)
+  "include": ["src", "perf", "e2e-perf", "e2e"],
   "references": [
     { "path": "../../packages/render" },
     { "path": "../../packages/sim" },
