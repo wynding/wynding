@@ -84,10 +84,10 @@ test('mid-run 220 ms press on Sell sells', async ({ page }) => {
   // named cell — a 75%/50% fraction of the board lands exactly ON a grid line (a boundary,
   // not an anchor, per the #98 investigation), where a cell center is deterministic. Cell
   // (21,17): the 2×2 footprint is clear of the border AND far enough below the row-11 creep
-  // path to be OUT of the basic tower's range, so if wave 1 ever auto-launches under a
-  // pathologically stalled run (~25 s in), no kill can pay bounty and corrupt the exact
-  // sell-refund delta asserted below. The `data-pending-adds` assertion is the in-test
-  // proof of buildability either way.
+  // path to be OUT of the basic tower's range — Start itself launches wave 1 immediately
+  // (#70), so it is this placement's range, not run timing, that keeps that launch from
+  // being able to pay bounty and corrupt the exact sell-refund delta asserted below. The
+  // `data-pending-adds` assertion is the in-test proof of buildability either way.
   const grid = await projectedGrid(page);
   const x = grid.x + (21.5 / GRID.cols) * grid.width;
   const y = grid.y + (17.5 / GRID.rows) * grid.height;

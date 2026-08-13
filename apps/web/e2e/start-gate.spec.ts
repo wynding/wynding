@@ -8,19 +8,24 @@ import { callWavePaced, titleAfterCall } from './paced-call';
 // `data-pending-adds`) so "held"/"frozen" are asserted directly instead of inferred from a
 // short wait.
 //
-// M2-S2 changes what Start proves here: it no longer claims wave 1 (Start ≠ claiming), so
-// the sim's own `phase` never flips on Start — it is `'running'` before, during, and after
-// (only `won`/`lost` are distinct phases now). What DOES move on Start is the wave-1
-// countdown, since `advance()` is gated on `started` — this spec asserts that COUNTDOWN
-// MOVEMENT directly, rather than a phase flip that no longer exists.
+// #70 changes what Start proves here again: it now CLAIMS wave 1 as well as un-holding the
+// run — pressing Start both flips `started` (gating `advance()`) AND buffers a
+// `callWaveEarly` for wave 1, consumed on the very next tick. The sim's own `phase` still
+// never flips on Start (only `won`/`lost` are distinct phases), so the observable proof of
+// the claim is the wave preview flipping to "Wave 2 of 10" once that buffered call lands —
+// this spec asserts that LAUNCH directly, alongside the wave-1 countdown movement
+// `advance()`'s `started` gate still produces.
 
 test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-again re-holds', async ({
   page,
 }) => {
-  // Above the sum of this test's own declared worst-case budgets — ten paced calls
-  // carrying a 5s in-page deadline each (paced-call.ts) plus the 60s results wait — so
-  // a pathological run dies at the stage that owns it, with that stage's named
-  // diagnostic, never as an anonymous whole-test timeout mid-budget (CodeRabbit #117).
+  // Above the sum of this test's own declared worst-case budgets — nine paced calls
+  // (#70: wave 1 now launches on Start itself, not through this loop) carrying a 5s
+  // in-page deadline each (paced-call.ts) plus the 60s results wait — so a pathological
+  // run dies at the stage that owns it, with that stage's named diagnostic, never as an
+  // anonymous whole-test timeout mid-budget (CodeRabbit #117). The budget itself is
+  // unchanged — #117 pinned it for the marathon's worst case and one fewer paced call
+  // only widens the margin.
   test.setTimeout(150_000);
   await page.goto('/');
 
@@ -67,10 +72,13 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   await expect(board).toHaveAttribute('data-started', 'false');
 
   // Start: ticks advance and the Pending tower commits (its buffer entry is gone —
-  // `data-pending-adds` returns to 0) — but wave 1 does NOT launch (M2-S2's decouple): the
-  // sim's phase stays `running` throughout (there is no flip to assert), so the observable
-  // proof of "actually running now" is the wave-1 COUNTDOWN moving.
+  // `data-pending-adds` returns to 0) — and wave 1 DOES launch (#70's claim-first
+  // composition): the sim's phase stays `running` throughout (there is no flip to
+  // assert), so the observable proof of "actually running now" is the wave-1 COUNTDOWN
+  // moving, and the observable proof of the CLAIM is the preview flipping to wave 2.
   const start = page.getByRole('button', { name: 'Start' });
+  const callWave = page.getByRole('button', { name: 'Call wave' });
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
   const initialCountdown = (await waveChipText.textContent())!;
   await start.click();
   await expect(board).toHaveAttribute('data-started', 'true');
@@ -78,6 +86,17 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   await expect(board).toHaveAttribute('data-sim-phase', 'running'); // never flips — only won/lost do
   await expect(board).toHaveAttribute('data-pending-adds', '0');
   await expect(waveChipText).not.toHaveText(initialCountdown); // the countdown itself moved
+  // Settle on wave 1's launch (buffered by the press, consumed on the next tick) before
+  // any further activation — a same-tick Pause below would race that consumption, not
+  // dedupe against it (Pause and Call wave are distinct controls), but this pins the
+  // claim itself as a named assertion rather than an incidental side effect of the loop.
+  // The settle window itself runs UNPAUSED — the claim can only be consumed by a real
+  // tick, so it cannot be waited for under pause. Bounded, not unbounded: two awaited
+  // assertions at 1x against ~450 ticks before this undefended run's first leak, so the
+  // #97 lag class has orders of magnitude of headroom here even though this is, strictly,
+  // a window the old same-tick Start->Pause did not have.
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await expect(callWave).toHaveAttribute('aria-disabled', 'false');
 
   // #97: enter the marathon loop PAUSED. An undefended run free-running at 2× while the
   // loop below does its per-wave assertion work loses around wave 8–9 on a lagged runner
@@ -86,17 +105,16 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   // sim; `callWavePaced` opens the only windows in which it advances.
   await page.getByRole('button', { name: 'Pause' }).click();
 
-  // Early-call every wave via the SAME morphed primary control (now "Call wave") — keeps
-  // this spec deterministic and fast rather than waiting out three full natural countdowns
-  // (smoke.spec.ts exercises the identical flow end-to-end, with the preview + axe).
-  const callWave = page.getByRole('button', { name: 'Call wave' });
-  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
-  // The bundle now carries ten waves — M2-S6 appended index 4 (`resolute`+`fast`),
+  // Early-call every REMAINING wave via the SAME morphed primary control (now
+  // "Call wave") — wave 1 already launched on Start above, so this calls 2 through 10,
+  // keeping the spec deterministic and fast rather than waiting out nine full natural
+  // countdowns (smoke.spec.ts exercises the identical flow end-to-end, with the preview
+  // + axe). The bundle carries ten waves — M2-S6 appended index 4 (`resolute`+`fast`),
   // M2-S7 appended index 5 (8 × `flying`), M2-S10 appended indices 6 and 7
   // (`armored-flyer` and the boss wave), and M2-S11 inserted two further rows (a second
   // `normal`+`swarm` wave and the arc's four-entry densest tick) — so this early-calls
-  // all ten, not four.
-  for (let waveNumber = 1; waveNumber <= 10; waveNumber++) {
+  // nine, not three.
+  for (let waveNumber = 2; waveNumber <= 10; waveNumber++) {
     // Gate each press on LAUNCH-specific state, not the free-running sim heartbeat:
     // a tick boundary can fall between a tick-read and the click, so a tick-poll
     // passes even when the press itself was swallowed or same-tick-deduped (local

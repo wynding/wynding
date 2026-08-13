@@ -14,7 +14,7 @@
 // `formatVersion` never bumps for this; only `simVersion` does, and each story that
 // adds behavior widens its own dimension(s) here alongside its `SIM_VERSION` bump.
 //
-// DIMENSIONS THAT DEFER TO THE SCHEMA at sv13 (a profile field wider than or equal
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv15 (a profile field wider than or equal
 // to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
 // and this profile's own gate has no rejection witness of its own —
 // `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
@@ -145,28 +145,32 @@ export interface CapabilityProfile {
   readonly maxBurstTravelTicks: number;
 }
 
-/** `SIM_VERSION` 14 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  sv13's burst axis plus (M2-S10) the multi-life leak un-collapses — a creep may
- *  carry a `leakCost` other than 1, up to `maxLeakCost`, and role `'boss'` is
- *  admitted. Every other axis is untouched from sv13.
+/** `SIM_VERSION` 15 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  sv14's capability surface, field for field. No axis activates, no ceiling moves,
+ *  no witness changes hands — this entry is the sv14 profile's contents verbatim, and
+ *  that is not an oversight. The bump (issue #70) exists for a step-behavior change no
+ *  profile can express: the opening launch pays nothing, so a log carrying an index-0
+ *  early call resolves differently than it did at sv14. Which bundles COMPILE is
+ *  identical either side of the bump.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv13 profile is deleted with this bump —
- *  a live sv13 entry would misdescribe v14 tick code (it could not compile a
- *  non-uniform-leakCost catalog or a `'boss'` creep, which v14's `compileRuleset`
- *  now admits and whose leak `step` now resolves per creep), and replay's strict
- *  version equality already owns cross-version rejection, so there is nothing for a
- *  stale profile to serve.
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv14 profile is deleted with this bump. This
+ *  is the first bump whose deleted entry would still have described bundle legality
+ *  accurately — and it goes anyway, because a profile's job is to describe what THIS
+ *  build can correctly SIMULATE, not what it can parse. v15 tick code resolves an
+ *  index-0 early call differently, so a live sv14 entry would stand as a claim that
+ *  this build honours sv14 semantics; it does not. Replay's strict version equality
+ *  already owns cross-version rejection, so there is nothing for a stale profile to
+ *  serve.
  *
- *  THE WITNESS HANDOVER: `allowedRoles` widens to `['boss']` — exactly the v2
- *  schema's own role enum — so it LOSES its rejection witness and joins the
- *  defer-to-the-schema list, the same shape S7's domain axes and S9's
- *  `allowedEffectKinds` hit. Deleting `requiredLeakCost` removes a second witness
- *  (the "must be exactly 1" reject). The one NEW ceiling, `maxLeakCost: 16`, is
- *  genuinely narrower than the schema's own 1..1000, so it carries a real rejection
- *  witness of its own — and since this bump loses two witnesses, it is the
- *  replacement for both. */
+ *  WITNESSES ARE UNCHANGED here — every ceiling genuinely narrower than the v2 schema
+ *  (`maxArmor`, `maxLeakCost`, `maxDotDurationTicks`, `maxDotDurationCadenceRatio`,
+ *  `maxSupportDamageMulFp`, `maxAoeRadiusFp`, `maxBurstTravelTicks`, `allowedBurstForms`)
+ *  carries its live rejection witness across untouched, so unlike a widening bump this one
+ *  needs no replacement witness at all. (The sv13 → sv14 handover that widened `allowedRoles` to the
+ *  schema's own enum and retired `requiredLeakCost` is history, not a description of
+ *  this profile.) */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  14: {
+  15: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,

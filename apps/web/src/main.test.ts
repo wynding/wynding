@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RenderHandle } from '@wynding/render';
 import type { InputHandle } from './input';
 import { createKeymap } from './keymap';
+import { MS_PER_TICK } from '@wynding/sim';
 
 // The Phaser scene is WebGL — mock the subpath so it never loads under jsdom. This is the
 // one module excluded from coverage; here we only need a fake handle. The factory is
@@ -46,6 +47,15 @@ beforeEach(() => {
   document.body.innerHTML = '';
   vi.clearAllMocks();
 });
+
+/** The clock step every harness in this file advances by per frame (~60 Hz). */
+const FRAME_MS = 16;
+/** Frames needed to cross one sim tick. Since #70 the Start press leaves its wave-1 claim
+ *  BUFFERED, and the primary control is legitimately not call-ready until a tick consumes
+ *  it — so any test asserting the settled post-Start state must drive at least this many
+ *  frames first, or it asserts against a transient and proves nothing. Derived from
+ *  `MS_PER_TICK` rather than written as `4`, so a change to the tick period moves it. */
+const FRAMES_PER_SIM_TICK = Math.ceil(MS_PER_TICK / FRAME_MS);
 
 /** A manual scheduler: captures the frame callback so the test drives frames by hand. */
 function manualSchedule(): {
@@ -166,7 +176,7 @@ describe('main — createApp wiring & frame loop', () => {
     expect(pauseBtn.hidden).toBe(true);
     expect(dockText(primaryBtn)).toBe('Start');
 
-    primaryBtn.click(); // unholds the run — Start no longer claims wave 1 (PLAN.md P3 step 15)
+    primaryBtn.click(); // Start CLAIMS wave 1 and then unholds the run (#70)
     // Start re-homes focus to the board (M3), independent of the primary control's own
     // fate — which stays visible and morphs rather than being removed from the DOM.
     expect(document.activeElement).toBe(board);
@@ -176,7 +186,12 @@ describe('main — createApp wiring & frame loop', () => {
     // run (Call wave), hiding only once the run is terminal — later waves auto-launch on
     // their own countdown below without a further primary-button press.
     expect(primaryBtn.hidden).toBe(false);
-    expect(dockText(primaryBtn)).toBe('Call wave');
+    // Start's own wave-1 claim sits BUFFERED until the next sim tick consumes it, so the
+    // control reads 'Launching…' across this 16 ms frame — a sim tick is 50 ms. Pinned
+    // rather than skipped past: it is the visible half of the claim-first composition.
+    expect(dockText(primaryBtn)).toBe('Launching…');
+    sched.frame((clock += MS_PER_TICK + FRAME_MS)); // >= one sim tick: the claim is consumed
+    expect(dockText(primaryBtn)).toBe('Call wave'); // now offering wave 2
 
     pauseBtn.click();
     sched.frame((clock += 16));
@@ -389,9 +404,20 @@ describe('main — keymap/button activation parity for the morphed primary contr
     h.key('KeyC'); // Start — the `!started` branch, unaffected by the gate
     h.frame();
     expect(h.board.dataset.started).toBe('true');
+    // Start's own wave-1 claim is itself a dispatch since #70 — the composition calls
+    // `callWaveEarly()` before un-holding — so the counter starts at 1, not 0. The gate
+    // under test does not apply to it: the `!started` branch runs ahead of the
+    // `callWaveReady` check by design (a held run's control reads Start, not Call wave).
+    expect(dispatches).toBe(1);
+    // CONSUME the opening claim before EITHER leg presses. While it sits unconsumed in
+    // the buffer the control is legitimately not call-ready, so a press would be inert
+    // for a reason that has nothing to do with the injected gate — both legs would pass
+    // while proving nothing. (Verified: without this drive, neutering the injected
+    // `callWaveReady: false` entirely still leaves the disabled leg green.)
+    for (let i = 0; i < FRAMES_PER_SIM_TICK; i++) h.frame();
     h.key('KeyC'); // the press under test: exposed-disabled, must not dispatch
     h.frame();
-    expect(dispatches).toBe(0);
+    expect(dispatches).toBe(1); // unchanged — the injected gate is the only suppressor
     expect(h.board.dataset.simPhase).toBe('running');
     // The enabled leg runs against the REAL state (no fiction): the same press
     // must now reach the controller — kills the closed-gate and cached-uiState
@@ -399,7 +425,7 @@ describe('main — keymap/button activation parity for the morphed primary contr
     forceDisabled = false;
     h.key('KeyC');
     h.frame();
-    expect(dispatches).toBe(1);
+    expect(dispatches).toBe(2);
     h.app.destroy();
   });
 });
@@ -1013,7 +1039,7 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
   });
 
   /** A createApp harness with a controllable `(pointer: coarse)`. */
-  function appWith(coarse: boolean) {
+  function appWith(coarse: boolean, controllerFactory?: (seed: number) => Controller) {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const sched = manualSchedule();
@@ -1028,10 +1054,103 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
         addEventListener: () => {},
         removeEventListener: () => {},
       }),
+      ...(controllerFactory === undefined ? {} : { controllerFactory }),
     });
     createdApps.push(app);
     return { root, app, frame: () => sched.frame((clock += 16)), advance: () => (clock += 300) };
   }
+
+  it('a REFUSED wave-1 claim aborts the entire Start action — no run, no fullscreen, no banner latch, no focus move (#70)', () => {
+    // The claim-first ordering exists for exactly this case. `startRun()` claims wave 1
+    // before it un-holds the run, so a refused claim (a legally full pre-start buffer)
+    // leaves everything untouched instead of producing a live run whose first wave never
+    // launched. Swapping the composition to start-first turns this test red — which is
+    // the point of pinning it.
+    const fs = stubFullscreen();
+    // The stub refuses the claim AND reports the rejection the real controller records on
+    // a full buffer, because the branch's one POSITIVE effect — refreshing so the live
+    // region announces — is only witnessable if the outcome is there to announce. A stub
+    // that merely returns false would let the `refreshHud()` call be deleted with every
+    // assertion below still green (they are all negatives, satisfied by doing nothing).
+    // The rejection is reported only AFTER the claim is actually refused — a stub that
+    // announced it unconditionally would have the live region already carrying the message
+    // at boot, and the assertion below would pass without the press doing anything
+    // (measured: it did, twice, before this flag was added).
+    let refused = false;
+    const { root, frame } = appWith(true, (seed) => {
+      const real = createController(seed);
+      return {
+        ...real,
+        callWaveEarly: () => {
+          refused = true;
+          return false;
+        },
+        uiState: () =>
+          refused
+            ? {
+                ...real.uiState(),
+                lastOutcome: { kind: 'rejected', reason: 'pendingCap' } as const,
+                outcomeSeq: real.uiState().outcomeSeq + 1,
+              }
+            : real.uiState(),
+      };
+    });
+    frame();
+    const primaryBtn = dockButton(root, 'Start');
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+    const live = root.querySelector<HTMLElement>('.wy-sr-only')!;
+    const focusBefore = document.activeElement;
+
+    // Not yet announced. (The region seeds with a single space so its first real write
+    // registers as a text change — see `shell.ts` — so this is a not-equal, not an empty.)
+    expect(live.textContent).not.toBe('Too many pending actions.');
+
+    primaryBtn.click();
+    // Asserted BEFORE any frame is driven, deliberately: the branch's refresh is
+    // SYNCHRONOUS so the rejection lands on the press rather than waiting for the next
+    // scheduled frame — the same reasoning the started branch's own refresh carries. Once
+    // a frame runs, the loop repaints the live region regardless, and this assertion would
+    // survive deleting the refresh entirely (measured — it did).
+    expect(live.textContent).toBe('Too many pending actions.');
+
+    frame();
+    expect(board.dataset.started).toBe('false'); // the run never un-held
+    // `requestFullscreen` is the FIRST side effect in the started branch and the install
+    // banner latch is the second, so zero fullscreen calls proves neither ran.
+    expect(fs.calls()).toBe(0);
+    expect(document.activeElement).toBe(focusBefore); // no focus re-home
+    expect(dockText(primaryBtn)).toBe('Start'); // still offering Start, not morphed
+  });
+
+  it('a duplicate Start activation claims wave 1 exactly once (#70)', () => {
+    // The suppressor is the control's own readiness state, not buffer dedupe: a second
+    // `callWaveEarly()` would return success (the sim treats a same-tick duplicate as an
+    // idempotent no-op), so counting buffered commands would miss an extra dispatch.
+    // Spying at the action layer is what actually catches it.
+    let claims = 0;
+    const { root, frame } = appWith(false, (seed) => {
+      const real = createController(seed);
+      return {
+        ...real,
+        callWaveEarly: () => {
+          claims++;
+          return real.callWaveEarly();
+        },
+      };
+    });
+    frame();
+    const primaryBtn = dockButton(root, 'Start');
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+
+    primaryBtn.click(); // Start: claims wave 1
+    // The keymapped start key routes to the SAME morphed control. Mid-run it takes the
+    // Call-wave branch, which is gated on `callWaveReady` — false while the opening claim
+    // is still unconsumed — so this press is inert rather than a second claim.
+    board.dispatchEvent(new KeyboardEvent('keydown', { code: START_KEY, cancelable: true }));
+    frame();
+
+    expect(claims).toBe(1);
+  });
 
   it('requests fullscreen ONCE on the started false→true edge; repeated Start presses mid-run never re-request', () => {
     const fs = stubFullscreen();
@@ -1075,8 +1194,11 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     primaryBtn.click();
     frame();
     expect(fs.calls()).toBe(0);
-    // The run started regardless — the control morphs to "Call wave" rather than hiding.
+    // The run started regardless — the control morphs rather than hiding. It reads
+    // 'Launching…' until Start's own wave-1 claim is consumed a sim tick later (#70),
+    // so drive past one 50 ms tick before pinning the settled 'Call wave'.
     expect(primaryBtn.hidden).toBe(false);
+    for (let i = 0; i < FRAMES_PER_SIM_TICK; i++) frame();
     expect(dockText(primaryBtn)).toBe('Call wave');
   });
 

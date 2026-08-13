@@ -29,13 +29,16 @@ function runToTerminal(c: Controller, cap = 6000): number {
   return n;
 }
 
-/** Unhold the run AND claim wave 1 — `start()` no longer does the latter (PLAN.md P3
- *  step 15's decouple), so every test that needs a live wave does both. Asserts the
- *  claim was ACCEPTED: a silently-rejected setup call would leave the test running
- *  waveless and fail somewhere misleading downstream (CodeRabbit PR #68). */
+/** Claim wave 1 AND unhold the run — the PRODUCT's Start-button composition (#70),
+ *  in the same claim-first order `main.ts`'s `startRun()` uses. `start()` itself is a
+ *  pure flag flip and never claims, so any test that needs a live wave does both, and
+ *  the ORDER is the contract: claiming first means a rejected claim leaves the run held
+ *  rather than live-but-waveless. Asserts the claim was ACCEPTED — a silently-rejected
+ *  setup call would leave the test running waveless and fail somewhere misleading
+ *  downstream (CodeRabbit PR #68). */
 function startAndCall(c: Controller): void {
-  c.start();
   expect(c.callWaveEarly(), 'startAndCall: the wave-1 claim was rejected').toBe(true);
+  c.start();
 }
 
 describe('controller — fixed loop, speed & pause', () => {
@@ -472,8 +475,9 @@ describe('controller — pending-aware paused-planning presentation (#37+#27)', 
 describe('controller — same-tick & paused ordering (determinism hazards)', () => {
   it('applies multiple commands issued within ONE tick in issued order', () => {
     const c = createController(1);
-    // `start()` no longer enqueues `callWaveEarly` (PLAN.md P3 step 15 — the decouple), so
-    // this queues it explicitly to keep the multi-command ordering under test: buffer:
+    // `start()` is a pure flag flip and enqueues nothing (#70 leaves that primitive alone —
+    // the CLAIM lives in the product's Start composition), so this queues the call
+    // explicitly to keep the multi-command ordering under test: buffer:
     // [callWaveEarly]; the build below appends to it: [callWaveEarly, placeTower(3,3)].
     c.start();
     c.callWaveEarly();
@@ -553,13 +557,19 @@ describe('controller — paused buffer-flood dedup + cap (P1)', () => {
 describe('controller — enqueueVerdict classifier (unit)', () => {
   it('a duplicate callWaveEarly is flagged, not queued', () => {
     const buffer: SimInput[] = [{ kind: 'callWaveEarly' }];
-    expect(enqueueVerdict(buffer, { kind: 'callWaveEarly' })).toBe('duplicate');
+    expect(enqueueVerdict(buffer, { kind: 'callWaveEarly' }, MAX_INPUTS_PER_TICK)).toBe(
+      'duplicate',
+    );
   });
 
   it('a same-id sellTower is a duplicate; a different-id sellTower still queues', () => {
     const buffer: SimInput[] = [{ kind: 'sellTower', tower: 1 }];
-    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 1 })).toBe('duplicate');
-    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 2 })).toBe('queue');
+    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 1 }, MAX_INPUTS_PER_TICK)).toBe(
+      'duplicate',
+    );
+    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 2 }, MAX_INPUTS_PER_TICK)).toBe(
+      'queue',
+    );
   });
 
   it('placeTower is never anchor-deduped here — a same-anchor command still queues (ship-review fix)', () => {
@@ -572,10 +582,18 @@ describe('controller — enqueueVerdict classifier (unit)', () => {
       { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' },
     ];
     expect(
-      enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' }),
+      enqueueVerdict(
+        buffer,
+        { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' },
+        MAX_INPUTS_PER_TICK,
+      ),
     ).toBe('queue');
     expect(
-      enqueueVerdict(buffer, { kind: 'placeTower', anchor: { col: 4, row: 3 }, towerId: 'basic' }),
+      enqueueVerdict(
+        buffer,
+        { kind: 'placeTower', anchor: { col: 4, row: 3 }, towerId: 'basic' },
+        MAX_INPUTS_PER_TICK,
+      ),
     ).toBe('queue');
   });
 
@@ -584,7 +602,13 @@ describe('controller — enqueueVerdict classifier (unit)', () => {
       kind: 'sellTower',
       tower: i,
     }));
-    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: MAX_INPUTS_PER_TICK })).toBe('full');
+    expect(
+      enqueueVerdict(
+        buffer,
+        { kind: 'sellTower', tower: MAX_INPUTS_PER_TICK },
+        MAX_INPUTS_PER_TICK,
+      ),
+    ).toBe('full');
   });
 
   it('duplicate wins over full — a full buffer containing the equivalent command is duplicate', () => {
@@ -592,7 +616,9 @@ describe('controller — enqueueVerdict classifier (unit)', () => {
       kind: 'sellTower',
       tower: i,
     }));
-    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 0 })).toBe('duplicate');
+    expect(enqueueVerdict(buffer, { kind: 'sellTower', tower: 0 }, MAX_INPUTS_PER_TICK)).toBe(
+      'duplicate',
+    );
   });
 });
 
@@ -1491,7 +1517,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     expect(c.frame().curVm.tick).toBeGreaterThan(0); // ticks advance immediately — not stuck paused
   });
 
-  it('start() flips started and begins stepping; Pending pre-start builds commit on the first stepped tick — wave 1 does NOT auto-launch (Start ≠ claiming, PLAN.md P3 step 15 decouple)', () => {
+  it('start() flips started and begins stepping; Pending pre-start builds commit on the first stepped tick — the PRIMITIVE does not claim wave 1 (only the product composition does, #70)', () => {
     const c = createController(1);
     c.armTower('basic');
     c.aimAt(3, 3);
@@ -1551,11 +1577,12 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     expect(c.frame().curVm.tick).toBe(0); // held again — Play-again is a fresh hold
   });
 
-  describe('the per-tick buffer cap, no pre-start reservation (PLAN.md P3 step 15)', () => {
-    // Pre-start planning used to be capped one slot short of `MAX_INPUTS_PER_TICK`,
-    // reserved for `start()`'s own `callWaveEarly` enqueue. `start()` no longer enqueues
-    // anything, so that reservation is gone — build/sell now caps at the FULL replay
-    // contract limit, held or not. Reach the boundary with a cheap build-then-sell cycle
+  describe('the per-tick buffer cap and its pre-start reservation (#70)', () => {
+    // Pre-start planning is capped one slot short of `MAX_INPUTS_PER_TICK`, reserved for
+    // the Start control's own `callWaveEarly`. M2-S2 retired that reservation when the
+    // decouple made Start enqueue nothing; #70 re-couples the product's Start to the
+    // wave-1 claim, so it is back — and only pre-start: once `started` there is nothing
+    // left to reserve for. Reach the boundary with a cheap build-then-sell cycle
     // at one cell (each cycle costs 2 commands + a net 2 Bounty, well within the starting
     // 80).
     function fillToCap(c: Controller, cycles: number): void {
@@ -1569,7 +1596,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     }
 
     it(
-      'accepts up to MAX_INPUTS_PER_TICK Pending build/sell commands pre-start, then rejects the next with a distinct pendingCap outcome and an invalid ghost — Start still succeeds (no reservation needed)',
+      'reserves the last pre-start slot for Start’s own wave-1 claim: the 63rd build/sell is accepted, the 64th rejected pendingCap on BOTH input paths — and Start’s claim still lands (#70)',
       // Same O(n²)-with-n=64 shape as the sibling below, which has carried an explicit
       // 20s budget since 98e6a3d (PR #68, squashed into 2edd61f) for exactly this
       // reason. This one was left on vitest's 5s default and duly timed out on CI (run
@@ -1581,24 +1608,101 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
       { timeout: 20_000 },
       () => {
         const c = createController(1);
-        // 32 build+sell cycles = 64 commands = MAX_INPUTS_PER_TICK exactly.
-        fillToCap(c, MAX_INPUTS_PER_TICK / 2);
+        // 31 build+sell cycles = 62 commands; each cycle nets the cell back to empty.
+        fillToCap(c, (MAX_INPUTS_PER_TICK - 2) / 2);
+        // The 63rd — the last slot ordinary build/sell traffic may take before the run
+        // starts (MAX_INPUTS_PER_TICK less the one reserved for Start's claim).
+        c.armTower('basic');
+        c.aimAt(3, 3);
+        expect(c.confirm()).toBe(true);
 
-        // The 65th planning action is rejected: invalid ghost + the distinct 'pendingCap'
-        // announcement (not the generic 'other').
+        // The SELL path is capped by the same reservation. It has its own enqueue site, so
+        // pinning only builds at this boundary would let that one site quietly claim the
+        // reserved slot — and the stranding it causes is identical: buffer at 64, Start's
+        // claim refused, run never begins. (Measured: with only the build assertions here,
+        // mutating the sell site to the full cap left all 486 web tests green.)
+        c.aimAt(3, 3); // selects the still-pending tower placed above
+        expect(c.sellSelected()).toBe(false);
+        expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
+
+        // The 64th BUILD is rejected too, even though the raw replay-contract cap would
+        // still take it: invalid ghost + the distinct 'pendingCap' announcement (not the
+        // generic 'other'). Off-by-one exact in BOTH directions — a reservation of 0 makes
+        // the 64th land and reddens these three lines; a reservation of 2 reddens the 63rd
+        // `confirm()` above.
         c.armTower('basic');
         c.aimAt(10, 3); // a fresh, otherwise-perfectly-buildable cell
         expect(c.frame().ghost).toMatchObject({ col: 10, row: 3, valid: false });
         expect(c.confirm()).toBe(false);
         expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
 
-        // Start is a trivial flag flip now — no reserved slot to guarantee, it just works.
+        // The MOUSE path refuses it too. Both are pinned because they reach the cap
+        // through different code (`clickAt`'s own pre-check vs `placementValid`'s fold),
+        // so threading the reservation through only one of them would leave the other
+        // promising a placement the buffer rejects. The Card is still armed — no
+        // rejection path disarms.
+        expect(c.uiState().armed).toBe('basic');
+        c.clickAt(10, 3);
+        expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'pendingCap' });
+
+        // And the reservation pays off: Start's own claim spends the 64th slot and is
+        // ACCEPTED, so the run begins with wave 1 actually launched. Without the
+        // reservation this claim is refused and the press strands the run — started, or
+        // not started, but waveless either way.
+        expect(c.callWaveEarly()).toBe(true);
         c.start();
         expect(c.uiState().started).toBe(true);
         tick(c);
         expect(c.hud().phase).toBe('running');
+        expect(c.hud().waveCursor).toBe(1); // wave 1 launched, not merely counted down
       },
     );
+
+    it(
+      'placementValid’s memo re-evaluates across the Start flip — the cap it folds moves with `started` (#70)',
+      { timeout: 20_000 },
+      () => {
+        const c = createController(1);
+        fillToCap(c, (MAX_INPUTS_PER_TICK - 2) / 2); // 62 commands
+        c.armTower('basic');
+        c.aimAt(3, 3);
+        expect(c.confirm()).toBe(true); // 63 — exactly the pre-start cap
+
+        // Everything the memo keys on EXCEPT `started` is identical either side of the
+        // flip: same cell, same towerId, same buffer length (the bare `start()` primitive
+        // enqueues nothing), same tick (nothing is advanced). So this is the one arrangement
+        // where dropping `started` from the key is observable — the stale pre-start `false`
+        // gets served and the ghost stays red at a cap that has just widened under it.
+        // Measured: without that key component, every other web test stays green.
+        c.armTower('basic');
+        c.aimAt(10, 3);
+        expect(c.frame().ghost).toMatchObject({ col: 10, row: 3, valid: false });
+        c.start();
+        c.aimAt(10, 3);
+        expect(c.frame().ghost).toMatchObject({ col: 10, row: 3, valid: true });
+      },
+    );
+  });
+});
+
+describe('controller — start() stays a pure flag flip (#70)', () => {
+  it('start() alone enqueues nothing: the direct-start path records no opening call', () => {
+    // The perf scenes (`apps/web/perf/main-perf*.ts`, `packages/perf/src/scenario.ts`) and
+    // `input.ts`'s default callback call this primitive directly and depend on the natural
+    // countdown launch for their measured workload. If `start()` ever grew the claim
+    // itself, every one of those recorded replays would gain a tick-0 command and the perf
+    // baseline would move underneath a change that never mentioned perf.
+    const c = createController(1);
+    c.start();
+    // A TICK MUST BE DRIVEN. `tickInputs` is appended only inside `onTick`, so a replay
+    // built straight after `start()` has an EMPTY log and any "contains no call" assertion
+    // over it is trivially true — it would stay green with the claim added to `start()`.
+    // The non-empty assertion below is what keeps this test honest.
+    tick(c);
+    const { tickInputs } = c.buildReplay();
+    expect(tickInputs.length).toBeGreaterThan(0);
+    expect(tickInputs.flat().filter((i) => i.kind === 'callWaveEarly')).toHaveLength(0);
+    expect(c.uiState().started).toBe(true); // it did un-hold the run — that is its whole job
   });
 });
 
@@ -1628,6 +1732,12 @@ describe('controller — call-wave readiness (UiState.callWaveReady, PLAN.md P3 
     { timeout: 20_000 },
     () => {
       const c = createController(1);
+      // STARTED, deliberately (#70): a held run reserves the last slot for Start's own
+      // wave-1 claim, so a 64-command buffer is unreachable before the run begins — the
+      // 64th build/sell is refused there, which is the sibling reservation test's subject.
+      // Once started there is nothing left to reserve for, the caps coincide, and this
+      // test can reach the genuinely-full buffer it exists to cover.
+      c.start();
       c.pause();
       for (let i = 0; i < MAX_INPUTS_PER_TICK / 2; i++) {
         const col = i % 2 === 0 ? 3 : 10; // two cells, alternating — never a stale duplicate

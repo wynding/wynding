@@ -242,32 +242,42 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
 });
 
 describe('deriveScore — outcome-dependent branches + credit forfeiture on a loss', () => {
+  // These three branches need a POSITIVE credit to be worth anything, and since sv15
+  // the opening launch pays nothing (#70) — so each fixture below leaves wave 0 to its
+  // own short countdown and accrues the credit by calling wave 1 (index 1) early. The
+  // coverage is the same score-branch coverage as before; only the wave it is anchored
+  // to moved.
   it('running: kill bounty + early-call credit (the live readout)', () => {
     const ruleset = testRuleset(OPEN, {
-      waveCount: 10,
-      waveSpacing: 20,
-      countdownTicks: 100,
       earlyCallScoreDivisor: 10,
+      waves: [
+        { waveCount: 10, waveSpacing: 20, countdownTicks: 5 },
+        { waveCount: 10, waveSpacing: 20, countdownTicks: 100 },
+      ],
     });
     let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, callEarly); // rem = 100 → credit = 10
+    for (let t = 0; t < 6; t++) s = step(s, ruleset, []); // wave 0 launches naturally at tick 5
+    expect(s.waveLaunchTick[0]).toBe(5);
+    s = step(s, ruleset, callEarly); // wave index 1, rem = 100 → credit = 10
     expect(s.phase).toBe('running');
+    expect(s.cumulativeEarlyCallCredit).toBe(10);
     expect(deriveScore(s, ruleset)).toBe(s.cumulativeKillBounty + 10);
   });
 
   it('won: kill bounty + credit + lives × survivalMul', () => {
     const ruleset = testRuleset(OPEN, {
       creepHp: 10,
-      waveCount: 3,
-      waveSpacing: 20,
-      countdownTicks: 100,
       earlyCallScoreDivisor: 10,
+      waves: [
+        { waveCount: 3, waveSpacing: 20, countdownTicks: 5 },
+        { waveCount: 3, waveSpacing: 20, countdownTicks: 100 },
+      ],
     });
     let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, [
-      { kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' },
-      ...callEarly,
-    ]);
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' }]);
+    for (let t = 1; t < 6; t++) s = step(s, ruleset, []); // wave 0 launches naturally at tick 5
+    expect(s.waveLaunchTick[0]).toBe(5);
+    s = step(s, ruleset, callEarly); // wave index 1 → the credit this branch retains
     for (let t = 0; t < 500 && s.phase === 'running'; t++) s = step(s, ruleset, []);
     expect(s.phase).toBe('won');
     const expected =
@@ -278,14 +288,16 @@ describe('deriveScore — outcome-dependent branches + credit forfeiture on a lo
 
   it('lost: kill bounty ONLY — the early-call credit is forfeited entirely, even if positive', () => {
     const ruleset = testRuleset(OPEN, {
-      waveCount: 10,
-      waveSpacing: 5,
       startingLives: 2,
-      countdownTicks: 50,
       earlyCallScoreDivisor: 1, // maximizes the credit so forfeiture is unmissable
+      waves: [
+        { waveCount: 10, waveSpacing: 5, countdownTicks: 5 },
+        { waveCount: 10, waveSpacing: 5, countdownTicks: 50 },
+      ],
     });
     let s = createInitialState(1, ruleset);
-    s = step(s, ruleset, callEarly);
+    for (let t = 0; t < 6; t++) s = step(s, ruleset, []); // wave 0 launches naturally at tick 5
+    s = step(s, ruleset, callEarly); // wave index 1, rem = 50 → credit = 50
     for (let t = 0; t < 2000 && s.phase === 'running'; t++) s = step(s, ruleset, []);
     expect(s.phase).toBe('lost');
     expect(s.cumulativeEarlyCallCredit).toBeGreaterThan(0); // credit WAS accrued live...

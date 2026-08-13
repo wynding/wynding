@@ -219,27 +219,41 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   test("658×320: the four-row wave-9 preview (M2-S11, the arc's densest tick) fits accessibly inside the bounded scrollport", async ({
     page,
   }) => {
-    // Above the sum of this test's declared worst-case budgets — eight paced calls
-    // carrying a 5s in-page deadline each (paced-call.ts) plus the axe/geometry/
-    // keyboard tail — which the 60s config default cannot hold (same budget-coherence
-    // rule as the two marathon specs, CodeRabbit #117).
+    // Above the sum of this test's declared worst-case budgets — seven paced calls
+    // (#70: wave 1 now launches on Start itself, not through this loop) carrying a 5s
+    // in-page deadline each (paced-call.ts) plus the axe/geometry/keyboard tail — which
+    // the 60s config default cannot hold (same budget-coherence rule as the two marathon
+    // specs, CodeRabbit #117). The budget itself is unchanged — one fewer paced call
+    // only widens the margin.
     test.setTimeout(120_000);
     await gotoAt(page, PHONE);
     const preview = page.locator('.wy-wave-preview');
     const previewTitle = preview.locator('.wy-wave-preview-title');
     const entries = preview.locator('li');
+    const callWave = page.getByRole('button', { name: 'Call wave' });
 
-    // Early-call through waves 1..8 to bring wave 9 (index 8, the four-stream wave) into
-    // the preview slot — the same gate-each-press-on-aria pattern smoke.spec.ts /
-    // start-gate.spec.ts use, so a same-tick-deduped press cannot silently short the loop.
+    // Start CLAIMS wave 1 as well as unholding the run (#70) — settle on the wave-2
+    // preview + a call-ready control before the Pause press below, so the claim itself
+    // is a named assertion rather than an incidental side effect of what follows.
     await page.getByRole('button', { name: 'Start' }).click();
+    // The settle window itself runs UNPAUSED — the claim can only be consumed by a real
+    // tick, so it cannot be waited for under pause. Bounded, not unbounded: two awaited
+    // assertions at 1x against ~450 ticks before this undefended run's first leak, so the
+    // #97 lag class has orders of magnitude of headroom here even though this is, strictly,
+    // a window the old same-tick Start->Pause did not have.
+    await expect(previewTitle).toHaveText('Wave 2 of 10');
+    await expect(callWave).toHaveAttribute('aria-disabled', 'false');
+
+    // Early-call through the REMAINING waves 2..8 to bring wave 9 (index 8, the
+    // four-stream wave) into the preview slot — the same gate-each-press-on-aria
+    // pattern smoke.spec.ts / start-gate.spec.ts use, so a same-tick-deduped press
+    // cannot silently short the loop.
     // #97: the same undefended-marathon pacing the smoke/start-gate loops use — enter
     // the loop PAUSED so runner lag between iterations stalls a frozen sim instead of
     // leaking creeps (this loop free-ran eight calls, the same class that lost runs
     // mid-loop in those specs, just at 1× with a shorter horizon).
     await page.getByRole('button', { name: 'Pause' }).click();
-    const callWave = page.getByRole('button', { name: 'Call wave' });
-    for (let waveNumber = 1; waveNumber <= 8; waveNumber++) {
+    for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
       await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
       await expect(callWave).toHaveAttribute('aria-disabled', 'false');
       await callWavePaced(page, titleAfterCall(waveNumber, 10));

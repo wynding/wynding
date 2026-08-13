@@ -153,8 +153,10 @@ const VENOM_TOWER_ID = 4;
 /**
  * The canonical input log: a pure function of the tick index. It exercises the FULL
  * command vocabulary — TWO `callWaveEarly` calls (tick 0 launches wave 0; tick 250,
- * mid-run, launches wave 1 — the `fast`-creep wave — early, both paying the
- * early-call bounty/credit from the undecremented countdown), THREE accepted builds
+ * mid-run, launches wave 1 — the `fast`-creep wave — early). Since sv15 (#70) only the
+ * SECOND of those pays: the tick-0 call is the opening launch, and there is no "early"
+ * for wave 1, so it banks neither bounty nor credit. Having both in one log is what
+ * makes the scenario a witness for BOTH sides of that rule. Also THREE accepted builds
  * into the creeps' lane (`basic`, `slow`, then `venom` — forcing a visible re-route
  * AND combat kills AND a slow application AND a resident, ticking DoT record), a
  * rejected build (the deterministic-no-op path), an explicit `noop`, and a later
@@ -217,14 +219,21 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: '31e0a94c', // re-pinned M2-S6 P5: the `stunUntilTick` column widens every creep's shape.
+  finalHash: 'd93528da',
+  // Re-pinned M2-S6 P5 ('31e0a94c'): the `stunUntilTick` column widens every creep's shape.
   // Re-pinned M2-S7 P6 (SIM_VERSION 10 → 11): `Impact` gained a `domain` mask, so every tick
-  // with an impact IN FLIGHT hashes differently. `finalHash` above is deliberately UNCHANGED
-  // and was not re-pinned — no impact is in flight at the terminal tick, so the end state is
-  // byte-identical. That asymmetry is the evidence this bump changed the impact record's SHAPE
-  // and not the scenario's behaviour; if `finalHash` had moved too, that would have warranted
-  // investigation rather than a re-pin.
-  traceDigest: '7c83bc85', // fnv1a(trace.join(':'))
+  // with an impact IN FLIGHT hashed differently — but `finalHash` was deliberately NOT
+  // re-pinned then, because no impact is in flight at the terminal tick. That asymmetry was
+  // the evidence the bump changed the impact record's SHAPE and not the scenario's behaviour.
+  //
+  // Re-pinned #70 (SIM_VERSION 14 → 15) — and this time BOTH values move, for the opposite
+  // reason: nothing about the state's shape changed, the scenario's BEHAVIOUR did. The tick-0
+  // call is the opening launch and no longer pays, so the run carries 10 less bounty from tick
+  // 0 onward and 10 less cumulative credit at the end. This is the sv-paired move the CI guard
+  // exists to allow; the scenario's own witnesses were re-checked rather than assumed — all
+  // three builds still land (the reduced bounty does not starve them), the detour, kills, slow
+  // and DoT witnesses stand, and the run still ends `lost` with `lives === 0`.
+  traceDigest: '442f4adb', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 
@@ -263,8 +272,10 @@ describe('determinism gate', () => {
     // RESIDENT in `SimState.dots` and observed actually TICKING (its `nextTickTick`
     // advancing, i.e. damage dealt — a merely-resident record would prove the state
     // shape serializes but not that the tick step ever ran); the tick-201 sell
-    // removes basic and venom (the slow tower survives); and BOTH early calls
-    // (tick 0 + tick 250) pay into the cumulative early-call credit.
+    // removes basic and venom (the slow tower survives); and the early-call economy
+    // is witnessed from BOTH sides of the sv15 rule — the tick-250 call on wave index
+    // 1 pays into the cumulative credit, while the tick-0 opening call launches wave 0
+    // and pays nothing.
     let state = createInitialState(SCENARIO_SEED, SCENARIO_RULESET);
     let sawAllThreeTowers = false;
     let sawDetour = false;
@@ -302,10 +313,12 @@ describe('determinism gate', () => {
     expect(sawResidentDot).toBe(true); // a DoT record rode the serialized state
     expect(sawDotTick).toBe(true); // and the tick step actually fired it
     expect(state.towers.id).toEqual([SLOW_TOWER_ID]); // basic+venom sold, slow survives
-    // ⌊500/50⌋ = 10 (the tick-0 call at full countdown) + ⌊51/50⌋ = 1 (the tick-250
-    // call: wave 1's 300-tick countdown began decrementing at tick 1, so 249
-    // decrements leave rem = 51) — NOT ⌊300/50⌋: the second call is mid-countdown.
-    expect(state.cumulativeEarlyCallCredit).toBe(11);
+    // ⌊51/50⌋ = 1, earned entirely by the tick-250 call: wave 1's 300-tick countdown
+    // began decrementing at tick 1, so 249 decrements leave rem = 51 — NOT ⌊300/50⌋,
+    // because that second call is mid-countdown. The tick-0 call adds nothing: it is
+    // the opening launch, which since sv15 (#70) pays neither bounty nor credit. This
+    // read 11 before the bump, the extra 10 being ⌊500/50⌋ from that opening call.
+    expect(state.cumulativeEarlyCallCredit).toBe(1);
     // The terminal the header documents, pinned (tick freezes at the terminal):
     expect(state.phase).toBe('lost');
     expect(state.tick).toBe(454);

@@ -340,44 +340,62 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *
    *  Fullscreen is requested only on the `started` false→true EDGE: repeated Start presses
    *  mid-run never re-request, while Play-again (which returns the run to a pre-start state)
-   *  makes the next Start eligible again. `startRun` itself no longer enqueues
-   *  `callWaveEarly` (`controller.start()` is now a trivial flag flip, PLAN.md P3 step 15 —
-   *  the Start decouple) — `primaryAction` below is what routes between this and the
-   *  Call-wave path once `started`. */
+   *  makes the next Start eligible again.
+   *
+   *  CLAIM-FIRST COMPOSITION (#70). Pressing Start is what calls wave 1 — there is no
+   *  countdown to sit through and no separate "call early" to find — so this handler claims
+   *  the wave BEFORE it un-holds the run and before any side effect fires. The order is
+   *  load-bearing, not stylistic: un-holding first and claiming second would leave a
+   *  rejected claim behind a run that is already live but whose first wave never launched.
+   *  `controller.start()` itself remains the pure flag flip it became at M2-S2 — the
+   *  composition is the PRODUCT's, and it lives here. The sv15 sim rule is what makes the
+   *  opening claim free: there is no "early" for the first wave. `primaryAction` below
+   *  routes to the Call-wave path once `started`. */
   function startRun(): void {
-    const wasStarted = controller.uiState().started;
-    controller.start();
-    if (!wasStarted && controller.uiState().started) {
-      requestFullscreen({
-        doc,
-        // Matched at request time, not at construction — a tablet can gain or lose a
-        // pointer between load and Start.
-        matchesCoarsePointer: () => matchMediaFn('(pointer: coarse)').matches,
-        // `installed` is checked alongside `standalone` everywhere (PLAN.md P3): an install
-        // accepted in THIS tab does not flip the display-mode query.
-        isStandalone: () => {
-          const s = install.state();
-          return s.standalone || s.installed;
-        },
-      });
-      // The install banner never resurrects after the session's first Start — including
-      // across Play-again, which returns to a pre-start state (PLAN.md P3). Mid-run chrome
-      // that re-appears between runs is noise, not a second chance.
-      install.endBannerForSession();
-      // overlay.update() hides the primary Dock button for the rest of the run once started
-      // (PLAN.md P4), and hiding the focused element drops focus to document.body. Re-home
-      // focus on the board — the natural next actionable place for a keyboard user (it owns
-      // the arrow-cursor + Enter placement path).
-      //
-      // INSIDE the edge, deliberately: the keymapped start key routes here too, and pressing
-      // it again mid-run is a no-op on the controller. Re-homing unconditionally would yank
-      // focus off the Card or the chips scrollport and lose the player's place for nothing.
-      board.focus();
+    if (controller.uiState().started) {
+      // A repeat press: `primaryAction` routes mid-run presses to the Call-wave path, so
+      // reaching this is defensive. The refresh stays unconditional (see its note below).
+      refreshHud();
+      return;
     }
+    if (!controller.callWaveEarly()) {
+      // The claim was refused — a legally full pre-start buffer announces 'pendingCap'.
+      // The run stays held and NOTHING else happens: no fullscreen request, no install-
+      // banner latch, no focus move. The refresh still runs so the rejection reaches the
+      // live region rather than the press vanishing silently.
+      refreshHud();
+      return;
+    }
+    controller.start();
+    requestFullscreen({
+      doc,
+      // Matched at request time, not at construction — a tablet can gain or lose a
+      // pointer between load and Start.
+      matchesCoarsePointer: () => matchMediaFn('(pointer: coarse)').matches,
+      // `installed` is checked alongside `standalone` everywhere (PLAN.md P3): an install
+      // accepted in THIS tab does not flip the display-mode query.
+      isStandalone: () => {
+        const s = install.state();
+        return s.standalone || s.installed;
+      },
+    });
+    // The install banner never resurrects after the session's first Start — including
+    // across Play-again, which returns to a pre-start state (PLAN.md P3). Mid-run chrome
+    // that re-appears between runs is noise, not a second chance.
+    install.endBannerForSession();
+    // overlay.update() hides the primary Dock button for the rest of the run once started
+    // (PLAN.md P4), and hiding the focused element drops focus to document.body. Re-home
+    // focus on the board — the natural next actionable place for a keyboard user (it owns
+    // the arrow-cursor + Enter placement path).
+    //
+    // Reached only on the false→true transition: the repeat-press and refused-claim paths
+    // both returned above. Re-homing unconditionally would yank focus off the Card or the
+    // chips scrollport and lose the player's place for nothing.
+    board.focus();
     // Starting HIDES the home link (started + unpaused = live), so the flip has to land in
     // this handler rather than waiting for the frame loop — same reasoning as `ensurePaused`
-    // above. Outside the edge deliberately: a repeat Start is a controller no-op, but the
-    // refresh is cheap and keeps this path unconditionally correct.
+    // above. Every exit path from this function refreshes, the two early returns included,
+    // so the HUD and the live region can never lag a press.
     refreshHud();
   }
 

@@ -298,11 +298,18 @@ test.describe('home affordance — Standard layout', () => {
   }) => {
     await gotoAt(page, STANDARD);
     await page.getByRole('button', { name: 'Start' }).click();
-    // Start no longer claims wave 1 (M2-S2, PLAN.md P3 step 15) — early-call it via the
-    // morphed primary control so this undefended loss resolves well within the wait below
-    // (wave 1's own natural 500-tick countdown alone would otherwise cost ~25s before a
-    // single creep even spawns).
-    await page.getByRole('button', { name: 'Call wave' }).click();
+    // Start now claims wave 1 itself (#70) — settle on the wave-2 preview + a call-ready
+    // control before this accelerator press, since a same-tick click here would dedupe
+    // against Start's own buffered wave-1 call rather than launching wave 2. Early-call
+    // wave 2 via the morphed primary control so this undefended loss resolves well
+    // within the wait below (wave 2's own natural countdown alone would otherwise cost
+    // far longer before a single creep even spawns).
+    const callWave = page.getByRole('button', { name: 'Call wave' });
+    await expect(page.locator('.wy-wave-preview .wy-wave-preview-title')).toHaveText(
+      'Wave 2 of 10',
+    );
+    await expect(callWave).toHaveAttribute('aria-disabled', 'false');
+    await callWave.click();
     const results = page.locator('.wy-results');
     await expect(results).toBeVisible({ timeout: 40_000 });
 

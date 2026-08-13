@@ -63,7 +63,7 @@ describe('input — keyboard (rebindable, drives the cursor & commands)', () => 
     expect(c.speed()).toBe(2);
   });
 
-  it('KeyC (the start key, routed to the morphed primary action) unholds the run WITHOUT launching wave 1 (PLAN.md P3 step 15 decouple); then builds with confirm and sells with the sell key', () => {
+  it('KeyC unholds the run WITHOUT launching wave 1 — `input.ts` standing alone calls the bare `start()` primitive, not the product composition that claims wave 1 (#70); then builds with confirm and sells with the sell key', () => {
     const c = createController(1);
     const km = createKeymap();
     attachInput(document, board, [], c, km, { getRect: () => RECT });

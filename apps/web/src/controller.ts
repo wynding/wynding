@@ -259,17 +259,24 @@ export interface Controller {
   uiRev(): number;
   /** Enqueue call-wave-early: accepted while a wave is left to call (idempotent in the
    *  sim — a duplicate already in the buffer is a no-op success, not a second command).
-   *  Wired to the morphed primary control (PLAN.md P3 step 15) once `started` — the
-   *  Start→Call-wave decouple means this is now a genuine UI-reachable action, not just
-   *  the shared primitive `start()` builds on. */
+   *  Wired to the morphed primary control (PLAN.md P3 step 15) — for wave 2 onward once
+   *  `started`, and for wave 1 as the Start press's own claim (#70). Either way it is a
+   *  genuine UI-reachable action, not just a primitive the app composes with. */
   callWaveEarly(): boolean;
-  /** Player-started runs (PLAN.md P4, decoupled further at P3 step 15): while `!started`,
-   *  `advance()` never steps. `start()` now ONLY flips `started` to `true` — it no longer
-   *  enqueues `callWaveEarly` (Start ≠ claiming the first wave early, PLAN.md's `S2`
-   *  headline decouple): once started, the sim's own wave-1 countdown begins ticking, and
-   *  an early launch is a deliberate `callWaveEarly()` press like any other wave's. A
-   *  trivial flag flip, so it's unconditionally idempotent — a repeat press mid-run is a
-   *  harmless no-op. */
+  /** Player-started runs (PLAN.md P4): while `!started`, `advance()` never steps.
+   *
+   *  `start()` ONLY flips `started` to `true` and enqueues nothing. That is the M2-S2
+   *  decouple and it still holds for this PRIMITIVE — driven directly (the perf scenes,
+   *  `input.ts`'s default callback), the run un-holds and wave 1 then launches on its own
+   *  countdown. A trivial flag flip, so it is unconditionally idempotent: a repeat press
+   *  mid-run is a harmless no-op.
+   *
+   *  THE PRODUCT'S START CONTROL IS THE COMPOSITION, NOT THIS CALL (#70). It claims wave 1
+   *  first and un-holds second — `if (started) return; if (!callWaveEarly()) return;
+   *  start();` in `main.ts` — because pressing Start is the act that calls the first wave.
+   *  Keeping the two separable is deliberate: the primitive has consumers that must NOT
+   *  claim, and a client wanting the product behavior composes the same two calls in the
+   *  same order rather than relying on hidden behavior in here. */
   start(): void;
   /** Reset everything for a new run (Play-again / boot). */
   startRun(seed: number): void;
@@ -331,27 +338,35 @@ const BLAST_RADIUS_FP = (r: CompiledRuleset, towerId: string): number | null =>
  *    selection, so `confirm()` never even reaches this classifier for it (the ghost is
  *    null). By the time we're here with a valid ghost, any same-anchor `placeTower`
  *    already in the buffer is necessarily a dead/cancelled one — never a live duplicate.
- *  - `'full'`: not a duplicate, and the buffer is already at `MAX_INPUTS_PER_TICK` (the
- *    replay contract's exact per-tick limit, imported not duplicated, so the two can
- *    never drift). This is an intentional product limit, not a bug surface: it exists so
- *    no recorded tick can ever exceed the replay contract even via many *distinct*
- *    commands. It is ONE cap, held or not — the P4-era pre-start reservation (a reduced
- *    cap holding a slot for `start()`'s own `callWaveEarly`) was retired at M2-S2 when
- *    the S2 decouple made `start()` enqueue nothing — and while reaching it takes
- *    deliberate play, it IS reachable (32 same-tick build/sell cycles fill all 64 slots
- *    from starting bounty — the regression test does exactly that) and hitting it is
- *    NOT silent: every reachable cap hit is
- *    surfaced to the player as a 'pendingCap' rejection. Mechanism per site: the sell
- *    and callWaveEarly sites route a 'full' verdict to 'pendingCap' directly; the two
- *    PLACEMENT sites announce 'pendingCap' from their own cap pre-checks BEFORE this
- *    function runs (`clickAt`'s explicit check and `placementValid`'s cap fold), which
- *    leaves their 'full' branches as defensive fallbacks a player cannot reach
- *    ('other' / a bare `false`).
+ *  - `'full'`: not a duplicate, and the buffer is already at `cap`. This is an
+ *    intentional product limit, not a bug surface: it exists so no recorded tick can ever
+ *    exceed the replay contract even via many *distinct* commands. Reaching it takes
+ *    deliberate play but IS reachable (32 same-tick build/sell cycles fill all 64 slots
+ *    from starting bounty — the regression test does exactly that), and hitting it is NOT
+ *    silent: every reachable cap hit is surfaced to the player as a 'pendingCap'
+ *    rejection. Mechanism per site: the sell and callWaveEarly sites route a 'full'
+ *    verdict to 'pendingCap' directly; the two PLACEMENT sites announce 'pendingCap' from
+ *    their own cap pre-checks BEFORE this function runs (`clickAt`'s explicit check and
+ *    `placementValid`'s cap fold), which leaves their 'full' branches as defensive
+ *    fallbacks a player cannot reach ('other' / a bare `false`).
+ *
+ *    `cap` IS A REQUIRED PARAMETER, and deliberately not defaulted to
+ *    `MAX_INPUTS_PER_TICK` (#70). There are two caps again: a run that has not started
+ *    reserves one slot for the Start control's own `callWaveEarly` — the command that
+ *    begins the run — so ordinary build/sell traffic is bounded by
+ *    `MAX_INPUTS_PER_TICK − 1` until then, while the reserved consumer spends the last
+ *    slot at the full cap. (M2-S2's decouple made `start()` enqueue nothing and the
+ *    reservation was retired; #70 re-couples the product's Start control to the wave-1
+ *    call, so it returns.) A defaulted parameter would let a future build/sell site claim
+ *    the reserved slot and strand Start on a legally full pre-start buffer — a state
+ *    `controller.test.ts` constructs on purpose — so the compiler is made to locate every
+ *    call site instead.
  *  - `'queue'`: otherwise — the command should be pushed.
  */
 export function enqueueVerdict(
   buffer: readonly SimInput[],
   cmd: SimInput,
+  cap: number,
 ): 'queue' | 'duplicate' | 'full' {
   const duplicate = buffer.some((existing) => {
     switch (cmd.kind) {
@@ -364,7 +379,7 @@ export function enqueueVerdict(
     }
   });
   if (duplicate) return 'duplicate';
-  if (buffer.length >= MAX_INPUTS_PER_TICK) return 'full';
+  if (buffer.length >= cap) return 'full';
   return 'queue';
 }
 
@@ -593,11 +608,27 @@ export function createController(
   // re-clicking the already-selected tower re-reveals. Reset to 0 on `startRun()`.
   let inspectSeq = 0;
   // Player-started runs (PLAN.md P4): the real advance gate. `false` from a fresh run/
-  // Play-again until `start()` flips it (a bare flag flip — the S2 decouple retired
-  // start()'s enqueue); `advance()` is a no-op while this is false, regardless of
+  // Play-again until `start()` flips it (a bare flag flip — `start()` itself enqueues
+  // nothing; the product's Start control composes the wave-1 claim around it, see the
+  // `start()` doc); `advance()` is a no-op while this is false, regardless of
   // `paused`/speed — held runs never step. Never reset by anything BUT `reset()` (a
   // fresh run identity) — `start()` only ever flips it true.
   let started = false;
+  /** The per-tick buffer cap ordinary build/sell traffic may fill (#70).
+   *
+   *  A held run reserves the last slot for the Start control's own `callWaveEarly` — the
+   *  command that launches wave 1 and begins the run. Without the reservation a player
+   *  who legally fills all 64 slots before pressing Start (32 same-tick build/sell
+   *  cycles; `controller.test.ts` builds exactly that buffer) would have Start's claim
+   *  rejected and the run stranded: the button reports failure and nothing starts.
+   *
+   *  Threaded through EVERY build/sell capacity consumer rather than checked at the
+   *  point of enqueue alone, so the ghost never previews a placement the cap will
+   *  reject and the keyboard path fails loudly instead of silently. The reserved
+   *  consumer — `doCallWaveEarly` — deliberately uses the FULL cap: the spare slot
+   *  exists for it. Once `started`, there is nothing left to reserve for and the two
+   *  caps coincide. */
+  const effectiveCap = (): number => (started ? MAX_INPUTS_PER_TICK : MAX_INPUTS_PER_TICK - 1);
   const bumpUiRev = (): void => {
     uiRev++;
   };
@@ -832,13 +863,15 @@ export function createController(
   // (cell, buffer length, tick): a hover that stays in one cell (or repeated frames)
   // re-uses the last clone instead of deep-cloning SimState each event. A cell that would
   // otherwise build fine still shows an invalid ghost once the buffer is at
-  // `MAX_INPUTS_PER_TICK` (the replay contract's per-tick limit — PLAN.md P3 step 15
-  // drops the P4-era pre-start reservation, so this is the one cap now, held or not), so
-  // the preview never promises a placement that a subsequent confirm/click would reject.
+  // `effectiveCap()` (the replay contract's per-tick limit, less the slot a held run
+  // reserves for Start's own wave-1 claim — see `effectiveCap`), so the preview never
+  // promises a placement that a subsequent confirm/click would reject.
   const placementValid = (col: number, row: number, towerId: string): boolean => {
-    const key = `${col},${row},${buffer.length},${state.tick},${towerId}`;
+    // `started` joins the memo key: the cap this reads MOVES when the run starts, so a
+    // key without it would serve a stale pre-start `false` to the first hover after Start.
+    const key = `${col},${row},${buffer.length},${state.tick},${towerId},${started}`;
     if (key === aimMemoKey) return aimMemoValid;
-    if (buffer.length >= MAX_INPUTS_PER_TICK) {
+    if (buffer.length >= effectiveCap()) {
       aimMemoKey = key;
       aimMemoValid = false;
       return false;
@@ -1034,10 +1067,10 @@ export function createController(
       }
       // The per-tick buffer cap takes priority over bounty/other — a cell that's
       // otherwise perfectly buildable but arrives when the buffer is already at
-      // `MAX_INPUTS_PER_TICK` must report the CAP as the reason, not a misleading
+      // `effectiveCap()` must report the CAP as the reason, not a misleading
       // 'bounty'/'other'. Checked before `placementValid` (which itself folds the cap
       // into its memoized result) so this exact branch can attach the distinct outcome.
-      if (buffer.length >= MAX_INPUTS_PER_TICK) {
+      if (buffer.length >= effectiveCap()) {
         ghost = invalidGhostAt(col, row, towerId);
         setOutcome({ kind: 'rejected', reason: 'pendingCap' });
         return;
@@ -1057,7 +1090,7 @@ export function createController(
       // common case — 'full' stays as a defensive fallback in case the buffer changed
       // underneath us between the check and here.
       const cmd: SimInput = { kind: 'placeTower', anchor: { col, row }, towerId };
-      const verdict = enqueueVerdict(buffer, cmd);
+      const verdict = enqueueVerdict(buffer, cmd, effectiveCap());
       if (verdict === 'full') {
         ghost = invalidGhostAt(col, row, towerId);
         setOutcome({ kind: 'rejected', reason: 'other' });
@@ -1200,7 +1233,10 @@ export function createController(
     if (isTerminalPhase(state.phase)) return false;
     if (state.waveCursor >= ruleset.waves.length) return false; // no more waves to call
     const cmd: SimInput = { kind: 'callWaveEarly' };
-    const verdict = enqueueVerdict(buffer, cmd);
+    // THE FULL CAP, not `effectiveCap()` (#70): this is the reserved consumer. A held
+    // run keeps the last slot back precisely so the Start control's wave-1 claim can
+    // always be made, so spending it here is the reservation working, not defeating it.
+    const verdict = enqueueVerdict(buffer, cmd, MAX_INPUTS_PER_TICK);
     if (verdict === 'full') {
       setOutcome({ kind: 'rejected', reason: 'pendingCap' });
       return false;
@@ -1324,7 +1360,7 @@ export function createController(
             inspectTower(existing, false);
             return false;
           }
-          if (buffer.length >= MAX_INPUTS_PER_TICK) {
+          if (buffer.length >= effectiveCap()) {
             setOutcome({ kind: 'rejected', reason: 'pendingCap' });
           } else {
             const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
@@ -1345,7 +1381,7 @@ export function createController(
         anchor: { col: ghost.col, row: ghost.row },
         towerId,
       };
-      const verdict = enqueueVerdict(buffer, cmd);
+      const verdict = enqueueVerdict(buffer, cmd, effectiveCap());
       if (verdict === 'full') return false;
       if (verdict === 'queue') {
         buffer.push(cmd);
@@ -1373,7 +1409,7 @@ export function createController(
       // The sold tower's anchor — captured before re-aiming, which may clear `selection`.
       const anchor = { col: selection.col, row: selection.row };
       const cmd: SimInput = { kind: 'sellTower', tower: selection.id };
-      const verdict = enqueueVerdict(buffer, cmd);
+      const verdict = enqueueVerdict(buffer, cmd, effectiveCap());
       if (verdict === 'full') {
         // Sells count against the same per-tick buffer cap as builds and calls.
         setOutcome({ kind: 'rejected', reason: 'pendingCap' });
@@ -1454,15 +1490,28 @@ export function createController(
         // buffer-capacity half is web-only and folded in here, not in `@wynding/render`.
         // Shares `currentHud()` with `hud()` above — one derivation per (tick, bufferRev),
         // not two.
+        // The FULL cap here for the same reason `doCallWaveEarly` uses it: this flag
+        // gates the reserved consumer, and the held run's spare slot is its to spend.
         callWaveReady: currentHud().callable && buffer.length < MAX_INPUTS_PER_TICK,
       };
     },
     uiRev: () => uiRev,
     callWaveEarly: doCallWaveEarly,
     start(): void {
-      // Decoupled (PLAN.md P3 step 15 — the S2 headline decouple): Start no longer
-      // enqueues `callWaveEarly`. A trivial flag flip is unconditionally idempotent, so a
-      // repeat press mid-run is a harmless no-op — no acceptance to gate on.
+      // A PURE FLAG FLIP, deliberately — it un-holds the run and enqueues nothing. That
+      // is the M2-S2 decouple and it stands: the perf scenes and `input.ts`'s default
+      // callback call this primitive directly and depend on the natural countdown
+      // launch for their measured workload. Unconditionally idempotent, so a repeat
+      // press mid-run is a harmless no-op with no acceptance to gate on.
+      //
+      // The PRODUCT's Start control is not this primitive alone (#70): it claims wave 1
+      // first and only then un-holds — `if (started) return; if (!callWaveEarly())
+      // return; start();` — because pressing Start IS the act that calls the first wave,
+      // and the sv15 rule makes that opening claim cost nothing. The composition lives
+      // at the action layer (`main.ts`) rather than in here so the two contracts stay
+      // separable; a future non-button client that wants the product behavior composes
+      // the same two calls in the same order. Claim-first matters: starting first would
+      // strand a run whose claim is then rejected.
       started = true;
     },
     startRun(nextSeed: number): void {

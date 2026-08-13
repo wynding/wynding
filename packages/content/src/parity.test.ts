@@ -158,12 +158,15 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
   // claim — the flip is the measured, reported outcome per ruling 1, not a regression.
   it('the early-calls + two-`slow`-towers build — no longer winning at eight waves, run to terminal under MAX_MATCH_TICKS, matches the pinned golden exactly', () => {
     // A wall of `basic` towers flanking the row-11 lane (row 10 and row 12, every
-    // third column), placed one per tick as budget allows: enough total DPS to
-    // clear all three waves outright. Once the wall is fully placed, two `slow`
+    // third column), one submitted per affordable tick: enough total DPS to
+    // clear all three waves outright. 18 anchors are offered and 16 stand — two are
+    // refused by the maze invariant as the wall closes onto the lane, which is a
+    // property of the board, not of the budget (see the terminal count assertion).
+    // Once the wall is fully placed, two `slow`
     // towers go up off-lane (rows 7 and 15, `slowAnchors` below) — proving the slow path
     // client/server-identically at content level (step 12). Wave 0 is
-    // early-called at tick 0 (paying the early-call bounty/credit from the
-    // undecremented 500-tick countdown); wave 1 launches naturally at tick 300
+    // early-called at tick 0 — since sv15 (#70) that opening launch pays NOTHING, it
+    // merely begins the run; wave 1 launches naturally at tick 300
     // (its countdown, not an early call, so it pays no credit — `rem` is 0 at
     // natural expiry); wave 2 is early-called at tick 550 (50 ticks before its
     // natural expiry, paying a small bounty/credit); the tick-1050 call WAS a
@@ -209,38 +212,72 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
       { col: 2, row: 7 },
       { col: 5, row: 15 },
     ];
+    const bundle = getBundledRuleset();
+    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const basicCost = ruleset.towerById['basic']!.cost;
+    const slowCost = ruleset.towerById['slow']!.cost;
+
+    // AFFORDABILITY-PACED (#70). This script used to submit one anchor per tick and
+    // advance its cursor unconditionally, so an anchor rejected for want of bounty was
+    // silently skipped. That stayed invisible while the opening early call banked a
+    // 10-bounty bonus on top of the 80 starting bounty; since sv15 the opening launch
+    // pays nothing, and an unconditional cursor would drop the tail of the wall and
+    // re-pin a DIFFERENT maze — a golden no longer describing the scenario it claims to.
+    //
+    // The cursor now advances only on a tick the tower is actually AFFORDABLE, so income
+    // paces the build instead of truncating it. Deliberately NOT "retry until it lands":
+    // several of these anchors are rejected STRUCTURALLY (the wall closes onto the lane
+    // as it grows), and holding one of those forever would stall the whole build at the
+    // first such anchor — measured, when this fixture was first written that way: zero
+    // towers placed and the run lost at tick 446. Submit-once-when-affordable keeps the
+    // structural accept/reject pattern — and therefore the maze — exactly as it was.
     let anchorIdx = 0;
+    let slowIdx = 0;
+    let bountyNow = ruleset.balance.startingBounty;
     function inputs(tick: number): SimInput[] {
       const out: SimInput[] = [];
-      if (anchorIdx < anchors.length) {
+      if (anchorIdx < anchors.length && bountyNow >= basicCost) {
         out.push({ kind: 'placeTower', anchor: anchors[anchorIdx]!, towerId: 'basic' });
         anchorIdx++;
-      }
-      if (tick === 600) {
-        out.push({ kind: 'placeTower', anchor: slowAnchors[0]!, towerId: 'slow' });
-      }
-      if (tick === 610) {
-        out.push({ kind: 'placeTower', anchor: slowAnchors[1]!, towerId: 'slow' });
+      } else if (anchorIdx >= anchors.length && bountyNow >= slowCost) {
+        // The two off-lane `slow` towers go up only once the wall is done and paid for
+        // — the ordering this scenario always had, now expressed as a condition rather
+        // than as the fixed ticks 600/610 that used to stand in for it.
+        if (tick >= 600 && slowIdx === 0) {
+          out.push({ kind: 'placeTower', anchor: slowAnchors[0]!, towerId: 'slow' });
+          slowIdx++;
+        } else if (tick >= 610 && slowIdx === 1) {
+          out.push({ kind: 'placeTower', anchor: slowAnchors[1]!, towerId: 'slow' });
+          slowIdx++;
+        }
       }
       if (tick === 0) out.push({ kind: 'callWaveEarly' }); // wave 0
       if (tick === 550) out.push({ kind: 'callWaveEarly' }); // wave 2
       if (tick === 1050) out.push({ kind: 'callWaveEarly' }); // M2-S6: launches wave index 4 early (was a no-op through M2-S5a)
       return out;
     }
-
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     // Mid-trace probe (Codex R2-3): a self-consistent golden alone cannot certify
     // the `slow` commands actually landed — this asserts some creep really carried
     // an active slow status at some tick during the run.
     let sawSlowedCreep = false;
     const { state, trace } = runScenarioUntilTerminal(inputs, (s) => {
       sawSlowedCreep ||= s.creeps.slowMulFp.some((mulFp) => mulFp !== 0);
+      // Feeds the affordability pacing above — read off the state rather than tracked
+      // independently, so the script can never believe it can afford what it cannot.
+      bountyNow = s.bounty;
     });
-    expect(sawSlowedCreep).toBe(true);
+    // Every measured diagnostic prints BEFORE any assertion fires — a re-measure after a
+    // balance or rule change needs the numbers, and an assertion that trips first hides
+    // exactly the log the next person has to read.
     console.log(
       'parity.test.ts winning scenario: hash',
       hashSimState(state),
+      'basicTowers',
+      state.towers.towerId.filter((id) => id === 'basic').length,
+      'slowTowers',
+      state.towers.towerId.filter((id) => id === 'slow').length,
+      'sawSlowedCreep',
+      sawSlowedCreep,
       'trace',
       fnv1a(trace.join(':')),
       'phase',
@@ -265,10 +302,23 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
       deriveStars(state, ruleset),
     );
 
+    expect(sawSlowedCreep).toBe(true);
+
     // Terminal proof the `slow` placements survived (not sim-silently no-op'd):
     // two rows still carry `towerId === 'slow'`.
     const slowTowerCount = state.towers.towerId.filter((id) => id === 'slow').length;
     expect(slowTowerCount).toBe(2);
+
+    // Terminal proof the wall itself is intact — the assertion the affordability pacing
+    // exists for. Without it a funding change can silently drop anchors and every hash
+    // below re-pins to a maze no comment here describes.
+    //
+    // 16, not 18: all 18 anchors are submitted, and two are rejected STRUCTURALLY — the
+    // wall closes onto the row-11 lane as it grows, and the maze invariant refuses the
+    // placement that would leave no route. That was true before #70 as well (measured on
+    // the pre-#70 rule: also 16), so this number pins the topology, not the funding.
+    const basicTowerCount = state.towers.towerId.filter((id) => id === 'basic').length;
+    expect(basicTowerCount).toBe(16);
 
     // Re-pinned M2-S5a P5: the appended `armored` wave (index 3, `6 × armored`)
     // is now part of "every wave cleared" — the `basic` wall's DPS also clears it
@@ -371,8 +421,24 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     //   lives (unchanged)              0 → 0
     //   score                          84 → 102 (kill-bounty only, lost branch)
     //   stars (unchanged)               0 → 0
-    expect(hashSimState(state)).toBe('bf13755b');
-    expect(fnv1a(trace.join(':'))).toBe('0c6af742');
+    //
+    // Re-pinned #70 (SIM_VERSION 14 → 15, measured): the tick-0 call is the OPENING
+    // launch and no longer pays, so this scenario loses exactly one payment — the
+    // ⌊500/50⌋ = 10 bounty and ⌊500/50⌋ = 10 credit it used to bank off wave 0's full
+    // 500-tick countdown. The tick-550 and tick-1050 calls are unaffected. Measured
+    // before → after:
+    //   cumulativeEarlyCallCredit      13 → 3   (-10: the opening call's share)
+    //   bounty                        130 → 120 (-10: likewise)
+    //   phase/tick/lives/waveResolved/waveCursor/cumulativeKillBounty/score/stars
+    //                                  ALL UNCHANGED
+    // The unchanged column is the interesting half: 10 fewer bounty across the whole
+    // run does not cost this build a single tower or shift its terminal by a tick, so
+    // the hashes move purely for the withheld payment. That was verified, not assumed —
+    // running THIS script with the sv14 rule restored reproduces the previous golden
+    // byte-for-byte (hash bf13755b, trace 0c6af742), which is what proves the
+    // affordability pacing added above changed nothing on its own.
+    expect(hashSimState(state)).toBe('1ca97ecb');
+    expect(fnv1a(trace.join(':'))).toBe('636178da');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(2256);
@@ -392,13 +458,13 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
       false,
     ]);
     expect(state.waveCursor).toBe(9);
-    // cumulativeKillBounty is re-measured at 102 (see the derivation above).
-    // cumulativeEarlyCallCredit is unchanged pre-terminal (13, the same three early
-    // calls as before), but the lost-branch score formula forfeits it entirely — see
-    // `deriveScore` below.
+    // cumulativeKillBounty is unchanged at 102 (see the derivation above).
+    // cumulativeEarlyCallCredit is 3 since #70 — the same three early calls, but the
+    // opening one now pays nothing — and the lost-branch score formula forfeits even
+    // that entirely; see `deriveScore` below.
     expect(state.cumulativeKillBounty).toBe(102);
-    expect(state.cumulativeEarlyCallCredit).toBe(13);
-    expect(state.bounty).toBe(130);
+    expect(state.cumulativeEarlyCallCredit).toBe(3);
+    expect(state.bounty).toBe(120);
     // Lost score formula: kill-bounty ONLY — no early-call credit, no survival term.
     expect(deriveScore(state, ruleset)).toBe(102);
     expect(deriveStars(state, ruleset)).toBe(0);

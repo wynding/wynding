@@ -674,21 +674,33 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
 
-  // Start unholds the run — the Dock's primary control morphs from "Start" to
-  // "Call wave" (M2-S2's decouple), which is what makes early-calling waves 1..4 below
-  // possible.
+  // Start unholds the run AND claims wave 1 (#70) — the Dock's primary control morphs
+  // from "Start" to "Call wave" (M2-S2's decouple), which is what makes early-calling
+  // the rest of the way to wave 4 below possible.
   await page.getByRole('button', { name: 'Start' }).click();
 
   // Early-call through to wave 4 (M2-S5a's `armored` creep — a hexagon silhouette on
   // canvas, out of axe's scope, but its wave-preview composition IS a DOM/AT surface:
   // `armor 6`, never `armor 0`, now that a wave actually carries a nonzero-armor creep
-  // — PLAN.md step 36's "preview's now-nonzero armor text").
+  // — PLAN.md step 36's "preview's now-nonzero armor text"). Wave 1 already launched on
+  // Start, so only TWO raw clicks are needed to bring wave 4 into the preview slot, and
+  // a third launches it. Every press is gated on the preview title + aria-disabled=false
+  // first — a same-tick click here would dedupe against the PREVIOUS call (Start's own
+  // buffered wave-1 claim, or this loop's own prior click), not just the first press
+  // after Start, so an ungated back-to-back run of raw clicks could silently short the
+  // walk to wave 4.
   const callWave = page.getByRole('button', { name: 'Call wave' });
   const preview = page.locator('.wy-wave-preview');
-  for (let waveNumber = 1; waveNumber <= 3; waveNumber++) await callWave.click();
+  const previewTitle = preview.locator('.wy-wave-preview-title');
+  for (let waveNumber = 2; waveNumber <= 3; waveNumber++) {
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
+    await expect(callWave).toHaveAttribute('aria-disabled', 'false');
+    await callWave.click();
+  }
   // M2-S11: the bundle now carries ten waves — the armored wave is wave 4 of 10, not
   // wave 4 of 4.
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 10');
+  await expect(previewTitle).toHaveText('Wave 4 of 10');
+  await expect(callWave).toHaveAttribute('aria-disabled', 'false');
   await expect(preview.locator('li')).toHaveText([
     '6 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
   ]);
@@ -706,13 +718,16 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   expect(liveAudit.violations, JSON.stringify(liveAudit.violations, null, 2)).toEqual([]);
 });
 
-test('supports player-started runs, pause / speed controls, early-calls all ten waves with the preview checked before each, and reaches a result', async ({
+test('supports player-started runs, pause / speed controls, launches wave 1 on Start and early-calls the remaining nine with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
-  // Above the sum of this test's own declared worst-case budgets — ten paced calls
-  // carrying a 5s in-page deadline each (paced-call.ts) plus the 60s results wait — so
-  // a pathological run dies at the stage that owns it, with that stage's named
-  // diagnostic, never as an anonymous whole-test timeout mid-budget (CodeRabbit #117).
+  // Above the sum of this test's own declared worst-case budgets — nine paced calls
+  // (#70: wave 1 now launches on Start itself, not through this loop) carrying a 5s
+  // in-page deadline each (paced-call.ts) plus the 60s results wait — so a pathological
+  // run dies at the stage that owns it, with that stage's named diagnostic, never as an
+  // anonymous whole-test timeout mid-budget (CodeRabbit #117). The budget itself is
+  // unchanged — #117 pinned it for the marathon's worst case and one fewer paced call
+  // only widens the margin.
   test.setTimeout(150_000);
   await page.goto('/');
 
@@ -739,16 +754,24 @@ test('supports player-started runs, pause / speed controls, early-calls all ten 
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(previewAudit.violations, JSON.stringify(previewAudit.violations, null, 2)).toEqual([]);
 
-  // Start no longer claims wave 1 (M2-S2's decouple) — it unholds the run, and the primary
-  // Dock control MORPHS to "Call wave" rather than hiding.
+  // Start CLAIMS wave 1 as well as unholding the run (#70) — the primary Dock control
+  // MORPHS to "Call wave" rather than hiding (M2-S2's morph), and that first wave is
+  // already launching by the time it does.
   const primary = page.locator('.wy-dock .wy-primary');
   const start = page.getByRole('button', { name: 'Start' });
+  const previewTitle = preview.locator('.wy-wave-preview-title');
   await start.click();
   // The SAME element stays visible and re-labels — it does not hide (M2-S2's morph).
   await expect(primary).toHaveCount(1);
   await expect(primary).toBeVisible();
   const callWave = page.getByRole('button', { name: 'Call wave' });
   await expect(callWave).toBeVisible();
+  // Settle on wave 1's launch (buffered by the Start press, consumed on the next tick)
+  // before the Pause press below — Pause is a distinct control from Call wave, so it
+  // cannot dedupe against the buffered call, but this pins the claim itself as a named
+  // assertion rather than an incidental side effect of what follows.
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await expect(callWave).toHaveAttribute('aria-disabled', 'false');
 
   const pause = page.getByRole('button', { name: 'Pause' });
   await expect(pause).toBeVisible();
@@ -767,7 +790,8 @@ test('supports player-started runs, pause / speed controls, early-calls all ten 
   // windows in which it advances.
   await page.getByRole('button', { name: 'Pause' }).click();
 
-  // Early-call every wave via the morphed primary control, checking the preview shows the
+  // Early-call every REMAINING wave via the morphed primary control — wave 1 already
+  // launched on Start above, so this calls 2 through 10 — checking the preview shows the
   // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since wave 2
   // is M2-S4a's DISTINCT swarm-creep composition and wave 3 is M2-S3's DISTINCT
   // fast-creep composition (only wave 1 stays the single normal-creep kind).
@@ -780,8 +804,10 @@ test('supports player-started runs, pause / speed controls, early-calls all ten 
   // a second `normal`+`swarm` wave ahead of the air waves, and the arc's densest tick, a
   // FOUR-entry wave (`swarm`+`fast`+`armored`+`flying`) — taking the bundle to ten waves
   // and reordering `flying` ahead of `resolute`+`fast`.
+  // Keyed from wave 2: wave 1 launches on Start, so its composition is asserted PRE-start
+  // above rather than inside the loop. Carrying a `1:` entry here too would be a second
+  // source of truth that nothing reads — and therefore nothing keeps honest.
   const EXPECTED_COMPOSITION: Record<number, string[]> = {
-    1: ['10 × Creep — ground, armor 0, leak cost 1, no immunities'],
     2: ['16 × Swarm Creep — ground, armor 0, leak cost 1, no immunities'],
     3: ['8 × Fast Creep — ground, armor 0, leak cost 1, no immunities'],
     4: ['6 × Armored Creep — ground, armor 6, leak cost 1, no immunities'],
@@ -806,8 +832,9 @@ test('supports player-started runs, pause / speed controls, early-calls all ten 
       '8 × Creep — ground, armor 0, leak cost 1, no immunities',
     ],
   };
-  for (let waveNumber = 1; waveNumber <= 10; waveNumber++) {
-    await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 10`);
+  for (let waveNumber = 2; waveNumber <= 10; waveNumber++) {
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
+    await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await expect(preview.locator('li')).toHaveText(EXPECTED_COMPOSITION[waveNumber]!);
     await callWavePaced(page, titleAfterCall(waveNumber, 10));
   }
