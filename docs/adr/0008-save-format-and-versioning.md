@@ -31,7 +31,8 @@ unchanged.)_ The `StorageDriver` contract and write-serialization mechanics live
 ### 1. Persistence is an app/platform concern, not a sim dependency
 
 `packages/sim` stays a **pure** function over serializable state and does **no I/O**
-(dependency graph `types <- engine <- sim <- {render, replay, content} <- apps`). An
+(dependency graph `{types, engine} <- sim <- {render, replay, content} <- perf <- apps`,
+read as layering shorthand — ADR 0001's corrected form). An
 async `StorageDriver` seam lives in a shared **platform** package that the app/UI
 orchestration uses — it hands serialized snapshots to and from the sim. **The sim never
 imports storage.** This keeps the determinism gate intact.
