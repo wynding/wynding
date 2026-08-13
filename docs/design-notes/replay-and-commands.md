@@ -17,6 +17,11 @@ callWaveEarly | noop` (`SimInput` in `packages/sim`, mirrored by the replay
   selectable targeting priority are deferred beyond M2 — and `startWave` became
   `callWaveEarly`: starting a run is deliberately NOT a recorded command (m2.md's S2
   decouple — the replay logs claims, not the run-begins flag).)_
+  _(UPDATED 2026-08-13, #70 — the run-begins flag is still not a command, but the Start
+  PRESS now records one: the product's Start control claims wave 1 via `callWaveEarly`
+  before un-holding the run, so a replay of a played run carries that call at the press
+  tick. A replay produced by driving `controller.start()` directly — the perf scenes —
+  still carries no such command.)_
 
 ## Application order
 

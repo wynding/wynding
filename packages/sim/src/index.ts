@@ -902,10 +902,20 @@ export function step(
     if (launchNow) {
       const k = state.waveCursor;
       const rem = state.countdownRemaining; // sampled BEFORE any reset below
-      if (balance.earlyCallBountyDivisor > 0) {
+      // THE OPENING LAUNCH PAYS NOTHING (sv15, issue #70). Both early-call payments are
+      // gated on a nonzero wave index because there is no "early" for the first wave:
+      // beginning the run IS the act that calls it, so the player has traded away no
+      // build time and banked no decision worth a bounty bonus or a score credit. From
+      // wave 2 on the tradeoff is real and the economy is unchanged.
+      //
+      // Natural launches already pay ~0 (`rem` <= 0 when the countdown expires), so this
+      // gate moves exactly one case: an index-0 EARLY call, which before sv15 banked the
+      // maximum of both. That is the behavior change the SIM_VERSION bump pairs with.
+      const paysEarlyCall = k > 0;
+      if (paysEarlyCall && balance.earlyCallBountyDivisor > 0) {
         state.bounty = satAdd(state.bounty, Math.floor(rem / balance.earlyCallBountyDivisor));
       }
-      if (scoring.earlyCallScoreDivisor > 0) {
+      if (paysEarlyCall && scoring.earlyCallScoreDivisor > 0) {
         state.cumulativeEarlyCallCredit = satAdd(
           state.cumulativeEarlyCallCredit,
           Math.floor(rem / scoring.earlyCallScoreDivisor),

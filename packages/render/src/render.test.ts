@@ -625,10 +625,13 @@ describe('hud score — earned components while live, authoritative once termina
   });
 
   it('equals the accrued kill bounty PLUS the accrued early-call credit mid-run (M2-S2)', () => {
-    // `startDefendedRun` early-calls wave 1 at tick 0, which earns a real early-call
-    // credit at launch (the divisor is 50, sampled from the undecremented countdown) —
-    // the running score is `kb + credit`, not `kb` alone, once M2-S2's credit accrues.
-    const s = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
+    // The credit has to come from a wave index >= 1. `startDefendedRun`'s call launches
+    // wave 1, and since sv15 (#70) that opening launch pays nothing — so this fixture
+    // calls the NEXT wave early once kills have accrued, and it is that call which earns
+    // the real credit (divisor 50, sampled from the undecremented countdown). The claim
+    // under test is unchanged: the running score is `kb + credit`, not `kb` alone.
+    let s = stepUntil(startDefendedRun(), (x) => x.cumulativeKillBounty > 0);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
     expect(s.phase).toBe('running');
     expect(s.cumulativeEarlyCallCredit).toBeGreaterThan(0);
     expect(deriveHud(s, ruleset).score).toBe(s.cumulativeKillBounty + s.cumulativeEarlyCallCredit);

@@ -144,7 +144,9 @@ _Avoid_: intel, forecast, wave list (that's a full-run roster, which this is not
 **Early call**:
 Launching the counting-down wave before its countdown expires — the tempo
 lever. Pays a bounty bonus and, from M2, earns **early-call score credit**;
-an auto-launch (countdown expiry) pays and earns nothing.
+an auto-launch (countdown expiry) pays and earns nothing. Calling the FIRST
+wave is the one exception: it uses the same command, but pays and earns
+nothing, because there is no "early" for wave 1.
 _Avoid_: early send, rush, skip.
 
 **Lives**:

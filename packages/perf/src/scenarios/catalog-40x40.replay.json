@@ -2,7 +2,7 @@
   "seed": 5678,
   "boardId": "catalog-40x40",
   "rulesetHash": "43ae0bc94e4d9dcf672366e57260e2bd193a984673284616934aa8c7a43db74c",
-  "simVersion": 14,
+  "simVersion": 15,
   "tickInputs": [
     [
       {

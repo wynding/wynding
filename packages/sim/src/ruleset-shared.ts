@@ -73,8 +73,17 @@ export class RulesetError extends Error {
  *  `role`, and `step`'s leak branch subtracts each leaking creep's own cost instead
  *  of one collapsed value. `Impact`, `SimState` and `rulesetHash` are untouched — the
  *  raw bundle already projected per-creep `leakCost`/`role` into the hash, so this is
- *  a compiled-surface change only. */
-export const SIM_VERSION = 14;
+ *  a compiled-surface change only.
+ *
+ *  Issue #70 bumps 14 → 15 — and nothing about bundle legality moves with it. What
+ *  changes is one STEP rule: the opening launch (wave index 0) pays neither the
+ *  early-call bounty bonus nor the score credit, because beginning the run is the act
+ *  that calls wave 1 and there is no "early" for it to be. Only a log containing an
+ *  index-0 early call resolves differently; every other log is bit-for-bit sv14.
+ *  `Impact`, `SimState` and `rulesetHash` are untouched, and so is the capability
+ *  profile — this is the first bump that is PURELY a tick-rule change, which is
+ *  precisely the class the version exists to fence off from stored replays. */
+export const SIM_VERSION = 15;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

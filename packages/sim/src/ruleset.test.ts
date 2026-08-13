@@ -183,7 +183,7 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects a burst effect form unsupported at simVersion 14 (valid schema, capability-gated: allowedBurstForms)', () => {
+  it('rejects a burst effect form unsupported at simVersion 15 (valid schema, capability-gated: allowedBurstForms)', () => {
     // Before M2-S9, 'burst' wasn't in `allowedEffectKinds` at all, so ANY burst
     // bundle tripped that gate first. Since sv13 'burst' joins `allowedEffectKinds`
     // (capability.ts's header comment — it now defers to the schema, exactly the
@@ -201,7 +201,7 @@ describe('compileRuleset — tower catalog domains', () => {
     // precisely why the profile's own `allowedBurstForms` ceiling has to reject it.
     b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      "burst effect form 'single' unsupported at simVersion 14",
+      "burst effect form 'single' unsupported at simVersion 15",
     );
   });
 

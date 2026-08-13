@@ -55,7 +55,7 @@ describe('wave launch + countdown', () => {
     expect(s.creeps.id).toHaveLength(1); // first creep spawned on the launch tick
   });
 
-  it('call-early launches immediately, paying the early-call bounty/credit from the undecremented countdown', () => {
+  it('the OPENING call launches immediately and pays nothing — there is no "early" for wave 1 (sv15)', () => {
     const ruleset = testRuleset(OPEN, {
       waveCount: 1,
       startingBounty: 80,
@@ -65,8 +65,36 @@ describe('wave launch + countdown', () => {
     });
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, callEarly);
-    expect(s.waveLaunchTick[0]).toBe(0);
-    expect(s.bounty).toBe(80 + Math.floor(100 / 50)); // 80 + 2
+    expect(s.waveLaunchTick[0]).toBe(0); // launched on the spot, exactly as before
+    // Both payments are withheld at wave index 0. Before sv15 this very call banked the
+    // maximum of each off the undecremented countdown — 80 + ⌊100/50⌋ = 82 bounty and
+    // ⌊100/25⌋ = 4 credit — which is the behavior change the version bump pairs with.
+    expect(s.bounty).toBe(80);
+    expect(s.cumulativeEarlyCallCredit).toBe(0);
+  });
+
+  it('a wave-2 early call still pays the full bounty/credit from the undecremented countdown', () => {
+    // The other half of the sv15 rule, and the reason it is a gate on the wave INDEX
+    // rather than on early calls as such. Wave 0's countdown is deliberately short so
+    // it launches NATURALLY at tick 5 — the opening call is not in play at all — which
+    // leaves wave 1's own 100-tick countdown undecremented for the call one tick later.
+    const ruleset = testRuleset(OPEN, {
+      startingBounty: 80,
+      earlyCallBountyDivisor: 50,
+      earlyCallScoreDivisor: 25,
+      waves: [
+        { waveCount: 1, waveSpacing: 5, countdownTicks: 5 },
+        { waveCount: 1, waveSpacing: 5, countdownTicks: 100 },
+      ],
+    });
+    let s = createInitialState(1, ruleset);
+    for (let t = 0; t < 6; t++) s = step(s, ruleset, []); // tick === countdownTicks (5) launches
+    expect(s.waveLaunchTick[0]).toBe(5);
+    expect(s.cumulativeEarlyCallCredit).toBe(0); // a natural launch pays 0 at any index
+    const bountyBeforeCall = s.bounty;
+    s = step(s, ruleset, callEarly); // wave index 1 — the early-call economy is untouched
+    expect(s.waveLaunchTick[1]).toBe(6);
+    expect(s.bounty).toBe(bountyBeforeCall + Math.floor(100 / 50)); // + 2
     expect(s.cumulativeEarlyCallCredit).toBe(Math.floor(100 / 25)); // 4
   });
 

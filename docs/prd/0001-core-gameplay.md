@@ -94,7 +94,11 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   launched by its own countdown expiring or by an early call — so **countdowns are sequential** (one wave
   counts down at a time), while the resulting creep **waves may overlap** on the board (the next
   wave arrives while the current one's creeps are still alive). The **first wave's countdown starts
-  at run start** (tick 0), so it is callable from the opening tick.
+  at run start** (tick 0), so it is callable from the opening tick — and in the shipped product it
+  IS called there: pressing Start claims wave 1 (#70). The first countdown is therefore the
+  fallback only for runs whose input log carries no opening call — tests and perf scenes driving
+  the controller directly — and NOT for a replay of played input, which re-applies the recorded
+  `callWaveEarly` at its press tick exactly as the live run did.
 
 ### 3. Building, selling & dynamic re-pathing
 
