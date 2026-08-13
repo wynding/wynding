@@ -205,7 +205,30 @@ jobs:
   # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
   # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is
   # paired with a version bump, so this PR-only job diffs the golden against the
-  # base branch and fails if it changed while SIM_VERSION did not.
+  # base branch and fails if it changed AND a non-test packages/sim/src/ file also
+  # changed in the same diff, while SIM_VERSION did not increase. (The sim-source
+  # axis, not a "rulesets/*.json changed" exemption — #107 checked the exemption
+  # against history and rejected it: every recent sim-behavior commit also touches
+  # wynding-core.json, so it would be open on essentially every substantive PR.)
+  # See scripts/check-determinism-version.mjs for the full trigger, the fail-closed
+  # base-ref handling, and the residual trade-offs it states plainly.
+  #
+  # ADVISORY BY DECISION, not by default — ruled 2026-08-13 (owner, #107), recorded
+  # in the same register as the `perf` ruling above and in docs/milestones/m2.md's
+  # "Open questions / first-pass flags".
+  #
+  # It does not flap the way `perf` can — it measures nothing, it is a diff over
+  # committed text — but the hardening in #107 deliberately ADDS two fail-closed
+  # exits (an unresolvable base ref, and a failed `git diff`), and one of them sits
+  # behind a NETWORK fetch. So "cannot flap" would be too strong a claim to make
+  # here, and an earlier draft of this comment made it. What is true: any red it
+  # produces is either a real finding or an infrastructure failure that should be
+  # loud, never a threshold that drifted. The reason it stays advisory is the
+  # owner's call, not a technical one. This ruling does NOT add the job to branch
+  # protection's required contexts — do not do so without a fresh owner ruling
+  # recorded here.
+  # What would change the decision: the owner deciding the job's track record (or a
+  # concrete miss it would have caught) justifies making it required.
   determinism-version:
     name: determinism golden ↔ SIM_VERSION
     if: github.event_name == 'pull_request'
