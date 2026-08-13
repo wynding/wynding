@@ -1057,7 +1057,12 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
       ...(controllerFactory === undefined ? {} : { controllerFactory }),
     });
     createdApps.push(app);
-    return { root, app, frame: () => sched.frame((clock += 16)), advance: () => (clock += 300) };
+    return {
+      root,
+      app,
+      frame: () => sched.frame((clock += FRAME_MS)),
+      advance: () => (clock += 300),
+    };
   }
 
   it('a REFUSED wave-1 claim aborts the entire Start action — no run, no fullscreen, no banner latch, no focus move (#70)', () => {

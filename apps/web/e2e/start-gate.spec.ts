@@ -91,10 +91,12 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   // dedupe against it (Pause and Call wave are distinct controls), but this pins the
   // claim itself as a named assertion rather than an incidental side effect of the loop.
   // The settle window itself runs UNPAUSED — the claim can only be consumed by a real
-  // tick, so it cannot be waited for under pause. Bounded, not unbounded: two awaited
-  // assertions at 1x against ~450 ticks before this undefended run's first leak, so the
-  // #97 lag class has orders of magnitude of headroom here even though this is, strictly,
-  // a window the old same-tick Start->Pause did not have.
+  // tick, so it cannot be waited for under pause. And it runs at 2x: the KeyF above cycles
+  // the speed while the run is still held, and nothing restores 1x before Start. Bounded
+  // even so — two awaited assertions against the ~450 ticks this undefended run takes to
+  // reach its first leak, halved by the speed to a still-enormous margin — but it is,
+  // strictly, a window the old same-tick Start->Pause did not have, so the real speed is
+  // stated rather than assumed.
   await expect(previewTitle).toHaveText('Wave 2 of 10');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
 
