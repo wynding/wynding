@@ -70,6 +70,39 @@ function runtimeBody(file) {
     .trim();
 }
 
+// The EMITTED JS is only half the invariant. `export declare const x: string` emits
+// nothing at all — dist/index.js stays `export {};` — while the .d.ts advertises a value
+// in the value space, so a consumer can import and use it and the package stops being
+// type-only in the only sense that matters to callers. (Caught by Codex on #113's PR,
+// verified: the JS-only form of this check reported success on exactly that input.)
+// Type-space declarations — interface, type, and `declare` on a namespace/module — are
+// fine and expected; these five keywords are the value-space ones.
+const VALUE_SPACE =
+  /^\s*(?:export\s+)?declare\s+(const|let|var|function|class)\b|^\s*(?:export\s+)?enum\b/m;
+
+function dtsFilesUnder(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) out.push(...dtsFilesUnder(full));
+    else if (/\.d\.(ts|mts|cts)$/.test(entry)) out.push(full);
+  }
+  return out;
+}
+
+const declaring = dtsFilesUnder(join(PKG_DIR, 'dist'))
+  .map((file) => ({ file, hit: VALUE_SPACE.exec(readFileSync(file, 'utf8')) }))
+  .filter(({ hit }) => hit !== null);
+
+if (declaring.length > 0) {
+  fail(
+    '@wynding/types declares runtime values in its .d.ts — it is meant to stay type-only.\n' +
+      declaring.map(({ file, hit }) => `   ${file}:\n   ${hit[0].trim()}`).join('\n') +
+      '\n   (These emit no JS, so the dist/*.js check above cannot see them — but a consumer\n' +
+      '   can still import and call them.)',
+  );
+}
+
 const emitted = jsFilesUnder(join(PKG_DIR, 'dist'));
 const offenders = emitted
   .map((file) => ({ file, body: runtimeBody(file) }))

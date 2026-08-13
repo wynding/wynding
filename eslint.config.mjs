@@ -66,6 +66,12 @@ export default tseslint.config(
           message: 'No ambient scheduler in the deterministic core.',
         },
         {
+          // Node-only, and @types/node is auto-included for these packages, so it is
+          // callable here even though no browser has it.
+          name: 'setImmediate',
+          message: 'No wall-clock scheduler in the deterministic core.',
+        },
+        {
           name: 'crypto',
           message:
             'Use the seeded Rng from @wynding/engine — ambient crypto breaks replay determinism.',
@@ -102,9 +108,11 @@ export default tseslint.config(
           // without this. `window`/`global`/`self` are covered for the same reason — none of
           // them exists in these packages today, which is exactly the point: the guard should
           // still hold the day someone adds a DOM-ish or Node-ish shim, not depend on their
-          // absence.
+          // absence. `Math` and `Date` are in the property list for the NESTED case:
+          // `globalThis.Math.random()` never produces a bare `Math` identifier either, so the
+          // inner `globalThis.Math` member expression is what has to match.
           selector:
-            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|queueMicrotask|performance|Date)$/]',
+            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|Date|Math)$/]',
           message:
             'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
         },
