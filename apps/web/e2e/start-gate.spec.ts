@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { callWavePaced, titleAfterCall } from './paced-call';
 
 // Player-started runs (PLAN.md P4/P6, decoupled further at M2-S2 P3 step 15): a fresh load
 // is HELD at tick 0 — no wave has launched, and pre-start planning (build/sell) is fully
@@ -74,6 +75,13 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   await expect(board).toHaveAttribute('data-pending-adds', '0');
   await expect(waveChipText).not.toHaveText(initialCountdown); // the countdown itself moved
 
+  // #97: enter the marathon loop PAUSED. An undefended run free-running at 2× while the
+  // loop below does its per-wave assertion work loses around wave 8–9 on a lagged runner
+  // (creeps leak in the stretched gaps), and at terminal the primary control hides — the
+  // recurring CI failure this spec wore. Every assert below now runs against a frozen
+  // sim; `callWavePaced` opens the only windows in which it advances.
+  await page.getByRole('button', { name: 'Pause' }).click();
+
   // Early-call every wave via the SAME morphed primary control (now "Call wave") — keeps
   // this spec deterministic and fast rather than waiting out three full natural countdowns
   // (smoke.spec.ts exercises the identical flow end-to-end, with the preview + axe).
@@ -93,13 +101,17 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
     // landed, and the aria gate proves this press is genuinely accepted-able.
     await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
-    await callWave.click();
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
   }
   await expect(previewTitle).toHaveText('Final wave launched — no more waves to call');
 
-  // The run resolves — results dialog appears.
+  // The loop exits paused (callWavePaced's contract) — release the run so the horde can
+  // stream through and resolve. The window is wider than the free-running spec's old 40s:
+  // pacing froze traversal between calls, so resolution now covers essentially the whole
+  // undefended march, not just its tail.
+  await page.getByRole('button', { name: 'Resume' }).click();
   const results = page.getByRole('dialog');
-  await expect(results).toBeVisible({ timeout: 40_000 });
+  await expect(results).toBeVisible({ timeout: 60_000 });
 
   // Play-again returns to the held state exactly as at first load.
   await page.getByRole('button', { name: 'Play again' }).click();

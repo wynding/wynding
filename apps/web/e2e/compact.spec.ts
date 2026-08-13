@@ -13,6 +13,7 @@ import {
 } from './layout-probe';
 import { firePrompt, installPromptFactory, stubIosPlatform } from './install-stub';
 import { stubFullscreen } from './fullscreen-stub';
+import { callWavePaced, titleAfterCall } from './paced-call';
 import { COMPACT_QUERY } from '../src/layout';
 
 /** The banner audience requires a coarse pointer, which only the `chromium-touch` device
@@ -227,19 +228,24 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // the preview slot — the same gate-each-press-on-aria pattern smoke.spec.ts /
     // start-gate.spec.ts use, so a same-tick-deduped press cannot silently short the loop.
     await page.getByRole('button', { name: 'Start' }).click();
+    // #97: the same undefended-marathon pacing the smoke/start-gate loops use — enter
+    // the loop PAUSED so runner lag between iterations stalls a frozen sim instead of
+    // leaking creeps (this loop free-ran eight calls, the same class that lost runs
+    // mid-loop in those specs, just at 1× with a shorter horizon).
+    await page.getByRole('button', { name: 'Pause' }).click();
     const callWave = page.getByRole('button', { name: 'Call wave' });
     for (let waveNumber = 1; waveNumber <= 8; waveNumber++) {
       await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
       await expect(callWave).toHaveAttribute('aria-disabled', 'false');
-      await callWave.click();
+      await callWavePaced(page, titleAfterCall(waveNumber, 10));
     }
     await expect(previewTitle).toHaveText('Wave 9 of 10');
-    // FREEZE the race, don't just guard it: wave 9's own 300-tick countdown keeps
-    // running under the long assertion tail below (axe + geometry + keyboard-scroll —
-    // observed flaking once the tail crossed the auto-launch boundary on a loaded
-    // machine). Pausing pins the preview on wave 9 for the whole tail; the preview
-    // reflects Pending state under pause by design, so nothing measured changes.
-    await page.getByRole('button', { name: 'Pause' }).click();
+    // The loop exits paused (callWavePaced's contract), and the tail below NEEDS that
+    // freeze — wave 9's own 300-tick countdown would otherwise keep running under the
+    // long assertion tail (axe + geometry + keyboard-scroll — observed flaking once the
+    // tail crossed the auto-launch boundary on a loaded machine). Paused pins the
+    // preview on wave 9 for the whole tail; the preview reflects Pending state under
+    // pause by design, so nothing measured changes.
     await expect(entries).toHaveCount(4);
     await expect(entries).toHaveText([
       '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
@@ -253,11 +259,12 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const audit = await new AxeBuilder({ page }).include('#app').analyze();
     expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 
-    // GUARD: wave 9's own 300-tick countdown keeps running in real time under this
-    // tail (~15 s at 1×) — if it auto-launches, the preview flips to wave 10's two-row
-    // composition and the 4 materialized entry locators go stale (boundingBox() null).
-    // Re-asserting the title here turns that race into a NAMED failure instead of a
-    // mystery null dereference on a slow runner.
+    // GUARD: the paused sim (the loop's #97 exit state) is what pins this title — wave
+    // 9's 300-tick countdown would otherwise auto-launch under this tail (~15 s at 1×)
+    // and flip the preview to wave 10's two-row composition, going stale on the 4
+    // materialized entry locators (boundingBox() null). Re-asserting the title keeps
+    // that a NAMED failure if the freeze is ever lost, instead of a mystery null
+    // dereference on a slow runner.
     await expect(previewTitle).toHaveText('Wave 9 of 10');
 
     // No clipping: the preview's rendered box, and every one of its 4 rows, stays within

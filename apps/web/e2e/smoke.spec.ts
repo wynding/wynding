@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { assertRenderedContrast } from './contrast';
+import { callWavePaced, titleAfterCall } from './paced-call';
 import {
   assertDeclaredRegions,
   assertRegionRelations,
@@ -630,9 +631,16 @@ test('supports player-started runs, pause / speed controls, early-calls all ten 
   await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
   await page.getByRole('button', { name: 'Resume' }).click();
 
-  // Run at 2× so a 3-wave undefended loss resolves well within the timeout regardless of
+  // Run at 2× so the undefended loss resolves well within the timeout regardless of
   // CI runner speed.
   await page.getByRole('button', { name: /^Speed:/ }).click();
+
+  // #97: enter the marathon loop PAUSED. Free-running at 2× while each iteration below
+  // does composition asserts stretched the inter-call gaps on lagged runners until the
+  // run LOST around wave 8–9 with calls still outstanding (the recurring a11y-job red).
+  // Every per-wave assert now runs against a frozen sim; `callWavePaced` opens the only
+  // windows in which it advances.
+  await page.getByRole('button', { name: 'Pause' }).click();
 
   // Early-call every wave via the morphed primary control, checking the preview shows the
   // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since wave 2
@@ -676,7 +684,7 @@ test('supports player-started runs, pause / speed controls, early-calls all ten 
   for (let waveNumber = 1; waveNumber <= 10; waveNumber++) {
     await expect(preview.locator('.wy-wave-preview-title')).toHaveText(`Wave ${waveNumber} of 10`);
     await expect(preview.locator('li')).toHaveText(EXPECTED_COMPOSITION[waveNumber]!);
-    await callWave.click();
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
   }
   // Every wave has launched: the preview's explicit last-wave marker, and the control is
   // visible-disabled (never hidden — it hides only at terminal).
@@ -687,9 +695,15 @@ test('supports player-started runs, pause / speed controls, early-calls all ten 
   await expect(callWave).toBeVisible();
   await expect(callWave).toHaveAttribute('aria-disabled', 'true');
 
+  // The loop exits paused (callWavePaced's contract) — release the run so it can stream
+  // to its terminal. Wider window than the free-running spec's old 40s: pacing froze
+  // traversal between calls, so resolution now covers essentially the whole undefended
+  // march, not just its tail.
+  await page.getByRole('button', { name: 'Resume' }).click();
+
   // The run resolves; the results dialog appears with a Play-again + Verify affordance.
   const results = page.getByRole('dialog');
-  await expect(results).toBeVisible({ timeout: 40_000 });
+  await expect(results).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole('button', { name: 'Verify this run' })).toBeVisible();
 
   // axe audit of the results-dialog state — the settings-panel state is covered by the

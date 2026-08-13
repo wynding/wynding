@@ -6,8 +6,11 @@ import { defineConfig, devices } from '@playwright/test';
 // + dev server) — run with `pnpm --filter @wynding/web e2e`.
 export default defineConfig({
   testDir: './e2e',
-  // Above the smoke test's 40s results-dialog wait — a no-tower M1 loss can approach ~25s
-  // of wall-clock even at 2×, so a 30s per-test cap could abort it on a slow CI runner.
+  // Above home.spec's 40s results-dialog wait — a no-tower loss can approach ~25s of
+  // wall-clock even at 2×, so a 30s per-test cap could abort it on a slow CI runner. The
+  // two marathon specs' own 60s dialog waits (#97: pacing defers the whole undefended
+  // march to one post-loop release) are governed by their per-test 90s overrides
+  // (`test.setTimeout` in smoke.spec/start-gate.spec), not this cap.
   timeout: 60_000,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
