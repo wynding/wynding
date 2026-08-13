@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { createProjection } from '@wynding/render';
 import { assertRenderedContrast } from './contrast';
 import { callWavePaced, titleAfterCall } from './paced-call';
 import {
   assertDeclaredRegions,
   assertRegionRelations,
+  GRID,
   projectedGrid,
   regionRect,
 } from './layout-probe';
@@ -254,6 +256,70 @@ test('arms the Card, places a tower via the keyboard cursor, sells it via the Pa
   await expect(board).toBeFocused(); // Sell → focus returns to the board
 });
 
+// #98/#115: the exact "can't sell mid-run" report — a player arms a Card while a tower is
+// already on the board, then clicks that tower meaning to inspect/sell it, and the OLD
+// behavior read it as an occupied-cell placement attempt and rejected it, leaving Sell
+// unreachable without first disarming by hand. #115's ruling: a direct press on an
+// EXISTING tower's footprint always reads as inspect intent, armed or not — the Card
+// disarms, the tower selects, and Sell is immediately available. Exercised MID-RUN (sim
+// actually stepping, not the static pre-start board), since that's the report's own
+// context.
+test('#115/#98: mid-run, arming a Card then clicking your OWN tower disarms and selects it — Sell stays reachable, never blocked by an armed Card', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const board = page.locator('.wy-board');
+  const card = page.getByRole('button', { name: /Basic Tower/ });
+  const panel = page.locator('.wy-panel');
+
+  // Place a tower pre-start via the keyboard cursor at (3,3) — smoke.spec's well-known
+  // buildable cell, the same arrow walk used throughout this file.
+  await card.click();
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible();
+  await page.keyboard.press('Escape'); // deselect — a clean slate before Start
+  await expect(panel).toBeHidden();
+
+  // Start the run and let the sim actually step — the report was specifically MID-RUN
+  // (creeps live, HUD refreshing), not the static pre-start board.
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(board).toHaveAttribute('data-started', 'true');
+  await expect
+    .poll(async () => Number(await board.getAttribute('data-sim-tick')))
+    .toBeGreaterThan(5);
+
+  // Arm the Card (a genuine "about to build" state) and click the tower already on the
+  // board, via a real mouse click at its projected cell — the pointer-intent path, the
+  // one #98 actually reported.
+  await card.click();
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+
+  const box = (await board.boundingBox()) as {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  const projection = createProjection({
+    cols: GRID.cols,
+    rows: GRID.rows,
+    cssWidth: box.width,
+    cssHeight: box.height,
+    dpr: 1,
+  });
+  const cell = projection.cellToPixel(3, 3);
+  await page.mouse.click(
+    box.x + cell.x + projection.cellPx / 2,
+    box.y + cell.y + projection.cellPx / 2,
+  );
+
+  await expect(card).toHaveAttribute('aria-pressed', 'false'); // #115: disarmed, never rejected
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible(); // Sell reachable mid-run
+});
+
 test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it, and the 3-card Rail is axe-clean', async ({
   page,
 }) => {
@@ -303,7 +369,7 @@ test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it
 // `packages/render` imports `scene.ts` at all — it stays coverage-excluded by long-standing
 // convention, per `docs/accessibility-checklist.md`'s own honest closing line). This e2e
 // proves the DOM-visible half: the Card/Panel/hotkey surface stays fully functional and
-// axe-clean for valid placement, invalid (occupied) placement, AND under reduced motion.
+// axe-clean for valid placement, invalid (border-blocked) placement, AND under reduced motion.
 test('the third Card (M2-S4a): arms Splash Tower by click AND by Digit3, labels its blast radius as TEXT, and stays axe-clean for valid + invalid placement', async ({
   page,
 }) => {
@@ -350,10 +416,29 @@ test('the third Card (M2-S4a): arms Splash Tower by click AND by Digit3, labels 
   const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
 
-  // INVALID placement: re-arm and aim at the SAME (now-occupied) cell — the keyboard
-  // cursor never moved off it, so this exercises the occupied-cell rejection (PLAN.md P2
-  // table: a persistent invalid ghost, still armed, never a crash).
+  // #115 ruling: keyboard CONFIRM (Enter) on an EXISTING TOWER's cell disarms-and-selects,
+  // exactly like a click — no rejection. The cursor still sits on the just-placed anchor
+  // (placement leaves it there — the pre-#115 version of this flow leaned on that same
+  // invariant for its occupied rejection), so re-arm and confirm IN PLACE: no walk, no
+  // geometry assumption.
   await page.keyboard.press('Digit3');
+  await page.keyboard.press('Enter');
+  await expect(splashCard).toHaveAttribute('aria-pressed', 'false'); // #115: inspect, not reject
+  await expect(panel).toContainText('Splash Tower'); // selects the same tower
+
+  const inspectAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(inspectAudit.violations, JSON.stringify(inspectAudit.violations, null, 2)).toEqual([]);
+
+  // Rejection coverage stays, on an honest NON-tower blocker: clamp-walk the cursor into
+  // the blocked border corner — 30 presses each way over-walk both board dimensions, so
+  // the landing cell is (0,0) no matter where the cursor sat (a fixed step count toward a
+  // named row proved false against the real cursor geometry: the first cut of this
+  // retarget landed on buildable ground and PLACED). Border cells are blocked terrain and
+  // can never hold a tower, so Enter here is a genuine rejection: invalid ghost, still
+  // armed (#115 keeps every non-tower rejection).
+  await page.keyboard.press('Digit3'); // re-arm (the inspect above disarmed)
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect(splashCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
 
@@ -446,10 +531,24 @@ test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels 
   const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
 
-  // INVALID placement: re-arm and aim at the SAME (now-occupied) cell — the keyboard
-  // cursor never moved off it, so this exercises the occupied-cell rejection (PLAN.md P2
-  // table: a persistent invalid ghost, still armed, never a crash).
+  // #115 ruling: keyboard CONFIRM (Enter) on an EXISTING TOWER's cell disarms-and-selects,
+  // exactly like a click — no rejection. The cursor still sits on the just-placed anchor
+  // (placement leaves it there), so re-arm and confirm IN PLACE — no walk, no geometry
+  // assumption (see the Splash flow's comment for why a fixed walk proved false).
   await page.keyboard.press('Digit4');
+  await page.keyboard.press('Enter');
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'false'); // #115: inspect, not reject
+  await expect(panel).toContainText('Venom Tower'); // selects the same tower
+
+  const inspectAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(inspectAudit.violations, JSON.stringify(inspectAudit.violations, null, 2)).toEqual([]);
+
+  // Rejection coverage stays, on an honest NON-tower blocker: clamp into the blocked
+  // border corner (0,0) — deterministic regardless of where the cursor sat; border cells
+  // can never hold a tower.
+  await page.keyboard.press('Digit4'); // re-arm (the inspect above disarmed)
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect(venomCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
 
@@ -520,8 +619,24 @@ test('the seventh Card (M2-S8): arms Beacon by click AND by Digit7, OMITS the fo
   const selectedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(selectedAudit.violations, JSON.stringify(selectedAudit.violations, null, 2)).toEqual([]);
 
-  // INVALID placement: re-arm and aim at the SAME (now-occupied) cell.
+  // #115 ruling: keyboard CONFIRM (Enter) on an EXISTING TOWER's cell disarms-and-selects,
+  // exactly like a click — no rejection. The cursor still sits on the just-placed anchor
+  // (placement leaves it there), so re-arm and confirm IN PLACE — no walk, no geometry
+  // assumption (see the Splash flow's comment for why a fixed walk proved false).
   await page.keyboard.press('Digit7');
+  await page.keyboard.press('Enter');
+  await expect(beaconCard).toHaveAttribute('aria-pressed', 'false'); // #115: inspect, not reject
+  await expect(panel).toContainText('Beacon'); // selects the same tower
+
+  const inspectAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(inspectAudit.violations, JSON.stringify(inspectAudit.violations, null, 2)).toEqual([]);
+
+  // Rejection coverage stays, on an honest NON-tower blocker: clamp into the blocked
+  // border corner (0,0) — deterministic regardless of where the cursor sat; border cells
+  // can never hold a tower.
+  await page.keyboard.press('Digit7'); // re-arm (the inspect above disarmed)
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect(beaconCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
 

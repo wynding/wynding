@@ -212,6 +212,34 @@ export interface Controller {
    *  deselects). Distinct from `aimAt`, which keeps its pre-P2 build-or-select behavior
    *  for the keyboard cursor. */
   clickAt(col: number, row: number): void;
+  /** Board-origin touch/pen release (P2 review round, #115): input.ts forwards the raw
+   *  (unoffset) pointer-UP cell — the finger's actual release point, the player's
+   *  INTENT — the offset ghost-anchor cell placement targets (PLAN.md P3's ghost never
+   *  sits under the finger), and `tap` (ENDPOINTS-ONLY: the release landed in the
+   *  press's cell or within the tap pixel threshold of the press point — a
+   *  wander-and-return still reads as a tap). `towerAt` is private and pending-aware, so
+   *  the classification has to live here, not in input.ts:
+   *   1. armed && tap && a tower under INTENT → inspect (disarm-and-select,
+   *      `reveal=true`, and the keyboard cursor is planted on the INTENT cell so a
+   *      follow-up `confirm()` can't re-derive over stale ground and drop the
+   *      selection). A deliberate TAP on a tower is inspect even over a valid anchor.
+   *   2. armed && NOT (1) && a tower under ANCHOR → the occupied rejection (persistent
+   *      invalid ghost, stays armed) — a DRAG whose anchor lands on a tower the finger
+   *      never touched is a rejection, not inspect intent.
+   *   3. armed otherwise → `clickAt`'s placement logic at the ANCHOR, unchanged.
+   *   4. unarmed (defensive — input.ts only calls this while armed) → `clickAt` at the
+   *      INTENT cell (the finger), not the anchor — the offset is an armed-only concept.
+   *  Card-origin drags ALSO call this (`tap=false`, `intent===anchor`) so an anchor
+   *  landing on a tower resolves through (2)'s occupied rejection rather than (1)'s
+   *  inspect branch; input.ts's `onCardPointerUp` keeps the cancel-and-disarm contract
+   *  itself, converting that still-armed rejection into a disarm. */
+  touchConfirmAt(
+    intentCol: number,
+    intentRow: number,
+    anchorCol: number,
+    anchorRow: number,
+    tap: boolean,
+  ): void;
   /** Document-scope Escape (PLAN.md P2 table): closes one layer at a time — armed
    *  disarms; otherwise a selection deselects. No-op in neither state. Caller (overlay.ts)
    *  is responsible for not invoking this while a modal owns Escape. */
@@ -823,9 +851,16 @@ export function createController(
     const existing = towerAt(col, row);
     if (existing !== null) {
       if (armed !== null) {
-        // Armed: an existing tower is an occupied cell, not a selection target — mirrors
-        // clickAt's occupied-cell rejection so the keyboard cursor can't silently arm
-        // `selection` (enabling a stray Sell) while a Card is still armed for placement.
+        // Armed: the confirm/step split (#115). This function is the STEP half — every
+        // arrow-key cursor move routes through `moveCursor` into here — and a tower under
+        // the cursor stays a blocked cell exactly as before #115: merely passing OVER a
+        // tower must never itself select it (that would let a stray Sell fire from bare
+        // navigation) or yank the player out of armed mode, so it keeps rendering the
+        // rejected-placement red ghost and staying armed. The CONFIRM half (Enter, or a
+        // click/touch release landing directly on the tower) is a deliberate act on this
+        // same blocked cell and is handled separately — by `confirm()` and `clickAt`/
+        // `touchConfirmAt` — as inspect intent (disarm-and-select via the shared
+        // `selectTower` helper). `aimAt` itself is otherwise unchanged.
         ghost = {
           col,
           row,
@@ -883,10 +918,11 @@ export function createController(
     cur = { col, row };
     // Armed interaction is placement-only (PLAN.md P2 table): an in-grid cell ALWAYS yields
     // a ghost — valid where placeable, INVALID over an occupied/blocked/unaffordable cell —
-    // never null and never a selection preview. An existing tower is an occupied cell
-    // (mirrors clickAt's 'occupied' rejection), so hovering its footprint shows a PERSISTENT
-    // invalid ghost rather than clearing it; previously the null-on-tower branch let the
-    // slightest hover erase the rejection cue over the very footprint a click had rejected.
+    // never null and never a selection preview. HOVERING an existing tower's footprint
+    // (unlike a CLICK/confirm/touch landing on one — inspect intent since #115) shows a
+    // PERSISTENT invalid ghost rather than clearing it; previously the null-on-tower branch
+    // let the slightest hover erase the rejection cue over the very footprint a click used
+    // to reject.
     if (towerAt(col, row) !== null) {
       ghost = {
         col,
@@ -906,11 +942,49 @@ export function createController(
     };
   };
 
+  /** The ONE path every mode selects a tower through (#115): mouse click, keyboard
+   *  Enter-confirm, and touch inspect all route here rather than each assigning
+   *  `selection` independently, so the three can't drift apart. `reveal` is the ONLY
+   *  axis they differ on — bumping `inspectSeq` (the Rail's auto-reveal key, #95) is
+   *  pointer intent (mouse click, touch release: `reveal=true`); a keyboard Enter-
+   *  confirm selects the SAME way but leaves the reveal key untouched (`reveal=false`,
+   *  Codex R1-5) since the Rail reveal stays pointer-intent-keyed exactly as #95 pinned
+   *  it. `aimAt`'s own arrow-key tower-selection (unarmed cursor landing on a tower) is
+   *  DELIBERATELY NOT routed through here — that path predates #115 and never bumped
+   *  `inspectSeq` either, so leaving it untouched is byte-identical behavior, not an
+   *  inconsistency. */
+  const selectTower = (
+    existing: {
+      readonly col: number;
+      readonly row: number;
+      readonly id: number;
+      readonly towerId: string;
+    },
+    reveal: boolean,
+  ): void => {
+    if (reveal) inspectSeq++;
+    selection = {
+      col: existing.col,
+      row: existing.row,
+      rangeFp: RANGE_FP(ruleset, existing.towerId),
+      blastRadiusFp: BLAST_RADIUS_FP(ruleset, existing.towerId),
+      id: existing.id,
+      towerId: existing.towerId,
+    };
+    ghost = null;
+    bumpUiRev();
+  };
+
   /** Mouse/pointer click at a board cell — the armed/selection state machine (PLAN.md P2
-   *  table). Armed: placement-only — an occupied/unaffordable/blocked cell rejects
-   *  (persistent invalid ghost, stays armed); a valid cell places, disarms, and selects the
-   *  new tower (never re-arms). Unarmed: selection-only — a tower selects, anything else
-   *  deselects; no ghost is ever shown while unarmed. */
+   *  table, revised #115). Armed: a cell blocked by an EXISTING TOWER (committed or
+   *  pending — `towerAt` reads the pending projection) is inspect intent, not a
+   *  rejection — disarm the Card and select that tower via `selectTower`'s `reveal=true`
+   *  (the Panel opening IS the feedback; no rejection outcome fires). Every OTHER
+   *  blocker (path/terrain/bounty/cap) keeps the persistent-invalid-ghost rejection
+   *  unchanged, and never disarms. A valid cell places, disarms, and selects the new
+   *  tower (never re-arms). Unarmed: selection-only — a tower selects (via the same
+   *  `selectTower`, `reveal=true`), anything else deselects; no ghost is ever shown
+   *  while unarmed. */
   const clickAt = (col: number, row: number): void => {
     if (!inBounds(col, row)) return;
     cur = { col, row };
@@ -918,14 +992,11 @@ export function createController(
       const towerId = armed;
       const existing = towerAt(col, row);
       if (existing !== null) {
-        ghost = {
-          col,
-          row,
-          valid: false,
-          rangeFp: RANGE_FP(ruleset, towerId),
-          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
-        };
-        setOutcome({ kind: 'rejected', reason: 'occupied' });
+        // Inspect intent (#115): disarm BEFORE selecting (mirrors the valid-placement
+        // branch below — never re-arms), and no rejection outcome fires on this path.
+        armed = null;
+        selectTower(existing, true);
+        setOutcome({ kind: 'disarmed', towerId });
         return;
       }
       // The per-tick buffer cap takes priority over bounty/other — a cell that's
@@ -985,25 +1056,82 @@ export function createController(
       return;
     }
     // Unarmed: selection-only. Clicking never places here — armed is placement-only, per
-    // the table.
+    // the table. The deliberate-inspect act (#69/#115): a pointer click that LANDS on a
+    // tower selects it through the shared `selectTower` helper (`reveal=true`), which
+    // bumps `inspectSeq` even on a re-click of the already-selected tower (mirrors
+    // `outcomeSeq`'s recorded-not-changed discipline).
     const existing = towerAt(col, row);
-    // The deliberate-inspect act (#69): a pointer click that LANDS on a tower. Bumped
-    // before the assignment below so re-clicking the current selection still advances the
-    // identity (mirrors `outcomeSeq`'s recorded-not-changed discipline).
-    if (existing !== null) inspectSeq++;
-    selection =
-      existing === null
-        ? null
-        : {
-            col: existing.col,
-            row: existing.row,
-            rangeFp: RANGE_FP(ruleset, existing.towerId),
-            blastRadiusFp: BLAST_RADIUS_FP(ruleset, existing.towerId),
-            id: existing.id,
-            towerId: existing.towerId,
-          };
+    if (existing !== null) {
+      selectTower(existing, true);
+      return;
+    }
+    selection = null;
     ghost = null;
     bumpUiRev();
+  };
+
+  /** Board-origin ARMED touch/pen release (P2 review round, #115) — see the `Controller`
+   *  interface doc for the full contract. `intent` is the raw (unoffset) pointer-UP
+   *  cell; `anchor` is the offset ghost anchor the ARMED preview has been showing; `tap`
+   *  is ENDPOINTS-ONLY — release in the press's cell or within the tap pixel threshold
+   *  of the press point (input.ts computes it; a wander-and-return reads as a tap).
+   *  Four-way table:
+   *   1. armed && tap && a tower under INTENT → inspect: disarm, plant the keyboard
+   *      cursor on the INTENT cell (so a stale `cur` at the offset anchor can't make
+   *      `confirm()`'s post-inspect `aimAt` re-derive over empty ground and null the
+   *      selection it just set), `selectTower(existing, true)`. A deliberate TAP on a
+   *      tower is inspect even if the offset anchor happens to be a valid placement.
+   *   2. armed && NOT (1) && a tower under ANCHOR → the pre-#115 occupied rejection,
+   *      owned here (not delegated to `clickAt`, so a DRAG whose anchor lands on a
+   *      tower can't be mistaken for inspect intent — the finger never touched that
+   *      cell): persistent invalid ghost at the anchor, `{kind:'rejected',
+   *      reason:'occupied'}`, stays armed.
+   *   3. armed otherwise → `clickAt(anchor)` — valid anchors place; other invalid
+   *      anchors reject exactly as `clickAt` always has. (`clickAt`'s own tower-inspect
+   *      branch still exists for MOUSE clicks; touch can no longer reach it here since
+   *      (2) pre-handles every touch anchor-on-tower case.)
+   *   4. unarmed (defensive — input.ts only ever calls this while armed) → `clickAt(intent)`:
+   *      an unarmed tap-select targets where the finger actually is, not the offset
+   *      anchor (the offset is an armed-only ghost concept). */
+  const touchConfirmAt = (
+    intentCol: number,
+    intentRow: number,
+    anchorCol: number,
+    anchorRow: number,
+    tap: boolean,
+  ): void => {
+    if (armed !== null) {
+      if (tap) {
+        const existing = towerAt(intentCol, intentRow);
+        if (existing !== null) {
+          const towerId = armed;
+          armed = null;
+          cur = { col: intentCol, row: intentRow };
+          selectTower(existing, true);
+          setOutcome({ kind: 'disarmed', towerId });
+          return;
+        }
+      }
+      const towerId = armed;
+      const atAnchor = towerAt(anchorCol, anchorRow);
+      if (atAnchor !== null) {
+        // Plant the cursor at the rejected anchor like every other pointer entry point
+        // (clickAt writes `cur` on entry) — keyboard continuity after a touch rejection.
+        cur = { col: anchorCol, row: anchorRow };
+        ghost = {
+          col: anchorCol,
+          row: anchorRow,
+          valid: false,
+          rangeFp: RANGE_FP(ruleset, towerId),
+          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
+        };
+        setOutcome({ kind: 'rejected', reason: 'occupied' });
+        return;
+      }
+      clickAt(anchorCol, anchorRow);
+      return;
+    }
+    clickAt(intentCol, intentRow);
   };
 
   /** Arm `towerId` for placement (PLAN.md P2 table, row 1; M2-S3): a no-op unless it
@@ -1196,15 +1324,27 @@ export function createController(
         // A `ghost === null` here means aimAt either selected an existing tower instead
         // (unarmed cursor landing on an occupied cell) or the cursor is UNARMED over an
         // empty cell (M2-S3: no honest candidate to preview) — neither is a rejected
-        // placement attempt, so both stay silent. Any other invalid ghost (armed) IS a
-        // rejected placement attempt and must announce to the live region
+        // placement attempt, so both stay silent. Any other invalid ghost (armed) is
+        // either the confirm half of the #115 confirm/step split (a tower under the
+        // cursor — inspect intent, not a rejection) or a genuinely rejected placement
+        // attempt, and either way must announce to the live region
         // (docs/accessibility-checklist.md), mirroring clickAt's occupied/pendingCap/
         // bounty/other reasons.
         if (ghost !== null && armed !== null) {
           const towerId = armed;
-          if (towerAt(ghost.col, ghost.row) !== null) {
-            setOutcome({ kind: 'rejected', reason: 'occupied' });
-          } else if (buffer.length >= MAX_INPUTS_PER_TICK) {
+          const existing = towerAt(ghost.col, ghost.row);
+          if (existing !== null) {
+            // Keyboard CONFIRM on a tower-blocked cell (#115): disarm-and-select like a
+            // click, via the SAME shared helper — but `reveal=false` (Codex R1-5): the
+            // Rail's auto-reveal stays pointer-intent-keyed exactly as #95 pinned it, so
+            // `inspectSeq` is NOT bumped here. No command was enqueued, so this returns
+            // `false` just like any other non-placing confirm.
+            armed = null;
+            selectTower(existing, false);
+            setOutcome({ kind: 'disarmed', towerId });
+            return false;
+          }
+          if (buffer.length >= MAX_INPUTS_PER_TICK) {
             setOutcome({ kind: 'rejected', reason: 'pendingCap' });
           } else {
             const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
@@ -1276,6 +1416,7 @@ export function createController(
     refundForSelection: computeRefund,
     armTower,
     clickAt,
+    touchConfirmAt,
     escape,
     uiState(): UiState {
       return {

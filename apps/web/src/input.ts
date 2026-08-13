@@ -386,12 +386,25 @@ export function attachInput(
 
   /** The board-origin touch/pen release (PLAN.md P3): unarmed is a plain single-tap
    *  select/deselect at the ACTUAL touched cell (two-tap is gone — one tap is enough);
-   *  armed commits/rejects at the offset ghost's anchor via `clickAt` (which already keeps
-   *  it armed with a persistent invalid ghost on rejection — exactly this packet's "release
-   *  on an invalid ghost... stays armed" contract, no extra state needed here). A release
-   *  over Shell chrome never commits and leaves everything as it was (tap-flow: stays
-   *  armed, ghost untouched). */
-  const releaseBoardTouch = (clientX: number, clientY: number): void => {
+   *  armed commits/rejects at the offset ghost's anchor via `touchConfirmAt`, which
+   *  already keeps it armed with a persistent invalid ghost on a genuine rejection
+   *  (this packet's "release on an invalid ghost... stays armed" contract, no extra
+   *  state needed here). Armed releases forward the raw pointer-UP cell (the INTENT —
+   *  where the finger actually let go), the offset anchor (where a placement would
+   *  land), and `tap` — true when the release's finger cell is the SAME cell the press
+   *  started on OR landed within `DRAG_THRESHOLD_PX` of the press point — the same-cell
+   *  half alone is boundary-fragile (phone cells run 12–21 CSS px, so a real finger's
+   *  1–2 px of jitter ACROSS a cell edge would demote a tap to a drag); the pixel half
+   *  alone would miss a legitimate tap that lands just over a cell edge but many px
+   *  away on a large-cell desktop board. Endpoints-only either way: a wander-and-return
+   *  still reads as a tap. A tap on a tower's rendered footprint releases with the finger
+   *  DIRECTLY over the tower, but the ghost/placement anchor sits elsewhere (PLAN.md
+   *  P3's offset never puts the ghost under the finger) — `towerAt` is private and
+   *  pending-aware, so input.ts cannot classify that itself and must forward intent,
+   *  anchor, and tap for the controller to classify (#115). A release over Shell
+   *  chrome never commits and leaves everything as it was (tap-flow: stays armed,
+   *  ghost untouched). */
+  const releaseBoardTouch = (clientX: number, clientY: number, press: PressEntry): void => {
     if (controller.uiState().armed === null) {
       if (isOverChrome(clientX, clientY)) return;
       const cell = cellFromEvent(clientX, clientY);
@@ -399,11 +412,25 @@ export function attachInput(
       return;
     }
     if (isOverChrome(clientX, clientY)) return;
+    // The raw (unoffset) pointer-UP cell — the intent cell (#115) — null exactly when
+    // the finger is out-of-grid (letterbox margin), same as `ghostAnchorFromPoint`'s own
+    // null case below (it derives from the same finger-cell check).
+    const intent = fingerCellFromEvent(clientX, clientY);
+    if (intent === null) return; // no target — stays armed (PLAN.md P3), nothing to forward
     const anchor = ghostAnchorFromPoint(clientX, clientY);
-    // Released in the letterbox margin (no target): no commit, and — like the chrome-release
-    // rule above — the board-origin tap flow stays armed (PLAN.md P3).
-    if (anchor === null) return;
-    controller.clickAt(anchor.col, anchor.row);
+    if (anchor === null) return; // unreachable given `intent` above (same finger-cell guard) — kept for type-safety
+    const pressCell = fingerCellFromEvent(press.startX, press.startY);
+    const sameCell =
+      pressCell !== null && pressCell.col === intent.col && pressCell.row === intent.row;
+    const withinTapPx =
+      Math.hypot(clientX - press.startX, clientY - press.startY) <= DRAG_THRESHOLD_PX;
+    controller.touchConfirmAt(
+      intent.col,
+      intent.row,
+      anchor.col,
+      anchor.row,
+      sameCell || withinTapPx,
+    );
   };
 
   const onBoardPointerUp = (e: PointerEvent): void => {
@@ -450,7 +477,7 @@ export function attachInput(
       if (cell !== null) controller.clickAt(cell.col, cell.row);
       return;
     }
-    releaseBoardTouch(e.clientX, e.clientY);
+    releaseBoardTouch(e.clientX, e.clientY, press);
   };
 
   const onBoardPointerCancelOrLost = (e: PointerEvent): void => {
@@ -595,10 +622,19 @@ export function attachInput(
         armClickSuppression();
         return;
       }
-      // Drag-from-rail release: valid cell places (→ disarm → select, via `clickAt`);
-      // off-board, over Shell chrome, or an invalid cell cancels AND disarms (the drag was
-      // one gesture — aborting returns to neutral, unlike the board-native drag, which
-      // keeps a rejected placement armed).
+      // Drag-from-rail release: valid cell places (→ disarm → select). Off-board, over
+      // Shell chrome, or an invalid cell cancels AND disarms (the drag was one gesture —
+      // aborting returns to neutral, unlike the board-native drag, which keeps a rejected
+      // placement armed). An occupied drop (an existing tower at the anchor) ALSO cancels-
+      // and-disarms here, deliberately UNCHANGED by #115's board-touch inspect-intent
+      // (PLAN.md P3's scope is board-origin only): the release routes through
+      // `touchConfirmAt` with `tap=false` and intent===anchor, so the controller's own
+      // classification table (step 2: armed && !tap && a tower at the anchor) hands back
+      // the 'occupied' rejection — still armed — rather than ever reaching the tap-only
+      // inspect branch. The "still armed → disarmAndClearGhost()" check below then
+      // converts that rejection (and every other genuine one) into the Card-drag cancel
+      // contract; no separate sniff of the outcome is needed, the controller owns all of
+      // it.
       //
       // Arm the synthetic-click suppression ONLY when the release lands back over the
       // Card itself — a release over the board (the common case: the drag moved the
@@ -619,8 +655,13 @@ export function attachInput(
         disarmAndClearGhost();
         return;
       }
-      controller.clickAt(anchor.col, anchor.row);
-      if (controller.uiState().armed !== null) disarmAndClearGhost(); // invalid drop still disarms
+      controller.touchConfirmAt(anchor.col, anchor.row, anchor.col, anchor.row, false);
+      if (controller.uiState().armed !== null) {
+        // A genuine rejection (bounty/terrain/cap/occupied/etc) still disarms — this is
+        // also how the occupied-anchor case above resolves into the cancel contract.
+        disarmAndClearGhost();
+        return;
+      }
     };
 
     const onCardPointerCancelOrLost = (e: PointerEvent): void => {
