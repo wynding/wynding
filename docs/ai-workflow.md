@@ -244,7 +244,11 @@ agents) are the contract — adapt the grill / verify / review steps to your har
 
 ## Services the full gate depends on (maintainer setup)
 
-- A **GitHub remote** + branch protection on `main` (required checks + reviews).
+- A **GitHub remote** + branch protection on `main` (required checks + reviews). The full
+  required-context set is the merge gate's enforced layer above: `verify (format,
+typecheck, lint, test)`, `codex-freshness`, and `e2e (functional + axe)` — context
+  strings are job NAMES exactly as CI reports them (#106's trap: a near-miss string wedges
+  every merge on a permanently-pending context).
 - `codex-freshness` in the branch-protection **required contexts** — the workflow posts the
   status either way; only the contexts list makes it block merges. Order matters: the
   workflows must be on `main` before the context is required — every subscribed event
