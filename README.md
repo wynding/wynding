@@ -6,7 +6,9 @@ mobile (Capacitor) and desktop/Steam (Tauri) wrappers planned.
 
 ## Status
 
-M1 feature-complete; cleanup complete; playtesting next.
+M2 (breadth) implementation: stories S1–S11 shipped; S12 (UI breadth) remaining, plus
+two open S11 residuals (the `R0` perf-baseline limit-3 re-record, deferred to CI, and
+the owner play session). Playtesting is live on the preview channel.
 
 ## Layout
 
@@ -18,6 +20,7 @@ packages/
   content  board / wave data
   replay   replay format + re-simulation validator
   types    shared types
+  perf     ADR 0005 perf gate + stress scenes — most-downstream, never shipped
 apps/
   web      Vite PWA
   server   AWS Lambda score-validation handler (re-sims a replay)
@@ -28,7 +31,7 @@ docs/      prd/  adr/  CONTEXT.md
 
 ## Determinism
 
-The simulation is a pure function of `(seed, ruleset, inputs)`: fixed 20 Hz tick,
+The simulation is a pure function of `(seed, ruleset, boardId, inputs)`: fixed 20 Hz tick,
 integer fixed-point math, a seeded RNG, and no wall-clock or `Math.random` in the
 sim path. That's what lets the server re-simulate a submitted replay and derive a
 trusted score. See [`docs/adr/0001-monorepo-and-stack.md`](docs/adr/0001-monorepo-and-stack.md).

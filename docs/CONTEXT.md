@@ -252,7 +252,9 @@ the R1.x releases).
 _Avoid_: epic, stage.
 
 **Milestone**:
-A feature-sized capability inside a phase; milestones roll up into a phase.
+A feature-sized capability inside a phase; milestones roll up into a phase. A
+completed milestone's build is a **checkpoint** (tagged `p<phase>-m<n>`), not a
+Release.
 _Avoid_: deliverable (feature is fine in prose).
 
 **Story**:
@@ -263,7 +265,8 @@ _Avoid_: task, ticket.
 **Release**:
 A public build, tagged by maturity — **alpha** (rough, expect breakage) → **beta**
 (stabilizing) → **stable**. The major number is the phase (R1.0, then R1.1 for a
-Phase 1 bugfix); early milestones ship as alphas ahead of the stable release.
+Phase 1 bugfix). Milestone builds are not Releases — they are checkpoints; the first
+alpha is cut when a phase reaches feature-complete.
 _Avoid_: launch (version is fine in prose).
 
 **P0–P3**:

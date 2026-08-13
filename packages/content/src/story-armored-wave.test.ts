@@ -837,7 +837,8 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
   );
 });
 
-// The four `stun` anchors for wave index 4 (M2-S6 P8 test 17), module scope for the
+// The four `stun` anchors for the `resolute`+`fast` wave — index 6 in the completed
+// arc (M2-S6 P8 test 17, authored when it sat at index 4) — module scope for the
 // same reason `basicAnchors`/`column16Anchors` are: `(1,7)`, `(3,7)`, `(5,7)`, `(7,7)`
 // — NOT from the existing test's anchor list (all eight of those are occupied by the
 // byte-identical wave-0-to-3 wall). A flanking line one lane ABOVE the descent, the
@@ -848,7 +849,7 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
 // probed only for PLACEMENT ACCEPTANCE, and all four do accept — but a probe of where
 // `resolute` actually travels shows it NEVER PASSES COLUMN 13: `basic`'s 10 damage
 // two-shots a 20-hp `resolute` in the columns 1-8 approach, so towers at columns
-// 20/24 never get a live shot at wave index 4's own creeps. The engagement proof
+// 20/24 never get a live shot at the `resolute` wave's own creeps. The engagement proof
 // below (`sawLiveResoluteStun`) was false under those anchors — the exact "measurement
 // passes while nothing happened" failure this test exists to rule out. Re-probed
 // against the real sim: at rows 7 all four accept in sequence at ticks 1500-1530 with
@@ -860,7 +861,7 @@ const stunAnchors: { col: number; row: number }[] = [
   { col: 7, row: 7 },
 ];
 
-describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of it, measured (M2-S6 P8 test 17)', () => {
+describe('wave index 6 (`resolute` + `fast`) — a stun-holding build ahead of it, measured (M2-S6 P8 test 17)', () => {
   // Four `stun` towers — `resolute` at speed 44 is the fastest ground creep in the
   // catalog and one 25%/20-tick tower cannot hold it — anchored 100 ticks after the
   // `resolute` wave's OWN observed countdown start (located by creep id, never a
@@ -953,9 +954,9 @@ describe('wave index 4 (`resolute` + `fast`) — a stun-holding build ahead of i
       // that array's comment for the anchors this replaced and why they read false.
       expect(sawLiveResoluteStun).toBe(true);
 
-      // THE S11 P2 MECHANISM CLAIM, de-indexed: wave index 4 (`resolute`+`fast`, located by
-      // creep id) itself resolved clean, never leaked — the stun wall's own done-criterion,
-      // independent of anything past it.
+      // THE S11 P2 MECHANISM CLAIM, de-indexed: the `resolute`+`fast` wave (located by
+      // creep id, index 6 in the completed arc) itself resolved clean, never leaked — the
+      // stun wall's own done-criterion, independent of anything past it.
       expect(state.waveResolved[resoluteWaveIndex]).toBe(true);
       expect(state.waveLeaked[resoluteWaveIndex]).toBe(false);
     },

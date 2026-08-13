@@ -18,8 +18,14 @@ Every user-facing string lives in a **message catalog**, referenced by a key.
 content task, not a code change. This includes **authored content display strings**
 (e.g. board names): content stores a **localization key/descriptor**, resolved to
 text at the UI layer — never a baked literal. (The exact content representation is
-finalized in the board/content-data-format ADR; today's `Board.name` sample string
-is placeholder scaffold predating the catalog.)
+finalized in the board/content-data-format ADR. An earlier parenthetical here about a
+`Board.name` sample string is moot as of 2026-08-12: v2 bundles carry no
+presentation-name field at all — board `name` was deleted from the schema entirely
+(see `normalizeForHash`'s header in `packages/sim/src/ruleset.ts`). Tower and creep
+display names live in the `en` catalog (`tower.<id>.name` / `creep.<id>.name`); a
+board display name currently has NO representation anywhere — the single shipped
+board's shell renders the game's own name — so a `board.<id>.name` contract is
+deferred until a second board first needs one.)
 
 ### 2. Catalog contract (so the above is enforceable)
 
@@ -43,18 +49,25 @@ is placeholder scaffold predating the catalog.)
 
 One locale to start, so that a **supported** second locale is later drop-in.
 
-> **Status:** this is the contract the **first real UI implements** — the `en`
-> catalog, typed `t()` accessor, string-literal lint rule, and extraction check do
-> **not** exist yet. The current scaffold predates them and still holds a couple of
-> placeholder hardcoded strings (e.g. `apps/web/src/main.ts`,
-> `packages/render/src/index.ts`); those are migrated when the i18n layer lands with
-> the first UI. Until then, "no hardcoded user-facing strings" is the standard being
-> adopted, not a claim that the mechanism is already wired.
+> **Status (updated 2026-08-12):** this contract is **implemented and CI-enforced**,
+> and has been since the first real UI (M1 Story 6, `755e3f2`): the `en` catalog
+> (`apps/web/src/i18n/en.json`) with its generated typed accessor
+> (`i18n/t.ts` / `i18n/catalog.gen.ts`), the string-literal lint rule
+> (`wynding/no-ui-literals`, `eslint.config.mjs`), and the extraction +
+> cross-locale check (`scripts/i18n-check.mjs`, run inside `verify`) all ship. The
+> previous revision of this callout — written five days before `t.ts` landed — said
+> none of it existed yet and named `apps/web/src/main.ts` /
+> `packages/render/src/index.ts` as still holding placeholder literals; both are
+> literal-free and lint-covered today, and the callout was simply never revisited.
 
 ### 4. Design for i18n from the start
 
 - **ICU MessageFormat** for plurals, gender, number, and date — never
-  sentence-building by string concatenation.
+  sentence-building by string concatenation. _(Shipped subset, noted 2026-08-12: the
+  live formatter substitutes ICU `{name}` placeholders only — no plural/select
+  branches yet, per `t.ts`'s own header. The catalog values stay ICU-compatible, so
+  adopting a full formatter when a branching message first appears is a drop-in;
+  this ADR's commitment is unchanged.)_
 - No essential text baked into images.
 - UI must reflow for longer translations (no fixed-width text assumptions).
 - Locale-aware number/time formatting.

@@ -15,8 +15,10 @@ export type Tick = Brand<number, 'Tick'>;
 export type Seed = Brand<number, 'Seed'>;
 
 /**
- * A fixed-point scalar (integer encoding of a fractional quantity). See
- * `@wynding/engine` for the FP_SHIFT / conversion helpers. Never a JS float.
+ * A fixed-point scalar (integer encoding of a fractional quantity). Never a JS
+ * float. The FP_SHIFT / conversion helpers live in `@wynding/engine` — a package
+ * this one deliberately does NOT depend on (both are workspace roots; nothing here
+ * imports them).
  */
 export type Fixed = Brand<number, 'Fixed'>;
 

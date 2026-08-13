@@ -21,8 +21,9 @@ game, and a codebase that's unmistakably ours.
 ## What Wynding is
 
 A deterministic, replay-verifiable tower defense game. The simulation is a pure
-function of `(seed, ruleset, inputs)`; the server re-simulates submitted replays
-to derive scores. That property is the backbone of the whole project — protect it.
+function of `(seed, ruleset, boardId, inputs)`; the server re-simulates submitted
+replays to derive scores. That property is the backbone of the whole project —
+protect it.
 
 ## Repository map
 
@@ -34,6 +35,7 @@ packages/
   content  board / wave data
   replay   replay format + re-simulation validator
   types    shared types
+  perf     ADR 0005 perf gate + stress scenes — most-downstream, never shipped
 apps/
   web      Vite PWA
   server   AWS Lambda score-validation handler (re-sims replays)
@@ -48,7 +50,12 @@ docs/      prd/  adr/  CONTEXT.md
   code. No `Math.random` (use the seeded `Rng`), no `Date`/`performance.now`, no
   floats (use fixed-point), no Phaser, no DOM. Same inputs → byte-identical state.
 - **Layering.** Render/input read sim state; they never mutate it. The dependency
-  graph flows one way: `types <- engine <- sim <- {render, replay, content} <- apps`.
+  graph flows one way:
+  `{types, engine} <- sim <- {render, replay, content} <- perf <- apps`
+  — read as layering shorthand: each layer MAY depend on anything to its left, not
+  that every drawn edge exists (`perf`, for instance, does not import `render`).
+  `types` and `engine` are both roots — `engine` depends only on `@noble/hashes`;
+  `perf` is most-downstream of the packages and nothing shipped may import it.
 - **Fixed tick.** 20 Hz (`50 ms`) fixed timestep. No variable-dt simulation.
 - **Tests.** Every simulation change ships with Vitest coverage, and the
   world-hash / replay-determinism tests must stay green. The deterministic core

@@ -29,8 +29,10 @@ let cosmetic choices affect the world-hash.
 What each wave spawns comes from the ruleset schedule (ADR 0007), not free player input,
 and the scheduler runs **inside the deterministic sim** — its timing depends on evolving
 sim state and on any recorded wave-timing command. So
-spawns are a deterministic function of `(seed, ruleset, inputs)` and re-simulation is
-exact, with no creep spawns in the input log.
+spawns are a deterministic function of `(seed, ruleset, boardId, inputs)` and
+re-simulation is exact, with no creep spawns in the input log. _(boardId added
+2026-08-12 for consistency with §3's initial conditions — this sentence predated
+that section's own addition of boardId and was never reconciled.)_
 
 > **Correction (2026-07-26, M2 spec):** an earlier revision illustrated the sim-state
 > dependence as "when the previous wave clears." That example was stale — wave timing

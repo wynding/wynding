@@ -37,7 +37,7 @@ reproducer; a failing `sim` test beats a console log.
 `test` with coverage, plus the root guards — i18n, dependabot config, glossary, scripts
 lint). Two gates are hard:
 
-- **Determinism** — same `(seed, ruleset, inputs)` → byte-identical state; the
+- **Determinism** — same `(seed, ruleset, boardId, inputs)` → byte-identical state; the
   world-hash / replay tests must pass. Lint bans `Math.random`/`Date`/`performance` in the
   core.
 - **Coverage** — `engine`/`sim`/`replay` ≥ 90% lines+branches.
@@ -206,6 +206,12 @@ setup below) with its findings addressed AND CodeRabbit approved AND owner appro
 review threads resolved). **Deploy:** merge to `main`
 auto-deploys the web build to a staging URL; a human manually promotes to prod (web on AWS
 S3 + CloudFront). Mobile/desktop ship as tagged releases.
+
+**Before the merge, ask: are the status lines current?** A story that changes where the
+project stands updates the standing declarations in the same PR — `README.md`'s Status,
+the milestone spec's header line, and any done-criteria whose measured outcomes the change
+moved. These are the first lines every newcomer (human or agent) orients from, and they rot
+silently: m2.md's header sat four stories behind `main` before #103 caught it.
 
 ## Tooling setup
 

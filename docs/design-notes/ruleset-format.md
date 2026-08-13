@@ -55,6 +55,14 @@ _(Addresses Codex PR #6: "Specify normalization before canonicalizing rulesets."
 
 Localization keys (board names, tower/creep display names) and any other non-sim field.
 Renaming a board must not invalidate replays, so only sim-affecting content is hashed.
+_(SUPERSEDED 2026-08-12 — v2 resolves this by exclusion at the SCHEMA, not at the hash:
+bundles carry no presentation fields at all (unknown properties are rejected, and board
+`name` was deleted from the schema — see `normalizeForHash`'s header in
+`packages/sim/src/ruleset.ts`), while display names live in the UI's `en` catalog
+(`tower.<id>.name` / `creep.<id>.name`; a `board.<id>.name` key is deferred until a
+second board first needs one — ADR 0004). The invariant this section wanted — renaming
+must never invalidate replays — now holds trivially: there is nothing presentational in
+the bundle to rename.)_
 
 ## Versioning
 

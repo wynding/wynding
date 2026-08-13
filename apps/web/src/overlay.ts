@@ -302,16 +302,19 @@ export function createOverlay(
     c.root.addEventListener('click', () => onAction({ type: 'armTower', tower: c.towerId }));
   }
 
-  /** Refresh card at `index`'s live hotkey badge — a card at catalog index ≥ 3 gets no
-   *  badge/`aria-keyshortcuts` at all (Codex R2-2, widened M2-S4a), remaining fully
-   *  keyboard-operable as a native button in the tab order. */
+  /** Refresh card at `index`'s live hotkey badge — a card past the last hotkey slot
+   *  (catalog index ≥ `ARM_TOWER_ACTIONS.length`, i.e. ≥ 9) gets no
+   *  badge/`aria-keyshortcuts` at all (Codex R2-2, widened M2-S4a and again at M2-S5a's
+   *  nine-slot generalization), remaining fully keyboard-operable as a native button in
+   *  the tab order. */
   function refreshCardHotkey(index: number): void {
     const c = cards[index];
     if (c === undefined) return;
     const action = hotkeyActionForCardIndex(index);
     if (action === null) {
-      // No hotkey slot for this card at all (catalog index ≥ 3) — badge hidden, no
-      // aria-keyshortcuts, still fully keyboard-operable as a native button.
+      // No hotkey slot for this card at all (catalog index ≥ ARM_TOWER_ACTIONS.length,
+      // i.e. ≥ 9) — badge hidden, no aria-keyshortcuts, still fully keyboard-operable
+      // as a native button.
       c.hotkey.textContent = '';
       c.root.removeAttribute('aria-keyshortcuts');
       return;

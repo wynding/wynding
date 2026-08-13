@@ -297,24 +297,27 @@ const BLAST_RADIUS_FP = (r: CompiledRuleset, towerId: string): number | null =>
  *    selection, so `confirm()` never even reaches this classifier for it (the ghost is
  *    null). By the time we're here with a valid ghost, any same-anchor `placeTower`
  *    already in the buffer is necessarily a dead/cancelled one — never a live duplicate.
- *  - `'full'`: not a duplicate, and the buffer is already at `cap` (`MAX_INPUTS_PER_TICK`
- *    by default — the replay contract's exact per-tick limit, imported not duplicated, so
- *    the two can never drift). This is an intentional product limit, not a bug surface: it
- *    exists so no recorded tick can ever exceed the replay contract even via many
- *    *distinct* commands, and the DEFAULT cap is unreachable through normal M1 play (board
- *    geometry + bounty bound distinct legal commands well under 64) — refusal at the
- *    default cap is silent by design, no UI error state. `controller.ts` passes an
- *    explicit REDUCED cap (`MAX_INPUTS_PER_TICK - 1`) for build/sell commands while a run
- *    is held pre-start (PLAN.md P4), reserving one slot for `start()`'s own
- *    `callWaveEarly` so a held run's buffer can never deadlock Start — that reduced cap
- *    IS reachable in play (a persistent build/sell reshuffler), and IS surfaced to the
- *    player (a distinct 'pendingCap' outcome, not silent).
+ *  - `'full'`: not a duplicate, and the buffer is already at `MAX_INPUTS_PER_TICK` (the
+ *    replay contract's exact per-tick limit, imported not duplicated, so the two can
+ *    never drift). This is an intentional product limit, not a bug surface: it exists so
+ *    no recorded tick can ever exceed the replay contract even via many *distinct*
+ *    commands. It is ONE cap, held or not — the P4-era pre-start reservation (a reduced
+ *    cap holding a slot for `start()`'s own `callWaveEarly`) was retired at M2-S2 when
+ *    the S2 decouple made `start()` enqueue nothing — and while reaching it takes
+ *    deliberate play, it IS reachable (32 same-tick build/sell cycles fill all 64 slots
+ *    from starting bounty — the regression test does exactly that) and hitting it is
+ *    NOT silent: every reachable cap hit is
+ *    surfaced to the player as a 'pendingCap' rejection. Mechanism per site: the sell
+ *    and callWaveEarly sites route a 'full' verdict to 'pendingCap' directly; the two
+ *    PLACEMENT sites announce 'pendingCap' from their own cap pre-checks BEFORE this
+ *    function runs (`clickAt`'s explicit check and `placementValid`'s cap fold), which
+ *    leaves their 'full' branches as defensive fallbacks a player cannot reach
+ *    ('other' / a bare `false`).
  *  - `'queue'`: otherwise — the command should be pushed.
  */
 export function enqueueVerdict(
   buffer: readonly SimInput[],
   cmd: SimInput,
-  cap: number = MAX_INPUTS_PER_TICK,
 ): 'queue' | 'duplicate' | 'full' {
   const duplicate = buffer.some((existing) => {
     switch (cmd.kind) {
@@ -327,7 +330,7 @@ export function enqueueVerdict(
     }
   });
   if (duplicate) return 'duplicate';
-  if (buffer.length >= cap) return 'full';
+  if (buffer.length >= MAX_INPUTS_PER_TICK) return 'full';
   return 'queue';
 }
 
@@ -556,9 +559,10 @@ export function createController(
   // re-clicking the already-selected tower re-reveals. Reset to 0 on `startRun()`.
   let inspectSeq = 0;
   // Player-started runs (PLAN.md P4): the real advance gate. `false` from a fresh run/
-  // Play-again until `start()`'s enqueue is accepted; `advance()` is a no-op while this is
-  // false, regardless of `paused`/speed — held runs never step. Never reset by anything
-  // BUT `reset()` (a fresh run identity) — `start()` only ever flips it true.
+  // Play-again until `start()` flips it (a bare flag flip — the S2 decouple retired
+  // start()'s enqueue); `advance()` is a no-op while this is false, regardless of
+  // `paused`/speed — held runs never step. Never reset by anything BUT `reset()` (a
+  // fresh run identity) — `start()` only ever flips it true.
   let started = false;
   const bumpUiRev = (): void => {
     uiRev++;

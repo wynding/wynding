@@ -1,9 +1,10 @@
 // palette.test.ts — the permanent contrast gate (ADR 0003 §2 colourblind conformance).
 // WCAG relative luminance / contrast ratio computed locally (no dependency on the scene
 // or DOM); every cue the scene draws OPAQUE is gated at source colour, and `range` (the
-// only cue ever drawn at partial alpha for essential information — the ghost-preview
-// stroke, `scene.ts:174`; the selected-tower stroke at 0.9, `scene.ts:142`, is strictly
-// stronger and so not the binding case) and `aura` (M2-S8's adjacency shell, at
+// only cue ever drawn at partial alpha for essential information — the 0.7 ghost-preview
+// stroke in `scene.ts`'s ghost branch; the two 0.9 draws, `board-draw.ts`'s
+// selected-tower stroke and `scene.ts`'s ghost blast crosshair, are strictly stronger
+// and so not the binding case) and `aura` (M2-S8's adjacency shell, at
 // `AURA_SHELL_ALPHA`) are gated at their composited alpha. `spark`
 // is exempt (transient fading FX, alpha → 0 by design, non-essential — the kill outcome
 // is carried by the creep/HP-pip state, and it is reduced-motion governed). `border` is
@@ -66,9 +67,11 @@ const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'airborne',
 ];
 
-// `range`'s weakest essential draw: the ghost-preview stroke at alpha 0.7 (scene.ts:174).
-// The selected-tower stroke at 0.9 (scene.ts:142) is strictly stronger, so 0.7 is binding.
-// A future alpha change at either draw site should update this constant.
+// `range`'s weakest essential draw: the ghost-preview range stroke at alpha 0.7
+// (`scene.ts`'s ghost branch). The 0.9 draws — the selected-tower stroke
+// (`board-draw.ts`'s selection block) and the ghost blast crosshair (`scene.ts`) — are
+// strictly stronger, so 0.7 is binding. A future alpha change at any of the three draw
+// sites should update this constant.
 const RANGE_GHOST_PREVIEW_ALPHA = 0.7;
 
 // `aura`'s only essential draw: the support-adjacency shell, stroked over the board FLOOR
