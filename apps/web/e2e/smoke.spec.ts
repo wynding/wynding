@@ -588,7 +588,11 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
 test('supports player-started runs, pause / speed controls, early-calls all ten waves with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  // Above the sum of this test's own declared worst-case budgets — ten paced calls
+  // carrying a 5s in-page deadline each (paced-call.ts) plus the 60s results wait — so
+  // a pathological run dies at the stage that owns it, with that stage's named
+  // diagnostic, never as an anonymous whole-test timeout mid-budget (CodeRabbit #117).
+  test.setTimeout(150_000);
   await page.goto('/');
 
   // Pre-start (PLAN.md P4 + Story 11's wave-slot states, decoupled further at M2-S2): the

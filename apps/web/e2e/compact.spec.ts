@@ -219,6 +219,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   test("658×320: the four-row wave-9 preview (M2-S11, the arc's densest tick) fits accessibly inside the bounded scrollport", async ({
     page,
   }) => {
+    // Above the sum of this test's declared worst-case budgets — eight paced calls
+    // carrying a 5s in-page deadline each (paced-call.ts) plus the axe/geometry/
+    // keyboard tail — which the 60s config default cannot hold (same budget-coherence
+    // rule as the two marathon specs, CodeRabbit #117).
+    test.setTimeout(120_000);
     await gotoAt(page, PHONE);
     const preview = page.locator('.wy-wave-preview');
     const previewTitle = preview.locator('.wy-wave-preview-title');

@@ -17,7 +17,11 @@ import { callWavePaced, titleAfterCall } from './paced-call';
 test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-again re-holds', async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  // Above the sum of this test's own declared worst-case budgets — ten paced calls
+  // carrying a 5s in-page deadline each (paced-call.ts) plus the 60s results wait — so
+  // a pathological run dies at the stage that owns it, with that stage's named
+  // diagnostic, never as an anonymous whole-test timeout mid-budget (CodeRabbit #117).
+  test.setTimeout(150_000);
   await page.goto('/');
 
   const board = page.locator('.wy-board');
