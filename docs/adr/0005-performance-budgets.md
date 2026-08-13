@@ -532,10 +532,10 @@ tell a budget that does not exist from one that could not be measured.
    against these 17 samples and draft 3's pass is reported on the same 17, which is fitting
    rather than validation. **What the baseline rests on instead** — an argument that needs no
    distributional assumption anywhere in it, because the cohort cannot support one. First,
-   **`perf` is advisory**: branch protection requires `verify` and `codex-freshness` only (as
-   configured at the time of writing — this repo cannot assert that, and if `perf` is ever made
-   required this argument voids silently), so a wrong baseline costs a red non-blocking job and
-   a human look. Second, a **purely descriptive margin**: the largest `R` ever observed under
+   **`perf` is advisory**: branch protection requires `verify`, `codex-freshness`, and — since
+   2026-08-12 (#106) — `e2e (functional + axe)`, but never `perf` (as configured at the time of
+   writing — this repo cannot assert that, and if `perf` is ever made required this argument
+   voids silently), so a wrong baseline costs a red non-blocking job and a human look. Second, a **purely descriptive margin**: the largest `R` ever observed under
    this statistic, across BOTH readings on record, is **1.0493** (from the four diagnostic runs;
    this cohort's own max is 1.0362) against a **1.1000** ceiling — a **4.8%** gap in the raw
    measurement, offered as a fact and not as a flake rate. An earlier draft quoted 1.0362 /

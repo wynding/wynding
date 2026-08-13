@@ -54,7 +54,13 @@ The full palette test cases and the per-action input matrix live in the checklis
 
 - **DOM UI:** **axe-core runs in CI** against the rendered DOM UI (via the
   Playwright e2e suite) and **CI fails on any violation**. This wiring lands with
-  the first real UI and is a required check thereafter.
+  the first real UI and is a required check thereafter. _(Reconciled 2026-08-12,
+  #106: the job itself landed with the first UI (M1-S6) but ran ADVISORY — not in
+  branch protection's required contexts — until now; a load-dependent spec flake
+  (#97) was the final obstacle. With #97 fixed, the job — renamed
+  `e2e (functional + axe)`, since it is also the repo's whole functional-UI gate —
+  is in the required set, making this sentence true going forward rather than
+  retroactively.)_
 - **Gameplay canvas** (can't be auto-audited): every **player-facing PR** completes
   the accessibility checklist at **`docs/accessibility-checklist.md`** (created with
   the first UI; owner: the maintainer) — the relevant items are ticked in the PR, or
@@ -70,5 +76,6 @@ The full palette test cases and the per-action input matrix live in the checklis
   colour, motion budgets, remappable input); the canvas can't be auto-audited, so
   it leans on the checklist + waiver discipline.
 - **Neutral:** we target GAG "Intermediate," not "Advanced," for now; the axe-CI
-  wiring and the checklist doc are created with the first UI (no UI exists yet to
-  gate).
+  wiring and the checklist doc were created with the first UI (M1-S6 — this line
+  predated it; the wiring's advisory-to-required history is in §3's 2026-08-12
+  reconciliation note).

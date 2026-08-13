@@ -22,7 +22,8 @@ them can be trusted much further than the other.
 | Browser  | `apps/web/e2e-perf` (Playwright) | frame time, JS heap, input latency           | **No** — recorded-only this story                     |
 
 "Not required" is exact: `main`'s branch protection requires `verify (format, typecheck, lint,
-test)` and `codex-freshness`, and nothing else. A red `perf` job is visible on the PR but does not
+test)`, `codex-freshness`, and — since 2026-08-12 (#106) — `e2e (functional + axe)`; `perf` is
+deliberately not among them. A red `perf` job is visible on the PR but does not
 stop a merge — which is why the ratio gate's flake rate below is a nuisance rather than an
 outage, and equally why a true positive there needs someone to look.
 
