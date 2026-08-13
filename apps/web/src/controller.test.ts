@@ -1050,6 +1050,21 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed
   });
 
+  it("armed with a DIFFERENT Card: inspecting a tower announces the SELECTED tower's id, never the armed Card's (#120 Codex R2)", () => {
+    const c = createController(1);
+    c.start();
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // a real committed basic at (3,3)
+    c.armTower('slow'); // arm a DIFFERENT catalog id, then inspect the basic
+    c.clickAt(3, 3);
+    const after = c.uiState();
+    expect(after.armed).toBeNull();
+    expect(after.selection).toMatchObject({ col: 3, row: 3 });
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
+  });
+
   it('armed: hovering a tower footprint keeps the invalid ghost — the preview never nulls over an occupied cell (setup rewritten off the retired click-rejection path, #115)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held

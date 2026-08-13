@@ -1001,11 +1001,12 @@ export function createController(
     reveal: boolean,
     atCell?: { readonly col: number; readonly row: number },
   ): void => {
-    const towerId = armed as string;
     armed = null;
     if (atCell !== undefined) cur = atCell;
     selectTower(existing, reveal);
-    setOutcome({ kind: 'inspected', towerId });
+    // The SELECTED tower's id, never the armed Card's — the live region names what the
+    // player is now looking at (arm Slow, inspect a Basic → "Basic Tower selected").
+    setOutcome({ kind: 'inspected', towerId: existing.towerId });
   };
 
   /** Mouse/pointer click at a board cell — the armed/selection state machine (PLAN.md P2
