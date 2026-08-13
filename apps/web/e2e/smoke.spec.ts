@@ -271,6 +271,7 @@ test('#115/#98: mid-run, arming a Card then clicking your OWN tower disarms and 
   const board = page.locator('.wy-board');
   const card = page.getByRole('button', { name: /Basic Tower/ });
   const panel = page.locator('.wy-panel');
+  const live = page.locator('.wy-sr-only[role="status"][aria-live="polite"]');
 
   // Place a tower pre-start via the keyboard cursor at (3,3) — smoke.spec's well-known
   // buildable cell, the same arrow walk used throughout this file.
@@ -318,6 +319,9 @@ test('#115/#98: mid-run, arming a Card then clicking your OWN tower disarms and 
   await expect(card).toHaveAttribute('aria-pressed', 'false'); // #115: disarmed, never rejected
   await expect(panel).toBeVisible();
   await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible(); // Sell reachable mid-run
+  // #120: this is an INSPECT, not a cancel — the live region names the tower, distinct
+  // from the plain "Placement cancelled." a Card toggle-off/Escape would announce.
+  await expect(live).toContainText('Basic Tower selected — Card set aside.');
 });
 
 test('the second Card (M2-S3): arms Slow Tower by click AND by Digit2, places it, and the 3-card Rail is axe-clean', async ({
@@ -430,15 +434,15 @@ test('the third Card (M2-S4a): arms Splash Tower by click AND by Digit3, labels 
   expect(inspectAudit.violations, JSON.stringify(inspectAudit.violations, null, 2)).toEqual([]);
 
   // Rejection coverage stays, on an honest NON-tower blocker: clamp-walk the cursor into
-  // the blocked border corner — 30 presses each way over-walk both board dimensions, so
-  // the landing cell is (0,0) no matter where the cursor sat (a fixed step count toward a
-  // named row proved false against the real cursor geometry: the first cut of this
-  // retarget landed on buildable ground and PLACED). Border cells are blocked terrain and
-  // can never hold a tower, so Enter here is a genuine rejection: invalid ghost, still
-  // armed (#115 keeps every non-tower rejection).
+  // the blocked border corner — GRID.cols/GRID.rows presses each way over-walk each board
+  // dimension, so the landing cell is (0,0) no matter where the cursor sat (a fixed step
+  // count toward a named row proved false against the real cursor geometry: the first cut
+  // of this retarget landed on buildable ground and PLACED). Border cells are blocked
+  // terrain and can never hold a tower, so Enter here is a genuine rejection: invalid
+  // ghost, still armed (#115 keeps every non-tower rejection).
   await page.keyboard.press('Digit3'); // re-arm (the inspect above disarmed)
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowLeft');
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowUp');
+  for (let i = 0; i < GRID.cols; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < GRID.rows; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect(splashCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
 
@@ -544,11 +548,12 @@ test('the fourth Card (M2-S5a): arms Venom Tower by click AND by Digit4, labels 
   expect(inspectAudit.violations, JSON.stringify(inspectAudit.violations, null, 2)).toEqual([]);
 
   // Rejection coverage stays, on an honest NON-tower blocker: clamp into the blocked
-  // border corner (0,0) — deterministic regardless of where the cursor sat; border cells
-  // can never hold a tower.
+  // border corner (0,0) — the walk spans each board dimension (GRID.cols/GRID.rows),
+  // so it's deterministic regardless of where the cursor sat; border cells can never
+  // hold a tower.
   await page.keyboard.press('Digit4'); // re-arm (the inspect above disarmed)
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowLeft');
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowUp');
+  for (let i = 0; i < GRID.cols; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < GRID.rows; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect(venomCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
 
@@ -632,11 +637,12 @@ test('the seventh Card (M2-S8): arms Beacon by click AND by Digit7, OMITS the fo
   expect(inspectAudit.violations, JSON.stringify(inspectAudit.violations, null, 2)).toEqual([]);
 
   // Rejection coverage stays, on an honest NON-tower blocker: clamp into the blocked
-  // border corner (0,0) — deterministic regardless of where the cursor sat; border cells
-  // can never hold a tower.
+  // border corner (0,0) — the walk spans each board dimension (GRID.cols/GRID.rows),
+  // so it's deterministic regardless of where the cursor sat; border cells can never
+  // hold a tower.
   await page.keyboard.press('Digit7'); // re-arm (the inspect above disarmed)
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowLeft');
-  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowUp');
+  for (let i = 0; i < GRID.cols; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < GRID.rows; i++) await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect(beaconCard).toHaveAttribute('aria-pressed', 'true'); // rejected — still armed
 

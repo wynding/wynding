@@ -111,6 +111,7 @@ export const EN = {
   "live.started": "Run started. The primary button now calls the current wave early.",
   "live.armed": "{name} armed. Place it on the board.",
   "live.disarmed": "Placement cancelled.",
+  "live.inspected": "{name} selected — Card set aside.",
   "live.placed": "{name} placed.",
   "live.rejected.bounty": "Not enough Bounty.",
   "live.rejected.occupied": "That cell is already occupied.",
@@ -248,6 +249,7 @@ export interface MessageParams {
   "live.started": Record<never, never>;
   "live.armed": { "name": string | number };
   "live.disarmed": Record<never, never>;
+  "live.inspected": { "name": string | number };
   "live.placed": { "name": string | number };
   "live.rejected.bounty": Record<never, never>;
   "live.rejected.occupied": Record<never, never>;

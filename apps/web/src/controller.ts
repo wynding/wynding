@@ -77,6 +77,14 @@ export interface AimResult {
 export type PlacementOutcome =
   | { readonly kind: 'armed'; readonly towerId: string }
   | { readonly kind: 'disarmed'; readonly towerId: string }
+  /** An armed inspect (#115/#120): a click/tap/confirm landed on an EXISTING tower while
+   *  armed — the Card disarms and the tower selects, but this is a deliberate "show me
+   *  that tower" act, not a cancelled placement, so it gets its own announcement
+   *  ("{name} selected — Card set aside.") rather than reusing `'disarmed'`'s "Placement
+   *  cancelled." (CodeRabbit PR #120 round 1: the reused kind read backwards to a
+   *  screen-reader user). `'disarmed'` stays reserved for an ACTUAL cancel — the Card
+   *  toggle-off and Escape. */
+  | { readonly kind: 'inspected'; readonly towerId: string }
   | { readonly kind: 'placed'; readonly towerId: string }
   | {
       readonly kind: 'rejected';
@@ -234,10 +242,8 @@ export interface Controller {
    *  inspect branch; input.ts's `onCardPointerUp` keeps the cancel-and-disarm contract
    *  itself, converting that still-armed rejection into a disarm. */
   touchConfirmAt(
-    intentCol: number,
-    intentRow: number,
-    anchorCol: number,
-    anchorRow: number,
+    intent: { readonly col: number; readonly row: number },
+    anchor: { readonly col: number; readonly row: number },
     tap: boolean,
   ): void;
   /** Document-scope Escape (PLAN.md P2 table): closes one layer at a time — armed
@@ -845,6 +851,19 @@ export function createController(
     return valid;
   };
 
+  /** The persistent-invalid-ghost literal (CodeRabbit PR #120 round 1): every rejection
+   *  site in this file (hover-over-a-tower, the pending-cap/bounty/other/occupied
+   *  rejections in `aimAt`/`previewAt`/`clickAt`/`touchConfirmAt`) shows the SAME shape —
+   *  an invalid ghost at `(col,row)` carrying `towerId`'s range/blast rings — and used to
+   *  repeat the four-field object literal at each of the six call sites. */
+  const invalidGhostAt = (col: number, row: number, towerId: string): GhostVM => ({
+    col,
+    row,
+    valid: false,
+    rangeFp: RANGE_FP(ruleset, towerId),
+    blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
+  });
+
   const aimAt = (col: number, row: number): AimResult => {
     if (!inBounds(col, row)) return { kind: 'blocked', col, row, valid: false };
     cur = { col, row };
@@ -861,13 +880,7 @@ export function createController(
         // same blocked cell and is handled separately — by `confirm()` and `clickAt`/
         // `touchConfirmAt` — as inspect intent (disarm-and-select via the shared
         // `selectTower` helper). `aimAt` itself is otherwise unchanged.
-        ghost = {
-          col,
-          row,
-          valid: false,
-          rangeFp: RANGE_FP(ruleset, armed),
-          blastRadiusFp: BLAST_RADIUS_FP(ruleset, armed),
-        };
+        ghost = invalidGhostAt(col, row, armed);
         bumpUiRev(); // keyboard-cursor aim is a discrete, user-driven event (PLAN.md P2)
         return { kind: 'blocked', col, row, valid: false };
       }
@@ -924,13 +937,7 @@ export function createController(
     // let the slightest hover erase the rejection cue over the very footprint a click used
     // to reject.
     if (towerAt(col, row) !== null) {
-      ghost = {
-        col,
-        row,
-        valid: false,
-        rangeFp: RANGE_FP(ruleset, armed),
-        blastRadiusFp: BLAST_RADIUS_FP(ruleset, armed),
-      };
+      ghost = invalidGhostAt(col, row, armed);
       return;
     }
     ghost = {
@@ -975,6 +982,32 @@ export function createController(
     bumpUiRev();
   };
 
+  /** The ONE path every ARMED inspect (#115/#120: a click, keyboard confirm, or touch tap
+   *  landing on an EXISTING tower) goes through — `clickAt`, `confirm()`, and
+   *  `touchConfirmAt`'s tap branch each used to repeat `armed = null` before calling
+   *  `selectTower` and recording the outcome by hand; folding that into one helper means
+   *  the disarm-and-select invariant can't drift across the three. `atCell`, when given
+   *  (touch only), plants the keyboard cursor on it BEFORE selecting — touch's INTENT
+   *  cell, not the offset anchor `cur` may already hold, so a follow-up `confirm()`
+   *  can't re-derive over stale/empty ground and drop the selection it just set. Callers
+   *  only ever invoke this while `armed !== null`. */
+  const inspectTower = (
+    existing: {
+      readonly col: number;
+      readonly row: number;
+      readonly id: number;
+      readonly towerId: string;
+    },
+    reveal: boolean,
+    atCell?: { readonly col: number; readonly row: number },
+  ): void => {
+    const towerId = armed as string;
+    armed = null;
+    if (atCell !== undefined) cur = atCell;
+    selectTower(existing, reveal);
+    setOutcome({ kind: 'inspected', towerId });
+  };
+
   /** Mouse/pointer click at a board cell — the armed/selection state machine (PLAN.md P2
    *  table, revised #115). Armed: a cell blocked by an EXISTING TOWER (committed or
    *  pending — `towerAt` reads the pending projection) is inspect intent, not a
@@ -992,11 +1025,10 @@ export function createController(
       const towerId = armed;
       const existing = towerAt(col, row);
       if (existing !== null) {
-        // Inspect intent (#115): disarm BEFORE selecting (mirrors the valid-placement
-        // branch below — never re-arms), and no rejection outcome fires on this path.
-        armed = null;
-        selectTower(existing, true);
-        setOutcome({ kind: 'disarmed', towerId });
+        // Inspect intent (#115/#120): the shared `inspectTower` helper owns the disarm,
+        // the select, and the 'inspected' outcome (mirrors the valid-placement branch
+        // below — never re-arms).
+        inspectTower(existing, true);
         return;
       }
       // The per-tick buffer cap takes priority over bounty/other — a cell that's
@@ -1005,24 +1037,12 @@ export function createController(
       // 'bounty'/'other'. Checked before `placementValid` (which itself folds the cap
       // into its memoized result) so this exact branch can attach the distinct outcome.
       if (buffer.length >= MAX_INPUTS_PER_TICK) {
-        ghost = {
-          col,
-          row,
-          valid: false,
-          rangeFp: RANGE_FP(ruleset, towerId),
-          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
-        };
+        ghost = invalidGhostAt(col, row, towerId);
         setOutcome({ kind: 'rejected', reason: 'pendingCap' });
         return;
       }
       if (!placementValid(col, row, towerId)) {
-        ghost = {
-          col,
-          row,
-          valid: false,
-          rangeFp: RANGE_FP(ruleset, towerId),
-          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
-        };
+        ghost = invalidGhostAt(col, row, towerId);
         const bounty = pendingProjection()?.preview.bounty ?? state.bounty;
         setOutcome({
           kind: 'rejected',
@@ -1038,13 +1058,7 @@ export function createController(
       const cmd: SimInput = { kind: 'placeTower', anchor: { col, row }, towerId };
       const verdict = enqueueVerdict(buffer, cmd);
       if (verdict === 'full') {
-        ghost = {
-          col,
-          row,
-          valid: false,
-          rangeFp: RANGE_FP(ruleset, towerId),
-          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
-        };
+        ghost = invalidGhostAt(col, row, towerId);
         setOutcome({ kind: 'rejected', reason: 'other' });
         return;
       }
@@ -1071,67 +1085,34 @@ export function createController(
   };
 
   /** Board-origin ARMED touch/pen release (P2 review round, #115) — see the `Controller`
-   *  interface doc for the full contract. `intent` is the raw (unoffset) pointer-UP
-   *  cell; `anchor` is the offset ghost anchor the ARMED preview has been showing; `tap`
-   *  is ENDPOINTS-ONLY — release in the press's cell or within the tap pixel threshold
-   *  of the press point (input.ts computes it; a wander-and-return reads as a tap).
-   *  Four-way table:
-   *   1. armed && tap && a tower under INTENT → inspect: disarm, plant the keyboard
-   *      cursor on the INTENT cell (so a stale `cur` at the offset anchor can't make
-   *      `confirm()`'s post-inspect `aimAt` re-derive over empty ground and null the
-   *      selection it just set), `selectTower(existing, true)`. A deliberate TAP on a
-   *      tower is inspect even if the offset anchor happens to be a valid placement.
-   *   2. armed && NOT (1) && a tower under ANCHOR → the pre-#115 occupied rejection,
-   *      owned here (not delegated to `clickAt`, so a DRAG whose anchor lands on a
-   *      tower can't be mistaken for inspect intent — the finger never touched that
-   *      cell): persistent invalid ghost at the anchor, `{kind:'rejected',
-   *      reason:'occupied'}`, stays armed.
-   *   3. armed otherwise → `clickAt(anchor)` — valid anchors place; other invalid
-   *      anchors reject exactly as `clickAt` always has. (`clickAt`'s own tower-inspect
-   *      branch still exists for MOUSE clicks; touch can no longer reach it here since
-   *      (2) pre-handles every touch anchor-on-tower case.)
-   *   4. unarmed (defensive — input.ts only ever calls this while armed) → `clickAt(intent)`:
-   *      an unarmed tap-select targets where the finger actually is, not the offset
-   *      anchor (the offset is an armed-only ghost concept). */
+   *  interface doc (the `touchConfirmAt` member above) for the full four-way contract. */
   const touchConfirmAt = (
-    intentCol: number,
-    intentRow: number,
-    anchorCol: number,
-    anchorRow: number,
+    intent: { readonly col: number; readonly row: number },
+    anchor: { readonly col: number; readonly row: number },
     tap: boolean,
   ): void => {
     if (armed !== null) {
       if (tap) {
-        const existing = towerAt(intentCol, intentRow);
+        const existing = towerAt(intent.col, intent.row);
         if (existing !== null) {
-          const towerId = armed;
-          armed = null;
-          cur = { col: intentCol, row: intentRow };
-          selectTower(existing, true);
-          setOutcome({ kind: 'disarmed', towerId });
+          inspectTower(existing, true, { col: intent.col, row: intent.row });
           return;
         }
       }
       const towerId = armed;
-      const atAnchor = towerAt(anchorCol, anchorRow);
+      const atAnchor = towerAt(anchor.col, anchor.row);
       if (atAnchor !== null) {
         // Plant the cursor at the rejected anchor like every other pointer entry point
         // (clickAt writes `cur` on entry) — keyboard continuity after a touch rejection.
-        cur = { col: anchorCol, row: anchorRow };
-        ghost = {
-          col: anchorCol,
-          row: anchorRow,
-          valid: false,
-          rangeFp: RANGE_FP(ruleset, towerId),
-          blastRadiusFp: BLAST_RADIUS_FP(ruleset, towerId),
-        };
+        cur = { col: anchor.col, row: anchor.row };
+        ghost = invalidGhostAt(anchor.col, anchor.row, towerId);
         setOutcome({ kind: 'rejected', reason: 'occupied' });
         return;
       }
-      clickAt(anchorCol, anchorRow);
+      clickAt(anchor.col, anchor.row);
       return;
     }
-    clickAt(intentCol, intentRow);
+    clickAt(intent.col, intent.row);
   };
 
   /** Arm `towerId` for placement (PLAN.md P2 table, row 1; M2-S3): a no-op unless it
@@ -1334,14 +1315,12 @@ export function createController(
           const towerId = armed;
           const existing = towerAt(ghost.col, ghost.row);
           if (existing !== null) {
-            // Keyboard CONFIRM on a tower-blocked cell (#115): disarm-and-select like a
-            // click, via the SAME shared helper — but `reveal=false` (Codex R1-5): the
+            // Keyboard CONFIRM on a tower-blocked cell (#115/#120): disarm-and-select via
+            // the shared `inspectTower` helper — but `reveal=false` (Codex R1-5): the
             // Rail's auto-reveal stays pointer-intent-keyed exactly as #95 pinned it, so
             // `inspectSeq` is NOT bumped here. No command was enqueued, so this returns
             // `false` just like any other non-placing confirm.
-            armed = null;
-            selectTower(existing, false);
-            setOutcome({ kind: 'disarmed', towerId });
+            inspectTower(existing, false);
             return false;
           }
           if (buffer.length >= MAX_INPUTS_PER_TICK) {

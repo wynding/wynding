@@ -424,13 +424,7 @@ export function attachInput(
       pressCell !== null && pressCell.col === intent.col && pressCell.row === intent.row;
     const withinTapPx =
       Math.hypot(clientX - press.startX, clientY - press.startY) <= DRAG_THRESHOLD_PX;
-    controller.touchConfirmAt(
-      intent.col,
-      intent.row,
-      anchor.col,
-      anchor.row,
-      sameCell || withinTapPx,
-    );
+    controller.touchConfirmAt(intent, anchor, sameCell || withinTapPx);
   };
 
   const onBoardPointerUp = (e: PointerEvent): void => {
@@ -655,7 +649,7 @@ export function attachInput(
         disarmAndClearGhost();
         return;
       }
-      controller.touchConfirmAt(anchor.col, anchor.row, anchor.col, anchor.row, false);
+      controller.touchConfirmAt(anchor, anchor, false);
       if (controller.uiState().armed !== null) {
         // A genuine rejection (bounty/terrain/cap/occupied/etc) still disarms — this is
         // also how the occupied-anchor case above resolves into the cancel contract.

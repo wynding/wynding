@@ -1046,7 +1046,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(after.armed).toBeNull(); // disarmed, not "stays armed"
     expect(after.selection).toMatchObject({ col: 3, row: 3 }); // and selected
     expect(after.inspectSeq).toBe(before + 1); // pointer intent bumps the Rail reveal key (#95)
-    expect(after.lastOutcome?.kind).not.toBe('rejected'); // no rejection outcome fires
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
     expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed
   });
 
@@ -1097,7 +1097,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.clickAt(3, 3); // click the PENDING tower's anchor while armed
     expect(c.uiState().armed).toBeNull(); // disarmed
     expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 }); // selects the pending tower
-    expect(c.uiState().lastOutcome?.kind).not.toBe('rejected');
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
   });
 
   it('armed+Enter-confirm on a tower-blocked cell disarms and selects it too, but does NOT bump inspectSeq (#115 — the Rail reveal stays pointer-intent-keyed, #95)', () => {
@@ -1115,7 +1115,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(after.armed).toBeNull(); // disarmed
     expect(after.selection).toMatchObject({ col: 3, row: 3 }); // and selected
     expect(after.inspectSeq).toBe(before); // NOT bumped — keyboard confirm is reveal=false
-    expect(after.lastOutcome?.kind).not.toBe('rejected');
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
   });
 
   it('touchConfirmAt (#115, board-origin armed touch/pen release): classifies by the INTENT cell (the raw pointer-UP cell), not the offset placement anchor', () => {
@@ -1127,12 +1127,12 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     tick(c); // committed tower at (3,3)-(4,4)
     c.armTower('basic'); // arm a second placement — the touch drag targets a distant empty anchor
     const before = c.uiState().inspectSeq;
-    c.touchConfirmAt(3, 3, 10, 10, true); // TAP: intent = the tower's cell; anchor = a distant empty cell
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // TAP: intent = the tower's cell; anchor = a distant empty cell
     const after = c.uiState();
     expect(after.armed).toBeNull(); // disarmed
     expect(after.selection).toMatchObject({ col: 3, row: 3 }); // selects the INTENT tower, not the anchor
     expect(after.inspectSeq).toBe(before + 1); // touch inspect is pointer intent, reveal=true
-    expect(after.lastOutcome?.kind).not.toBe('rejected');
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
     tick(c);
     expect(c.frame().curVm.towers).toHaveLength(1); // nothing built at the anchor
   });
@@ -1141,7 +1141,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.armTower('basic');
-    c.touchConfirmAt(3, 3, 10, 10, true); // intent cell empty; anchor cell empty and buildable
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // intent cell empty; anchor cell empty and buildable
     expect(c.uiState().armed).toBeNull(); // disarmed by the successful placement
     expect(c.uiState().selection).toMatchObject({ col: 10, row: 10 }); // selects the just-placed tower AT THE ANCHOR
     tick(c);
@@ -1156,11 +1156,11 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.confirm();
     tick(c); // committed tower at (3,3)-(4,4)
     c.armTower('basic'); // arm a second placement
-    c.touchConfirmAt(3, 3, 10, 10, true); // TAP: finger on the tower; anchor (10,10) is empty/buildable
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // TAP: finger on the tower; anchor (10,10) is empty/buildable
     const after = c.uiState();
     expect(after.armed).toBeNull(); // disarmed — inspect, not placement
     expect(after.selection).toMatchObject({ col: 3, row: 3 }); // the TOUCHED tower, not the valid anchor
-    expect(after.lastOutcome?.kind).not.toBe('rejected');
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
     expect(c.frame().pendingAdds).toHaveLength(0); // nothing queued at the valid anchor
   });
 
@@ -1175,7 +1175,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     // DRAG: the finger releases directly over the (3,3) tower, but the offset anchor
     // (10,10) is a valid, empty cell — this must PLACE, not inspect (#115 P2 review:
     // vertically-adjacent packing above a tower was impossible by touch before this fix).
-    c.touchConfirmAt(3, 3, 10, 10, false);
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, false);
     expect(c.uiState().armed).toBeNull(); // disarmed by the successful placement
     expect(c.uiState().selection).toMatchObject({ col: 10, row: 10 }); // selects the just-placed tower AT THE ANCHOR
     tick(c);
@@ -1191,7 +1191,24 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.confirm();
     tick(c); // committed tower at (3,3)-(4,4)
     c.armTower('basic'); // arm a second placement
-    c.touchConfirmAt(10, 10, 3, 3, false); // DRAG: intent (10,10) empty; anchor (3,3) is the tower
+    c.touchConfirmAt({ col: 10, row: 10 }, { col: 3, row: 3 }, false); // DRAG: intent (10,10) empty; anchor (3,3) is the tower
+    expect(c.uiState().armed).toBe('basic'); // still armed
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
+  });
+
+  it("touchConfirmAt: TAP with an empty intent but a tower-covered ANCHOR still rejects 'occupied', stays armed — tap alone must not bypass the anchor-tower rejection", () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    c.armTower('basic'); // arm a second placement
+    // TAP (unlike the DRAG test above) but the INTENT cell (10,10) is empty — no tower to
+    // inspect there, so table row (1) never fires and this falls through to row (2): the
+    // anchor (3,3) is the tower, so it's the 'occupied' rejection, not inspect intent.
+    c.touchConfirmAt({ col: 10, row: 10 }, { col: 3, row: 3 }, true);
     expect(c.uiState().armed).toBe('basic'); // still armed
     expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
     expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
@@ -1205,7 +1222,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.confirm();
     tick(c); // committed tower at (3,3)-(4,4)
     c.armTower('basic'); // arm a second placement
-    c.touchConfirmAt(3, 3, 10, 10, true); // TAP on the tower; the offset anchor (10,10) is far away
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // TAP on the tower; the offset anchor (10,10) is far away
     expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 });
     expect(c.confirm()).toBe(false); // Enter right after a touch inspect: no command to enqueue
     expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 }); // selection must SURVIVE, not null out
@@ -1219,7 +1236,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.confirm();
     tick(c); // committed tower at (3,3)-(4,4)
     expect(c.uiState().armed).toBeNull(); // UNARMED
-    c.touchConfirmAt(3, 3, 10, 10, false); // intent = the tower's cell; anchor = elsewhere/empty
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, false); // intent = the tower's cell; anchor = elsewhere/empty
     expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 }); // selected via the INTENT cell
   });
 

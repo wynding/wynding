@@ -1608,6 +1608,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     );
     expect(render({ kind: 'placed', towerId: 'stun' })).toBe('Stun Tower placed.');
     expect(render({ kind: 'disarmed', towerId: 'basic' })).toBe('Placement cancelled.');
+    // #120: an armed inspect (a click/tap/confirm landing on an existing tower) is its
+    // own outcome, distinct from 'disarmed' — the reused kind used to read backwards
+    // ("Placement cancelled.") for a deliberate "show me that tower" act.
+    expect(render({ kind: 'inspected', towerId: 'slow' })).toBe(
+      'Slow Tower selected — Card set aside.',
+    );
     expect(render({ kind: 'placed', towerId: 'basic' })).toBe('Basic Tower placed.');
     expect(render({ kind: 'rejected', reason: 'bounty' })).toBe('Not enough Bounty.');
     expect(render({ kind: 'rejected', reason: 'occupied' })).toBe('That cell is already occupied.');
