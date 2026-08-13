@@ -76,5 +76,6 @@ The full palette test cases and the per-action input matrix live in the checklis
   colour, motion budgets, remappable input); the canvas can't be auto-audited, so
   it leans on the checklist + waiver discipline.
 - **Neutral:** we target GAG "Intermediate," not "Advanced," for now; the axe-CI
-  wiring and the checklist doc are created with the first UI (no UI exists yet to
-  gate).
+  wiring and the checklist doc were created with the first UI (M1-S6 — this line
+  predated it; the wiring's advisory-to-required history is in §3's 2026-08-12
+  reconciliation note).
