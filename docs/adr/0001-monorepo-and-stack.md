@@ -34,7 +34,9 @@ The decisive reason for a monorepo over separate repos: `apps/server` re-simulat
 replays using the **same `packages/sim`** the client runs. Sharing one versioned
 package — rather than syncing two repos — is what keeps client and server
 simulations identical. Boundaries are enforced by the package dependency graph:
-`{types, engine} <- sim <- {render, replay, content} <- perf <- apps`. _(Corrected
+`{types, engine} <- sim <- {render, replay, content} <- perf <- apps` — read as
+layering shorthand: each layer MAY depend on anything to its left, not that every
+drawn edge exists (`perf`, for instance, does not import `render`). _(Corrected
 2026-08-12: `types` and `engine` are both roots — `engine` declares no dependency on
 `@wynding/types` (its only dependency is `@noble/hashes`) — and `perf` was missing
 from the graph entirely.)_

@@ -15,7 +15,8 @@
 Wynding has a vision, a roadmap, and the technical decisions (ADRs) — but no defined
 **gameplay**. This PRD pins the **shapes and invariants** of the core loop for **Phase 1**
 (the single-player game that culminates in **Release 1**), with **M1** — the first public
-alpha: one board, one tower, one wave, one creep — as the first concrete slice.
+slice, the `p1-m1` checkpoint: one board, one tower, one wave, one creep — as the first
+concrete step.
 
 It decides **rules and shapes, not balance numbers.** Every quantity (hit points, damage,
 costs, ranges, spawn timing, starting lives and bounty, the difficulty curves) is **tuned
@@ -299,7 +300,7 @@ waiver**, mitigated by pause/build-while-paused/speed; **selectable difficulty i
 criterion.** The waiver is recorded in the accessibility checklist and each player-facing PR
 once the first UI lands.
 
-## The M1 slice (first public alpha)
+## The M1 slice (the first public checkpoint)
 
 M1 is the whole loop above, instantiated at its thinnest — playable end to end. The default
 **two-path board** named by the roadmap is the R1 target that M2–M5 build toward; M1 starts on a

@@ -52,8 +52,10 @@ docs/      prd/  adr/  CONTEXT.md
 - **Layering.** Render/input read sim state; they never mutate it. The dependency
   graph flows one way:
   `{types, engine} <- sim <- {render, replay, content} <- perf <- apps`
-  (`types` and `engine` are both roots — `engine` depends only on `@noble/hashes`;
-  `perf` is most-downstream of the packages and nothing shipped may import it).
+  — read as layering shorthand: each layer MAY depend on anything to its left, not
+  that every drawn edge exists (`perf`, for instance, does not import `render`).
+  `types` and `engine` are both roots — `engine` depends only on `@noble/hashes`;
+  `perf` is most-downstream of the packages and nothing shipped may import it.
 - **Fixed tick.** 20 Hz (`50 ms`) fixed timestep. No variable-dt simulation.
 - **Tests.** Every simulation change ships with Vitest coverage, and the
   world-hash / replay-determinism tests must stay green. The deterministic core

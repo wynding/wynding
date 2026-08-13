@@ -303,9 +303,10 @@ const BLAST_RADIUS_FP = (r: CompiledRuleset, towerId: string): number | null =>
  *    no recorded tick can ever exceed the replay contract even via many *distinct*
  *    commands. It is ONE cap, held or not — the P4-era pre-start reservation (a reduced
  *    cap holding a slot for `start()`'s own `callWaveEarly`) was retired at M2-S2 when
- *    the S2 decouple made `start()` enqueue nothing — and while it is effectively
- *    unreachable through normal play (board geometry + bounty bound distinct legal
- *    commands well under 64), hitting it is NOT silent: every reachable cap hit is
+ *    the S2 decouple made `start()` enqueue nothing — and while reaching it takes
+ *    deliberate play, it IS reachable (32 same-tick build/sell cycles fill all 64 slots
+ *    from starting bounty — the regression test does exactly that) and hitting it is
+ *    NOT silent: every reachable cap hit is
  *    surfaced to the player as a 'pendingCap' rejection. Mechanism per site: the sell
  *    and callWaveEarly sites route a 'full' verdict to 'pendingCap' directly; the two
  *    PLACEMENT sites announce 'pendingCap' from their own cap pre-checks BEFORE this

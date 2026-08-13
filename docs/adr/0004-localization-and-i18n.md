@@ -21,8 +21,11 @@ text at the UI layer — never a baked literal. (The exact content representatio
 finalized in the board/content-data-format ADR. An earlier parenthetical here about a
 `Board.name` sample string is moot as of 2026-08-12: v2 bundles carry no
 presentation-name field at all — board `name` was deleted from the schema entirely
-(see `normalizeForHash`'s header in `packages/sim/src/ruleset.ts`), and display names
-live in the `en` catalog as `tower.<id>.name` keys.)
+(see `normalizeForHash`'s header in `packages/sim/src/ruleset.ts`). Tower and creep
+display names live in the `en` catalog (`tower.<id>.name` / `creep.<id>.name`); a
+board display name currently has NO representation anywhere — the single shipped
+board's shell renders the game's own name — so a `board.<id>.name` contract is
+deferred until a second board first needs one.)
 
 ### 2. Catalog contract (so the above is enforceable)
 
