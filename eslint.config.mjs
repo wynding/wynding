@@ -77,7 +77,25 @@ export default tseslint.config(
             'Use the seeded Rng from @wynding/engine — ambient crypto breaks replay determinism.',
         },
       ],
-      // `no-restricted-globals` alone doesn't close this: `import { randomBytes } from
+      // WHAT THIS ZONE IS, AND IS NOT. It raises the cost of ACCIDENTALLY reaching a
+      // nondeterministic API from the deterministic core — a habit import, an autocomplete,
+      // a copied snippet. It is NOT a sandbox and cannot become one: the set of spellings
+      // is open (bare and `node:` imports, dynamic `import()`, the bare global, the same
+      // global through `globalThis`/`window`/`global`/`self`, one level deeper through
+      // `globalThis.Math`, Node's `process` surface, and `Reflect.get` or a computed
+      // member access would evade all of the above). Successive review rounds on #111 each
+      // named another; that enumeration does not terminate, and a rule claiming to be
+      // exhaustive would be lying.
+      //
+      // The real backstop is elsewhere and is structural: any nondeterminism that actually
+      // reaches the sim moves the determinism golden, which CI pairs with a SIM_VERSION
+      // bump (#107), and replay byte-identity fails on divergence. This zone catches the
+      // accident early and cheaply; those catch the consequence, always.
+      //
+      // So: ADD spellings here freely as they are noticed, and do not treat a newly-named
+      // one as a defect in this rule.
+      //
+      // `no-restricted-globals` alone doesn't close it: `import { randomBytes } from
       // 'node:crypto'` (or `node:timers`) typechecks the same way the ambient globals
       // above do (@types/node is auto-included — no `types` option is set for these
       // packages) and dodges the globals rule entirely by never referencing the global.
@@ -96,6 +114,15 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
+          // Node's `process` timing/scheduling surface: `process.nextTick(...)` schedules
+          // work outside the initiating step, `process.hrtime.bigint()` is ambient timing.
+          // Both typecheck here because @types/node is auto-included.
+          selector:
+            "MemberExpression[object.name='process'][property.name=/^(nextTick|hrtime|uptime)$/]",
+          message:
+            'No wall-clock scheduler or ambient timing in the deterministic core — use the tick counter.',
+        },
+        {
           selector:
             'ImportExpression[source.value=/^(node:)?(crypto|timers|timers\\u002Fpromises)$/]',
           message:
@@ -112,7 +139,7 @@ export default tseslint.config(
           // `globalThis.Math.random()` never produces a bare `Math` identifier either, so the
           // inner `globalThis.Math` member expression is what has to match.
           selector:
-            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|Date|Math)$/]',
+            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|Date|Math|process)$/]',
           message:
             'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
         },

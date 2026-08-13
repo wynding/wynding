@@ -45,19 +45,23 @@ if (!existsSync(DIST_INDEX)) {
 // through the current exports map" is a much weaker promise than "this package emits no
 // runtime code", and the latter is what the header claims and what the missing coverage
 // gate makes load-bearing.
-function jsFilesUnder(dir) {
+/** Every file under `dir` whose name matches `re`. One walker: a fix to the traversal
+ *  (symlinks, `withFileTypes`, an ignore) then lands once instead of half-landing. */
+function filesUnder(dir, re) {
   const out = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...jsFilesUnder(full));
-    // Every JS extension tsc can emit, not just `.js`: a `.mts` source emits `.mjs` and a
-    // `.cts` emits `.cjs`, and a scan that collected only `.js` reported success while a
-    // runtime-bearing `.mjs` sat beside it unchecked (verified by Codex on #113's PR) —
-    // which defeats the every-emitted-module invariant this script exists to state.
-    else if (/\.(js|mjs|cjs)$/.test(entry)) out.push(full);
+    if (statSync(full).isDirectory()) out.push(...filesUnder(full, re));
+    else if (re.test(entry)) out.push(full);
   }
   return out;
 }
+
+// Every JS extension tsc can emit, not just `.js`: a `.mts` source emits `.mjs` and a
+// `.cts` emits `.cjs`, and a scan collecting only `.js` reported success while a
+// runtime-bearing `.mjs` sat beside it unchecked (Codex, #113's PR).
+const EMITTED_JS = /\.(js|mjs|cjs)$/;
+const EMITTED_DTS = /\.d\.(ts|mts|cts)$/;
 
 // Strip line comments (tsc preserves the source header and appends the sourcemap
 // comment by default) and blank lines — what's left must be exactly the one
@@ -70,6 +74,19 @@ function runtimeBody(file) {
     .trim();
 }
 
+// WHAT THIS SCRIPT IS, AND IS NOT. It proves `@wynding/types` ships no runtime code by
+// the two routes a consumer can actually reach: emitted JavaScript, and value-space
+// declarations in the emitted types. It is a REGRESSION guard, not a proof — like the
+// determinism lint zone, the set of ways to occupy value space is open, and successive
+// review rounds on #113 each named another (a runtime `export const`, a `.mts` emitting
+// `.mjs`, an `export declare const`, an `export declare namespace`). Add arms here as
+// they are noticed; a newly-named one is an addition, not a defect in this check.
+//
+// The property that does NOT depend on enumeration: `dist/index.js` being exactly
+// `export {};` means nothing this package emits can execute. Everything else here guards
+// the types LYING about that — declarations a consumer can import against and that then
+// are not there at runtime.
+
 // The EMITTED JS is only half the invariant. `export declare const x: string` emits
 // nothing at all — dist/index.js stays `export {};` — while the .d.ts advertises a value
 // in the value space, so a consumer can import and use it and the package stops being
@@ -78,19 +95,9 @@ function runtimeBody(file) {
 // Type-space declarations — interface, type, and `declare` on a namespace/module — are
 // fine and expected; these five keywords are the value-space ones.
 const VALUE_SPACE =
-  /^\s*(?:export\s+)?declare\s+(const|let|var|function|class)\b|^\s*(?:export\s+)?enum\b/m;
+  /^\s*(?:export\s+)?declare\s+(const|let|var|function|class|namespace|module)\b|^\s*(?:export\s+)?(enum|namespace)\b/m;
 
-function dtsFilesUnder(dir) {
-  const out = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...dtsFilesUnder(full));
-    else if (/\.d\.(ts|mts|cts)$/.test(entry)) out.push(full);
-  }
-  return out;
-}
-
-const declaring = dtsFilesUnder(join(PKG_DIR, 'dist'))
+const declaring = filesUnder(join(PKG_DIR, 'dist'), EMITTED_DTS)
   .map((file) => ({ file, hit: VALUE_SPACE.exec(readFileSync(file, 'utf8')) }))
   .filter(({ hit }) => hit !== null);
 
@@ -103,7 +110,7 @@ if (declaring.length > 0) {
   );
 }
 
-const emitted = jsFilesUnder(join(PKG_DIR, 'dist'));
+const emitted = filesUnder(join(PKG_DIR, 'dist'), EMITTED_JS);
 const offenders = emitted
   .map((file) => ({ file, body: runtimeBody(file) }))
   .filter(({ body }) => body !== 'export {};');
