@@ -95,6 +95,19 @@ export default tseslint.config(
           message:
             'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
         },
+        {
+          // Global-OBJECT access is a third spelling `no-restricted-globals` cannot see:
+          // `globalThis.crypto.getRandomValues(...)` and `globalThis.setTimeout(...)` contain
+          // no bare identifier for that rule to match, so both typecheck AND lint clean
+          // without this. `window`/`global`/`self` are covered for the same reason — none of
+          // them exists in these packages today, which is exactly the point: the guard should
+          // still hold the day someone adds a DOM-ish or Node-ish shim, not depend on their
+          // absence.
+          selector:
+            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|queueMicrotask|performance|Date)$/]',
+          message:
+            'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
+        },
       ],
       'no-restricted-imports': [
         'error',

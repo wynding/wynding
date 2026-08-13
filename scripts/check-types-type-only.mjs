@@ -50,7 +50,11 @@ function jsFilesUnder(dir) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) out.push(...jsFilesUnder(full));
-    else if (entry.endsWith('.js')) out.push(full);
+    // Every JS extension tsc can emit, not just `.js`: a `.mts` source emits `.mjs` and a
+    // `.cts` emits `.cjs`, and a scan that collected only `.js` reported success while a
+    // runtime-bearing `.mjs` sat beside it unchecked (verified by Codex on #113's PR) —
+    // which defeats the every-emitted-module invariant this script exists to state.
+    else if (/\.(js|mjs|cjs)$/.test(entry)) out.push(full);
   }
   return out;
 }
