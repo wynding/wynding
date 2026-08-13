@@ -1526,6 +1526,8 @@ export function createOverlay(
         return t('live.armed', { name: towerName(outcome.towerId) });
       case 'disarmed':
         return t('live.disarmed');
+      case 'inspected':
+        return t('live.inspected', { name: towerName(outcome.towerId) });
       case 'placed':
         return t('live.placed', { name: towerName(outcome.towerId) });
       case 'rejected':

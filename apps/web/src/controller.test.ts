@@ -1032,7 +1032,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.frame().curVm.towers).toHaveLength(1); // it actually queued a real build
   });
 
-  it('armed: click an OCCUPIED cell (an existing tower) rejects, stays armed, ghost persists invalid', () => {
+  it('armed: click a cell whose blocker is an EXISTING TOWER reads as inspect intent — disarms, selects it, no rejection outcome (#115)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.armTower('basic');
@@ -1040,22 +1040,43 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     c.confirm();
     tick(c); // a real committed tower at (3,3)
     c.armTower('basic');
+    const before = c.uiState().inspectSeq;
     c.clickAt(3, 3); // click directly on the tower's anchor while armed
-    expect(c.uiState().armed).toBe('basic'); // stays armed
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
-    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false }); // persistent invalid ghost
+    const after = c.uiState();
+    expect(after.armed).toBeNull(); // disarmed, not "stays armed"
+    expect(after.selection).toMatchObject({ col: 3, row: 3 }); // and selected
+    expect(after.inspectSeq).toBe(before + 1); // pointer intent bumps the Rail reveal key (#95)
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
     expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed
   });
 
-  it('armed: hovering the occupied footprint keeps the invalid ghost — a click-then-move never erases the rejection cue', () => {
+  it("armed with a DIFFERENT Card: inspecting a tower announces the SELECTED tower's id, never the armed Card's (#120 Codex R2)", () => {
+    const c = createController(1);
+    c.start();
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // a real committed basic at (3,3)
+    c.armTower('slow'); // arm a DIFFERENT catalog id, then inspect the basic
+    c.clickAt(3, 3);
+    const after = c.uiState();
+    expect(after.armed).toBeNull();
+    expect(after.selection).toMatchObject({ col: 3, row: 3 });
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
+  });
+
+  it('armed: hovering a tower footprint keeps the invalid ghost — the preview never nulls over an occupied cell (setup rewritten off the retired click-rejection path, #115)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // committed tower at (3,3), footprint cols 3-4 / rows 3-4
+    // Re-arm — a CLICK on this footprint now inspects rather than rejecting (#115), so
+    // this pins the HOVER (previewAt) path's own persistent-invalid-ghost behaviour,
+    // which is unchanged and no longer reachable by setting up via a rejecting click.
     c.armTower('basic');
-    c.clickAt(3, 3); // occupied rejection creates the persistent invalid ghost
+    c.previewAt(3, 3);
     expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
     c.previewAt(3, 4); // move within the SAME footprint — previously this nulled the ghost
     expect(c.frame().ghost).toMatchObject({ col: 3, row: 4, valid: false });
@@ -1063,22 +1084,175 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     expect(c.frame().ghost).toMatchObject({ col: 4, row: 4, valid: false });
   });
 
-  it('armed: clicking the SAME occupied cell twice in a row records the identical outcome twice, bumping outcomeSeq both times', () => {
+  it('armed: clicking the SAME overlap-blocked cell twice in a row records the identical outcome twice, bumping outcomeSeq both times — retargeted off the retired occupied-click case (#115)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3), footprint cols 3-4/rows 3-4
+    c.armTower('basic');
+    c.clickAt(2, 2); // first rejection — footprint (2-3,2-3) overlaps (3,3)'s
+    const first = c.uiState();
+    expect(first.lastOutcome).toEqual({ kind: 'rejected', reason: 'other' });
+    c.clickAt(2, 2); // second rejection — SAME outcome content, but a distinct occurrence
+    const second = c.uiState();
+    expect(second.lastOutcome).toEqual({ kind: 'rejected', reason: 'other' }); // unchanged content
+    expect(second.outcomeSeq).toBeGreaterThan(first.outcomeSeq); // but a NEW identity — overlay.ts
+    // The live region keys re-announcement on this, not on message-text equality.
+  });
+
+  it('armed: clicking a PENDING (not yet committed) tower also reads as inspect intent — towerAt is pending-aware (#115)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.clickAt(3, 3); // queued, not yet committed — pending tower at (3,3)
+    expect(c.frame().pendingAdds).toHaveLength(1); // still pending, no tick yet
+    c.armTower('basic'); // arm a second placement (armTower clears the selection just made)
+    c.clickAt(3, 3); // click the PENDING tower's anchor while armed
+    expect(c.uiState().armed).toBeNull(); // disarmed
+    expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 }); // selects the pending tower
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
+  });
+
+  it('armed+Enter-confirm on a tower-blocked cell disarms and selects it too, but does NOT bump inspectSeq (#115 — the Rail reveal stays pointer-intent-keyed, #95)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c); // a real committed tower at (3,3)
+    c.armTower('basic'); // re-arm for a second attempt
+    c.aimAt(3, 3); // arrow-key cursor step onto the tower — stays armed, red ghost (unchanged)
+    const before = c.uiState().inspectSeq;
+    expect(c.confirm()).toBe(false); // no command enqueued — inspect intent, not a placement
+    const after = c.uiState();
+    expect(after.armed).toBeNull(); // disarmed
+    expect(after.selection).toMatchObject({ col: 3, row: 3 }); // and selected
+    expect(after.inspectSeq).toBe(before); // NOT bumped — keyboard confirm is reveal=false
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
+  });
+
+  it('touchConfirmAt (#115, board-origin armed touch/pen release): classifies by the INTENT cell (the raw pointer-UP cell), not the offset placement anchor', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
     c.armTower('basic');
-    c.clickAt(3, 3); // first rejection
-    const first = c.uiState();
-    expect(first.lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
-    c.clickAt(3, 3); // second rejection — SAME outcome content, but a distinct occurrence
-    const second = c.uiState();
-    expect(second.lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' }); // unchanged content
-    expect(second.outcomeSeq).toBeGreaterThan(first.outcomeSeq); // but a NEW identity — overlay.ts
-    // The live region keys re-announcement on this, not on message-text equality.
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    c.armTower('basic'); // arm a second placement — the touch drag targets a distant empty anchor
+    const before = c.uiState().inspectSeq;
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // TAP: intent = the tower's cell; anchor = a distant empty cell
+    const after = c.uiState();
+    expect(after.armed).toBeNull(); // disarmed
+    expect(after.selection).toMatchObject({ col: 3, row: 3 }); // selects the INTENT tower, not the anchor
+    expect(after.inspectSeq).toBe(before + 1); // touch inspect is pointer intent, reveal=true
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1); // nothing built at the anchor
+  });
+
+  it('touchConfirmAt falls through to placement at the ANCHOR when the intent cell is not a tower', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // intent cell empty; anchor cell empty and buildable
+    expect(c.uiState().armed).toBeNull(); // disarmed by the successful placement
+    expect(c.uiState().selection).toMatchObject({ col: 10, row: 10 }); // selects the just-placed tower AT THE ANCHOR
+    tick(c);
+    expect(c.frame().curVm.towers[0]).toMatchObject({ col: 10, row: 10 });
+  });
+
+  it('touchConfirmAt: tap on a tower inspects even when the offset anchor is a VALID placement — does not place at the anchor', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    c.armTower('basic'); // arm a second placement
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // TAP: finger on the tower; anchor (10,10) is empty/buildable
+    const after = c.uiState();
+    expect(after.armed).toBeNull(); // disarmed — inspect, not placement
+    expect(after.selection).toMatchObject({ col: 3, row: 3 }); // the TOUCHED tower, not the valid anchor
+    expect(after.lastOutcome).toEqual({ kind: 'inspected', towerId: 'basic' });
+    expect(c.frame().pendingAdds).toHaveLength(0); // nothing queued at the valid anchor
+  });
+
+  it('touchConfirmAt: a DRAG (tap=false) release with the finger over a tower but a VALID anchor PLACES at the anchor', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    c.armTower('basic'); // arm a second placement
+    // DRAG: the finger releases directly over the (3,3) tower, but the offset anchor
+    // (10,10) is a valid, empty cell — this must PLACE, not inspect (#115 P2 review:
+    // vertically-adjacent packing above a tower was impossible by touch before this fix).
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, false);
+    expect(c.uiState().armed).toBeNull(); // disarmed by the successful placement
+    expect(c.uiState().selection).toMatchObject({ col: 10, row: 10 }); // selects the just-placed tower AT THE ANCHOR
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(2); // the first tower plus the new one at the anchor
+    expect(c.frame().curVm.towers).toContainEqual(expect.objectContaining({ col: 10, row: 10 }));
+  });
+
+  it("touchConfirmAt: a DRAG release with a tower-covered ANCHOR and an empty intent rejects 'occupied', stays armed, invalid ghost at the anchor", () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    c.armTower('basic'); // arm a second placement
+    c.touchConfirmAt({ col: 10, row: 10 }, { col: 3, row: 3 }, false); // DRAG: intent (10,10) empty; anchor (3,3) is the tower
+    expect(c.uiState().armed).toBe('basic'); // still armed
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
+  });
+
+  it("touchConfirmAt: TAP with an empty intent but a tower-covered ANCHOR still rejects 'occupied', stays armed — tap alone must not bypass the anchor-tower rejection", () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    c.armTower('basic'); // arm a second placement
+    // TAP (unlike the DRAG test above) but the INTENT cell (10,10) is empty — no tower to
+    // inspect there, so table row (1) never fires and this falls through to row (2): the
+    // anchor (3,3) is the tower, so it's the 'occupied' rejection, not inspect intent.
+    c.touchConfirmAt({ col: 10, row: 10 }, { col: 3, row: 3 }, true);
+    expect(c.uiState().armed).toBe('basic'); // still armed
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'rejected', reason: 'occupied' });
+    expect(c.frame().ghost).toMatchObject({ col: 3, row: 3, valid: false });
+  });
+
+  it('touchConfirmAt: touch inspect then confirm() — the selection SURVIVES (cur is planted on the intent cell, not left at a stale anchor)', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    c.armTower('basic'); // arm a second placement
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, true); // TAP on the tower; the offset anchor (10,10) is far away
+    expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 });
+    expect(c.confirm()).toBe(false); // Enter right after a touch inspect: no command to enqueue
+    expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 }); // selection must SURVIVE, not null out
+  });
+
+  it('touchConfirmAt: UNARMED targets the INTENT cell — selects a tower under the finger even when the anchor cell is elsewhere/empty', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    c.armTower('basic');
+    c.aimAt(3, 3);
+    c.confirm();
+    tick(c); // committed tower at (3,3)-(4,4)
+    expect(c.uiState().armed).toBeNull(); // UNARMED
+    c.touchConfirmAt({ col: 3, row: 3 }, { col: 10, row: 10 }, false); // intent = the tower's cell; anchor = elsewhere/empty
+    expect(c.uiState().selection).toMatchObject({ col: 3, row: 3 }); // selected via the INTENT cell
   });
 
   it("armed: click a cell whose footprint overlaps an existing tower (but isn't itself occupied) rejects as 'other', not 'occupied'", () => {

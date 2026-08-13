@@ -108,6 +108,7 @@
   "live.started": "Run started. The primary button now calls the current wave early.",
   "live.armed": "{name} armed. Place it on the board.",
   "live.disarmed": "Placement cancelled.",
+  "live.inspected": "{name} selected — Card set aside.",
   "live.placed": "{name} placed.",
   "live.rejected.bounty": "Not enough Bounty.",
   "live.rejected.occupied": "That cell is already occupied.",

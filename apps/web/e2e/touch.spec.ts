@@ -364,7 +364,15 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     await expect(page.locator('.wy-panel')).toBeHidden();
   });
 
-  test('an invalid tap-release (an occupied cell) leaves the ghost persistent and stays armed — no flash timer, no two-tap', async ({
+  // #115 ruling (deliberate behavior change): this spec USED to pin the trap — a tap on an
+  // occupied cell rejected with "already occupied", a dead end for a player who was
+  // clearly looking at their own tower and trying to inspect/sell it. It now pins the NEW
+  // contract instead: a tap that lands on a tower's own RENDERED FOOTPRINT — the finger
+  // physically on the tower's cells, NOT the offset-anchor-adjusted point a press-release
+  // there would have BUILT at (that's a different cell, `TOUCH_GHOST_OFFSET_CELLS` rows
+  // below the tower) — disarms the Card and selects the tower. The Panel opening IS the
+  // feedback; no rejection outcome fires, no red ghost, no "already occupied" flash.
+  test("an armed tap on an EXISTING tower's rendered footprint disarms and selects it — inspect intent, never a rejection", async ({
     page,
   }) => {
     const board = page.locator('.wy-board');
@@ -382,10 +390,17 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
       dpr: 1,
     });
     const cellPx = projection.cellPx;
-    const fingerCell = { col: 10, row: 15 }; // anchor lands at (10,13)
+    const fingerCell = { col: 10, row: 15 }; // press-release cell used to BUILD — anchor lands at (10,13)
+    const anchorCell = { col: 10, row: 13 }; // TOUCH_GHOST_OFFSET_CELLS above fingerCell — the tower's actual cell
     const fingerPx = projection.cellToPixel(fingerCell.col, fingerCell.row);
+    const anchorPx = projection.cellToPixel(anchorCell.col, anchorCell.row);
     const fx = box.x + fingerPx.x + cellPx / 2;
     const fy = box.y + fingerPx.y + cellPx / 2;
+    // The tower's own rendered footprint — deliberately NOT `fx,fy` (which built it via
+    // the offset transform): a tap physically here must classify as inspect, not as a
+    // press-release that would offset-anchor two rows further down.
+    const towerX = box.x + anchorPx.x + cellPx / 2;
+    const towerY = box.y + anchorPx.y + cellPx / 2;
 
     const card = page.getByRole('button', { name: /Basic Tower/ });
     const cardBox = (await card.boundingBox()) as {
@@ -396,23 +411,24 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     };
     const cardCenter = { x: cardBox.x + cardBox.width / 2, y: cardBox.y + cardBox.height / 2 };
 
-    // Build the first tower at this anchor.
+    // Build the first tower at the anchor cell.
     await tap(session, cardCenter.x, cardCenter.y);
     await touchStart(session, [{ x: fx, y: fy, id: 0 }]);
     await touchEnd(session);
     await expect(card).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
 
-    // Arm again and press-release at the SAME anchor: occupied, so nothing places — the
-    // invalid ghost persists and the Card stays armed.
+    // Arm again and tap DIRECTLY on the tower's rendered footprint (the finger's own
+    // cell, unoffset — the intent cell the controller now classifies against, R2-4).
     await tap(session, cardCenter.x, cardCenter.y);
     await expect(card).toHaveAttribute('aria-pressed', 'true');
-    await touchStart(session, [{ x: fx, y: fy, id: 0 }]);
+    await touchStart(session, [{ x: towerX, y: towerY, id: 0 }]);
     await touchEnd(session);
 
-    await expect(card).toHaveAttribute('aria-pressed', 'true'); // stays armed
-    const live = page.locator('.wy-sr-only[role="status"][aria-live="polite"]');
-    await expect(live).toContainText('already occupied');
+    await expect(card).toHaveAttribute('aria-pressed', 'false'); // #115: disarmed, never rejected
+    const panel = page.locator('.wy-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible();
   });
 
   test('axe: no violations with the Panel open (armed) under touch', async ({

@@ -294,20 +294,43 @@ describe.each([['touch'], ['pen']])(
       expect(c.uiState().selection).toMatchObject({ col: 4, row: 8 }); // and selected
     });
 
-    it('release on an invalid ghost places nothing, keeps armed, and the ghost persists', () => {
+    it('release on an invalid (footprint-overlap) ghost places nothing, keeps armed, and the ghost persists — rejection coverage retargeted off the anchor-on-a-tower case (#115, that case now inspects, see below)', () => {
+      const c = createController(1);
+      c.start(); // PLAN.md P4: advance() no-ops while held
+      attachInput(document, board, [], c, createKeymap(), { getRect: () => RECT });
+      c.armTower('basic');
+      tap(35, 105, pointerType); // commit at anchor (3,8), footprint cols 3-4/rows 8-9
+      c.advance(50);
+      c.armTower('basic'); // re-arm for a second attempt
+      // finger at (2,9): anchor row = 9-2 = 7, col = 2 → anchor (2,7) — itself EMPTY, but
+      // its footprint (2-3,7-8) overlaps the committed tower's (3,8) cell.
+      board.dispatchEvent(ptr('pointerdown', 25, 95, pointerType));
+      board.dispatchEvent(ptr('pointerup', 25, 95, pointerType));
+      expect(c.uiState().armed).not.toBeNull(); // stays armed
+      expect(c.frame().ghost).toMatchObject({ col: 2, row: 7, valid: false }); // persistent invalid ghost
+      c.advance(50);
+      expect(c.frame().curVm.towers).toHaveLength(1); // no second tower placed
+    });
+
+    it('an armed release whose finger comes down directly on an existing tower reads as inspect intent (#115) — even though the offset anchor sits elsewhere, forwarding the raw pointer-UP cell as the intent lets the controller classify it', () => {
       const c = createController(1);
       c.start(); // PLAN.md P4: advance() no-ops while held
       attachInput(document, board, [], c, createKeymap(), { getRect: () => RECT });
       c.armTower('basic');
       tap(35, 105, pointerType); // commit at anchor (3,8)
       c.advance(50);
-      c.armTower('basic'); // re-arm to try the SAME (now occupied) anchor
-      board.dispatchEvent(ptr('pointerdown', 35, 105, pointerType));
-      board.dispatchEvent(ptr('pointerup', 35, 105, pointerType));
-      expect(c.uiState().armed).not.toBeNull(); // stays armed
-      expect(c.frame().ghost).toMatchObject({ col: 3, row: 8, valid: false }); // persistent invalid ghost
+      c.armTower('basic'); // arm a second placement
+      // Finger comes down ON the tower's own footprint (cols 3-4, rows 8-9): the raw
+      // pointer-UP cell (3,8) IS the tower, even though the offset ghost anchor this
+      // release would place at sits two rows further up (row 6) — a cell input.ts must
+      // NOT itself detect the tower over (towerAt is private/pending-aware), so it
+      // forwards both cells and the controller classifies by the INTENT cell.
+      board.dispatchEvent(ptr('pointerdown', 35, 85, pointerType)); // finger at (3,8)
+      board.dispatchEvent(ptr('pointerup', 35, 85, pointerType));
+      expect(c.uiState().armed).toBeNull(); // disarmed
+      expect(c.uiState().selection).toMatchObject({ col: 3, row: 8 }); // selects the tower under the finger
       c.advance(50);
-      expect(c.frame().curVm.towers).toHaveLength(1); // no second tower placed
+      expect(c.frame().curVm.towers).toHaveLength(1); // nothing new placed at the anchor
     });
 
     it('an unarmed single tap selects a tower (or deselects) — no two-tap required', () => {
@@ -560,25 +583,31 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
     expect(c.frame().ghost).toBeNull();
   });
 
-  it('an invalid-cell drag release also disarms (drag-flow, unlike a board-origin invalid release)', () => {
+  it('an invalid-cell drag release also disarms (drag-flow, unlike a board-origin invalid release) — and, unlike board-native touch (#115), never SELECTS the occupying tower either', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
       getRect: () => RECT,
     });
     c.armTower('basic');
-    board.dispatchEvent(ptr('pointerdown', 35, 65, 'touch')); // build at (3,6) directly
+    board.dispatchEvent(ptr('pointerdown', 35, 65, 'touch')); // finger (3,6) → OFFSET ANCHOR (3,4)
     board.dispatchEvent(ptr('pointerup', 35, 65, 'touch'));
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(1);
+    expect(c.frame().curVm.towers[0]).toMatchObject({ col: 3, row: 4 }); // the real anchor
 
-    // Now drag the Card onto that SAME (now-occupied) cell.
+    // Now drag the Card so its OFFSET ANCHOR lands on that SAME (now-occupied) anchor —
+    // #115's inspect-intent is board-origin only (PLAN.md P3); Card-origin drags keep
+    // their OLDER cancel-and-disarm-on-occupied-drop contract, untouched, even though
+    // `clickAt` itself now treats a tower-blocked cell as inspect intent for every other
+    // caller.
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
-    card.dispatchEvent(ptr('pointermove', 35, 65, 'touch')); // maps to the occupied anchor
+    card.dispatchEvent(ptr('pointermove', 35, 65, 'touch')); // maps to the SAME anchor (3,4)
     card.dispatchEvent(ptr('pointerup', 35, 65, 'touch'));
-    expect(c.uiState().armed).toBeNull(); // rejected AND disarmed — drag-flow, not tap-flow
+    expect(c.uiState().armed).toBeNull(); // disarmed — drag-flow, not tap-flow
+    expect(c.uiState().selection).toBeNull(); // and NOT selected — Card-drag never inspects
     c.advance(50);
-    expect(c.frame().curVm.towers).toHaveLength(1); // no second tower
+    expect(c.frame().curVm.towers).toHaveLength(1); // no second tower, no placement
   });
 
   it('a release over Shell chrome cancels a Card drag AND disarms', () => {
