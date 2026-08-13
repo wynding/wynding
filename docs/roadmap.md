@@ -16,8 +16,16 @@ in the glossary, [CONTEXT.md](CONTEXT.md)):
   PR ▸ commits).
 - **Release axis.** A **release** is a public build, tagged by maturity — **alpha**
   (rough, expect breakage) → **beta** (stabilizing) → **stable**. The major number
-  tracks the phase (Phase 1 → the **R1.x** line; R1.0 first stable, R1.1 a bugfix);
-  early milestones ship as **alpha** builds ahead of the stable release.
+  tracks the phase (Phase 1 → the **R1.x** line; R1.0 first stable, R1.1 a bugfix).
+- **Checkpoints are not releases** _(amended 2026-08-12 — #60; an earlier clause here
+  had milestones shipping as alphas, which made "alpha" mean only "we tagged it")_. A
+  completed milestone's build is a development **checkpoint**, tagged
+  **`p<phase>-m<n>`** (`p1-m1`, `p1-m2`, …) — deliberately **not** semver, so
+  checkpoints never sort into the `v*` sequence or compete with releases for
+  "latest" (`git tag -l 'v*'` lists exactly the real releases). The first real
+  **alpha** (`v1.0.0-alpha.1`) is cut when Phase 1 reaches feature-complete; the
+  maturity ladder is checkpoints → alpha → beta → stable, and Phase 2's checkpoints
+  (`p2-m1`, …) never collide with Phase 1's.
 
 **Every milestone is public and held to the day-one bars** the ADRs tie to the
 first UI — the full accessibility gate (ADR 0003) and externalized strings for
@@ -26,7 +34,7 @@ localization (ADR 0004). We do not defer those to a later phase.
 ## Phase 1 — a solid, complete, fun single-player game → R1
 
 One default board (a two-path board) taken from nothing to a game worth playing.
-Milestones, in rough build order (each a public **alpha**):
+Milestones, in rough build order (each a tagged **checkpoint**, `p1-m<n>`):
 
 - **M1 — first vertical slice:** one board, one tower, one wave, one creep type —
   playable end to end. The first thing we show people.

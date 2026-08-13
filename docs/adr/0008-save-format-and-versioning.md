@@ -6,6 +6,16 @@
 ## Context
 
 No save format exists; `StorageDriver` is only _named_ in `apps/mobile/README.md`.
+_(Corrected 2026-08-12: that premise under-counted its own document — the
+`StorageDriver` contract and write-serialization mechanics are specified in
+`docs/design-notes/save-format.md`, as the update note below already says. And the
+repo's first real cross-session persistence has since shipped: the install-dismissal
+adapter in `apps/web/src/install.ts` (localStorage-backed, classified in its own
+comment as a one-bit UI acknowledgement deliberately OUTSIDE this ADR's future async
+`StorageDriver` seam), with `apps/web/src/settings.ts` recording the mirror-image
+classification — player settings stay session-scoped precisely so they don't bypass
+this ADR's seam. The driver itself still does not exist; the decisions below are
+unchanged.)_
 `docs/CONTEXT.md` draws the canonical distinction: a **save is a state snapshot**, a
 **replay is an input log**. `SimState` is already serializable (it includes its
 `rngState`), so the primitives exist. We decide the persistence format and seam before

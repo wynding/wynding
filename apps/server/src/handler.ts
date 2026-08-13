@@ -1,6 +1,6 @@
 // apps/server — AWS Lambda handler that turns an untrusted client replay into a
 // trusted score by RE-SIMULATING it with the same deterministic sim the client
-// ran. Because the sim is a pure function of (seed, inputs), the server arrives
+// ran. Because the sim is a pure function of (seed, ruleset, boardId, inputs), the server arrives
 // at the exact final state the client saw — so scores can't be forged by
 // tampering with a claimed result; only a valid input log reproduces the score.
 //

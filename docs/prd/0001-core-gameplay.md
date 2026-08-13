@@ -1,6 +1,9 @@
 # PRD 0001 — Core Gameplay
 
-- **Status:** Draft
+- **Status:** Accepted _(promoted from Draft 2026-08-12 — #103: this line had read
+  Draft since creation while the PRD governed two shipped milestones; no PRD status
+  vocabulary exists, so the ADRs' `Accepted` is borrowed as the nearest in-repo
+  precedent, proposed for owner ratification at the PR)_
 - **Date:** 2026-07-19
 - **Relates to:** [vision](../vision.md) · [roadmap](../roadmap.md) · [glossary](../CONTEXT.md) ·
   ADRs [0001](../adr/0001-monorepo-and-stack.md), [0003](../adr/0003-accessibility-standard.md),

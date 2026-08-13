@@ -11,6 +11,12 @@ decisions; this note is the_ how _and will be superseded by the code and its tes
 - Entities are referenced by stable `EntityId`; board cells by integer `Cell { col, row }`.
 - Placeholder vocabulary (finalizes with the Core Gameplay PRD): `placeTower`,
   `sellTower`, `upgradeTower`, `setTargetPriority`, `startWave`.
+  _(SUPERSEDED 2026-08-12 — the shipped union is `placeTower | sellTower |
+callWaveEarly | noop` (`SimInput` in `packages/sim`, mirrored by the replay
+  validator). `upgradeTower` and `setTargetPriority` were never built — upgrades and
+  selectable targeting priority are deferred beyond M2 — and `startWave` became
+  `callWaveEarly`: starting a run is deliberately NOT a recorded command (m2.md's S2
+  decouple — the replay logs claims, not the run-begins flag).)_
 
 ## Application order
 
@@ -33,8 +39,13 @@ cell no-ops).
 A submitted replay is hostile input. Structural validation bounds individual _values_ but
 must also bound _dimensions_, **before** re-simulation:
 
-- reject if `tickInputs.length` exceeds the board's **maximum match length** (derived
-  from the ruleset);
+- reject if `tickInputs.length` exceeds the board's **maximum match length**;
+  _(SUPERSEDED 2026-08-12 — shipped as the deliberate CONSTANT `MAX_TICKS =
+MAX_MATCH_TICKS` (36,000 ticks — the value lives in `packages/sim/src/ruleset.ts`,
+  imported by the validator in `packages/replay`), not a ruleset-derived formula:
+  the validator's own comment records the reasoning — "a ruleset-derived ceiling
+  formula would only ever saturate to this cap (adversarial build/sell juggling
+  dominates), so the constant is the honest bound".)_
 - reject if any tick's command count exceeds a fixed **per-tick cap**.
 
 And enforce that same maximum **during** re-simulation as a **hard tick ceiling**: finite

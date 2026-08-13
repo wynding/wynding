@@ -994,7 +994,8 @@ and the oracle passes all 34 rows. Nothing in this amendment remains open.
 
 **Ruling 5 — `R0`'s out-of-sample re-record clears what `gate.ts`'s own criterion allows, and
 no more.** The re-record packet declared its statistic and cohort before taking any sample
-(one head, one image, ≥ 10 samples, both dispersion tests from `gate.ts:917-923`), then found,
+(one head, one image, ≥ 10 samples, both dispersion tests from `gate.ts`'s "What ships"
+re-record criterion — the sd-margin and chi-square-upper-bound gates), then found,
 before recording, that the only machine available to it was a local development machine —
 not the documented `ubuntu-24.04` GitHub Actions runner image the file's own vocabulary keys
 "image" to throughout. `gate.ts:626-633` independently and explicitly disclaims any
@@ -1014,8 +1015,9 @@ and `R0`, `TOLERANCE` (1.10), and the ceiling (1.1000) are byte-identical to bef
 story.
 
 **Ruling 6 — the real low-end Android pass still does not run, and its absence is
-re-accepted, not re-litigated.** The owner re-affirms the branch this ADR and `m2.md:707`
-both already provide for: the pinned Chrome emulation profiles remain the reference device
+re-accepted, not re-litigated.** The owner re-affirms the branch this ADR and m2.md's
+S12-scope bullet on #36 (the real-device pass that "cannot close at S12") both already
+provide for: the pinned Chrome emulation profiles remain the reference device
 through M2's close-out, the S10 Finding's Phaser-vs-accessibility tension above rests on
 emulation evidence alone, and **#36 cannot close at S12** — its real-device evidence spans
 every story from S3 on, all still deferred. The architecture decision this ADR's S10 Finding

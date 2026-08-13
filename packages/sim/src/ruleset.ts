@@ -203,7 +203,7 @@ export interface CompiledCreep {
   readonly armor: number;
   readonly immunities: readonly ('slow' | 'stun')[];
   readonly leakCost: number;
-  /** Omitted = no role, mirroring `normalizeForHash`'s posture (`ruleset.ts:352`) —
+  /** Omitted = no role, mirroring `normalizeForHash`'s role projection —
    *  projected only when present, never `role: undefined`. */
   readonly role?: 'boss';
 }
@@ -791,7 +791,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       armor: c.armor,
       immunities: c.immunities,
       leakCost: c.leakCost,
-      // Omitted key, never `role: undefined` (mirrors `normalizeForHash`, `:352`).
+      // Omitted key, never `role: undefined` (mirrors `normalizeForHash`'s role projection).
       ...(c.role !== undefined ? { role: c.role } : {}),
     };
   }
