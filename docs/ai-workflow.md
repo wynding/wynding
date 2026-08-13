@@ -200,10 +200,18 @@ report the pattern with a recommendation rather than paying a third runtime.
 
 ### 5. Ship — gated + staged
 
-**Merge gate:** merge is blocked until **green CI AND a Codex review of the current head (the
-`codex-freshness` status, binding once in the branch-protection required contexts — maintainer
-setup below) with its findings addressed AND CodeRabbit approved AND owner approval** (all
-review threads resolved). **Deploy:** merge to `main`
+**Merge gate — two layers, named honestly (#106).** Enforced by branch protection (a merge
+is mechanically impossible without them): the required status contexts — `verify (format,
+typecheck, lint, test)`, `codex-freshness` (a Codex verdict whose recorded head is the
+current head), and `e2e (functional + axe)` (the full Playwright suite + axe audit, wired
+required 2026-08-12 once #97 stabilized it) — plus `required_conversation_resolution`
+(every review thread resolved). Enforced by process (this playbook, not configuration):
+the remaining CI jobs (`perf` advisory per ADR 0005's recorded ruling;
+`determinism golden ↔ SIM_VERSION`, posture tracked in #107), Codex findings addressed,
+CodeRabbit approved (advisory in the gate definition — #72 §5 — though its auto-approve
+follows thread resolution anyway), and owner approval of the merge itself
+(`required_approving_review_count` is 0; the owner's word, not a GitHub review, is the
+approval mechanism). **Deploy:** merge to `main`
 auto-deploys the web build to a staging URL; a human manually promotes to prod (web on AWS
 S3 + CloudFront). Mobile/desktop ship as tagged releases.
 

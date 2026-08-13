@@ -51,10 +51,15 @@ jobs:
       # ≤ 3 MB gzipped. Runs after the build so the dist output exists.
       - run: pnpm run size
 
-  # Accessibility gate (ADR 0003 §3): axe-core runs against the real DOM UI via the
-  # Playwright e2e smoke and fails the build on any violation.
+  # The repo's whole functional-UI gate, carrying the ADR 0003 §3 accessibility audit:
+  # the full Playwright e2e suite (placement, touch, layouts, run lifecycle, the #98
+  # webkit arm) plus axe-core against the real DOM UI, failing on any violation. Named
+  # for what it covers (#106 — the old "a11y e2e (axe-core)" name undersold that any
+  # broken e2e reddens it, not just an axe finding). Branch protection requires this
+  # job's NAME as a context — renaming it again means re-doing that wiring in the same
+  # change, or every merge wedges on a permanently-pending context.
   a11y-e2e:
-    name: a11y e2e (axe-core)
+    name: e2e (functional + axe)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
