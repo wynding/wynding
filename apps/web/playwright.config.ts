@@ -6,8 +6,12 @@ import { defineConfig, devices } from '@playwright/test';
 // + dev server) — run with `pnpm --filter @wynding/web e2e`.
 export default defineConfig({
   testDir: './e2e',
-  // Above the smoke test's 40s results-dialog wait — a no-tower M1 loss can approach ~25s
-  // of wall-clock even at 2×, so a 30s per-test cap could abort it on a slow CI runner.
+  // Above home.spec's 40s results-dialog wait — a no-tower loss can approach ~25s of
+  // wall-clock even at 2×, so a 30s per-test cap could abort it on a slow CI runner. The
+  // paced marathon tests (#97) carry per-test `test.setTimeout` overrides sized above
+  // the sum of their own declared worst-case budgets (ten/eight 5s pulse deadlines plus
+  // the 60s dialog waits) — 150s in smoke.spec/start-gate.spec, 120s in compact.spec —
+  // so this cap never governs them.
   timeout: 60_000,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
