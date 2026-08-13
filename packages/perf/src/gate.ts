@@ -607,8 +607,9 @@ export const TOLERANCE = 1.1;
  * readings differ: the shipped 2.49 ceiling was EVALUATED three times (samples 5, 7, 8)
  * and passed all three; but of the eight samples measured on this runner class, ONE would
  * have failed it. "Roughly 1-in-8" is that counterfactual, not an observed failure rate.
- * `perf` is NOT a required check on `main` (branch protection requires `verify` and
- * `codex-freshness` only), so a flake is noise rather than something that stops a merge —
+ * `perf` is NOT a required check on `main` (branch protection requires `verify`,
+ * `codex-freshness`, and — since 2026-08-12, #106 — `e2e (functional + axe)`, never
+ * `perf`), so a flake is noise rather than something that stops a merge —
  * but it is noise people learn to ignore, and that was this gate's real risk. Ruled
  * 2026-07-31 (`docs/milestones/m2.md`'s S4 flags): accept the flake, with the rate on
  * record. The p95 move above is a DATED REVISIT of that ruling's substance, not a reopening
@@ -684,8 +685,9 @@ export const TOLERANCE = 1.1;
  *
  * The argument that does not need the cohort to be anything it isn't:
  *
- *   - **`perf` is ADVISORY.** Branch protection requires `verify` and `codex-freshness` only
- *     as configured at the time of writing,
+ *   - **`perf` is ADVISORY.** Branch protection requires `verify`, `codex-freshness`, and
+ *     (since 2026-08-12, #106) `e2e (functional + axe)` — never `perf` — as configured at
+ *     the time of writing,
  *     so a baseline that is wrong in either direction costs a red non-blocking job and a
  *     human look. This is the whole of the risk case, and it does not depend on the sample
  *     being representative, i.i.d., or normally distributed. (It DOES depend on repository
