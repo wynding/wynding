@@ -1,20 +1,21 @@
 {
-  "note": "Exceptions for scripts/check-glossary-terms.mjs. `include` is the doc set that carries Wynding's game vocabulary; ADRs and design-notes are deliberately out of scope — they are engineering prose, where these words (save, layer, field, digest) carry their ordinary technical senses and would cost far more exceptions than the drift they would catch. `ignoredTerms` are avoided words whose other sense cannot be told apart mechanically. `allowedSenses` are case-insensitive regexes over a line of prose: a hit inside a match is a different sense, not drift; keep them narrow, since a loose pattern exempts the next real violation on the same line. Every entry states why; an entry that matches nothing fails the check. See docs/ai-workflow.md.",
+  "note": "Exceptions for scripts/check-glossary-terms.mjs. `include` is the doc set that carries Wynding's game vocabulary; ADRs and design-notes are deliberately out of scope \u2014 they are engineering prose, where these words (save, layer, field, digest) carry their ordinary technical senses and would cost far more exceptions than the drift they would catch. `ignoredTerms` are avoided words whose other sense cannot be told apart mechanically. `allowedSenses` are case-insensitive regexes over a line of prose: a hit inside a match is a different sense, not drift; keep them narrow, since a loose pattern exempts the next real violation on the same line. Every entry states why; an entry that matches nothing fails the check. See docs/ai-workflow.md. THREAT MODEL, so this list stops being read as adversarial-proof: an allowedSenses entry disambiguates a SPECIFIC sentence that exists in a scanned document. It is not a filter an adversary cannot defeat, and it cannot become one \u2014 the patterns are regexes over prose, so a sufficiently determined sentence can always be built to fit one. The job here is catching DRIFT in newly written prose, and for that the discipline that matters is anchoring each alternative to distinctive words from its host clause rather than to common ones. Successive review rounds on #91 kept finding alternatives that were still too generic; each was tightened, and finding another is an improvement to make, not a defect in the mechanism.",
   "include": [
     "docs/CONTEXT.md",
     "docs/vision.md",
     "docs/roadmap.md",
     "docs/prd",
-    "docs/milestones"
+    "docs/milestones",
+    "docs/accessibility-checklist.md"
   ],
   "ignoredTerms": [
     {
       "term": "route",
-      "why": "The glossary itself allows it: \"interchangeable in prose, but 'path' is canonical in code\" — so linting it in docs would contradict the entry it comes from."
+      "why": "The glossary itself allows it: \"interchangeable in prose, but 'path' is canonical in code\" \u2014 so linting it in docs would contradict the entry it comes from."
     },
     {
       "term": "unit",
-      "why": "Unavoidable generic English in these docs — grid unit, fixed-point units, unit of work, unit-tested. Telling those from 'unit' meaning a tower needs grammar, not grep."
+      "why": "Unavoidable generic English in these docs \u2014 grid unit, fixed-point units, unit of work, unit-tested. Telling those from 'unit' meaning a tower needs grammar, not grep."
     },
     {
       "term": "building",
@@ -26,7 +27,7 @@
     },
     {
       "term": "save",
-      "why": "A save is its own concept per the Replay entry's aside and ADR 0008 — a state snapshot. Only calling a replay a save is drift, and that reads identically to a grep."
+      "why": "A save is its own concept per the Replay entry's aside and ADR 0008 \u2014 a state snapshot. Only calling a replay a save is drift, and that reads identically to a grep."
     },
     {
       "term": "update",
@@ -37,7 +38,7 @@
     {
       "term": "core",
       "pattern": "core[- ](loop|gameplay)",
-      "why": "\"Core Gameplay\" is PRD 0001's title and \"core loop\" is the game's central loop — neither names the engine package."
+      "why": "\"Core Gameplay\" is PRD 0001's title and \"core loop\" is the game's central loop \u2014 neither names the engine package."
     },
     {
       "term": "core",
@@ -47,22 +48,22 @@
     {
       "term": "model",
       "pattern": "(damage|grid|domain|defense|state|pinned) model",
-      "why": "Modelling prose — the damage, grid, domain, or multi-wave state model is a set of rules, not the sim package."
+      "why": "Modelling prose \u2014 the damage, grid, domain, or multi-wave state model is a set of rules, not the sim package."
     },
     {
       "term": "defense",
       "pattern": "(tower|fixed-lane|working) defense",
-      "why": "The genre name (\"tower defense\", \"fixed-lane defense\") and the player's defenses as a whole — not armor, the stat."
+      "why": "The genre name (\"tower defense\", \"fixed-lane defense\") and the player's defenses as a whole \u2014 not armor, the stat."
     },
     {
       "term": "defense",
       "pattern": "damage & defense model",
-      "why": "Names the whole damage system in PRD 0001 §5; the stat inside it is still called armor."
+      "why": "Names the whole damage system in PRD 0001 \u00a75; the stat inside it is still called armor."
     },
     {
       "term": "level",
       "pattern": "(single|base|max|upgrade|tower) level|level \\d|(tick|milestone)-level",
-      "why": "A tower's upgrade level, and the two granularity suffixes the specs use (tick-level, milestone-level) — not a board, wave, or difficulty tier."
+      "why": "A tower's upgrade level, and the two granularity suffixes the specs use (tick-level, milestone-level) \u2014 not a board, wave, or difficulty tier."
     },
     {
       "term": "field",
@@ -72,7 +73,7 @@
     {
       "term": "field",
       "pattern": "field in ADR|buffed field|axis fields",
-      "why": "The data-record sense — a schema field, the field a buff modifies, the five axis fields of a creep."
+      "why": "The data-record sense \u2014 a schema field, the field a buff modifies, the five axis fields of a creep."
     },
     {
       "term": "points",
@@ -86,23 +87,23 @@
     },
     {
       "term": "hp",
-      "pattern": "hp pips|creep hp|\\(hp, damage|durability = hp|\\| hp\\b|max hp|hp-fraction",
-      "why": "The glossary's own note — HP is a creep stat: its table column, its durability axis, its render fraction. Deliberately narrow, so \"the player's HP\" and \"0 HP left\" keep failing."
+      "pattern": "hp pips?|creep[/ ]hp|\\(hp, damage|durability = hp|\\| hp\\b|max hp|hp-fraction",
+      "why": "The glossary's own note \u2014 HP is a creep stat: its table column, its durability axis, its render fraction. Deliberately narrow, so \"the player's HP\" and \"0 HP left\" keep failing. `pips?` (not just the plural) covers the accessibility checklist's singular \"HP pip\"; `creep[/ ]hp` covers both \"creep HP\" and \"creep/HP-pip\"."
     },
     {
       "term": "launch",
       "pattern": "wave\\s+(auto-)?launch(es|ed|ing)?|launch(es|ed|ing)?\\s+(the\\s+next|the|that|a|an|its)\\s+wave",
-      "why": "A wave launches, auto-launches, or is launched by an early call — the wave-start sense, not a release. Deliberately requires the wave to be launching or be launched: \"we launch after the last wave\" is still drift."
+      "why": "A wave launches, auto-launches, or is launched by an early call \u2014 the wave-start sense, not a release. Deliberately requires the wave to be launching or be launched: \"we launch after the last wave\" is still drift."
     },
     {
       "term": "launch",
-      "pattern": "launch\\s*(&|\\+)|launch tick|auto-launch(es|ed|ing)?|countdown before launch|previous\\s+launch|launch itself|start at launch|on the launch$",
-      "why": "The wave-start sense, named construction by construction: the launch tick, an auto-launch on countdown expiry, the countdown before launch, timing that chains off the previous launch. \"Ships at launch\" is still drift."
+      "pattern": "Launch & spawn spacing|launch \\+ \\d+ ticks|launch tick|auto-launch(es|ed|ing)?|countdown before launch|wave timing chains off the previous\\s+launch|launch itself \u2014 spawns|start at launch, offset",
+      "why": "The wave-start sense, named construction by construction \u2014 never a bare \"(before|at|previous|the) launch\", which would equally exempt a release-sense sentence (issue #65): the m1.md bold list-item lead-in \"Launch & spawn spacing\", the tick-offset math \"launch + 180 ticks\", the launch tick, an auto-launch on countdown expiry, the countdown before launch, wave timing that CHAINS OFF THE PREVIOUS launch (not a bare \"previous launch\"), the launch itself immediately followed by what it does (\"\u2014 spawns\", not a bare \"launch itself\"), and the mixed-wave stream-offset default (\"start at launch, offset\", not a bare \"at launch\"). \"Ships at launch\" and \"the product launch itself is delayed\" are still drift. Two residuals found in review and closed: `launch + N` is now `launch + N ticks` (it would otherwise have exempted \"the product launch + 3 weeks of polish\"), and the chains-off form now requires its wave subject."
     },
     {
       "term": "high",
       "pattern": "\\bhighs?\\b(?![\\s-]*(severity|priority))",
-      "why": "The adjective — \"high durability\", \"one high-impact discharge\". Written as a negative, so the grading sense the P0–P3 entry rejects (\"high severity\", \"high-priority\") is not exempted and still fails."
+      "why": "The adjective \u2014 \"high durability\", \"one high-impact discharge\". Written as a negative, so the grading sense the P0\u2013P3 entry rejects (\"high severity\", \"high-priority\") is not exempted and still fails."
     },
     {
       "term": "medium",
@@ -112,7 +113,7 @@
     {
       "term": "stage",
       "pattern": "coherent stage",
-      "why": "The Phase entry's own definition — \"a coherent stage of the product\" — defining the canonical term in plain English."
+      "why": "The Phase entry's own definition \u2014 \"a coherent stage of the product\" \u2014 defining the canonical term in plain English."
     },
     {
       "term": "deliverable",
@@ -122,27 +123,27 @@
     {
       "term": "type",
       "pattern": "damage[- ]types?",
-      "why": "The elemental damage-type system PRD 0001 rules out — not a creep's domain."
+      "why": "The elemental damage-type system PRD 0001 rules out \u2014 not a creep's domain."
     },
     {
       "term": "type",
       "pattern": "more (tower|creep)([\\s/]*(tower|creep))?[\\s/]*types?|creep types(,| and)|one creep type",
-      "why": "The catalog sense — more tower/creep types, the wave preview's \"creep types and counts\", one creep type in the M1 slice. Deliberately narrow: \"each creep type is ground or air\" is domain drift and still fails."
+      "why": "The catalog sense \u2014 more tower/creep types, the wave preview's \"creep types and counts\", one creep type in the M1 slice. Deliberately narrow: \"each creep type is ground or air\" is domain drift and still fails."
     },
     {
       "term": "frame",
       "pattern": "has a frame|outer frame",
-      "why": "Structural senses — the product has a frame, a tick has an outer frame of phases — not a rendered frame."
+      "why": "Structural senses \u2014 the product has a frame, a tick has an outer frame of phases \u2014 not a rendered frame."
     },
     {
       "term": "frame",
       "pattern": "\\bframe[- ](rate|budget|time)\\b",
-      "why": "The rendered sense, which CONTEXT.md's Tick entry itself calls a render concept and bars only as a SYNONYM for 'tick'. The entry above covers the structural senses; this one covers the render-side compounds m2.md needs from M2-S4b on, hyphenated or spaced: the spike reports 95th-percentile frame time against a frame-rate floor. A frame time is emphatically not a tick — the whole point of the render/sim decoupling is that they are different clocks — so calling it a tick would be the actual drift. Kept to these compounds so a bare 'frame' meaning a tick still trips."
+      "why": "The rendered sense, which CONTEXT.md's Tick entry itself calls a render concept and bars only as a SYNONYM for 'tick'. The entry above covers the structural senses; this one covers the render-side compounds m2.md needs from M2-S4b on, hyphenated or spaced: the spike reports 95th-percentile frame time against a frame-rate floor. A frame time is emphatically not a tick \u2014 the whole point of the render/sim decoupling is that they are different clocks \u2014 so calling it a tick would be the actual drift. Kept to these compounds so a bare 'frame' meaning a tick still trips."
     },
     {
       "term": "layer",
       "pattern": "fresh layer|presentation-layer",
-      "why": "A fresh layer of tuning, and the presentation layer of the app — not a creep's domain."
+      "why": "A fresh layer of tuning, and the presentation layer of the app \u2014 not a creep's domain."
     },
     {
       "term": "queued",
@@ -152,7 +153,7 @@
     {
       "term": "p4",
       "pattern": "no p4",
-      "why": "The severity entry says there is no P4 — it has to name it to rule it out."
+      "why": "The severity entry says there is no P4 \u2014 it has to name it to rule it out."
     },
     {
       "term": "enemy",
@@ -161,13 +162,13 @@
     },
     {
       "term": "credits",
-      "pattern": "(score|early-call|Σ) credits|credits its kill|^\\s*credits — it",
-      "why": "Early-call score credit, the scoring component the glossary's Early call entry names. \"80 credits\" for currency is still drift — that is what the Bounty entry rejects."
+      "pattern": "(score|early-call|\u03a3) credits|credits its kill|^\\s*credits \u2014 it",
+      "why": "Early-call score credit, the scoring component the glossary's Early call entry names. \"80 credits\" for currency is still drift \u2014 that is what the Bounty entry rejects."
     },
     {
       "term": "low",
       "pattern": "\\blows?\\b(?![\\s-]*(severity|priority))",
-      "why": "The adjective — \"low-end device\". Written as a negative, so the grading sense (\"low severity\", \"low-priority\") still fails."
+      "why": "The adjective \u2014 \"low-end device\". Written as a negative, so the grading sense (\"low severity\", \"low-priority\") still fails."
     },
     {
       "term": "layout",
@@ -177,17 +178,161 @@
     {
       "term": "runtime",
       "pattern": "runtime load path",
-      "why": "The ruleset's runtime load path — when loading happens, not the Engine package."
+      "why": "The ruleset's runtime load path \u2014 when loading happens, not the Engine package."
     },
     {
       "term": "framework",
       "pattern": "status-effect framework",
-      "why": "The status-effect framework — a named subsystem of the sim, not the Engine package."
+      "why": "The status-effect framework \u2014 a named subsystem of the sim, not the Engine package."
     },
     {
       "term": "digest",
       "pattern": "digest parity|digest-unchanged",
       "why": "The ruleset digest of ADR 0007, a different hash from the world-hash; the glossary's own aside allows the word in prose."
+    },
+    {
+      "term": "core",
+      "pattern": "axe-core",
+      "why": "axe-core is the accessibility-testing tool's own name (docs/accessibility-checklist.md, ADR 0003 \u00a73), not the Engine package.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "layout",
+      "pattern": "app-shell layout|Shell/Rail/Card/Panel/Dock layout|in BOTH layouts|Both layouts already|one DOM topology, two layouts|Compact layout|layout/interaction story|New layout states|layout/topology change|Neither layout has a fixed card count|declared layout region",
+      "why": "The app's Standard/Compact responsive UI layout system, construction by construction. `both layouts` is anchored to \"in BOTH layouts\" \u2014 bare, it would exempt \"both layouts funnel creeps into a corridor\", which IS the maze sense. Review found `two layouts` and `Neither layout` still bare \u2014 each anchored to its host clause after a sweep that constructed a maze-sense sentence for every short alternative in this file, not just the one that was reported.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "layout",
+      "pattern": "cue-radius(/overlap)? layout",
+      "why": "The deferred cue-geometry design pass this checklist repeatedly refers back to (Story 6/8's PARTIAL rows) \u2014 an arrangement of render radii, not a maze. Review found `two layouts` and `Neither layout` still bare \u2014 each anchored to its host clause after a sweep that constructed a maze-sense sentence for every short alternative in this file, not just the one that was reported.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "mode",
+      "pattern": "colour[- ]?blind modes?|colour[- ]modes?|colour-vision modes?|tritan value sits closer to that mode",
+      "why": "The selectable colour-vision modes (protan/deutan/tritan/default), not a difficulty tier. The last alternative ties the bare \"that mode's\" back to the tritan/colour-mode sentence it refers to, rather than exempting a bare \"mode\".",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "mode",
+      "pattern": "failure mode|dev-mode",
+      "why": "Ordinary software idioms \u2014 a UI failure mode, a dev-mode console warning \u2014 not a difficulty tier.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "indicator",
+      "pattern": "Visible focus indicators|3px focus indicator|focus indicators? \\(WCAG",
+      "why": "WCAG's own term for the visible focus ring (2.4.7 Focus Visible), anchored to the conformance-row label and the WCAG citation \u2014 a bare `focus indicator` would exempt \"the slowed effect's focus indicator\", which IS telegraph drift.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "skip",
+      "pattern": "extended to also skip|skip to site|draw sites skip",
+      "why": "Three unrelated ordinary-English constructions, each anchored to its host clause: a Playwright project's testIgnore skipping specs, the conventional \"skip to site\" nav-link pattern, and a draw call skipping a null ring. A bare `to also skip` would exempt \"choose to also skip the countdown\", which IS the early-call sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "trap",
+      "pattern": "It never traps|focus trap|two-branch trap",
+      "why": "Three unrelated senses: the Fullscreen API never trapping the user, WCAG's keyboard focus trap, and the ordinary \"code trap\" (a two-branch pitfall a mutation test catches) \u2014 none is the burst-tower sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "level",
+      "pattern": "any game-level Escape|type-level|zoom level",
+      "why": "Ordinary English compounds \u2014 Escape handling scoped to the whole game, a TypeScript type-system fact, and browser zoom percentage \u2014 none is a board, wave, or difficulty tier.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "type",
+      "pattern": "type-level",
+      "why": "TypeScript's type system (\"a type-level fact\"), not a creep's domain.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "layer",
+      "pattern": "disarm or deselect one layer at a time|paint layer",
+      "why": "Escape/Close backing out one modal/UI layer at a time, and the render paint layer (`drawCreeps`/`drawTowers`) \u2014 neither is a creep's domain.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "config",
+      "pattern": "e2e coverage \\+ config|playwright\\.config",
+      "why": "Playwright's own test configuration (`playwright.config.ts`), not the ruleset.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "field",
+      "pattern": "field, not two independent booleans|they read the same field|the field is proven to gate on data|dated to record the sixth field|six-field accessible text|every other Panel field",
+      "why": "The TowerStats/Panel schema sense. `read the same field` is anchored to its subject (\"they read the same field\") \u2014 bare, it would exempt \"creeps entering from the north read the same field\", which IS the board sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "p4",
+      "pattern": "P1\u2013P4",
+      "why": "PLAN.md's own packet numbering (P1 through P4), not the review-severity scale that has no P4.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "decimal",
+      "pattern": "one-decimal",
+      "why": "Display rounding precision (the Panel's shared one-decimal `formatNumber`), not the sim's internal fixed-point encoding.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "points",
+      "pattern": "it points at",
+      "why": "The ordinary verb \"to point at\" (describing footprint-mark geometry, hand-wrapped across a line break so \"at\" was pulled up onto the same line as \"points\"), not the score sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "nit",
+      "pattern": "copy nit",
+      "why": "\"Not a copy nit\" \u2014 an ordinary editorial-polish sense, not the P0\u2013P3 review-severity scale's rejected grading term.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "map",
+      "pattern": "literal-key map|label map|total-over-any-string map|re-maps the palette|maps to the existing|Both maps are unit-tested",
+      "why": "The JS lookup-table sense. `Both maps are` is anchored to \"unit-tested\" \u2014 bare, it would exempt \"both maps are twenty by twelve\", which IS the board sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "model",
+      "pattern": "interaction model|Armed model|rotate model|sim-derived view model",
+      "why": "The UI-state sense. `view model` is anchored to \"sim-derived view model\" \u2014 bare, it would exempt \"the view model of the world advances one step per tick\", which IS the sim sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "recording",
+      "pattern": "are now asserted against a recording|recording-double",
+      "why": "The test-double sense, anchored to its host clause. An earlier form allowed 25 arbitrary characters between \"recording\" and \"double\" \u2014 the loosest pattern in this file \u2014 which would have exempted \"the recording plays back at double speed\". Note the anchor cannot name the code span between them: this linter strips inline code before matching.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "health",
+      "pattern": "health of the thing it is drawn on",
+      "why": "A recurring engineering maxim in this checklist (an essential cue must not depend on the condition of what it's drawn on) \u2014 applied to auras and towers as much as creeps, not the player's Lives.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "stage",
+      "pattern": "resizes the stage|over the Stage on Standard|painted bottom-left over the Stage|sub-400px stages",
+      "why": "The app's own named Stage element. `over the Stage` is anchored to its two host clauses \u2014 bare and case-insensitive, it would exempt \"the rollout runs over the stage where we gate the beta\", which IS the phase sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "round",
+      "pattern": "QC round[\\s-]?\\d+|round[\\s-]?\\d+ (wrongly|noted|corrected)|taken in a review round|round-trip|Playtest polish round",
+      "why": "Review/QC round numbering and the serialize round-trip. `review round` is anchored to \"taken in a review round\" \u2014 bare, it would exempt \"the review round of creeps arrives at tick 200\", which IS the wave sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "frame",
+      "pattern": "rather than relying on a frame|frame that refreshes|can tick every few frames",
+      "why": "The render-frame (rAF) sense. `relying on a frame` is anchored to \"rather than relying on a frame\" \u2014 bare, it would exempt \"the sim advances by relying on a frame counter\", which IS the tick sense.",
+      "files": ["docs/accessibility-checklist.md"]
     }
   ]
 }
