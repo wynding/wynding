@@ -1,5 +1,5 @@
-// layering.test.ts — a real guard for the layering invariant `index.ts`'s header
-// states (QC: this package's dev-only reverse dependency): "nothing shipped may import `@wynding/perf` or
+// layering.test.ts — a cheap regression catch for the layering invariant `index.ts`'s
+// header states (QC: this package's dev-only reverse dependency): "nothing shipped may import `@wynding/perf` or
 // `@wynding/content/stress`". `apps/web` genuinely DEV-depends on this package now
 // (`apps/web/perf/main-perf.ts`, the perf-only browser entry point) — the production
 // graph is still clean, but a stated guarantee with nothing checking it is not a
@@ -9,52 +9,46 @@
 // must-not-ship class as `./stress`: a synthetic perf bundle, deliberately absent from
 // the registry, that must never reach production code.
 //
-// HOW IT CHECKS, and why it changed shape. This guard used to grep for the two SPELLINGS a
-// forbidden import might use — the package specifier, then relative paths containing a
-// literal `packages/` segment. Chasing spellings is what kept it narrower than the
-// invariant: successive reviews found it blind to `apps/server`, then to every
-// `packages/*/src`, then — once those trees were in scope — to `../../content/src/stress`,
-// the sibling reach that never contains `packages/` at all, and finally to a re-export
-// (`export { X } from './catalog'` inside `packages/content/src/index.ts`), one line that
-// pulls a synthetic 1,000,000-hp bundle into the graph of every consumer while matching no
-// spelling at all.
+// WHAT THIS IS, AND WHAT IT IS NOT — stated plainly, because the honest scope is the whole
+// point of this file's shape. It greps shipped source for the PACKAGE-SPECIFIER spelling of
+// a forbidden import, which is the realistic accident: a habit import, an autocomplete, a
+// copied snippet. The match is deliberately context-free — it looks for the quoted specifier
+// itself, not for a `from`/`import` keyword before it — so it is indifferent to import
+// syntax, and catches the static form, `await import(...)`, a re-export, and even a comment
+// interrupting the call, all the same.
 //
-// So it no longer reads spellings. It RESOLVES every import specifier in every shipped file
-// to an absolute path and asks one question of the result: is that path not-shippable? All
-// four reaches above collapse into that single question, and so does the next spelling
-// nobody has thought of.
+// What it does NOT catch is every PATH-shaped reach at the same modules, because it does not
+// resolve paths at all: `../../content/src/stress` from a sibling package, `./catalog`
+// re-exported inside `packages/content`, `../perf/main-perf` or the Vite root-relative
+// `/perf/main-perf` from the web app, or a shipped module importing a `.test.ts` helper that
+// imports one of them. Those are demonstrated with probes in #129, which owns the real check.
 //
-// Residuals, stated rather than left for the next reviewer to find: this reads source text,
-// so a comment quoting an import of a forbidden module counts as one (it fails the guard
-// CLOSED — a one-line diagnosis, and the safe direction). It does not model conditional
-// exports, `require`, or a bundler alias, none of which this repo uses. And it says nothing
-// about `apps/web/perf/**` importing what it likes — that tree is BUILT BY A SEPARATE CONFIG
-// (`vite.perf.config.ts`, whose input is `perf/index.html`) and is itself on the
-// not-shippable list, so it is a forbidden target here, never a scanned source.
+// This file is deliberately NOT grown to cover them. An earlier revision chased those
+// spellings through enumeration, then workspace discovery, then full specifier resolution
+// with each package's `exports` map, and a reviewer defeated every version — because all
+// three kept scanning TEXT, and the set of spellings Vite and tsc accept is strictly larger
+// than any scanner written by hand. #129 proposes asking the bundler instead, which is both
+// complete and less code than the resolver it would replace.
+//
+// One honest caveat, so nobody mistakes this for sufficient: unlike the determinism lint
+// zone — which can afford an open spelling set because the determinism golden and replay
+// byte-identity catch the CONSEQUENCE — this invariant has no structural backstop today.
+// The `pnpm size` budget is far too loose to notice a shipped synthetic bundle. This test is
+// the only line of defence, and it is a grep. That gap is the reason #129 exists.
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+// This package's own tree, derived from this file's location so it can never name the wrong
+// directory: it is the thing nothing else may import, and its modules use the synthetic
+// bundles constantly.
+const PERF_PACKAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
+const REPO_ROOT = join(PERF_PACKAGE_DIR, '..', '..');
 const asRepoPath = (abs: string): string => relative(REPO_ROOT, abs).split(sep).join('/');
 
-// The modules that must never enter a shipped graph, as absolute paths — a directory entry
-// covers everything beneath it. This ONE list does all the exempting: a file that is itself
-// not-shippable is skipped as a source (this package's own modules import the synthetic
-// bundles constantly, and must), and every scanned import is judged by whether it lands
-// here. There is no second notion of "excluded" to keep in sync with this one.
-const NOT_SHIPPABLE = [
-  join(REPO_ROOT, 'packages', 'perf'), // the dev-only package itself
-  join(REPO_ROOT, 'packages', 'content', 'src', 'stress.ts'), // synthetic perf bundles, kept
-  join(REPO_ROOT, 'packages', 'content', 'src', 'catalog.ts'), // out of the registry on purpose
-  join(REPO_ROOT, 'apps', 'web', 'perf'), // the perf-only browser entry point
-  join(REPO_ROOT, 'apps', 'web', 'e2e-perf'), // and the perf-only Playwright specs
-];
-
-const isNotShippable = (abs: string): boolean =>
-  NOT_SHIPPABLE.some((target) => abs === target || abs.startsWith(target + sep));
+const FORBIDDEN_SPECIFIER = /['"]@wynding\/(?:perf|content\/(?:stress|catalog))['"]/;
 
 function listFilesRecursive(dir: string): string[] {
   const out: string[] = [];
@@ -69,110 +63,48 @@ function listFilesRecursive(dir: string): string[] {
   return out;
 }
 
-// Every shipped source tree, DISCOVERED — deliberately not a literal list. Enumerating the
-// trees is what left `apps/server` and then every `packages/*/src` unscanned, so the scope
-// is now whatever the workspace holds: every `apps/<member>/src` and `packages/<member>/src`
-// on disk. A new workspace member is covered the day it is created, by nobody remembering
-// anything. `packages/perf` is NOT special-cased here — its files are skipped by the
-// not-shippable list, like every other forbidden module.
-//
-// Why `src/` is the boundary: `apps/web/index.html` loads `/src/boot-entry.ts` and
-// `apps/server`'s tsconfig compiles `src`, so those trees ARE what ships, and each package's
-// `exports` map points into its own `src`.
+// The shipped trees are DISCOVERED rather than listed. Two successive reviews found a
+// written-down list too narrow — first missing `apps/server`, then every `packages/*/src`,
+// and `packages/render` is bundled straight into the web app just as the apps are. That is
+// twelve lines and it retires the whole class, so it stays even though the rest of the
+// chase-the-spelling machinery did not. `src/` is the boundary because
+// `apps/web/index.html` loads `/src/boot-entry.ts`, `apps/server`'s tsconfig compiles `src`,
+// and each package's `exports` map points into its own `src`. `apps/web/perf/**` falls
+// outside it by construction — a separate Vite config (`vite.perf.config.ts`) builds that
+// entry, so it never enters the production bundle.
 function shippedSrcTrees(): string[] {
   const trees: string[] = [];
   for (const group of ['apps', 'packages']) {
     const groupDir = join(REPO_ROOT, group);
     for (const entry of readdirSync(groupDir).sort()) {
       const memberDir = join(groupDir, entry);
-      if (!statSync(memberDir).isDirectory()) continue;
+      if (!statSync(memberDir).isDirectory() || memberDir === PERF_PACKAGE_DIR) continue;
       const srcDir = join(memberDir, 'src');
-      if (existsSync(srcDir) && statSync(srcDir).isDirectory()) trees.push(srcDir);
+      if (statSync(srcDir, { throwIfNoEntry: false })?.isDirectory() === true) trees.push(srcDir);
     }
   }
   return trees;
 }
 
-// `from '...'` / `import '...'` / `import('...')` / `export ... from '...'` — one shape, because
-// every one of them puts the module into the importing file's graph.
-const SPECIFIER = /\b(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
-const WORKSPACE_SCOPE = '@wynding/';
-
-// A relative specifier omits its extension; the resolved path has to name the real file for
-// the not-shippable comparison to mean anything (`./catalog` must become `catalog.ts`).
-function withExtension(path: string): string {
-  for (const candidate of [path, `${path}.ts`, join(path, 'index.ts')]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
-  }
-  return path;
-}
-
-const exportsCache = new Map<string, Record<string, unknown>>();
-function packageExports(packageDir: string): Record<string, unknown> {
-  let map = exportsCache.get(packageDir);
-  if (!map) {
-    const manifest = join(packageDir, 'package.json');
-    map = existsSync(manifest)
-      ? ((JSON.parse(readFileSync(manifest, 'utf8')).exports ?? {}) as Record<string, unknown>)
-      : {};
-    exportsCache.set(packageDir, map);
-  }
-  return map;
-}
-
-/** The absolute module a specifier names, or `null` for anything outside this workspace. */
-function resolveSpecifier(fromFile: string, specifier: string): string | null {
-  if (specifier.startsWith('.')) return withExtension(resolve(dirname(fromFile), specifier));
-  if (!specifier.startsWith(WORKSPACE_SCOPE)) return null; // third-party: not this rule's business
-  const [member, ...subpath] = specifier.slice(WORKSPACE_SCOPE.length).split('/');
-  if (member === undefined || member === '') return null; // a bare `@wynding/` names nothing
-  const packageDir = join(REPO_ROOT, 'packages', member);
-  // The `exports` map is the authority on what a subpath means — reading it is what keeps
-  // `@wynding/content/stress` and `./stress` resolving to the same file.
-  const target = packageExports(packageDir)[subpath.length ? `./${subpath.join('/')}` : '.'];
-  return typeof target === 'string' ? join(packageDir, target) : null;
-}
-
-describe('nothing shipped reaches a not-shippable module', () => {
-  it('every not-shippable path exists — a stale entry would exempt nothing and pass silently', () => {
-    // The whole guard is a comparison against this list. A typo here does not fail loudly,
-    // it makes the check vacuous, which is the exact failure mode this file exists to catch.
-    const missing = NOT_SHIPPABLE.filter((target) => !existsSync(target)).map(asRepoPath);
-    expect(missing).toEqual([]);
-  });
-
-  it('discovery includes the trees earlier scopes missed', () => {
+describe('no shipped tree names this package or the not-shippable content subpaths', () => {
+  it('covers every shipped src tree, including the ones earlier scopes missed', () => {
     const trees = shippedSrcTrees().map(asRepoPath);
-    // The scopes this guard has had, pinned so a regression to any narrower one is red
-    // rather than silent: `apps/web/src` was the original, the other three are what
-    // successive reviews found missing. Witnesses, not the scan scope — the scan is
-    // whatever is on disk.
+    // Witnesses, not the scan scope — the scan is whatever is on disk. `apps/web/src` was
+    // this guard's original scope; the other two are what successive reviews found missing,
+    // pinned so a regression to a narrower list is red rather than silent.
     expect(trees).toContain('apps/web/src');
     expect(trees).toContain('apps/server/src');
     expect(trees).toContain('packages/render/src');
-    expect(trees).toContain('packages/content/src');
+    expect(trees).not.toContain('packages/perf/src');
   });
 
-  it('no shipped file imports @wynding/perf, the synthetic bundles, or the perf-only entry — by any spelling', () => {
+  it('no file under a shipped src/** names @wynding/perf, @wynding/content/stress, or @wynding/content/catalog', () => {
     const files = shippedSrcTrees().flatMap(listFilesRecursive);
     expect(files.length).toBeGreaterThan(0); // sanity: the directories actually resolved
 
-    const offenders: string[] = [];
-    for (const file of files) {
-      // Tests are not bundled, so they are not shipped code — and one legitimately reaches
-      // for a fixture by path (`apps/server/src/replay-parity.test.ts`) while the content
-      // package's own tests import the very bundles under guard.
-      if (file.endsWith('.test.ts') || isNotShippable(file)) continue;
-      const text = readFileSync(file, 'utf8');
-      for (const match of text.matchAll(SPECIFIER)) {
-        const specifier = match[1];
-        if (specifier === undefined) continue; // unreachable: the group is not optional
-        const target = resolveSpecifier(file, specifier);
-        if (target !== null && isNotShippable(target)) {
-          offenders.push(`${asRepoPath(file)} -> ${specifier} (${asRepoPath(target)})`);
-        }
-      }
-    }
+    const offenders = files
+      .filter((file) => FORBIDDEN_SPECIFIER.test(readFileSync(file, 'utf8')))
+      .map(asRepoPath);
     expect(offenders).toEqual([]);
   });
 });

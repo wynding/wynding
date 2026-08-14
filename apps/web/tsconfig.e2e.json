@@ -4,7 +4,9 @@
   // program and stay invisible to `apps/web/src/**`. See the `e2e` paragraph in
   // `tsconfig.json` for why that reverse edge is worth this second file.
   //
-  // `extends` inherits compilerOptions only — `include` is overridden below, and the specs'
+  // `extends` supplies the shared configuration; `files`, `include` and `exclude` are the
+  // fields a child REPLACES rather than merges, so the `include` below fully supersedes the
+  // base's rather than adding to it — which is exactly what is wanted here, and the specs'
   // own imports (`../src/layout`) pull in what they need. Run by `pnpm -C apps/web typecheck`
   // as a second `tsc --noEmit -p`, so a broken spec fails `verify` exactly as loudly as
   // broken app code.
