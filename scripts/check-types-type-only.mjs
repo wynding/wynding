@@ -77,11 +77,17 @@ const EMITTED_DTS = /\.d\.(ts|mts|cts)$/;
 // comment by default) and blank lines — what's left must be exactly the one
 // runtime statement a type-only module emits.
 function runtimeBody(file) {
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim() !== '' && !line.trim().startsWith('//'))
-    .join('\n')
-    .trim();
+  return (
+    readFileSync(file, 'utf8')
+      // Block comments first: tsc PRESERVES a `/* ... */` header from the source into the
+      // emit, and a line filter that only drops `//` would then read it as runtime content
+      // and fail a perfectly type-only package (Codex, #113's PR).
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !line.trim().startsWith('//'))
+      .join('\n')
+      .trim()
+  );
 }
 
 // WHAT THIS SCRIPT IS, AND IS NOT. It proves `@wynding/types` ships no runtime code by
