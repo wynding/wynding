@@ -16,7 +16,7 @@
 // keeps the check honest without adding a build dependency to the turbo test task.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,6 +28,16 @@ function fail(message) {
   console.error(`❌ check:types-type-only failed: ${message}`);
   process.exit(1);
 }
+
+// CLEAN FIRST. `tsc -b` does not remove the outputs of a source file that was deleted or
+// renamed, so an orphaned `dist/gone.js` survives indefinitely — and this check, which
+// scans everything under `dist`, would then fail `verify` over a module whose source no
+// longer exists. That is a false positive with no action the developer can take except
+// guessing that `dist` is stale (verified by Codex on #113's PR). Removing `dist` and its
+// build info makes the scan describe the CURRENT sources and nothing else; the package is
+// tiny, so a full rebuild costs nothing.
+rmSync(join(PKG_DIR, 'dist'), { recursive: true, force: true });
+rmSync(join(PKG_DIR, 'tsconfig.tsbuildinfo'), { force: true });
 
 const build = spawnSync('pnpm', ['-C', PKG_DIR, 'run', 'build'], { stdio: 'inherit' });
 if (build.status !== 0) {
@@ -95,7 +105,7 @@ function runtimeBody(file) {
 // Type-space declarations — interface, type, and `declare` on a namespace/module — are
 // fine and expected; these five keywords are the value-space ones.
 const VALUE_SPACE =
-  /^\s*(?:export\s+)?declare\s+(const|let|var|function|class|namespace|module)\b|^\s*(?:export\s+)?(enum|namespace)\b/m;
+  /^\s*(?:export\s+)?declare\s+(?:abstract\s+|async\s+)*(const|let|var|function|class|namespace|module)\b|^\s*(?:export\s+)?(?:const\s+)?(enum|namespace)\b/m;
 
 const declaring = filesUnder(join(PKG_DIR, 'dist'), EMITTED_DTS)
   .map((file) => ({ file, hit: VALUE_SPACE.exec(readFileSync(file, 'utf8')) }))
