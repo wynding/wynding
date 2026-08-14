@@ -100,30 +100,45 @@ export default tseslint.config(
       // above do (@types/node is auto-included — no `types` option is set for these
       // packages) and dodges the globals rule entirely by never referencing the global.
       //
-      // BOTH SPELLINGS, and a pattern for the dynamic form. Node resolves the bare
-      // `crypto`/`timers` specifiers identically to their `node:` twins, and @types/node
-      // (a hoisted root devDependency) declares both — so a rule listing only the prefixed
-      // form typechecks AND lints clean on the unprefixed one, which is a guard one
-      // autocomplete away from useless. `paths` does not match `await import(...)`, so the
-      // dynamic form needs `patterns` alongside it.
-      // `no-restricted-imports` does not inspect dynamic `import()` expressions at all
-      // (ESLint 9 — verified against a probe: the static forms below error, the dynamic
-      // one passed clean), so the same specifiers are matched a second time at the syntax
-      // level. Without this, `await import('node:crypto')` is a one-line bypass of the
+      // BOTH SPELLINGS. Node resolves the bare `crypto`/`timers` specifiers identically to
+      // their `node:` twins, and @types/node (a hoisted root devDependency) declares both —
+      // so a rule listing only the prefixed form typechecks AND lints clean on the
+      // unprefixed one, which is a guard one autocomplete away from useless.
+      //
+      // `no-restricted-imports` does not inspect dynamic `import()` expressions AT ALL
+      // (ESLint 9 — verified against a probe: the static forms error, the dynamic one
+      // passed clean), so the same specifiers are matched a second time at the syntax level
+      // below. Without that, `await import('node:crypto')` is a one-line bypass of the
       // whole determinism zone.
+      //
+      // A `patterns` group does NOT help with the dynamic form, and one used to sit beside
+      // `paths` here on the theory that it did. It cost two real defects and bought nothing
+      // (Codex/CodeRabbit, #111's PR): it duplicated all six specifiers, so every static
+      // violation reported TWICE, and ESLint 9 matches `group` entries with GITIGNORE
+      // semantics — a bare `timers` matches that path segment anywhere — so a relative
+      // `./timers` or `./crypto/thing` was rejected with a message simply wrong about what
+      // the import did. `paths` matches whole specifiers and has neither problem.
       'no-restricted-syntax': [
         'error',
         {
-          // `Math` and `Date` reached through a global object need the NONDETERMINISTIC
-          // member named, not the namespace: matching `globalThis.Math` wholesale rejected
+          // `Math` reached through a global object needs the NONDETERMINISTIC member named,
+          // not the namespace: matching `globalThis.Math` wholesale rejected
           // `globalThis.Math.floor(3 / 2)`, which is perfectly deterministic (Codex,
           // #111's PR — the fourth false positive this zone produced, and the same lesson
           // as the type-only check's: a guard matching one level too high reds correct
           // code, which is worse than the gap it was widened to close).
+          //
+          // `Date` is NOT here, and the difference is the point. `Math` has deterministic
+          // members worth keeping; `Date` has none this zone allows, and the bare global is
+          // already restricted whole (`no-restricted-globals` above). So it belongs in the
+          // namespace-level selector below — where naming only `.now` left `new
+          // globalThis.Date()` and `globalThis.Date.parse(...)` linting clean (Codex,
+          // #111's PR). Keeping it in one selector is also what stops a single
+          // `globalThis.Date.now()` reporting twice.
           selector:
-            'MemberExpression[object.object.name=/^(globalThis|window|global|self)$/][object.property.name=/^(Math|Date)$/][property.name=/^(random|now)$/]',
+            "MemberExpression[object.object.name=/^(globalThis|window|global|self)$/][object.property.name='Math'][property.name='random']",
           message:
-            'No ambient randomness or wall-clock time in the deterministic core — use the seeded Rng from @wynding/engine and the tick counter.',
+            'No ambient randomness in the deterministic core — use the seeded Rng from @wynding/engine.',
         },
         {
           // Node's `process` timing/scheduling surface: `process.nextTick(...)` schedules
@@ -147,32 +162,19 @@ export default tseslint.config(
           // without this. `window`/`global`/`self` are covered for the same reason — none of
           // them exists in these packages today, which is exactly the point: the guard should
           // still hold the day someone adds a DOM-ish or Node-ish shim, not depend on their
-          // absence. `Math` and `Date` are in the property list for the NESTED case:
-          // `globalThis.Math.random()` never produces a bare `Math` identifier either, so the
-          // inner `globalThis.Math` member expression is what has to match.
+          // absence. `Date` is in the property list for the same reason `performance` is —
+          // both are restricted as bare globals above, and the object form is the spelling
+          // that dodges that rule — and it covers `new globalThis.Date()` and
+          // `globalThis.Date.parse(...)` too, which naming `.now` alone did not.
           selector:
-            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|process)$/]',
+            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|process|Date)$/]',
           message:
-            'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
+            'No ambient crypto, wall-clock or scheduler access in the deterministic core — use the seeded Rng from @wynding/engine and the tick counter.',
         },
       ],
       'no-restricted-imports': [
         'error',
         {
-          patterns: [
-            {
-              group: [
-                'crypto',
-                'node:crypto',
-                'timers',
-                'node:timers',
-                'timers/promises',
-                'node:timers/promises',
-              ],
-              message:
-                'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
-            },
-          ],
           paths: [
             {
               name: 'crypto',

@@ -27,14 +27,28 @@
   // direction ("nothing outside them depends on their types"), which is true but beside
   // the point — these specs are CI's whole functional-UI gate (the a11y e2e job), so a
   // type error inside one should fail loud as a type error, not surface later as an
-  // assertion that silently stops asserting. Including it added no edges (nothing
-  // outside `e2e/**` imports from it), and the fallout was one call site: `stage-
+  // assertion that silently stops asserting. The fallout was one call site: `stage-
   // stability.spec.ts`'s `page.evaluate(([x, y]) => …, [down.x, down.y])` inferred `x`/
   // `y` as `number | undefined` (array-literal argument, not a tuple) — rewritten as the
   // `{ x, y }` object-argument form, which `layout-probe.ts` already uses for the same
   // reason. (Most `page.evaluate` calls in this directory take no argument or a single
   // scalar and were unaffected.)
-  "include": ["src", "perf", "e2e-perf", "e2e"],
+  //
+  // But it is typechecked in its OWN program (`tsconfig.e2e.json`, run as a second
+  // `tsc --noEmit` by this package's `typecheck` script), NOT by adding it here. That
+  // goal is one-directional — errors in a spec should be loud — while putting `e2e` in
+  // this `include` also bought the reverse edge nobody wants: `e2e/fullscreen-stub.ts`
+  // and `e2e/install-stub.ts` carry `declare global { interface Window { … } }` blocks,
+  // and a global augmentation is PROGRAM-WIDE, so `__wyFullscreenCalls`, `__wyMakePrompt`
+  // and `__wyPromptCalls` became type-clean references from `src/**` — the compile-time
+  // barrier against shipping a test-only debug surface, quietly gone (Codex, #111's PR).
+  // Nothing shipped: Vite resolves its graph from `index.html`, not from this file. The
+  // barrier is the point, not the current absence of a violation.
+  //
+  // `e2e-perf` above stays in THIS program for the opposite reason: its `declare global`
+  // is deliberately meant to be cross-checked against `perf/main-perf.ts`, which is in
+  // this program too. Same construct, opposite intent — hence the split.
+  "include": ["src", "perf", "e2e-perf"],
   "references": [
     { "path": "../../packages/render" },
     { "path": "../../packages/sim" },

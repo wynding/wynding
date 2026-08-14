@@ -1,0 +1,13 @@
+{
+  // The Playwright specs get a REAL typecheck (#110) — but in their own program, so the
+  // `declare global { interface Window { … } }` blocks in `e2e/*-stub.ts` augment only this
+  // program and stay invisible to `apps/web/src/**`. See the `e2e` paragraph in
+  // `tsconfig.json` for why that reverse edge is worth this second file.
+  //
+  // `extends` inherits compilerOptions only — `include` is overridden below, and the specs'
+  // own imports (`../src/layout`) pull in what they need. Run by `pnpm -C apps/web typecheck`
+  // as a second `tsc --noEmit -p`, so a broken spec fails `verify` exactly as loudly as
+  // broken app code.
+  "extends": "./tsconfig.json",
+  "include": ["e2e"]
+}

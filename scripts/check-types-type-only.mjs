@@ -33,11 +33,13 @@ function fail(message) {
 // renamed, so an orphaned `dist/gone.js` survives indefinitely — and this check, which
 // scans everything under `dist`, would then fail `verify` over a module whose source no
 // longer exists. That is a false positive with no action the developer can take except
-// guessing that `dist` is stale (verified by Codex on #113's PR). Removing `dist` and its
-// build info makes the scan describe the CURRENT sources and nothing else; the package is
-// tiny, so a full rebuild costs nothing.
+// guessing that `dist` is stale (verified by Codex on #113's PR). Removing `dist` makes the
+// scan describe the CURRENT sources and nothing else; the package is tiny, so a full
+// rebuild costs nothing. One `rmSync` is all it takes because this package's build info goes
+// INSIDE that directory (`packages/types/tsconfig.json` sets
+// `"tsBuildInfoFile": "dist/.tsbuildinfo"`); a second call for a root `tsconfig.tsbuildinfo`
+// stood here and never deleted anything, because tsc never wrote one (Codex, #111's PR).
 rmSync(join(PKG_DIR, 'dist'), { recursive: true, force: true });
-rmSync(join(PKG_DIR, 'tsconfig.tsbuildinfo'), { force: true });
 
 const build = spawnSync('pnpm', ['-C', PKG_DIR, 'run', 'build'], { stdio: 'inherit' });
 if (build.status !== 0) {
@@ -73,21 +75,25 @@ function filesUnder(dir, re) {
 const EMITTED_JS = /\.(js|mjs|cjs)$/;
 const EMITTED_DTS = /\.d\.(ts|mts|cts)$/;
 
-// Strip line comments (tsc preserves the source header and appends the sourcemap
-// comment by default) and blank lines — what's left must be exactly the one
-// runtime statement a type-only module emits.
+// COMMENTS ARE NOT CONTENT, on either arm. tsc PRESERVES a `/* ... */` header from the
+// source into BOTH the emitted JS and the emitted `.d.ts`, and appends a
+// `//# sourceMappingURL` line to each. A scan reading raw text counts that prose as content:
+// the JS arm read a preserved header as runtime code (Codex, #113's PR), and the `.d.ts` arm
+// failed `verify` over a doc comment that merely QUOTED `export declare const` (Codex,
+// #111's PR) — the same defect, found twice because the stripping lived in only one of them.
+// One stripper now, so a fix to it lands on both.
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[^\S\n]*\/\/.*$/gm, '');
+}
+
+// Comments and blank lines removed, what's left must be exactly the one runtime statement a
+// type-only module emits.
 function runtimeBody(file) {
-  return (
-    readFileSync(file, 'utf8')
-      // Block comments first: tsc PRESERVES a `/* ... */` header from the source into the
-      // emit, and a line filter that only drops `//` would then read it as runtime content
-      // and fail a perfectly type-only package (Codex, #113's PR).
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .split('\n')
-      .filter((line) => line.trim() !== '' && !line.trim().startsWith('//'))
-      .join('\n')
-      .trim()
-  );
+  return stripComments(readFileSync(file, 'utf8'))
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .join('\n')
+    .trim();
 }
 
 // WHAT THIS SCRIPT IS, AND IS NOT. It proves `@wynding/types` ships no runtime code by
@@ -124,8 +130,23 @@ function runtimeBody(file) {
 const VALUE_SPACE =
   /^\s*export\s+declare\s+(?:abstract\s+|async\s+)*(const|let|var|function|class|namespace|module)\b|^\s*export\s+(?:const\s+)?(enum|namespace)\b/m;
 
-const declaring = filesUnder(join(PKG_DIR, 'dist'), EMITTED_DTS)
-  .map((file) => ({ file, hit: VALUE_SPACE.exec(readFileSync(file, 'utf8')) }))
+// A FLOOR, because zero files scanned is not a pass. The JS arm has `existsSync(DIST_INDEX)`
+// above and so cannot silently examine nothing; this arm had no equivalent, and if
+// declaration emit were ever turned off in `tsconfig.base.json` — or the declarations landed
+// outside `dist` — it would report success having read no file at all (Codex, #111's PR).
+// Silent under-coverage is the exact failure this script exists to catch, so it must not be
+// this script's own failure mode.
+const declarationFiles = filesUnder(join(PKG_DIR, 'dist'), EMITTED_DTS);
+if (declarationFiles.length === 0) {
+  fail(
+    `no .d.ts files under ${join(PKG_DIR, 'dist')} after a successful build — the value-space\n` +
+      '   check would have scanned nothing and passed. Has `declaration` been turned off, or\n' +
+      '   the declaration output moved out of `dist`?',
+  );
+}
+
+const declaring = declarationFiles
+  .map((file) => ({ file, hit: VALUE_SPACE.exec(stripComments(readFileSync(file, 'utf8'))) }))
   .filter(({ hit }) => hit !== null);
 
 if (declaring.length > 0) {
@@ -149,6 +170,9 @@ if (offenders.length > 0) {
   );
 }
 
+// Both counts, because a success line naming only one arm cannot distinguish "the other arm
+// found nothing wrong" from "the other arm read nothing at all".
 console.log(
-  `✓ @wynding/types emits nothing but \`export {};\` across all ${String(emitted.length)} emitted module(s) (still type-only).`,
+  `✓ @wynding/types emits nothing but \`export {};\` across all ${String(emitted.length)} emitted module(s), ` +
+    `and declares no value-space exports across ${String(declarationFiles.length)} .d.ts file(s) (still type-only).`,
 );
