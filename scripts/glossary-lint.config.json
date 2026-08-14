@@ -1,5 +1,5 @@
 {
-  "note": "Exceptions for scripts/check-glossary-terms.mjs. `include` is the doc set that carries Wynding's game vocabulary; ADRs and design-notes are deliberately out of scope \u2014 they are engineering prose, where these words (save, layer, field, digest) carry their ordinary technical senses and would cost far more exceptions than the drift they would catch. `ignoredTerms` are avoided words whose other sense cannot be told apart mechanically. `allowedSenses` are case-insensitive regexes over a line of prose: a hit inside a match is a different sense, not drift; keep them narrow, since a loose pattern exempts the next real violation on the same line. Every entry states why; an entry that matches nothing fails the check. See docs/ai-workflow.md.",
+  "note": "Exceptions for scripts/check-glossary-terms.mjs. `include` is the doc set that carries Wynding's game vocabulary; ADRs and design-notes are deliberately out of scope \u2014 they are engineering prose, where these words (save, layer, field, digest) carry their ordinary technical senses and would cost far more exceptions than the drift they would catch. `ignoredTerms` are avoided words whose other sense cannot be told apart mechanically. `allowedSenses` are case-insensitive regexes over a line of prose: a hit inside a match is a different sense, not drift; keep them narrow, since a loose pattern exempts the next real violation on the same line. Every entry states why; an entry that matches nothing fails the check. See docs/ai-workflow.md. THREAT MODEL, so this list stops being read as adversarial-proof: an allowedSenses entry disambiguates a SPECIFIC sentence that exists in a scanned document. It is not a filter an adversary cannot defeat, and it cannot become one \u2014 the patterns are regexes over prose, so a sufficiently determined sentence can always be built to fit one. The job here is catching DRIFT in newly written prose, and for that the discipline that matters is anchoring each alternative to distinctive words from its host clause rather than to common ones. Successive review rounds on #91 kept finding alternatives that were still too generic; each was tightened, and finding another is an improvement to make, not a defect in the mechanism.",
   "include": [
     "docs/CONTEXT.md",
     "docs/vision.md",
@@ -252,7 +252,7 @@
     },
     {
       "term": "layer",
-      "pattern": "one layer at a time|paint layer",
+      "pattern": "disarm or deselect one layer at a time|paint layer",
       "why": "Escape/Close backing out one modal/UI layer at a time, and the render paint layer (`drawCreeps`/`drawTowers`) \u2014 neither is a creep's domain.",
       "files": ["docs/accessibility-checklist.md"]
     },
@@ -264,7 +264,7 @@
     },
     {
       "term": "field",
-      "pattern": "field, not two independent booleans|they read the same field|the field is proven to gate on data|the sixth field|six-field accessible text|every other Panel field",
+      "pattern": "field, not two independent booleans|they read the same field|the field is proven to gate on data|dated to record the sixth field|six-field accessible text|every other Panel field",
       "why": "The TowerStats/Panel schema sense. `read the same field` is anchored to its subject (\"they read the same field\") \u2014 bare, it would exempt \"creeps entering from the north read the same field\", which IS the board sense.",
       "files": ["docs/accessibility-checklist.md"]
     },
@@ -294,7 +294,7 @@
     },
     {
       "term": "map",
-      "pattern": "literal-key map|label map|total-over-any-string map|re-maps the palette|maps to the|Both maps are unit-tested",
+      "pattern": "literal-key map|label map|total-over-any-string map|re-maps the palette|maps to the existing|Both maps are unit-tested",
       "why": "The JS lookup-table sense. `Both maps are` is anchored to \"unit-tested\" \u2014 bare, it would exempt \"both maps are twenty by twelve\", which IS the board sense.",
       "files": ["docs/accessibility-checklist.md"]
     },
@@ -306,7 +306,7 @@
     },
     {
       "term": "recording",
-      "pattern": "asserted against a recording|recording-double",
+      "pattern": "are now asserted against a recording|recording-double",
       "why": "The test-double sense, anchored to its host clause. An earlier form allowed 25 arbitrary characters between \"recording\" and \"double\" \u2014 the loosest pattern in this file \u2014 which would have exempted \"the recording plays back at double speed\". Note the anchor cannot name the code span between them: this linter strips inline code before matching.",
       "files": ["docs/accessibility-checklist.md"]
     },
@@ -330,7 +330,7 @@
     },
     {
       "term": "frame",
-      "pattern": "rather than relying on a frame|frame that refreshes|every few frames",
+      "pattern": "rather than relying on a frame|frame that refreshes|can tick every few frames",
       "why": "The render-frame (rAF) sense. `relying on a frame` is anchored to \"rather than relying on a frame\" \u2014 bare, it would exempt \"the sim advances by relying on a frame counter\", which IS the tick sense.",
       "files": ["docs/accessibility-checklist.md"]
     }
