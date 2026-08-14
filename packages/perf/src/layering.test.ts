@@ -60,6 +60,17 @@ describe('the SHIPPED app trees never import this package or the not-shippable c
         /['"]@wynding\/content\/catalog['"]/.test(text)
       ) {
         offenders.push(file);
+        continue;
+      }
+      // A RELATIVE path reaches the same modules while dodging every specifier above:
+      // `../../../packages/content/src/catalog` is resolved and bundled by Vite exactly
+      // like the package import (Codex, #111's PR). Rather than enumerate the reachable
+      // targets a second time, reject the whole shape — shipped code has no business
+      // reaching into another package by path when the package graph exists. Test files
+      // are excluded because they are not bundled, and one legitimately does this
+      // (`apps/server/src/replay-parity.test.ts` imports a showcase fixture).
+      if (!file.endsWith('.test.ts') && /(?:from|import)\s*\(?\s*['"][^'"]*packages\//.test(text)) {
+        offenders.push(file);
       }
     }
     expect(offenders).toEqual([]);
