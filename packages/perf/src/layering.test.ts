@@ -36,20 +36,20 @@ function listFilesRecursive(dir: string): string[] {
   return out;
 }
 
-describe('apps/web/src (the SHIPPED app) never imports this package or the stress subpath', () => {
-  const webSrcDir = join(
-    dirname(fileURLToPath(import.meta.url)),
-    '..',
-    '..',
-    '..',
-    'apps',
-    'web',
-    'src',
-  );
+// EVERY shipped tree, not just the web app. `apps/server` ships too and already declares
+// `@wynding/content` as a production dependency, so a `@wynding/content/catalog` import
+// there would have gone undetected by a check scoped to `apps/web/src` (Codex, #111's PR)
+// — the same defect class this guard exists for: narrower than the invariant it encodes.
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const SHIPPED_TREES = [
+  join(REPO_ROOT, 'apps', 'web', 'src'),
+  join(REPO_ROOT, 'apps', 'server', 'src'),
+];
 
-  it('no file under apps/web/src/** imports @wynding/perf, @wynding/content/stress, or @wynding/content/catalog', () => {
-    const files = listFilesRecursive(webSrcDir);
-    expect(files.length).toBeGreaterThan(0); // sanity: the directory actually resolved
+describe('the SHIPPED app trees never import this package or the not-shippable content subpaths', () => {
+  it('no file under a shipped src/** imports @wynding/perf, @wynding/content/stress, or @wynding/content/catalog', () => {
+    const files = SHIPPED_TREES.flatMap(listFilesRecursive);
+    expect(files.length).toBeGreaterThan(0); // sanity: the directories actually resolved
 
     const offenders: string[] = [];
     for (const file of files) {

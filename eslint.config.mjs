@@ -114,6 +114,18 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
+          // `Math` and `Date` reached through a global object need the NONDETERMINISTIC
+          // member named, not the namespace: matching `globalThis.Math` wholesale rejected
+          // `globalThis.Math.floor(3 / 2)`, which is perfectly deterministic (Codex,
+          // #111's PR — the fourth false positive this zone produced, and the same lesson
+          // as the type-only check's: a guard matching one level too high reds correct
+          // code, which is worse than the gap it was widened to close).
+          selector:
+            'MemberExpression[object.object.name=/^(globalThis|window|global|self)$/][object.property.name=/^(Math|Date)$/][property.name=/^(random|now)$/]',
+          message:
+            'No ambient randomness or wall-clock time in the deterministic core — use the seeded Rng from @wynding/engine and the tick counter.',
+        },
+        {
           // Node's `process` timing/scheduling surface: `process.nextTick(...)` schedules
           // work outside the initiating step, `process.hrtime.bigint()` is ambient timing.
           // Both typecheck here because @types/node is auto-included.
@@ -139,7 +151,7 @@ export default tseslint.config(
           // `globalThis.Math.random()` never produces a bare `Math` identifier either, so the
           // inner `globalThis.Math` member expression is what has to match.
           selector:
-            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|Date|Math|process)$/]',
+            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|process)$/]',
           message:
             'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
         },
