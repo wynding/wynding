@@ -198,14 +198,14 @@
     },
     {
       "term": "layout",
-      "pattern": "app-shell layout|Shell/Rail/Card/Panel/Dock layout|in BOTH layouts|Both layouts already|two layouts|Compact layout|layout/interaction story|New layout states|layout/topology change|Neither layout|declared layout region",
-      "why": "The app's Standard/Compact responsive UI layout system, construction by construction. `both layouts` is anchored to \"in BOTH layouts\" \u2014 bare, it would exempt \"both layouts funnel creeps into a corridor\", which IS the maze sense.",
+      "pattern": "app-shell layout|Shell/Rail/Card/Panel/Dock layout|in BOTH layouts|Both layouts already|one DOM topology, two layouts|Compact layout|layout/interaction story|New layout states|layout/topology change|Neither layout has a fixed card count|declared layout region",
+      "why": "The app's Standard/Compact responsive UI layout system, construction by construction. `both layouts` is anchored to \"in BOTH layouts\" \u2014 bare, it would exempt \"both layouts funnel creeps into a corridor\", which IS the maze sense. Review found `two layouts` and `Neither layout` still bare \u2014 each anchored to its host clause after a sweep that constructed a maze-sense sentence for every short alternative in this file, not just the one that was reported.",
       "files": ["docs/accessibility-checklist.md"]
     },
     {
       "term": "layout",
       "pattern": "cue-radius(/overlap)? layout",
-      "why": "The deferred cue-geometry design pass this checklist repeatedly refers back to (Story 6/8's PARTIAL rows) \u2014 an arrangement of render radii, not a maze.",
+      "why": "The deferred cue-geometry design pass this checklist repeatedly refers back to (Story 6/8's PARTIAL rows) \u2014 an arrangement of render radii, not a maze. Review found `two layouts` and `Neither layout` still bare \u2014 each anchored to its host clause after a sweep that constructed a maze-sense sentence for every short alternative in this file, not just the one that was reported.",
       "files": ["docs/accessibility-checklist.md"]
     },
     {
@@ -234,13 +234,13 @@
     },
     {
       "term": "trap",
-      "pattern": "never traps|focus trap|two-branch trap",
+      "pattern": "It never traps|focus trap|two-branch trap",
       "why": "Three unrelated senses: the Fullscreen API never trapping the user, WCAG's keyboard focus trap, and the ordinary \"code trap\" (a two-branch pitfall a mutation test catches) \u2014 none is the burst-tower sense.",
       "files": ["docs/accessibility-checklist.md"]
     },
     {
       "term": "level",
-      "pattern": "game-level|type-level|zoom level",
+      "pattern": "any game-level Escape|type-level|zoom level",
       "why": "Ordinary English compounds \u2014 Escape handling scoped to the whole game, a TypeScript type-system fact, and browser zoom percentage \u2014 none is a board, wave, or difficulty tier.",
       "files": ["docs/accessibility-checklist.md"]
     },
@@ -294,7 +294,7 @@
     },
     {
       "term": "map",
-      "pattern": "literal-key map|label map|total-over-any-string map|re-maps the|maps to the|Both maps are unit-tested",
+      "pattern": "literal-key map|label map|total-over-any-string map|re-maps the palette|maps to the|Both maps are unit-tested",
       "why": "The JS lookup-table sense. `Both maps are` is anchored to \"unit-tested\" \u2014 bare, it would exempt \"both maps are twenty by twelve\", which IS the board sense.",
       "files": ["docs/accessibility-checklist.md"]
     },
