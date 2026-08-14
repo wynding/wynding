@@ -108,10 +108,21 @@ function runtimeBody(file) {
 // in the value space, so a consumer can import and use it and the package stops being
 // type-only in the only sense that matters to callers. (Caught by Codex on #113's PR,
 // verified: the JS-only form of this check reported success on exactly that input.)
-// Type-space declarations — interface, type, and `declare` on a namespace/module — are
-// fine and expected; these five keywords are the value-space ones.
+// EXPORTED value-space declarations only, and that is the structural point rather than a
+// concession. The invariant is about what a CONSUMER can reach: a non-exported
+// `declare const brand: unique symbol` is the idiomatic way to key a branded type, emits
+// no JavaScript, and cannot be imported — flagging it would fail a legitimately type-only
+// package (Codex, #113's PR; the third false positive this check produced, and the one
+// that showed the earlier arms were matching the wrong property). Requiring `export`
+// removes that whole class instead of adding another exception for each shape of it.
+//
+// Known residual, stated rather than papered over: `declare const x; export { x };`
+// separates the declaration from its export and would pass. Consistent with this script's
+// recorded scope — it is a regression guard, not a proof.
+// Type-space declarations — interface, type, and `declare` on a namespace/module without
+// an export — are fine and expected.
 const VALUE_SPACE =
-  /^\s*(?:export\s+)?declare\s+(?:abstract\s+|async\s+)*(const|let|var|function|class|namespace|module)\b|^\s*(?:export\s+)?(?:const\s+)?(enum|namespace)\b/m;
+  /^\s*export\s+declare\s+(?:abstract\s+|async\s+)*(const|let|var|function|class|namespace|module)\b|^\s*export\s+(?:const\s+)?(enum|namespace)\b/m;
 
 const declaring = filesUnder(join(PKG_DIR, 'dist'), EMITTED_DTS)
   .map((file) => ({ file, hit: VALUE_SPACE.exec(readFileSync(file, 'utf8')) }))
