@@ -281,10 +281,28 @@ if (declaring.length > 0) {
   );
 }
 
+// THE TWO SHAPES AN EMPTY MODULE COMPILES TO — which one tsc writes is decided by the module
+// FORMAT, not by the source being empty. An ESM emit (`.js` from `.ts`, `.mjs` from `.mts`) is
+// `export {};`; a CommonJS emit (`.cjs` from a `.cts`) is the `"use strict"` + `__esModule`
+// scaffold instead. Comparing against the ESM form alone meant a perfectly type-only `.cts` was
+// reported as "emits runtime code" while its own `.d.cts` declared nothing at all — so the
+// package simply could not contain a `.cts`, whatever was in it (Codex, #111's PR).
+//
+// All three emissions were measured rather than reasoned about, which is what showed `.mjs`
+// needs no entry of its own: it emits the identical ESM string.
+//
+// Still an EXACT comparison, against a closed set of two. That exactness is what makes this arm
+// unforgeable — one extra statement of any kind fails it — and if a future tsc changes its
+// scaffold, this fails CLOSED on a real build rather than quietly admitting something.
+const EMPTY_MODULE_BODIES = new Set([
+  'export {};',
+  '"use strict";\nObject.defineProperty(exports, "__esModule", { value: true });',
+]);
+
 const emitted = filesUnder(join(PKG_DIR, 'dist'), EMITTED_JS);
 const offenders = emitted
   .map((file) => ({ file, body: runtimeBody(file) }))
-  .filter(({ body }) => body !== 'export {};');
+  .filter(({ body }) => !EMPTY_MODULE_BODIES.has(body));
 
 if (offenders.length > 0) {
   fail(
@@ -296,6 +314,6 @@ if (offenders.length > 0) {
 // Both counts, because a success line naming only one arm cannot distinguish "the other arm
 // found nothing wrong" from "the other arm read nothing at all".
 console.log(
-  `✓ @wynding/types emits nothing but \`export {};\` across all ${String(emitted.length)} emitted module(s), ` +
+  `✓ @wynding/types emits only empty modules across all ${String(emitted.length)} emitted module(s), ` +
     `and declares no value-space exports across ${String(declarationFiles.length)} .d.ts file(s) (still type-only).`,
 );
