@@ -23,6 +23,16 @@
 // `/perf/main-perf` from the web app, or a shipped module importing a `.test.ts` helper that
 // imports one of them. Those are demonstrated with probes in #129, which owns the real check.
 //
+// One SPECIFIER-shaped escape is also left open, deliberately, and saying so is the point of
+// this paragraph — an earlier draft claimed the specifier side was airtight, and it was not.
+// A no-substitution template literal — import(`@wynding/perf`) with backticks — is resolved
+// statically by Vite and matches nothing here, because backtick is not in the quote class.
+// Adding it would cost more than it buys: three existing header comments legitimately name
+// these packages in backticked prose (`packages/content/src/stress.ts`, `catalog.ts`,
+// `stress.test.ts`), and every future comment would owe the same tax, so the guard would start
+// reddening documentation. A template-literal import specifier is not the accident this file
+// exists to catch; a comment mentioning a package name is an everyday act.
+//
 // This file is deliberately NOT grown to cover them. An earlier revision chased those
 // spellings through enumeration, then workspace discovery, then full specifier resolution
 // with each package's `exports` map, and a reviewer defeated every version — because all
@@ -48,7 +58,10 @@ const PERF_PACKAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = join(PERF_PACKAGE_DIR, '..', '..');
 const asRepoPath = (abs: string): string => relative(REPO_ROOT, abs).split(sep).join('/');
 
-const FORBIDDEN_SPECIFIER = /['"]@wynding\/(?:perf|content\/(?:stress|catalog))['"]/;
+// The `(?:\/…)?` tail covers SUBPATHS. `@wynding/perf/harness` slipped past a pattern that
+// demanded the closing quote immediately after `perf` — latent today, since perf's `exports` map
+// offers only ".", but live the day anyone adds a subpath export (adversarial review, #111's PR).
+const FORBIDDEN_SPECIFIER = /['"]@wynding\/(?:perf|content\/(?:stress|catalog))(?:\/[^'"]*)?['"]/;
 
 function listFilesRecursive(dir: string): string[] {
   const out: string[] = [];

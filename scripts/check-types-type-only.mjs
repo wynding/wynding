@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PKG_DIR = join(ROOT, 'packages', 'types');
@@ -75,13 +76,17 @@ function filesUnder(dir, re) {
 const EMITTED_JS = /\.(js|mjs|cjs)$/;
 const EMITTED_DTS = /\.d\.(ts|mts|cts)$/;
 
-// COMMENTS ARE NOT CONTENT, on either arm. tsc PRESERVES a `/* ... */` header from the
-// source into BOTH the emitted JS and the emitted `.d.ts`, and appends a
-// `//# sourceMappingURL` line to each. A scan reading raw text counts that prose as content:
-// the JS arm read a preserved header as runtime code (Codex, #113's PR), and the `.d.ts` arm
-// failed `verify` over a doc comment that merely QUOTED `export declare const` (Codex,
-// #111's PR) — the same defect, found twice because the stripping lived in only one of them.
-// One stripper now, so a fix to it lands on both.
+// COMMENTS ARE NOT CONTENT. tsc PRESERVES a `/* ... */` header from the source into the emit
+// and appends a `//# sourceMappingURL` line, and a scan reading raw text counts that prose as
+// runtime code (Codex, #113's PR).
+//
+// Used by the JS arm ONLY. It is a string-blind regex — `'/*'` inside a string literal opens a
+// comment it cannot see — and that blindness was a live escape while the `.d.ts` arm shared it:
+// `export type A = '/*'` … `export type B = '*/'` deleted an `export declare enum` sitting
+// between them. That arm now parses instead (see `valueDeclarations`), which is the real fix.
+// Here the blindness is harmless in the only direction that matters: this arm demands the body
+// equal EXACTLY `export {};`, so mangled input fails the comparison rather than passing it.
+// Fail-closed, and deliberately left simple.
 function stripComments(text) {
   return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[^\S\n]*\/\/.*$/gm, '');
 }
@@ -122,13 +127,129 @@ function runtimeBody(file) {
 // that showed the earlier arms were matching the wrong property). Requiring `export`
 // removes that whole class instead of adding another exception for each shape of it.
 //
-// Known residual, stated rather than papered over: `declare const x; export { x };`
-// separates the declaration from its export and would pass. Consistent with this script's
-// recorded scope — it is a regression guard, not a proof.
-// Type-space declarations — interface, type, and `declare` on a namespace/module without
-// an export — are fine and expected.
-const VALUE_SPACE =
-  /^\s*export\s+declare\s+(?:abstract\s+|async\s+)*(const|let|var|function|class|namespace|module)\b|^\s*export\s+(?:const\s+)?(enum|namespace)\b/m;
+// THIS ARM PARSES; IT DOES NOT MATCH TEXT. That is a reversal, and the evidence for it is
+// specific rather than aesthetic. Four rounds of regex refinement on this check each closed one
+// spelling and opened another, and the two most recent are the argument:
+//
+//   - Requiring an `export` prefix (added to kill a false positive on the branded-symbol idiom)
+//     made `declare global { … }` and `declare module 'node:fs' { … }` invisible, because tsc
+//     emits augmentations WITHOUT that prefix and strips `export` from their members. A package
+//     could augment its own name — `declare module '@wynding/types' { export const x: number }` —
+//     and this check would certify it type-only.
+//   - `stripComments` (added to kill a false positive on a doc comment quoting a declaration) is
+//     string-blind, so `export type A = '/*'` … `export type B = '*/'` deletes everything between
+//     them, an `export declare enum` included.
+//
+// Both were measured end to end: a consumer importing the resulting phantom bindings compiled
+// with `tsc` exit 0 and then died at runtime with `TypeError: Cannot read properties of
+// undefined` — the exact lie this script exists to prevent, certified clean by it. (Adversarial
+// review on #111's PR.) A guard that must strip comments to avoid false positives, in a language
+// whose strings can contain comment delimiters, has the wrong substrate.
+//
+// So the question — "does this `.d.ts` declare anything a consumer can import as a VALUE?" — is
+// handed to the parser that owns it. This is deliberately NOT the module-graph mistake made
+// elsewhere in this PR: that question needed the bundler and no amount of parsing would have
+// answered it, whereas this one is purely syntactic, single-file, and needs no type checker, no
+// resolution, and no new dependency (`typescript` is already installed and already spawned to
+// build this package). Comments and string literals stop being hazards because the parser knows
+// what they are, and a namespace body becomes inspectable instead of guessed at.
+const VALUE_STATEMENT = new Set([
+  ts.SyntaxKind.VariableStatement,
+  ts.SyntaxKind.FunctionDeclaration,
+  ts.SyntaxKind.ClassDeclaration,
+  ts.SyntaxKind.EnumDeclaration,
+]);
+
+const isExported = (node) =>
+  (node.modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+
+/** Does this namespace/module body introduce anything that exists at runtime? Members are counted
+ *  whether or not they carry `export`: inside an ambient block tsc omits the keyword, and counting
+ *  them is the safe side. */
+function bodyDeclaresValue(node) {
+  // A DOTTED namespace nests through its BODY, not through a block. `namespace A.B { … }` parses
+  // as A whose `body` is another ModuleDeclaration, so `body.statements` is `undefined` and the
+  // whole form read as empty — `export declare namespace ZA.ZB { const smuggled: number }` shipped
+  // a phantom binding that a consumer compiled against (tsc exit 0) and then crashed on at runtime
+  // (adversarial review, #111's PR). Braced nesting was always handled; only this spelling was not.
+  if (node.body !== undefined && ts.isModuleDeclaration(node.body))
+    return bodyDeclaresValue(node.body);
+  return (node.body?.statements ?? []).some(
+    (s) =>
+      VALUE_STATEMENT.has(s.kind) ||
+      s.kind === ts.SyntaxKind.ExportAssignment ||
+      (ts.isModuleDeclaration(s) && bodyDeclaresValue(s)),
+  );
+}
+
+/** Every value-space binding this `.d.ts` puts within a consumer's reach, as printable text. */
+function valueDeclarations(file, text) {
+  const found = [];
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  // A PARSE ERROR MUST NOT READ AS "no values declared". `createSourceFile` never throws — it
+  // recovers, and recovery can swallow whole declarations (an unterminated `interface {` absorbs
+  // the `export declare const` after it). Unreachable today, since this scans emit that tsc has
+  // just produced from a successful build, but a scan that examines nothing and reports success is
+  // precisely this script's own stated failure mode, so it fails closed instead.
+  if (source.parseDiagnostics?.length > 0) {
+    fail(
+      `${file} did not parse cleanly, so its value-space scan cannot be trusted:\n` +
+        // `messageText` is a DiagnosticMessageChain for chained errors, which prints as
+        // `[object Object]` — flatten it or the one diagnostic a reader needs is unreadable.
+        `   ${ts.flattenDiagnosticMessageText(source.parseDiagnostics[0].messageText, ' ')}`,
+    );
+  }
+  // `getStart` rather than `node.pos`: the latter begins at the node's leading trivia, so a
+  // declaration carrying a doc comment reported the COMMENT as the offending line.
+  const record = (node, why) =>
+    found.push(`${why}: ${text.slice(node.getStart(source), node.end).trim().split('\n')[0]}`);
+
+  for (const node of source.statements) {
+    if (VALUE_STATEMENT.has(node.kind) && isExported(node)) {
+      record(node, 'exported value declaration');
+    } else if (ts.isImportEqualsDeclaration(node) && isExported(node)) {
+      // `export import X = Y` aliases whatever Y is, values included, and names none of the
+      // keywords a text scan would look for.
+      record(node, 'exported import-equals alias');
+    } else if (ts.isExportAssignment(node)) {
+      record(node, 'export assignment'); // `export = X` / `export default X`
+    } else if (ts.isModuleDeclaration(node)) {
+      if (node.flags & ts.NodeFlags.GlobalAugmentation) {
+        // `declare global` needs no export to reach a consumer — it reaches EVERY consumer.
+        record(node, 'global augmentation');
+      } else if (ts.isStringLiteral(node.name)) {
+        // `declare module 'x'` augments another module (or this one). A dependency-free
+        // vocabulary package has no business doing that at all, so the container is the
+        // offence and the body does not need inspecting.
+        record(node, 'module augmentation');
+      } else if (isExported(node) && bodyDeclaresValue(node)) {
+        // A plain namespace is flagged only when it actually holds values — the check the old
+        // regex could not make, and the reason `export declare namespace N { type T = string }`
+        // used to be a standing false positive.
+        record(node, 'exported namespace holding values');
+      }
+    }
+  }
+  return found;
+}
+
+// Deliberately NOT flagged here: a bare `export { x }` re-export. Whether `x` is a type or a
+// value is not decidable from this file alone, and flagging it would red every type re-export.
+// It needs no arm — `verbatimModuleSyntax` emits the re-export into `dist/index.js`, so the JS
+// arm above fails on it. Measured, along with `export default <a value>` and a re-exported
+// ambient enum; an earlier comment here claimed that form was an unguarded residual, and it
+// was simply wrong.
+//
+// Also deliberately not counted: an `export import X = Y` sitting INSIDE a namespace body.
+// Whether `Y` names a type or a value needs a type checker, and counting it flagged
+// `declare namespace Pub { export import T = Internal.T }` — the idiomatic way to re-export a
+// type from a namespace, which emits no JS whatsoever (adversarial review, #111's PR). Erring
+// the other way is the deliberate choice this file has now made three times: a guard that reds
+// correct code is worse than one with a stated gap. The gap is narrow — a namespace holding a
+// real VALUE alias is instantiated, so tsc emits JS for it and the JS arm fires; only the
+// ambient (`declare namespace`) spelling of a value alias would slip, and this package declares
+// no namespaces at all. The top-level `export import` above IS still flagged, and costs nothing:
+// `verbatimModuleSyntax` rejects that form at build (TS1269/TS1288) before it can reach here.
 
 // A FLOOR, because zero files scanned is not a pass. The JS arm has `existsSync(DIST_INDEX)`
 // above and so cannot silently examine nothing; this arm had no equivalent, and if
@@ -146,13 +267,15 @@ if (declarationFiles.length === 0) {
 }
 
 const declaring = declarationFiles
-  .map((file) => ({ file, hit: VALUE_SPACE.exec(stripComments(readFileSync(file, 'utf8'))) }))
-  .filter(({ hit }) => hit !== null);
+  .map((file) => ({ file, hits: valueDeclarations(file, readFileSync(file, 'utf8')) }))
+  .filter(({ hits }) => hits.length > 0);
 
 if (declaring.length > 0) {
   fail(
     '@wynding/types declares runtime values in its .d.ts — it is meant to stay type-only.\n' +
-      declaring.map(({ file, hit }) => `   ${file}:\n   ${hit[0].trim()}`).join('\n') +
+      declaring
+        .map(({ file, hits }) => `   ${file}:\n${hits.map((h) => `     ${h}`).join('\n')}`)
+        .join('\n') +
       '\n   (These emit no JS, so the dist/*.js check above cannot see them — but a consumer\n' +
       '   can still import and call them.)',
   );
