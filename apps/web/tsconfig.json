@@ -10,11 +10,9 @@
   },
   // `perf` joins `src` because it is APPLICATION code — Vite builds it
   // (`vite.perf.config.ts`), and Vite does not typecheck, so a type error there would
-  // surface only as a broken perf run. `e2e` (the shipped app's Playwright specs) stays
-  // out, matching this repo's existing convention: those run under Playwright's own
-  // transform and nothing outside them depends on their types.
+  // surface only as a broken perf run.
   //
-  // `e2e-perf` is the one exception (QC round-1 fix 10): `stress.perf.spec.ts` hand-
+  // `e2e-perf` was the first carve-out (QC round-1 fix 10): `stress.perf.spec.ts` hand-
   // maintains a `declare global { interface Window { wyndingPerf?: … } }` block that
   // must structurally match `perf/main-perf.ts`'s own `PerfHarness` interface (see that
   // file's header for why it is a hand-copy rather than a shared import). Nothing
@@ -23,6 +21,33 @@
   // or removed field. Pulling `@playwright/test`'s types in for this one directory did
   // not need any special handling: `stress.perf.spec.ts` imports `test`/`expect`
   // explicitly, so its types resolve the same way any other npm package's would.
+  //
+  // `e2e` (#110 — supersedes the earlier "stays out, matching this repo's existing
+  // convention" note that used to live here): the old rationale was about dependency
+  // direction ("nothing outside them depends on their types"), which is true but beside
+  // the point — these specs are CI's whole functional-UI gate (the a11y e2e job), so a
+  // type error inside one should fail loud as a type error, not surface later as an
+  // assertion that silently stops asserting. The fallout was one call site: `stage-
+  // stability.spec.ts`'s `page.evaluate(([x, y]) => …, [down.x, down.y])` inferred `x`/
+  // `y` as `number | undefined` (array-literal argument, not a tuple) — rewritten as the
+  // `{ x, y }` object-argument form, which `layout-probe.ts` already uses for the same
+  // reason. (Most `page.evaluate` calls in this directory take no argument or a single
+  // scalar and were unaffected.)
+  //
+  // But it is typechecked in its OWN program (`tsconfig.e2e.json`, run as a second
+  // `tsc --noEmit` by this package's `typecheck` script), NOT by adding it here. That
+  // goal is one-directional — errors in a spec should be loud — while putting `e2e` in
+  // this `include` also bought the reverse edge nobody wants: `e2e/fullscreen-stub.ts`
+  // and `e2e/install-stub.ts` carry `declare global { interface Window { … } }` blocks,
+  // and a global augmentation is PROGRAM-WIDE, so `__wyFullscreenCalls`, `__wyMakePrompt`
+  // and `__wyPromptCalls` became type-clean references from `src/**` — the compile-time
+  // barrier against shipping a test-only debug surface, quietly gone (Codex, #111's PR).
+  // Nothing shipped: Vite resolves its graph from `index.html`, not from this file. The
+  // barrier is the point, not the current absence of a violation.
+  //
+  // `e2e-perf` above stays in THIS program for the opposite reason: its `declare global`
+  // is deliberately meant to be cross-checked against `perf/main-perf.ts`, which is in
+  // this program too. Same construct, opposite intent — hence the split.
   "include": ["src", "perf", "e2e-perf"],
   "references": [
     { "path": "../../packages/render" },

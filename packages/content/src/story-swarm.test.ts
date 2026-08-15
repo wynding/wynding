@@ -185,6 +185,13 @@ describe('M2-S11 P4 — the re-ruled swarm criterion: clearable with AoE, not cl
       for (let col = 1; col <= 25; col++) {
         // Yield between columns: minutes of back-to-back synchronous sims starve the
         // vitest worker's RPC heartbeat under a contended `verify` run.
+        //
+        // The determinism zone bans schedulers because wall-clock timing inside the sim
+        // breaks replay byte-identity. Nothing crosses this yield: each `runSwarmWave`
+        // below is a complete, self-contained synchronous run, and the yield sits BETWEEN
+        // runs purely so the test runner can breathe. Site-local and deliberate rather
+        // than an exemption in the rule, so the guard stays strict everywhere else.
+        // eslint-disable-next-line no-restricted-globals -- yield between runs, not inside one
         await new Promise((resolve) => setImmediate(resolve));
         for (let row = 1; row <= 19; row++) {
           const r = runSwarmWave(
@@ -211,6 +218,7 @@ describe('M2-S11 P4 — the re-ruled swarm criterion: clearable with AoE, not cl
     // are a property of the non-AoE ids rather than of the sweep or the wave.
     let splashCleared = 0;
     for (let col = 1; col <= 25; col++) {
+      // eslint-disable-next-line no-restricted-globals -- yield between runs, not inside one
       await new Promise((resolve) => setImmediate(resolve)); // same heartbeat yield as above
       for (let row = 1; row <= 19; row++) {
         const r = runSwarmWave(

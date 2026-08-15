@@ -1,7 +1,7 @@
 {
   "name": "@wynding/types",
   "version": "0.0.0",
-  "description": "Shared types: the ADR 0007 ruleset-schema vocabulary and cross-package primitives.",
+  "description": "Shared types: the ADR 0007 ruleset-schema vocabulary and the domain types with production consumers.",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",

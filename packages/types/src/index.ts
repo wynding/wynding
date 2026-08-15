@@ -1,44 +1,22 @@
 // @wynding/types — shared domain types.
 //
 // Kept dependency-free and framework-agnostic so both the deterministic core
-// and the presentation/app layers can share one vocabulary. Nominal (branded)
-// primitives make it a type error to mix, say, a raw tile count with a
-// fixed-point quantity.
-
-/** Branded nominal type helper. */
-export type Brand<T, B extends string> = T & { readonly __brand: B };
-
-/** A discrete simulation step index. Game time is `tick * MS_PER_TICK`. */
-export type Tick = Brand<number, 'Tick'>;
-
-/** Seed for the deterministic RNG (uint32). */
-export type Seed = Brand<number, 'Seed'>;
-
-/**
- * A fixed-point scalar (integer encoding of a fractional quantity). Never a JS
- * float. The FP_SHIFT / conversion helpers live in `@wynding/engine` — a package
- * this one deliberately does NOT depend on (both are workspace roots; nothing here
- * imports them).
- */
-export type Fixed = Brand<number, 'Fixed'>;
-
-/** Stable identifier for a simulation entity (creep, tower, ...). */
-export type EntityId = Brand<number, 'EntityId'>;
-
-/** A position in fixed-point board space. */
-export interface Vec2 {
-  readonly x: Fixed;
-  readonly y: Fixed;
-}
+// and the presentation/app layers can share one vocabulary. Its real job is the
+// ADR 0007 ruleset schema below (the authored data shapes every package that
+// touches a ruleset shares) plus the small set of domain types with actual
+// production consumers, such as `Cell` (`board.ts`, `context.ts`,
+// `pathfinding.ts`, `tower.ts`). It previously also carried a branded-primitive
+// vocabulary (`Brand`/`Tick`/`Fixed`/`EntityId`/`Vec2`/`WorldHash`/`Seed`) meant
+// to make unit mix-ups a type error; #113 removed it — fifteen stories in, it had
+// zero real consumers (the sim's state is plain `number` throughout, and its one
+// near-consumer, `Seed`, was erased at the door by a `Seed | number` union), so
+// keeping it made a promise the codebase didn't keep.
 
 /** Integer board coordinate (tile grid cell). */
 export interface Cell {
   readonly col: number;
   readonly row: number;
 }
-
-/** A hex string content-hash of serialized state (see world-hash in the engine). */
-export type WorldHash = Brand<string, 'WorldHash'>;
 
 // ── The ruleset bundle (ADR 0007) — v2 schema ─────────────────────────────────
 //

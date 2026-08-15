@@ -152,9 +152,6 @@ importers:
 
   packages/replay:
     dependencies:
-      '@wynding/engine':
-        specifier: workspace:*
-        version: link:../engine
       '@wynding/sim':
         specifier: workspace:*
         version: link:../sim
