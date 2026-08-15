@@ -63,13 +63,25 @@ const asRepoPath = (abs: string): string => relative(REPO_ROOT, abs).split(sep).
 // offers only ".", but live the day anyone adds a subpath export (adversarial review, #111's PR).
 const FORBIDDEN_SPECIFIER = /['"]@wynding\/(?:perf|content\/(?:stress|catalog))(?:\/[^'"]*)?['"]/;
 
+// EVERY module extension a bundler will follow, not just the two this repo happens to contain.
+// A `.mts` or `.cts` module under a shipped tree was collected by nobody, so it could import
+// `@wynding/perf` and reach the bundle with this guard green (Codex, #111's PR — verified, and
+// `.js`/`.cjs`/`.mjs` were equally unscanned). The extensions in use today are 160 `.ts` files
+// and nothing else, which is exactly why the narrow filter looked correct for so long.
+//
+// Provenance worth keeping, because it is the same lesson twice: `check-types-type-only.mjs` in
+// this very PR already carries `EMITTED_JS = /\.(js|mjs|cjs)$/` with a comment recording that a
+// scan collecting only `.js` reported success while a runtime-bearing `.mjs` sat beside it
+// unchecked. That fix was made in one file and never carried to its sibling.
+const MODULE_FILE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
 function listFilesRecursive(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       out.push(...listFilesRecursive(full));
-    } else if (/\.(ts|tsx)$/.test(entry)) {
+    } else if (MODULE_FILE.test(entry)) {
       out.push(full);
     }
   }
