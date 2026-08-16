@@ -701,7 +701,7 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   // wave 4 of 4.
   await expect(previewTitle).toHaveText('Wave 4 of 10');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
-  await expect(preview.locator('li')).toHaveText([
+  await expect(preview.locator('.wy-preview-full')).toHaveText([
     '6 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
   ]);
 
@@ -744,7 +744,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   const preview = page.locator('.wy-wave-preview');
   await expect(preview).toBeVisible();
   await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 10');
-  await expect(preview.locator('li')).toHaveText([
+  await expect(preview.locator('.wy-preview-full')).toHaveText([
     '10 × Creep — ground, armor 0, leak cost 1, no immunities',
   ]);
 
@@ -828,14 +828,18 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
     ],
     10: [
-      '1 × Boss — ground, armor 8, leak cost 3, stun',
+      // The ONLY row in the arc carrying a role, and the only one whose accessible text
+      // changed at #101 — the `boss` clause leads because a role is an identity, not a
+      // deviation from a baseline. Its presence here is the parity proof: the role reaches
+      // assistive tech, not merely the visible glance.
+      '1 × Boss — boss, ground, armor 8, leak cost 3, stun',
       '8 × Creep — ground, armor 0, leak cost 1, no immunities',
     ],
   };
   for (let waveNumber = 2; waveNumber <= 10; waveNumber++) {
     await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
-    await expect(preview.locator('li')).toHaveText(EXPECTED_COMPOSITION[waveNumber]!);
+    await expect(preview.locator('.wy-preview-full')).toHaveText(EXPECTED_COMPOSITION[waveNumber]!);
     await callWavePaced(page, titleAfterCall(waveNumber, 10));
   }
   // Every wave has launched: the preview's explicit last-wave marker, and the control is

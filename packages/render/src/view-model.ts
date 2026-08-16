@@ -128,7 +128,7 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
  *  `entriesSummary` row is derived from a validated, catalog-resolved entry), but the
  *  join stays defensive rather than throwing: a forged/hand-built ruleset must not crash
  *  the renderer, so a missing definition falls back to the safest sv6-legal values
- *  (ground domain, no armor, no immunities) rather than dropping the row (an entry
+ *  (ground domain, no armor, no immunities, no boss role) rather than dropping the row (an entry
  *  disappearing from the preview is a worse UX bug than one rendering with placeholder
  *  metadata — a player would trust the shorter list).
  */
@@ -149,6 +149,11 @@ function previewEntries(
       // already takes on `domain`/`armor`/`immunities`.
       leakCost: def?.leakCost ?? 1,
       immunities: def?.immunities ?? [],
+      // `role` is optional on `CompiledCreep` ("omitted = no role"), so the comparison —
+      // not a truthiness check — is what makes this total: absent role, forged ruleset, and
+      // a future non-boss role all land on `false`, the same safest-legal-value fallback
+      // `domain`/`armor`/`immunities` take above.
+      boss: def?.role === 'boss',
     };
   });
 }

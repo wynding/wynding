@@ -49,7 +49,15 @@ test('1512×854: preview growth and hiding cannot re-project the board', async (
   const statusBefore = await statusHeight(page);
 
   // Grow the preview by three entry lines — wave 9 previews FOUR entries, so this is the
-  // real in-run range, applied as a DOM probe so the pin needs no four-wave playthrough.
+  // real in-run COUNT range, applied as a DOM probe so the pin needs no four-wave
+  // playthrough.
+  //
+  // The injected row text is the pre-#101 verbose sentence, KEPT DELIBERATELY after the
+  // content diet shortened real rows: these probes bound how far the preview may grow
+  // before the Board re-projects, so a taller-than-real row is the conservative direction
+  // and swapping in the shorter glance form would weaken every pin in this file. It is a
+  // height fixture, not a rendering assertion — the rendered text is pinned in
+  // `compact.spec.ts` and `smoke.spec.ts`, against both forms.
   await page.evaluate(() => {
     const list = document.querySelector('.wy-wave-preview-list')!;
     for (let i = 0; i < 3; i++) {

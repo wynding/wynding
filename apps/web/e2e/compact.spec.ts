@@ -178,11 +178,16 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const preview = page.locator('.wy-wave-preview');
     await expect(preview).toBeVisible(); // visible pre-start too (M2-S2 decouple)
     await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 10'); // M2-S11: the ten-wave arc
+    // Rows carry BOTH forms since #101, so a bare `li` locator reads the accessible
+    // sentence and the visible glance concatenated. Address each explicitly: the full form
+    // is unchanged (which is the parity guarantee — the diet cost no information), and the
+    // glance is the text a sighted player actually reads.
     const entries = preview.locator('li');
     await expect(entries).toHaveCount(1); // the shipped bundle's single creep kind
-    await expect(entries.first()).toHaveText(
+    await expect(preview.locator('.wy-preview-full').first()).toHaveText(
       '10 × Creep — ground, armor 0, leak cost 1, no immunities',
     );
+    await expect(preview.locator('.wy-preview-glance').first()).toHaveText('10 × Creep');
 
     // Force the SAME overflow smoke.spec's 200%-zoom gate proves for the chips, and confirm
     // the preview is still present and KEYBOARD-OPERABLE inside that same scrollport — never
@@ -266,11 +271,20 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // preview on wave 9 for the whole tail; the preview reflects Pending state under
     // pause by design, so nothing measured changes.
     await expect(entries).toHaveCount(4);
-    await expect(entries).toHaveText([
+    await expect(preview.locator('.wy-preview-full')).toHaveText([
       '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
       '4 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
       '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
+    ]);
+    // The arc's densest wave, in the form a player actually reads it (#101): three of the
+    // four rows collapse to bare count-and-name, and `air` is the only annotation standing
+    // — which is precisely the "is air next?" question the surface is scanned for.
+    await expect(preview.locator('.wy-preview-glance')).toHaveText([
+      '10 × Swarm Creep',
+      '6 × Fast Creep',
+      '4 × Armored Creep — armor 6',
+      '4 × Flying Creep — air',
     ]);
 
     // axe audit with all 4 rows showing — the standard bar every other HUD content is

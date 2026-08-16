@@ -1407,24 +1407,90 @@ export function createOverlay(
     stun: () => t('hud.preview.immunity.stun'),
   };
 
-  /** "{count} × {name} — {domain}, armor {n}, leak cost {n}, {immunities}" (M2-S10 ruling
-   *  3), never colour/icon-only. Leak cost is an ALWAYS-PRESENT stat slot, mirroring
-   *  `armor` — not conditional on being > 1 — following the `hud.preview.immunities.none`
-   *  precedent (name the zero case, i.e. the boring value, rather than omit the slot). */
-  function previewEntryText(entry: PreviewEntryVM): string {
+  /** THE ACCESSIBLE FORM — every stat slot always named: "{count} × {name} — {domain},
+   *  armor {n}, leak cost {n}, {immunities}", never colour/icon-only.
+   *
+   *  M2-S10 ruling 3 still holds here IN FULL: leak cost is an ALWAYS-PRESENT slot
+   *  mirroring `armor`, not conditional on being > 1, following the
+   *  `hud.preview.immunities.none` precedent (name the zero case, i.e. the boring value,
+   *  rather than omit the slot). The ruling's rationale is LEARNABILITY — a reader who does
+   *  not yet know that leak cost 1 is the baseline learns nothing from its absence — and a
+   *  screen-reader user cannot glance to pick deviations out of a list, so the vocabulary
+   *  that teaches what the stats ARE stays unabridged on this side. */
+  function previewEntryFull(entry: PreviewEntryVM): string {
     const domain = DOMAIN_NAME[entry.domain]();
     const immunities =
       entry.immunities.length === 0
         ? t('hud.preview.immunities.none')
         : entry.immunities.map((i) => IMMUNITY_NAME[i]()).join(', ');
-    return t('hud.preview.entry', {
+    // Two templates rather than one with an optional slot: the role is a LEADING clause, and
+    // an empty slot would leave "{name} — , ground, …" in every non-boss row. The one
+    // duplicated string is the cheaper failure mode, and it keeps each template independently
+    // localizable (a translator may need the role somewhere other than first).
+    //
+    // Each key is spelled as a LITERAL argument at its own call rather than selected by a
+    // ternary inside one call: `i18n-check.mjs` extracts usages by matching a quoted string
+    // immediately after the translate call, so a computed key is invisible to it and BOTH
+    // templates get reported as dead catalog entries (verified — that is how this first
+    // failed). The gate is right; the call shape is what had to change. NB the extractor
+    // scans comments too, so prose here must not spell a call-with-quoted-key either.
+    const params = {
       count: entry.count,
       name: creepName(entry.creepId),
       domain,
       armor: t('hud.preview.armor', { armor: entry.armor }),
       leakCost: t('hud.preview.leakCost', { leakCost: entry.leakCost }),
       immunities,
-    });
+    };
+    return entry.boss ? t('hud.preview.entry.boss', params) : t('hud.preview.entry', params);
+  }
+
+  /** THE VISIBLE FORM — the same row with every BASELINE-VALUED clause omitted, so what is
+   *  printed is exactly what deviates. M2-S10 ruling 3 was narrowed to the full form above
+   *  by the owner on 2026-08-16 (#101) on measured evidence: the preview is read to answer
+   *  two questions — "is air next?" and "is a boss next?" — while a live wave runs, i.e. as
+   *  a threat-signature glance, not a stat-table read. Rendering four clauses a row to
+   *  answer that tripled the card's height, and the card floats over the playing field.
+   *
+   *  OMITTED BY SEMANTIC BASELINE, NOT BY FREQUENCY. Each omission means "nothing to say
+   *  here": `ground` is the absence of the air threat, `armor 0` the absence of mitigation,
+   *  `leakCost 1` the schema floor (uniform across the whole catalog until M2-S10 lifted it
+   *  to a per-creep ceiling), `[]` the absence of immunities. That framing is what keeps
+   *  this correct for a MODDED bundle — a ruleset shipping nothing but armored creeps still
+   *  reads correctly, where a rule tuned to "what today's catalog happens to make rare"
+   *  would invert and print the common case while hiding the exception. */
+  function previewEntryGlance(entry: PreviewEntryVM): string {
+    const notes: string[] = [];
+    // Role leads — it is the heaviest thing about a row and the second of the two questions
+    // the surface is read to answer. It is NOT part of the omit-at-baseline set below: a
+    // role is an identity, not a deviation from a value.
+    //
+    // Mildly redundant against TODAY's catalog, whose only boss is localized "Boss" — but
+    // the redundancy is the safe direction, and it is temporary. `role` is DATA and the name
+    // is CONTENT: any bundle may name a boss anything (M3 delivers the tuned campaign), and
+    // inferring the role from the name would couple this surface to the copy.
+    if (entry.boss) notes.push(t('hud.preview.role.boss'));
+    if (entry.domain !== 'ground') notes.push(DOMAIN_NAME[entry.domain]());
+    if (entry.armor !== 0) notes.push(t('hud.preview.armor', { armor: entry.armor }));
+    if (entry.leakCost !== 1) {
+      notes.push(t('hud.preview.leakCost', { leakCost: entry.leakCost }));
+    }
+    if (entry.immunities.length > 0) {
+      notes.push(
+        t('hud.preview.glance.immune', {
+          // Wrapped rather than reusing the full form's bare list: standing alone in a
+          // glance, "stun" cannot be told from a creep that INFLICTS one.
+          immunities: entry.immunities.map((i) => IMMUNITY_NAME[i]()).join(', '),
+        }),
+      );
+    }
+    const count = entry.count;
+    const name = creepName(entry.creepId);
+    // The join separator is punctuation between already-translated fragments, not copy — the
+    // same posture the immunities list above has always taken with its `', '`.
+    return notes.length === 0
+      ? t('hud.preview.glance', { count, name })
+      : t('hud.preview.glance.noted', { count, name, notes: notes.join(' · ') });
   }
 
   // The preview's content only changes when `waveCursor` moves — a handful of times per
@@ -1446,7 +1512,7 @@ export function createOverlay(
         : `${preview.waveNumber}/${preview.waveCount}:${preview.entries
             .map(
               (e) =>
-                `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.leakCost}:${e.immunities.join('+')}`,
+                `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.leakCost}:${e.immunities.join('+')}:${e.boss ? 'boss' : ''}`,
             )
             .join('|')}`;
     // Locale self-heal: the key is CONTENT-only, so a runtime
@@ -1465,7 +1531,15 @@ export function createOverlay(
         ? t('hud.preview.lastWave')
         : t('hud.preview.title', { waveNumber: preview.waveNumber, waveCount: preview.waveCount });
     const firstEntry = preview.kind === 'upcoming' ? preview.entries[0] : undefined;
-    const expectedFirstRow = firstEntry === undefined ? null : previewEntryText(firstEntry);
+    // `textContent` on a row concatenates BOTH forms in document order (full, then glance
+    // — the append order below), so this sentinel covers every catalog key either form
+    // reads. Comparing one side alone would let a locale swap self-heal that form while
+    // the other stayed stale: the two read DISJOINT key sets (`hud.preview.glance*` vs
+    // `hud.preview.entry`/`domain.ground`/`immunities.none`).
+    const expectedFirstRow =
+      firstEntry === undefined
+        ? null
+        : previewEntryFull(firstEntry) + previewEntryGlance(firstEntry);
     const firstRowCurrent = previewEl.list.firstElementChild?.textContent ?? null;
     if (
       key === lastPreviewKey &&
@@ -1488,7 +1562,19 @@ export function createOverlay(
     warnUnmappedCreeps(preview.entries); // dev diagnostic — rebuild path only
     for (const entry of preview.entries) {
       const li = doc.createElement('li');
-      li.textContent = previewEntryText(entry);
+      // Dual-form row, mirroring `shell.ts`'s `chip()` exactly: both nodes always exist,
+      // the glance carries `aria-hidden` so assistive tech reads the full sentence and ONLY
+      // the full sentence (never both, which is what an unhidden glance would produce), and
+      // `ui.css` owns which one takes the visible slot. Append order is load-bearing for
+      // the locale sentinel above.
+      const full = doc.createElement('span');
+      full.className = 'wy-preview-full';
+      full.textContent = previewEntryFull(entry);
+      const glance = doc.createElement('span');
+      glance.className = 'wy-preview-glance';
+      glance.setAttribute('aria-hidden', 'true');
+      glance.textContent = previewEntryGlance(entry);
+      li.append(full, glance);
       previewEl.list.appendChild(li);
     }
   }
