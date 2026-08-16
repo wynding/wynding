@@ -12,11 +12,29 @@ export interface PreviewEntryVM {
   readonly count: number;
   readonly domain: 'ground' | 'air';
   readonly armor: number;
-  /** The creep's per-leak lives cost (M2-S10 ruling 3) — an ALWAYS-PRESENT stat slot
-   *  mirroring `armor`, never conditional on being > 1. `?? 1` at the join site is the
-   *  safe fallback for a forged/unresolved `creepId`, matching `armor`'s `?? 0` posture. */
+  /** The creep's per-leak lives cost. `?? 1` at the join site is the safe fallback for a
+   *  forged/unresolved `creepId`, matching `armor`'s `?? 0` posture.
+   *
+   *  M2-S10 ruling 3 made this an ALWAYS-PRESENT slot in the RENDERED row ("name the zero
+   *  case, i.e. the boring value, rather than omit the slot"). That ruling was narrowed by
+   *  the owner on 2026-08-16 (#101) and now governs the accessible/full form only: this VM
+   *  still always carries the value and `previewEntryFull` still always names it, while the
+   *  visible glance form omits it at the default. See `overlay.ts`'s `previewEntryGlance`
+   *  for the evidence — the ruling is narrowed, not retracted. */
   readonly leakCost: number;
   readonly immunities: readonly ('slow' | 'stun')[];
+  /** Whether this creep carries the boss role (`CompiledCreep.role === 'boss'` — axis 5).
+   *  A catalog JOIN like `domain` and `armor`, never sim state: it cannot change
+   *  tick-to-tick for a given creep. `false` for a forged/unresolved `creepId`, the same
+   *  safest-legal-value posture the rest of this join takes (an entry rendering with
+   *  placeholder metadata beats an entry vanishing from the list).
+   *
+   *  Carried because "is a boss next?" is one of the exactly two questions the preview is
+   *  read to answer in practice (owner playtest, 2026-08-16, #101) — and it was previously
+   *  answerable ONLY by recognising the creep's localized name. The surface spent three
+   *  clauses per row on default-valued stats while omitting the one binary the player was
+   *  looking for. */
+  readonly boss: boolean;
 }
 
 /** The HUD's wave-preview surface (M2-S2, PLAN.md P3 step 16): `'upcoming'` while

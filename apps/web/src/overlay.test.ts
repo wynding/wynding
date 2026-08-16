@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { HudVM } from '@wynding/render';
+import type { HudVM, PreviewEntryVM } from '@wynding/render';
 import { compileRuleset } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { createOverlay, type UiAction, type HudView } from './overlay';
@@ -254,6 +254,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
               armor: 0,
               leakCost: 1,
               immunities: [],
+              boss: false,
             },
           ],
         },
@@ -267,12 +268,17 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     expect(shell.preview.title.textContent).toBe('Wave 2 of 3');
     const items = [...shell.preview.list.querySelectorAll('li')];
     expect(items).toHaveLength(1);
-    expect(items[0]!.textContent).toBe('10 × Creep — ground, armor 0, leak cost 1, no immunities');
+    expect(items[0]!.querySelector('.wy-preview-full')!.textContent).toBe(
+      '10 × Creep — ground, armor 0, leak cost 1, no immunities',
+    );
   });
 
-  // M2-S10 ruling 3: leak cost is an ALWAYS-PRESENT stat slot, not conditional on being
-  // > 1 — pinned here against the boss's real leakCost 3, so a leak-cost-1-only test
-  // suite could not hide a "only show when > 1" regression.
+  // M2-S10 ruling 3: leak cost is an ALWAYS-PRESENT stat slot in the ACCESSIBLE form, not
+  // conditional on being > 1 — pinned here against the boss's real leakCost 3, so a
+  // leak-cost-1-only test suite could not hide a "only show when > 1" regression.
+  // (The ruling was narrowed to this form by #101; the visible glance DOES omit at the
+  // baseline, pinned separately below. Both halves are asserted so neither can drift into
+  // the other's contract.)
   it("renders the boss's leak cost 3, distinct from the always-1 default", () => {
     const { overlay, shell } = setup();
     overlay.update({
@@ -289,6 +295,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
               armor: 8,
               leakCost: 3,
               immunities: ['stun'],
+              boss: true,
             },
           ],
         },
@@ -298,8 +305,95 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       ui: uiState(),
       refund: 0,
     });
-    const text = shell.preview.list.querySelector('li')!.textContent;
-    expect(text).toBe('1 × Boss — ground, armor 8, leak cost 3, stun');
+    const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
+    expect(text).toBe('1 × Boss — boss, ground, armor 8, leak cost 3, stun');
+  });
+
+  // --- The glance form (#101) --------------------------------------------------------
+  // M2-S10 ruling 3 ("name the boring value rather than omit the slot") was NARROWED to the
+  // accessible form above by owner ruling 2026-08-16: the surface is read as a threat-
+  // signature glance while a wave runs, and four clauses a row tripled the height of a card
+  // that floats over the playing field. These pin the VISIBLE half.
+  const glanceOf = (entry: PreviewEntryVM): string => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({ preview: { kind: 'upcoming', waveNumber: 1, waveCount: 2, entries: [entry] } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    return shell.preview.list.querySelector('.wy-preview-glance')!.textContent!;
+  };
+  const baseline: PreviewEntryVM = {
+    creepId: 'normal',
+    count: 10,
+    domain: 'ground',
+    armor: 0,
+    leakCost: 1,
+    immunities: [],
+    boss: false,
+  };
+
+  it('omits every baseline-valued clause — an all-default creep glances as count × name alone', () => {
+    expect(glanceOf(baseline)).toBe('10 × Creep');
+  });
+
+  it.each([
+    ['air domain', { domain: 'air' as const }, '10 × Creep — air'],
+    ['armor', { armor: 6 }, '10 × Creep — armor 6'],
+    ['leak cost', { leakCost: 3 }, '10 × Creep — leak cost 3'],
+    ['immunities', { immunities: ['slow'] as const }, '10 × Creep — immune to slow'],
+    ['boss role', { boss: true }, '10 × Creep — boss'],
+  ])(
+    'surfaces %s when it deviates — and that clause ALONE, so the deviation is what is read',
+    (_axis, over, expected) => {
+      expect(glanceOf({ ...baseline, ...over })).toBe(expected);
+    },
+  );
+
+  it('orders a fully-loaded row role-first, then domain, armor, leak cost, immunities', () => {
+    expect(
+      glanceOf({
+        creepId: 'boss',
+        count: 1,
+        domain: 'air',
+        armor: 8,
+        leakCost: 3,
+        immunities: ['slow', 'stun'],
+        boss: true,
+      }),
+    ).toBe('1 × Boss — boss · air · armor 8 · leak cost 3 · immune to slow, stun');
+  });
+
+  // The parity contract, asserted rather than assumed: assistive tech must read the FULL
+  // sentence and only it. An unhidden glance would make AT read the row twice; a hidden
+  // full would silently drop the stat vocabulary the ruling exists to teach.
+  it('exposes the full sentence to assistive tech and hides the glance from it', () => {
+    const { overlay, shell } = setup();
+    overlay.update({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 1,
+          waveCount: 2,
+          entries: [{ ...baseline, domain: 'air', armor: 4 }],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    const row = shell.preview.list.querySelector('li')!;
+    const full = row.querySelector('.wy-preview-full')!;
+    const glance = row.querySelector('.wy-preview-glance')!;
+    expect(glance.getAttribute('aria-hidden')).toBe('true');
+    expect(full.getAttribute('aria-hidden')).toBeNull();
+    // The full form keeps every slot the glance drops — the guarantee that makes the diet
+    // a presentation change rather than an information loss.
+    expect(full.textContent).toBe('10 × Creep — air, armor 4, leak cost 1, no immunities');
+    expect(glance.textContent).toBe('10 × Creep — air · armor 4');
   });
 
   // M2-S6 P7: verify (add nothing) that `resolute`'s slow immunity actually renders
@@ -321,6 +415,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
               armor: 0,
               leakCost: 1,
               immunities: ['slow'],
+              boss: false,
             },
           ],
         },
@@ -330,7 +425,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       ui: uiState(),
       refund: 0,
     });
-    const text = shell.preview.list.querySelector('li')!.textContent;
+    const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe('6 × Resolute Creep — ground, armor 0, leak cost 1, slow');
   });
 
@@ -356,6 +451,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
               armor: 0,
               leakCost: 1,
               immunities: [],
+              boss: false,
             },
           ],
         },
@@ -418,6 +514,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
               armor: 2,
               leakCost: 1,
               immunities: [],
+              boss: false,
             },
           ],
         },
@@ -427,7 +524,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       ui: uiState(),
       refund: 0,
     });
-    const text = shell.preview.list.querySelector('li')!.textContent;
+    const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe(
       '4 × Unknown creep (future-kind) — ground, armor 2, leak cost 1, no immunities',
     );
@@ -459,6 +556,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
               armor: 2,
               leakCost: 1,
               immunities: [],
+              boss: false,
             },
           ],
         },
@@ -468,7 +566,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       ui: uiState(),
       refund: 0,
     });
-    const text = shell.preview.list.querySelector('li')!.textContent;
+    const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe(
       '4 × Unknown creep (constructor) — ground, armor 2, leak cost 1, no immunities',
     );
@@ -493,6 +591,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           armor: 0,
           leakCost: 1,
           immunities: [],
+          boss: false,
         },
         {
           creepId: 'normal',
@@ -501,6 +600,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           armor: 0,
           leakCost: 1,
           immunities: [],
+          boss: false,
         },
       ],
     };
@@ -1791,6 +1891,7 @@ describe('overlay — a steady-state refresh performs zero child-node replacemen
               armor: 0,
               leakCost: 1,
               immunities: [],
+              boss: false,
             },
           ],
         },

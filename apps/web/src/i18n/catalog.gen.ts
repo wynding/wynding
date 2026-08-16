@@ -22,6 +22,11 @@ export const EN = {
   "hud.preview.immunities.none": "no immunities",
   "hud.preview.immunity.slow": "slow",
   "hud.preview.immunity.stun": "stun",
+  "hud.preview.entry.boss": "{count} × {name} — boss, {domain}, {armor}, {leakCost}, {immunities}",
+  "hud.preview.role.boss": "boss",
+  "hud.preview.glance": "{count} × {name}",
+  "hud.preview.glance.noted": "{count} × {name} — {notes}",
+  "hud.preview.glance.immune": "immune to {immunities}",
   "hud.preview.lastWave": "Final wave launched — no more waves to call",
   "creep.normal.name": "Creep",
   "creep.fast.name": "Fast Creep",
@@ -160,6 +165,11 @@ export interface MessageParams {
   "hud.preview.immunities.none": Record<never, never>;
   "hud.preview.immunity.slow": Record<never, never>;
   "hud.preview.immunity.stun": Record<never, never>;
+  "hud.preview.entry.boss": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
+  "hud.preview.role.boss": Record<never, never>;
+  "hud.preview.glance": { "count": string | number; "name": string | number };
+  "hud.preview.glance.noted": { "count": string | number; "name": string | number; "notes": string | number };
+  "hud.preview.glance.immune": { "immunities": string | number };
   "hud.preview.lastWave": Record<never, never>;
   "creep.normal.name": Record<never, never>;
   "creep.fast.name": Record<never, never>;
