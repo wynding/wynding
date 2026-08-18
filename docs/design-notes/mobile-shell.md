@@ -142,8 +142,14 @@ rasterizer is unrecorded cannot be interpreted at all.
 10-second window on a mains-powered workstation that never got warm — which is exactly why thermal
 throttling heads its list of unvalidated properties. Reproducing the spike's method faithfully on a
 phone would therefore reproduce its blind spot: a cold 10-second run can pass while saying nothing
-about the first thing this pass exists to test. So #141 additionally pins battery and thermal state,
-and measures over a sustained run — a full arc played to its terminal, not a snapshot.
+about the first thing this pass exists to test. So #141 additionally pins battery and thermal state.
+
+**And the thermal load has to coincide with the peak workload, which does not happen by itself.**
+The stress scenario's creep population peaks just past the last spawn and drains from there, so a
+device playing one arc from cold is hottest only after most of the workload has gone — yielding
+acceptable percentiles that never sampled the full scene under throttling. That is a false pass,
+and the most expensive kind, because it reads as validation of the budget. The run must soak before
+sampling, or hold or repeat the peak and sample there. #141 carries the specifics.
 
 ## Findings
 
