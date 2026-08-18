@@ -51,7 +51,8 @@ Gate 2 — an Android device plays a build
     #138  Back button ............ any time after the Android platform exists
 
 Gate 3 — the measurement ADR 0005 ruling (b) deferred
-    #135 Android half + #148 — NOT the rest of Gate 2
+    #135 Android half + #148 — not #137 or #138
+    #136 too, unless #148 isolates the perf layout (ui.css is in that build)
     #148  perf-harness device build ──► #141  real-device pass
     the play APK cannot measure; it ships none of the harness
     an iOS pass is a useful extension, never a prerequisite
@@ -112,13 +113,16 @@ the ADR calls the binding constraint. Nothing from the iOS side is required; mea
 worthwhile extension, never a prerequisite.
 
 The Android prerequisite is narrower than the playable gate: this pass runs #148's separate
-artifact, so it needs the **Android half of #135 plus #148**, and an installable build — not
-release signing (#137), not the Back button (#138), and not the safe-area work (#136), which
-cannot affect it because the perf entries load no stylesheet at all. Gate 3 is therefore reachable
-well before Gate 2 closes, which matters given that it is the outcome justifying the epic. One
-caveat rather than a blocker: the perf entry builds on `createApp`, so #146's surfaces are in its
-graph and an unfixed fullscreen request could perturb a run — worth landing first, not worth
-waiting on.
+artifact, so it needs the **Android half of #135 plus #148** and an installable build — not
+release signing (#137, which gates the distributable play APK) and not the Back button (#138).
+Gate 3 is therefore reachable before Gate 2 closes, which matters given that it is the outcome
+justifying the epic.
+
+**But the perf artifact must render under the same conditions as the play build**, or its numbers
+describe something we do not ship. That is not automatic today — the perf entries inherit the app's
+stylesheet and set no viewport metadata — and until it holds, **#136 is a prerequisite on Android
+15+ devices** rather than exempt. #148 owns making the two artifacts comparable and records what
+that takes.
 
 That distinction is worth stating precisely rather than leaving implied, because it decides
 scheduling. Gate 3 is the outcome that justifies the epic, and any iOS work placed in front of it
