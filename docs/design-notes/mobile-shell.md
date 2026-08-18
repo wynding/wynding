@@ -16,7 +16,8 @@ Three capability gates, in priority order:
 2. **An Android device runs a build.** A signed APK, sideloaded.
 3. **The real-device measurement pass runs** — the one
    [ADR 0005](../adr/0005-performance-budgets.md) ruling (b) deferred to S11 and S11 shipped
-   without.
+   without. Ruling (b) names it "the real low-end **Android** device pass", so this gate needs
+   Gate 2 and not Gate 1.
 
 Gate 3 is the one that pays for the other two. ADR 0005 pins **≥ 30 fps on a low-end Android
 WebView** and calls that device the binding constraint; the S4b spike measured **66.8 ms** p95
@@ -34,25 +35,32 @@ decision at a later phase, and nothing here presumes it.
 ## Build order
 
 ```
+Shared prerequisites — Tracks A and C, apps/web only, no native SDK needed
+    #139  pause-on-background
+    #140  wake lock
+    #146  install + home link
+
 Gate 1 — an iOS device plays a build
-    #139  pause-on-background  ┐
-    #140  wake lock            ├─ Track A + C: apps/web only, no native SDK needed
-    #146  install + home link  ┘
+    the shared prerequisites
     #135  iOS half ............... needs Xcode
 
 Gate 2 — an Android device plays a build
-    everything in Gate 1
+    the shared prerequisites
     #135  Android half ........... needs the Android SDK
     #136  edge-to-edge ──► #137  signed APK      (in that order)
     #138  Back button ............ any time after the Android platform exists
 
-Gate 3 — the measurement ADR 0005 deferred
-    Gates 1 and 2
+Gate 3 — the measurement ADR 0005 ruling (b) deferred
+    Gate 2 ONLY — ruling (b) defers "the real low-end Android device pass"
     #141  real-device pass
+    an iOS pass is a useful extension, never a prerequisite
 
 Unscheduled
     #142  settings persistence — blocks nothing, blocked by nothing
 ```
+
+The two device gates are siblings, not a chain: Gate 2 does not wait on Gate 1. Neither half of
+#135 blocks the other, and the shared prerequisites are the only thing both need.
 
 ### Track A — web lifecycle, start now
 
@@ -90,9 +98,18 @@ Android platform exists; it shares the `ensurePaused` seam with #139 and the two
 
 ### Track E — measurement (#141)
 
-Needs a build on both platforms and, on Android, a signed APK that survives a reboot. Record what
-[`performance-spike.md`](performance-spike.md) §Methodology records, so the numbers are
-comparable — including the WebGL renderer string, which the spike pins per run because an fps
+**Needs Android only.** ADR 0005 ruling (b) defers "the real low-end Android device pass", and the
+budget it exists to test is stated against the low-end Android WebView, which the ADR calls the
+binding constraint. So Gate 3 requires Gate 2 — a signed APK that survives a reboot — and nothing
+from the iOS side. Measuring iOS too is worth doing and tells us something real, but it is an
+extension of this pass, never a prerequisite for it.
+
+That distinction is load-bearing right now rather than pedantic: Xcode is not installed (see the
+toolchain audit), so treating iOS as a prerequisite would park the epic's most valuable outcome
+behind a download it does not need.
+
+Record what [`performance-spike.md`](performance-spike.md) §Methodology records, so the numbers
+are comparable — including the WebGL renderer string, which the spike pins per run because an fps
 figure whose rasterizer is unrecorded cannot be interpreted at all.
 
 ## Findings
