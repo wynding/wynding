@@ -256,10 +256,22 @@ The two _with_ fallbacks still matter, for a different reason: they are the **lo
 `--wy-compact-col` and `--wy-rail-w` are track sizes computed from insets, so zeroed insets move
 the layout's geometry, not just its padding.
 
-The sharpest consequence is for verification. `compact.spec.ts` relies on `env()` resolving to 0 in
-headless Chromium — which is **exactly the on-device failure state**. The existing suite therefore
-pins the broken rendering as the expected one, and a green run is not evidence of anything here.
-Whatever verifies #136 needs a real WebView or an injected-inset harness.
+The sharpest consequence is for verification, and it is worth stating exactly rather than
+dramatically. `compact.spec.ts` never mentions insets at all. It runs in headless Chromium, where
+`env(safe-area-inset-*)` is always 0, so the geometry it pins is zero-inset geometry:
+`stage.y <= 1`, `status.y <= 1`, and `status.width <= 96` against a track that computes to 64px at
+the 658×320 phone viewport.
+
+Two consequences follow, and only the second is a real blind spot:
+
+- The suite is **not** incapable of noticing an inset — a genuine top inset would push the stage
+  down and trip `status.y <= 1`. It simply never encounters one, because the environment cannot
+  produce one. The path is unexercised, not unguarded.
+- The width assertion carries **32px of slack** over the value it actually computes, so a left
+  inset up to that size would pass unremarked even if the harness did produce one.
+
+So a green `compact.spec.ts` is not evidence about #136 either way, and verifying it needs a real
+WebView or a harness that injects inset values deliberately.
 
 ## Repo hygiene — `cap sync` will break CI
 
@@ -271,8 +283,23 @@ only build output, generated i18n, and the locally-gitignored planning docs. `ca
 - `apps/mobile/ios/App/App/public/**`
 
 Those are HTML, JS, CSS and JSON — all parseable by prettier, none formatted to its taste. The
-first `cap sync` therefore turns `format:check` red. Native sources (Swift, Kotlin, Gradle) are
-safe: prettier has no parser for them and skips them.
+first `cap sync` therefore turns `format:check` red.
+
+The exact scanned surface, checked with `prettier --file-info` rather than assumed, because it
+decides how wide the ignore entries have to be:
+
+| Path                                                       | Prettier                 |
+| ---------------------------------------------------------- | ------------------------ |
+| `android/app/src/main/assets/public/index.html`            | ✅ scanned (html)        |
+| `ios/App/App/public/assets/*.js`                           | ✅ scanned (babel)       |
+| `android/app/src/main/assets/capacitor.config.json`        | ✅ scanned (json)        |
+| `capacitor.config.ts` (ours, hand-authored)                | ✅ scanned (ts) — wanted |
+| `AppDelegate.swift`, `build.gradle`, `*.kt`, `strings.xml` | skipped, no parser       |
+
+So the hazard is **not only the copied `public/` trees**. Generated JSON inside the native
+projects — `capacitor.config.json` among it — is scanned too, while Swift, Gradle, Kotlin and XML
+are skipped for lack of a parser rather than by any ignore rule. Our own `capacitor.config.ts`
+should stay scanned; it is source we author.
 
 **Decided: the generated `ios/` and `android/` projects are committed**, following Capacitor's
 convention. They are where native config has to live — permissions, signing, the edge-to-edge
