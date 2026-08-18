@@ -109,7 +109,7 @@ export const EN = {
   "panel.glance.singleUse": "One shot",
   "panel.glance.slow": "Slow {percent}% for {duration}s",
   "panel.glance.stun": "Stun {chance}% for {duration}s",
-  "panel.glance.support": "+{percent}% shared edge",
+  "panel.glance.support": "+{percent}% dmg, shared edge",
   "panel.glance.targets": "Hits {targets}",
   "panel.glance.triggerRange": "Trigger {tiles} tiles",
   "panel.range": "Range: {tiles} tiles",

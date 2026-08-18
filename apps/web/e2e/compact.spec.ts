@@ -739,6 +739,31 @@ async function armByHotkey(page: import('@playwright/test').Page, key: string): 
   await expect(page.locator('.wy-panel')).toBeVisible();
 }
 
+/** Focus scrolling is ANIMATED in Chromium, so a geometry read taken straight after
+ *  `.focus()` catches the Rail mid-flight — and mid-flight is a different world: the fade is
+ *  still painted and the focused Card has not reached its resting place. Measured without
+ *  this, the last Card reported 16px under the band; settled, it is at maximum scroll where
+ *  `wy-rail-has-more` is false and the band paints nothing at all. */
+async function settleRailScroll(page: import('@playwright/test').Page): Promise<void> {
+  let previous = -1;
+  for (let i = 0; i < 20; i++) {
+    const now = await page.evaluate(
+      () => (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
+    );
+    if (now === previous) return;
+    previous = now;
+    await page.waitForTimeout(30);
+  }
+}
+
+/* NOTE — the visible-stats-block fork (`glance` unless it is `display: none`) is
+   re-derived inline in each `page.evaluate` below rather than hoisted. Playwright
+   serializes every evaluate body independently, so sharing it means either an
+   `evaluateHandle` threaded through each call or an init-script global — and the failure
+   mode the duplication risks is a LOUD one: if the fork or either class name moves, these
+   tests fail rather than silently passing, which is precisely their job. Declined as a
+   worse trade than the repetition. */
+
 /** The rows a browser is actually SHOWING — catalog-derived, never a hardcoded list.
  *  `beacon` has no Damage row at all (cost + support only) and `mine` has no Fire rate, so
  *  a fixed "cost and damage" expectation is unsatisfiable for one and incomplete for the
@@ -1140,6 +1165,7 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
           ? (panel.querySelector('.wy-stats-glance') as HTMLElement)
           : (panel.querySelector('.wy-stats-full') as HTMLElement);
       return {
+        railScrollTop: (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
         pinned: getComputedStyle(panel).position === 'sticky',
         panelWithinRail: pr.top >= rail.top - 1 && pr.bottom <= rail.bottom + 1,
         closeHeight: cr.height,
@@ -1149,6 +1175,11 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
       };
     });
     expect(m.pinned).toBe(true);
+    // The same guard the sibling placement test carries, and for the reason `armByHotkey`'s
+    // docstring records: a Playwright `.click()` on a Card auto-scrolls the Rail, which would
+    // move the Panel into view as a side effect and let every geometry claim below pass with
+    // the defect intact. Basic Tower is above the fold today; nothing pins that but this.
+    expect(m.railScrollTop, 'the click path must not have scrolled the Rail').toBe(0);
     // The whole Panel — chrome included — stays inside the scrollport it is pinned to.
     expect(m.panelWithinRail, 'the capped Panel must not overflow the Rail').toBe(true);
     expect(m.renderedRows, 'the stat rows must actually render').toBeGreaterThan(0);
@@ -1166,6 +1197,7 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     const results: boolean[] = [];
     for (let i = 0; i < 9; i++) {
       await page.locator('.wy-card').nth(i).focus();
+      await settleRailScroll(page);
       results.push(
         await page.evaluate((n) => {
           const card = document.querySelectorAll('.wy-card')[n] as HTMLElement;
@@ -1200,6 +1232,7 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
       const covered: number[] = [];
       for (let i = 0; i < 9; i++) {
         await page.locator('.wy-card').nth(i).focus();
+        await settleRailScroll(page);
         covered.push(
           await page.evaluate((n) => {
             const rail = document.querySelector('.wy-rail') as HTMLElement;
@@ -1207,8 +1240,20 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
               document.querySelectorAll('.wy-card')[n] as HTMLElement
             ).getBoundingClientRect();
             const panel = document.querySelector('.wy-panel') as HTMLElement;
-            const fadeH = parseFloat(getComputedStyle(rail).getPropertyValue('--wy-rail-fade-h'));
             const pinned = !panel.hidden && getComputedStyle(panel).position === 'sticky';
+            // Read the PAINTED pseudo-element, never the token. `--wy-rail-fade-h` is an
+            // unregistered custom property, so `getComputedStyle` returns the literal token
+            // stream "1.5rem" and `parseFloat` keeps the 1.5 while silently dropping the
+            // unit — a 16x under-measure that made this assertion unfailable.
+            const band = pinned
+              ? getComputedStyle(panel, '::before')
+              : getComputedStyle(rail, '::after');
+            // A band at `opacity: 0` paints nothing, so it occludes nothing. Not a
+            // convenience: at maximum scroll the last Card's bottom sits inside the band's
+            // geometry while `wy-rail-has-more` is false, so measuring geometry alone would
+            // report a defect where no pixel is drawn.
+            if (band.opacity === '0' || band.display === 'none') return 0;
+            const fadeH = parseFloat(band.height);
             // The occluding band rides the Panel's top edge when pinned, the scrollport's
             // bottom edge otherwise.
             const bandBottom = pinned
@@ -1325,11 +1370,64 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     // — and the revoke path runs with focus still inside it.
     await page.setViewportSize({ width: 1000, height: 720 });
     await expect(page.locator('.wy-panel')).toBeVisible();
-    await page.waitForTimeout(200);
+    // Wait on the REVOKE, not on the clock. The 200ms this replaced was a bet on how fast
+    // the ResizeObserver fires and the revoke path runs, which is machine- and engine-
+    // dependent — the one flake candidate in this suite. The un-pin is the observable
+    // state change that says the path has run.
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () => getComputedStyle(document.querySelector('.wy-panel') as HTMLElement).position,
+        ),
+      )
+      .toBe('static');
     expect(
       await page.evaluate(() => document.activeElement?.className ?? ''),
       'focus must not fall to document.body',
     ).toContain('wy-panel-scroll');
+  });
+
+  // The other half of the retention rule. Keeping the tab stop while the scrollport holds
+  // focus is only correct if something releases it once focus leaves — and neither scroll,
+  // resize nor render is guaranteed to follow the click that moves focus away, so without a
+  // focus trigger the non-scrollable element sat in the tab order for the rest of the
+  // session as a stop that scrolls nothing.
+  test('the retained tab stop is released once focus leaves the scrollport', async ({ page }) => {
+    await gotoAt(page, PHONE);
+    await armByHotkey(page, '9');
+    const scroller = page.locator('.wy-panel-scroll');
+    await expect(scroller).toHaveAttribute('tabindex', '0');
+    await scroller.focus();
+
+    // Un-pin: the cap lifts, the scrollport stops overflowing, and the stop is RETAINED
+    // because releasing it here would drop focus to `<body>`.
+    await page.setViewportSize({ width: 1000, height: 720 });
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () => getComputedStyle(document.querySelector('.wy-panel') as HTMLElement).position,
+        ),
+      )
+      .toBe('static');
+    await expect(
+      scroller,
+      'retained while focused — releasing it would drop focus',
+    ).toHaveAttribute('tabindex', '0');
+
+    // Now move focus OUT OF THE RAIL entirely — to the board. Deliberately not to a Card:
+    // focusing a Card scrolls it into view, which fires the scroll trigger and would revoke
+    // the stop for a reason that has nothing to do with focus, leaving this test green with
+    // the focus trigger deleted. Focus landing outside the Rail scrolls nothing, so the
+    // focusout listener is the only thing that can release it.
+    const scrollBefore = await page.evaluate(
+      () => (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
+    );
+    await page.locator('.wy-board').focus();
+    expect(
+      await page.evaluate(() => (document.querySelector('.wy-rail') as HTMLElement).scrollTop),
+      'this step must not scroll the Rail — that would be a different trigger releasing it',
+    ).toBe(scrollBefore);
+    await expect(scroller, 'released once focus leaves the Rail').not.toHaveAttribute('tabindex');
   });
 
   // The two-column Rail (>=1280w, aspect >= 16/10) is a GRID, where the fade needs its own

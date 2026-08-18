@@ -201,8 +201,13 @@ function setChip(chip: ShellChip, full: string, glance: string): void {
  *  children into one Text node — and never the outcome live region (the `outcomeSeq`-gated
  *  write in `update()`), which deliberately FORCES a mutation on repeated messages so
  *  assistive tech re-announces them. */
-function setLabel(el: Element, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
+/** Returns whether it actually wrote. Callers on the render-loop path use that to gate
+ *  follow-on work — a label patched to the value it already held must not cost a layout
+ *  read 20 times a second. */
+function setLabel(el: Element, text: string): boolean {
+  if (el.textContent === text) return false;
+  el.textContent = text;
+  return true;
 }
 
 function button(doc: Document, className: string, label: string): HTMLButtonElement {
@@ -1301,7 +1306,7 @@ export function createOverlay(
    *
    *  Returned rather than closed over so the caller decides what else belongs inside — the
    *  armed form has no action row. */
-  function appendScrollport(stats: TowerStats): HTMLElement {
+  function appendScrollport(stats: TowerStats): { scroll: HTMLElement; statsEl: HTMLElement } {
     const scroll = doc.createElement('div');
     scroll.className = 'wy-panel-scroll';
     const heading = doc.createElement('p');
@@ -1310,13 +1315,16 @@ export function createOverlay(
     // The rows keep a container of their OWN inside the scrollport: the live aura patch
     // below clears it, and clearing the scrollport would take the heading and the buttons
     // (and any focus inside them) with it.
-    panelStatsEl = doc.createElement('div');
-    panelStatsEl.className = 'wy-panel-stats';
-    appendStatRows(panelStatsEl, stats);
-    scroll.append(heading, panelStatsEl);
-    panelScrollEl = scroll;
+    const statsEl = doc.createElement('div');
+    statsEl.className = 'wy-panel-stats';
+    appendStatRows(statsEl, stats);
+    scroll.append(heading, statsEl);
     panel.root.appendChild(scroll);
-    return scroll;
+    // BOTH handles returned, neither latched here. This used to assign `panelScrollEl` and
+    // `panelStatsEl` as a side effect while also returning the node — three responsibilities,
+    // one of them invisible at the call site, since neither caller read the assignments it
+    // depended on. `renderPanel` owns that state and now visibly sets it.
+    return { scroll, statsEl };
   }
 
   /** Owns BOTH P4 resources so neither can be forgotten separately: the passive scroll
@@ -1333,7 +1341,7 @@ export function createOverlay(
    *  (`main.ts`), which carries no scroll component, so a scroll would never reach it — and
    *  per-frame `scrollTop`/`scrollHeight` reads would add layout work to a budget ADR 0005
    *  already records as breached. */
-  function syncRailAffordances(): void {
+  function syncRailAffordances(focusLeavingScrollport = false): void {
     const rail = shell.rail;
     // A pinned Panel overlays the Cards, so the Rail must reserve room for it when a
     // focused Card scrolls in. Keyed on the Panel being BOTH open and pinned: reserving on
@@ -1365,7 +1373,7 @@ export function createOverlay(
         // list for a box whose only job is to scroll.
         panelScrollEl.setAttribute('role', 'group');
         panelScrollEl.setAttribute('aria-label', t('panel.details.label'));
-      } else if (!scrolls && doc.activeElement !== panelScrollEl) {
+      } else if (!scrolls && (focusLeavingScrollport || doc.activeElement !== panelScrollEl)) {
         // Revoked only while it does NOT hold focus. Removing `tabindex` from the focused
         // element makes it unfocusable and Chromium resets focus to `<body>` — so a
         // keyboard user reading a pinned Panel that stops overflowing (a widened window, a
@@ -1477,7 +1485,16 @@ export function createOverlay(
       // focus, but the Sell refund can still change while the SAME tower stays selected (the
       // pending queue changed). Patch the existing button's label in place rather than
       // re-keying/recreating the Panel on `refund`.
-      if (panelSellBtn !== null) setLabel(panelSellBtn, t('panel.sell', { refund }));
+      // `mutated` gates the recompute at the foot of this block. THIS PATH IS THE RENDER
+      // LOOP — `update()` calls `renderPanel` on every HUD memo-key change (~20x/s) and the
+      // same-key return is what it takes — so an unconditional recompute here would read
+      // `scrollHeight`/`clientHeight`/`getComputedStyle` every frame, forcing layout against
+      // a budget ADR 0005 already records as breached, and contradicting this function's own
+      // "deliberately NOT driven from the render loop" contract. Both mutations below were
+      // already change-guarded; only the recompute was not.
+      let mutated = false;
+      if (panelSellBtn !== null && setLabel(panelSellBtn, t('panel.sell', { refund })))
+        mutated = true;
       // The support aura reaching an already-selected tower can change too (M2-S8) — a
       // beacon built or sold beside it — and the stat rows are built ONCE on the rebuild
       // path below, so without this the Damage/(boosted)/Poison rows froze at whatever
@@ -1496,21 +1513,21 @@ export function createOverlay(
           panelStatsBuffMulFp = nextBuff;
           clearChildren(panelStatsEl);
           appendStatRows(panelStatsEl, towerStats(ui.selection.towerId, nextBuff));
-          // The rows changed without any visibility transition, so the seam below is never
-          // reached on this path. The `ResizeObserver` covers the Panel's own height, but
-          // once the cap binds the Panel STOPS resizing and only the scrollport's
-          // `scrollHeight` moves — which no observer of border-box sizes can see, and which
-          // is what decides whether the scrollport earns its keyboard tab stop.
+          mutated = true;
         }
       }
-      if (inspectRequested && ui.armed === null && ui.selection !== null) revealPanel();
-      // ONE recompute covering every mutation this early-return path performs — the refund
-      // label as well as the rows. Both change the scrollport's content height without any
-      // visibility transition, and once the cap binds, the Panel STOPS resizing while only
-      // the scrollport's `scrollHeight` moves, which no observer of border-box sizes can
-      // see. That is exactly what decides whether the scrollport earns its tab stop, and a
-      // Sell label wrapping to a second line is enough to tip a near-boundary Panel over.
-      syncRailAffordances();
+      if (inspectRequested && ui.armed === null && ui.selection !== null) {
+        revealPanel();
+        mutated = true; // an unpinned reveal scrolls the Rail, which moves `hasMore`
+      }
+      // ONE recompute, and only when something on this path actually changed. Rows and the
+      // Sell label both alter the scrollport's content height with no visibility transition,
+      // and once the cap binds, the Panel STOPS resizing while only the scrollport's
+      // `scrollHeight` moves — which no observer of border-box sizes can see, and which is
+      // what decides whether the scrollport earns its tab stop. A Sell label wrapping to a
+      // second line is enough to tip a near-boundary Panel over; a Sell label rewritten to
+      // the value it already held is not, and must cost nothing.
+      if (mutated) syncRailAffordances();
       return;
     }
     // Focus re-homing seam (PLAN.md P2 Focus rules): renderPanel is the ONE place the Panel
@@ -1531,14 +1548,16 @@ export function createOverlay(
     panelStatsBuffMulFp = SUPPORT_MUL_IDENTITY;
     clearChildren(panel.root);
     if (ui.armed !== null) {
-      appendScrollport(towerStats(ui.armed));
+      ({ scroll: panelScrollEl, statsEl: panelStatsEl } = appendScrollport(towerStats(ui.armed)));
       appendCloseButton(panel.root);
       panel.root.hidden = false;
     } else if (ui.selection !== null) {
       const stats = towerStats(ui.selection.towerId, ui.selection.buffMulFp);
-      const scroll = appendScrollport(stats);
+      const built = appendScrollport(stats);
+      panelScrollEl = built.scroll;
+      panelStatsEl = built.statsEl;
       panelStatsBuffMulFp = ui.selection.buffMulFp;
-      appendActionRow(scroll, refund);
+      appendActionRow(built.scroll, refund);
       appendCloseButton(panel.root);
       panel.root.hidden = false;
     } else {
@@ -1881,10 +1900,33 @@ export function createOverlay(
   // `renderPanel`, and (4) this initial pass. A `scroll` listener alone is not enough: the
   // Panel opening changes the content height with no scroll at all, and a text-zoom reflow
   // changes both.
-  shell.rail.addEventListener('scroll', syncRailAffordances, {
+  // WRAPPED, never passed as the listener itself. `syncRailAffordances` now takes a leading
+  // boolean, and both an `Event` and a `ResizeObserverEntry[]` are truthy — handing either
+  // straight to it would read as "focus is leaving the scrollport" and revoke the tab stop
+  // out from under a keyboard user on every scroll tick.
+  shell.rail.addEventListener('scroll', () => syncRailAffordances(), {
     passive: true,
     signal: railAffordanceAbort.signal,
   });
+  // TRIGGER 5 (M2-S12a, Codex P2): the retention branch keeps the tab stop while the
+  // scrollport holds focus, which is only half a rule — nothing recomputed when focus left,
+  // so after a resize stopped the scrollport overflowing, clicking away left a
+  // non-scrollable element sitting in the tab order as a phantom stop for the rest of the
+  // session. Neither scroll, resize nor render is guaranteed to follow that click.
+  shell.rail.addEventListener(
+    'focusout',
+    (event) => {
+      // `relatedTarget` is the element RECEIVING focus. Moving within the scrollport — the
+      // container to its own Sell button — is not leaving it. `contains` counts self.
+      const next = (event as FocusEvent).relatedTarget;
+      if (panelScrollEl !== null && next instanceof Node && panelScrollEl.contains(next)) return;
+      // Told explicitly rather than inferred: during a `focusout` the document's
+      // `activeElement` is still the outgoing element (or already `body`), so reading it
+      // here would keep retaining the stop it is meant to release.
+      syncRailAffordances(true);
+    },
+    { passive: true, signal: railAffordanceAbort.signal },
+  );
   // Observes the Rail's CHILDREN, not the window. The e2e suite changes text size by
   // injecting `:root { font-size: … }`, which reflows every Card and the Panel WITHOUT
   // firing `resize` — so a `window.resize` listener would go stale in exactly the case that
@@ -1893,7 +1935,7 @@ export function createOverlay(
   // `ResizeObserver`, so the unit environment simply runs with triggers 1, 3 and 4.
   const view = doc.defaultView;
   if (view !== null && typeof view.ResizeObserver === 'function') {
-    railAffordanceObserver = new view.ResizeObserver(syncRailAffordances);
+    railAffordanceObserver = new view.ResizeObserver(() => syncRailAffordances());
     // The RAIL ITSELF, and not only its children. `hasMore` is a function of
     // `scrollHeight - clientHeight`, and `clientHeight` is the Rail's own box — which no
     // child resize reports. Below 800px wide both rail-width formulas resolve to 9rem, so a

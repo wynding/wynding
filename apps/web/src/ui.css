@@ -835,7 +835,7 @@ body {
     right: 0;
     bottom: 100%;
     left: 0;
-    height: 1.5rem;
+    height: var(--wy-rail-fade-h);
     pointer-events: none;
     opacity: 0;
     background: linear-gradient(to top, var(--wy-surface), transparent);
@@ -851,8 +851,18 @@ body {
      Standard and carries the same 144px Rail with the same 6-of-8 wrapped rows. The
      threshold is a judgement on a measured curve, not a boundary between named sizes —
      a 128px content box wraps 6 of 8 rows into a 423.5px Panel, a 192px one wraps none
-     into 277.1px, and 164px sits in a light-wrapping middle the existing scroll + reveal
-     already serves. 160px keeps the heavy band and excludes the light one.
+     into 277.1px, and 164px sits in a light-wrapping middle. 160px keeps the heavy band and
+     excludes the light one.
+
+     That reasoning is sound for CONDENSING, which answers wrapping. It does NOT carry to
+     the PIN, and an earlier draft of this comment claimed it did — asserting the 164px band
+     was one "the existing scroll + reveal already serves". It is not: `revealPanel()` is
+     unreachable when arming, because both of its call sites are gated on
+     `ui.armed === null && ui.selection !== null`, and arming has no selection. No reveal
+     machinery serves that band at all. The pin's real condition is whether the Panel FITS
+     the Rail — a height relationship no container query can ask about — so the band from
+     ~980px to the two-column gate still shows zero Panel pixels on arm, exactly as `main`
+     does. Open, owner-gated, and recorded here rather than papered over.
 
      Like `.wy-preview-full` (#101), this RESTATES `.wy-sr-only`'s rules rather than
      composing that class on: `.wy-sr-only` is used as an IDENTITY by the
@@ -1313,8 +1323,8 @@ body {
      100% zoom (measured 501-900px), and true only where the Rail genuinely overflows. */
   .wy-rail::after {
     grid-column: 1 / -1;
-    height: 1.5rem;
-    margin-top: calc(-1.5rem - 0.5rem);
+    height: var(--wy-rail-fade-h);
+    margin-top: calc(-1 * var(--wy-rail-fade-h) - 0.5rem);
   }
 }
 
@@ -1522,7 +1532,7 @@ body {
     right: 0;
     bottom: 100%;
     left: 0;
-    height: 1.5rem;
+    height: var(--wy-rail-fade-h);
     pointer-events: none;
     opacity: 0;
     background: linear-gradient(to top, var(--wy-surface), transparent);

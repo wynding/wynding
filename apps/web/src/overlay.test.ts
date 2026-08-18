@@ -1427,8 +1427,12 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     // `beacon` has no attack at all: cost and support, nothing else.
     const beacon = glanceOf('beacon');
     expect(beacon).toContain('◈15');
-    expect(beacon).toContain('+50.0% shared edge');
-    expect(beacon).not.toContain('dmg'); // no damage row to abbreviate
+    expect(beacon).toContain('+50.0% dmg, shared edge');
+    // A beacon has no Damage row, so its cost line is the BARE cost form — never the
+    // cost+damage one. Asserted on that shape rather than on the absence of the word "dmg",
+    // which the Support row legitimately carries now that it names what its percentage
+    // modifies.
+    expect(beacon).not.toMatch(/◈15\s*·/);
     expect(beacon).not.toContain('tiles'); // no range
     expect(beacon).not.toContain('/s'); // no fire rate
     expect(beacon).not.toContain('Hits'); // no target domain
