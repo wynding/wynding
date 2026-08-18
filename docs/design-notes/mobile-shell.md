@@ -134,9 +134,26 @@ initial-load budget for convenience. Two artifacts, one playable and one measura
 decides whether the shell has one build target or two, #148 belongs with #135's work rather than
 after it.
 
-Record what [`performance-spike.md`](performance-spike.md) §Methodology records, so the numbers
-are comparable — including the WebGL renderer string, which the spike pins per run because an fps
-figure whose rasterizer is unrecorded cannot be interpreted at all.
+**Pointing `webDir` at `dist-perf` is not sufficient and would not boot.** The perf config's input
+is `perf/index.html`, so the build emits `dist-perf/perf/index.html` and **no** `dist-perf/index.html`
+— `playwright.perf.config.ts` records that the origin `/` 404s, which is why its own readiness poll
+targets `/perf/index.html` rather than the bare origin. A shell loading its asset root would open on
+that 404. #148 has to stage a root entry or route the native entry point explicitly at
+`/perf/index.html`.
+
+### What #141 must record
+
+Reproduce [`performance-spike.md`](performance-spike.md) §Methodology so the numbers are comparable
+— including the WebGL renderer string, which the spike pins per run because an fps figure whose
+rasterizer is unrecorded cannot be interpreted at all.
+
+**Then exceed it, because the spike's methodology is deficient by ADR 0005's own account.** Ruling
+(d) records that no thermal or power state is pinned by that pass, and that every figure is a
+10-second window on a mains-powered workstation that never got warm — which is exactly why thermal
+throttling heads its list of unvalidated properties. Reproducing the spike's method faithfully on a
+phone would therefore reproduce its blind spot: a cold 10-second run can pass while saying nothing
+about the first thing this pass exists to test. So #141 additionally pins battery and thermal state,
+and measures over a sustained run — a full arc played to its terminal, not a snapshot.
 
 ## Findings
 
