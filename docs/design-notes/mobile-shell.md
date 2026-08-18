@@ -84,7 +84,7 @@ devices per platform, re-signed by replugging.
 
 ### Track C — corrections the WebView forces (#146)
 
-See [Findings](#findings). This is **on the critical path for Gate 1**, not cleanup: the two
+See [Findings](#findings). This is **on the critical path for Gate 1**, not cleanup: the
 affordances involved are among the most likely first-minute interactions, and one of them ends a
 run. The code is `apps/web` and can be written before either SDK exists; only its verification
 waits on #135.
@@ -114,31 +114,58 @@ figure whose rasterizer is unrecorded cannot be interpreted at all.
 
 ## Findings
 
-Three things the survey turned up that the original #135–#142 did not cover. The first two are
-one class — **the web build assumes it is running in a browser on the open web**, and that
-assumption is false inside a WebView. A sweep of `apps/web/src` for outbound navigation and
-browser-context checks found exactly two surfaces where it leaks, so the class is bounded; they
-are filed together as **#146**. The third sharpens **#136** and is recorded there.
+Three things the survey turned up that the original #135–#142 did not cover. The first two are one
+class — **the web build assumes it is running in a browser on the open web**, and that assumption
+is false inside a WebView. They are filed together as **#146**. The third sharpens **#136** and is
+recorded there.
 
-### 1. The install affordance appears inside the installed app
+A note on how that class was scoped, because the first attempt got it wrong. The original sweep
+read the candidate modules and judged each on its own logic, which cleared `fullscreen.ts` — its
+gate is capability-based, it renders nothing, and it no-ops on iOS. That was the wrong unit of
+analysis: the defect is not in the module but in the state its **call site** feeds it, and
+`main.ts` passes the same broken `install.state()` pair into it. The scoping that actually holds
+is by wrong fact rather than by module — enumerate every consumer of the bad state, which is a
+grep with a definite answer, instead of asking module by module whether it looks safe. Doing that
+gives `overlay.ts` and `main.ts` and nothing else, which is the boundary claimed below.
 
-`install.ts` decides whether to offer installation from
+### 1. `install.state()` is wrong in a WebView, and two features act on it
+
+`install.ts` decides whether the app is already installed from
 `isStandalone() = matchMedia('(display-mode: standalone)').matches || navigator.standalone`.
 Inside a Capacitor WebView **both are false** — `display-mode` reports `browser` and
-`navigator.standalone` is a Safari-only flag. `installed` is also false, having only ever been
-set by an `appinstalled` event that never fires. So `overlay.ts:750`'s
-`hidden = state.standalone || state.installed` is **false**, and:
+`navigator.standalone` is a Safari-only flag. `installed` is also false, having only ever been set
+by an `appinstalled` event that never fires.
+
+That single wrong fact has **two consumers**, and they are the complete set: a grep for
+`install.state()` outside the module itself returns `overlay.ts` and `main.ts`, and nothing else.
+
+**Consumer 1 — the install UI** (`overlay.ts:750`, `hidden = state.standalone || state.installed`):
 
 - **iOS** — `branch()` returns `'ios'` on a UA match, and `bannerAudience` is
-  `coarse && (branch === 'promptable' || branch === 'ios')`, so the pre-start banner shows and
-  its action opens the **"Add to Home Screen" instructions dialog** — inside a native app that is
+  `coarse && (branch === 'promptable' || branch === 'ios')`, so the pre-start banner shows and its
+  action opens the **"Add to Home Screen" instructions dialog** — inside a native app that is
   already on the home screen.
 - **Both platforms** — the settings row is documented as **PERMANENT** (`overlay.ts:381`), so it
   never goes away, telling the player how to install what they are running.
 
-Neither is subtle and both are on the first screen. Fix at the capability level, not by UA
-sniffing: the shell knows it is the shell, and that fact should reach `install.ts` as an injected
-dep, consistent with how the module already takes `matchMedia` and its storage adapter.
+**Consumer 2 — the one-shot fullscreen request on Start** (`main.ts:376`, which passes
+`s.standalone || s.installed` as `requestFullscreen`'s `isStandalone` dep). `fullscreen.ts` fires
+when `requestFullscreen` exists, the pointer is coarse, and the app is _not_ standalone — so on a
+coarse-pointer device whose WebView exposes the API, pressing Start requests fullscreen inside a
+native shell that already owns the whole screen.
+
+This one is easy to dismiss on its own and should not be. Read in isolation `fullscreen.ts` looks
+safe: its gate is capability-based by design, it renders no affordance, and on iOS it simply
+no-ops because WKWebView has no element fullscreen. The defect is not in the module, it is in what
+the call site feeds it — which is exactly why an audit of these modules one at a time misses it.
+Its own severity is low; its significance is that it is the second consumer of the same wrong
+fact, so a fix wired into `overlay.ts` alone leaves the codebase in the worst state of the three:
+inconsistent.
+
+Fix at the capability level, not by UA sniffing: the shell knows it is the shell, and that fact
+should reach `install.ts` as an injected dep, consistent with how the module already takes
+`matchMedia` and its storage adapter. Both consumers then follow from the corrected state without
+either of them learning what a WebView is.
 
 One honest caveat on the diagnosis, which the remedy is deliberately insensitive to. What a
 Capacitor WebView reports for `(display-mode: standalone)` is reasoned here from the fact that
