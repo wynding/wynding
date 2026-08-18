@@ -279,16 +279,22 @@ dramatically. `compact.spec.ts` never mentions insets at all. It runs in headles
 `stage.y <= 1`, `status.y <= 1`, and `status.width <= 96` against a track that computes to 64px at
 the 658×320 phone viewport.
 
-Two consequences follow, and only the second is a real blind spot:
+The two axes behave differently, and the difference decides what a harness has to assert:
 
-- The suite is **not** incapable of noticing an inset — a genuine top inset would push the stage
-  down and trip `status.y <= 1`. It simply never encounters one, because the environment cannot
-  produce one. The path is unexercised, not unguarded.
-- The width assertion carries **32px of slack** over the value it actually computes, so a left
-  inset up to that size would pass unremarked even if the harness did produce one.
+- **A top inset is undetectable by these checks.** In Compact `.wy-status` is `grid-row: 1`
+  (`ui.css:1105`) and `.wy-main` is `grid-row: 1` (`ui.css:1202`) — the same row, whose edge is at 0. The inset enters at `ui.css:1115` as `.wy-status`'s **internal** `padding-top`, which moves
+  content within the box without moving the box. So `status.y <= 1` and `stage.y <= 1` both hold at
+  any inset value. Treat the top path as unguarded.
+- **A left inset is partly detectable**, because there the inset reaches a **grid track** rather
+  than padding: `--wy-compact-col` is `min(4rem, 10vw) + env(safe-area-inset-left)`, so the column
+  genuinely widens. Against a computed 64px and an assertion of `<= 96`, an inset over roughly 32px
+  fails and anything under it passes unremarked.
 
-So a green `compact.spec.ts` is not evidence about #136 either way, and verifying it needs a real
-WebView or a harness that injects inset values deliberately.
+So a green `compact.spec.ts` is not evidence about #136, and a harness for it must assert an
+affected padding value or descendant position for the top axis — bounding-box geometry alone cannot
+see it. This paragraph has been wrong twice: first claiming the spec references `env()` (it does
+not), then claiming a top inset would trip `status.y` (it does not, for the grid reason above).
+Both errors came from reasoning about layout without tracing where the inset actually lands.
 
 ## Repo hygiene — `cap sync` will break CI
 
@@ -339,8 +345,13 @@ Related constraints:
   than leaving native Android changes validated only on one machine. Out of scope here, but
   nothing in this note should be read as ruling it out.
 - **`apps/mobile` is already a workspace package** (`pnpm-workspace.yaml` globs `apps/*`) with no
-  scripts. Whatever scripts it gains must not put a native toolchain on
-  `turbo run typecheck lint test`, or `verify` fails on every machine without Xcode.
+  scripts, and Turbo will pick up whatever it gains. The exposure is wider than `verify`: the CI
+  job runs `pnpm run build` — `turbo run build` — immediately afterwards as a build smoke gate
+  compiling every package (`ci.yml:43`). So an `apps/mobile#build` that shells out to Capacitor or
+  either native SDK is selected automatically and breaks the Ubuntu runner, and breaks local
+  builds on any machine without both toolchains. **`build` is the dangerous name**, alongside
+  `typecheck`, `lint` and `test`. Native sync and build belong under explicitly named scripts that
+  no root Turbo task selects — or the root `build` task must exclude this package deliberately.
 - **The mobile build must not use `--base=/play/`.** Capacitor serves from the WebView root, so
   the default base is the correct one — plain `pnpm --filter @wynding/web build`. Worth stating
   because the deploy path uses the rewrite and reusing that invocation is the obvious mistake.
