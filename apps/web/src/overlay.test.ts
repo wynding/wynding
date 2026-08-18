@@ -306,7 +306,9 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       refund: 0,
     });
     const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
-    expect(text).toBe('1 × Boss — boss, ground, armor 8, leak cost 3, stun');
+    expect(text).toBe(
+      '1 × Boss — boss, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
+    );
   });
 
   // --- The glance form (#101) --------------------------------------------------------
@@ -341,7 +343,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
 
   it.each([
     ['air domain', { domain: 'air' as const }, '10 × Creep — air'],
-    ['armor', { armor: 6 }, '10 × Creep — armor 6'],
+    ['armor', { armor: 6 }, '10 × Creep — armor −6 direct'],
     ['leak cost', { leakCost: 3 }, '10 × Creep — leak cost 3'],
     ['immunities', { immunities: ['slow'] as const }, '10 × Creep — immune to slow'],
     ['boss role', { boss: true }, '10 × Creep — boss'],
@@ -363,7 +365,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
         immunities: ['slow', 'stun'],
         boss: true,
       }),
-    ).toBe('1 × Boss — boss · air · armor 8 · leak cost 3 · immune to slow, stun');
+    ).toBe('1 × Boss — boss · air · armor −8 direct · leak cost 3 · immune to slow, stun');
   });
 
   // The parity contract, asserted rather than assumed: assistive tech must read the FULL
@@ -392,8 +394,10 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     expect(full.getAttribute('aria-hidden')).toBeNull();
     // The full form keeps every slot the glance drops — the guarantee that makes the diet
     // a presentation change rather than an information loss.
-    expect(full.textContent).toBe('10 × Creep — air, armor 4, leak cost 1, no immunities');
-    expect(glance.textContent).toBe('10 × Creep — air · armor 4');
+    expect(full.textContent).toBe(
+      '10 × Creep — air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    );
+    expect(glance.textContent).toBe('10 × Creep — air · armor −4 direct');
   });
 
   // M2-S6 P7: verify (add nothing) that `resolute`'s slow immunity actually renders
@@ -526,7 +530,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe(
-      '4 × Unknown creep (future-kind) — ground, armor 2, leak cost 1, no immunities',
+      '4 × Unknown creep (future-kind) — ground, armor 2 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     );
     // The dev-only warn is asserted conditionally — Vitest defaults DEV to true, but a
     // production-mode run must not fail on a behaviour (the warn) that build mode elides.
@@ -568,7 +572,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe(
-      '4 × Unknown creep (constructor) — ground, armor 2, leak cost 1, no immunities',
+      '4 × Unknown creep (constructor) — ground, armor 2 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     );
     expect(text).not.toContain('[object');
     if (import.meta.env.DEV) {
@@ -1316,6 +1320,130 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(text).toContain('Blast radius: 2.5 tiles'); // radiusFp 640 / FP_ONE 256 — kept, unlike Range
     expect(text).not.toContain('Fire rate'); // a burst tower has no cadence
     expect(text).toContain('Destroyed when it fires');
+  });
+
+  // --- M2-S12a P4: the Rail affordance's teardown -----------------------------------
+  // Written to be able to OBSERVE a leak, which is the whole difficulty: creating a second
+  // app and scrolling its new Rail proves nothing, because a leaked listener stays bound to
+  // the OLD node and would never be invoked by that. So this retains the old Rail, destroys
+  // the app, and then pokes the detached node directly.
+  it('destroy() releases the Rail scroll listener — a detached Rail is never written to again', () => {
+    const { overlay, shell } = setup();
+    const rail = shell.rail; // retained across the teardown ON PURPOSE
+    overlay.destroy();
+    // A sentinel the live handler would clear: with no content below the fold (jsdom lays
+    // nothing out, so every scroll metric is 0), a surviving listener recomputes `hasMore`
+    // as false and removes this class.
+    rail.classList.add('wy-rail-has-more');
+    rail.dispatchEvent(new Event('scroll'));
+    expect(
+      rail.classList.contains('wy-rail-has-more'),
+      "a scroll on the destroyed app's Rail must not reach the overlay",
+    ).toBe(true);
+  });
+
+  // --- M2-S12a P2: the condensed Panel's dual-form stat rows -------------------------
+  // The contract these pin is #130's shipped one: the FULL sentences are the Panel's
+  // accessible text at every width, the glance block is `aria-hidden` presentation, and
+  // `ui.css` alone decides which is visible. jsdom applies no stylesheet, so these assert
+  // the DOM contract; `compact.spec.ts` asserts which block a browser actually shows.
+  it('the Panel emits BOTH stat forms as sibling blocks — full is the accessible text, glance is aria-hidden', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    const full = panel.root.querySelector('.wy-stats-full')!;
+    const glance = panel.root.querySelector('.wy-stats-glance')!;
+    expect(full, 'the full block must exist at every width').not.toBeNull();
+    expect(glance, 'the glance block must exist at every width').not.toBeNull();
+    // Siblings, not nested: `ui.css` toggles them independently.
+    expect(glance.previousElementSibling).toBe(full);
+    // The glance is hidden from AT PERMANENTLY, so a screen reader is never offered two
+    // readings of the same fact and never has to be told which one to believe.
+    expect(glance.getAttribute('aria-hidden')).toBe('true');
+    expect(full.getAttribute('aria-hidden')).toBeNull();
+    // The full block still carries the whole sentence set.
+    expect(full.textContent).toContain('Cost: 5');
+    expect(full.textContent).toContain('Damage: 10');
+    expect(full.textContent).toContain('Range: 4.0 tiles');
+  });
+
+  // THE PARITY GATE. Pointing the glance builder at the full row array is the obvious
+  // shortcut and would ship a condensed form that condenses nothing — it passes any test
+  // that only counts blocks or checks aria-hidden. This one dies on that mutation: the
+  // glance must carry FEWER rows and must not restate the full form's labels.
+  it('the glance block is a genuinely SEPARATE, shorter form — never the full rows relabelled', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'frost-splash' }),
+      refund: 0,
+    });
+    const full = panel.root.querySelector('.wy-stats-full')!;
+    const glance = panel.root.querySelector('.wy-stats-glance')!;
+    const fullRows = full.querySelectorAll('p').length;
+    const glanceRows = glance.querySelectorAll('p').length;
+    expect(
+      fullRows,
+      "the catalog's densest tower: cost, damage, range, rate, targets, blast, slow",
+    ).toBe(7);
+    expect(glanceRows, 'cost+damage and range+rate each collapse to one line').toBe(5);
+    expect(glanceRows).toBeLessThan(fullRows);
+    // The labels the glance drops BECAUSE the line already implies them.
+    const g = glance.textContent!;
+    expect(g).not.toContain('Cost:');
+    expect(g).not.toContain('Damage:');
+    expect(g).not.toContain('Range:');
+    expect(g).not.toContain('Fire rate:');
+    expect(g).not.toContain('Targets:');
+    // Cost keeps the `◈` vocabulary the Compact bounty chip teaches — never a `g` suffix,
+    // which reintroduces the gold metaphor CONTEXT.md's Bounty entry avoids.
+    expect(g).toContain('◈16');
+    expect(g).not.toMatch(/\b16g\b/);
+  });
+
+  // The glance form must be defined for the catalog's REAL shapes, not just the ordinary
+  // one — a single template with optional slots produces "◈15 ·  dmg" for a beacon and a
+  // phantom fire rate for a mine.
+  it('the glance form covers a support tower (no attack) and a burst tower (no fire rate)', () => {
+    const { overlay, panel } = setup();
+    const glanceOf = (towerId: string): string => {
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ armed: towerId }),
+        refund: 0,
+      });
+      return panel.root.querySelector('.wy-stats-glance')!.textContent!;
+    };
+
+    // `beacon` has no attack at all: cost and support, nothing else.
+    const beacon = glanceOf('beacon');
+    expect(beacon).toContain('◈15');
+    expect(beacon).toContain('+50.0% dmg, shared edge');
+    // A beacon has no Damage row, so its cost line is the BARE cost form — never the
+    // cost+damage one. Asserted on that shape rather than on the absence of the word "dmg",
+    // which the Support row legitimately carries now that it names what its percentage
+    // modifies.
+    expect(beacon).not.toMatch(/◈15\s*·/);
+    expect(beacon).not.toContain('tiles'); // no range
+    expect(beacon).not.toContain('/s'); // no fire rate
+    expect(beacon).not.toContain('Hits'); // no target domain
+
+    // `mine` is burst: a TRIGGER range, a blast, single-use, and NO fire rate.
+    const mine = glanceOf('mine');
+    expect(mine).toContain('◈6 · 45 dmg');
+    expect(mine).toContain('Trigger 2.3 tiles');
+    expect(mine).toContain('Blast 2.5 tiles');
+    expect(mine).toContain('One shot');
+    expect(mine).not.toContain('/s'); // a burst tower has no cadence
   });
 
   // A CADENCED tower's Panel must stay exactly as it was: no trigger-range relabelling

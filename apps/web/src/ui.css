@@ -37,6 +37,26 @@
      which sample computed color/backgroundColor rather than composited alpha, actually
      measure the dimmed state. */
   --wy-fg-dim: #9ba2ae;
+  /* The pinned Panel's cap (M2-S12a P3), as a FRACTION OF THE RAIL, and the single source
+     for both `max-height` and the focus reserve, so the reserve can never under-cover the
+     Panel. 60% is `.wy-banner`'s `25dvh` posture applied to a container: enough to read a
+     tower at a glance, never enough to swallow the Rail. Measured: 182.4px in a 320px-tall
+     Rail (the percentage resolves against the Rail's CONTENT box, 304px — not its 320px
+     border box, which is why the reserve below deliberately adds the Rail's own bottom
+     padding rather than assuming the two bases match). */
+  --wy-panel-cap: 60%;
+  /* The scroll fade's band height (M2-S12a P4). A token because THREE rules must agree: the
+     fade paints it, and both focus reserves must clear it — a focused Card parked flush
+     against the scrollport's bottom edge sits under a gradient that ends fully opaque, which
+     erases the lower legs of its `:focus-visible` outline. Measured at 658x320 before this
+     was reserved: 24px of a 58.4px Card covered, its bottom border and outline gone. */
+  --wy-rail-fade-h: 1.5rem;
+  /* The pinned Panel's TOP edge against the Cards it overlays. `.wy-panel`'s ordinary
+     `#33465f` border is 1.63:1 on --wy-surface — fine as a resting seam between two
+     same-plane boxes, under ADR 0003's 3:1 UI-boundary bar the moment that seam becomes
+     the line between a floating overlay and the content beneath it. axe cannot evaluate a
+     rendered boundary, so this pairing is gated numerically in `ui-contrast.test.ts`. */
+  --wy-panel-edge: #5f7797;
   /* Compact status-column width (contract §2). vw-capped so 200% text zoom cannot starve
      the board: at 200% `4rem` would be 128px, but `10vw` holds it to ~66px on a 658px-wide
      phone. Content that no longer fits scrolls inside `.wy-hud` (the ADR 0003 doctrine)
@@ -603,7 +623,15 @@ body {
   gap: 0.5rem;
   /* The containing block is the SHELL, so `100%` is the full shell width — subtract the Rail
      track (`.wy-main`'s second column) so the Dock still wraps at the Stage's right edge and
-     can never extend over the Rail (which is unpositioned and would lose to `z-index: 1`). */
+     can never extend over the Rail. The Dock is POSITIONED with `z-index: 1`, so it paints in
+     the positive-z-index layer, above in-flow content; the Rail never reaches that layer.
+     Two earlier phrasings of this reason were wrong and are worth naming so a third is not
+     invented: "the Rail is unpositioned" stopped being the mechanism when the Rail took
+     `container-type: inline-size` (which applies `contain: layout` and therefore DOES form a
+     stacking context), and the replacement — "the Rail paints at z-index 0" — is wrong too,
+     because a stacking context formed by a non-positioned element with `z-index: auto` still
+     paints in the in-flow block layer, not with z-index-0 positioned content. The conclusion
+     has survived both corrections; only the reason kept moving. */
   max-width: calc(100% - 1rem - var(--wy-rail-w));
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
@@ -614,6 +642,35 @@ body {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  /* M2-S12a P2: the Rail is a size query container so the Panel can condense on the RAIL's
+     width rather than the viewport's. Measured before it was relied on (2026-08-17,
+     Chromium): containment leaves `overflow-y: auto`, the scrollport's scrollHeight/
+     clientHeight, the Rail's own box and every Card's geometry byte-identical, and a sticky
+     last child still pins. The fallback if that ever stops holding is the viewport math that
+     produces the same widths.
+
+     Containment DOES make this element a containing block for absolutely-positioned
+     descendants, and this file goes on to add two of them — the condensed form's sr-only
+     `.wy-stats-full` sentences, and the Upgrade description. Both are re-anchored to
+     `.wy-panel-scroll` (see its `position: relative` below) rather than left to resolve
+     against the Rail, so neither adds scroll extent here; an earlier draft that left them
+     to resolve outward put 55px of empty, draggable extent below the last Card. */
+  container-type: inline-size;
+  container-name: wy-rail;
+  /* Reserve the scroll fade's band, so a Tab-focused Card is parked ABOVE it rather than
+     under the opaque end of its gradient (ADR 0003's visible-focus requirement). The pinned
+     reserve below supersedes this and adds the same band on top of the Panel's cap.
+
+     `+ 0.5rem + env(safe-area-inset-bottom, 0px)` is this element's OWN bottom padding, and
+     it is required here for the same reason the pinned reserve spells out: the band is a
+     flex item, so it is laid out in the CONTENT box and its bottom edge is the content
+     box's, while `scroll-padding` measures from the PADDING box. Reserving the bare band
+     height therefore leaves exactly that padding as overlap. Measured at 658x320 without
+     this term: the band painted rows 288-312 while focus scrolling parked Cards 3 and 6 at
+     295.6 / 295.7, putting 7.6px of each — its bottom border and the entire lower leg of its
+     3px focus outline — under a gradient that ends fully opaque. 15.6-16.4px at 200% text
+     zoom, and the whole band once a real bottom inset (~21px, iPhone in landscape) counts. */
+  scroll-padding-bottom: calc(var(--wy-rail-fade-h) + 0.5rem + env(safe-area-inset-bottom, 0px));
   padding: 0.5rem;
   padding-right: calc(0.5rem + env(safe-area-inset-right));
   padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
@@ -711,6 +768,241 @@ body {
   background: var(--wy-surface);
   border: 1px solid #33465f;
   border-radius: 6px;
+  /* M2-S12a P3: `--wy-panel-cap` feeds BOTH this element's `max-height` and the Rail's
+     focus reserve, so the cap has to mean the same thing to both. Content-box sizing would
+     let this Panel's padding + border render ~26px TALLER than the number the reserve
+     reserved, and a focused Card would sit under the overhang. */
+  box-sizing: border-box;
+}
+
+/* The glance block is DISPLAY-ONLY presentation and defaults to absent, so a Rail wide
+   enough to render the full sentences never pays for it.
+
+   DECLARED BEFORE the container query that turns it on, and that ordering is load-bearing:
+   `.wy-stats-glance` and `.wy-stats-glance` inside `@container` have the SAME specificity
+   (0,1,0) — a container query adds none — so source order is the only tie-break. Declared
+   after, this rule wins everywhere and the condensed form never appears; worse, the full
+   block has already gone sr-only by then, so the Panel renders no stat rows at all. */
+.wy-stats-glance {
+  display: none;
+}
+
+/* --- The pinned Panel (M2-S12a P3) --------------------------------------------------
+   Where the Rail cannot show the Panel in flow, the Panel pins to the Rail's bottom edge
+   as its last child. Arming then costs no scroll and moves no DOM, which is what keeps
+   `compact.spec.ts`'s `railScrollTop === 0` and `touch.spec.ts`'s cached-Card-position
+   guarantee green (Act 1 ruling 2).
+
+   TWO ARMS, because neither condition can see both cases — measured 2026-08-17:
+     · a NARROW RAIL (below), any viewport height — catches 640x560, which is Standard
+       (height 560 > 500) yet carries the identical 144px Rail and the identical defect;
+     · a SHORT VIEWPORT (the Compact fork at the foot of this file) — catches 900x480 at
+       200% text zoom, where `--wy-rail-w` grows with the root font to a 220px content box
+       and leaves the width arm entirely, while the Panel grows to 888px in a 480px Rail.
+   Deliberately NOT global. Global sticky computes as `sticky` on every Standard viewport,
+   which would make the non-pinned branch unreachable and break `arming.spec.ts`'s
+   1000x720 case — the one that pins that a pointer inspect DOES scroll the Rail. 1000x720
+   presents a 164px content box at 100% zoom and 248px at 200%, outside the width arm at
+   both, and its height keeps it outside the Compact arm.
+
+   The rule body is repeated in the Compact fork rather than hoisted behind a custom
+   property: a container query cannot style its own container, `@container` and `@media`
+   cannot be OR-ed, and `revealPanel()` detects the pin by reading this element's computed
+   `position` — so the one thing that must not become clever is which condition sets it. */
+@container wy-rail (max-width: 160px) {
+  .wy-panel {
+    position: sticky;
+    bottom: 0;
+    max-height: var(--wy-panel-cap);
+    border-top-color: var(--wy-panel-edge);
+    /* Scoped to the PINNED arms, never the base rule. A flex or grid item with a z-index
+       other than `auto` forms a stacking context and joins z-index paint order even at
+       `position: static`, so declaring this on `.wy-panel` itself put the Panel above
+       `.wy-rail::after` at EVERY width — and outside these arms there is no
+       `.wy-panel::before` to take over, so on Standard the scroll fade silently vanished at
+       exactly the moment it exists for: an open Panel over a Rail with content below.
+       Verified by sampling the painted pixel, not by reading the cascade. */
+    z-index: 2;
+    /* Exactly TWO children, and that split is the cap's whole meaning: the scrollport
+       (`.wy-panel-scroll` — the name, the rows, the actions) and the Close button, which
+       stays outside it and so can never be scrolled out of reach on the layout least able
+       to afford that trap. A cap only squeezes what is allowed to shrink, and neither a
+       `<p>` of wrapped text nor a 44px button is: chrome left outside the scrollport does
+       not get squeezed, it OVERFLOWS, into the void below the Rail's bottom edge. Measured
+       at 658×320 with a tower selected, back when the name row and the action row were
+       chrome out here: 220px of content in a 182px cap, zero stat rows rendered, and 17 of
+       the Close button's 44px on screen. `.wy-panel` itself deliberately does NOT scroll —
+       `overflow-y: auto` here would also clip the fade below, which paints ABOVE this
+       element's top edge. */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The one shrinkable child: it takes whatever the cap leaves once the Close button has
+     its own `min-height` (44px, ADR 0003) — down to nothing — and scrolls the remainder
+     rather than clipping it, the posture every capped region in this file takes. */
+  .wy-panel-scroll {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* The scroll affordance's PINNED home (P4): anchored to the Panel's own top edge, so it
+     tracks the Panel's height with no measurement and no observer. */
+  .wy-panel::before {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    left: 0;
+    height: var(--wy-rail-fade-h);
+    pointer-events: none;
+    opacity: 0;
+    background: linear-gradient(to top, var(--wy-surface), transparent);
+  }
+
+  /* --- The condensed Panel (M2-S12a P2) ---------------------------------------------
+     Dual-form stat rows on the shipped `.wy-chip-full`/`.wy-chip-glance` contract: the
+     full ICU sentences stay the Panel's accessible text at EVERY width, and only the
+     PRESENTATION forks. The glance block carries `aria-hidden` permanently in the DOM, so
+     a screen reader never sees it and never has to be told which of the two to believe.
+
+     Keyed on the RAIL's width, not the Compact fork, and not the viewport's: 640x560 is
+     Standard and carries the same 144px Rail with the same 6-of-8 wrapped rows. The
+     threshold is a judgement on a measured curve, not a boundary between named sizes —
+     a 128px content box wraps 6 of 8 rows into a 423.5px Panel, a 192px one wraps none
+     into 277.1px, and 164px sits in a light-wrapping middle. 160px keeps the heavy band and
+     excludes the light one.
+
+     That reasoning is sound for CONDENSING, which answers wrapping. It does NOT carry to
+     the PIN, and an earlier draft of this comment claimed it did — asserting the 164px band
+     was one "the existing scroll + reveal already serves". It is not: `revealPanel()` is
+     unreachable when arming, because both of its call sites are gated on
+     `ui.armed === null && ui.selection !== null`, and arming has no selection. No reveal
+     machinery serves that band at all. The pin's real condition is whether the Panel FITS
+     the Rail — a height relationship no container query can ask about — so the band from
+     ~980px to the two-column gate still shows zero Panel pixels on arm, exactly as `main`
+     does. Open, owner-gated, and recorded here rather than papered over.
+
+     Like `.wy-preview-full` (#101), this RESTATES `.wy-sr-only`'s rules rather than
+     composing that class on: `.wy-sr-only` is used as an IDENTITY by the
+     `querySelector('.wy-sr-only')` that resolves the HUD live region, and composing it
+     here would make that selector resolve to a stat block instead. */
+  .wy-stats-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .wy-stats-glance {
+    display: block;
+    /* The `.wy-hud` Compact precedent. Measured at a 128px content box: at 1rem the
+       densest glance set (`frost-splash`) renders 173px and `slow` 169px against a 180px
+       bound — under it, but with no room for a longer translation. At 0.875rem the same
+       sets render 134px and 130px. */
+    font-size: 0.875rem;
+  }
+}
+
+/* --- The Rail's scroll affordance (M2-S12a P4) ---------------------------------------
+   Five of nine Cards sit below the fold at 658x320 with a 0px scrollbar gutter, and
+   nothing on screen says so. A fade at the scrollport's bottom edge, shown only while
+   content actually remains below — `overlay.ts` owns the boolean and toggles the class.
+
+   DECORATIVE ONLY, and the a11y audit says so rather than claiming it as a fix: the
+   hidden Cards are native buttons already in the tab order, and focusing one scrolls it
+   in. This is for the sighted pointer user who has no other cue.
+
+   Two homes, because a pinned Panel occupies the very edge this would otherwise mark:
+   `.wy-panel::before` (declared in the container query above) rides the Panel's top edge
+   and needs no height tracking; this one marks the Rail's own edge when no Panel is
+   pinned there, and loses to the Panel's `z-index: 2` when one is. */
+.wy-rail::after {
+  content: '';
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex: 0 0 var(--wy-rail-fade-h);
+  /* Cancels its own box AND the flex `gap` that precedes it, so this affordance leaves
+     `scrollHeight` — the very quantity the has-more computation reads — unchanged, and the
+     fade can never become the reason the fade is shown. */
+  margin-top: calc(-1 * var(--wy-rail-fade-h) - 0.5rem);
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(to top, var(--wy-surface), transparent);
+}
+
+.wy-rail-has-more::after,
+.wy-rail-has-more .wy-panel::before {
+  opacity: 1;
+}
+
+/* The focus reserve (M2-S12a P3). A sticky Panel paints OVER earlier siblings, and native
+   focus scrolling only guarantees a focused Card intersects the scrollport — not that it
+   clears an overlay, which is ADR 0003's visible-focus requirement.
+
+   Reserves the CAP, never the live height: a class toggle is synchronous, so there is no
+   frame in which a focused Card can be occluded, where an observer tracking the live
+   height necessarily lags the resize it exists to track. `+ 0.5rem` is the Rail's own
+   bottom padding, which sits between the Panel's bottom edge and the scrollport's — the
+   two percentages resolve against different boxes (`max-height` against the Rail's content
+   box, `scroll-padding` against its padding box), so this is the term that makes
+   over-reserving a guarantee rather than an arithmetic coincidence. Over-reserving only
+   seats a focused Card slightly higher; under-reserving hides it.
+
+   `env(safe-area-inset-bottom)` is part of that term because it is part of the padding it
+   mirrors (see `.wy-rail` above). Omitting it does not fail immediately — it just makes the
+   surplus `9.6 − 0.4·inset` px, which stays positive until roughly a 24px inset and so
+   survives an iPhone in landscape (21px) by about a pixel. That is precisely the arithmetic
+   coincidence this comment claims not to be relying on. */
+.wy-rail-panel-pinned {
+  scroll-padding-bottom: calc(
+    var(--wy-panel-cap) + 0.5rem + env(safe-area-inset-bottom, 0px) + var(--wy-rail-fade-h)
+  );
+}
+
+/* The scrollport is the containing block for its own visually-hidden boxes: the condensed
+   form's `.wy-stats-full` sentences and the Upgrade description are both `position:
+   absolute`, and this is what keeps them resolving against THIS box rather than escaping to
+   whatever positioned ancestor lies further up.
+
+   HONEST STATUS: mutation-tested against the live build (forcing `position: static`), this
+   currently changes nothing measurable — Rail overflow, scrollport overflow and the tab stop
+   are identical at 658×320 armed, 658×320 selected and 1000×720 selected. An earlier comment
+   here claimed it prevented "55px of empty scroll extent"; that no longer reproduces, and the
+   claim is removed rather than left to be trusted. It is inert because `.wy-stats-full` only
+   becomes absolute inside the container query that ALSO makes `.wy-panel` sticky, so a
+   containing block already exists wherever the escape was possible.
+
+   Kept deliberately: that is a coupling between two rules in different blocks, not a
+   guarantee, and this line is what stops it being load-bearing. `relative` with no `z-index`
+   forms no stacking context, so paint order is untouched. */
+.wy-panel-scroll {
+  position: relative;
+}
+
+/* ...and the Upgrade description is then anchored to that origin rather than left at its
+   static position. `.wy-sr-only` sets no `top`, so the box would sit at the very end of the
+   content — 5px past it, once `.wy-panel p`'s margin is counted — and 5px of phantom extent
+   is exactly what the tab-stop test below reads as "this box scrolls", handing the Standard
+   Panel a tab stop that scrolls nothing. Clipped to 1px at either origin, so nothing about
+   what AT reads changes; it stays beside the control it describes. */
+.wy-panel-scroll > .wy-sr-only {
+  top: 0;
+}
+
+/* The capped Panel's scrollport needs a keyboard operator (WCAG 2.1.1): most of what it
+   holds — the stat rows — are `<p>` elements that cannot take focus themselves.
+   `overlay.ts` adds the tab stop only when this container actually overflows — a tab stop
+   that scrolls nothing is noise. */
+.wy-panel-scroll:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: 2px;
 }
 
 .wy-panel p {
@@ -1038,6 +1330,31 @@ body {
   .wy-panel {
     grid-column: 1 / -1;
   }
+
+  /* The scroll fade's cancellation is a FLEX construction (`flex-basis` supplies the box,
+     the negative margin removes it again), and none of that applies to a grid item — so the
+     same box has to be rebuilt here in grid terms: an explicit height, spanning both
+     columns, cancelled against the ROW gap rather than the flex gap.
+
+     An earlier draft simply switched this off, on the premise that the two-column Rail is
+     the one shape that never overflows. That is true at 100% and false at the 200% text
+     zoom this file commits to: measured at 1440x900 the Rail overflows by 184px, at
+     1366x768 by 316px. `syncRailAffordances()` set `wy-rail-has-more` and the has-more rule
+     resolved opacity to 1 — the box simply was not generated, so a sighted pointer user saw
+     Cards below a 0px-gutter fold with no cue at all, which is the exact defect the
+     affordance exists for.
+
+     COST, stated rather than implied: unlike the flex construction this one is NOT free. A
+     flex line absorbs a negative outer size, so there the box and its gap both cancel; a
+     grid track clamps at zero, so the row gap survives and this adds exactly 0.5rem of
+     scroll extent. That matters only if it could become the reason the fade is shown, so
+     that is what the e2e asserts: `wy-rail-has-more` is false at every two-column height at
+     100% zoom (measured 501-900px), and true only where the Rail genuinely overflows. */
+  .wy-rail::after {
+    grid-column: 1 / -1;
+    height: var(--wy-rail-fade-h);
+    margin-top: calc(-1 * var(--wy-rail-fade-h) - 0.5rem);
+  }
 }
 
 @media (max-height: 500px) {
@@ -1211,6 +1528,51 @@ body {
     --wy-rail-w: calc(min(9rem, 28vw) + env(safe-area-inset-right, 0px));
 
     grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
+  }
+
+  /* The pinned Panel's SECOND arm (M2-S12a P3) — see the full rationale beside the
+     container-query arm, which owns the shape. This arm exists for one measured case the
+     width arm cannot see: at 200% text zoom `--wy-rail-w` grows with the root font (9rem
+     becomes 288px, held to 252px by the 28vw cap at 900px wide), presenting a 220px
+     content box — outside the 160px query — while the Panel grows to 888px inside a 480px
+     Rail and shows the player zero pixels. Short viewport, wide Rail: pinning is keyed to
+     the Panel not fitting, and on Compact it never does.
+
+     The condensed form is deliberately NOT repeated here. Condensing answers WRAPPING,
+     which is a width phenomenon and correctly keyed to width alone; at a 220px content box
+     nothing wraps and there is nothing to condense. This arm answers VISIBILITY. */
+  .wy-panel {
+    position: sticky;
+    bottom: 0;
+    max-height: var(--wy-panel-cap);
+    border-top-color: var(--wy-panel-edge);
+    /* Scoped to the PINNED arms, never the base rule. A flex or grid item with a z-index
+       other than `auto` forms a stacking context and joins z-index paint order even at
+       `position: static`, so declaring this on `.wy-panel` itself put the Panel above
+       `.wy-rail::after` at EVERY width — and outside these arms there is no
+       `.wy-panel::before` to take over, so on Standard the scroll fade silently vanished at
+       exactly the moment it exists for: an open Panel over a Rail with content below.
+       Verified by sampling the painted pixel, not by reading the cascade. */
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .wy-panel-scroll {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .wy-panel::before {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    left: 0;
+    height: var(--wy-rail-fade-h);
+    pointer-events: none;
+    opacity: 0;
+    background: linear-gradient(to top, var(--wy-surface), transparent);
   }
 
   /* Hotkey badge is COMPACT-gated, not pointer-gated (decision 1): touch laptops keep the

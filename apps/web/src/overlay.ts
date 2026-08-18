@@ -201,8 +201,13 @@ function setChip(chip: ShellChip, full: string, glance: string): void {
  *  children into one Text node — and never the outcome live region (the `outcomeSeq`-gated
  *  write in `update()`), which deliberately FORCES a mutation on repeated messages so
  *  assistive tech re-announces them. */
-function setLabel(el: Element, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
+/** Returns whether it actually wrote. Callers on the render-loop path use that to gate
+ *  follow-on work — a label patched to the value it already held must not cost a layout
+ *  read 20 times a second. */
+function setLabel(el: Element, text: string): boolean {
+  if (el.textContent === text) return false;
+  el.textContent = text;
+  return true;
 }
 
 function button(doc: Document, className: string, label: string): HTMLButtonElement {
@@ -1070,8 +1075,8 @@ export function createOverlay(
     };
   }
 
-  function appendStatRows(container: HTMLElement, stats: TowerStats): void {
-    const rows = [
+  function fullStatRows(stats: TowerStats): readonly string[] {
+    return [
       t('panel.cost', { cost: stats.cost }),
       // M2-S8: each attack-derived row is present iff the tower actually attacks. A
       // support tower shows the Support row in their place — the same omit-rather-than-
@@ -1137,11 +1142,129 @@ export function createOverlay(
             }),
           ]),
     ];
+  }
+
+  /** THE VISIBLE FORM at a narrow Rail (M2-S12a P2) — the same facts with the labels the
+   *  line already implies dropped, and related fields grouped onto one line. The full
+   *  sentences above remain the Panel's accessible text at every width (Act 1 ruling 1);
+   *  this block is `aria-hidden`, so nothing here is ever the only carrier of a fact.
+   *
+   *  GROUPED, not abbreviated one-for-one, which is why this is a second builder over the
+   *  same struct rather than a per-row pair of spans: cost and damage share a line, as do
+   *  range and rate, so there is no row to pair against.
+   *
+   *  Written for the catalog's REAL shapes rather than one template with optional slots —
+   *  `beacon` has no attack at all (cost and support only), and `mine` is a burst tower
+   *  with a TRIGGER range and no fire rate. Each variant is therefore its own literal key
+   *  at its own call: `i18n-check.mjs` extracts a quoted string immediately after the
+   *  translate call, so a key selected by a ternary inside one call is invisible to it and
+   *  every variant reports as dead. */
+  function glanceStatRows(stats: TowerStats): readonly string[] {
+    const rows: string[] = [];
+    // Cost leads, in the `◈` vocabulary the Compact bounty chip already teaches — never a
+    // `g` suffix, which reintroduces exactly the gold/coin metaphor `docs/CONTEXT.md`'s
+    // Bounty entry avoids.
+    // The glyph comes from `ICONS`, which this file documents as owning it — never baked
+    // into the catalog string. A glyph has no language, so a copy in `en.json` is not a
+    // translation, it is a SECOND source of truth: change `ICONS.bounty` and the Compact
+    // bounty chip renders the new mark while the Panel's cost line keeps the old one, on the
+    // same screen, with nothing to detect the drift.
+    if (stats.damage === null) {
+      rows.push(t('panel.glance.cost', { bounty: ICONS.bounty, cost: stats.cost }));
+    } else if (stats.buffed) {
+      rows.push(
+        t('panel.glance.costDamageBuffed', {
+          bounty: ICONS.bounty,
+          cost: stats.cost,
+          damage: stats.damage,
+        }),
+      );
+    } else {
+      rows.push(
+        t('panel.glance.costDamage', {
+          bounty: ICONS.bounty,
+          cost: stats.cost,
+          damage: stats.damage,
+        }),
+      );
+    }
+    if (stats.rangeTiles !== null) {
+      if (stats.attackMode === 'burst') {
+        rows.push(t('panel.glance.triggerRange', { tiles: stats.rangeTiles }));
+      } else if (stats.fireRate !== null) {
+        rows.push(t('panel.glance.rangeRate', { tiles: stats.rangeTiles, rate: stats.fireRate }));
+      }
+      // No `else`, deliberately. A range implies `def.attack`, and `attack.mode` is exactly
+      // `'cadenced' | 'burst'`, so a non-burst tower with a range always has a fire rate and
+      // the remaining branch is unreachable. A defensive range-only variant would be a string
+      // no player or translator could ever see rendered — and `i18n-check` could not tell:
+      // a key quoted at a live call site counts as used however unreachable that call is.
+      // Should the impossible happen, the row is OMITTED rather than printed with a hole,
+      // which is the rule the rest of this builder already follows.
+    }
+    if (stats.targets !== null) rows.push(t('panel.glance.targets', { targets: stats.targets }));
+    if (stats.supportPercent !== null) {
+      rows.push(t('panel.glance.support', { percent: stats.supportPercent }));
+    }
+    if (stats.blastRadiusTiles !== null) {
+      rows.push(t('panel.glance.blastRadius', { tiles: stats.blastRadiusTiles }));
+    }
+    if (stats.attackMode === 'burst') rows.push(t('panel.glance.singleUse'));
+    if (stats.dot !== null) {
+      rows.push(
+        stats.dot.buffed
+          ? t('panel.glance.dotBuffed', {
+              damage: stats.dot.damage,
+              // The CADENCE is carried, not dropped. It is the one number in this whole
+              // block whose absence changes what the row MEANS rather than how long it is:
+              // "Poison 4 for 3.0s" reads as 4 total, where `venom` applies 4 every 0.5s
+              // across 3.0s — about 24, against a direct hit of 2. Without it the condensed
+              // Panel makes the catalog's headline poisoner read as strictly worse than
+              // `basic`.
+              cadence: stats.dot.cadence,
+              duration: stats.dot.duration,
+            })
+          : t('panel.glance.dot', {
+              damage: stats.dot.damage,
+              cadence: stats.dot.cadence,
+              duration: stats.dot.duration,
+            }),
+      );
+    }
+    if (stats.stun !== null) {
+      rows.push(
+        t('panel.glance.stun', { chance: stats.stun.chance, duration: stats.stun.duration }),
+      );
+    }
+    if (stats.slow !== null) {
+      rows.push(
+        t('panel.glance.slow', { percent: stats.slow.percent, duration: stats.slow.duration }),
+      );
+    }
+    return rows;
+  }
+
+  function appendRowsTo(block: HTMLElement, rows: readonly string[]): void {
     for (const text of rows) {
       const p = doc.createElement('p');
       p.textContent = text;
-      container.appendChild(p);
+      block.appendChild(p);
     }
+  }
+
+  /** Both forms, as SIBLING BLOCKS — `ui.css`'s container query decides which one is
+   *  visible, and the default outside it is the full form. The glance block carries
+   *  `aria-hidden` permanently, so the accessible text is the full sentence set at every
+   *  width and only the presentation forks (#130's shipped pattern). */
+  function appendStatRows(container: HTMLElement, stats: TowerStats): void {
+    const full = doc.createElement('div');
+    full.className = 'wy-stats-full';
+    appendRowsTo(full, fullStatRows(stats));
+    const glance = doc.createElement('div');
+    glance.className = 'wy-stats-glance';
+    glance.setAttribute('aria-hidden', 'true');
+    appendRowsTo(glance, glanceStatRows(stats));
+    container.append(full, glance);
   }
 
   function clearChildren(el: HTMLElement): void {
@@ -1185,6 +1308,108 @@ export function createOverlay(
     container.append(actions, upgradeDesc);
   }
 
+  /** The Panel's SCROLLPORT (M2-S12a P3) — heading, stat rows, and (for a selection) the
+   *  action row the caller appends into the returned element. EVERYTHING the cap cannot
+   *  squeeze lives in here, and the Close button alone stays outside as the Panel's fixed
+   *  footer.
+   *
+   *  That split is the whole point: the cap can only squeeze a box that is allowed to
+   *  shrink, and a `<p>` of wrapped text or a 44px button is not. Measured at 658×320 with
+   *  a tower selected, the heading + Sell + Max level + Close needed 220px of a 182px cap,
+   *  so the surplus overflowed the capped box into the void below the Rail's bottom edge —
+   *  zero stat rows rendered and 17 of the Close button's 44px on screen. Inside the
+   *  scrollport that same surplus scrolls (ADR 0003's posture for every capped region here)
+   *  and the footer is never in the overflow to begin with.
+   *
+   *  Returned rather than closed over so the caller decides what else belongs inside — the
+   *  armed form has no action row. */
+  function appendScrollport(stats: TowerStats): { scroll: HTMLElement; statsEl: HTMLElement } {
+    const scroll = doc.createElement('div');
+    scroll.className = 'wy-panel-scroll';
+    const heading = doc.createElement('p');
+    heading.className = 'wy-panel-name';
+    heading.textContent = stats.name;
+    // The rows keep a container of their OWN inside the scrollport: the live aura patch
+    // below clears it, and clearing the scrollport would take the heading and the buttons
+    // (and any focus inside them) with it.
+    const statsEl = doc.createElement('div');
+    statsEl.className = 'wy-panel-stats';
+    appendStatRows(statsEl, stats);
+    scroll.append(heading, statsEl);
+    panel.root.appendChild(scroll);
+    // BOTH handles returned, neither latched here. This used to assign `panelScrollEl` and
+    // `panelStatsEl` as a side effect while also returning the node — three responsibilities,
+    // one of them invisible at the call site, since neither caller read the assignments it
+    // depended on. `renderPanel` owns that state and now visibly sets it.
+    return { scroll, statsEl };
+  }
+
+  /** Owns BOTH P4 resources so neither can be forgotten separately: the passive scroll
+   *  listener aborts with this signal, the observer disconnects beside it, and `destroy()`
+   *  does both in one place. */
+  const railAffordanceAbort = new AbortController();
+  let railAffordanceObserver: ResizeObserver | null = null;
+
+  /** Recompute the Rail's scroll affordance, the focus reserve and the rows block's tab
+   *  stop (M2-S12a P3/P4). Idempotent and cheap — three class/attribute toggles guarded on
+   *  the value actually changing — so every trigger can call it unconditionally.
+   *
+   *  Deliberately NOT driven from the render loop: `overlay.update()` is gated on `hudKey`
+   *  (`main.ts`), which carries no scroll component, so a scroll would never reach it — and
+   *  per-frame `scrollTop`/`scrollHeight` reads would add layout work to a budget ADR 0005
+   *  already records as breached. */
+  function syncRailAffordances(focusLeavingScrollport = false): void {
+    const rail = shell.rail;
+    // A pinned Panel overlays the Cards, so the Rail must reserve room for it when a
+    // focused Card scrolls in. Keyed on the Panel being BOTH open and pinned: reserving on
+    // Standard, where the Panel sits in flow and covers nothing, would seat focused Cards
+    // high for no reason.
+    const pinned = !panel.root.hidden && panelIsPinned();
+    rail.classList.toggle('wy-rail-panel-pinned', pinned);
+    // `scrollHeight - clientHeight` is the maximum scrollTop; anything left is content
+    // still below the fold. The 1px slack absorbs sub-pixel rounding at fractional zoom —
+    // without it the fade flickers at the end of the scroll on a 1.25x display.
+    const hasMore = rail.scrollHeight - rail.clientHeight - rail.scrollTop > 1;
+    rail.classList.toggle('wy-rail-has-more', hasMore);
+    // The capped scrollport is an internal scroll container, and most of what it holds —
+    // the stat rows — are `<p>` elements that cannot take focus, so without a tab stop of
+    // its own it would be operable by mouse and test only, a WCAG 2.1.1 regression of this
+    // story's own making. Granted only when it ACTUALLY overflows: a tab stop that scrolls
+    // nothing is noise in the tab order of the layout least able to afford it.
+    if (panelScrollEl !== null) {
+      const scrolls = panelScrollEl.scrollHeight - panelScrollEl.clientHeight > 1;
+      // GUARDED on the value actually changing, like the two class toggles above — this
+      // function is bound to the Rail's `scroll` event, so an unguarded write here re-set
+      // `role` and `aria-label` on every rAF-aligned scroll event. An attribute write with
+      // an identical value still runs the engine's attribute-modified path and marks the
+      // accessibility object dirty, so a flick-scroll churned the AX cache once per frame
+      // for no state change — on the layout least able to afford the work.
+      if (scrolls && panelScrollEl.getAttribute('tabindex') === null) {
+        panelScrollEl.setAttribute('tabindex', '0');
+        // `group`, never `region`: a landmark here would announce itself in every landmark
+        // list for a box whose only job is to scroll.
+        panelScrollEl.setAttribute('role', 'group');
+        panelScrollEl.setAttribute('aria-label', t('panel.details.label'));
+      } else if (
+        !scrolls &&
+        panelScrollEl.hasAttribute('tabindex') &&
+        (focusLeavingScrollport || doc.activeElement !== panelScrollEl)
+      ) {
+        // Revoked only while it does NOT hold focus. Removing `tabindex` from the focused
+        // element makes it unfocusable and Chromium resets focus to `<body>` — so a
+        // keyboard user reading a pinned Panel that stops overflowing (a widened window, a
+        // shorter tower) would silently lose their place and Tab from the top of the
+        // document. Every other Panel teardown route in this file re-homes focus
+        // deliberately; this path has no teardown to hang that on, so it simply waits. The
+        // stop is retired by the next recompute after focus moves away, and a tab stop that
+        // scrolls nothing is a far smaller cost than a focus jump nobody asked for.
+        panelScrollEl.removeAttribute('tabindex');
+        panelScrollEl.removeAttribute('role');
+        panelScrollEl.removeAttribute('aria-label');
+      }
+    }
+  }
+
   let lastPanelKey = '';
   // The last `UiState.inspectSeq` renderPanel consumed — `null` before the first frame so
   // boot's seq of 0 isn't mistaken for a fresh inspect (the `selection` guard covers that
@@ -1198,6 +1423,11 @@ export function createOverlay(
    *  without tearing down the Panel subtree (and its focus) — M2-S8, mirroring
    *  `panelSellBtn`'s in-place patching. `null` whenever the Panel isn't showing stats. */
   let panelStatsEl: HTMLElement | null = null;
+  /** The Panel's scrollport — the box the cap squeezes and the one that earns the tab stop
+   *  when it overflows (`appendScrollport`). Its own element, never the rows container:
+   *  the rows are cleared in place on an aura change, and the scrollport holds the heading
+   *  and the action row too. `null` whenever the Panel is closed. */
+  let panelScrollEl: HTMLElement | null = null;
   /** The multiplier `panelStatsEl`'s rows were last rendered at, so the patch above is a
    *  no-op on the overwhelmingly common frame where the aura has not moved. */
   let panelStatsBuffMulFp = SUPPORT_MUL_IDENTITY;
@@ -1212,6 +1442,17 @@ export function createOverlay(
   // very first `update()` call already has `ui.started === true` (a resumed/host-provided
   // snapshot, not necessarily a fresh boot) must not read as "just started".
   let announcedStarted = true;
+  /** Is the Panel currently pinned to the Rail's bottom edge (M2-S12a P3)? Read from the
+   *  Panel's own COMPUTED `position` rather than by restating `ui.css`'s conditions in JS:
+   *  the pin has two arms (a narrow Rail, or the Compact fork) and re-deriving either here
+   *  would be a second source of truth that drifts the first time one moves. Under jsdom no
+   *  stylesheet is applied, so this is `false` and the unit environment keeps the shipped
+   *  scroll-and-reveal behaviour unchanged. */
+  function panelIsPinned(): boolean {
+    const view = doc.defaultView;
+    return view !== null && view.getComputedStyle(panel.root).position === 'sticky';
+  }
+
   /** Scroll the Rail so the Panel's TOP edge lands at the top of its scrollport (#69).
    *
    *  Reveal is keyed on the player's deliberate inspect act ALONE (`UiState.inspectSeq` —
@@ -1239,6 +1480,14 @@ export function createOverlay(
   function revealPanel(): void {
     const rail = panel.root.parentElement;
     if (rail === null) return;
+    // Where the Panel is pinned it is ALREADY fully visible, so revealing it would scroll
+    // the Rail to its end — moving every Card out from under the player's finger — to
+    // achieve nothing. The pinned analogue of the top-first reveal below is resetting the
+    // Panel's OWN scroll, so a re-inspect of the same selection starts at the heading.
+    if (panelIsPinned()) {
+      if (panelScrollEl !== null) panelScrollEl.scrollTop = 0;
+      return;
+    }
     rail.scrollTop = panel.root.offsetTop - rail.offsetTop;
   }
   function renderPanel(ui: UiState, refund: number): void {
@@ -1257,7 +1506,16 @@ export function createOverlay(
       // focus, but the Sell refund can still change while the SAME tower stays selected (the
       // pending queue changed). Patch the existing button's label in place rather than
       // re-keying/recreating the Panel on `refund`.
-      if (panelSellBtn !== null) setLabel(panelSellBtn, t('panel.sell', { refund }));
+      // `mutated` gates the recompute at the foot of this block. THIS PATH IS THE RENDER
+      // LOOP — `update()` calls `renderPanel` on every HUD memo-key change (~20x/s) and the
+      // same-key return is what it takes — so an unconditional recompute here would read
+      // `scrollHeight`/`clientHeight`/`getComputedStyle` every frame, forcing layout against
+      // a budget ADR 0005 already records as breached, and contradicting this function's own
+      // "deliberately NOT driven from the render loop" contract. Both mutations below were
+      // already change-guarded; only the recompute was not.
+      let mutated = false;
+      if (panelSellBtn !== null && setLabel(panelSellBtn, t('panel.sell', { refund })))
+        mutated = true;
       // The support aura reaching an already-selected tower can change too (M2-S8) — a
       // beacon built or sold beside it — and the stat rows are built ONCE on the rebuild
       // path below, so without this the Damage/(boosted)/Poison rows froze at whatever
@@ -1276,9 +1534,21 @@ export function createOverlay(
           panelStatsBuffMulFp = nextBuff;
           clearChildren(panelStatsEl);
           appendStatRows(panelStatsEl, towerStats(ui.selection.towerId, nextBuff));
+          mutated = true;
         }
       }
-      if (inspectRequested && ui.armed === null && ui.selection !== null) revealPanel();
+      if (inspectRequested && ui.armed === null && ui.selection !== null) {
+        revealPanel();
+        mutated = true; // an unpinned reveal scrolls the Rail, which moves `hasMore`
+      }
+      // ONE recompute, and only when something on this path actually changed. Rows and the
+      // Sell label both alter the scrollport's content height with no visibility transition,
+      // and once the cap binds, the Panel STOPS resizing while only the scrollport's
+      // `scrollHeight` moves — which no observer of border-box sizes can see, and which is
+      // what decides whether the scrollport earns its tab stop. A Sell label wrapping to a
+      // second line is enough to tip a near-boundary Panel over; a Sell label rewritten to
+      // the value it already held is not, and must cost nothing.
+      if (mutated) syncRailAffordances();
       return;
     }
     // Focus re-homing seam (PLAN.md P2 Focus rules): renderPanel is the ONE place the Panel
@@ -1295,30 +1565,20 @@ export function createOverlay(
     lastPanelKey = key;
     panelSellBtn = null;
     panelStatsEl = null;
+    panelScrollEl = null;
     panelStatsBuffMulFp = SUPPORT_MUL_IDENTITY;
     clearChildren(panel.root);
     if (ui.armed !== null) {
-      const stats = towerStats(ui.armed);
-      const heading = doc.createElement('p');
-      heading.className = 'wy-panel-name';
-      heading.textContent = stats.name;
-      panel.root.appendChild(heading);
-      panelStatsEl = doc.createElement('div');
-      panel.root.appendChild(panelStatsEl);
-      appendStatRows(panelStatsEl, stats);
+      ({ scroll: panelScrollEl, statsEl: panelStatsEl } = appendScrollport(towerStats(ui.armed)));
       appendCloseButton(panel.root);
       panel.root.hidden = false;
     } else if (ui.selection !== null) {
       const stats = towerStats(ui.selection.towerId, ui.selection.buffMulFp);
-      const heading = doc.createElement('p');
-      heading.className = 'wy-panel-name';
-      heading.textContent = stats.name;
-      panel.root.appendChild(heading);
-      panelStatsEl = doc.createElement('div');
-      panel.root.appendChild(panelStatsEl);
-      appendStatRows(panelStatsEl, stats);
+      const built = appendScrollport(stats);
+      panelScrollEl = built.scroll;
+      panelStatsEl = built.statsEl;
       panelStatsBuffMulFp = ui.selection.buffMulFp;
-      appendActionRow(panel.root, refund);
+      appendActionRow(built.scroll, refund);
       appendCloseButton(panel.root);
       panel.root.hidden = false;
     } else {
@@ -1327,6 +1587,13 @@ export function createOverlay(
     // The rebuild-path half of the auto-reveal — the WHY (and the acts that must never
     // scroll) is documented on `revealPanel` above.
     if (inspectRequested && ui.armed === null && ui.selection !== null) revealPanel();
+    // THE recompute seam (M2-S12a P4). Placed here — after the final `hidden` assignment
+    // and after any reveal scroll — rather than at the three `appendStatRows` calls: those
+    // all run BEFORE `hidden` is written, so they would measure stale visibility, and the
+    // close branch never calls them at all, so the fade would survive the Panel that
+    // caused it. A reveal moves `scrollTop`, which is one of the inputs, so this must also
+    // follow the call above rather than precede it.
+    syncRailAffordances();
     // Re-home only when the torn-down subtree actually held focus AND the rebuild didn't
     // re-establish it inside the Panel (the Panel never auto-focuses, so a previously-held
     // focus always lands on document.body here). A disarm-close (was armed, now closed) →
@@ -1434,11 +1701,22 @@ export function createOverlay(
     // templates get reported as dead catalog entries (verified — that is how this first
     // failed). The gate is right; the call shape is what had to change. NB the extractor
     // scans comments too, so prose here must not spell a call-with-quoted-key either.
+    // #132, the accessible half: the rule is spelled out in a sentence, PARENTHESISED so it
+    // reads as one clause inside the row's comma-separated list rather than dissolving into
+    // it. Two literal keys rather than one with an optional tail, on this function's own
+    // `entry`/`entry.boss` precedent: an armor of 0 subtracts nothing from anything, so
+    // teaching a subtraction rule on that row would be noise at best and wrong at worst.
+    // `armor 0` therefore keeps the bare clause it has always had, and only a row that
+    // actually mitigates carries the explanation.
+    const armorClause =
+      entry.armor === 0
+        ? t('hud.preview.armor', { armor: entry.armor })
+        : t('hud.preview.armor.armored', { armor: entry.armor });
     const params = {
       count: entry.count,
       name: creepName(entry.creepId),
       domain,
-      armor: t('hud.preview.armor', { armor: entry.armor }),
+      armor: armorClause,
       leakCost: t('hud.preview.leakCost', { leakCost: entry.leakCost }),
       immunities,
     };
@@ -1471,7 +1749,17 @@ export function createOverlay(
     // inferring the role from the name would couple this surface to the copy.
     if (entry.boss) notes.push(t('hud.preview.role.boss'));
     if (entry.domain !== 'ground') notes.push(DOMAIN_NAME[entry.domain]());
-    if (entry.armor !== 0) notes.push(t('hud.preview.armor', { armor: entry.armor }));
+    // #132: the glance carries the SIGN and the SCOPE, not just the number. `armor 8` read
+    // as a stat with no operator, and the playtest showed the reader guessing at both which
+    // way it applied and to what. `armor −8 direct` says both in three tokens.
+    //
+    // `direct` is load-bearing and was verified against the sim rather than assumed: armor
+    // is a flat subtraction applied ONLY to the `direct` kind, and the DoT tick passes a
+    // literal `0` armor argument marked as an intentional bypass. An earlier draft of this
+    // string said the reduction applied to every hit — which would have told the player
+    // their poison was being cut by 8, the exact inverse of the mechanic this exists to
+    // expose. The full form beside it spells the same rule out in a sentence.
+    if (entry.armor !== 0) notes.push(t('hud.preview.armor.glance', { armor: entry.armor }));
     if (entry.leakCost !== 1) {
       notes.push(t('hud.preview.leakCost', { leakCost: entry.leakCost }));
     }
@@ -1628,6 +1916,71 @@ export function createOverlay(
     }
   }
 
+  // --- The Rail affordance's four triggers (M2-S12a P4) --------------------------------
+  // (1) the scroll itself, (2) any Rail child changing size, (3) the render seam in
+  // `renderPanel`, and (4) this initial pass. A `scroll` listener alone is not enough: the
+  // Panel opening changes the content height with no scroll at all, and a text-zoom reflow
+  // changes both.
+  // WRAPPED, never passed as the listener itself. `syncRailAffordances` now takes a leading
+  // boolean, and both an `Event` and a `ResizeObserverEntry[]` are truthy — handing either
+  // straight to it would read as "focus is leaving the scrollport" and revoke the tab stop
+  // out from under a keyboard user on every scroll tick.
+  shell.rail.addEventListener('scroll', () => syncRailAffordances(), {
+    passive: true,
+    signal: railAffordanceAbort.signal,
+  });
+  // TRIGGER 5 (M2-S12a, Codex P2): the retention branch keeps the tab stop while the
+  // scrollport holds focus, which is only half a rule — nothing recomputed when focus left,
+  // so after a resize stopped the scrollport overflowing, clicking away left a
+  // non-scrollable element sitting in the tab order as a phantom stop for the rest of the
+  // session. Neither scroll, resize nor render is guaranteed to follow that click.
+  shell.rail.addEventListener(
+    'focusout',
+    (event) => {
+      // `relatedTarget` is the element RECEIVING focus. Moving within the scrollport — the
+      // container to its own Sell button — is not leaving it. `contains` counts self.
+      // IDENTITY, not containment. The retention rule exists for exactly one hazard: removing
+      // `tabindex` from the element that currently HAS focus makes it unfocusable and drops
+      // focus to `<body>`. That hazard only exists while the container itself is focused —
+      // once focus sits on a DESCENDANT (Tab from the container reaches the Sell button
+      // inside it), revoking the container's own tab stop is harmless, because the child
+      // keeps focus. A `contains()` guard read the descendant case as "still inside, do not
+      // revoke", so the obsolete stop survived and Shift+Tab landed straight back on a
+      // non-scrollable container.
+      //
+      // This also retires a realm hazard rather than working around it: an identity
+      // comparison needs no `instanceof Node`, so there is nothing left to resolve against
+      // the wrong realm when `createOverlay(doc, ...)` is handed an injected document.
+      if ((event as FocusEvent).relatedTarget === panelScrollEl) return;
+      // Told explicitly rather than inferred: during a `focusout` the document's
+      // `activeElement` is still the outgoing element (or already `body`), so reading it
+      // here would keep retaining the stop it is meant to release.
+      syncRailAffordances(true);
+    },
+    { passive: true, signal: railAffordanceAbort.signal },
+  );
+  // Observes the Rail's CHILDREN, not the window. The e2e suite changes text size by
+  // injecting `:root { font-size: … }`, which reflows every Card and the Panel WITHOUT
+  // firing `resize` — so a `window.resize` listener would go stale in exactly the case that
+  // creates the overflow. (This is not a reversal of the focus reserve's no-observer
+  // decision: that reserve tracks a FIXED cap and stays synchronous.) jsdom implements no
+  // `ResizeObserver`, so the unit environment simply runs with triggers 1, 3 and 4.
+  const view = doc.defaultView;
+  if (view !== null && typeof view.ResizeObserver === 'function') {
+    railAffordanceObserver = new view.ResizeObserver(() => syncRailAffordances());
+    // The RAIL ITSELF, and not only its children. `hasMore` is a function of
+    // `scrollHeight - clientHeight`, and `clientHeight` is the Rail's own box — which no
+    // child resize reports. Below 800px wide both rail-width formulas resolve to 9rem, so a
+    // viewport HEIGHT change there resizes the Rail without resizing a single child and no
+    // trigger fires: the fade stays absent exactly when content has just gone below the
+    // fold, and — in the other direction — stays painted over a Rail with nothing below it,
+    // which cannot self-heal, because a Rail that no longer scrolls can never fire the
+    // scroll listener that would clear it.
+    railAffordanceObserver.observe(shell.rail);
+    for (const child of shell.rail.children) railAffordanceObserver.observe(child);
+  }
+  syncRailAffordances();
+
   return {
     resultsEl: results,
     settingsEl: settingsDialog,
@@ -1756,6 +2109,13 @@ export function createOverlay(
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI
       doc.removeEventListener('keydown', onGameKeydown);
+      // Both P4 resources, released together — one abort for the listener, one disconnect
+      // for the observer. A leak here is invisible in normal play and fatal under a
+      // re-created app: the listener stays bound to the OLD Rail node and keeps writing
+      // classes onto a detached tree.
+      railAffordanceAbort.abort();
+      railAffordanceObserver?.disconnect();
+      railAffordanceObserver = null;
       modal.destroy();
       results.remove();
       settingsDialog.remove();
