@@ -702,7 +702,7 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   await expect(previewTitle).toHaveText('Wave 4 of 10');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
-    '6 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
+    '6 × Armored Creep — ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
   ]);
 
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
@@ -810,7 +810,9 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   const EXPECTED_COMPOSITION: Record<number, string[]> = {
     2: ['16 × Swarm Creep — ground, armor 0, leak cost 1, no immunities'],
     3: ['8 × Fast Creep — ground, armor 0, leak cost 1, no immunities'],
-    4: ['6 × Armored Creep — ground, armor 6, leak cost 1, no immunities'],
+    4: [
+      '6 × Armored Creep — ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    ],
     5: [
       '12 × Creep — ground, armor 0, leak cost 1, no immunities',
       '6 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
@@ -820,11 +822,13 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '6 × Resolute Creep — ground, armor 0, leak cost 1, slow',
       '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
     ],
-    8: ['6 × Armored Flyer — air, armor 5, leak cost 1, no immunities'],
+    8: [
+      '6 × Armored Flyer — air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    ],
     9: [
       '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
-      '4 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
+      '4 × Armored Creep — ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
     ],
     10: [
@@ -832,7 +836,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       // changed at #101 — the `boss` clause leads because a role is an identity, not a
       // deviation from a baseline. Its presence here is the parity proof: the role reaches
       // assistive tech, not merely the visible glance.
-      '1 × Boss — boss, ground, armor 8, leak cost 3, stun',
+      '1 × Boss — boss, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
       '8 × Creep — ground, armor 0, leak cost 1, no immunities',
     ],
   };

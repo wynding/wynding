@@ -274,7 +274,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(preview.locator('.wy-preview-full')).toHaveText([
       '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
-      '4 × Armored Creep — ground, armor 6, leak cost 1, no immunities',
+      '4 × Armored Creep — ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
     ]);
     // The arc's densest wave, in the form a player actually reads it (#101): three of the
@@ -283,7 +283,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(preview.locator('.wy-preview-glance')).toHaveText([
       '10 × Swarm Creep',
       '6 × Fast Creep',
-      '4 × Armored Creep — armor 6',
+      '4 × Armored Creep — armor −6 direct',
       '4 × Flying Creep — air',
     ]);
 
@@ -629,7 +629,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
 });
 
 test.describe('Rail under the open Panel — Compact (#69)', () => {
-  test('658×320: Cards never squash, arming/placing never scrolls, a pointer inspect reveals the Panel TOP-first', async ({
+  test('658×320: Cards never squash, arming/placing never scrolls, and a pointer inspect needs no reveal — the Panel is PINNED', async ({
     page,
   }) => {
     await gotoAt(page, PHONE);
@@ -682,9 +682,24 @@ test.describe('Rail under the open Panel — Compact (#69)', () => {
     );
     await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
 
-    await expect
-      .poll(railScrollTop, { message: 'a pointer inspect must scroll the Rail' })
-      .toBeGreaterThan(0);
+    // M2-S12a P3 INVERTS this branch, and does so deliberately. At 658×320 the Panel is
+    // now PINNED to the Rail's bottom edge, so it is already fully visible and
+    // `revealPanel()` no-ops instead of scrolling the Rail to its end for nothing. The
+    // OUTCOME this test has always been about — the heading readable after a pointer
+    // inspect — is asserted immediately below and is now strictly STRONGER: it holds at
+    // `scrollTop === 0`, with every Card still exactly where the finger left it. The three
+    // `=== 0` assertions earlier in this test are untouched, which is the check that the
+    // design did not drift: they pass for the same reason they always did.
+    expect(
+      await page.evaluate(
+        () => getComputedStyle(document.querySelector('.wy-panel') as HTMLElement).position,
+      ),
+      'the Panel must be pinned at this viewport — the whole premise of the assertion below',
+    ).toBe('sticky');
+    expect(
+      await railScrollTop(),
+      'a pinned Panel is already visible, so a reveal must not scroll the Rail',
+    ).toBe(0);
     const name = await page.evaluate(() => {
       const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
       const heading = (
@@ -705,4 +720,679 @@ test.describe('Rail under the open Panel — Compact (#69)', () => {
       name.railBottom + 1,
     );
   });
+});
+
+// =====================================================================================
+// M2-S12a — the Compact build loop. THE assertion this story exists to add: after arming
+// a tower on the smallest supported viewports, can the player actually SEE what they
+// armed? Before this story the answer was measurably no — the Panel rendered at content
+// offset 677.5px in a 320px scrollport, with zero pixels on screen, and nothing had ever
+// asserted the outcome (only that arming did not scroll, which it did not).
+// =====================================================================================
+
+/** Arm a tower by HOTKEY, never by clicking its Card. A Playwright `.click()` on a
+ *  below-the-fold Card auto-scrolls the Rail to reach it, which would move the Panel into
+ *  view as a side effect and let every assertion below pass with the defect fully intact. */
+async function armByHotkey(page: import('@playwright/test').Page, key: string): Promise<void> {
+  await page.evaluate(() => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 0));
+  await page.keyboard.press(key);
+  await expect(page.locator('.wy-panel')).toBeVisible();
+}
+
+/** The rows a browser is actually SHOWING — catalog-derived, never a hardcoded list.
+ *  `beacon` has no Damage row at all (cost + support only) and `mine` has no Fire rate, so
+ *  a fixed "cost and damage" expectation is unsatisfiable for one and incomplete for the
+ *  other. */
+async function visibleRowTexts(page: import('@playwright/test').Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const panel = document.querySelector('.wy-panel') as HTMLElement;
+    const glance = panel.querySelector('.wy-stats-glance') as HTMLElement;
+    const full = panel.querySelector('.wy-stats-full') as HTMLElement;
+    const shown = getComputedStyle(glance).display !== 'none' ? glance : full;
+    return [...shown.querySelectorAll('p')].map((p) => p.textContent ?? '');
+  });
+}
+
+test.describe('M2-S12a: arming shows the player what they armed', () => {
+  // Run for the three shapes the catalog actually has — an ordinary cadenced tower, the
+  // attackless support tower, and the burst tower — because each produces a different row
+  // set and a Panel sized differently.
+  for (const [label, hotkey] of [
+    ['basic (ordinary, cadenced)', '1'],
+    ['beacon (no attack at all)', '7'],
+    ['mine (burst, no fire rate)', '8'],
+  ] as const) {
+    test(`658×320: arming ${label} by hotkey puts its heading and first row on screen`, async ({
+      page,
+    }) => {
+      await gotoAt(page, PHONE);
+      await armByHotkey(page, hotkey);
+
+      const geom = await page.evaluate(() => {
+        const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
+        const panel = (document.querySelector('.wy-panel') as HTMLElement).getBoundingClientRect();
+        const heading = (
+          document.querySelector('.wy-panel-name') as HTMLElement
+        ).getBoundingClientRect();
+        const shownBlock = document.querySelector('.wy-stats-glance') as HTMLElement;
+        const firstRow = (
+          (getComputedStyle(shownBlock).display !== 'none'
+            ? shownBlock
+            : (document.querySelector('.wy-stats-full') as HTMLElement)
+          ).querySelector('p') as HTMLElement
+        ).getBoundingClientRect();
+        return {
+          rail,
+          panel,
+          heading,
+          firstRow,
+          railScrollTop: (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
+        };
+      });
+
+      // Arming still must not scroll the Rail — the guarantee `touch.spec.ts` depends on.
+      expect(geom.railScrollTop, 'arming must not scroll the Rail').toBe(0);
+      // FULLY inside, both boxes. A one-pixel border sliver peeking into the scrollport
+      // would satisfy a naive "> 0 pixels visible" check while showing the player nothing.
+      for (const [name, r] of [
+        ['heading', geom.heading],
+        ['first row', geom.firstRow],
+      ] as const) {
+        expect(r.top, `${name} must be inside the Rail's scrollport`).toBeGreaterThanOrEqual(
+          geom.rail.top - 1,
+        );
+        expect(r.bottom, `${name} must be inside the Rail's scrollport`).toBeLessThanOrEqual(
+          geom.rail.bottom + 1,
+        );
+        expect(r.top, `${name} must be inside the Panel's own box`).toBeGreaterThanOrEqual(
+          geom.panel.top - 1,
+        );
+        expect(r.bottom, `${name} must be inside the Panel's own box`).toBeLessThanOrEqual(
+          geom.panel.bottom + 1,
+        );
+        expect(r.height, `${name} must have a real box, not a collapsed one`).toBeGreaterThan(4);
+      }
+    });
+  }
+
+  test('658×320: every remaining row is reachable by KEYBOARD from the Panel’s own tab stop', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    await armByHotkey(page, '9'); // frost-splash — the catalog's densest Panel
+
+    const rowCount = (await visibleRowTexts(page)).length;
+    expect(rowCount, 'the densest tower must actually have rows to reach').toBeGreaterThan(3);
+
+    const scroller = page.locator('.wy-panel-scroll');
+    // The cap gives the rows their own scroll container, and the rows are `<p>` elements
+    // that cannot take focus — so without a tab stop of its own it would be operable by
+    // mouse and test only. That is a WCAG 2.1.1 regression, and it would be one of this
+    // story's own making.
+    await expect(scroller).toHaveAttribute('tabindex', '0');
+    await expect(scroller).toHaveAttribute('aria-label', /\S/);
+    await scroller.focus();
+
+    // Every row must become fully visible through ACTUAL KEY PRESSES — never
+    // `scrollIntoViewIfNeeded()`, which would prove only that the row exists in the DOM,
+    // not that a keyboard user can reach it.
+    const seen = new Set<number>();
+    const recordVisible = async (): Promise<void> => {
+      const idx = await page.evaluate(() => {
+        const sc = document.querySelector('.wy-panel-scroll') as HTMLElement;
+        const glance = sc.querySelector('.wy-stats-glance') as HTMLElement;
+        const shown =
+          getComputedStyle(glance).display !== 'none'
+            ? glance
+            : (sc.querySelector('.wy-stats-full') as HTMLElement);
+        const box = sc.getBoundingClientRect();
+        return [...shown.querySelectorAll('p')]
+          .map((p, i) => {
+            const r = p.getBoundingClientRect();
+            return r.top >= box.top - 1 && r.bottom <= box.bottom + 1 ? i : -1;
+          })
+          .filter((i) => i >= 0);
+      });
+      for (const i of idx) seen.add(i);
+    };
+
+    // Chromium ANIMATES keyboard scrolling by default, so a read taken straight after the
+    // keypress catches the container a pixel or two into a ~100ms animation and reports the
+    // row as still clipped. Settle before measuring — otherwise this test fails for a
+    // reason that has nothing to do with whether the row is reachable.
+    const settle = async (): Promise<void> => {
+      let previous = -1;
+      for (let i = 0; i < 20; i++) {
+        const now = await page.evaluate(
+          () => (document.querySelector('.wy-panel-scroll') as HTMLElement).scrollTop,
+        );
+        if (now === previous) return;
+        previous = now;
+        await page.waitForTimeout(30);
+      }
+    };
+
+    await recordVisible();
+    // ArrowDown AND PageDown, alternating. Both are ordinary keyboard operation of a focused
+    // scroll container, and the claim under test is that every row is REACHABLE by keyboard
+    // — not that one particular key does it. That distinction is load-bearing: in WebKit an
+    // active `requestAnimationFrame` loop suppresses arrow-key scrolling of a focused scroll
+    // container, and this app runs a continuous render loop, so an ArrowDown-only assertion
+    // states a property that holds in Chromium and fails on the only engine iOS allows.
+    for (let i = 0; i < 16 && seen.size < rowCount; i++) {
+      await page.keyboard.press(i % 2 === 0 ? 'ArrowDown' : 'PageDown');
+      await settle();
+      await recordVisible();
+    }
+    expect(
+      [...seen].sort((a, b) => a - b),
+      'every row must be reachable with the keyboard alone',
+    ).toEqual(Array.from({ length: rowCount }, (_, i) => i));
+  });
+
+  // The four viewports the design argument rests on, at both zoom levels. 900×480 and
+  // 640×560 would otherwise be unguarded — and 640×560 is the case that proves the rule is
+  // keyed on the RAIL rather than on the Compact fork, since it is Standard by height and
+  // carries the identical 144px Rail.
+  for (const [label, size] of [
+    ['PHONE 658×320', PHONE],
+    ['NARROW 568×320', NARROW],
+    ['SHORT_DESKTOP 900×480', SHORT_DESKTOP],
+    ['TABLET 640×560', TABLET],
+  ] as const) {
+    for (const zoom of [100, 200]) {
+      test(`${label} at ${zoom}% text zoom: an armed Panel is on screen and pinned`, async ({
+        page,
+      }) => {
+        await gotoAt(page, size);
+        if (zoom === 200) await page.addStyleTag({ content: ':root { font-size: 200% }' });
+        await armByHotkey(page, '9');
+
+        const m = await page.evaluate(() => {
+          const rail = document.querySelector('.wy-rail') as HTMLElement;
+          const panel = document.querySelector('.wy-panel') as HTMLElement;
+          const rr = rail.getBoundingClientRect();
+          const pr = panel.getBoundingClientRect();
+          return {
+            position: getComputedStyle(panel).position,
+            visiblePx: Math.max(0, Math.min(pr.bottom, rr.bottom) - Math.max(pr.top, rr.top)),
+            railHeight: rr.height,
+          };
+        });
+        expect(m.position, 'the Panel must be pinned at every Compact-class viewport').toBe(
+          'sticky',
+        );
+        // The headline defect: this read exactly 0 at all four of these before the story.
+        expect(m.visiblePx, 'the armed Panel must be on screen').toBeGreaterThan(0);
+        // And a real slice of it, not a sliver — enough for the heading plus a row.
+        expect(m.visiblePx).toBeGreaterThan(60);
+        // The cap is what stands between 200% zoom and a Panel that swallows the Rail.
+        expect(m.visiblePx, 'the cap must leave room for the Cards').toBeLessThan(
+          m.railHeight * 0.75,
+        );
+      });
+    }
+  }
+
+  // The SELECTED Panel, which the armed cases above cannot reach: it carries the action row
+  // ON TOP of everything the armed form shows, and it is the form a placement leaves on
+  // screen — the build loop's resting state, not a detour. A cap only squeezes what may
+  // shrink, so while the name row and the actions sat OUTSIDE the scrollport they were not
+  // squeezed by it, they overflowed it: measured at both 320px-tall floors, 220px of content
+  // in a 182px cap, the rows block collapsed to 0px and 17 of the Close button's 44px on
+  // screen with its centre below the Rail's bottom edge. The Panel's visible height is
+  // unchanged by the fix, so no assertion above could have caught it.
+  for (const [label, size] of [
+    ['658×320', PHONE],
+    ['568×320', NARROW],
+  ] as const) {
+    for (const zoom of [100, 200]) {
+      test(`${label} at ${zoom}% text zoom: a placement's Panel keeps its Close button whole and clickable`, async ({
+        page,
+      }) => {
+        await gotoAt(page, size);
+        if (zoom === 200) await page.addStyleTag({ content: ':root { font-size: 200% }' });
+        // The ordinary build path, by keyboard: arm, walk, place. The placement
+        // auto-selects, which is the form under test — and, like `armByHotkey`, none of it
+        // scrolls the Rail, so a passing read cannot be a scroll's doing.
+        await armByHotkey(page, '1');
+        for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+        for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+        await page.keyboard.press('Enter');
+        await expect(
+          page.locator('.wy-panel').getByRole('button', { name: /^Sell/ }),
+        ).toBeVisible();
+
+        const m = await page.evaluate(() => {
+          const rail = document.querySelector('.wy-rail') as HTMLElement;
+          const panel = document.querySelector('.wy-panel') as HTMLElement;
+          const scroll = document.querySelector('.wy-panel-scroll') as HTMLElement;
+          const heading = document.querySelector('.wy-panel-name') as HTMLElement;
+          // The Panel's only DIRECT-child button: Sell and Max level live inside the
+          // scrollport, so this selector also pins WHICH control was kept out of the scroll.
+          const close = document.querySelector('.wy-panel > button') as HTMLElement;
+          const rr = rail.getBoundingClientRect();
+          const sr = scroll.getBoundingClientRect();
+          const cr = close.getBoundingClientRect();
+          const shownBlock = panel.querySelector('.wy-stats-glance') as HTMLElement;
+          const shown =
+            getComputedStyle(shownBlock).display !== 'none'
+              ? shownBlock
+              : (panel.querySelector('.wy-stats-full') as HTMLElement);
+          const hit = document.elementFromPoint((cr.left + cr.right) / 2, (cr.top + cr.bottom) / 2);
+          return {
+            position: getComputedStyle(panel).position,
+            railScrollTop: rail.scrollTop,
+            closeName: close.textContent ?? '',
+            closeHeight: cr.height,
+            closeTopGap: cr.top - rr.top,
+            closeBottomGap: rr.bottom - cr.bottom,
+            closeIsHit: hit !== null && (hit === close || close.contains(hit)),
+            headingStartsInside: heading.getBoundingClientRect().top >= sr.top - 1,
+            scrollportHeight: sr.height,
+            rowsFullyVisible: [...shown.querySelectorAll('p')].filter((p) => {
+              const r = p.getBoundingClientRect();
+              return r.top >= sr.top - 1 && r.bottom <= sr.bottom + 1;
+            }).length,
+          };
+        });
+
+        expect(m.position, 'the Panel must be pinned at this viewport').toBe('sticky');
+        expect(m.railScrollTop, 'a placement must not scroll the Rail').toBe(0);
+        // WHOLE: both edges inside the scrollport, not a clipped stub of a 44px target.
+        expect(m.closeName, 'the Panel-level button is the Close button').toMatch(/\S/);
+        expect(m.closeHeight, 'the Close button keeps its 44px floor').toBeGreaterThanOrEqual(44);
+        expect(m.closeTopGap, 'the Close button must be inside the Rail').toBeGreaterThanOrEqual(
+          -1,
+        );
+        expect(m.closeBottomGap, 'the Close button must be inside the Rail').toBeGreaterThanOrEqual(
+          -1,
+        );
+        // CLICKABLE: laid out inside the scrollport is not the same as reachable by a
+        // finger — the pre-fix Panel had a Close button whose centre hit-tested to nothing.
+        expect(m.closeIsHit, 'the Close button must answer a press at its centre').toBe(true);
+        // And the scrollport still has a box to read the tower in, starting at its name.
+        expect(m.scrollportHeight, 'the scrollport must not collapse').toBeGreaterThan(40);
+        expect(m.headingStartsInside, 'the Panel opens on its name row').toBe(true);
+        // The stat rows are the story's headline outcome, and they are only geometrically
+        // possible at 100%: at 200% on a 320px-tall Rail the name row alone is 134px of a
+        // 92px scrollport, so what the player sees first is the name and the rows are one
+        // scroll of the Panel's own tab stop away.
+        if (zoom === 100) {
+          expect(m.rowsFullyVisible, 'a placed tower must show what it is worth').toBeGreaterThan(
+            0,
+          );
+        }
+      });
+    }
+  }
+});
+
+test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
+  // Asserted on WHICH BLOCK IS SELECTED, never on whether rows wrap. "Rows wrap at 144px
+  // and not at 208px" is already true of the form that shipped before this story, so a
+  // wrapping assertion would pass with the condensed form entirely absent — the vacuous
+  // pass this gate exists to avoid. Real, reachable viewports on both sides; never the
+  // threshold value itself.
+  test('658×320: the GLANCE block is the visible one and the full sentences stay the accessible text', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    await armByHotkey(page, '9');
+    const m = await page.evaluate(() => {
+      const glance = document.querySelector('.wy-stats-glance') as HTMLElement;
+      const full = document.querySelector('.wy-stats-full') as HTMLElement;
+      const gs = getComputedStyle(glance);
+      const fs = getComputedStyle(full);
+      return {
+        glanceDisplay: gs.display,
+        glanceAriaHidden: glance.getAttribute('aria-hidden'),
+        fullPosition: fs.position,
+        fullClip: fs.clipPath,
+        fullWidth: full.getBoundingClientRect().width,
+        glanceScrollHeight: glance.scrollHeight,
+        glanceText: glance.textContent ?? '',
+        fullText: full.textContent ?? '',
+      };
+    });
+    expect(m.glanceDisplay, 'the glance block is the visible one at a 144px Rail').not.toBe('none');
+    // Visually hidden, NOT removed: the full sentences remain the Panel's accessible text
+    // at every width, so only the presentation forks.
+    expect(m.fullPosition).toBe('absolute');
+    expect(m.fullClip).toContain('inset');
+    expect(m.fullWidth).toBeLessThanOrEqual(2);
+    expect(m.glanceAriaHidden).toBe('true');
+    expect(m.fullText).toContain('Cost: 16');
+    expect(m.glanceText).toContain('◈16');
+
+    // The BOUND, asserted on intrinsic `scrollHeight` rather than rendered height: P3's cap
+    // already squeezes any Panel in a 320px Rail, so a rendered-height bound could not tell
+    // the condensed form from the capped uncondensed one and would pass either way.
+    // Measured on the same element: 293px uncondensed at this Rail width, before the story.
+    expect(
+      m.glanceScrollHeight,
+      'the condensed rows block must actually be condensed',
+    ).toBeLessThanOrEqual(180);
+  });
+
+  test('1000×720: a wide Rail keeps the FULL block visible and drops the glance entirely', async ({
+    page,
+  }) => {
+    await gotoAt(page, { width: 1000, height: 720 });
+    await armByHotkey(page, '9');
+    const m = await page.evaluate(() => {
+      const glance = document.querySelector('.wy-stats-glance') as HTMLElement;
+      const full = document.querySelector('.wy-stats-full') as HTMLElement;
+      return {
+        glanceDisplay: getComputedStyle(glance).display,
+        fullPosition: getComputedStyle(full).position,
+        panelPosition: getComputedStyle(document.querySelector('.wy-panel') as HTMLElement)
+          .position,
+      };
+    });
+    // A Rail wide enough to render the full sentences never pays for the glance block.
+    expect(m.glanceDisplay).toBe('none');
+    // ...and an UNPINNED scrollport must not carry a tab stop. Deleting
+    // `.wy-panel-scroll > .wy-sr-only { top: 0 }` leaves the Upgrade description at the end
+    // of the content instead of its origin — ~5px of phantom scroll extent, enough for the
+    // overflow test to hand every Standard keyboard user a tab stop that scrolls nothing.
+    // Asserted in the SELECTION state, the only one that renders that description at all.
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /Basic Tower/ }).click();
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
+    await expect(page.locator('.wy-panel-scroll')).not.toHaveAttribute('tabindex');
+    expect(m.fullPosition, 'the full block is in normal flow here').toBe('static');
+    // And the non-pinned branch stays reachable — this is the shape that still owns the
+    // scroll + reveal machinery (`arming.spec.ts`).
+    expect(m.panelPosition).toBe('static');
+  });
+
+  // THE SELECTION PATH, which the arming tests above cannot reach. A selected tower's Panel
+  // carries an action row (Sell + Max level) that an armed one does not, and the cap can
+  // only squeeze what is allowed to shrink — so chrome left outside the scrollport does not
+  // get squeezed, it OVERFLOWS past the Rail's bottom edge. Measured while that was the
+  // shape: 220px of content in a 182px cap, zero stat rows rendered, and 17 of the Close
+  // button's 44px on screen. Nothing caught it, because every other test here ARMS.
+  test('658×320: a SELECTED tower fits the cap — stat rows render and Close keeps its full 44px', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    await page.getByRole('button', { name: /Basic Tower/ }).click();
+    // Place at (3,3) — smoke.spec's walk. A placement auto-selects, which is the state.
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
+
+    const m = await page.evaluate(() => {
+      const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
+      const panel = document.querySelector('.wy-panel') as HTMLElement;
+      const pr = panel.getBoundingClientRect();
+      const close = [...panel.querySelectorAll('button')].find((b) =>
+        /close/i.test(b.textContent ?? ''),
+      ) as HTMLElement;
+      const cr = close.getBoundingClientRect();
+      const shown =
+        getComputedStyle(panel.querySelector('.wy-stats-glance') as HTMLElement).display !== 'none'
+          ? (panel.querySelector('.wy-stats-glance') as HTMLElement)
+          : (panel.querySelector('.wy-stats-full') as HTMLElement);
+      return {
+        pinned: getComputedStyle(panel).position === 'sticky',
+        panelWithinRail: pr.top >= rail.top - 1 && pr.bottom <= rail.bottom + 1,
+        closeHeight: cr.height,
+        closeWithinPanel: cr.top >= pr.top - 1 && cr.bottom <= pr.bottom + 1,
+        closeWithinRail: cr.top >= rail.top - 1 && cr.bottom <= rail.bottom + 1,
+        renderedRows: shown.querySelectorAll('p').length,
+      };
+    });
+    expect(m.pinned).toBe(true);
+    // The whole Panel — chrome included — stays inside the scrollport it is pinned to.
+    expect(m.panelWithinRail, 'the capped Panel must not overflow the Rail').toBe(true);
+    expect(m.renderedRows, 'the stat rows must actually render').toBeGreaterThan(0);
+    // ADR 0003's 44px target, in full, not a clipped remnant.
+    expect(m.closeHeight).toBeGreaterThanOrEqual(44);
+    expect(m.closeWithinPanel, 'Close must be inside the Panel').toBe(true);
+    expect(m.closeWithinRail, 'Close must be on screen').toBe(true);
+  });
+
+  test('658×320: a focused Card always clears the pinned Panel — all nine of them', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    await armByHotkey(page, '1');
+    const results: boolean[] = [];
+    for (let i = 0; i < 9; i++) {
+      await page.locator('.wy-card').nth(i).focus();
+      results.push(
+        await page.evaluate((n) => {
+          const card = document.querySelectorAll('.wy-card')[n] as HTMLElement;
+          const panel = document.querySelector('.wy-panel') as HTMLElement;
+          const rail = document.querySelector('.wy-rail') as HTMLElement;
+          const cb = card.getBoundingClientRect();
+          const pb = panel.getBoundingClientRect();
+          const rb = rail.getBoundingClientRect();
+          return cb.bottom <= pb.top + 0.5 && cb.top >= rb.top - 0.5;
+        }, i),
+      );
+    }
+    // A sticky Panel paints OVER earlier siblings, and native focus scrolling only
+    // guarantees a focused Card INTERSECTS the scrollport — not that it clears an overlay,
+    // which is what ADR 0003's visible-focus requirement actually needs.
+    expect(results, 'every focused Card must sit above the pinned Panel').toEqual(
+      Array.from({ length: 9 }, () => true),
+    );
+  });
+
+  // The scroll fade is an overlay too, and its gradient ends FULLY OPAQUE at the band's
+  // bottom — the exact edge native focus scrolling parks a Card against. Before the band was
+  // reserved this covered 24px of a 58.4px Card, erasing its bottom border and the lower
+  // legs of its 3px focus outline. Asserted in both states, because the band has two homes.
+  for (const [label, armFirst] of [
+    ['Panel closed', false],
+    ['Panel pinned open', true],
+  ] as const) {
+    test(`658×320 (${label}): the scroll fade never covers a focused Card`, async ({ page }) => {
+      await gotoAt(page, PHONE);
+      if (armFirst) await armByHotkey(page, '1');
+      const covered: number[] = [];
+      for (let i = 0; i < 9; i++) {
+        await page.locator('.wy-card').nth(i).focus();
+        covered.push(
+          await page.evaluate((n) => {
+            const rail = document.querySelector('.wy-rail') as HTMLElement;
+            const card = (
+              document.querySelectorAll('.wy-card')[n] as HTMLElement
+            ).getBoundingClientRect();
+            const panel = document.querySelector('.wy-panel') as HTMLElement;
+            const fadeH = parseFloat(getComputedStyle(rail).getPropertyValue('--wy-rail-fade-h'));
+            const pinned = !panel.hidden && getComputedStyle(panel).position === 'sticky';
+            // The occluding band rides the Panel's top edge when pinned, the scrollport's
+            // bottom edge otherwise.
+            const bandBottom = pinned
+              ? panel.getBoundingClientRect().top
+              : rail.getBoundingClientRect().bottom;
+            return Math.max(
+              0,
+              Math.min(card.bottom, bandBottom) - Math.max(card.top, bandBottom - fadeH),
+            );
+          }, i),
+        );
+      }
+      expect(covered, 'no focused Card may sit under the fade band').toEqual(
+        Array.from({ length: 9 }, () => 0),
+      );
+    });
+  }
+
+  test('658×320: the scroll affordance appears only while Cards remain below', async ({ page }) => {
+    await gotoAt(page, PHONE);
+    const rail = page.locator('.wy-rail');
+    // At rest, with five of nine Cards below a 0px-scrollbar-gutter fold.
+    await expect(rail).toHaveClass(/wy-rail-has-more/);
+    const fadeAt = () =>
+      page.evaluate(
+        () =>
+          getComputedStyle(document.querySelector('.wy-rail') as HTMLElement, '::after').opacity,
+      );
+    expect(await fadeAt()).toBe('1');
+
+    // At the end of the scroll there is nothing below, so the affordance must go.
+    await page.evaluate(() => {
+      const r = document.querySelector('.wy-rail') as HTMLElement;
+      r.scrollTop = r.scrollHeight;
+    });
+    await expect(rail).not.toHaveClass(/wy-rail-has-more/);
+    expect(await fadeAt(), 'the fade must be gone at the end of the scroll').toBe('0');
+
+    // And it returns on the way back up.
+    await page.evaluate(() => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 0));
+    await expect(rail).toHaveClass(/wy-rail-has-more/);
+
+    // Opening the Panel does not disturb it, and the fade then rides the PANEL's top edge
+    // rather than the Rail's — the Rail's own edge is occupied.
+    await armByHotkey(page, '1');
+    await expect(rail).toHaveClass(/wy-rail-has-more/);
+    const placement = await page.evaluate(() => {
+      const panel = document.querySelector('.wy-panel') as HTMLElement;
+      const before = getComputedStyle(panel, '::before');
+      return { opacity: before.opacity, height: before.height };
+    });
+    expect(placement.opacity, "the Panel's own fade must be showing").toBe('1');
+    expect(parseFloat(placement.height)).toBeGreaterThan(0);
+  });
+
+  test('658×320: the Rail at rest is untouched — the affordance costs no scroll extent and no Card', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    const m = await page.evaluate(() => {
+      const rail = document.querySelector('.wy-rail') as HTMLElement;
+      const rr = rail.getBoundingClientRect();
+      return {
+        cardsFullyVisible: [...document.querySelectorAll('.wy-card')].filter((c) => {
+          const b = c.getBoundingClientRect();
+          return b.top >= rr.top - 0.5 && b.bottom <= rr.bottom + 0.5;
+        }).length,
+        overflow: rail.scrollHeight - rail.clientHeight,
+        panelHidden: (document.querySelector('.wy-panel') as HTMLElement).hidden,
+        contentEndsAtLastChild: (() => {
+          const kids = [...rail.children] as HTMLElement[];
+          const last = kids.filter((k) => !k.hidden).at(-1) as HTMLElement;
+          const padBottom = parseFloat(getComputedStyle(rail).paddingBottom);
+          return (
+            Math.abs(rail.scrollHeight - (last.offsetTop + last.offsetHeight + padBottom)) <= 1
+          );
+        })(),
+      };
+    });
+    expect(m.panelHidden, 'at rest means Panel closed').toBe(true);
+    // Reachability floor: browsing must not get worse than it already was. Measured before
+    // the story at this viewport: 4 Cards, 358px of overflow.
+    expect(
+      m.cardsFullyVisible,
+      'at-rest Card reachability must not regress',
+    ).toBeGreaterThanOrEqual(4);
+    // The fade cancels its own box AND the flex gap before it, so the quantity the
+    // has-more computation reads is the same one it read before the affordance existed —
+    // otherwise the fade would become a reason the fade is shown. Asserted as the INVARIANT
+    // rather than as the 358px this happens to measure today: a pixel total would break on
+    // any legitimate Card-height change while saying nothing about the property. The
+    // scrollable content must end exactly at the last REAL child plus the Rail's own bottom
+    // padding, leaving no room for a pseudo-element to have contributed.
+    expect(m.contentEndsAtLastChild, 'the affordance must not add scroll extent').toBe(true);
+  });
+
+  // The scrollport's tab stop is revoked when it stops overflowing — but revoking
+  // `tabindex` from the FOCUSED element makes it unfocusable, and Chromium then resets
+  // focus to `<body>`. A keyboard user reading a pinned Panel through a window resize would
+  // lose their place and Tab from the top of the document.
+  test('a resize that un-pins the Panel never drops focus out of a focused scrollport', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    await armByHotkey(page, '9'); // frost-splash — dense enough that the scrollport overflows
+    const scroller = page.locator('.wy-panel-scroll');
+    await expect(scroller).toHaveAttribute('tabindex', '0');
+    await scroller.focus();
+    expect(await page.evaluate(() => document.activeElement?.className ?? '')).toContain(
+      'wy-panel-scroll',
+    );
+
+    // Widen past the pin: the Panel un-pins, the cap lifts, the scrollport stops overflowing
+    // — and the revoke path runs with focus still inside it.
+    await page.setViewportSize({ width: 1000, height: 720 });
+    await expect(page.locator('.wy-panel')).toBeVisible();
+    await page.waitForTimeout(200);
+    expect(
+      await page.evaluate(() => document.activeElement?.className ?? ''),
+      'focus must not fall to document.body',
+    ).toContain('wy-panel-scroll');
+  });
+
+  // The two-column Rail (>=1280w, aspect >= 16/10) is a GRID, where the fade needs its own
+  // construction. It genuinely never overflows at 100% — but it does at 200% text zoom,
+  // which this project commits to supporting, and an earlier draft switched the fade off
+  // here on the false premise that it never overflows at all.
+  test('1440x900 two-column: the fade is absent at 100% and present at 200% zoom', async ({
+    page,
+  }) => {
+    await gotoAt(page, { width: 1440, height: 900 });
+    const rail = page.locator('.wy-rail');
+    const state = () =>
+      page.evaluate(() => {
+        const r = document.querySelector('.wy-rail') as HTMLElement;
+        const after = getComputedStyle(r, '::after');
+        return {
+          columns: getComputedStyle(r).gridTemplateColumns.split(' ').length,
+          overflow: r.scrollHeight - r.clientHeight,
+          hasMore: r.classList.contains('wy-rail-has-more'),
+          display: after.display,
+          opacity: after.opacity,
+        };
+      });
+
+    const at100 = await state();
+    expect(at100.columns, 'this viewport must actually be the two-column Rail').toBe(2);
+    // Swept across the two-column band, not measured once: the 0.5rem this fade costs can
+    // only bite in the `overflow in (0, 8px]` regime, so a single height would leave the
+    // property the CSS comment leans on ungated.
+    for (const h of [501, 620, 760, 900]) {
+      await page.setViewportSize({ width: 1440, height: h });
+      const s = await state();
+      expect(s.columns, `1440x${h} must still be two-column`).toBe(2);
+      expect(s.overflow, `1440x${h} must not overflow at 100%`).toBe(0);
+      expect(s.hasMore, `1440x${h} must show no cue`).toBe(false);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // The fade costs 0.5rem of scroll extent here (a grid track clamps at zero where a flex
+    // line does not), so the load-bearing assertion is that it never becomes its own cause.
+    expect(at100.overflow, 'the two-column Rail must not overflow at 100%').toBe(0);
+    expect(at100.hasMore, 'no cue where there is nothing below').toBe(false);
+    expect(at100.opacity).toBe('0');
+
+    await page.addStyleTag({ content: ':root { font-size: 200% }' });
+    await expect(rail).toHaveClass(/wy-rail-has-more/);
+    const at200 = await state();
+    expect(at200.overflow, 'the two-column Rail DOES overflow at 200%').toBeGreaterThan(0);
+    // The box must be GENERATED, not merely opaque — `display: none` here was the defect.
+    expect(at200.display, 'the fade must exist as a box in the grid').not.toBe('none');
+    expect(at200.opacity, 'and be painted').toBe('1');
+  });
+
+  for (const [label, size] of [
+    ['658×320', PHONE],
+    ['568×320', NARROW],
+  ] as const) {
+    test(`${label}: axe is clean with the pinned Panel both open and closed`, async ({ page }) => {
+      await gotoAt(page, size);
+      const closed = await new AxeBuilder({ page }).include('#app').analyze();
+      expect(closed.violations, 'Panel closed').toEqual([]);
+      await armByHotkey(page, '9');
+      const open = await new AxeBuilder({ page }).include('#app').analyze();
+      expect(open.violations, 'Panel open').toEqual([]);
+    });
+  }
 });

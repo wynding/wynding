@@ -1342,23 +1342,43 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     // where wave changes re-projected the board for zoomed Standard users — deleted. The
     // RO stub also pins the observer lifecycle: both boxes observed, disconnected on
     // destroy.
-    const observed: Element[] = [];
+    // PER-INSTANCE, not a shared array: the app legitimately runs more than one observer
+    // (M2-S12a's Rail affordance watches the Rail's children), and a single shared list
+    // conflates them — it turns "main.ts observes exactly the preview and the stage" into a
+    // total that any unrelated observer perturbs, and lets ONE disconnect satisfy a
+    // teardown assertion meant for all of them. Identity + every-instance teardown is the
+    // stricter claim, and it is the one this test was always making.
+    const instances: { observed: Element[]; disconnected: boolean }[] = [];
     (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      readonly observed: Element[] = [];
+      disconnected = false;
+      constructor() {
+        instances.push(this);
+      }
       observe(el: Element): void {
-        observed.push(el);
+        this.observed.push(el);
       }
       disconnect(): void {
-        observed.length = 0;
+        this.disconnected = true;
+        this.observed.length = 0;
       }
     };
     try {
       document.documentElement.style.fontSize = '32px'; // 200%
       const h = homeApp();
       const preview = h.root.querySelector('.wy-wave-preview')!;
+      const stage = h.root.querySelector('.wy-stage')!;
       expect(preview.parentElement?.className).toBe('wy-stage'); // zoom never re-homes
-      expect(observed.length).toBe(2); // the preview AND the stage (the width bucket's input)
+      // The preview's own observer watches exactly two boxes: the preview AND the stage
+      // (the width bucket's input).
+      const previewObserver = instances.find((i) => i.observed.includes(preview));
+      expect(previewObserver, 'the preview must be observed').toBeDefined();
+      expect(new Set(previewObserver!.observed)).toEqual(new Set([preview, stage]));
       h.app.destroy();
-      expect(observed).toHaveLength(0); // disconnected
+      // EVERY observer the app created, not just the preview's — a leaked one keeps writing
+      // to a detached tree for the lifetime of the page.
+      expect(instances.length).toBeGreaterThan(0);
+      for (const i of instances) expect(i.disconnected).toBe(true);
     } finally {
       document.documentElement.style.fontSize = '';
       delete (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;

@@ -166,8 +166,9 @@ does not persist across runs.
 _Avoid_: gold, money, cash, credits.
 
 **Armor**:
-A creep durability stat: a **flat** reduction applied to each **direct** hit, so
-armor favors few-big-hits over many-small-hits. Damage-over-time bypasses armor.
+A creep durability stat: a **flat** reduction applied to each **direct** hit —
+including a blast's damage, which resolves as a direct hit — so armor favors
+few-big-hits over many-small-hits. Damage-over-time bypasses armor.
 _Avoid_: defense, resistance (armor is flat and direct-hit-only).
 
 **Domain**:
@@ -241,6 +242,39 @@ _Avoid_: checksum, digest (fine in prose; "world-hash" is canonical).
 The behavior version stamped on a replay; bumped on any determinism-affecting
 change so a replay is validated against the version it was recorded under.
 _Avoid_: game version, schema version.
+
+## Interface
+
+The on-screen furniture the player builds through. These name what the player sees;
+how it is assembled is code.
+
+**Standard / Compact**:
+The two forms the interface takes, chosen by viewport **height** alone — Compact is
+the short one (a status column beside the Board), Standard is everything else. There
+is no third form and no device test: a short desktop window gets Compact.
+_Avoid_: mobile layout, desktop layout, phone layout.
+
+**Rail**:
+The strip listing one **Card** per buildable tower, alongside the **Panel**. It is
+where the player chooses what to build, and it scrolls internally rather than
+squashing what it holds.
+_Avoid_: sidebar, tray, tower bar.
+
+**Card**:
+One buildable tower's entry in the Rail — the control that arms it. A Card names a
+tower the player _could_ build; it is not a Tower.
+_Avoid_: thumbnail.
+
+**Panel**:
+The detail surface for a single tower — its stats while arming, its actions once
+placed. One Panel exists at a time.
+_Avoid_: inspector, tooltip, info box.
+
+**Dock**:
+The cluster of run controls: pause, speed, settings, and the headline Start action.
+The Dock never holds towers — the **Rail** does. ("Top-dock header" names moving this
+cluster to the top edge, not the Rail.)
+_Avoid_: control bar, button bar.
 
 ## Delivery
 

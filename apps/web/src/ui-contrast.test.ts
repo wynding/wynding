@@ -63,6 +63,9 @@ const REQUIRED_TOKENS = [
   'armed',
   'on-accent',
   'board-bg',
+  // M2-S12a P3: the pinned Panel's top edge. Deleting it would silently fall back to
+  // `.wy-panel`'s ordinary 1.63:1 border against the Cards it now floats over.
+  'panel-edge',
 ];
 
 describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥ 3:1)', () => {
@@ -95,6 +98,11 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // The focus ring renders at the board's edge — its real adjacent fills are the
       // board backdrop and the page bg (gated above), both.
       ['focus', 'board-bg'],
+      // M2-S12a P3. A pinned Panel stops being a resting seam between two same-plane boxes
+      // and becomes the boundary between a floating overlay and the Cards beneath it, which
+      // is ADR 0003's 3:1 UI-boundary case. axe cannot evaluate a rendered boundary, so this
+      // is the only thing standing between the design and an invisible edge.
+      ['panel-edge', 'surface'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
