@@ -34,7 +34,7 @@ decision at a later phase, and nothing here presumes it.
 
 ## Build order
 
-```
+```text
 Shared prerequisites — Tracks A and C, apps/web only, no native SDK needed
     #139  pause-on-background
     #140  wake lock
@@ -93,9 +93,15 @@ waits on #135.
 ### Track D — Android distribution
 
 Order matters. **#136 before #137**: a signed APK of a broken layout is a wasted
-build-install-look cycle, and edge-to-edge is enforced for anything targeting SDK 35+, so the
-first Android build hits it immediately. **#138** (Back button) can land any time after the
-Android platform exists; it shares the `ensurePaused` seam with #139 and the two may share a PR.
+build-install-look cycle. **#138** (Back button) can land any time after the Android platform
+exists; it shares the `ensurePaused` seam with #139 and the two may share a PR.
+
+Be precise about when #136 actually bites, because it decides which device can witness it.
+Edge-to-edge is enforced when an app **targeting SDK 35+ runs on Android 15+** — both halves are
+required. Capacitor 8 compiles and targets API 36, so our side of the condition is always met, and
+the trigger is therefore the **first run on an Android 15 or newer device**. On Android 14 and
+below the same APK will not reproduce it. Worth confirming the test device's OS version before
+concluding from a clean run that the issue is absent.
 
 ### Track E — measurement (#141)
 
@@ -217,9 +223,18 @@ The real failure mode is the opposite shape. `env()` is supported across every W
 targets, so the declarations parse and compute fine — they just compute against **zero insets**,
 because under Android's enforced edge-to-edge the system insets are not necessarily propagated
 into the web layer. Nothing is dropped; everything resolves as though the display had no notch and
-no navigation bar, and content sits underneath the system bars. That is why Capacitor 8.3.2+
-injects `--safe-area-inset-*` custom properties and why `@capacitor-community/safe-area` exists —
-both are workarounds for values that are present and wrong, not for a function that is missing.
+no navigation bar, and content sits underneath the system bars. That is why the ecosystem's
+workarounds exist at all — Capacitor's own injected `--safe-area-inset-*` custom properties, and
+`@capacitor-community/safe-area`. Both address values that are present and wrong, not a function
+that is missing.
+
+Do not treat Capacitor's injection as automatic. It arrives in 8.3.2+, runs through the Android
+`SystemBars` path on API 35+ only, is conditional on inset handling being enabled, and checks for
+`viewport-fit=cover` (which `index.html` already sets). API 34 and below take a different path,
+and it does not speak to iOS. `apps/mobile` has no Capacitor dependency yet, so none of it is
+configured. Which mechanism to adopt, and how to configure it, is #136's call — this note records
+that the choice exists and what it is conditional on, deliberately without pre-empting the
+setting.
 
 The two _with_ fallbacks still matter, for a different reason: they are the **load-bearing** ones.
 `--wy-compact-col` and `--wy-rail-w` are track sizes computed from insets, so zeroed insets move
@@ -300,15 +315,44 @@ The Android SDK lives at `/opt/homebrew/share/android-commandlinetools` (Homebre
 ## Open decisions
 
 1. **How does the shell announce itself to the web layer?** Finding 1 needs it, #138 and #139
-   probably want it, and the honest options are a Capacitor platform check at the boot entry
-   (injected down as a dep, matching existing style) or a build-time flag. Decide once, in #135,
-   before three call sites each invent their own.
+   probably want it. Decide once, in #135, before several call sites each invent their own.
+
+   The fact to inject is **"am I inside a host shell?", not "am I inside Capacitor?"** — and the
+   difference is not hypothetical. ADR 0001 §4 has `apps/desktop` (Tauri) wrapping the same
+   canonical web build, so a `Capacitor.isNativePlatform()` check would read false there and hand
+   the Tauri app exactly the defects Finding 1 describes: an install prompt inside an installed
+   desktop app, and every later consumer of this fix silently wrong on that platform. A
+   Capacitor-shaped dependency would have to be replaced the day desktop starts, having quietly
+   accumulated call sites in the meantime.
+
+   So the seam is a host-shell fact that either wrapper can supply — a build-time flag set by
+   whichever shell is building is the obvious candidate, since it needs no runtime API from either.
+   The detection mechanism stays behind that boundary and can differ per wrapper.
+
 2. **Scope of the `StorageDriver` seam in #142** — settings only, or all four ADR 0008 categories.
    Recorded in the issue; restated here because it is a real trade-off (a narrow seam risks a
    Phase 2 rewrite; a general one is a much larger job this epic does not justify).
 
 ## Relationship to M2
 
-None. This track neither blocks nor is blocked by the M2 stories in flight. It touches
-`apps/mobile` (empty), the two lifecycle modules, and — for Findings 1 and 2 — `install.ts` and
-`shell.ts`, which no M2 story owns. Sequencing is a scheduling choice, not a dependency.
+**No scheduling dependency, but one inherited obligation.** Those are different things and the
+distinction matters, so both are stated.
+
+Nothing here blocks or is blocked by the M2 stories in flight. This track touches `apps/mobile`
+(empty), the two lifecycle modules, and — for Finding 1 — `install.ts`, `overlay.ts`, `main.ts`
+and `shell.ts`, none of which an M2 story owns. Ordering the two tracks against each other is a
+scheduling choice.
+
+What #141 **does** inherit is a deferral M2 recorded rather than closed, so it should not be read
+as new work invented by this epic:
+
+- `m2.md` logs the ruling of 2026-07-31 that the over-budget ADR 0005 spike gets a real-device
+  pass at S11. S11 shipped without it. #141 is where that pass now lives.
+- `m2.md` ruling 6 (2026-08-08) records that **#36** cannot close at S12, its absence re-accepted
+  at the S11 close-out on 2026-08-09. #141 closes as much of that backlog as real hardware allows.
+
+Keep the two kinds of evidence apart when #141 reports. The **performance** result is measured
+against ADR 0005's pinned budgets and either validates the provisional numbers or triggers the
+spike's Finding 1 escalation. The **accessibility** result is #36's checklist evidence, judged
+against its own items. They come from the same device session and answer different questions;
+merging them would let a pass on one imply a pass on the other.
