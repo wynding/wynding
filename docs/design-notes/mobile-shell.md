@@ -51,7 +51,7 @@ Gate 2 — an Android device plays a build
     #138  Back button ............ any time after the Android platform exists
 
 Gate 3 — the measurement ADR 0005 ruling (b) deferred
-    Gate 2 ONLY — ruling (b) defers "the real low-end Android device pass"
+    #135 Android half + #148 — NOT the rest of Gate 2
     #148  perf-harness device build ──► #141  real-device pass
     the play APK cannot measure; it ships none of the harness
     an iOS pass is a useful extension, never a prerequisite
@@ -106,11 +106,19 @@ concluding from a clean run that the issue is absent.
 
 ### Track E — measurement (#141)
 
-**Needs Android only.** ADR 0005 ruling (b) defers "the real low-end Android device pass", and the
-budget it exists to test is stated against the low-end Android WebView, which the ADR calls the
-binding constraint. So Gate 3 requires Gate 2 — a signed APK that survives a reboot — and nothing
-from the iOS side. Measuring iOS too is worth doing and tells us something real, but it is an
-extension of this pass, never a prerequisite for it.
+**Needs Android only, and not all of Gate 2.** ADR 0005 ruling (b) defers "the real low-end Android
+device pass", and the budget it exists to test is stated against the low-end Android WebView, which
+the ADR calls the binding constraint. Nothing from the iOS side is required; measuring iOS is a
+worthwhile extension, never a prerequisite.
+
+The Android prerequisite is narrower than the playable gate: this pass runs #148's separate
+artifact, so it needs the **Android half of #135 plus #148**, and an installable build — not
+release signing (#137), not the Back button (#138), and not the safe-area work (#136), which
+cannot affect it because the perf entries load no stylesheet at all. Gate 3 is therefore reachable
+well before Gate 2 closes, which matters given that it is the outcome justifying the epic. One
+caveat rather than a blocker: the perf entry builds on `createApp`, so #146's surfaces are in its
+graph and an unfixed fullscreen request could perturb a run — worth landing first, not worth
+waiting on.
 
 That distinction is worth stating precisely rather than leaving implied, because it decides
 scheduling. Gate 3 is the outcome that justifies the epic, and any iOS work placed in front of it
