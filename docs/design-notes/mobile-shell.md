@@ -119,27 +119,17 @@ Xcode was still absent — it would have parked the whole payoff behind a downlo
 holds now that both toolchains are provisioned, because the Android and iOS tracks can then run
 independently rather than one waiting on the other.
 
-**It also needs a second artifact, which is #148.** The Gate 2 APK cannot perform this
-measurement: the shell wraps `apps/web/dist`, and the harness is not there. `vite.perf.config.ts`
-builds `perf/index.html` and `perf/catalog.html` to `dist-perf/`, `main-perf.ts` exposes
-`window.wyndingPerf` from a graph production never reaches, and the config states the property
-deliberately — there being no path from `vite.config.ts` to it, the perf build is _"STRUCTURALLY
-incapable of entering the production artifact."_ The play build therefore ships no stress scene, no
-measurement surface, and no access to the 40×40 stress ruleset, which is absent from the bundled
-registry by design.
+**It also needs a second artifact, which is #148.** The Gate 2 APK cannot perform this measurement.
+The shell wraps `apps/web/dist`, and the perf harness is deliberately not in it — `vite.perf.config.ts`
+builds to `dist-perf/` from entries production never references, and states the guarantee itself:
+the perf build is _"STRUCTURALLY incapable of entering the production artifact."_ So the play build
+ships no stress scene, no measurement surface, and no stress ruleset.
 
-So Gate 3 needs a development-only WebView build packaging `dist-perf`, and the fix must not be to
-merge the two graphs — doing that would trade the structural guarantee and ADR 0005's < 3 MB
-initial-load budget for convenience. Two artifacts, one playable and one measurable. Because it
-decides whether the shell has one build target or two, #148 belongs with #135's work rather than
-after it.
-
-**Pointing `webDir` at `dist-perf` is not sufficient and would not boot.** The perf config's input
-is `perf/index.html`, so the build emits `dist-perf/perf/index.html` and **no** `dist-perf/index.html`
-— `playwright.perf.config.ts` records that the origin `/` 404s, which is why its own readiness poll
-targets `/perf/index.html` rather than the bare origin. A shell loading its asset root would open on
-that 404. #148 has to stage a root entry or route the native entry point explicitly at
-`/perf/index.html`.
+Gate 3 therefore needs a development-only build packaging `dist-perf`, and **must not** be solved
+by merging the two graphs — that would trade the structural guarantee and ADR 0005's < 3 MB
+initial-load budget for convenience. Two artifacts: one playable, one measurable. Since it decides
+whether the shell has one build target or two, #148 belongs with #135's work rather than after it.
+The packaging is less obvious than it looks — #148 records why, and what the entry point has to do.
 
 ### What #141 must record
 
@@ -162,14 +152,10 @@ class — **the web build assumes it is running in a browser on the open web**, 
 is false inside a WebView. They are filed together as **#146**. The third sharpens **#136** and is
 recorded there.
 
-A note on how that class was scoped, because the first attempt got it wrong. The original sweep
-read the candidate modules and judged each on its own logic, which cleared `fullscreen.ts` — its
-gate is capability-based, it renders nothing, and it no-ops on iOS. That was the wrong unit of
-analysis: the defect is not in the module but in the state its **call site** feeds it, and
-`main.ts` passes the same broken `install.state()` pair into it. The scoping that actually holds
-is by wrong fact rather than by module — enumerate every consumer of the bad state, which is a
-grep with a definite answer, instead of asking module by module whether it looks safe. Doing that
-gives `overlay.ts` and `main.ts` and nothing else, which is the boundary claimed below.
+The class is bounded by enumeration rather than judgement: every consumer of the bad state, which
+is `overlay.ts` and `main.ts` and nothing else. Scoping it by reading each module instead misses
+the second one, because that module is correct on its own terms and only its **call site** is
+wrong.
 
 ### 1. `install.state()` is wrong in a WebView, and two features act on it
 
@@ -197,27 +183,18 @@ when `requestFullscreen` exists, the pointer is coarse, and the app is _not_ sta
 coarse-pointer device whose WebView exposes the API, pressing Start requests fullscreen inside a
 native shell that already owns the whole screen.
 
-This one is easy to dismiss on its own and should not be. Read in isolation `fullscreen.ts` looks
-safe: its gate is capability-based by design, it renders no affordance, and on iOS it simply
-no-ops because WKWebView has no element fullscreen. The defect is not in the module, it is in what
-the call site feeds it — which is exactly why an audit of these modules one at a time misses it.
-Its own severity is low; its significance is that it is the second consumer of the same wrong
-fact, so a fix wired into `overlay.ts` alone leaves the codebase in the worst state of the three:
-inconsistent.
+Its own severity is low — it no-ops on iOS. It is in scope because it is the **second consumer of
+the same wrong fact**, so fixing `overlay.ts` alone leaves the two call sites disagreeing about
+whether the app is installed, which is worse than fixing neither.
 
 Fix at the capability level, not by UA sniffing: the shell knows it is the shell, and that fact
-should reach `install.ts` as an injected dep, consistent with how the module already takes
-`matchMedia` and its storage adapter. Both consumers then follow from the corrected state without
-either of them learning what a WebView is.
+reaches `install.ts` as an injected dep, consistent with how the module already takes `matchMedia`
+and its storage adapter. Both consumers then follow from the corrected state.
 
-One honest caveat on the diagnosis, which the remedy is deliberately insensitive to. What a
-Capacitor WebView reports for `(display-mode: standalone)` is reasoned here from the fact that
-neither WKWebView nor Android's WebView implements manifest display modes — which is why Capacitor
-ships `isNativePlatform()` at all — but it has not been observed on a device, because no device
-build exists yet. If some WebView does report `standalone`, the diagnosis narrows and the fix does
-not change: injecting shell-presence explicitly is correct regardless of what the media query
-answers, and is the reason to prefer it over inferring the environment. Confirm the reported value
-while implementing; do not build anything that depends on it.
+The diagnosis is reasoned, not observed — no device build exists yet. The remedy is deliberately
+insensitive to that: injecting shell-presence is correct whatever the media query reports, which
+is the argument for injection over inference. Confirm the real values while implementing; depend
+on none of them.
 
 ### 2. The home link ends the run and lands nowhere
 
@@ -246,95 +223,44 @@ Sharpens **#136**, whose title said "19 places" and has been corrected. `ui.css`
 declarations**, of which two pass a fallback (`--wy-compact-col` at line 54, `--wy-rail-w` at
 line 1211) and sixteen do not.
 
-**That fallback count is not the defect, and it is worth saying so before someone spends a day on
-it.** A fallback lives _inside_ `env()`, so an engine that cannot parse the function invalidates
-the declaration either way — `env(x, 0px)` and `env(x)` fail identically. The fallback only does
-work when `env()` _is_ supported and the named variable is unset. Adding sixteen fallbacks would
-change nothing.
+**The fallback count is not the defect** — worth stating so nobody spends a day adding sixteen
+fallbacks for nothing. A fallback only applies where `env()` is supported and the variable is
+unset, so it cannot rescue a declaration from an engine that cannot parse the function.
 
-The real failure mode is the opposite shape. `env()` is supported across every WebView Capacitor 8
-targets, so the declarations parse and compute fine — they just compute against **zero insets**,
-because under Android's enforced edge-to-edge the system insets are not necessarily propagated
-into the web layer. Nothing is dropped; everything resolves as though the display had no notch and
-no navigation bar, and content sits underneath the system bars. That is why the ecosystem's
-workarounds exist at all — Capacitor's own injected `--safe-area-inset-*` custom properties, and
-`@capacitor-community/safe-area`. Both address values that are present and wrong, not a function
-that is missing.
+The real failure is the opposite shape: `env()` **is** supported in these WebViews, so the
+declarations compute normally — against **zero insets**, because enforced edge-to-edge does not
+necessarily propagate the system insets into the web layer. Content ends up under the system bars.
+That is what the ecosystem's workarounds address (Capacitor's injected `--safe-area-inset-*`
+properties, `@capacitor-community/safe-area`) — values present and wrong, not a missing function.
+Neither is automatic; both are conditional, and which to adopt is #136's call.
 
-Do not treat Capacitor's injection as automatic. It arrives in 8.3.2+, runs through the Android
-`SystemBars` path on API 35+ only, is conditional on inset handling being enabled, and checks for
-`viewport-fit=cover` (which `index.html` already sets). API 34 and below take a different path,
-and it does not speak to iOS. `apps/mobile` has no Capacitor dependency yet, so none of it is
-configured. Which mechanism to adopt, and how to configure it, is #136's call — this note records
-that the choice exists and what it is conditional on, deliberately without pre-empting the
-setting.
+The two declarations _with_ fallbacks are the **load-bearing** ones: `--wy-compact-col` and
+`--wy-rail-w` are track sizes computed from insets, so zeroed insets move the layout's geometry
+rather than only its spacing.
 
-The two _with_ fallbacks still matter, for a different reason: they are the **load-bearing** ones.
-`--wy-compact-col` and `--wy-rail-w` are track sizes computed from insets, so zeroed insets move
-the layout's geometry, not just its padding.
-
-The sharpest consequence is for verification, and it is worth stating exactly rather than
-dramatically. `compact.spec.ts` never mentions insets at all. It runs in headless Chromium, where
-`env(safe-area-inset-*)` is always 0, so the geometry it pins is zero-inset geometry:
-`stage.y <= 1`, `status.y <= 1`, and `status.width <= 96` against a track that computes to 64px at
-the 658×320 phone viewport.
-
-The two axes behave differently, and the difference decides what a harness has to assert:
-
-- **A top inset is undetectable by these checks.** In Compact `.wy-status` is `grid-row: 1`
-  (`ui.css:1105`) and `.wy-main` is `grid-row: 1` (`ui.css:1202`) — the same row, whose edge is at 0. The inset enters at `ui.css:1115` as `.wy-status`'s **internal** `padding-top`, which moves
-  content within the box without moving the box. So `status.y <= 1` and `stage.y <= 1` both hold at
-  any inset value. Treat the top path as unguarded.
-- **A left inset is partly detectable**, because there the inset reaches a **grid track** rather
-  than padding: `--wy-compact-col` is `min(4rem, 10vw) + env(safe-area-inset-left)`, so the column
-  genuinely widens. Against a computed 64px and an assertion of `<= 96`, an inset over roughly 32px
-  fails and anything under it passes unremarked.
-
-So a green `compact.spec.ts` is not evidence about #136, and a harness for it must assert an
-affected padding value or descendant position for the top axis — bounding-box geometry alone cannot
-see it. This paragraph has been wrong twice: first claiming the spec references `env()` (it does
-not), then claiming a top inset would trip `status.y` (it does not, for the grid reason above).
-Both errors came from reasoning about layout without tracing where the inset actually lands.
+**The consequence that changes the estimate:** the existing e2e suite cannot verify this. It runs
+where insets are always zero, and for the top axis the inset lands in internal padding inside a
+grid row whose edge does not move — so bounding-box assertions cannot see it at any inset value.
+#136 needs a harness that injects inset values and asserts padding or descendant position, which
+is a more invasive assertion than the suite currently makes. The traced analysis is on #136.
 
 ## Repo hygiene — `cap sync` will break CI
 
-`verify` runs `prettier --check .` across the whole repo, and `.prettierignore` currently excludes
-only build output, generated i18n, and the locally-gitignored planning docs. `cap sync` copies
-`apps/web/dist` into the native projects:
-
-- `apps/mobile/android/app/src/main/assets/public/**`
-- `apps/mobile/ios/App/App/public/**`
-
-Those are HTML, JS, CSS and JSON — all parseable by prettier, none formatted to its taste. The
-first `cap sync` therefore turns `format:check` red.
-
-The exact scanned surface, checked with `prettier --file-info` rather than assumed, because it
-decides how wide the ignore entries have to be:
-
-| Path                                                       | Prettier                 |
-| ---------------------------------------------------------- | ------------------------ |
-| `android/app/src/main/assets/public/index.html`            | ✅ scanned (html)        |
-| `ios/App/App/public/assets/*.js`                           | ✅ scanned (babel)       |
-| `android/app/src/main/assets/capacitor.config.json`        | ✅ scanned (json)        |
-| `capacitor.config.ts` (ours, hand-authored)                | ✅ scanned (ts) — wanted |
-| `AppDelegate.swift`, `build.gradle`, `*.kt`, `strings.xml` | skipped, no parser       |
-
-So the hazard is **not only the copied `public/` trees**. Generated JSON inside the native
-projects — `capacitor.config.json` among it — is scanned too, while Swift, Gradle, Kotlin and XML
-are skipped for lack of a parser rather than by any ignore rule. Our own `capacitor.config.ts`
-should stay scanned; it is source we author.
+`verify` runs `prettier --check .` repo-wide, and `cap sync` copies the web bundle into the native
+projects as HTML, JS, CSS and JSON — all of which prettier parses. **The first `cap sync` turns
+`format:check` red**, and generated config inside the projects is caught too, not only the copied
+`public/` trees. Native sources are unaffected; prettier has no parser for them. The verified path
+list is on #135, where the work happens.
 
 **Decided: the generated `ios/` and `android/` projects are committed**, following Capacitor's
 convention. They are where native config has to live — permissions, signing, the edge-to-edge
-handling of #136 — so generating them on demand would leave that material homeless and make the
-build depend on reproducing `cap add` exactly. The cost is accepted: a large, churn-prone tree in
-a public repo.
+handling of #136 — so generating on demand would leave that material homeless. The cost is
+accepted: a large, churn-prone tree in a public repo.
 
 That decision requires `.gitignore` and `.prettierignore` entries **in the same change** as
-`cap add`, not as a follow-up. The copied `public/` trees are gitignored outright: they are build
-output, reproducible by `cap sync`, and committing them would duplicate the entire web bundle
-into the repo on every build. Committing the projects and committing their synced payload are
-different things, and only the first is wanted.
+`cap add`, not as a follow-up. The copied `public/` trees are gitignored outright — they are build
+output, and committing them would duplicate the whole web bundle on every build. Committing the
+projects and committing their synced payload are different things; only the first is wanted.
 
 Related constraints:
 
@@ -388,17 +314,11 @@ The Android SDK lives at `/opt/homebrew/share/android-commandlinetools` (Homebre
 1. **How does the shell announce itself to the web layer?** Finding 1 needs it, #138 and #139
    probably want it. Decide once, in #135, before several call sites each invent their own.
 
-   The fact to inject is **"am I inside a host shell?", not "am I inside Capacitor?"** — and the
-   difference is not hypothetical. ADR 0001 §4 has `apps/desktop` (Tauri) wrapping the same
-   canonical web build, so a `Capacitor.isNativePlatform()` check would read false there and hand
-   the Tauri app exactly the defects Finding 1 describes: an install prompt inside an installed
-   desktop app, and every later consumer of this fix silently wrong on that platform. A
-   Capacitor-shaped dependency would have to be replaced the day desktop starts, having quietly
-   accumulated call sites in the meantime.
-
-   So the seam is a host-shell fact that either wrapper can supply — a build-time flag set by
-   whichever shell is building is the obvious candidate, since it needs no runtime API from either.
-   The detection mechanism stays behind that boundary and can differ per wrapper.
+   The fact to inject is **"am I inside a host shell?", not "am I inside Capacitor?"** ADR 0001 §4
+   has `apps/desktop` (Tauri) wrapping the same web build, so a Capacitor-specific check reads
+   false there and hands the desktop app the same defects — silently, on a platform that does not
+   exist yet, after the dependency has accumulated call sites. Either wrapper must be able to
+   supply it.
 
 2. **Scope of the `StorageDriver` seam in #142** — settings only, or all four ADR 0008 categories.
    Recorded in the issue; restated here because it is a real trade-off (a narrow seam risks a
