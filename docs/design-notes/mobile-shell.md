@@ -123,6 +123,15 @@ Neither is subtle and both are on the first screen. Fix at the capability level,
 sniffing: the shell knows it is the shell, and that fact should reach `install.ts` as an injected
 dep, consistent with how the module already takes `matchMedia` and its storage adapter.
 
+One honest caveat on the diagnosis, which the remedy is deliberately insensitive to. What a
+Capacitor WebView reports for `(display-mode: standalone)` is reasoned here from the fact that
+neither WKWebView nor Android's WebView implements manifest display modes — which is why Capacitor
+ships `isNativePlatform()` at all — but it has not been observed on a device, because no device
+build exists yet. If some WebView does report `standalone`, the diagnosis narrows and the fix does
+not change: injecting shell-presence explicitly is correct regardless of what the media query
+answers, and is the reason to prefer it over inferring the environment. Confirm the reported value
+while implementing; do not build anything that depends on it.
+
 ### 2. The home link ends the run and lands nowhere
 
 `HOME_HREF` is `'/'` (`shell.ts:221`) — deliberately root-absolute so it stays correct under the
