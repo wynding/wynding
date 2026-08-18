@@ -740,21 +740,42 @@ async function armByHotkey(page: import('@playwright/test').Page, key: string): 
   await expect(page.locator('.wy-panel')).toBeVisible();
 }
 
-/** Focus scrolling is ANIMATED in Chromium, so a geometry read taken straight after
- *  `.focus()` catches the Rail mid-flight — and mid-flight is a different world: the fade is
- *  still painted and the focused Card has not reached its resting place. Measured without
- *  this, the last Card reported 16px under the band; settled, it is at maximum scroll where
- *  `wy-rail-has-more` is false and the band paints nothing at all. */
+/** Wait for a scroll container to come to rest, measured in ANIMATION FRAMES rather than on
+ *  the wall clock. Focus and keyboard scrolling are both animated in Chromium, so a geometry
+ *  read taken straight after `.focus()` catches the container mid-flight — a different world,
+ *  where the fade is still painted and the focused Card has not reached its resting place.
+ *  Measured without settling, the last Card reported 16px under the band; settled, it sits at
+ *  maximum scroll where `wy-rail-has-more` is false and the band paints nothing at all.
+ *
+ *  FRAMES, and CONSECUTIVE ones, for two distinct reasons. Sleeping a fixed interval couples
+ *  the test to machine speed and to the engine's animation timing, which is the flake this
+ *  suite exists to avoid. And returning on the FIRST unchanged reading — which the wall-clock
+ *  version this replaced did — can observe a single quiet sample during easing, or before the
+ *  animation has advanced at all, and settle on a value the scroll is about to leave.
+ *  Requiring four consecutive unchanged frames outlasts both by construction rather than by
+ *  luck. */
+async function settleScroll(
+  page: import('@playwright/test').Page,
+  selector: string,
+): Promise<void> {
+  await page.evaluate(async (sel) => {
+    const el = document.querySelector(sel) as HTMLElement;
+    const nextFrame = (): Promise<void> =>
+      new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    let previous = Number.NaN;
+    let stableFrames = 0;
+    // Bounded at ~2s of frames; the animation itself runs ~100-150ms.
+    for (let i = 0; i < 120 && stableFrames < 4; i++) {
+      await nextFrame();
+      const now = el.scrollTop;
+      stableFrames = now === previous ? stableFrames + 1 : 0;
+      previous = now;
+    }
+  }, selector);
+}
+
 async function settleRailScroll(page: import('@playwright/test').Page): Promise<void> {
-  let previous = -1;
-  for (let i = 0; i < 20; i++) {
-    const now = await page.evaluate(
-      () => (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
-    );
-    if (now === previous) return;
-    previous = now;
-    await page.waitForTimeout(30);
-  }
+  await settleScroll(page, '.wy-rail');
 }
 
 /* NOTE — the visible-stats-block fork (`glance` unless it is `display: none`) is
@@ -886,17 +907,7 @@ test.describe('M2-S12a: arming shows the player what they armed', () => {
     // keypress catches the container a pixel or two into a ~100ms animation and reports the
     // row as still clipped. Settle before measuring — otherwise this test fails for a
     // reason that has nothing to do with whether the row is reachable.
-    const settle = async (): Promise<void> => {
-      let previous = -1;
-      for (let i = 0; i < 20; i++) {
-        const now = await page.evaluate(
-          () => (document.querySelector('.wy-panel-scroll') as HTMLElement).scrollTop,
-        );
-        if (now === previous) return;
-        previous = now;
-        await page.waitForTimeout(30);
-      }
-    };
+    const settle = (): Promise<void> => settleScroll(page, '.wy-panel-scroll');
 
     await recordVisible();
     // ArrowDown AND PageDown, alternating. Both are ordinary keyboard operation of a focused
