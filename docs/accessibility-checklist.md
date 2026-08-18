@@ -742,3 +742,19 @@ deferred): the condensed rows' legibility at 0.875rem on a real phone, and the p
 edge contrast under real device colour profiles, are asserted by the computed-value and e2e
 evidence above rather than a real-device capture. **#36 close-out and the top-dock header are
 S12b**, which is device-gated — see #143.
+
+**WAIVER for those deferrals, named rather than implied.** Owner **Rob**; ruling 6 of
+**2026-08-08**, re-accepted at the S11 close-out on **2026-08-09** (recorded in full in the
+Story 11 section above and in `docs/milestones/m2.md`'s Open questions). **Accepted scope:**
+real-device capture for every story from S3 on stays deferred to #36 for the remainder of M2 —
+the pinned Chrome emulation profiles are the reference device through M2's close-out, and
+ADR 0005's low-end Android pass does not run in M2. Nothing in Story 12a widens that scope: its
+two deferred items are the same two classes (legibility at a real DPI, colour under a real
+display profile) the ruling already covers. This paragraph exists because the deferral was
+previously carried by cross-reference alone, which is not the same as an identified waiver.
+
+**Two further items accepted by the owner on 2026-08-18, in scope for this story:** the
+`armor −{n} direct` wording stands as ruled (the glossary's **Armor** entry was sharpened
+instead), and the pin's remaining blind range on ordinary desktop windows ships as-is and is
+tracked in #145 rather than closed here — it is not a regression, and closing it would overturn
+`arming.spec.ts`'s documented reveal-scroll control.

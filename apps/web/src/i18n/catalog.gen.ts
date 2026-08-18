@@ -100,9 +100,9 @@ export const EN = {
   "panel.dotBuffed": "Poison: {damage} damage every {cadence}s for {duration}s (boosted)",
   "panel.fireRate": "Fire rate: {rate}/s",
   "panel.glance.blastRadius": "Blast {tiles} tiles",
-  "panel.glance.cost": "◈{cost}",
-  "panel.glance.costDamage": "◈{cost} · {damage} dmg",
-  "panel.glance.costDamageBuffed": "◈{cost} · {damage} dmg ↑",
+  "panel.glance.cost": "{bounty}{cost}",
+  "panel.glance.costDamage": "{bounty}{cost} · {damage} dmg",
+  "panel.glance.costDamageBuffed": "{bounty}{cost} · {damage} dmg ↑",
   "panel.glance.dot": "Poison {damage}/{cadence}s for {duration}s",
   "panel.glance.dotBuffed": "Poison {damage}/{cadence}s for {duration}s ↑",
   "panel.glance.rangeRate": "{tiles} tiles · {rate}/s",
@@ -259,9 +259,9 @@ export interface MessageParams {
   "panel.dotBuffed": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.fireRate": { "rate": string | number };
   "panel.glance.blastRadius": { "tiles": string | number };
-  "panel.glance.cost": { "cost": string | number };
-  "panel.glance.costDamage": { "cost": string | number; "damage": string | number };
-  "panel.glance.costDamageBuffed": { "cost": string | number; "damage": string | number };
+  "panel.glance.cost": { "bounty": string | number; "cost": string | number };
+  "panel.glance.costDamage": { "bounty": string | number; "cost": string | number; "damage": string | number };
+  "panel.glance.costDamageBuffed": { "bounty": string | number; "cost": string | number; "damage": string | number };
   "panel.glance.dot": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.glance.dotBuffed": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.glance.rangeRate": { "tiles": string | number; "rate": string | number };

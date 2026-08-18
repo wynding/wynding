@@ -1374,6 +1374,11 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
       const previewObserver = instances.find((i) => i.observed.includes(preview));
       expect(previewObserver, 'the preview must be observed').toBeDefined();
       expect(new Set(previewObserver!.observed)).toEqual(new Set([preview, stage]));
+      // Length BESIDE the set, because `new Set` discards multiplicity: a regression that
+      // re-observes the preview on every recompute leaves `[preview, stage, preview, ...]`,
+      // which the set comparison still accepts. That is the very leak class this test claims
+      // to be strengthening, and the `length === 2` this replaced used to catch it.
+      expect(previewObserver!.observed).toHaveLength(2);
       h.app.destroy();
       // EVERY observer the app created, not just the preview's — a leaked one keeps writing
       // to a detached tree for the lifetime of the page.

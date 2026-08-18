@@ -1164,12 +1164,29 @@ export function createOverlay(
     // Cost leads, in the `◈` vocabulary the Compact bounty chip already teaches — never a
     // `g` suffix, which reintroduces exactly the gold/coin metaphor `docs/CONTEXT.md`'s
     // Bounty entry avoids.
+    // The glyph comes from `ICONS`, which this file documents as owning it — never baked
+    // into the catalog string. A glyph has no language, so a copy in `en.json` is not a
+    // translation, it is a SECOND source of truth: change `ICONS.bounty` and the Compact
+    // bounty chip renders the new mark while the Panel's cost line keeps the old one, on the
+    // same screen, with nothing to detect the drift.
     if (stats.damage === null) {
-      rows.push(t('panel.glance.cost', { cost: stats.cost }));
+      rows.push(t('panel.glance.cost', { bounty: ICONS.bounty, cost: stats.cost }));
     } else if (stats.buffed) {
-      rows.push(t('panel.glance.costDamageBuffed', { cost: stats.cost, damage: stats.damage }));
+      rows.push(
+        t('panel.glance.costDamageBuffed', {
+          bounty: ICONS.bounty,
+          cost: stats.cost,
+          damage: stats.damage,
+        }),
+      );
     } else {
-      rows.push(t('panel.glance.costDamage', { cost: stats.cost, damage: stats.damage }));
+      rows.push(
+        t('panel.glance.costDamage', {
+          bounty: ICONS.bounty,
+          cost: stats.cost,
+          damage: stats.damage,
+        }),
+      );
     }
     if (stats.rangeTiles !== null) {
       if (stats.attackMode === 'burst') {
@@ -1373,7 +1390,11 @@ export function createOverlay(
         // list for a box whose only job is to scroll.
         panelScrollEl.setAttribute('role', 'group');
         panelScrollEl.setAttribute('aria-label', t('panel.details.label'));
-      } else if (!scrolls && (focusLeavingScrollport || doc.activeElement !== panelScrollEl)) {
+      } else if (
+        !scrolls &&
+        panelScrollEl.hasAttribute('tabindex') &&
+        (focusLeavingScrollport || doc.activeElement !== panelScrollEl)
+      ) {
         // Revoked only while it does NOT hold focus. Removing `tabindex` from the focused
         // element makes it unfocusable and Chromium resets focus to `<body>` — so a
         // keyboard user reading a pinned Panel that stops overflowing (a widened window, a
@@ -1919,7 +1940,16 @@ export function createOverlay(
       // `relatedTarget` is the element RECEIVING focus. Moving within the scrollport — the
       // container to its own Sell button — is not leaving it. `contains` counts self.
       const next = (event as FocusEvent).relatedTarget;
-      if (panelScrollEl !== null && next instanceof Node && panelScrollEl.contains(next)) return;
+      // Duck-typed on `nodeType`, NOT `next instanceof Node`. `createOverlay(doc, ...)` exists
+      // so the document can be injected, and `panelIsPinned` / the ResizeObserver lookup both
+      // already reach through `doc.defaultView` for exactly that reason. Against a foreign
+      // realm the ambient `Node` never matches, the "focus moved WITHIN the scrollport" early
+      // return never fires, and every intra-scrollport move reads as a departure.
+      const nextNode =
+        typeof next === 'object' && next !== null && typeof (next as Node).nodeType === 'number'
+          ? (next as Node)
+          : null;
+      if (panelScrollEl !== null && nextNode !== null && panelScrollEl.contains(nextNode)) return;
       // Told explicitly rather than inferred: during a `focusout` the document's
       // `activeElement` is still the outgoing element (or already `body`), so reading it
       // here would keep retaining the stop it is meant to release.

@@ -623,12 +623,15 @@ body {
   gap: 0.5rem;
   /* The containing block is the SHELL, so `100%` is the full shell width — subtract the Rail
      track (`.wy-main`'s second column) so the Dock still wraps at the Stage's right edge and
-     can never extend over the Rail (which paints at `z-index: 0` and so loses to `z-index: 1`).
-     Stated as the z-index rather than as "the Rail is unpositioned", which stopped being the
-     reason when the Rail took `container-type: inline-size`: that applies `contain: layout`,
-     which makes the Rail a stacking context painted with the z-index-0 positioned content
-     instead of in the in-flow block layer. The conclusion is unchanged and no paint or
-     hit-test regression was found — but the premise a future change would lean on is. */
+     can never extend over the Rail. The Dock is POSITIONED with `z-index: 1`, so it paints in
+     the positive-z-index layer, above in-flow content; the Rail never reaches that layer.
+     Two earlier phrasings of this reason were wrong and are worth naming so a third is not
+     invented: "the Rail is unpositioned" stopped being the mechanism when the Rail took
+     `container-type: inline-size` (which applies `contain: layout` and therefore DOES form a
+     stacking context), and the replacement — "the Rail paints at z-index 0" — is wrong too,
+     because a stacking context formed by a non-positioned element with `z-index: auto` still
+     paints in the in-flow block layer, not with z-index-0 positioned content. The conclusion
+     has survived both corrections; only the reason kept moving. */
   max-width: calc(100% - 1rem - var(--wy-rail-w));
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
@@ -656,8 +659,18 @@ body {
   container-name: wy-rail;
   /* Reserve the scroll fade's band, so a Tab-focused Card is parked ABOVE it rather than
      under the opaque end of its gradient (ADR 0003's visible-focus requirement). The pinned
-     reserve below supersedes this and adds the same band on top of the Panel's cap. */
-  scroll-padding-bottom: var(--wy-rail-fade-h);
+     reserve below supersedes this and adds the same band on top of the Panel's cap.
+
+     `+ 0.5rem + env(safe-area-inset-bottom, 0px)` is this element's OWN bottom padding, and
+     it is required here for the same reason the pinned reserve spells out: the band is a
+     flex item, so it is laid out in the CONTENT box and its bottom edge is the content
+     box's, while `scroll-padding` measures from the PADDING box. Reserving the bare band
+     height therefore leaves exactly that padding as overlap. Measured at 658x320 without
+     this term: the band painted rows 288-312 while focus scrolling parked Cards 3 and 6 at
+     295.6 / 295.7, putting 7.6px of each — its bottom border and the entire lower leg of its
+     3px focus outline — under a gradient that ends fully opaque. 15.6-16.4px at 200% text
+     zoom, and the whole band once a real bottom inset (~21px, iPhone in landscape) counts. */
+  scroll-padding-bottom: calc(var(--wy-rail-fade-h) + 0.5rem + env(safe-area-inset-bottom, 0px));
   padding: 0.5rem;
   padding-right: calc(0.5rem + env(safe-area-inset-right));
   padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
@@ -760,8 +773,6 @@ body {
      let this Panel's padding + border render ~26px TALLER than the number the reserve
      reserved, and a focused Card would sit under the overhang. */
   box-sizing: border-box;
-  /* Paints over the Cards it pins in front of, and over the Rail's own scroll fade. */
-  z-index: 2;
 }
 
 /* The glance block is DISPLAY-ONLY presentation and defaults to absent, so a Rail wide
@@ -804,6 +815,14 @@ body {
     bottom: 0;
     max-height: var(--wy-panel-cap);
     border-top-color: var(--wy-panel-edge);
+    /* Scoped to the PINNED arms, never the base rule. A flex or grid item with a z-index
+       other than `auto` forms a stacking context and joins z-index paint order even at
+       `position: static`, so declaring this on `.wy-panel` itself put the Panel above
+       `.wy-rail::after` at EVERY width — and outside these arms there is no
+       `.wy-panel::before` to take over, so on Standard the scroll fade silently vanished at
+       exactly the moment it exists for: an open Panel over a Rail with content below.
+       Verified by sampling the painted pixel, not by reading the cascade. */
+    z-index: 2;
     /* Exactly TWO children, and that split is the cap's whole meaning: the scrollport
        (`.wy-panel-scroll` — the name, the rows, the actions) and the Close button, which
        stays outside it and so can never be scrolled out of reach on the layout least able
@@ -947,12 +966,22 @@ body {
   );
 }
 
-/* The scrollport is the containing block for its own visually-hidden boxes — the condensed
+/* The scrollport is the containing block for its own visually-hidden boxes: the condensed
    form's `.wy-stats-full` sentences and the Upgrade description are both `position:
-   absolute`, and left to resolve against `.wy-panel` they escape this box's clip and land
-   wherever the unscrolled content would have put them: 55px of empty scroll extent added to
-   the Rail at 658×320 with a tower selected, below the last Card and reachable by dragging.
-   `relative` with no `z-index` adds no stacking context, so paint order is untouched. */
+   absolute`, and this is what keeps them resolving against THIS box rather than escaping to
+   whatever positioned ancestor lies further up.
+
+   HONEST STATUS: mutation-tested against the live build (forcing `position: static`), this
+   currently changes nothing measurable — Rail overflow, scrollport overflow and the tab stop
+   are identical at 658×320 armed, 658×320 selected and 1000×720 selected. An earlier comment
+   here claimed it prevented "55px of empty scroll extent"; that no longer reproduces, and the
+   claim is removed rather than left to be trusted. It is inert because `.wy-stats-full` only
+   becomes absolute inside the container query that ALSO makes `.wy-panel` sticky, so a
+   containing block already exists wherever the escape was possible.
+
+   Kept deliberately: that is a coupling between two rules in different blocks, not a
+   guarantee, and this line is what stops it being load-bearing. `relative` with no `z-index`
+   forms no stacking context, so paint order is untouched. */
 .wy-panel-scroll {
   position: relative;
 }
@@ -1517,6 +1546,14 @@ body {
     bottom: 0;
     max-height: var(--wy-panel-cap);
     border-top-color: var(--wy-panel-edge);
+    /* Scoped to the PINNED arms, never the base rule. A flex or grid item with a z-index
+       other than `auto` forms a stacking context and joins z-index paint order even at
+       `position: static`, so declaring this on `.wy-panel` itself put the Panel above
+       `.wy-rail::after` at EVERY width — and outside these arms there is no
+       `.wy-panel::before` to take over, so on Standard the scroll fade silently vanished at
+       exactly the moment it exists for: an open Panel over a Rail with content below.
+       Verified by sampling the painted pixel, not by reading the cascade. */
+    z-index: 2;
     display: flex;
     flex-direction: column;
   }

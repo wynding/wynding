@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { PNG } from 'pngjs';
 import { createProjection } from '@wynding/render';
 import {
   GRID,
@@ -1254,11 +1255,16 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
             // report a defect where no pixel is drawn.
             if (band.opacity === '0' || band.display === 'none') return 0;
             const fadeH = parseFloat(band.height);
-            // The occluding band rides the Panel's top edge when pinned, the scrollport's
-            // bottom edge otherwise.
+            // The occluding band rides the Panel's top edge when pinned, and the Rail's own
+            // CONTENT-box bottom otherwise — not the scrollport's. Unpinned the band is a
+            // flex item, so it is laid out inside the padding, and reading
+            // `rail.bottom` put this measurement 8px too low: the exact width of the overlap
+            // it exists to catch, which is how a reserve short by the Rail's bottom padding
+            // held nine zeroes here while 7.6px of Cards 3 and 6 painted under the gradient.
             const bandBottom = pinned
               ? panel.getBoundingClientRect().top
-              : rail.getBoundingClientRect().bottom;
+              : rail.getBoundingClientRect().bottom -
+                parseFloat(getComputedStyle(rail).paddingBottom);
             return Math.max(
               0,
               Math.min(card.bottom, bandBottom) - Math.max(card.top, bandBottom - fadeH),
@@ -1428,6 +1434,61 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
       'this step must not scroll the Rail — that would be a different trigger releasing it',
     ).toBe(scrollBefore);
     await expect(scroller, 'released once focus leaves the Rail').not.toHaveAttribute('tabindex');
+  });
+
+  // STANDARD, Panel OPEN — the state every other fade assertion here misses. The others run
+  // with the Panel closed or in the pinned arms, and the pinned arms have `.wy-panel::before`
+  // to fall back on. Outside them there is no fallback, so if the Panel outranks the Rail's
+  // own band the cue simply vanishes at the one moment it exists for.
+  //
+  // Asserted on the PAINTED PIXEL, not on the cascade. The defect this catches was invisible
+  // to every computed-style check: `wy-rail-has-more` was true and `::after` resolved to
+  // `opacity: 1` while nothing was drawn, because a flex item with a z-index other than
+  // `auto` forms a stacking context and joins paint order even at `position: static`.
+  test('1000×720 Standard, Panel open: the Rail fade is actually PAINTED over the Cards', async ({
+    page,
+  }) => {
+    await gotoAt(page, { width: 1000, height: 720 });
+    // Repaint the band in a colour no part of this UI uses, so one pixel is decisive.
+    await page.addStyleTag({
+      content: '.wy-rail::after { background: rgb(255, 0, 0) !important; }',
+    });
+    await armByHotkey(page, '1');
+    await page.evaluate(
+      () => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 200),
+    );
+    await settleRailScroll(page);
+
+    const state = await page.evaluate(() => {
+      const rail = document.querySelector('.wy-rail') as HTMLElement;
+      const panel = document.querySelector('.wy-panel') as HTMLElement;
+      const rr = rail.getBoundingClientRect();
+      const after = getComputedStyle(rail, '::after');
+      return {
+        panelPosition: getComputedStyle(panel).position,
+        panelZIndex: getComputedStyle(panel).zIndex,
+        hasMore: rail.classList.contains('wy-rail-has-more'),
+        opacity: after.opacity,
+        belowFold: rail.scrollHeight - rail.clientHeight - rail.scrollTop,
+        x: Math.round(rr.left + rr.width / 2),
+        y: Math.round(rr.bottom - parseFloat(after.height) / 2),
+      };
+    });
+    // Preconditions — without these the pixel proves nothing.
+    expect(state.panelPosition, 'this viewport must be the UNPINNED branch').toBe('static');
+    expect(state.belowFold, 'there must be content below the fold').toBeGreaterThan(0);
+    expect(state.hasMore).toBe(true);
+    expect(state.opacity).toBe('1');
+    // The mechanism, so a regression names itself: an unpinned Panel must not form a
+    // stacking context that outranks the band.
+    expect(state.panelZIndex, 'an unpinned Panel must not outrank the Rail fade').toBe('auto');
+
+    const shot = await page.screenshot({ clip: { x: state.x, y: state.y, width: 1, height: 1 } });
+    const px = PNG.sync.read(shot);
+    expect(
+      [px.data[0], px.data[1], px.data[2]],
+      'the fade must be painted, not merely opaque in the cascade',
+    ).toEqual([255, 0, 0]);
   });
 
   // The two-column Rail (>=1280w, aspect >= 16/10) is a GRID, where the fade needs its own
