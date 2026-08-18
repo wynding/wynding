@@ -1939,17 +1939,19 @@ export function createOverlay(
     (event) => {
       // `relatedTarget` is the element RECEIVING focus. Moving within the scrollport — the
       // container to its own Sell button — is not leaving it. `contains` counts self.
-      const next = (event as FocusEvent).relatedTarget;
-      // Duck-typed on `nodeType`, NOT `next instanceof Node`. `createOverlay(doc, ...)` exists
-      // so the document can be injected, and `panelIsPinned` / the ResizeObserver lookup both
-      // already reach through `doc.defaultView` for exactly that reason. Against a foreign
-      // realm the ambient `Node` never matches, the "focus moved WITHIN the scrollport" early
-      // return never fires, and every intra-scrollport move reads as a departure.
-      const nextNode =
-        typeof next === 'object' && next !== null && typeof (next as Node).nodeType === 'number'
-          ? (next as Node)
-          : null;
-      if (panelScrollEl !== null && nextNode !== null && panelScrollEl.contains(nextNode)) return;
+      // IDENTITY, not containment. The retention rule exists for exactly one hazard: removing
+      // `tabindex` from the element that currently HAS focus makes it unfocusable and drops
+      // focus to `<body>`. That hazard only exists while the container itself is focused —
+      // once focus sits on a DESCENDANT (Tab from the container reaches the Sell button
+      // inside it), revoking the container's own tab stop is harmless, because the child
+      // keeps focus. A `contains()` guard read the descendant case as "still inside, do not
+      // revoke", so the obsolete stop survived and Shift+Tab landed straight back on a
+      // non-scrollable container.
+      //
+      // This also retires a realm hazard rather than working around it: an identity
+      // comparison needs no `instanceof Node`, so there is nothing left to resolve against
+      // the wrong realm when `createOverlay(doc, ...)` is handed an injected document.
+      if ((event as FocusEvent).relatedTarget === panelScrollEl) return;
       // Told explicitly rather than inferred: during a `focusout` the document's
       // `activeElement` is still the outgoing element (or already `body`), so reading it
       // here would keep retaining the stop it is meant to release.

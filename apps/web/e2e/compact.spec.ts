@@ -1502,6 +1502,72 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     ).toEqual([255, 0, 0]);
   });
 
+  // The keyboard path the `focusout` trigger alone does not complete. Retention exists for
+  // ONE hazard — revoking `tabindex` from the focused element drops focus to `<body>` — and
+  // that hazard ends the moment focus moves to a DESCENDANT. Tab from the container reaches
+  // the Sell button inside it; if the guard treats that as "still inside", the obsolete stop
+  // survives and Shift+Tab lands right back on a container that no longer scrolls.
+  test('tabbing from the retained scrollport into its own Sell button releases the stop', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    // A SELECTION, not an arm: the action row only exists here, and it is the descendant the
+    // guard has to distinguish from a real departure.
+    await page.getByRole('button', { name: /Basic Tower/ }).click();
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    const sell = page.locator('.wy-panel').getByRole('button', { name: /^Sell/ });
+    await expect(sell).toBeVisible();
+
+    const scroller = page.locator('.wy-panel-scroll');
+    await expect(scroller).toHaveAttribute('tabindex', '0');
+    await scroller.focus();
+
+    // Widen past the pin: the cap lifts, the scrollport stops overflowing, and the stop is
+    // RETAINED because revoking it here would drop focus to the document body.
+    await page.setViewportSize({ width: 1000, height: 720 });
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () => getComputedStyle(document.querySelector('.wy-panel') as HTMLElement).position,
+        ),
+      )
+      .toBe('static');
+    await expect(scroller, 'retained while the container itself is focused').toHaveAttribute(
+      'tabindex',
+      '0',
+    );
+
+    // Move focus into the scrollport's own child WITHOUT scrolling. `preventScroll` is what
+    // makes this test bite: an ordinary Tab scrolls the Sell button into view (measured: the
+    // Rail jumps 187 -> 406), and that scroll fires the scroll trigger, which revokes the stop
+    // on its own. A Tab-based assertion therefore passes with this guard deleted — it proves
+    // only that SOMETHING released the stop, not that focus movement did.
+    const railTopBefore = await page.evaluate(
+      () => (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
+    );
+    await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('.wy-panel-scroll button')].find((b) =>
+        /^Sell/.test(b.textContent ?? ''),
+      ) as HTMLElement;
+      btn.focus({ preventScroll: true });
+    });
+    expect(
+      await page.evaluate(() => (document.querySelector('.wy-rail') as HTMLElement).scrollTop),
+      'no scroll may occur — otherwise the scroll trigger, not focus, explains the release',
+    ).toBe(railTopBefore);
+    await expect(sell, 'focus must land on the child, not fall to the body').toBeFocused();
+    await expect(scroller, 'the obsolete stop must be released').not.toHaveAttribute('tabindex');
+
+    // And the realistic path still behaves: Shift+Tab back out must not land on a phantom
+    // stop, which is the symptom this whole guard exists to prevent.
+    await page.keyboard.press('Shift+Tab');
+    await expect(scroller, 'the container must not be a tab stop any more').not.toHaveAttribute(
+      'tabindex',
+    );
+  });
+
   // The two-column Rail (>=1280w, aspect >= 16/10) is a GRID, where the fade needs its own
   // construction. It genuinely never overflows at 100% — but it does at 200% text zoom,
   // which this project commits to supporting, and an earlier draft switched the fade off
