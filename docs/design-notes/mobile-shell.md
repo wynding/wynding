@@ -17,7 +17,8 @@ Three capability gates, in priority order:
 3. **The real-device measurement pass runs** — the one
    [ADR 0005](../adr/0005-performance-budgets.md) ruling (b) deferred to S11 and S11 shipped
    without. Ruling (b) names it "the real low-end **Android** device pass", so this gate needs
-   Gate 2 and not Gate 1.
+   part of the Android track and nothing from Gate 1 — see the build order for which part, since
+   it is narrower than Gate 2.
 
 Gate 3 is the one that pays for the other two. ADR 0005 pins **≥ 30 fps on a low-end Android
 WebView** and calls that device the binding constraint; the S4b spike measured **66.8 ms** p95
