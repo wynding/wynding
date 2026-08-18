@@ -5,8 +5,8 @@ core_): the web build is the canonical artifact and `apps/mobile` wraps it. ADR 
 **that**; this note is the **how** — what has to be built, in what order, and what the repo
 already assumes that stops being true inside a WebView.
 
-Tracked as epic [#134](https://github.com/wynding/wynding/issues/134) with sub-issues #135–#142
-and #146.
+Tracked as epic [#134](https://github.com/wynding/wynding/issues/134) with sub-issues #135–#142,
+#146 and #148.
 
 ## What this is for
 
@@ -52,7 +52,8 @@ Gate 2 — an Android device plays a build
 
 Gate 3 — the measurement ADR 0005 ruling (b) deferred
     Gate 2 ONLY — ruling (b) defers "the real low-end Android device pass"
-    #141  real-device pass
+    #148  perf-harness device build ──► #141  real-device pass
+    the play APK cannot measure; it ships none of the harness
     an iOS pass is a useful extension, never a prerequisite
 
 Unscheduled
@@ -117,6 +118,21 @@ serialises the measurement behind something ADR 0005 never asked for. The point 
 Xcode was still absent — it would have parked the whole payoff behind a download — and it still
 holds now that both toolchains are provisioned, because the Android and iOS tracks can then run
 independently rather than one waiting on the other.
+
+**It also needs a second artifact, which is #148.** The Gate 2 APK cannot perform this
+measurement: the shell wraps `apps/web/dist`, and the harness is not there. `vite.perf.config.ts`
+builds `perf/index.html` and `perf/catalog.html` to `dist-perf/`, `main-perf.ts` exposes
+`window.wyndingPerf` from a graph production never reaches, and the config states the property
+deliberately — there being no path from `vite.config.ts` to it, the perf build is _"STRUCTURALLY
+incapable of entering the production artifact."_ The play build therefore ships no stress scene, no
+measurement surface, and no access to the 40×40 stress ruleset, which is absent from the bundled
+registry by design.
+
+So Gate 3 needs a development-only WebView build packaging `dist-perf`, and the fix must not be to
+merge the two graphs — doing that would trade the structural guarantee and ADR 0005's < 3 MB
+initial-load budget for convenience. Two artifacts, one playable and one measurable. Because it
+decides whether the shell has one build target or two, #148 belongs with #135's work rather than
+after it.
 
 Record what [`performance-spike.md`](performance-spike.md) §Methodology records, so the numbers
 are comparable — including the WebGL renderer string, which the spike pins per run because an fps
