@@ -12,6 +12,9 @@ implementation detail, not an amendment to the decision it serves.
 
 Current notes:
 
+- [`mobile-shell.md`](mobile-shell.md) — implements ADR 0001 §4 (cross-platform via a
+  single web core): the Capacitor wrap in build order, and what the web build assumes
+  that stops being true inside a WebView.
 - [`performance-spike.md`](performance-spike.md) — implements ADR 0005 (performance
   budgets): the seeded stress scenario, the two harnesses, and what the spike measured.
 - [`replay-and-commands.md`](replay-and-commands.md) — implements ADR 0006 (input-command
