@@ -63,8 +63,9 @@ means the very first device build already behaves — rather than advancing wave
 flattening a battery on the first playtest.
 
 They are also the two smallest items in the epic, and the toolchain audit below makes their
-position load-bearing rather than merely tidy: neither native SDK is installed yet, so Track A is
-the only work in this epic that can proceed while those downloads run.
+position load-bearing rather than merely tidy: neither native SDK is installed yet. Together with
+#146 they are the work that can proceed while those downloads run — three issues' worth, all of
+it in `apps/web` and all of it unit-testable without a device.
 
 ### Track B — the shell (#135)
 
@@ -142,27 +143,35 @@ Severity note, since it would be easy to assume a phone is spared: in Compact
 `.wy-home` itself is restyled as a mark-only in-flow item and explicitly keeps the ADR 0003
 **44px touch floor**. It is a first-class tap target on exactly the devices this epic targets.
 
-### 3. Sixteen of eighteen safe-area declarations have no fallback
+### 3. The safe-area surface is 18 declarations, and CI pins the broken state as correct
 
 Sharpens **#136**, whose title said "19 places" and has been corrected. `ui.css` uses
 `env(safe-area-inset-*)` on 20 lines, but two of those are inside comments — **18 live
-declarations**. Only **two** of the 18 pass a fallback:
+declarations**, of which two pass a fallback (`--wy-compact-col` at line 54, `--wy-rail-w` at
+line 1211) and sixteen do not.
 
-- `--wy-compact-col: calc(min(4rem, 10vw) + env(safe-area-inset-left, 0px))` (line 54)
-- `--wy-rail-w: calc(min(9rem, 28vw) + env(safe-area-inset-right, 0px))` (line 1211)
+**That fallback count is not the defect, and it is worth saying so before someone spends a day on
+it.** A fallback lives _inside_ `env()`, so an engine that cannot parse the function invalidates
+the declaration either way — `env(x, 0px)` and `env(x)` fail identically. The fallback only does
+work when `env()` _is_ supported and the named variable is unset. Adding sixteen fallbacks would
+change nothing.
 
-The other sixteen — every padding and every `max-height` — are bare. A bare `env()` that the
-engine does not support makes the **whole declaration invalid**, so it is dropped rather than
-computed as zero: `padding-top: calc(0.5rem + env(safe-area-inset-top))` does not become
-`0.5rem`, it becomes **no padding-top at all**, and the cascade supplies whatever is underneath.
-That is a silent geometry change, not a visible error, and it is the failure mode to test for.
+The real failure mode is the opposite shape. `env()` is supported across every WebView Capacitor 8
+targets, so the declarations parse and compute fine — they just compute against **zero insets**,
+because under Android's enforced edge-to-edge the system insets are not necessarily propagated
+into the web layer. Nothing is dropped; everything resolves as though the display had no notch and
+no navigation bar, and content sits underneath the system bars. That is why Capacitor 8.3.2+
+injects `--safe-area-inset-*` custom properties and why `@capacitor-community/safe-area` exists —
+both are workarounds for values that are present and wrong, not for a function that is missing.
 
-Note also that the two _with_ fallbacks are the two **load-bearing** ones: the Compact column and
-the Rail width are computed from insets, so under enforced edge-to-edge the layout's track sizes
-move, not just its padding.
+The two _with_ fallbacks still matter, for a different reason: they are the **load-bearing** ones.
+`--wy-compact-col` and `--wy-rail-w` are track sizes computed from insets, so zeroed insets move
+the layout's geometry, not just its padding.
 
-And the existing e2e suite **cannot** catch any of this — `compact.spec.ts` relies on `env()`
-resolving to 0 in headless Chromium, which is precisely the case that does not occur on device.
+The sharpest consequence is for verification. `compact.spec.ts` relies on `env()` resolving to 0 in
+headless Chromium — which is **exactly the on-device failure state**. The existing suite therefore
+pins the broken rendering as the expected one, and a green run is not evidence of anything here.
+Whatever verifies #136 needs a real WebView or an injected-inset harness.
 
 ## Repo hygiene — `cap sync` will break CI
 
@@ -191,9 +200,12 @@ different things, and only the first is wanted.
 
 Related constraints:
 
-- **CI cannot build either platform.** Every job in `ci.yml` is `ubuntu-latest`. iOS needs macOS;
-  Android needs a JDK and the SDK. Native builds are local-only for this epic, and no CI job
-  should be written that pretends otherwise.
+- **CI can build Android; it cannot build iOS.** Every job in `ci.yml` is `ubuntu-latest`. iOS
+  needs a macOS runner, so iOS builds stay local for this epic. Android does not: GitHub's Ubuntu
+  runner image ships a JDK and the Android SDK, and a Gradle build needs no GUI, so
+  `./gradlew assembleDebug` is a viable CI gate once the platform exists. Worth adding rather
+  than leaving native Android changes validated only on one machine. Out of scope here, but
+  nothing in this note should be read as ruling it out.
 - **`apps/mobile` is already a workspace package** (`pnpm-workspace.yaml` globs `apps/*`) with no
   scripts. Whatever scripts it gains must not put a native toolchain on
   `turbo run typecheck lint test`, or `verify` fails on every machine without Xcode.
