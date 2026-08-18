@@ -70,10 +70,11 @@ native toolchain, they are unit-testable at the existing `ensurePaused` seam
 means the very first device build already behaves — rather than advancing waves in a pocket and
 flattening a battery on the first playtest.
 
-They are also the two smallest items in the epic, and the toolchain audit below makes their
-position load-bearing rather than merely tidy: neither native SDK is installed yet. Together with
-#146 they are the work that can proceed while those downloads run — three issues' worth, all of
-it in `apps/web` and all of it unit-testable without a device.
+They are also the two smallest items in the epic. With #146 they form the shared prerequisite
+block: three issues, all in `apps/web`, all unit-testable with no device and no native build. That
+made them the only available work while the SDKs were still downloading, and it keeps them the
+cheapest place to start now that both are in — nothing about them can be blocked by a toolchain
+problem.
 
 ### Track B — the shell (#135)
 
@@ -104,9 +105,12 @@ binding constraint. So Gate 3 requires Gate 2 — a signed APK that survives a r
 from the iOS side. Measuring iOS too is worth doing and tells us something real, but it is an
 extension of this pass, never a prerequisite for it.
 
-That distinction is load-bearing right now rather than pedantic: Xcode is not installed (see the
-toolchain audit), so treating iOS as a prerequisite would park the epic's most valuable outcome
-behind a download it does not need.
+That distinction is worth stating precisely rather than leaving implied, because it decides
+scheduling. Gate 3 is the outcome that justifies the epic, and any iOS work placed in front of it
+serialises the measurement behind something ADR 0005 never asked for. The point held sharply while
+Xcode was still absent — it would have parked the whole payoff behind a download — and it still
+holds now that both toolchains are provisioned, because the Android and iOS tracks can then run
+independently rather than one waiting on the other.
 
 Record what [`performance-spike.md`](performance-spike.md) §Methodology records, so the numbers
 are comparable — including the WebGL renderer string, which the spike pins per run because an fps
@@ -268,29 +272,30 @@ Related constraints:
 - **There is no service worker** anywhere in `apps/web`, which removes the usual Capacitor
   stale-asset hazard. `viewport-fit=cover` is already set in `index.html`.
 
-## Toolchain — audited 2026-08-18
+## Toolchain — provisioned 2026-08-18
 
 Capacitor 8 requires min iOS 15 / Android API 24, compile and target **API 36**, Android Studio
-Otter or newer, and uses SPM by default for newly added iOS platforms. Audit of the development
-machine against that:
+Otter or newer, and uses SPM by default for newly added iOS platforms. The development machine now
+meets all of it. Both native SDKs were absent when this note was first written and were installed
+the same day; the table records the provisioned state.
 
-| Component       | State                                             | Verdict                                      |
-| --------------- | ------------------------------------------------- | -------------------------------------------- |
-| Node            | v26.0.0                                           | ✅ repo needs ≥ 22                           |
-| pnpm            | 10.33.0                                           | ✅ exactly the `packageManager` pin          |
-| JDK             | OpenJDK 21.0.10 (Homebrew)                        | ✅ what AGP needs for API 36                 |
-| Disk free       | ~290 GB                                           | ✅ ample for both SDKs                       |
-| **Xcode**       | **absent** — Command Line Tools only              | ❌ **blocks the iOS half of #135**           |
-| **Android SDK** | **absent** — no Studio, no `adb`, no `sdkmanager` | ❌ **blocks the Android half of #135**       |
-| CocoaPods       | absent                                            | ⚠️ likely unnecessary — Capacitor 8 uses SPM |
+| Component      | State                                                        | Verdict                                    |
+| -------------- | ------------------------------------------------------------ | ------------------------------------------ |
+| Node           | v26.0.0                                                      | ✅ repo needs ≥ 22                         |
+| pnpm           | 10.33.0                                                      | ✅ exactly the `packageManager` pin        |
+| JDK            | OpenJDK 21.0.10 (Homebrew)                                   | ✅ what AGP needs for API 36               |
+| Xcode          | 26.6 (17F113), iOS SDK 26.5                                  | ✅ first-launch components in, licence in  |
+| Android SDK    | platform 36, build-tools 36.0.0, platform-tools 37.0.1 (adb) | ✅ the API 36 target Capacitor 8 wants     |
+| Android Studio | 2026.1                                                       | ✅ past the Otter floor                    |
+| CocoaPods      | absent                                                       | ⚠️ expected — Capacitor 8 uses SPM instead |
 
-`xcode-select -p` resolves to `/Library/Developer/CommandLineTools`, so Swift 6.3.3 and `clang`
-are present but `xcodebuild` is not: there is no iOS SDK, no simulator, no device provisioning,
-and no way to sign. Full Xcode from the App Store is a hard prerequisite, not a nicety.
+Two details worth keeping, because both cost time to rediscover. `xcode-select` retargeted itself
+to `/Applications/Xcode.app/Contents/Developer` when Xcode first launched, so no `sudo xcode-select
+-s` was needed. And the iOS **SDK** arrives with Xcode itself, ahead of the simulator runtimes that
+continue downloading afterwards — device deployment does not wait on those.
 
-Neither install is work in the code sense, but both are large downloads and both gate their
-track. Track A (#139, #140) is deliberately positioned to be buildable and testable while they
-run, since it needs neither.
+The Android SDK lives at `/opt/homebrew/share/android-commandlinetools` (Homebrew cask), with
+`ANDROID_HOME` and `platform-tools` exported from `~/.zshrc`.
 
 ## Open decisions
 
