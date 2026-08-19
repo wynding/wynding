@@ -265,6 +265,36 @@ if (pbx !== null) {
   }
 }
 
+// The scan above skips LocalSigning.xcconfig BY NAME — it is the one file that is supposed to
+// carry a team, and scanning it would fail this check on exactly the machine that set signing
+// up correctly. That exclusion is a hole on its own: `git add -f` beats any ignore rule, and a
+// committed LocalSigning.xcconfig would then sail past both the scan (skipped) and the ignore
+// assertion below (the rule still exists) with a team ID in it, in a public repository. So the
+// file's TRACKED state is asserted directly, the same way the web payload is.
+let trackedSigning = null;
+try {
+  trackedSigning = execFileSync(
+    'git',
+    ['ls-files', '--', 'apps/mobile/ios/LocalSigning.xcconfig'],
+    {
+      cwd: ROOT,
+      encoding: 'utf8',
+    },
+  )
+    .split('\n')
+    .filter(Boolean);
+} catch {
+  trackedSigning = null;
+}
+expect(
+  trackedSigning !== null && trackedSigning.length === 0,
+  'LocalSigning.xcconfig is not committed',
+  trackedSigning === null
+    ? 'could not ask git — this check cannot pass vacuously'
+    : `${trackedSigning.join(', ')} is TRACKED. It carries a development team ID and this ` +
+        `repository is public: \`git rm --cached\` it, and rotate the identity if it was pushed.`,
+);
+
 const rootGitignore = required(join(ROOT, '.gitignore'), 'root .gitignore present');
 expect(
   rootGitignore !== null && /^apps\/mobile\/ios\/LocalSigning\.xcconfig$/m.test(rootGitignore),

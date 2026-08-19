@@ -76,7 +76,7 @@ leaves the committed path dangling, which Gradle reports as a missing project di
 no hint about the cause. `pnpm run check:native` catches it in `verify` first; the fix is one
 command:
 
-```
+```shell
 pnpm --filter @wynding/mobile run sync:android
 ```
 
@@ -88,7 +88,7 @@ tied to a real person.
 
 Instead, create `ios/LocalSigning.xcconfig` — untracked and gitignored:
 
-```
+```ini
 DEVELOPMENT_TEAM = YOURTEAMID
 ```
 
@@ -102,10 +102,12 @@ as part of `pnpm run verify`.
 Development builds today use a free Apple Account and a cable, not a paid membership. That
 carries real limits, and they are limits on playtesting rather than on the build:
 
-- **Provisioning expires after 7 days.** The app stops launching until you rebuild.
-- **Three devices** at a time.
-- **Re-signing means replugging** — there is no over-the-air path. TestFlight and paid signing
-  are deferred with the rest of distribution.
+- **Provisioning expires after 7 days.** The app stops launching until you rebuild and
+  reinstall it — so a playtest device goes cold within a week of being set up.
+- **Three registered devices per platform**, not three in total.
+- **No over-the-air distribution.** Re-signing means deploying from Xcode again; a cable is
+  needed for the first pairing, after which Xcode can deploy over Wi-Fi. TestFlight and paid
+  signing are deferred with the rest of distribution.
 
 ## Orientation
 

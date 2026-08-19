@@ -124,9 +124,13 @@ const ICONS = [
  */
 const NATIVE_OUT_DIR = join(HERE, '..', 'assets', 'native');
 
+// Exactly the four `@capacitor/assets` reads in Full Control mode, and no more. There is
+// deliberately no plain `icon.png`: that name belongs to the tool's Easy Mode, so in this mode
+// it is never opened — verified by deleting it and regenerating, which produced a byte-identical
+// iOS AppIcon. The plain icons (iOS, and Android's pre-API-26 legacy set) are COMPOSITED from
+// the foreground over the background below, which is why authoring a fifth source would change
+// nothing except add a file nobody reads.
 const NATIVE = [
-  // The plain app icon, at the size `@capacitor/assets` expects to downscale from.
-  { file: 'icon.png', size: 1024, svg: (size) => markSvg(size, 0.06), opaque: true },
   // Adaptive foreground. WHICH STAGE OWNS THE SAFE ZONE MATTERS, and it is not this one:
   // `@capacitor/assets` wraps this image in `<inset android:inset="16.7%">` in the adaptive
   // icon XML it generates, which already reduces it to the central 72 of 108dp. Its contract
