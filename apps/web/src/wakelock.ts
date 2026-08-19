@@ -24,7 +24,8 @@
 //   3. The platform releases the lock ON ITS OWN when the document hides, so held-ness is
 //      OBSERVED (the sentinel's `release` event) rather than remembered.
 //   4. A REFUSAL IS LATCHED. `refresh()` is called from the app's HUD refresh, which runs on
-//      every sim tick while a wave is moving — 20/s at speed 1, 60/s at 3× — so a platform
+//      every sim tick while a wave is moving — 20/s at speed 1 and 40/s at 2×, the fastest
+//      the game offers (`Speed = 1 | 2`, `MS_PER_TICK = 50`) — so a platform
 //      that exposes the API and declines (Chrome denies a screen lock on low battery; a
 //      WebView without the `screen-wake-lock` grant refuses outright) would otherwise be
 //      asked again on every one of those, for the whole run, on the battery-constrained
@@ -79,18 +80,43 @@ export function createWakeLock(deps: WakeLockDeps): WakeLockHandle {
   let refused = false;
   let destroyed = false;
 
-  /** Property 3: the platform drops the lock itself when the document hides (and may for its
-   *  own reasons — a low battery). Forget the sentinel; deliberately do NOT re-request here.
-   *  Re-acquisition belongs to the next state edge, which is what keeps a platform that
-   *  refuses-then-releases from becoming a request loop. */
-  const onRelease = (): void => {
-    sentinel = null;
-    // Deliberately NOT latched, unlike a refusal. The common cause is the document hiding,
-    // where the predicate's visibility term takes over and re-acquisition on return is
-    // exactly what is wanted — and where the hide event never fired, re-acquiring is the
-    // whole point of reconciling on visibility restore. The revoke-then-decline case costs
-    // ONE request, because that request is refused and property 4 latches it; and while a
-    // request is outstanding no other can start, so this can never become a per-tick loop.
+  /** Adopt a freshly-granted sentinel, listening for the platform taking it back.
+   *
+   *  The listener is PER SENTINEL and checks identity before acting. A single shared closure
+   *  that blindly nulled `sentinel` was wrong in two ways: it was only ever detached inside
+   *  `drop()`, which the revoke path never calls, so it stayed attached to a dead sentinel
+   *  forever; and a late or duplicated `release` from that dead sentinel would then null a
+   *  DIFFERENT, genuinely-held one, leaving the module with no reference to release it and
+   *  the screen pinned awake for the life of the page. */
+  const adopt = (s: WakeLockSentinelLike): void => {
+    const onRelease = (): void => {
+      if (sentinel !== s) return; // a stale or duplicated event from a sentinel we let go
+      s.removeEventListener('release', onRelease);
+      sentinel = null;
+      // Property 3: the platform drops the lock itself when the document hides (and may for
+      // its own reasons — a low battery). Deliberately NOT latched the way a refusal is: the
+      // common cause is hiding, where the predicate's visibility term takes over and
+      // re-acquisition on return is exactly what is wanted — and where the hide event never
+      // fired, re-acquiring is the whole point of reconciling on visibility restore.
+      //
+      // WHAT IS AND IS NOT GUARANTEED, stated exactly, because an earlier version of this
+      // comment overclaimed. A refusal costs one request per predicate-true window (property
+      // 4). A revoke costs one request per revoke — no more, because while a request is
+      // outstanding no second one can start, and a granted lock makes every later reconcile
+      // return early. The request rate is therefore bounded by the PLATFORM's revoke rate,
+      // not by our tick rate. What is NOT bounded is a platform that grants and immediately
+      // revokes in a tight cycle; that would cost one request per cycle.
+      //
+      // No defence against that is attempted, and the omission is deliberate. No known engine
+      // behaves that way, and both bounds tried here were worse than the thing they guarded:
+      // a per-window count latched the screen free to sleep after the third ordinary app
+      // switch, and adding a held-long-enough clock to forgive those moved the same failure
+      // onto a player who fumbles the app switcher three times. Each traded a real, common
+      // regression for a hypothetical one. If a device is ever seen doing this, bound it
+      // then, against a measurement.
+    };
+    s.addEventListener('release', onRelease);
+    sentinel = s;
   };
 
   /** Let go of a sentinel without caring whether the release succeeds — by the time this
@@ -102,7 +128,6 @@ export function createWakeLock(deps: WakeLockDeps): WakeLockHandle {
    *  the frame-loop callback, `ensurePaused`, `togglePause` and `startRun` alike, and from the
    *  request-resolution handler it would become an unhandled rejection instead. */
   const drop = (s: WakeLockSentinelLike): void => {
-    s.removeEventListener('release', onRelease);
     try {
       void Promise.resolve(s.release()).catch(() => {});
     } catch {
@@ -142,14 +167,18 @@ export function createWakeLock(deps: WakeLockDeps): WakeLockHandle {
             drop(s);
             return;
           }
-          sentinel = s;
-          s.addEventListener('release', onRelease);
+          adopt(s);
         },
         () => {
           // Refused: no user gesture, a permissions policy, a hidden document, a platform
           // that exposes the API and declines to honour it. Silent — the run is unaffected —
           // and LATCHED, so the refusal costs one request rather than one per tick.
           requesting = false;
+          // Symmetric with the success path: a dead handle's predicate is never consulted.
+          // `main.ts` supplies one that reads the controller and the document, on an app
+          // whose overlay, input and Shell have already been torn down — inert today only by
+          // accident, and an escaping throw here would be an unhandled rejection.
+          if (destroyed) return;
           // Re-read the predicate first, exactly as the success path does (property 1). A
           // rejection can land AFTER the state that asked for it is gone — the hide path
           // makes that ordinary, since the API refuses a document that is no longer visible

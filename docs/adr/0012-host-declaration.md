@@ -62,8 +62,8 @@ Three constraints define the fact, and each rules out a cheaper thing:
    declared.
 
 This closes Open decision 1 in the mobile-shell design note. It does **not** decide the
-mechanism — what the fact is called, and how a host sets it before the bundle runs — which is
-#135's, since that is where both native projects are created.
+mechanism — what the fact is called, and how a host sets it before the bundle runs. That
+belongs to #135, since that is where both native projects are created.
 
 ## Consequences
 

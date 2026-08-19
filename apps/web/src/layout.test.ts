@@ -176,13 +176,21 @@ describe('layout — the home link box model and visibility contract', () => {
     expect(ruleBody(uncommented, 'a.wy-home:hover .wy-wordmark')).toContain(
       'text-decoration: underline',
     );
-    // …and nothing paints hover on the bare class ANYWHERE. Enumerating positions (start of
-    // a rule, after a comma) misses the descendant form — `.wy-status .wy-home:hover` would
-    // slip through and paint the hosted span exactly as before. Match the selector wherever
-    // it appears without an `a` immediately in front of it instead, which also covers
-    // `:is()`/`:where()` wrappers. Since jsdom applies no CSS, this source-text guard is the
-    // only thing between a hosted desktop host and a hover tint on a dead element.
-    expect(uncommented).not.toMatch(/(?<![\w.-])\.wy-home:hover/);
+    // …and EVERY occurrence of the hover selector is anchor-scoped. Asserted positively —
+    // enumerate what is actually there and check each prefix — because two successive
+    // negative guards each shipped with a hole: the first enumerated positions and missed
+    // the descendant form (`.wy-status .wy-home:hover`); the second used a lookbehind that
+    // excluded any word character and so admitted `span.wy-home:hover`, which is precisely
+    // the selector that would repaint hover on the hosted mark. A positive check cannot have
+    // a third hole: anything not exactly `a`-prefixed fails, whatever shape it takes. Since
+    // jsdom applies no CSS, this source-text guard is the only thing between a hosted desktop
+    // host and a hover tint on a dead element.
+    const hoverPrefixes = [...uncommented.matchAll(/(\S*)\.wy-home:hover/g)].map((m) => m[1] ?? '');
+    expect(hoverPrefixes.length, 'the hover rules must still be present').toBeGreaterThanOrEqual(2);
+    expect(
+      hoverPrefixes.filter((p) => p !== 'a'),
+      'every `.wy-home:hover` must be anchor-scoped — these are not',
+    ).toEqual([]);
     // The focus ring is scoped the same way. A `span` cannot match `:focus-visible` anyway,
     // so this is consistency rather than a fix — but an unscoped rule would read as a claim
     // that the hosted mark is focusable.

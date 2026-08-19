@@ -194,10 +194,10 @@ That single wrong fact has **two consumers**, and they are the complete set: a g
   `coarse && (branch === 'promptable' || branch === 'ios')`, so the pre-start banner shows and its
   action opens the **"Add to Home Screen" instructions dialog** — inside a native app that is
   already on the home screen.
-- **Both platforms** — the settings row is documented as **PERMANENT** (`overlay.ts:381`), so it
+- **Both platforms** — the settings row is documented as **PERMANENT** (`overlay.ts:386`), so it
   never goes away, telling the player how to install what they are running.
 
-**Consumer 2 — the one-shot fullscreen request on Start** (`main.ts:448`, which passes
+**Consumer 2 — the one-shot fullscreen request on Start** (`main.ts:449`, which passes
 `s.standalone || s.installed` as `requestFullscreen`'s `isStandalone` dep; the fix added a
 separate `hosted` gate inside `fullscreen.ts` rather than folding it in here). `fullscreen.ts` fires
 when `requestFullscreen` exists, the pointer is coarse, and the app is _not_ standalone — so on a
@@ -221,8 +221,8 @@ on none of them.
 
 `HOME_HREF` is `'/'` (`shell.ts:229`) — deliberately root-absolute so it stays correct under the
 production `--base=/play/` rewrite, and used by exactly two call sites that are one declaration
-on purpose: the wordmark anchor (`shell.ts:374`, now built as an anchor only when NOT hosted) and
-the confirmed-exit navigation (`main.ts:553` → `location.assign`).
+on purpose: the wordmark anchor (`shell.ts:379`, now built as an anchor only when NOT hosted) and
+the confirmed-exit navigation (`main.ts:554` → `location.assign`).
 
 Inside Capacitor, `/` resolves against `capacitor://localhost` (iOS) or `https://localhost`
 (Android) — **the app's own root**. So the flow is: tap the mark, confirm the "leave" dialog,

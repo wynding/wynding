@@ -8,63 +8,14 @@
 // is asserted against the real controller and the real app in `main.test.ts`.
 
 import { describe, it, expect, vi } from 'vitest';
-import { createWakeLock, type WakeLockApi, type WakeLockSentinelLike } from './wakelock';
+import { createWakeLock, type WakeLockApi } from './wakelock';
+import { fakeWakeLock } from './wakelock-fakes';
 
-/** A controllable `navigator.wakeLock`. Every sentinel it hands out is tracked, so a leaked
- *  one — acquired for a state that has since gone, and never released — is VISIBLE as a
- *  still-held sentinel rather than merely as a missing call. */
-function fakeApi(behaviour: 'resolve' | 'reject' | 'throw' = 'resolve') {
-  let requests = 0;
-  /** Pending resolvers, so a test can decide WHEN a request completes. */
-  const pending: Array<() => void> = [];
-  const sentinels: { released: boolean; listeners: Set<() => void> }[] = [];
-
-  const makeSentinel = (): WakeLockSentinelLike => {
-    const s = { released: false, listeners: new Set<() => void>() };
-    sentinels.push(s);
-    return {
-      release: () => {
-        s.released = true;
-        return Promise.resolve();
-      },
-      addEventListener: (_t: 'release', l: () => void) => void s.listeners.add(l),
-      removeEventListener: (_t: 'release', l: () => void) => void s.listeners.delete(l),
-    };
-  };
-
-  const api: WakeLockApi = {
-    request: (type: 'screen') => {
-      expect(type).toBe('screen');
-      requests++;
-      if (behaviour === 'throw') throw new Error('synchronous refusal');
-      if (behaviour === 'reject') return Promise.reject(new Error('refused'));
-      return new Promise<WakeLockSentinelLike>((resolve) => {
-        pending.push(() => resolve(makeSentinel()));
-      });
-    },
-  };
-
-  return {
-    api,
-    requests: () => requests,
-    /** Let every outstanding request resolve, then drain the microtask queue. */
-    settle: async (): Promise<void> => {
-      for (const r of pending.splice(0)) r();
-      await Promise.resolve();
-      await Promise.resolve();
-    },
-    /** How many sentinels this API handed out that have not been released. */
-    liveSentinels: () => sentinels.filter((s) => !s.released).length,
-    /** Simulate the PLATFORM revoking the lock (what happens when the document hides). */
-    revokeAll: (): void => {
-      for (const s of sentinels) {
-        if (s.released) continue;
-        s.released = true;
-        for (const l of [...s.listeners]) l();
-      }
-    },
-  };
-}
+/** This suite drives the module's own asynchronous races, so it holds every successful
+ *  request OPEN until `settle()` — `deferred` is what makes "the sentinel arrives HERE"
+ *  literal rather than a matter of microtask ordering. */
+const fakeApi = (behaviour: 'resolve' | 'reject' | 'throw' = 'resolve') =>
+  fakeWakeLock({ behaviour, deferred: true });
 
 describe('wakelock — an absent API is a silent no-op, never an error', () => {
   it('does nothing at all when navigator.wakeLock is missing (iOS below 16.4)', async () => {
@@ -296,6 +247,140 @@ describe('wakelock — the platform can take the lock back (#140 property 3)', (
     expect(lock.held()).toBe(true);
     expect(api.requests()).toBe(2);
     lock.destroy();
+  });
+
+  it('a run whose hide event never fires keeps re-acquiring — the budget is not per RUN', async () => {
+    // The restore-only path, and the one this module has to get right: `main.ts` reconciles
+    // on visibility change in BOTH directions because the hide half is historically
+    // unreliable in an Android WebView, so that #140 is not correct only when #139 is. Where
+    // it never arrives, nothing pauses the run and the predicate reads true throughout —
+    // started, unpaused, unresolved, and visible again by the time anything asks — so the
+    // predicate cycling can never be what clears the revoke budget.
+    //
+    // Every bound tried here broke exactly this: a count latched the lock off after the THIRD
+    // app switch (a phone call, the app switcher, the home gesture) for the rest of a ~10-wave
+    // run — the screen free to auto-lock mid-wave, which is the defect #140 exists to fix.
+    // Not bounding it is what keeps this working, and this test is what holds that line.
+    const api = fakeApi();
+    const lock = createWakeLock({ api: api.api, shouldHold: () => true });
+    lock.refresh();
+    await api.settle();
+    expect(lock.held()).toBe(true);
+
+    for (let i = 1; i <= 20; i++) {
+      api.revokeAll(); // the OS takes the lock back — and no hide event fires
+      lock.refresh(); // the restore half, the only one this platform delivers
+      await api.settle();
+      expect(lock.held(), `the lock was not re-acquired after app switch ${i}`).toBe(true);
+    }
+    expect(api.requests(), 'one request per app switch, and none refused').toBe(21);
+    lock.destroy();
+  });
+
+  it('a revoke costs ONE request, and a revoke-then-decline settles on the latch', async () => {
+    // What the module actually guarantees, now that no bound is attempted. A revoke is not
+    // latched — re-acquiring on visibility restore is the whole point of #140 not being
+    // correct only when #139 is — so each revoke costs exactly one request: no second one can
+    // start while the first is outstanding, and a granted lock makes later reconciles return
+    // early. The rate is the PLATFORM's, never the sim tick's.
+    const api = fakeApi();
+    const lock = createWakeLock({ api: api.api, shouldHold: () => true });
+    lock.refresh();
+    await api.settle();
+    expect(api.requests()).toBe(1);
+
+    api.revokeAll();
+    for (let i = 0; i < 40; i++) lock.refresh(); // two waves' worth of reconciles
+    await api.settle();
+    expect(api.requests(), 'a single revoke must cost a single request').toBe(2);
+    expect(lock.held()).toBe(true);
+    lock.destroy();
+  });
+
+  it('a revoking platform that then DECLINES stops being asked — the latch catches it', async () => {
+    // The case that makes the unbounded revoke path safe in practice: the platform that takes
+    // the lock back is overwhelmingly the one that will also refuse the follow-up (a hidden
+    // document, a low battery), and property 4 latches that after one request.
+    let answer: 'grant' | 'refuse' = 'grant';
+    let requests = 0;
+    const listeners = new Set<() => void>();
+    const api = {
+      request: () => {
+        requests += 1;
+        if (answer === 'refuse') return Promise.reject(new Error('refused'));
+        return Promise.resolve({
+          release: () => Promise.resolve(),
+          addEventListener: (_t: 'release', l: () => void) => void listeners.add(l),
+          removeEventListener: (_t: 'release', l: () => void) => void listeners.delete(l),
+        });
+      },
+    };
+    const lock = createWakeLock({ api, shouldHold: () => true });
+    lock.refresh();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lock.held()).toBe(true);
+
+    answer = 'refuse';
+    for (const l of [...listeners]) l(); // the platform takes it back…
+    for (let i = 0; i < 40; i++) lock.refresh(); // …and declines every follow-up
+    await Promise.resolve();
+    await Promise.resolve();
+    for (let i = 0; i < 40; i++) lock.refresh();
+    expect(requests, 'the refusal latch must stop the retries after one').toBe(2);
+    lock.destroy();
+  });
+
+  it('a release event from a sentinel we already dropped cannot disown the live one', async () => {
+    // The reachable orphan, and why the listener is identity-checked. `releaseHeld()` — the
+    // ordinary pause path — hands the sentinel to `drop()`, which releases it but does NOT
+    // detach its listener (the listener detaches itself when it fires). A real sentinel emits
+    // `release` when it is released, so that event arrives on a sentinel we have already let
+    // go, quite possibly after the next one has been adopted.
+    //
+    // Without the identity check that event nulls the CURRENT sentinel: the module then
+    // reports nothing held, has no reference left to release what it is actually holding, and
+    // the screen stays awake for the life of the page — the exact leak `destroy()` and
+    // property 1 exist to prevent.
+    const api = fakeApi();
+    let want = true;
+    const lock = createWakeLock({ api: api.api, shouldHold: () => want });
+    lock.refresh();
+    await api.settle();
+    const dropped = api.sentinelAt(0);
+
+    want = false; // the player pauses — `releaseHeld()` drops sentinel A
+    lock.refresh();
+    want = true; // …and resumes, so sentinel B is adopted
+    lock.refresh();
+    await api.settle();
+    expect(lock.held()).toBe(true);
+
+    dropped.fireRelease(); // A's own release event finally arrives
+    expect(lock.held(), 'a dropped sentinel must not be able to disown a live one').toBe(true);
+    lock.destroy();
+    expect(api.liveSentinels()).toBe(0);
+  });
+
+  it('a rejection landing after destroy() never consults the app predicate', async () => {
+    // The predicate `main.ts` supplies reads the controller and the document on an app whose
+    // overlay, input and Shell are already gone. The success path has always guarded on
+    // `destroyed`; the rejection path did not, and a throw from there would escape as an
+    // unhandled rejection.
+    const api = fakeApi('reject');
+    let asked = 0;
+    const lock = createWakeLock({
+      api: api.api,
+      shouldHold: () => {
+        asked += 1;
+        return true;
+      },
+    });
+    lock.refresh();
+    const askedBeforeTeardown = asked;
+    lock.destroy();
+    await api.settle();
+    expect(asked, 'the predicate was consulted on a torn-down handle').toBe(askedBeforeTeardown);
   });
 
   it('a release that THROWS synchronously is swallowed too', async () => {

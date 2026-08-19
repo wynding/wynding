@@ -362,7 +362,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     //
     // Note what that costs, because it is not obvious: this is NOT an edges-only path. The
     // frame loop calls it whenever the memo key moves, and the key leads with the sim tick —
-    // so while a wave is running this fires 20×/s at speed 1 and 60×/s at 3×. `refresh()` is
+    // so while a wave is running this fires 20×/s at speed 1 and 40×/s at 2×, the fastest the
+    // game offers (`Speed = 1 | 2`, `MS_PER_TICK = 50`). `refresh()` is
     // built to be idempotent under exactly that (`wakelock.ts` property 4: a refusal is
     // latched until the predicate cycles), which is what makes one call site correct instead
     // of merely convenient. Visibility has its own listener below, since nothing about the
@@ -581,17 +582,33 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  fires on restore) the run would otherwise be live with the screen free to sleep and
    *  nothing left to re-acquire. #140 must not be correct only when #139 is. */
   const lifecycle = new AbortController();
+  /** Cancel any captured placement gesture, THEN pause — the order every other caller of the
+   *  seam uses (settings in `overlay.ts`, the rotate prompt in `rotate.ts`, the leave guard
+   *  above). Without it a finger held on the board when the app backgrounds keeps its press
+   *  in flight: no modal opened, so `isModalOpen()` is false, and the `pointerup` delivered
+   *  on return COMMITS a placement into a run the player never meant to act on. The platform
+   *  usually fires `pointercancel` first, so this is belt-and-braces — but Story 10's
+   *  cancellation contract is explicitly stated to hold whether or not an opener remembered
+   *  to abort, and these were the only two callers outside it. */
   const onBackgrounded = (): void => {
+    input.abort();
     ensurePaused();
     wakeLock.refresh();
   };
   doc.addEventListener(
     'visibilitychange',
     () => {
-      // Fired in BOTH directions. Only the hide half pauses — pausing on return would be a
-      // no-op today (the run is already paused) but would encode the wrong rule.
-      if (doc.visibilityState === 'hidden') ensurePaused();
-      wakeLock.refresh();
+      // Fired in BOTH directions. Only the hide half backgrounds — doing it on return would
+      // be a no-op today (the run is already paused) but would encode the wrong rule. The
+      // wake lock is reconciled either way, which is what keeps #140 from being correct only
+      // when #139 is.
+      //
+      // The hide half calls the NAMED sequence rather than repeating its two steps: one
+      // statement of the contract, one implementation. Spelling it out again here meant a
+      // later step added to `onBackgrounded` would silently reach `pagehide` and miss this
+      // path — the more common of the two on the platforms this phase targets.
+      if (doc.visibilityState === 'hidden') onBackgrounded();
+      else wakeLock.refresh();
     },
     { signal: lifecycle.signal },
   );

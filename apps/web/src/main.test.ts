@@ -23,7 +23,10 @@ vi.mock('./input', async (importOriginal) => {
     ...actual,
     attachInput: vi.fn((...args: Parameters<typeof actual.attachInput>): InputHandle => {
       const handle = actual.attachInput(...args);
-      return { destroy: handle.destroy, reset: vi.fn(handle.reset), abort: handle.abort };
+      // `abort` is spied for the same reason `reset` is: it wraps the REAL implementation,
+      // so every other test keeps genuine gesture behaviour, and the #139 backgrounding
+      // test can still see that the captured gesture was cancelled.
+      return { destroy: handle.destroy, reset: vi.fn(handle.reset), abort: vi.fn(handle.abort) };
     }),
   };
 });
@@ -39,7 +42,8 @@ import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
 import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
-import type { WakeLockApi, WakeLockSentinelLike } from './wakelock';
+import type { WakeLockApi } from './wakelock';
+import { fakeWakeLock } from './wakelock-fakes';
 
 // The shared fake handle the mocked scene returns (same object every mount call).
 const fakeHandle = (mountMock as unknown as () => RenderHandle)();
@@ -323,6 +327,20 @@ function homeState(root: HTMLElement): { live: boolean; inert: boolean } {
 const VISIBLE = { live: false, inert: false };
 const HIDDEN = { live: true, inert: true };
 
+/** Every app `homeApp` built this test, torn down afterwards whatever happened. See the
+ *  note inside `homeApp` for why a trailing `destroy()` is not enough any more. */
+const openApps: { destroy: () => void }[] = [];
+afterEach(() => {
+  for (const a of openApps.splice(0)) a.destroy();
+});
+// The shared `document`'s visibility patch, restored after EVERY test whatever it did — in
+// one place, beside the app registry, rather than per-describe where the order would depend
+// on which block happened to register a hook. Not optional: without it a test that sets
+// `hidden` leaves it hidden for the whole rest of the file, and every later wake-lock
+// assertion fails on a predicate term that has nothing to do with what it is testing.
+// (`restoreVisibility` is a hoisted function declaration, so registering it here is fine.)
+afterEach(restoreVisibility);
+
 interface HomeAppOptions {
   readonly navigate?: (href: string) => void;
   readonly controllerFactory?: (seed: number) => Controller;
@@ -362,9 +380,23 @@ function homeApp(options: HomeAppOptions = {}) {
       : { controllerFactory: options.controllerFactory }),
   });
   const board = root.querySelector<HTMLElement>('.wy-board')!;
+  // Teardown registered AT CREATION, not trailing each test body. A trailing `destroy()`
+  // never runs if an assertion throws first — and this phase is what first puts
+  // `visibilitychange`/`pagehide` listeners on the SHARED `document`/`window`, so a leaked
+  // app then reaches a torn-down controller in every later test in this file. One genuine
+  // failure would cascade into spurious ones and bury its own cause. Registering here rather
+  // than at each call site covers the ~30 pre-existing ones too, and `destroy` is IDEMPOTENT
+  // so their trailing calls — and the tests whose subject IS teardown — stay valid.
+  let destroyed = false;
+  const destroy = (): void => {
+    if (destroyed) return;
+    destroyed = true;
+    app.destroy();
+  };
+  openApps.push({ destroy });
   return {
     root,
-    app,
+    app: { destroy },
     navigate,
     board,
     home: homeLink(root),
@@ -1514,6 +1546,11 @@ function setVisibility(state: 'visible' | 'hidden'): void {
     configurable: true,
     get: () => state,
   });
+  // Verified BEFORE the event is dispatched. The patch is an own accessor on the shared jsdom
+  // `document`, restored by a hook — so if it ever failed to take, the tests downstream would
+  // fail on a wake-lock or pause assertion whose message says nothing about visibility. This
+  // makes such a failure name its own cause instead.
+  expect(document.visibilityState, 'the visibilityState patch did not take effect').toBe(state);
   document.dispatchEvent(new Event('visibilitychange'));
 }
 function restoreVisibility(): void {
@@ -1547,7 +1584,6 @@ describe('main — hosted: the three web behaviours that are wrong inside a Host
     expect(e.defaultPrevented, 'nothing intercepted the activation').toBe(false);
     expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(true);
     expect(h.navigate).not.toHaveBeenCalled();
-    h.app.destroy();
   });
 
   it('the auto-hide contract is unchanged — the hosted mark still shows and hides', () => {
@@ -1561,7 +1597,6 @@ describe('main — hosted: the three web behaviours that are wrong inside a Host
     expect(h.state()).toEqual(HIDDEN);
     h.key('Space');
     expect(h.state()).toEqual(VISIBLE);
-    h.app.destroy();
   });
 
   it('no install surface reaches the DOM — the fact really does reach install.ts', () => {
@@ -1595,7 +1630,6 @@ describe('main — hosted: the three web behaviours that are wrong inside a Host
     hosted.frame();
     expect(settingsRow(hosted).hidden).toBe(true);
     expect(hosted.root.querySelector<HTMLElement>('.wy-banner')!.hidden).toBe(true);
-    hosted.app.destroy();
   });
 
   it('with NO declaration the mark is still the site link, guard and all', () => {
@@ -1609,13 +1643,10 @@ describe('main — hosted: the three web behaviours that are wrong inside a Host
     const e = h.click();
     expect(e.defaultPrevented).toBe(true);
     expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(false);
-    h.app.destroy();
   });
 });
 
 describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)', () => {
-  afterEach(restoreVisibility);
-
   it('visibilitychange to hidden pauses a live run — synchronously, with no frame driven', () => {
     // "No frame driven" is the whole point. A backgrounded tab is exactly where frames stop
     // arriving, so a pause that waited for the frame loop's memo gate could sit undone for
@@ -1633,7 +1664,6 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
     // …and the home link is back in the same synchronous write, per `ensurePaused`'s own
     // contract. This is the visible proof that the seam ran, not just the controller.
     expect(h.state()).toEqual(VISIBLE);
-    h.app.destroy();
   });
 
   it('coming BACK does not resume — the player resumes deliberately from the Dock', () => {
@@ -1652,7 +1682,6 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
     // Nothing opened either — returning closes nothing and starts nothing.
     expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(true);
     expect(h.shell.hasAttribute('inert')).toBe(false);
-    h.app.destroy();
   });
 
   it('pagehide pauses too — the ending visibilitychange does not always cover', () => {
@@ -1665,7 +1694,6 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
     expect(pausePressed(h.root)).toBe('false');
     window.dispatchEvent(new Event('pagehide'));
     expect(pausePressed(h.root)).toBe('true');
-    h.app.destroy();
   });
 
   it('backgrounding a HELD run leaves the next Start able to run', () => {
@@ -1684,7 +1712,27 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
       Number(h.board.dataset.simTick),
       'the sim never advanced — a pre-start pause left `paused` true through Start',
     ).toBeGreaterThan(0);
-    h.app.destroy();
+  });
+
+  it('cancels a captured placement gesture BEFORE pausing, like every other caller', () => {
+    // A finger held on the board when the app backgrounds keeps its press in flight. No modal
+    // opens on this path, so `isModalOpen()` is false and the `pointerup` delivered on return
+    // would COMMIT a placement into a run the player never meant to act on. Every other caller
+    // of the seam aborts first — settings, the rotate prompt, the leave guard — and these two
+    // were the only ones outside that contract.
+    const h = homeApp();
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    const calls = (attachInputMock as unknown as { mock: { results: { value: InputHandle }[] } })
+      .mock.results;
+    const abortSpy = calls[calls.length - 1]!.value.abort as unknown as ReturnType<typeof vi.fn>;
+    const before = abortSpy.mock.calls.length;
+
+    setVisibility('hidden');
+    expect(abortSpy.mock.calls.length, 'visibilitychange must cancel the gesture').toBe(before + 1);
+
+    window.dispatchEvent(new Event('pagehide'));
+    expect(abortSpy.mock.calls.length, 'pagehide must cancel it too').toBe(before + 2);
   });
 
   it('a run that RESOLVED is left alone — a real, played-out loss', () => {
@@ -1710,7 +1758,6 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
     setVisibility('hidden');
     h.frame();
     expect(pausePressed(h.root)).toBe('false');
-    h.app.destroy();
   });
 
   it('…and the same after a WIN', () => {
@@ -1747,57 +1794,10 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
     setVisibility('hidden');
     h.frame();
     expect(pausePressed(h.root)).toBe('false');
-    h.app.destroy();
   });
 });
 
 describe('main — the screen wake lock (#140)', () => {
-  afterEach(restoreVisibility);
-
-  /** A controllable `navigator.wakeLock`. Sentinels are tracked rather than counted, so a
-   *  leak — one acquired for a state that has since gone and never released — shows up as a
-   *  still-live sentinel instead of merely as a missing call. */
-  function fakeWakeLock({ refuse = false }: { refuse?: boolean } = {}) {
-    let requests = 0;
-    const sentinels: { released: boolean; listeners: Set<() => void> }[] = [];
-    const api: WakeLockApi = {
-      request: (): Promise<WakeLockSentinelLike> => {
-        requests++;
-        if (refuse) return Promise.reject(new Error('refused'));
-        const s = { released: false, listeners: new Set<() => void>() };
-        sentinels.push(s);
-        return Promise.resolve({
-          release: () => {
-            s.released = true;
-            return Promise.resolve();
-          },
-          addEventListener: (_t: 'release', l: () => void) => void s.listeners.add(l),
-          removeEventListener: (_t: 'release', l: () => void) => void s.listeners.delete(l),
-        });
-      },
-    };
-    return {
-      api,
-      requests: () => requests,
-      live: () => sentinels.filter((s) => !s.released).length,
-      /** The PLATFORM taking the lock back, unannounced — what really happens when the
-       *  document hides, and the state the restore test needs to start from. */
-      revokeAll: (): void => {
-        for (const s of sentinels) {
-          if (s.released) continue;
-          s.released = true;
-          for (const l of [...s.listeners]) l();
-        }
-      },
-      /** The request resolves on a microtask, so every assertion about held-ness has to
-       *  come after the queue drains. */
-      settle: async (): Promise<void> => {
-        await Promise.resolve();
-        await Promise.resolve();
-      },
-    };
-  }
-
   it('is held only while started AND unpaused AND unresolved AND visible', async () => {
     const lock = fakeWakeLock();
     const h = homeApp({ wakeLock: lock.api });
@@ -1806,30 +1806,29 @@ describe('main — the screen wake lock (#140)', () => {
     // Held pre-start: the board is up, nothing is moving, and the player may be reading it
     // for as long as they like. No lock.
     await lock.settle();
-    expect(lock.live()).toBe(0);
+    expect(lock.liveSentinels()).toBe(0);
     expect(lock.requests()).toBe(0);
 
     dockButton(h.root, 'Start').click();
     await lock.settle();
-    expect(lock.live(), 'the wave is moving — hold the screen awake').toBe(1);
+    expect(lock.liveSentinels(), 'the wave is moving — hold the screen awake').toBe(1);
 
     // PAUSED PLANNING releases it. This is the phase's most contestable decision and it is
     // deliberate: paused planning is real play in Wynding — builds and sells queue there and
     // drain on resume — so pondering a maze for longer than the device's auto-lock will dim
     // the screen. Chosen for battery: the lock is held for the shortest defensible window.
     h.key('Space');
-    expect(lock.live()).toBe(0);
+    expect(lock.liveSentinels()).toBe(0);
 
     h.key('Space'); // resume
     await lock.settle();
-    expect(lock.live()).toBe(1);
+    expect(lock.liveSentinels()).toBe(1);
 
     // BACKGROUNDED. #139 pauses the run here as well, but the release must not depend on
     // that: the predicate carries the visibility term itself.
     setVisibility('hidden');
     await lock.settle();
-    expect(lock.live()).toBe(0);
-    h.app.destroy();
+    expect(lock.liveSentinels()).toBe(0);
   });
 
   it('is released when the run RESOLVES, with no help from anything else', async () => {
@@ -1838,14 +1837,13 @@ describe('main — the screen wake lock (#140)', () => {
     h.frame();
     dockButton(h.root, 'Start').click();
     await lock.settle();
-    expect(lock.live()).toBe(1);
+    expect(lock.liveSentinels()).toBe(1);
 
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
     for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
     expect(results.hidden).toBe(false);
     await lock.settle();
-    expect(lock.live(), 'a finished match must not hold the screen awake').toBe(0);
-    h.app.destroy();
+    expect(lock.liveSentinels(), 'a finished match must not hold the screen awake').toBe(0);
   });
 
   it('never asks while the document is hidden — the API refuses a hidden document', async () => {
@@ -1859,7 +1857,6 @@ describe('main — the screen wake lock (#140)', () => {
     dockButton(h.root, 'Start').click();
     await lock.settle();
     expect(lock.requests()).toBe(0);
-    h.app.destroy();
   });
 
   it('re-evaluates on visibility restore, so #140 is not correct only when #139 is', async () => {
@@ -1873,20 +1870,19 @@ describe('main — the screen wake lock (#140)', () => {
     h.frame();
     dockButton(h.root, 'Start').click();
     await lock.settle();
-    expect(lock.live()).toBe(1);
+    expect(lock.liveSentinels()).toBe(1);
 
     // The OS drops the lock when the app goes away — but the hide event NEVER ARRIVES, so
     // nothing pauses the run and nothing has re-acquired. Without the revoke this test would
     // assert `live() === 1` twice over and pass with the reconcile deleted.
     lock.revokeAll();
-    expect(lock.live()).toBe(0);
+    expect(lock.liveSentinels()).toBe(0);
 
     setVisibility('visible');
     await lock.settle();
     expect(pausePressed(h.root), 'the run was never paused — no hide event fired').toBe('false');
     expect(lock.requests(), 'the restore must reconcile, not assume').toBe(2);
-    expect(lock.live()).toBe(1);
-    h.app.destroy();
+    expect(lock.liveSentinels()).toBe(1);
   });
 
   it('a REFUSING platform is asked once per wave, not once per tick', async () => {
@@ -1895,7 +1891,7 @@ describe('main — the screen wake lock (#140)', () => {
     // speed 1, for the whole run, on precisely the battery-constrained device the feature
     // exists to serve (Chrome denies a screen lock on low battery; a WebView without the
     // `screen-wake-lock` grant refuses outright).
-    const lock = fakeWakeLock({ refuse: true });
+    const lock = fakeWakeLock({ behaviour: 'reject' });
     const h = homeApp({ wakeLock: lock.api });
     h.frame();
     dockButton(h.root, 'Start').click();
@@ -1916,7 +1912,6 @@ describe('main — the screen wake lock (#140)', () => {
     h.key('Space');
     await lock.settle();
     expect(lock.requests()).toBe(2);
-    h.app.destroy();
   });
 
   it('an absent API is a silent no-op — the run is completely unaffected', async () => {
@@ -1928,7 +1923,6 @@ describe('main — the screen wake lock (#140)', () => {
     for (let i = 0; i < 20; i++) h.frame();
     expect(Number(h.board.dataset.simTick)).toBeGreaterThan(0);
     await Promise.resolve();
-    h.app.destroy();
   });
 
   it('destroy() releases a held lock', async () => {
@@ -1937,9 +1931,9 @@ describe('main — the screen wake lock (#140)', () => {
     h.frame();
     dockButton(h.root, 'Start').click();
     await lock.settle();
-    expect(lock.live()).toBe(1);
+    expect(lock.liveSentinels()).toBe(1);
     h.app.destroy();
-    expect(lock.live()).toBe(0);
+    expect(lock.liveSentinels()).toBe(0);
   });
 
   it('destroy() also unregisters the backgrounding listeners', () => {
