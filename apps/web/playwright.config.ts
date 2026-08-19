@@ -94,10 +94,42 @@ export default defineConfig({
       use: { ...devices['Desktop Safari'] },
     },
   ],
-  webServer: {
-    command: 'pnpm run build && pnpm run preview -- --port 4173 --strictPort',
-    url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  // TWO servers, one per artifact (#135, ADR 0013). `hosted.spec.ts` is the only check in
+  // the repo that looks at a BUILT Host build, and it needs the open-web build alongside it
+  // as its inverted control, so both are served for the whole run.
+  //
+  // Every flag is handed to Vite DIRECTLY rather than forwarded through a pnpm script. This
+  // is not style: `pnpm run <script> -- --port 4174` appends the arguments — the `--`
+  // included — to the script's command line, and Vite's CLI parser discards everything after
+  // a `--`. So NO forwarded flag arrives, silently. That bit once already: the host arm was
+  // written as `pnpm run preview:host -- --port 4174 --strictPort`, bound Vite's DEFAULT
+  // 4173, and only landed on 4174 because the other server had taken 4173 first and Vite
+  // incremented. The port mapping this spec asserts against was decided by binding order,
+  // and `--strictPort` — whose whole job is to make that loud — was itself discarded.
+  //
+  // Each entry also builds only the artifact it serves, so neither depends on the other
+  // having run. (Playwright sets these up sequentially, not concurrently, so a shared build
+  // would have worked too — it is simply cheaper for each to build one artifact.)
+  //
+  // PORTS ARE ALLOCATED ACROSS BOTH CONFIGS, not just this one. 4173 is this suite's, and
+  // 4174 is already taken: `playwright.perf.config.ts` binds it with `--strictPort` and says
+  // in as many words that the two webServers must never collide. So the Host build gets
+  // 4175. It matters more than it looks — with `reuseExistingServer` true locally, a
+  // leftover preview from an aborted `perf:e2e` would not clash loudly but be ADOPTED, and
+  // the host arm would silently assert against the perf bundle instead of `dist-host`.
+  webServer: [
+    {
+      command: 'pnpm run build:web && pnpm exec vite preview --port 4173 --strictPort',
+      url: 'http://localhost:4173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command:
+        'pnpm run build:host && pnpm exec vite preview --outDir dist-host --port 4175 --strictPort',
+      url: 'http://localhost:4175',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 });

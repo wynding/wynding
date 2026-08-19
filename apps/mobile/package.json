@@ -3,8 +3,25 @@
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
-  "description": "Capacitor wrapper for the Wynding web build (iOS / Android / iPad).",
+  "description": "Capacitor Host that packages the Wynding Host build (iOS / iPadOS / Android).",
   "scripts": {
-    "//": "Placeholder — Capacitor is wired up in a later phase; see README.md."
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint capacitor.config.ts",
+    "sync:ios": "pnpm --filter @wynding/web run build:host && cap sync ios",
+    "sync:android": "pnpm --filter @wynding/web run build:host && cap sync android",
+    "sync:all": "pnpm --filter @wynding/web run build:host && cap sync",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android",
+    "assets:ios": "pnpm --filter @wynding/web run gen:icons && capacitor-assets generate --ios --assetPath ../web/assets/native",
+    "assets:android": "pnpm --filter @wynding/web run gen:icons && capacitor-assets generate --android --assetPath ../web/assets/native"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.0"
   }
 }

@@ -1,0 +1,22 @@
+{
+  // `capacitor.config.ts` is the only hand-written TypeScript in this package, and it is
+  // read by the Capacitor CLI rather than compiled by us — so nothing else would ever catch
+  // a malformed config before a device did. `tsc --noEmit` over it shells out to no native
+  // SDK, runs on Ubuntu, and is therefore safe to expose as this package's `typecheck` task
+  // (design note: the warning is about scripts that invoke Capacitor or a native toolchain,
+  // which this is not).
+  //
+  // The generated `ios/` and `android/` trees are excluded: they are native project sources
+  // (Swift, Kotlin, Gradle, plists), not TypeScript, and the only `.ts`-adjacent files they
+  // could ever contain are the synced web bundle, which is build output.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["capacitor.config.ts", "scripts/**/*.ts"],
+  "exclude": ["ios", "android"]
+}

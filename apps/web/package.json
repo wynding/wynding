@@ -7,15 +7,17 @@
   "description": "Wynding PWA shell (Vite).",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/assert-no-forwarded-args.mjs && pnpm run build:web && pnpm run build:host",
+    "build:web": "vite build",
+    "build:host": "vite build --mode host",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json",
-    "lint": "eslint src perf e2e-perf e2e scripts",
+    "lint": "eslint build-config.ts src perf e2e-perf e2e scripts",
     "test": "vitest run --coverage",
     "e2e": "playwright test",
     "perf:e2e": "playwright test --config playwright.perf.config.ts",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "clean": "rm -rf dist dist-perf *.tsbuildinfo"
+    "clean": "rm -rf dist dist-perf dist-host *.tsbuildinfo"
   },
   "dependencies": {
     "@wynding/content": "workspace:*",

@@ -5,7 +5,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", "dist-host/**"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
@@ -25,6 +25,10 @@
       "outputs": []
     },
     "@wynding/server#typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "@wynding/mobile#typecheck": {
       "dependsOn": ["^typecheck"],
       "outputs": []
     }

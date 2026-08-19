@@ -1,0 +1,11 @@
+// #135 - the Release counterpart of debug.xcconfig.
+//
+// Capacitor's template wires debug.xcconfig into both Debug configurations and leaves the
+// Release ones with no base configuration at all, so a signing identity supplied only
+// through the Debug path would silently not apply to a Release build. This file exists to
+// give the Release configurations somewhere to read it from; it is referenced from
+// project.pbxproj exactly as debug.xcconfig is.
+//
+// It carries no settings of its own. CAPACITOR_DEBUG deliberately does NOT appear here -
+// that is Debug-only, and this file is not a copy of debug.xcconfig.
+#include? "LocalSigning.xcconfig"

@@ -1,7 +1,8 @@
 # ADR 0012 — A host declares itself to the web build; the web build never infers it
 
 - **Status:** Accepted. The contract is decided here; the mechanism that carries it is
-  [#135](https://github.com/wynding/wynding/issues/135)'s work.
+  [#135](https://github.com/wynding/wynding/issues/135)'s work, recorded in
+  [ADR 0013](0013-host-build-is-a-separate-artifact.md).
 - **Date:** 2026-08-18
 - **Relates to:** ADR [0001](0001-monorepo-and-stack.md) §4 (cross-platform via a single web
   core — the decision this serves) · design note
@@ -63,7 +64,8 @@ Three constraints define the fact, and each rules out a cheaper thing:
 
 This closes Open decision 1 in the mobile-shell design note. It does **not** decide the
 mechanism — what the fact is called, and how a host sets it before the bundle runs. That
-belongs to #135, since that is where both native projects are created.
+belongs to #135, since that is where both native projects are created, and is decided in
+[ADR 0013](0013-host-build-is-a-separate-artifact.md).
 
 ## Consequences
 
