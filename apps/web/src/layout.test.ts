@@ -162,6 +162,33 @@ describe('layout — the home link box model and visibility contract', () => {
     expect((osBlock as RegExpExecArray)[1]).toContain('transition: none !important');
   });
 
+  it('the hover affordance is scoped to the ANCHOR, so a hosted mark cannot paint one', () => {
+    // #146 consumer 3 / ADR 0012. When hosted the mark ships as `span.wy-home` with no
+    // destination, and hover paint on it is an advertisement of interactivity that no longer
+    // exists — worst on the pointer-driven desktop host the ADR exists to keep correct.
+    //
+    // The gate is the ELEMENT TYPE rather than a `hosted` attribute on purpose: the paint
+    // then cannot outlive the link, because it is keyed on the link. Asserted on source text
+    // because jsdom applies no CSS at all — an unscoped selector would be invisible to every
+    // other test in the suite.
+    const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(ruleBody(uncommented, 'a.wy-home:hover')).toContain('background: var(--wy-surface)');
+    expect(ruleBody(uncommented, 'a.wy-home:hover .wy-wordmark')).toContain(
+      'text-decoration: underline',
+    );
+    // …and nothing paints hover on the bare class ANYWHERE. Enumerating positions (start of
+    // a rule, after a comma) misses the descendant form — `.wy-status .wy-home:hover` would
+    // slip through and paint the hosted span exactly as before. Match the selector wherever
+    // it appears without an `a` immediately in front of it instead, which also covers
+    // `:is()`/`:where()` wrappers. Since jsdom applies no CSS, this source-text guard is the
+    // only thing between a hosted desktop host and a hover tint on a dead element.
+    expect(uncommented).not.toMatch(/(?<![\w.-])\.wy-home:hover/);
+    // The focus ring is scoped the same way. A `span` cannot match `:focus-visible` anyway,
+    // so this is consistency rather than a fix — but an unscoped rule would read as a claim
+    // that the hosted mark is focusable.
+    expect(ruleBody(uncommented, 'a.wy-home:focus-visible')).toContain('outline-offset: -3px');
+  });
+
   it('Compact drops the Standard box model entirely — the playfield pays nothing', () => {
     // The Compact rules live inside the single `@media (max-height: 500px)` block, so scope
     // the search to it rather than matching the Standard `.wy-home` rule again.

@@ -60,6 +60,27 @@ describe('fullscreen — the capability gate (PLAN.md P4)', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it('4b. HOSTED (ADR 0012): never called — a Host already owns the screen', () => {
+    // #146 consumer 2. Note what the OTHER gates say here: the pointer is coarse and
+    // `isStandalone` is FALSE — which is exactly what a real WebView reports, since neither
+    // `(display-mode: standalone)` nor `navigator.standalone` flips inside one. That
+    // misidentification is the whole reason ADR 0012 exists, so this branch is reachable
+    // only through the declared fact and by nothing this module could have inferred.
+    const { deps: d, request } = deps({ hosted: true });
+    expect(d.isStandalone()).toBe(false);
+    expect(requestFullscreen(d)).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('an ABSENT declaration is not hosted (ADR 0012 constraint 3)', () => {
+    // The deployed web build passes nothing at all, so `hosted` must be undefined-safe
+    // rather than merely false-safe. Mutation-checked: changing the gate to a truthiness
+    // test on a defaulted-true value fails here.
+    const { deps: d } = deps();
+    expect('hosted' in d).toBe(false);
+    expect(requestFullscreen(d)).toBe(true);
+  });
+
   it('5. already fullscreen: never re-requested', () => {
     const request = vi.fn(() => Promise.resolve());
     const element = { nodeType: 1 } as unknown as Element;

@@ -128,8 +128,13 @@ export interface InstallState {
   readonly promptDeclined: boolean;
   /** Is this session in the BANNER's audience? Coarse pointer AND a branch with something
    *  to offer — the banner is phone-oriented, so a promptable DESKTOP session gets the
-   *  settings-row Install action only. */
+   *  settings-row Install action only. Never true when hosted. */
   readonly bannerAudience: boolean;
+  /** Running inside a **Host** (ADR 0012) — declared by the host, never inferred here.
+   *  Deliberately its OWN field rather than folded into `standalone`: a host is not an
+   *  installed PWA (`docs/CONTEXT.md`), it just likewise has no install flow to offer. Every
+   *  install surface must gate on this alongside `standalone`/`installed`. */
+  readonly hosted: boolean;
 }
 
 export type PromptResult = 'accepted' | 'dismissed' | 'unavailable';
@@ -173,6 +178,11 @@ export interface InstallDeps {
   readonly matchMedia: InstallMatchMediaFn;
   readonly target: InstallEventTarget;
   readonly navigator: InstallNavigator;
+  /** The host declaration (ADR 0012), SUPPLIED by the app entry rather than discovered
+   *  here — this module's own `isStandalone()` inference is the exact thing that ADR is a
+   *  reaction to. Optional because ABSENT MEANS NOT HOSTED: the open web declares nothing
+   *  and behaves exactly as it does today. */
+  readonly hosted?: boolean;
 }
 
 /** iOS Safari's Add-to-Home-Screen audience. `navigator.platform` is deprecated but remains
@@ -185,6 +195,9 @@ function isIos(nav: InstallNavigator): boolean {
 
 export function createInstall(deps: InstallDeps): InstallHandle {
   const { storage, matchMedia, target, navigator: nav } = deps;
+  // Read ONCE, at construction: a session cannot start on the open web and become hosted,
+  // so unlike the media queries below there is nothing to subscribe to.
+  const hosted = deps.hosted === true;
 
   const standaloneQuery = matchMedia('(display-mode: standalone)');
   const coarseQuery = matchMedia('(pointer: coarse)');
@@ -251,7 +264,11 @@ export function createInstall(deps: InstallDeps): InstallHandle {
         dismissed,
         canPrompt: held !== null,
         promptDeclined,
-        bannerAudience: coarseQuery.matches && (b === 'promptable' || b === 'ios'),
+        // A host has no install flow at ANY branch — `isIos(nav)` is still true inside an
+        // iOS host, so without this term the Add-to-Home-Screen banner appears inside an
+        // app that is already on the home screen (#146).
+        bannerAudience: !hosted && coarseQuery.matches && (b === 'promptable' || b === 'ios'),
+        hosted,
       };
     },
     onChange(cb: () => void): () => void {

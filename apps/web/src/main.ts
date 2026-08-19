@@ -19,6 +19,7 @@ import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './ro
 import { COMPACT_QUERY } from './layout';
 import { paintSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
+import { createWakeLock, type WakeLockApi } from './wakelock';
 import {
   createInstall,
   createStorageAdapter,
@@ -63,6 +64,22 @@ export interface AppDeps {
    *  app's existing dependency pattern (`now`, `schedule`, `sceneFactory`). Defaults to a
    *  real same-document navigation. */
   readonly navigate?: (href: string) => void;
+  /** THE host declaration (ADR 0012): the one fact a **Host** — Capacitor on mobile, Tauri
+   *  on desktop — tells the web build about itself, and the only place it is ever set. It is
+   *  SUPPLIED here, never inferred: this app has no user-agent test, no protocol test and no
+   *  probe for a host's globals, because inference is a claim about the set of
+   *  environments made by the component that cannot see the set — which is precisely how
+   *  `install.ts` came to be confidently wrong inside a WebView (#146).
+   *
+   *  ABSENT MEANS NOT HOSTED, so the deployed web build passes nothing and behaves exactly
+   *  as it does today. Nothing in this phase sets it true outside tests; how a host actually
+   *  sets it before the bundle runs is #135's, with both native projects. */
+  readonly hosted?: boolean;
+  /** `navigator.wakeLock` (#140), injected for the same reason `matchMedia` is: jsdom has no
+   *  implementation, so every branch of the lock's lifecycle would otherwise be unreachable
+   *  in a unit test. Defaults to the real navigator's, which is legitimately absent on a
+   *  supported device (iOS below 16.4) — see `wakelock.ts`. */
+  readonly wakeLock?: WakeLockApi | null;
 }
 
 export interface AppHandle {
@@ -71,6 +88,9 @@ export interface AppHandle {
 
 /** Wire the whole app into `root`. Pure of Phaser/rAF (both injected via `deps`). */
 export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppHandle {
+  // The host declaration, resolved ONCE (ADR 0012). Read here rather than at each consumer
+  // so the three #146 surfaces below can never disagree about the one fact all of them read.
+  const hosted = deps.hosted === true;
   const settings = createSettings({ reducedMotion: deps.prefersReducedMotion ?? false });
   const keymap = createKeymap();
   const controller = (deps.controllerFactory ?? createController)(deps.seed);
@@ -90,7 +110,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // the modal owner (`modal.ts`, wired inside `createOverlay`) ever toggles `inert` on.
   // The Rail builds one Card per catalog tower (M2-S3), in catalog order.
   const cardDescriptors = controller.ruleset.towers.map((t) => ({ towerId: t.id }));
-  const shell = createShell(doc, cardDescriptors);
+  const shell = createShell(doc, cardDescriptors, { hosted });
   const board = shell.board;
 
   // The install path (Story 11 P3). `matchMediaFn` is resolved below for the rotate prompt;
@@ -111,6 +131,34 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // no-op target degrades to the `other` branch rather than throwing at construction.
     target: view ?? { addEventListener: () => {}, removeEventListener: () => {} },
     navigator: view?.navigator ?? { platform: '', maxTouchPoints: 0 },
+    hosted,
+  });
+
+  // The screen wake lock (#140). Held ONLY while the wave is actually moving: started, not
+  // paused, not resolved, and the document visible. Paused planning is real play — builds and
+  // sells queue there and drain on resume — and the lock is deliberately NOT held through it:
+  // the decision is battery over convenience, so a maze pondered for longer than the device's
+  // auto-lock will dim the screen. Visibility is IN the predicate rather than assumed, because
+  // the API refuses a hidden document: without that term every reconcile while backgrounded
+  // would be a rejected request. Everything else — the async race, single-flight, teardown —
+  // is `wakelock.ts`'s; this is only the predicate and the feature detection.
+  //
+  // Declared HERE, above `createOverlay`/`createRotate`, for the same temporal-dead-zone
+  // reason the `let`s below are: `createRotate` calls `evaluate()` eagerly, which can reach
+  // `ensurePaused()` and therefore `refreshHud()`, which reconciles this lock.
+  const wakeLock = createWakeLock({
+    // `undefined` means "use the platform's, whatever it is"; an explicit `null` means
+    // "there is none" — the distinction a `??` would silently collapse, and the only way a
+    // test can assert the absent-API path in an environment that happens to have one.
+    api:
+      deps.wakeLock === undefined
+        ? (view?.navigator as { wakeLock?: WakeLockApi } | undefined)?.wakeLock
+        : deps.wakeLock,
+    shouldHold: (): boolean =>
+      controller.uiState().started &&
+      !controller.isPaused() &&
+      !controller.isTerminal() &&
+      doc.visibilityState !== 'hidden',
   });
 
   // Every `let` that `refreshHud` closes over is declared HERE, above all the wiring below,
@@ -307,6 +355,19 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       overlay.showResults(hud);
       resultsShown = true;
     }
+    // Every input to the wake lock's predicate except document visibility moves through this
+    // function — start, both pause paths, the terminal transition, Play-again — so this is
+    // where the lock is reconciled, in ONE place rather than at each of those call sites. An
+    // enumeration is what a later refactor gets wrong in the direction of a lock stuck on.
+    //
+    // Note what that costs, because it is not obvious: this is NOT an edges-only path. The
+    // frame loop calls it whenever the memo key moves, and the key leads with the sim tick —
+    // so while a wave is running this fires 20×/s at speed 1 and 60×/s at 3×. `refresh()` is
+    // built to be idempotent under exactly that (`wakelock.ts` property 4: a refusal is
+    // latched until the predicate cycles), which is what makes one call site correct instead
+    // of merely convenient. Visibility has its own listener below, since nothing about the
+    // sim moves when the app backgrounds.
+    wakeLock.refresh();
   }
 
   /** The ONE app-level pause seam. EVERY pause mutation in the app routes through here or
@@ -317,11 +378,18 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  frame loop's memo-key gate would let the link sit hidden (or, worse, interactable in a
    *  stale state) for a frame — indefinitely if frames are throttled in a background tab.
    *
-   *  Owns the started-and-unpaused guard, so any caller can invoke it unconditionally: a
-   *  held pre-start run and an already-paused one are both no-ops, and the refresh is skipped
-   *  with them since nothing changed. */
+   *  Owns the started-and-unpaused-and-unresolved guard, so any caller can invoke it
+   *  unconditionally: a held pre-start run, an already-paused one and a RESOLVED one are all
+   *  no-ops, and the refresh is skipped with them since nothing changed.
+   *
+   *  The `isTerminal()` term is #139's rule — a background event must do nothing to a run
+   *  that is already over — and it lives HERE rather than at that one call site precisely
+   *  because of the contract in the paragraph above. Guarding at the caller would retire
+   *  "any caller can invoke it unconditionally" and leave the other three still pausing
+   *  finished runs. `overlay.ts`'s own `runLive` has carried the same term all along; this
+   *  seam simply lacked it. */
   function ensurePaused(): void {
-    if (!controller.uiState().started || controller.isPaused()) return;
+    if (!controller.uiState().started || controller.isPaused() || controller.isTerminal()) return;
     controller.pause();
     refreshHud();
   }
@@ -369,6 +437,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     controller.start();
     requestFullscreen({
       doc,
+      // #146 consumer 2. A Host already owns the whole screen — there are no browser
+      // toolbars to reclaim — and the request is at best a no-op there, at worst a surprise.
+      hosted,
       // Matched at request time, not at construction — a tablet can gain or lose a
       // pointer between load and Start.
       matchesCoarsePointer: () => matchMediaFn('(pointer: coarse)').matches,
@@ -443,35 +514,88 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // across a destroy/recreate (the pattern `dismissalStorage` below already anticipates) would
   // otherwise double-register this guard and open the dialog twice.
   const guardListener = new AbortController();
-  shell.home.addEventListener(
-    'click',
-    (e: MouseEvent) => {
-      if (e.defaultPrevented) return;
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      if (controller.isTerminal()) return; // resolved → nothing to lose, navigate natively
-      // Read at click time like every other term here, never cached: a plan can be queued or
-      // committed between any two clicks. `frame()` already runs every frame, so one more call
-      // on a click costs nothing.
-      const pending = controller.frame();
-      const hasPlan = pending.pendingAdds.length > 0 || pending.pendingSells.length > 0;
-      if (!controller.uiState().started && !hasPlan) return; // held AND empty → native
-      e.preventDefault();
-      // Defensive pause (belt-and-braces, matching the settings dialog's own open lifecycle).
-      // The visibility rule means the link should not be REACHABLE while unpaused — but the
-      // guard must not depend on that being true, so it pauses for itself. `showLeave` aborts
-      // any in-flight placement gesture as part of the shared modal-open lifecycle.
-      ensurePaused();
-      // Focus the link BEFORE opening, so the modal owner's generic pre-modal capture has a
-      // deterministic thing to restore to on Stay. Browsers disagree about whether a click
-      // focuses an anchor at all — Safari on macOS notably does not — so without this the
-      // player would be returned to whatever happened to be focused before (the board, after
-      // Start), varying by browser. Safe here: the run is paused by the line above, so the link
-      // is not `inert` and `focus()` cannot silently no-op.
-      shell.home.focus();
-      overlay.showLeave(() => navigate(HOME_HREF));
+  // #146 consumer 3, the other half of `createShell`'s span-instead-of-anchor: when hosted
+  // there is no link to intercept, so the guard is NEVER REGISTERED rather than registered
+  // and made inert. The leave dialog therefore cannot open inside a host — which is the
+  // point, since `/` there resolves to the host's own root and confirming would end the run
+  // on a blank view. It remains fully reachable in the web build, unchanged.
+  //
+  // Accepted cost, recorded in the plan rather than papered over: a hosted build has NO
+  // mid-run exit at all, because Play-again only appears once a run resolves. A run is ten
+  // waves to a boss and swiping the app away is an ordinary phone gesture, so this is
+  // deliberately not solved with new UI. Revisit if a playtest says otherwise.
+  if (!hosted) {
+    shell.home.addEventListener(
+      'click',
+      (e: MouseEvent) => {
+        if (e.defaultPrevented) return;
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        if (controller.isTerminal()) return; // resolved → nothing to lose, navigate natively
+        // Read at click time like every other term here, never cached: a plan can be queued or
+        // committed between any two clicks. `frame()` already runs every frame, so one more call
+        // on a click costs nothing.
+        const pending = controller.frame();
+        const hasPlan = pending.pendingAdds.length > 0 || pending.pendingSells.length > 0;
+        if (!controller.uiState().started && !hasPlan) return; // held AND empty → native
+        e.preventDefault();
+        // Defensive pause (belt-and-braces, matching the settings dialog's own open lifecycle).
+        // The visibility rule means the link should not be REACHABLE while unpaused — but the
+        // guard must not depend on that being true, so it pauses for itself. `showLeave` aborts
+        // any in-flight placement gesture as part of the shared modal-open lifecycle.
+        ensurePaused();
+        // Focus the link BEFORE opening, so the modal owner's generic pre-modal capture has a
+        // deterministic thing to restore to on Stay. Browsers disagree about whether a click
+        // focuses an anchor at all — Safari on macOS notably does not — so without this the
+        // player would be returned to whatever happened to be focused before (the board, after
+        // Start), varying by browser. Safe here: the run is paused by the line above, so the link
+        // is not `inert` and `focus()` cannot silently no-op.
+        shell.home.focus();
+        overlay.showLeave(() => navigate(HOME_HREF));
+      },
+      { signal: guardListener.signal },
+    );
+  }
+
+  /** The app going to the BACKGROUND (#139) — a phone call, the app switcher, the home
+   *  gesture, the screen locking. A run left running there is a run being lost while nobody
+   *  is looking at it, so the app pauses itself.
+   *
+   *  It routes through `ensurePaused`, which means it is one more CALLER of the existing
+   *  seam and not a second pause mechanism — and it inherits that seam's whole guard,
+   *  including the resolved-run no-op #139 asks for.
+   *
+   *  NOTHING HERE RESUMES. Returning to the foreground closes nothing and starts nothing; the
+   *  player resumes deliberately from the Dock. That is now a house rule with three instances
+   *  — the rotate prompt, the settings dialog, and this — rather than a per-case choice: one
+   *  rule to learn, and a board you left mid-wave is readable before it starts moving again.
+   *
+   *  `pagehide` joins `visibilitychange` because the two cover different endings: a tab
+   *  becoming hidden fires `visibilitychange`, while a page being frozen into the bfcache or
+   *  torn down fires `pagehide`. Android WebViews have historically been the less reliable of
+   *  the two on `visibilitychange` (verified on device, not before — a native lifecycle event
+   *  supplied the same way is the fallback, and it is additional work under #135, not free).
+   *
+   *  The wake lock is reconciled on EVERY visibility change, in both directions and
+   *  unconditionally — not only via the pause above. The platform drops the lock by itself
+   *  when the document hides, so if the pause somehow did not happen (an event that only
+   *  fires on restore) the run would otherwise be live with the screen free to sleep and
+   *  nothing left to re-acquire. #140 must not be correct only when #139 is. */
+  const lifecycle = new AbortController();
+  const onBackgrounded = (): void => {
+    ensurePaused();
+    wakeLock.refresh();
+  };
+  doc.addEventListener(
+    'visibilitychange',
+    () => {
+      // Fired in BOTH directions. Only the hide half pauses — pausing on return would be a
+      // no-op today (the run is already paused) but would encode the wrong rule.
+      if (doc.visibilityState === 'hidden') ensurePaused();
+      wakeLock.refresh();
     },
-    { signal: guardListener.signal },
+    { signal: lifecycle.signal },
   );
+  view?.addEventListener('pagehide', onBackgrounded, { signal: lifecycle.signal });
 
   function onAction(action: UiAction): void {
     switch (action.type) {
@@ -595,6 +719,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       previewResizeObserver?.disconnect();
       setFloatScroll(false); // the preview grants this module owns, cleared by its owner
       guardListener.abort(); // the home-link exit guard
+      lifecycle.abort(); // the backgrounding listeners (#139)
+      // Releases a held lock AND disowns one still in flight, so a request that resolves
+      // after teardown cannot leave the screen pinned awake (#140).
+      wakeLock.destroy();
       reflectReducedMotion(false); // the attribute this module owns, cleared by its owner
       unsubscribeInstall();
       install.destroy();

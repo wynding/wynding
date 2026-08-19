@@ -35,3 +35,21 @@ research/
 .claude/
 .cursor/
 .aider*
+
+# Working artifacts of the grill-with-docs-codex loop. PLAN.md is a scratch plan for one
+# task and PLAN-REVIEW-LOG.md is its argument transcript with Codex — both are session
+# state, superseded the moment the work lands. What survives goes to an ADR, a design
+# note, or the issue. CONTEXT.md is deliberately NOT here: the glossary is tracked.
+#
+# ANCHORED to the repo root, because these are created at the root and nowhere else. Without
+# the leading slash git matches every path component at every depth, so a deliberately-tracked
+# `apps/mobile/PLAN.md` — and ADR 0012 expects both native projects to arrive under #135 —
+# would vanish silently.
+#
+# Stated precisely, since the anchoring cuts both ways: this rule is NARROWER than the
+# unanchored pair in a local `.git/info/exclude`, so a scratch file written under a
+# subdirectory is neither tracked nor ignored and `git add -A` would sweep it into a commit.
+# That is the accepted trade — a silently-vanished source file is worse than a visibly-added
+# scratch one — and the obligation it leaves is simply: keep these two at the root.
+/PLAN.md
+/PLAN-REVIEW-LOG.md
