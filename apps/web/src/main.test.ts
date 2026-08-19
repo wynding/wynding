@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RenderHandle } from '@wynding/render';
 import type { InputHandle } from './input';
 import { createKeymap } from './keymap';
-import { MS_PER_TICK } from '@wynding/sim';
+import { MS_PER_TICK, isTerminalPhase, type SimPhase } from '@wynding/sim';
 
 // The Phaser scene is WebGL — mock the subpath so it never loads under jsdom. This is the
 // one module excluded from coverage; here we only need a fake handle. The factory is
@@ -23,7 +23,10 @@ vi.mock('./input', async (importOriginal) => {
     ...actual,
     attachInput: vi.fn((...args: Parameters<typeof actual.attachInput>): InputHandle => {
       const handle = actual.attachInput(...args);
-      return { destroy: handle.destroy, reset: vi.fn(handle.reset), abort: handle.abort };
+      // `abort` is spied for the same reason `reset` is: it wraps the REAL implementation,
+      // so every other test keeps genuine gesture behaviour, and the #139 backgrounding
+      // test can still see that the captured gesture was cancelled.
+      return { destroy: handle.destroy, reset: vi.fn(handle.reset), abort: vi.fn(handle.abort) };
     }),
   };
 });
@@ -39,6 +42,8 @@ import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
 import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
+import type { WakeLockApi } from './wakelock';
+import { fakeWakeLock } from './wakelock-fakes';
 
 // The shared fake handle the mocked scene returns (same object every mount call).
 const fakeHandle = (mountMock as unknown as () => RenderHandle)();
@@ -110,6 +115,7 @@ describe('main — createApp wiring & frame loop', () => {
       now: () => 0,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     expect(root.querySelector('.wy-wordmark')!.textContent).toBe('Wynding');
     expect(root.querySelector('.wy-board')!.getAttribute('role')).toBe('application');
@@ -140,6 +146,7 @@ describe('main — createApp wiring & frame loop', () => {
       now: () => 0,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     app.destroy();
     expect(root.childElementCount).toBe(0); // no leaked shell/results/settings/rotate
     // A recreate must yield exactly one of each — not a stacked duplicate/focus target.
@@ -165,6 +172,7 @@ describe('main — createApp wiring & frame loop', () => {
       now: () => clock,
       seed: 7,
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     sched.frame((clock += 16)); // one frame so overlay.update() has run at least once
@@ -255,6 +263,7 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
       now: () => clock,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     const key = (code: string): void => {
@@ -308,8 +317,12 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
 /** The home link, and the two attributes `overlay.ts` drives together. `data-live` is the
  *  CSS hook (opacity/pointer-events); `inert` is what actually removes the tab stop and every
  *  activation path, which is why both are asserted every time rather than just the visible one. */
-function homeLink(root: HTMLElement): HTMLAnchorElement {
-  return root.querySelector<HTMLAnchorElement>('a.wy-home')!;
+function homeLink(root: HTMLElement): HTMLElement {
+  // Queried by CLASS, not by `a.wy-home`: when hosted the identical mark ships as a `span`
+  // (ADR 0012, #146) and the auto-hide contract below applies to both forms. Whether it is
+  // an anchor at all is asserted where that is the subject — `shell.test.ts` and the hosted
+  // describe further down.
+  return root.querySelector<HTMLElement>('.wy-home')!;
 }
 function homeState(root: HTMLElement): { live: boolean; inert: boolean } {
   const el = homeLink(root);
@@ -317,6 +330,20 @@ function homeState(root: HTMLElement): { live: boolean; inert: boolean } {
 }
 const VISIBLE = { live: false, inert: false };
 const HIDDEN = { live: true, inert: true };
+
+/** Every app `homeApp` built this test, torn down afterwards whatever happened. See the
+ *  note inside `homeApp` for why a trailing `destroy()` is not enough any more. */
+const openApps: { destroy: () => void }[] = [];
+afterEach(() => {
+  for (const a of openApps.splice(0)) a.destroy();
+});
+// The shared `document`'s visibility patch, restored after EVERY test whatever it did — in
+// one place, beside the app registry, rather than per-describe where the order would depend
+// on which block happened to register a hook. Not optional: without it a test that sets
+// `hidden` leaves it hidden for the whole rest of the file, and every later wake-lock
+// assertion fails on a predicate term that has nothing to do with what it is testing.
+// (`restoreVisibility` is a hoisted function declaration, so registering it here is fine.)
+afterEach(restoreVisibility);
 
 interface HomeAppOptions {
   readonly navigate?: (href: string) => void;
@@ -326,6 +353,12 @@ interface HomeAppOptions {
     addEventListener: (t: 'change', l: () => void) => void;
     removeEventListener: (t: 'change', l: () => void) => void;
   };
+  /** The host declaration (ADR 0012). Omitted by every pre-existing test, which is the
+   *  point: absent means not hosted, so they all still describe the web build. */
+  readonly hosted?: boolean;
+  /** `navigator.wakeLock` (#140). `null` is "this platform has none"; omitted falls through
+   *  to the real navigator, which under jsdom has none either. */
+  readonly wakeLock?: WakeLockApi | null;
 }
 
 /** An app wired for the home-link tests: manual scheduler (so "no frame driven" is literal),
@@ -344,14 +377,31 @@ function homeApp(options: HomeAppOptions = {}) {
     seed: 1,
     navigate,
     ...(options.matchMedia === undefined ? {} : { matchMedia: options.matchMedia }),
+    ...(options.hosted === undefined ? {} : { hosted: options.hosted }),
+    ...(options.wakeLock === undefined ? {} : { wakeLock: options.wakeLock }),
     ...(options.controllerFactory === undefined
       ? {}
       : { controllerFactory: options.controllerFactory }),
   });
+  openApps.push(app); // torn down even if an assertion throws first
   const board = root.querySelector<HTMLElement>('.wy-board')!;
+  // Teardown registered AT CREATION, not trailing each test body. A trailing `destroy()`
+  // never runs if an assertion throws first — and this phase is what first puts
+  // `visibilitychange`/`pagehide` listeners on the SHARED `document`/`window`, so a leaked
+  // app then reaches a torn-down controller in every later test in this file. One genuine
+  // failure would cascade into spurious ones and bury its own cause. Registering here rather
+  // than at each call site covers the ~30 pre-existing ones too, and `destroy` is IDEMPOTENT
+  // so their trailing calls — and the tests whose subject IS teardown — stay valid.
+  let destroyed = false;
+  const destroy = (): void => {
+    if (destroyed) return;
+    destroyed = true;
+    app.destroy();
+  };
+  openApps.push({ destroy });
   return {
     root,
-    app,
+    app: { destroy },
     navigate,
     board,
     home: homeLink(root),
@@ -859,6 +909,7 @@ describe('main — the DEFAULT navigate dep (the real, irreversible exit)', () =
       seed: 1,
       // deliberately NO `navigate` — this test exists to exercise the default
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     sched.frame((clock += 16));
@@ -911,6 +962,7 @@ describe('main — in-app reduced motion is reflected onto the Shell', () => {
       seed: 1,
       prefersReducedMotion: true,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     expect(root.querySelector('.wy-shell')!.hasAttribute(ATTR)).toBe(true);
     app.destroy();
   });
@@ -928,6 +980,7 @@ describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
       now: () => clock,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     const key = (code: string): void => {
       board.dispatchEvent(new KeyboardEvent('keydown', { code, cancelable: true }));
@@ -983,6 +1036,7 @@ describe('main — input.reset() across Play-again (#40)', () => {
       now: () => clock,
       seed: 7,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     const calls = (attachInputMock as unknown as { mock: { results: { value: InputHandle }[] } })
       .mock.results;
     const inputHandle = calls[calls.length - 1]!.value;
@@ -1039,7 +1093,11 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
   });
 
   /** A createApp harness with a controllable `(pointer: coarse)`. */
-  function appWith(coarse: boolean, controllerFactory?: (seed: number) => Controller) {
+  function appWith(
+    coarse: boolean,
+    controllerFactory?: (seed: number) => Controller,
+    options: { readonly hosted?: boolean } = {},
+  ) {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const sched = manualSchedule();
@@ -1054,6 +1112,7 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
         addEventListener: () => {},
         removeEventListener: () => {},
       }),
+      ...(options.hosted === undefined ? {} : { hosted: options.hosted }),
       ...(controllerFactory === undefined ? {} : { controllerFactory }),
     });
     createdApps.push(app);
@@ -1189,6 +1248,31 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
 
     dockButton(root, 'Start').click();
     expect(fs.calls()).toBe(2);
+  });
+
+  it('HOSTED: Start requests no fullscreen, and the run starts anyway (#146, ADR 0012)', () => {
+    // #146 consumer 2, through the real wiring. The pointer is COARSE here — the same
+    // session that legitimately requests fullscreen on the open web — so the only thing
+    // stopping the request is the declared fact. A Host already owns the whole screen:
+    // there are no browser toolbars to reclaim, and the request is at best a no-op.
+    const fs = stubFullscreen();
+    const { root, frame } = appWith(true, undefined, { hosted: true });
+    frame();
+    dockButton(root, 'Start').click();
+    frame();
+    expect(fs.calls()).toBe(0);
+    // Nothing else about Start changed — the run is genuinely under way.
+    expect(root.querySelector<HTMLElement>('.wy-board')!.dataset.started).toBe('true');
+  });
+
+  it('an ABSENT declaration still requests it — the web build is untouched', () => {
+    // The control for the test above, and ADR 0012 constraint 3 at the app level: identical
+    // in every respect except that nothing declared itself.
+    const fs = stubFullscreen();
+    const { root, frame } = appWith(true);
+    frame();
+    dockButton(root, 'Start').click();
+    expect(fs.calls()).toBe(1);
   });
 
   it('a fine-pointer session never requests fullscreen, and Start still works', () => {
@@ -1446,5 +1530,446 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount * 2);
     expect(vi.mocked(paintSwatch).mock.calls.at(-1)?.[2]).toBe('protan');
     h.app.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Phase 1 of the mobile work: the host declaration (ADR 0012) and its three #146 consumers,
+// then the two run-lifecycle gaps a phone exposes — #139 (pause on backgrounding) and #140
+// (hold the screen awake while the wave is moving).
+//
+// Nothing here is verifiable on a device yet, by construction. Every behaviour is asserted
+// by supplying `hosted` BOTH ways against the real controller and the real DOM. The existing
+// Playwright suite runs desktop Chromium on the open web — the one environment in which all
+// three #146 affordances are already correct — so it can never fail on them, and its
+// continuing to pass is not evidence.
+// ---------------------------------------------------------------------------------------
+
+/** Drive the document between foreground and background. jsdom implements `visibilityState`
+ *  as a prototype getter that never changes, so the property is overridden on the instance
+ *  and the event dispatched by hand — in that order, which is the order a real backgrounding
+ *  produces. `restoreVisibility` puts the prototype getter back; the document is shared by
+ *  every test in this file. */
+function setVisibility(state: 'visible' | 'hidden'): void {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => state,
+  });
+  // Verified BEFORE the event is dispatched. The patch is an own accessor on the shared jsdom
+  // `document`, restored by a hook — so if it ever failed to take, the tests downstream would
+  // fail on a wake-lock or pause assertion whose message says nothing about visibility. This
+  // makes such a failure name its own cause instead.
+  expect(document.visibilityState, 'the visibilityState patch did not take effect').toBe(state);
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+function restoreVisibility(): void {
+  Reflect.deleteProperty(document, 'visibilityState');
+}
+
+/** The Pause control's STATE (not its label — it reads "Resume" while paused). This is the
+ *  app's own observable for `controller.isPaused()`, which is exactly what makes it the
+ *  right assertion for a seam that is supposed to do nothing: if `ensurePaused` wrongly
+ *  pauses, it also refreshes the HUD, so this flips. */
+function pausePressed(root: HTMLElement): string | null {
+  return dockButton(root, /Pause|Resume/).getAttribute('aria-pressed');
+}
+
+describe('main — hosted: the three web behaviours that are wrong inside a Host (#146)', () => {
+  it('the mark still renders, but as a span with no link, no guard and no dialog', () => {
+    const h = homeApp({ hosted: true });
+    h.frame();
+    const mark = h.root.querySelector<HTMLElement>('.wy-home')!;
+    expect(mark.tagName).toBe('SPAN');
+    expect(h.root.querySelector('a.wy-home')).toBeNull();
+
+    // The leave guard is NOT REGISTERED at all — not registered-and-inert. Drive the state
+    // in which the web build unconditionally intercepts (a live run, paused, so the mark is
+    // reachable) and show that a plain left-click does nothing whatsoever.
+    dockButton(h.root, 'Start').click();
+    h.key('Space');
+    h.frame();
+    const e = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    mark.dispatchEvent(e);
+    expect(e.defaultPrevented, 'nothing intercepted the activation').toBe(false);
+    expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(true);
+    expect(h.navigate).not.toHaveBeenCalled();
+  });
+
+  it('the auto-hide contract is unchanged — the hosted mark still shows and hides', () => {
+    // Deliberately identical presentation: the mark is the app's identity in the bar and
+    // Compact's only branding. `overlay.ts` drives `data-live`/`inert` on the span exactly
+    // as on the anchor, so nothing about the grid, the column or the fade moves.
+    const h = homeApp({ hosted: true });
+    h.frame();
+    expect(h.state()).toEqual(VISIBLE);
+    dockButton(h.root, 'Start').click();
+    expect(h.state()).toEqual(HIDDEN);
+    h.key('Space');
+    expect(h.state()).toEqual(VISIBLE);
+  });
+
+  it('no install surface reaches the DOM — the fact really does reach install.ts', () => {
+    // The end-to-end thread: `AppDeps.hosted` → `createInstall` → the overlay's own render.
+    // `overlay.test.ts` pins both surfaces against a matched unhosted control; what this
+    // test has to add is that the two are actually WIRED, so the assertion must be one that
+    // changes when the declaration is removed.
+    //
+    // The BANNER is not that assertion. `homeApp` hands `createInstall` jsdom's real
+    // navigator, which reports `platform: ''` and never fires `beforeinstallprompt`, so the
+    // branch is 'other' and `bannerAudience` is false whether or not the app is hosted — the
+    // banner is hidden either way and the test would pass with `hosted` deleted.
+    //
+    // The settings ROW is: it is gated on `standalone || installed || hosted`, and under
+    // jsdom the first two are false, so it is visible unhosted and hidden hosted. That makes
+    // it the load-bearing half — and it is also the half `bannerAudience` cannot cover, which
+    // is the part of #146 that needed a second gate in the first place.
+    // Scoped to the app's OWN root — `createApp` appends `overlay.settingsEl` there. Going
+    // up to `document.body` would resolve correctly only because the first app is torn down
+    // before the second is built; reorder the two halves and both lookups would return the
+    // first app's row, so the hosted assertion would silently read the unhosted control.
+    const settingsRow = (h: ReturnType<typeof homeApp>): HTMLElement =>
+      h.root.querySelector<HTMLElement>('.wy-install-row')!;
+
+    const web = homeApp();
+    web.frame();
+    expect(settingsRow(web).hidden, 'the control: unhosted, the row is offered').toBe(false);
+    web.app.destroy();
+
+    const hosted = homeApp({ hosted: true });
+    hosted.frame();
+    expect(settingsRow(hosted).hidden).toBe(true);
+    expect(hosted.root.querySelector<HTMLElement>('.wy-banner')!.hidden).toBe(true);
+  });
+
+  it('with NO declaration the mark is still the site link, guard and all', () => {
+    // ADR 0012 constraint 3, at the app level: absent means not hosted, so the deployed web
+    // build is untouched. Every other test in this file is a second instance of this.
+    const h = homeApp();
+    h.frame();
+    expect(h.root.querySelector('a.wy-home')).not.toBeNull();
+    dockButton(h.root, 'Start').click();
+    h.key('Space');
+    const e = h.click();
+    expect(e.defaultPrevented).toBe(true);
+    expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(false);
+  });
+});
+
+describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)', () => {
+  it('visibilitychange to hidden pauses a live run — synchronously, with no frame driven', () => {
+    // "No frame driven" is the whole point. A backgrounded tab is exactly where frames stop
+    // arriving, so a pause that waited for the frame loop's memo gate could sit undone for
+    // as long as the app is away — which is the entire window this feature exists for.
+    const h = homeApp();
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    h.frame();
+    expect(pausePressed(h.root)).toBe('false');
+    expect(h.state()).toEqual(HIDDEN); // live
+
+    setVisibility('hidden');
+
+    expect(pausePressed(h.root)).toBe('true');
+    // …and the home link is back in the same synchronous write, per `ensurePaused`'s own
+    // contract. This is the visible proof that the seam ran, not just the controller.
+    expect(h.state()).toEqual(VISIBLE);
+  });
+
+  it('coming BACK does not resume — the player resumes deliberately from the Dock', () => {
+    // The house rule, now with three instances (rotate prompt, settings dialog, this).
+    // Costs one tap on return; buys the chance to read a board you left mid-wave before it
+    // starts moving again, and one rule to learn instead of two.
+    const h = homeApp();
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    setVisibility('hidden');
+    expect(pausePressed(h.root)).toBe('true');
+
+    setVisibility('visible');
+    h.frame();
+    expect(pausePressed(h.root)).toBe('true');
+    // Nothing opened either — returning closes nothing and starts nothing.
+    expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(true);
+    expect(h.shell.hasAttribute('inert')).toBe(false);
+  });
+
+  it('pagehide pauses too — the ending visibilitychange does not always cover', () => {
+    // A page frozen into the bfcache or torn down fires `pagehide`, and Android WebViews
+    // have historically been the less reliable of the two on `visibilitychange`.
+    const h = homeApp();
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    h.frame();
+    expect(pausePressed(h.root)).toBe('false');
+    window.dispatchEvent(new Event('pagehide'));
+    expect(pausePressed(h.root)).toBe('true');
+  });
+
+  it('backgrounding a HELD run leaves the next Start able to run', () => {
+    // The `!started` term of the shared guard, through this new caller. `controller.pause()`
+    // is a bare flag set with no started check of its own, so pausing a held run leaves
+    // `paused` invisibly true and the Start that follows never clears it: the board freezes
+    // at tick 0 forever. Backgrounding before pressing Start is an ordinary phone thing to
+    // do. Mutation-checked: removing `!controller.uiState().started` fails this.
+    const h = homeApp();
+    h.frame();
+    setVisibility('hidden');
+    setVisibility('visible');
+    dockButton(h.root, 'Start').click();
+    for (let i = 0; i < 20; i++) h.frame();
+    expect(
+      Number(h.board.dataset.simTick),
+      'the sim never advanced — a pre-start pause left `paused` true through Start',
+    ).toBeGreaterThan(0);
+  });
+
+  it('cancels a captured placement gesture BEFORE pausing, like every other caller', () => {
+    // A finger held on the board when the app backgrounds keeps its press in flight. No modal
+    // opens on this path, so `isModalOpen()` is false and the `pointerup` delivered on return
+    // would COMMIT a placement into a run the player never meant to act on. Every other caller
+    // of the seam aborts first — settings, the rotate prompt, the leave guard — and these two
+    // were the only ones outside that contract.
+    const h = homeApp();
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    const calls = (attachInputMock as unknown as { mock: { results: { value: InputHandle }[] } })
+      .mock.results;
+    const abortSpy = calls[calls.length - 1]!.value.abort as unknown as ReturnType<typeof vi.fn>;
+    const before = abortSpy.mock.calls.length;
+
+    setVisibility('hidden');
+    expect(abortSpy.mock.calls.length, 'visibilitychange must cancel the gesture').toBe(before + 1);
+
+    window.dispatchEvent(new Event('pagehide'));
+    expect(abortSpy.mock.calls.length, 'pagehide must cancel it too').toBe(before + 2);
+  });
+
+  it('a run that RESOLVED is left alone — a real, played-out loss', () => {
+    // The `isTerminal()` term, which `ensurePaused` did not have before this phase: a
+    // resolved run is still `started` and normally unpaused, so a background event would
+    // have paused a finished match. #139 says nothing should happen.
+    //
+    // The term lives in the SHARED seam rather than at this one call site because
+    // `ensurePaused` documents itself as owning the guard so any caller can invoke it
+    // unconditionally — guarding here would retire that contract and leave the other three
+    // callers still pausing finished runs.
+    //
+    // Mutation-checked: dropping `|| controller.isTerminal()` makes this fail, because the
+    // wrong pause also refreshes the HUD and flips `aria-pressed`.
+    const h = homeApp();
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    const results = h.root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    expect(results.hidden, 'the run must actually have resolved').toBe(false);
+    expect(pausePressed(h.root)).toBe('false');
+
+    setVisibility('hidden');
+    h.frame();
+    expect(pausePressed(h.root)).toBe('false');
+  });
+
+  it('…and the same after a WIN', () => {
+    // Reaching a real win needs a maze that survives ten waves and a boss; the money cap is
+    // sixteen towers and every layout tried loses, so the one terminal phase a unit test
+    // cannot play its way to is supplied through `AppDeps.controllerFactory` — the seam that
+    // exists for exactly this. Only the PHASE is forced: `isTerminal()` is derived from it by
+    // the sim's own `isTerminalPhase`, so 'won' and 'lost' differ here the way they differ
+    // in the real controller, and `pause()` underneath is the real one.
+    let forced: SimPhase | null = null;
+    const h = homeApp({
+      controllerFactory: (seed) => {
+        const real = createController(seed);
+        return {
+          ...real,
+          hud: () => (forced === null ? real.hud() : { ...real.hud(), phase: forced }),
+          isTerminal: () => (forced === null ? real.isTerminal() : isTerminalPhase(forced)),
+        };
+      },
+    });
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    h.frame();
+    expect(pausePressed(h.root)).toBe('false');
+
+    forced = 'won';
+    // The results dialog opens from `refreshHud`, which the frame loop gates on its memo
+    // key — and a forced phase moves none of that key's components. Drive past a real sim
+    // tick so the key changes and the app actually SEES the resolution, rather than
+    // asserting against a state only the wrapper knows about.
+    for (let i = 0; i < FRAMES_PER_SIM_TICK + 1; i++) h.frame();
+    expect(h.root.querySelector<HTMLElement>('.wy-results')!.hidden).toBe(false);
+
+    setVisibility('hidden');
+    h.frame();
+    expect(pausePressed(h.root)).toBe('false');
+  });
+});
+
+describe('main — the screen wake lock (#140)', () => {
+  it('is held only while started AND unpaused AND unresolved AND visible', async () => {
+    const lock = fakeWakeLock();
+    const h = homeApp({ wakeLock: lock.api });
+    h.frame();
+
+    // Held pre-start: the board is up, nothing is moving, and the player may be reading it
+    // for as long as they like. No lock.
+    await lock.settle();
+    expect(lock.liveSentinels()).toBe(0);
+    expect(lock.requests()).toBe(0);
+
+    dockButton(h.root, 'Start').click();
+    await lock.settle();
+    expect(lock.liveSentinels(), 'the wave is moving — hold the screen awake').toBe(1);
+
+    // PAUSED PLANNING releases it. This is the phase's most contestable decision and it is
+    // deliberate: paused planning is real play in Wynding — builds and sells queue there and
+    // drain on resume — so pondering a maze for longer than the device's auto-lock will dim
+    // the screen. Chosen for battery: the lock is held for the shortest defensible window.
+    h.key('Space');
+    expect(lock.liveSentinels()).toBe(0);
+
+    h.key('Space'); // resume
+    await lock.settle();
+    expect(lock.liveSentinels()).toBe(1);
+
+    // BACKGROUNDED. #139 pauses the run here as well, but the release must not depend on
+    // that: the predicate carries the visibility term itself.
+    setVisibility('hidden');
+    await lock.settle();
+    expect(lock.liveSentinels()).toBe(0);
+  });
+
+  it('is released when the run RESOLVES, with no help from anything else', async () => {
+    const lock = fakeWakeLock();
+    const h = homeApp({ wakeLock: lock.api });
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    await lock.settle();
+    expect(lock.liveSentinels()).toBe(1);
+
+    const results = h.root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    expect(results.hidden).toBe(false);
+    await lock.settle();
+    expect(lock.liveSentinels(), 'a finished match must not hold the screen awake').toBe(0);
+  });
+
+  it('never asks while the document is hidden — the API refuses a hidden document', async () => {
+    // Visibility is IN the predicate rather than assumed. Without that term every reconcile
+    // while backgrounded would be a request the platform rejects, and the rejection path
+    // would be the app's steady state rather than its exception.
+    const lock = fakeWakeLock();
+    const h = homeApp({ wakeLock: lock.api });
+    h.frame();
+    setVisibility('hidden');
+    dockButton(h.root, 'Start').click();
+    await lock.settle();
+    expect(lock.requests()).toBe(0);
+  });
+
+  it('re-evaluates on visibility restore, so #140 is not correct only when #139 is', async () => {
+    // If the backgrounding event never fired, the run would still be live while the OS had
+    // silently dropped the lock — and nothing would re-acquire it. So the reconcile on
+    // visibility change is unconditional and in both directions, not a side effect of the
+    // pause. Simulated by dispatching only the RESTORE half, which is the shape of the
+    // Android WebView unreliability this guards against.
+    const lock = fakeWakeLock();
+    const h = homeApp({ wakeLock: lock.api });
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    await lock.settle();
+    expect(lock.liveSentinels()).toBe(1);
+
+    // The OS drops the lock when the app goes away — but the hide event NEVER ARRIVES, so
+    // nothing pauses the run and nothing has re-acquired. Without the revoke this test would
+    // assert `live() === 1` twice over and pass with the reconcile deleted.
+    lock.revokeAll();
+    expect(lock.liveSentinels()).toBe(0);
+
+    setVisibility('visible');
+    await lock.settle();
+    expect(pausePressed(h.root), 'the run was never paused — no hide event fired').toBe('false');
+    expect(lock.requests(), 'the restore must reconcile, not assume').toBe(2);
+    expect(lock.liveSentinels()).toBe(1);
+  });
+
+  it('a REFUSING platform is asked once per wave, not once per tick', async () => {
+    // The reconcile hangs off `refreshHud`, which the frame loop drives on every sim-tick
+    // change — so without `wakelock.ts`'s refusal latch this is a request per tick, ~20/s at
+    // speed 1, for the whole run, on precisely the battery-constrained device the feature
+    // exists to serve (Chrome denies a screen lock on low battery; a WebView without the
+    // `screen-wake-lock` grant refuses outright).
+    const lock = fakeWakeLock({ behaviour: 'reject' });
+    const h = homeApp({ wakeLock: lock.api });
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    // SETTLE FIRST. The frame loop below is entirely synchronous, so without this the
+    // rejection microtask never runs during it, `requesting` stays true, and single-flight
+    // alone caps the count at 1 — the assertion would then hold with the refusal latch
+    // deleted, which is the one thing this test exists to pin.
+    await lock.settle();
+    expect(lock.requests()).toBe(1);
+
+    for (let i = 0; i < FRAMES_PER_SIM_TICK * 6; i++) h.frame();
+    await lock.settle();
+    expect(lock.requests(), 'a refusal must cost one request, not one per tick').toBe(1);
+
+    // …and the refusal is not permanent: pausing cycles the predicate, so the next wave asks
+    // again in case whatever made the platform decline has passed.
+    h.key('Space');
+    h.key('Space');
+    await lock.settle();
+    expect(lock.requests()).toBe(2);
+  });
+
+  it('an absent API is a silent no-op — the run is completely unaffected', async () => {
+    // iOS below 16.4 (Capacitor 8's floor is iOS 15) and an AOSP WebView without Play
+    // updates simply have none. That is a quiet degradation, never an error the run notices.
+    const h = homeApp({ wakeLock: null });
+    h.frame();
+    expect(() => dockButton(h.root, 'Start').click()).not.toThrow();
+    for (let i = 0; i < 20; i++) h.frame();
+    expect(Number(h.board.dataset.simTick)).toBeGreaterThan(0);
+    await Promise.resolve();
+  });
+
+  it('destroy() releases a held lock', async () => {
+    const lock = fakeWakeLock();
+    const h = homeApp({ wakeLock: lock.api });
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    await lock.settle();
+    expect(lock.liveSentinels()).toBe(1);
+    h.app.destroy();
+    expect(lock.liveSentinels()).toBe(0);
+  });
+
+  it('destroy() also unregisters the backgrounding listeners', () => {
+    // Both #139 listeners live on the shared `document`/`window`, so a leaked one would reach
+    // a torn-down app on every later test — and, in a real host remounting `createApp`, would
+    // pause runs through a dead controller.
+    //
+    // `not.toThrow()` is NOT the assertion for that: a leaked handler runs
+    // `ensurePaused` → `controller.pause()` → `refreshHud()` → `overlay.update()`, and
+    // nothing on that path dereferences a torn-down field, so it completes silently. Capture
+    // the Pause control BEFORE the teardown (the Shell is detached afterwards, so a lookup
+    // would fail for the wrong reason) and assert its state is untouched — a leaked listener
+    // flips it, because the wrongful pause refreshes the HUD into the detached nodes.
+    const h = homeApp();
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    h.frame();
+    const pauseBtn = dockButton(h.root, /Pause|Resume/);
+    expect(pauseBtn.getAttribute('aria-pressed')).toBe('false');
+
+    h.app.destroy();
+    setVisibility('hidden');
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(
+      pauseBtn.getAttribute('aria-pressed'),
+      'a listener outlived destroy() and paused a torn-down run',
+    ).toBe('false');
   });
 });

@@ -5,10 +5,10 @@ import { defineConfig } from 'vitest/config';
 // branch bar — the controller, settings, keymap, i18n, the DOM overlay/input, and the
 // `main` bootstrap (tested with the Phaser scene + rAF mocked). The only product source
 // excluded in the whole render/app surface is the Phaser scene
-// (packages/render/src/scene.ts) and `boot-entry.ts` (see below). `install-fakes.ts` is
-// a TEST-ONLY helper (the shared install fakes both `*.test.ts` suites import) — like
-// the test files themselves, it is exercised only by tests, so it is excluded rather
-// than held to the branch bar. The generated catalog is data (fully covered on
+// (packages/render/src/scene.ts) and `boot-entry.ts` (see below). `install-fakes.ts` and
+// `wakelock-fakes.ts` are TEST-ONLY helpers (shared fakes that two `*.test.ts` suites each
+// import) — like the test files themselves, they are exercised only by tests, so they are
+// excluded rather than held to the branch bar. The generated catalog is data (fully covered on
 // import); the Playwright e2e lives under `e2e/` (not `src`) and runs separately.
 //
 // `boot-entry.ts` (QC: the side-effect boot moved out of `main.ts`) is a genuinely untestable side-effect-only module
@@ -26,7 +26,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts', 'src/install-fakes.ts', 'src/boot-entry.ts'],
+      exclude: [
+        'src/**/*.test.ts',
+        'src/install-fakes.ts',
+        'src/wakelock-fakes.ts',
+        'src/boot-entry.ts',
+      ],
       thresholds: {
         lines: 90,
         branches: 90,

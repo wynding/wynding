@@ -2061,6 +2061,7 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
       readonly maxTouchPoints?: number;
       readonly storage?: StorageAdapter;
       readonly abortGesture?: () => void;
+      readonly hosted?: boolean;
     } = {},
   ) {
     const mm = fakeMatchMedia(options.matching ?? [COARSE]);
@@ -2073,6 +2074,7 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
         platform: options.platform ?? 'Linux x86_64',
         maxTouchPoints: options.maxTouchPoints ?? 0,
       },
+      hosted: options.hosted === true,
     });
     const s = setup(fakeEnsurePaused(), options.abortGesture ?? (() => {}), { install });
     // The overlay re-renders on `update()`; wire the install handle's own change signal the
@@ -2108,6 +2110,48 @@ describe('overlay — install banner, settings row, iOS instructions (PLAN.md St
       'Wynding plays best as an app — full screen, no browser bars.',
     );
     promptable.overlay.destroy();
+  });
+
+  it('HOSTED: neither surface appears — not the banner, not the settings row (ADR 0012, #146)', () => {
+    // Both #146 install defects at once, through the real render path. The comparison is
+    // against an IDENTICAL session that only lacks the declaration, so the assertions cannot
+    // pass by the fixture simply having nothing to show: same coarse pointer, same iPhone
+    // platform, same absent display-mode match — the exact facts an iOS WebView reports.
+    const web = installSetup({ platform: 'iPhone', maxTouchPoints: 5 });
+    web.render(false);
+    const webRow = web.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!;
+    expect(bannerVisible(web.shell)).toBe(true);
+    expect(webRow.hidden).toBe(false);
+    web.overlay.destroy();
+
+    const hosted = installSetup({ platform: 'iPhone', maxTouchPoints: 5, hosted: true });
+    hosted.render(false);
+    const hostedRow = hosted.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!;
+    // The banner: an Add-to-Home-Screen suggestion inside an app that IS on the home screen.
+    expect(bannerVisible(hosted.shell)).toBe(false);
+    // The settings row: permanent until now, and gated only on `standalone || installed` —
+    // neither of which a WebView reports. This is the half `bannerAudience` cannot cover.
+    expect(hostedRow.hidden).toBe(true);
+    // Not by pretending to be installed. The row is hidden because there is no install flow
+    // here, not because one already succeeded.
+    expect(hosted.install.state().standalone).toBe(false);
+    expect(hosted.install.state().installed).toBe(false);
+    hosted.overlay.destroy();
+  });
+
+  it('HOSTED: a promptable branch is suppressed too — the fact outranks the signal', () => {
+    // Not reachable in a WebView today, but the gate must not be "iOS only": Chromium's
+    // `beforeinstallprompt` reaching a hosted build would otherwise re-open both surfaces,
+    // and this is the branch that owns an ACTION rather than instructions.
+    const hosted = installSetup({ hosted: true });
+    hosted.target.dispatch(fakePromptEvent().event);
+    hosted.render(false);
+    expect(hosted.install.state().branch).toBe('promptable');
+    expect(bannerVisible(hosted.shell)).toBe(false);
+    expect(hosted.overlay.settingsEl.querySelector<HTMLElement>('.wy-install-row')!.hidden).toBe(
+      true,
+    );
+    hosted.overlay.destroy();
   });
 
   it('iOS + coarse pointer: the banner offers instructions, with no prompt event involved', () => {

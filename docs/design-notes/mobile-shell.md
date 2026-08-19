@@ -187,17 +187,19 @@ by an `appinstalled` event that never fires.
 That single wrong fact has **two consumers**, and they are the complete set: a grep for
 `install.state()` outside the module itself returns `overlay.ts` and `main.ts`, and nothing else.
 
-**Consumer 1 — the install UI** (`overlay.ts:750`, `hidden = state.standalone || state.installed`):
+**Consumer 1 — the install UI** (`overlay.ts:759`, now
+`hidden = state.standalone || state.installed || state.hosted` — the `hosted` term is the fix):
 
 - **iOS** — `branch()` returns `'ios'` on a UA match, and `bannerAudience` is
   `coarse && (branch === 'promptable' || branch === 'ios')`, so the pre-start banner shows and its
   action opens the **"Add to Home Screen" instructions dialog** — inside a native app that is
   already on the home screen.
-- **Both platforms** — the settings row is documented as **PERMANENT** (`overlay.ts:381`), so it
+- **Both platforms** — the settings row is documented as **PERMANENT** (`overlay.ts:386`), so it
   never goes away, telling the player how to install what they are running.
 
-**Consumer 2 — the one-shot fullscreen request on Start** (`main.ts:376`, which passes
-`s.standalone || s.installed` as `requestFullscreen`'s `isStandalone` dep). `fullscreen.ts` fires
+**Consumer 2 — the one-shot fullscreen request on Start** (`main.ts:449`, which passes
+`s.standalone || s.installed` as `requestFullscreen`'s `isStandalone` dep; the fix added a
+separate `hosted` gate inside `fullscreen.ts` rather than folding it in here). `fullscreen.ts` fires
 when `requestFullscreen` exists, the pointer is coarse, and the app is _not_ standalone — so on a
 coarse-pointer device whose WebView exposes the API, pressing Start requests fullscreen inside a
 native shell that already owns the whole screen.
@@ -217,10 +219,10 @@ on none of them.
 
 ### 2. The home link ends the run and lands nowhere
 
-`HOME_HREF` is `'/'` (`shell.ts:221`) — deliberately root-absolute so it stays correct under the
+`HOME_HREF` is `'/'` (`shell.ts:229`) — deliberately root-absolute so it stays correct under the
 production `--base=/play/` rewrite, and used by exactly two call sites that are one declaration
-on purpose: the wordmark anchor (`shell.ts:340`) and the confirmed-exit navigation
-(`main.ts:471` → `location.assign`).
+on purpose: the wordmark anchor (`shell.ts:379`, now built as an anchor only when NOT hosted) and
+the confirmed-exit navigation (`main.ts:554` → `location.assign`).
 
 Inside Capacitor, `/` resolves against `capacitor://localhost` (iOS) or `https://localhost`
 (Android) — **the app's own root**. So the flow is: tap the mark, confirm the "leave" dialog,
@@ -330,14 +332,22 @@ The Android SDK lives at `/opt/homebrew/share/android-commandlinetools` (Homebre
 
 ## Open decisions
 
-1. **How does the shell announce itself to the web layer?** Finding 1 needs it, #138 and #139
-   probably want it. Decide once, in #135, before several call sites each invent their own.
+1. ~~**How does the shell announce itself to the web layer?**~~ **CLOSED by
+   [ADR 0012](../adr/0012-host-declaration.md).** The **host** declares one documented fact and
+   the web build performs no detection of its own. Its three consumers have since shipped, so a
+   reader should no longer schedule around this as open.
 
-   The fact to inject is **"am I inside a host shell?", not "am I inside Capacitor?"** ADR 0001 §4
-   has `apps/desktop` (Tauri) wrapping the same web build, so a Capacitor-specific check reads
-   false there and hands the desktop app the same defects — silently, on a platform that does not
-   exist yet, after the dependency has accumulated call sites. Either wrapper must be able to
-   supply it.
+   (Terminology: this note predates `CONTEXT.md`'s glossary and says "shell" throughout for what
+   is now ratified as a **Host** — the application that embeds the web build. `Shell` is reserved
+   there for the web build's own outer structure, so the closing text below uses **host**.)
+
+   The fact to inject is **"am I hosted?", not "am I inside Capacitor?"** ADR 0001 §4 has
+   `apps/desktop` (Tauri) wrapping the same web build, so a Capacitor-specific check reads false
+   there and hands the desktop app the same defects — silently, on a platform that does not exist
+   yet, after the dependency has accumulated call sites. Either host must be able to supply it.
+
+   What remains with #135 is the MECHANISM alone — what the fact is called on the wire, and how a
+   host sets it before the bundle runs — since that is where both native projects are created.
 
 2. **Scope of the `StorageDriver` seam in #142** — settings only, or all four ADR 0008 categories.
    Recorded in the issue; restated here because it is a real trade-off (a narrow seam risks a

@@ -98,6 +98,54 @@ describe('install — branch detection (PLAN.md P3)', () => {
   });
 });
 
+describe('install — hosted: there is no install flow inside a Host (ADR 0012, #146)', () => {
+  // A Host embeds the web build and presents it as its own app, so there is nothing to
+  // install and never will be. Every fake below deliberately points this module's own
+  // inferences the WRONG way — coarse pointer, an iPhone platform, no display-mode match —
+  // because that combination is precisely what a real iOS WebView reports, and is what
+  // produced two of #146's three defects.
+  const iosHost = { platform: 'iPhone', maxTouchPoints: 5 };
+
+  it('reports no banner audience, on the one branch that has a banner to lose', () => {
+    // The control first: undeclared, this session IS the banner's audience.
+    const web = createInstall(
+      deps({ navigator: iosHost, matchMedia: fakeMatchMedia([COARSE]).fn }),
+    );
+    expect(web.state().branch).toBe('ios');
+    expect(web.state().bannerAudience).toBe(true);
+    web.destroy();
+
+    const hosted = createInstall(
+      deps({ navigator: iosHost, matchMedia: fakeMatchMedia([COARSE]).fn, hosted: true }),
+    );
+    expect(hosted.state().bannerAudience).toBe(false);
+    // The BRANCH is deliberately untouched: `hosted` answers "is there anything to offer
+    // here", not "which flow would it be". Collapsing the branch too would make the two
+    // facts one and lose the ability to say why a surface is quiet.
+    expect(hosted.state().branch).toBe('ios');
+    expect(hosted.state().hosted).toBe(true);
+    hosted.destroy();
+  });
+
+  it('is NOT reported as standalone — a Host is not an installed PWA', () => {
+    // `docs/CONTEXT.md` keeps those two distinct, and this is where the distinction costs
+    // something: folding hosting into `standalone` would hide the settings row with one
+    // fewer field, at the price of the app claiming to be installed when it is not — a
+    // claim `fullscreen.ts` and any future surface would then read as true.
+    const handle = createInstall(deps({ hosted: true }));
+    expect(handle.state().hosted).toBe(true);
+    expect(handle.state().standalone).toBe(false);
+    expect(handle.state().installed).toBe(false);
+    handle.destroy();
+  });
+
+  it('ABSENT means not hosted (ADR 0012 constraint 3)', () => {
+    const handle = createInstall(deps()); // declares nothing at all, like the web build
+    expect(handle.state().hosted).toBe(false);
+    handle.destroy();
+  });
+});
+
 describe('install — dismissal + session lifecycle (PLAN.md P3)', () => {
   it('persists the dismissal and reports it back on a fresh handle over the SAME adapter', () => {
     const storage = fakeStorage();

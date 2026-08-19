@@ -196,12 +196,20 @@ body {
    which would leave the mark-only form with no hover affordance at all. Compact is keyed on
    viewport HEIGHT, not pointer, so a desktop mouse session lands there too (a short window;
    `compact.spec.ts` pins the 900×480 fine-pointer case) — back the underline with a surface
-   tint on the anchor itself, which works in both layouts and for the mark alone. */
-.wy-home:hover {
+   tint on the anchor itself, which works in both layouts and for the mark alone.
+
+   SCOPED TO `a.` (ADR 0012, #146 consumer 3). When hosted the mark ships as `span.wy-home`
+   with no destination, and hover paint is an ADVERTISEMENT of interactivity: a tint plus an
+   underline on something that does nothing. It costs least on a phone and most on the
+   pointer-driven desktop host this ADR exists to keep correct, which is exactly why it is
+   the element type — not a `hosted` attribute — that gates it: the paint cannot outlive the
+   link, because it is keyed on the link. `:focus-visible` below is scoped for the same
+   reason, though a `span` could not match it anyway. */
+a.wy-home:hover {
   background: var(--wy-surface);
 }
 
-.wy-home:hover .wy-wordmark {
+a.wy-home:hover .wy-wordmark {
   text-decoration: underline;
 }
 
@@ -217,7 +225,7 @@ body {
    Both layouts are verified by sampling rendered pixels in `home.spec.ts`: neither the DOM nor
    axe can see a clipped ring, and an earlier `outline-offset: 0` attempt passed every other
    gate while rendering the exact defect it claimed to fix (WCAG 2.4.7). */
-.wy-home:focus-visible {
+a.wy-home:focus-visible {
   outline: 3px solid var(--wy-focus);
   outline-offset: -3px;
 }

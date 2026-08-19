@@ -752,7 +752,11 @@ export function createOverlay(
    *  the run's `started` flag, and re-homes any focus it strands. */
   function renderInstall(started: boolean): void {
     const state: InstallState = install.state();
-    const hidden = state.standalone || state.installed;
+    // The ONE derivation both install surfaces gate on, so a third can never read a subset
+    // of it: already installed, installed in THIS tab, or HOSTED — a Host has no install
+    // flow to offer and never will (ADR 0012, #146). `bannerAudience` carries the same fact
+    // independently, so the banner is doubly covered; the settings row has only this.
+    const hidden = state.standalone || state.installed || state.hosted;
 
     // Banner: browser-tab mode ∧ audience ∧ pre-start ∧ un-dismissed ∧ not ended for this
     // session (the last survives Play-again, which returns to a pre-start state).

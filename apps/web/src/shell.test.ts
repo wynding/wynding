@@ -104,6 +104,58 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.home.dataset.live).toBeUndefined();
   });
 
+  // HOSTED (ADR 0012, #146 consumer 3). Inside a Host, `/` resolves to the host's own root,
+  // so the flow was: pause, tap the mark, confirm, lose the run, land on a blank view. The
+  // mark stays — it is the app's identity in the bar and Compact's only branding — but every
+  // trace of the link goes with the destination. Structural only, as above.
+  it('hosted: the mark is a plain span — no href, no tab stop, no link name', () => {
+    const shell = createShell(document, TWO_CARDS, { hosted: true });
+    // A `span`, not an `<a>` with the href stripped. The two are equivalent to AT (an anchor
+    // without `href` is already role-less and non-focusable), but only one of them cannot
+    // REGAIN a destination by a later edit — and `a.wy-home:hover` in ui.css is keyed on the
+    // element being an anchor, so the honest element is what removes the paint too.
+    expect(shell.home.tagName).toBe('SPAN');
+    expect(shell.home.hasAttribute('href')).toBe(false);
+    // Not focusable: no tabindex of its own, and `span` has no implicit one. (jsdom reports
+    // -1 for an element with no tabindex attribute and no implicitly-focusable tag.)
+    expect(shell.home.hasAttribute('tabindex')).toBe(false);
+    expect(shell.home.tabIndex).toBe(-1);
+    // The name that announced an ACTION goes with the action. What is left is the ordinary
+    // wordmark text, so AT hears "Wynding" and not "Wynding — home, link".
+    expect(shell.home.getAttribute('aria-label')).toBeNull();
+    expect(shell.home.getAttribute('role')).toBeNull();
+  });
+
+  it('hosted: the mark itself is untouched — same class, same artwork, same slot', () => {
+    // Everything about the presentation is deliberately identical, so nothing in the grid,
+    // the Compact column or the auto-hide fade moves between the two builds. The ONLY
+    // difference is the link semantics asserted above.
+    const web = createShell(document, TWO_CARDS);
+    const hosted = createShell(document, TWO_CARDS, { hosted: true });
+    for (const shell of [web, hosted]) {
+      expect(shell.home.className).toBe('wy-home');
+      expect(shell.status.firstElementChild).toBe(shell.home);
+      const mark = shell.home.querySelector('svg.wy-mark')!;
+      const wordmark = shell.home.querySelector('.wy-wordmark')!;
+      expect([...shell.home.children]).toEqual([mark, wordmark]);
+      expect(wordmark.textContent).toBe('Wynding');
+      expect(mark.getAttribute('aria-hidden')).toBe('true');
+      // Ships live-clear either way — `overlay.ts` drives `data-live`/`inert` on both forms.
+      expect(shell.home.hasAttribute('inert')).toBe(false);
+      expect(shell.home.dataset.live).toBeUndefined();
+    }
+  });
+
+  it('an ABSENT declaration builds the web link (ADR 0012 constraint 3)', () => {
+    // The deployed build passes no third argument at all — the default must be the anchor,
+    // not merely a `hosted: false` that someone has to remember to pass.
+    const shell = createShell(document, TWO_CARDS);
+    expect(shell.home.tagName).toBe('A');
+    expect(shell.home.getAttribute('href')).toBe(HOME_HREF);
+    // …and an explicit `false` is the same thing, since a host declares itself or nothing.
+    expect(createShell(document, TWO_CARDS, { hosted: false }).home.tagName).toBe('A');
+  });
+
   it('the board is focusable and carries its ARIA role (its aria-label is set dynamically by overlay.ts)', () => {
     const shell = createShell(document, TWO_CARDS);
     expect(shell.board.tabIndex).toBe(0);

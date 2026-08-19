@@ -276,6 +276,29 @@ The Dock never holds towers — the **Rail** does. ("Top-dock header" names movi
 cluster to the top edge, not the Rail.)
 _Avoid_: control bar, button bar.
 
+**Shell**:
+The interface's own outer structure — the status header, its chips, and the surface the
+Board sits in. Strictly a web-build concept, and never a synonym for **Host**.
+_Avoid_: frame.
+
+## Platform
+
+Where the game is running. The web build is the canonical artifact (ADR 0001 §4);
+everything here names something that embeds it.
+
+**Host**:
+An application that embeds the web build and presents it as its own — Capacitor on
+mobile, Tauri on desktop. A host is a role, not a product: naming one particular host
+where the concept is meant excludes every other.
+_Avoid_: wrapper.
+
+**Hosted**:
+Running inside a **Host**, rather than on the open web. The distinction is load-bearing
+because the web build's assumptions about being a web page — that there is a site to
+navigate to, that it can be installed, that it does not already own the screen — are
+each false when hosted. Distinct from an **installed** PWA, which a host is not.
+Declared by the host, never inferred (ADR 0012).
+
 ## Delivery
 
 How we break work down and ship it. See [`roadmap.md`](roadmap.md) for the actual

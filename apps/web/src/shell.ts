@@ -5,6 +5,8 @@
 //   .wy-shell
 //   ├── header.wy-status
 //   │   ├── a.wy-home              (board-mark + span.wy-wordmark — the text is Compact-hidden)
+//   │   │                           …or span.wy-home when HOSTED: identical artwork, no link
+//   │   │                           semantics at all (ADR 0012, #146 — see `createShell`)
 //   │   ├── div.wy-hud              (the five status chips; the labelled scrollport)
 //   │   └── div.wy-dock             (Pause/Speed/Settings/Start)
 //   ├── div.wy-banner  (the install suggestion — a RESERVED grid row, hidden by default)
@@ -132,10 +134,16 @@ export interface ShellBanner {
 export interface ShellHandle {
   readonly root: HTMLElement; // .wy-shell
   readonly status: HTMLElement; // header.wy-status
-  /** The site home link (`a.wy-home[href="/"]`) — the board-mark plus the wordmark. Its
-   *  auto-hide (`data-live` + `inert`) is driven by `overlay.ts`; the live-run exit guard
-   *  that intercepts its activation is owned by `main.ts`. */
-  readonly home: HTMLAnchorElement;
+  /** The Wynding mark — the board-mark plus the wordmark. On the open web it is the site
+   *  home LINK (`a.wy-home[href="/"]`); when hosted (ADR 0012) the identical artwork ships
+   *  as a plain `span.wy-home` with no link semantics at all, because `/` inside a **Host**
+   *  resolves to the host's own root and the flow was pause → tap → confirm → lose the run
+   *  → land on a blank view (#146). Hence `HTMLElement`, not `HTMLAnchorElement`.
+   *
+   *  Its auto-hide (`data-live` + `inert`) is driven by `overlay.ts` in BOTH forms — the
+   *  mark shows and hides identically either way; the live-run exit guard that intercepts
+   *  its activation is owned by `main.ts` and is registered only for the anchor form. */
+  readonly home: HTMLElement;
   readonly board: HTMLElement; // .wy-board — the scene mount point
   /** The board's positioned wrapper (`div.wy-stage`) — the containing block the floating
    *  wave preview anchors to on Standard (playtest round). */
@@ -234,8 +242,13 @@ const MARK_ROUTE = '#e8552f';
  *  that is a different mark for a different surface.
  *
  *  Purely decorative (`aria-hidden`, `focusable="false"` for legacy IE-era focus behaviour):
- *  the anchor's own localized `aria-label` carries the whole accessible name, so AT never
- *  hears the link twice. No `width`/`height` attributes — `ui.css` sizes it per layout. */
+ *  on the open web the anchor's own localized `aria-label` carries the whole accessible name,
+ *  so AT never hears the link twice. When HOSTED there is no anchor and no `aria-label`, so
+ *  nothing names the mark — which is the intended outcome, not an oversight: a role-less
+ *  `span` is simply not announced, so there is nothing to name and nothing said twice. (In
+ *  Compact, where `ui.css` hides `.wy-wordmark`, that leaves the hosted mark with no
+ *  accessible content at all — correct for pure decoration.) No `width`/`height` attributes —
+ *  `ui.css` sizes it per layout. */
 function boardMark(doc: Document): SVGSVGElement {
   const svg = doc.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('class', 'wy-mark');
@@ -288,6 +301,18 @@ function boardMark(doc: Document): SVGSVGElement {
   return svg;
 }
 
+/** The OPEN-WEB form of the Wynding mark: a real link to the site root, named from the
+ *  catalog (ADR 0004) since the artwork beside it is `aria-hidden` decoration. Factored out
+ *  so the hosted branch is a plain `createElement('span')` with no cast and no dead `href`
+ *  to strip. `href` is root-absolute so it is correct from `/play/` regardless of the
+ *  build's `--base` rewrite. */
+function homeAnchor(doc: Document): HTMLAnchorElement {
+  const a = doc.createElement('a');
+  a.href = HOME_HREF;
+  a.setAttribute('aria-label', t('app.home'));
+  return a;
+}
+
 /** One dual-form chip slot. Both nodes always exist; `overlay.ts` writes both through its
  *  single `setChip` path, and `ui.css` decides which one is visible per layout. */
 function chip(doc: Document, slot: string): ShellChip {
@@ -303,6 +328,14 @@ function chip(doc: Document, slot: string): ShellChip {
   return { root, full, glance };
 }
 
+/** What the Shell needs told rather than discovered. One field today; a named type so the
+ *  call site reads `{ hosted: true }` instead of a bare positional boolean. */
+export interface ShellDeps {
+  /** The host declaration (ADR 0012). Optional because ABSENT MEANS NOT HOSTED — the
+   *  deployed web build passes nothing and gets exactly today's Shell. */
+  readonly hosted?: boolean;
+}
+
 /** Build the Shell into a detached root; the caller appends `handle.root` wherever the
  *  pinned topology requires (a direct child of `#app`, alongside the results/settings/
  *  rotate siblings). `cardDescriptors` (M2-S3) is the catalog-order list of tower ids the
@@ -311,6 +344,7 @@ function chip(doc: Document, slot: string): ShellChip {
 export function createShell(
   doc: Document,
   cardDescriptors: readonly { readonly towerId: string }[],
+  deps: ShellDeps = {},
 ): ShellHandle {
   const shell = doc.createElement('div');
   shell.className = 'wy-shell';
@@ -335,16 +369,21 @@ export function createShell(
   // root-absolute so it is correct from `/play/` regardless of the build's `--base` rewrite.
   // The accessible name comes from the catalog (ADR 0004) rather than the mark's own
   // `aria-label`; the artwork itself is `aria-hidden` decoration alongside it. ---
-  const home = doc.createElement('a');
+  // HOSTED (ADR 0012, #146 consumer 3): a `span`, not an anchor with the href stripped. An
+  // `<a>` without `href` is already non-focusable and role-less, so the two forms are
+  // equivalent to AT — but only one of them is unable to REGAIN a destination by a later
+  // edit, and `a.wy-home:hover`'s link affordance is keyed off the element being an anchor
+  // (ui.css), so the honest element is what removes the paint too. The mark itself is
+  // untouched: same class, same children, same `data-live`/`inert` auto-hide, so nothing
+  // about the layout, the grid or the fade moves.
+  const home: HTMLElement = deps.hosted === true ? doc.createElement('span') : homeAnchor(doc);
   home.className = 'wy-home';
-  home.href = HOME_HREF;
-  home.setAttribute('aria-label', t('app.home'));
   // NO `title` here, deliberately. It was tried as a tooltip for the sighted mouse user in
   // Compact (where the mark renders alone), on the reasoning that `aria-label` wins for naming
   // so a matching `title` costs AT nothing. That is wrong: per accname, once the name comes
   // from `aria-label` the `title` becomes the accessible DESCRIPTION, so NVDA/JAWS announce
   // "Wynding — home, link" and then the description "Wynding — home" — the same string twice.
-  // The hover affordance is carried by `.wy-home:hover`'s surface tint instead (ui.css), which
+  // The hover affordance is carried by `a.wy-home:hover`'s surface tint instead (ui.css), which
   // costs assistive tech nothing and, unlike a tooltip, is visible to touch users too.
   home.append(boardMark(doc), wordmark);
 
