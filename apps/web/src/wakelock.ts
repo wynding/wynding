@@ -78,16 +78,26 @@ export function createWakeLock(deps: WakeLockDeps): WakeLockHandle {
   let requesting = false;
   /** Property 4: this platform said no. Cleared when the predicate next reads false. */
   let refused = false;
+  /** Which live window we are in. Bumped every time the predicate reads false, so a request
+   *  can tell whether the state that asked for it still exists when its answer arrives.
+   *  `shouldHold()` alone cannot: the predicate going false and TRUE again — a player pausing
+   *  and resuming inside one request round-trip — reads identical to never having moved. */
+  let windowId = 0;
   let destroyed = false;
 
   /** Adopt a freshly-granted sentinel, listening for the platform taking it back.
    *
-   *  The listener is PER SENTINEL and checks identity before acting. A single shared closure
-   *  that blindly nulled `sentinel` was wrong in two ways: it was only ever detached inside
-   *  `drop()`, which the revoke path never calls, so it stayed attached to a dead sentinel
-   *  forever; and a late or duplicated `release` from that dead sentinel would then null a
-   *  DIFFERENT, genuinely-held one, leaving the module with no reference to release it and
-   *  the screen pinned awake for the life of the page. */
+   *  The listener is PER SENTINEL and checks identity before acting, which is what makes a
+   *  late or duplicated `release` from a sentinel we already let go HARMLESS: without it,
+   *  that event nulled whichever sentinel happened to be live at the time, leaving the module
+   *  with no reference to release it and the screen pinned awake for the life of the page.
+   *
+   *  It does NOT make such a sentinel detach. The identity guard returns before
+   *  `removeEventListener`, so a sentinel dropped by `releaseHeld()` keeps its listener until
+   *  it is collected — which is fine, because the sentinel, its listener set and this closure
+   *  form a cycle with no live references once we drop ours. Stated because the honest reason
+   *  `drop()` does not detach is "the stale event is harmless", not "the listener detaches
+   *  itself" — and the second is what a reader would otherwise rely on. */
   const adopt = (s: WakeLockSentinelLike): void => {
     const onRelease = (): void => {
       if (sentinel !== s) return; // a stale or duplicated event from a sentinel we let go
@@ -149,13 +159,22 @@ export function createWakeLock(deps: WakeLockDeps): WakeLockHandle {
       // or went to the background. Whatever made the platform decline last time may not hold
       // for the next wave, so the latch is dropped and the next acquisition is free to ask.
       refused = false;
+      windowId += 1;
       releaseHeld();
       return;
     }
     if (sentinel !== null) return; // already held — nothing to do
-    if (requesting) return; // property 2: single-flight
+    // Property 2: single-flight. NOT timed out, deliberately. A request that never settles
+    // would wedge this latch for the session — but no known engine leaves a wake-lock request
+    // pending forever, and the consequence is the SAME graceful degradation an absent API
+    // gives: no lock, no error, a run that never notices. Adding a timer, a duration and a
+    // retry path to recover a hypothetical would repeat the mistake the revoke bound made
+    // above — trading a real regression for an imagined one. Bound it against a measurement
+    // if a device is ever seen doing it.
+    if (requesting) return;
     if (refused) return; // property 4: asked and declined; wait for the predicate to cycle
     requesting = true;
+    const askedIn = windowId;
     try {
       void Promise.resolve(api.request('screen')).then(
         (s: WakeLockSentinelLike) => {
@@ -167,7 +186,20 @@ export function createWakeLock(deps: WakeLockDeps): WakeLockHandle {
             drop(s);
             return;
           }
-          adopt(s);
+          try {
+            adopt(s);
+          } catch {
+            // The one failure shape this module's own discipline still missed. `drop()`
+            // absorbs a rejected release and a synchronous throw, and the request path
+            // absorbs a synchronous throw from `request()` — but the RESOLUTION handler
+            // absorbed neither, and it runs inside a promise that is deliberately `void`ed.
+            // So a non-conforming sentinel (no `addEventListener`, or `request()` resolving
+            // with something that is not a sentinel at all) both escaped as an unhandled
+            // rejection and left the granted lock unrecorded — held by the platform, with
+            // nothing in here able to release it, not `refresh()` and not `destroy()`. That
+            // is the screen pinned awake for the life of the page.
+            drop(s);
+          }
         },
         () => {
           // Refused: no user gesture, a permissions policy, a hidden document, a platform
@@ -179,14 +211,17 @@ export function createWakeLock(deps: WakeLockDeps): WakeLockHandle {
           // whose overlay, input and Shell have already been torn down — inert today only by
           // accident, and an escaping throw here would be an unhandled rejection.
           if (destroyed) return;
-          // Re-read the predicate first, exactly as the success path does (property 1). A
-          // rejection can land AFTER the state that asked for it is gone — the hide path
-          // makes that ordinary, since the API refuses a document that is no longer visible
-          // — and latching then would be latching against a state that no longer exists.
-          // The player resuming would find `refused` already set and never ask again, so the
-          // screen would stay free to sleep for the whole of that next live window. The
-          // latch is about THIS state having been declined, not about the request having
-          // failed.
+          // The latch is about THIS window having been declined, not about a request having
+          // failed — so a rejection that outlives the window that asked for it must not set
+          // it. Two ways that happens, and the predicate alone only catches the first:
+          //
+          //   • the window is still open  — `shouldHold()` reads false, so no latch;
+          //   • the window ENDED AND A NEW ONE BEGAN — a player pausing and resuming inside
+          //     one request round-trip. `shouldHold()` reads true again and is indistinguish-
+          //     able from never having moved, so the stale refusal would latch against a live
+          //     wave that never got a request of its own, and the screen would be free to
+          //     sleep for the rest of it. That is what `windowId` is for.
+          if (windowId !== askedIn) return;
           if (deps.shouldHold()) refused = true;
         },
       );

@@ -185,6 +185,39 @@ describe('wakelock — the asynchronous races (#140 properties 1 and 2)', () => 
     lock.destroy();
   });
 
+  it('a rejection whose window ENDED AND RESTARTED does not latch the new one', async () => {
+    // Codex P2. The predicate re-read alone cannot catch this: a player who pauses and
+    // resumes inside one request round-trip leaves `shouldHold()` reading true again, which
+    // is indistinguishable from never having moved. The stale refusal would then latch a live
+    // wave that never got a request of its own — screen free to sleep for the rest of it.
+    const api = fakeApi('reject');
+    let want = true;
+    const lock = createWakeLock({ api: api.api, shouldHold: () => want });
+
+    lock.refresh(); // asks in window 0
+    want = false; // the player pauses…
+    lock.refresh();
+    want = true; // …and resumes, all while the request is still outstanding
+    lock.refresh();
+    await api.settle(); // window 0's rejection lands, in window 1
+    expect(api.requests()).toBe(1);
+
+    lock.refresh();
+    expect(api.requests(), 'a stale rejection latched the window that followed it').toBe(2);
+    lock.destroy();
+  });
+
+  it('only ever asks for the SCREEN lock', () => {
+    // Asserted from the test body, not inside the fake: `request` is called synchronously
+    // from `refresh()` inside the module's own throw-absorbing `try`, so an `expect` in there
+    // is swallowed and presents as a platform refusal — pinning nothing while claiming to.
+    const api = fakeApi();
+    const lock = createWakeLock({ api: api.api, shouldHold: () => true });
+    lock.refresh();
+    expect(api.requestedTypes()).toEqual(['screen']);
+    lock.destroy();
+  });
+
   it('a SYNCHRONOUSLY throwing request is absorbed and latched the same way', async () => {
     const api = fakeApi('throw');
     let want = true;
@@ -301,40 +334,31 @@ describe('wakelock — the platform can take the lock back (#140 property 3)', (
     // The case that makes the unbounded revoke path safe in practice: the platform that takes
     // the lock back is overwhelmingly the one that will also refuse the follow-up (a hidden
     // document, a low battery), and property 4 latches that after one request.
-    let answer: 'grant' | 'refuse' = 'grant';
-    let requests = 0;
-    const listeners = new Set<() => void>();
-    const api = {
-      request: () => {
-        requests += 1;
-        if (answer === 'refuse') return Promise.reject(new Error('refused'));
-        return Promise.resolve({
-          release: () => Promise.resolve(),
-          addEventListener: (_t: 'release', l: () => void) => void listeners.add(l),
-          removeEventListener: (_t: 'release', l: () => void) => void listeners.delete(l),
-        });
-      },
-    };
-    const lock = createWakeLock({ api, shouldHold: () => true });
+    //
+    // Driven through the SHARED fake's `setBehaviour` rather than a hand-rolled sentinel
+    // model — an inline copy here would be exactly the silent drift `wakelock-fakes.ts` was
+    // extracted to prevent.
+    const api = fakeApi();
+    const lock = createWakeLock({ api: api.api, shouldHold: () => true });
     lock.refresh();
-    await Promise.resolve();
-    await Promise.resolve();
+    await api.settle();
     expect(lock.held()).toBe(true);
 
-    answer = 'refuse';
-    for (const l of [...listeners]) l(); // the platform takes it back…
-    for (let i = 0; i < 40; i++) lock.refresh(); // …and declines every follow-up
-    await Promise.resolve();
-    await Promise.resolve();
+    api.setBehaviour('reject'); // …and from here the platform declines
+    api.revokeAll(); // the platform takes it back
     for (let i = 0; i < 40; i++) lock.refresh();
-    expect(requests, 'the refusal latch must stop the retries after one').toBe(2);
+    await api.settle();
+    for (let i = 0; i < 40; i++) lock.refresh();
+    expect(api.requests(), 'the refusal latch must stop the retries after one').toBe(2);
+    expect(lock.held()).toBe(false);
     lock.destroy();
   });
-
   it('a release event from a sentinel we already dropped cannot disown the live one', async () => {
     // The reachable orphan, and why the listener is identity-checked. `releaseHeld()` — the
     // ordinary pause path — hands the sentinel to `drop()`, which releases it but does NOT
-    // detach its listener (the listener detaches itself when it fires). A real sentinel emits
+    // detach its listener; nor does the listener detach itself here, since the identity guard
+    // returns before `removeEventListener`. The dropped sentinel keeps it until collection,
+    // which is harmless precisely BECAUSE of the guard under test. A real sentinel emits
     // `release` when it is released, so that event arrives on a sentinel we have already let
     // go, quite possibly after the next one has been adopted.
     //
@@ -342,7 +366,10 @@ describe('wakelock — the platform can take the lock back (#140 property 3)', (
     // reports nothing held, has no reference left to release what it is actually holding, and
     // the screen stays awake for the life of the page — the exact leak `destroy()` and
     // property 1 exist to prevent.
-    const api = fakeApi();
+    // `lateRelease` models an engine whose release EVENT arrives after the call. That is the
+    // only ordering in which this guard is load-bearing: a spec-conforming engine notifies
+    // while `sentinel` is still null, where nulling it again would be harmless anyway.
+    const api = fakeWakeLock({ deferred: true, lateRelease: true });
     let want = true;
     const lock = createWakeLock({ api: api.api, shouldHold: () => want });
     lock.refresh();
@@ -428,6 +455,60 @@ describe('wakelock — the platform can take the lock back (#140 property 3)', (
     expect(lock.held()).toBe(false);
     // No unhandled rejection escapes into the run.
     await Promise.resolve();
+  });
+});
+
+describe('wakelock-fakes — one release contract, not three', () => {
+  it('release() notifies its listeners, exactly as a platform revoke does', () => {
+    // Per the spec, `WakeLockSentinel.release()` runs the release algorithm, which DISPATCHES
+    // `release` at the sentinel — so a real engine always delivers that event on the ordinary
+    // pause path. A fake that marked without notifying left that sequence unreachable in the
+    // suite while `revokeAll()` and `fireRelease()` both notified: one platform contract
+    // modelled three ways, which is the silent drift the shared module exists to prevent.
+    const api = fakeWakeLock();
+    let fired = 0;
+    let released = false;
+    void api.api.request('screen').then((s) => {
+      s.addEventListener('release', () => void (fired += 1));
+      void s.release().then(() => void (released = true));
+    });
+    return Promise.resolve()
+      .then(() => Promise.resolve())
+      .then(() => {
+        expect(fired, 'release() must notify, like revokeAll() and fireRelease()').toBe(1);
+        expect(released).toBe(true);
+        expect(api.liveSentinels(), 'and mark it released, like both siblings').toBe(0);
+      });
+  });
+});
+
+describe('wakelock — a non-conforming grant cannot orphan the lock', () => {
+  it('absorbs a throw while adopting, and lets the sentinel go', async () => {
+    // The resolution handler absorbed neither failure shape, unlike `drop()` and the request
+    // path. A sentinel whose `addEventListener` throws would both escape as an unhandled
+    // rejection (the promise is `void`ed) and stay unrecorded — held by the platform, with
+    // nothing in here able to release it. Screen awake for the life of the page.
+    let released = false;
+    const hostile: WakeLockApi = {
+      request: () =>
+        Promise.resolve({
+          release: () => {
+            released = true;
+            return Promise.resolve();
+          },
+          addEventListener: () => {
+            throw new Error('non-conforming sentinel');
+          },
+          removeEventListener: () => {},
+        }),
+    };
+    const lock = createWakeLock({ api: hostile, shouldHold: () => true });
+    expect(() => lock.refresh()).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lock.held(), 'nothing may be recorded as held').toBe(false);
+    expect(released, 'the granted lock must be let go, not orphaned').toBe(true);
+    lock.destroy();
   });
 });
 

@@ -10,7 +10,6 @@
 // Test-only: imported solely by `*.test.ts`, so it is coverage-excluded in
 // `vitest.config.ts` rather than held to the 90% branch bar, exactly as `install-fakes.ts` is.
 
-import { expect } from 'vitest';
 import type { WakeLockApi, WakeLockSentinelLike } from './wakelock';
 
 export interface WakeLockFakeOptions {
@@ -18,6 +17,13 @@ export interface WakeLockFakeOptions {
    *  that HAS the API and declines is the case the refusal latch exists for, and it is not
    *  the same as an absent API. `throw` covers a non-conforming engine that raises instead. */
   readonly behaviour?: 'resolve' | 'reject' | 'throw';
+  /** Model an engine whose `release` EVENT arrives late rather than with the call — the
+   *  `release()` promise settles, but the sentinel does not notify until a test says so via
+   *  `sentinelAt(i).fireRelease()`. That is the ordering the per-sentinel identity guard
+   *  exists for: an event from a sentinel already let go, arriving after the NEXT one was
+   *  adopted. Default false, i.e. the spec-conforming behaviour where releasing notifies at
+   *  once and `sentinel` is still null when it does. */
+  readonly lateRelease?: boolean;
   /** Hold each successful request OPEN until `settle()` is called, so a test can decide
    *  exactly when the sentinel arrives and drive the asynchronous races against it. Default
    *  false: the request resolves on its own microtask, which is all an app-level test needs.
@@ -32,8 +38,16 @@ export interface WakeLockFakeOptions {
 export function fakeWakeLock({
   behaviour = 'resolve',
   deferred = false,
+  lateRelease = false,
 }: WakeLockFakeOptions = {}) {
   let requests = 0;
+  let answer = behaviour;
+  /** Every lock type asked for, in order. RECORDED rather than asserted in here: `request` is
+   *  called synchronously from `refresh()`, inside the module's own `try`/`catch` for engines
+   *  that throw instead of rejecting — so an `expect` here never reaches Vitest at all. It is
+   *  swallowed and presents as a platform refusal, which is the exact opposite of pinning
+   *  anything. Assert it from the test body, where a failure is attributable. */
+  const types: string[] = [];
   /** Resolvers held back while `deferred`, so a test can choose when a request completes. */
   const pending: (() => void)[] = [];
   const sentinels: { released: boolean; listeners: Set<() => void> }[] = [];
@@ -43,7 +57,14 @@ export function fakeWakeLock({
     sentinels.push(s);
     return {
       release: () => {
+        // Fires the event as well as marking it. Per the spec, `WakeLockSentinel.release()`
+        // runs the release algorithm, which DISPATCHES `release` at the sentinel — so a real
+        // engine always delivers that event on the ordinary pause path
+        // (`releaseHeld()` → `drop()` → `release()`). Marking without notifying made this
+        // module's three release paths model one platform contract three different ways,
+        // which is the silent drift it was extracted to prevent.
         s.released = true;
+        if (!lateRelease) for (const l of [...s.listeners]) l();
         return Promise.resolve();
       },
       addEventListener: (_t: 'release', l: () => void) => void s.listeners.add(l),
@@ -53,12 +74,10 @@ export function fakeWakeLock({
 
   const api: WakeLockApi = {
     request: (type: 'screen') => {
-      // Pinned here rather than in each suite: the app must ask for the SCREEN lock, and a
-      // fake that quietly accepts any type would let a wrong one through both suites at once.
-      expect(type).toBe('screen');
+      types.push(type);
       requests++;
-      if (behaviour === 'throw') throw new Error('synchronous refusal');
-      if (behaviour === 'reject') return Promise.reject(new Error('refused'));
+      if (answer === 'throw') throw new Error('synchronous refusal');
+      if (answer === 'reject') return Promise.reject(new Error('refused'));
       if (!deferred) return Promise.resolve(makeSentinel());
       return new Promise<WakeLockSentinelLike>((resolve) => {
         pending.push(() => resolve(makeSentinel()));
@@ -69,6 +88,14 @@ export function fakeWakeLock({
   return {
     api,
     requests: () => requests,
+    /** The lock types asked for, in order. The app must only ever ask for `'screen'`. */
+    requestedTypes: (): readonly string[] => types,
+    /** Change how the platform answers MID-TEST — "grant, then refuse" is a real sequence (a
+     *  device that revokes and then declines the follow-up) and the only reason a suite would
+     *  otherwise hand-roll a second sentinel model, which is what this module exists to stop. */
+    setBehaviour: (next: 'resolve' | 'reject' | 'throw'): void => {
+      answer = next;
+    },
     /** How many sentinels this API handed out that have NOT been released. */
     liveSentinels: () => sentinels.filter((s) => !s.released).length,
     /** Release anything held back, then drain the microtask queue — every assertion about

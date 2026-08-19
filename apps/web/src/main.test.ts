@@ -115,6 +115,7 @@ describe('main — createApp wiring & frame loop', () => {
       now: () => 0,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     expect(root.querySelector('.wy-wordmark')!.textContent).toBe('Wynding');
     expect(root.querySelector('.wy-board')!.getAttribute('role')).toBe('application');
@@ -145,6 +146,7 @@ describe('main — createApp wiring & frame loop', () => {
       now: () => 0,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     app.destroy();
     expect(root.childElementCount).toBe(0); // no leaked shell/results/settings/rotate
     // A recreate must yield exactly one of each — not a stacked duplicate/focus target.
@@ -170,6 +172,7 @@ describe('main — createApp wiring & frame loop', () => {
       now: () => clock,
       seed: 7,
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     sched.frame((clock += 16)); // one frame so overlay.update() has run at least once
@@ -260,6 +263,7 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
       now: () => clock,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     const key = (code: string): void => {
@@ -379,6 +383,7 @@ function homeApp(options: HomeAppOptions = {}) {
       ? {}
       : { controllerFactory: options.controllerFactory }),
   });
+  openApps.push(app); // torn down even if an assertion throws first
   const board = root.querySelector<HTMLElement>('.wy-board')!;
   // Teardown registered AT CREATION, not trailing each test body. A trailing `destroy()`
   // never runs if an assertion throws first — and this phase is what first puts
@@ -904,6 +909,7 @@ describe('main — the DEFAULT navigate dep (the real, irreversible exit)', () =
       seed: 1,
       // deliberately NO `navigate` — this test exists to exercise the default
     });
+    openApps.push(app); // torn down even if an assertion throws first
 
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     sched.frame((clock += 16));
@@ -956,6 +962,7 @@ describe('main — in-app reduced motion is reflected onto the Shell', () => {
       seed: 1,
       prefersReducedMotion: true,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     expect(root.querySelector('.wy-shell')!.hasAttribute(ATTR)).toBe(true);
     app.destroy();
   });
@@ -973,6 +980,7 @@ describe('main — pending-aware HUD refresh while paused (#37+#27)', () => {
       now: () => clock,
       seed: 1,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     const board = root.querySelector<HTMLElement>('.wy-board')!;
     const key = (code: string): void => {
       board.dispatchEvent(new KeyboardEvent('keydown', { code, cancelable: true }));
@@ -1028,6 +1036,7 @@ describe('main — input.reset() across Play-again (#40)', () => {
       now: () => clock,
       seed: 7,
     });
+    openApps.push(app); // torn down even if an assertion throws first
     const calls = (attachInputMock as unknown as { mock: { results: { value: InputHandle }[] } })
       .mock.results;
     const inputHandle = calls[calls.length - 1]!.value;
