@@ -23,6 +23,16 @@
 // `(orientation: portrait)`/`(pointer: coarse)` are fixed booleans that keep firing
 // `change` forever, so one listener each suffices for the module's lifetime; the
 // conjunction is simply recomputed on every `change` from either.
+//
+// STILL LIVE INSIDE A HOST (#135). The native projects hard-lock landscape, so it is
+// tempting to read this module as dead code on device. It is not, and the difference is
+// player-visible. Neither platform's lock is unconditional: iPadOS honours an orientation
+// restriction only alongside `UIRequiresFullScreen`, and Android 16 (API 36, which
+// Capacitor 8 targets) IGNORES `android:screenOrientation` on `sw600dp`+ displays unless an
+// exception applies. #135 sets both of those, but the OS decides — and where it declines,
+// THIS prompt is what the player gets instead of an unplayable portrait board. So the
+// honest statement is that a hard lock is the preferred path and this is the fallback
+// wherever one is refused: the open web always, and large-screen form factors sometimes.
 
 import { t } from './i18n/t';
 import type { ModalOwner, ModalOverlay } from './modal';

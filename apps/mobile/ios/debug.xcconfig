@@ -1,0 +1,13 @@
+CAPACITOR_DEBUG = true
+
+// #135 - iOS signing identity, kept OUT of this public repository.
+//
+// Xcode writes DEVELOPMENT_TEAM straight into the tracked project.pbxproj the moment a team
+// is picked in its UI, and a team ID is a durable, personally-linked identifier. So the
+// developer sets it in LocalSigning.xcconfig - untracked, gitignored, next to this file -
+// and never in the project settings. See apps/mobile/README.md.
+//
+// The `?` is what makes this safe to commit: the include is OPTIONAL, so a fresh clone with
+// no local file builds normally (and simply cannot sign for a device until one exists).
+// release.xcconfig carries the same line for the Release configurations.
+#include? "LocalSigning.xcconfig"

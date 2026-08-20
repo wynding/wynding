@@ -1,4 +1,8 @@
-# Build output & caches
+# Build output & caches. Note `dist-host/` and `dist-perf/` are deliberately NOT listed here:
+# prettier reads the root `.gitignore` too, which already covers both, and adding them would
+# be redundant rather than defensive. What that does NOT extend to is a NESTED .gitignore —
+# prettier reads the root one only — which is exactly why the two `apps/mobile` rules further
+# down are load-bearing even though Capacitor ignores those paths in its own ignore files.
 dist/
 **/dist/
 .turbo/
@@ -7,6 +11,21 @@ pnpm-lock.yaml
 
 # Not ours to format
 LICENSE
+
+# The generated native project trees (#135). Everything prettier can even PARSE inside them
+# is machine-written, and formatting any of it is actively wrong:
+#   - `*/public/**` and `capacitor.config.json` are the synced web payload and its generated
+#     config — build output that `cap sync` overwrites, and gitignored by Capacitor's own
+#     ignore files;
+#   - `Assets.xcassets/**/Contents.json` is the Xcode asset catalog's index, rewritten
+#     verbatim by `cap add` and `@capacitor/assets` — reformatting it would put the tracked
+#     file permanently out of sync with what regeneration produces.
+# Everything else in there (Swift, Kotlin/Java, Gradle, plists, xcconfig, storyboards) has no
+# prettier parser at all, so a narrower rule would buy nothing and would go red again the
+# next time the templates gain a JSON file. Derived from the eleven files `format:check`
+# actually reported after the first `cap add` + `cap sync`, not guessed.
+apps/mobile/ios/
+apps/mobile/android/
 
 # Machine-generated (byte-identical to scripts/i18n-gen.mjs output; the i18n:check
 # gate verifies it, so prettier must not reformat it out of sync)

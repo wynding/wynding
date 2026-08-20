@@ -1,0 +1,21 @@
+App/build
+App/Pods
+App/output
+App/App/public
+DerivedData
+xcuserdata
+
+# Cordova plugins for Capacitor
+capacitor-cordova-ios-plugins
+
+# Generated Config files
+App/App/capacitor.config.json
+App/App/config.xml
+
+# Signing material. Same rule as the team ID in the root .gitignore, one tier up in stakes:
+# a provisioning profile or an exported private key in a PUBLIC repository is a live credential.
+# `pnpm run check:native` asserts these rules survive a template regeneration.
+*.mobileprovision
+*.p12
+*.cer
+ExportOptions.plist

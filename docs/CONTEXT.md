@@ -299,6 +299,13 @@ navigate to, that it can be installed, that it does not already own the screen â
 each false when hosted. Distinct from an **installed** PWA, which a host is not.
 Declared by the host, never inferred (ADR 0012).
 
+**Host build**:
+The web build compiled for a **Host** â€” the same source as the open-web build, with the
+hosted declaration baked in rather than detected by the web build itself (ADR 0012). It is
+a separate artifact with its own output, so a build that never declared itself cannot be
+packaged into a host by mistake.
+_Avoid_: shell build, capacitor build, wrapper build.
+
 ## Delivery
 
 How we break work down and ship it. See [`roadmap.md`](roadmap.md) for the actual

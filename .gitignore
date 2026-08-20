@@ -8,9 +8,12 @@ Thumbs.db
 # Dependencies
 node_modules/
 
-# Build output
+# Build output. `dist-host/` is the Host build (ADR 0013) — a second artifact of the same
+# source, produced by `pnpm --filter @wynding/web build:host` and packaged by the native
+# hosts. Ignored for the same reason `dist/` is: it is generated on every build.
 dist/
 dist-perf/
+dist-host/
 build/
 *.tsbuildinfo
 
@@ -26,6 +29,13 @@ test-results/
 # Env
 .env
 .env.local
+
+# iOS signing identity (#135). A development team ID is a durable, personally-linked
+# identifier and this repository is PUBLIC, so it never enters a tracked file. The developer
+# writes DEVELOPMENT_TEAM here; `ios/debug.xcconfig` and `ios/release.xcconfig` each pull it
+# in with an OPTIONAL include, so a clone without this file still builds. Never remove this
+# rule to "fix" a signing problem — see apps/mobile/README.md for the intended workflow.
+apps/mobile/ios/LocalSigning.xcconfig
 
 # Reference material from inspiring games — competitive research lives here and
 # stays OUT of the tracked repo (clean-room boundary).

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { hostedDefine, webBuildConfig } from './build-config';
 
 // Story 6 coverage gate for the app/orchestration layer. jsdom so the DOM overlay +
 // input modules are exercised for real. Every source module is covered at the 90%
@@ -19,6 +20,15 @@ import { defineConfig } from 'vitest/config';
 // `scene.ts` is — there's no seam left to inject, `index.html`'s `<script>` tag is the
 // only real caller, and that path is proven by the Playwright e2e suite, not Vitest.
 export default defineConfig({
+  // The hosted declaration is a build-time constant (ADR 0013). Supplying it here is about
+  // being explicit, NOT about avoiding a crash: `import.meta.env` is a real object under
+  // Vitest, so an undeclared key reads as `undefined` and `=== true` is already false. (That
+  // is also why `vite.perf.config.ts` needs no `define` despite having `main.ts` in its
+  // graph — it is not broken.) Vitest's mode is `'test'`, which is not `HOST_MODE`, so
+  // unit tests run the UNHOSTED default: the hosted paths are exercised the way they always
+  // have been, by passing `hosted` into `createApp`/`createShell` directly. The key comes
+  // from `build-config.ts` so it cannot drift from the one Vite defines.
+  define: hostedDefine(webBuildConfig('test').hosted),
   test: {
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],

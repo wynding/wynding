@@ -57,7 +57,20 @@ Requirements:
 This is a **pnpm + Turborepo** monorepo. Useful scripts (the package-scoped ones run
 through Turbo, cached per package):
 
-- `pnpm run build` — build every package/app.
+- `pnpm run build` — build the whole SDK-free graph: every package, plus the web app's two
+  artifacts (`dist`, the open web; `dist-host`, the **Host build** the native apps package —
+  see [ADR 0013](docs/adr/0013-host-build-is-a-separate-artifact.md)). It deliberately does
+  NOT build the native apps: those need Xcode or the Android SDK, so they live under script
+  names Turbo never selects (see `apps/mobile/README.md`). Do not pass build arguments to this
+  aggregate: `pnpm run` appends a script's arguments to the END of its command line, so a
+  forwarded `--base` would reach only the last of the two builds — the Host build, which must
+  never carry one — while `dist`, the artifact served under `/play/`, would be built without it.
+  The web app's `build` refuses arguments rather than mis-routing them. To build one artifact
+  with flags, call Vite directly:
+  `pnpm --filter @wynding/web exec vite build --base=/play/` (the deployed web build) or
+  `pnpm --filter @wynding/web exec vite build --mode host` (the Host build). Avoid the
+  `pnpm run … -- --flag` form anywhere: pnpm passes the `--` straight through and Vite ignores
+  everything after it, so the flag vanishes without a word.
 - `pnpm run typecheck` — `tsc -b` across the project graph.
 - `pnpm run lint` — ESLint (flat config) over the workspace packages.
 - `pnpm run lint:scripts` — ESLint over the root `scripts/` and `eslint-rules/` (not part
@@ -65,6 +78,8 @@ through Turbo, cached per package):
 - `pnpm test` — Vitest unit/integration suites.
 - `pnpm run format` / `pnpm run format:check` — Prettier (write / check).
 - `pnpm run verify` — the full local gate CI also runs (see `.github/workflows/ci.yml`).
+- `pnpm --filter @wynding/mobile run sync:ios` / `sync:android` — build the Host build and copy
+  it into one native project. Needs that platform's toolchain; never run by CI or by `verify`.
 
 You can scope any task to one package with Turbo's filter, e.g.
 `pnpm turbo run test --filter @wynding/engine`.

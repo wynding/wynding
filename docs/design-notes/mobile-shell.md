@@ -133,7 +133,8 @@ holds now that both toolchains are provisioned, because the Android and iOS trac
 independently rather than one waiting on the other.
 
 **It also needs a second artifact, which is #148.** The Gate 2 APK cannot perform this measurement.
-The shell wraps `apps/web/dist`, and the perf harness is deliberately not in it — `vite.perf.config.ts`
+The shell wraps the **Host build** (`apps/web/dist-host` — ADR 0013), and the perf harness is
+deliberately not in it — `vite.perf.config.ts`
 builds to `dist-perf/` from entries production never references, and states the guarantee itself:
 the perf build is _"STRUCTURALLY incapable of entering the production artifact."_ So the play build
 ships no stress scene, no measurement surface, and no stress ruleset.

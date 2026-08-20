@@ -805,5 +805,10 @@ export function boot(doc: Document): AppHandle | null {
     seed: Date.now() >>> 0,
     prefersReducedMotion,
     storage: dismissalStorage(),
+    // ADR 0012: the web build is TOLD it is hosted and never infers. The fact is a
+    // build-time constant baked into the Host build (ADR 0013), so this is the one place
+    // in production code that reads it — every consumer downstream takes it as an injected
+    // dependency off `AppDeps`, which is what keeps them reachable in jsdom.
+    hosted: import.meta.env.WYNDING_HOSTED === true,
   });
 }
