@@ -41,12 +41,32 @@ async function inject(page: Page, values: Partial<Record<Axis, string>>): Promis
   );
 }
 
+/** Border-box width of the first match, in CSS px. */
 const widthOf = async (page: Page, sel: string): Promise<number> =>
   page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().width, sel);
 
-const heightOf = async (page: Page, sel: string): Promise<number> =>
-  page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().height, sel);
+/** CONTENT-box width — border box minus the element's own horizontal padding.
+ *
+ *  This is the half of the additive-track contract the track width cannot show. A track that
+ *  grows by the inset while its element spends that inset as internal padding leaves the
+ *  content width UNCHANGED; that invariant is the entire reason the `+ inset` term exists.
+ *  Deleting the paired padding keeps every track assertion green while the content spills into
+ *  the notch strip — demonstrated by mutation, which is why this helper exists.
+ */
+const contentWidthOf = async (page: Page, sel: string): Promise<number> =>
+  page.evaluate((s) => {
+    const el = document.querySelector(s)!;
+    const cs = getComputedStyle(el);
+    return (
+      el.getBoundingClientRect().width -
+      parseFloat(cs.paddingLeft) -
+      parseFloat(cs.paddingRight) -
+      parseFloat(cs.borderLeftWidth) -
+      parseFloat(cs.borderRightWidth)
+    );
+  }, sel);
 
+/** Resolved value of a computed length property, in CSS px. */
 const pxProp = async (page: Page, sel: string, prop: string): Promise<number> =>
   page.evaluate(
     ([s, p]) => parseFloat(getComputedStyle(document.querySelector(s!)!).getPropertyValue(p!)),
@@ -57,18 +77,25 @@ test.describe('safe-area seam — additive tracks (Compact)', () => {
   test('a left inset grows the status column track by exactly that inset', async ({ page }) => {
     await gotoAt(page, PHONE);
     const before = await widthOf(page, '.wy-status');
+    const contentBefore = await contentWidthOf(page, '.wy-status');
     await inject(page, { left: '37px' });
-    // `--wy-compact-col` is `min(4rem, 10vw) + inset`, and `.wy-status` spends the inset as
-    // internal padding-left — so the track grows and the CONTENT width is unchanged, which is
-    // the whole point of the term. Assert the track, not the padding.
+    // `--wy-compact-col` is `min(4rem, 10vw) + inset`, and `.wy-status` spends that inset as
+    // internal padding-left. BOTH halves are asserted, because either alone is satisfiable
+    // with the other deleted: the track must grow by the inset, AND the content width must not
+    // move. Dropping the paired padding leaves the track assertion green while the Compact
+    // Dock buttons render under the physical cutout — the exact regression the term prevents.
     expect(await widthOf(page, '.wy-status')).toBeCloseTo(before + 37, 0);
+    expect(await contentWidthOf(page, '.wy-status')).toBeCloseTo(contentBefore, 0);
   });
 
   test('a right inset grows the Rail track by exactly that inset', async ({ page }) => {
     await gotoAt(page, PHONE);
     const before = await widthOf(page, '.wy-rail');
+    const contentBefore = await contentWidthOf(page, '.wy-rail');
     await inject(page, { right: '29px' });
     expect(await widthOf(page, '.wy-rail')).toBeCloseTo(before + 29, 0);
+    // Same pairing as the column above: the Card's `width: 100%` content box must not shrink.
+    expect(await contentWidthOf(page, '.wy-rail')).toBeCloseTo(contentBefore, 0);
   });
 
   test('a bottom inset lands in the Compact status column padding', async ({ page }) => {
@@ -89,16 +116,19 @@ test.describe('safe-area seam — subtractive bound and the target floor (Standa
     const bound = (): Promise<number> => pxProp(page, '.wy-hud', 'max-height');
     const before = await bound();
 
-    // Big enough that the clamp binds rather than merely narrowing a bound nothing reaches.
     await inject(page, { top: '160px' });
     const after = await bound();
     expect(after).toBeCloseTo(before - 160, 0);
-
-    // The rendered consequence, which is what a sign error actually costs: with the bound
-    // tightened the element is clamped to it. A `+` instead of `-` would RAISE the bound and
-    // leave the HUD content-sized, passing any assertion that only checked "it changed".
-    expect(await heightOf(page, '.wy-hud')).toBeLessThanOrEqual(after + 1);
     expect(after).toBeLessThan(before);
+
+    // NO rendered-clamp assertion here, deliberately. An earlier draft asserted the HUD's
+    // rendered height fell to the tightened bound; that assertion was INERT and its comment
+    // was false. At this viewport the HUD is content-sized at ~24.6px while the bound's own
+    // `max(2.5rem, …)` floor keeps it at 40px or above, so the element cannot clamp at ANY
+    // inset — the assertion passed identically under the sign-flip mutation it claimed to
+    // catch. The sign IS caught, by `toBeCloseTo(before - 160)` above: flipping `-` to `+`
+    // makes the bound 392px, not 72px. Asserting the bound is the honest claim; asserting a
+    // clamp that never happens only looks stronger.
   });
 
   test('a bottom inset keeps the Dock inside the safe area without shrinking its targets', async ({
@@ -112,15 +142,17 @@ test.describe('safe-area seam — subtractive bound and the target floor (Standa
 
     // ADR 0003's floor survives the inset, and no control is left under the system bar the
     // inset stands for — the accessibility claim this whole seam exists to make assertable.
-    const controls = await page.evaluate(
-      (min) =>
-        [...document.querySelectorAll('.wy-dock .wy-btn')]
-          .filter((el) => (el as HTMLElement).offsetParent !== null)
-          .map((el) => {
-            const r = el.getBoundingClientRect();
-            return { w: r.width, h: r.height, bottom: r.bottom, min };
-          }),
-      TARGET_MIN_PX,
+    // The 44px floor is applied Node-side, below. Nothing is passed into the page: an earlier
+    // draft threaded TARGET_MIN_PX in and returned it on every control without ever reading
+    // it there, which read as if this `.filter()` applied the floor. It filters on visibility
+    // only.
+    const controls = await page.evaluate(() =>
+      [...document.querySelectorAll('.wy-dock .wy-btn')]
+        .filter((el) => (el as HTMLElement).offsetParent !== null)
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { w: r.width, h: r.height, bottom: r.bottom };
+        }),
     );
     expect(controls.length).toBeGreaterThan(0);
     const limit = STANDARD.height - INSET;

@@ -275,6 +275,28 @@ describe('layout — the safe-area seam (#136)', () => {
     expect(wrong).toEqual([]);
   });
 
+  it('vertical bounds read a VERTICAL axis token', () => {
+    // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which three
+    // of the twenty call sites are not: two `max-height` bounds and one `height`, all
+    // subtracting `--wy-safe-top`. Two of those sit behind `:has()` selectors that are not
+    // exercised at page load (`.wy-shell:has(.wy-banner:not([hidden]))` and
+    // `.wy-hud:has(> .wy-wave-preview)`), so a top→left slip there would shrink the HUD by the
+    // wrong inset with the entire suite green — the exact failure the guard exists to catch,
+    // in the one place it could not see.
+    const re = /(?:max-)?height\s*:([^;]+);/g;
+    const wrong: string[] = [];
+    let seen = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(uncommented)) !== null) {
+      const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(m[1] as string);
+      if (token === null) continue;
+      seen += 1;
+      if (token[1] !== 'top' && token[1] !== 'bottom') wrong.push(m[0].trim());
+    }
+    expect(seen, 'expected the three vertical bounds that read an inset').toBe(3);
+    expect(wrong).toEqual([]);
+  });
+
   it('--wy-compact-col grows its track by the left inset (`.wy-status` pads left)', () => {
     const decls = tokenDecls(css, '--wy-compact-col');
     expect(decls).toHaveLength(1);
