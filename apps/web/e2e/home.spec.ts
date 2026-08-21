@@ -10,6 +10,7 @@ import {
 } from './layout-probe';
 import { stubFullscreen } from './fullscreen-stub';
 import { COMPACT_QUERY } from '../src/layout';
+import { TARGET_MIN_PX } from './targets';
 
 // home.spec.ts — the site home affordance, measured in a REAL browser in BOTH layouts.
 //
@@ -21,9 +22,6 @@ import { COMPACT_QUERY } from '../src/layout';
 const STANDARD = { width: 1280, height: 720 };
 const PHONE = { width: 658, height: 320 }; // Galaxy S9+ landscape — the smallest supported
 const NARROW = { width: 568, height: 320 }; // iPhone-SE-class narrow floor
-
-/** ADR 0003's interactive-target floor. */
-const TARGET_MIN_PX = 44;
 
 /** The Standard status row's expected height: the chips line alone, exactly the link's
  *  44px hit box absorbed into the row's own padding (ui.css derives this) — measured
