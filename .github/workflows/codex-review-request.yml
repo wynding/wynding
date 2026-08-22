@@ -71,7 +71,22 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+      # #154: this POST has declared `issues: write` since this workflow's first commit —
+      # confirmed by git history — yet the live probe on PR #156 (push 75e4f1a) hit the
+      # identical 403 anyway. That rules out the permissions block; what remains is an
+      # org-level token cap only an org admin can inspect, not something fixable from this
+      # repo. #72 §3's `CODEX_TRIGGER_TOKEN` (a fine-grained PAT, owner lane) is the
+      # recorded fix. Until it lands, this step CANNOT reliably succeed at posting, so it
+      # is `continue-on-error` and downgrades its own POST failure to a workflow warning
+      # rather than a red job: a check that is red on every single future push trains
+      # reviewers to ignore it — exactly the failure mode #154's original report
+      # described — and it is not in the required-checks set (verify, codex-freshness,
+      # e2e), so the merge gate loses nothing real by this step going quiet on failure.
+      # `codex-freshness` still goes red separately and honestly when no verdict covers
+      # the head; that status is the one that matters. REVERT continue-on-error and the
+      # warning-downgrade below the moment the PAT lands and this step can succeed again.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
+        continue-on-error: true
         run: |
           set -euo pipefail
           # A missing script also makes node exit 1 — the same code as a confirmed-stale
@@ -87,9 +102,18 @@ jobs:
             1)
               # The REST issues endpoint, deliberately not `gh pr comment` — that command
               # posts via GraphQL addComment, whose scope mapping is murkier than the
-              # documented issues-write grant this call rides on.
-              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'
-              echo "Requested a Codex review of the new head."
+              # documented issues-write grant this call rides on. Wrapped in `if` (not
+              # `set -e`'s bare exit) so its own 403 prints verbatim above, THEN gets a
+              # warning annotation, THEN the step still concludes success — `if`'s
+              # condition command is exempt from `set -e` by POSIX, so this needs no
+              # special-casing beyond the wrap itself.
+              if gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'; then
+                echo "Requested a Codex review of the new head."
+              else
+                post_ec=$?
+                echo "::warning::auto-trigger POST failed (HTTP 403 — org-level token cap suspected; see #154 probe + #72 §3). Post '@codex review' manually."
+                echo "gh api exited $post_ec — see the raw error above." >&2
+              fi
               ;;
             *)
               # Exit 2 = the check could not determine freshness. Do NOT comment on a
