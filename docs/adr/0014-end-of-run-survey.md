@@ -81,7 +81,14 @@ meanings would be worse than one that swallows it once.
 
 **A run started mid-survey cancels any in-flight submission.** `hideResults()` is the single
 choke point every run-start path already passes through, and it already clears the transient
-live-region text. Cancellation hangs there: the request is aborted, the expansion collapses, and
+live-region text. **What is cancelled is the whole submission _operation_, not merely a request
+in flight** — an operation token (an `AbortSignal`) is minted when Send is pressed, invalidated by
+`hideResults()`, checked at every async boundary the submission crosses, and wired into the fetch
+itself. That distinction is load-bearing rather than pedantic: computing `replayDigest` is
+asynchronous, so Play again pressed between Send and the digest settling would find **no request
+yet to abort**, and a continuation that resumed afterwards would happily POST the previous run.
+Under an operation token the continuation instead finds the token dead and never sends. So:
+the operation is cancelled, the expansion collapses, and
 the survey releases the shared live region back to Verify (§6) — releasing it **clears** the
 region on this path, because an aborted send has no result worth announcing. Nothing is queued,
 nothing is
@@ -148,10 +155,21 @@ Two responses consume the ask, and they differ in scope:
 - **Don't ask again** is a **checkbox modifier, not an action.** Checking it arms
   forever-dismissal; the next collapse-committing action — Not now or Send — commits the durable
   write; unchecking before that disarms it. It never writes storage on its own, which keeps the
-  rule below true and keeps a check from being a trap the player cannot back out of. Because Not
-  now leaves the button live on the current dialog, a player who commits and immediately regrets
-  it can reopen the survey there and uncheck — though a second collapse then re-commits whatever
-  the checkbox says at that moment. That is the whole rule; it is deliberately not smarter.
+  rule below true and keeps a check from being a trap the player cannot back out of.
+
+  **The committing action writes the checkbox's _current_ state — including clearing a dismissal
+  that was already stored.** Stating the false branch matters, because an implementation that
+  only writes when the box is checked leaves unchecking able to change the UI and nothing else,
+  and the player would have no way back. Committing unchecked therefore **deletes or falsifies
+  the stored dismissal**, and that transition needs a test that survives a reload: check, commit,
+  reload, reopen, uncheck, commit, and confirm the survey is offered again.
+
+  **The uncheck window is same-dialog only, and that is a real limit rather than an oversight.**
+  Because Not now leaves the button live on the current dialog (above), a player who commits and
+  immediately regrets it can reopen the survey there and uncheck — a second collapse re-commits
+  whatever the checkbox says at that moment. But a dismissal stored in a **prior session** has no
+  un-ask path from inside the game, because the button never renders again to be reopened.
+  "Honoured forever" means exactly that. It is deliberately not smarter.
 
 Both halves need durable storage, and this is where the implementation gets it wrong if nobody
 says so. ADR 0011 already named the trap: `apps/web/src/settings.ts` is deliberately
@@ -205,9 +223,20 @@ labels itself in its own comment — "fast, deterministic 8-hex-char digest (not
 hex digits is 32 bits. It is a **cheap, human-legible discriminator** — excellent for spotting
 that two runs differ, useless as a claim that two runs are the same.
 
-`replayDigest` carries the weight `finalHash` cannot. It is a **SHA-256 over the recorder's
-canonical serialized input log**, computed by the **app layer at send time** — and it too
-requires no sim change and no change to ADR 0011. The recorder already holds the log:
+`replayDigest` carries the weight `finalHash` cannot, and **its construction is pinned here
+rather than described**, because a digest two implementations spell differently is a digest that
+rejects the join it exists to make. It is exactly
+**`sha256Hex(canonicalJson(tickInputs))`**, using the shared `@wynding/engine` helpers — the same
+pairing the ruleset digest already uses (`packages/sim/src/ruleset.ts`, `sha256Hex(canonicalJson(
+normalizeForHash(bundle)))`). Encoding and key ordering are whatever those helpers do; the
+contract mandates the **shared helper**, not a prose description of bytes, so there is one
+implementation and no second spelling.
+
+**Scope: the `tickInputs` array alone**, exactly as the replay format serializes it — not a
+wrapper carrying the identity fields. Those are carried separately and checked separately, so
+folding them in would double-count them and muddy the derivability argument below, which depends
+on the digest being a function of _the log and nothing else_. Computed by the **app layer at send
+time**, it requires no sim change and no change to ADR 0011. The recorder already holds the log:
 `apps/web/src/controller.ts` accumulates `tickInputs` and exposes the whole envelope through
 `buildReplay()`. The digest comes from Web Crypto's `crypto.subtle.digest`, available in the
 secure contexts this PWA already requires. Nothing new is captured — the digest is a function of
@@ -232,10 +261,19 @@ established** — `apps/web/build-config.ts` grows a version define alongside th
 `hostedDefine` is the **precedent** for that mechanism, not the carrier: it defines a single
 boolean and is not where a version belongs. `apps/web/package.json` is deliberately not the
 source either — it is pinned at `0.0.0` and never bumped, so reading a version from it would make
-every release look identical. **Its bump boundary: every deployed build is a new
-`gameVersion`.** That is the honest reading of "once per version", and its cost is equally
-honest — **"Not now" lasts until the next deployed build**, which on an actively deployed game
-can be days rather than weeks.
+every release look identical. **Its boundary is a distinct deployed source revision** — not
+"every deployed build". A rebuild, a redeploy or a rollback reuses the revision it came from, so
+a revision-derived value cannot mint a fresh identity for one, and promising otherwise would be a
+rule the identifier could not keep. Redefining the boundary rather than complicating the
+identifier is also what §3's own rationale asks for: the version boundary matters because it is
+_the thing whose answers differ_, and redeploying identical code changes nothing worth re-asking
+about.
+
+**Rollback semantics follow, and are owned rather than glossed:** rolling back to a prior
+revision restores that version's ask state, including a consumed "Not now". That is correct, not
+a bug — the player is being served the game they already answered for. The cost stays honest:
+**"Not now" lasts until the next deployed _revision_**, which on an actively developed game can
+be days rather than weeks.
 
 **The analysis grouping keys are `simVersion` + `rulesetHash`, not `gameVersion`.** A deploy that
 changes only a stylesheet mints a new `gameVersion` while the game plays identically, so grouping
@@ -292,8 +330,10 @@ playtrace. This repo already learned that lesson elsewhere: `outcomesMatch` in
 comment — "a different tower layout reaching the same score" makes score and stars agree while
 the world diverged. A join on aggregates alone was repeating that mistake.
 
-The terminal state includes the final tower layout, so two runs matching across the envelope
-including `finalHash` share their end state byte for byte. But that is a filter, not an identity,
+The terminal state includes the final tower layout, so `finalHash` agreement is **evidence that
+two runs ended in the same state — at 32 bits of it**, which is a filter and not a proof: FNV-1a
+at that width is a discriminator, and equal values do not establish equal terminal states. It is
+emphatically not an identity,
 and an earlier revision of this ADR overclaimed by treating it as one: **distinct mid-run paths
 can converge on an identical terminal state**, and when they do, inspecting the candidate logs
 reproduces both paths without revealing which one the player was talking about. A mid-run
@@ -301,8 +341,12 @@ reproduces both paths without revealing which one the player was talking about. 
 
 **`replayDigest` settles content identity, and it does so without the playtrace storing it: the
 digest is carried in one record and _derivable_ from the other**, because **the playtrace _is_
-the input log**, so a candidate's digest can always be recomputed. What that proves is that two
-records describe the same run _content_ — same seed, same inputs, same everything.
+the input log**, so a candidate's digest can always be recomputed. What its agreement gives is
+**strong evidence, at 256 bits, that two records describe the same input log** — and that claim
+is bounded twice over. It is evidence rather than proof, and it covers **the log only**: the
+seed, the ruleset and the outcome are separate envelope fields, carried separately and **checked
+separately**, not vouched for by this digest. `finalHash` and `replayDigest` are verification
+_inputs_ that each answer part of the question; neither is a certificate of identity.
 
 **What it cannot do is distinguish two instances of that content, and that is the limit of every
 content-derived key.** Two runs that reuse a seed and repeat the same inputs — an automated
@@ -361,17 +405,42 @@ beyond §7's server-side length cap are named here for the same reason that one 
 contract's business even though the mechanism is the endpoint ADR's: **server-side volume
 bounding** (rate limiting and abuse controls) and **dedup**.
 
+**Full server-side schema validation is the third, and it is the one most easily assumed away.**
+Every gate this ADR describes on the client — the `aria-disabled` Send, the `maxlength`, the
+choice controls that only offer 1–5 — constrains the _UI_, and constrains nothing whatsoever
+about what a direct POST can contain. The endpoint must therefore validate and reject on its own
+authority: **`rating` required, an integer 1–5; `difficulty` optional, an integer 1–5 when
+present; `somethingBroke` a boolean; free text within the 2000-UTF-16-code-unit cap; every
+envelope field checked against its declared format; and unknown fields rejected outright.**
+Unknown-field rejection is called out because it is the one people skip: without it, an
+unrecognised key rides through validation into storage and reaches moderation and aggregation as
+unvalidated content. All of this happens **before** anything is stored, moderated or aggregated.
+
 Dedup here means **retry idempotency**, and it needs a stated key or the endpoint ADR inherits
 something that sounds impossible. There are no accounts and ADR 0011 makes the `sessionId`
 rotate and die on reload, so nothing can be deduplicated "per player" — the coherent target is
 the case §1 and the Consequences themselves create: a send that was aborted client-side but
 delivered anyway, followed by a re-send. The client therefore mints a **per-submission
 idempotency key**, and the scoping matters: the key belongs to _one logical submission_, not to
-the session. It is **stable
-across an unchanged retry** and **refreshed whenever the payload changes**. Deriving it from the
-payload is the natural implementation and is named as such — an unchanged retry reproduces the
-same key mechanically, while an edit produces a different one without the client having to track
-anything.
+the session and not to a payload. It is an **opaque value held in survey state**, minted when a
+submission is first composed, **reused unchanged for retries**, and **rotated on an edit event** —
+the player actually changing an answer — never by hashing what the payload happens to contain.
+
+Deriving the key from the payload was the obvious shortcut and it is wrong twice, which is why
+the contract names the mechanism instead of leaving it to taste. Edit A → B → back to A returns
+to the original key, so a genuinely new logical submission silently adopts the identity of the
+old one. And the payload contains `sessionId`, which ADR 0011 rotates on its own schedule — so a
+rotation between two attempts changes the payload _with no edit at all_, handing an unchanged
+retry a fresh key and letting it duplicate an already-accepted submission. An opaque key tracks
+the player's intent, which is the thing being deduplicated; a payload hash tracks bytes, which is
+not.
+
+Its behaviour is defined for both failure shapes. **Transient failure** (rejected, offline): the
+retry reuses the key, so the server sees the same submission twice and stores it once.
+**Accepted-but-lost acknowledgement**: the resend also carries the same key, so the duplicate is
+detectable server-side by key equality. The trade is stated plainly — **the error mode is a
+benign duplicate, never a swallowed edit.** A duplicate is something the receiving system can
+collapse; a silently discarded revision is not something anyone can recover.
 
 That distinction closes a case a session-scoped key would get wrong. Because a rejected send
 re-enables the form with the player's text preserved (§1), the player may edit their answers
@@ -399,8 +468,12 @@ free text on a client-side promise has no such bound.
 
 Every string goes through the typed catalog (ADR 0004) — the question set is then a content
 decision under the unused-key and cross-locale gates, not a scatter of literals the
-`wynding/no-ui-literals` rule would reject anyway. The form is axe-clean in the e2e suite like
-every other overlay (ADR 0003), with real labels on every control rather than placeholder text.
+`wynding/no-ui-literals` rule would reject anyway. **The form must be axe-clean** — stated as an
+acceptance criterion for the follow-up implementation, not as a result this ADR can claim, since
+nothing is built here. The gate that enforces it already exists and is already required: the
+`e2e (functional + axe)` job, which runs `@axe-core/playwright` against the rendered DOM and
+fails CI on any violation (ADR 0003 §3). Real labels on every control rather than placeholder
+text, like every other overlay.
 
 Submit outcomes are announced in a live region — specifically, **the survey writes to the
 existing `role="status"` `aria-live="polite"` node that Verify already uses**, rather than adding
@@ -488,9 +561,33 @@ When the send resolves as rejected or offline the guards lift, with the text pre
   **90 days is this contract's requirement on the receiving system, narrowing that delegation for
   survey data specifically.** The receiving system still owns the mechanism; what it does not own
   is whether free text may sit around longer than this.
+- **Send is the affirmative consent act, and there is no separate consent checkbox.** Pressing
+  Send is what consents to transmitting the enumerated fields under the site privacy notice, and
+  the point-of-submission notice reference above is _what the player is consenting to_ — which is
+  why that reference is a requirement rather than a courtesy. A separate consent checkbox is
+  rejected for the same reason §5 rejects the attach-the-run checkbox: it would ask permission
+  for the thing the player is already, unmistakably, doing. **The submission records which notice
+  version governed it** — that requirement is this contract's; whether the version is carried by
+  the client or stamped by the server is the endpoint ADR's choice.
 - **Deletion by `sessionId`**, as a defined manual process, owned by the receiving system
   alongside the retention window. ADR 0011's third ship gate applies here in full: retention and
   deletion must be defined before we start sending anything.
+
+  **Deletion cascades across every retained copy joinable to the submission**, not just the row
+  it arrived as: moderation-queue copies, idempotency records, and any other derived store that
+  carries the `sessionId`, all within the same 90-day frame. A deletion that clears the primary
+  record and leaves the moderation copy is not a deletion. **Post-moderation aggregates are the
+  stated exception**: once feedback has been folded into a count or a distribution it is no
+  longer joinable to a person or a session, and deletion does not unwind it — said out loud so
+  nobody discovers the limit by being surprised.
+
+  **Request-log PII is a different regime, and this contract does not pretend otherwise.** The
+  IP and User-Agent recorded at the edge are **not keyed by `sessionId`** and cannot be found by
+  it, so promising per-`sessionId` log deletion would be promising something the logs cannot
+  deliver. Those records are governed by the site's own log-retention and anonymisation policy,
+  under the disclosure ADR 0011 already requires. Two regimes, both named: the submission and its
+  derived copies are deletable by `sessionId`; the access logs age out under the site's policy.
+
 - **The `sessionId` is shown in the survey at or before Send** — not only in the message that
   follows an accepted one. It is client-generated and needs no acknowledgment from anyone, so
   there is nothing to wait for. This is not decoration: ADR 0011 requires that id to be bounded
@@ -591,7 +688,10 @@ run resolves
 
 ── at ANY point above ──────────────────────────────────────────────────────────────────
 a run starts (Play again, or any other path through `hideResults()`)
-  └─► in-flight submission ABORTED · expansion collapses · live region released AND cleared
+  └─► the whole submission OPERATION is cancelled — token minted at Send, killed here,
+      checked at every async boundary. This covers the window BEFORE a request exists:
+      a digest still computing resumes, finds the token dead, and never POSTs.
+      expansion collapses · live region released AND cleared
       (an aborted send has no result to announce — unlike the accepted path above, whose
       message hideResults() is precisely the thing that clears)
       no retry, no queue, and no result from this run ever lands on the next one's dialog
