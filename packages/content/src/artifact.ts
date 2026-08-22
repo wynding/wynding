@@ -15,7 +15,7 @@
  *  and there are exactly two such modules. Workspace consumers (vitest, tsx,
  *  Vite) run the TS source, so it is `src/artifact.ts` → `src/rulesets/…`. The
  *  deployed server runs neither this file nor a compiled copy of it: esbuild
- *  inlines the expression into `apps/server/dist/handler.js` (#109), where it
+ *  inlines the expression into `apps/server/dist/handler.mjs` (#109), where it
  *  resolves beside the BUNDLE — `apps/server/dist/rulesets/…`, staged there by
  *  that package's build from this package's `dist/rulesets/` (`cp` after `tsc
  *  -b`; tsc emits no assets, and without that copy a deployed server ENOENTs at

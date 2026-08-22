@@ -7,7 +7,7 @@
 // actually breaks is the BUNDLED copy drifting from the on-disk copy: the client
 // embeds the ruleset as bundler-inlined `?raw` text (`packages/content/src/registry.ts`),
 // the server reads it from disk at cold start via `BUNDLED_ARTIFACT_URL`
-// (`packages/content/src/artifact.ts` + `apps/server/src/handler.ts:23`). That drift
+// (`packages/content/src/artifact.ts` + `apps/server/src/handler.ts`'s module init). That drift
 // has bitten before — Codex PR #66 P1: a dist-deployed server ENOENT'd at cold start
 // because `packages/content`'s `tsc` build emits no assets; the fix was the `build`
 // script's `cp src/rulesets/*.json dist/rulesets/` step. This script re-proves that
@@ -20,7 +20,7 @@
 // (`pnpm run check:artifact-parity`), invoked separately, that BUILDS first.
 //
 // The same reasoning is why leg 1f EXECUTES the artifact instead of asserting it
-// exists. `existsSync` passed for months over a `dist/handler.js` that could not be
+// exists. `existsSync` passed for months over a built handler that could not be
 // imported at all (#109): the workspace's `exports` maps point at `./src/*.ts`, so
 // Node followed `@wynding/sim` into TypeScript source and failed on its extensionless
 // relative specifiers. `apps/server` therefore builds with esbuild `--bundle` — one
@@ -135,8 +135,8 @@ if (clientBundlePath === undefined || clientText === undefined) {
 // stages THAT copy beside its bundle (#109). The second is the one the artifact
 // actually opens at cold start — `@wynding/content/artifact`'s `BUNDLED_ARTIFACT_URL`
 // is `new URL('./rulesets/…', import.meta.url)`, and esbuild inlines that expression
-// into `dist/handler.js`, so `import.meta.url` resolves beside the BUNDLE.
-const serverHandlerPath = path.join(REPO_ROOT, 'apps/server/dist/handler.js');
+// into `dist/handler.mjs`, so `import.meta.url` resolves beside the BUNDLE.
+const serverHandlerPath = path.join(REPO_ROOT, 'apps/server/dist/handler.mjs');
 if (!existsSync(serverHandlerPath)) {
   fail(`missing server build output: ${serverHandlerPath} does not exist`);
 }
@@ -198,7 +198,7 @@ if (clientHash !== serverHash) {
 }
 
 // --- Leg 1f: EXECUTE the built artifact under plain `node` --------------------------
-// `existsSync(dist/handler.js)` proved only that a file was written. It was written, and
+// `existsSync(the built handler)` proved only that a file was written. It was written, and
 // it could not run: the workspace packages export `./src/index.ts`, so Node's ESM
 // resolver followed `@wynding/sim` to TypeScript source and then died on ITS
 // extensionless relative specifiers (#109 — `ERR_MODULE_NOT_FOUND … /engine/src/rng`).
@@ -278,13 +278,23 @@ const smoke = spawnSync(process.execPath, ['--input-type=module', '-e', SMOKE_SO
   cwd: REPO_ROOT,
   env: smokeEnv,
   encoding: 'utf8',
+  // The artifact re-simulates a replay, so a hang is a plausible failure (a sim that never
+  // terminates), and an un-timed `spawnSync` would hang the whole CI job rather than fail
+  // it. Generous against the ~2s this actually takes: a slow cold runner should not red.
+  timeout: 60_000,
 });
 if (smoke.error) {
   fail(`could not spawn node to execute the built artifact: ${smoke.error.message}`);
 }
 if (smoke.status !== 0) {
+  // A signal-killed child (the `timeout` above lands as SIGTERM) reports `status: null`,
+  // so name the signal too — "exit null" alone reads as a mystery.
+  const how =
+    smoke.signal === null || smoke.signal === undefined
+      ? `exit ${String(smoke.status)}`
+      : `killed by ${smoke.signal}${smoke.signal === 'SIGTERM' ? ' — the 60s timeout' : ''}`;
   fail(
-    `the built server artifact does not RUN under plain node (exit ${String(smoke.status)}):\n` +
+    `the built server artifact does not RUN under plain node (${how}):\n` +
       `  artifact: ${serverHandlerPath}\n` +
       `${(smoke.stderr || '(no stderr)').trimEnd()}\n\n` +
       'A resolver error here means the artifact is not self-contained — check the esbuild ' +
@@ -312,6 +322,24 @@ function smokeResult(name: string): SmokeResult {
   return result;
 }
 
+/** The response body as the artifact returned it. Parsed through the curated `fail()`
+ *  path for the same reason the smoke run's own stdout is: an artifact that RAN but
+ *  answered with something unparseable is a real outcome, and letting a bare
+ *  `JSON.parse` throw would report it as an unhandled exception with no mention of which
+ *  case, or which file, produced it. */
+function smokePayload(run: SmokeResult): Record<string, unknown> {
+  try {
+    return JSON.parse(run.body) as Record<string, unknown>;
+  } catch {
+    fail(
+      `the built server artifact ran, but returned a malformed body for the ${run.name} replay:\n` +
+        `  artifact: ${serverHandlerPath}\n` +
+        `  statusCode: ${String(run.statusCode)}\n` +
+        `  body: ${run.body}`,
+    );
+  }
+}
+
 const mismatches: string[] = [];
 function expectField(field: string, actual: unknown, expected: unknown): void {
   if (actual !== expected) {
@@ -323,7 +351,7 @@ function expectField(field: string, actual: unknown, expected: unknown): void {
 
 const goodRun = smokeResult('known-good');
 expectField('known-good statusCode', goodRun.statusCode, 200);
-const goodPayload = JSON.parse(goodRun.body) as Record<string, unknown>;
+const goodPayload = smokePayload(goodRun);
 expectField('known-good ok', goodPayload.ok, true);
 expectField('known-good score', goodPayload.score, expectedGood.score);
 expectField('known-good stars', goodPayload.stars, expectedGood.stars);
@@ -335,7 +363,7 @@ expectField('known-good rulesetHash', goodPayload.rulesetHash, clientHash);
 
 const badRun = smokeResult('known-bad');
 expectField('known-bad statusCode', badRun.statusCode, 422);
-const badPayload = JSON.parse(badRun.body) as Record<string, unknown>;
+const badPayload = smokePayload(badRun);
 expectField('known-bad ok', badPayload.ok, false);
 expectField('known-bad error', badPayload.error, expectedBad.reason);
 

@@ -1,5 +1,5 @@
 {
-  // `noEmit` (#109): esbuild builds this package now — `dist/handler.js` is a single
+  // `noEmit` (#109): esbuild builds this package now — `dist/handler.mjs` is a single
   // self-contained bundle, and `dist/rulesets/` is staged beside it. `tsc` is the TYPE
   // CHECKER here and nothing else; left emitting, it would scatter per-module `.js` into
   // the same `dist/` the bundle owns, where a stale file can shadow what actually ships.

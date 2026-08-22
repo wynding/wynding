@@ -7,10 +7,19 @@
   //
   // `rootDir` widens to the package: inheriting `src` as the root is precisely what makes
   // `scripts/` a TS6059 in the main program. Nothing here emits, so `outDir` is inert.
+  //
+  // `references` is the one field `extends` does NOT inherit, so it is restated — the same
+  // note every `tsconfig.tests.json` in this repo carries, and it is load-bearing here:
+  // without it this program resolved `@wynding/sim` and `@wynding/replay` to their SOURCE
+  // and pulled 22 sibling files in (14 sim, 6 engine, 1 replay, 1 types), against 0 for the
+  // `src` program next door. Naming only the two packages this script imports is enough —
+  // measured, 0 sibling sources remain: those projects' own configs reference `engine` and
+  // `types`, and the redirect to built `.d.ts` follows through them.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "."
   },
   "include": ["scripts"],
-  "exclude": []
+  "exclude": [],
+  "references": [{ "path": "../../packages/sim" }, { "path": "../../packages/replay" }]
 }
