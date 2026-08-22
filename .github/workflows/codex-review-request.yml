@@ -102,17 +102,31 @@ jobs:
             1)
               # The REST issues endpoint, deliberately not `gh pr comment` — that command
               # posts via GraphQL addComment, whose scope mapping is murkier than the
-              # documented issues-write grant this call rides on. Wrapped in `if` (not
-              # `set -e`'s bare exit) so its own 403 prints verbatim above, THEN gets a
-              # warning annotation, THEN the step still concludes success — `if`'s
-              # condition command is exempt from `set -e` by POSIX, so this needs no
-              # special-casing beyond the wrap itself.
-              if gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'; then
+              # documented issues-write grant this call rides on. `gh` exits 1 for EVERY
+              # failure alike — a 500, a network outage, a bad endpoint, an expired token,
+              # and the known org-level 403 all land on the same exit code (Codex, PR #156
+              # round 3) — so the exit code alone cannot tell a known, admin-owned cap from
+              # a fresh, actionable problem; the OUTPUT has to be inspected. Captured
+              # rather than streamed live so its content can be tested — `|| post_ec=$?`
+              # keeps `set -e` from killing the script at the assignment itself (POSIX
+              # exempts the first command of an OR list) — then reprinted verbatim before
+              # any decision, on every path, so nothing here suppresses what gh actually
+              # said.
+              post_ec=0
+              post_out=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review' 2>&1) || post_ec=$?
+              printf '%s\n' "$post_out"
+              if [ "$post_ec" -eq 0 ]; then
                 echo "Requested a Codex review of the new head."
-              else
-                post_ec=$?
+              elif printf '%s\n' "$post_out" | grep -qE 'HTTP 403|Resource not accessible by integration'; then
+                # CONFIRMED 403 shape, matching the #154 probe verbatim — the known,
+                # admin-owned token cap. Downgrade to a warning; do not fail the job.
                 echo "::warning::auto-trigger POST failed (HTTP 403 — org-level token cap suspected; see #154 probe + #72 §3). Post '@codex review' manually."
-                echo "gh api exited $post_ec — see the raw error above." >&2
+              else
+                # NOT the known 403 shape — a different, fresh problem (a 500, a network
+                # blip, an auth issue, anything else `gh` might exit 1 for). This is not
+                # the token cap, so it gets no graceful downgrade: fail loudly.
+                echo "auto-trigger POST failed with a non-403 error (exit $post_ec) — not the known token cap. Failing." >&2
+                exit "$post_ec"
               fi
               ;;
             *)

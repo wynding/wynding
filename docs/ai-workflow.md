@@ -151,16 +151,23 @@ node scripts/check-qc-record.mjs
 
 **husky**, chained with another command that also reads the refs — buffer stdin once and
 replay the same bytes to every consumer, propagating the checker's exit code (a shell script's
-own exit status is its LAST command's unless something stops it earlier):
+own exit status is its LAST command's unless something stops it earlier). EVERY consumer always
+runs, including on an empty push — it gets exactly the bytes git actually supplied, which on an
+empty push is zero, not skipped: a consumer may legitimately want to act on an empty push too.
 
 ```sh
 # .husky/pre-push — only meant to run under git (piped stdin); `cat` blocks on a terminal.
 refs=$(cat)
-# git supplies genuinely empty stdin only when there is nothing to push — guarded so an empty
-# push hands every consumer zero bytes, not the one blank line a bare printf would produce.
 if [ -n "$refs" ]; then
   printf '%s\n' "$refs" | node scripts/check-qc-record.mjs || exit 1
   printf '%s\n' "$refs" | your-other-stdin-consumer || exit 1
+else
+  # git supplies genuinely empty stdin only when there is nothing to push. Both consumers
+  # still run here — redirected FROM /dev/null, never skipped — because a bare
+  # `printf '%s\n' "$refs"` would hand them one blank line (printf's trailing \n) rather
+  # than the zero bytes git actually sent.
+  node scripts/check-qc-record.mjs </dev/null || exit 1
+  your-other-stdin-consumer </dev/null || exit 1
 fi
 ```
 
