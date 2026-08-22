@@ -76,17 +76,17 @@ jobs:
       # identical 403 anyway. That rules out the permissions block; what remains is an
       # org-level token cap only an org admin can inspect, not something fixable from this
       # repo. #72 §3's `CODEX_TRIGGER_TOKEN` (a fine-grained PAT, owner lane) is the
-      # recorded fix. Until it lands, this step CANNOT reliably succeed at posting, so it
-      # is `continue-on-error` and downgrades its own POST failure to a workflow warning
-      # rather than a red job: a check that is red on every single future push trains
-      # reviewers to ignore it — exactly the failure mode #154's original report
-      # described — and it is not in the required-checks set (verify, codex-freshness,
-      # e2e), so the merge gate loses nothing real by this step going quiet on failure.
-      # `codex-freshness` still goes red separately and honestly when no verdict covers
-      # the head; that status is the one that matters. REVERT continue-on-error and the
-      # warning-downgrade below the moment the PAT lands and this step can succeed again.
+      # recorded fix. Until it lands, the 403 branch below downgrades ITSELF to a workflow
+      # warning — the `if`/`else` around the `gh api` call, not a step-level flag. A
+      # step-wide `continue-on-error` was tried here and removed (Codex, PR #156 round 2):
+      # it would also swallow a missing script, an indeterminate freshness read, or any
+      # other real failure in this step, exactly the silent-green #154 exists to prevent.
+      # Only the KNOWN 403 goes quiet; everything else in this step still fails the job
+      # loudly, as it should. `codex-freshness` still goes red separately and honestly
+      # when no verdict covers the head; that status is the one that matters. REVERT the
+      # warning-downgrade in the `else` branch below the moment the PAT lands and the POST
+      # can succeed again.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
-        continue-on-error: true
         run: |
           set -euo pipefail
           # A missing script also makes node exit 1 — the same code as a confirmed-stale
