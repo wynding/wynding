@@ -81,14 +81,16 @@ meanings would be worse than one that swallows it once.
 
 **A run started mid-survey cancels any in-flight submission.** `hideResults()` is the single
 choke point every run-start path already passes through, and it already clears the transient
-live-region text. **What is cancelled is the whole submission _operation_, not merely a request
-in flight** — an operation token (an `AbortSignal`) is minted when Send is pressed, invalidated by
-`hideResults()`, checked at every async boundary the submission crosses, and wired into the fetch
-itself. That distinction is load-bearing rather than pedantic: computing `replayDigest` is
-asynchronous, so Play again pressed between Send and the digest settling would find **no request
-yet to abort**, and a continuation that resumed afterwards would happily POST the previous run.
-Under an operation token the continuation instead finds the token dead and never sends. So:
-the operation is cancelled, the expansion collapses, and
+live-region text. **What is cancelled is the whole submission _operation_** — an operation token
+(an `AbortSignal`) minted when Send is pressed, invalidated by `hideResults()`, and wired into the
+fetch.
+
+There is exactly one asynchronous boundary to guard, and that is a property of the pinned digest
+helper rather than an accident: `sha256Hex` is **synchronous** (§4), so the digest and the payload
+assembly both complete inside the Send handler, and **no pre-request window exists by
+construction** — there is no interval in which Play again could arrive to find a submission
+started but no request yet to abort. The fetch is the only thing that outlives the handler, which
+is what the token governs. So: the operation is cancelled, the expansion collapses, and
 the survey releases the shared live region back to Verify (§6) — releasing it **clears** the
 region on this path, because an aborted send has no result worth announcing. Nothing is queued,
 nothing is
@@ -238,8 +240,9 @@ folding them in would double-count them and muddy the derivability argument belo
 on the digest being a function of _the log and nothing else_. Computed by the **app layer at send
 time**, it requires no sim change and no change to ADR 0011. The recorder already holds the log:
 `apps/web/src/controller.ts` accumulates `tickInputs` and exposes the whole envelope through
-`buildReplay()`. The digest comes from Web Crypto's `crypto.subtle.digest`, available in the
-secure contexts this PWA already requires. Nothing new is captured — the digest is a function of
+`buildReplay()`. The helper is **synchronous** — `sha256Hex` is a `@noble/hashes` implementation
+(`packages/engine/src/canonical.ts`), not `crypto.subtle.digest` — which is why §1's cancellation
+has no pre-request window to cover. Nothing new is captured — the digest is a function of
 data the app already has, and §7's privacy posture is untouched because **the digest reveals
 nothing the playtrace does not already carry**; it is a fingerprint of the log, not an addition
 to it.
@@ -689,8 +692,8 @@ run resolves
 ── at ANY point above ──────────────────────────────────────────────────────────────────
 a run starts (Play again, or any other path through `hideResults()`)
   └─► the whole submission OPERATION is cancelled — token minted at Send, killed here,
-      checked at every async boundary. This covers the window BEFORE a request exists:
-      a digest still computing resumes, finds the token dead, and never POSTs.
+      wired into the fetch. Digest + payload assembly are SYNCHRONOUS (sha256Hex),
+      so there is no pre-request window to guard: the fetch is the only async boundary.
       expansion collapses · live region released AND cleared
       (an aborted send has no result to announce — unlike the accepted path above, whose
       message hideResults() is precisely the thing that clears)
