@@ -224,10 +224,36 @@ a player's words to their run. Two submissions, because ADR 0011's first conditi
 negotiable: free text must never ride the automatic path. Merging them would put player-authored
 prose into an automatic upload, which is precisely the thing that condition exists to prevent.
 
-The join is therefore **the `sessionId`, not an attachment**. A consent checkbox offering to
-attach the run is not the right shape here, because under ADR 0011 the run is already on its way
-under its own notice — the checkbox would be asking permission for something already decided, and
-would imply the survey is what carries the run.
+The join is therefore **the composite run identity the envelope already carries (anchored by
+`sessionId`), not an attachment**. A consent checkbox offering to attach the run is not the right
+shape here, because under ADR 0011 the run is already on its way under its own notice — the
+checkbox would be asking permission for something already decided, and would imply the survey is
+what carries the run.
+
+**`sessionId` alone is not enough to name a run, and saying so is the point.** ADR 0011's
+rotation is deliberate: an id bounded by a run count and an elapsed time is _designed_ to span
+more than one run, because a diagnostic thread often does. So a player who finishes several runs
+before it rotates produces several playtraces sharing one id, and a survey joined on that field
+alone has multiple candidate runs — which would attribute a rating or a difficulty answer to the
+wrong outcome, in exactly the analysis §2 spent a question on. The join is therefore the whole
+composite §4 already carries: **`sessionId`, plus the replay identity (`seed`, `boardId`,
+`rulesetHash`, `simVersion`), plus the outcome fields (outcome, `score`, `stars`, wave reached,
+final tick)**. No new field, no envelope change, and no ripple into ADR 0011 — the identity was
+already there; only the naming of it was too loose.
+
+One residual survives that, and it is stated rather than hidden: **two runs identical across
+every envelope field are indistinguishable at the join.** They are also equivalent for the
+analysis — same board, same seed, same ruleset, same outcome, same score and stars — so the
+ambiguity has no analytic consequence, which is precisely why it is tolerated rather than
+engineered away. Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission
+in that session, and that coarser grain is the right one for a privacy operation anyway.
+
+A dedicated **per-run identifier** carried in both the playtrace capture and this envelope would
+remove even the residual. This contract does not mint one, because doing so unilaterally would
+put a new identifier into a payload whose minimalism ADR 0011 argues from. But if
+[#133](https://github.com/wynding/wynding/issues/133)'s capture implementation mints one for its
+own reasons, **this contract can adopt it additively, without amendment** — the composite join
+above keeps working in the meantime and simply becomes redundant.
 
 One consequence must be stated rather than left to be inferred: **the survey is player-initiated,
 so pressing Send is the act, and the playtrace opt-out does not govern it.** The opt-out governs
