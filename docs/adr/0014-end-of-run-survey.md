@@ -179,7 +179,14 @@ and means a player who simply ignores the button leaves no trace of having been 
 
 The survey submission carries the answers plus the run's identity: `sessionId`, `gameVersion`,
 `simVersion`, `rulesetHash`, `boardId`, `seed`, outcome, `score`, `stars`, wave reached
-(`waveCursor`) and the final tick.
+(`waveCursor`), the final tick, and **`finalHash`** — the sim's deterministic content-hash of the
+terminal world state.
+
+`finalHash` is not a new quantity and nothing about it is minted here. `hashSimState` is already
+exported from `packages/sim`, the app layer already calls it at run end
+(`apps/web/src/controller.ts`), and it is the same value the determinism golden pins
+(`packages/content/src/m2-golden.test.ts`, guarded by `scripts/check-determinism-version.mjs`).
+The survey reads it exactly as it reads every other field above.
 
 **No sim changes, and no new sim outputs.** The replay identity (`seed`, `boardId`,
 `rulesetHash`, `simVersion`) is already the shape `@wynding/replay` uses; outcome, score, stars,
@@ -238,15 +245,26 @@ alone has multiple candidate runs — which would attribute a rating or a diffic
 wrong outcome, in exactly the analysis §2 spent a question on. The join is therefore the whole
 composite §4 already carries: **`sessionId`, plus the replay identity (`seed`, `boardId`,
 `rulesetHash`, `simVersion`), plus the outcome fields (outcome, `score`, `stars`, wave reached,
-final tick)**. No new field, no envelope change, and no ripple into ADR 0011 — the identity was
-already there; only the naming of it was too loose.
+final tick), plus `finalHash`**. No new field, no envelope change, and no ripple into ADR 0011 —
+the identity was already there; only the naming of it was too loose.
 
-One residual survives that, and it is stated rather than hidden: **two runs identical across
-every envelope field are indistinguishable at the join.** They are also equivalent for the
-analysis — same board, same seed, same ruleset, same outcome, same score and stars — so the
-ambiguity has no analytic consequence, which is precisely why it is tolerated rather than
-engineered away. Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission
-in that session, and that coarser grain is the right one for a privacy operation anyway.
+**`finalHash` is what makes that composite bite, and it is why the aggregate fields alone were
+not enough.** Two runs in one session can reuse a seed and finish with identical outcome, score,
+stars, wave and tick while differing in their input logs, their tower layouts and how they
+failed — which is precisely the difference a "something broke" report needs joined to the right
+playtrace. This repo already learned that lesson elsewhere: `outcomesMatch` in
+`apps/web/src/controller.ts` gates replay verification on `finalHash` and says why in its own
+comment — "a different tower layout reaching the same score" makes score and stars agree while
+the world diverged. A join on aggregates alone was repeating that mistake.
+
+The terminal state includes the final tower layout, so **two runs matching across the envelope
+including `finalHash` share their end state byte for byte.** The residual is now narrow and
+stated precisely rather than waved away: distinct mid-run paths can still converge on an
+identical terminal state. For that case the joined playtrace's own input log is what
+disambiguates reproduction — and the join cannot land on a "wrong" playtrace in the way that
+matters, because any playtrace whose replay produces a different `finalHash` is excluded by the
+key itself. Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission in
+that session, and that coarser grain is the right one for a privacy operation anyway.
 
 A dedicated **per-run identifier** carried in both the playtrace capture and this envelope would
 remove even the residual. This contract does not mint one, because doing so unilaterally would
