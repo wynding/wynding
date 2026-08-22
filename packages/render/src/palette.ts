@@ -145,7 +145,13 @@ const DEFAULT: Palette = {
   // 0x8fb8f0 → 1.68). Choosing separation here would trade an enforced gate for an
   // unenforced one. Shape carries the distinction instead, decisively and per ADR 0003's
   // primary channel: a stun jolt is a RING at r×1.15; the airborne cue is two line
-  // strokes at r×2.6–2.9, a cell away. Same posture as `poisoned`'s own tritan note.
+  // strokes whose NEAREST point is r×3.23 (the wingtips), over a cell out from the creep
+  // centre — a separation no near-white pair can erase. Restated from the `airborne` key
+  // above, whose own note names `creep-paint.ts`'s CUE-RADIUS ORDERING as the authority
+  // precisely so a restatement cannot become a second source of truth. This line proved
+  // the point: #126 moved the strokes out from r×2.6–2.9 and this sentence went stale,
+  // caught by external review rather than by the move. Same posture as `poisoned`'s own
+  // tritan note.
   airborne: 0xdcf8ff,
   // Pale lavender (M2-S8) — clearing the floor at 7.64:1 composited at
   // `AURA_SHELL_ALPHA`, and byte-distinct from every cue the shell can share a surface

@@ -428,7 +428,7 @@ export interface AirborneCuePaintOp {
 //                                    extent at the crest is r×2.58 ordinarily and
 //                                    r×2.83 at the narrow floor (r = 3.5), r×2.90 at
 //                                    the defensive `max(3, …)` clamp.
-//   airborne       r×3.23+           CATALOG-derived — outside the drift, for the same
+//   airborne       r×3.22+           CATALOG-derived — outside the drift, for the same
 //                                    reason it is outside the ward
 //
 // THE DoT CUES ARE PART OF THIS LIST (#126). An earlier version of this block enumerated
@@ -437,9 +437,25 @@ export interface AirborneCuePaintOp {
 // airborne cue sits well outside every timed ring" from it, and the drift is a timed cue
 // that reaches further than every ring here. Its extent is a RATIO PLUS A PIXEL FLOOR
 // (`DOT_PIP_MIN_PX`), so it grows relative to `r` as cells shrink, which is exactly where
-// the airborne cue's own clearance was tightest. A poisoned flyer is the co-occurrence,
-// and it is reachable: `flying` carries no DoT immunity and `venom` is both-domain
-// since S7.
+// the airborne cue's own clearance was tightest.
+//
+// THE CO-OCCURRENCE IS A VM CONTRACT, NOT A CONTENT FACT — and the distinction is the
+// whole point (#126 ship-review). `poisoned` and `airborne` are independent booleans on the
+// render VM, so this module must draw both together on demand; it is keyed on the VM, never
+// on a catalog. In TODAY'S shipped rulesets that pairing is UNREACHABLE: every `dot` effect
+// belongs to a GROUND-domain tower (`venom` in `wynding-core.json` and `catalog-40x40.json`,
+// `stress-venom` in `stress-40x40.json` — one DoT source each, all `"domain": "ground"`),
+// and `combat.ts` rejects any impact whose domain does not cover the target's, so no shipped
+// tower can poison a flyer. `slow` is the both-domain effect since S7 — the ordering note
+// below says so correctly, and an earlier draft of THIS paragraph misattributed that
+// property to `venom`.
+//
+// So the clearance below is DEFENSIVE, and deliberately so. The alternative — asserting the
+// pair is safe because shipped DoT sources happen to be ground-only — would pin content
+// domain assignments inside a render test, which is precisely the cross-layer rot this
+// comment block exists to correct. A ruleset that ever ships an air-capable DoT would then
+// silently reintroduce a dual-encoding defect the renderer had "proved" impossible. The
+// overlap the geometry produces is real regardless of who can currently trigger it.
 //
 // An earlier draft placed the apex at r×1.10 and the wingtips at (±1.3r, −0.5r), i.e.
 // radius r×1.393 — sitting ON the slow ring (1.4) and crossing the jolt ring (1.15),
@@ -452,7 +468,7 @@ export interface AirborneCuePaintOp {
 // `wardPaintOps` set the precedent: a catalog-derived, non-timed cue sits OUTSIDE the
 // timed band so it can never be misread as an active status. The airborne cue is the
 // same class, so it goes outside the ward — and outside the drift, which reaches further
-// than the ward does — in turn. Every point below is at radius ≥ r×3.23 (the wingtips;
+// than the ward does — in turn. Every point below is at radius ≥ r×3.22 (the wingtips,
 // the apex is r×3.4), clearing the drift's drawn extent at every supported cell size.
 //
 // THE APEX MOVED OUT FROM r×2.9 TO r×3.4 (#126), because at r×2.9 it did not clear the
@@ -460,8 +476,15 @@ export interface AirborneCuePaintOp {
 // `creep-paint.test.ts`'s "clears the DoT drift" case, which walks the sawtooth and prints
 // the worst gap between a drift pip's filled disc and the chevron's 2px-wide strokes:
 //
-//     r = 3.5 (CELL_PX_MIN_NARROW = 10, the supported floor)   was −0.840px → now +0.820px
-//     r = 3   (the defensive `max(3, …)` clamp)                was −1.077px → now +0.346px
+//     r = 3.5 (CELL_PX_MIN_NARROW = 10, the supported floor)   was −0.838px → now +0.823px
+//     r = 3   (the defensive `max(3, …)` clamp)                was −1.075px → now +0.348px
+//
+// Those are the values the test PRINTS, so re-running it reproduces this table exactly. The
+// test samples the 900ms sawtooth at 1ms steps, so its worst sample is phase 899/900 rather
+// than the analytic crest at phase → 1; the crest bound is fractionally tighter (−0.840 →
+// +0.820 at r = 3.5, −1.077 → +0.346 at r = 3) and is what the sign of the result rests on.
+// Both are quoted because a reader checking this block against the console must not find a
+// third set of numbers.
 //
 // The glyph's SHAPE is untouched — half-span 0.9r, tips 0.3r below the apex, both exactly
 // as before. Only its standoff from the creep centre changed, so every argument this block
@@ -473,8 +496,13 @@ export interface AirborneCuePaintOp {
 // TWO RESIDUALS, stated rather than hidden — both belong to the deferred cue-radius
 // layout pass the stun note names, not to a fourth cue inventing its own scheme:
 //
-// (1) The clearance is a RATIO and `r` floors at 3px, so at that floor the gap above the
-//     ward is ~1.2px — tight rather than clean. No size-independent radius fixes it.
+// (1) The clearances are RATIOS while `r` floors at 3px and the stroke/pip widths do not,
+//     so the tightest pair is whichever one the pixel floors bite hardest — and #126 MOVED
+//     which pair that is. It used to be airborne-vs-ward, ~1.2px at the clamp; with the tips
+//     now at r×3.23 that gap is ≈3.1px and no longer the constraint. The tight pair is now
+//     airborne-vs-drift at +0.348px (r = 3) / +0.823px (r = 3.5) — the numbers the test
+//     above prints, and the reason it prints them rather than merely asserting a sign. No
+//     size-independent radius fixes this class of tightness; only the layout pass can.
 // (2) THIS ANALYSIS COVERS SAME-CREEP COLLISIONS ONLY. With `r = cellPx × 0.35`
 //     (`board-draw.ts`), an apex at r×3.4 sits ≈1.19 × cellPx above the creep centre —
 //     i.e. the chevron renders in the cell to the NORTH, where ANOTHER creep's
@@ -522,7 +550,7 @@ const AIRBORNE_WING_SPAN_MUL = 0.9;
  * Like `wardPaintOps`, this is a CATALOG-derived cue (`CreepVM.domain === 'air'`), NOT a
  * timed status (see CONTEXT.md's Domain entry) — so it takes no `renderTimeMs`, has no
  * reduced-motion branch, and carries no motion cue at all. It floats clear ABOVE the
- * creep, every point at radius ≥ `r×3.23` — outside the silhouette, outside all three
+ * creep, every point at radius ≥ `r×3.22` — outside the silhouette, outside all three
  * timed telegraph rings, outside the ward, and outside the DoT drift's drawn extent at
  * every supported cell size (#126 moved the apex out from `r×2.9` for that last one; the
  * measurement is `creep-paint.test.ts`'s "clears the DoT drift" case). See the cue-radius

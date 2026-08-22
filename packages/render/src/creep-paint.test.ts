@@ -393,7 +393,7 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     expect(airborne[0]!.kind).toBe('wingspan');
   });
 
-  it('clears the silhouette AND every timed telegraph ring AND the ward — every point at radius ≥ r×3.23', () => {
+  it('clears the silhouette AND every timed telegraph ring AND the ward — every point at radius ≥ r×3.22', () => {
     // The original version of this test only checked the SILHOUETTE (|y| > r, |x| > r),
     // which the old r×1.393 wingtips satisfied while sitting exactly on the slow ring at
     // r×1.4 and crossing the stun jolt at r×1.15 (ship-review, M2-S7). Radius from the
@@ -417,6 +417,13 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
       // ladder mirrors used to omit entirely (#126). Its DRAWN extent goes further still;
       // that is measured, not laddered, by the case below.
       expect(radius(x, y)).toBeGreaterThan(2.4);
+      // …and the rung this title actually claims. Without it the whole body passes under
+      // the PRE-#126 geometry (tips at r×2.751, apex r×2.9), so the title's radius was an
+      // unpinned assertion — the same class of defect as the comment block this ladder
+      // mirrors. The bound is r×3.22, NOT the r×3.23 the prose rounds to: the wingtips are
+      // the minimum at √(0.9² + 3.1²) = 3.22800…, so "≥ 3.23" is false by 0.002 and would
+      // fail here. Approximations may round; a pinned bound may not.
+      expect(radius(x, y)).toBeGreaterThan(3.22);
       expect(y).toBeLessThan(0); // and it floats ABOVE the creep, not around it
     }
     expect(op!.leftX).toBeLessThan(0); // still a chevron: tips either side of the apex
@@ -482,15 +489,26 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
   };
 
   it('clears the DoT drift — the outermost timed cue — at the narrow cell floor, where the pip floor makes it widest (#126)', () => {
-    // THE CO-OCCURRENCE IS REACHABLE, not hypothetical: `flying` carries no DoT immunity
-    // and `venom` is both-domain since S7, so a poisoned flyer draws BOTH plans. The
-    // drift's outward crest lands straight above the creep (the 270° pip) — the one
+    // THE CO-OCCURRENCE IS A VM CONTRACT, NOT A REACHABLE CONTENT STATE. `poisoned` and
+    // `airborne` are independent booleans on the render VM, so the builders must compose
+    // for a creep carrying both — that alone is what this asserts. In today's shipped
+    // rulesets a poisoned flyer cannot occur: every `dot` effect belongs to a GROUND-domain
+    // tower (`venom`, and `stress-venom` in the stress ruleset), and `combat.ts` rejects an
+    // impact whose domain does not cover the target's. `slow` is the both-domain effect
+    // since S7; an earlier version of this comment misattributed that to `venom`.
+    //
+    // Asserted anyway, and DELIBERATELY: the alternative — "safe, because shipped DoT
+    // sources are ground-only" — would pin content domain assignments inside a render test,
+    // the exact cross-layer coupling #126 exists to correct, and would go quietly wrong the
+    // day a ruleset ships an air-capable DoT. The geometry is real either way.
+    //
+    // The drift's outward crest lands straight above the creep (the 270° pip) — the one
     // sector the chevron occupies — and its drawn disc is held at `DOT_PIP_MIN_PX` while
     // the chevron's radius stays proportional, so the narrow floor is where they meet.
     //
     // MEASURED, never hand-computed: the numbers below are printed by this test, and it
     // is the print that made #126 decidable. At the pre-#126 apex of r×2.9 both were
-    // NEGATIVE (r=3.5: −0.840px, r=3: −1.077px) — a real overlap, not a tight fit.
+    // NEGATIVE (r=3.5: −0.838px, r=3: −1.075px) — a real overlap, not a tight fit.
     const supported = worstDriftGap(R); // R = 3.5, the CELL_PX_MIN_NARROW = 10 floor
     const clamped = worstDriftGap(3); // the defensive `max(3, cellPx × 0.35)` clamp
     console.log(
