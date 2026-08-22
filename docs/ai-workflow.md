@@ -130,6 +130,31 @@ git's stdin protocol, so invoke it **before** anything else consumes stdin; a wr
 drains the pipe would leave the gate announcing "no refs on stdin" and gating nothing). The
 install says which case it hit and leaves both alone.
 
+**Already using husky/lefthook/your own hooks?** Don't take over `core.hooksPath` — delegate.
+Add one line to whatever your manager already runs on `pre-push` that shells out to the same
+checker, **forwarding git's stdin untouched**: invoke it before anything else in your hook
+reads stdin (the caveat above applies here too — a wrapper that drains the pipe first leaves
+the gate announcing "no refs on stdin" and gating nothing). Any hook manager that forwards its
+hook's stdin to the commands it runs can host it this way, not just the two below; the exit
+code is the whole contract — 0 passes the push through to your other checks, 1 refuses it, and
+the gate's own message on stderr says why.
+
+```sh
+# husky (.husky/pre-push) — a plain shell script git invokes directly, so stdin already
+# reaches whatever runs first in the file:
+node scripts/check-qc-record.mjs
+```
+
+```yaml
+# lefthook (lefthook.yml) — `use_stdin: true` is what forwards git's stdin to the command;
+# without it lefthook's pseudo-TTY never hands the gate a stdin to read:
+pre-push:
+  commands:
+    wynding-qc-gate:
+      run: node scripts/check-qc-record.mjs
+      use_stdin: true
+```
+
 Both records are claims, not proofs — they say the pass and the loop happened, where a reviewer
 can see the claim. Their value is the boundary: a step checked at push time gets done; a step
 nothing checks gets skipped exactly when attention is consumed by the incident of the day.

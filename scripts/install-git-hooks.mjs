@@ -42,10 +42,17 @@ if (current === HOOKS_PATH) {
 
 if (current !== '') {
   // Someone (or another tool) owns this setting — say so rather than silently taking it over.
+  // A hook manager commonly owns this (husky v9 points it at `.husky`, for one), so the
+  // takeover command below is presented as what it is — a command that would silently
+  // disable every hook that manager runs — not the default move.
   console.warn(`⚠️  core.hooksPath is set to '${current}', not '${HOOKS_PATH}'.`);
+  console.warn(`   The pre-push QC gate will not run.`);
   console.warn(
-    `   The pre-push QC gate will not run. To use it: git config core.hooksPath ${HOOKS_PATH}`,
+    `   git config core.hooksPath ${HOOKS_PATH} takes it over — but that SILENTLY DISABLES`,
   );
+  console.warn(`   every hook '${current}' currently runs. Already using husky/lefthook/your`);
+  console.warn(`   own hooks? Delegate instead — see docs/ai-workflow.md §3.5 ("already using`);
+  console.warn(`   husky/lefthook...") — that's the coexistence path.`);
   process.exit(0);
 }
 
@@ -71,6 +78,8 @@ if (installed.length > 0) {
   console.warn(`   Leaving them alone — setting core.hooksPath would stop them running.`);
   console.warn(`   To use the QC gate, move them into ${HOOKS_PATH}/ and run:`);
   console.warn(`   git config core.hooksPath ${HOOKS_PATH}`);
+  console.warn(`   Already using husky/lefthook/your own hooks? Delegate instead of taking`);
+  console.warn(`   over — see docs/ai-workflow.md §3.5 ("already using husky/lefthook...").`);
   process.exit(0);
 }
 

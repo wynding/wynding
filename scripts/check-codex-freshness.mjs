@@ -208,10 +208,19 @@ try {
   console.error('   by itself; a findings review lands on the next push — or run one');
   console.error('   codex-freshness dispatch with this PR number.');
   if (POSTING) {
+    // #154: this read and codex-review-request.yml's own trigger POST are two separate
+    // workflow runs racing the same event — on #151 the freshness check ran 6s BEFORE the
+    // trigger comment landed, so the red status was already stale the moment it was
+    // written. No re-evaluation loop is added; cheapest honest fix is saying so in the
+    // status text itself. The text stops at "point-in-time" — it does NOT also claim a
+    // superseding run is coming: that is only true on the synchronize path. A
+    // workflow_dispatch re-evaluation, or the documented stuck state (bot-authored
+    // triggers ignored), has no such run queued, and a claim that isn't always true here
+    // would be exactly the dishonesty this fix exists to remove.
     await postStatus(
       headSha,
       'failure',
-      `No Codex verdict for head ${short(headSha)} — comment "@codex review"`,
+      `No Codex verdict for head ${short(headSha)} — point-in-time, before any auto-trigger — comment "@codex review"`,
     );
     process.exit(0); // the red status is the report; the job itself ran fine
   }
