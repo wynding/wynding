@@ -2,7 +2,11 @@
 
 - **Status:** Accepted. The surface, the question set and the constraints are decided here.
   Nothing is built by this ADR — implementation is the follow-up issue its acceptance files.
-  Two positions wait on work elsewhere, named below: the durable dismissal and the endpoint.
+  Three positions wait on work elsewhere, all named below: the **durable dismissal**
+  ([#142](https://github.com/wynding/wynding/issues/142)'s `StorageDriver`), the **endpoint**
+  (`wynding-site`'s own ADR), and **`runId` in the playtrace capture's allowlist**
+  ([#133](https://github.com/wynding/wynding/issues/133)) — the last is a prerequisite for the
+  join's primary layer, not a nicety.
 - **Date:** 2026-08-22
 - **Closes:** [#100](https://github.com/wynding/wynding/issues/100) — its ADR, its flow sketch,
   and the eight questions it asks.
@@ -143,13 +147,18 @@ channel; asking once ever under-samples a game that changes weekly. A version bo
 natural unit because it is the thing whose answers differ.
 
 **The button's presence is an affordance, not an ask.** It appears on every results dialog of a
-`gameVersion` until an explicit player response consumes that version's ask. A button the player
-never touches consumes nothing and is there again on the next run within the same version —
-which is exactly what makes it an affordance rather than a prompt to keep batting away.
+`gameVersion` until an explicit player response consumes that version's ask. **Presence consumes
+nothing, and neither does expansion**: a player who never touches the button, and equally one who
+opens the survey, reads it and walks away, has not responded — the button is there again on the
+next run within the same version. Only the three responses below consume anything. That is
+exactly what makes it an affordance rather than a prompt to keep batting away.
 
 Two responses consume the ask, and they differ in scope:
 
-- **Send** retires the button on this dialog, with a thank-you in its place.
+- **Send**, once **accepted**, retires the button on this dialog with a thank-you in its place,
+  and — exactly as Not now does — consumes the ask on **subsequent** results dialogs this
+  version. The player answered for this version; the strongest response cannot consume less than
+  the weakest one.
 - **Not now** collapses the survey but **leaves Give feedback present and live on the current
   dialog** — reopening is allowed, because a misclick should be recoverable and §1 sends focus
   back to that button, which must therefore be real. What it consumes is the ask on
@@ -172,6 +181,14 @@ Two responses consume the ask, and they differ in scope:
   whatever the checkbox says at that moment. But a dismissal stored in a **prior session** has no
   un-ask path from inside the game, because the button never renders again to be reopened.
   "Honoured forever" means exactly that. It is deliberately not smarter.
+
+**Everything else consumes nothing**, and the abandonment paths are worth naming because an
+implementer will otherwise have to guess. A send that was **not accepted** — rejected, offline,
+or cancelled by a run start — consumes nothing: the ask survives, and the button is offered on
+the next dialog this version. A **run start collapses the survey without committing anything**,
+including an armed "don't ask again": the committing actions are exactly **Not now and an
+accepted Send**, and Play again is neither. A player who arms the checkbox and then starts a new
+run has not dismissed anything, and will be asked again.
 
 Both halves need durable storage, and this is where the implementation gets it wrong if nobody
 says so. ADR 0011 already named the trap: `apps/web/src/settings.ts` is deliberately
@@ -257,9 +274,15 @@ now is cheaper than a reviewer discovering it later and reading "already in app 
 promise the tree does not keep.
 
 **`gameVersion` is a build-time release identifier derived from git**, and it needs to be pinned
-here rather than left to the implementation, because §3's whole frequency rule rests on it. It is
-minted at build time as the tag if the build sits on one and the short commit sha otherwise
-(`git describe`-style), and carried through the **same build-time define mechanism ADR 0013
+here rather than left to the implementation, because §3's whole frequency rule rests on it. **The
+stored identity is the full commit SHA** — canonical, and exactly one per source revision by
+construction. A tag, where one exists, rides beside it as **display-only metadata and is never
+the identity.** An earlier revision minted "the tag if the build sits on one, else the short SHA",
+which spells a single revision two different ways: tag visibility differs between builds and
+between checkouts of the same commit, and an abbreviated SHA lengthens as the repository gains
+colliding prefixes. Either divergence mints a fresh `gameVersion` for a revision that already had
+one and re-asks a player the boundary below promises not to re-ask. The value is carried through
+the **same build-time define mechanism ADR 0013
 established** — `apps/web/build-config.ts` grows a version define alongside the hosted one.
 `hostedDefine` is the **precedent** for that mechanism, not the carrier: it defines a single
 boolean and is not where a version belongs. `apps/web/package.json` is deliberately not the
@@ -375,8 +398,11 @@ sends nothing anywhere), and it lives as a results-dialog secondary action, so a
 player who wants a broken run investigated can export the playtrace and attach it to the issue
 form themselves. A deliberate manual act, consistent with "pressing Send is the act".
 
-Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission in that session,
-and that coarser grain is the right one for a privacy operation anyway.
+Deletion is unaffected: §7 deletes by `sessionId` — sweeping that session's submissions and
+cascading to the copies joinable to them — and that coarser grain is the right one for a privacy
+operation anyway. §7 also names what deletion does _not_ reach (post-moderation aggregates, and
+request logs, which are not keyed by `sessionId` at all); this section does not restate those
+limits, it defers to them.
 
 Two questions this shape invites, answered here so nobody has to re-derive them:
 
@@ -445,6 +471,15 @@ detectable server-side by key equality. The trade is stated plainly — **the er
 benign duplicate, never a swallowed edit.** A duplicate is something the receiving system can
 collapse; a silently discarded revision is not something anyone can recover.
 
+**A reload is out of scope by decision, not by omission.** All survey state is page-ephemeral —
+the draft answers, the opaque idempotency key, `runId` and `sessionId` alike — so a reload
+**abandons the logical submission**, and anything sent afterwards is a new submission with a new
+key. The corner that creates is the lost-acknowledgement one again: a reload between an accepted
+send and its acknowledgement leaves the old key unrecoverable, so a later resend cannot be
+collapsed against it. That lands on the already-stated side of the trade — a benign duplicate,
+never a swallowed edit — and it is recorded here so the silence reads as a decision, the way §3's
+dismissal states its own reload story.
+
 That distinction closes a case a session-scoped key would get wrong. Because a rejected send
 re-enables the form with the player's text preserved (§1), the player may edit their answers
 before retrying. If the server had in fact stored the first attempt and only the response was
@@ -453,11 +488,14 @@ payload and report success — while the revisions were never stored at all. A k
 on edit cannot do that: an edited retry is a new logical submission and lands as one.
 
 `(sessionId, gameVersion)` still travels, but as **politeness and join context, not the dedup
-key**. The rotation limit stands and is worth stating rather than discovering: if the session id
-rotated between two attempts, the re-send is **un-joinable to the earlier one**. That is
-tolerated, because the client's own once-per-version politeness bounds how often it can happen,
-and because the alternative — an identifier stable enough to join across rotation — is precisely
-the persistent identifier ADR 0011 refuses to create. Volume bounding stays a separate
+key** — and that reassignment **removes** the rotation problem rather than tolerating it. The key
+is opaque and held in survey state, so a `sessionId` rotation between two attempts leaves it
+untouched: the retry carries the same key and dedups correctly. An earlier revision of this ADR
+recorded a standing "rotation limit" at this point; it was a property of the superseded
+`(sessionId, gameVersion)` key and does not survive the opaque one, so it is withdrawn rather
+than restated. What rotation can still touch is the **join**, never the dedup — and only for
+records predating `runId`, which the fallback clause above already bounds to nothing in practice.
+Volume bounding stays a separate
 requirement: idempotency deduplicates an honest client's retries, and does nothing about a
 dishonest one. The mechanism — how the key is carried and enforced — belongs to the endpoint ADR.
 
@@ -483,8 +521,13 @@ existing `role="status"` `aria-live="polite"` node that Verify already uses**, r
 a second one. Two live regions in one dialog would let two features announce over each other with
 no way for a screen reader to tell which message was current. Sharing one node instead requires a
 **single-owner handoff**: a feature takes the region when it has something to say, and holds it
-until its outcome is final. **Releasing is handing the region back, which is not the same as
-wiping it.** On the accepted path the final message — the thank-you and the reference — **stands
+until it has **announced an outcome**, at which point it releases. For the survey the lifecycle is
+exact: it **takes** the region at Send ("Sending…"), **holds** it across the request, and
+**releases on the outcome announcement** — accepted, rejected or offline alike, since all three
+are final _for that attempt_. **Try again re-takes** it, and the cycle repeats.
+
+**Releasing is handing the region back, which is not the same as wiping it.** On the accepted
+path the final message — the thank-you and the reference — **stands
 after the survey collapses**, and is cleared only by the next owner taking the region (a Verify
 press) or by `hideResults()` on the next run start. Collapsing on every _other_ path clears,
 because a cancelled or abandoned send has no result worth announcing. This distinction is the
@@ -497,7 +540,12 @@ press mid-flight would overwrite "Sending…", and the survey's own callback wou
 the Verify result, leaving both features lying to the player and the single-owner rule true only
 on paper. Therefore **Verify is `aria-disabled` while the survey owns the region** (the same
 shared gate and the same announcement convention as every other suppressed control here), and is
-re-enabled the moment the region is released.
+**re-enabled the moment the region is released** — which, per the lifecycle above, is when the
+outcome is announced rather than when the survey eventually collapses. So after a rejection the
+survey stays open with Try again and the preserved text, and **Verify is pressable again**; a
+Verify press then takes the region normally and its message replaces "Couldn't send." That is
+correct rather than a loss: the failure is still visible in the survey itself — Try again, and
+the text the player wrote — so the live region moving on costs nothing.
 
 The other direction needs no symmetric lock, which is worth saying so nobody adds one: opening
 the survey while a Verify result is displayed simply **takes** the region under the existing
@@ -537,7 +585,8 @@ work:
   state** immediately. Weaker, because it corrects rather than prevents, but it keeps the
   displayed answers equal to the payload, which is the property that actually matters.
 
-All of it runs through the **same shared-gate discipline** §6 already applies to activation, so
+All of it runs through the **same shared-gate discipline** this section applies to activation
+above, so
 the pointer and keyboard routes are guarded by one rule rather than two that can drift apart.
 When the send resolves as rejected or offline the guards lift, with the text preserved exactly as
 §1 specifies.
@@ -674,10 +723,14 @@ run resolves
                  │                      that is impossible: restore the prior state
                  │                      [Verify this run] goes aria-disabled — it writes
                  │                      this same region, so ownership is enforced, not
-                 │                      merely agreed; re-enabled when the region releases
+                 │                      merely agreed; re-enabled when the region is
+                 │                      RELEASED, i.e. when the outcome is announced —
+                 │                      not when the survey eventually collapses
                  ├─ accepted ─────────► "Thanks. Reference <sessionId>."
                  │                       collapses (+ don't-ask-again if armed)
                  │                       Give feedback retired · focus ──► [Play again]
+                 │                       consumes the ask for SUBSEQUENT dialogs too,
+                 │                       exactly as Not now does
                  │                       the message STANDS through the collapse — cleared
                  │                       only by the next owner (Verify) or hideResults()
                  ├─ rejected ─────────► "Couldn't send." · text preserved · guards lift,
@@ -686,6 +739,9 @@ run resolves
                  │                       deduped away against the earlier attempt
                  │                       [Send] is relabelled [Try again] IN PLACE, so focus
                  │                       never moved — it is already there
+                 │                       region RELEASED on this announcement → [Verify]
+                 │                       pressable again · [Try again] re-takes it
+                 │                       consumes NOTHING — the ask survives
                  └─ offline ──────────► said as offline · otherwise exactly as rejected
                                          nothing queued, nothing retried in the background
 
@@ -697,6 +753,8 @@ a run starts (Play again, or any other path through `hideResults()`)
       expansion collapses · live region released AND cleared
       (an aborted send has no result to announce — unlike the accepted path above, whose
       message hideResults() is precisely the thing that clears)
+      COMMITS NOTHING — not even an armed don't-ask-again: the committing actions are
+      exactly Not now and an accepted Send, and Play again is neither · the ask survives
       no retry, no queue, and no result from this run ever lands on the next one's dialog
       the abort stops the CLIENT waiting — a delivered request may still have been stored,
       which is why the reference above is shown at Send and not only on success
@@ -721,7 +779,7 @@ flight. That is the property the whole surface is arranged around.
 - **One merged payload with the playtrace.** Rejected by ADR 0011's first condition. It is the
   simplest thing to build and would put player-authored free text on the automatic path.
 - **An opt-in checkbox to attach the run to the survey.** Redundant under ADR 0011, where the run
-  travels under its own notice; the `sessionId` joins them without asking a question whose honest
+  travels under its own notice; `runId` joins them (§5) without asking a question whose honest
   answer is "we already did".
 - **Ship the deep-link interim now instead of an ADR.** Rejected as the ordering, not the idea:
   §8 keeps it available, and deciding the question set and the retention rules first is what
@@ -737,8 +795,9 @@ flight. That is the property the whole surface is arranged around.
   because the log never left their device. That is the opt-out working as specified rather than a
   gap to be closed — and the one route back, exporting the playtrace by hand and attaching it, is
   deliberately theirs to choose rather than ours to prompt for.
-- **A client-side abort stops the client waiting; it does not un-send.** §1's cancellation aborts
-  the request, but a request already delivered may still be durably stored at the far end. This is
+- **A client-side abort stops the client waiting; it does not un-send.** §1's cancellation kills
+  the whole submission operation, but a request already delivered may still be durably stored at
+  the far end. This is
   exactly why §7 shows the `sessionId` at Send rather than on success: without it, the one
   submission a player most plausibly wants deleted — the one whose outcome they never saw — would
   be the one whose reference they never got.
@@ -750,6 +809,12 @@ flight. That is the property the whole surface is arranged around.
   follows it. The cost is a protocol two features must both keep, rather than a second live region
   to maintain — a trade taken deliberately, because two regions announcing over each other is the
   worse failure and the harder one to notice.
+- **Survey state does not survive a reload, deliberately.** The draft, the idempotency key,
+  `runId` and `sessionId` are all page-ephemeral (§5), so a reload abandons the submission in
+  progress and anything sent afterwards is a new one. The cost is bounded and already priced in:
+  a reload between an accepted send and its acknowledgement can leave a duplicate nothing can
+  collapse — the benign side of the trade, chosen over persisting identifiers ADR 0011 refuses to
+  create.
 - **The once-per-version promise is only as durable as the storage under it**, and the storage
   under it does not exist yet. Until [#142](https://github.com/wynding/wynding/issues/142) or the
   `install.ts` pattern carries it, a naive implementation silently degrades to "every reload",
