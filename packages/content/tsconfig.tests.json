@@ -1,0 +1,22 @@
+{
+  // The test files `tsconfig.base.json` excludes from the EMITTING program, type-checked
+  // here in a second, check-only one — the same idiom `apps/web/tsconfig.e2e.json` uses.
+  // `exclude` is REPLACED, not merged, by a child config, so `[]` restores the full `src`
+  // program; `noEmit` keeps it out of `dist/`, which is the whole point of the exclude.
+  //
+  // `references` is the one field `extends` does NOT inherit, so it is restated below.
+  // Without it, a `@wynding/*` import resolves to the sibling package's SOURCE instead of
+  // its built `.d.ts`, which drags files the sibling's own program owns (and its ambient
+  // `env.d.ts` declarations, which do not travel) into this one. Turbo's `typecheck` task
+  // `dependsOn` `^typecheck`, so those outputs are always built before this runs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true
+  },
+  "include": ["src"],
+  "exclude": [],
+  "references": [{ "path": "../types" }, { "path": "../sim" }]
+}

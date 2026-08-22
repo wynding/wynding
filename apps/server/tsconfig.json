@@ -3,6 +3,11 @@
   // self-contained bundle, and `dist/rulesets/` is staged beside it. `tsc` is the TYPE
   // CHECKER here and nothing else; left emitting, it would scatter per-module `.js` into
   // the same `dist/` the bundle owns, where a stale file can shadow what actually ships.
+  //
+  // Which is also why `exclude` is emptied (#108): `tsconfig.base.json` keeps `*.test.ts`
+  // out of programs that EMIT, so their compiled selves stay out of `dist/`. Nothing is
+  // emitted here, so there is nothing to keep them out of — and leaving them in this one
+  // program is what type-checks them at all, no second config required.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": false,
@@ -14,6 +19,7 @@
     "rootDir": "src"
   },
   "include": ["src"],
+  "exclude": [],
   "references": [
     { "path": "../../packages/sim" },
     { "path": "../../packages/replay" },

@@ -9,7 +9,7 @@
     "build": "esbuild src/handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/handler.js --sourcemap && mkdir -p dist/rulesets && cp ../../packages/content/dist/rulesets/*.json dist/rulesets/",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
     "lint": "eslint src scripts",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
