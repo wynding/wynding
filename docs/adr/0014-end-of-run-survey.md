@@ -177,10 +177,23 @@ and means a player who simply ignores the button leaves no trace of having been 
 
 ### 4. Envelope: run identity, and no sim changes
 
-The survey submission carries the answers plus the run's identity: `sessionId`, `gameVersion`,
-`simVersion`, `rulesetHash`, `boardId`, `seed`, outcome, `score`, `stars`, wave reached
-(`waveCursor`), the final tick, **`finalHash`** — the sim's content-hash of the terminal world
-state — and **`replayDigest`**, a collision-resistant digest of the run's input log.
+The survey submission carries the answers plus the run's identity: **`runId`** — a render-layer
+UUID minted at run start — plus `sessionId`, `gameVersion`, `simVersion`, `rulesetHash`,
+`boardId`, `seed`, outcome, `score`, `stars`, wave reached (`waveCursor`), the final tick,
+**`finalHash`** — the sim's content-hash of the terminal world state — and **`replayDigest`**, a
+collision-resistant digest of the run's input log.
+
+**`runId` is the instance identity, and it is the one field this ADR asks of the playtrace
+capture.** It is minted at each run start in the render layer, exactly like `sessionId` and under
+the same non-persistence rules — no sim change, since the sim neither reads nor produces it. It
+must also be carried by the playtrace, which is a requirement this ADR places on
+[#133](https://github.com/wynding/wynding/issues/133)'s capture: that work's ratified plan already
+requires its allowlist to be serialized **explicitly** (never an object by reference, with a
+snapshot test proving an upstream field cannot leak in unlisted), and already puts `boardId` "in
+anything identifying a run" — a per-run id is squarely that family. No ADR 0011 text needs
+amending, because 0011 delegated the capture payload to #133, and #133 is being built in this
+same campaign, so the requirement lands with work already in flight rather than waiting on a
+future amendment.
 
 `finalHash` is not a new quantity and nothing about it is minted here. `hashSimState` is already
 exported from `packages/sim`, the app layer already calls it at run end
@@ -204,11 +217,12 @@ to it.
 
 **No sim changes, and no new sim outputs.** The replay identity (`seed`, `boardId`,
 `rulesetHash`, `simVersion`) is already the shape `@wynding/replay` uses; outcome, score, stars,
-wave cursor and tick are already sim state the HUD reads every frame. Two fields are honestly
+wave cursor and tick are already sim state the HUD reads every frame. Three fields are honestly
 render-layer facts that **do not exist in the source today** and are minted by the
 implementation, not extracted from the sim: `sessionId`, the render-layer UUID ADR 0011 defines
-and bounds, and `gameVersion`. Naming them now is cheaper than a reviewer discovering it later
-and reading "already in app state" as a promise the tree does not keep.
+and bounds; `runId`, minted per run start under the same rules; and `gameVersion`. Naming them
+now is cheaper than a reviewer discovering it later and reading "already in app state" as a
+promise the tree does not keep.
 
 **`gameVersion` is a build-time release identifier derived from git**, and it needs to be pinned
 here rather than left to the implementation, because §3's whole frequency rule rests on it. It is
@@ -245,8 +259,8 @@ a player's words to their run. Two submissions, because ADR 0011's first conditi
 negotiable: free text must never ride the automatic path. Merging them would put player-authored
 prose into an automatic upload, which is precisely the thing that condition exists to prevent.
 
-The join is therefore **the composite run identity the envelope already carries (anchored by
-`sessionId`), not an attachment**. A consent checkbox offering to attach the run is not the right
+The join is therefore **the run identity the envelope carries — anchored by `runId` and verified
+by the rest — not an attachment**. A consent checkbox offering to attach the run is not the right
 shape here, because under ADR 0011 the run is already on its way under its own notice — the
 checkbox would be asking permission for something already decided, and would imply the survey is
 what carries the run.
@@ -256,12 +270,18 @@ rotation is deliberate: an id bounded by a run count and an elapsed time is _des
 more than one run, because a diagnostic thread often does. So a player who finishes several runs
 before it rotates produces several playtraces sharing one id, and a survey joined on that field
 alone has multiple candidate runs — which would attribute a rating or a difficulty answer to the
-wrong outcome, in exactly the analysis §2 spent a question on. The join therefore **narrows** on
-the whole composite §4 carries — **`sessionId`, plus the replay identity (`seed`, `boardId`,
-`rulesetHash`, `simVersion`), plus the outcome fields (outcome, `score`, `stars`, wave reached,
-final tick), plus `finalHash`** — and then **matches exactly** on `replayDigest`, below. No new
-_capture_, no sim change, and no ripple into ADR 0011: every part of the composite was already in
-the envelope, and the digest is derived at send time from a log the app already holds.
+wrong outcome, in exactly the analysis §2 spent a question on.
+
+**The join is therefore layered, and the layers answer different questions.** `runId` **selects
+the instance** — carried by both records, exact, and the only field that can tell two runs apart
+when everything about their content agrees. The composite (`sessionId`, the replay identity, the
+outcome fields, `finalHash`) and `replayDigest` remain as the **verification layer**: they
+establish that the selected playtrace really is the run the survey describes, rather than
+something mislabelled. They are also the **fallback** for any record that predates the id.
+
+That fallback exists for robustness, not migration: **neither record exists in production yet**,
+so adoption is clean and there is no legacy-data gap to bridge — the survey endpoint has never
+run, and #133's capture is still being built.
 
 **`finalHash` is what makes that composite bite, and it is why the aggregate fields alone were
 not enough.** Two runs in one session can reuse a seed and finish with identical outcome, score,
@@ -279,27 +299,39 @@ can converge on an identical terminal state**, and when they do, inspecting the 
 reproduces both paths without revealing which one the player was talking about. A mid-run
 "something broke" report could still be attached to the wrong playtrace.
 
-**`replayDigest` closes that exactly, and the reason it can is worth stating plainly: the digest
-is carried in one record and _derivable_ from the other.** The survey submission carries it; the
-playtrace does not need to, because **the playtrace _is_ the input log** — recomputing the digest
-from a candidate's own log is always possible. So the join runs in two steps: the composite above
-**narrows** the candidates, then each candidate is **matched exactly** by recomputing its digest
-and comparing. Two runs with different input paths have different logs and therefore different
-digests, so at most one candidate can match. That is what makes the join exact by construction
-rather than by luck, and it is why no field has to be added to the playtrace side and no part of
-ADR 0011 has to be amended.
+**`replayDigest` settles content identity, and it does so without the playtrace storing it: the
+digest is carried in one record and _derivable_ from the other**, because **the playtrace _is_
+the input log**, so a candidate's digest can always be recomputed. What that proves is that two
+records describe the same run _content_ — same seed, same inputs, same everything.
+
+**What it cannot do is distinguish two instances of that content, and that is the limit of every
+content-derived key.** Two runs that reuse a seed and repeat the same inputs — an automated
+re-run, or a player deliberately replaying the same opening — produce byte-identical logs and
+therefore identical digests. Every narrowing field agrees too. An earlier revision of this ADR
+claimed at most one candidate could match; that was false for exactly this case, and it is why
+`runId` is the identity rather than an optimisation. Content-derived keys answer "is this the
+same run?"; only a minted id answers "which occurrence?".
 
 Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission in that session,
 and that coarser grain is the right one for a privacy operation anyway.
 
-A dedicated **per-run identifier** carried in both records would make the same join cheaper —
-a direct key lookup instead of a filter plus a recomputation. It is no longer needed for
-_completeness_, since `replayDigest` already makes the join exact; it is an **implementation
-simplification**. This contract still does not mint one, because doing so unilaterally would put
-a new identifier into a payload whose minimalism ADR 0011 argues from. But if
-[#133](https://github.com/wynding/wynding/issues/133)'s capture implementation mints one for its
-own reasons, **this contract can adopt it additively, without amendment** — the digest join keeps
-working in the meantime and simply becomes the slower path.
+Two questions this shape invites, answered here so nobody has to re-derive them:
+
+- **Why not `runId` alone?** Because a bare identifier proves nothing about content. It says two
+  records claim to be the same run; it cannot say they agree on the seed, the inputs or the
+  outcome. A mislabelled or truncated capture would join cleanly and silently. The layers answer
+  different questions — **which instance** (`runId`), and **whether the content matches**
+  (composite + `replayDigest`) — so keeping both is what makes a bad join detectable instead of
+  merely unlikely.
+- **UUID collision?** A v4 UUID's collision probability is negligible at any volume this game
+  will ever produce, and the verification layer would catch the only interesting case anyway: a
+  collision across _different_ content shows up immediately as a digest mismatch.
+
+**Privacy: `runId` is narrower than `sessionId`, not wider.** It is ephemeral to a single run and
+deliberately links nothing — where `sessionId` is bounded precisely because it groups a few runs
+together (ADR 0011), a per-run id groups none. It falls under the same non-persistence rules, is
+never stored on the device, and reveals nothing about the player: it distinguishes one run from
+another and does no other work.
 
 One consequence must be stated rather than left to be inferred: **the survey is player-initiated,
 so pressing Send is the act, and the playtrace opt-out does not govern it.** The opt-out governs
