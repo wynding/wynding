@@ -312,6 +312,22 @@ claimed at most one candidate could match; that was false for exactly this case,
 `runId` is the identity rather than an optimisation. Content-derived keys answer "is this the
 same run?"; only a minted id answers "which occurrence?".
 
+**A player who has taken ADR 0011's durable opt-out uploads no playtraces, so their submissions
+are standalone — by design, not by omission.** The premise elsewhere in this section, that the run
+is already on its way, is simply false for them, and the survey honours the opt-out literally:
+their runs do not leave the device, and their words still can. The envelope's run-identity fields
+still travel and still describe the run's shape — outcome, `score`, `stars`, wave, tick, `seed`,
+`boardId`, `rulesetHash`, `runId`, `replayDigest` — so the feedback is not context-free; there is
+simply no server-side playtrace for `runId` to select. What is unavailable is reproduction from
+the input log, and that is **the opt-out's honest cost, chosen by the player**, not a defect in
+this contract. No attach-my-run affordance is added to the survey for this case: it would
+resurrect precisely the consent-checkbox shape rejected above and complicate the surface for a
+small intersection. The escape hatch already exists in ratified machinery — #133's **local
+capture and export is deliberately ungated by the opt-out** (0011's own reasoning: an export
+sends nothing anywhere), and it lives as a results-dialog secondary action, so an opted-out
+player who wants a broken run investigated can export the playtrace and attach it to the issue
+form themselves. A deliberate manual act, consistent with "pressing Send is the act".
+
 Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission in that session,
 and that coarser grain is the right one for a privacy operation anyway.
 
@@ -613,6 +629,11 @@ flight. That is the property the whole surface is arranged around.
 - **The first player-authored text this project transmits anywhere.** Every constraint in §7
   exists because free text is unbounded by construction and someone will type their own name into
   it.
+- **The opt-out buys privacy with diagnosability, and the survey does not paper over the
+  trade.** An opted-out player can still say a run broke; nobody can replay the run they mean,
+  because the log never left their device. That is the opt-out working as specified rather than a
+  gap to be closed — and the one route back, exporting the playtrace by hand and attaching it, is
+  deliberately theirs to choose rather than ours to prompt for.
 - **A client-side abort stops the client waiting; it does not un-send.** §1's cancellation aborts
   the request, but a request already delivered may still be durably stored at the far end. This is
   exactly why §7 shows the `sessionId` at Send rather than on success: without it, the one
