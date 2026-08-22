@@ -245,14 +245,29 @@ Dedup here means **retry idempotency**, and it needs a stated key or the endpoin
 something that sounds impossible. There are no accounts and ADR 0011 makes the `sessionId`
 rotate and die on reload, so nothing can be deduplicated "per player" — the coherent target is
 the case §1 and the Consequences themselves create: a send that was aborted client-side but
-delivered anyway, followed by a re-send. The client therefore carries an **idempotency key of
-`(sessionId, gameVersion)`**, which collapses re-sends within a session onto one record. The
-limit is real and worth stating rather than discovering: if the session id rotated between the
-two attempts, the re-send is **un-joinable and will land as a second record**. That is tolerated,
-because the client's own once-per-version politeness bounds how often it can happen, and because
-the alternative — an identifier stable enough to join across rotation — is precisely the
-persistent identifier ADR 0011 refuses to create. Volume bounding stays a separate requirement:
-idempotency deduplicates an honest client's retries, and does nothing about a dishonest one.
+delivered anyway, followed by a re-send. The client therefore mints a **per-submission
+idempotency key**, and the scoping matters: the key belongs to _one logical submission_, not to
+the session. It is **stable
+across an unchanged retry** and **refreshed whenever the payload changes**. Deriving it from the
+payload is the natural implementation and is named as such — an unchanged retry reproduces the
+same key mechanically, while an edit produces a different one without the client having to track
+anything.
+
+That distinction closes a case a session-scoped key would get wrong. Because a rejected send
+re-enables the form with the player's text preserved (§1), the player may edit their answers
+before retrying. If the server had in fact stored the first attempt and only the response was
+lost, a key scoped to the session would dedup the _edited_ attempt against the _stored earlier_
+payload and report success — while the revisions were never stored at all. A key that refreshes
+on edit cannot do that: an edited retry is a new logical submission and lands as one.
+
+`(sessionId, gameVersion)` still travels, but as **politeness and join context, not the dedup
+key**. The rotation limit stands and is worth stating rather than discovering: if the session id
+rotated between two attempts, the re-send is **un-joinable to the earlier one**. That is
+tolerated, because the client's own once-per-version politeness bounds how often it can happen,
+and because the alternative — an identifier stable enough to join across rotation — is precisely
+the persistent identifier ADR 0011 refuses to create. Volume bounding stays a separate
+requirement: idempotency deduplicates an honest client's retries, and does nothing about a
+dishonest one. The mechanism — how the key is carried and enforced — belongs to the endpoint ADR.
 
 §3's once-per-`gameVersion` rule is
 client-side, and therefore bounds politeness rather than load: anyone willing to POST directly
@@ -292,6 +307,18 @@ states its reason: dynamically disabling a control that currently holds focus dr
 tab order and strands focus, and hides it from assistive technology entirely. `main.ts`'s
 `primaryAction` shows the other half — the keyboard path shares the same gate, so a press arriving
 through the keymap can never activate what the button itself refuses.
+
+**In flight, that is not enough on its own, and the difference is worth spelling out because the
+convention above is button-shaped.** `aria-disabled` is an announcement, not an enforcement, and
+click suppression only covers pointer _activation_ — neither stops a focused textarea accepting
+typing, and neither stops a radio or a checkbox changing under the keyboard. Left there, the
+answers on screen could drift away from the payload already in flight, and the player would be
+looking at something we never sent. So the in-flight state guards **every edit, not just
+activation**: the free-text control goes `readonly` (which, unlike `disabled`, keeps it focusable
+and readable), and the choice controls suppress `input`/`change` — through the **same shared-gate
+discipline** §6 already applies to activation, so the pointer and keyboard routes are guarded by
+one rule rather than two that can drift apart. When the send resolves as rejected or offline the
+guards lift, with the text preserved exactly as §1 specifies.
 
 ### 7. Free text: caps, moderation before aggregation, retention and deletion
 
@@ -394,12 +421,18 @@ run resolves
             │                           allowed; offered again only on the next gameVersion
             └─ [Send] ────────────────► controls aria-disabled (never `disabled`, so focus
                  │                      is never dropped) · live region: "Sending…"
+                 │                      EDITS guarded too, not just activation: free text
+                 │                      goes readonly, choices suppress input/change —
+                 │                      what is on screen cannot drift from what was sent
                  ├─ accepted ─────────► "Thanks. Reference <sessionId>."
                  │                       collapses (+ don't-ask-again if armed)
                  │                       Give feedback retired · focus ──► [Play again]
                  │                       the message STANDS through the collapse — cleared
                  │                       only by the next owner (Verify) or hideResults()
-                 ├─ rejected ─────────► "Couldn't send." · text preserved · controls re-enable
+                 ├─ rejected ─────────► "Couldn't send." · text preserved · guards lift,
+                 │                       controls re-enable · editing before a retry mints
+                 │                       a NEW idempotency key, so the edit cannot be
+                 │                       deduped away against the earlier attempt
                  │                       [Send] is relabelled [Try again] IN PLACE, so focus
                  │                       never moved — it is already there
                  └─ offline ──────────► said as offline · otherwise exactly as rejected
