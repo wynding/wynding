@@ -172,8 +172,21 @@ Two responses consume the ask, and they differ in scope:
   that was already stored.** Stating the false branch matters, because an implementation that
   only writes when the box is checked leaves unchecking able to change the UI and nothing else,
   and the player would have no way back. Committing unchecked therefore **deletes or falsifies
-  the stored dismissal**, and that transition needs a test that survives a reload: check, commit,
-  reload, reopen, uncheck, commit, and confirm the survey is offered again.
+  the stored dismissal**.
+
+  Testing that transition takes some care, because the obvious sequence cannot run. Once a
+  dismissal commits, a reload suppresses Give feedback forever — so "reload, then reopen and
+  uncheck" is **unreachable by construction**, and a test written that way would be asserting
+  against a dialog these rules never produce. The undo happens **same-dialog**, the only window
+  that exists (below): check → commit via Not now → reopen, the button still being live here →
+  uncheck → commit again. The write is then asserted **directly, at unit level**: after the
+  second commit the stored dismissal is cleared.
+
+  Across a reload, two behavioural observables are reachable, and both are worth asserting
+  because together they separate two rules that look identical from the outside. **In the same
+  version the button stays absent** — Not now consumed that version's ask, so absence here proves
+  nothing about the dismissal and must not be read as though it did. **On the next `gameVersion`
+  the button returns**, and that is what actually proves "forever" was cleared.
 
   **The uncheck window is same-dialog only, and that is a real limit rather than an oversight.**
   Because Not now leaves the button live on the current dialog (above), a player who commits and
