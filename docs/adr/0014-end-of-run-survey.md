@@ -1,0 +1,843 @@
+# ADR 0014 — The end-of-run survey: a second non-primary action, asked once per version
+
+- **Status:** Accepted. The surface, the question set and the constraints are decided here.
+  Nothing is built by this ADR — implementation is the follow-up issue its acceptance files.
+  Three positions wait on work elsewhere, all named below: the **durable dismissal**
+  ([#142](https://github.com/wynding/wynding/issues/142)'s `StorageDriver`), the **endpoint**
+  (`wynding-site`'s own ADR), and **`runId` in the playtrace capture's allowlist**
+  ([#133](https://github.com/wynding/wynding/issues/133)) — the last is a prerequisite for the
+  join's primary layer, not a nicety.
+- **Date:** 2026-08-22
+- **Closes:** [#100](https://github.com/wynding/wynding/issues/100) — its ADR, its flow sketch,
+  and the eight questions it asks.
+- **Relates to:** ADR [0011](0011-playtrace-capture-and-privacy.md) (the companion contract,
+  and the one constraint it places on this one) · ADR
+  [0004](0004-localization-and-i18n.md) (the typed catalog every string goes through) · ADR
+  [0008](0008-save-format-and-versioning.md) (the `StorageDriver` seam the dismissal waits for,
+  [#142](https://github.com/wynding/wynding/issues/142)) · ADR
+  [0003](0003-accessibility-standard.md) (the bar every overlay already meets).
+
+## Context
+
+Feedback reaches us today as prose, or not at all. Two structured channels exist, and both are
+somewhere else. The player-feedback issue form
+([#57](https://github.com/wynding/wynding/pull/57)) requires leaving the game and holding a
+GitHub account; that form's own intro routes anyone who would "rather not use GitHub" to the
+site's feedback form at `wynding.net/#feedback`, which drops the account requirement but is
+free-form and carries no run identity, so nothing it collects can be joined to the run it is
+about. The moment a player has an opinion is the moment the run resolves, and at that moment we
+collect nothing.
+
+ADR 0011 settled how a **run** gets to us: playtraces upload automatically under a notice, and
+local capture is ungated. It deliberately did not settle how a **player's words** get to us, and
+it handed this ADR the only constraint it placed on #100, in its own words: _"Player-authored
+free text never rides the automatic path... This is why an end-of-run survey must be a separate
+submission rather than a field on a playtrace."_ Everything below is built on that split.
+
+The surface already exists and is more capable than it looks. `apps/web/src/overlay.ts` builds
+the results dialog as a `role="dialog"` `aria-modal="true"` sibling of the Shell, named per-open
+by its own heading, holding a title, a summary, **Play again** (`wy-primary`) and a **second,
+non-primary action** — Verify this run — whose outcome is announced through a
+`role="status"` `aria-live="polite"` paragraph that `showResults` and `hideResults` both clear.
+A secondary action on this dialog that reports its result to a live region is therefore not a
+new pattern to invent; it is the pattern already shipping beside Play again.
+
+Containment is worth stating precisely, because it constrains the shape below. `modal.ts` is the
+single authority: `.wy-shell` is the **only** node ever made `inert`, overlays are siblings of
+it, focus is saved before the first modal opens and restored after the last closes, and only the
+**highest-priority open overlay** is shown. There is no tab-cycle focus trap anywhere in the app
+— containment is `inert` plus sibling structure, and Tab simply walks the dialog's own controls.
+
+## Decision
+
+### 1. Surface: an inline expansion of the results dialog, never a gate
+
+**"Give feedback" is a second non-primary action on the results dialog, beside Verify this run.
+Pressing it expands the survey in place, inside `.wy-results`. Play again is untouched: it keeps
+its primary styling, it keeps initial focus, and it is never disabled, deferred or moved.**
+
+Inline rather than a stacked dialog, and the reason is mechanical rather than aesthetic. Results
+registers at `results` priority, which outranks everything (`results` 0 > `rotate` 1 >
+`settings` 2), and the modal owner shows only the highest-priority open entry. A survey dialog
+opened at `settings` or `rotate` priority would be recorded on the stack and stay invisible while
+results is open — and then **surface at the worst possible moment**: `close()` calls
+`applyActive()`, which shows the highest-priority _remaining_ entry, so the survey would appear
+exactly as Play again drove `hideResults()`, in front of the run the player had just started. One
+opened at `results` priority would win the last-opened tie-break and **hide the results dialog
+underneath it** — replacing the results screen rather than adding to it. Neither is "an optional
+secondary action on the results screen", and both require changing `modal.ts`. An inline
+expansion requires nothing new: the Shell is already inert, the dialog already owns focus, and
+the new controls simply join its tab order after Play again.
+
+Focus follows the patterns already in the file. `resultsOverlay.show()` focuses Play again and
+**keeps doing so** — opening the survey must never be what a player lands on. Activating Give
+feedback moves focus to the first question. Every exit from the survey names its destination,
+because a collapse that leaves focus on a removed node strands it: **Not now** returns focus to
+Give feedback, which stays present and live on this dialog (§3) so the focus target is real and
+a misclick is recoverable; **an accepted Send** retires Give feedback along with the form, so
+focus goes to **Play again** instead; a **rejected or offline** Send leaves focus exactly where
+it is, because **Try again is the Send control relabelled in place** — the same node, so nothing
+moves. The survey's other controls re-enable on a rejection, with the player's text preserved.
+Escape stays exactly as it is: results is state-driven, carries no
+`dismissOnEscape`, and consumes Escape without dismissing. The survey does not change that, and
+does not claim Escape for a collapse — a dialog that swallowed Escape twice with two different
+meanings would be worse than one that swallows it once.
+
+**A run started mid-survey cancels any in-flight submission.** `hideResults()` is the single
+choke point every run-start path already passes through, and it already clears the transient
+live-region text. **What is cancelled is the whole submission _operation_** — an operation token
+(an `AbortSignal`) minted when Send is pressed, invalidated by `hideResults()`, and wired into the
+fetch.
+
+There is exactly one asynchronous boundary to guard, and that is a property of the pinned digest
+helper rather than an accident: `sha256Hex` is **synchronous** (§4), so the digest and the payload
+assembly both complete inside the Send handler, and **no pre-request window exists by
+construction** — there is no interval in which Play again could arrive to find a submission
+started but no request yet to abort. The fetch is the only thing that outlives the handler, which
+is what the token governs. So: the operation is cancelled, the expansion collapses, and
+the survey releases the shared live region back to Verify (§6) — releasing it **clears** the
+region on this path, because an aborted send has no result worth announcing. Nothing is queued,
+nothing is
+retried, and no result from a previous run is ever allowed to land on the next run's results
+dialog. What an abort cannot do is un-send — see the Consequences.
+
+### 2. Question set: four questions, and a standing burden on the fifth
+
+**Rating 1–5. Difficulty 1–5. A "something broke" flag. Free text, capped at 2000 UTF-16 code
+units.**
+
+Three of those are the irreducible minimum: how was it, did it break, and a place to say the
+thing we did not think to ask. Difficulty earns the fourth slot on the strength of what M2 is
+actually doing — a balance pass — for which "it felt too hard" correlated with the run's real
+outcome, score, stars and wave reached is the difference between an anecdote and evidence. Every
+question after the first costs completion rate, so **any addition must argue against that cost
+explicitly**, and this ADR is where that argument gets made. Everything except the rating is
+optional; a player may send a rating alone. The rating is what makes a submission mean anything,
+so **Send is `aria-disabled` until a rating is chosen** — §6's convention, never the native
+`disabled` attribute — and a press while it is disabled announces what is missing rather than
+doing nothing and leaving the player to work out why.
+
+That announcement is a **deliberate divergence** from the Dock convention §6 otherwise adopts,
+and it is called out here because an implementer copying the cited code would build the opposite.
+`main.ts` states the Dock's rule as "a disabled control must not announce a rejection (or
+dispatch at all)", and `overlay.ts`'s click suppression is a bare early return. That silence is
+right for the Dock, whose primary control sits under movement keys and absorbs presses the player
+never meant. It is wrong here: pressing Send is an explicit submit attempt, and an explicit
+attempt deserves an answer. So the suppressed press still writes the live region — and it must do
+so **identically on the click and keymap routes**, or keyboard users get exactly the
+silence-on-press asymmetry the shared-gate citation exists to prevent.
+
+The cap is ours and is chosen twice over: long enough that a real bug report fits without the
+player editing themselves down, short enough that a single request stays bounded and a moderation
+queue stays affordable. It is stated in **UTF-16 code units, as the client's `maxlength` counts
+them** — the unit the platform actually enforces. "Characters" would leave the emoji case
+undecided, where one astral character costs two code units and a client and a server counting
+differently would reject text the player was allowed to type. So the server-side cap **must not
+be stricter than what the client permitted**.
+
+### 3. Frequency: once per game version, plus a dismissal that sticks
+
+**Ask once per `gameVersion`, and offer a persistent "don't ask again" that is honoured forever.**
+
+"Ask" here means an **interaction-demanding solicitation** — something that takes the player's
+attention and needs a response to clear. The definition is load-bearing, because the Give feedback
+button is not one: a passive secondary control demands nothing. So the rejection that follows
+targets **prompts, not presence**. Asking every run trains the reflex-dismiss that destroys the
+channel; asking once ever under-samples a game that changes weekly. A version boundary is the
+natural unit because it is the thing whose answers differ.
+
+**The button's presence is an affordance, not an ask.** It appears on every results dialog of a
+`gameVersion` until an explicit player response consumes that version's ask. **Presence consumes
+nothing, and neither does expansion**: a player who never touches the button, and equally one who
+opens the survey, reads it and walks away, has not responded — the button is there again on the
+next run within the same version. Only the three responses below consume anything. That is
+exactly what makes it an affordance rather than a prompt to keep batting away.
+
+Two responses consume the ask, and they differ in scope:
+
+- **Send**, once **accepted**, retires the button on this dialog with a thank-you in its place,
+  and — exactly as Not now does — consumes the ask on **subsequent** results dialogs this
+  version. The player answered for this version; the strongest response cannot consume less than
+  the weakest one.
+- **Not now** collapses the survey but **leaves Give feedback present and live on the current
+  dialog** — reopening is allowed, because a misclick should be recoverable and §1 sends focus
+  back to that button, which must therefore be real. What it consumes is the ask on
+  **subsequent** results dialogs this version.
+- **Don't ask again** is a **checkbox modifier, not an action.** Checking it arms
+  forever-dismissal; the next collapse-committing action — Not now or Send — commits the durable
+  write; unchecking before that disarms it. It never writes storage on its own, which keeps the
+  rule below true and keeps a check from being a trap the player cannot back out of.
+
+  **The committing action writes the checkbox's _current_ state — including clearing a dismissal
+  that was already stored.** Stating the false branch matters, because an implementation that
+  only writes when the box is checked leaves unchecking able to change the UI and nothing else,
+  and the player would have no way back. Committing unchecked therefore **deletes or falsifies
+  the stored dismissal**.
+
+  Testing that transition takes some care, because the obvious sequence cannot run. Once a
+  dismissal commits, a reload suppresses Give feedback forever — so "reload, then reopen and
+  uncheck" is **unreachable by construction**, and a test written that way would be asserting
+  against a dialog these rules never produce. The undo happens **same-dialog**, the only window
+  that exists (below): check → commit via Not now → reopen, the button still being live here →
+  uncheck → commit again. The write is then asserted **directly, at unit level**: after the
+  second commit the stored dismissal is cleared.
+
+  Across a reload, two behavioural observables are reachable, and both are worth asserting
+  because together they separate two rules that look identical from the outside. **In the same
+  version the button stays absent** — Not now consumed that version's ask, so absence here proves
+  nothing about the dismissal and must not be read as though it did. **On the next `gameVersion`
+  the button returns**, and that is what actually proves "forever" was cleared.
+
+  **The uncheck window is same-dialog only, and that is a real limit rather than an oversight.**
+  Because Not now leaves the button live on the current dialog (above), a player who commits and
+  immediately regrets it can reopen the survey there and uncheck — a second collapse re-commits
+  whatever the checkbox says at that moment. But a dismissal stored in a **prior session** has no
+  un-ask path from inside the game, because the button never renders again to be reopened.
+  "Honoured forever" means exactly that. It is deliberately not smarter.
+
+**Everything else consumes nothing**, and the abandonment paths are worth naming because an
+implementer will otherwise have to guess. A send that was **not accepted** — rejected, offline,
+or cancelled by a run start — consumes nothing: the ask survives, and the button is offered on
+the next dialog this version. A **run start collapses the survey without committing anything**,
+including an armed "don't ask again": the committing actions are exactly **Not now and an
+accepted Send**, and Play again is neither. A player who arms the checkbox and then starts a new
+run has not dismissed anything, and will be asked again.
+
+Both halves need durable storage, and this is where the implementation gets it wrong if nobody
+says so. ADR 0011 already named the trap: `apps/web/src/settings.ts` is deliberately
+session-scoped pending ADR 0008's async `StorageDriver` seam, which does not exist yet, so a
+flag added there resets on every reload —
+which here means asking a player who already said no. `apps/web/src/install.ts` shows the other
+shape available today, a localStorage-backed one-bit UI acknowledgement classified in its own
+comment as deliberately outside that seam. Which of the two the dismissal rides is an
+implementation choice against [#142](https://github.com/wynding/wynding/issues/142)'s progress.
+**This is a dependency of the implementation, not of accepting this ADR** — the decision that the
+dismissal must be durable stands on its own, and the ADR does not wait on the seam to be true.
+Where storage exists but cannot be written, fail toward **not asking** — and that means exactly
+one thing: **an unpersistable dismissal is honoured in memory for the rest of the session**, the
+same posture `install.ts` already takes, so a player who said "don't ask again" is not asked
+again in the session where they said it. Across sessions, a dismissal that could not be recorded
+is a dismissal we do not know about, so the button returns. The feature is never withheld
+wholesale: hiding Give feedback because storage is unwritable would punish Safari private-mode
+players with the loss of a channel they never declined.
+
+Durable storage is written **only on an explicit player action** — never on mere display. Showing
+the button records nothing, which keeps §5's "pressing Send is the act" true of the whole surface,
+and means a player who simply ignores the button leaves no trace of having been offered it.
+
+### 4. Envelope: run identity, and no sim changes
+
+The survey submission carries the answers plus the run's identity: **`runId`** — a render-layer
+UUID minted at run start — plus `sessionId`, `gameVersion`, `simVersion`, `rulesetHash`,
+`boardId`, `seed`, outcome, `score`, `stars`, wave reached (`waveCursor`), the final tick,
+**`finalHash`** — the sim's content-hash of the terminal world state — and **`replayDigest`**, a
+collision-resistant digest of the run's input log.
+
+**`runId` is the instance identity, and it is the one field this ADR asks of the playtrace
+capture.** It is minted at each run start in the render layer, exactly like `sessionId` and under
+the same non-persistence rules — no sim change, since the sim neither reads nor produces it. It
+must also be carried by the playtrace, which is a requirement this ADR places on
+[#133](https://github.com/wynding/wynding/issues/133)'s capture: that work's ratified plan already
+requires its allowlist to be serialized **explicitly** (never an object by reference, with a
+snapshot test proving an upstream field cannot leak in unlisted), and already puts `boardId` "in
+anything identifying a run" — a per-run id is squarely that family. No ADR 0011 text needs
+amending, because 0011 delegated the capture payload to #133, and #133 is being built in this
+same campaign, so the requirement lands with work already in flight rather than waiting on a
+future amendment.
+
+`finalHash` is not a new quantity and nothing about it is minted here. `hashSimState` is already
+exported from `packages/sim`, the app layer already calls it at run end
+(`apps/web/src/controller.ts`), and it is the same value the determinism golden pins
+(`packages/content/src/m2-golden.test.ts`, guarded by `scripts/check-determinism-version.mjs`).
+The survey reads it exactly as it reads every other field above. What it is **not** is an
+identity: `packages/engine/src/hash.ts` implements it as FNV-1a over the serialized state and
+labels itself in its own comment — "fast, deterministic 8-hex-char digest (not crypto)". Eight
+hex digits is 32 bits. It is a **cheap, human-legible discriminator** — excellent for spotting
+that two runs differ, useless as a claim that two runs are the same.
+
+`replayDigest` carries the weight `finalHash` cannot, and **its construction is pinned here
+rather than described**, because a digest two implementations spell differently is a digest that
+rejects the join it exists to make. It is exactly
+**`sha256Hex(canonicalJson(tickInputs))`**, using the shared `@wynding/engine` helpers — the same
+pairing the ruleset digest already uses (`packages/sim/src/ruleset.ts`, `sha256Hex(canonicalJson(
+normalizeForHash(bundle)))`). Encoding and key ordering are whatever those helpers do; the
+contract mandates the **shared helper**, not a prose description of bytes, so there is one
+implementation and no second spelling.
+
+**Scope: the `tickInputs` array alone**, exactly as the replay format serializes it — not a
+wrapper carrying the identity fields. Those are carried separately and checked separately, so
+folding them in would double-count them and muddy the derivability argument below, which depends
+on the digest being a function of _the log and nothing else_. Computed by the **app layer at send
+time**, it requires no sim change and no change to ADR 0011. The recorder already holds the log:
+`apps/web/src/controller.ts` accumulates `tickInputs` and exposes the whole envelope through
+`buildReplay()`. The helper is **synchronous** — `sha256Hex` is a `@noble/hashes` implementation
+(`packages/engine/src/canonical.ts`), not `crypto.subtle.digest` — which is why §1's cancellation
+has no pre-request window to cover. Nothing new is captured — the digest is a function of
+data the app already has, and §7's privacy posture is untouched because **the digest reveals
+nothing the playtrace does not already carry**; it is a fingerprint of the log, not an addition
+to it.
+
+**No sim changes, and no new sim outputs.** The replay identity (`seed`, `boardId`,
+`rulesetHash`, `simVersion`) is already the shape `@wynding/replay` uses; outcome, score, stars,
+wave cursor and tick are already sim state the HUD reads every frame. Three fields are honestly
+render-layer facts that **do not exist in the source today** and are minted by the
+implementation, not extracted from the sim: `sessionId`, the render-layer UUID ADR 0011 defines
+and bounds; `runId`, minted per run start under the same rules; and `gameVersion`. Naming them
+now is cheaper than a reviewer discovering it later and reading "already in app state" as a
+promise the tree does not keep.
+
+**`gameVersion` is a build-time release identifier derived from git**, and it needs to be pinned
+here rather than left to the implementation, because §3's whole frequency rule rests on it. **The
+stored identity is the full commit SHA** — canonical, and exactly one per source revision by
+construction. A tag, where one exists, rides beside it as **display-only metadata and is never
+the identity.** An earlier revision minted "the tag if the build sits on one, else the short SHA",
+which spells a single revision two different ways: tag visibility differs between builds and
+between checkouts of the same commit, and an abbreviated SHA lengthens as the repository gains
+colliding prefixes. Either divergence mints a fresh `gameVersion` for a revision that already had
+one and re-asks a player the boundary below promises not to re-ask. The value is carried through
+the **same build-time define mechanism ADR 0013
+established** — `apps/web/build-config.ts` grows a version define alongside the hosted one.
+`hostedDefine` is the **precedent** for that mechanism, not the carrier: it defines a single
+boolean and is not where a version belongs. `apps/web/package.json` is deliberately not the
+source either — it is pinned at `0.0.0` and never bumped, so reading a version from it would make
+every release look identical. **Its boundary is a distinct deployed source revision** — not
+"every deployed build". A rebuild, a redeploy or a rollback reuses the revision it came from, so
+a revision-derived value cannot mint a fresh identity for one, and promising otherwise would be a
+rule the identifier could not keep. Redefining the boundary rather than complicating the
+identifier is also what §3's own rationale asks for: the version boundary matters because it is
+_the thing whose answers differ_, and redeploying identical code changes nothing worth re-asking
+about.
+
+**Rollback semantics follow, and are owned rather than glossed:** rolling back to a prior
+revision restores that version's ask state, including a consumed "Not now". That is correct, not
+a bug — the player is being served the game they already answered for. The cost stays honest:
+**"Not now" lasts until the next deployed _revision_**, which on an actively developed game can
+be days rather than weeks.
+
+**The analysis grouping keys are `simVersion` + `rulesetHash`, not `gameVersion`.** A deploy that
+changes only a stylesheet mints a new `gameVersion` while the game plays identically, so grouping
+answers by it would split one balance question across builds that share a ruleset. The envelope
+already carries both keys for exactly this reason: `gameVersion` governs how often we ask,
+`simVersion` and `rulesetHash` govern what the answers can be compared against.
+
+Nothing about the player, the device, or their settings. ADR 0011's exclusion applies unchanged
+and for the same reason: `Settings` is `colourMode` and `reducedMotion`, and shipping those with
+a behavioural record would attach disability-adjacent data to it.
+
+### 5. Transport: one contract with the playtrace endpoint family, two submissions
+
+**The survey uses the same endpoint family, the same versioned envelope and the same privacy
+constraints as the playtrace pipeline — as a separate submission, stored separately.** #100 asked
+for this argued either way, so both halves are argued.
+
+One contract, because the alternative is two schemas, two version ladders and two sets of
+retention rules for one system, and because the analysis that makes any of this worth doing joins
+a player's words to their run. Two submissions, because ADR 0011's first condition is not
+negotiable: free text must never ride the automatic path. Merging them would put player-authored
+prose into an automatic upload, which is precisely the thing that condition exists to prevent.
+
+The join is therefore **the run identity the envelope carries — anchored by `runId` and verified
+by the rest — not an attachment**. A consent checkbox offering to attach the run is not the right
+shape here, because under ADR 0011 the run is already on its way under its own notice — the
+checkbox would be asking permission for something already decided, and would imply the survey is
+what carries the run.
+
+**`sessionId` alone is not enough to name a run, and saying so is the point.** ADR 0011's
+rotation is deliberate: an id bounded by a run count and an elapsed time is _designed_ to span
+more than one run, because a diagnostic thread often does. So a player who finishes several runs
+before it rotates produces several playtraces sharing one id, and a survey joined on that field
+alone has multiple candidate runs — which would attribute a rating or a difficulty answer to the
+wrong outcome, in exactly the analysis §2 spent a question on.
+
+**The join is therefore layered, and the layers answer different questions.** `runId` **selects
+the instance** — carried by both records, exact, and the only field that can tell two runs apart
+when everything about their content agrees. The composite (`sessionId`, the replay identity, the
+outcome fields, `finalHash`) and `replayDigest` remain as the **verification layer**: they
+establish that the selected playtrace really is the run the survey describes, rather than
+something mislabelled. They are also the **fallback** for any record that predates the id.
+
+That fallback exists for robustness, not migration: **neither record exists in production yet**,
+so adoption is clean and there is no legacy-data gap to bridge — the survey endpoint has never
+run, and #133's capture is still being built.
+
+**`finalHash` is what makes that composite bite, and it is why the aggregate fields alone were
+not enough.** Two runs in one session can reuse a seed and finish with identical outcome, score,
+stars, wave and tick while differing in their input logs, their tower layouts and how they
+failed — which is precisely the difference a "something broke" report needs joined to the right
+playtrace. This repo already learned that lesson elsewhere: `outcomesMatch` in
+`apps/web/src/controller.ts` gates replay verification on `finalHash` and says why in its own
+comment — "a different tower layout reaching the same score" makes score and stars agree while
+the world diverged. A join on aggregates alone was repeating that mistake.
+
+The terminal state includes the final tower layout, so `finalHash` agreement is **evidence that
+two runs ended in the same state — at 32 bits of it**, which is a filter and not a proof: FNV-1a
+at that width is a discriminator, and equal values do not establish equal terminal states. It is
+emphatically not an identity,
+and an earlier revision of this ADR overclaimed by treating it as one: **distinct mid-run paths
+can converge on an identical terminal state**, and when they do, inspecting the candidate logs
+reproduces both paths without revealing which one the player was talking about. A mid-run
+"something broke" report could still be attached to the wrong playtrace.
+
+**`replayDigest` settles content identity, and it does so without the playtrace storing it: the
+digest is carried in one record and _derivable_ from the other**, because **the playtrace _is_
+the input log**, so a candidate's digest can always be recomputed. What its agreement gives is
+**strong evidence, at 256 bits, that two records describe the same input log** — and that claim
+is bounded twice over. It is evidence rather than proof, and it covers **the log only**: the
+seed, the ruleset and the outcome are separate envelope fields, carried separately and **checked
+separately**, not vouched for by this digest. `finalHash` and `replayDigest` are verification
+_inputs_ that each answer part of the question; neither is a certificate of identity.
+
+**What it cannot do is distinguish two instances of that content, and that is the limit of every
+content-derived key.** Two runs that reuse a seed and repeat the same inputs — an automated
+re-run, or a player deliberately replaying the same opening — produce byte-identical logs and
+therefore identical digests. Every narrowing field agrees too. An earlier revision of this ADR
+claimed at most one candidate could match; that was false for exactly this case, and it is why
+`runId` is the identity rather than an optimisation. Content-derived keys answer "is this the
+same run?"; only a minted id answers "which occurrence?".
+
+**A player who has taken ADR 0011's durable opt-out uploads no playtraces, so their submissions
+are standalone — by design, not by omission.** The premise elsewhere in this section, that the run
+is already on its way, is simply false for them, and the survey honours the opt-out literally:
+their runs do not leave the device, and their words still can. The envelope's run-identity fields
+still travel and still describe the run's shape — outcome, `score`, `stars`, wave, tick, `seed`,
+`boardId`, `rulesetHash`, `runId`, `replayDigest` — so the feedback is not context-free; there is
+simply no server-side playtrace for `runId` to select. What is unavailable is reproduction from
+the input log, and that is **the opt-out's honest cost, chosen by the player**, not a defect in
+this contract. No attach-my-run affordance is added to the survey for this case: it would
+resurrect precisely the consent-checkbox shape rejected above and complicate the surface for a
+small intersection. The escape hatch already exists in ratified machinery — #133's **local
+capture and export is deliberately ungated by the opt-out** (0011's own reasoning: an export
+sends nothing anywhere), and it lives as a results-dialog secondary action, so an opted-out
+player who wants a broken run investigated can export the playtrace and attach it to the issue
+form themselves. A deliberate manual act, consistent with "pressing Send is the act".
+
+Deletion is unaffected: §7 deletes by `sessionId` — sweeping that session's submissions and
+cascading to the copies joinable to them — and that coarser grain is the right one for a privacy
+operation anyway. §7 also names what deletion does _not_ reach (post-moderation aggregates, and
+request logs, which are not keyed by `sessionId` at all); this section does not restate those
+limits, it defers to them.
+
+Two questions this shape invites, answered here so nobody has to re-derive them:
+
+- **Why not `runId` alone?** Because a bare identifier proves nothing about content. It says two
+  records claim to be the same run; it cannot say they agree on the seed, the inputs or the
+  outcome. A mislabelled or truncated capture would join cleanly and silently. The layers answer
+  different questions — **which instance** (`runId`), and **whether the content matches**
+  (composite + `replayDigest`) — so keeping both is what makes a bad join detectable instead of
+  merely unlikely.
+- **UUID collision?** A v4 UUID's collision probability is negligible at any volume this game
+  will ever produce, and the verification layer would catch the only interesting case anyway: a
+  collision across _different_ content shows up immediately as a digest mismatch.
+
+**Privacy: `runId` is narrower than `sessionId`, not wider.** It is ephemeral to a single run and
+deliberately links nothing — where `sessionId` is bounded precisely because it groups a few runs
+together (ADR 0011), a per-run id groups none. It falls under the same non-persistence rules, is
+never stored on the device, and reveals nothing about the player: it distinguishes one run from
+another and does no other work.
+
+One consequence must be stated rather than left to be inferred: **the survey is player-initiated,
+so pressing Send is the act, and the playtrace opt-out does not govern it.** The opt-out governs
+automatic upload of runs. A player who has opted out of that and then deliberately types feedback
+and presses Send has sent feedback. The reverse must also hold — opting out must not silently
+remove the Give feedback button — or the opt-out becomes a mute button nobody asked for.
+
+The endpoint does not exist. Per ADR 0011 it belongs to `wynding-site` and gets its own ADR
+there; this one fixes what the payload is and what any transport must satisfy. Two requirements
+beyond §7's server-side length cap are named here for the same reason that one is — they are the
+contract's business even though the mechanism is the endpoint ADR's: **server-side volume
+bounding** (rate limiting and abuse controls) and **dedup**.
+
+**Full server-side schema validation is the third, and it is the one most easily assumed away.**
+Every gate this ADR describes on the client — the `aria-disabled` Send, the `maxlength`, the
+choice controls that only offer 1–5 — constrains the _UI_, and constrains nothing whatsoever
+about what a direct POST can contain. The endpoint must therefore validate and reject on its own
+authority: **`rating` required, an integer 1–5; `difficulty` optional, an integer 1–5 when
+present; `somethingBroke` a boolean; free text within the 2000-UTF-16-code-unit cap; every
+envelope field checked against its declared format; and unknown fields rejected outright.**
+Unknown-field rejection is called out because it is the one people skip: without it, an
+unrecognised key rides through validation into storage and reaches moderation and aggregation as
+unvalidated content. All of this happens **before** anything is stored, moderated or aggregated.
+
+Dedup here means **retry idempotency**, and it needs a stated key or the endpoint ADR inherits
+something that sounds impossible. There are no accounts and ADR 0011 makes the `sessionId`
+rotate and die on reload, so nothing can be deduplicated "per player" — the coherent target is
+the case §1 and the Consequences themselves create: a send that was aborted client-side but
+delivered anyway, followed by a re-send. The client therefore mints a **per-submission
+idempotency key**, and the scoping matters: the key belongs to _one logical submission_, not to
+the session and not to a payload. It is an **opaque value held in survey state**, minted when a
+submission is first composed, **reused unchanged for retries**, and **rotated on an edit event** —
+the player actually changing an answer — never by hashing what the payload happens to contain.
+
+Deriving the key from the payload was the obvious shortcut and it is wrong twice, which is why
+the contract names the mechanism instead of leaving it to taste. Edit A → B → back to A returns
+to the original key, so a genuinely new logical submission silently adopts the identity of the
+old one. And the payload contains `sessionId`, which ADR 0011 rotates on its own schedule — so a
+rotation between two attempts changes the payload _with no edit at all_, handing an unchanged
+retry a fresh key and letting it duplicate an already-accepted submission. An opaque key tracks
+the player's intent, which is the thing being deduplicated; a payload hash tracks bytes, which is
+not.
+
+Its behaviour is defined for both failure shapes. **Transient failure** (rejected, offline): the
+retry reuses the key, so the server sees the same submission twice and stores it once.
+**Accepted-but-lost acknowledgement**: the resend also carries the same key, so the duplicate is
+detectable server-side by key equality. The trade is stated plainly — **the error mode is a
+benign duplicate, never a swallowed edit.** A duplicate is something the receiving system can
+collapse; a silently discarded revision is not something anyone can recover.
+
+**A reload is out of scope by decision, not by omission.** All survey state is page-ephemeral —
+the draft answers, the opaque idempotency key, `runId` and `sessionId` alike — so a reload
+**abandons the logical submission**, and anything sent afterwards is a new submission with a new
+key. The corner that creates is the lost-acknowledgement one again: a reload between an accepted
+send and its acknowledgement leaves the old key unrecoverable, so a later resend cannot be
+collapsed against it. That lands on the already-stated side of the trade — a benign duplicate,
+never a swallowed edit — and it is recorded here so the silence reads as a decision, the way §3's
+dismissal states its own reload story.
+
+That distinction closes a case a session-scoped key would get wrong. Because a rejected send
+re-enables the form with the player's text preserved (§1), the player may edit their answers
+before retrying. If the server had in fact stored the first attempt and only the response was
+lost, a key scoped to the session would dedup the _edited_ attempt against the _stored earlier_
+payload and report success — while the revisions were never stored at all. A key that refreshes
+on edit cannot do that: an edited retry is a new logical submission and lands as one.
+
+`(sessionId, gameVersion)` still travels, but as **politeness and join context, not the dedup
+key** — and that reassignment **removes** the rotation problem rather than tolerating it. The key
+is opaque and held in survey state, so a `sessionId` rotation between two attempts leaves it
+untouched: the retry carries the same key and dedups correctly. An earlier revision of this ADR
+recorded a standing "rotation limit" at this point; it was a property of the superseded
+`(sessionId, gameVersion)` key and does not survive the opaque one, so it is withdrawn rather
+than restated. What rotation can still touch is the **join**, never the dedup — and only for
+records predating `runId`, which the fallback clause above already bounds to nothing in practice.
+Volume bounding stays a separate
+requirement: idempotency deduplicates an honest client's retries, and does nothing about a
+dishonest one. The mechanism — how the key is carried and enforced — belongs to the endpoint ADR.
+
+§3's once-per-`gameVersion` rule is
+client-side, and therefore bounds politeness rather than load: anyone willing to POST directly
+bypasses it entirely. §2's argument that a moderation queue "stays affordable" depends on volume
+being bounded somewhere the client cannot lie about, and an unauthenticated endpoint that accepts
+free text on a client-side promise has no such bound.
+
+### 6. Strings and announcements
+
+Every string goes through the typed catalog (ADR 0004) — the question set is then a content
+decision under the unused-key and cross-locale gates, not a scatter of literals the
+`wynding/no-ui-literals` rule would reject anyway. **The form must be axe-clean** — stated as an
+acceptance criterion for the follow-up implementation, not as a result this ADR can claim, since
+nothing is built here. The gate that enforces it already exists and is already required: the
+`e2e (functional + axe)` job, which runs `@axe-core/playwright` against the rendered DOM and
+fails CI on any violation (ADR 0003 §3). Real labels on every control rather than placeholder
+text, like every other overlay.
+
+Submit outcomes are announced in a live region — specifically, **the survey writes to the
+existing `role="status"` `aria-live="polite"` node that Verify already uses**, rather than adding
+a second one. Two live regions in one dialog would let two features announce over each other with
+no way for a screen reader to tell which message was current. Sharing one node instead requires a
+**single-owner handoff**: a feature takes the region when it has something to say, and holds it
+until it has **announced an outcome**, at which point it releases. For the survey the lifecycle is
+exact: it **takes** the region at Send ("Sending…"), **holds** it across the request, and
+**releases on the outcome announcement** — accepted, rejected or offline alike, since all three
+are final _for that attempt_. **Try again re-takes** it, and the cycle repeats.
+
+**Releasing is handing the region back, which is not the same as wiping it.** On the accepted
+path the final message — the thank-you and the reference — **stands
+after the survey collapses**, and is cleared only by the next owner taking the region (a Verify
+press) or by `hideResults()` on the next run start. Collapsing on every _other_ path clears,
+because a cancelled or abandoned send has no result worth announcing. This distinction is the
+whole point: a polite live region announces asynchronously, so clearing the node in the same turn
+that wrote the confirmation would race the announcement and could leave a screen-reader user with
+no confirmation at all — the accepted send would be the one outcome that announced nothing.
+**The handoff is enforced by control state, not by politeness.** Verify is a sibling action that
+writes this same node, and it stays pressable throughout a send unless something stops it — so a
+press mid-flight would overwrite "Sending…", and the survey's own callback would then overwrite
+the Verify result, leaving both features lying to the player and the single-owner rule true only
+on paper. Therefore **Verify is `aria-disabled` while the survey owns the region** (the same
+shared gate and the same announcement convention as every other suppressed control here), and is
+**re-enabled the moment the region is released** — which, per the lifecycle above, is when the
+outcome is announced rather than when the survey eventually collapses. So after a rejection the
+survey stays open with Try again and the preserved text, and **Verify is pressable again**; a
+Verify press then takes the region normally and its message replaces "Couldn't send." That is
+correct rather than a loss: the failure is still visible in the survey itself — Try again, and
+the text the player wrote — so the live region moving on costs nothing.
+
+The other direction needs no symmetric lock, which is worth saying so nobody adds one: opening
+the survey while a Verify result is displayed simply **takes** the region under the existing
+handoff, and taking clears. That is safe because Verify's write is synchronous and final at press
+time — there is no pending outcome of its own to lose, unlike a send in flight.
+
+**Success, failure and offline each get a player-visible, non-blocking result.** None of them
+ever blocks Play again. Silence on
+failure is the specific defect to avoid — a player who pressed Send and heard nothing has to
+guess, and will guess that it worked.
+
+Controls that are momentarily unavailable — Send before a rating exists, and the survey's controls
+while a submission is in flight — use **`aria-disabled` with activation suppressed at the click
+site, never the native `disabled` attribute**. That is the house convention and `overlay.ts`
+states its reason: dynamically disabling a control that currently holds focus drops it from the
+tab order and strands focus, and hides it from assistive technology entirely. `main.ts`'s
+`primaryAction` shows the other half — the keyboard path shares the same gate, so a press arriving
+through the keymap can never activate what the button itself refuses.
+
+**In flight, that is not enough on its own, and the difference is worth spelling out because the
+convention above is button-shaped.** `aria-disabled` is an announcement, not an enforcement, and
+click suppression only covers pointer _activation_ — neither stops a focused textarea accepting
+typing, and neither stops a radio or a checkbox changing under the keyboard. Left there, the
+answers on screen could drift away from the payload already in flight, and the player would be
+looking at something we never sent. So the in-flight state guards **every edit, not just
+activation** — and the level it guards at is load-bearing, because the obvious choice does not
+work:
+
+- **Free text goes `readonly`** — which, unlike `disabled`, keeps the control focusable and
+  readable, so the player can still see and select what they wrote.
+- **Choice controls suppress the interaction's default action at its source**: `keydown` (Arrow
+  and Space) and `click`. **Not `input`/`change`.** Those fire _after_ the state has already
+  flipped and are **not cancelable**, so a handler there cannot prevent anything — a focused
+  radio's Arrow-key default action checks the new option before `input` is dispatched, and
+  listening for it would leave the lock announcing a change it was supposed to stop.
+- **Fallback where a default action cannot be suppressed** on some surface: **restore the prior
+  state** immediately. Weaker, because it corrects rather than prevents, but it keeps the
+  displayed answers equal to the payload, which is the property that actually matters.
+
+All of it runs through the **same shared-gate discipline** this section applies to activation
+above, so
+the pointer and keyboard routes are guarded by one rule rather than two that can drift apart.
+When the send resolves as rejected or offline the guards lift, with the text preserved exactly as
+§1 specifies.
+
+### 7. Free text: caps, moderation before aggregation, retention and deletion
+
+- **Capped on both sides.** 2000 UTF-16 code units client-side, as `maxlength` counts them, so
+  the player sees the limit while typing; and again server-side, because a client-side cap is a
+  courtesy and not a control. The server's cap must not be stricter than the client's (§2).
+- **Disclosure follows ADR 0011's mechanism rather than inventing one.** That ADR discloses
+  request-log capture — IP and User-Agent, logged on every request to the site — through a
+  **privacy notice owned by `wynding-site`**, and makes the notice's existence a ship gate. The
+  survey adopts the same mechanism: the same notice, extended to cover survey submissions (the
+  free text, and §4's run identity), under the same gate — nothing is sent before it exists.
+  Because Send is a discrete, player-initiated act rather than an automatic upload, the Send
+  control also references that notice at the point of submission, which is the one moment a
+  player is actually deciding.
+- **Moderation before aggregation.** No free text reaches a dashboard, a digest, or any surface
+  someone reads in bulk until it has passed a moderation step. Recorded as a requirement of the
+  contract; the tooling is explicitly out of scope and is not built here.
+- **Retention: 90 days**, chosen as ours — long enough to cover a balance pass end to end, short
+  enough that the promise stays cheap to keep and is not quietly broken later. ADR 0011 delegates
+  "storage and retention" to `wynding-site`, so to be explicit rather than quietly contradictory:
+  **90 days is this contract's requirement on the receiving system, narrowing that delegation for
+  survey data specifically.** The receiving system still owns the mechanism; what it does not own
+  is whether free text may sit around longer than this.
+- **Send is the affirmative consent act, and there is no separate consent checkbox.** Pressing
+  Send is what consents to transmitting the enumerated fields under the site privacy notice, and
+  the point-of-submission notice reference above is _what the player is consenting to_ — which is
+  why that reference is a requirement rather than a courtesy. A separate consent checkbox is
+  rejected for the same reason §5 rejects the attach-the-run checkbox: it would ask permission
+  for the thing the player is already, unmistakably, doing. **The submission records which notice
+  version governed it** — that requirement is this contract's; whether the version is carried by
+  the client or stamped by the server is the endpoint ADR's choice.
+- **Deletion by `sessionId`**, as a defined manual process, owned by the receiving system
+  alongside the retention window. ADR 0011's third ship gate applies here in full: retention and
+  deletion must be defined before we start sending anything.
+
+  **Deletion cascades across every retained copy joinable to the submission**, not just the row
+  it arrived as: moderation-queue copies, idempotency records, and any other derived store that
+  carries the `sessionId`, all within the same 90-day frame. A deletion that clears the primary
+  record and leaves the moderation copy is not a deletion. **Post-moderation aggregates are the
+  stated exception**: once feedback has been folded into a count or a distribution it is no
+  longer joinable to a person or a session, and deletion does not unwind it — said out loud so
+  nobody discovers the limit by being surprised.
+
+  **Request-log PII is a different regime, and this contract does not pretend otherwise.** The
+  IP and User-Agent recorded at the edge are **not keyed by `sessionId`** and cannot be found by
+  it, so promising per-`sessionId` log deletion would be promising something the logs cannot
+  deliver. Those records are governed by the site's own log-retention and anonymisation policy,
+  under the disclosure ADR 0011 already requires. Two regimes, both named: the submission and its
+  derived copies are deletable by `sessionId`; the access logs age out under the site's policy.
+
+- **The `sessionId` is shown in the survey at or before Send** — not only in the message that
+  follows an accepted one. It is client-generated and needs no acknowledgment from anyone, so
+  there is nothing to wait for. This is not decoration: ADR 0011 requires that id to be bounded
+  and **never persisted**, so a player who does not capture it cannot recover it afterwards, and
+  showing it only on success would lose it in precisely the case that needs it most — a send that
+  raced a run start, where the request may have been delivered and stored while the client
+  stopped waiting for the answer.
+
+### 8. Before an endpoint exists: named, not built
+
+The zero-infrastructure interim is a **"Give feedback" button that deep-links the existing issue
+form ([#57](https://github.com/wynding/wynding/pull/57)) with the run's identity prefilled in the
+URL**. It measures whether the appetite is real before anyone builds a Lambda for it — but it
+**works with a small form change, not as-is**, and that dependency is named here rather than
+discovered by whoever picks it up. A GitHub issue form is prefilled **by field id**, and only for
+fields the form actually defines; `.github/ISSUE_TEMPLATE/feedback.yml` defines `kind`, `what`,
+`steps`, `build` and `env`, none of which is a machine-identity field. So shipping this means
+either **adding a run-identity field to `feedback.yml`** (after which it prefills cleanly by id)
+or **accepting the identity prefilled into one of the existing prose fields**, where the player
+is also typing. The first is a real, small change to this repo; the second is free and uglier.
+
+**The site's own feedback form (`wynding.net/#feedback`) is the other candidate, and it loses
+today.** It would dodge the GitHub account requirement outright, and plausibly the URL-log
+objection below along with it, since the request would go to our own origin. But it is
+unstructured and carries no run identity, so a submission through it cannot be joined to the run
+it describes — which is the entire reason this ADR exists. Giving it structured fields and a
+run-identity parameter would make it a serious option; at that point it has become the endpoint,
+and the interim question is moot.
+
+It is **named here as the pre-endpoint option and is not built by this ADR**, and it does not
+arrive cost-free. ADR 0011 considered the same deep link for playtraces and declined it: the run
+is encoded into a request to GitHub and reaches URL logs and history before the player submits
+anything. That objection survives here and is not answered by this ADR. One narrowing is
+available and should be recorded — a deep link that prefills **only the machine-generated run
+fields** (which presupposes the form change above), leaving the player to type their own words
+into GitHub's form, means no player-authored text ever rides our URL. That reduces the objection
+to the run fields alone; it does not dissolve it. Whoever ships this owes that argument, and this
+ADR does not pre-approve it.
+
+## The flow
+
+```text
+run resolves
+  └─► results dialog opens          Shell inert · `results` priority · Escape consumed, never a
+      │                             dismissal
+      focus ──► [Play again]        always first, never moved, never gated, never disabled
+      │
+      ├─ [Play again] ─────────────────────────────────────────────────► new run
+      ├─ [Verify this run] ──► wy-verify live region                     (exists today)
+      └─ [Give feedback] ──► the survey expands IN PLACE, below the summary
+                             focus ──► first question
+          ┌───────────────────────────────────────────────────────────┐
+          │  How was it?          ( 1  2  3  4  5 )   ← required      │
+          │  How hard was it?     ( 1  2  3  4  5 )                   │
+          │  [ ] Something broke                                      │
+          │  Anything else?       [ free text, ≤ 2000 code units ]    │
+          │                                                           │
+          │  Reference <sessionId> · what a deletion request quotes   │
+          │  Sending also means the site privacy notice applies       │
+          │                                                           │
+          │  [Send]   [Not now]        [ ] Don't ask again            │
+          └───────────────────────────────────────────────────────────┘
+                                       └─ a MODIFIER, not an action: arms
+                                          forever-dismissal, committed by the
+                                          next Not now / Send · unchecking
+                                          before that disarms it
+            │
+            ├─ [Send] with no rating ─► aria-disabled · press announces "choose a rating"
+            │                           (click and keymap routes alike) · nothing sent
+            │                           focus stays put
+            ├─ [Not now] ─────────────► collapses (+ don't-ask-again if armed)
+            │                           nothing sent · focus ──► [Give feedback]
+            │                           the button stays LIVE on this dialog — reopening
+            │                           allowed; offered again only on the next gameVersion
+            └─ [Send] ────────────────► controls aria-disabled (never `disabled`, so focus
+                 │                      is never dropped) · live region: "Sending…"
+                 │                      EDITS guarded too, not just activation: free text
+                 │                      readonly; choices suppress the DEFAULT ACTION at
+                 │                      keydown/click (NOT input/change — those fire after
+                 │                      the flip and cannot be cancelled) · fallback where
+                 │                      that is impossible: restore the prior state
+                 │                      [Verify this run] goes aria-disabled — it writes
+                 │                      this same region, so ownership is enforced, not
+                 │                      merely agreed; re-enabled when the region is
+                 │                      RELEASED, i.e. when the outcome is announced —
+                 │                      not when the survey eventually collapses
+                 ├─ accepted ─────────► "Thanks. Reference <sessionId>."
+                 │                       collapses (+ don't-ask-again if armed)
+                 │                       Give feedback retired · focus ──► [Play again]
+                 │                       consumes the ask for SUBSEQUENT dialogs too,
+                 │                       exactly as Not now does
+                 │                       the message STANDS through the collapse — cleared
+                 │                       only by the next owner (Verify) or hideResults()
+                 ├─ rejected ─────────► "Couldn't send." · text preserved · guards lift,
+                 │                       controls re-enable · editing before a retry mints
+                 │                       a NEW idempotency key, so the edit cannot be
+                 │                       deduped away against the earlier attempt
+                 │                       [Send] is relabelled [Try again] IN PLACE, so focus
+                 │                       never moved — it is already there
+                 │                       region RELEASED on this announcement → [Verify]
+                 │                       pressable again · [Try again] re-takes it
+                 │                       consumes NOTHING — the ask survives
+                 └─ offline ──────────► said as offline · otherwise exactly as rejected
+                                         nothing queued, nothing retried in the background
+
+── at ANY point above ──────────────────────────────────────────────────────────────────
+a run starts (Play again, or any other path through `hideResults()`)
+  └─► the whole submission OPERATION is cancelled — token minted at Send, killed here,
+      wired into the fetch. Digest + payload assembly are SYNCHRONOUS (sha256Hex),
+      so there is no pre-request window to guard: the fetch is the only async boundary.
+      expansion collapses · live region released AND cleared
+      (an aborted send has no result to announce — unlike the accepted path above, whose
+      message hideResults() is precisely the thing that clears)
+      COMMITS NOTHING — not even an armed don't-ask-again: the committing actions are
+      exactly Not now and an accepted Send, and Play again is neither · the ask survives
+      no retry, no queue, and no result from this run ever lands on the next one's dialog
+      the abort stops the CLIENT waiting — a delivered request may still have been stored,
+      which is why the reference above is shown at Send and not only on success
+```
+
+Play again is reachable from every state in that sketch, including while a submission is in
+flight. That is the property the whole surface is arranged around.
+
+## Considered options
+
+- **A stacked survey dialog over the results dialog.** Rejected on mechanism, not taste: the
+  modal owner shows only the highest-priority open overlay, and results already holds the top
+  priority. Stacked _below_ it the survey stays invisible while results is open — and then
+  appears at the worst moment, because `close()` calls `applyActive()`, which promotes the
+  highest-priority remaining entry: the survey would pop up over the run the player had just
+  started. Stacked at _equal_ priority it hides the results screen it is supposed to accompany.
+  Both need `modal.ts` changed to support a shape inline expansion gets for free.
+- **Ask every run, or once per session.** Every run trains reflex-dismissal and poisons the
+  channel within a sitting. Once per session under-samples badly, and "session" is a slippery
+  unit in an app that installs as a standalone PWA and can hold a tab open for days — the same
+  reason ADR 0011 refused to bound its session id by page lifetime.
+- **One merged payload with the playtrace.** Rejected by ADR 0011's first condition. It is the
+  simplest thing to build and would put player-authored free text on the automatic path.
+- **An opt-in checkbox to attach the run to the survey.** Redundant under ADR 0011, where the run
+  travels under its own notice; `runId` joins them (§5) without asking a question whose honest
+  answer is "we already did".
+- **Ship the deep-link interim now instead of an ADR.** Rejected as the ordering, not the idea:
+  §8 keeps it available, and deciding the question set and the retention rules first is what
+  stops the interim from setting them by default.
+
+## Consequences
+
+- **The first player-authored text this project transmits anywhere.** Every constraint in §7
+  exists because free text is unbounded by construction and someone will type their own name into
+  it.
+- **The opt-out buys privacy with diagnosability, and the survey does not paper over the
+  trade.** An opted-out player can still say a run broke; nobody can replay the run they mean,
+  because the log never left their device. That is the opt-out working as specified rather than a
+  gap to be closed — and the one route back, exporting the playtrace by hand and attaching it, is
+  deliberately theirs to choose rather than ours to prompt for.
+- **A client-side abort stops the client waiting; it does not un-send.** §1's cancellation kills
+  the whole submission operation, but a request already delivered may still be durably stored at
+  the far end. This is
+  exactly why §7 shows the `sessionId` at Send rather than on success: without it, the one
+  submission a player most plausibly wants deleted — the one whose outcome they never saw — would
+  be the one whose reference they never got.
+- **The results dialog gains a third action and stops being trivially simple.** Its contrast
+  spot-check, its axe coverage and its focus behaviour all now have more surface to hold, and the
+  live region is now genuinely shared: §6 decides that the survey writes to Verify's existing
+  `role="status"` node under a single-owner handoff, where releasing hands the region back rather
+  than wiping it, and an accepted send's confirmation deliberately outlives the collapse that
+  follows it. The cost is a protocol two features must both keep, rather than a second live region
+  to maintain — a trade taken deliberately, because two regions announcing over each other is the
+  worse failure and the harder one to notice.
+- **Survey state does not survive a reload, deliberately.** The draft, the idempotency key,
+  `runId` and `sessionId` are all page-ephemeral (§5), so a reload abandons the submission in
+  progress and anything sent afterwards is a new one. The cost is bounded and already priced in:
+  a reload between an accepted send and its acknowledgement can leave a duplicate nothing can
+  collapse — the benign side of the trade, chosen over persisting identifiers ADR 0011 refuses to
+  create.
+- **The once-per-version promise is only as durable as the storage under it**, and the storage
+  under it does not exist yet. Until [#142](https://github.com/wynding/wynding/issues/142) or the
+  `install.ts` pattern carries it, a naive implementation silently degrades to "every reload",
+  which is the failure mode most likely to ship unnoticed because it looks fine to whoever wrote
+  it.
+- **Deletion depends on the player having written down a number.** Honest rather than
+  comfortable: bounded, never-persisted session ids and durable per-player deletion are in real
+  tension, and this ADR resolves it toward the id staying bounded. A player who loses the
+  reference has no route to their submission, and no promise is made that they do.
+- **Completion rate is now a number worth watching.** Four questions is a judgement, not a
+  measurement; if the surface gets used and the free-text field is where players stop, that is
+  evidence to cut a question, and §2's standing burden is what makes that a decision rather than
+  a drift.
