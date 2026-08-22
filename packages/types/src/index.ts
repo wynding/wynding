@@ -210,7 +210,10 @@ export interface BalanceConstants {
 export interface ScoringConfig {
   /** score = Σ kill-bounties + max(0, lives) × survivalMul. */
   readonly survivalMul: number; // int 0..1e6
-  /** Non-decreasing lives cutoffs for [1★, 2★, 3★]; a loss earns 0 stars. */
+  /** Non-decreasing lives cutoffs for [1★, 2★, 3★]. Only a LOSS earns 0 stars: since
+   *  sv16 a win floors at 1★ even below the 1★ cutoff, so that first cutoff no longer
+   *  separates a graded win from an ungraded one — it is the point at which the ladder
+   *  starts being read, not a bar a win can fall under. */
   readonly starThresholds: readonly [number, number, number]; // positive ints ≤ 1e6, non-decreasing
   /** 0 = off; else credit = ⌊ticksRemaining / earlyCallScoreDivisor⌋. Pinned to 0
    *  by the M1/M2-S1 capability profile. */

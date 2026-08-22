@@ -14,7 +14,7 @@
 // `formatVersion` never bumps for this; only `simVersion` does, and each story that
 // adds behavior widens its own dimension(s) here alongside its `SIM_VERSION` bump.
 //
-// DIMENSIONS THAT DEFER TO THE SCHEMA at sv15 (a profile field wider than or equal
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv16 (a profile field wider than or equal
 // to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
 // and this profile's own gate has no rejection witness of its own —
 // `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
@@ -145,22 +145,23 @@ export interface CapabilityProfile {
   readonly maxBurstTravelTicks: number;
 }
 
-/** `SIM_VERSION` 15 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  sv14's capability surface, field for field. No axis activates, no ceiling moves,
- *  no witness changes hands — this entry is the sv14 profile's contents verbatim, and
- *  that is not an oversight. The bump (issue #70) exists for a step-behavior change no
- *  profile can express: the opening launch pays nothing, so a log carrying an index-0
- *  early call resolves differently than it did at sv14. Which bundles COMPILE is
- *  identical either side of the bump.
+/** `SIM_VERSION` 16 (imported from `./ruleset-shared`, the dependency-free leaf):
+ *  sv15's capability surface, field for field. No axis activates, no ceiling moves,
+ *  no witness changes hands — this entry is the sv15 profile's contents verbatim, and
+ *  that is not an oversight. The bump (issue #25) exists for a change no profile can
+ *  express, and this time not even a step-behavior one: the TERMINAL GRADING contract
+ *  moves (a win floors at ≥ 1 star, a loss scores 0), so a log resolves to a different
+ *  score/stars pair than it did at sv15 while simulating bit-for-bit identically. Which
+ *  bundles COMPILE is identical either side of the bump.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv14 profile is deleted with this bump. This
- *  is the first bump whose deleted entry would still have described bundle legality
- *  accurately — and it goes anyway, because a profile's job is to describe what THIS
- *  build can correctly SIMULATE, not what it can parse. v15 tick code resolves an
- *  index-0 early call differently, so a live sv14 entry would stand as a claim that
- *  this build honours sv14 semantics; it does not. Replay's strict version equality
- *  already owns cross-version rejection, so there is nothing for a stale profile to
- *  serve.
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv15 profile is deleted with this bump. Like
+ *  the sv14 entry before it, the deleted entry would still have described bundle
+ *  legality accurately — and it goes anyway, because a profile's job is to describe what
+ *  THIS build can correctly SIMULATE, and simulating a replay includes handing back the
+ *  score its version promises. v16 grades a terminal state differently, so a live sv15
+ *  entry would stand as a claim that this build honours sv15 semantics; it does not.
+ *  Replay's strict version equality already owns cross-version rejection, so there is
+ *  nothing for a stale profile to serve.
  *
  *  WITNESSES ARE UNCHANGED here — every ceiling genuinely narrower than the v2 schema
  *  (`maxArmor`, `maxLeakCost`, `maxDotDurationTicks`, `maxDotDurationCadenceRatio`,
@@ -170,7 +171,7 @@ export interface CapabilityProfile {
  *  schema's own enum and retired `requiredLeakCost` is history, not a description of
  *  this profile.) */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  15: {
+  16: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,

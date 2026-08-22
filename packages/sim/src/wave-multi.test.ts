@@ -6,7 +6,14 @@
 // satAdd/satMul saturation helpers, and ragged wave-column termination.
 
 import { describe, it, expect } from 'vitest';
-import { createInitialState, step, deriveScore, hashSimState, type SimInput } from './index';
+import {
+  createInitialState,
+  step,
+  deriveScore,
+  deriveStars,
+  hashSimState,
+  type SimInput,
+} from './index';
 import { satAdd, satMul } from './combat';
 import { testBundle, testRuleset } from './test-support';
 import { compileRuleset } from './ruleset';
@@ -212,8 +219,12 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
           // the mark's kill bounty AND wave 1's clear bonus (7) — wave 0's bonus
           // is forfeited (it leaked). Exact delta, no inequality.
           expect(s.bounty).toBe(bountyBefore + killBounty + 7);
-          // Loss priority: deriveScore in the lost branch is kill-bounty ONLY.
-          expect(deriveScore(s, ruleset)).toBe(s.cumulativeKillBounty);
+          // Loss priority, and the sharpest possible statement of it (#25, sv16): this
+          // tick BANKED a kill bounty — settlement really did pay before the terminal
+          // was marked — and the run still grades 0, because a loss scores nothing at
+          // all. The bounty paid into the wallet; it did not pay into the score.
+          expect(s.cumulativeKillBounty).toBeGreaterThan(0);
+          expect(deriveScore(s, ruleset)).toBe(0);
         }
       }
     }
@@ -241,12 +252,20 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
   });
 });
 
-describe('deriveScore — outcome-dependent branches + credit forfeiture on a loss', () => {
+describe('deriveScore — outcome-dependent branches + TOTAL forfeiture on a loss (#25, sv16)', () => {
   // These three branches need a POSITIVE credit to be worth anything, and since sv15
   // the opening launch pays nothing (#70) — so each fixture below leaves wave 0 to its
   // own short countdown and accrues the credit by calling wave 1 (index 1) early. The
   // coverage is the same score-branch coverage as before; only the wave it is anchored
   // to moved.
+  //
+  // The lost branch below is the one that MOVED at sv16 (owner ruling, 2026-08-22). It
+  // used to pin `deriveScore === s.cumulativeKillBounty` — the superseded "Σ kill-
+  // bounties ONLY" contract — and now pins 0. That flip is only worth anything if the
+  // fixture actually banked a kill bounty to forfeit, so the loss fixture DEFENDS the
+  // lane (the other two branches leave it open) and asserts the bounty is nonzero
+  // BEFORE reading the score: a zero-kill loss would grade 0 under either contract and
+  // prove nothing.
   it('running: kill bounty + early-call credit (the live readout)', () => {
     const ruleset = testRuleset(OPEN, {
       earlyCallScoreDivisor: 10,
@@ -286,22 +305,34 @@ describe('deriveScore — outcome-dependent branches + credit forfeiture on a lo
     expect(s.cumulativeEarlyCallCredit).toBeGreaterThan(0); // the credit is retained on a win
   });
 
-  it('lost: kill bounty ONLY — the early-call credit is forfeited entirely, even if positive', () => {
+  it('lost: ZERO — the kill bounty is forfeited along with the early-call credit, both positive', () => {
     const ruleset = testRuleset(OPEN, {
       startingLives: 2,
+      creepHp: 10, // one-shot creeps, so the lone tower below banks real kills...
       earlyCallScoreDivisor: 1, // maximizes the credit so forfeiture is unmissable
       waves: [
+        // ...and 20 creeps at spacing 5 against 2 lives still overrun it.
         { waveCount: 10, waveSpacing: 5, countdownTicks: 5 },
         { waveCount: 10, waveSpacing: 5, countdownTicks: 50 },
       ],
     });
     let s = createInitialState(1, ruleset);
-    for (let t = 0; t < 6; t++) s = step(s, ruleset, []); // wave 0 launches naturally at tick 5
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 1 }, towerId: 'basic' }]);
+    for (let t = 1; t < 6; t++) s = step(s, ruleset, []); // wave 0 launches naturally at tick 5
     s = step(s, ruleset, callEarly); // wave index 1, rem = 50 → credit = 50
     for (let t = 0; t < 2000 && s.phase === 'running'; t++) s = step(s, ruleset, []);
     expect(s.phase).toBe('lost');
-    expect(s.cumulativeEarlyCallCredit).toBeGreaterThan(0); // credit WAS accrued live...
-    expect(deriveScore(s, ruleset)).toBe(s.cumulativeKillBounty); // ...but forfeited on loss
+
+    // BOTH accumulators are positive at the terminal state — this is the anti-vacuity
+    // half, and it is asserted first so a fixture that stopped killing (or stopped
+    // calling early) fails HERE, naming the reason, rather than passing a hardcoded 0.
+    expect(s.cumulativeKillBounty).toBeGreaterThan(0);
+    expect(s.cumulativeEarlyCallCredit).toBeGreaterThan(0);
+
+    // ...and the loss grades 0 anyway: sv16 forfeits the kill bounty too, so there is
+    // nothing left of the live readout at all. Stars agree — the symmetry is the point.
+    expect(deriveScore(s, ruleset)).toBe(0);
+    expect(deriveStars(s, ruleset)).toBe(0);
   });
 });
 

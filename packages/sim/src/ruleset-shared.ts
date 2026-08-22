@@ -82,8 +82,23 @@ export class RulesetError extends Error {
  *  index-0 early call resolves differently; every other log is bit-for-bit sv14.
  *  `Impact`, `SimState` and `rulesetHash` are untouched, and so is the capability
  *  profile — this is the first bump that is PURELY a tick-rule change, which is
- *  precisely the class the version exists to fence off from stored replays. */
-export const SIM_VERSION = 15;
+ *  precisely the class the version exists to fence off from stored replays.
+ *
+ *  Issue #25 bumps 15 → 16 — the TERMINAL GRADING CONTRACT, and the first bump that
+ *  changes no tick rule at all. `step` is byte-identical to sv15: every hash, every
+ *  trace, every `SimState` field is untouched, and the determinism golden does not move
+ *  (verified, not assumed). What moves is what the two derived functions read OUT of a
+ *  terminal state (owner rulings, 2026-08-22): a WIN now always earns ≥ 1 star
+ *  (`deriveStars` floors to 1 below the lowest authored threshold), and a LOSS now
+ *  scores 0 (`deriveScore`'s lost branch forfeits the kill bounty alongside the
+ *  early-call credit, superseding the sv6–sv15 "Σ kill-bounties only" contract).
+ *  Grading is nevertheless part of the versioned replay contract, not decoration: ADR
+ *  0006 makes the validator accept only its OWN version precisely so two same-version
+ *  implementations must agree on the score they hand back, so a build that grades a
+ *  stored sv15 replay by sv16 rules would answer a question it was never asked. The
+ *  capability profile is again unchanged — which bundles compile is identical either
+ *  side of the bump. */
+export const SIM_VERSION = 16;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

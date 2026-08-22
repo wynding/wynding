@@ -245,14 +245,18 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
   /** The Score chip's displayed number, read off the chip's full ICU message node (the
    *  accessible text) rather than the chip's raw textContent, which also carries the
    *  aria-hidden glance glyph. */
-  function scoreChip(root: HTMLElement): number {
-    const text = root.querySelector('[data-wy-chip="score"] .wy-chip-full')?.textContent ?? '';
+  function chipNumber(root: HTMLElement, slot: string): number {
+    const text = root.querySelector(`[data-wy-chip="${slot}"] .wy-chip-full`)?.textContent ?? '';
     const digits = /-?\d+/.exec(text);
-    if (digits === null) throw new Error(`no number in Score chip text: ${JSON.stringify(text)}`);
+    if (digits === null) {
+      throw new Error(`no number in ${slot} chip text: ${JSON.stringify(text)}`);
+    }
     return Number(digits[0]);
   }
+  const scoreChip = (root: HTMLElement): number => chipNumber(root, 'score');
+  const livesChip = (root: HTMLElement): number => chipNumber(root, 'lives');
 
-  it('reads 0 before Start, shows the terminal score at resolution, and is back to 0 the instant Play-again is clicked', () => {
+  it('reads 0 before Start, shows the live total mid-run and the authoritative terminal at resolution, and resets the instant Play-again is clicked', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const sched = manualSchedule();
@@ -284,19 +288,43 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
     key('Enter'); // confirm the build
     sched.frame((clock += 16));
 
+    const startingLives = livesChip(root);
+    expect(startingLives).toBeGreaterThan(0);
+
     dockButton(root, 'Start').click();
     const results = root.querySelector<HTMLElement>('.wy-results')!;
+
+    // MID-RUN, before anything resolves: the chip carries the earned-so-far total, which
+    // the tower built above makes nonzero. Asserted as its own step because the terminal
+    // assertion below can no longer carry it (see the re-pin note there) — this is what
+    // proves the chip renders real values rather than a constant.
+    let liveScore = 0;
+    for (let i = 0; i < 4000 && results.hidden && liveScore === 0; i++) {
+      sched.frame((clock += 300));
+      liveScore = scoreChip(root);
+    }
+    expect(liveScore).toBeGreaterThan(0);
+    expect(results.hidden).toBe(true); // ...and it was LIVE, not a terminal readout
+
     for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
     expect(results.hidden).toBe(false);
 
-    // At resolution the chip carries the authoritative total, survival term included.
-    const terminalScore = scoreChip(root);
-    expect(terminalScore).toBeGreaterThan(0);
+    // Re-pinned #25 (SIM_VERSION 15 → 16, measured). At resolution the chip stops showing
+    // the earned-so-far readout and shows the AUTHORITATIVE terminal — and this fixture's
+    // one tower loses the ten-wave arc, so since sv16 that authoritative number is 0: a
+    // loss forfeits its kill bounty along with its early-call credit. Measured: this
+    // chip read 6 before the bump. The live→authoritative switch is still witnessed, and
+    // more sharply than before (a nonzero live value replaced by 0), but the Play-again
+    // reset can no longer be witnessed on the Score chip — so it is witnessed on the
+    // LIVES chip instead, which really does go 0 → 10 across the click.
+    expect(scoreChip(root)).toBe(0);
+    expect(livesChip(root)).toBe(0); // the run ended at zero lives
 
     // The seam this test exists for: the repaint must be synchronous with the click, not
     // deferred to the next scheduled frame — no frame is driven between these two lines,
     // and in a throttled background tab there might not be one for a long while.
     results.querySelectorAll<HTMLButtonElement>('.wy-btn')[0]!.click(); // Play again
+    expect(livesChip(root)).toBe(startingLives);
     expect(scoreChip(root)).toBe(0);
 
     app.destroy();

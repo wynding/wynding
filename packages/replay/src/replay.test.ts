@@ -41,7 +41,10 @@ describe('replay validate() — terminal re-simulation + score', () => {
     expect(first.finalHash).toBe(again.finalHash);
     expect(first.score).toBe(again.score);
     expect(first.stars).toBe(again.stars);
-    // Undefended M1: the wave leaks out → a loss (0 stars, score = kill-bounties = 0).
+    // Undefended M1: the wave leaks out → a loss, which since sv16 (#25) grades 0 on both
+    // readouts regardless of what it banked. This fixture banks nothing either (no tower,
+    // no kills), so it reaches 0 by both routes at once; `packages/sim`'s wave-multi loss
+    // branch and `packages/content`'s registry invariant are where the two are told apart.
     expect(first.stars).toBe(0);
     expect(first.score).toBe(0);
     expect((first.ticks ?? 0) < 36_000).toBe(true); // terminated well before the ceiling
@@ -216,7 +219,12 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
   it('rejects a canonical replay that logs ANY tick past the terminal transition', () => {
     // The undefended wave leaks out and the match ends (loss) well before tick 800. A
     // canonical replay must END at the terminal tick — ANY logged tick after it (even an
-    // empty or noop-only one) is padding and rejected (strict PLAN/ADR 0006 contract).
+    // empty or noop-only one) is padding and rejected (strict PLAN/ADR 0006 contract,
+    // re-ratified for #25 item 1 on 2026-08-22: the narrower anti-cheat surface wins over
+    // tolerance for other clients, and the strictness is CONTRACT, not an accident of
+    // implementation). `apps/server`'s parity suite pins the same rejection on a WINNING
+    // replay, through the real handler, as a 422 with this exact reason — the case the
+    // issue was actually filed about.
     for (const trailing of [
       [{ kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId: 'basic' }] as SimInput[],
       [{ kind: 'noop' }] as SimInput[],

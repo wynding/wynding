@@ -465,8 +465,16 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(state.cumulativeKillBounty).toBe(102);
     expect(state.cumulativeEarlyCallCredit).toBe(3);
     expect(state.bounty).toBe(120);
-    // Lost score formula: kill-bounty ONLY — no early-call credit, no survival term.
-    expect(deriveScore(state, ruleset)).toBe(102);
+    // Re-pinned #25 (SIM_VERSION 15 → 16, measured): the ONLY line in this scenario that
+    // moves. Grading is derived FROM the terminal state and is no part of it, so both
+    // hashes above, the tick, the wave arrays and all three accumulators are byte-
+    // identical to sv15 — the whole diff of the bump is here. Lost score formula since
+    // sv16: ZERO. The 102 kill bounty is forfeited alongside the 3 early-call credit,
+    // and the state's own `cumulativeKillBounty` two lines up is what keeps that
+    // non-vacuous: this run really did bank 102 and really does grade 0.
+    //   score  102 → 0
+    //   stars    0 → 0 (unchanged — a loss never earned a star)
+    expect(deriveScore(state, ruleset)).toBe(0);
     expect(deriveStars(state, ruleset)).toBe(0);
   });
 });

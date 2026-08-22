@@ -10,11 +10,15 @@ import { describe, it, expect } from 'vitest';
 import {
   parseRulesetJson,
   compileRuleset,
+  createInitialState,
+  deriveScore,
+  deriveStars,
   MAX_RULESET_TEXT_UNITS,
   MAX_MATCH_TICKS,
   rulesetDigest,
   RulesetError,
   DIAG_LEN,
+  type SimState,
 } from '@wynding/sim';
 import {
   DEFAULT_RULESET_ID,
@@ -450,11 +454,22 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
 
 describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 sets the margin)', () => {
   // `deriveScore` (index.ts): running/won = cumulativeKillBounty + cumulativeEarlyCallCredit
-  // (+ max(0,lives) × survivalMul when won); lost = cumulativeKillBounty only, early-call
-  // credit forfeited. A leaked creep earns no kill bounty. Derived entirely from the
-  // COMPILED bundle's own bounty/leakCost/lives/survivalMul terms — never typed as a
-  // literal — so a catalog or wave edit changes what this test computes, not just what it
-  // happens to match.
+  // (+ max(0,lives) × survivalMul when won); lost = ZERO since #25 / sv16 — the kill bounty
+  // is forfeited alongside the early-call credit. A leaked creep earns no kill bounty.
+  // Derived entirely from the COMPILED bundle's own bounty/leakCost/lives/survivalMul terms
+  // — never typed as a literal — so a catalog or wave edit changes what this test computes,
+  // not just what it happens to match.
+  //
+  // WHAT #25 DID TO THIS BLOCK. Through sv15 the losing side of the ordering was a BALANCE
+  // property: the best losing score was `B − (cheapest Σbounty that spends L lives)` = 201,
+  // and keeping it under the worst win was a tuning obligation discharged by `survivalMul`.
+  // sv16 makes the losing side a THEOREM — every loss grades 0 — so the knapsack below no
+  // longer computes a score. It is kept, and renamed to what it now measures: the largest
+  // kill bounty a losing run could have banked, i.e. the SIZE of the forfeiture. That keeps
+  // the content-derived arithmetic (and its 201) under test rather than deleting it, and
+  // the ordering itself is now asserted against the real `deriveScore`/`deriveStars` on a
+  // forged terminal loss carrying exactly that bounty — the strongest form of the claim,
+  // since it fails if the contract is ever quietly reverted, not merely if a number drifts.
   //
   // M2-S11 P4 replaces S10's PER-KIND GREEDY with the plan's own BOUNDED KNAPSACKS over
   // the SCHEDULED CREEP MULTISET. The greedy silently assumed both extremes are reached by
@@ -492,10 +507,12 @@ describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 s
   // B — total scheduled kill bounty (ruling 8's "today's arithmetic: 211" cross-check).
   const B = scheduled.reduce((sum, c) => sum + c.bounty, 0);
 
-  // KNAPSACK 1 — BEST LOSS = B − min Σbounty over leak-subsets with ΣleakCost ≥ L.
-  // The life axis SATURATES at L (spending more than L lives is still just a loss), so a
-  // 0/1 knapsack over `scheduled` with the index clamped to L answers it exactly. Inner
-  // loop descends so each scheduled creep is used at most once.
+  // KNAPSACK 1 — BEST LOSING KILL BOUNTY = B − min Σbounty over leak-subsets with
+  // ΣleakCost ≥ L. The life axis SATURATES at L (spending more than L lives is still just
+  // a loss), so a 0/1 knapsack over `scheduled` with the index clamped to L answers it
+  // exactly. Inner loop descends so each scheduled creep is used at most once. Through
+  // sv15 this WAS the best losing score; since sv16 it is the largest bounty a loss can
+  // forfeit, and the forged terminal below is what turns it into a grade.
   const INF = Number.POSITIVE_INFINITY;
   const minBounty = new Array<number>(L + 1).fill(INF);
   minBounty[0] = 0;
@@ -506,7 +523,7 @@ describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 s
       minBounty[next] = Math.min(minBounty[next]!, minBounty[spent]! + c.bounty);
     }
   }
-  const bestLossScore = B - minBounty[L]!;
+  const bestLossKillBounty = B - minBounty[L]!;
 
   // KNAPSACK 2 — WORST WIN = min over leak-subsets with ΣleakCost ≤ L−1 of
   // (B − Σbounty) + (L − ΣleakCost) × survivalMul, at zero early-call credit. Here the
@@ -530,21 +547,58 @@ describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 s
   /** The margin S11 pre-committed to (ruling 3), before any of these numbers were run. */
   const MARGIN_FLOOR = 15;
 
+  /** The best-case losing terminal, graded by the REAL scorer: a forged `lost` state
+   *  carrying the largest kill bounty any losing run of this bundle could have banked,
+   *  plus a deliberately outsized early-call credit. Both accumulators are nonzero, so a
+   *  scorer that forfeited neither, or only one, would grade this above 0. */
+  function bestCaseLosingTerminal(): SimState {
+    const compiled = compileRuleset(bundle, board!.id);
+    return {
+      ...createInitialState(1, compiled),
+      phase: 'lost',
+      lives: 0,
+      cumulativeKillBounty: bestLossKillBounty,
+      cumulativeEarlyCallCredit: 1_000,
+    };
+  }
+
   it('worst win beats best loss by the pre-committed margin, derived from the bundle', () => {
+    const compiled = compileRuleset(bundle, board.id);
+    const bestLossScore = deriveScore(bestCaseLosingTerminal(), compiled);
     console.log(
-      `registry.test.ts: B=${B} bestLossScore=${bestLossScore} worstWinScore=${worstWinScore} ` +
+      `registry.test.ts: B=${B} bestLossKillBounty=${bestLossKillBounty} ` +
+        `bestLossScore=${bestLossScore} worstWinScore=${worstWinScore} ` +
         `margin=${worstWinScore - bestLossScore} survivalMul=${survivalMul}`,
     );
     // Re-pinned M2-S11 P4 (measured). `B` is unchanged from P3 at 211 — P4 moved no
-    // creep bounty and no wave composition. `bestLossScore` is unchanged at 201: the
+    // creep bounty and no wave composition. `bestLossKillBounty` is unchanged at 201: the
     // cheapest way to spend 10 lives is still ten 1-bounty leaks, and the schedule holds
     // 62 of them, so the knapsack and the retired greedy agree here. `worstWinScore`
     // moves 203 → 218 purely because P4 raised `survivalMul` 35 → 50 — the one lever
     // ruling 8 assigns to this margin, because it appears only in the winning terminal
     // and so moves worst-win without touching combat, economy or clear bonuses.
     expect(B).toBe(211);
-    expect(bestLossScore).toBe(201);
+    expect(bestLossKillBounty).toBe(201);
     expect(worstWinScore).toBe(218);
+    // Re-pinned #25 (SIM_VERSION 15 → 16, measured): the best losing SCORE moves 201 → 0,
+    // and the margin 17 → 218 with it. `survivalMul` is no longer load-bearing for this
+    // invariant — but the floor is kept and still checked, because it is what would catch
+    // a future bundle whose worst win collapsed toward zero.
+    expect(bestLossScore).toBe(0);
     expect(worstWinScore - bestLossScore).toBeGreaterThanOrEqual(MARGIN_FLOOR);
+  });
+
+  it('the ordering is now STRUCTURAL, not a tuning result — the richest possible loss still grades 0★/0 (#25, sv16)', () => {
+    const compiled = compileRuleset(bundle, board.id);
+    const lost = bestCaseLosingTerminal();
+    // Anti-vacuity first: this terminal really is carrying both score inputs, and the
+    // bounty half is the arc's own maximum, not a token value.
+    expect(lost.cumulativeKillBounty).toBe(201);
+    expect(lost.cumulativeEarlyCallCredit).toBeGreaterThan(0);
+    // ...and it grades 0 on both readouts, so no losing run of this bundle can reach any
+    // winning run's score — without a leaderboard consumer gating on phase or stars.
+    expect(deriveScore(lost, compiled)).toBe(0);
+    expect(deriveStars(lost, compiled)).toBe(0);
+    expect(worstWinScore).toBeGreaterThan(0); // the winning side is nonempty
   });
 });

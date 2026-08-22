@@ -807,7 +807,7 @@ describe('hud score — earned components while live, authoritative once termina
     expect(score).toBeGreaterThan(won.cumulativeKillBounty);
   });
 
-  it('keeps the kill component at a loss, where the survival term contributes zero', () => {
+  it('reads 0 at a loss even with a kill banked — the HUD shows the forfeiture (#25, sv16)', () => {
     // A played-out M1 loss WITH kills is unreachable: the wave is 10 creeps against 10
     // lives, so any kill leaves at least one life and the run resolves `won`. Take a real
     // run that accrued a kill and drive it to the terminal loss state directly (PLAN.md
@@ -816,9 +816,14 @@ describe('hud score — earned components while live, authoritative once termina
     // Forge a COPY into the loss state rather than mutating the sim's own object —
     // render code (tests included) reads sim state, never writes it (AGENTS.md layering).
     const lost: SimState = { ...run, lives: 0, phase: 'lost' };
-    expect(deriveScore(lost, ruleset)).toBe(lost.cumulativeKillBounty); // survival term is 0
-    expect(deriveHud(lost, ruleset).score).toBe(deriveScore(lost, ruleset));
-    expect(deriveHud(lost, ruleset).score).toBeGreaterThan(0);
+    // Re-pinned #25 (SIM_VERSION 15 → 16). This case USED to prove the opposite — that
+    // the kill component survived a loss while only the survival term zeroed. A loss now
+    // scores nothing at all, so the HUD's terminal readout drops to 0 with a real bounty
+    // banked, which is the product-visible face of the forfeiture. The nonzero assertion
+    // is what keeps that non-vacuous: without it a zero-kill run would pass either way.
+    expect(lost.cumulativeKillBounty).toBeGreaterThan(0); // there IS something to forfeit...
+    expect(deriveScore(lost, ruleset)).toBe(0); // ...and all of it is forfeited
+    expect(deriveHud(lost, ruleset).score).toBe(0); // the HUD shows the authoritative 0
   });
 
   it('reads 0 rather than NaN if the accumulator is ragged, matching deriveScore’s guard', () => {

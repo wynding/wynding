@@ -241,9 +241,9 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       expect(state.cumulativeKillBounty).toBe(102);
       expect(state.bounty).toBe(165);
       expect(hashSimState(state)).toBe('bd6516b9');
-      // Lost score formula: kill-bounty only — no early-call credit (none was earned
-      // here), no survival term.
-      expect(deriveScore(state, ruleset)).toBe(102);
+      // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 102 → 0. The sv16 lost
+      // branch forfeits the kill bounty too, so the 102 pinned above grades nothing.
+      expect(deriveScore(state, ruleset)).toBe(0);
       expect(deriveStars(state, ruleset)).toBe(0);
     },
   );
@@ -533,8 +533,9 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       expect(state.cumulativeKillBounty).toBe(106);
       expect(state.bounty).toBe(153);
       expect(hashSimState(state)).toBe('3471ba09');
-      // Lost score formula: kill-bounty only.
-      expect(deriveScore(state, ruleset)).toBe(106);
+      // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 106 → 0, the sv16 lost
+      // branch. The 106 pinned above is what it forfeits.
+      expect(deriveScore(state, ruleset)).toBe(0);
       expect(deriveStars(state, ruleset)).toBe(0);
     },
   );
