@@ -208,7 +208,9 @@ export interface BalanceConstants {
 
 /** Scoring weights — the ladder measure (ADR 0006) + the casual star grade. */
 export interface ScoringConfig {
-  /** score = Σ kill-bounties + max(0, lives) × survivalMul. */
+  /** Weights the survival term of the WINNING score only — won = Σ kill-bounties +
+   *  Σ early-call credit + max(0, lives) × survivalMul. A loss scores 0 outright since
+   *  sv16 (#25), so this knob has no effect on a losing run's grade. */
   readonly survivalMul: number; // int 0..1e6
   /** Non-decreasing lives cutoffs for [1★, 2★, 3★]. Only a LOSS earns 0 stars: since
    *  sv16 a win floors at 1★ even below the 1★ cutoff, so that first cutoff no longer
