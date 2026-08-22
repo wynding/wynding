@@ -1,0 +1,16 @@
+{
+  // `scripts/check-artifact-parity.ts` is real TypeScript that nothing type-checked: the
+  // package's own program is `rootDir: "src"`, and a file outside it is TS6059, not a
+  // silently-checked extra. It grew a `node`-executed leg in #109, so it gets the same
+  // second-program treatment `apps/web/tsconfig.e2e.json` gives the Playwright specs —
+  // run as a second `tsc --noEmit -p` by this package's `typecheck` script.
+  //
+  // `rootDir` widens to the package: inheriting `src` as the root is precisely what makes
+  // `scripts/` a TS6059 in the main program. Nothing here emits, so `outDir` is inert.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "."
+  },
+  "include": ["scripts"],
+  "exclude": []
+}

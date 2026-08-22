@@ -7,6 +7,14 @@
 // Minimal API-Gateway-style event/result shapes are declared locally to keep the
 // stub free of an @types/aws-lambda dependency; swap them for the real types when
 // wiring the deployment (Function URL / API Gateway proxy integration).
+//
+// PACKAGING (#109). This module is the esbuild `--bundle` entry point: `pnpm -C
+// apps/server run build` emits ONE self-contained `dist/handler.js` and stages
+// `dist/rulesets/` beside it. It is bundled rather than `tsc`-compiled because every
+// `@wynding/*` package exports `./src/*.ts` — plain Node followed those into TypeScript
+// source and died on its extensionless relative specifiers, so the `tsc` output was a
+// file that existed and could not run. `pnpm run check:artifact-parity` now executes the
+// built artifact under plain `node`, which is what keeps that from silently returning.
 
 import { readFileSync } from 'node:fs';
 import { validate, type Replay } from '@wynding/replay';
