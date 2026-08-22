@@ -295,6 +295,19 @@ because a cancelled or abandoned send has no result worth announcing. This disti
 whole point: a polite live region announces asynchronously, so clearing the node in the same turn
 that wrote the confirmation would race the announcement and could leave a screen-reader user with
 no confirmation at all — the accepted send would be the one outcome that announced nothing.
+**The handoff is enforced by control state, not by politeness.** Verify is a sibling action that
+writes this same node, and it stays pressable throughout a send unless something stops it — so a
+press mid-flight would overwrite "Sending…", and the survey's own callback would then overwrite
+the Verify result, leaving both features lying to the player and the single-owner rule true only
+on paper. Therefore **Verify is `aria-disabled` while the survey owns the region** (the same
+shared gate and the same announcement convention as every other suppressed control here), and is
+re-enabled the moment the region is released.
+
+The other direction needs no symmetric lock, which is worth saying so nobody adds one: opening
+the survey while a Verify result is displayed simply **takes** the region under the existing
+handoff, and taking clears. That is safe because Verify's write is synchronous and final at press
+time — there is no pending outcome of its own to lose, unlike a send in flight.
+
 **Success, failure and offline each get a player-visible, non-blocking result.** None of them
 ever blocks Play again. Silence on
 failure is the specific defect to avoid — a player who pressed Send and heard nothing has to
@@ -314,11 +327,24 @@ click suppression only covers pointer _activation_ — neither stops a focused t
 typing, and neither stops a radio or a checkbox changing under the keyboard. Left there, the
 answers on screen could drift away from the payload already in flight, and the player would be
 looking at something we never sent. So the in-flight state guards **every edit, not just
-activation**: the free-text control goes `readonly` (which, unlike `disabled`, keeps it focusable
-and readable), and the choice controls suppress `input`/`change` — through the **same shared-gate
-discipline** §6 already applies to activation, so the pointer and keyboard routes are guarded by
-one rule rather than two that can drift apart. When the send resolves as rejected or offline the
-guards lift, with the text preserved exactly as §1 specifies.
+activation** — and the level it guards at is load-bearing, because the obvious choice does not
+work:
+
+- **Free text goes `readonly`** — which, unlike `disabled`, keeps the control focusable and
+  readable, so the player can still see and select what they wrote.
+- **Choice controls suppress the interaction's default action at its source**: `keydown` (Arrow
+  and Space) and `click`. **Not `input`/`change`.** Those fire _after_ the state has already
+  flipped and are **not cancelable**, so a handler there cannot prevent anything — a focused
+  radio's Arrow-key default action checks the new option before `input` is dispatched, and
+  listening for it would leave the lock announcing a change it was supposed to stop.
+- **Fallback where a default action cannot be suppressed** on some surface: **restore the prior
+  state** immediately. Weaker, because it corrects rather than prevents, but it keeps the
+  displayed answers equal to the payload, which is the property that actually matters.
+
+All of it runs through the **same shared-gate discipline** §6 already applies to activation, so
+the pointer and keyboard routes are guarded by one rule rather than two that can drift apart.
+When the send resolves as rejected or offline the guards lift, with the text preserved exactly as
+§1 specifies.
 
 ### 7. Free text: caps, moderation before aggregation, retention and deletion
 
@@ -422,8 +448,13 @@ run resolves
             └─ [Send] ────────────────► controls aria-disabled (never `disabled`, so focus
                  │                      is never dropped) · live region: "Sending…"
                  │                      EDITS guarded too, not just activation: free text
-                 │                      goes readonly, choices suppress input/change —
-                 │                      what is on screen cannot drift from what was sent
+                 │                      readonly; choices suppress the DEFAULT ACTION at
+                 │                      keydown/click (NOT input/change — those fire after
+                 │                      the flip and cannot be cancelled) · fallback where
+                 │                      that is impossible: restore the prior state
+                 │                      [Verify this run] goes aria-disabled — it writes
+                 │                      this same region, so ownership is enforced, not
+                 │                      merely agreed; re-enabled when the region releases
                  ├─ accepted ─────────► "Thanks. Reference <sessionId>."
                  │                       collapses (+ don't-ask-again if armed)
                  │                       Give feedback retired · focus ──► [Play again]
