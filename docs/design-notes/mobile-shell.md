@@ -238,33 +238,65 @@ Severity note, since it would be easy to assume a phone is spared: in Compact
 `.wy-home` itself is restyled as a mark-only in-flow item and explicitly keeps the ADR 0003
 **44px touch floor**. It is a first-class tap target on exactly the devices this epic targets.
 
-### 3. The safe-area surface is 18 declarations, and CI pins the broken state as correct
+### 3. The safe-area surface is 20 declarations, and CI could not see any of them
 
-Sharpens **#136**, whose title said "19 places" and has been corrected. `ui.css` uses
-`env(safe-area-inset-*)` on 20 lines, but two of those are inside comments — **18 live
-declarations**, of which two pass a fallback (`--wy-compact-col` at line 54, `--wy-rail-w` at
-line 1211) and sixteen do not.
+Sharpens **#136**, whose title said "19 places". Before this branch, `ui.css` read
+`env(safe-area-inset-*)` on 24 lines; four were inside comments, leaving **20 live
+declarations**, of which four passed a fallback and sixteen did not. (An earlier revision of
+this section said 18 and 2, and cited lines 54 and 1211 — both were measured before #144, which
+added two fallback-bearing sites and moved every line number.)
+
+**Those counts are historical now.** The surface is the same twenty reads, but they go through
+`var(--wy-safe-*)`; only the four `:root` token declarations still name `env()`, so grepping for
+it today returns five lines, not twenty-four.
 
 **The fallback count is not the defect** — worth stating so nobody spends a day adding sixteen
 fallbacks for nothing. A fallback only applies where `env()` is supported and the variable is
 unset, so it cannot rescue a declaration from an engine that cannot parse the function.
 
-The real failure is the opposite shape: `env()` **is** supported in these WebViews, so the
-declarations compute normally — against **zero insets**, because enforced edge-to-edge does not
-necessarily propagate the system insets into the web layer. Content ends up under the system bars.
-That is what the ecosystem's workarounds address (Capacitor's injected `--safe-area-inset-*`
-properties, `@capacitor-community/safe-area`) — values present and wrong, not a missing function.
-Neither is automatic; both are conditional, and which to adopt is #136's call.
+**Nor, it turns out, is the WebView the defect.** `@capacitor/android` 8.5 registers `SystemBars`
+as a core plugin (`Bridge.java:658`) with `insetsHandling` defaulting to `"css"`, and it branches
+three ways rather than the two #136 assumed:
 
-The two declarations _with_ fallbacks are the **load-bearing** ones: `--wy-compact-col` and
-`--wy-rail-w` are track sizes computed from insets, so zeroed insets move the layout's geometry
-rather than only its spacing.
+- **WebView ≥ 140 with `viewport-fit=cover`** (which `dist-host/index.html` carries): true
+  edge-to-edge, `env()` correct, and `--safe-area-inset-*` injected with real values.
+- **WebView < 140 on API ≥ 35**: Capacitor pads the WebView's _parent view_ natively
+  (`SystemBars.java:226`), zeroes the insets and injects zeros — content is not under the system
+  bars, so zero is correct.
+- **Pre-API-35**: that padding branch does not run, but edge-to-edge is not enforced below API 35
+  either, so the platform's ordinary window behaviour already insets the content.
 
-**The consequence that changes the estimate:** the existing e2e suite cannot verify this. It runs
-where insets are always zero, and for the top axis the inset lands in internal padding inside a
-grid row whose edge does not move — so bounding-box assertions cannot see it at any inset value.
-#136 needs a harness that injects inset values and asserts padding or descendant position, which
-is a more invasive assertion than the suite currently makes. The traced analysis is on #136.
+So neither of #136's two proposed routes is the mechanism that rescues the low-end population;
+native padding is, and it is automatic. **This is read from the installed Java source, not
+observed on a device** — #141 should confirm it.
+
+**What was real is that none of the twenty had ever been exercised at a nonzero inset.** The suite
+runs where insets are always zero, and `env()` cannot be set from a test, so the strongest
+assertion available was on the source text of two declarations.
+
+**Now closed.** Every read goes through a `--wy-safe-*` token whose first term is
+`--safe-area-inset-*` — the exact property Capacitor sets on `document.documentElement`
+(`SystemBars.java:265-268`) — so `e2e/insets.spec.ts` drives the identical path a device does,
+and `layout.test.ts` guards completeness across all twenty. The tokens are `@property`-registered
+`<length>` with `initial-value: 0px`, because a malformed value is otherwise
+invalid-at-computed-value-time and discards the _whole_ consuming declaration: padding to zero, a
+subtractive `max-height` to unbounded. The Capacitor-owned names are deliberately **not**
+registered — an `initial-value` would make them always-defined, so `var()` would never reach its
+`env()` fallback and iOS would silently lose its insets.
+
+The two track tokens remain the **load-bearing** cases: `--wy-compact-col` and `--wy-rail-w` are
+track sizes computed from insets, so zeroed insets move the layout's geometry rather than only its
+spacing.
+
+**One trap for anyone extending this coverage:** several inset reads are unconditional in source
+but overridden in one fork, so asserting one at the wrong viewport is silently vacuous. `.wy-dock`'s
+bottom padding is zeroed in Compact, `.wy-hud`'s `max-height` becomes `none` there, and
+`.wy-hud:has(> .wy-wave-preview)`'s height becomes `auto`. Three drafts of the spec were vacuous
+for exactly this reason before the overrides were read rather than assumed.
+
+**Still open:** the Android 15+ device check. It needs an Android 15 or newer device, which the
+available Fire tablet (Fire OS 8 = Android 11) is not, so it cannot be reproduced on hardware we
+have. Owner ruling 2026-08-21: tabled and folded into #141.
 
 ## Repo hygiene — `cap sync` will break CI
 

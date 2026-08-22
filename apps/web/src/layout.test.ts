@@ -225,17 +225,116 @@ describe('layout — the home link box model and visibility contract', () => {
   });
 });
 
-describe('layout — Compact fixed tracks grow by their safe-area inset (Codex P1)', () => {
+describe('layout — the safe-area seam (#136)', () => {
   // A Compact region that spends a safe-area inset as INTERNAL padding while its grid track is
   // a fixed width starves the content by the inset (≈44–59px on a notched iPhone in
-  // landscape, invisible in CI where env()=0). Pin that each such token grows its track by the
-  // matching inset so the content keeps its intended min() width. Assert on the source text
-  // rather than computed layout because jsdom resolves env() to nothing.
+  // landscape). Pin that each such token grows its track by the matching inset so the content
+  // keeps its intended min() width.
+  //
+  // Every inset read now goes through a `--wy-safe-*` token rather than `env()` directly,
+  // because `env()` cannot be set from a test and a custom property can — `insets.spec.ts`
+  // drives the rendered consequences through the same property Capacitor writes. These source
+  // assertions are what scale to all twenty call sites; the rendered spec covers five
+  // mechanisms and structurally cannot reach the rest.
+  const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const AXES = ['top', 'right', 'bottom', 'left'] as const;
+
+  it.each(AXES)('--wy-safe-%s chains to its OWN axis of env()', (axis) => {
+    const decls = tokenDecls(css, `--wy-safe-${axis}`);
+    expect(decls).toHaveLength(1);
+    // `env()` is iOS's source and the source wherever Capacitor is absent. Dropping it would
+    // leave the token silently zero on every non-Capacitor platform, which no rendered test
+    // in CI can see — CI has no insets either way.
+    expect(decls[0]).toContain(`env(safe-area-inset-${axis}`);
+    // A transposed axis here would misroute EVERY consumer of this token at once.
+    for (const other of AXES) {
+      if (other !== axis) expect(decls[0]).not.toContain(`safe-area-inset-${other}`);
+    }
+  });
+
+  it('env(safe-area-inset-*) appears ONLY inside the four token declarations', () => {
+    // The completeness guard. A site left on bare `env()` still works today — CI resolves it
+    // to zero exactly as the token does — so nothing else in the suite would notice, and the
+    // seam would be silently incomplete.
+    const withoutTokens = uncommented.replace(/--wy-safe-(?:top|right|bottom|left)\s*:[^;]+;/g, '');
+    const strays = withoutTokens.match(/env\(safe-area-inset-\w+/g) ?? [];
+    expect(strays, `these sites bypass the seam: ${strays.join(', ')}`).toEqual([]);
+
+    // The OTHER way round the seam, and the more dangerous one: reading the Capacitor-owned
+    // name directly. `padding-left: calc(1rem + var(--safe-area-inset-left))` trips no guard
+    // above (no `env(`, no `--wy-safe-*` to axis-check) and would look correct in
+    // `insets.spec.ts`, which injects exactly that property — then break everywhere Capacitor
+    // is absent, because with no `env()` fallback the variable is unset, the substitution is
+    // guaranteed-invalid, and the whole declaration dies at computed-value time. The seam
+    // comment in ui.css names this property, so reaching for it is the easy mistake.
+    const direct = withoutTokens.match(/var\(--safe-area-inset-\w+/g) ?? [];
+    expect(direct, `use --wy-safe-*, not the raw Capacitor name: ${direct.join(', ')}`).toEqual([]);
+  });
+
+  it('every axis-named property reads its MATCHING axis token', () => {
+    // Catches a transposition at a call site (e.g. `padding-left: … var(--wy-safe-right)`),
+    // which no rendered assertion covers for the sites `insets.spec.ts` cannot reach.
+    const re = /(?:scroll-)?(?:padding|margin|inset)-(top|right|bottom|left)\s*:([^;]+);/g;
+    const wrong: string[] = [];
+    let seen = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(uncommented)) !== null) {
+      const [, axis, value] = m as unknown as [string, string, string];
+      const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(value);
+      if (token === null) continue;
+      seen += 1;
+      if (token[1] !== axis) wrong.push(m[0].trim());
+    }
+    expect(wrong).toEqual([]);
+    // The tripwire the sibling below already had and this one did not. Without it, a site
+    // leaving the regex's reach — a logical longhand (`padding-inline-start`), a fold into the
+    // `padding` shorthand, a dropped trailing `;` — takes its transposition cover with it and
+    // `wrong` stays `[]`, passing while guarding nothing. `ui.css` already uses logical
+    // longhands next door (`.wy-home { margin-block: … }`), so that refactor is ordinary.
+    expect(seen, 'expected the fifteen axis-named sites that read an inset').toBe(15);
+  });
+
+  it('the three guards together account for every token read', () => {
+    // 15 axis-named + 3 vertical bounds + 2 track tokens = the 20 call sites. Asserting the
+    // partition means a NEW read cannot land in the gap between the guards: it either matches
+    // one of them or fails this. Each guard's own count pins its share; this pins the whole.
+    const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
+    expect(reads).toHaveLength(20);
+  });
+
+  it('vertical bounds read a VERTICAL axis token', () => {
+    // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which three
+    // of the twenty call sites are not: two `max-height` bounds and one `height`, all
+    // subtracting `--wy-safe-top`. Two of those sit behind `:has()` selectors that are not
+    // exercised at page load (`.wy-shell:has(.wy-banner:not([hidden]))` and
+    // `.wy-hud:has(> .wy-wave-preview)`), so a top→left slip there would shrink the HUD by the
+    // wrong inset with the entire suite green — the exact failure the guard exists to catch,
+    // in the one place it could not see.
+    const re = /(?:max-)?height\s*:([^;]+);/g;
+    const wrong: string[] = [];
+    let seen = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(uncommented)) !== null) {
+      const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(m[1] as string);
+      if (token === null) continue;
+      seen += 1;
+      // TOP specifically, not "any vertical axis" (Codex P2 on c9b1cfa). All three of these
+      // are `calc(NNdvh - 3.5rem - var(--wy-safe-top))` — a budget measured DOWN from the top
+      // edge, so `top` is the only correct axis. Accepting `bottom` as well let a slip pass
+      // this guard AND keep the 20-read partition intact, while the rendered spec probes only
+      // the base `.wy-hud` rule and never the two `:has()`-gated ones — so those bounds would
+      // react to the wrong physical inset with the whole suite green.
+      if (token[1] !== 'top') wrong.push(m[0].trim());
+    }
+    expect(seen, 'expected the three vertical bounds that read an inset').toBe(3);
+    expect(wrong).toEqual([]);
+  });
+
   it('--wy-compact-col grows its track by the left inset (`.wy-status` pads left)', () => {
     const decls = tokenDecls(css, '--wy-compact-col');
     expect(decls).toHaveLength(1);
     expect(decls[0]).toContain('min(4rem, 10vw)');
-    expect(decls[0]).toContain('env(safe-area-inset-left');
+    expect(decls[0]).toContain('var(--wy-safe-left)');
   });
 
   it('the Compact --wy-rail-w override grows its track by the right inset (`.wy-rail` pads right)', () => {
@@ -243,6 +342,6 @@ describe('layout — Compact fixed tracks grow by their safe-area inset (Codex P
     // pick the override by its distinctive `min(9rem, 28vw)` core.
     const override = tokenDecls(css, '--wy-rail-w').find((d) => d.includes('min(9rem, 28vw)'));
     expect(override).toBeDefined();
-    expect(override).toContain('env(safe-area-inset-right');
+    expect(override).toContain('var(--wy-safe-right)');
   });
 });

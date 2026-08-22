@@ -5,6 +5,18 @@ App/App/public
 DerivedData
 xcuserdata
 
+# Xcode workspace IDE state. `IDEWorkspaceChecks.plist` records which one-time migration
+# prompts this machine has dismissed (e.g. IDEDidComputeMac32BitWarning) — per-machine, and
+# it reappears the moment anyone opens the project.
+#
+# Its SIBLING is deliberately NOT ignored. `xcshareddata/swiftpm/Package.resolved` pins
+# capacitor-swift-pm to an exact revision, and Capacitor 8 takes its iOS runtime through
+# SwiftPM (`App/CapApp-SPM/Package.swift`), not the Pods this file's `App/Pods` rule predates.
+# It is the iOS half of what pnpm-lock.yaml is for the web build, so it is TRACKED. Do not
+# widen this rule to the whole `xcshareddata/` or `swiftpm/` directory to "clean up" the
+# untracked plist — that silently unpins the native runtime.
+IDEWorkspaceChecks.plist
+
 # Cordova plugins for Capacitor
 capacitor-cordova-ios-plugins
 

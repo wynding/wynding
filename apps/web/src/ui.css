@@ -15,7 +15,55 @@
    mechanically checked against `COMPACT_QUERY` in `layout.ts` (`layout.test.ts`). Nothing
    is compact-only or standard-only: both layouts render the same DOM. */
 
+/* SAFE-AREA SEAM (#136). Every `env(safe-area-inset-*)` read in this file goes through one of
+   the four tokens below, because `env()` cannot be set from a test and these can — so the
+   layout's inset behaviour is assertable in CI instead of being device-only.
+
+   `--safe-area-inset-*` is the name Capacitor writes on `document.documentElement`
+   (`SystemBars.java:265-268`), so a test that sets it drives the identical path a device does.
+   `env()` stays the fallback: it is iOS's source, and the source anywhere Capacitor is absent.
+
+   REGISTER OUR NAMES ONLY. Do not add `@property` for `--safe-area-inset-*` to "complete the
+   set": an `initial-value` would make it always-defined, so `var()` would never reach its
+   `env()` fallback and iOS would silently lose its insets. The registration here exists for a
+   narrower reason — an invalid value is invalid-at-computed-value-time, which discards the
+   WHOLE consuming declaration (padding to 0, a subtractive `max-height` to unbounded) rather
+   than just ignoring the inset. `<length>` + `initial-value: 0px` contains that to "inset
+   ignored, base kept".
+
+   ONE TRADE, recorded so it is not rediscovered: a literal `env()` an engine cannot parse is
+   invalid at PARSE time, so the declaration is dropped and a preceding shorthand still
+   supplies a value. `var()` always parses, so the same failure moves to computed-value time,
+   where the shorthand is never consulted. On an engine older than `env()` itself (pre-Chrome
+   69 / Safari 11.2) that turns a graceful fallback into `padding: 0` and an unbounded
+   `.wy-hud`. Accepted: nothing in this repo targets an engine that old, and the registration
+   above cannot help here — every engine with `@property` also has `env()`. */
+@property --wy-safe-top {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --wy-safe-right {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --wy-safe-bottom {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --wy-safe-left {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
 :root {
+  --wy-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --wy-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --wy-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --wy-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   --wy-bg: #0d1b2a;
   --wy-surface: #16233a;
   --wy-fg: #f4f7fb; /* ~15:1 on --wy-bg */
@@ -62,16 +110,16 @@
      phone. Content that no longer fits scrolls inside `.wy-hud` (the ADR 0003 doctrine)
      while the board's floor stays gated numerically by the projection thresholds in
      `compact.spec.ts` / `smoke.spec.ts`.
-     The `+ env(safe-area-inset-left, 0px)` term GROWS the track by the left notch/inset that
+     The `+ var(--wy-safe-left)` term GROWS the track by the left notch/inset that
      `.wy-status` then spends as internal `padding-left` — so the CONTENT width the Compact
      Dock buttons (`width: 100%`) see stays the intended `min(4rem, 10vw)` instead of being
      eaten down to a few px on a notched iPhone in landscape (where the inset is ~44–59px).
-     env() resolves to 0 in headless CI, so the projection thresholds in compact.spec.ts /
-     smoke.spec.ts are UNCHANGED there: at 658×320 with env()=0 the track is exactly
+     The token resolves to 0 with no inset present, so the projection thresholds in
+     compact.spec.ts / smoke.spec.ts are UNCHANGED by default: at 658×320 the track is exactly
      `min(4rem, 10vw)` and the 200%-zoom board-floor math above is untouched. On a real
      notched device the board cedes exactly the unusable notch strip and nothing more —
      honest accounting. */
-  --wy-compact-col: calc(min(4rem, 10vw) + env(safe-area-inset-left, 0px));
+  --wy-compact-col: calc(min(4rem, 10vw) + var(--wy-safe-left));
   /* Standard Rail track width (PLAN.md P1): the clamp's rem floor is vw-capped (like
      `--wy-compact-col`) so 200% text zoom cannot starve the board on a narrow viewport. Named
      so the `.wy-main` grid track and the `.wy-dock` max-width subtraction consume ONE
@@ -128,9 +176,9 @@ body {
   flex-wrap: wrap;
   gap: 0.75rem 1.25rem;
   padding: 0.5rem 1rem;
-  padding-top: calc(0.5rem + env(safe-area-inset-top));
-  padding-left: calc(1rem + env(safe-area-inset-left));
-  padding-right: calc(1rem + env(safe-area-inset-right));
+  padding-top: calc(0.5rem + var(--wy-safe-top));
+  padding-left: calc(1rem + var(--wy-safe-left));
+  padding-right: calc(1rem + var(--wy-safe-right));
   min-height: 0;
   /* EXACT row order (contract §1). Explicit placement, not auto-flow: while `.wy-banner` is
      `hidden` it is not a grid item at all, so auto-flow would slide `.wy-main` up into the
@@ -291,7 +339,7 @@ a.wy-home:focus-visible {
   font-size: 1.1rem;
   min-width: 0;
   min-height: 0;
-  max-height: max(2.5rem, calc(40dvh - 3.5rem - env(safe-area-inset-top)));
+  max-height: max(2.5rem, calc(40dvh - 3.5rem - var(--wy-safe-top)));
   overflow-y: auto;
 }
 
@@ -315,8 +363,8 @@ a.wy-home:focus-visible {
   align-items: center;
   gap: 0.5rem 0.75rem;
   padding: 0.25rem 0.75rem;
-  padding-left: calc(0.75rem + env(safe-area-inset-left));
-  padding-right: calc(0.75rem + env(safe-area-inset-right));
+  padding-left: calc(0.75rem + var(--wy-safe-left));
+  padding-right: calc(0.75rem + var(--wy-safe-right));
   background: var(--wy-surface);
   min-width: 0;
   min-height: 0;
@@ -357,7 +405,7 @@ a.wy-home:focus-visible {
    moving the trigger without moving this line fails CI. */
 @media not all and (max-height: 500px) {
   .wy-shell:has(.wy-banner:not([hidden])) .wy-hud {
-    max-height: max(2.5rem, calc(25dvh - 3.5rem - env(safe-area-inset-top)));
+    max-height: max(2.5rem, calc(25dvh - 3.5rem - var(--wy-safe-top)));
   }
 
   .wy-shell:has(.wy-banner:not([hidden])) .wy-banner {
@@ -562,7 +610,7 @@ a.wy-home:focus-visible {
    fork restores content-sizing: its status COLUMN is width-fixed, so preview growth
    there scrolls inside the hud and cannot touch the board. */
 .wy-hud:has(> .wy-wave-preview) {
-  height: max(2.5rem, calc(40dvh - 3.5rem - env(safe-area-inset-top)));
+  height: max(2.5rem, calc(40dvh - 3.5rem - var(--wy-safe-top)));
 }
 
 .wy-wave-preview-title {
@@ -641,8 +689,8 @@ a.wy-home:focus-visible {
      paints in the in-flow block layer, not with z-index-0 positioned content. The conclusion
      has survived both corrections; only the reason kept moving. */
   max-width: calc(100% - 1rem - var(--wy-rail-w));
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
+  padding-bottom: var(--wy-safe-bottom);
+  padding-left: var(--wy-safe-left);
   user-select: none; /* Shell chrome (PLAN.md P3) */
 }
 
@@ -669,7 +717,7 @@ a.wy-home:focus-visible {
      under the opaque end of its gradient (ADR 0003's visible-focus requirement). The pinned
      reserve below supersedes this and adds the same band on top of the Panel's cap.
 
-     `+ 0.5rem + env(safe-area-inset-bottom, 0px)` is this element's OWN bottom padding, and
+     `+ 0.5rem + var(--wy-safe-bottom)` is this element's OWN bottom padding, and
      it is required here for the same reason the pinned reserve spells out: the band is a
      flex item, so it is laid out in the CONTENT box and its bottom edge is the content
      box's, while `scroll-padding` measures from the PADDING box. Reserving the bare band
@@ -678,10 +726,10 @@ a.wy-home:focus-visible {
      295.6 / 295.7, putting 7.6px of each — its bottom border and the entire lower leg of its
      3px focus outline — under a gradient that ends fully opaque. 15.6-16.4px at 200% text
      zoom, and the whole band once a real bottom inset (~21px, iPhone in landscape) counts. */
-  scroll-padding-bottom: calc(var(--wy-rail-fade-h) + 0.5rem + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: calc(var(--wy-rail-fade-h) + 0.5rem + var(--wy-safe-bottom));
   padding: 0.5rem;
-  padding-right: calc(0.5rem + env(safe-area-inset-right));
-  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  padding-right: calc(0.5rem + var(--wy-safe-right));
+  padding-bottom: calc(0.5rem + var(--wy-safe-bottom));
   background: var(--wy-surface);
   display: flex;
   flex-direction: column;
@@ -963,14 +1011,14 @@ a.wy-home:focus-visible {
    over-reserving a guarantee rather than an arithmetic coincidence. Over-reserving only
    seats a focused Card slightly higher; under-reserving hides it.
 
-   `env(safe-area-inset-bottom)` is part of that term because it is part of the padding it
+   `var(--wy-safe-bottom)` is part of that term because it is part of the padding it
    mirrors (see `.wy-rail` above). Omitting it does not fail immediately — it just makes the
    surplus `9.6 − 0.4·inset` px, which stays positive until roughly a 24px inset and so
    survives an iPhone in landscape (21px) by about a pixel. That is precisely the arithmetic
    coincidence this comment claims not to be relying on. */
 .wy-rail-panel-pinned {
   scroll-padding-bottom: calc(
-    var(--wy-panel-cap) + 0.5rem + env(safe-area-inset-bottom, 0px) + var(--wy-rail-fade-h)
+    var(--wy-panel-cap) + 0.5rem + var(--wy-safe-bottom) + var(--wy-rail-fade-h)
   );
 }
 
@@ -1380,7 +1428,7 @@ a.wy-home:focus-visible {
     grid-column: 1 / -1;
     /* Compact puts the banner at the BOTTOM edge of the shell, so it — not `.wy-status` —
        is what has to clear the home indicator / gesture bar. */
-    padding-bottom: calc(0.25rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(0.25rem + var(--wy-safe-bottom));
   }
 
   /* The column's width belongs to the chips and controls — the text stays hidden exactly as
@@ -1437,9 +1485,9 @@ a.wy-home:focus-visible {
     gap: 0.25rem;
     min-width: 0;
     padding: 0.25rem;
-    padding-top: calc(0.25rem + env(safe-area-inset-top));
-    padding-left: calc(0.25rem + env(safe-area-inset-left));
-    padding-bottom: calc(0.25rem + env(safe-area-inset-bottom));
+    padding-top: calc(0.25rem + var(--wy-safe-top));
+    padding-left: calc(0.25rem + var(--wy-safe-left));
+    padding-bottom: calc(0.25rem + var(--wy-safe-bottom));
     /* The column is the outer bound; its two children each scroll on their own. */
     overflow: hidden;
   }
@@ -1528,12 +1576,12 @@ a.wy-home:focus-visible {
     grid-row: 1;
     grid-column: 2;
     /* The Compact fork overrides the token (contract §2) rather than restating the track.
-       Same shape as `--wy-compact-col`: `.wy-rail` spends `env(safe-area-inset-right)` as
+       Same shape as `--wy-compact-col`: `.wy-rail` spends `var(--wy-safe-right)` as
        internal `padding-right`, so grow the fixed track by that inset to keep the Card's
        (`width: 100%`) content width at the intended `min(9rem, 28vw)` on a right-notched
-       landscape iPhone. env()=0 in headless CI leaves the track — and the projection
-       thresholds — exactly `min(9rem, 28vw)`. */
-    --wy-rail-w: calc(min(9rem, 28vw) + env(safe-area-inset-right, 0px));
+       landscape iPhone. With no inset present the token is 0, leaving the track — and the
+       projection thresholds — exactly `min(9rem, 28vw)`. */
+    --wy-rail-w: calc(min(9rem, 28vw) + var(--wy-safe-right));
 
     grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
   }

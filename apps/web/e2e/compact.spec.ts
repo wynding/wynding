@@ -16,6 +16,7 @@ import { firePrompt, installPromptFactory, stubIosPlatform } from './install-stu
 import { stubFullscreen } from './fullscreen-stub';
 import { callWavePaced, titleAfterCall } from './paced-call';
 import { COMPACT_QUERY } from '../src/layout';
+import { TARGET_MIN_PX } from './targets';
 
 /** The banner audience requires a coarse pointer, which only the `chromium-touch` device
  *  profile provides — the four banner specs below skip under the fine-pointer project. One
@@ -1038,7 +1039,9 @@ test.describe('M2-S12a: arming shows the player what they armed', () => {
         expect(m.railScrollTop, 'a placement must not scroll the Rail').toBe(0);
         // WHOLE: both edges inside the scrollport, not a clipped stub of a 44px target.
         expect(m.closeName, 'the Panel-level button is the Close button').toMatch(/\S/);
-        expect(m.closeHeight, 'the Close button keeps its 44px floor').toBeGreaterThanOrEqual(44);
+        expect(m.closeHeight, 'the Close button keeps its 44px floor').toBeGreaterThanOrEqual(
+          TARGET_MIN_PX,
+        );
         expect(m.closeTopGap, 'the Close button must be inside the Rail').toBeGreaterThanOrEqual(
           -1,
         );
@@ -1196,7 +1199,7 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     expect(m.panelWithinRail, 'the capped Panel must not overflow the Rail').toBe(true);
     expect(m.renderedRows, 'the stat rows must actually render').toBeGreaterThan(0);
     // ADR 0003's 44px target, in full, not a clipped remnant.
-    expect(m.closeHeight).toBeGreaterThanOrEqual(44);
+    expect(m.closeHeight).toBeGreaterThanOrEqual(TARGET_MIN_PX);
     expect(m.closeWithinPanel, 'Close must be inside the Panel').toBe(true);
     expect(m.closeWithinRail, 'Close must be on screen').toBe(true);
   });
