@@ -36,7 +36,9 @@
  *  `airborneCuePaintOps`), the exact combination this header already names. `boss` reads
  *  as armored (the hexagon) AND larger (`BOSS_SCALE` in `board-draw.ts`) AND warded (it
  *  is stun-immune, `wardPaintOps`) — role stays a pure axis, so a future boss VARIANT
- *  would compose the same way rather than needing a fourth silhouette. */
+ *  would compose the same way rather than needing a SIXTH silhouette. (Counted against
+ *  the union below, which has five members. Two docstrings in this file said "fourth"
+ *  and one said "sixth"; the S7 accessibility audit copied the wrong one — #126.) */
 export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
 
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
@@ -504,11 +506,15 @@ const AIRBORNE_WING_Y_MUL = 3.1; // tips sit 0.3r lower than the apex, so the ch
 const AIRBORNE_WING_SPAN_MUL = 0.9;
 
 /**
- * The airborne cue's paint plan (M2-S7): a wing chevron — two strokes fanning out from
- * an apex above the silhouette's top vertex to tips beyond its sides — layered OVER
+ * The airborne cue's paint plan (M2-S7): a wing chevron — two strokes fanning DOWN and
+ * out from an apex above the silhouette's top vertex to tips that are NARROWER than the
+ * silhouette, not beyond its sides (`AIRBORNE_WING_SPAN_MUL` puts them at `x ± 0.9r`
+ * against a half-width of `r`, so the glyph clears the silhouette VERTICALLY and never
+ * laterally — #126; the earlier "tips beyond its sides" is what the S7 accessibility
+ * audit transcribed). Layered OVER
  * whichever base silhouette `creepShapeFor` already draws (`creepId` is untouched by
  * this module; the airborne cue is a wholly independent paint plan, composed alongside
- * it, never a fourth mutually-exclusive `CreepShape`). That independence is exactly why
+ * it, never a SIXTH mutually-exclusive `CreepShape`). That independence is exactly why
  * it composes: `armored-flyer` (S10) draws the hexagon from `creepSilhouettePaintOp`
  * AND this wingspan, so it reads as armored *and* airborne at once, which a single
  * id-keyed shape could never express.
@@ -519,9 +525,9 @@ const AIRBORNE_WING_SPAN_MUL = 0.9;
  * creep, every point at radius ≥ `r×3.23` — outside the silhouette, outside all three
  * timed telegraph rings, outside the ward, and outside the DoT drift's drawn extent at
  * every supported cell size (#126 moved the apex out from `r×2.9` for that last one; the
- * measurement is `creep-paint.test.ts`'s "clears the DoT drift" case). See the
- * cue-radius ordering derived at
- * the constants below; that clearance is the load-bearing part, not the glyph. It keeps
+ * measurement is `creep-paint.test.ts`'s "clears the DoT drift" case). See the cue-radius
+ * ordering derived at the constants ABOVE (this docstring follows them, and said "below"
+ * until #126); that clearance is the load-bearing part, not the glyph. It keeps
  * the same posture `wardPaintOps`' own note explains (an essential cue must not depend
  * on the health of the thing it is drawn on) and adds the one this file's stun note
  * shows matters just as much: it must not be drawn through another cue either. A
