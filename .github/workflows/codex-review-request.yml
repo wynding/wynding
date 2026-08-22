@@ -71,6 +71,21 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+      # #154: this POST has declared `issues: write` since this workflow's first commit —
+      # confirmed by git history — yet the live probe on PR #156 (push 75e4f1a) hit the
+      # identical 403 anyway. That rules out the permissions block; what remains is an
+      # org-level token cap only an org admin can inspect, not something fixable from this
+      # repo. #72 §3's `CODEX_TRIGGER_TOKEN` (a fine-grained PAT, owner lane) is the
+      # recorded fix. Until it lands, the 403 branch below downgrades ITSELF to a workflow
+      # warning — the `if`/`else` around the `gh api` call, not a step-level flag. A
+      # step-wide `continue-on-error` was tried here and removed (Codex, PR #156 round 2):
+      # it would also swallow a missing script, an indeterminate freshness read, or any
+      # other real failure in this step, exactly the silent-green #154 exists to prevent.
+      # Only the KNOWN 403 goes quiet; everything else in this step still fails the job
+      # loudly, as it should. `codex-freshness` still goes red separately and honestly
+      # when no verdict covers the head; that status is the one that matters. REVERT the
+      # warning-downgrade in the `else` branch below the moment the PAT lands and the POST
+      # can succeed again.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
         run: |
           set -euo pipefail
@@ -87,9 +102,32 @@ jobs:
             1)
               # The REST issues endpoint, deliberately not `gh pr comment` — that command
               # posts via GraphQL addComment, whose scope mapping is murkier than the
-              # documented issues-write grant this call rides on.
-              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'
-              echo "Requested a Codex review of the new head."
+              # documented issues-write grant this call rides on. `gh` exits 1 for EVERY
+              # failure alike — a 500, a network outage, a bad endpoint, an expired token,
+              # and the known org-level 403 all land on the same exit code (Codex, PR #156
+              # round 3) — so the exit code alone cannot tell a known, admin-owned cap from
+              # a fresh, actionable problem; the OUTPUT has to be inspected. Captured
+              # rather than streamed live so its content can be tested — `|| post_ec=$?`
+              # keeps `set -e` from killing the script at the assignment itself (POSIX
+              # exempts the first command of an OR list) — then reprinted verbatim before
+              # any decision, on every path, so nothing here suppresses what gh actually
+              # said.
+              post_ec=0
+              post_out=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review' 2>&1) || post_ec=$?
+              printf '%s\n' "$post_out"
+              if [ "$post_ec" -eq 0 ]; then
+                echo "Requested a Codex review of the new head."
+              elif printf '%s\n' "$post_out" | grep -qE 'HTTP 403|Resource not accessible by integration'; then
+                # CONFIRMED 403 shape, matching the #154 probe verbatim — the known,
+                # admin-owned token cap. Downgrade to a warning; do not fail the job.
+                echo "::warning::auto-trigger POST failed (HTTP 403 — org-level token cap suspected; see #154 probe + #72 §3). Post '@codex review' manually."
+              else
+                # NOT the known 403 shape — a different, fresh problem (a 500, a network
+                # blip, an auth issue, anything else `gh` might exit 1 for). This is not
+                # the token cap, so it gets no graceful downgrade: fail loudly.
+                echo "auto-trigger POST failed with a non-403 error (exit $post_ec) — not the known token cap. Failing." >&2
+                exit "$post_ec"
+              fi
               ;;
             *)
               # Exit 2 = the check could not determine freshness. Do NOT comment on a

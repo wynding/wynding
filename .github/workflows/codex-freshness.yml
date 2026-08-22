@@ -58,6 +58,15 @@ permissions:
   contents: read
   statuses: write
   pull-requests: read
+  # #154: kept at `read`, deliberately. This job's own step only READS issue comments
+  # (verdict parsing in check-codex-freshness.mjs) and POSTs a commit status; it never
+  # posts an issue comment, so `write` here would be unused privilege on a
+  # pull_request_target workflow. The 403 the issue reports ("Resource not accessible by
+  # integration" on creating an issue comment) traces to codex-review-request.yml's
+  # trigger POST, whose `issues: write` has been in place since that workflow's first
+  # commit — this repo's own git history disproves the "this permissions block" diagnosis,
+  # so nothing here needed changing. This PR is the live probe of whether that workflow's
+  # auto-trigger actually reaches Codex (see codex-review-request.yml's own header).
   issues: read
 
 jobs:

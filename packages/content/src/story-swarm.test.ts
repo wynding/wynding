@@ -173,65 +173,81 @@ describe('M2-S11 P4 — the re-ruled swarm criterion: clearable with AoE, not cl
     }
   });
 
-  it('WITHOUT AoE: an exhaustive sweep of every vertically-flanking pair on the board clears nothing, on any id', async () => {
-    // The declared family: `(col, row)` + `(col, row + 2)` — the lane-flanking geometry
-    // every story file in this repo builds with, swept over EVERY column and row where
-    // both placements are legal. 475 candidate pairs per id; the ones the sim refuses
-    // (off-board footprint, sealed maze) are skipped rather than counted as passes.
-    const results: Record<string, { built: number; cleared: number }> = {};
-    for (const id of NON_AOE_IDS) {
-      let built = 0;
-      let cleared = 0;
+  it(
+    'WITHOUT AoE: an exhaustive sweep of every vertically-flanking pair on the board clears nothing, on any id',
+    // Contention-sensitive family (#122), controller.test.ts's cap-boundary convention
+    // (3e9b8eb): this is a ~3,325-build sweep (6 non-AoE ids + the splash control, ×475
+    // legal flanking pairs each), one full sim run per build. Measured ~28.7s isolated
+    // (this run) — matches the ~28s first reported. Under contention it does not scale
+    // linearly: 322s observed on a moderately busy machine, then 542,777ms (file total
+    // 544,797ms) with three other background agents running — already past the previous
+    // bare 300_000ms budget. The sweep is exhaustive BY DESIGN (it proves a universal
+    // negative over the declared family; shrinking it would weaken the criterion it
+    // exists to pin, not just its cost), so the fix is headroom, not a smaller family: a
+    // budget derived from the worst measured contended run, not a round guess. A budget,
+    // not a diagnosis — nothing else in the repo watches this path's cost, so if the
+    // sweep grows or contention worsens, this timeout is the only signal.
+    { timeout: 900_000 },
+    async () => {
+      // The declared family: `(col, row)` + `(col, row + 2)` — the lane-flanking geometry
+      // every story file in this repo builds with, swept over EVERY column and row where
+      // both placements are legal. 475 candidate pairs per id; the ones the sim refuses
+      // (off-board footprint, sealed maze) are skipped rather than counted as passes.
+      const results: Record<string, { built: number; cleared: number }> = {};
+      for (const id of NON_AOE_IDS) {
+        let built = 0;
+        let cleared = 0;
+        for (let col = 1; col <= 25; col++) {
+          // Yield between columns: minutes of back-to-back synchronous sims starve the
+          // vitest worker's RPC heartbeat under a contended `verify` run.
+          //
+          // The determinism zone bans schedulers because wall-clock timing inside the sim
+          // breaks replay byte-identity. Nothing crosses this yield: each `runSwarmWave`
+          // below is a complete, self-contained synchronous run, and the yield sits BETWEEN
+          // runs purely so the test runner can breathe. Site-local and deliberate rather
+          // than an exemption in the rule, so the guard stays strict everywhere else.
+          // eslint-disable-next-line no-restricted-globals -- yield between runs, not inside one
+          await new Promise((resolve) => setImmediate(resolve));
+          for (let row = 1; row <= 19; row++) {
+            const r = runSwarmWave(
+              [
+                { col, row },
+                { col, row: row + 2 },
+              ],
+              id,
+            );
+            if (!r.built) continue;
+            built++;
+            if (r.cleared) cleared++;
+          }
+        }
+        results[id] = { built, cleared };
+      }
+      console.log(`[story-swarm] non-AoE flanking-pair sweep: ${JSON.stringify(results)}`);
+      for (const id of NON_AOE_IDS) {
+        expect(results[id]!.built).toBeGreaterThan(100); // the sweep really ran real builds
+        expect(results[id]!.cleared).toBe(0);
+      }
+
+      // ...and the same sweep DOES find clearing builds for `splash`, so the zeroes above
+      // are a property of the non-AoE ids rather than of the sweep or the wave.
+      let splashCleared = 0;
       for (let col = 1; col <= 25; col++) {
-        // Yield between columns: minutes of back-to-back synchronous sims starve the
-        // vitest worker's RPC heartbeat under a contended `verify` run.
-        //
-        // The determinism zone bans schedulers because wall-clock timing inside the sim
-        // breaks replay byte-identity. Nothing crosses this yield: each `runSwarmWave`
-        // below is a complete, self-contained synchronous run, and the yield sits BETWEEN
-        // runs purely so the test runner can breathe. Site-local and deliberate rather
-        // than an exemption in the rule, so the guard stays strict everywhere else.
         // eslint-disable-next-line no-restricted-globals -- yield between runs, not inside one
-        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve)); // same heartbeat yield as above
         for (let row = 1; row <= 19; row++) {
           const r = runSwarmWave(
             [
               { col, row },
               { col, row: row + 2 },
             ],
-            id,
+            'splash',
           );
-          if (!r.built) continue;
-          built++;
-          if (r.cleared) cleared++;
+          if (r.built && r.cleared) splashCleared++;
         }
       }
-      results[id] = { built, cleared };
-    }
-    console.log(`[story-swarm] non-AoE flanking-pair sweep: ${JSON.stringify(results)}`);
-    for (const id of NON_AOE_IDS) {
-      expect(results[id]!.built).toBeGreaterThan(100); // the sweep really ran real builds
-      expect(results[id]!.cleared).toBe(0);
-    }
-
-    // ...and the same sweep DOES find clearing builds for `splash`, so the zeroes above
-    // are a property of the non-AoE ids rather than of the sweep or the wave.
-    let splashCleared = 0;
-    for (let col = 1; col <= 25; col++) {
-      // eslint-disable-next-line no-restricted-globals -- yield between runs, not inside one
-      await new Promise((resolve) => setImmediate(resolve)); // same heartbeat yield as above
-      for (let row = 1; row <= 19; row++) {
-        const r = runSwarmWave(
-          [
-            { col, row },
-            { col, row: row + 2 },
-          ],
-          'splash',
-        );
-        if (r.built && r.cleared) splashCleared++;
-      }
-    }
-    console.log(`[story-swarm] splash flanking-pair sweep: cleared=${splashCleared}`);
-    expect(splashCleared).toBeGreaterThan(0);
-  }, 300_000);
+      console.log(`[story-swarm] splash flanking-pair sweep: cleared=${splashCleared}`);
+      expect(splashCleared).toBeGreaterThan(0);
+    },
+  );
 });

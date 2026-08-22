@@ -130,6 +130,64 @@ git's stdin protocol, so invoke it **before** anything else consumes stdin; a wr
 drains the pipe would leave the gate announcing "no refs on stdin" and gating nothing). The
 install says which case it hit and leaves both alone.
 
+**Already using husky/lefthook/your own hooks?** Don't take over `core.hooksPath` — delegate.
+Add a line to whatever your manager already runs on `pre-push` that shells out to the same
+checker — mind stdin in BOTH directions. Upstream: don't let anything drain the pipe before the
+checker runs (the caveat above — a wrapper that drains it first leaves the gate announcing "no
+refs on stdin" and gating nothing). Downstream: don't let the checker's OWN read starve
+anything after it — `check-qc-record.mjs` calls `readFileSync(0)`, consuming the whole ref
+stream, so a later command in the same chain that also reads stdin gets EOF and silently skips
+its own checks. Any hook manager that forwards its hook's stdin to the commands it runs can
+host this, not just the two below; the exit code is the whole contract — 0 passes the push
+through to your other checks, 1 refuses it, and the gate's own message on stderr says why.
+
+**husky**, the checker as the ONLY stdin consumer in the chain — safe exactly because nothing
+else in the file reads stdin:
+
+```sh
+# .husky/pre-push
+node scripts/check-qc-record.mjs
+```
+
+**husky**, chained with another command that also reads the refs — buffer stdin once and
+replay the same bytes to every consumer, propagating the checker's exit code (a shell script's
+own exit status is its LAST command's unless something stops it earlier). EVERY consumer always
+runs, including on an empty push — it gets exactly the bytes git actually supplied, which on an
+empty push is zero, not skipped: a consumer may legitimately want to act on an empty push too.
+
+```sh
+# .husky/pre-push — only meant to run under git (piped stdin); `cat` blocks on a terminal.
+refs=$(cat)
+if [ -n "$refs" ]; then
+  printf '%s\n' "$refs" | node scripts/check-qc-record.mjs || exit 1
+  printf '%s\n' "$refs" | your-other-stdin-consumer || exit 1
+else
+  # git supplies genuinely empty stdin only when there is nothing to push. Both consumers
+  # still run here — redirected FROM /dev/null, never skipped — because a bare
+  # `printf '%s\n' "$refs"` would hand them one blank line (printf's trailing \n) rather
+  # than the zero bytes git actually sent.
+  node scripts/check-qc-record.mjs </dev/null || exit 1
+  your-other-stdin-consumer </dev/null || exit 1
+fi
+```
+
+**lefthook** — a different story, not the same dance. `use_stdin: true` reads through a single
+CACHED reader that every `use_stdin: true` command in the hook shares, so several commands each
+seeing the same ref lines is the default — no buffering needed. That sharing depends on the
+commands running SEQUENTIALLY: pair `use_stdin: true` with `parallel: true` and concurrent
+reads against the same cached buffer can hand different commands the wrong data. Never combine
+the two for stdin-consuming commands:
+
+```yaml
+# lefthook.yml — sequential (a hook's commands run this way by default); do not add
+# `parallel: true` here while any command below sets use_stdin: true.
+pre-push:
+  commands:
+    wynding-qc-gate:
+      run: node scripts/check-qc-record.mjs
+      use_stdin: true
+```
+
 Both records are claims, not proofs — they say the pass and the loop happened, where a reviewer
 can see the claim. Their value is the boundary: a step checked at push time gets done; a step
 nothing checks gets skipped exactly when attention is consumed by the incident of the day.

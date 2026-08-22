@@ -145,6 +145,22 @@ test('mid-run 220 ms press on Sell sells', async ({ page }) => {
   const bountyBefore = await readBounty();
   expect(bountyBefore, `bounty chip text did not match the expected shape`).not.toBeNull();
 
+  // Zero-income witness (#121): the exact bounty-delta assertion below only proves "refund,
+  // no run income" if run income really is zero — until now that rested on the placement
+  // comment's geometric argument (out of tower range) alone, unasserted. While a run is
+  // active, `deriveScore`'s RUNNING phase (packages/sim/src/index.ts, ADR 0006) is
+  // Σ kill-bounties + Σ early-call credit — both terms, not kill bounties alone — separate
+  // from the `survivalMul` term, which only applies once the match resolves. Kill income is
+  // zero by the placement geometry above; early-call credit is zero for a DIFFERENT, harder
+  // reason worth pinning explicitly: `paysEarlyCall = k > 0` (sv15, #70) pays nothing for
+  // wave index 0, and Start's own launch of wave 1 is the only launch this flow ever
+  // triggers — no `callWaveEarly` on wave 2+ occurs before the sell. So "Score: 0" here is
+  // the direct, enforced form of "neither income term has paid anything yet." If a future
+  // change to range/lane geometry OR to the wave-1-is-free rule ever let this flow earn
+  // either term, the failure now points at income (this assertion), not at bogus refund
+  // arithmetic three lines down.
+  await expect(page.locator('.wy-chip[data-wy-chip="score"] .wy-chip-full')).toHaveText('Score: 0');
+
   await sellBtn.click({ delay: 220 });
 
   // Outcome: the Panel hides (Sell closes it immediately, per the existing Panel contract),

@@ -208,10 +208,20 @@ try {
   console.error('   by itself; a findings review lands on the next push — or run one');
   console.error('   codex-freshness dispatch with this PR number.');
   if (POSTING) {
+    // #154: this read and codex-review-request.yml's own trigger POST are two separate
+    // workflow runs racing the same event — on #151 the freshness check ran 6s BEFORE the
+    // trigger comment landed, so the red status was already stale the moment it was
+    // written. No re-evaluation loop is added; cheapest honest fix is saying so in the
+    // status text itself. An earlier draft here also said "before any auto-trigger" —
+    // dropped (Codex, PR #156 round 1): that is false on the `issue_comment` and
+    // `workflow_dispatch` paths, where an auto-trigger may already have run, and even on
+    // `synchronize` codex-review-request.yml's own POST can win the race against this
+    // read. No wording here can know which is true without reading that workflow's live
+    // state, so the text says only what THIS read itself knows — the moment it was taken.
     await postStatus(
       headSha,
       'failure',
-      `No Codex verdict for head ${short(headSha)} — comment "@codex review"`,
+      `No Codex verdict for head ${short(headSha)} — point-in-time read — comment "@codex review"`,
     );
     process.exit(0); // the red status is the report; the job itself ran fine
   }
