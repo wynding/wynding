@@ -318,7 +318,13 @@ describe('layout — the safe-area seam (#136)', () => {
       const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(m[1] as string);
       if (token === null) continue;
       seen += 1;
-      if (token[1] !== 'top' && token[1] !== 'bottom') wrong.push(m[0].trim());
+      // TOP specifically, not "any vertical axis" (Codex P2 on c9b1cfa). All three of these
+      // are `calc(NNdvh - 3.5rem - var(--wy-safe-top))` — a budget measured DOWN from the top
+      // edge, so `top` is the only correct axis. Accepting `bottom` as well let a slip pass
+      // this guard AND keep the 20-read partition intact, while the rendered spec probes only
+      // the base `.wy-hud` rule and never the two `:has()`-gated ones — so those bounds would
+      // react to the wrong physical inset with the whole suite green.
+      if (token[1] !== 'top') wrong.push(m[0].trim());
     }
     expect(seen, 'expected the three vertical bounds that read an inset').toBe(3);
     expect(wrong).toEqual([]);
