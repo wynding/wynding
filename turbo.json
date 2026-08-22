@@ -17,6 +17,15 @@
     "test": {
       "dependsOn": ["^typecheck"]
     },
+    "@wynding/perf#test": {
+      "dependsOn": ["^typecheck"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "../../docs/adr/0005-performance-budgets.md",
+        "../../docs/design-notes/performance-spike.md",
+        "../../docs/milestones/m2.md"
+      ]
+    },
     "clean": {
       "cache": false
     },

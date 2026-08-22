@@ -136,23 +136,36 @@ describe('the executable constants agree with their rows', () => {
   });
 });
 
+/** A site's human label. Several claims are stated TWICE in one file — `2.8%` appears three
+ *  times in the spike alone — so the file name alone does not name a site, and a duplicate
+ *  `it()` title would leave a reader unable to tell which copy failed. The anchor is what
+ *  distinguishes them, so it rides in the title and in every diagnostic. */
+function label(site: ClaimSite): string {
+  return `${site.file} @ /${site.anchor}/`;
+}
+
 describe('every claim states the same value at every site', () => {
   for (const claim of CLAIMS) {
     for (const site of claim.sites) {
-      it(`${claim.id} @ ${site.file}`, () => {
+      it(`${claim.id} — ${label(site)}`, () => {
         const result = extract(site);
         if ('error' in result) {
           throw new Error(
-            `claim "${claim.id}" (${claim.claim}) could not be read at ${site.file}: ${result.error}`,
+            `claim "${claim.id}" (${claim.claim}) could not be read at ${label(site)}: ${result.error}`,
           );
         }
         if (!agrees(claim, result.value)) {
           throw new Error(
-            `claim "${claim.id}" (${claim.claim}) is ${claim.value} in claims.ts but ${result.value} at ${site.file}. ` +
+            `claim "${claim.id}" (${claim.claim}) is ${claim.value} in claims.ts but ${result.value} at ${label(site)}. ` +
               `Basis: ${claim.basis}. Fix the table row first, then every site it lists.`,
           );
         }
       });
     }
   }
+
+  it('generates a unique title for every site, so a failure names one place', () => {
+    const titles = CLAIMS.flatMap((c) => c.sites.map((s) => `${c.id} — ${label(s)}`));
+    expect(new Set(titles).size).toBe(titles.length);
+  });
 });

@@ -96,12 +96,46 @@ export function controlStat(controlSamples: readonly SampledTick[]): number {
  *  consecutive CI runs on `ubuntu-24.04` whose workload oracles are byte-identical across all
  *  four — so every difference below is runner noise, not workload:
  *
- *    | ratio statistic            | half-spread of R |
- *    | -------------------------- | ---------------- |
- *    | p95(subset) / p50(control) | +/- 15.5%        |
- *    | p95(subset) / p95(control) | +/- 16.4%        |
- *    | p99(subset) / p99(control) | +/- 11.7%        |
- *    | p50(subset) / p50(control) | +/-  2.8%        |
+ *    | ratio statistic            | R across the four runs      | half-spread |
+ *    | -------------------------- | --------------------------- | ----------- |
+ *    | p95(subset) / p50(control) | 1.3444 1.7522 1.4214 1.8348 | +/- 15.5%   |
+ *    | p95(subset) / p95(control) | 0.6524 0.6119 0.7461 0.8411 | +/- 16.4%   |
+ *    | p99(subset) / p99(control) | 0.5406 0.5816 0.6855 0.6622 | +/- 11.7%   |
+ *    | p50(subset) / p50(control) | 0.9962 0.9938 1.0164 1.0493 | +/-  2.8%   |
+ *
+ *  THE PER-ARM VALUES THOSE RATIOS ARE BUILT FROM, same run order (ms). Published because
+ *  without them nothing derived per-arm is checkable, and because `TOLERANCE` 1.10 rests on
+ *  the +/- 2.8% row above rather than on the 17-run `R0` cohort — so these four runs, not
+ *  that cohort, are what makes the tolerance recomputable. ADR 0005's per-arm range table
+ *  cites this table by name for exactly that reason:
+ *
+ *    | run | control p50 | control p95 | stress p50 | stress p95 |
+ *    | --- | ----------- | ----------- | ---------- | ---------- |
+ *    |  1  |   0.3863    |   0.7960    |   0.3848   |   0.5193   |
+ *    |  2  |   0.4102    |   1.1746    |   0.4077   |   0.7188   |
+ *    |  3  |   0.4048    |   0.7711    |   0.4114   |   0.5753   |
+ *    |  4  |   0.3128    |   0.6824    |   0.3282   |   0.5739   |
+ *
+ *  TWO CAVEATS ON THAT TABLE, both load-bearing for anyone recomputing from it.
+ *  (1) IT IS RECONSTRUCTED, NOT TRANSCRIBED. What the diagnosis recorded was the four ratio
+ *  series above plus ADR 0005's per-arm MIN/MAX, never the per-run arms; the ratios
+ *  over-determine them, and the assignment is unique because each run attains a different
+ *  recorded endpoint. Seven of the eight endpoints reproduce to 4 dp; the eighth, control
+ *  p95's max, comes out 1.17462 against a recorded 1.1747 — worst endpoint error 7.6e-5.
+ *  Said exactly rather than as "reproduces all eight", because a reader checking will find
+ *  that cell. (2) EVERY DERIVED FIGURE IS COMPUTED FROM THE UNROUNDED SCALES, so recomputing
+ *  from the printed 4 dp cells can move a last digit — run 3 is where it shows (the printed
+ *  control p50 0.4048 gives 0.5754 / 0.7712 where the unrounded scale gives 0.5753 / 0.7711),
+ *  and stress p95's per-arm half-spread is 17.35% unrounded against 17.36% off the printed
+ *  cells. Under this file's declared half-spread convention the per-arm figures are control
+ *  p50 12.31%, control p95 31.41%, stress p50 10.50%, stress p95 17.35% — tails 1.65x-2.55x
+ *  the medians, which is the multiplier ADR 0005 quotes.
+ *
+ *  PROVENANCE GAP, recorded rather than papered over: these four runs were recorded without
+ *  run or job ids and those are not recoverable. Every figure above is falsifiable by
+ *  recomputation, but none of it is traceable to the jobs that produced it — which is why
+ *  `R0`'s own record names its run, and why limit 1 below refuses to lean on this cohort as
+ *  independent evidence.
  *
  *  WHAT n = 4 SETTLES AND WHAT IT DOES NOT. The gap between p50/p50 and every tail ratio is
  *  4.2x-5.9x, and the four series are PAIRED — same four runs — which makes that gap
