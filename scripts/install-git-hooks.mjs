@@ -42,7 +42,8 @@ if (current === HOOKS_PATH) {
 
 if (current !== '') {
   // Someone (or another tool) owns this setting — say so rather than silently taking it over.
-  // A hook manager commonly owns this (husky v9 points it at `.husky`, for one), so the
+  // A hook manager commonly owns this (husky v9 points it at `.husky/_`, its internal
+  // runner dir — your own hook scripts live in `.husky/`, one level up — for one), so the
   // takeover command below is presented as what it is — a command that would silently
   // disable every hook that manager runs — not the default move.
   console.warn(`⚠️  core.hooksPath is set to '${current}', not '${HOOKS_PATH}'.`);

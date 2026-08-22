@@ -212,15 +212,16 @@ try {
     // workflow runs racing the same event — on #151 the freshness check ran 6s BEFORE the
     // trigger comment landed, so the red status was already stale the moment it was
     // written. No re-evaluation loop is added; cheapest honest fix is saying so in the
-    // status text itself. The text stops at "point-in-time" — it does NOT also claim a
-    // superseding run is coming: that is only true on the synchronize path. A
-    // workflow_dispatch re-evaluation, or the documented stuck state (bot-authored
-    // triggers ignored), has no such run queued, and a claim that isn't always true here
-    // would be exactly the dishonesty this fix exists to remove.
+    // status text itself. An earlier draft here also said "before any auto-trigger" —
+    // dropped (Codex, PR #156 round 1): that is false on the `issue_comment` and
+    // `workflow_dispatch` paths, where an auto-trigger may already have run, and even on
+    // `synchronize` codex-review-request.yml's own POST can win the race against this
+    // read. No wording here can know which is true without reading that workflow's live
+    // state, so the text says only what THIS read itself knows — the moment it was taken.
     await postStatus(
       headSha,
       'failure',
-      `No Codex verdict for head ${short(headSha)} — point-in-time, before any auto-trigger — comment "@codex review"`,
+      `No Codex verdict for head ${short(headSha)} — point-in-time read — comment "@codex review"`,
     );
     process.exit(0); // the red status is the report; the job itself ran fine
   }
