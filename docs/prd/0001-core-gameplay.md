@@ -355,8 +355,12 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   transcendentals). The **"first" targeting metric and the predictive lead both read the same
   weighted remaining path-distance** along the creep's current route — flow-field for ground,
   straight line for air — so both-domain towers compare like with like.
-- **Re-pathing** recomputes routes on every maze change within the tick it happens; the maze
-  invariant is enforced _before_ a build applies, so the sim is never in a no-path state.
+- **Re-pathing** recomputes routes on every maze change, and the recomputed routes govern
+  **every movement step after the change** — routing is per-tick derived state, so a change
+  applied before the tick's movement phase (a build) is reflected in that tick's snapshot, and
+  one applied after it (a burst consumption during combat) is reflected in the next tick's, with
+  no creep ever taking a movement step on the stale maze in either case. The maze invariant is
+  enforced _before_ a build applies, so the sim is never in a no-path state.
 - **Speed and pause are cosmetic on replay:** speed multiplies ticks-per-second, pause runs
   zero ticks; for a **fixed input log**, the tick sequence — and therefore the world-hash and
   score — is identical at any playback speed (ADR 0006). During live play, speed only changes
