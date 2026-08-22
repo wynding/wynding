@@ -259,6 +259,16 @@ describe('layout — the safe-area seam (#136)', () => {
     const withoutTokens = uncommented.replace(/--wy-safe-(?:top|right|bottom|left)\s*:[^;]+;/g, '');
     const strays = withoutTokens.match(/env\(safe-area-inset-\w+/g) ?? [];
     expect(strays, `these sites bypass the seam: ${strays.join(', ')}`).toEqual([]);
+
+    // The OTHER way round the seam, and the more dangerous one: reading the Capacitor-owned
+    // name directly. `padding-left: calc(1rem + var(--safe-area-inset-left))` trips no guard
+    // above (no `env(`, no `--wy-safe-*` to axis-check) and would look correct in
+    // `insets.spec.ts`, which injects exactly that property — then break everywhere Capacitor
+    // is absent, because with no `env()` fallback the variable is unset, the substitution is
+    // guaranteed-invalid, and the whole declaration dies at computed-value time. The seam
+    // comment in ui.css names this property, so reaching for it is the easy mistake.
+    const direct = withoutTokens.match(/var\(--safe-area-inset-\w+/g) ?? [];
+    expect(direct, `use --wy-safe-*, not the raw Capacitor name: ${direct.join(', ')}`).toEqual([]);
   });
 
   it('every axis-named property reads its MATCHING axis token', () => {
@@ -266,13 +276,30 @@ describe('layout — the safe-area seam (#136)', () => {
     // which no rendered assertion covers for the sites `insets.spec.ts` cannot reach.
     const re = /(?:scroll-)?(?:padding|margin|inset)-(top|right|bottom|left)\s*:([^;]+);/g;
     const wrong: string[] = [];
+    let seen = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(uncommented)) !== null) {
       const [, axis, value] = m as unknown as [string, string, string];
       const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(value);
-      if (token !== null && token[1] !== axis) wrong.push(m[0].trim());
+      if (token === null) continue;
+      seen += 1;
+      if (token[1] !== axis) wrong.push(m[0].trim());
     }
     expect(wrong).toEqual([]);
+    // The tripwire the sibling below already had and this one did not. Without it, a site
+    // leaving the regex's reach — a logical longhand (`padding-inline-start`), a fold into the
+    // `padding` shorthand, a dropped trailing `;` — takes its transposition cover with it and
+    // `wrong` stays `[]`, passing while guarding nothing. `ui.css` already uses logical
+    // longhands next door (`.wy-home { margin-block: … }`), so that refactor is ordinary.
+    expect(seen, 'expected the fifteen axis-named sites that read an inset').toBe(15);
+  });
+
+  it('the three guards together account for every token read', () => {
+    // 15 axis-named + 3 vertical bounds + 2 track tokens = the 20 call sites. Asserting the
+    // partition means a NEW read cannot land in the gap between the guards: it either matches
+    // one of them or fails this. Each guard's own count pins its share; this pins the whole.
+    const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
+    expect(reads).toHaveLength(20);
   });
 
   it('vertical bounds read a VERTICAL axis token', () => {

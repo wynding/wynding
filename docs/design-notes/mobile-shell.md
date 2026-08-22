@@ -240,11 +240,15 @@ Severity note, since it would be easy to assume a phone is spared: in Compact
 
 ### 3. The safe-area surface is 20 declarations, and CI could not see any of them
 
-Sharpens **#136**, whose title said "19 places". `ui.css` reads `env(safe-area-inset-*)` on 24
-lines; four are inside comments, leaving **20 live declarations**, of which four pass a fallback
-and sixteen do not. (An earlier revision of this section said 18 and 2, and cited lines 54 and
-1211 — both were measured before #144, which added two fallback-bearing sites and moved every
-line number.)
+Sharpens **#136**, whose title said "19 places". Before this branch, `ui.css` read
+`env(safe-area-inset-*)` on 24 lines; four were inside comments, leaving **20 live
+declarations**, of which four passed a fallback and sixteen did not. (An earlier revision of
+this section said 18 and 2, and cited lines 54 and 1211 — both were measured before #144, which
+added two fallback-bearing sites and moved every line number.)
+
+**Those counts are historical now.** The surface is the same twenty reads, but they go through
+`var(--wy-safe-*)`; only the four `:root` token declarations still name `env()`, so grepping for
+it today returns five lines, not twenty-four.
 
 **The fallback count is not the defect** — worth stating so nobody spends a day adding sixteen
 fallbacks for nothing. A fallback only applies where `env()` is supported and the variable is

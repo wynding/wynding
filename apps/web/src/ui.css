@@ -29,7 +29,15 @@
    narrower reason — an invalid value is invalid-at-computed-value-time, which discards the
    WHOLE consuming declaration (padding to 0, a subtractive `max-height` to unbounded) rather
    than just ignoring the inset. `<length>` + `initial-value: 0px` contains that to "inset
-   ignored, base kept". */
+   ignored, base kept".
+
+   ONE TRADE, recorded so it is not rediscovered: a literal `env()` an engine cannot parse is
+   invalid at PARSE time, so the declaration is dropped and a preceding shorthand still
+   supplies a value. `var()` always parses, so the same failure moves to computed-value time,
+   where the shorthand is never consulted. On an engine older than `env()` itself (pre-Chrome
+   69 / Safari 11.2) that turns a graceful fallback into `padding: 0` and an unbounded
+   `.wy-hud`. Accepted: nothing in this repo targets an engine that old, and the registration
+   above cannot help here — every engine with `@property` also has `env()`. */
 @property --wy-safe-top {
   syntax: '<length>';
   inherits: true;
