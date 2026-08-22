@@ -998,8 +998,10 @@ no more.** The re-record packet declared its statistic and cohort before taking 
 re-record criterion — the sd-margin and chi-square-upper-bound gates), then found,
 before recording, that the only machine available to it was a local development machine —
 not the documented `ubuntu-24.04` GitHub Actions runner image the file's own vocabulary keys
-"image" to throughout. `gate.ts:626-633` independently and explicitly disclaims any
-comparability between a local run and the CI ceiling it gates. No sample was recorded, and
+"image" to throughout. `gate.ts`'s `R0` doc, under **THE TWO CONSEQUENCES**, independently
+and explicitly disclaims any comparability between a local run and the CI ceiling it gates
+(cited by block name, not by line: the line-number form of this citation had already rotted
+once — see #86). No sample was recorded, and
 **limit 3 (in-sample rule selection) stays open** — this is reported as a finding, not
 absorbed as a re-record, and `TOLERANCE`/the ceiling were not widened to compensate (the move
 this repo has declined twice). What DID change: `gate.ts`'s `R0` doc comment gained an M2-S11
