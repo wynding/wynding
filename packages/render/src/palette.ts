@@ -56,7 +56,7 @@ export interface Palette {
    *  Not a timed status (see CONTEXT.md's Domain entry), so gated ≥ 3:1 like every
    *  other opaque cue (`palette.test.ts`) with no motion-cue caveat — same posture as
    *  `warded`. The wingspan draws entirely OUTSIDE the silhouette and outside every
-   *  other cue's radius — apex at r×2.9, tips at ≈ r×2.75 — so its contrast partner is
+   *  other cue's radius — apex at r×3.4, tips at ≈ r×3.23 — so its contrast partner is
    *  the board floor. Radii are NOT restated beyond that: the authoritative ordering,
    *  and the reason it must stay outside the ward, is derived at `creep-paint.ts`'s
    *  CUE-RADIUS ORDERING block. (An earlier version of this comment quoted r×1.1/r×1.3,

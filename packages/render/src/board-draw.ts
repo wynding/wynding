@@ -124,7 +124,7 @@ function drawBolt(g: GraphicsLike, cx: number, cy: number, halfSize: number): vo
  *
  *  The shaft and the barbs' downward fan are BOTH load-bearing, which is why this is not
  *  the bare "^" it started as: `airborneCuePaintOps` (`creep-paint.ts`) draws the
- *  airborne creep cue as exactly that apex-plus-two-strokes glyph, and its r×2.9 offset
+ *  airborne creep cue as exactly that apex-plus-two-strokes glyph, and its r×3.4 offset
  *  puts it ≈1 cell ABOVE the creep — so a flyer on the shipped board's row-11 lane paints
  *  its cue over a row-10 footprint, a tenth of a cell from this mark. An `antiair` tower
  *  plus a flying wave is the normal case, not a corner one, so two upward chevrons would

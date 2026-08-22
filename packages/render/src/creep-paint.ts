@@ -411,11 +411,33 @@ export interface AirborneCuePaintOp {
 // THE CUE-RADIUS ORDERING (read before changing any number here). Every other cue in
 // this file is a circle centred on the creep, so a cue's radius BAND is what decides
 // whether it collides, regardless of which angular sector it occupies:
-//   jolt (stun)   r×1.15   timed
-//   ring (slow)   r×1.40   timed
-//   pulse (slow)  r×2.00   timed, motion
-//   ward          r×2.20   CATALOG-derived — deliberately outside the timed band
-//   airborne      r×2.60+  CATALOG-derived — outside the ward, for the same reason
+//   jolt (stun)    r×1.15            timed
+//   ring (slow)    r×1.40            timed
+//   pip (DoT)      r×1.80            timed — GUARANTEED, a FILLED disc of radius
+//                                    max(1.5px, 0.18r), so its drawn extent is r×1.98
+//                                    ordinarily and r×2.23 at the narrow floor
+//   pulse (slow)   r×2.00            timed, motion
+//   ward           r×2.20            CATALOG-derived — deliberately outside the timed band
+//   drift (DoT)    r×1.80 → r×2.40   timed, motion — the outermost TIMED cue, and the
+//                                    only one that SWEEPS: its pips travel outward from
+//                                    the guaranteed ring, crossing the pulse and the
+//                                    ward on the way, and fade to alpha 0 as they go.
+//                                    Same disc radius as the pip above, so the drawn
+//                                    extent at the crest is r×2.58 ordinarily and
+//                                    r×2.83 at the narrow floor (r = 3.5), r×2.90 at
+//                                    the defensive `max(3, …)` clamp.
+//   airborne       r×3.23+           CATALOG-derived — outside the drift, for the same
+//                                    reason it is outside the ward
+//
+// THE DoT CUES ARE PART OF THIS LIST (#126). An earlier version of this block enumerated
+// only the five ring-shaped cues and read as exhaustive; it was not, and the omission was
+// load-bearing rather than cosmetic — the M2-S7 accessibility audit transcribed "the
+// airborne cue sits well outside every timed ring" from it, and the drift is a timed cue
+// that reaches further than every ring here. Its extent is a RATIO PLUS A PIXEL FLOOR
+// (`DOT_PIP_MIN_PX`), so it grows relative to `r` as cells shrink, which is exactly where
+// the airborne cue's own clearance was tightest. A poisoned flyer is the co-occurrence,
+// and it is reachable: `flying` carries no DoT immunity and `venom` is both-domain
+// since S7.
 //
 // An earlier draft placed the apex at r×1.10 and the wingtips at (±1.3r, −0.5r), i.e.
 // radius r×1.393 — sitting ON the slow ring (1.4) and crossing the jolt ring (1.15),
@@ -427,8 +449,24 @@ export interface AirborneCuePaintOp {
 //
 // `wardPaintOps` set the precedent: a catalog-derived, non-timed cue sits OUTSIDE the
 // timed band so it can never be misread as an active status. The airborne cue is the
-// same class, so it goes outside the ward in turn. Every point below is at radius
-// ≥ r×2.60, clearing the ward's outer stroke edge.
+// same class, so it goes outside the ward — and outside the drift, which reaches further
+// than the ward does — in turn. Every point below is at radius ≥ r×3.23 (the wingtips;
+// the apex is r×3.4), clearing the drift's drawn extent at every supported cell size.
+//
+// THE APEX MOVED OUT FROM r×2.9 TO r×3.4 (#126), because at r×2.9 it did not clear the
+// drift. That is the whole derivation, and it is MEASURED rather than reasoned about, by
+// `creep-paint.test.ts`'s "clears the DoT drift" case, which walks the sawtooth and prints
+// the worst gap between a drift pip's filled disc and the chevron's 2px-wide strokes:
+//
+//     r = 3.5 (CELL_PX_MIN_NARROW = 10, the supported floor)   was −0.840px → now +0.820px
+//     r = 3   (the defensive `max(3, …)` clamp)                was −1.077px → now +0.346px
+//
+// The glyph's SHAPE is untouched — half-span 0.9r, tips 0.3r below the apex, both exactly
+// as before. Only its standoff from the creep centre changed, so every argument this block
+// makes about shape distinctness survives verbatim; the drift, not a reshape, is what moved
+// it. The alternative lever (pulling the drift in) needed `DOT_DRIFT_RADIUS_MUL_SPAN` cut
+// from 0.6 to 0.2 to clear the same floor — 0.6px of travel at r = 3, which is not a
+// motion cue any more.
 //
 // TWO RESIDUALS, stated rather than hidden — both belong to the deferred cue-radius
 // layout pass the stun note names, not to a fourth cue inventing its own scheme:
@@ -436,12 +474,15 @@ export interface AirborneCuePaintOp {
 // (1) The clearance is a RATIO and `r` floors at 3px, so at that floor the gap above the
 //     ward is ~1.2px — tight rather than clean. No size-independent radius fixes it.
 // (2) THIS ANALYSIS COVERS SAME-CREEP COLLISIONS ONLY. With `r = cellPx × 0.35`
-//     (`board-draw.ts`), an apex at r×2.9 sits ≈1.02 × cellPx above the creep centre —
+//     (`board-draw.ts`), an apex at r×3.4 sits ≈1.19 × cellPx above the creep centre —
 //     i.e. the chevron renders in the cell to the NORTH, where ANOTHER creep's
 //     silhouette, HP pip or telegraph rings may already be. On the shipped board every
 //     creep walks the row-11 lane, so a flyer's cue lands across row 10. That is a real
-//     trade, not an oversight: the ward already occupies r×2.2, so no radius both clears
-//     every same-creep cue AND stays inside the cell. SHAPE still carries the load there,
+//     trade, not an oversight: the drift already reaches r×2.83 at the narrow floor, so no
+//     radius both clears every same-creep cue AND stays inside the cell. The #126 move
+//     from r×2.9 to r×3.4 deepens this residual without changing its CHARACTER — 1.19
+//     cellPx still lands in the row-10 cell (leaving it would take 1.5), so it is the same
+//     one cell, further into it. SHAPE still carries the load there,
 //     not colour: the cell it lands in is usually a tower footprint, so no footprint mark
 //     may be this glyph — `antiair` (the tower that co-occurs with flyers by definition)
 //     therefore draws the `'arrow'` mark, a shafted arrow, rather than the bare "^" it
@@ -453,9 +494,14 @@ export interface AirborneCuePaintOp {
 //     board (every creep walks the row-11 lane), and called out here because an earlier
 //     draft of this block claimed to have enumerated the adjacent-cell cases and had
 //     only enumerated the interior ones.
-const AIRBORNE_APEX_R_MUL = 2.9; // straight above centre — beyond every ring, timed or not
-const AIRBORNE_WING_Y_MUL = 2.6; // tips sit lower than the apex, so the chevron reads as wings
-const AIRBORNE_WING_SPAN_MUL = 0.9; // half-span; tip radius = √(0.9² + 2.6²) ≈ r×2.75
+const AIRBORNE_APEX_R_MUL = 3.4; // straight above centre — beyond every cue, timed or not
+const AIRBORNE_WING_Y_MUL = 3.1; // tips sit 0.3r lower than the apex, so the chevron reads as wings
+// Half-span. NARROWER than the silhouette's own half-width of r, so the tips clear the
+// silhouette VERTICALLY, never laterally. The tip radius √(0.9² + 3.1²) ≈ r×3.23 is the
+// glyph's MINIMUM radius, not its maximum: the apex at r×3.4 is its furthest point, and
+// with the apex this far out the nearest point of either stroke to the creep centre is
+// the tip itself (at r×2.9 it was an interior point of the stroke, at r×2.751).
+const AIRBORNE_WING_SPAN_MUL = 0.9;
 
 /**
  * The airborne cue's paint plan (M2-S7): a wing chevron — two strokes fanning out from
@@ -470,8 +516,11 @@ const AIRBORNE_WING_SPAN_MUL = 0.9; // half-span; tip radius = √(0.9² + 2.6²
  * Like `wardPaintOps`, this is a CATALOG-derived cue (`CreepVM.domain === 'air'`), NOT a
  * timed status (see CONTEXT.md's Domain entry) — so it takes no `renderTimeMs`, has no
  * reduced-motion branch, and carries no motion cue at all. It floats clear ABOVE the
- * creep, every point at radius ≥ `r×2.6` — outside the silhouette, outside all three
- * timed telegraph rings, and outside the ward. See the cue-radius ordering derived at
+ * creep, every point at radius ≥ `r×3.23` — outside the silhouette, outside all three
+ * timed telegraph rings, outside the ward, and outside the DoT drift's drawn extent at
+ * every supported cell size (#126 moved the apex out from `r×2.9` for that last one; the
+ * measurement is `creep-paint.test.ts`'s "clears the DoT drift" case). See the
+ * cue-radius ordering derived at
  * the constants below; that clearance is the load-bearing part, not the glyph. It keeps
  * the same posture `wardPaintOps`' own note explains (an essential cue must not depend
  * on the health of the thing it is drawn on) and adds the one this file's stun note
