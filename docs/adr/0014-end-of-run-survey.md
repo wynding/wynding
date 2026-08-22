@@ -179,14 +179,28 @@ and means a player who simply ignores the button leaves no trace of having been 
 
 The survey submission carries the answers plus the run's identity: `sessionId`, `gameVersion`,
 `simVersion`, `rulesetHash`, `boardId`, `seed`, outcome, `score`, `stars`, wave reached
-(`waveCursor`), the final tick, and **`finalHash`** — the sim's deterministic content-hash of the
-terminal world state.
+(`waveCursor`), the final tick, **`finalHash`** — the sim's content-hash of the terminal world
+state — and **`replayDigest`**, a collision-resistant digest of the run's input log.
 
 `finalHash` is not a new quantity and nothing about it is minted here. `hashSimState` is already
 exported from `packages/sim`, the app layer already calls it at run end
 (`apps/web/src/controller.ts`), and it is the same value the determinism golden pins
 (`packages/content/src/m2-golden.test.ts`, guarded by `scripts/check-determinism-version.mjs`).
-The survey reads it exactly as it reads every other field above.
+The survey reads it exactly as it reads every other field above. What it is **not** is an
+identity: `packages/engine/src/hash.ts` implements it as FNV-1a over the serialized state and
+labels itself in its own comment — "fast, deterministic 8-hex-char digest (not crypto)". Eight
+hex digits is 32 bits. It is a **cheap, human-legible discriminator** — excellent for spotting
+that two runs differ, useless as a claim that two runs are the same.
+
+`replayDigest` carries the weight `finalHash` cannot. It is a **SHA-256 over the recorder's
+canonical serialized input log**, computed by the **app layer at send time** — and it too
+requires no sim change and no change to ADR 0011. The recorder already holds the log:
+`apps/web/src/controller.ts` accumulates `tickInputs` and exposes the whole envelope through
+`buildReplay()`. The digest comes from Web Crypto's `crypto.subtle.digest`, available in the
+secure contexts this PWA already requires. Nothing new is captured — the digest is a function of
+data the app already has, and §7's privacy posture is untouched because **the digest reveals
+nothing the playtrace does not already carry**; it is a fingerprint of the log, not an addition
+to it.
 
 **No sim changes, and no new sim outputs.** The replay identity (`seed`, `boardId`,
 `rulesetHash`, `simVersion`) is already the shape `@wynding/replay` uses; outcome, score, stars,
@@ -242,11 +256,12 @@ rotation is deliberate: an id bounded by a run count and an elapsed time is _des
 more than one run, because a diagnostic thread often does. So a player who finishes several runs
 before it rotates produces several playtraces sharing one id, and a survey joined on that field
 alone has multiple candidate runs — which would attribute a rating or a difficulty answer to the
-wrong outcome, in exactly the analysis §2 spent a question on. The join is therefore the whole
-composite §4 already carries: **`sessionId`, plus the replay identity (`seed`, `boardId`,
+wrong outcome, in exactly the analysis §2 spent a question on. The join therefore **narrows** on
+the whole composite §4 carries — **`sessionId`, plus the replay identity (`seed`, `boardId`,
 `rulesetHash`, `simVersion`), plus the outcome fields (outcome, `score`, `stars`, wave reached,
-final tick), plus `finalHash`**. No new field, no envelope change, and no ripple into ADR 0011 —
-the identity was already there; only the naming of it was too loose.
+final tick), plus `finalHash`** — and then **matches exactly** on `replayDigest`, below. No new
+_capture_, no sim change, and no ripple into ADR 0011: every part of the composite was already in
+the envelope, and the digest is derived at send time from a log the app already holds.
 
 **`finalHash` is what makes that composite bite, and it is why the aggregate fields alone were
 not enough.** Two runs in one session can reuse a seed and finish with identical outcome, score,
@@ -257,21 +272,34 @@ playtrace. This repo already learned that lesson elsewhere: `outcomesMatch` in
 comment — "a different tower layout reaching the same score" makes score and stars agree while
 the world diverged. A join on aggregates alone was repeating that mistake.
 
-The terminal state includes the final tower layout, so **two runs matching across the envelope
-including `finalHash` share their end state byte for byte.** The residual is now narrow and
-stated precisely rather than waved away: distinct mid-run paths can still converge on an
-identical terminal state. For that case the joined playtrace's own input log is what
-disambiguates reproduction — and the join cannot land on a "wrong" playtrace in the way that
-matters, because any playtrace whose replay produces a different `finalHash` is excluded by the
-key itself. Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission in
-that session, and that coarser grain is the right one for a privacy operation anyway.
+The terminal state includes the final tower layout, so two runs matching across the envelope
+including `finalHash` share their end state byte for byte. But that is a filter, not an identity,
+and an earlier revision of this ADR overclaimed by treating it as one: **distinct mid-run paths
+can converge on an identical terminal state**, and when they do, inspecting the candidate logs
+reproduces both paths without revealing which one the player was talking about. A mid-run
+"something broke" report could still be attached to the wrong playtrace.
 
-A dedicated **per-run identifier** carried in both the playtrace capture and this envelope would
-remove even the residual. This contract does not mint one, because doing so unilaterally would
-put a new identifier into a payload whose minimalism ADR 0011 argues from. But if
+**`replayDigest` closes that exactly, and the reason it can is worth stating plainly: the digest
+is carried in one record and _derivable_ from the other.** The survey submission carries it; the
+playtrace does not need to, because **the playtrace _is_ the input log** — recomputing the digest
+from a candidate's own log is always possible. So the join runs in two steps: the composite above
+**narrows** the candidates, then each candidate is **matched exactly** by recomputing its digest
+and comparing. Two runs with different input paths have different logs and therefore different
+digests, so at most one candidate can match. That is what makes the join exact by construction
+rather than by luck, and it is why no field has to be added to the playtrace side and no part of
+ADR 0011 has to be amended.
+
+Deletion is unaffected: §7 deletes by `sessionId`, which sweeps every submission in that session,
+and that coarser grain is the right one for a privacy operation anyway.
+
+A dedicated **per-run identifier** carried in both records would make the same join cheaper —
+a direct key lookup instead of a filter plus a recomputation. It is no longer needed for
+_completeness_, since `replayDigest` already makes the join exact; it is an **implementation
+simplification**. This contract still does not mint one, because doing so unilaterally would put
+a new identifier into a payload whose minimalism ADR 0011 argues from. But if
 [#133](https://github.com/wynding/wynding/issues/133)'s capture implementation mints one for its
-own reasons, **this contract can adopt it additively, without amendment** — the composite join
-above keeps working in the meantime and simply becomes redundant.
+own reasons, **this contract can adopt it additively, without amendment** — the digest join keeps
+working in the meantime and simply becomes the slower path.
 
 One consequence must be stated rather than left to be inferred: **the survey is player-initiated,
 so pressing Send is the act, and the playtrace opt-out does not govern it.** The opt-out governs
