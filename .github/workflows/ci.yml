@@ -74,10 +74,38 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @wynding/web exec playwright install --with-deps chromium webkit
       - run: pnpm --filter @wynding/web run e2e
+      # Layering reachability over BUILD OUTPUT (#129): no file the shipped web build emits
+      # may carry a marker of @wynding/perf or the never-shipped @wynding/content/stress and
+      # /catalog bundles. It lives HERE, not in `verify`, because it needs three real Vite
+      # builds and this is already the longest job — the fast unit path stays fast. (An
+      # earlier note said "this job already pays for two of them", which does no work as a
+      # reason: `verify`'s `pnpm run build` pays for the same two, and the script rebuilds all
+      # three itself regardless, deliberately never trusting an existing dist. The marginal
+      # cost is three builds wherever it sits.) Runs after `e2e` rather than before so a
+      # functional regression is reported as a functional regression.
+      #
+      # THIS STEP IS WHY THE JOB'S NAME NOW UNDERSELLS IT, and that is a known, accepted debt
+      # rather than an oversight. `e2e (functional + axe)` is a REQUIRED context, so a layering
+      # violation is merge-blocking here — which is the point, and which is exactly what would
+      # be lost by moving this into a job of its own. Renaming the context means re-wiring
+      # branch protection in the same change (see the note above at the job header), so it is
+      # left to an owner pass. The step carries an explicit `name:` so a red run says
+      # "layering", not "Playwright".
+      #
+      # This is the only guard that answers the reachability question against the real module
+      # graph. `eslint.config.mjs`'s layering zones and `packages/perf/src/layering.test.ts`
+      # run in `verify` and catch the specifier-shaped cases earlier and cheaper; the six PATH
+      # escapes in #129's table, and the template literal `layering.test.ts` leaves open by
+      # design, are caught only here — with the caveat the script's own header states, that a
+      # marker must survive tree-shaking to be seen.
+      - name: layering reachability over build output (#129 — not a Playwright failure)
+        run: pnpm run check:build-layering
       # Failure forensics ONLY (the no-artifact stance in the comment above is about build
       # outputs): Playwright's per-failure error-context page snapshots and on-first-retry
       # traces are the difference between diagnosing a Linux-only failure from the log tail
-      # and guessing at it. Exists solely when the gate is already red.
+      # and guessing at it. Exists solely when the gate is already red — which, since the
+      # layering step above joined this job, can also mean a red that produced no Playwright
+      # output at all. `if-no-files-found: ignore` makes that upload a harmless no-op.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:

@@ -33,13 +33,55 @@ caching.
 The decisive reason for a monorepo over separate repos: `apps/server` re-simulates
 replays using the **same `packages/sim`** the client runs. Sharing one versioned
 package — rather than syncing two repos — is what keeps client and server
-simulations identical. Boundaries are enforced by the package dependency graph:
+simulations identical. The boundary is the package dependency graph:
 `{types, engine} <- sim <- {render, replay, content} <- perf <- apps` — read as
 layering shorthand: each layer MAY depend on anything to its left, not that every
-drawn edge exists (`perf`, for instance, does not import `render`). _(Corrected
-2026-08-12: `types` and `engine` are both roots — `engine` declares no dependency on
-`@wynding/types` (its only dependency is `@noble/hashes`) — and `perf` was missing
-from the graph entirely.)_
+drawn edge exists (`perf`, for instance, does not import `render`). Edges WITHIN a
+layer are permitted and do exist — `render`'s and `replay`'s tests import
+`@wynding/content`. What the graph forbids is a **back-edge**: an import of anything
+strictly to the right. _(Corrected 2026-08-12: `types` and `engine` are both roots —
+`engine` declares no dependency on `@wynding/types` (its only dependency is
+`@noble/hashes`) — and `perf` was missing from the graph entirely.)_
+
+**This graph is enforced by a lint rule generated from it** — `eslint.config.mjs`'s
+layering zones, which derive each zone's forbidden set from the layer table above, and
+each package's subpath spellings from that package's own `exports` map. (Generated is
+exact, and its limit is worth stating: the two zones guarding the shipped **apps** are
+hand-written, because they carry the never-ship invariant rather than the graph.)
+
+Until 2026-08-22 this ADR said instead that "boundaries are enforced by the package
+dependency graph", which overstated what pnpm and tsc give you. What they actually catch
+is narrower: an _undeclared_ import fails to resolve, and a reference _cycle_ fails the
+build. **Any declared, non-cyclic import passes both** — and two different violations
+hide in that gap:
+
+- a true **back-edge**, an import of something strictly to the right (`packages/sim`
+  reaching `@wynding/content`);
+- a declared import of a **never-shipped** package, which this graph positively permits:
+  `apps/web/src` importing `@wynding/perf` is a _leftward_ edge, since `perf` is upstream
+  of `apps`, and it is already a declared devDependency for the perf sandbox. It would
+  have typechecked, linted and bundled into the shipped app without a murmur (#112).
+
+The concession is worth recording either way: pnpm and tsc do genuinely catch cycles and
+undeclared imports; what the tooling adds is protection against _declared_ violations,
+which is exactly the kind a hurried refactor or a helpful bot produces. **Three** guards
+now hold it — no one of them sufficient, and the third is not a formality:
+
+1. **At the source:** the per-zone `no-restricted-imports` above, in `verify`'s lint. It
+   reads specifiers, and does not inspect dynamic `import()` at all.
+2. **At the artifact:** `pnpm run check:build-layering` (#129), which asks the bundler
+   rather than the source text — no file the shipped **web** build emits may carry the
+   never-shipped modules' markers, so a reach spelled as a relative path, a re-export, a
+   root-relative specifier or a template literal is caught, Vite having already resolved
+   it. Two limits, both real: it covers the web app only (`apps/server` ships too, and is
+   bundled by esbuild, but this check does not read its output), and it matches
+   **string-shaped markers**, so a reach that drags in no marker-bearing string — Rollup
+   tree-shakes per module — can still pass. Vite resolving the specifier is necessary,
+   not sufficient.
+3. **At the source, cheaply:** `packages/perf/src/layering.test.ts`, the context-free grep
+   over every shipped `src` tree. It is the only one of the three that covers
+   `apps/server` and dynamic or comment-interrupted `import()` of the three never-shipped
+   specifiers.
 
 Planning docs (PRDs, ADRs, `CONTEXT.md`) live **in** the repo under `docs/`, public
 and versioned with the code.

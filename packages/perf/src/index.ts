@@ -15,11 +15,19 @@
 // dependencies, so a root-level script has no way to import `@wynding/sim` et al. at all.
 //
 // Hence a dedicated workspace package, downstream of everything it needs and upstream
-// of nothing that ships. There is no automated dependency-direction lint for this (the
-// repo's one custom rule, `eslint-rules/no-ui-literals.mjs`, checks something else
-// entirely) — the "nothing shipped may import this" invariant is held by review, PLUS
-// `layering.test.ts` (QC: this package's dev-only reverse dependency), which greps
-// `apps/web/src/**` for an import of this package or of `@wynding/content/stress`.
+// of nothing that ships. THREE guards hold the "nothing shipped may import this"
+// invariant, as of #112/#129 — this comment used to say there was no automated
+// dependency-direction lint at all, which was true when it was written and is not now:
+//   - `eslint.config.mjs`'s layering zones, generated from ADR 0001's graph, which red a
+//     DECLARED back-edge (this package is a declared devDependency of `apps/web`, so it
+//     is exactly the import nothing else in the toolchain objects to);
+//   - `pnpm run check:build-layering`, which asserts over the BUILT web app that no
+//     emitted file carries this package's or the synthetic bundles' markers — the
+//     authority, because it asks Vite rather than reading source text;
+//   - `layering.test.ts` (QC: this package's dev-only reverse dependency), the cheap grep
+//     over every shipped `src` tree, which is the arm that still covers `apps/server`
+//     (which `check:build-layering` does not scan — esbuild bundles it, but that check reads
+//     the web app's output only) and dynamic `import()` spellings.
 //
 // QC corrected a stale claim here: this file used to say the invariant was held "by
 // this package's own total absence of reverse dependencies" — no longer true.
