@@ -20,7 +20,9 @@
 // to be wrong.
 //
 // SCOPE, as the test implements it. The SURFACE is `PERF_SOURCES` — the six `packages/perf`
-// sources; a figure is a perf-gate claim if the perf package states it. Coverage is then
+// sources; a figure is a perf-gate claim if the perf package states it, in PROSE or as a
+// numeric literal its code EXECUTES — both are occurrences, and the second was invisible to
+// the sweep until Codex found it (PR #161; see `codeLiterals`). Coverage is then
 // ALL-PAIRS across every file in `GUARDED_FILES`: any such figure appearing in two guarded
 // files needs a row, whoever states it, so an ADR<->spike disagreement is caught with no
 // `gate.ts` copy involved. An earlier version of this paragraph said the contract was
@@ -44,9 +46,10 @@
 // are on record rather than quietly folded in: ship-review found ten multi-file figures with no
 // row and five rowed figures whose second and third copies were unguarded; Codex found two
 // whole families still missing, then found rows were matched by VALUE rather than per
-// occurrence, then found an executable-pin exemption that guarded no prose copy; CodeRabbit
-// found the sweep seeded from one file. Each time the fix was to close the gap, never to soften
-// the claim to fit it.
+// occurrence, then found an executable-pin exemption that guarded no prose copy, then found
+// the sweep could not see a value that lives only in CODE — so a literal copied into a document
+// duplicated invisibly; CodeRabbit found the sweep seeded from one file. Each time the fix was
+// to close the gap, never to soften the claim to fit it.
 //
 // HOW TO CHANGE A NUMBER. Edit the row here, then every site it lists — the test tells you
 // when you have missed one. Adding a new copy of an existing claim means adding a site to
@@ -1232,6 +1235,25 @@ export const CLAIMS: readonly Claim[] = [
   },
 
   // ---------------------------------------------------------------------------------------
+  // THE SCENE'S REPRODUCIBILITY PIN — the seed every figure below was measured under.
+  // Found by widening the sweep to the values the code EXECUTES: the seed is a literal in
+  // `scenario.ts` and a table row in the spike, with no prose copy anywhere, so it was
+  // invisible to a sweep that read comments only and the two copies bound nothing.
+  // ---------------------------------------------------------------------------------------
+  {
+    id: 'stress-seed',
+    claim: 'the fixed seed both perf scenarios run under',
+    value: '1234',
+    numeric: 1234,
+    basis:
+      'arbitrary but pinned, so the committed replays — and every figure measured against them — reproduce byte-for-byte',
+    sites: [
+      { file: SCENARIO, anchor: 'const STRESS_SEED =', pattern: '\\s*(\\d+);' },
+      { file: SPIKE, anchor: '\\| Seed\\s+\\|', pattern: '\\s*(\\d+)' },
+    ],
+  },
+
+  // ---------------------------------------------------------------------------------------
   // THE TWO ARMS' WORKLOADS — the population gap and the DoT asymmetry.
   // Codex found this whole family unrowed: `gate.ts` states all eight figures, and every
   // one is duplicated into the oracle, the scenario builder, their tests, or the docs.
@@ -1558,6 +1580,22 @@ export const CLAIMS: readonly Claim[] = [
       { file: FIXTURE_TEST, anchor: "while p95's ratio at k =", pattern: '\\s*([\\d.]+)' },
       { file: FIXTURE_TEST, anchor: 'failure would be .expected', pattern: '\\s*([\\d.]+)' },
       { file: ADR, anchor: "name while still printing the grid's", pattern: '\\s*([\\d.]+)' },
+      // The three EXECUTABLE occurrences: the grid itself, and the two assertions that read
+      // it. Seven prose sites restated this grid point and not one of them bound the literal
+      // the fixture actually runs — `KS`'s `0.0075` could have been retuned and every one of
+      // them stayed green, because the sweep could not see a value that lives only in code
+      // (Codex, PR #161). Executable literals are an occurrence class now, so they are sites.
+      { file: FIXTURE_TEST, anchor: 'const KS = \\[', pattern: '[\\d.]+, ([\\d.]+),' },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'deliberately and re-record the pins\\.',
+        pattern: '\\s*expect\\(ratio\\(broad\\(([\\d.]+)\\)',
+      },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'expect\\(kGating\\)\\.toBe\\(0\\.01\\);',
+        pattern: '\\s*expect\\(k95\\)\\.toBe\\(([\\d.]+)\\)',
+      },
     ],
   },
   {

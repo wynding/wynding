@@ -380,6 +380,16 @@ describe('no site can silently fall back to another occurrence', () => {
 // template literals so a `//` inside a string is not mistaken for a comment (CodeRabbit).
 // Then it blanks the token shapes that are references rather than claims.
 //
+// TWO OCCURRENCE CLASSES, because prose was never the only place a guarded file STATES a
+// figure. The scan above keeps comment text and blanks code, so a value living only as an
+// executable literal was invisible to both halves and could be copied into a document with
+// nothing binding the copies — Codex planted `export const executableClaimProbe = 7654321`
+// beside the same numeral in ADR 0005 and all 725 tests stayed green (PR #161). The numeric
+// literals a guarded `.ts` source executes are therefore an occurrence class of their own,
+// read off the SAME parse as the prose projection, normalised through the SAME grammar, and
+// fed to the same two halves. `codeLiterals` below states the admission bar and the census
+// behind it.
+//
 // THE DISCIPLINE for occurrence accounting, stated because a bare numeral cannot always
 // identify a claim. Accounting is enforced for HIGH-INFORMATION occurrences — three or more
 // decimal places, or five or more digits — where the numeral is effectively self-identifying
@@ -388,12 +398,14 @@ describe('no site can silently fall back to another occurrence', () => {
 // other things), and requiring every one of them to sit at a listed site would produce noise
 // rather than signal. Those values are still covered by the all-pairs half and by their rows'
 // declared sites; what is NOT claimed is that every low-information restatement is guarded.
-// That gap is real, bounded, and named here rather than papered over.
+// That gap is real, bounded, and named here rather than papered over. It is ONE bar, and the
+// code class is admitted by it rather than by a second rule of its own.
 
-/** The files whose prose the perf gate's claim set lives in. The SEED half — the six
- *  `packages/perf` sources — defines the SURFACE: a figure is a perf-gate claim if the perf
- *  package states it. The docs are guarded too, and all-pairs coverage runs across every
- *  guarded file, so an ADR<->spike disagreement about a perf figure is caught even when
+/** The files the perf gate's claim set lives in. The SEED half — the six `packages/perf`
+ *  sources — defines the SURFACE: a figure is a perf-gate claim if the perf package states
+ *  it, in PROSE or as a numeric literal its code EXECUTES. The docs are guarded too, and
+ *  all-pairs coverage runs across every guarded file, so an ADR<->spike disagreement about a
+ *  perf figure is caught even when
  *  `gate.ts` never mentions it (CodeRabbit). What the surface deliberately excludes is the
  *  rest of those documents' numeric content — device frame budgets, board geometry, wave
  *  arithmetic — which belongs to other packages and other tests, and which this table has no
@@ -678,6 +690,20 @@ const OCCURRENCE_EXCEPTIONS: readonly {
   },
 ];
 
+/** One numeric literal the source EXECUTES, with the span it occupies. */
+interface CodeLiteral {
+  readonly start: number;
+  readonly end: number;
+  /** The literal exactly as written — separators, base prefix and all. */
+  readonly text: string;
+  /** Where the unary `+`/`-` this literal is the operand of begins, when it has one. The
+   *  VALUE is still read UNSIGNED, exactly as the prose tokenizer reads it and for the same
+   *  reason — a row valued -1.36 is what covers a stated 1.36, and the sign is enforced at
+   *  the row's sites, which capture it. A site is free to capture the sign or not, so the
+   *  occurrence has to be accountable at either offset; this is the other one. */
+  readonly signAt?: number;
+}
+
 /** THE SCANNER IS THE LANGUAGE'S OWN, and that is the whole design.
  *
  *  This file used to carry a hand-rolled lexer. It was rewritten five times in five review
@@ -712,6 +738,9 @@ interface Walked {
   readonly commentAt: readonly boolean[];
   /** Per byte: ordinary code — not a string, not a template literal, not a comment. */
   readonly codeAt: readonly boolean[];
+  /** Every numeric literal in the source, in source order. Read off THIS parse rather than
+   *  a second one, so there is one tree and one truth about where a value sits. */
+  readonly numericLiterals: readonly CodeLiteral[];
   /** Reasons the source could not be parsed at all. Empty for anything that compiles. */
   readonly problems: ReadonlySet<string>;
 }
@@ -725,6 +754,7 @@ function walk(src: string): Walked {
   const sf = ts.createSourceFile('scan.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const commentAt = new Array<boolean>(src.length).fill(false);
   const literalAt = new Array<boolean>(src.length).fill(false);
+  const numericLiterals: CodeLiteral[] = [];
   const problems = new Set<string>();
 
   const mark = (into: boolean[], from: number, to: number): void => {
@@ -753,6 +783,12 @@ function walk(src: string): Walked {
   // Literal TEXT — what the language reads as data rather than as code. Template heads,
   // middles and tails are literal; the substitutions between them are not, which is the one
   // place this projection is deliberately finer than the lexer it replaced.
+  //
+  // The same pass records the NUMERIC literals, which are the opposite thing: not data the
+  // scan must skip, but values the code states by executing them. Both of the language's
+  // numeric literal kinds are taken — a `BigIntLiteral` is a numeral wearing an `n`, and
+  // asking the compiler for "a numeric literal" rather than listing shapes is what keeps
+  // this from becoming the keyword list every other rule in this file had to stop being.
   const collectLiterals = (node: ts.Node): void => {
     switch (node.kind) {
       case ts.SyntaxKind.StringLiteral:
@@ -763,6 +799,25 @@ function walk(src: string): Walked {
       case ts.SyntaxKind.RegularExpressionLiteral:
         mark(literalAt, node.getStart(sf), node.getEnd());
         break;
+      case ts.SyntaxKind.NumericLiteral:
+      case ts.SyntaxKind.BigIntLiteral: {
+        const start = node.getStart(sf);
+        const end = node.getEnd();
+        const parent = node.parent as ts.Node | undefined;
+        const signed =
+          parent !== undefined &&
+          ts.isPrefixUnaryExpression(parent) &&
+          parent.operand === node &&
+          (parent.operator === ts.SyntaxKind.MinusToken ||
+            parent.operator === ts.SyntaxKind.PlusToken);
+        numericLiterals.push({
+          start,
+          end,
+          text: src.slice(start, end),
+          ...(signed ? { signAt: (parent as ts.PrefixUnaryExpression).getStart(sf) } : {}),
+        });
+        break;
+      }
       default:
         break;
     }
@@ -784,7 +839,7 @@ function walk(src: string): Walked {
     );
   }
 
-  const walked: Walked = { commentAt, codeAt, problems };
+  const walked: Walked = { commentAt, codeAt, numericLiterals, problems };
   walkCache.set(src, walked);
   return walked;
 }
@@ -922,6 +977,11 @@ interface Numeral {
   readonly raw: string;
   readonly value: string;
   readonly at: number;
+  /** A SECOND offset at which a site may legitimately capture this same occurrence. Only a
+   *  signed code literal has one: `at` covers the sign, `alsoAt` starts at the digits, and a
+   *  site's capture group may be written either way. Accounting accepts both, so a correct
+   *  site is never reported as an unaccounted restatement of itself. */
+  readonly alsoAt?: number;
 }
 
 /** The NUMERIC GRAMMAR this sweep reads, which is the language's, not a run of digits. A
@@ -969,6 +1029,72 @@ function scan(file: string): Numeral[] {
   return n;
 }
 
+/** A literal's value, spelled the ONE way this file spells numbers. A decimal literal goes
+ *  through `normalizeNumeral` — the same normalisation prose gets — so `1e3` in code and
+ *  `1,000` in a document reach one claim key. A literal in another BASE, or a bigint, is not
+ *  in that grammar at all, so it is converted to its value and spelled decimally rather than
+ *  dropped: the fail-closed direction, since a bit pattern that matches no claim is merely
+ *  inert in the sweep while dropping it would be a silent hole. */
+function literalValue(text: string): string | undefined {
+  const cleaned = text.replace(/[,_]/g, '').replace(/n$/, '');
+  if (IS_NUMERAL.test(cleaned)) return normalizeNumeral(cleaned);
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? String(parsed) : undefined;
+}
+
+/** THE SECOND OCCURRENCE CLASS — the values a guarded source states by EXECUTING them.
+ *
+ *  An executable literal is the strongest statement of a value in this repository: it is the
+ *  one the gate actually runs. It was also the one thing the sweep could not see, because
+ *  `scannedProse` keeps comment text and blanks code. So a figure existing only as a literal
+ *  could be copied into a guarded document and the copies bound nothing — Codex planted
+ *  `export const executableClaimProbe = 7654321` next to the same numeral in ADR 0005 and the
+ *  whole suite stayed green (PR #161). It is read off the same parse and normalised through
+ *  the same grammar as prose, so `0.0075` in `KS` and `0.0075` in a paragraph are one claim.
+ *
+ *  THE ADMISSION BAR IS `highInformation` — the bar the occurrence half already applies, not
+ *  a second rule invented for this class. It is applied HERE, at admission, because the
+ *  all-pairs half has no threshold of its own and code is where low-information numerals are
+ *  densest: array bounds, indices, tick counts, fixture inputs.
+ *
+ *  WHY THAT CANNOT HIDE A CLAIM-SHAPED VALUE, censused rather than asserted. Admitting the
+ *  class UNFILTERED surfaces seven cross-file pairs beyond the ones already swept. Six are
+ *  coincidences between a fixture input and an unrelated figure in a document — `slowedCreeps:
+ *  120` against a 120 Hz display cadence, `routeLength: 700` against "700-1,400 gated runs a
+ *  year", `towersPlacedAfterBuild: 149` against Chrome 149.0.7827.55, a `0.4` sample value
+ *  against a 0.4% paint share, and `99`/`199` against each other in two test files. The
+ *  seventh is real — `scenario.ts`'s `STRESS_SEED = 1234` is the spike's recorded `Seed |
+ *  1234` — and it is ROWED (`stress-seed`), not left to the threshold to catch. The residue
+ *  the bar leaves is the same one the header names and bounds for prose: below it a numeral
+ *  cannot identify a claim on its own, so it is guarded by its row's declared sites rather
+ *  than by the sweep. One bar, two classes, one admission. */
+function codeLiterals(file: string): Numeral[] {
+  if (file.endsWith('.md')) return [];
+  const raw = read(file);
+  rejectUnlexableSyntax(file, raw);
+  const found: Numeral[] = [];
+  for (const lit of walk(raw).numericLiterals) {
+    const value = literalValue(lit.text);
+    if (value === undefined || !highInformation(value)) continue;
+    const at = lit.signAt ?? lit.start;
+    found.push({ raw: raw.slice(at, lit.end), value, at, alsoAt: lit.start });
+  }
+  return found;
+}
+
+/** EVERY OCCURRENCE OF A VALUE IN A GUARDED FILE — its prose numerals and its executed
+ *  literals, in one list. Both coverage halves and both table audits read this rather than
+ *  `scan`, because "what does this file state" has one answer and a second definition of it
+ *  is how every previous round of this file started. */
+const occurrenceCache = new Map<string, Numeral[]>();
+function occurrences(file: string): Numeral[] {
+  const hit = occurrenceCache.get(file);
+  if (hit !== undefined) return hit;
+  const all = [...scan(file), ...codeLiterals(file)];
+  occurrenceCache.set(file, all);
+  return all;
+}
+
 describe('the coverage contract is enforced, not merely asserted', () => {
   it('every figure the perf package states, and another guarded file repeats, has a row', () => {
     // Everything here keys by `claimKey`, so `12.340` in a source and `12.34` in a doc are
@@ -977,12 +1103,14 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     // without their sign, so a row valued -1.36 is what covers a prose `1.36`. The sign is
     // still enforced where it matters — at the row's sites, which capture it.
     const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
-    const surface = new Set(PERF_SOURCES.flatMap((f) => scan(f).map((n) => claimKey(n.value))));
+    const surface = new Set(
+      PERF_SOURCES.flatMap((f) => occurrences(f).map((n) => claimKey(n.value))),
+    );
     const excluded = new Set([...EXCLUDED].map(claimKey));
     const where = new Map<string, Set<string>>();
     const spelling = new Map<string, string>();
     for (const file of GUARDED_FILES) {
-      for (const n of scan(file)) {
+      for (const n of occurrences(file)) {
         const key = claimKey(n.value);
         if (excluded.has(key)) continue;
         // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values.
@@ -1040,17 +1168,20 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     const unaccounted: string[] = [];
     for (const file of GUARDED_FILES) {
       const raw = read(file);
-      for (const n of scan(file)) {
+      for (const n of occurrences(file)) {
         if (!highInformation(n.value)) continue;
         const key = claimKey(n.value);
         if (!rowedValues.has(key)) continue;
         const at = `${file}:${n.at}`;
+        // A signed code literal has two honest capture offsets — with the sign and without —
+        // and a site may be written either way, so both account for it.
+        const alsoAt = n.alsoAt === undefined ? at : `${file}:${n.alsoAt}`;
         // Aliased keys prefer exact-spelling attribution when a row spells it that way, so a
         // `0.0100` occurrence is not accounted for by a `0.010` site; when no row carries the
         // spelling, any row sharing the key may account for it — but SOMETHING must.
         const exact = accountedBySpelling.get(n.value);
         const pool = ALIASED_KEYS.has(key) && exact !== undefined ? exact : accountedByKey.get(key);
-        if (pool !== undefined && pool.has(at)) continue;
+        if (pool !== undefined && (pool.has(at) || pool.has(alsoAt))) continue;
         const before = raw.slice(Math.max(0, n.at - 90), n.at);
         if (
           OCCURRENCE_EXCEPTIONS.some(
@@ -1099,7 +1230,9 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       //    acquiring it changed the collision the entry documents without failing anything
       //    (Codex, PR #161). A collision that GROWS needs re-justifying just as much as one that
       //    shrinks, because the entry's whole claim is that it describes what it cuts a hole for.
-      const surfaces = GUARDED_FILES.filter((f) => scan(f).some((n) => claimKey(n.value) === key));
+      const surfaces = GUARDED_FILES.filter((f) =>
+        occurrences(f).some((n) => claimKey(n.value) === key),
+      );
       expect(
         [...surfaces].sort(),
         `CONTRACT_EXCLUSIONS entry "${e.value}" no longer describes the collision it excuses. ` +
@@ -1158,7 +1291,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   it('carries no unused occurrence exception', () => {
     for (const e of OCCURRENCE_EXCEPTIONS) {
       const raw = read(e.file);
-      const excuses = scan(e.file).some(
+      const excuses = occurrences(e.file).some(
         (n) =>
           claimKey(n.value) === claimKey(e.value) &&
           new RegExp(`${e.near}$`).test(raw.slice(Math.max(0, n.at - 90), n.at)),
@@ -1247,6 +1380,81 @@ describe("the language's own scanner reads what the hand-rolled one refused", ()
   it('refuses only a source the compiler cannot parse at all', () => {
     expect(() => rejectUnlexableSyntax('broken.ts', 'const x = (;')).toThrow(/does not parse/);
     expect(() => rejectUnlexableSyntax('fine.ts', 'const x = `a ${`b`} c`;')).not.toThrow();
+  });
+});
+
+// The prose scan blanks code, which is right for reading prose and was wrong as an answer to
+// "what does this file state". A value living only as a literal was invisible to both coverage
+// halves, so it could be copied into a document with nothing binding the copies (Codex, PR
+// #161). These pin the second occurrence class: what it admits, what it deliberately does not,
+// and that the bar excluding the rest is the one the prose half already uses.
+describe('the values the code EXECUTES are occurrences too', () => {
+  const seen = (file: string): string[] => codeLiterals(file).map((n) => n.value);
+
+  it('reads the executable grid the fixture runs, which seven prose sites never bound', () => {
+    expect(seen('packages/perf/src/gate-fixture.test.ts')).toContain('0.0075');
+  });
+
+  it('never reads a literal out of a MARKDOWN file — there is no code there to execute', () => {
+    expect(codeLiterals('docs/adr/0005-performance-budgets.md')).toEqual([]);
+  });
+
+  // The occurrence's offset has to be the one a site's capture resolves to, or a correctly
+  // sited literal would be reported as an unaccounted restatement of itself.
+  it('reports the literal at the offset a site captures it at', () => {
+    const file = 'packages/perf/src/gate-fixture.test.ts';
+    const raw = read(file);
+    for (const n of codeLiterals(file)) {
+      expect(raw.slice(n.at, n.at + n.raw.length), `${n.raw} at ${file}:${n.at}`).toBe(n.raw);
+    }
+  });
+
+  // `literalValue` is exercised through the real walk, not a copy of it, so these cannot drift
+  // from what the sweep actually reads.
+  const literalsOf = (src: string): (string | undefined)[] =>
+    walk(src).numericLiterals.map((l) => literalValue(l.text));
+
+  it('spells every base the ONE way, so a hex constant and its decimal restatement group', () => {
+    expect(literalsOf('const a = 0x6d2b79f5;')).toEqual(['1831565813']);
+    expect(literalsOf('const b = 0b1010;')).toEqual(['10']);
+    expect(literalsOf('const c = 1_000_000;')).toEqual(['1000000']);
+    expect(literalsOf('const d = 9.22e-3;')).toEqual(['0.00922']);
+    // A bigint is a numeral wearing an `n`, and it is the language's OTHER numeric literal
+    // kind — taken by kind rather than by shape, so the class cannot be short by one.
+    expect(literalsOf('const e = 1427n;')).toEqual(['1427']);
+    // and the spelling reaches the same key as the prose spelling of the same number
+    expect(claimKey(literalsOf('const f = 9.22e-3;')[0] as string)).toBe(claimKey('0.00922'));
+  });
+
+  // The sign is read OFF the value, exactly as the prose tokenizer reads it: a row valued
+  // -1.36 is what covers a stated 1.36, and the sign is enforced at the row's sites.
+  it('reads a negative literal as its magnitude, and spans the sign as well', () => {
+    const src = 'const skew = -1.3600;';
+    const [lit] = walk(src).numericLiterals;
+    expect(literalValue((lit as CodeLiteral).text)).toBe('1.3600');
+    expect((lit as CodeLiteral).signAt).toBe(src.indexOf('-'));
+    expect(src.slice((lit as CodeLiteral).signAt as number, (lit as CodeLiteral).end)).toBe(
+      '-1.3600',
+    );
+  });
+
+  // THE BAR, asserted rather than described. A sub-threshold literal is not admitted — that is
+  // what keeps `slowedCreeps: 120` out of a sweep it would only add coincidences to — and the
+  // one real sub-threshold pair the census found is ROWED instead, so the bar is not what is
+  // guarding it.
+  it('admits only what the occurrence half already calls self-identifying', () => {
+    expect(literalsOf('const k = 0.0075;').every((v) => highInformation(v as string))).toBe(true);
+    expect(highInformation('120')).toBe(false);
+    expect(seen('packages/perf/src/oracle.test.ts')).not.toContain('120');
+    expect(seen('packages/perf/src/scenario.ts')).not.toContain('1234');
+    expect(CLAIMS.some((c) => c.id === 'stress-seed' && c.value === '1234')).toBe(true);
+  });
+
+  // The class is NUMERIC LITERALS, and the boundary is stated rather than left to be inferred:
+  // a figure written as a STRING stays out. It is already blanked as literal data by the prose
+  // projection, and admitting it would annex every `toBe('1.0550')` expectation in the package.
+  it('does not read a figure written as a string literal', () => {
+    expect(literalsOf("const s = '1.0065';")).toEqual([]);
   });
 });
 
