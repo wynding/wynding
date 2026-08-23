@@ -42,7 +42,12 @@ import {
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
-import { waveIndexForCreep, anchoredWallInputs, waveLaunchTickObserved } from './wave-lookup';
+import {
+  waveIndexForCreep,
+  wallInputsFromTick,
+  wallInputsFromObservedWave,
+  waveLaunchTickObserved,
+} from './wave-lookup';
 
 /** Fixed seed — same convention as parity.test.ts / story-armored-wave.test.ts. */
 const SCENARIO_SEED = 0x5eed;
@@ -75,28 +80,6 @@ const column16Anchors: { col: number; row: number }[] = [
   { col: 16, row: 12 },
 ];
 
-/** One tower of `towerId` placed every `spacingTicks` ticks (default 10), in
- *  `anchors` order, starting at `startTick` (default 0) — same idiom as
- *  `story-armored-wave.test.ts`'s `anchorWallInputs`, redefined here rather than
- *  imported (each story-golden file is a self-contained script, per this repo's
- *  convention — see that file's own header). */
-function anchorWallInputs(
-  anchors: readonly { col: number; row: number }[],
-  towerId: string,
-  startTick = 0,
-  spacingTicks = 10,
-): (tick: number) => SimInput[] {
-  let next = 0;
-  return (tick: number): SimInput[] => {
-    const out: SimInput[] = [];
-    if (tick >= startTick && (tick - startTick) % spacingTicks === 0 && next < anchors.length) {
-      out.push({ kind: 'placeTower', anchor: anchors[next]!, towerId });
-      next++;
-    }
-    return out;
-  };
-}
-
 /** The shared baseline build: the `basic` wall plus the `venom` pair, anchored 200 ticks
  *  after the `armored` wave's own OBSERVED countdown start (located by creep id, never a
  *  hardcoded index; S11 P2) — exactly `story-armored-wave.test.ts`'s first scripted
@@ -106,9 +89,15 @@ function baselineInputs(
   ruleset: CompiledRuleset,
   extra: (tick: number, state: SimState) => SimInput[],
 ): (tick: number, state: SimState) => SimInput[] {
-  const basicWall = anchorWallInputs(basicAnchors, 'basic');
+  const basicWall = wallInputsFromTick(basicAnchors, 'basic');
   const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
-  const venomWall = anchoredWallInputs(ruleset, armoredWaveIndex, column16Anchors, 'venom', 200);
+  const venomWall = wallInputsFromObservedWave(
+    ruleset,
+    armoredWaveIndex,
+    column16Anchors,
+    'venom',
+    200,
+  );
   return (tick: number, state: SimState): SimInput[] => {
     const out = basicWall(tick);
     out.push(...venomWall(tick, state));
@@ -291,7 +280,7 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     const flyingWaveIndex = waveIndexForCreep(ruleset, 'flying');
-    const antiairWall = anchoredWallInputs(
+    const antiairWall = wallInputsFromObservedWave(
       ruleset,
       flyingWaveIndex,
       antiairAnchors,
@@ -438,7 +427,7 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     const flyingWaveIndex = waveIndexForCreep(ruleset, 'flying');
-    const slowWall = anchoredWallInputs(ruleset, flyingWaveIndex, slowAnchors, 'slow', 200);
+    const slowWall = wallInputsFromObservedWave(ruleset, flyingWaveIndex, slowAnchors, 'slow', 200);
     const inputs = baselineInputs(ruleset, slowWall);
 
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
@@ -575,7 +564,7 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
     // that bottleneck, in the wide-open interior where the invariant can route
     // around any single 2×2 footprint.
     // Anchored to the flying wave's OWN OBSERVED launch, never a static tick literal
-    // (S11 P2) — unlike `anchoredWallInputs`'s placement commands (which fire at
+    // (S11 P2) — unlike `wallInputsFromObservedWave`'s placement commands (which fire at
     // countdown-start + a lead), this loop must run PAST launch: a flyer needs several
     // ticks to spawn and travel to column 13. `OBSERVATION_MARGIN_TICKS` is the margin
     // the old literal (`2400`) implied past this scenario's own flying-wave launch tick;

@@ -27,7 +27,12 @@ import {
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
-import { waveIndexForCreep, anchoredWallInputs, waveLaunchTickObserved } from './wave-lookup';
+import {
+  waveIndexForCreep,
+  wallInputsFromTick,
+  wallInputsFromObservedWave,
+  waveLaunchTickObserved,
+} from './wave-lookup';
 
 const SCENARIO_SEED = 0x5eed;
 
@@ -45,27 +50,6 @@ interface SceneResult {
   readonly creepsByTick: ReadonlyMap<number, readonly CreepSnapshot[]>;
   readonly rngStateByTick: readonly number[]; // rngState AFTER that tick's step
   readonly ruleset: ReturnType<typeof compileRuleset>;
-}
-
-/** One tower placed every `spacingTicks` ticks (default 10) in `anchors` order,
- *  starting at `startTick` — same idiom as `story-flying-wave.test.ts`'s
- *  `anchorWallInputs`, redefined here per this repo's self-contained-story-file
- *  convention. */
-function anchorWallInputs(
-  anchors: readonly { col: number; row: number }[],
-  towerId: string,
-  startTick = 0,
-  spacingTicks = 10,
-): (tick: number) => SimInput[] {
-  let next = 0;
-  return (tick: number): SimInput[] => {
-    const out: SimInput[] = [];
-    if (tick >= startTick && (tick - startTick) % spacingTicks === 0 && next < anchors.length) {
-      out.push({ kind: 'placeTower', anchor: anchors[next]!, towerId });
-      next++;
-    }
-    return out;
-  };
 }
 
 // ---------------------------------------------------------------------------------
@@ -121,9 +105,21 @@ function survivalWallInputs(
 ): (tick: number, state: SimState) => SimInput[] {
   const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
   const flyingWaveIndex = waveIndexForCreep(ruleset, 'flying');
-  const basicWall = anchorWallInputs(basicAnchors, 'basic');
-  const venomWall = anchoredWallInputs(ruleset, armoredWaveIndex, column16Anchors, 'venom', 200);
-  const antiairWall = anchoredWallInputs(ruleset, flyingWaveIndex, antiairAnchors, 'antiair', 200);
+  const basicWall = wallInputsFromTick(basicAnchors, 'basic');
+  const venomWall = wallInputsFromObservedWave(
+    ruleset,
+    armoredWaveIndex,
+    column16Anchors,
+    'venom',
+    200,
+  );
+  const antiairWall = wallInputsFromObservedWave(
+    ruleset,
+    flyingWaveIndex,
+    antiairAnchors,
+    'antiair',
+    200,
+  );
   return (tick: number, state: SimState): SimInput[] => {
     const out = basicWall(tick);
     out.push(...venomWall(tick, state));
@@ -224,7 +220,7 @@ function runBossProbe(
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
   // Each probe placed 10 ticks apart, anchored to the BOSS wave's OWN observed LAUNCH
   // transition (located by creep id, never a hardcoded index; S11 P2). A per-probe
-  // closure, not `anchoredWallInputs`, because probes carry DIFFERENT tower ids
+  // closure, not `wallInputsFromObservedWave`, because probes carry DIFFERENT tower ids
   // (`splash`, `beacon`, ...), not one shared id over a shared anchor list.
   //
   // M2-S11 P4 — WHY THE BOSS WAVE'S LAUNCH, not the `flying` wave's countdown start
@@ -417,7 +413,7 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
   // nothing else is left to draw its fire. The boss wave's own `normal` escort was also
   // given `offsetTicks: 600` so it trails well behind the boss and cannot confound the
   // isolation either. This was not a refactor defect (P2's
-  // `waveIndexForCreep`/`anchoredWallInputs` correctly locate `armored`/`flying` by
+  // `waveIndexForCreep`/`wallInputsFromObservedWave` correctly locate `armored`/`flying` by
   // creep id throughout, and the SURVIVAL_WALL's own outcome — test 1 above — was
   // internally consistent throughout). Composition stayed frozen (ruling 2) — the fix
   // is entirely in the probe script's own anchoring, never in wave 8's creep kinds,

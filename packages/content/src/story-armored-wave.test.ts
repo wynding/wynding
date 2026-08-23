@@ -47,7 +47,7 @@ import {
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
-import { waveIndexForCreep, anchoredWallInputs } from './wave-lookup';
+import { waveIndexForCreep, wallInputsFromTick, wallInputsFromObservedWave } from './wave-lookup';
 
 /** Fixed seed — same convention as parity.test.ts. */
 const SCENARIO_SEED = 0x5eed;
@@ -83,37 +83,13 @@ const column16Anchors: { col: number; row: number }[] = [
   { col: 16, row: 12 },
 ];
 
-/** Builds a fresh `inputs`-style placement function: one tower of `towerId` placed
- *  every `spacingTicks` ticks (default 10, this file's original cadence), in
- *  `anchors` order, starting at `startTick` (default 0, this file's original
- *  unhurried early build) — extended with explicit `startTick`/`spacingTicks`
- *  parameters (M2-S6 P8 test 17) so a LATE build (ahead of the fifth wave, not tick
- *  0) is expressible without a second helper. Returns a NEW closure (its own
- *  cursor) each call, so callers never share placement state even when they build
- *  on the same anchor array. */
-function anchorWallInputs(
-  anchors: readonly { col: number; row: number }[],
-  towerId: string,
-  startTick = 0,
-  spacingTicks = 10,
-): (tick: number) => SimInput[] {
-  let next = 0;
-  return (tick: number): SimInput[] => {
-    const out: SimInput[] = [];
-    if (tick >= startTick && (tick - startTick) % spacingTicks === 0 && next < anchors.length) {
-      out.push({ kind: 'placeTower', anchor: anchors[next]!, towerId });
-      next++;
-    }
-    return out;
-  };
-}
-
-/** The `basic`-wall specialization the two wave-4 tests build on: `anchorWallInputs` over
- *  `basicAnchors`, `basic` towers. (The venom-heavy test below deliberately does NOT use
- *  it — it calls `anchorWallInputs(basicAnchors, 'venom')` for the same anchors and
- *  cadence with the kind swapped, which is the whole point of that comparison.) */
+/** The `basic`-wall specialization the two wave-4 tests build on: `wallInputsFromTick`
+ *  (M2-S11 P2, moved to `wave-lookup.ts` at G1-b/#94) over `basicAnchors`, `basic`
+ *  towers. (The venom-heavy test below deliberately does NOT use it — it calls
+ *  `wallInputsFromTick(basicAnchors, 'venom')` for the same anchors and cadence with the
+ *  kind swapped, which is the whole point of that comparison.) */
 function basicWallInputs(): (tick: number) => SimInput[] {
-  return anchorWallInputs(basicAnchors, 'basic');
+  return wallInputsFromTick(basicAnchors, 'basic');
 }
 
 describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build measurement', () => {
@@ -152,7 +128,13 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
     // only 4/hit against `armored`'s armor 6 (P1's formula); `venom`'s direct 2 nets 0 —
     // the DoT is what has to do the real work here.
     const basicWall = basicWallInputs();
-    const venomWall = anchoredWallInputs(ruleset, armoredWaveIndex, column16Anchors, 'venom', 200);
+    const venomWall = wallInputsFromObservedWave(
+      ruleset,
+      armoredWaveIndex,
+      column16Anchors,
+      'venom',
+      200,
+    );
     function inputs(tick: number, state: SimState): SimInput[] {
       const out = basicWall(tick);
       out.push(...venomWall(tick, state));
@@ -631,7 +613,7 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
   // Same board, same seed, same geometry idiom as the first script above, with the kinds
   // swapped: six `venom` on `basicAnchors` (cost 54 of the starting 80), built on the same
   // ticks the `basic` wall was built on above (tick 0, 10, 20, 30, 40, 50 — one every 10
-  // ticks in anchor order, `anchorWallInputs`'s cadence); two `basic` on `column16Anchors`
+  // ticks in anchor order, `wallInputsFromTick`'s cadence); two `basic` on `column16Anchors`
   // (cost 10), built at ticks 1300/1310 — the first test's venom pair's anchors and ticks,
   // kind swapped. `venom` is deliberately the weaker buy against unarmored creeps (the
   // test above), so this build is exercised across ALL five waves (M2-S6 appends wave
@@ -652,8 +634,8 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
     // 200 ticks after the `armored` wave's OWN observed countdown start (located by
     // creep id, never a hardcoded index; S11 P2).
     const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
-    const venomWall = anchorWallInputs(basicAnchors, 'venom');
-    const basicPairWall = anchoredWallInputs(
+    const venomWall = wallInputsFromTick(basicAnchors, 'venom');
+    const basicPairWall = wallInputsFromObservedWave(
       ruleset,
       armoredWaveIndex,
       column16Anchors,
@@ -885,8 +867,20 @@ describe('wave index 6 (`resolute` + `fast`) — a stun-holding build ahead of i
     const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
     const resoluteWaveIndex = waveIndexForCreep(ruleset, 'resolute');
     const basicWall = basicWallInputs();
-    const venomWall = anchoredWallInputs(ruleset, armoredWaveIndex, column16Anchors, 'venom', 200);
-    const stunWall = anchoredWallInputs(ruleset, resoluteWaveIndex, stunAnchors, 'stun', 100);
+    const venomWall = wallInputsFromObservedWave(
+      ruleset,
+      armoredWaveIndex,
+      column16Anchors,
+      'venom',
+      200,
+    );
+    const stunWall = wallInputsFromObservedWave(
+      ruleset,
+      resoluteWaveIndex,
+      stunAnchors,
+      'stun',
+      100,
+    );
     function inputs(tick: number, state: SimState): SimInput[] {
       const out = basicWall(tick);
       out.push(...venomWall(tick, state));

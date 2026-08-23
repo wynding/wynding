@@ -29,18 +29,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   compileRuleset,
-  createInitialState,
-  step,
   deriveScore,
   deriveStars,
-  MAX_MATCH_TICKS,
-  type SimInput,
   type SimState,
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
 import { waveIndexForCreep } from './wave-lookup';
 import { WINNER_A, type Placement } from './showcase-builds';
+import { runBuildScript } from './script-runner';
 
 const SCENARIO_SEED = 0x5eed;
 
@@ -123,8 +120,6 @@ interface BuildResult {
 function runBuild(plan: readonly Placement[]): BuildResult {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
-  let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-  let cursor = 0;
 
   // The UNBUFFED authored amount per tower id, read off the compiled catalog — the
   // baseline the beacon's support-added damage is measured against. A fire-time
@@ -152,156 +147,154 @@ function runBuild(plan: readonly Placement[]): BuildResult {
   let attributionExact = true;
   const bossHp = ruleset.creepById['boss']?.hp;
 
-  for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-    const inputs: SimInput[] = [];
-    if (cursor < plan.length) {
-      const next = plan[cursor]!;
-      const cost = ruleset.towerById[next.towerId]?.cost;
-      if (cost === undefined)
-        throw new Error(`unknown towerId '${next.towerId}' in a build script`);
-      if (state.bounty >= cost) {
-        inputs.push({
-          kind: 'placeTower',
-          anchor: { col: next.col, row: next.row },
-          towerId: next.towerId,
-        });
+  // Per-tick scratch: written by `beforeStep` (a snapshot of the state `step()` is about
+  // to consume — the tick this replay's "pre" side is measured against), read back by
+  // `afterStep` (the same tick's replay/reconcile, below). The loop itself now lives in
+  // `script-runner.ts` (G1-b, #94) — see that module's header for why only the loop moved.
+  let preHp = new Map<number, number>();
+  let preKind = new Map<number, string>();
+  let preWave = new Map<number, number>();
+  let preSlowUntil = new Map<number, number>();
+  let preStunUntil = new Map<number, number>();
+  let dueImpacts: SimState['impacts'] = [];
+  let dueDots: SimState['dots'] = [];
+  let preKillBounty = 0;
+
+  const { state, placedCount } = runBuildScript(ruleset, SCENARIO_SEED, plan, {
+    beforeStep: (state) => {
+      preHp = new Map();
+      preKind = new Map();
+      preWave = new Map();
+      preSlowUntil = new Map();
+      preStunUntil = new Map();
+      for (let i = 0; i < state.creeps.id.length; i++) {
+        const id = state.creeps.id[i]!;
+        preHp.set(id, state.creeps.hp[i]!);
+        preKind.set(id, state.creeps.creepId[i]!);
+        preWave.set(id, state.creeps.wave[i]!);
+        preSlowUntil.set(id, state.creeps.slowUntilTick[i]!);
+        preStunUntil.set(id, state.creeps.stunUntilTick[i]!);
       }
-    }
-    const towersBefore = state.towers.id.length;
-
-    const preHp = new Map<number, number>();
-    const preKind = new Map<number, string>();
-    const preWave = new Map<number, number>();
-    const preSlowUntil = new Map<number, number>();
-    const preStunUntil = new Map<number, number>();
-    for (let i = 0; i < state.creeps.id.length; i++) {
-      const id = state.creeps.id[i]!;
-      preHp.set(id, state.creeps.hp[i]!);
-      preKind.set(id, state.creeps.creepId[i]!);
-      preWave.set(id, state.creeps.wave[i]!);
-      preSlowUntil.set(id, state.creeps.slowUntilTick[i]!);
-      preStunUntil.set(id, state.creeps.stunUntilTick[i]!);
-    }
-    const tickNow = state.tick;
-    const dueImpacts = state.impacts.filter((im) => im.impactTick <= tickNow);
-    const dueDots = state.dots.filter((d) => d.nextTickTick <= tickNow && d.untilTick >= tickNow);
-    const preKillBounty = state.cumulativeKillBounty;
-
-    state = step(state, ruleset, inputs);
-
-    if (state.towers.id.length > towersBefore && cursor < plan.length) {
-      const placed = plan[cursor]!;
-      spendById[placed.towerId] =
-        (spendById[placed.towerId] ?? 0) + (ruleset.towerById[placed.towerId]?.cost ?? 0);
-      cursor++;
-    }
-    for (let r = 0; r < state.towers.id.length; r++) {
-      towerKindById.set(state.towers.id[r]!, state.towers.towerId[r]!);
-    }
-
-    // --- replay this tick's damage resolution (see the header) ---------------------
-    const remaining = new Map<number, number>(preHp);
-    const hits: { creep: number; source: number; amount: number; added: number }[] = [];
-    for (const im of dueImpacts) {
-      if (im.kind !== 'targeted') {
-        attributionExact = false; // a blast impact: not modelled, never approximated
-        continue;
+      const tickNow = state.tick;
+      dueImpacts = state.impacts.filter((im) => im.impactTick <= tickNow);
+      dueDots = state.dots.filter((d) => d.nextTickTick <= tickNow && d.untilTick >= tickNow);
+      preKillBounty = state.cumulativeKillBounty;
+    },
+    afterStep: (state, _ruleset, _inputs, placed) => {
+      if (placed) {
+        spendById[placed.towerId] =
+          (spendById[placed.towerId] ?? 0) + (ruleset.towerById[placed.towerId]?.cost ?? 0);
       }
-      const preImpactHp = remaining.get(im.targetId);
-      if (preImpactHp === undefined || preImpactHp <= 0) continue; // wasted shot
-      const def = ruleset.creepById[preKind.get(im.targetId)!];
-      const armor = def?.armor ?? 0;
-      const kind = towerKindById.get(im.sourceId);
-      let left = preImpactHp;
-      for (const e of im.effects) {
-        if (e.kind !== 'direct') continue;
-        const actual = Math.min(left, Math.max(0, e.amount - armor));
-        const base = kind === undefined ? undefined : baseDirect[kind];
-        // The unbuffed counterfactual is capped at the target's PRE-IMPACT hp, per the
-        // plan's own definition of support-added damage.
-        const unbuffed =
-          base !== undefined && e.amount > base
-            ? Math.min(preImpactHp, Math.max(0, base - armor))
-            : actual;
-        left -= actual;
+      for (let r = 0; r < state.towers.id.length; r++) {
+        towerKindById.set(state.towers.id[r]!, state.towers.towerId[r]!);
+      }
+
+      // --- replay this tick's damage resolution (see the header) ---------------------
+      const remaining = new Map<number, number>(preHp);
+      const hits: { creep: number; source: number; amount: number; added: number }[] = [];
+      for (const im of dueImpacts) {
+        if (im.kind !== 'targeted') {
+          attributionExact = false; // a blast impact: not modelled, never approximated
+          continue;
+        }
+        const preImpactHp = remaining.get(im.targetId);
+        if (preImpactHp === undefined || preImpactHp <= 0) continue; // wasted shot
+        const def = ruleset.creepById[preKind.get(im.targetId)!];
+        const armor = def?.armor ?? 0;
+        const kind = towerKindById.get(im.sourceId);
+        let left = preImpactHp;
+        for (const e of im.effects) {
+          if (e.kind !== 'direct') continue;
+          const actual = Math.min(left, Math.max(0, e.amount - armor));
+          const base = kind === undefined ? undefined : baseDirect[kind];
+          // The unbuffed counterfactual is capped at the target's PRE-IMPACT hp, per the
+          // plan's own definition of support-added damage.
+          const unbuffed =
+            base !== undefined && e.amount > base
+              ? Math.min(preImpactHp, Math.max(0, base - armor))
+              : actual;
+          left -= actual;
+          hits.push({
+            creep: im.targetId,
+            source: im.sourceId,
+            amount: actual,
+            added: actual - unbuffed,
+          });
+        }
+        remaining.set(im.targetId, left);
+      }
+      for (const d of dueDots) {
+        const preTickHp = remaining.get(d.targetId);
+        if (preTickHp === undefined || preTickHp <= 0) continue; // a corpse does not tick
+        const actual = Math.min(preTickHp, d.amount); // DoT bypasses armor entirely
+        const kind = towerKindById.get(d.sourceId);
+        const base = kind === undefined ? undefined : baseDot[kind];
+        const unbuffed = base !== undefined && d.amount > base ? Math.min(preTickHp, base) : actual;
+        remaining.set(d.targetId, preTickHp - actual);
         hits.push({
-          creep: im.targetId,
-          source: im.sourceId,
+          creep: d.targetId,
+          source: d.sourceId,
           amount: actual,
           added: actual - unbuffed,
         });
       }
-      remaining.set(im.targetId, left);
-    }
-    for (const d of dueDots) {
-      const preTickHp = remaining.get(d.targetId);
-      if (preTickHp === undefined || preTickHp <= 0) continue; // a corpse does not tick
-      const actual = Math.min(preTickHp, d.amount); // DoT bypasses armor entirely
-      const kind = towerKindById.get(d.sourceId);
-      const base = kind === undefined ? undefined : baseDot[kind];
-      const unbuffed = base !== undefined && d.amount > base ? Math.min(preTickHp, base) : actual;
-      remaining.set(d.targetId, preTickHp - actual);
-      hits.push({
-        creep: d.targetId,
-        source: d.sourceId,
-        amount: actual,
-        added: actual - unbuffed,
-      });
-    }
 
-    // --- reconcile the replay against what the sim actually did --------------------
-    const postHp = new Map<number, number>();
-    for (let i = 0; i < state.creeps.id.length; i++)
-      postHp.set(state.creeps.id[i]!, state.creeps.hp[i]!);
-    let replayedKillBounty = 0;
-    const leakedIds = new Set<number>();
-    for (const id of preHp.keys()) {
-      const observed = postHp.get(id);
-      const replayed = remaining.get(id)!;
-      if (observed === undefined) {
-        if (replayed <= 0) {
-          // killed this tick — credit its own bounty, exactly as the sweep does
-          replayedKillBounty += ruleset.creepById[preKind.get(id)!]?.bounty ?? 0;
-          kills++;
-          if (preKind.get(id) === 'boss') bossKilled = true;
-        } else {
-          // gone with hp to spare: a LEAK, which happens in movement BEFORE combat, so
-          // this tick's shots at it were wasted and attribute nothing.
-          leakedIds.add(id);
-          leaksByWave[preWave.get(id)!]!++;
+      // --- reconcile the replay against what the sim actually did --------------------
+      const postHp = new Map<number, number>();
+      for (let i = 0; i < state.creeps.id.length; i++)
+        postHp.set(state.creeps.id[i]!, state.creeps.hp[i]!);
+      let replayedKillBounty = 0;
+      const leakedIds = new Set<number>();
+      for (const id of preHp.keys()) {
+        const observed = postHp.get(id);
+        const replayed = remaining.get(id)!;
+        if (observed === undefined) {
+          if (replayed <= 0) {
+            // killed this tick — credit its own bounty, exactly as the sweep does
+            replayedKillBounty += ruleset.creepById[preKind.get(id)!]?.bounty ?? 0;
+            kills++;
+            if (preKind.get(id) === 'boss') bossKilled = true;
+          } else {
+            // gone with hp to spare: a LEAK, which happens in movement BEFORE combat, so
+            // this tick's shots at it were wasted and attribute nothing.
+            leakedIds.add(id);
+            leaksByWave[preWave.get(id)!]!++;
+          }
+        } else if (observed !== replayed) {
+          attributionExact = false;
         }
-      } else if (observed !== replayed) {
+      }
+      if (replayedKillBounty !== state.cumulativeKillBounty - preKillBounty)
         attributionExact = false;
-      }
-    }
-    if (replayedKillBounty !== state.cumulativeKillBounty - preKillBounty) attributionExact = false;
 
-    for (const hit of hits) {
-      if (leakedIds.has(hit.creep)) continue;
-      const kind = towerKindById.get(hit.source);
-      if (kind === undefined) continue;
-      damageById[kind] = (damageById[kind] ?? 0) + hit.amount;
-      supportAdded += hit.added;
-    }
+      for (const hit of hits) {
+        if (leakedIds.has(hit.creep)) continue;
+        const kind = towerKindById.get(hit.source);
+        if (kind === undefined) continue;
+        damageById[kind] = (damageById[kind] ?? 0) + hit.amount;
+        supportAdded += hit.added;
+      }
 
-    // --- successful status APPLICATIONS, observed on the real SoA status columns ----
-    // A landing is a creep whose `slowUntilTick`/`stunUntilTick` MOVED FORWARD this
-    // tick: `applySlow` writes the pair only when the incoming slow is at least as
-    // strong, and `applyStun` only when the roll came up, so a forward move IS a
-    // successful application. Conservative by construction — two same-kind landings on
-    // one creep on one tick collapse into a single observation — which is the safe
-    // direction against an absolute floor.
-    for (let i = 0; i < state.creeps.id.length; i++) {
-      const id = state.creeps.id[i]!;
-      if (state.creeps.slowUntilTick[i]! > (preSlowUntil.get(id) ?? 0)) {
-        statusById['slow'] = (statusById['slow'] ?? 0) + 1;
+      // --- successful status APPLICATIONS, observed on the real SoA status columns ----
+      // A landing is a creep whose `slowUntilTick`/`stunUntilTick` MOVED FORWARD this
+      // tick: `applySlow` writes the pair only when the incoming slow is at least as
+      // strong, and `applyStun` only when the roll came up, so a forward move IS a
+      // successful application. Conservative by construction — two same-kind landings on
+      // one creep on one tick collapse into a single observation — which is the safe
+      // direction against an absolute floor.
+      for (let i = 0; i < state.creeps.id.length; i++) {
+        const id = state.creeps.id[i]!;
+        if (state.creeps.slowUntilTick[i]! > (preSlowUntil.get(id) ?? 0)) {
+          statusById['slow'] = (statusById['slow'] ?? 0) + 1;
+        }
+        if (state.creeps.stunUntilTick[i]! > (preStunUntil.get(id) ?? 0)) {
+          statusById['stun'] = (statusById['stun'] ?? 0) + 1;
+        }
+        if (state.creeps.creepId[i] === 'boss' && state.creeps.hp[i] === bossHp)
+          sawFullHpBoss = true;
       }
-      if (state.creeps.stunUntilTick[i]! > (preStunUntil.get(id) ?? 0)) {
-        statusById['stun'] = (statusById['stun'] ?? 0) + 1;
-      }
-      if (state.creeps.creepId[i] === 'boss' && state.creeps.hp[i] === bossHp) sawFullHpBoss = true;
-    }
-  }
+    },
+  });
 
   let totalDamage = 0;
   for (const v of Object.values(damageById)) totalDamage += v;
@@ -309,7 +302,7 @@ function runBuild(plan: readonly Placement[]): BuildResult {
   return {
     state,
     ruleset,
-    placedCount: cursor,
+    placedCount,
     spendById,
     damageById,
     totalDamage,
