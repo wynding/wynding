@@ -418,53 +418,104 @@ const GUARDED_FILES = [
  *  which a test below enforces. Same shape as `scripts/glossary-lint.config.json`'s
  *  exception list: a machine-checked contract with named, justified exceptions beats a
  *  prose promise. */
-const CONTRACT_EXCLUSIONS: readonly { readonly value: string; readonly why: string }[] = [
+/** The guarded surfaces, named once so an exclusion's census can cite them without a wall of
+ *  paths. */
+/** The number of guarded surfaces at which a repeated numeral becomes a cross-file claim the
+ *  table must account for. Named once, because the coverage half and the exclusion check both
+ *  ask it and a second copy is how the last four rounds each started. */
+const COLLISION_THRESHOLD = 2;
+
+const G = {
+  gate: 'packages/perf/src/gate.ts',
+  gateTest: 'packages/perf/src/gate.test.ts',
+  fixture: 'packages/perf/src/gate-fixture.test.ts',
+  oracle: 'packages/perf/src/oracle.ts',
+  oracleTest: 'packages/perf/src/oracle.test.ts',
+  scenario: 'packages/perf/src/scenario.ts',
+  adr: 'docs/adr/0005-performance-budgets.md',
+  spike: 'docs/design-notes/performance-spike.md',
+  m2: 'docs/milestones/m2.md',
+} as const;
+
+const CONTRACT_EXCLUSIONS: readonly {
+  readonly value: string;
+  /** The guarded surfaces whose DIFFERENT meanings of this numeral justified the entry — the
+   *  census taken when it was written, re-verified every run. An exclusion is subtracted from
+   *  the sweep BEFORE the coverage census is built, so unlike a known-unrowed claim nothing
+   *  else re-checks it; without this field the only thing verified was that the numeral still
+   *  existed somewhere, and an entry whose collision had collapsed sat on, able to suppress a
+   *  future genuine cross-file duplicate (Codex, PR #161). */
+  readonly surfaces: readonly string[];
+  readonly why: string;
+}[] = [
   {
     value: '0',
+    surfaces: [
+      G.gate,
+      G.gateTest,
+      G.fixture,
+      G.oracle,
+      G.oracleTest,
+      G.scenario,
+      G.adr,
+      G.spike,
+      G.m2,
+    ],
     why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0". Not a measurement.',
   },
   {
     value: '10',
+    surfaces: [G.gate, G.gateTest, G.adr, G.spike, G.m2],
     why: 'The tolerance percentage ("a 10% move in R"), the escalation rule\'s sample floor, and n = 10 all collide on one numeral; each is rowed or argued in its own words, and the digit alone identifies nothing.',
   },
   {
     value: '95',
+    surfaces: [G.gate, G.fixture, G.adr, G.m2],
     why: 'Reads as the percentile name (p95) and as "95% power"/"95% CI" throughout; the percentile is a statistic identifier, not a claim value.',
   },
   {
     value: '50',
+    surfaces: [G.gate, G.oracle, G.scenario, G.adr, G.spike, G.m2],
     why: 'Same collision as 95 — the p50 percentile name against "50% power" and the 50 venom towers.',
   },
   {
     value: '60',
+    surfaces: [G.gate, G.oracle, G.adr, G.spike, G.m2],
     why: "`splash`'s cadence-60 and the 60-tick DoT window are catalog facts owned by the content tests, not perf-gate claims.",
   },
   {
     value: '0.25',
+    surfaces: [G.gate, G.adr],
     why: "A digit collision, not a shared claim: gate.ts's 0.25 is `dot-bench`'s ms-per-1,000-records curve, while ADR 0005's only 0.25 is `0.25σ` — the margin flooring discards. Neither document states the other's quantity.",
   },
   {
     value: '1000',
+    surfaces: [G.gate, G.oracleTest, G.adr, G.spike, G.m2],
     why: "Another collision: gate.ts's 1,000 is the denominator of that same dot-bench curve; elsewhere it is `MAX_TOTAL_TOWER_COMMANDS`. Different quantities, same numeral.",
   },
   {
     value: '0.8',
+    surfaces: [G.gate, G.fixture, G.adr],
     why: 'Two different quantities that coincide: the gating p50 scores 0.8 on the CONCENTRATED injection and p95 scores 0.8 on the BROAD one. Each is stated beside the statistic it belongs to and beside its counterpart (2.2 and 3.9, both rowed), so the pair is guarded through those; the bare numeral cannot tell the two apart and a row keyed on it would bind the wrong sites together.',
   },
   {
     value: '0.3863',
+    surfaces: [G.gate, G.spike],
     why: "A collision between two unrelated per-arm tables: gate.ts's 0.3863 is run 1's control p50 in the four-run diagnostic table, while the spike's is attempt 15's STRESS p50 in the 17-attempt operands table. Same numeral, different arm, different cohort.",
   },
   {
     value: '1.9',
+    surfaces: [G.fixture, G.adr],
     why: "A collision the numeric normalisation itself surfaced: `gate-fixture.test.ts` states the blind spot's p99 movement as +1.9% (single-file, so not a shared claim), while ADR 0005's only 1.90 is `wy:draw` 1.90% of busy frame time in the browser-spike section. Different subsystems entirely; the two spellings never grouped until claimKey made 1.9 and 1.90 one key.",
   },
   {
     value: '2.7',
+    surfaces: [G.gate, G.adr],
     why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops.",
   },
   {
     value: '30',
+    surfaces: [G.oracle, G.adr, G.spike, G.m2],
     why: "Collision, and revealed only when the file-path mask stopped eating compact ratios: oracle.ts's 30 is the DoT record window in `floor((240-1)/30)+1`, ADR 0005's is the ≥ 30 fps low-end floor, the spike's are a 30% slow and a 30% ambient-load swing, and m2.md's are tower range columns. Five unrelated quantities wearing one numeral; a row keyed on it would bind every one of those sites to the others.",
   },
 ];
@@ -919,7 +970,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
 
     const gaps: string[] = [];
     for (const [key, files] of where) {
-      if (files.size < 2) continue;
+      if (files.size < COLLISION_THRESHOLD) continue;
       if (rowed.has(key)) continue;
       gaps.push(spelling.get(key) as string);
     }
@@ -1000,19 +1051,64 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     ).toEqual([]);
   });
 
-  it('carries no unused exclusion — an exception that stops being needed is deleted', () => {
-    const everywhere = new Set(GUARDED_FILES.flatMap((f) => scan(f).map((n) => n.value)));
+  // An exclusion is a HOLE cut in the coverage census, and it is subtracted BEFORE that census
+  // is built — so unlike a known-unrowed claim, nothing downstream re-checks it. Verifying only
+  // that the numeral still existed SOMEWHERE let an entry whose justification had lapsed sit on:
+  // the collision could collapse to one surface, or the value could later be rowed, and the
+  // entry stayed, still armed to suppress a future genuine cross-file duplicate (Codex, PR
+  // #161). Each entry now re-proves its own recorded justification every run.
+  it('carries no stale exclusion — every entry re-proves its own justification', () => {
+    const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
     for (const e of CONTRACT_EXCLUSIONS) {
+      const key = claimKey(e.value);
+
+      // 1. The census is CURRENT: every surface it names still states the numeral.
+      for (const file of e.surfaces) {
+        expect(
+          scan(file).some((n) => claimKey(n.value) === key),
+          `CONTRACT_EXCLUSIONS entry "${e.value}" names ${file} among the colliding surfaces ` +
+            `that justified it, but that file no longer states the numeral. The collision it ` +
+            `documents has changed — re-justify the entry against what is there now, or delete it.`,
+        ).toBe(true);
+      }
+
+      // 2. The collision still meets the THRESHOLD the coverage half uses. Below it there is no
+      //    cross-file duplicate to suppress, so the hole is cutting nothing and only hiding.
       expect(
-        everywhere.has(e.value),
-        `CONTRACT_EXCLUSIONS entry "${e.value}" matches nothing`,
-      ).toBe(true);
+        e.surfaces.length,
+        `CONTRACT_EXCLUSIONS entry "${e.value}" names fewer than ${COLLISION_THRESHOLD} ` +
+          `colliding surfaces, so it suppresses nothing and should be deleted.`,
+      ).toBeGreaterThanOrEqual(COLLISION_THRESHOLD);
+
+      // 3. It is not SHADOWED by a row. A rowed value needs no hole — and while the hole stands
+      //    the sweep never sees the occurrences the row exists to bind.
+      expect(
+        rowed.has(key),
+        `CONTRACT_EXCLUSIONS entry "${e.value}" is also a claim row's value. The row covers it, ` +
+          `so the hole is stale — and while it stands the sweep never sees the occurrences that ` +
+          `row is meant to bind.`,
+      ).toBe(false);
+
       expect(e.why.length, `CONTRACT_EXCLUSIONS entry "${e.value}" has no reason`).toBeGreaterThan(
         20,
       );
     }
   });
 
+  // WHY THIS ONE IS ONLY A REASON CHECK, decided deliberately rather than left as an omission.
+  // The same one-sided-existence defect was looked for here and is not present, because the two
+  // tables have opposite shapes. An EXCLUSION is subtracted from the coverage census before it
+  // is built, so nothing downstream can notice a stale one — which is why it now re-proves its
+  // own justification above. A KNOWN-UNROWED claim is the opposite: the gap set is recomputed
+  // from the guarded files every run and compared to this list EXACTLY, so an entry whose
+  // condition lapses is already loud. Verified, not assumed — removing one of `2499`'s two
+  // stated occurrences drops it out of the recomputed gaps and the comparison fails naming it:
+  //
+  //     -   "2499",
+  //
+  // So existence-exactness IS the correct contract here, and the only thing left unchecked is
+  // the PROSE of the reason, which is owner-ruled residue (whose oracle-surface backlog is
+  // tracked in #163) rather than a machine-checkable condition.
   it('records a reason for every known-unrowed claim', () => {
     for (const e of KNOWN_UNROWED) {
       expect(e.why.length, `KNOWN_UNROWED entry ${e.value} has no reason`).toBeGreaterThan(20);
