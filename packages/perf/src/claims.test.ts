@@ -139,6 +139,25 @@ const DIGIT_RUN = String.raw`\d(?:[\d,_]*\d)?`;
 
 const NUMERAL_BODY = String.raw`(?:${DIGIT_RUN}(?:\.${DIGIT_RUN})?|\.${DIGIT_RUN})(?:[eE][+-]?${DIGIT_RUN})?`;
 
+/** THE OTHER BASES THE LANGUAGE WRITES A NUMBER IN. `codeLiterals` has normalised hex, binary
+ *  and octal through `Number()` since round 23, because the compiler hands them over as numeric
+ *  literals — but the PROSE grammar was decimal-only, so the two could never associate. Codex
+ *  put `0x74cbb1` in a guarded source as a literal and the same spelling in ADR 0005: the code
+ *  side keyed it as 7654321 and the prose scan saw only the leading `0`, and all 777 tests
+ *  stayed green (PR #161). One number, one key, however it is spelled — the rule this file has
+ *  applied to leading-dot and scientific spellings since round 15, arriving for radix ones.
+ *
+ *  THE CONTROL IS THE NUMERAL BOUNDARY, and it is load-bearing rather than incidental:
+ *  `catalog-40x40` contains the substring `0x40`. It is a board dimension, not a hex literal,
+ *  and what keeps it one is that the `0` there is preceded by a digit, which `NUMERAL_BOUNDARY`
+ *  already refuses. Measured on the guarded corpus, that substring is the ONLY `0x`-shaped text
+ *  in the documents, so the boundary is the whole of what stands between this grammar and
+ *  reading a board size as 64. It is asserted in both directions below. */
+const RADIX_BODY = String.raw`0[xX][\da-fA-F](?:[\da-fA-F_]*[\da-fA-F])?|0[bB][01](?:[01_]*[01])?|0[oO][0-7](?:[0-7_]*[0-7])?`;
+
+/** Every spelling the scan reads. Radix first, so `0x74cbb1` is never read as a bare `0`. */
+const ANY_NUMERAL_BODY = String.raw`(?:${RADIX_BODY}|${NUMERAL_BODY})`;
+
 /** WHERE A NUMERAL MAY BEGIN, defined as "not part of the same numeral, and not part of a
  *  NAME" rather than as the complement of a hand-listed word-char set. The old lookbehind was
  *  that complement, and it treated `_` as a word character — so `_1.0065_`, which is just
@@ -163,7 +182,7 @@ const NUMERAL_BODY = String.raw`(?:${DIGIT_RUN}(?:\.${DIGIT_RUN})?|\.${DIGIT_RUN
  *  dashes, `%`, `$`, `/`, `,`. Each is covered by a case in the delimiter test below. */
 const NUMERAL_BOUNDARY = String.raw`(?<![A-Za-z])(?<![A-Za-z0-9_]_)(?<![\d.])`;
 
-const IS_NUMERAL = new RegExp(String.raw`^[+-]?` + NUMERAL_BODY + String.raw`$`);
+const IS_NUMERAL = new RegExp(String.raw`^[+-]?` + ANY_NUMERAL_BODY + String.raw`$`);
 
 function claimKey(stated: string): string {
   // A leading typographic minus (U+2212) or en-dash is the same sign as an ASCII '-';
@@ -739,120 +758,439 @@ const CONTRACT_EXCLUSIONS: readonly {
  *  rowing them with verified sites is a body of work this PR sized and measured but did not
  *  undertake — recorded here rather than absorbed silently, and asserted EXACTLY so a new gap
  *  fails the build instead of joining the list. */
-const KNOWN_UNROWED: readonly { readonly value: string; readonly why: string }[] = [
+const KNOWN_UNROWED: readonly {
+  readonly value: string;
+  /** The guarded surfaces stating it, EACH WITH ITS OCCURRENCE COUNT — recomputed and compared
+   *  exactly every run, exactly as `CONTRACT_EXCLUSIONS` records its collision.
+   *
+   *  THIS SUPERSEDES A PIECE OF REASONING THIS FILE GOT WRONG, and the correction belongs on
+   *  the record rather than folded in quietly. Round 22 argued that existence-exactness was
+   *  the CORRECT contract here because the two tables have opposite shapes: an exclusion is
+   *  subtracted before the census is built, while a known-unrowed value is recomputed and
+   *  compared, so a lapsed entry was said to be already loud. That reasoning was one-sided in
+   *  a way the argument itself concealed. It is true of an entry whose condition COLLAPSES —
+   *  drop one of `2499`'s two occurrences and the value leaves `gaps` and the comparison
+   *  fails. It is false of one that GROWS: `gaps` is a set of VALUES, so a listed value
+   *  acquiring a third and fourth copy produces the identical set. Codex appended a further
+   *  `1427` to `gate.ts` and all 768 tests passed (PR #161).
+   *
+   *  An acknowledged gap is a promise about a known set of copies, not a licence for that set
+   *  to grow unobserved. So this table takes the same shape as the other one — and the
+   *  symmetry the old argument used to justify the difference is what actually argued for
+   *  making them alike. */
+  readonly surfaces: readonly (readonly [file: string, occurrences: number])[];
+  readonly why: string;
+}[] = [
   {
     value: '0.1',
+    surfaces: [
+      [G.adr, 1],
+      [G.fixture, 2],
+      [G.gateTest, 1],
+    ],
     why: 'its canonical value is an executable constant in gate.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '0.2',
+    surfaces: [
+      [G.adr, 2],
+      [G.gateTest, 1],
+      [G.m2, 1],
+      [G.spike, 1],
+    ],
     why: 'its canonical value is an executable constant in gate.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '0.99',
+    surfaces: [
+      [G.adr, 5],
+      [G.fixture, 1],
+      [G.spike, 1],
+    ],
     why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '100',
+    surfaces: [
+      [G.adr, 3],
+      [G.fixture, 1],
+      [G.gateTest, 1],
+      [G.m2, 4],
+      [G.oracle, 7],
+      [G.oracleTest, 1],
+      [G.scenario, 2],
+      [G.spike, 6],
+    ],
     why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '14',
+    surfaces: [
+      [G.fixture, 1],
+      [G.spike, 2],
+    ],
     why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '1427',
+    surfaces: [
+      [G.adr, 1],
+      [G.fixture, 3],
+      [G.m2, 1],
+      [G.spike, 2],
+    ],
     why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '15',
+    surfaces: [
+      [G.adr, 4],
+      [G.fixture, 1],
+      [G.m2, 14],
+      [G.scenario, 1],
+      [G.spike, 7],
+    ],
     why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '150',
+    surfaces: [
+      [G.adr, 14],
+      [G.dotBench, 1],
+      [G.fixture, 1],
+      [G.m2, 9],
+      [G.oracle, 9],
+      [G.scenario, 5],
+      [G.spike, 13],
+    ],
     why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '20',
+    surfaces: [
+      [G.adr, 5],
+      [G.dotBench, 1],
+      [G.m2, 16],
+      [G.oracle, 1],
+      [G.spike, 8],
+    ],
     why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '200',
+    surfaces: [
+      [G.adr, 3],
+      [G.m2, 3],
+      [G.oracle, 5],
+      [G.oracleTest, 1],
+      [G.spike, 4],
+    ],
     why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '2000',
+    surfaces: [
+      [G.dotBench, 1],
+      [G.m2, 1],
+      [G.oracle, 2],
+    ],
     why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '2499',
+    surfaces: [
+      [G.oracle, 1],
+      [G.spike, 1],
+    ],
     why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '2500',
+    surfaces: [
+      [G.adr, 1],
+      [G.fixture, 8],
+      [G.m2, 1],
+      [G.oracle, 1],
+      [G.scenario, 1],
+      [G.spike, 2],
+    ],
     why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '270',
+    surfaces: [
+      [G.adr, 1],
+      [G.fixture, 2],
+      [G.m2, 1],
+      [G.oracle, 1],
+      [G.spike, 2],
+    ],
     why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '280',
+    surfaces: [
+      [G.m2, 1],
+      [G.oracle, 1],
+      [G.oracleTest, 1],
+      [G.spike, 1],
+    ],
     why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '3.0',
+    surfaces: [
+      [G.adr, 17],
+      [G.fixture, 4],
+      [G.gate, 12],
+      [G.m2, 35],
+      [G.oracle, 2],
+      [G.scenario, 3],
+      [G.spike, 18],
+    ],
     why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '300',
+    surfaces: [
+      [G.adr, 3],
+      [G.m2, 11],
+      [G.oracle, 1],
+      [G.spike, 3],
+    ],
     why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
   {
     value: '55',
+    surfaces: [
+      [G.adr, 1],
+      [G.scenario, 1],
+    ],
     why: 'its canonical value is an executable constant in scenario.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
-  { value: '0.9', why: 'A fixture ratio quoted in the spike; oracle-surface.' },
-  { value: '114', why: 'Peak armored live creeps — oracle.ts doc, ADR and spike.' },
+  {
+    value: '0.9',
+    surfaces: [
+      [G.fixture, 12],
+      [G.spike, 2],
+    ],
+    why: 'A fixture ratio quoted in the spike; oracle-surface.',
+  },
+  {
+    value: '114',
+    surfaces: [
+      [G.adr, 3],
+      [G.oracle, 2],
+      [G.spike, 1],
+    ],
+    why: 'Peak armored live creeps — oracle.ts doc, ADR and spike.',
+  },
   {
     value: '12',
+    surfaces: [
+      [G.adr, 5],
+      [G.m2, 9],
+      [G.oracle, 1],
+      [G.scenario, 1],
+      [G.spike, 1],
+    ],
     why: 'Measured peak resident DoT records at the catalog scene — oracle/ADR/spike/m2.',
   },
-  { value: '16', why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2.' },
-  { value: '165', why: 'Catalog-scene tower count — scenario.ts, ADR and m2.' },
-  { value: '1800', why: 'Catalog-scene tick figure — scenario.ts and the ADR.' },
-  { value: '19.2', why: "The control arm's population gap percentage — scenario.ts and spike." },
-  { value: '25', why: 'A fixture/threshold figure shared between the fixture test and the docs.' },
-  { value: '28.6', why: 'The pre-narrowing population gap percentage — scenario.ts and spike.' },
+  {
+    value: '16',
+    surfaces: [
+      [G.adr, 1],
+      [G.m2, 7],
+      [G.oracle, 1],
+      [G.spike, 3],
+    ],
+    why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2.',
+  },
+  {
+    value: '165',
+    surfaces: [
+      [G.adr, 3],
+      [G.m2, 2],
+      [G.scenario, 3],
+    ],
+    why: 'Catalog-scene tower count — scenario.ts, ADR and m2.',
+  },
+  {
+    value: '1800',
+    surfaces: [
+      [G.adr, 2],
+      [G.scenario, 1],
+    ],
+    why: 'Catalog-scene tick figure — scenario.ts and the ADR.',
+  },
+  {
+    value: '19.2',
+    surfaces: [
+      [G.scenario, 1],
+      [G.spike, 1],
+    ],
+    why: "The control arm's population gap percentage — scenario.ts and spike.",
+  },
+  {
+    value: '25',
+    surfaces: [
+      [G.adr, 6],
+      [G.fixture, 1],
+      [G.m2, 9],
+      [G.spike, 2],
+    ],
+    why: 'A fixture/threshold figure shared between the fixture test and the docs.',
+  },
+  {
+    value: '28.6',
+    surfaces: [
+      [G.scenario, 1],
+      [G.spike, 1],
+    ],
+    why: 'The pre-narrowing population gap percentage — scenario.ts and spike.',
+  },
 
   {
     value: '329',
+    surfaces: [
+      [G.adr, 8],
+      [G.m2, 4],
+      [G.oracle, 8],
+      [G.oracleTest, 5],
+      [G.spike, 14],
+    ],
     why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
   },
-  { value: '330', why: 'Route-length cap at ~150 towers — oracle.ts, ADR and m2.' },
-  { value: '36', why: 'Catalog-scene arithmetic shared between scenario.ts and m2.' },
-  { value: '40', why: 'Board dimension / threshold numeral shared across oracle and the docs.' },
-  { value: '400', why: 'Re-pinned stunned-samples floor — oracle.ts, ADR and m2.' },
-  { value: '450', why: 'An oracle threshold quoted in the ADR and m2.' },
-  { value: '459', why: 'The 40x40 route-length ceiling — oracle.ts, ADR, spike and m2.' },
-  { value: '600', why: 'The unreachable route target — oracle.ts, ADR, spike and m2.' },
-  { value: '80', why: 'Board-size figure in the route-cap table — oracle.ts and the docs.' },
-  { value: '9.2', why: 'DoT record depth per carrier at peak — oracle.ts doc prose.' },
+  {
+    value: '330',
+    surfaces: [
+      [G.adr, 1],
+      [G.m2, 1],
+      [G.oracle, 1],
+    ],
+    why: 'Route-length cap at ~150 towers — oracle.ts, ADR and m2.',
+  },
+  {
+    value: '36',
+    surfaces: [
+      [G.m2, 3],
+      [G.scenario, 1],
+    ],
+    why: 'Catalog-scene arithmetic shared between scenario.ts and m2.',
+  },
+  {
+    value: '40',
+    surfaces: [
+      [G.adr, 9],
+      [G.m2, 10],
+      [G.oracle, 4],
+      [G.spike, 8],
+    ],
+    why: 'Board dimension / threshold numeral shared across oracle and the docs.',
+  },
+  {
+    value: '400',
+    surfaces: [
+      [G.adr, 1],
+      [G.m2, 4],
+      [G.oracle, 2],
+    ],
+    why: 'Re-pinned stunned-samples floor — oracle.ts, ADR and m2.',
+  },
+  {
+    value: '450',
+    surfaces: [
+      [G.adr, 1],
+      [G.m2, 1],
+      [G.oracle, 1],
+    ],
+    why: 'An oracle threshold quoted in the ADR and m2.',
+  },
+  {
+    value: '459',
+    surfaces: [
+      [G.adr, 1],
+      [G.m2, 1],
+      [G.oracle, 1],
+      [G.spike, 1],
+    ],
+    why: 'The 40x40 route-length ceiling — oracle.ts, ADR, spike and m2.',
+  },
+  {
+    value: '600',
+    surfaces: [
+      [G.adr, 4],
+      [G.m2, 4],
+      [G.oracle, 6],
+      [G.oracleTest, 2],
+      [G.spike, 6],
+    ],
+    why: 'The unreachable route target — oracle.ts, ADR, spike and m2.',
+  },
+  {
+    value: '80',
+    surfaces: [
+      [G.adr, 2],
+      [G.m2, 2],
+      [G.oracle, 2],
+      [G.spike, 2],
+    ],
+    why: 'Board-size figure in the route-cap table — oracle.ts and the docs.',
+  },
+  {
+    value: '9.2',
+    surfaces: [
+      [G.oracle, 1],
+      [G.oracleTest, 1],
+    ],
+    why: 'DoT record depth per carrier at peak — oracle.ts doc prose.',
+  },
   {
     value: '298',
+    surfaces: [
+      [G.adr, 1],
+      [G.oracle, 1],
+      [G.spike, 1],
+    ],
     why: "its canonical statement is oracle.ts's compact `307/298/308/329` series of band-only layout cell counts, which the FILE-PATH MASK blanked whole because the series has no letter in it - so three of the four values were invisible to this sweep while 329, which also appears standalone, was not. ADR 0005 and the spike both restate it longhand per board size. Oracle-surface, tracked in #163.",
   },
   {
     value: '307',
+    surfaces: [
+      [G.adr, 1],
+      [G.oracle, 1],
+      [G.spike, 2],
+    ],
     why: "its canonical statement is oracle.ts's compact `307/298/308/329` series of band-only layout cell counts, which the FILE-PATH MASK blanked whole because the series has no letter in it - so three of the four values were invisible to this sweep while 329, which also appears standalone, was not. ADR 0005 and the spike both restate it longhand per board size. Oracle-surface, tracked in #163.",
   },
   {
     value: '308',
+    surfaces: [
+      [G.adr, 1],
+      [G.m2, 1],
+      [G.oracle, 1],
+      [G.spike, 1],
+    ],
     why: "same band-only cell-count series as 298 and 307, hidden by the same file-path mask, and restated longhand in ADR 0005 and the spike. It ALSO coincides with m2.md's `of 308 total` bounty spend, which is an unrelated quantity - so rowing this one will need explicit sites rather than a bare value. Oracle-surface, tracked in #163.",
   },
 ];
 
 const EXCLUDED = new Set(CONTRACT_EXCLUSIONS.map((e) => e.value));
+
+/** ONE CENSUS VOCABULARY, because both escape tables now record the same thing and a second
+ *  spelling of "same census" is how every previous round of this file began. Every stale entry
+ *  is reported rather than the first, since a table is a set and its drift should be readable
+ *  in one run. */
+const fmtCensus = (c: readonly (readonly [string, number])[]): string =>
+  [...c]
+    .sort()
+    .map(([f, n]) => `${f.split('/').pop() as string}x${n}`)
+    .join(' ');
+
+const sameCensus = (
+  a: readonly (readonly [string, number])[],
+  b: readonly (readonly [string, number])[],
+): boolean => fmtCensus(a) === fmtCensus(b);
 
 /** High-information occurrences that are NOT restatements of the row that shares their
  *  numeral. Each names the file and the text immediately before the occurrence, so the
@@ -866,18 +1204,31 @@ const OCCURRENCE_EXCEPTIONS: readonly {
    *  restating k-new as `// Exactly 0.00922` and watching the suite stay green. An exception
    *  now names what it excuses, so an unexpected numeral after the same phrase still fails. */
   readonly value: string;
+  /** HOW MANY occurrences it excuses, compared exactly. Naming the (near, value) pair still
+   *  left one exception suppressing EVERY occurrence in the file that matched it, so a later
+   *  restatement could inherit a hole cut for an earlier one: a second `// Exactly 1.0000`
+   *  appended to `gate-fixture.test.ts` was excused by the entry written for the first, and
+   *  all 780 tests stayed green (Codex, PR #161).
+   *
+   *  This is the third and last of the escape tables to be counted rather than merely matched.
+   *  `CONTRACT_EXCLUSIONS` was counted in round 25 and `KNOWN_UNROWED` in this one, and the
+   *  argument is the same each time: a hole is cut for the occurrences that existed when it
+   *  was justified, and a new one is new drift whether or not an old one stands beside it. */
+  readonly occurrences: number;
   readonly why: string;
 }[] = [
   {
     file: 'packages/perf/src/gate-fixture.test.ts',
     near: 'Exactly ',
     value: '1.0000',
+    occurrences: 1,
     why: 'A ratio that happens to equal 1.0000 exactly at the fixture boundary — not the committed `R0` of 1.00 restated.',
   },
   {
     file: 'packages/perf/src/gate-fixture.test.ts',
     near: 'p95 was ALREADY\\s*\\n\\s*// exactly ',
     value: '1.0000',
+    occurrences: 1,
     why: 'The same boundary ratio, quoted a second time in the paragraph explaining it. Still not `R0`.',
   },
 ];
@@ -1181,12 +1532,25 @@ const REFERENCE_MASKS: readonly { readonly what: string; readonly re: RegExp }[]
   // is a ratio wearing a slash, and masking it hid a claim in plain sight.
   { what: 'file paths', re: /[\w./-]*\/[\w./-]+/g },
   { what: 'runner image / release ids', re: /\bubuntu-?\d[\w.]*(?:\/[\d.]+)?/gi },
-  // Deliberately NOT tolerant of a hard line wrap. `step\n// 21` is a reference this misses,
-  // and the tolerance that would catch it — treating a comment continuation as whitespace —
-  // is fail-OPEN: `at each step\n// 500 records` would take a real claim with it. A missed
-  // reference surfaces LOUDLY as an uncovered figure; a masked measurement vanishes. So the
-  // mask stays narrow and the one wrapped reference was rewrapped at its source instead.
-  { what: 'plan step refs', re: /\b(PLAN\s+)?step\s+\d+/gi },
+  // THE QUALIFIER IS REQUIRED, because `step` on its own is ordinary English and this mask was
+  // treating every `step <integer>` phrase as a reference: `at each step 7654321 records` was
+  // consumed WHOLE — so the round-26 aligner permitted it, the numeral being taken entire
+  // rather than split — and both copies left the sweep (Codex, PR #161). Round 24's audit said
+  // every other mask is anchored on a non-numeric token it REQUIRES; this one merely preferred
+  // its token, and that is the whole difference between the nine that were safe and the one
+  // that was not.
+  //
+  // `PLAN.md step 21` is how this corpus actually writes the reference — the optional `.md` is
+  // why the old `(PLAN\s+)?` never matched and every real reference fell through to the bare
+  // arm. Fifteen of the seventeen `step <int>` phrases here carry the qualifier; of the rest,
+  // one was a loose reference rejoined to its `PLAN` at source, and `step 6` in m2.md is a bare
+  // integer under ten, which the sweep drops as prose anyway.
+  //
+  // Still deliberately NOT tolerant of a hard line wrap: treating a comment continuation as
+  // whitespace is fail-OPEN, since `at each step\n// 500 records` would take a real claim with
+  // it. A missed reference surfaces LOUDLY as an uncovered figure; a masked measurement
+  // vanishes.
+  { what: 'plan step refs', re: /\bPLAN(?:\.md)?\s+step\s+\d+/gi },
   { what: 'milestone/story refs', re: /\bM\d+-S\d+\w*/g },
   { what: 'commit shas', re: /\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi },
   { what: 'percentile NAMES, not values', re: /\bp(50|95|99)\b/g },
@@ -1298,10 +1662,16 @@ interface Numeral {
  *  Signs are still read OFF the numeral, deliberately and as before: a row valued -1.36 is what
  *  covers a prose 1.36, and the sign is enforced at the row's SITES, which capture it. An
  *  exponent's sign is part of the number rather than in front of it, so that one is read. */
-const NUMERAL = new RegExp(NUMERAL_BOUNDARY + NUMERAL_BODY, 'g');
+const NUMERAL = new RegExp(NUMERAL_BOUNDARY + ANY_NUMERAL_BODY, 'g');
 
-/** One number, one spelling: `.00922`, `9.22e-3` and `0.00922` must reach `claimKey` alike. */
+/** One number, one spelling: `.00922`, `9.22e-3`, `0.00922` and `0x74cbb1` must reach
+ *  `claimKey` alike. A radix spelling has no decimal reading at all, so it is converted rather
+ *  than adjusted — the same `Number()` the code side has always used for it. */
 function normalizeNumeral(cleaned: string): string {
+  if (/^0[xXbBoO]/.test(cleaned)) {
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? String(n) : cleaned;
+  }
   if (/[eE]/.test(cleaned)) {
     const n = Number(cleaned);
     const plain = String(n);
@@ -1329,6 +1699,29 @@ function isSpecific(spelling: string): boolean {
   return decimals >= 3 || spelling.replace(/[^\d]/g, '').length >= 5;
 }
 
+/** HOW BIG THE NUMBER IS, in digits — which is what "five or more digits" was always trying to
+ *  ask, and what counting characters in a string only approximates. `String(Number('1e100'))`
+ *  is `'1e+100'`, four digit characters standing for a 101-digit magnitude, so the count read
+ *  it as low-information and an executable `1e100` beside the same value in ADR prose stayed
+ *  green (Codex, PR #161). JavaScript renders a number exponentially above 1e20 and below
+ *  1e-6, so the defect had a whole band, not one case.
+ *
+ *  Magnitude is spelling-independent, which is the point: for everything JavaScript renders
+ *  plainly these return exactly what the character count returned, so this GENERALISES the
+ *  existing rule rather than adding an arm to it. */
+function magnitudeDigits(value: string): number {
+  const n = Math.abs(Number(value));
+  if (!Number.isFinite(n) || n === 0 || n < 1) return 0;
+  return Math.floor(Math.log10(n)) + 1;
+}
+
+/** And how many decimal places the value pins when it sits below 1: `1e-7` pins seven. */
+function magnitudeDecimals(value: string): number {
+  const n = Math.abs(Number(value));
+  if (!Number.isFinite(n) || n === 0 || n >= 1) return 0;
+  return -Math.floor(Math.log10(n));
+}
+
 /** Self-identifying: a numeral this specific is a restatement, not a coincidence.
  *
  *  JUDGED ON THE SPELLING AS WRITTEN **AND** ON THE VALUE IT DENOTES, and satisfied by either,
@@ -1344,7 +1737,12 @@ function isSpecific(spelling: string): boolean {
  *  over-admitting is a numeral someone must account for and the cost of under-admitting is a
  *  restatement free to drift. */
 function highInformation(spelling: string, value: string = spelling): boolean {
-  return isSpecific(spelling) || isSpecific(value);
+  return (
+    isSpecific(spelling) ||
+    isSpecific(value) ||
+    magnitudeDigits(value) >= 5 ||
+    magnitudeDecimals(value) >= 3
+  );
 }
 
 const scanCache = new Map<string, Numeral[]>();
@@ -1586,17 +1984,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // census rather than compared against it.
   it('carries no stale exclusion — every entry re-proves its own justification', () => {
     const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
-    // Every stale entry is reported, not just the first. A loop that throws on entry one hides
-    // entries two onward, and the table is a set — its drift should be readable in one run.
-    const fmt = (c: readonly (readonly [string, number])[]): string =>
-      [...c]
-        .sort()
-        .map(([f, n]) => `${f.split('/').pop() as string}x${n}`)
-        .join(' ');
-    const sameCensus = (
-      a: readonly (readonly [string, number])[],
-      b: readonly (readonly [string, number])[],
-    ): boolean => fmt(a) === fmt(b);
+    const fmt = fmtCensus;
     const mismatches: string[] = [];
     for (const e of CONTRACT_EXCLUSIONS) {
       const key = claimKey(e.value);
@@ -1649,24 +2037,35 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     ).toEqual([]);
   });
 
-  // WHY THIS ONE IS ONLY A REASON CHECK, decided deliberately rather than left as an omission.
-  // The same one-sided-existence defect was looked for here and is not present, because the two
-  // tables have opposite shapes. An EXCLUSION is subtracted from the coverage census before it
-  // is built, so nothing downstream can notice a stale one — which is why it now re-proves its
-  // own justification above. A KNOWN-UNROWED claim is the opposite: the gap set is recomputed
-  // from the guarded files every run and compared to this list EXACTLY, so an entry whose
-  // condition lapses is already loud. Verified, not assumed — removing one of `2499`'s two
-  // stated occurrences drops it out of the recomputed gaps and the comparison fails naming it:
+  // AN ACKNOWLEDGED GAP IS A PROMISE ABOUT A KNOWN SET OF COPIES, not a licence for that set to
+  // grow unobserved — and the `gaps` comparison above cannot tell the difference, because it
+  // compares VALUES. A listed value acquiring a third copy yields the identical set; Codex
+  // appended a further `1427` to `gate.ts` and all 768 tests passed (PR #161).
   //
-  //     -   "2499",
-  //
-  // So existence-exactness IS the correct contract here, and the only thing left unchecked is
-  // the PROSE of the reason, which is owner-ruled residue (whose oracle-surface backlog is
-  // tracked in #163) rather than a machine-checkable condition.
-  it('records a reason for every known-unrowed claim', () => {
+  // Round 22's comment here argued the opposite, and the correction is recorded on the entry
+  // type rather than folded in: existence-exactness catches a condition that COLLAPSES and is
+  // blind to one that GROWS. Both tables carry a counted census now.
+  it('carries a current census for every known-unrowed claim', () => {
+    const mismatches: string[] = [];
     for (const e of KNOWN_UNROWED) {
+      const key = claimKey(e.value);
+      const census = GUARDED_FILES.map(
+        (f) => [f, occurrences(f).filter((n) => claimKey(n.value) === key).length] as const,
+      ).filter(([, n]) => n > 0);
+      if (!sameCensus(census, e.surfaces)) {
+        mismatches.push(
+          `  "${e.value}": recorded ${fmtCensus(e.surfaces)}\n            but found ${fmtCensus(census)}`,
+        );
+      }
       expect(e.why.length, `KNOWN_UNROWED entry ${e.value} has no reason`).toBeGreaterThan(20);
     }
+    expect(
+      mismatches,
+      `these KNOWN_UNROWED entries no longer describe the gap they acknowledge. An entry is a ` +
+        `promise about the copies that existed when it was written; a new copy is new drift, ` +
+        `whether or not the file already held one. Re-census the entry, or row the claim:\n` +
+        `${mismatches.join('\n')}`,
+    ).toEqual([]);
   });
 
   // An exception is USED only when its (near, value) PAIR actually excused an occurrence this
@@ -1674,20 +2073,25 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // the excused figure away and the exception stayed "used", still armed to suppress a future
   // unlisted occurrence of that value after the same phrase (Codex). Stale exceptions are rot,
   // and this table's whole claim is that its holes are named and current.
-  it('carries no unused occurrence exception', () => {
+  it('excuses exactly the occurrences it was written for, and no more', () => {
     for (const e of OCCURRENCE_EXCEPTIONS) {
       const raw = read(e.file);
-      const excuses = occurrences(e.file).some(
+      const excused = occurrences(e.file).filter(
         (n) =>
           claimKey(n.value) === claimKey(e.value) &&
           new RegExp(`${e.near}$`).test(raw.slice(Math.max(0, n.at - 90), n.at)),
-      );
+      ).length;
+      // ONE assertion covers both failures, because they are the same failure: an entry that
+      // excuses FEWER than recorded is rot (the phrase outlived the numeral), and one that
+      // excuses MORE is a later restatement inheriting a hole cut for an earlier one.
       expect(
-        excuses,
-        `OCCURRENCE_EXCEPTIONS entry for ${e.file} (/${e.near}/ excusing ${e.value}) excuses ` +
-          `nothing: no occurrence of that VALUE sits after that phrase. The phrase may still be ` +
-          `in the file — that is exactly the rot this checks for.`,
-      ).toBe(true);
+        excused,
+        `OCCURRENCE_EXCEPTIONS entry for ${e.file} (/${e.near}/ excusing ${e.value}) is ` +
+          `recorded as excusing ${e.occurrences} occurrence(s) but excuses ${excused}. ` +
+          `Fewer means the phrase outlived the numeral it was written for; MORE means a new ` +
+          `restatement has inherited a hole cut for an older one, which is the drift this ` +
+          `table exists to stop. Re-count the entry, or give the new occurrence its own site.`,
+      ).toBe(e.occurrences);
       expect(
         e.why.length,
         `OCCURRENCE_EXCEPTIONS entry for ${e.file} has no reason`,
@@ -1831,12 +2235,61 @@ describe('the values the code EXECUTES are occurrences too', () => {
   // Normalization is a KEYING step and was never a judgment. Asking it whether a numeral is
   // self-identifying let `1.1000e0` arrive as `1.1` and be waved through (Codex, PR #161); the
   // mirror, asking only the spelling, would wave `1e10` through instead. Both are asked.
+  // A radix spelling is a spelling of a NUMBER, and the code side has normalised it through
+  // `Number()` since round 23 — but the prose grammar was decimal-only, so `0x74cbb1` as a
+  // literal and `0x74cbb1` in ADR prose could never associate: the code keyed 7654321 and the
+  // prose saw a bare `0` (Codex, PR #161).
+  it('reads a radix spelling in prose as the number it denotes', () => {
+    const values = (t: string): string[] =>
+      [...t.matchAll(NUMERAL)].map((m) => normalizeNumeral(m[0].replace(/[,_]/g, '')));
+    expect(values('the constant 0x74cbb1 holds')).toEqual(['7654321']);
+    expect(values('the mask 0b1010 holds')).toEqual(['10']);
+    expect(values('the mode 0o17 holds')).toEqual(['15']);
+    // and it reaches the same key as the decimal spelling of the same number
+    expect(claimKey(values('0x74cbb1')[0] as string)).toBe(claimKey('7654321'));
+  });
+
+  // THE CONTROL, and it is the whole of what keeps this grammar honest: `catalog-40x40` holds
+  // the substring `0x40`. It is a board dimension, and what makes it one is that its `0` is
+  // preceded by a digit — which the numeral boundary already refuses. Measured on the guarded
+  // corpus, that substring is the only `0x`-shaped text in the documents.
+  it('does not read a board dimension as a hex literal', () => {
+    const values = (t: string): string[] =>
+      [...t.matchAll(NUMERAL)].map((m) => normalizeNumeral(m[0].replace(/[,_]/g, '')));
+    // `64` is what a hex reading would produce, and it is what must never appear. The trailing
+    // `40` is refused for a second reason the grammar already had — it follows a letter, so it
+    // is part of a name — which is why one `40` comes back rather than two.
+    expect(values('the `catalog-40x40` scene')).toEqual(['40']);
+    expect(values('a 40x40 board')).not.toContain('64');
+    expect(values('the ratio 2x40 holds')).toEqual(['2']);
+    expect(IS_NUMERAL.test('0x40')).toBe(true);
+  });
+
   it('judges information on the spelling AND the value, taking the greater', () => {
     expect(highInformation('1.1000e0', '1.1'), 'the spelling pins four decimals').toBe(true);
     expect(highInformation('1e10', '10000000000'), 'the value denotes eleven digits').toBe(true);
     expect(highInformation('0.00922', '0.00922')).toBe(true);
     expect(highInformation('120', '120')).toBe(false);
     expect(highInformation('1.1', '1.1')).toBe(false);
+  });
+
+  // The band where `String(Number(...))` keeps exponential form — above 1e20 and below 1e-6 —
+  // was invisible to a rule that counted characters: `1e100` shows four digit characters in
+  // BOTH spellings and denotes a 101-digit magnitude (Codex, PR #161). Magnitude is what the
+  // "five or more digits" rule was always asking for; counting a string only approximated it.
+  it('counts the magnitude an exponent denotes, not the characters of its spelling', () => {
+    expect(highInformation('1e100', normalizeNumeral('1e100')), '101 digits').toBe(true);
+    expect(highInformation('1e21', normalizeNumeral('1e21')), 'past the plain-render band').toBe(
+      true,
+    );
+    expect(highInformation('1e-7', normalizeNumeral('1e-7')), 'pins seven decimals').toBe(true);
+    // and the low end is unmoved: an exponent is not information by merely existing
+    expect(highInformation('1e1', normalizeNumeral('1e1')), '10 is not self-identifying').toBe(
+      false,
+    );
+    expect(highInformation('1e2', normalizeNumeral('1e2'))).toBe(false);
+    expect(magnitudeDigits('1e100')).toBe(101);
+    expect(magnitudeDecimals('1e-7')).toBe(7);
   });
 
   it('admits only what the occurrence half already calls self-identifying', () => {
@@ -2058,7 +2511,17 @@ describe('the reference masks blank references, not measurements', () => {
     // The reference is still masked whenever it wraps a numeral WHOLE — yielding is not
     // surrender, it is the narrower of the two honest answers.
     expect(maskReferences('PLAN step 21 is explicit')).not.toContain('21');
-    expect(maskReferences('see step 4 below')).not.toContain('4');
+    // ...but ONLY with the qualifier. Round 26 asserted the opposite here, and it was wrong:
+    // consuming a whole numeral is not the same as being entitled to. `step` is ordinary
+    // English, and a mask anchored on it reads `at each step 7654321 records` as a reference
+    // (Codex, PR #161). What changed is not the aligner — the numeral was taken entire, so the
+    // aligner had nothing to object to — but whether this mask may claim the phrase at all.
+    expect(maskReferences('see step 4 below')).toContain('4');
+    expect(maskReferences('at each step 7654321 records')).toContain('7654321');
+    // The qualifier as this corpus actually writes it: `PLAN.md step N`. The optional `.md` is
+    // why the old `(PLAN\s+)?` matched none of the real references and every one of them fell
+    // through to the bare arm the finding is about.
+    expect(maskReferences('pinned in PLAN.md step 21, which')).not.toContain('21');
   });
 
   // THE AUDIT, run against the REAL chain rather than a copy of it. The doctrine is one line —
