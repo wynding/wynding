@@ -450,12 +450,30 @@ if (gradle !== null) {
   // names (and an optional `=`/`file(`). A `/` anywhere else in the file is not reachable
   // by this pattern, so arithmetic elsewhere is untouched.
   //
-  // Still anchored to statement position, which is now safe rather than merely narrow:
-  // comments are blanked above, so the false positive that forced the anchor — the word
-  // `keyPassword` inside this file's own error MESSAGE — cannot recur from a comment.
+  // SCANNED ON THE RAW SOURCE, NOT THE STRIPPED VIEW — the two checks want opposite things
+  // from a comment and an earlier revision gave them the same view, which broke this one.
+  // Blanking comments is right for the WIRING checks above: a comment must never satisfy a
+  // structural claim. It is exactly wrong here: `// storePassword = "hunter2"` is a live
+  // credential sitting in a tracked file in a PUBLIC repo, and stripping erased it before
+  // the scan could see it. Verified by injection — a commented-out assignment passed all
+  // 38 checks. Commenting a secret out does not un-publish it.
+  //
+  // So the comment PREFIX is matched rather than removed: an optional `//` or block-comment
+  // `*` may sit between the line start and the property name. Everything else about the
+  // anchor is unchanged, which is what keeps the legitimate case green — a comment that
+  // merely NAMES a variable ("set WYNDING_KEYSTORE_PASSWORD in keystore.properties") has no
+  // signing property at statement position and no quoted value after it, so it cannot trip.
+  // Only a value-BEARING assignment does.
+  //
+  // The literal must be separated from the property name by `=` or whitespace, and that is
+  // load-bearing rather than cosmetic: without it the slashy branch matched a slash-
+  // SEPARATED LIST in prose — the comment `// storePassword/keyPassword/keyAlias/storeFile`
+  // reads as `storePassword` followed by `/`, i.e. the opening of a slashy string. Caught by
+  // running the legitimate-comment fixture, which went red. Neither spelling is valid Groovy
+  // assignment without a separator, so requiring one costs no real coverage.
   const inlined = [
-    ...code.matchAll(
-      /^[ \t]*(storePassword|keyPassword|keyAlias|storeFile)[ \t]*=?[ \t]*(?:file[ \t]*\([ \t]*)?(?:["']|\$\/|\/)/gm,
+    ...gradle.matchAll(
+      /^[ \t]*(?:\/\/[ \t]*|\*[ \t]*)?(storePassword|keyPassword|keyAlias|storeFile)(?:[ \t]*=[ \t]*|[ \t]+)(?:file[ \t]*\([ \t]*)?(?:["']|\$\/|\/)/gm,
     ),
   ].map((m) => m[0].trim());
   expect(

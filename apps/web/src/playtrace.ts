@@ -264,37 +264,86 @@ export interface PlaytraceRecorder {
 }
 
 export interface PlaytraceRecorderOptions {
+  /** WALL CLOCK. Used for the exported `capturedAt`/`exportedAt` timestamps and nothing
+   *  else — never to decide whether a run has expired. */
   readonly now: () => number;
+  /** MONOTONIC elapsed source (`performance.now`), which is what the six-hour bound is
+   *  actually measured against. See {@link createPlaytraceRecorder}. */
+  readonly monotonicNow?: () => number;
   readonly optOut?: PlaytraceOptOut;
   readonly maxRuns?: number;
   readonly maxAgeMs?: number;
 }
 
+/** A ring entry: the exported payload plus the internal monotonic stamp the expiry reads.
+ *  `monotonicAt` is deliberately NOT part of `Playtrace` — it never leaves this module and
+ *  never reaches an export. */
+interface RingEntry {
+  readonly trace: Playtrace;
+  readonly monotonicAt: number;
+}
+
+/**
+ * The recent-runs recorder.
+ *
+ * THE SIX-HOUR BOUND IS MEASURED MONOTONICALLY, and that is a privacy property rather than
+ * a tidiness one. ADR 0011 §3 makes bounded linkage the thing the whole posture rests on,
+ * so a bound that can be defeated is a promise that can be broken. Measured against
+ * `Date.now()` it could be: when the wall clock steps BACKWARD — an NTP correction, a
+ * manual change, a device waking with a bad RTC — `now - capturedAt` goes negative, which
+ * is smaller than any bound, so every run stays eligible indefinitely. The expiry silently
+ * stops expiring, and nothing surfaces it.
+ *
+ * `performance.now()` is monotonic within a document and cannot regress, which makes it
+ * the honest instrument here. The ring is IN-MEMORY and dies with the page (see
+ * MAX_RECENT_AGE_MS), so a monotonic origin is available for every entry that exists —
+ * there is no cross-session case needing a wall-clock fallback.
+ *
+ * The wall clock is still checked, as a belt, under an EXPIRED-IF-EITHER rule with
+ * negative elapsed clamped to expired. Where the two clocks disagree we cannot know which
+ * is right, and the privacy-favouring answer is to drop the run — a lost diagnostic is a
+ * cost we can pay, an unbounded linkage window is not.
+ */
 export function createPlaytraceRecorder(options: PlaytraceRecorderOptions): PlaytraceRecorder {
   const maxRuns = options.maxRuns ?? MAX_RECENT_RUNS;
   const maxAgeMs = options.maxAgeMs ?? MAX_RECENT_AGE_MS;
-  let ring: Playtrace[] = [];
+  const monotonicNow = options.monotonicNow ?? ((): number => performance.now());
+  let ring: RingEntry[] = [];
 
-  /** Apply BOTH bounds. Age is evaluated against the caller's clock, so a ring that sat
+  /** Has this entry outlived the bound under EITHER clock? A backward wall clock yields a
+   *  negative elapsed, which is treated as expired rather than as "no time has passed". */
+  const expired = (entry: RingEntry, now: number, monotonic: number): boolean => {
+    if (monotonic - entry.monotonicAt >= maxAgeMs) return true;
+    const wallElapsed = now - entry.trace.capturedAt;
+    return wallElapsed < 0 || wallElapsed >= maxAgeMs;
+  };
+
+  /** Apply BOTH bounds. Age is evaluated against the caller's clocks, so a ring that sat
    *  untouched for seven hours empties on the next read rather than on a timer. */
-  const prune = (now: number): Playtrace[] => {
-    ring = ring.filter((t) => now - t.capturedAt < maxAgeMs);
+  const prune = (now: number, monotonic: number): RingEntry[] => {
+    ring = ring.filter((entry) => !expired(entry, now, monotonic));
     if (ring.length > maxRuns) ring = ring.slice(ring.length - maxRuns);
     return ring;
   };
 
+  const traces = (entries: RingEntry[]): Playtrace[] => entries.map((e) => e.trace);
+
   return {
     capture(source): Playtrace {
       const now = options.now();
+      const monotonic = monotonicNow();
       const trace = buildPlaytrace({ ...source, capturedAt: now });
-      ring.push(trace);
-      prune(now);
+      ring.push({ trace, monotonicAt: monotonic });
+      prune(now, monotonic);
       return trace;
     },
-    recent: () => prune(options.now()).slice(),
+    recent: () => traces(prune(options.now(), monotonicNow())),
     buildExport(): PlaytraceExport {
       const now = options.now();
-      return { playtraceVersion: PLAYTRACE_VERSION, exportedAt: now, runs: prune(now).slice() };
+      // Pruned BEFORE the payload is assembled, so an expired run cannot reach an export
+      // under either clock — the export path is the one that would carry it off-device.
+      const runs = traces(prune(now, monotonicNow()));
+      return { playtraceVersion: PLAYTRACE_VERSION, exportedAt: now, runs };
     },
     uploadOptedOut: () => options.optOut?.optedOut() ?? false,
   };

@@ -198,6 +198,72 @@ describe('the recent-runs ring — bounded by run count AND elapsed time', () =>
     expect(recorder.recent().map((r) => r.runId)).toEqual(['fresh']);
   });
 
+  it('EXPIRES ON SCHEDULE EVEN IF THE WALL CLOCK GOES BACKWARD', async () => {
+    // ADR 0011 §3 rests the whole upload posture on linkage being BOUNDED, so a bound that
+    // can be defeated is a promise that can be broken. Measured against `Date.now()` it
+    // could be: step the wall clock backward and `now - capturedAt` goes negative, which is
+    // smaller than any bound, so every run stayed eligible forever and nothing surfaced it.
+    let wall = 1_000_000;
+    let mono = 0;
+    const recorder = createPlaytraceRecorder({
+      now: () => wall,
+      monotonicNow: () => mono,
+    });
+    recorder.capture(trace('run-1'));
+    expect(recorder.recent()).toHaveLength(1);
+
+    // The device's clock jumps a day into the past (an NTP correction, a bad RTC on wake).
+    wall -= 24 * 60 * 60 * 1000;
+    // Monotonic time advances past the bound regardless — it cannot regress.
+    mono += MAX_RECENT_AGE_MS;
+
+    expect(recorder.recent(), 'a backward wall clock kept the run alive').toEqual([]);
+    expect(recorder.buildExport().runs).toEqual([]);
+  });
+
+  it('treats a NEGATIVE wall elapsed as expired, not as "no time has passed"', async () => {
+    // Expired-if-either, with negative clamped to expiry-favouring. Where the two clocks
+    // disagree we cannot know which is right, and the privacy answer is to drop the run.
+    let wall = 1_000_000;
+    const recorder = createPlaytraceRecorder({ now: () => wall, monotonicNow: () => 0 });
+    recorder.capture(trace('run-1'));
+    expect(recorder.recent()).toHaveLength(1);
+
+    wall -= 1; // the smallest possible backward step, monotonic unmoved
+    expect(recorder.recent()).toEqual([]);
+  });
+
+  it('the monotonic bound expires a run whose wall clock has not moved at all', async () => {
+    // The mirror case: a frozen or coarse wall clock must not keep a run alive either.
+    let mono = 0;
+    const recorder = createPlaytraceRecorder({ now: () => 1_000_000, monotonicNow: () => mono });
+    recorder.capture(trace('run-1'));
+    mono = MAX_RECENT_AGE_MS - 1;
+    expect(recorder.recent()).toHaveLength(1);
+    mono = MAX_RECENT_AGE_MS;
+    expect(recorder.recent()).toEqual([]);
+  });
+
+  it('never exports a run older than the bound under EITHER clock', async () => {
+    for (const [name, advance] of [
+      ['monotonic', (s: { wall: number; mono: number }) => (s.mono += MAX_RECENT_AGE_MS)],
+      ['wall', (s: { wall: number; mono: number }) => (s.wall += MAX_RECENT_AGE_MS)],
+      ['wall backward', (s: { wall: number; mono: number }) => (s.wall -= 1)],
+    ] as const) {
+      const state = { wall: 1_000_000, mono: 0 };
+      const recorder = createPlaytraceRecorder({
+        now: () => state.wall,
+        monotonicNow: () => state.mono,
+      });
+      recorder.capture(trace('run-1'));
+      advance(state);
+      expect(
+        recorder.buildExport().runs,
+        `${name} clock let an expired run reach the export`,
+      ).toEqual([]);
+    }
+  });
+
   it('exports every run still inside the window, under a versioned wrapper', () => {
     let clock = 5;
     const recorder = createPlaytraceRecorder({ now: () => clock });

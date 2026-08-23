@@ -198,9 +198,13 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   const playtraceViewport = (): PlaytraceViewport =>
     matchMediaFn(COMPACT_QUERY).matches ? 'compact' : 'standard';
   const playtrace = createPlaytraceRecorder({
-    // WALL-CLOCK, deliberately, not `deps.now` (the monotonic frame clock): the ring's
-    // six-hour bound is about elapsed real time across a play session.
+    // Wall clock for the exported TIMESTAMPS only.
     now: () => Date.now(),
+    // ...and the monotonic frame clock for the six-hour bound itself. `deps.now` is
+    // `performance.now` in production, which cannot regress — the wall clock can, and a
+    // backward step made every run eligible indefinitely, silently defeating ADR 0011 §3's
+    // bounded-linkage promise.
+    monotonicNow: () => deps.now(),
     optOut: deps.playtraceOptOut,
   });
   const delivery = deps.playtraceDelivery ?? browserDelivery(doc);
