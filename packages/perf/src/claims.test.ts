@@ -518,8 +518,16 @@ const OCCURRENCE_EXCEPTIONS: readonly {
 function rejectUnlexableSyntax(file: string, src: string): void {
   const bare = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
   const nestedTemplate = /`[^`]*\$\{[^}]*`/.test(bare);
-  const quoteInRegex =
-    /[=(,:]\s*\/(?![/*])(?:\\.|\[[^\]]*\]|[^/\n])*['"](?:\\.|\[[^\]]*\]|[^/\n])*\//.test(bare);
+  // A regex literal can open in ANY expression position, not just after `= ( , :` — an
+  // earlier form missed `return /'/;`, which is valid JavaScript and would make the lexer
+  // read the quote as a string delimiter and mask every comment after it (CodeRabbit).
+  // Deliberately conservative: it would rather refuse a file it could lex than lex one it
+  // cannot, because the failure it guards against is silent.
+  const regexOpener = String.raw`(?:^|[=(,:;[{!?&|+\-*%<>~^]|\breturn\b|\btypeof\b|\bcase\b|\bin\b|\bof\b|\bdo\b|=>|&&|\|\|)`;
+  const quoteInRegex = new RegExp(
+    regexOpener +
+      String.raw`\s*\/(?![/*])(?:\\.|\[[^\]]*\]|[^/\n])*['"](?:\\.|\[[^\]]*\]|[^/\n])*\/`,
+  ).test(bare);
   if (nestedTemplate || quoteInRegex) {
     const what = [
       nestedTemplate ? 'a nested template literal' : '',
@@ -679,12 +687,23 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     const rowedValues = new Set(CLAIMS.map((c) => claimKey(c.value)));
 
     // Where the resolver actually reads each claim from.
-    const accounted = new Set<string>();
+    // Two indexes: by the claim's KEY, and by its exact SPELLING. Aliased values need both —
+    // a `0.0100` occurrence should be attributed to the `0.0100` row when one exists, but an
+    // occurrence spelled `0.0200` that matches no row's exact value must still be attributed
+    // to SOME row sharing its key rather than skipped, which is what an earlier `continue`
+    // did (Codex, PR #161).
+    const accountedByKey = new Map<string, Set<string>>();
+    const accountedBySpelling = new Map<string, Set<string>>();
     for (const claim of CLAIMS) {
       for (const site of claim.sites) {
         const found = extract(site);
         if ('error' in found) continue;
-        accounted.add(`${site.file}:${found.start}`);
+        const at = `${site.file}:${found.start}`;
+        const key = claimKey(claim.value);
+        if (!accountedByKey.has(key)) accountedByKey.set(key, new Set());
+        (accountedByKey.get(key) as Set<string>).add(at);
+        if (!accountedBySpelling.has(claim.value)) accountedBySpelling.set(claim.value, new Set());
+        (accountedBySpelling.get(claim.value) as Set<string>).add(at);
       }
     }
 
@@ -694,12 +713,14 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       for (const n of scan(file)) {
         if (!highInformation(n.raw)) continue;
         const key = claimKey(n.value);
-        // Aliased keys are attributed by exact spelling, so a `0.0100` occurrence cannot be
-        // accounted for by a `0.010` site that merely normalises to the same number.
-        if (ALIASED_KEYS.has(key)) {
-          if (!CLAIMS.some((c) => c.value === n.value)) continue;
-        } else if (!rowedValues.has(key)) continue;
-        if (accounted.has(`${file}:${n.at}`)) continue;
+        if (!rowedValues.has(key)) continue;
+        const at = `${file}:${n.at}`;
+        // Aliased keys prefer exact-spelling attribution when a row spells it that way, so a
+        // `0.0100` occurrence is not accounted for by a `0.010` site; when no row carries the
+        // spelling, any row sharing the key may account for it — but SOMETHING must.
+        const exact = accountedBySpelling.get(n.value);
+        const pool = ALIASED_KEYS.has(key) && exact !== undefined ? exact : accountedByKey.get(key);
+        if (pool !== undefined && pool.has(at)) continue;
         const before = raw.slice(Math.max(0, n.at - 90), n.at);
         if (
           OCCURRENCE_EXCEPTIONS.some(
@@ -761,6 +782,34 @@ describe('the coverage contract is enforced, not merely asserted', () => {
 // FIRST identical substring in the full match, which is the wrong span whenever the capture
 // repeats earlier in the match — and a wrong span silently mis-targets the blanking in
 // `no site can silently fall back`. The `d` flag gives the group's real span (CodeRabbit).
+describe('the scanner refuses syntax it cannot lex', () => {
+  // `return /'/;` is valid JavaScript in an expression position the earlier check did not
+  // cover. Left unrejected, `commentsOnly` reads the regex's quote as a string delimiter and
+  // masks every comment after it, so those numerals escape occurrence coverage entirely —
+  // a silent miscount, which is the one failure mode this file cannot tolerate (CodeRabbit).
+  it('rejects a regex literal containing a quote in `return` position', () => {
+    expect(() => rejectUnlexableSyntax('synthetic.ts', "function f() { return /'/; }")).toThrow(
+      /regex literal containing a quote/,
+    );
+  });
+
+  it('rejects a nested template literal', () => {
+    expect(() => rejectUnlexableSyntax('synthetic.ts', 'const x = `a ${`b`} c`;')).toThrow(
+      /nested template literal/,
+    );
+  });
+
+  it('accepts the ordinary constructs the guarded files actually use', () => {
+    const ordinary = [
+      'const re = /[0-9]+/;',
+      'const s = "a // not a comment";',
+      'const t = `plain ${x} template`;',
+      '// a trailing comment with 1.0065 in it',
+    ].join('\n');
+    expect(() => rejectUnlexableSyntax('synthetic.ts', ordinary)).not.toThrow();
+  });
+});
+
 describe('the resolver reads the capture group, not the first lookalike', () => {
   it('takes the SECOND occurrence when that is what the group captured', () => {
     const text = 'ANCHOR-XYZ 2.8 and 2.8 percent';
