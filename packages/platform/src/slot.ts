@@ -2,6 +2,28 @@
 // write queue that makes `revision` allocation atomic, plus ADR 0008 §5's
 // migrate-or-preserve rules. The bare `StorageDriver` `get`/`set` are NOT assumed atomic
 // on their own — serialization is this module's job, exactly as the note says.
+//
+// THE EXACT SCOPE OF "ATOMIC", because an unqualified claim here was over-stated and a
+// storage layer that promises more than it delivers is worse than one that promises less:
+//
+//   WITHIN a context (tab / WebView): always. The in-process queue below serializes every
+//   operation on a slot, so two overlapping writes from one document can never both read
+//   `N` and write `N + 1`.
+//
+//   ACROSS contexts (two tabs of the open web): only where the host provides the **Web
+//   Locks API**. Where it does not, `webLockFn` degrades to running the callback directly
+//   — see its own note — and two tabs CAN both read `N` and write `N + 1`. The later write
+//   wins and one update is lost. That is last-write-wins, and it is stated rather than
+//   papered over: the alternatives are a `localStorage`-based lock, which is
+//   read-then-write and therefore racy in exactly the way it claims to prevent, or
+//   refusing durable writes on such a host, which would cost every player on a legacy
+//   browser their settings to protect a counter no code reads yet.
+//
+//   PER SLOT, not per device — see `envelope.ts`'s note on `revision`.
+//
+// The shipped Host is unaffected: the Capacitor WebView is modern Chromium in a secure
+// context, where Web Locks is always present. The narrowed guarantee describes legacy web
+// only.
 
 import type { StorageDriver } from './driver';
 import { SAVE_VERSION, decodeEnvelope, encodeEnvelope, type SaveEnvelope } from './envelope';
@@ -9,7 +31,12 @@ import { SAVE_VERSION, decodeEnvelope, encodeEnvelope, type SaveEnvelope } from 
 /** Mutual exclusion around a read-modify-write, across whatever contexts share the
  *  store. On the web that is the **Web Locks API** (two tabs, overlapping autosaves);
  *  inside a single-WebView host there is nothing to contend with and the in-process
- *  queue alone suffices. */
+ *  queue alone suffices.
+ *
+ *  A `LockFn` that does not actually exclude across contexts reduces this module's
+ *  cross-context guarantee to last-write-wins. That is a supported configuration, not a
+ *  defect — but it is the caller's to know about, so it is stated here and at
+ *  {@link webLockFn} rather than assumed. */
 export type LockFn = <R>(name: string, fn: () => Promise<R>) => Promise<R>;
 
 /** The `navigator.locks` surface, declared structurally so this package stays DOM-free. */
@@ -17,10 +44,25 @@ export interface LockManagerLike {
   request<R>(name: string, callback: () => Promise<R>): Promise<R>;
 }
 
-/** Wrap a host `navigator.locks` as a {@link LockFn}. Falls back to running the callback
- *  directly where the API is absent (older WebKit, a non-secure context): the in-process
- *  queue below still serializes this document's own writes, which is the whole of the
- *  contention that exists when there is only one context. */
+/**
+ * Wrap a host `navigator.locks` as a {@link LockFn}.
+ *
+ * WHERE THE API IS ABSENT (older WebKit, a non-secure context) this falls back to running
+ * the callback directly, and the honest description of that fallback is NOT "the
+ * in-process queue covers it". It covers one context. Two tabs of the open web on such a
+ * host can both read revision `N` and both write `N + 1`; the later write wins and the
+ * earlier one is lost. Cross-context atomicity is therefore a property of the HOST, not
+ * of this module, and the module says so rather than claiming a guarantee it cannot keep.
+ *
+ * The alternative was considered and rejected: a `localStorage`-based mutex is itself a
+ * read-then-write, so it races in precisely the way it advertises preventing — lock
+ * theater, and worse than an honest gap because it invites reliance. Refusing durable
+ * writes without Web Locks was the other option, and it trades every legacy-browser
+ * player's settings for a counter no consumer reads today.
+ *
+ * The shipped Host never takes this path: the Capacitor WebView is modern Chromium in a
+ * secure context.
+ */
 export function webLockFn(locks: LockManagerLike | null | undefined): LockFn {
   if (locks === null || locks === undefined) {
     return <R>(_name: string, fn: () => Promise<R>): Promise<R> => fn();

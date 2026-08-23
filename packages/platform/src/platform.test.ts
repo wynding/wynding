@@ -183,6 +183,34 @@ describe('the save slot — serialized writes and atomic revision allocation', (
     expect(held).toEqual(['settings:write']);
   });
 
+  it('WITHOUT a real cross-context lock, concurrent contexts are last-write-wins', async () => {
+    // The narrowed guarantee, pinned so it stays honest. Two SLOTS over one store is two
+    // tabs: each has its own in-process queue, and `webLockFn(null)` — the fallback on a
+    // host with no Web Locks — excludes nothing between them. Both read revision 1 and
+    // both write 2; the later write wins and the earlier is lost.
+    //
+    // This is a supported configuration, not a defect, and the shipped Host never reaches
+    // it (the Capacitor WebView is modern Chromium in a secure context). What must not
+    // happen is the module claiming atomicity it cannot deliver — so the honest behaviour
+    // is asserted rather than the aspirational one.
+    const storage = fakeStorage();
+    const seed = stringSlot(storage, { lock: webLockFn(null) });
+    await seed.write('original');
+
+    const tabA = stringSlot(storage, { lock: webLockFn(null) });
+    const tabB = stringSlot(storage, { lock: webLockFn(null) });
+    // CONCURRENT, which is the whole point — awaiting them in turn would let the second
+    // read the first's envelope and produce a perfectly correct 1 → 2 → 3. In flight
+    // together, with nothing excluding them, both read revision 1 and both write 2.
+    await Promise.all([tabA.write('from A'), tabB.write('from B')]);
+
+    const final = await seed.read();
+    expect(final).toMatchObject({ status: 'ok', data: 'from B', revision: 2 });
+    // A's write is GONE — not merged, not detectable from the envelope. That is what
+    // "last-write-wins" means, and why the module documents it instead of implying a
+    // localStorage mutex would fix it (it would race the same way).
+  });
+
   it('does NOT advance revision when the write fails', async () => {
     const storage = fakeStorage();
     const slot = stringSlot(storage);
@@ -380,6 +408,33 @@ describe('the save slot — serialized writes and atomic revision allocation', (
     });
     await slot.read();
     expect(held).toEqual(['settings:write']);
+  });
+
+  it('revisions are per (device, SLOT) — independence is deliberate, not a bug', async () => {
+    // Two slots on one device, written once each, both land on revision 1. That reads
+    // like an ambiguous device-wide order, and it would be — if anything ever compared
+    // revisions across slots. Nothing does, and nothing should: a settings envelope and a
+    // playtrace envelope describe different data and can never be in conflict, so
+    // resolution is per slot and comparing across them is a category error.
+    //
+    // Pinned as INTENT rather than left as an observation, because the obvious "fix" —
+    // one shared per-device counter — would introduce a mutable value every slot must
+    // read-modify-write, i.e. exactly the cross-context shared state whose atomicity the
+    // test above shows cannot be guaranteed on every host.
+    const storage = fakeStorage();
+    const settings = stringSlot(storage, { key: 'settings' });
+    const playtrace = stringSlot(storage, { key: 'playtrace' });
+
+    await settings.write('a');
+    await playtrace.write('b');
+    expect(await settings.read()).toMatchObject({ revision: 1 });
+    expect(await playtrace.read()).toMatchObject({ revision: 1 });
+
+    // And they advance independently: one slot's traffic never moves the other's counter.
+    await settings.write('a2');
+    await settings.write('a3');
+    expect(await settings.read()).toMatchObject({ data: 'a3', revision: 3 });
+    expect(await playtrace.read()).toMatchObject({ data: 'b', revision: 1 });
   });
 });
 

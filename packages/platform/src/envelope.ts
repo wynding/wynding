@@ -7,13 +7,33 @@ export const SAVE_VERSION = 1;
 
 export interface SaveEnvelope {
   readonly saveVersion: number;
-  /** Identifies the writing device. With `revision` it gives a per-device write order. */
+  /** Identifies the writing device. With `revision` it orders writes to ONE SLOT from
+   *  this device — see `revision`, which is where the scope is spelled out. */
   readonly deviceId: string;
-  /** A **monotonic per-device counter**, bumped on every write. This is the local
-   *  write-ordering primitive — preferred over the wall-clock `updatedAt`, which drifts,
-   *  moves backward and ties on concurrent offline writes. It does NOT by itself
-   *  establish causal order *across* devices; that scheme is designed when sync is
-   *  built (design note). A failed write does not advance it. */
+  /**
+   * A **monotonic counter per (device, slot)**, bumped on every write to that slot. The
+   * local write-ordering primitive — preferred over the wall-clock `updatedAt`, which
+   * drifts, moves backward and ties on concurrent offline writes. A failed write does not
+   * advance it.
+   *
+   * PER SLOT IS THE POINT, not an accident of the implementation, and the contract used
+   * to say "per-device" and over-claim. Each slot derives its next revision from its own
+   * stored envelope, so the first `settings` write and the first `playtrace` write are
+   * both `(deviceId, 1)` — which would be an ambiguous *device-wide* order if anything
+   * ever compared them. Nothing does, and nothing should: conflict resolution is per
+   * slot, because a settings envelope and a playtrace envelope describe different data
+   * and can never be in conflict. Comparing revisions across slots is a category error,
+   * and `platform.test.ts` pins that the independence is deliberate.
+   *
+   * A shared per-device counter was the alternative and is rejected on the same evidence:
+   * it would introduce one mutable value every slot must read-modify-write, i.e. exactly
+   * the cross-context shared state whose atomicity `slot.ts` can only guarantee where Web
+   * Locks exists — buying a device-wide order no consumer wants at the price of a new
+   * lost-update surface on every write.
+   *
+   * It does NOT by itself establish causal order *across devices*; that scheme is
+   * designed when sync is built (design note).
+   */
   readonly revision: number;
   /** Wall-clock ms. **Informational only** — never the ordering input. */
   readonly updatedAt: number;

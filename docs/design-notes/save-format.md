@@ -29,12 +29,14 @@ The sim never imports this interface (ADR 0008 §1).
 `{ saveVersion, deviceId, revision, updatedAt, data }`:
 
 - **`saveVersion`** — schema-migration gate (distinct from `simVersion` / `rulesetHash`).
-- **`deviceId` + `revision`** — `revision` is a **monotonic per-device counter** bumped on
-  every write; with `deviceId` it gives a per-device write order, preferred over wall-clock
-  `updatedAt` (which drifts, moves backward, or ties on concurrent offline writes — so it
-  is informational only). This is the local write-ordering primitive; it does **not** by
-  itself establish causal order _across_ devices (that scheme — a version vector / causal
-  metadata, or an explicit last-writer policy — is designed when sync is built).
+- **`deviceId` + `revision`** — `revision` is a **monotonic counter per `(device, slot)`**
+  bumped on every write to that slot; with `deviceId` it orders one device's writes to one
+  slot, preferred over wall-clock `updatedAt` (which drifts, moves backward, or ties on
+  concurrent offline writes — so it is informational only). This is the local
+  write-ordering primitive; it does **not** by itself establish causal order _across_
+  devices (that scheme — a version vector / causal metadata, or an explicit last-writer
+  policy — is designed when sync is built), and it is **not** a device-wide sequence
+  across slots — see the two scope limits under _Atomic revision allocation_.
 
 ## Atomic revision allocation
 
@@ -44,6 +46,24 @@ uses a lock, e.g. the **Web Locks API**. This makes `revision` allocation atomic
 writers can't both read `N` and write `N + 1` (a lost update). A **failed write does not
 advance `revision`.** The bare `StorageDriver` `get` / `set` are not assumed atomic on
 their own — serialization is the save manager's job.
+
+Two scope limits, recorded because the unqualified claim above was read as stronger than
+the implementation can be (Codex, PR #165):
+
+- **The counter is per `(device, slot)`, not per device.** Each slot derives its next
+  revision from its own stored envelope, so a device's first write to two different slots
+  produces `(D, 1)` twice. That is deliberate: conflict resolution is per slot — a
+  settings envelope and a playtrace envelope describe different data and can never be in
+  conflict — so comparing revisions _across_ slots is a category error, and nothing does
+  it. A shared per-device counter would buy a device-wide order no consumer wants, at the
+  price of one more cross-context mutable on every write.
+- **Cross-context atomicity is a property of the host.** Within a context the serialized
+  queue always holds. Across contexts it holds only where the host provides Web Locks;
+  where it does not, the fallback runs each context's critical section independently and
+  concurrent writers are **last-write-wins**, with duplicate revisions possible and one
+  update lost. A `localStorage`-based mutex is not the fix — it is itself a read-then-write
+  and races the same way. The shipped Host is unaffected (the Capacitor WebView is modern
+  Chromium in a secure context); this describes legacy web only.
 
 ## The reserved `runInProgress` slot
 
