@@ -718,6 +718,92 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   expect(liveAudit.violations, JSON.stringify(liveAudit.violations, null, 2)).toEqual([]);
 });
 
+test('the pollable board summary (#79): a real slow + venom crossfire puts BOTH statuses on the board, the summary reports them without ever announcing them, and it clears when the statuses do', async ({
+  page,
+}) => {
+  // The ONE place the summary is exercised against real sim state rather than a
+  // hand-built count: statuses are applied by actual towers hitting actual creeps, so a
+  // derivation that read the wrong column — or agreed with a fixture but not with the
+  // sim — fails here and nowhere else.
+  await page.goto('/');
+  const summary = page.locator('.wy-status-summary');
+  const board = page.locator('.wy-board');
+  const panel = page.locator('.wy-panel');
+  const live = page.locator('.wy-sr-only[role="status"][aria-live="polite"]');
+
+  // CLEARED, pre-start: an empty board has nothing to poll, so the surface is absent —
+  // never "0 slowed". This is the first half of the transition asserted below.
+  await expect(summary).toBeHidden();
+
+  const box = (await board.boundingBox()) as {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  const projection = createProjection({
+    cols: GRID.cols,
+    rows: GRID.rows,
+    cssWidth: box.width,
+    cssHeight: box.height,
+    dpr: 1,
+  });
+  const clickCell = async (col: number, row: number): Promise<void> => {
+    const cell = projection.cellToPixel(col, row);
+    await page.mouse.click(
+      box.x + cell.x + projection.cellPx / 2,
+      box.y + cell.y + projection.cellPx / 2,
+    );
+  };
+
+  // Both towers anchor at row 9 — their 2×2 footprints occupy rows 9-10, one row clear of
+  // the entrance→exit corridor on row 11, so the path stays open and every creep of wave 1
+  // walks through both towers' range (1024fp = 4 cells) on its way across.
+  await page.getByRole('button', { name: /Slow Tower/ }).click();
+  await clickCell(4, 9);
+  await page.getByRole('button', { name: /Venom Tower/ }).click();
+  await clickCell(7, 9);
+
+  // Start CLAIMS wave 1 (#70), so creeps are on their way without an early call.
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(board).toHaveAttribute('data-started', 'true');
+
+  // BOTH statuses at once, from one poll — the aggregate the owner playtest settled on
+  // (nothing in the design requires knowing WHICH creep carries which).
+  await expect
+    .poll(async () => (await summary.textContent()) ?? '', { timeout: 30_000 })
+    .toMatch(/On the board: .*slowed.*·.*poisoned/);
+  // Freeze the board so the assertion tail below reads a stable count rather than racing
+  // the wave (the same pacing discipline `paced-call.ts` records).
+  await page.getByRole('button', { name: 'Pause' }).click();
+
+  // POLLED, NEVER ANNOUNCED. Two independent halves: the element declares `aria-live="off"`,
+  // and the app's one polite announcer — already carrying placement/arm/sell feedback — was
+  // never handed a status. A per-application live region is what this issue's decision
+  // rejected; this is the assertion that would catch it being added back.
+  await expect(summary).toHaveAttribute('aria-live', 'off');
+  await expect(live).not.toContainText('slowed');
+  await expect(live).not.toContainText('poisoned');
+
+  // Axe over the live DOM with the summary populated — same audit every other overlay gets.
+  const summaryAudit = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(summaryAudit.violations, JSON.stringify(summaryAudit.violations, null, 2)).toEqual([]);
+
+  // CLEARING, the other direction, forced rather than waited out: sell both towers and no
+  // further slow/DoT can be applied, so within their own durations (40 and 60 ticks) every
+  // status on the board expires and the surface goes away again.
+  await page.getByRole('button', { name: 'Resume' }).click();
+  for (const [col, row] of [
+    [4, 9],
+    [7, 9],
+  ] as const) {
+    await clickCell(col, row);
+    await expect(panel).toBeVisible();
+    await panel.getByRole('button', { name: /^Sell/ }).click();
+  }
+  await expect(summary).toBeHidden({ timeout: 30_000 });
+});
+
 test('supports player-started runs, pause / speed controls, launches wave 1 on Start and early-calls the remaining nine with the preview checked before each, and reaches a result', async ({
   page,
 }) => {

@@ -656,6 +656,33 @@ a.wy-home:focus-visible {
   display: block;
 }
 
+/* The pollable board summary (#79) — live creep-status counts inside the labelled HUD
+   group, `aria-live="off"` so it is READ ON DEMAND and never interrupts.
+
+   OUT OF FLOW, and that is the whole point of these ten declarations rather than a
+   `display: none` or a visible chip. `.wy-hud` sits in `.wy-status`, the shell's
+   content-sized first grid row, so a summary with a layout box would resize that row every
+   time the last poisoned creep died — re-projecting the board MID-RUN, the exact defect
+   `stage-stability.spec.ts` forbids and that the wave preview left this row to avoid.
+   `display: none` would take AT with it. Absolutely-positioned and clipped costs the board
+   nothing at any zoom while staying in the accessibility tree.
+
+   RESTATED rather than composed from `.wy-sr-only`, for the identical reason recorded at
+   `.wy-preview-full` above: `.wy-sr-only` is an IDENTITY in this codebase
+   (`querySelector('.wy-sr-only')` resolves the live-region announcer), so wearing it here
+   would make that lookup resolve to this element instead. */
+.wy-status-summary {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .wy-dock {
   /* Bottom-left floating control cluster, overlapping the board border. Anchored to
      `.wy-shell` (its containing block) rather than `.wy-stage`, since the node now lives in

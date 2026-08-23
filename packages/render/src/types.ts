@@ -53,6 +53,33 @@ export type HudPreview =
     }
   | { readonly kind: 'lastWave' };
 
+/** Live counts of every creep status on the board RIGHT NOW (#79) — the data behind the
+ *  HUD's pollable board summary ("3 slowed · 2 poisoned · 1 armored").
+ *
+ *  An AGGREGATE, deliberately: the owner playtest (2026-08-16, #79) established that
+ *  nothing in the design requires a per-creep response — no retarget, no held build,
+ *  because *that* one is poisoned — so a per-creep enumeration would withhold no
+ *  actionable information while costing an assistive-tech user a far longer read.
+ *
+ *  Five axes, of two kinds, both genuinely live in the aggregate even though only three
+ *  are sim state per creep: `slowed`/`poisoned`/`stunned` are live status effects, while
+ *  `armored`/`airborne` are catalog joins that cannot change for a given creep but whose
+ *  COUNT moves as creeps spawn, die and leak — "is anything armored on the board" is the
+ *  same question the wave preview answers one wave ahead (`hud.preview.armor`), asked of
+ *  the present. */
+export interface CreepStatusCounts {
+  /** Creeps under an active slow (`CreepVM.slowed`). */
+  readonly slowed: number;
+  /** Creeps carrying a live DoT record (`CreepVM.poisoned`). */
+  readonly poisoned: number;
+  /** Creeps whose catalog definition carries nonzero `armor`. */
+  readonly armored: number;
+  /** Creeps held by an active stun (`CreepVM.stunned`). */
+  readonly stunned: number;
+  /** Creeps in the `air` domain (`CreepVM.domain`). */
+  readonly airborne: number;
+}
+
 /** One creep as the renderer sees it: derived point (fixed-point sim units) + health. */
 export interface CreepVM {
   readonly id: number;
@@ -166,6 +193,11 @@ export interface HudVM {
   /** The wave-preview surface (PLAN.md P3 step 16) — `null` once the run is terminal
    *  (there is nothing left to preview; the results dialog takes over). */
   readonly preview: HudPreview | null;
+  /** Live creep-status counts for the HUD's pollable board summary (#79). ALWAYS present
+   *  (all-zero when the board is empty) rather than nullable: "nothing on the board" is a
+   *  count of zero, not an absent surface, and the overlay's own hide rule reads the
+   *  counts rather than a second null branch. */
+  readonly statuses: CreepStatusCounts;
 }
 
 /** Selectable colourblind mode (a11y setting, GAG §2). `default` = the base palette. */

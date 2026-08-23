@@ -165,7 +165,7 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.board.getAttribute('aria-label')).toBeNull();
   });
 
-  it('the HUD group holds Lives/Bounty/Score/wave/preview/Stars, in that order (M2-S2: the wave preview surface sits near the countdown)', () => {
+  it('the HUD group holds Lives/Bounty/Score/wave/preview/Stars/board-summary, in that order (M2-S2: the wave preview surface sits near the countdown; #79 appends the pollable summary last)', () => {
     const shell = createShell(document, TWO_CARDS);
     expect(shell.hudBox.className).toBe('wy-hud');
     expect(shell.hudBox.getAttribute('role')).toBe('group');
@@ -176,7 +176,20 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
       shell.hud.wave.root,
       shell.preview.root,
       shell.hud.stars.root,
+      shell.statusSummary,
     ]);
+  });
+
+  it('the pollable board summary (#79) starts hidden, is aria-live="off", and is NOT a chip', () => {
+    const shell = createShell(document, TWO_CARDS);
+    expect(shell.statusSummary.hidden).toBe(true);
+    expect(shell.statusSummary.textContent).toBe('');
+    expect(shell.statusSummary.getAttribute('aria-live')).toBe('off');
+    // Never `.wy-chip`: the dual-form chip contract (a visually-hidden `full` beside an
+    // aria-hidden `glance`) does not apply here, and `layout-probe.ts`'s
+    // `visibleChipAccessibleText` walks `.wy-hud > .wy-chip` — a summary wearing that
+    // class would silently join the chip gate's subject list.
+    expect(shell.statusSummary.classList.contains('wy-chip')).toBe(false);
   });
 
   it('the wave preview surface starts hidden, with its title/list scaffolding empty', () => {

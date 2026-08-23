@@ -18,6 +18,7 @@ import {
   type HudPreview,
   type PreviewEntryVM,
   type ColourMode,
+  type CreepStatusCounts,
 } from '@wynding/render';
 import {
   MS_PER_TICK,
@@ -121,6 +122,42 @@ const ACTION_LABEL: Record<GameAction, () => string> = {
   armTower8: () => t('action.armTower8'),
   armTower9: () => t('action.armTower9'),
 };
+
+/** The board summary's per-status phrase, one entry per `CreepStatusCounts` axis (#79).
+ *
+ *  `Record<keyof CreepStatusCounts, …>` makes the map EXHAUSTIVE — a sixth status added to
+ *  the view-model is a compile error here rather than a silently un-summarized status — and
+ *  `Object.keys` on it is the summary's print ORDER, so the two can never drift the way a
+ *  separate order array beside an exhaustive map would. (Own string keys enumerate in
+ *  insertion order, so the declaration order below IS the reading order.)
+ *
+ *  Literal keys, never a computed `t(\`hud.statuses.${axis}\`)`, for the same reason
+ *  `COLOUR_LABEL`/`ACTION_LABEL` above spell theirs out: the i18n extraction gate discovers
+ *  used keys by matching string-literal arguments, so a computed key reads as dead copy and
+ *  fails CI. */
+const STATUS_COUNT_LABEL: Readonly<Record<keyof CreepStatusCounts, (count: number) => string>> = {
+  slowed: (count) => t('hud.statuses.slowed', { count }),
+  poisoned: (count) => t('hud.statuses.poisoned', { count }),
+  armored: (count) => t('hud.statuses.armored', { count }),
+  stunned: (count) => t('hud.statuses.stunned', { count }),
+  airborne: (count) => t('hud.statuses.airborne', { count }),
+};
+
+/** The board summary's accessible text, or `''` when no creep on the board carries any of
+ *  the five statuses — which the caller renders as a HIDDEN element, matching `setChip`'s
+ *  "nothing to say, so the slot hides" rule rather than announcing an empty board.
+ *
+ *  ZERO COUNTS ARE OMITTED, not printed as "0 slowed": this is a poll of what is happening
+ *  now, and five always-present axes would make the one that changed the hardest part to
+ *  find. The separator is joined OUTSIDE the text sink and handed to the catalog as a
+ *  parameter, the same shape `previewEntryGlance`'s note list already uses. */
+function statusSummaryText(counts: CreepStatusCounts): string {
+  const axes = Object.keys(STATUS_COUNT_LABEL) as (keyof CreepStatusCounts)[];
+  const parts = axes
+    .filter((axis) => counts[axis] > 0)
+    .map((axis) => STATUS_COUNT_LABEL[axis](counts[axis]));
+  return parts.length === 0 ? '' : t('hud.statuses', { statuses: parts.join(' · ') });
+}
 
 /** Tower display names by catalog id (M2-S3) — a PARTIAL literal-key map (mirrors
  *  `CREEP_NAME`'s strategy exactly, Codex R1-5): catalog ids are OPEN strings (any
@@ -251,7 +288,16 @@ export function createOverlay(
   abortGesture: () => void,
   install: InstallHandle,
 ): Overlay {
-  const { hud: hudEls, preview: previewEl, dock, cards, panel, live, banner } = shell;
+  const {
+    hud: hudEls,
+    preview: previewEl,
+    statusSummary: statusSummaryEl,
+    dock,
+    cards,
+    panel,
+    live,
+    banner,
+  } = shell;
   const { pause: pauseBtn, speed: speedBtn, settings: settingsBtn, primary: primaryBtn } = dock;
 
   // Dock markup contract (Story 11 P1): every Dock button carries an aria-hidden icon span
@@ -2058,6 +2104,16 @@ export function createOverlay(
           : '',
       );
       renderPreview(hud.preview);
+      // The pollable board summary (#79). CHANGE-GATED like every other per-tick leaf write
+      // (`setLabel`): the counts move only when a status is applied or a creep leaves the
+      // board, but this runs on every HUD refresh — 20-40× a second through a live wave.
+      // The gate matters twice over here: it keeps the #98 same-value-rewrite hazard off a
+      // node inside the HUD, and it keeps a screen reader's virtual cursor from being
+      // dropped by a Text-node replacement that changed nothing. (`aria-live="off"` already
+      // means no announcement is at stake — this is about cursor stability and churn.)
+      const summaryText = statusSummaryText(hud.statuses);
+      setLabel(statusSummaryEl, summaryText);
+      statusSummaryEl.hidden = summaryText === '';
       // Pause is HIDDEN (not disabled) pre-start (PLAN.md P4) — there's nothing to pause
       // yet, and a hidden control can't be tabbed to or announced as a false affordance.
       pauseBtn.hidden = !view.ui.started;

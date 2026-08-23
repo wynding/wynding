@@ -52,6 +52,10 @@ function hud(over: Partial<HudVM> = {}): HudVM {
     // that never touch the wave preview aren't affected by it — the dedicated "wave
     // preview" describe block below overrides this explicitly.
     preview: null,
+    // An EMPTY board by default (#79) — like `preview: null` above, so the many
+    // pre-existing HUD-readout tests aren't affected by the pollable board summary; the
+    // dedicated describe block below overrides this explicitly.
+    statuses: { slowed: 0, poisoned: 0, armored: 0, stunned: 0, airborne: 0 },
     ...over,
   };
 }
@@ -627,6 +631,88 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       refund: 0,
     });
     expect(shell.preview.list.children).toHaveLength(1);
+  });
+});
+
+describe('overlay — the pollable board summary (#79)', () => {
+  /** One HUD refresh carrying `counts` on an otherwise-neutral mid-run view. */
+  function updateWith(counts: Partial<HudVM['statuses']>): ReturnType<typeof setup> {
+    const h = setup();
+    h.overlay.update({
+      hud: hud({
+        statuses: { slowed: 0, poisoned: 0, armored: 0, stunned: 0, airborne: 0, ...counts },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    return h;
+  }
+
+  it('enumerates EVERY status at once, in a fixed reading order, omitting the zero axes', () => {
+    const { shell } = updateWith({ slowed: 3, poisoned: 2, armored: 1 });
+    expect(shell.statusSummary.hidden).toBe(false);
+    expect(shell.statusSummary.textContent).toBe('On the board: 3 slowed · 2 poisoned · 1 armored');
+  });
+
+  it('reaches all five catalog phrases — the two catalog-join axes included', () => {
+    const { shell } = updateWith({
+      slowed: 1,
+      poisoned: 2,
+      armored: 3,
+      stunned: 4,
+      airborne: 5,
+    });
+    expect(shell.statusSummary.textContent).toBe(
+      'On the board: 1 slowed · 2 poisoned · 3 armored · 4 stunned · 5 airborne',
+    );
+  });
+
+  it('hides entirely when nothing on the board carries a status — "cleared" is an absent surface, never "0 slowed"', () => {
+    const { shell } = updateWith({});
+    expect(shell.statusSummary.hidden).toBe(true);
+    expect(shell.statusSummary.textContent).toBe('');
+    expect(shell.statusSummary.isConnected).toBe(true); // the node is retained, like a chip
+  });
+
+  it('is POLLED, never announced: aria-live="off", and it is not the app\'s live region', () => {
+    const { shell } = updateWith({ stunned: 1 });
+    expect(shell.statusSummary.getAttribute('aria-live')).toBe('off');
+    expect(shell.statusSummary.getAttribute('role')).toBeNull();
+    // It lives inside the labelled HUD group, where assistive tech already navigates —
+    // NOT beside the polite announcer, whose queue stays reserved for build feedback.
+    expect(shell.statusSummary.parentElement).toBe(shell.hudBox);
+    expect(shell.live.textContent).not.toContain('stunned');
+    // `.wy-sr-only` is an IDENTITY (`querySelector` resolves the announcer through it) —
+    // the summary must never wear it, or that lookup finds the wrong node.
+    expect(shell.statusSummary.classList.contains('wy-sr-only')).toBe(false);
+    expect(shell.root.querySelector('.wy-sr-only')).toBe(shell.live);
+  });
+
+  it('reflects a transition in BOTH directions across refreshes, in place', () => {
+    const { overlay, shell } = updateWith({ slowed: 2, poisoned: 1 });
+    const node = shell.statusSummary;
+    expect(node.textContent).toBe('On the board: 2 slowed · 1 poisoned');
+
+    overlay.update({
+      hud: hud({ statuses: { slowed: 2, poisoned: 0, armored: 0, stunned: 0, airborne: 0 } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(node.textContent).toBe('On the board: 2 slowed');
+
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(node.hidden).toBe(true);
+    expect(shell.statusSummary).toBe(node); // same node throughout — re-homed, never rebuilt
   });
 });
 
@@ -2047,6 +2133,19 @@ describe('overlay — a steady-state refresh performs zero child-node replacemen
       paused: false,
       speed: 1,
       ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+  });
+
+  it('(d) a POPULATED board summary in view (#79) — the counts hold still through a wave', () => {
+    // The `hud()` default is an empty board, where the summary is hidden and never
+    // written at all — which would leave this whole class untested for the one HUD node
+    // that changes most often mid-wave.
+    expectSteadyStateIsQuiet({
+      hud: hud({ statuses: { slowed: 3, poisoned: 2, armored: 1, stunned: 0, airborne: 0 } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
       refund: 0,
     });
   });

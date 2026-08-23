@@ -318,6 +318,95 @@ describe('view-model + hud derivation', () => {
     expect(c?.stunned).toBe(false);
   });
 
+  it('the pollable board summary (#79) counts an EMPTY board as five zeroes, never a null surface', () => {
+    const s = createInitialState(1, ruleset);
+    expect(deriveHud(s, ruleset).statuses).toEqual({
+      slowed: 0,
+      poisoned: 0,
+      armored: 0,
+      stunned: 0,
+      airborne: 0,
+    });
+  });
+
+  it('the pollable board summary (#79) counts all five statuses at once, and agrees with the per-creep telegraph flags creep-for-creep', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    // Spawn enough rows to give every axis a distinct population: the shipped wave 1 is
+    // ten `normal`s spawned over time, so step until there are at least five live rows.
+    for (let i = 0; i < 200 && s.creeps.id.length < 5; i++) s = step(s, ruleset, []);
+    expect(s.creeps.id.length).toBeGreaterThanOrEqual(5);
+
+    // Row 0 slowed, row 1 stunned (inclusive expiry), row 2 poisoned by a live DoT
+    // record, row 3 `armored` (nonzero catalog armor), row 4 `flying` (air domain).
+    s.creeps.slowMulFp[0] = 128;
+    s.creeps.slowUntilTick[0] = s.tick + 10;
+    s.creeps.stunUntilTick[1] = s.tick;
+    s.dots = [
+      {
+        targetId: s.creeps.id[2] as number,
+        sourceId: 101,
+        amount: 4,
+        cadenceTicks: 10,
+        nextTickTick: s.tick + 10,
+        untilTick: s.tick + 60,
+      },
+    ];
+    s.creeps.creepId[3] = 'armored';
+    s.creeps.creepId[4] = 'flying';
+
+    const hud = deriveHud(s, ruleset);
+    expect(hud.statuses).toEqual({
+      slowed: 1,
+      poisoned: 1,
+      armored: 1,
+      stunned: 1,
+      airborne: 1,
+    });
+
+    // The counts and the drawn telegraphs read the SAME rules — a second copy of
+    // "slowed right now" is exactly how a cue and a count come to disagree.
+    const vm = deriveViewModel(s, ruleset);
+    expect(vm.creeps.filter((c) => c.slowed)).toHaveLength(hud.statuses.slowed);
+    expect(vm.creeps.filter((c) => c.poisoned)).toHaveLength(hud.statuses.poisoned);
+    expect(vm.creeps.filter((c) => c.stunned)).toHaveLength(hud.statuses.stunned);
+    expect(vm.creeps.filter((c) => c.domain === 'air')).toHaveLength(hud.statuses.airborne);
+  });
+
+  it('the pollable board summary (#79) counts one creep on every axis it satisfies, and a forged creepId on neither catalog axis', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    for (let i = 0; i < 200 && s.creeps.id.length < 2; i++) s = step(s, ruleset, []);
+
+    // One creep, three statuses at once: overlap is additive per AXIS, never
+    // winner-takes-all — the summary reports state, not a classification.
+    s.creeps.creepId[0] = 'armored-flyer'; // armor 5 AND domain air
+    s.creeps.slowMulFp[0] = 128;
+    s.creeps.slowUntilTick[0] = s.tick + 10;
+    // A forged/unresolved id must not throw and must count on NEITHER catalog axis —
+    // the same total-over-absent-definition posture `warded`'s join takes.
+    s.creeps.creepId[1] = 'nonexistent';
+
+    const rest = s.creeps.id.length - 2;
+    expect(deriveHud(s, ruleset).statuses).toEqual({
+      slowed: 1,
+      poisoned: 0,
+      armored: 1,
+      stunned: 0,
+      airborne: 1,
+    });
+    expect(rest).toBe(0); // the remaining rows are plain `normal`s and add nothing
+  });
+
+  it('the pollable board summary (#79) is derived through the PreviewState path too (paused planning)', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    s.creeps.slowMulFp[0] = 128;
+    s.creeps.slowUntilTick[0] = s.tick + 10;
+    const { preview } = previewInputs(s, ruleset, []);
+    expect(deriveHud(preview, ruleset).statuses.slowed).toBe(1);
+  });
+
   it('projects `warded` as a catalog join (M2-S6): true for a creep whose def carries an immunity, false otherwise — never sim state', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
