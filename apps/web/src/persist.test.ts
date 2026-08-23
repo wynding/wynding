@@ -7,6 +7,7 @@ import {
   createBrowserStorageDriver,
   loadSettings,
   parseStoredSettings,
+  resolveDeviceId,
 } from './persist';
 import { createSettings } from './settings';
 
@@ -38,18 +39,20 @@ const settingsEnvelope = (data: unknown): string =>
     data,
   });
 
-const load = (
+const load = async (
   storage: WebStorageLike | null,
   prefersReducedMotion = false,
   onUnavailable?: () => void,
-) =>
-  loadSettings({
-    driver: createWebStorageDriver(storage),
+) => {
+  const driver = createWebStorageDriver(storage);
+  return loadSettings({
+    driver,
     prefersReducedMotion,
-    crypto: { randomUUID: () => 'fixed-device-id' },
+    deviceId: await resolveDeviceId(driver, { randomUUID: () => 'fixed-device-id' }),
     now: () => 1000,
     onUnavailable,
   });
+};
 
 describe('persist — hydrating settings through the ADR 0008 seam', () => {
   it('seeds from a stored payload through createSettings', async () => {
@@ -137,6 +140,27 @@ describe('persist — hydrating settings through the ADR 0008 seam', () => {
     expect(createSettings(p.seed).get()).toEqual({ colourMode: 'default', reducedMotion: false });
     expect(storage.map.get(`${NS}${SETTINGS_KEY}.quarantine`)).toBe('{not json');
     expect(p.durable()).toBe(true);
+  });
+});
+
+describe('resolveDeviceId', () => {
+  it('never rejects: an unreadable store still yields a session identity', async () => {
+    await expect(resolveDeviceId(createWebStorageDriver(null))).resolves.toMatch(/-/);
+  });
+
+  it('does not overwrite an id already on the device', async () => {
+    const storage = fakeStorage({ [`${NS}${DEVICE_ID_KEY}`]: 'existing' });
+    await expect(
+      resolveDeviceId(storage === null ? storage : createWebStorageDriver(storage)),
+    ).resolves.toBe('existing');
+  });
+
+  it('mints one even when the store refuses the write', async () => {
+    const storage = fakeStorage();
+    storage.failWrites = true;
+    await expect(
+      resolveDeviceId(createWebStorageDriver(storage), { randomUUID: () => 'minted' }),
+    ).resolves.toBe('minted');
   });
 });
 

@@ -2218,3 +2218,145 @@ describe('main — the screen wake lock (#140)', () => {
     ).toBe('false');
   });
 });
+
+describe('main — the playtrace capture and its export actions (#133)', () => {
+  /** An app wired with an inspectable delivery and a pinned `runId` mint. */
+  function playtraceApp(runIds: string[] = ['run-1', 'run-2', 'run-3']) {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const copied: string[] = [];
+    const saved: { filename: string; text: string }[] = [];
+    let copyRejects = false;
+    let saveThrows = false;
+    let minted = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      mintRunId: () => runIds[minted++] ?? `run-overflow-${String(minted)}`,
+      playtraceDelivery: {
+        copy: async (text: string) => {
+          if (copyRejects) throw new Error('clipboard refused');
+          copied.push(text);
+        },
+        save: (filename: string, text: string) => {
+          if (saveThrows) throw new Error('download refused');
+          saved.push({ filename, text });
+        },
+      },
+    });
+    openApps.push(app);
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    const resultsButton = (label: string): HTMLButtonElement => {
+      const btn = [...results.querySelectorAll<HTMLButtonElement>('.wy-btn')].find(
+        (b) => b.textContent === label,
+      );
+      if (btn === undefined) throw new Error(`no results button named ${label}`);
+      return btn;
+    };
+    return {
+      root,
+      results,
+      copied,
+      saved,
+      resultsButton,
+      status: (): string => results.querySelector('.wy-verify')!.textContent ?? '',
+      setCopyRejects: (v: boolean): void => void (copyRejects = v),
+      setSaveThrows: (v: boolean): void => void (saveThrows = v),
+      frame: (): void => sched.frame((clock += 16)),
+      /** Drive the run to its terminal state so the results dialog opens. */
+      resolve(): void {
+        this.frame();
+        dockButton(root, 'Start').click();
+        for (let i = 0; i < 4000 && results.hidden; i++) this.frame();
+        expect(results.hidden, 'the run must actually have resolved').toBe(false);
+      },
+    };
+  }
+
+  const parsePayload = (
+    text: string,
+  ): { playtraceVersion: number; runs: Record<string, unknown>[] } =>
+    JSON.parse(text) as { playtraceVersion: number; runs: Record<string, unknown>[] };
+
+  it('copies a payload carrying the run identity, and says so in the live region', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+
+    const payload = parsePayload(h.copied[0]!);
+    expect(payload.playtraceVersion).toBe(1);
+    expect(payload.runs).toHaveLength(1);
+    expect(payload.runs[0]!.runId).toBe('run-1');
+    expect(payload.runs[0]!.boardId).toEqual(expect.any(String));
+    expect(payload.runs[0]!.viewport).toBe('standard');
+    // ADR 0011's payload ban, asserted at the app boundary and not only in the unit.
+    expect(payload.runs[0]!.colourMode).toBeUndefined();
+    expect(payload.runs[0]!.reducedMotion).toBeUndefined();
+    expect(payload.runs[0]!.keybindings).toBeUndefined();
+    expect(payload.runs[0]!.deviceId).toBeUndefined();
+    await vi.waitFor(() => expect(h.status()).toBe('Run data copied to the clipboard.'));
+  });
+
+  it('says a refused clipboard FAILED rather than looking like a press that did nothing', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.setCopyRejects(true);
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.status()).toBe('Could not export the run data.'));
+    expect(h.copied).toEqual([]);
+  });
+
+  it('saves a named file, and reports a refused download too', () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Save run data').click();
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.filename).toMatch(/^wynding-playtrace-\d+\.json$/);
+    expect(h.status()).toContain('Run data saved as wynding-playtrace-');
+
+    h.setSaveThrows(true);
+    h.resultsButton('Save run data').click();
+    expect(h.status()).toBe('Could not export the run data.');
+  });
+
+  it('mints a NEW runId per run, and the ring keeps the earlier one (#98)', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Play again').click();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+
+    const runs = parsePayload(h.copied[0]!).runs;
+    // BOTH runs are in the export — which is the whole point of the ring: a player who
+    // notices a problem one run later still has the run that caused it.
+    expect(runs.map((r) => r.runId)).toEqual(['run-1', 'run-2']);
+  });
+
+  it('captures ONCE per run, not once per frame the dialog is up', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    for (let i = 0; i < 20; i++) h.frame();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+    expect(parsePayload(h.copied[0]!).runs).toHaveLength(1);
+  });
+
+  it('pins the world hash to the capture boundary, and the tick count to the log length', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+    const run = parsePayload(h.copied[0]!).runs[0]!;
+    // #99 note 1: the count IS the number of recorded entries, so an analyzer stepping
+    // that many lands on exactly the state `stateHash` describes.
+    expect(run.ticksCompleted).toBe((run.tickInputs as unknown[]).length);
+    expect(run.stateHash).toMatch(/^[0-9a-f]+$/);
+    expect(run.pendingInputsTruncated).toBe(false);
+  });
+});

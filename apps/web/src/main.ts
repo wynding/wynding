@@ -9,6 +9,7 @@
 // covered, and only `packages/render/src/scene.ts` (Phaser/WebGL) is coverage-excluded.
 
 import './ui.css';
+import { createSaveSlot } from '@wynding/platform';
 import { createController, type Controller } from './controller';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
@@ -18,9 +19,23 @@ import {
   browserLockFn,
   createBrowserStorageDriver,
   loadSettings,
+  resolveDeviceId,
   type SettingsPersistence,
 } from './persist';
-import { ambientCrypto } from './uuid';
+import { ambientCrypto, mintUuid } from './uuid';
+import {
+  browserDelivery,
+  createPlaytraceRecorder,
+  formatPlaytraceExport,
+  loadPlaytraceOptOut,
+  OPT_OUT_KEY,
+  parseStoredOptOut,
+  playtraceFilename,
+  type PlaytraceDelivery,
+  type PlaytraceOptOut,
+  type PlaytraceViewport,
+  type StoredOptOut,
+} from './playtrace';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
@@ -65,6 +80,16 @@ export interface AppDeps {
    *  tests and the perf harness run with: settings then seed from
    *  `prefersReducedMotion` alone and nothing is written. */
   readonly settingsPersistence?: SettingsPersistence;
+  /** ADR 0011's durable opt-out, hydrated by `boot()` off the same seam as settings
+   *  (#133). Absent means "no durable store", which is what unit tests and the perf
+   *  harness run with. It gates FUTURE automatic upload only — local capture and export
+   *  are ungated by the ADR's own reasoning, so nothing on this page reads it yet. */
+  readonly playtraceOptOut?: PlaytraceOptOut;
+  /** Where an exported playtrace goes. Injected because a clipboard permission and
+   *  `URL.createObjectURL` are both absent under jsdom. */
+  readonly playtraceDelivery?: PlaytraceDelivery;
+  /** The per-run UUID mint (#133/ADR 0014 §4) — injected so a test can pin `runId`. */
+  readonly mintRunId?: () => string;
   /** matchMedia lookup for viewport-gated features (the P5 rotate prompt, Story 11's
    *  install detection) — injectable for tests; defaults to `doc.defaultView.matchMedia`
    *  when available, or an always-non-matching stub otherwise (e.g. jsdom without a stub). */
@@ -121,6 +146,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // source is coarse): mix in a monotonic run counter so consecutive runs never repeat.
   let runCounter = 0;
   const nextSeed = (): number => ((seedSource() >>> 0) ^ Math.imul(++runCounter, 0x9e3779b1)) >>> 0;
+  /** ADR 0014 §4's per-run instance identity: a render-layer UUID minted at each run
+   *  start. The sim neither reads nor produces it, so nothing about it is a sim change.
+   *  It is minted HERE, beside the seed, because this is the one place per-run state is
+   *  already minted — and `beginRun` returns the seed so the two can never drift apart. */
+  const mintRunId = deps.mintRunId ?? ((): string => mintUuid(ambientCrypto(doc.defaultView)));
+  let runId = mintRunId();
+  const beginRun = (): number => {
+    runId = mintRunId();
+    return nextSeed();
+  };
 
   // Pinned DOM topology (PLAN.md P1): #app > .wy-shell (status + main/stage/board+dock +
   // rail) as siblings of the results/settings/rotate overlays — the Shell is the ONLY node
@@ -140,6 +175,25 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       return { matches: false, addEventListener: () => {}, removeEventListener: () => {} };
     });
   const view = doc.defaultView;
+
+  // --- The playtrace recorder (#133, ADR 0011) ---
+  // Declared HERE, above the overlay/rotate wiring, and not beside the `compactMq` the
+  // wave preview uses, for the reason the `resultsShown` declaration a few lines below
+  // spells out: `createRotate` calls `evaluate()` eagerly at construction, that reaches
+  // `ensurePaused()` and can reach `refreshHud()`, and a `const` declared after that
+  // wiring would sit in its temporal dead zone. The viewport bucket is therefore resolved
+  // LAZILY, at capture time — once per results dialog, not per frame — rather than by
+  // holding a MediaQueryList this early.
+  const playtraceViewport = (): PlaytraceViewport =>
+    matchMediaFn(COMPACT_QUERY).matches ? 'compact' : 'standard';
+  const playtrace = createPlaytraceRecorder({
+    // WALL-CLOCK, deliberately, not `deps.now` (the monotonic frame clock): the ring's
+    // six-hour bound is about elapsed real time across a play session.
+    now: () => Date.now(),
+    optOut: deps.playtraceOptOut,
+  });
+  const delivery = deps.playtraceDelivery ?? browserDelivery(doc);
+
   const install: InstallHandle = createInstall({
     storage: deps.storage ?? createStorageAdapter(view),
     matchMedia: matchMediaFn,
@@ -533,6 +587,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       refund: controller.refundForSelection(),
     });
     if (controller.isTerminal() && !resultsShown) {
+      // Capture BEFORE the dialog opens (#133). The controller is frozen at the terminal
+      // transition, so nothing can move between here and the export — and capturing on
+      // the same `!resultsShown` edge means exactly one capture per run, never one per
+      // frame the dialog is up.
+      capturePlaytrace();
       overlay.showResults(hud);
       resultsShown = true;
     }
@@ -574,6 +633,50 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     if (!controller.uiState().started || controller.isPaused() || controller.isTerminal()) return;
     controller.pause();
     refreshHud();
+  }
+
+  /** Fold the just-finished run into the recent-runs ring (#133).
+   *
+   *  The three capture facts come from ONE `controller.capture()` call rather than three
+   *  reads, so `ticksCompleted`, the world hash pinned to that boundary, and the pending
+   *  buffer can never describe different moments. */
+  function capturePlaytrace(): void {
+    const snapshot = controller.capture();
+    playtrace.capture({
+      runId,
+      replay: controller.buildReplay(),
+      ticksCompleted: snapshot.ticksCompleted,
+      stateHash: snapshot.stateHash,
+      pendingInputs: snapshot.pendingInputs,
+      viewport: playtraceViewport(),
+    });
+  }
+
+  /** The two export actions. Local only — nothing leaves the device, which is why neither
+   *  consults the opt-out (ADR 0011: "Building a playtrace and letting the player export
+   *  it to a file or clipboard sends nothing anywhere"). Both report through the results
+   *  dialog's one shared live region, and a failure says so rather than looking like a
+   *  press that did nothing. */
+  function exportPlaytrace(destination: 'clipboard' | 'file'): void {
+    const payload = playtrace.buildExport();
+    const text = formatPlaytraceExport(payload);
+    if (destination === 'file') {
+      const filename = playtraceFilename(payload.exportedAt);
+      try {
+        delivery.save(filename, text);
+        overlay.setResultsStatus(t('playtrace.saved', { filename }));
+      } catch {
+        overlay.setResultsStatus(t('playtrace.failed'));
+      }
+      return;
+    }
+    // The clipboard write is async and can be REFUSED (no permission, a non-secure
+    // context, a WebView without one), so the announcement waits for the outcome instead
+    // of claiming success optimistically.
+    delivery.copy(text).then(
+      () => overlay.setResultsStatus(t('playtrace.copied')),
+      () => overlay.setResultsStatus(t('playtrace.failed')),
+    );
   }
 
   /** The Pause CONTROL's path (Dock button + keymapped pause key) — a toggle either way, so
@@ -829,7 +932,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.escape();
         break;
       case 'playAgain':
-        controller.startRun(nextSeed());
+        // A fresh seed AND a fresh `runId`, minted together — this is the run-start edge.
+        controller.startRun(beginRun());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
         overlay.hideResults();
@@ -853,9 +957,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         if (!r.ok) message = t('verify.fail', { reason: r.reason ?? '' });
         else if (r.matchedLive === false) message = t('verify.mismatch');
         else message = t('verify.ok');
-        overlay.setVerifyMessage(message);
+        overlay.setResultsStatus(message);
         break;
       }
+      case 'copyPlaytrace':
+        exportPlaytrace('clipboard');
+        break;
+      case 'savePlaytrace':
+        exportPlaytrace('file');
+        break;
     }
   }
 
@@ -990,11 +1100,17 @@ async function bootInto(doc: Document, root: HTMLElement): Promise<AppHandle> {
   const prefersReducedMotion =
     typeof view?.matchMedia === 'function' &&
     view.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const driver = createBrowserStorageDriver(view);
+  const lock = browserLockFn(view);
+  // ONE device identity for every slot this boot stamps (ADR 0008 §2's `deviceId` +
+  // `revision` pair). Resolving it per slot would mint two ids on a fresh device and
+  // make the pair meaningless as a per-device write order.
+  const deviceId = await resolveDeviceId(driver, ambientCrypto(view));
   const settingsPersistence = await loadSettings({
-    driver: createBrowserStorageDriver(view),
+    driver,
     prefersReducedMotion,
-    crypto: ambientCrypto(view),
-    lock: browserLockFn(view),
+    deviceId,
+    lock,
     onUnavailable: (error) => {
       // Fail-closed is not the same as silent: persistence has shut off for the session
       // and the player's settings will not survive a reload. There is no UI for that
@@ -1010,10 +1126,25 @@ async function bootInto(doc: Document, root: HTMLElement): Promise<AppHandle> {
       }
     },
   });
+  // ADR 0011's durable opt-out, on the SAME seam and hydrated in the same pass (#133).
+  // It is read here rather than lazily so the fail-closed default is settled before the
+  // app exists, and so a future upload path can never find it un-hydrated. Its slot is
+  // its own — a separate key beside `settings`, not a field inside it, because ADR 0011
+  // forbids settings from carrying it and ADR 0008 §5's rules apply per slot.
+  const playtraceOptOut = await loadPlaytraceOptOut(
+    createSaveSlot<StoredOptOut>({
+      driver,
+      key: OPT_OUT_KEY,
+      deviceId,
+      parse: parseStoredOptOut,
+      lock,
+    }),
+  );
   return createApp(doc, root, {
     sceneFactory: phaserSceneFactory,
     schedule: rafScheduler,
     now: () => performance.now(),
+    playtraceOptOut,
     // Wall-clock seed (wide entropy). performance.now() would be a small navigation-
     // relative value that clusters across reloads, collapsing the RNG's variety.
     seed: Date.now() >>> 0,

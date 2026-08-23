@@ -28,7 +28,6 @@ import {
   createWebStorageDriver,
   webLockFn,
   type LockFn,
-  type SaveSlot,
   type StorageDriver,
   type WebStorageLike,
 } from '@wynding/platform';
@@ -81,7 +80,10 @@ export interface LoadSettingsOptions {
   /** The OS preference, used only where nothing is stored — an explicit player choice
    *  outranks it, which is the entire point of persisting one. */
   readonly prefersReducedMotion: boolean;
-  readonly crypto?: UuidCrypto | null;
+  /** The envelope's writer identity, resolved ONCE per boot by {@link resolveDeviceId}
+   *  and shared with every other slot — two slots minting two device ids would make the
+   *  `deviceId` + `revision` pair meaningless as a per-device write order. */
+  readonly deviceId: string;
   readonly now?: () => number;
   readonly lock?: LockFn;
   /** Called once, the first time storage refuses. Injected rather than logged from here
@@ -113,18 +115,16 @@ export async function loadSettings(options: LoadSettingsOptions): Promise<Settin
     options.onUnavailable?.(error);
   };
 
-  let slot: SaveSlot<StoredSettings> | null = null;
+  const slot = createSaveSlot<StoredSettings>({
+    driver,
+    key: SETTINGS_KEY,
+    deviceId: options.deviceId,
+    parse: parseStoredSettings,
+    now: options.now,
+    lock: options.lock,
+  });
   let stored: StoredSettings = {};
   try {
-    const deviceId = await resolveDeviceId(driver, options.crypto);
-    slot = createSaveSlot<StoredSettings>({
-      driver,
-      key: SETTINGS_KEY,
-      deviceId,
-      parse: parseStoredSettings,
-      now: options.now,
-      lock: options.lock,
-    });
     const read = await slot.read();
     if (read.status === 'ok') stored = read.data;
     // `absent` seeds from the OS preference below. `incompatible` has already been
@@ -146,7 +146,7 @@ export async function loadSettings(options: LoadSettingsOptions): Promise<Settin
         stored.reducedMotion === undefined ? prefersReducedMotion : stored.reducedMotion,
     },
     write(settings: Readonly<Settings>): void {
-      if (!durable || slot === null) return;
+      if (!durable) return;
       void slot
         .write({ colourMode: settings.colourMode, reducedMotion: settings.reducedMotion })
         .catch(fail);
@@ -155,20 +155,29 @@ export async function loadSettings(options: LoadSettingsOptions): Promise<Settin
   };
 }
 
-/** Read the device identity, minting and storing one on first run. A failed mint-write
- *  is not fatal to the boot: the id is still used for this session's envelopes, and the
- *  caller's own write attempt is what discovers the store is unwritable. */
-async function resolveDeviceId(
+/**
+ * Read the device identity, minting and storing one on first run.
+ *
+ * NEVER REJECTS. Storage being unreadable is not a reason to fail a boot — the id is
+ * still needed to stamp this session's envelopes, and the slot reads and writes that
+ * follow are what actually discover, and report, that the store refuses. Resolved ONCE
+ * per boot and shared across every slot.
+ */
+export async function resolveDeviceId(
   driver: StorageDriver,
-  cryptoSource: UuidCrypto | null | undefined,
+  cryptoSource?: UuidCrypto | null,
 ): Promise<string> {
-  const existing = await driver.get(DEVICE_ID_KEY);
-  if (typeof existing === 'string' && existing !== '') return existing;
+  try {
+    const existing = await driver.get(DEVICE_ID_KEY);
+    if (typeof existing === 'string' && existing !== '') return existing;
+  } catch {
+    /* unreadable — mint a session id below and let the slot report the store */
+  }
   const minted = mintUuid(cryptoSource);
   try {
     await driver.set(DEVICE_ID_KEY, minted);
   } catch {
-    /* unwritable — the settings write below is what reports it */
+    /* unwritable — the settings write is what reports it */
   }
   return minted;
 }

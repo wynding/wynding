@@ -44,6 +44,10 @@ export type UiAction =
   | { readonly type: 'start' }
   | { readonly type: 'playAgain' }
   | { readonly type: 'verify' }
+  /** ADR 0011's local export, from the results dialog's secondary-action row (#133).
+   *  Both are ungated and send nothing anywhere. */
+  | { readonly type: 'copyPlaytrace' }
+  | { readonly type: 'savePlaytrace' }
   | { readonly type: 'armTower'; readonly tower: ArmedTower }
   | { readonly type: 'escape' }
   | { readonly type: 'sellSelected' }
@@ -82,7 +86,11 @@ export interface Overlay {
   showLeave(onConfirm: () => void): void;
   showResults(hud: HudVM): void;
   hideResults(): void;
-  setVerifyMessage(message: string): void;
+  /** Write the results dialog's ONE shared status region — the `role="status"`
+   *  `aria-live="polite"` paragraph every secondary action reports through (Verify, and
+   *  since #133 the two export actions). `showResults`/`hideResults` both clear it, so a
+   *  result from one run can never land on the next run's dialog. */
+  setResultsStatus(message: string): void;
   destroy(): void;
 }
 
@@ -697,13 +705,34 @@ export function createOverlay(
   const resultSummary = doc.createElement('p');
   const playAgainBtn = button(doc, 'wy-btn wy-primary', t('controls.playAgain'));
   const verifyBtn = button(doc, 'wy-btn', t('controls.verify'));
-  const verifyMsg = doc.createElement('p');
-  verifyMsg.className = 'wy-verify';
-  verifyMsg.setAttribute('role', 'status');
-  verifyMsg.setAttribute('aria-live', 'polite');
+  // ADR 0011's local export (#133), as two more NON-PRIMARY actions beside Verify. Play
+  // again keeps its primary styling and its initial focus; these simply join the dialog's
+  // tab order after it. Two buttons rather than one because the two destinations are
+  // genuinely different acts — a paste into an issue form, and a file to attach — and a
+  // single control could only ever guess which one the player meant.
+  const copyRunBtn = button(doc, 'wy-btn', t('controls.copyRun'));
+  const saveRunBtn = button(doc, 'wy-btn', t('controls.saveRun'));
+  // The results dialog's ONE shared status region. Named `.wy-verify` in the stylesheet
+  // since M1 and left that way on purpose: renaming a class costs a ui.css edit and buys
+  // nothing, and the ELEMENT's contract (one polite live region, cleared on every
+  // show/hide) is what the three actions share.
+  const resultsStatus = doc.createElement('p');
+  resultsStatus.className = 'wy-verify';
+  resultsStatus.setAttribute('role', 'status');
+  resultsStatus.setAttribute('aria-live', 'polite');
   playAgainBtn.addEventListener('click', () => onAction({ type: 'playAgain' }));
   verifyBtn.addEventListener('click', () => onAction({ type: 'verify' }));
-  results.append(resultTitle, resultSummary, playAgainBtn, verifyBtn, verifyMsg);
+  copyRunBtn.addEventListener('click', () => onAction({ type: 'copyPlaytrace' }));
+  saveRunBtn.addEventListener('click', () => onAction({ type: 'savePlaytrace' }));
+  results.append(
+    resultTitle,
+    resultSummary,
+    playAgainBtn,
+    verifyBtn,
+    copyRunBtn,
+    saveRunBtn,
+    resultsStatus,
+  );
 
   // --- Modal owner: single authority over `.wy-shell`'s inert + focus save/restore ---
   const modal = createModalOwner(doc, shell.root, {
@@ -2204,16 +2233,16 @@ export function createOverlay(
       resultTitle.textContent = heading;
       resultSummary.textContent = t('results.summary', { score: hud.score, stars: hud.stars });
       results.setAttribute('aria-label', heading);
-      verifyMsg.textContent = '';
+      resultsStatus.textContent = '';
       // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
       modal.open(resultsOverlay, { priority: 'results' });
     },
     hideResults(): void {
-      verifyMsg.textContent = '';
+      resultsStatus.textContent = '';
       modal.close(resultsOverlay);
     },
-    setVerifyMessage(message: string): void {
-      verifyMsg.textContent = message;
+    setResultsStatus(message: string): void {
+      resultsStatus.textContent = message;
     },
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI
