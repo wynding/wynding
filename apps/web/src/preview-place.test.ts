@@ -104,6 +104,24 @@ describe('preview-place — the compliant band (#101)', () => {
     expect(odd).toMatchObject({ maxWidth: 110 - PREVIEW_FLOAT_GAP_PX });
   });
 
+  it('a band straddling the floor takes the QUALIFYING side — a tie preference must not reject it', () => {
+    // The tie tolerance is a preference between equals; it is not an admission rule. When
+    // the two bands straddle the floor INSIDE that tolerance, choosing a side before testing
+    // the floor throws away a compliant band: a centred 983×720 stage projects 30px cells
+    // and a 143px remainder, giving 63px on the left and 64px on the right, so preferring
+    // left failed the 64px floor and rejected the whole LETTERBOX tier — advancing the card
+    // onto the board's blocked border ring while a fully compliant letterbox band sat
+    // unexamined one side over. Qualify first, then prefer.
+    const straddle = placePreviewFloat(stage(983, 720));
+    expect(straddle).toEqual({
+      kind: 'band',
+      side: 'right',
+      inset: PREVIEW_FLOAT_GAP_PX,
+      maxWidth: PREVIEW_FLOAT_MIN_W_PX, // exactly the floor: 64px, the right band's whole room
+      overBoard: false, // ...and the tier did NOT advance
+    });
+  });
+
   it('a fractional stage width — the vw-sized Rail’s real output — does not flip the side either', () => {
     // `--wy-rail-w`'s `18vw` arm produces fractional Rail widths, so the Stage is routinely
     // fractional too and the remainder is never a clean integer. The band difference is

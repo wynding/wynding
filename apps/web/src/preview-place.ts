@@ -62,7 +62,11 @@ export const PREVIEW_FLOAT_CAP_PX = 256;
  *  the board for the whole drag. A tolerance strictly greater than the largest possible
  *  difference removes the parity from the decision entirely: the side stops depending on a
  *  bit that flips every pixel. Every fixture this suite had happened to land on an even
- *  remainder, which is why sixteen green viewport sweeps never witnessed it. */
+ *  remainder, which is why sixteen green viewport sweeps never witnessed it.
+ *
+ *  SUBORDINATE TO THE FLOOR, always. This is a preference between bands that are already
+ *  admissible, not an admission rule of its own — see `placePreviewFloat`, where the two
+ *  are ordered so a tie preference can never reject a qualifying band. */
 export const PREVIEW_FLOAT_SIDE_BIAS_PX = 2;
 
 /** The narrowest card this module will place. Below it the float is abandoned for the hud
@@ -115,7 +119,9 @@ export type PreviewFloat =
  *  which point `main.ts` sends the card to its in-flow hud home. Within a tier the WIDER of
  *  the two side bands wins, since the whole constraint here is horizontal room — but only
  *  by a margin worth having: anything inside `PREVIEW_FLOAT_SIDE_BIAS_PX` counts as a tie
- *  and goes left, the card's historical corner and the side away from the Rail. */
+ *  and goes left, the card's historical corner and the side away from the Rail. That
+ *  preference is applied only AMONG BANDS THAT ALREADY CLEAR THE FLOOR: a tier is rejected
+ *  when NEITHER side can host a legible card, never because the preferred side could not. */
 export function placePreviewFloat(input: PreviewFloatInput): PreviewFloat {
   const { stageWidth, stageHeight, boardLeft, boardWidth, boardHeight, cols, rows } = input;
   if (stageWidth <= 0 || stageHeight <= 0 || boardWidth <= 0 || boardHeight <= 0) {
@@ -136,24 +142,41 @@ export function placePreviewFloat(input: PreviewFloatInput): PreviewFloat {
     // The blocked border ring is one cell deep on every side, so the second tier simply
     // moves the forbidden edge one cell inward.
     const borrow = overBoard ? projection.cellPx : 0;
-    const leftRoom = gridLeft + borrow - PREVIEW_FLOAT_GAP_PX;
-    const rightRoom = stageWidth - (gridRight - borrow) - PREVIEW_FLOAT_GAP_PX;
-    const side = leftRoom + PREVIEW_FLOAT_SIDE_BIAS_PX >= rightRoom ? 'left' : 'right';
+    // Floored HERE, once, so the legibility test and the width cap read the same integer.
+    // A band is only worth what a whole pixel of it can render.
+    const leftRoom = Math.floor(gridLeft + borrow - PREVIEW_FLOAT_GAP_PX);
+    const rightRoom = Math.floor(stageWidth - (gridRight - borrow) - PREVIEW_FLOAT_GAP_PX);
+
+    // QUALIFY, THEN CHOOSE — never the other way round (Codex, PR #164). Picking a side
+    // first and testing the floor afterwards throws away a compliant band whenever the two
+    // straddle the floor INSIDE the tie tolerance: a centred 983×720 stage gives 63px left
+    // and 64px right, so the tolerance took left, left failed the floor, and the whole tier
+    // was rejected — advancing the card to the blocked border ring while a fully compliant
+    // letterbox band sat unexamined on the other side. The tolerance is a preference between
+    // equals; it was never meant to outrank the floor, which is a hard admission test.
+    const leftFits = leftRoom >= PREVIEW_FLOAT_MIN_W_PX;
+    const rightFits = rightRoom >= PREVIEW_FLOAT_MIN_W_PX;
+    if (!leftFits && !rightFits) continue; // neither side can host a legible card — next tier
+    // Among QUALIFYING bands only: prefer left inside the tolerance (the parity guard, whose
+    // whole job is to keep a bit that flips every pixel out of the decision), otherwise the
+    // wider one, and if only one clears the floor there is nothing to prefer.
+    const side =
+      leftFits && (!rightFits || leftRoom + PREVIEW_FLOAT_SIDE_BIAS_PX >= rightRoom)
+        ? 'left'
+        : 'right';
     // The room of the band actually CHOSEN, never `max(left, right)`. With a tie tolerance
     // in play those two stop agreeing — left can now win while right is up to 2px wider —
     // and a cap taken from the other side's room would let the card reach exactly that far
     // past its own band, i.e. onto the buildable cells this whole module exists to keep
     // clear. The bug the tolerance would otherwise introduce, closed in the same line.
-    const room = Math.floor(side === 'left' ? leftRoom : rightRoom);
-    if (room >= PREVIEW_FLOAT_MIN_W_PX) {
-      return {
-        kind: 'band',
-        side,
-        inset: PREVIEW_FLOAT_GAP_PX,
-        maxWidth: Math.min(PREVIEW_FLOAT_CAP_PX, room),
-        overBoard,
-      };
-    }
+    const room = side === 'left' ? leftRoom : rightRoom;
+    return {
+      kind: 'band',
+      side,
+      inset: PREVIEW_FLOAT_GAP_PX,
+      maxWidth: Math.min(PREVIEW_FLOAT_CAP_PX, room),
+      overBoard,
+    };
   }
   return { kind: 'none' };
 }
