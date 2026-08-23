@@ -148,6 +148,10 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
+    // Hands-off, so nothing was ever banked: this 0 is reached by BOTH routes at once —
+    // the arithmetic (no kills) and the sv16 lost branch — and would read 0 under the
+    // superseded contract too. Annotated so it is not mistaken for a forfeiture pin; the
+    // scenario below, and `wave-multi.test.ts`, are where the two are told apart.
     expect(deriveScore(state, ruleset)).toBe(0);
     expect(deriveStars(state, ruleset)).toBe(0);
   });
@@ -460,8 +464,8 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(state.waveCursor).toBe(9);
     // cumulativeKillBounty is unchanged at 102 (see the derivation above).
     // cumulativeEarlyCallCredit is 3 since #70 — the same three early calls, but the
-    // opening one now pays nothing — and the lost-branch score formula forfeits even
-    // that entirely; see `deriveScore` below.
+    // opening one now pays nothing — and since sv16 the lost branch forfeits it AND the
+    // 102 kill bounty above it; see `deriveScore` below.
     expect(state.cumulativeKillBounty).toBe(102);
     expect(state.cumulativeEarlyCallCredit).toBe(3);
     expect(state.bounty).toBe(120);

@@ -212,14 +212,44 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
     expect(payload.score).toBe(deriveScore(client.state, ruleset));
     expect(payload.stars).toBe(deriveStars(client.state, ruleset));
     expect(payload.finalHash).toBe(hashSimState(client.state));
-    // A win, so it carries at least one star — the sv16 floor, seen from the wire.
-    expect(payload.stars).toBeGreaterThanOrEqual(1);
+    // NO `stars >= 1` FLOOR ASSERTION HERE, deliberately: the handler compiles the
+    // SHIPPED bundle, whose ladder starts at t1 = 1, and WINNER_A finishes on 10 lives
+    // for a clean 3★ — so such an assertion would pass identically at sv15 and witness
+    // nothing. The floor is only observable against an authored ladder that puts a win
+    // below its first rung, which `packages/sim`'s story5 suite does with `[5, 7, 9]`.
+    // The parity claim two lines up is what this leg is actually for.
+  }, 120_000);
+
+  it('a LOSING run that banked a real kill bounty comes back 0/0 through the wire — the sv16 forfeiture, end to end', async () => {
+    // The other half of ruling 2, on the path the ruling is ABOUT. `packages/sim` proves
+    // the lost branch directly and `packages/replay`'s own losing fixture banks nothing,
+    // so without this leg no test drives a bounty-banking loss through `validate()` — and
+    // the server is precisely the consumer the ruling names ("a leaderboard consumer
+    // ingesting `score`"). Ruling 3 got real-handler coverage below; this is ruling 2's.
+    //
+    // A 12-placement prefix of WINNER_A is measured, not guessed: enough defense to bank
+    // kills across the early arc, far too little to survive it. The guards below are what
+    // keep the fixture honest if content is retuned — they fail by NAME rather than
+    // letting the 0/0 assertions pass vacuously.
+    const client = runScript(ruleset, WINNER_A.slice(0, 12));
+    expect(client.state.phase).toBe('lost');
+    expect(client.state.cumulativeKillBounty).toBeGreaterThan(0); // there IS a forfeiture
+
+    const res = await handler({ body: JSON.stringify(replayFor(client.tickInputs)) });
+    expect(res.statusCode).toBe(200); // a loss is a VALID replay, not a rejected one
+    const payload = JSON.parse(res.body) as { ok: boolean; score: number; stars: number };
+    expect(payload.ok).toBe(true);
+    expect(payload.score).toBe(0);
+    expect(payload.stars).toBe(0);
   }, 120_000);
 
   it('the SAME winning log plus one inert trailing tick is rejected 422, with the exact reason', async () => {
     const client = runScript(ruleset, WINNER_A);
     expect(client.state.phase).toBe('won');
-    const terminalTick = client.tickInputs.length;
+    // The log ends AT the terminal tick, so its LENGTH is the first index a canonical log
+    // must not contain — the terminal tick index + 1. Named for what it is: `terminalTick`
+    // would have been off by one against the sibling test's own vocabulary above.
+    const firstPaddedTick = client.tickInputs.length;
 
     // "Inert" is the whole point: the sim is frozen at a terminal state, so neither of
     // these ticks could change the outcome even if it were simulated. They are rejected
@@ -231,9 +261,11 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
       const payload = JSON.parse(res.body) as { ok: boolean; error: string };
       expect(payload.ok).toBe(false);
       // The EXACT reason, not a substring match on 'termination' — the message names the
-      // offending tick index, and that index is the terminal tick + 0 (the first tick the
-      // canonical log must not contain).
-      expect(payload.error).toBe(`tick ${String(terminalTick)} is logged past match termination`);
+      // offending tick index, which is the terminal tick index + 1, i.e. the log's own
+      // length: the first tick the canonical log must not contain.
+      expect(payload.error).toBe(
+        `tick ${String(firstPaddedTick)} is logged past match termination`,
+      );
     }
   }, 120_000);
 });

@@ -276,12 +276,16 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
     sched.frame((clock += 16)); // one frame so the HUD has been painted at least once
 
     // The defect in the screenshot: on first load, before anything is started, the chip
-    // rendered the terminal formula's survival term (startingLives × survivalMul = 250).
+    // rendered the terminal formula's survival term — startingLives × survivalMul, which
+    // was 10 × 25 = 250 when this was written; S11 raised the multiplier to 50, so the
+    // same defect would read 500 today.
     expect(scoreChip(root)).toBe(0);
 
-    // Build one tower beside the entrance lane so this run actually SCORES — the plain
-    // undefended fixture used elsewhere in this file ends at 0, which would make the
-    // Play-again assertion below pass with or without the fix.
+    // Build one tower beside the entrance lane so this run accrues a LIVE score. The
+    // reason changed at sv16 and the old one is no longer true: this fixture's TERMINAL
+    // now reads 0 either way (it loses — see the re-pin note below), so the tower is not
+    // what keeps the Play-again assertion honest. It is what keeps the MID-RUN assertion
+    // below non-vacuous; the Play-again reset is witnessed on the Lives chip instead.
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' })); // arm the basic Card (M2-S3)
     for (let i = 0; i < 3; i++) key('ArrowRight');
     for (let i = 0; i < 2; i++) key('ArrowUp'); // entrance row 11 → row 9
@@ -298,6 +302,12 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
     // the tower built above makes nonzero. Asserted as its own step because the terminal
     // assertion below can no longer carry it (see the re-pin note there) — this is what
     // proves the chip renders real values rather than a constant.
+    //
+    // A dependency worth stating, since it is what keeps the terminal `toBe(0)` below from
+    // going vacuous: the live readout is `kill bounty + early-call credit`, and this flow
+    // makes no early call after Start (Start's own opening launch pays nothing since sv15,
+    // #70), so credit stays 0 and a nonzero `liveScore` here IS a nonzero kill bounty.
+    // Adding an early call to this fixture would break that chain silently.
     let liveScore = 0;
     for (let i = 0; i < 4000 && results.hidden && liveScore === 0; i++) {
       sched.frame((clock += 300));

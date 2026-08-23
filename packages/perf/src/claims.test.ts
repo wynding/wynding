@@ -643,9 +643,9 @@ const CONTRACT_EXCLUSIONS: readonly {
       [G.dotBench, 1],
       [G.adr, 7],
       [G.spike, 6],
-      [G.m2, 50],
+      [G.m2, 53],
     ],
-    why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0", `dots: []`. Not a measurement. Re-censused 37 → 50 in m2.md by #25 (sv16), which makes the terminal GRADE of a loss zero and so states it repeatedly in §Scoring & star grade and in two story reconciliations ("a loss scores 0", "loss: 0", "score 0, stars 0", "0★ win"). Still bare zero, still not a measurement, and none of the new copies is a perf figure.',
+    why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0", `dots: []`. Not a measurement. Re-censused 37 → 53 in m2.md by #25 (sv16), which makes the terminal GRADE of a loss zero and so states it repeatedly in §Scoring & star grade and in two story reconciliations ("a loss scores 0", "loss: 0", "score 0, stars 0", "0★ win"); the last 3 of those are the clause scoping the guarantee to the STAR readout, which names `survivalMul: 0` and a 0-scoring win as the reason score alone is not a loss signature. Still bare zero, still not a measurement, and none of the new copies is a perf figure.',
   },
   {
     value: '10',
@@ -1038,7 +1038,7 @@ const KNOWN_UNROWED: readonly {
       [G.oracle, 1],
       [G.spike, 3],
     ],
-    why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2. Re-censused 7 → 11 in m2.md by #25: the four new copies are the sim behavior version `simVersion` 16 this change bumps to, cited once per grading claim it settles — a numeral collision with the wave-entry count, not four new copies of it.',
+    why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2. Re-censused 7 → 11 in m2.md by #25: the four new copies are the sim behavior version `simVersion` 16 this change bumps to, cited at each of the four places the change is stated: the two spec clauses in §Scoring & star grade and the two story reconciliations — a numeral collision with the wave-entry count, not four new copies of it.',
   },
   {
     value: '165',

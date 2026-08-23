@@ -452,7 +452,7 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   });
 });
 
-describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 sets the margin)', () => {
+describe('the win-over-loss score ordering invariant (m2.md §Scoring & star grade; M2-S11 P4 sets the margin)', () => {
   // `deriveScore` (index.ts): running/won = cumulativeKillBounty + cumulativeEarlyCallCredit
   // (+ max(0,lives) × survivalMul when won); lost = ZERO since #25 / sv16 — the kill bounty
   // is forfeited alongside the early-call credit. A leaked creep earns no kill bounty.
@@ -544,9 +544,6 @@ describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 s
     worstWinScore = Math.min(worstWinScore, B - maxBounty[spent]! + (L - spent) * survivalMul);
   }
 
-  /** The margin S11 pre-committed to (ruling 3), before any of these numbers were run. */
-  const MARGIN_FLOOR = 15;
-
   /** The best-case losing terminal, graded by the REAL scorer: a forged `lost` state
    *  carrying the largest kill bounty any losing run of this bundle could have banked,
    *  plus a deliberately outsized early-call credit. Both accumulators are nonzero, so a
@@ -581,11 +578,16 @@ describe('the win-over-loss score ordering invariant (m2.md:272-277; M2-S11 P4 s
     expect(bestLossKillBounty).toBe(201);
     expect(worstWinScore).toBe(218);
     // Re-pinned #25 (SIM_VERSION 15 → 16, measured): the best losing SCORE moves 201 → 0,
-    // and the margin 17 → 218 with it. `survivalMul` is no longer load-bearing for this
-    // invariant — but the floor is kept and still checked, because it is what would catch
-    // a future bundle whose worst win collapsed toward zero.
+    // and the margin 17 → 218 with it.
     expect(bestLossScore).toBe(0);
-    expect(worstWinScore - bestLossScore).toBeGreaterThanOrEqual(MARGIN_FLOOR);
+    // S11's pre-committed margin floor of 15 (ruling 3) USED to be asserted here as
+    // `worstWinScore - bestLossScore >= 15`. It is gone rather than re-pinned: with the
+    // losing side structurally 0 and the winning side exactly pinned one line above, that
+    // comparison was `218 - 0 >= 15` — implied by its own neighbours, incapable of being
+    // the assertion that fails, and so coverage in appearance only. The two exact pins
+    // above are what actually catch a catalog or wave edit now; `survivalMul` is no longer
+    // the lever this invariant rests on, and the floor it was tuned against is discharged
+    // history. The structural claim itself is the test below.
   });
 
   it('the ordering is now STRUCTURAL, not a tuning result — the richest possible loss still grades 0★/0 (#25, sv16)', () => {

@@ -231,7 +231,12 @@ describe('deriveStars — A WIN ALWAYS EARNS AT LEAST ONE STAR (#25, sv16)', () 
     expect(stars).toBe(1);
   });
 
-  it('a win exactly AT the 1★ threshold grades per-threshold — the boundary is unmoved', () => {
+  // Retitled from "grades per-threshold — the boundary is unmoved", which overclaimed:
+  // since the floor maps both sides of `t1` to 1★, NO fixture can witness that cutoff, and
+  // a title promising a boundary check would have been a promise the assertion cannot keep.
+  // The case is still worth pinning — it is the ruling's "at t1 exactly" clause — but what
+  // holds it up now is the floor, not the comparison.
+  it('a win exactly AT the old 1★ cutoff grades 1★ — now by the floor, not by the cutoff', () => {
     expect(wonWith(LADDER[0]).stars).toBe(1); // 5 lives, t1 = 5
   });
 
@@ -250,6 +255,24 @@ describe('deriveStars — A WIN ALWAYS EARNS AT LEAST ONE STAR (#25, sv16)', () 
     const s = runToEnd(ruleset, callEarly); // undefended: the wave walks through
     expect(s.phase).toBe('lost');
     expect(deriveStars(s, ruleset)).toBe(0);
+  });
+
+  it('a WON state with a ragged lives accumulator still earns its star — the floor covers the guard', () => {
+    // `deriveStars` guards `lives` with `Number.isSafeInteger` and falls back to 0, which
+    // before sv16 dropped such a state to 0★ — indistinguishable from a loss. The floor now
+    // carries it to 1★ instead. Unreachable through `step` (loss priority means `won`
+    // implies lives >= 1), but `deriveScore`/`deriveStars` accept `PreviewState` and forged
+    // states by contract, and `render.test.ts` pins the same guard for the SCORE — so this
+    // pins the answer as intended rather than leaving it an accident of the floor.
+    const bundle = testBundle(OPEN, { creepHp: 10, waveCount: 3, waveSpacing: 20 });
+    const ruleset = compileRuleset(
+      { ...bundle, scoring: { ...bundle.scoring, starThresholds: [...LADDER] } },
+      'test',
+    );
+    const won = runToEnd(ruleset, [{ kind: 'callWaveEarly' }, place(3, 1)]);
+    expect(won.phase).toBe('won');
+    const ragged = { ...won, lives: Number.NaN };
+    expect(deriveStars(ragged, ruleset)).toBe(1);
   });
 });
 

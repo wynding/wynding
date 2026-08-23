@@ -200,9 +200,9 @@ export interface BalanceConstants {
    *  (M2: 1/4). */
   readonly slowFloorNum: number; // int, 0 ≤ slowFloorNum ≤ slowFloorDen
   readonly slowFloorDen: number; // int 1..1e6
-  /** 0 = off; else bonus = ⌊ticksRemaining / earlyCallBountyDivisor⌋. Pinned to 0
-   *  by the M1/M2-S1 capability profile (`maxEarlyCallBountyDivisor: 0`) — S2
-   *  implements the divisor formula as its sim change. */
+  /** 0 = off; else bonus = ⌊ticksRemaining / earlyCallBountyDivisor⌋. The shipped bundle
+   *  authors 50; the "pinned to 0 by the M1/M2-S1 capability profile" this used to claim
+   *  lapsed when S2 implemented the divisor formula as its sim change. */
   readonly earlyCallBountyDivisor: number; // int 0..1e6
 }
 
@@ -213,12 +213,14 @@ export interface ScoringConfig {
    *  sv16 (#25), so this knob has no effect on a losing run's grade. */
   readonly survivalMul: number; // int 0..1e6
   /** Non-decreasing lives cutoffs for [1★, 2★, 3★]. Only a LOSS earns 0 stars: since
-   *  sv16 a win floors at 1★ even below the 1★ cutoff, so that first cutoff no longer
-   *  separates a graded win from an ungraded one — it is the point at which the ladder
-   *  starts being read, not a bar a win can fall under. */
+   *  sv16 (#25) a win floors at 1★, so the [0] cutoff is NOT READ by `deriveStars` at
+   *  all — a win below it grades 1★ exactly as a win at it does. Authoring it lower or
+   *  higher changes no grade; [1] and [2] are the live rungs. Kept in the shape because
+   *  retiring a schema field is a content decision, not a grading one. */
   readonly starThresholds: readonly [number, number, number]; // positive ints ≤ 1e6, non-decreasing
-  /** 0 = off; else credit = ⌊ticksRemaining / earlyCallScoreDivisor⌋. Pinned to 0
-   *  by the M1/M2-S1 capability profile. */
+  /** 0 = off; else credit = ⌊ticksRemaining / earlyCallScoreDivisor⌋. The shipped bundle
+   *  authors 50; the "pinned to 0 by the M1/M2-S1 capability profile" this used to claim
+   *  lapsed when S2 implemented the divisor formula. */
   readonly earlyCallScoreDivisor: number; // int 0..1e6
 }
 

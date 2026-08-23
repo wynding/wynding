@@ -2,7 +2,7 @@
 // story5.test.ts/sim.test.ts suites can't exercise (PLAN.md step 11's test matrix):
 // wave-handoff timing across ≥2 waves, cross-wave spawn ordering on a shared tick,
 // per-wave clear-bonus forfeit isolation, settlement-before-terminal on the final
-// tick (win AND loss), the outcome-dependent scorer + credit forfeiture, the
+// tick (win AND loss), the outcome-dependent scorer + TOTAL forfeiture on a loss, the
 // satAdd/satMul saturation helpers, and ragged wave-column termination.
 
 import { describe, it, expect } from 'vitest';

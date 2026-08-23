@@ -214,7 +214,8 @@ const defaultCompileCache = new CompileCache();
  * bundle's digest must equal `replay.rulesetHash`, and `boardId` must resolve; (3)
  * re-run the log then empty ticks until a terminal `phase` or the bounded tick
  * ceiling (a run that never terminates is a timeout — rejected); (4) reject any log
- * input past the terminal transition (padding); (5) derive the score/stars from the
+ * TICK past the terminal transition — command-bearing, `noop`-only or empty alike
+ * (padding); (5) derive the score/stars from the
  * terminal state. The sim's freeze-on-terminal makes the final hash independent of
  * trailing empty ticks.
  *

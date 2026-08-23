@@ -805,6 +805,19 @@ describe('hud score — earned components while live, authoritative once termina
     // The terminal number is strictly more than the earned component — i.e. the survival
     // term really is credited here and was really excluded before.
     expect(score).toBeGreaterThan(won.cumulativeKillBounty);
+
+    // ...and the STAR floor, on the same HUD path (#25, sv16). The synthetic bundle's own
+    // ladder is `[1, 6, 9]`, where this 8-lives win grades 2★ and the floor is invisible —
+    // so the floor is witnessed by re-grading the SAME terminal state against a ladder the
+    // win falls entirely below. Without this, `hud.stars` had no winning assertion anywhere
+    // in the repo, and the product surface the ruling is about (the results dialog's
+    // "N of 3 stars") went uncovered.
+    const raisedLadder = compileRuleset(
+      { ...syntheticBundle, scoring: { ...syntheticBundle.scoring, starThresholds: [10, 10, 10] } },
+      SYNTHETIC_BOARD_ID,
+    );
+    expect(won.lives).toBeLessThan(10); // genuinely below every rung — not a vacuous pass
+    expect(deriveHud(won, raisedLadder).stars).toBe(1);
   });
 
   it('reads 0 at a loss even with a kill banked — the HUD shows the forfeiture (#25, sv16)', () => {
