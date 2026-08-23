@@ -307,8 +307,8 @@ export const CLAIMS: readonly Claim[] = [
         anchor: '\\(four rows, all n = 4\\); comparing its',
         pattern: '\\s*([\\d.]+)%',
       },
-      { file: ADR, anchor: 'so do not read 31\\.1% against', pattern: '.([\\d.]+)%' },
-      { file: ADR, anchor: 'matched medians give', pattern: '\\*\\*.([\\d.]+)%\\*\\* half-spread' },
+      { file: ADR, anchor: 'so do not read 31\\.1% against', pattern: '±([\\d.]+)%' },
+      { file: ADR, anchor: 'matched medians give', pattern: '\\*\\*±([\\d.]+)%\\*\\* half-spread' },
       {
         file: ADR,
         anchor: 'must be derived from the\\s*\\n\\s*unrounded 2\\.758%, not the published',
@@ -317,22 +317,22 @@ export const CLAIMS: readonly Claim[] = [
       {
         file: SPIKE,
         anchor: 'the difference is the point: measured over four',
-        pattern: 'and .([\\d.]+)% with matched medians',
+        pattern: 'and ±([\\d.]+)% with matched medians',
       },
       {
         file: SPIKE,
         anchor: 'the limit that move REDUCES',
-        pattern: '([\\d.]+)% is a much smaller residue',
+        pattern: '±([\\d.]+)% is a much smaller residue',
       },
       {
         file: SPIKE,
         anchor: 'Measured over four consecutive byte-identical CI runs',
-        pattern: 'and .([\\d.]+)% with matched medians',
+        pattern: 'and ±([\\d.]+)% with matched medians',
       },
       {
         file: M2,
         anchor: 'four byte-identical runs, `R` swings',
-        pattern: 'and .([\\d.]+)% under p50/p50',
+        pattern: 'and ±([\\d.]+)% under p50/p50',
       },
       {
         file: FIXTURE_TEST,
@@ -358,21 +358,21 @@ export const CLAIMS: readonly Claim[] = [
         anchor: '\\| p95\\(subset\\) / p50\\(control\\) \\|',
         pattern: '\\+/-\\s*([\\d.]+)%',
       },
-      { file: ADR, anchor: 'over the same four runs, against', pattern: '.([\\d.]+)%' },
+      { file: ADR, anchor: 'over the same four runs, against', pattern: '±([\\d.]+)%' },
       {
         file: SPIKE,
         anchor: 'the difference is the point: measured over four',
-        pattern: '.([\\d.]+)% with a tail numerator',
+        pattern: '±([\\d.]+)% with a tail numerator',
       },
       {
         file: SPIKE,
         anchor: 'Measured over four consecutive byte-identical CI runs',
-        pattern: '.([\\d.]+)% with a tail',
+        pattern: '±([\\d.]+)% with a tail',
       },
       {
         file: M2,
         anchor: 'four byte-identical runs, `R` swings',
-        pattern: '.([\\d.]+)% under p95/p50',
+        pattern: '±([\\d.]+)% under p95/p50',
       },
       {
         file: FIXTURE_TEST,
@@ -397,12 +397,12 @@ export const CLAIMS: readonly Claim[] = [
       {
         file: ADR,
         anchor: 'for the previously shipped p95/p50 and',
-        pattern: '.([\\d.]+)% for a like-for-like',
+        pattern: '±([\\d.]+)% for a like-for-like',
       },
       {
         file: ADR,
         anchor: 'p95 cannot be run at 1\\.10, because its own',
-        pattern: '.([\\d.]+)% spread exceeds',
+        pattern: '±([\\d.]+)% spread exceeds',
       },
       {
         file: SPIKE,
