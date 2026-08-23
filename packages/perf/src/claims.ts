@@ -1815,6 +1815,38 @@ export const CLAIMS: readonly Claim[] = [
     ],
   },
   {
+    id: 'superseded-r0',
+    claim: 'the baseline the p95/p50 era ran at, before M2-S6 re-recorded it',
+    value: '1.42',
+    numeric: 1.42,
+    basis:
+      "the floored median of the five-attempt cohort ADR 0005 now carries (1.427743 -> 1.42); rowed rather than exempted because `gate.test.ts`'s only occurrence is an it() TITLE and its assertion checks R0 === 1.00, so nothing executable pinned the doc copies (Codex, PR #161)",
+    sites: [
+      {
+        file: GATE_TEST,
+        anchor: 'not the stale',
+        pattern: '\\s*([\\d.]+) from the superseded',
+      },
+      { file: ADR, anchor: '\\*\\*`R0` re-recorded at', pattern: '\\s*([\\d.]+)\\*\\*' },
+      {
+        file: ADR,
+        anchor: 'to the nearer hundredth . `R0` =',
+        pattern: '\\s*([\\d.]+)\\.',
+      },
+      { file: ADR, anchor: 'Ceiling =', pattern: '\\s*([\\d.]+) .' },
+      { file: ADR, anchor: 'The first CI run after `R0 =', pattern: '\\s*([\\d.]+)` was recorded' },
+      { file: ADR, anchor: 'which is the current state\\.', pattern: '\\s*([\\d.]+) baselines' },
+      { file: ADR, anchor: 'CI perf job on the PR, against `R0 =', pattern: '\\s*([\\d.]+)`' },
+      {
+        file: SPIKE,
+        anchor: 'and `R0` was re-recorded\\s*\\n',
+        pattern: 'to ([\\d.]+) on the post-P9',
+      },
+      { file: SPIKE, anchor: 're-recorded to \\*\\*', pattern: '([\\d.]+)\\*\\*' },
+      { file: M2, anchor: 're-recorded to \\*\\*', pattern: '([\\d.]+)\\*\\*' },
+    ],
+  },
+  {
     id: 'two-consequences-block-name',
     claim: "the name of the `gate.ts` block ADR 0005's Ruling 5 cites for the local-run disclaimer",
     value: 'THE TWO CONSEQUENCES',

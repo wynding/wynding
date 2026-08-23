@@ -104,13 +104,27 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
   return { value: captured, start: capturedAt, end: capturedAt + captured.length };
 }
 
-/** Numeric claims compare by value, so `1.1` and `1.10` agree and only a real change
- *  fails. Identifier claims (run ids, commit heads, image names, block names) compare
- *  exactly. */
+/** THE ONE CLAIM-VALUE SEMANTICS. Everything in this suite that compares or keys a stated
+ *  value goes through here, because three subsystems previously each decided for themselves
+ *  and two of them decided differently: the resolver treated `1.1` and `1.10` as the same
+ *  claim while the fallback check compared raw strings (so blanking a named `1.10` that fell
+ *  through to a `1.1` looked like a real difference and passed), and the all-pairs sweep
+ *  keyed by exact spelling (so `12.340` in a source and `12.34` in a doc never grouped).
+ *  Codex found both. A site-local reimplementation of this is the bug, so there is exactly
+ *  one of them.
+ *
+ *  A numeric token normalises to its number; anything else — run ids, commit heads, image
+ *  names, block names — is its own exact string, since `a1600c9` is not a quantity. */
+function claimKey(stated: string): string {
+  const bare = stated.replace(/[,_]/g, '');
+  const parsed = Number(bare);
+  return /^[+-]?\d[\d.]*$/.test(bare) && Number.isFinite(parsed) ? `n:${parsed}` : `s:${stated}`;
+}
+
+/** Whether a value stated at a site is the claim the row holds. */
 function agrees(claim: Claim, stated: string): boolean {
   if (claim.numeric === undefined) return stated === claim.value;
-  const parsed = Number(stated);
-  return Number.isFinite(parsed) && parsed === claim.numeric;
+  return claimKey(stated) === claimKey(String(claim.numeric));
 }
 
 /** A site's human label. Several claims are stated TWICE in one file — `2.8%` appears three
@@ -216,10 +230,13 @@ describe('no site can silently fall back to another occurrence', () => {
           original.slice(found.end);
         const after = extract(site, blanked);
         if ('error' in after) return; // deleting the claim broke the site — correct.
-        if (after.value === found.value) {
+        // Compared through `claimKey`, not as raw strings: a named `1.10` falling through to
+        // a `1.1` elsewhere in the window IS the silent fallback this property exists to
+        // catch, and string inequality would have called it a pass (Codex, PR #161).
+        if (claimKey(after.value) === claimKey(found.value)) {
           throw new Error(
             `claim "${claim.id}" at ${label(site)} is BLEED-PRONE: after blanking the value it matched, ` +
-              `the same pattern found "${after.value}" again elsewhere within its ${site.within ?? DEFAULT_SITE_WINDOW}-character window. ` +
+              `the same pattern found "${after.value}" — the same claim value — again elsewhere within its ${site.within ?? DEFAULT_SITE_WINDOW}-character window. ` +
               `Deleting the named occurrence would NOT fail this test. Constrain the pattern or the window to this site.`,
           );
         }
@@ -331,6 +348,10 @@ const CONTRACT_EXCLUSIONS: readonly { readonly value: string; readonly why: stri
     why: "A collision between two unrelated per-arm tables: gate.ts's 0.3863 is run 1's control p50 in the four-run diagnostic table, while the spike's is attempt 15's STRESS p50 in the 17-attempt operands table. Same numeral, different arm, different cohort.",
   },
   {
+    value: '1.9',
+    why: "A collision the numeric normalisation itself surfaced: `gate-fixture.test.ts` states the blind spot's p99 movement as +1.9% (single-file, so not a shared claim), while ADR 0005's only 1.90 is `wy:draw` 1.90% of busy frame time in the browser-spike section. Different subsystems entirely; the two spellings never grouped until claimKey made 1.9 and 1.90 one key.",
+  },
+  {
     value: '2.7',
     why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops.",
   },
@@ -358,11 +379,6 @@ const PINNED_IN_CODE: readonly {
     value: '0.99',
     file: 'packages/perf/src/gate-fixture.test.ts',
     why: 'A fixture ratio asserted directly in code.',
-  },
-  {
-    value: '1.42',
-    file: 'packages/perf/src/gate.test.ts',
-    why: "The superseded baseline, pinned by the R0 test's own assertion that the value is 1.00 and not 1.42.",
   },
   {
     value: '100',
@@ -527,9 +543,16 @@ function commentsOnly(src: string): string {
   return out.join('');
 }
 
-/** The inverse of `commentsOnly`: executable text with comments blanked. Used to verify that
- *  a PINNED_IN_CODE figure is genuinely a constant rather than more prose. */
-function codeOnly(src: string): string {
+/** Executable text with comments AND string/template literals removed — what is left is what
+ *  a numeric ASSERTION can actually be written in.
+ *
+ *  Stripping strings is the whole point. An earlier version kept them, so `1.42` counted as
+ *  "pinned in code" on the strength of appearing in an `it()` TITLE while the assertion under
+ *  it checked `R0 === 1.00` — nothing executable pinned 1.42 at all, and its copies in the
+ *  ADR, the spike and m2 could drift green. Codex caught it; the audit that followed rechecked
+ *  all 20 entries under this stricter reading and reclassified exactly that one, which is now
+ *  a normal claim row (`superseded-r0`). */
+function assertionsOnly(src: string): string {
   const out = new Array<string>(src.length).fill(' ');
   let i = 0;
   while (i < src.length) {
@@ -540,6 +563,14 @@ function codeOnly(src: string): string {
     } else if (c === '/' && n === '*') {
       const e = src.indexOf('*/', i + 2);
       i = e === -1 ? src.length : e + 2;
+    } else if (c === "'" || c === '"' || c === '`') {
+      const q = c;
+      i++;
+      while (i < src.length && src[i] !== q) {
+        if (src[i] === '\\') i++;
+        i++;
+      }
+      i++;
     } else {
       out[i] = src[i] as string;
       i++;
@@ -599,30 +630,33 @@ function scan(file: string): Numeral[] {
 
 describe('the coverage contract is enforced, not merely asserted', () => {
   it('every figure the perf package states, and another guarded file repeats, has a row', () => {
-    const rowed = new Set(
-      CLAIMS.map((c) => Number(c.value))
-        .filter((n) => Number.isFinite(n))
-        .map(String),
-    );
-    const surface = new Set(PERF_SOURCES.flatMap((f) => scan(f).map((n) => n.value)));
+    // Everything here keys by `claimKey`, so `12.340` in a source and `12.34` in a doc are
+    // one claim rather than two strangers that never group (Codex, PR #161).
+    const rowed = new Set(CLAIMS.map((c) => claimKey(c.value)));
+    const surface = new Set(PERF_SOURCES.flatMap((f) => scan(f).map((n) => claimKey(n.value))));
+    const excluded = new Set([...EXCLUDED].map(claimKey));
+    const pinned = new Set(PINNED_IN_CODE.map((e) => claimKey(e.value)));
     const where = new Map<string, Set<string>>();
+    const spelling = new Map<string, string>();
     for (const file of GUARDED_FILES) {
       for (const n of scan(file)) {
-        if (EXCLUDED.has(n.value)) continue;
+        const key = claimKey(n.value);
+        if (excluded.has(key)) continue;
         // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values.
         if (!n.value.includes('.') && Number(n.value) < 10) continue;
-        if (!surface.has(n.value)) continue;
-        if (!where.has(n.value)) where.set(n.value, new Set());
-        (where.get(n.value) as Set<string>).add(file);
+        if (!surface.has(key)) continue;
+        if (!where.has(key)) where.set(key, new Set());
+        (where.get(key) as Set<string>).add(file);
+        if (!spelling.has(key)) spelling.set(key, n.value);
       }
     }
 
     const gaps: string[] = [];
-    for (const [value, files] of where) {
+    for (const [key, files] of where) {
       if (files.size < 2) continue;
-      if (rowed.has(String(Number(value)))) continue;
-      if (PINNED_IN_CODE.some((e) => e.value === value)) continue;
-      gaps.push(value);
+      if (rowed.has(key)) continue;
+      if (pinned.has(key)) continue;
+      gaps.push(spelling.get(key) as string);
     }
     gaps.sort();
 
@@ -637,11 +671,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   });
 
   it('every high-information occurrence of a rowed value sits at a listed site', () => {
-    const rowedValues = new Set(
-      CLAIMS.map((c) => Number(c.value))
-        .filter((n) => Number.isFinite(n))
-        .map(String),
-    );
+    const rowedValues = new Set(CLAIMS.map((c) => claimKey(c.value)));
 
     // Where the resolver actually reads each claim from.
     const accounted = new Set<string>();
@@ -658,7 +688,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       const raw = read(file);
       for (const n of scan(file)) {
         if (!highInformation(n.raw)) continue;
-        if (!rowedValues.has(String(Number(n.value)))) continue;
+        if (!rowedValues.has(claimKey(n.value))) continue;
         if (accounted.has(`${file}:${n.at}`)) continue;
         const before = raw.slice(Math.max(0, n.at - 90), n.at);
         if (
@@ -696,14 +726,14 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     }
   });
 
-  it("every PINNED_IN_CODE figure really is pinned in that file's executable code", () => {
+  it('every PINNED_IN_CODE figure is pinned by a real numeric expression, not a title string', () => {
     for (const e of PINNED_IN_CODE) {
-      const code = codeOnly(read(e.file));
+      const code = assertionsOnly(read(e.file));
       const re = new RegExp(`(?<![\\w.])${e.value.replace('.', '\\.')}(?![\\d])`);
       expect(
         re.test(code) || re.test(code.replace(/[_,]/g, '')),
-        `PINNED_IN_CODE says ${e.value} is pinned in ${e.file}, but it does not appear in that file's code — ` +
-          `if it moved into prose, it needs a claim row instead`,
+        `PINNED_IN_CODE says ${e.value} is pinned in ${e.file}, but it appears only in a comment or a ` +
+          `string literal there, which pins nothing. It needs a claim row instead`,
       ).toBe(true);
       expect(e.why.length, `PINNED_IN_CODE entry ${e.value} has no reason`).toBeGreaterThan(20);
     }
