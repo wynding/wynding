@@ -383,6 +383,10 @@ const CONTRACT_EXCLUSIONS: readonly { readonly value: string; readonly why: stri
     value: '2.7',
     why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops.",
   },
+  {
+    value: '30',
+    why: "Collision, and revealed only when the file-path mask stopped eating compact ratios: oracle.ts's 30 is the DoT record window in `floor((240-1)/30)+1`, ADR 0005's is the ≥ 30 fps low-end floor, the spike's are a 30% slow and a 30% ambient-load swing, and m2.md's are tower range columns. Five unrelated quantities wearing one numeral; a row keyed on it would bind every one of those sites to the others.",
+  },
 ];
 
 /** REAL unrowed shared claims, pinned so the set cannot grow silently.
@@ -493,6 +497,18 @@ const KNOWN_UNROWED: readonly { readonly value: string; readonly why: string }[]
   { value: '600', why: 'The unreachable route target — oracle.ts, ADR, spike and m2.' },
   { value: '80', why: 'Board-size figure in the route-cap table — oracle.ts and the docs.' },
   { value: '9.2', why: 'DoT record depth per carrier at peak — oracle.ts doc prose.' },
+  {
+    value: '298',
+    why: "its canonical statement is oracle.ts's compact `307/298/308/329` series of band-only layout cell counts, which the FILE-PATH MASK blanked whole because the series has no letter in it - so three of the four values were invisible to this sweep while 329, which also appears standalone, was not. ADR 0005 and the spike both restate it longhand per board size. Oracle-surface, tracked in #163.",
+  },
+  {
+    value: '307',
+    why: "its canonical statement is oracle.ts's compact `307/298/308/329` series of band-only layout cell counts, which the FILE-PATH MASK blanked whole because the series has no letter in it - so three of the four values were invisible to this sweep while 329, which also appears standalone, was not. ADR 0005 and the spike both restate it longhand per board size. Oracle-surface, tracked in #163.",
+  },
+  {
+    value: '308',
+    why: "same band-only cell-count series as 298 and 307, hidden by the same file-path mask, and restated longhand in ADR 0005 and the spike. It ALSO coincides with m2.md's `of 308 total` bounty spend, which is an unrelated quantity - so rowing this one will need explicit sites rather than a bare value. Oracle-surface, tracked in #163.",
+  },
 ];
 
 const EXCLUDED = new Set(CONTRACT_EXCLUSIONS.map((e) => e.value));
@@ -533,39 +549,109 @@ const STRING_OPENERS = ["'", '"', '`'] as const;
 const opensString = (c: string | undefined): boolean =>
   (STRING_OPENERS as readonly string[]).includes(c ?? '');
 
-/** Words after which a `/` opens a REGEX rather than dividing. After any other identifier — or
- *  a digit, a `)`, or a `]` — a value has just ended, and the grammar cannot read a regex
- *  literal there. That asymmetry is what lets the substitution rule admit division and still
- *  make regexes impossible. */
-const REGEX_CONTEXT_WORDS = new Set([
-  'return',
-  'typeof',
-  'instanceof',
-  'in',
-  'of',
-  'new',
-  'delete',
-  'void',
+/** The reserved words of the language, in full — the ECMAScript list, which is CLOSED and
+ *  specified rather than curated. That distinction is the fix: this replaced a hand-picked set
+ *  of "words after which a regex may open", which was a guess, and which turned out to be
+ *  missing `throw` and then `default` on successive rounds (Codex, PR #161). A closed list can
+ *  be transcribed and checked, and a test below walks every member of it, so a word going
+ *  missing cannot pass unnoticed. A curated one can only ever be extended by the next bug. */
+const RESERVED_WORDS = new Set([
+  'await',
+  'break',
   'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'debugger',
+  'default',
+  'delete',
   'do',
   'else',
-  'yield',
-  'await',
+  'enum',
+  'export',
+  'extends',
+  'false',
+  'finally',
+  'for',
+  'function',
+  'if',
+  'implements',
+  'import',
+  'in',
+  'instanceof',
+  'interface',
+  'let',
+  'new',
+  'null',
+  'package',
+  'private',
+  'protected',
+  'public',
+  'return',
+  'static',
+  'super',
+  'switch',
+  'this',
   'throw',
+  'true',
+  'try',
+  'typeof',
+  'var',
+  'void',
+  'while',
+  'with',
+  'yield',
 ]);
 
-/** Whether the `/` at `at` is unambiguously DIVISION: the previous significant token produces
- *  a value, so a regex literal cannot legally begin here. */
+/** The five reserved words that DENOTE a value, so a `/` after one really is division. */
+const VALUE_WORDS = new Set(['this', 'true', 'false', 'null', 'super']);
+
+/** Contextual keywords: NOT reserved — each is a legal identifier — but each can also sit in
+ *  expression-START position, where a regex may follow. `for (x of /re/)`. Kept separate so
+ *  the reserved list above stays exactly the specified one; adding here is the loud
+ *  direction, since the cost of a wrong entry is a division read as a regex. */
+const CONTEXTUAL_KEYWORDS = new Set(['of']);
+
+/** Whether the `/` at `at` is DIVISION. It has to PROVE it.
+ *
+ *  The classification is FAIL-CLOSED, and that shape is the whole point. Division is returned
+ *  only where the previous significant token AFFIRMATIVELY produces a value: an identifier
+ *  that is not a reserved word, a numeric literal, the end of a string or template, a `)`, a
+ *  `]`, a postfix `++` or `--`. EVERYTHING else is regex context — every keyword, every
+ *  operator, the start of input, and a `}`, whose block-versus-object-literal ambiguity is
+ *  resolved toward regex because that is the side that fails safely.
+ *
+ *  The risk is inverted permanently. An omission from the VALUE-PRODUCER side reads a division
+ *  as a regex, and that fails LOUDLY: the regex runs to the end of the line and is reported as
+ *  unterminated, because a regex body cannot cross a newline. The rule this replaced ran the
+ *  other way — it enumerated the contexts where a regex MAY open, so an omission read a regex
+ *  as a division, the walk blundered into the regex body, and a quote inside it opened a
+ *  phantom string that swallowed the next comment SILENTLY. That is precisely how `throw` and
+ *  then `default` each got a numeral past the whole suite.
+ *
+ *  One residual, stated rather than glossed: a word wrongly ABSENT from `RESERVED_WORDS` is
+ *  read as an identifier, so as a value, so as division — the silent direction. It is bounded
+ *  in a way the old rule's blind spot was not, because the reserved-word list is closed and
+ *  specified rather than curated, and the test below asserts that every member of it puts a
+ *  following slash into regex context. */
 function isDivision(src: string, at: number): boolean {
   let j = at - 1;
   while (j >= 0 && /\s/.test(src[j] as string)) j--;
   if (j < 0) return false;
   const prev = src[j] as string;
   if (prev === ')' || prev === ']') return true;
+  // The END of a string or template. The walk has already skipped the literal whole, so a
+  // quote sitting here closes one rather than opening one.
+  if (opensString(prev)) return true;
+  // Postfix `++` and `--` produce a value; the bare operators do not.
+  if ((prev === '+' || prev === '-') && src[j - 1] === prev) return true;
   if (!/[A-Za-z0-9_$]/.test(prev)) return false;
   let k = j;
   while (k >= 0 && /[A-Za-z0-9_$]/.test(src[k] as string)) k--;
-  return !REGEX_CONTEXT_WORDS.has(src.slice(k + 1, j + 1));
+  const word = src.slice(k + 1, j + 1);
+  if (VALUE_WORDS.has(word)) return true;
+  return !RESERVED_WORDS.has(word) && !CONTEXTUAL_KEYWORDS.has(word);
 }
 
 interface Walked {
@@ -826,10 +912,18 @@ function scannedProse(file: string): string {
       change would be wrong`);
   }
   const masked = prose
-    .replace(/\d{4}-\d{2}-\d{2}(\/\d{2})?/g, spaces) // ISO dates
+    // Both date and path masks require a NON-NUMERIC shape. A mask made only of digits and
+    // separators cannot tell a reference from a measurement, and will eat the measurement:
+    // the path mask blanked `1.0065/1.0065` as though it were a directory, which took a
+    // restated ratio out of BOTH all-pairs coverage and per-occurrence accounting (Codex).
+    // The date mask has the same shape, so it is bounded to real months and days here rather
+    // than left to match any hyphenated numeric triple.
+    .replace(/\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:\/\d{2})?/g, spaces) // ISO dates
     .replace(/#\d+/g, spaces) // issue refs
     .replace(/\b(ADR|PRD)\s+\d+/g, spaces) // document refs
-    .replace(/[\w./-]*\/[\w./-]+/g, spaces) // file paths (carry ADR/format numbers)
+    // A path needs a LETTER somewhere. `docs/adr/0005-x.md` is a reference; `1.0065/1.0065`
+    // is a ratio wearing a slash, and masking it hid a claim in plain sight.
+    .replace(/[\w./-]*\/[\w./-]+/g, (m) => (/[A-Za-z]/.test(m) ? spaces(m) : m)) // file paths
     .replace(/\bubuntu-?\d[\w.]*/gi, spaces) // runner image / release ids
     .replace(/\b(PLAN\s+)?step\s+\d+/gi, spaces) // plan step refs
     .replace(/\bM\d+-S\d+\w*/g, spaces) // milestone/story refs
@@ -1129,14 +1223,47 @@ describe('the scanner refuses syntax it cannot lex', () => {
   // already used — `throw` was in one list and not the other. So this went unrecognised, the
   // regex's quote opened a phantom string that swallowed the trailing comment, and its numeral
   // masked green. The two lists are now one function, so the divergence cannot recur.
-  it('recognises a regex opening after EVERY keyword the grammar allows, not a chosen few', () => {
-    for (const opener of ['throw', 'return', 'case', 'typeof', 'void', 'in', 'of', 'yield']) {
-      const src = `${opener} /'/; // ' 1.0065\n`;
+  // Walks the WHOLE reserved set rather than a chosen few, which is the point: `throw` was
+  // missing in round 13 and `default` in round 14, each from a curated list. A curated list can
+  // only be extended by the next bug; this one is closed, so the test can enumerate it.
+  it('recognises a regex opening after EVERY reserved word, not a chosen few', () => {
+    for (const word of [...RESERVED_WORDS, ...CONTEXTUAL_KEYWORDS]) {
+      if (VALUE_WORDS.has(word)) continue;
+      const src = `${word} /'/; // ' 1.0065\n`;
       expect(
         () => rejectUnlexableSyntax('synthetic.ts', src),
-        `a regex opening after \`${opener}\` must be recognised`,
+        `a regex opening after \`${word}\` must be recognised`,
       ).toThrow(/regex literal containing a quote or backtick/);
     }
+  });
+
+  // Codex's round-14 reproduction, named. It is one member of the set above, and it stayed
+  // green through 705 tests before the classification was inverted.
+  it("rejects the regex in `export default /'/;`", () => {
+    expect(() =>
+      rejectUnlexableSyntax('synthetic.ts', "export default /'/; // ' 1.0065\n"),
+    ).toThrow(/regex literal containing a quote or backtick/);
+  });
+
+  it('reads a value-producing reserved word as division, not as a regex', () => {
+    for (const word of VALUE_WORDS) {
+      expect(
+        () => rejectUnlexableSyntax('d.ts', `const a = ${word} / 2;`),
+        `\`${word} / 2\` is division`,
+      ).not.toThrow();
+    }
+  });
+
+  // THE LOUD DIRECTION, pinned. `{} / 2` is valid JavaScript, and a `}` is deliberately NOT
+  // treated as value-producing, because block-versus-object-literal cannot be told apart here.
+  // So this division is misread as a regex — and it fails LOUDLY, running to the end of the
+  // line and reporting itself, rather than silently swallowing the comment behind it. That is
+  // the whole reason the classification is shaped as "prove it is division" rather than
+  // "list where a regex may open": every omission lands on this side.
+  it('fails LOUDLY, never silently, when it misreads a division as a regex', () => {
+    expect(() => rejectUnlexableSyntax('synthetic.ts', 'const n = {} / 2; // 1.0065\n')).toThrow(
+      /unterminated regex literal/,
+    );
   });
 
   it('leaves the numeral visible once the regex is lexed rather than blundered into', () => {
@@ -1176,5 +1303,51 @@ describe('the resolver reads the capture group, not the first lookalike', () => 
     // The captured group is the SECOND "2.8", at index 19 — not the first at index 11.
     expect(found.start).toBe(19);
     expect(text.slice(found.start, found.end)).toBe('2.8');
+  });
+});
+
+// A mask is a hole by construction: whatever it blanks leaves the sweep entirely, escaping
+// BOTH all-pairs coverage and per-occurrence accounting. So a mask made only of digits and
+// separators cannot be allowed — it has no way to tell a reference from a measurement, and it
+// will eat the measurement. Ten masks run in `scannedProse`; two had that shape and are now
+// restricted (Codex, PR #161).
+describe('the reference masks blank references, not measurements', () => {
+  const valuesIn = (file: string): string[] => numeralsOf(file).map((n) => n.value);
+
+  // Codex's reproduction, in the place it actually bit. `oracle.ts` states the band-only cell
+  // counts compactly as `307/298/308/329`; the file-path mask read that as a directory and
+  // blanked it whole, so three of the four vanished from the sweep while 329 — which also
+  // appears standalone — did not. A restated figure that no mask can see is a claim that
+  // cannot drift red.
+  it('sees a compact ratio series that the file-path mask used to eat', () => {
+    const values = valuesIn('packages/perf/src/oracle.ts');
+    for (const cell of ['307', '298', '308', '329']) {
+      expect(values, `${cell} is a measurement, not a path segment`).toContain(cell);
+    }
+  });
+
+  it('still blanks a real file path, so its ADR and format numbers stay out of the sweep', () => {
+    // `gate.ts` names `docs/adr/0005-performance-budgets.md` in its header prose. The `0005`
+    // is a document reference; if the restriction had turned the mask off it would surface.
+    expect(valuesIn('packages/perf/src/gate.ts')).not.toContain('0005');
+  });
+
+  it('leaves a bare ratio alone but blanks a path that shares its shape', () => {
+    // The discriminator is a LETTER. Both look alike to a character class of `[\w./-]`.
+    const pathLike = /[\w./-]*\/[\w./-]+/g;
+    const mask = (s: string): string =>
+      s.replace(pathLike, (m) => (/[A-Za-z]/.test(m) ? ' '.repeat(m.length) : m));
+    expect(mask('the ratio 1.0065/1.0065 holds')).toContain('1.0065/1.0065');
+    expect(mask('see docs/adr/0005-x.md now')).not.toContain('0005');
+    // Length is preserved either way, because the occurrence half compares byte offsets.
+    expect(mask('see docs/adr/0005-x.md now')).toHaveLength('see docs/adr/0005-x.md now'.length);
+  });
+
+  it('bounds the ISO-date mask to real months and days, not any numeric triple', () => {
+    // Same pure-numeric shape as the path mask, so it is bounded rather than trusted.
+    const dates = /\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:\/\d{2})?/g;
+    expect('2026-08-03/05'.replace(dates, '')).toBe('');
+    expect('2026-07-30'.replace(dates, '')).toBe('');
+    expect('1000-20-30'.replace(dates, '')).toBe('1000-20-30');
   });
 });
