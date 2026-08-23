@@ -485,12 +485,26 @@ if (gradle !== null) {
     `app/build.gradle does not register a \`validateReleaseArtifact\` task. The guard must be ` +
       `a task packaging can depend on, not an action on the task that packages.`,
   );
+  // BOUND TO THE RELEASE SELECTION, not merely present in the file. Asking only whether
+  // `dependsOn(validateReleaseArtifact)` appears anywhere let an UNRELATED task's edge
+  // stand in for the real one: delete the package/sign wiring, add
+  // `tasks.named('preBuild').configure { it.dependsOn(validateReleaseArtifact) }`, and the
+  // check passed while nothing guarded packaging at all — verified by injecting exactly
+  // that. It is the same defect this file already learned about one level down (see the
+  // proximity note below): presence of a token is not evidence of the wiring it implies.
+  //
+  // So the edge must sit INSIDE a `tasks.matching { … package/sign … Release … }
+  // .configureEach { … }` block, which is the only shape that puts the dependency on the
+  // tasks that write an artifact.
   expect(
-    /dependsOn\(\s*validateReleaseArtifact\s*\)/.test(code),
-    'packaging and signing DEPEND ON the release guard',
-    `nothing in app/build.gradle declares \`dependsOn(validateReleaseArtifact)\`. Without that ` +
-      `edge the validation is not a prerequisite of anything and cannot stop an artifact ` +
-      `being written.`,
+    /tasks\.matching[\s\S]{0,300}?(?:package|sign)[\s\S]{0,300}?Release[\s\S]{0,300}?\.configureEach[\s\S]{0,300}?dependsOn\(\s*validateReleaseArtifact\s*\)/.test(
+      code,
+    ),
+    'the release guard is wired to the package/sign tasks themselves',
+    `app/build.gradle does not declare \`dependsOn(validateReleaseArtifact)\` inside a ` +
+      `\`tasks.matching { … package/sign … Release … }.configureEach\` block. An edge on some ` +
+      `other task does not stop a release artifact being written — only an edge on the tasks ` +
+      `that write one does.`,
   );
   // Matched on PROXIMITY, not on a single `assembleRelease` token, because neither the
   // shape being banned nor a hand-written fixture of it ever spells the name that way:
