@@ -680,19 +680,30 @@ function commentsOnly(src: string): string {
 
 const spaces = (m: string): string => ' '.repeat(m.length);
 
-/** A path NAMES something; a measurement MEASURES something. Requiring a LETTER anywhere was
- *  not enough, because a unit suffix is a letter: `1.0065/ms` read as a directory and the
- *  measurement vanished from the sweep entirely (Codex).
+/** A path NAMES something; a measurement MEASURES something. The rule is stated as a thing the
+ *  mask may never do, because every attempt to state it as a thing the mask SHOULD do has been
+ *  a list, and every list has been short by one.
  *
- *  The exclusion is shaped like the thing it protects rather than like its opposite. Keying on
- *  the FIRST segment instead — "a path starts with a directory" — was tried and measured, and
- *  it unmasks every RELATIVE path (`./stats`, `../adr/0005-x.md`), whose leading segment has no
- *  letter of its own. So the rule stays "a letter means a path", with one narrow carve-out: a
- *  whole match of `<number>/<number>` or `<number>/<unit>` is a measurement. */
-const MEASUREMENT_WITH_UNIT = /^\d[\d.,_]*\/(?:\d[\d.,_]*|[A-Za-z]{1,6})\.?$/;
+ *    A NUMERAL-LED TOKEN IS NEVER A PATH.
+ *
+ *  Requiring a LETTER anywhere was not enough — a unit suffix is a letter, so `1.0065/ms` read
+ *  as a directory. Carving out `<number>/<unit>` was not enough either, because the carve-out
+ *  had to guess how long a unit is, and `1.0065/iteration` is eleven characters (Codex). The
+ *  length game is the keyword-list game again, so it ends the same way: by inverting it.
+ *
+ *  Real path segments carry letters, or are `.` or `..`. A leading segment that is a BARE
+ *  NUMERAL therefore cannot be a directory, and what follows the slash — a unit, another
+ *  numeral, anything — no longer has to be classified at all. Note this is NOT the rejected
+ *  "the first segment must contain a letter": that one unmasked every relative path, since `.`
+ *  and `..` have no letters either. Asking what the segment is NOT keeps them masked.
+ *
+ *  The direction is fail-closed. Misreading a path as a measurement surfaces its numerals as
+ *  LOUD unaccounted claims; misreading a measurement as a path blanks it SILENTLY, which is the
+ *  failure this whole file exists to prevent. */
+const NUMERAL_LED = /^\d[\d.,_]*\//;
 
 function looksLikePath(m: string): boolean {
-  return /[A-Za-z]/.test(m) && !MEASUREMENT_WITH_UNIT.test(m);
+  return /[A-Za-z]/.test(m) && !NUMERAL_LED.test(m);
 }
 
 /** The claim-bearing prose of a guarded file, masked to preserve every byte offset. */
@@ -1072,13 +1083,19 @@ describe('the reference masks blank references, not measurements', () => {
     expect(mask('see docs/adr/0005-x.md now')).toHaveLength('see docs/adr/0005-x.md now'.length);
   });
 
-  it('leaves a UNIT-suffixed measurement alone, though a unit is a letter', () => {
+  it('leaves a UNIT-suffixed measurement alone, at any unit length', () => {
     expect(mask('throughput 1.0065/ms holds')).toContain('1.0065/ms');
     expect(mask('DoT lands 4/tick and slow 3/tick')).toContain('4/tick');
+    // The carve-out this replaced capped a unit at six characters, so these escaped it. The
+    // rule asks nothing about what FOLLOWS the slash any more (Codex, PR #161).
+    expect(mask('cost 1.0065/iteration measured')).toContain('1.0065/iteration');
+    expect(mask('rate 240/millisecond measured')).toContain('240/millisecond');
+    expect(mask('depth 9.2/records-per-creep')).toContain('9.2/records-per-creep');
   });
 
   it('still blanks a RELATIVE path, whose leading segment has no letter of its own', () => {
-    // Keying the rule on the first segment would have unmasked all of these.
+    // The rule asks what the leading segment IS NOT — a bare numeral — rather than what it is.
+    // Requiring a LETTER there would unmask every one of these, since `.` and `..` have none.
     expect(mask('see ../adr/0005-x.md now')).not.toContain('0005');
     expect(mask('see ../../prd/0001-core.md now')).not.toContain('0001');
     expect(mask('see //github.com/o/r/issues/22 now')).not.toContain('22');
