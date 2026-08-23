@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { projectedGrid } from './layout-probe';
+import { createProjection } from '@wynding/render';
+import { buildableRect, intersect, projectedGrid, GRID, type Rect } from './layout-probe';
+import { callWavePaced, titleAfterCall } from './paced-call';
 
 // stage-stability.spec.ts — the playtest round's core invariant: THE BOARD NEVER MOVES.
 //
@@ -109,8 +111,8 @@ test('1512×854 at 200% text zoom: the float STAYS — zoom never re-homes, cont
   // Codex #96 P1: an earlier draft re-homed the preview to the hud from 150% root font —
   // but the hud lives in the content-sized status row, so wave changes re-projected the
   // board for zoomed Standard users, the exact defect this round ends. The px-capped
-  // card + in-place scroll form serve every zoom level instead, so the ONLY hud homes
-  // are static (Compact; sub-400px stages).
+  // card + in-place scroll form serve every zoom level instead, so the hud homes are
+  // Compact and (since #101) a Stage with no compliant dead band — never zoom itself.
   await gotoAt(page, STANDARD);
   expect(await previewHome(page)).toBe('stage');
   await page.addStyleTag({ content: ':root { font-size: 200% }' });
@@ -148,7 +150,7 @@ test('1512×854 at 200% text zoom: the float STAYS — zoom never re-homes, cont
 test('360×640 (portrait Standard): the hud home is content-invariant — the row reservation', async ({
   page,
 }) => {
-  // The one Standard shape that cannot host a readable float (the width bucket): the hud
+  // A Standard shape whose dead space cannot host a readable float (#101): the hud
   // hosts the preview, and ui.css's reservation pins the hud at its cap — so the wave
   // 1→4-entry swing and the end-of-run hide, the exact changes that resized the row
   // pre-round, cannot move the board from this home either (Codex #96 P1's second half).
@@ -291,9 +293,21 @@ test('1280×720 at 140% zoom, scroll-form preview: a captured board release over
   // live `document.elementFromPoint`, and the selector against the real node. The
   // classification itself is unit-pinned per release path in input.test.ts; this is the
   // real-pipeline witness.
+  //
+  // THE CARD IS DRIVEN BACK OVER THE GRID, and that override is the honest consequence of
+  // #101 rather than a convenience. The ratified placement now parks the float in dead
+  // space, so at the SHIPPED position no release over it could place a tower anyway — which
+  // would make every assertion below pass for a reason that has nothing to do with
+  // `input.ts`. Overriding the band grant (the same custom property `main.ts` writes) puts
+  // the card back on a placeable cell so the CHROME CLASSIFICATION is what is being tested,
+  // exactly as before. That #101 removed the geometry this defect needed is a good outcome;
+  // it is not a reason to stop pinning the contract.
   await gotoAt(page, { width: 1280, height: 720 });
   await page.addStyleTag({ content: ':root { font-size: 140% }' });
   await expect.poll(() => previewHome(page)).toBe('stage');
+  await page.addStyleTag({
+    content: '.wy-wave-preview { --wy-preview-left: 25% !important; --wy-preview-right: auto; }',
+  });
   await page.evaluate(() => {
     const list = document.querySelector('.wy-wave-preview-list')!;
     for (let i = 0; i < 5; i++) {
@@ -394,4 +408,151 @@ test('the preview re-homes across the layout fork — Stage on Standard, chips c
   await expect
     .poll(() => previewHome(page), { message: 'Standard must re-float the preview' })
     .toBe('stage');
+});
+
+// --- The ratified placement rule (#101, owner 2026-08-17) ---------------------------
+//
+// "The preview never occludes a STRUCTURALLY buildable cell" — a cell a tower could EVER
+// be placed on, not one that happens to be empty. This replaces a ≤40%-of-grid-AREA
+// allowance that was retired for cause: it passed while the playtest failed, and still
+// passed at 3.5% coverage, because bounding an overlap by area says nothing about WHICH
+// cells are covered.
+
+/** Every Standard viewport this suite pins, plus the reported one. Compact viewports are
+ *  excluded on purpose — there the preview is in its in-flow hud home, where a layout rect
+ *  inside a scrollport says nothing about occlusion (`layout-probe.ts` records why). */
+const PINNED_STANDARD = [
+  { width: 1512, height: 854 }, // the viewport #101 was reported at
+  { width: 1440, height: 900 },
+  { width: 1366, height: 768 },
+  { width: 1280, height: 900 }, // the hidpi projects' fixed viewport
+  { width: 1280, height: 720 }, // Playwright's Desktop Chrome default
+  { width: 1000, height: 720 },
+  { width: 640, height: 560 }, // coarse-pointer landscape tablet — Standard
+  { width: 360, height: 640 }, // portrait phone — Standard by height
+];
+
+for (const size of PINNED_STANDARD) {
+  for (const zoom of [100, 200]) {
+    test(`${size.width}×${size.height} at ${zoom}% zoom: the preview occludes no structurally buildable cell (#101)`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      if (zoom !== 100) {
+        await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+        await page.waitForTimeout(200); // the zoom's own (legitimate) reflow
+      }
+      // Grow the card to wave 9's four-entry shape FIRST: the rule has to hold at the
+      // preview's largest real size, and a one-entry card would let a placement that only
+      // just fits pass here and fail in play. Same height fixture the pins above use.
+      await page.evaluate(() => {
+        const list = document.querySelector('.wy-wave-preview-list')!;
+        for (let i = 0; i < 3; i++) {
+          const li = document.createElement('li');
+          li.textContent = '12 × Probe — ground, armor 0, leak cost 1, no immunities';
+          list.append(li);
+        }
+      });
+      await page.waitForTimeout(200); // the ResizeObserver's re-placement
+
+      const home = await previewHome(page);
+      if (home === 'hud') {
+        // The ratified escape hatch. Nothing to measure — an in-flow card inside a
+        // scrollport occludes nothing — but assert it is genuinely in flow so a float that
+        // merely lost its `.wy-stage` parent cannot slip through this branch.
+        expect(
+          await page.evaluate(
+            () => getComputedStyle(document.querySelector('.wy-wave-preview')!).position,
+          ),
+        ).toBe('static');
+        return;
+      }
+      expect(home, 'the preview must be in one of its two homes').toBe('stage');
+
+      const grid = await projectedGrid(page);
+      const card = (await page.locator('.wy-wave-preview').boundingBox()) as Rect;
+      expect(card, 'the floating preview must have a layout box to measure').not.toBeNull();
+      const clipped = intersect(card, buildableRect(grid));
+      expect(
+        clipped,
+        clipped === null
+          ? ''
+          : `covers ${(clipped.width / grid.cellPx).toFixed(1)}×${(
+              clipped.height / grid.cellPx
+            ).toFixed(1)} buildable cells`,
+      ).toBeNull();
+    });
+  }
+}
+
+test('1512×854, wave 9 pending: a tower built in the corner the preview used to own is FULLY visible (#101)', async ({
+  page,
+}) => {
+  // The regression case, at the reported viewport, in the reported situation. The owner's
+  // words were "I rarely build in that corner, though — but I could! Except I can't because
+  // it's in the way" — so this builds there, walks the run to wave 9 (the arc's densest
+  // preview, four entries), and proves the card and the tower do not share a pixel.
+  //
+  // Above the sum of this test's budgets — seven paced calls at a 5s in-page deadline each
+  // (`paced-call.ts`) plus the placement and geometry tail — which the 60s config default
+  // cannot hold. Same budget-coherence rule as the other marathon specs.
+  test.setTimeout(150_000);
+  await gotoAt(page, STANDARD);
+
+  const board = page.locator('.wy-board');
+  const box = (await board.boundingBox()) as Rect;
+  const projection = createProjection({
+    cols: GRID.cols,
+    rows: GRID.rows,
+    cssWidth: box.width,
+    cssHeight: box.height,
+    dpr: 1,
+  });
+  // THE corner: the top-left-most cell a 2×2 footprint can anchor on, one cell in from the
+  // blocked border ring. Pre-#101 the float sat at the Stage's top-left with a 256px-wide
+  // card, squarely over it.
+  const CORNER = { col: 1, row: 1 };
+  const anchor = projection.cellToPixel(CORNER.col, CORNER.row);
+  await page.getByRole('button', { name: /Basic Tower/ }).click();
+  await page.mouse.click(
+    box.x + anchor.x + projection.cellPx / 2,
+    box.y + anchor.y + projection.cellPx / 2,
+  );
+  await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
+
+  // Walk to wave 9. Start claims wave 1 (#70), so waves 2..8 are called from here; the
+  // paced helper holds the sim frozen for every observation so an undefended marathon
+  // cannot lose mid-loop (#97).
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+  }
+  await expect(previewTitle).toHaveText('Wave 9 of 10');
+  await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
+
+  // The tower's own 2×2 footprint in page coordinates, and the card's box. Not one pixel
+  // of overlap — the whole complaint was that the corner was unusable because the card was
+  // over it, and "mostly clear" is what the retired area budget already allowed.
+  const grid = await projectedGrid(page);
+  const footprint: Rect = {
+    x: grid.x + CORNER.col * grid.cellPx,
+    y: grid.y + CORNER.row * grid.cellPx,
+    width: 2 * grid.cellPx,
+    height: 2 * grid.cellPx,
+  };
+  const card = (await page.locator('.wy-wave-preview').boundingBox()) as Rect;
+  expect(
+    intersect(card, footprint),
+    `the wave-9 preview at [${Math.round(card.x)},${Math.round(card.y)} ${Math.round(
+      card.width,
+    )}×${Math.round(card.height)}] covers the corner tower at [${Math.round(
+      footprint.x,
+    )},${Math.round(footprint.y)}]`,
+  ).toBeNull();
+  // ...and the card is still doing its job from wherever it moved to: the wave-9
+  // composition is on screen, not merely out of the way.
+  await expect(page.locator('.wy-wave-preview')).toBeVisible();
 });

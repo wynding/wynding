@@ -1474,13 +1474,18 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     }
   });
 
-  it('a sub-400px stage is a hud home — the width bucket (portrait phones are Standard)', () => {
-    // jsdom lays nothing out (rect width 0 = "no signal", which the bucket ignores), so
-    // the narrow stage is driven at the prototype seam for this test only: `.wy-stage`
-    // reports the 360×640-portrait geometry, everything else passes through.
+  it('a stage with no compliant dead band is a hud home (#101 — portrait phones are Standard)', () => {
+    // jsdom lays nothing out (rect width 0 = "no signal", which the placement ignores), so
+    // the narrow stage is driven at the prototype seam for this test only: `.wy-stage` and
+    // the `.wy-board` filling it both report the 360×640-portrait geometry, everything else
+    // passes through. At 259×596 the 28×24 grid projects to 9px cells and a 3px letterbox
+    // margin — 5px of dead band even after borrowing the blocked border ring, far under the
+    // 64px floor — so the float has nowhere compliant to sit and the hud takes it. This
+    // REPLACED a hand-picked sub-400px width bucket: the same viewports still land here,
+    // now by measuring the space rather than by guessing a threshold.
     const original = Element.prototype.getBoundingClientRect;
     Element.prototype.getBoundingClientRect = function (this: Element) {
-      if (this.classList.contains('wy-stage')) {
+      if (this.classList.contains('wy-stage') || this.classList.contains('wy-board')) {
         return {
           width: 259,
           height: 596,
@@ -1502,6 +1507,82 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
       // The scroll form's grants are cleared in the hud home — no stray tab stop.
       expect(preview.getAttribute('tabindex')).toBeNull();
       expect(preview.getAttribute('role')).toBeNull();
+      // ...and so are the BAND grants (#101): a stale width cap from a band that no longer
+      // exists would pin the in-flow form, which sizes to its column, not to dead space.
+      expect((preview as HTMLElement).style.getPropertyValue('--wy-preview-max-w')).toBe('');
+      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(false);
+      h.app.destroy();
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it('a stage with a letterbox margin keeps the float, pinned to the band and capped to it (#101)', () => {
+    // The 1512×854 geometry, measured on the shipped build: a 1144×810 stage, a 28×24 grid
+    // at 33px cells (924×792), leaving a 110px letterbox margin on each side. The card is
+    // pinned into it and capped to it — 102px, the band less its 8px gap — so it covers no
+    // grid cell at all, buildable or otherwise, and needs no reduced-weight companion form.
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains('wy-stage') || this.classList.contains('wy-board')) {
+        return {
+          width: 1144,
+          height: 810,
+          top: 0,
+          left: 0,
+          right: 1144,
+          bottom: 810,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return original.call(this);
+    };
+    try {
+      const h = homeApp();
+      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
+      expect(preview.parentElement?.className).toBe('wy-stage');
+      expect(preview.style.getPropertyValue('--wy-preview-left')).toBe('8px');
+      expect(preview.style.getPropertyValue('--wy-preview-right')).toBe('auto');
+      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('102px');
+      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(false);
+      h.app.destroy();
+      // The band grants are this module's to clear, like the scroll form's beside them.
+      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('');
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it('a stage whose letterbox is too narrow borrows the blocked border ring, and says so (#101)', () => {
+    // The 1440×900 geometry, measured: a 1072×856 stage, 35px cells, a 46px letterbox
+    // margin — 38px of usable band, under the 64px floor. Borrowing the one-cell blocked
+    // ring lifts it to 81px (73px usable), which clears the floor, so the card sits over
+    // board terrain no tower can ever occupy and takes the reduced-weight companion form.
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains('wy-stage') || this.classList.contains('wy-board')) {
+        return {
+          width: 1072,
+          height: 856,
+          top: 0,
+          left: 0,
+          right: 1072,
+          bottom: 856,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return original.call(this);
+    };
+    try {
+      const h = homeApp();
+      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
+      expect(preview.parentElement?.className).toBe('wy-stage');
+      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('73px');
+      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(true);
       h.app.destroy();
     } finally {
       Element.prototype.getBoundingClientRect = original;

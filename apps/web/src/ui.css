@@ -523,8 +523,9 @@ a.wy-home:focus-visible {
    the content-sized status row, and moving there re-projects the board mid-run, the
    exact defect this float exists to end (Codex #96 P1: the earlier ≥150% zoom bucket
    re-homed there and reopened the bug for zoomed Standard — deleted; the float serves
-   every zoom level). Only two STATIC homes remain hud-side — Compact, and sub-400px
-   stages — and there the hud reservation below keeps the row content-invariant; the
+   every zoom level). Two homes remain hud-side — Compact, and (since #101) any Stage with
+   no dead band wide enough for a legible card — and there the hud reservation below keeps
+   the row content-invariant; the
    `.wy-hud`-keyed rule restores the in-flow look wherever the node lives in the hud.
    Opaque surface + border so it reads over whatever it lands on; no z-index needed — it
    is a LATER sibling of `.wy-board` inside `.wy-stage`, so it paints above the canvas by
@@ -533,12 +534,21 @@ a.wy-home:focus-visible {
 .wy-wave-preview {
   position: absolute;
   top: 0.5rem;
-  left: 0.5rem;
+  /* THE COMPLIANT BAND (#101). `main.ts` measures the stage's dead space each layout pass
+     and writes these three custom properties; `preview-place.ts` owns the geometry and the
+     ratified rule ("the preview never occludes a structurally buildable cell"). Exactly one
+     of left/right is a length and the other is `auto`, so the card is pinned to the stage
+     edge its band belongs to and still shrinks to fit its content.
+
+     THE DEFAULTS ARE LOAD-BEARING, not decoration: they are the pre-measurement placement,
+     which is what jsdom and a stage mid-resize get. `min(256px, 45%)` is the card's own
+     historical cap — px-capped against zoom growth, %-capped against tiny Standard stages
+     (a 360-wide portrait window is still Standard). `preview-place.ts` mirrors the 256 and
+     `layout.test.ts` asserts this declaration still carries it, so the two cannot drift. */
+  left: var(--wy-preview-left, 0.5rem);
+  right: var(--wy-preview-right, auto);
   box-sizing: border-box;
-  /* px-capped against zoom growth AND %-capped against tiny Standard stages (a 360-wide
-     portrait window is still Standard): the relations gate pins the resulting grid
-     overlap to <= 40% of the grid's AREA, which the 45% arm is what keeps true there. */
-  max-width: min(256px, 45%);
+  max-width: var(--wy-preview-max-w, min(256px, 45%));
   /* The clamp the scroll form scrolls WITHIN. Truncation is never a shipped state: the
      moment content exceeds this box (scrollHeight > clientHeight — heavy zoom, a small
      window, a four-entry wave, in any combination), `main.ts` flips the card to its
@@ -574,14 +584,29 @@ a.wy-home:focus-visible {
   pointer-events: auto;
 }
 
+/* Candidate 5 (#101), scoped exactly as the ratified plan scopes it: ON only while the card
+   borrows the board's BLOCKED BORDER ring — the second-preference band, where it still
+   covers board terrain (the ring and the two openings) even though it covers no buildable
+   cell. Nothing about the letterbox band needs this; there is no board underneath it.
+
+   AN OUTLINE, NOT TRANSLUCENCY, and the reason is measurability rather than taste. The
+   surface under this card is the Phaser canvas, whose colours change with the colour-vision
+   mode, and `e2e/contrast.ts`'s rendered-contrast probe reads `background-color` without
+   compositing alpha — so a translucent card would ship a text-contrast claim that no gate in
+   this repo can check. The dashed edge carries the same message (this is an overlay resting
+   on terrain, not a panel replacing it) at zero contrast risk. */
+.wy-wave-preview--over-board {
+  border-style: dashed;
+}
+
 .wy-wave-preview--scroll:focus-visible {
   outline: 3px solid var(--wy-focus);
   outline-offset: 2px;
 }
 
-/* The preview's IN-FLOW form, keyed on its HOME (`.wy-hud` hosts it on Compact and on
-   sub-400px Standard stages — `shell.placePreview`), never on a media query: one rule
-   serves both re-homing reasons and cannot drift from the reparent logic.
+/* The preview's IN-FLOW form, keyed on its HOME (`.wy-hud` hosts it on Compact and on any
+   Standard stage with no compliant dead band — `shell.placePreview`), never on a media
+   query: one rule serves both re-homing reasons and cannot drift from the reparent logic.
    `pointer-events` back on so touch-dragging the scrollable chips column works over the
    preview's own area. */
 .wy-hud .wy-wave-preview {
@@ -596,15 +621,21 @@ a.wy-home:focus-visible {
   pointer-events: auto;
 }
 
-/* THE ROW RESERVATION (Codex #96 P1): while the hud HOSTS the preview node on Standard
-   (the sub-400px width bucket), the hud is pinned at its cap instead of content-sizing —
-   otherwise every wave's entry-count change (1 line on most waves, 4 on wave 9) and the
-   end-of-run hide would resize the status row and re-project the board from this home
-   too, the exact mid-run movement the playtest round exists to end. The cost is honest
-   and STATIC: the row spends its full 40dvh budget whenever this home is in use.
+/* THE ROW RESERVATION (Codex #96 P1): while the hud HOSTS the preview node on Standard,
+   the hud is pinned at its cap instead of content-sizing — otherwise every wave's
+   entry-count change (1 line on most waves, 4 on wave 9) and the end-of-run hide would
+   resize the status row and re-project the board from this home too, the exact mid-run
+   movement the playtest round exists to end. The cost is honest and STATIC: the row spends
+   its full 40dvh budget whenever this home is in use.
    MEASURED worst case vs a content-sized row: one cellPx (~7%) on stages 391-399px wide
    under ~560px tall, where the pin flips the board from width- to height-limited; zero
-   at every wider or taller shape probed. A static 7% beats a mid-run re-projection. Keyed on `:has` (the
+   at every wider or taller shape probed. A static 7% beats a mid-run re-projection.
+   #101 WIDENED WHO PAYS IT, and that is worth stating rather than leaving to the reader:
+   this home is now the escape hatch for any Standard stage with no compliant dead band,
+   where the full 40dvh IS expensive — measured cellPx 28 → 19 at 1000×720 and 34 → 24 at
+   1280×900/200%. `preview-place.ts` reaches for it last for exactly that reason; the
+   number recorded above describes the narrow-stage case it was originally sized for.
+   Keyed on `:has` (the
    `.wy-banner` precedent above) so it engages exactly when the node lives here — hidden
    or not, deliberately: `[hidden]` toggling must not resize the row either. The Compact
    fork restores content-sizing: its status COLUMN is width-fixed, so preview growth

@@ -17,6 +17,7 @@ import { createSettings } from './settings';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
+import { placePreviewFloat, type PreviewFloat } from './preview-place';
 import { paintSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
@@ -262,12 +263,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     if (modeChanged) paintSwatches();
   });
 
-  // The wave preview's home (playtest round): floating over the Stage on Standard stages
-  // ≥ 400px wide — at EVERY zoom level (Codex #96 P1: a zoom-keyed hud fallback parked
-  // the preview in the content-sized status row, where wave changes re-projected the
-  // board for zoomed users; the px-capped card + in-place scroll form serve zoom
-  // instead) — and in the bounded chips scrollport on Compact and on sub-400px stages,
-  // both STATIC viewport properties. `shell.placePreview` owns the topology; this
+  // The wave preview's home (playtest round; re-shaped by #101): floating over the Stage
+  // wherever the Stage has dead space wide enough to hold a legible card — at EVERY zoom
+  // level (Codex #96 P1: a zoom-keyed hud fallback parked the preview in the content-sized
+  // status row, where wave changes re-projected the board for zoomed users; the px-capped
+  // card + in-place scroll form serve zoom instead) — and in the bounded chips scrollport
+  // on Compact, and wherever no compliant band exists. That last case REPLACED a
+  // hand-picked sub-400px width bucket: the same viewports still land in the hud, now
+  // because the space was measured rather than because a threshold guessed at it.
+  // `shell.placePreview` owns the topology and `preview-place.ts` the geometry; this
   // decides only which home — via the same injectable matchMedia seam as the rotate
   // prompt, plus a ResizeObserver (jsdom, which lacks it, also lacks the rendering that
   // would make its signals meaningful).
@@ -286,8 +290,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  focusability half). Stable by construction: the toggle changes no geometry (the box
    *  is already at its clamp), so nothing feeds back into the ResizeObserver driving it.
    *  This form serves EVERY zoom level — the card is px-capped, so zoom grows only its
-   *  internal wrapping, never its box — which is what lets Standard stages ≥ 400px keep
-   *  the float (and the board-stability invariant) at any text size. */
+   *  internal wrapping, never its box — which is what lets a Stage with a compliant dead
+   *  band keep the float (and the board-stability invariant) at any text size. */
   const setFloatScroll = (scrollable: boolean): void => {
     previewEl.classList.toggle('wy-wave-preview--scroll', scrollable);
     if (scrollable) {
@@ -300,34 +304,118 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       previewEl.removeAttribute('aria-label');
     }
   };
+  /** The float's BAND grants (#101) — the three custom properties `ui.css` reads for the
+   *  card's compliant position and width cap, plus the reduced-weight companion class. All
+   *  cleared together, so a re-home to the hud can never leave a stale cap on the in-flow
+   *  form (which sizes to its column, not to a dead band that no longer exists). */
+  const setFloatBand = (band: PreviewFloat): void => {
+    const style = previewEl.style;
+    if (band.kind !== 'band') {
+      style.removeProperty('--wy-preview-left');
+      style.removeProperty('--wy-preview-right');
+      style.removeProperty('--wy-preview-max-w');
+      previewEl.classList.remove('wy-wave-preview--over-board');
+      return;
+    }
+    const inset = `${band.inset}px`;
+    style.setProperty('--wy-preview-left', band.side === 'left' ? inset : 'auto');
+    style.setProperty('--wy-preview-right', band.side === 'right' ? inset : 'auto');
+    style.setProperty('--wy-preview-max-w', `${band.maxWidth}px`);
+    // Candidate 5 (#101), applied EXACTLY where the plan scopes it: only when the card is
+    // borrowing the board's blocked border ring does it need to read as an overlay sitting
+    // on terrain rather than as a panel replacing it.
+    previewEl.classList.toggle('wy-wave-preview--over-board', band.overBoard);
+  };
+
+  /** The home-INDEPENDENT inputs to the placement decision — the ones that change only
+   *  because the user changed something (window size, text zoom, the install banner's
+   *  reserved row appearing or going).
+   *
+   *  This key exists to break a feedback loop that is otherwise fatal, not to save work.
+   *  The hud home spends the status row's whole 40dvh budget, which SHRINKS the Stage —
+   *  measured at 1280×900/200%: stage 819px tall floating, ~550px in the hud. A shorter
+   *  Stage means smaller cells, which means WIDER letterbox margins, which would say "a
+   *  compliant band exists" and send the card back to the Stage, which restores the tall
+   *  Stage and the narrow margins, which says "no band"… forever, once per ResizeObserver
+   *  tick. Keying the decision on inputs the home cannot move is what makes it terminate.
+   *
+   *  BOUNDARY, stated rather than implied: safe-area insets are not in the key. They move
+   *  on a device rotation, which moves `innerWidth`/`innerHeight` too, so the key still
+   *  turns over — but a hypothetical inset change at a fixed viewport size would not
+   *  re-decide until the next real one. */
+  const previewHomeKey = (): string => {
+    const view = doc.defaultView;
+    return [
+      view?.innerWidth ?? 0,
+      view?.innerHeight ?? 0,
+      view === null || view === undefined
+        ? ''
+        : view.getComputedStyle(doc.documentElement).fontSize,
+      shell.banner.root.hidden ? '0' : '1',
+    ].join('|');
+  };
+  /** The key that was in force when the hud last took the card, or `null` while it floats.
+   *  ONLY the hud home is latched — see `previewHomeKey`. Floating needs no latch at all:
+   *  the card is `position: absolute` inside the Stage, so it contributes nothing to the
+   *  layout the decision reads, and re-deciding on every tick from live geometry is both
+   *  safe and strictly more correct (a mid-run status-row rewrap re-places the card instead
+   *  of stranding it on a stale band). */
+  let hudLatchKey: string | null = null;
+
   const applyPreviewHome = (): void => {
     if (compactMq.matches) {
       setFloatScroll(false); // the hud scrollport owns overflow in this home
+      setFloatBand({ kind: 'none' });
       shell.placePreview('hud');
+      hudLatchKey = null; // re-measure on the way back out of Compact
       return;
     }
-    const stageW = shell.stage.getBoundingClientRect().width;
-    // ONE static bucket: a stage narrower than 400px (a portrait phone is STANDARD — the
-    // Compact trigger is height-keyed) cannot host a readable float — the 45% width arm
-    // would pencil the card below legibility and its permanent scroll form would take
-    // live cells from a touch device's board. The hud hosts it there instead, with the
-    // row RESERVATION (`ui.css`: `.wy-hud:has(> .wy-wave-preview)` fixes the hud at its
-    // cap) keeping the status row content-invariant — wave changes cannot re-project the
-    // board from that home either. Width changes re-home legitimately (a window resize is
-    // a user-initiated whole-page reflow); wave content never does. (`stageW > 0`: jsdom
-    // lays nothing out and reports 0 — no signal, not a narrow stage.)
-    if (stageW > 0 && stageW < 400) {
-      setFloatScroll(false);
-      shell.placePreview('hud');
-      return;
-    }
+    // Held by the latch: the Stage geometry visible from the hud home is the SHRUNKEN one,
+    // so re-deciding from it is the loop `previewHomeKey` describes. Nothing measured here.
+    if (hudLatchKey !== null && hudLatchKey === previewHomeKey()) return;
+
+    // MEASURED IN THE FLOAT HOME, ALWAYS. Restoring the Stage home first is what makes the
+    // geometry below the one the answer has to be true of. `getBoundingClientRect` flushes
+    // layout synchronously, so the reads see the restored Stage, not the pre-move one.
     shell.placePreview('stage');
+    const stageBox = shell.stage.getBoundingClientRect();
+    const boardBox = shell.board.getBoundingClientRect();
+    // THE RATIFIED PLACEMENT (#101, owner 2026-08-17): the float goes in true dead space —
+    // the letterbox margins, then the board's blocked border band — and never over a cell a
+    // tower could be built on. `preview-place.ts` owns the geometry and the reasoning; this
+    // decides only what to do with its answer.
+    const band = placePreviewFloat({
+      stageWidth: stageBox.width,
+      stageHeight: stageBox.height,
+      boardLeft: boardBox.x - stageBox.x,
+      boardWidth: boardBox.width,
+      boardHeight: boardBox.height,
+      cols: grid.width,
+      rows: grid.height,
+    });
+    // NO COMPLIANT BAND — the hud home is the escape hatch the ratified plan names, and the
+    // one that already carries the row RESERVATION (`ui.css`: `.wy-hud:has(>
+    // .wy-wave-preview)` fixes the hud at its cap) so wave changes cannot re-project the
+    // board from there either. This subsumes the old sub-400px width bucket: a stage that
+    // narrow has no dead band wide enough for a legible card, so it lands here by
+    // measurement rather than by a separate hand-picked threshold.
+    if (band.kind === 'none') {
+      setFloatScroll(false);
+      setFloatBand(band);
+      shell.placePreview('hud');
+      hudLatchKey = previewHomeKey();
+      return;
+    }
+    // `unmeasured` (jsdom, or a stage mid-resize) is NO SIGNAL, not "no room": keep the
+    // float and leave the stylesheet's own default placement alone.
+    hudLatchKey = null;
+    setFloatBand(band);
     setFloatScroll(!previewEl.hidden && previewEl.scrollHeight > previewEl.clientHeight);
   };
   applyPreviewHome();
   compactMq.addEventListener('change', applyPreviewHome);
   // Observing BOTH boxes: content and zoom changes resize the preview (the scroll-form
-  // trigger); a window resize changes the stage (the width bucket's input) without
+  // trigger); a window resize changes the stage (the placement's own input) without
   // touching the preview's own box. Reads the injected document's view, not the global —
   // the same discipline as the dpr lookup.
   const PreviewRO = doc.defaultView?.ResizeObserver;
@@ -735,6 +823,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       compactMq.removeEventListener('change', applyPreviewHome);
       previewResizeObserver?.disconnect();
       setFloatScroll(false); // the preview grants this module owns, cleared by its owner
+      setFloatBand({ kind: 'none' }); // ...and the band grants beside them (#101)
       guardListener.abort(); // the home-link exit guard
       lifecycle.abort(); // the backgrounding listeners (#139)
       // Releases a held lock AND disowns one still in flight, so a request that resolves
