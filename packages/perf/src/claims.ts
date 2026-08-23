@@ -147,7 +147,7 @@ export const CLAIMS: readonly Claim[] = [
       {
         file: SPIKE,
         anchor: 'the numerator moved again to',
-        pattern: '`TOLERANCE` tightened \\*\\*1\\.25 . ([\\d.]+)\\*\\*',
+        pattern: '`TOLERANCE` tightened \\*\\*1\\.25 → ([\\d.]+)\\*\\*',
       },
       { file: M2, anchor: 'The numerator is now', pattern: '`TOLERANCE` is ([\\d.]+)' },
     ],
@@ -473,7 +473,7 @@ export const CLAIMS: readonly Claim[] = [
       {
         file: ADR,
         anchor: 'matched medians give',
-        pattern: 'half-spread \\([\\d.]+ . ([\\d.]+)\\)',
+        pattern: 'half-spread \\([\\d.]+ [–—-] ([\\d.]+)\\)',
       },
       {
         file: ADR,
@@ -496,7 +496,7 @@ export const CLAIMS: readonly Claim[] = [
     basis: 'one of the eight recorded endpoints that pin the per-arm reconstruction',
     sites: [
       { file: GATE, anchor: '\\|  4  \\|', pattern: '\\s*([\\d.]+)\\s*\\|' },
-      { file: ADR, anchor: '\\| control p50\\s+\\|', pattern: '\\s*([\\d.]+) .' },
+      { file: ADR, anchor: '\\| control p50\\s+\\|', pattern: '\\s*([\\d.]+) [–—-]' },
     ],
   },
   {
@@ -507,7 +507,7 @@ export const CLAIMS: readonly Claim[] = [
     basis: 'one of the eight recorded endpoints that pin the per-arm reconstruction',
     sites: [
       { file: GATE, anchor: '\\|  2  \\|', pattern: '\\s*([\\d.]+)\\s*\\|' },
-      { file: ADR, anchor: '\\| control p50\\s+\\|', pattern: '[\\d.]+ . ([\\d.]+)' },
+      { file: ADR, anchor: '\\| control p50\\s+\\|', pattern: '[\\d.]+ [–—-] ([\\d.]+)' },
     ],
   },
   {
@@ -522,7 +522,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: '\\|  4  \\|',
         pattern: '\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*([\\d.]+)\\s*\\|',
       },
-      { file: ADR, anchor: '\\| stress p50\\s+\\|', pattern: '\\s*([\\d.]+) .' },
+      { file: ADR, anchor: '\\| stress p50\\s+\\|', pattern: '\\s*([\\d.]+) [–—-]' },
     ],
   },
   {
@@ -537,7 +537,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: '\\|  3  \\|',
         pattern: '\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*([\\d.]+)\\s*\\|',
       },
-      { file: ADR, anchor: '\\| stress p50\\s+\\|', pattern: '[\\d.]+ . ([\\d.]+)' },
+      { file: ADR, anchor: '\\| stress p50\\s+\\|', pattern: '[\\d.]+ [–—-] ([\\d.]+)' },
     ],
   },
   {
@@ -548,7 +548,7 @@ export const CLAIMS: readonly Claim[] = [
     basis: 'one of the eight recorded endpoints that pin the per-arm reconstruction',
     sites: [
       { file: GATE, anchor: '\\|  4  \\|', pattern: '\\s*[\\d.]+\\s*\\|\\s*([\\d.]+)\\s*\\|' },
-      { file: ADR, anchor: '\\| control p95\\s+\\|', pattern: '\\s*([\\d.]+) .' },
+      { file: ADR, anchor: '\\| control p95\\s+\\|', pattern: '\\s*([\\d.]+) [–—-]' },
     ],
   },
   {
@@ -563,7 +563,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: '\\|  1  \\|',
         pattern: '\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*([\\d.]+)\\s*\\|',
       },
-      { file: ADR, anchor: '\\| stress p95\\s+\\|', pattern: '\\s*([\\d.]+) .' },
+      { file: ADR, anchor: '\\| stress p95\\s+\\|', pattern: '\\s*([\\d.]+) [–—-]' },
     ],
   },
   {
@@ -578,7 +578,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: '\\|  2  \\|',
         pattern: '\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*([\\d.]+)\\s*\\|',
       },
-      { file: ADR, anchor: '\\| stress p95\\s+\\|', pattern: '[\\d.]+ . ([\\d.]+)' },
+      { file: ADR, anchor: '\\| stress p95\\s+\\|', pattern: '[\\d.]+ [–—-] ([\\d.]+)' },
     ],
   },
   {
@@ -590,7 +590,7 @@ export const CLAIMS: readonly Claim[] = [
       "ADR 0005's per-arm range table; `gate.ts`'s per-run cell is the reconstruction, not this",
     sites: [
       { file: GATE, anchor: 'comes out 1\\.17462 against a recorded', pattern: '\\s*([\\d.]+)' },
-      { file: ADR, anchor: '\\| control p95\\s+\\|', pattern: '[\\d.]+ . ([\\d.]+)' },
+      { file: ADR, anchor: '\\| control p95\\s+\\|', pattern: '[\\d.]+ [–—-] ([\\d.]+)' },
       { file: ADR, anchor: "this table's control-p95 max,", pattern: '\\s*([\\d.]+),' },
     ],
   },
@@ -621,8 +621,8 @@ export const CLAIMS: readonly Claim[] = [
         anchor: '\\|  3  \\|',
         pattern: '\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*[\\d.]+\\s*\\|\\s*([\\d.]+)\\s*\\|',
       },
-      { file: ADR, anchor: 'and the numerator barely moved \\(', pattern: '([\\d.]+) .' },
-      { file: SPIKE, anchor: 'the numerator unmoved \\(', pattern: '([\\d.]+) .' },
+      { file: ADR, anchor: 'and the numerator barely moved \\(', pattern: '([\\d.]+) →' },
+      { file: SPIKE, anchor: 'the numerator unmoved \\(', pattern: '([\\d.]+) →' },
       { file: GATE, anchor: 'where the unrounded scale gives', pattern: '\\s*([\\d.]+) /' },
     ],
   },
@@ -641,9 +641,9 @@ export const CLAIMS: readonly Claim[] = [
       {
         file: ADR,
         anchor: 'and the numerator barely moved \\(',
-        pattern: '[\\d.]+ . ([\\d.]+)\\)',
+        pattern: '[\\d.]+ → ([\\d.]+)\\)',
       },
-      { file: SPIKE, anchor: 'the numerator unmoved \\(', pattern: '[\\d.]+ . ([\\d.]+)\\)' },
+      { file: SPIKE, anchor: 'the numerator unmoved \\(', pattern: '[\\d.]+ → ([\\d.]+)\\)' },
     ],
   },
   {
@@ -708,8 +708,8 @@ export const CLAIMS: readonly Claim[] = [
       'stress p95 17.35% against stress p50 10.50%, on the declared convention — a WITHIN-arm\n      ratio, as ADR 0005 pairs them; an earlier basis named the cross-arm pairing, which computes\n      to 1.41 rather than 1.65 (Fable stand-in, PR #161)',
     sites: [
       { file: GATE, anchor: 'stress p95 17\\.35% — tails', pattern: '\\s*([\\d.]+)x' },
-      { file: ADR, anchor: 'so more survives the division —', pattern: '\\*\\*([\\d.]+).' },
-      { file: SPIKE, anchor: 'while the tails are', pattern: '\\s*([\\d.]+).' },
+      { file: ADR, anchor: 'so more survives the division —', pattern: '\\*\\*([\\d.]+)×' },
+      { file: SPIKE, anchor: 'while the tails are', pattern: '\\s*([\\d.]+)×' },
     ],
   },
   {
@@ -723,9 +723,9 @@ export const CLAIMS: readonly Claim[] = [
       {
         file: ADR,
         anchor: 'so more survives the division — \\*\\*1\\.65.',
-        pattern: '([\\d.]+).\\*\\*',
+        pattern: '([\\d.]+)×\\*\\*',
       },
-      { file: SPIKE, anchor: 'while the tails are 1\\.65.', pattern: '([\\d.]+).' },
+      { file: SPIKE, anchor: 'while the tails are 1\\.65.', pattern: '([\\d.]+)×' },
     ],
   },
 
@@ -756,7 +756,7 @@ export const CLAIMS: readonly Claim[] = [
         pattern: 'k = ([\\d.]+) on',
       },
       { file: ADR, anchor: 'old gate k = 0\\.01536, new gate k =', pattern: '\\s*([\\d.]+),' },
-      { file: M2, anchor: 'The end-to-end sensitivity gain is', pattern: '. ([\\d.]+), swept\\)' },
+      { file: M2, anchor: 'The end-to-end sensitivity gain is', pattern: '→ ([\\d.]+), swept\\)' },
       {
         file: FIXTURE_TEST,
         anchor: 'continuous sweep \\(step 1e-5',
@@ -830,9 +830,9 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'gain therefore belongs to the tolerance, and it is',
         pattern: '\\s*([\\d.]+)x',
       },
-      { file: ADR, anchor: 'old gate k =', pattern: '\\*\\*([\\d.]+).\\*\\*' },
-      { file: ADR, anchor: '\\(step 1e-5, n = 2,500\\) is', pattern: '\\s*([\\d.]+).' },
-      { file: M2, anchor: 'The end-to-end sensitivity gain is', pattern: '\\s*([\\d.]+).' },
+      { file: ADR, anchor: 'old gate k =', pattern: '\\*\\*([\\d.]+)×\\*\\*' },
+      { file: ADR, anchor: '\\(step 1e-5, n = 2,500\\) is', pattern: '\\s*([\\d.]+)×' },
+      { file: M2, anchor: 'The end-to-end sensitivity gain is', pattern: '\\s*([\\d.]+)×' },
       {
         file: FIXTURE_TEST,
         anchor: 'claim a 2\\.00x end-to-end gain for what is',
@@ -966,10 +966,10 @@ export const CLAIMS: readonly Claim[] = [
       {
         file: GATE_TEST,
         anchor: 'The median of 17 CI samples',
-        pattern: '`([\\w.-]+)` . rounded DOWN',
+        pattern: '`([\\w.-]+)` [–—-] rounded DOWN',
       },
       { file: ADR, anchor: '\\*\\*RECORDED 2026-08-05:', pattern: 'head `\\w+`, `([\\w.-]+)`\\)' },
-      { file: SPIKE, anchor: 'from 17 CI samples', pattern: 'attempts 1.17, `([\\w.-]+)`' },
+      { file: SPIKE, anchor: 'from 17 CI samples', pattern: 'attempts 1[–—-]17, `([\\w.-]+)`' },
     ],
   },
   {
@@ -1079,8 +1079,12 @@ export const CLAIMS: readonly Claim[] = [
     basis: "why any agreement between the two cohorts' sds is coincidence rather than confirmation",
     sites: [
       { file: GATE, anchor: 'a sample sd carries a 95% CI of', pattern: '\\s*([\\d.]+)%' },
-      { file: ADR, anchor: 'being a coincidence at n = 4 \\(95% CI', pattern: '\\s*([\\d.]+).' },
-      { file: ADR, anchor: 'The n = 4 sd carries a 95% CI', pattern: '([\\d.]+)%.[\\d.]+%' },
+      {
+        file: ADR,
+        anchor: 'being a coincidence at n = 4 \\(95% CI',
+        pattern: '\\s*([\\d.]+)[–—-]',
+      },
+      { file: ADR, anchor: 'The n = 4 sd carries a 95% CI', pattern: '([\\d.]+)%[–—-][\\d.]+%' },
     ],
   },
   {
@@ -1096,7 +1100,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'being a coincidence at n = 4 \\(95% CI 1\\.45.',
         pattern: '([\\d.]+)%',
       },
-      { file: ADR, anchor: 'The n = 4 sd carries a 95% CI', pattern: '[\\d.]+%.([\\d.]+)%' },
+      { file: ADR, anchor: 'The n = 4 sd carries a 95% CI', pattern: '[\\d.]+%[–—-]([\\d.]+)%' },
     ],
   },
 
@@ -1196,7 +1200,7 @@ export const CLAIMS: readonly Claim[] = [
     basis: '8 runs, same commit — the evidence that a local `R` cannot predict this gate',
     sites: [
       { file: GATE, anchor: 'authoring machine `R` sat at', pattern: '\\s*([\\d.]+)-' },
-      { file: SPIKE, anchor: 'on the same laptop, measured', pattern: '\\s*([\\d.]+).' },
+      { file: SPIKE, anchor: 'on the same laptop, measured', pattern: '\\s*([\\d.]+)[–—-]' },
     ],
   },
   {
@@ -1207,7 +1211,7 @@ export const CLAIMS: readonly Claim[] = [
     basis: '6 runs, same commit, same machine — ambient load alone moves it ~30%',
     sites: [
       { file: GATE, anchor: 'the same command measured', pattern: '\\s*([\\d.]+)-' },
-      { file: SPIKE, anchor: 'across 8 runs when it was quiet and', pattern: '\\s*([\\d.]+).' },
+      { file: SPIKE, anchor: 'across 8 runs when it was quiet and', pattern: '\\s*([\\d.]+)[–—-]' },
     ],
   },
   {
@@ -1414,8 +1418,8 @@ export const CLAIMS: readonly Claim[] = [
         pattern: '([\\d.]+) bounded a p95',
       },
       { file: GATE_TEST, anchor: 'Tightened', pattern: '\\s*([\\d.]+) ->' },
-      { file: ADR, anchor: '\\*\\*`TOLERANCE`', pattern: '\\s*([\\d.]+) .' },
-      { file: SPIKE, anchor: '`TOLERANCE` tightened \\*\\*', pattern: '([\\d.]+) .' },
+      { file: ADR, anchor: '\\*\\*`TOLERANCE`', pattern: '\\s*([\\d.]+) →' },
+      { file: SPIKE, anchor: '`TOLERANCE` tightened \\*\\*', pattern: '([\\d.]+) →' },
     ],
   },
   {
@@ -1462,7 +1466,7 @@ export const CLAIMS: readonly Claim[] = [
     basis: 'paired over the same four runs, which is what makes the gap decisive at n = 4',
     sites: [
       { file: GATE, anchor: 'every tail ratio is\\s*\\n \\*  ', pattern: '([\\d.]+)x' },
-      { file: ADR, anchor: 'every tail ratio is', pattern: '\\s*([\\d.]+).–' },
+      { file: ADR, anchor: 'every tail ratio is', pattern: '\\s*([\\d.]+)×–' },
     ],
   },
   {
@@ -1474,7 +1478,7 @@ export const CLAIMS: readonly Claim[] = [
       'the same paired comparison; the load-bearing evidence for the statistic, ahead of the correlations',
     sites: [
       { file: GATE, anchor: 'every tail ratio is\\s*\\n \\*  [\\d.]+x-', pattern: '([\\d.]+)x' },
-      { file: ADR, anchor: 'every tail ratio is [\\d.]+.–', pattern: '([\\d.]+).' },
+      { file: ADR, anchor: 'every tail ratio is [\\d.]+.–', pattern: '([\\d.]+)×' },
     ],
   },
   {
@@ -1486,8 +1490,8 @@ export const CLAIMS: readonly Claim[] = [
       'why the honest reading is "the median ratio is quieter than any tail ratio", not a ranking among tails',
     sites: [
       { file: GATE, anchor: 'p99/p99 is', pattern: '\\s*([\\d.]+)x' },
-      { file: ADR, anchor: 'p95/p95 versus p99/p99 is', pattern: '\\s*([\\d.]+).' },
-      { file: SPIKE, anchor: 'Even at face value that', pattern: '\\s*([\\d.]+). gap' },
+      { file: ADR, anchor: 'p95/p95 versus p99/p99 is', pattern: '\\s*([\\d.]+)×' },
+      { file: SPIKE, anchor: 'Even at face value that', pattern: '\\s*([\\d.]+)× gap' },
     ],
   },
   {
@@ -1512,7 +1516,7 @@ export const CLAIMS: readonly Claim[] = [
     sites: [
       { file: GATE, anchor: 'scanning would take\\), measured at k =', pattern: '\\s*([\\d.]+),' },
       { file: FIXTURE_TEST, anchor: 'Measured at k =', pattern: '\\s*([\\d.]+):' },
-      { file: ADR, anchor: 'this amendment\'s original "k =', pattern: '\\s*([\\d.]+) .' },
+      { file: ADR, anchor: 'this amendment\'s original "k =', pattern: '\\s*([\\d.]+) →' },
       { file: FIXTURE_TEST, anchor: 'an injection of at most 8 \\* ', pattern: '([\\d.]+)' },
       {
         file: ADR,
@@ -1581,7 +1585,7 @@ export const CLAIMS: readonly Claim[] = [
     sites: [
       { file: GATE, anchor: 'gain\\s*\\n// into a claimed', pattern: '\\s*([\\d.]+)x' },
       { file: FIXTURE_TEST, anchor: 'claim a', pattern: '\\s*([\\d.]+)x end-to-end' },
-      { file: ADR, anchor: 'a claimed', pattern: '\\s*([\\d.]+). where the swept' },
+      { file: ADR, anchor: 'a claimed', pattern: '\\s*([\\d.]+)× where the swept' },
     ],
   },
 
@@ -1857,7 +1861,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'to the nearer hundredth . `R0` =',
         pattern: '\\s*([\\d.]+)\\.',
       },
-      { file: ADR, anchor: 'Ceiling =', pattern: '\\s*([\\d.]+) .' },
+      { file: ADR, anchor: 'Ceiling =', pattern: '\\s*([\\d.]+) ×' },
       { file: ADR, anchor: 'The first CI run after `R0 =', pattern: '\\s*([\\d.]+)` was recorded' },
       { file: ADR, anchor: 'which is the current state\\.', pattern: '\\s*([\\d.]+) baselines' },
       { file: ADR, anchor: 'CI perf job on the PR, against `R0 =', pattern: '\\s*([\\d.]+)`' },

@@ -116,12 +116,31 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
  *
  *  A numeric token normalises to its number; anything else — run ids, commit heads, image
  *  names, block names — is its own exact string, since `a1600c9` is not a quantity. */
+/** ONE DEFINITION OF "A NUMERAL", and everything that asks about numerals asks this.
+ *
+ *  It drifted once already, exactly the way the slash classifier did. The tokenizer learned
+ *  leading-dot and scientific spellings in round 15; the mask's numeral-led prohibition, written
+ *  a round later, still required an initial DIGIT — so `.00922/iteration` was blanked as a file
+ *  path and its numeral left the sweep silently (Codex). `claimKey` carried a third spelling of
+ *  the same idea, which filed `.00922` under a string key instead of a numeric one.
+ *
+ *  A second definition of a thing is a defect waiting for its reproduction. There is one now:
+ *  the grammar body below, and the three consumers built from it — `IS_NUMERAL` (is this whole
+ *  string one), `NUMERAL` (find them in prose), `NUMERAL_LED` (does this token open with one).
+ *
+ *  Signs are still read OFF the numeral, deliberately: a row valued -1.36 covers a prose 1.36,
+ *  and the sign is enforced at the row's sites. `IS_NUMERAL` accepts a leading sign because it
+ *  answers a different question — whether an already-extracted string is numeric. */
+const NUMERAL_BODY = String.raw`(?:\d[\d,_]*(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?`;
+
+const IS_NUMERAL = new RegExp(String.raw`^[+-]?` + NUMERAL_BODY + String.raw`$`);
+
 function claimKey(stated: string): string {
   // A leading typographic minus (U+2212) or en-dash is the same sign as an ASCII '-';
   // ADR 0005 writes the cohort's skew as −1.36 while `gate.ts` writes -1.36.
   const bare = stated.replace(/[,_]/g, '').replace(/^[\u2212\u2013]/, '-');
   const parsed = Number(bare);
-  return /^[+-]?\d[\d.]*$/.test(bare) && Number.isFinite(parsed) ? `n:${parsed}` : `s:${stated}`;
+  return IS_NUMERAL.test(bare) && Number.isFinite(parsed) ? `n:${parsed}` : `s:${stated}`;
 }
 
 /** Claim ids that share a `claimKey` with another row — `0.0100` (the fixture's upper grid
@@ -189,6 +208,42 @@ describe('the claim table is well formed', () => {
         expect(site.anchor, `${claim.id} at ${site.file}`).not.toMatch(/:\d+(-\d+)?\s*$/);
       }
     }
+  });
+
+  // A `.` outside a character class matches ANYTHING, so a pattern that wildcards the character
+  // BETWEEN two numbers stops reading a range and starts reading whatever is there: flip the
+  // en-dash of `1.45%–9.51%` to a `+` and a confidence interval becomes an addition, still green
+  // (Codex, PR #161). Thirty-eight of these existed, every one of them standing in for a single
+  // symbol — 15 en-dashes, 13 multiplication signs, 8 arrows, 1 em-dash — and one, `attempts
+  // 1.17`, was an unescaped decimal point quietly matching the `1–17` actually in the prose.
+  //
+  // Round 10 closed the symbol-BEFORE-a-number class the same way. This is the BETWEEN and
+  // AFTER class, and this test is what keeps it closed: a site may not wildcard anything.
+  it('wildcards nothing — every character a pattern matches is one it names', () => {
+    const offenders: string[] = [];
+    for (const claim of CLAIMS) {
+      for (const site of claim.sites) {
+        let inClass = false;
+        for (let i = 0; i < site.pattern.length; i++) {
+          const c = site.pattern[i];
+          if (c === '\\') {
+            i++;
+            continue;
+          }
+          if (c === '[') inClass = true;
+          else if (c === ']') inClass = false;
+          else if (c === '.' && !inClass) {
+            offenders.push(`${claim.id} at ${site.file}: /${site.pattern}/`);
+          }
+        }
+      }
+    }
+    expect(
+      offenders,
+      `these site patterns contain a WILDCARD, so they no longer pin what they appear to pin. ` +
+        `Name the character — a dash class, an arrow, a times sign — or escape it if it is a ` +
+        `decimal point:\n  ${offenders.join('\n  ')}`,
+    ).toEqual([]);
   });
 });
 
@@ -700,7 +755,7 @@ const spaces = (m: string): string => ' '.repeat(m.length);
  *  The direction is fail-closed. Misreading a path as a measurement surfaces its numerals as
  *  LOUD unaccounted claims; misreading a measurement as a path blanks it SILENTLY, which is the
  *  failure this whole file exists to prevent. */
-const NUMERAL_LED = /^\d[\d.,_]*\//;
+const NUMERAL_LED = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`\/`);
 
 function looksLikePath(m: string): boolean {
   return /[A-Za-z]/.test(m) && !NUMERAL_LED.test(m);
@@ -763,8 +818,7 @@ interface Numeral {
  *  Signs are still read OFF the numeral, deliberately and as before: a row valued -1.36 is what
  *  covers a prose 1.36, and the sign is enforced at the row's SITES, which capture it. An
  *  exponent's sign is part of the number rather than in front of it, so that one is read. */
-const NUMERAL =
-  /(?<![A-Za-z_])\d[\d,_]*(?:\.\d+)?(?:[eE][+-]?\d+)?|(?<![A-Za-z_.\d])\.\d+(?:[eE][+-]?\d+)?/g;
+const NUMERAL = new RegExp(String.raw`(?<![A-Za-z_.\d])` + NUMERAL_BODY, 'g');
 
 /** One number, one spelling: `.00922`, `9.22e-3` and `0.00922` must reach `claimKey` alike. */
 function normalizeNumeral(cleaned: string): string {
@@ -1083,6 +1137,16 @@ describe('the reference masks blank references, not measurements', () => {
     expect(mask('see docs/adr/0005-x.md now')).toHaveLength('see docs/adr/0005-x.md now'.length);
   });
 
+  // The prohibition and the tokenizer must agree about what a numeral IS. They did not: the
+  // prohibition required an initial digit while the tokenizer had learned leading-dot and
+  // scientific spellings, so these masked as paths and vanished silently (Codex, PR #161).
+  it('never masks a numeral-led token, at any numeral SPELLING', () => {
+    expect(mask('cost .00922/iteration measured')).toContain('.00922/iteration');
+    expect(mask('cost 9.22e-3/iteration measured')).toContain('9.22e-3/iteration');
+    expect(mask('rate .5/ms measured')).toContain('.5/ms');
+    expect(mask('rate 1,427/tick measured')).toContain('1,427/tick');
+  });
+
   it('leaves a UNIT-suffixed measurement alone, at any unit length', () => {
     expect(mask('throughput 1.0065/ms holds')).toContain('1.0065/ms');
     expect(mask('DoT lands 4/tick and slow 3/tick')).toContain('4/tick');
@@ -1130,6 +1194,17 @@ describe("the numeral grammar is the language's, not a run of digits", () => {
     const spellings = ['0.00922', '.00922', '9.22e-3'];
     const keys = new Set(spellings.map((t) => claimKey(values(t)[0] as string)));
     expect([...keys]).toHaveLength(1);
+  });
+
+  // One definition, three consumers. If they ever disagree again, this fails first.
+  it('answers "is this a numeral" identically everywhere it is asked', () => {
+    for (const spelling of ['0.00922', '.00922', '9.22e-3', '1,427', '1.0065', '900000']) {
+      expect(IS_NUMERAL.test(spelling), `IS_NUMERAL rejected ${spelling}`).toBe(true);
+      expect(NUMERAL_LED.test(`${spelling}/unit`), `NUMERAL_LED missed ${spelling}`).toBe(true);
+      expect([...`x ${spelling} y`.matchAll(NUMERAL)], `NUMERAL missed ${spelling}`).toHaveLength(
+        1,
+      );
+    }
   });
 
   it('does not split an ordinary decimal into a bare fraction', () => {
