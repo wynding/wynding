@@ -1011,9 +1011,9 @@ const KNOWN_UNROWED: readonly {
     surfaces: [
       [G.adr, 3],
       [G.m2, 2],
-      [G.scenario, 3],
+      [G.scenario, 4],
     ],
-    why: 'Catalog-scene tower count — scenario.ts, ADR and m2.',
+    why: "Catalog-scene tower count — scenario.ts, ADR and m2. The scenario.ts count went 3 -> 4 when main's test-support consolidation (#94) restated it as `(165 placements, its own `CATALOG_BUILD_TICKS`)`; re-censused rather than rowed, because it is another statement of the same acknowledged gap and rowing the oracle surface is #163's work. This entry is also the counted census earning its keep on its first run: the copy landed on main while this branch compared VALUES, so every round before this one saw the identical gap set and passed.",
   },
   {
     value: '1800',
