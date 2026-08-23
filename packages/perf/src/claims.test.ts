@@ -525,178 +525,264 @@ const OCCURRENCE_EXCEPTIONS: readonly {
   },
 ];
 
-/** The three characters that open a region `commentsOnly` skips. Named once, and consulted by
- *  both the scanner and the tripwire, because the two drifting apart is exactly how the
- *  backtick came to be a string opener the scanner honoured and the tripwire did not. */
+/** The three characters that open a region the walk skips. Named once and consulted
+ *  everywhere, because the scanner and the tripwire drifting apart is exactly how the backtick
+ *  came to be a string opener one of them honoured and the other did not. */
 const STRING_OPENERS = ["'", '"', '`'] as const;
 
 const opensString = (c: string | undefined): boolean =>
   (STRING_OPENERS as readonly string[]).includes(c ?? '');
 
-/** Advance past a quoted region opening at `i` — string or template — honouring backslash
- *  escapes, and return the index just past its closing quote. THE one fast-forward. */
-function skipQuoted(src: string, i: number): number {
-  const quote = src[i];
-  i++;
-  while (i < src.length && src[i] !== quote) {
-    if (src[i] === '\\') i++;
-    i++;
-  }
-  return i + 1;
+/** Words after which a `/` opens a REGEX rather than dividing. After any other identifier — or
+ *  a digit, a `)`, or a `]` — a value has just ended, and the grammar cannot read a regex
+ *  literal there. That asymmetry is what lets the substitution rule admit division and still
+ *  make regexes impossible. */
+const REGEX_CONTEXT_WORDS = new Set([
+  'return',
+  'typeof',
+  'instanceof',
+  'in',
+  'of',
+  'new',
+  'delete',
+  'void',
+  'case',
+  'do',
+  'else',
+  'yield',
+  'await',
+  'throw',
+]);
+
+/** Whether the `/` at `at` is unambiguously DIVISION: the previous significant token produces
+ *  a value, so a regex literal cannot legally begin here. */
+function isDivision(src: string, at: number): boolean {
+  let j = at - 1;
+  while (j >= 0 && /\s/.test(src[j] as string)) j--;
+  if (j < 0) return false;
+  const prev = src[j] as string;
+  if (prev === ')' || prev === ']') return true;
+  if (!/[A-Za-z0-9_$]/.test(prev)) return false;
+  let k = j;
+  while (k >= 0 && /[A-Za-z0-9_$]/.test(src[k] as string)) k--;
+  return !REGEX_CONTEXT_WORDS.has(src.slice(k + 1, j + 1));
 }
 
-/** THE SCANNER'S SKIP-PATH INVARIANT, stated so the next "can it lex X?" question has an
- *  answer instead of an investigation.
+interface Walked {
+  /** Per byte: inside comment TEXT. */
+  readonly commentAt: readonly boolean[];
+  /** Per byte: ordinary code — not a string, not a template, not a comment. */
+  readonly codeAt: readonly boolean[];
+  /** Constructs the walk cannot lex soundly, phrased for the error message. */
+  readonly problems: ReadonlySet<string>;
+}
+
+/** A regex literal whose body holds a string opener, matched against the RAW source. It has to
+ *  be found where it actually sits, because the walk desynchronises on precisely this
+ *  construct and would blank the evidence before the search ran. Matches that land in a
+ *  comment or a string are discarded by `codeAt` — which is the job the old comment-stripping
+ *  `replace` was doing, done string-awarely (CodeRabbit). */
+const REGEX_HOLDING_OPENER = new RegExp(
+  String.raw`(?:^|[=(,:;[{!?&|+\-*%<>~^]|\breturn\b|\btypeof\b|\bcase\b|\bin\b|\bof\b|\bdo\b|=>|&&|\|\|)` +
+    String.raw`\s*\/(?![/*])` +
+    String.raw`(?:\\.|\[[^\]]*\]|[^/\n])*` +
+    `[${STRING_OPENERS.join('')}]` +
+    String.raw`(?:\\.|\[[^\]]*\]|[^/\n])*\/`,
+  'g',
+);
+
+/** THE ONE WALKER, and the soundness conditions that make trusting it legitimate — stated so
+ *  the next "can it lex X?" question has an answer instead of an investigation.
  *
- *  `commentsOnly` keeps comment text and blanks everything else. It reads the source one
- *  character at a time except where it FAST-FORWARDS over a region, and every such region
- *  must satisfy one of two conditions:
+ *  Everything that needs to know what is prose, what is code and what is literal text asks
+ *  THIS function. `commentsOnly` (keep comment text, blank the rest) and
+ *  `rejectUnlexableSyntax` (refuse what cannot be lexed) are both projections of a single
+ *  pass. There is no second, regex-shaped lexer anywhere: an earlier one stripped `//...` with
+ *  a plain `replace`, which reached INSIDE strings and cascaded into misclassification
+ *  (CodeRabbit).
  *
- *    (a) NO COMMENT CAN EXIST THERE, so skipping it cannot hide prose; or
- *    (b) it is REJECTED here, loudly, before the scan runs.
+ *  The governing invariant — every region the walk does not scan for prose is either
  *
- *  There is exactly ONE fast-forward: `skipQuoted`, over a region opened by one of the three
- *  `STRING_OPENERS`. Ordinary code advances a character at a time and both comment forms are
- *  captured rather than skipped. So the enumeration is those openers, plus the constructs
- *  that make the scanner mistake where a skipped region BEGINS:
+ *    (a) INCAPABLE of containing a comment, so skipping it cannot hide anything; or
+ *    (b) REJECTED, loudly, before any scan is trusted.
  *
- *    1. `'...'` and `"..."` — skipped, and (a) holds by the language's own rules: a `//` or a
- *       block-comment opener inside a string is literal text, not a comment. (A numeral in a
- *       string is code data, not prose; the table guards prose. `1.42` living in an `it()`
- *       title is exactly why that figure is a rowed claim rather than an exemption.)
- *    2. A template literal — skipped to its closing backtick, substitutions and all. A
- *       substitution is an ordinary expression position and CAN hold a real comment, so (a)
- *       does NOT hold and a numeral hidden there is skipped silently. Rejected below (Codex).
- *    3. A NESTED template literal — a backtick inside a substitution desynchronises the
- *       backtick matching outright. Rejected below.
- *    4. A regex literal containing a STRING OPENER — read as the start of a quoted region,
- *       which masks every comment after it. All THREE openers count, not just the two quote
- *       characters: `skipQuoted` cannot tell them apart, so neither may the tripwire. The
- *       backtick was the gap this invariant was written to find.
+ *  The regions, and which condition carries each:
  *
- *  Anything added to the scanner that skips a region must extend this list and satisfy (a)
- *  or (b).
+ *    1. `'...'` and `"..."` — skipped; (a) holds by the language's own rules, since a comment
+ *       marker inside a string is literal text. (A numeral in a string is code data, not
+ *       prose; the table guards prose. `1.42` living in an `it()` title is exactly why that
+ *       figure is a rowed claim rather than an exemption.)
+ *    2. A template literal — skipped whole, substitutions included; (a) FAILS, because a
+ *       substitution is an ordinary expression position that can hold a real comment. Carried
+ *       by (b), via the substitution rule below.
+ *    3. A NESTED template literal — desynchronises backtick matching outright. Rejected, and
+ *       detected by the walk's own brace and string tracking rather than by a regex, so
+ *       nesting that opens AFTER a `}` in the same substitution is caught too (CodeRabbit).
+ *    4. A regex literal holding a STRING OPENER — read as the start of a quoted region, which
+ *       masks every comment after it. Rejected. All three openers count; the walk cannot tell
+ *       them apart, so neither may the tripwire.
+ *
+ *  THE SUBSTITUTION RULE, which ENDS the slash ambiguity instead of parsing around it. A `/`
+ *  inside a substitution is a comment, a regex, or a division, and only the last is harmless.
+ *  A comment there hides prose; a regex body can carry braces and quotes that derail the
+ *  counter looking for the substitution's close — a regex holding a brace, followed by a block
+ *  comment, was exactly Codex's reproduction. So:
+ *
+ *    - `//` or `/*` in a substitution is REJECTED outright; and
+ *    - any other `/` in a substitution is REJECTED unless the previous significant token
+ *      produces a value (`isDivision`), which is precisely where the grammar forbids a regex.
+ *
+ *  A regex literal therefore cannot occur in an accepted substitution, and neither can a
+ *  comment. So every brace inside a substitution and outside a string is a real code brace,
+ *  the depth counter that finds the closing `}` is SOUND, and that is what licenses skipping
+ *  the template at all. Division survives the rule because a guarded file genuinely uses it:
+ *  `oracle.ts` reports a ratio inside a substitution, so a blanket ban on slashes would refuse
+ *  a file that lexes perfectly well.
+ *
+ *  The conditions together: strings are skipped by `skipString`, so no brace or comment marker
+ *  inside one is ever read as code; regexes and comments are impossible inside substitutions,
+ *  by rejection; therefore braces track, therefore the walk knows where every region begins
+ *  and ends. Anything added that skips a region must extend this list and satisfy (a) or (b).
  *
  *  The posture is deliberately conservative — it would rather refuse a file it could lex than
  *  lex one it cannot — because the failure it guards against is SILENT, which is the one
  *  outcome this whole file exists to prevent (CodeRabbit and Codex, PR #161). */
-function rejectUnlexableSyntax(file: string, src: string): void {
-  const bare = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
-  const nestedTemplate = /`[^`]*\$\{[^}]*`/.test(bare);
-  // A regex literal can open in ANY expression position, not just after `= ( , :` — an
-  // earlier form missed `return /'/;`, which is valid JavaScript and would make the lexer
-  // read the quote as a string delimiter and mask every comment after it (CodeRabbit).
-  const regexOpener = String.raw`(?:^|[=(,:;[{!?&|+\-*%<>~^]|\breturn\b|\btypeof\b|\bcase\b|\bin\b|\bof\b|\bdo\b|=>|&&|\|\|)`;
-  // Built from STRING_OPENERS rather than spelled out, so the class cannot fall behind the
-  // scanner again. It read `['"]` while `commentsOnly` skipped on the backtick too, which let
-  // `const re = /` + '`' + `/;` swallow every comment after it in silence (self-raised).
-  const openerClass = `[${STRING_OPENERS.join('')}]`;
-  const runOfRegexBody = String.raw`(?:\\.|\[[^\]]*\]|[^/\n])*`;
-  const quoteInRegex = new RegExp(
-    regexOpener + String.raw`\s*\/(?![/*])` + runOfRegexBody + openerClass + runOfRegexBody + '/',
-  ).test(bare);
-  const substitutionComment = hasCommentInTemplateSubstitution(src);
-
-  const what = [
-    nestedTemplate ? 'a nested template literal' : '',
-    quoteInRegex ? 'a regex literal containing a quote or backtick' : '',
-    substitutionComment ? 'a comment inside a template substitution' : '',
-  ].filter(Boolean);
-  if (what.length > 0) {
-    throw new Error(
-      `${file} contains syntax this scanner cannot lex (${what.join(' and ')}). Upgrade ` +
-        `commentsOnly before trusting the scan — a desynchronised lexer miscounts silently.`,
-    );
-  }
-}
-
-/** Walk a template substitution from just after its `${` to the matching `}`, reporting
- *  whether a comment opens in CODE position inside it, and where the substitution ended.
- *
- *  Read with the same discipline as the rest of the file rather than by substring-matching
- *  the interior, which got it wrong in both directions: a `}` inside a string ended the scan
- *  early and hid the comment after it, and a `//` inside a string — a URL, a path — read as a
- *  comment and would have refused a file that lexes perfectly well (both self-raised). */
-function scanSubstitution(src: string, from: number): { at: number; comment: boolean } {
-  let i = from;
-  let depth = 1;
-  while (i < src.length && depth > 0) {
-    const c = src[i];
-    const n = src[i + 1];
-    if (c === '/' && (n === '/' || n === '*')) return { at: i, comment: true };
-    if (opensString(c)) {
-      i = skipQuoted(src, i);
-      continue;
-    }
-    if (c === '{') depth++;
-    else if (c === '}') depth--;
-    if (depth > 0) i++;
-  }
-  return { at: i, comment: false };
-}
-
-/** Whether any template substitution contains a comment. Scanned rather than matched with a
- *  regex, because `${...}` nests braces and a regex cannot find the matching close. */
-function hasCommentInTemplateSubstitution(src: string): boolean {
+function walk(src: string): Walked {
+  const commentAt = new Array<boolean>(src.length).fill(false);
+  const codeAt = new Array<boolean>(src.length).fill(false);
+  const problems = new Set<string>();
   let i = 0;
   while (i < src.length) {
     const c = src[i];
     const n = src[i + 1];
     if (c === '/' && n === '/') {
-      while (i < src.length && src[i] !== '\n') i++;
-    } else if (c === '/' && n === '*') {
-      const e = src.indexOf('*/', i + 2);
-      i = e === -1 ? src.length : e + 2;
-    } else if (c === "'" || c === '"') {
-      i = skipQuoted(src, i);
-    } else if (c === '`') {
-      i++;
-      while (i < src.length && src[i] !== '`') {
-        if (src[i] === '\\') {
-          i += 2;
-          continue;
-        }
-        if (src[i] === '$' && src[i + 1] === '{') {
-          const sub = scanSubstitution(src, i + 2);
-          if (sub.comment) return true;
-          i = sub.at;
-          continue;
-        }
+      while (i < src.length && src[i] !== '\n') {
+        commentAt[i] = true;
         i++;
       }
-      i++;
+    } else if (c === '/' && n === '*') {
+      const end = src.indexOf('*/', i + 2);
+      if (end === -1) problems.add('an unterminated block comment');
+      const stop = end === -1 ? src.length : end + 2;
+      for (; i < stop; i++) commentAt[i] = true;
+    } else if (c === '`') {
+      i = walkTemplate(src, i, problems);
+    } else if (opensString(c)) {
+      i = skipString(src, i, problems);
     } else {
+      codeAt[i] = true;
       i++;
     }
   }
-  return false;
+  return { commentAt, codeAt, problems };
+}
+
+/** Advance past a `'`- or `"`-quoted string opening at `i`, honouring backslash escapes, and
+ *  return the index just past its closing quote. A raw newline inside one is not a long
+ *  string, it is proof the walk is desynchronised — most often because a regex literal
+ *  containing a quote was read as a string opener — so it is reported rather than absorbed. */
+function skipString(src: string, i: number, problems: Set<string>): number {
+  const quote = src[i];
+  i++;
+  while (i < src.length && src[i] !== quote) {
+    if (src[i] === '\n') {
+      problems.add('an unterminated string literal');
+      return i;
+    }
+    if (src[i] === '\\') i++;
+    i++;
+  }
+  if (i >= src.length) problems.add('an unterminated string literal');
+  return i + 1;
+}
+
+/** Advance past a template literal opening at `i`, stepping THROUGH its substitutions rather
+ *  than over them, and return the index just past its closing backtick. */
+function walkTemplate(src: string, i: number, problems: Set<string>): number {
+  i++;
+  while (i < src.length && src[i] !== '`') {
+    if (src[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    if (src[i] === '$' && src[i + 1] === '{') {
+      i = walkSubstitution(src, i + 2, problems);
+      continue;
+    }
+    i++;
+  }
+  if (i >= src.length) {
+    problems.add('an unterminated template literal');
+    return i;
+  }
+  return i + 1;
+}
+
+/** Walk a substitution from just past its `${` to just past its matching `}`, enforcing the
+ *  substitution rule. Strings are skipped, so a brace inside one never moves the counter. */
+function walkSubstitution(src: string, from: number, problems: Set<string>): number {
+  let i = from;
+  let depth = 1;
+  while (i < src.length) {
+    const c = src[i];
+    const n = src[i + 1];
+    if (c === '/' && (n === '/' || n === '*')) {
+      problems.add('a comment inside a template substitution');
+      i++;
+      continue;
+    }
+    if (c === '/' && !isDivision(src, i)) {
+      problems.add('a regex literal inside a template substitution');
+      i++;
+      continue;
+    }
+    if (c === '`') {
+      problems.add('a nested template literal');
+      i = walkTemplate(src, i, problems);
+      continue;
+    }
+    if (opensString(c)) {
+      i = skipString(src, i, problems);
+      continue;
+    }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+    i++;
+  }
+  problems.add('an unterminated template substitution');
+  return i;
+}
+
+/** Refuse a file the walk cannot lex soundly, before anything trusts the scan. */
+function rejectUnlexableSyntax(file: string, src: string): void {
+  const { codeAt, problems } = walk(src);
+  const what = new Set(problems);
+  for (const m of src.matchAll(REGEX_HOLDING_OPENER)) {
+    if (codeAt[m.index ?? 0] === true) {
+      what.add('a regex literal containing a quote or backtick');
+      break;
+    }
+  }
+  if (what.size > 0) {
+    throw new Error(
+      `${file} contains syntax this scanner cannot lex (${[...what].join(' and ')}). Upgrade ` +
+        `the walker before trusting the scan — a desynchronised lexer miscounts silently.`,
+    );
+  }
 }
 
 /** Blank everything in a `.ts` source except comment text, preserving length so byte offsets
- *  stay comparable with the resolver's. Tracks string and template literals, so `//` inside a
- *  string is code rather than a comment, and keeps TRAILING comments. Its one skip path is
- *  `skipQuoted`; see the invariant above `rejectUnlexableSyntax`, which guards it. */
+ *  stay comparable with the resolver's. A projection of the walk, so `//` inside a string is
+ *  code rather than a comment, and TRAILING comments are kept. */
 function commentsOnly(src: string): string {
-  const out = new Array<string>(src.length).fill(' ');
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    const next = src[i + 1];
-    if (c === '/' && next === '/') {
-      while (i < src.length && src[i] !== '\n') {
-        out[i] = src[i] as string;
-        i++;
-      }
-    } else if (c === '/' && next === '*') {
-      const end = src.indexOf('*/', i + 2);
-      const stop = end === -1 ? src.length : end + 2;
-      for (; i < stop; i++) out[i] = src[i] as string;
-    } else if (opensString(c)) {
-      i = skipQuoted(src, i);
-    } else {
-      if (c === '\n') out[i] = '\n';
-      i++;
-    }
+  const { commentAt, codeAt } = walk(src);
+  const out = new Array<string>(src.length);
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i] as string;
+    out[i] = commentAt[i] === true ? c : codeAt[i] === true && c === '\n' ? '\n' : ' ';
   }
   return out.join('');
 }
@@ -711,6 +797,12 @@ function scannedProse(file: string): string {
   // Every mask replaces text with the SAME number of spaces, because the occurrence half
   // compares byte offsets against the resolver's. A length change would silently shift every
   // offset after it, so it is asserted rather than assumed (CodeRabbit, PR #161).
+  //
+  // These masks are regexes, but none of them can reach inside a string: they run on `prose`,
+  // which for a `.ts` file is the walk's comment-only projection (string bodies are already
+  // blanked) and for a `.md` file is markdown, which has no string literals. They mask
+  // reference NUMERALS, never comment markers. The one replacement that did strip comment
+  // markers by regex — and did reach inside strings — was the tripwire's, and it is gone.
   if (prose.length !== raw.length) {
     throw new Error(`commentsOnly changed the length of ${file} — every offset after the
       change would be wrong`);
@@ -964,6 +1056,36 @@ describe('the scanner refuses syntax it cannot lex', () => {
     );
   });
 
+  // Codex's reproduction. The regex's `}` was counted as the substitution's close, so the
+  // scan walked out of the substitution early, never saw the block comment behind it, and
+  // `commentsOnly` skipped the whole template — the planted 1.0065 stayed green. The rule
+  // that kills it is not a regex parser but a refusal: a `/` here cannot start a regex.
+  it('rejects a regex literal inside a template substitution', () => {
+    const src = 'const s = `${/}/.test(x) /' + '* 1.0065 *' + '/}`;';
+    expect(() => rejectUnlexableSyntax('synthetic.ts', src)).toThrow(
+      /regex literal inside a template substitution/,
+    );
+  });
+
+  // CodeRabbit: the old `nestedTemplate` regex required no `}` between `${` and the nested
+  // backtick, so nesting that opened after a brace in the SAME substitution slipped past it.
+  // The walker counts real braces and skips real strings, so position no longer matters.
+  it('rejects a nested template that opens after a brace in the same substitution', () => {
+    const src = 'const s = `a ${({x: 1}, `inner // literal 1.0065`)} c`;';
+    expect(() => rejectUnlexableSyntax('synthetic.ts', src)).toThrow(/nested template literal/);
+  });
+
+  // CodeRabbit: the old tripwire stripped `//...` with a plain replace before looking for a
+  // quote-bearing regex, so a `//` inside a STRING erased the rest of the line — regex and
+  // all — and the regex went unrejected while `commentsOnly` masked every later comment.
+  // Nothing strips comment markers by regex any more; comment spans come from the walk.
+  it('rejects a quote-bearing regex standing behind a string that contains a comment marker', () => {
+    const src = 'const prefix = "//"; const re = /' + "'" + '/;\n// 1.0065 must stay visible\n';
+    expect(() => rejectUnlexableSyntax('synthetic.ts', src)).toThrow(
+      /regex literal containing a quote or backtick|unterminated string literal/,
+    );
+  });
+
   it('accepts the ordinary constructs the guarded files actually use', () => {
     const ordinary = [
       'const re = /[0-9]+/;',
@@ -973,9 +1095,27 @@ describe('the scanner refuses syntax it cannot lex', () => {
       // A comment marker inside a STRING inside a substitution is literal text — a URL or a
       // path, not prose. Refusing these would make the tripwire a blanket refusal.
       'const v = `see ${"https://example.test/a"} and ${"}"} done`;',
+      // DIVISION inside a substitution, which `oracle.ts` genuinely does. The slash rule bans
+      // regexes and comments, not arithmetic — a blanket ban would refuse a guarded file.
+      'const w = `${(peak / cap).toFixed(4)} of cap`;',
       '// a trailing comment with 1.0065 in it',
     ].join('\n');
     expect(() => rejectUnlexableSyntax('synthetic.ts', ordinary)).not.toThrow();
+  });
+
+  // The narrowing is a grammar fact, not a guess: a regex cannot begin where a value just
+  // ended. Both halves are pinned so neither can drift into over- or under-rejection.
+  it('separates division from regex by the token before the slash', () => {
+    expect(() => rejectUnlexableSyntax('d.ts', 'const a = `${x / y}`;')).not.toThrow();
+    expect(() => rejectUnlexableSyntax('d.ts', 'const b = `${f(x) / 2}`;')).not.toThrow();
+    expect(() => rejectUnlexableSyntax('d.ts', 'const c = `${xs[0] / 2}`;')).not.toThrow();
+    // ...but after a keyword, or at the start of the substitution, a regex is what fits.
+    expect(() => rejectUnlexableSyntax('d.ts', 'const d = `${typeof /x/}`;')).toThrow(
+      /regex literal inside a template substitution/,
+    );
+    expect(() => rejectUnlexableSyntax('d.ts', 'const e = `${/x/.test(s)}`;')).toThrow(
+      /regex literal inside a template substitution/,
+    );
   });
 });
 
