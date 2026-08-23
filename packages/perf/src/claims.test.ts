@@ -126,7 +126,7 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
  *
  *  A second definition of a thing is a defect waiting for its reproduction. There is one now:
  *  the grammar body below, and the three consumers built from it — `IS_NUMERAL` (is this whole
- *  string one), `NUMERAL` (find them in prose), `NUMERAL_LED` (does this token open with one).
+ *  string one), `NUMERAL` (find them in prose), `IS_BARE_NUMERAL` (is this path segment nothing but one).
  *
  *  Signs are still read OFF the numeral, deliberately: a row valued -1.36 covers a prose 1.36,
  *  and the sign is enforced at the row's sites. `IS_NUMERAL` accepts a leading sign because it
@@ -739,26 +739,39 @@ const spaces = (m: string): string => ' '.repeat(m.length);
  *  mask may never do, because every attempt to state it as a thing the mask SHOULD do has been
  *  a list, and every list has been short by one.
  *
- *    A NUMERAL-LED TOKEN IS NEVER A PATH.
+ *    A TOKEN CONTAINING A BARE-NUMERAL SEGMENT IS NEVER A PATH.
  *
  *  Requiring a LETTER anywhere was not enough — a unit suffix is a letter, so `1.0065/ms` read
  *  as a directory. Carving out `<number>/<unit>` was not enough either, because the carve-out
  *  had to guess how long a unit is, and `1.0065/iteration` is eleven characters (Codex). The
  *  length game is the keyword-list game again, so it ends the same way: by inverting it.
  *
- *  Real path segments carry letters, or are `.` or `..`. A leading segment that is a BARE
- *  NUMERAL therefore cannot be a directory, and what follows the slash — a unit, another
- *  numeral, anything — no longer has to be classified at all. Note this is NOT the rejected
- *  "the first segment must contain a letter": that one unmasked every relative path, since `.`
- *  and `..` have no letters either. Asking what the segment is NOT keeps them masked.
+ *  Real path segments carry letters, or are `.` or `..`. A segment that is nothing BUT a
+ *  numeral therefore cannot be a directory, so a token holding one is carrying a value and
+ *  belongs in the scan. This is the FAIL-CLOSED COMPLETION of the rule, and it subsumes its
+ *  own history: round 16 prohibited a numeral-LED token, which is just the leading-segment
+ *  special case, and it left `R/1.0065` — a compact algebraic ratio, letter-led — masking as a
+ *  path with its value inside (Codex). Any segment that IS a claim-shaped numeral now forces
+ *  the whole token into the scan, wherever it sits.
+ *
+ *  Note this is NOT the rejected "the first segment must contain a letter": that one unmasked
+ *  every relative path, since `.` and `..` have no letters either. Asking what a segment IS NOT
+ *  keeps them masked, and `0005-performance-budgets.md` stays a path because it carries letters
+ *  and an extension rather than being a bare numeral.
+ *
+ *  The widening hands two reference classes back to the masks that own them, which is where
+ *  they belonged: an issue reference is the issue-ref mask's (in both `#22` and `issues/22`
+ *  spellings) and a dated runner build is the runner mask's, rather than both being swallowed
+ *  by a path mask that cannot tell a reference from a measurement. Real dates were already the
+ *  date mask's, and it runs first.
  *
  *  The direction is fail-closed. Misreading a path as a measurement surfaces its numerals as
  *  LOUD unaccounted claims; misreading a measurement as a path blanks it SILENTLY, which is the
  *  failure this whole file exists to prevent. */
-const NUMERAL_LED = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`\/`);
+const IS_BARE_NUMERAL = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`$`);
 
 function looksLikePath(m: string): boolean {
-  return /[A-Za-z]/.test(m) && !NUMERAL_LED.test(m);
+  return /[A-Za-z]/.test(m) && !m.split('/').some((seg) => IS_BARE_NUMERAL.test(seg));
 }
 
 /** The claim-bearing prose of a guarded file, masked to preserve every byte offset. */
@@ -787,12 +800,12 @@ function scannedProse(file: string): string {
     // The date mask has the same shape, so it is bounded to real months and days here rather
     // than left to match any hyphenated numeric triple.
     .replace(/\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:\/\d{2})?/g, spaces) // ISO dates
-    .replace(/#\d+/g, spaces) // issue refs
+    .replace(/#\d+|\b(?:issues|pull)\/\d+/g, spaces) // issue refs, in both spellings
     .replace(/\b(ADR|PRD)\s+\d+/g, spaces) // document refs
     // A path needs a LETTER somewhere. `docs/adr/0005-x.md` is a reference; `1.0065/1.0065`
     // is a ratio wearing a slash, and masking it hid a claim in plain sight.
     .replace(/[\w./-]*\/[\w./-]+/g, (m) => (looksLikePath(m) ? spaces(m) : m)) // file paths
-    .replace(/\bubuntu-?\d[\w.]*/gi, spaces) // runner image / release ids
+    .replace(/\bubuntu-?\d[\w.]*(?:\/[\d.]+)?/gi, spaces) // runner image / release ids
     .replace(/\b(PLAN\s+)?step\s+\d+/gi, spaces) // plan step refs
     .replace(/\bM\d+-S\d+\w*/g, spaces) // milestone/story refs
     .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi, spaces) // commit shas
@@ -1140,6 +1153,20 @@ describe('the reference masks blank references, not measurements', () => {
   // The prohibition and the tokenizer must agree about what a numeral IS. They did not: the
   // prohibition required an initial digit while the tokenizer had learned leading-dot and
   // scientific spellings, so these masked as paths and vanished silently (Codex, PR #161).
+  // A bare-numeral segment ANYWHERE, not merely in front. `R/1.0065` is a compact algebraic
+  // ratio whose value sat inside a token the mask read as a directory (Codex, PR #161).
+  it('never masks a token with a bare-numeral segment, wherever the segment sits', () => {
+    expect(mask('the ratio R/1.0065 holds')).toContain('R/1.0065');
+    expect(mask('the ratio ceiling/1.7750 holds')).toContain('ceiling/1.7750');
+    expect(mask('the ratio R/n/0.00922 holds')).toContain('0.00922');
+  });
+
+  it('still blanks a path whose numeral segment is not BARE', () => {
+    // `0005-performance-budgets.md` carries letters and an extension; it is a name, not a value.
+    expect(mask('see docs/adr/0005-performance-budgets.md now')).not.toContain('0005');
+    expect(mask('see ../adr/0005-performance-budgets.md now')).not.toContain('0005');
+  });
+
   it('never masks a numeral-led token, at any numeral SPELLING', () => {
     expect(mask('cost .00922/iteration measured')).toContain('.00922/iteration');
     expect(mask('cost 9.22e-3/iteration measured')).toContain('9.22e-3/iteration');
@@ -1162,7 +1189,15 @@ describe('the reference masks blank references, not measurements', () => {
     // Requiring a LETTER there would unmask every one of these, since `.` and `..` have none.
     expect(mask('see ../adr/0005-x.md now')).not.toContain('0005');
     expect(mask('see ../../prd/0001-core.md now')).not.toContain('0001');
-    expect(mask('see //github.com/o/r/issues/22 now')).not.toContain('22');
+    // The URL's trailing `22` IS a bare numeral, so the path mask correctly declines it now —
+    // an issue reference is owned by the issue-ref mask, in both of its spellings, rather than
+    // swallowed by a path mask that cannot tell a reference from a measurement.
+    expect(mask('see //github.com/o/r/issues/22 now')).toContain('22');
+    expect(
+      'see //github.com/o/r/issues/22 now'.replace(/#\d+|\b(?:issues|pull)\/\d+/g, (x) =>
+        ' '.repeat(x.length),
+      ),
+    ).not.toContain('22');
   });
 
   it('bounds the ISO-date mask to real months and days, not any numeric triple', () => {
@@ -1200,7 +1235,7 @@ describe("the numeral grammar is the language's, not a run of digits", () => {
   it('answers "is this a numeral" identically everywhere it is asked', () => {
     for (const spelling of ['0.00922', '.00922', '9.22e-3', '1,427', '1.0065', '900000']) {
       expect(IS_NUMERAL.test(spelling), `IS_NUMERAL rejected ${spelling}`).toBe(true);
-      expect(NUMERAL_LED.test(`${spelling}/unit`), `NUMERAL_LED missed ${spelling}`).toBe(true);
+      expect(IS_BARE_NUMERAL.test(spelling), `IS_BARE_NUMERAL missed ${spelling}`).toBe(true);
       expect([...`x ${spelling} y`.matchAll(NUMERAL)], `NUMERAL missed ${spelling}`).toHaveLength(
         1,
       );
