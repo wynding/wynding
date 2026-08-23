@@ -14,8 +14,17 @@ describe('mintUuid', () => {
     }
   });
 
-  it('mints distinct ids', () => {
-    expect(mintUuid(null)).not.toBe(mintUuid(null));
+  it('mints a distinct id per call', () => {
+    // Asserted through an INJECTED source, not the `Math.random` fallback. Two draws from
+    // an unseeded generator collide with probability ~2^-122 — vanishingly small, but the
+    // assertion would then be about the platform's RNG rather than about this function,
+    // and a test whose subject is somebody else's entropy is one that can fail for a
+    // reason nobody here can fix. The fallback's SHAPE is covered by the test above.
+    let n = 0;
+    const source = { randomUUID: () => `id-${String(++n)}` };
+    expect(mintUuid(source)).toBe('id-1');
+    expect(mintUuid(source)).toBe('id-2');
+    expect(mintUuid(source)).not.toBe(mintUuid(source));
   });
 });
 

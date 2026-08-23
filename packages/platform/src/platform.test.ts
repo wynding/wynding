@@ -19,12 +19,14 @@ function fakeStorage(seed: Record<string, string> = {}): WebStorageLike & {
   map: Map<string, string>;
   failWrites: boolean;
   failReads: boolean;
+  failRemoves: boolean;
 } {
   const map = new Map(Object.entries(seed));
   return {
     map,
     failWrites: false,
     failReads: false,
+    failRemoves: false,
     getItem(key) {
       // The shape Safari private mode / a blocked-cookies profile actually throws with.
       if (this.failReads) throw new Error('SecurityError: read blocked');
@@ -35,6 +37,7 @@ function fakeStorage(seed: Record<string, string> = {}): WebStorageLike & {
       map.set(key, value);
     },
     removeItem(key) {
+      if (this.failRemoves) throw new Error('SecurityError: remove blocked');
       map.delete(key);
     },
   };
@@ -130,6 +133,24 @@ describe('the envelope (ADR 0008 §2)', () => {
     expect(decodeEnvelope('{"saveVersion":1,"deviceId":"d","revision":-1,"updatedAt":0}')).toEqual({
       status: 'corrupt',
     });
+    // A bare JSON PRIMITIVE parses fine and is not an envelope — `5` is the one that would
+    // slip past a `typeof parsed === 'object'` test written without the null/array guards.
+    expect(decodeEnvelope('5')).toEqual({ status: 'corrupt' });
+    expect(decodeEnvelope('"a string"')).toEqual({ status: 'corrupt' });
+    expect(decodeEnvelope('null')).toEqual({ status: 'corrupt' });
+    // A NON-INTEGER saveVersion: `1.5` is neither this version nor a future one, so it
+    // must not sail through the `> SAVE_VERSION` comparison as "current".
+    expect(decodeEnvelope('{"saveVersion":1.5,"deviceId":"d","revision":1,"updatedAt":0}')).toEqual(
+      { status: 'corrupt' },
+    );
+    // `updatedAt` is informational, but a MISSING or non-finite one still means the
+    // payload is not envelope-shaped — the field was previously validated with no test.
+    expect(decodeEnvelope('{"saveVersion":1,"deviceId":"d","revision":1}')).toEqual({
+      status: 'corrupt',
+    });
+    expect(
+      decodeEnvelope('{"saveVersion":1,"deviceId":"d","revision":1,"updatedAt":"soon"}'),
+    ).toEqual({ status: 'corrupt' });
   });
 });
 
@@ -237,6 +258,53 @@ describe('the save slot — serialized writes and atomic revision allocation', (
     await slot.clear();
     expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBeUndefined();
     expect(storage.map.get(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe('{not json');
+  });
+
+  it('clear() REFUSES a newer save — deleting one is worse than the overwrite write refuses', async () => {
+    // The asymmetry this closes: `write` politely declined to overwrite a future payload
+    // while `clear` deleted it outright, so the gentler operation was guarded and the
+    // destructive one was not. Both now run the same guard, because there is only one
+    // mutation path left to put it on.
+    const stored = encodeEnvelope({
+      saveVersion: SAVE_VERSION + 1,
+      deviceId: 'device-b',
+      revision: 9,
+      updatedAt: 0,
+      data: 'from the future',
+    });
+    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: stored });
+    const slot = stringSlot(storage);
+    await expect(slot.clear()).rejects.toThrow(/newer saveVersion/);
+    expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBe(stored);
+  });
+
+  it('clear() surfaces an I/O failure rather than reporting a removal that did not happen', async () => {
+    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: 'x' });
+    const slot = stringSlot(storage, { parse: () => 'x' });
+    storage.failRemoves = true;
+    await expect(slot.clear()).rejects.toBeInstanceOf(StorageError);
+    expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBe('x');
+  });
+
+  it('the FIRST quarantined original wins — a second corruption never overwrites it', async () => {
+    // "Never deletes" has to survive a second corruption. Overwriting the preserved
+    // original with a later one is a delete wearing a different verb, and it destroys the
+    // copy most likely to explain how the slot went wrong in the first place.
+    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: '{first corruption' });
+    const slot = stringSlot(storage);
+    await slot.read();
+    expect(storage.map.get(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe(
+      '{first corruption',
+    );
+
+    // A fresh write lands, and is then corrupted again by something outside this slot.
+    await slot.write('healthy');
+    storage.map.set(`${STORAGE_NAMESPACE}settings`, '{second corruption');
+    await slot.read();
+
+    expect(storage.map.get(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe(
+      '{first corruption',
+    );
   });
 
   it('quarantines the bytes it CLASSIFIED, never a re-read (the two-tab race)', async () => {

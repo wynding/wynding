@@ -155,6 +155,32 @@ describe('resolveDeviceId', () => {
     ).resolves.toBe('existing');
   });
 
+  it('SERIALIZES first-run creation — two tabs cannot mint two device ids', async () => {
+    // The race: both tabs read an empty key, both mint, both write, and the loser's
+    // envelopes are afterwards stamped with an id that is no longer the device's —
+    // which makes `deviceId` + `revision`, ADR 0008 §2's per-device write order, describe
+    // two devices that are one. A single real lock, shared by both callers, is what
+    // settles it; the second read INSIDE the lock is what makes the loser adopt the
+    // winner's id instead of overwriting it.
+    const storage = fakeStorage();
+    const driver = createWebStorageDriver(storage);
+    let held = Promise.resolve<unknown>(undefined);
+    const lock = <R>(_name: string, fn: () => Promise<R>): Promise<R> => {
+      const next = held.then(fn, fn);
+      held = next.catch(() => undefined);
+      return next;
+    };
+    let minted = 0;
+    const crypto = { randomUUID: () => `minted-${String(++minted)}` };
+
+    const [a, b] = await Promise.all([
+      resolveDeviceId(driver, crypto, lock),
+      resolveDeviceId(driver, crypto, lock),
+    ]);
+    expect(a).toBe(b);
+    expect(storage.map.get(`${NS}${DEVICE_ID_KEY}`)).toBe(a);
+  });
+
   it('mints one even when the store refuses the write', async () => {
     const storage = fakeStorage();
     storage.failWrites = true;

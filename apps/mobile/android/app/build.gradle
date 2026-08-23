@@ -141,6 +141,22 @@ tasks.matching { task ->
                 "— 'Release signing'. NEVER commit any of it: this repository is public."
             )
         }
+        // The README requires an ABSOLUTE storeFile, and this is what makes that a rule
+        // rather than advice. A relative path resolves against `android/app/`, which is
+        // almost never where anyone keeps a keystore — so the honest outcomes are a
+        // confusing "file not found" or, far worse, silently signing with a DIFFERENT
+        // keystore that happens to sit at that relative path. A key mismatch only shows up
+        // as INSTALL_FAILED_UPDATE_INCOMPATIBLE on a player's device, long after release.
+        if (!new File(releaseStoreFile).isAbsolute()) {
+            throw new GradleException(
+                "Release keystore path must be ABSOLUTE, got '" + releaseStoreFile + "'. " +
+                "A relative path resolves against apps/mobile/android/app/, not your working " +
+                "directory — and would silently sign with whatever keystore happens to sit " +
+                "there. Supply an absolute path in WYNDING_KEYSTORE_FILE or as storeFile in " +
+                "apps/mobile/android/keystore.properties. See apps/mobile/README.md — " +
+                "'Release signing'."
+            )
+        }
         if (stagedCapacitorConfig.exists() &&
                 stagedCapacitorConfig.text.contains("webContentsDebuggingEnabled")) {
             throw new GradleException(

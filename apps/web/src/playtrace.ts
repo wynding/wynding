@@ -45,7 +45,7 @@
 // rather than a silently-dropped command. `playtrace.test.ts` makes that falsifiable.
 
 import type { SimInput } from '@wynding/sim';
-import { MAX_TOTAL_TOWER_COMMANDS, type Replay } from '@wynding/replay';
+import { MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
 import type { SaveSlot } from '@wynding/platform';
 
 /** Payload schema version. Distinct from `simVersion` and from `saveVersion`. */
@@ -79,7 +79,7 @@ export interface Playtrace {
   readonly stateHash: string;
   readonly tickInputs: readonly (readonly SimInput[])[];
   readonly pendingInputs: readonly SimInput[];
-  /** True when the pending buffer exceeded {@link MAX_TOTAL_TOWER_COMMANDS} and was cut.
+  /** True when the pending buffer exceeded {@link MAX_INPUTS_PER_TICK} and was cut.
    *  Carried rather than left implicit: a truncation nobody can see is a silent discard. */
   readonly pendingInputsTruncated: boolean;
   readonly viewport: PlaytraceViewport;
@@ -132,7 +132,7 @@ function serializeInput(cmd: SimInput): SimInput {
  *  handed over by reference. */
 export function buildPlaytrace(source: PlaytraceSource): Playtrace {
   const pending = source.pendingInputs;
-  const truncated = pending.length > MAX_TOTAL_TOWER_COMMANDS;
+  const truncated = pending.length > MAX_INPUTS_PER_TICK;
   return {
     runId: source.runId,
     capturedAt: source.capturedAt,
@@ -143,9 +143,14 @@ export function buildPlaytrace(source: PlaytraceSource): Playtrace {
     ticksCompleted: source.ticksCompleted,
     stateHash: source.stateHash,
     tickInputs: source.replay.tickInputs.map((tick) => tick.map(serializeInput)),
-    // Capped against the run-wide bound the replay validator already enforces, rather
-    // than trusting the buffer to be short (#99 note 3).
-    pendingInputs: (truncated ? pending.slice(0, MAX_TOTAL_TOWER_COMMANDS) : pending).map(
+    // Capped against the bound that actually governs this buffer (#99 note 3 asked for
+    // an explicit cap; it named the wrong constant). `pendingInputs` is the controller's
+    // PER-TICK buffer, which `effectiveCap()` bounds by `MAX_INPUTS_PER_TICK` (64, or 63
+    // pre-start with one slot reserved for Start's own wave claim). The run-wide
+    // `MAX_TOTAL_TOWER_COMMANDS` (1,000) counts placeTower/sellTower across a whole match
+    // and is 15x too loose here — a "cap" that can never bind is not a cap, and it would
+    // have let a corrupted buffer through at 999 entries while claiming to be bounded.
+    pendingInputs: (truncated ? pending.slice(0, MAX_INPUTS_PER_TICK) : pending).map(
       serializeInput,
     ),
     pendingInputsTruncated: truncated,
@@ -175,10 +180,23 @@ export interface StoredOptOut {
 /** The opt-out slot's bare key. */
 export const OPT_OUT_KEY = 'playtrace';
 
+/**
+ * Validate a stored opt-out. `undefined` — "not this slot's shape" — for anything whose
+ * `optOut` is not an actual boolean.
+ *
+ * THE COERCION THIS REPLACED WAS A PRIVACY BUG, not a style problem. `optOut: optOut ===
+ * true` turned every malformed payload into a valid record reading `false`, so a
+ * truncated write, a hand-edited value, or a `{optOut: "true"}` from some future writer
+ * all came back as "this player is happy to be uploaded" — corruption silently promoted
+ * to consent. Rejecting instead routes those through the slot's `incompatible` branch,
+ * which `loadPlaytraceOptOut` fails CLOSED on. Where we cannot know what was chosen, the
+ * answer must be the protective one, and an unreadable record is exactly that case.
+ */
 export function parseStoredOptOut(data: unknown): StoredOptOut | undefined {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined;
   const { optOut } = data as { optOut?: unknown };
-  return { optOut: optOut === true };
+  if (typeof optOut !== 'boolean') return undefined;
+  return { optOut };
 }
 
 export interface PlaytraceOptOut {
@@ -312,20 +330,28 @@ export function browserDelivery(doc: Document): PlaytraceDelivery {
     save(filename: string, text: string): void {
       const view = doc.defaultView;
       if (view === null) throw new Error('no window to download from');
-      const url = view.URL.createObjectURL(new view.Blob([text], { type: 'application/json' }));
+      // CAPTURED ONCE, not re-read inside the deferred revoke below. An object URL is a
+      // handle owned by the `URL` object that minted it, so revoking through a different
+      // one is at best a no-op and at worst a leak — and the revoke now runs on a later
+      // task, which is exactly the window in which `view.URL` could have been replaced.
+      const urlApi = view.URL;
+      const url = urlApi.createObjectURL(new view.Blob([text], { type: 'application/json' }));
       const link = doc.createElement('a');
       link.href = url;
       link.download = filename;
       // Not appended to the document: a click on a detached anchor still starts the
       // download in every engine that supports `download`, and appending would put a
       // stray node inside the results dialog's tab order for a frame.
-      link.click();
-      // DEFERRED past the click, per MDN's own note on `createObjectURL`: revoking
-      // synchronously can invalidate the blob before the engine has actually started
-      // fetching it, and the download then silently does nothing. A task boundary is
-      // enough — the click's default action is queued by the time this returns — and it
-      // still revokes, so the blob is not leaked for the page's lifetime.
-      view.setTimeout(() => view.URL.revokeObjectURL(url), 0);
+      try {
+        link.click();
+      } finally {
+        // SCHEDULED IN `finally`, so a `click()` that throws — a security policy refusing
+        // the navigation, an engine quirk — still frees the blob instead of pinning it for
+        // the page's lifetime. And DEFERRED past the click either way, per MDN's own note
+        // on `createObjectURL`: revoking synchronously can invalidate the blob before the
+        // engine has started fetching it, and the download then silently does nothing.
+        view.setTimeout(() => urlApi.revokeObjectURL(url), 0);
+      }
     },
   };
 }

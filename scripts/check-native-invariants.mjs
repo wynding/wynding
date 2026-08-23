@@ -326,6 +326,70 @@ for (const [dir, rules] of [
   );
 }
 
+/**
+ * Blank out Groovy comments, preserving every byte position that is not a comment.
+ *
+ * STRING-AWARE ON PURPOSE. A naive `//`-to-end-of-line strip would truncate any string
+ * containing a URL or a path, and truncation is the DANGEROUS direction here: text that
+ * vanishes cannot be scanned, so an inlined credential could hide behind one and the gate
+ * would pass. This walks the source tracking quote state instead, so only real comments go.
+ *
+ * Comments become SPACES rather than being deleted, and newlines survive, so line and
+ * column positions are unchanged — which is what lets the statement-position anchors in
+ * the caller keep meaning what they say.
+ *
+ * Groovy's triple-quoted and dollar-slashy strings are not modelled; neither appears in
+ * the file this reads. If one ever does, the failure mode is a false POSITIVE (a comment
+ * left un-blanked, reddening correct code), never a false pass — the right way round for
+ * a gate whose whole job is refusing to miss a secret.
+ */
+function stripGroovyComments(source) {
+  const BACKSLASH = String.fromCharCode(92);
+  let out = '';
+  let i = 0;
+  let quote = null; // "'" or '"' while inside a string
+  while (i < source.length) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (quote !== null) {
+      out += c;
+      if (c === BACKSLASH && i + 1 < source.length) {
+        out += next; // an escaped char cannot close the string
+        i += 2;
+        continue;
+      }
+      if (c === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      out += c;
+      i += 1;
+      continue;
+    }
+    if (c === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') {
+        out += ' ';
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) {
+        out += source[i] === '\n' ? '\n' : ' ';
+        i += 1;
+      }
+      out += '  '; // the closing */
+      i += 2;
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
 // 2b. The release signing config reads its material from OUT OF BAND, and carries none.
 //
 // The ignore rules above are one half — "a keystore file cannot be committed". This is the
@@ -342,28 +406,50 @@ if (gradle !== null) {
     'WYNDING_KEY_ALIAS',
     'WYNDING_KEY_PASSWORD',
   ];
-  const missingEnv = ENV_NAMES.filter((n) => !gradle.includes(n));
+  // EVERY CHECK BELOW READS EXECUTABLE GRADLE, NEVER RAW TEXT. Both halves of this
+  // invariant were satisfiable by a comment before: an env name merely MENTIONED anywhere
+  // passed the presence test, so deleting the real `signingValue(...)` call and leaving
+  // the name in a comment left the gate green while the config read nothing; and a
+  // credential parked in a commented-out line was invisible to the literal scan while
+  // still sitting in a tracked file in a public repo. `code` is the file with comments
+  // blanked out, so what is asserted is what Gradle would actually run.
+  const code = stripGroovyComments(gradle);
+
+  // Each name must appear INSIDE a `signingValue(...)` call — the one function that reads
+  // the environment. Presence anywhere was never the claim; being wired up is.
+  const missingEnv = ENV_NAMES.filter(
+    (n) => !new RegExp(`signingValue\\(\\s*["']${n}["']`).test(code),
+  );
   expect(
     missingEnv.length === 0,
     'the release signing config reads every value from the environment',
-    `app/build.gradle never mentions ${missingEnv.join(', ')} — the signing config must take ` +
-      `its material out of band, never from a tracked file.`,
+    `app/build.gradle has no signingValue('<name>', …) call for ${missingEnv.join(', ')} — ` +
+      `the signing config must take its material out of band, never from a tracked file. ` +
+      `(A mention in a comment does not count: this reads executable statements only.)`,
   );
   expect(
-    /rootProject\.file\(["']keystore\.properties["']\)/.test(gradle),
+    /rootProject\.file\(["']keystore\.properties["']\)/.test(code),
     'the release signing config falls back to the untracked keystore.properties',
     `app/build.gradle does not read rootProject.file("keystore.properties") — that file is the ` +
       `gitignored home of a developer's own credentials (see the rules asserted above).`,
   );
-  // A LITERAL on the right of any of these is the accident. Variable references
-  // (`storePassword releaseStorePassword`) carry no quotes and pass.
+  // A QUOTED LITERAL assigned to any signing property is the accident. Variable references
+  // (`storePassword releaseStorePassword`, `storeFile file(releaseStoreFile)`) carry no
+  // quotes and pass.
   //
-  // ANCHORED TO STATEMENT POSITION (`^\s*`), and that is not defensive tidying: the
-  // unanchored form matched the word `keyPassword` inside this very file's own error
-  // MESSAGE — a guard one level too high, reddening correct code, which is worse than the
-  // gap it was widened to close. A real assignment always begins its line.
+  // THREE SPELLINGS, because Groovy accepts all three and an earlier version of this
+  // matched only the first: the space form (`storePassword "…"`), the assignment form
+  // (`storePassword = "…"`), and the wrapped form (`storeFile file("…")`, with or without
+  // the `=`). A guard that knows one spelling of three is a guard one autocomplete away
+  // from useless — the same lesson the determinism zone records about its own spellings.
+  //
+  // Still anchored to statement position, which is now safe rather than merely narrow:
+  // comments are blanked above, so the false positive that forced the anchor — the word
+  // `keyPassword` inside this file's own error MESSAGE — cannot recur from a comment.
   const inlined = [
-    ...gradle.matchAll(/^[ \t]*(storePassword|keyPassword|keyAlias|storeFile)[ \t]+["']/gm),
+    ...code.matchAll(
+      /^[ \t]*(storePassword|keyPassword|keyAlias|storeFile)[ \t]*=?[ \t]*(?:file[ \t]*\([ \t]*)?["']/gm,
+    ),
   ].map((m) => m[0].trim());
   expect(
     inlined.length === 0,

@@ -144,6 +144,15 @@ export function createModalOwner(
     }
   }
 
+  /** Dismiss the active overlay if it is dismissable; a no-op otherwise. ONE
+   *  implementation, shared by Escape below and by hardware Back (#138) — the doc on
+   *  `activeDismissal` promises the two can never disagree about an overlay, and two
+   *  copies of this rule is exactly how that promise would quietly stop being true. */
+  function dismissActive(): void {
+    const active = activeEntry();
+    if (active !== null && active.dismissOnEscape) close(active.overlay);
+  }
+
   const onKeydown = (e: KeyboardEvent): void => {
     // Prefer `e.key` — `e.code` can be '' on virtual/on-screen keyboards — keeping `code`
     // as a fallback for the physical keyboards that populate it.
@@ -153,7 +162,7 @@ export function createModalOwner(
     if (active === null) return; // no modal open — game-level Escape (P2) may handle it
     e.preventDefault();
     e.stopPropagation();
-    if (active.dismissOnEscape) close(active.overlay);
+    dismissActive();
     // Otherwise (results/rotate): consumed, not dismissable — no further action.
   };
   doc.addEventListener('keydown', onKeydown, true); // capture: runs before game-level Escape
@@ -166,10 +175,7 @@ export function createModalOwner(
       if (active === null) return null;
       return active.dismissOnEscape ? 'dismiss' : 'consume';
     },
-    dismissActive(): void {
-      const active = activeEntry();
-      if (active !== null && active.dismissOnEscape) close(active.overlay);
-    },
+    dismissActive,
     destroy(): void {
       doc.removeEventListener('keydown', onKeydown, true);
       // Destroying with a non-empty stack must not strand the app: tear the stack down like

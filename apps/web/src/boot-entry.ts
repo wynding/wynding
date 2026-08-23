@@ -31,7 +31,14 @@ const booting = boot(document);
 if (booting === null) {
   throw new Error('missing #app root element');
 }
-// Deliberately UNHANDLED on the failure path: a boot that throws should reach the
-// console and `unhandledrejection` exactly as an uncaught error would, not be swallowed
-// into a blank page that looks fine.
-void booting;
+// A boot that FAILS must be as loud as a boot that never started. `void` marks a promise
+// as deliberately un-awaited; it does not handle a rejection, so an async boot failure
+// would have surfaced only as a bare `unhandledrejection` whose message some consoles
+// truncate and whose stack points into the microtask queue rather than at the app.
+// Rethrowing from a timeout puts it on the global error path instead — the same place the
+// missing-root `throw` above lands — with the original cause attached.
+booting.catch((cause: unknown) => {
+  setTimeout(() => {
+    throw new Error('Wynding failed to boot', { cause });
+  });
+});

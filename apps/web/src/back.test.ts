@@ -262,11 +262,15 @@ describe('createBackHandler — the wiring', () => {
     const fake = fakePlugin();
     const calls = { ensurePaused: 0, abortGesture: 0, dismissActive: 0, refreshWakeLock: 0 };
     const leaveConfirms: (() => void)[] = [];
+    let dismissal: 'dismiss' | 'consume' | null = options.dismissal ?? null;
     const handle = createBackHandler({
       modal: {
         open: vi.fn(),
         close: vi.fn(),
-        activeDismissal: () => options.dismissal ?? null,
+        // MUTABLE, so a test can drive one handler through a real sequence of presses
+        // where the modal state CHANGES between them — which is what actually happens
+        // when a Back press opens the leave confirm and the next press meets it.
+        activeDismissal: () => dismissal,
         dismissActive: () => void calls.dismissActive++,
         destroy: vi.fn(),
       },
@@ -278,7 +282,14 @@ describe('createBackHandler — the wiring', () => {
       refreshWakeLock: () => void calls.refreshWakeLock++,
       plugin: fake.plugin,
     });
-    return { ...fake, calls, leaveConfirms, handle };
+    return {
+      ...fake,
+      calls,
+      leaveConfirms,
+      handle,
+      /** Move the modal state, as opening or closing a dialog really would. */
+      setDismissal: (v: 'dismiss' | 'consume' | null): void => void (dismissal = v),
+    };
   }
 
   it('registers for both the Back button and the native lifecycle', async () => {
@@ -343,20 +354,27 @@ describe('createBackHandler — the wiring', () => {
     h.handle.destroy();
   });
 
-  it('Stay is just not committing — the confirm never exits on its own', async () => {
+  it('Stay is just not committing: a SECOND Back dismisses the confirm and still never exits', async () => {
+    // ONE handler, two presses, with the modal state moving between them exactly as it
+    // does in the app — the sequence this test is named for. An earlier version used two
+    // separate handlers with hardcoded states, which asserted the table twice and the
+    // SEQUENCE not at all: nothing in it could have caught a second press that exited.
     const h = harness({ runLive: false, runUnresolved: true });
     await vi.waitFor(() => expect(h.registered()).toContain('backButton'));
-    h.back();
-    // A second Back lands on the now-open, dismissable confirm — which the modal row
-    // handles as a dismissal. Simulated here by the dismissal the real dialog registers.
-    const dismissable = harness({ dismissal: 'dismiss', runUnresolved: true });
-    await vi.waitFor(() => expect(dismissable.registered()).toContain('backButton'));
-    dismissable.back();
-    expect(dismissable.calls.dismissActive).toBe(1);
-    expect(dismissable.exitApp).not.toHaveBeenCalled();
+
+    h.back(); // press one: nothing open, unresolved run → ask
+    expect(h.leaveConfirms).toHaveLength(1);
     expect(h.exitApp).not.toHaveBeenCalled();
+
+    // The confirm is now open, and it registers dismissable (settings priority,
+    // `dismissOnEscape: true` — see `overlay.ts`'s `showLeave`).
+    h.setDismissal('dismiss');
+    h.back(); // press two: the dismissable row wins → Stay
+    expect(h.calls.dismissActive).toBe(1);
+    expect(h.exitApp).not.toHaveBeenCalled();
+    expect(h.leaveConfirms).toHaveLength(1); // not re-asked
+
     h.handle.destroy();
-    dismissable.handle.destroy();
   });
 
   it('backgrounding pauses (#134) and returning to the foreground does NOT resume', async () => {

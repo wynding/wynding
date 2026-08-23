@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SimInput } from '@wynding/sim';
-import { MAX_TOTAL_TOWER_COMMANDS, validate, type Replay } from '@wynding/replay';
+import { MAX_INPUTS_PER_TICK, validate, type Replay } from '@wynding/replay';
 import { getBundledRuleset } from '@wynding/content';
-import { createSaveSlot, createWebStorageDriver, type WebStorageLike } from '@wynding/platform';
+import {
+  createSaveSlot,
+  createWebStorageDriver,
+  encodeEnvelope,
+  SAVE_VERSION,
+  type WebStorageLike,
+} from '@wynding/platform';
 import {
   MAX_RECENT_AGE_MS,
   MAX_RECENT_RUNS,
@@ -129,16 +135,19 @@ describe('the pending-buffer cap (#99 note 3)', () => {
   const fill = (n: number): SimInput[] =>
     Array.from({ length: n }, (): SimInput => ({ kind: 'callWaveEarly' }));
 
-  it('caps against the replay validator’s own run-wide bound, not a restated number', () => {
-    const built = buildPlaytrace(source({ pendingInputs: fill(MAX_TOTAL_TOWER_COMMANDS + 25) }));
-    expect(built.pendingInputs).toHaveLength(MAX_TOTAL_TOWER_COMMANDS);
-    expect(MAX_TOTAL_TOWER_COMMANDS).toBe(1_000);
+  it('caps against the bound that actually governs a PER-TICK buffer', () => {
+    // Not the run-wide `MAX_TOTAL_TOWER_COMMANDS` (1,000) #99 note 3 named: this buffer is
+    // the controller's per-tick one, which `effectiveCap()` bounds by MAX_INPUTS_PER_TICK.
+    // A cap 15x looser than the thing it bounds can never bind, and would have waved a
+    // corrupted 999-entry buffer through while claiming to be bounded.
+    const built = buildPlaytrace(source({ pendingInputs: fill(MAX_INPUTS_PER_TICK + 25) }));
+    expect(built.pendingInputs).toHaveLength(MAX_INPUTS_PER_TICK);
   });
 
   it('flags a truncation rather than discarding silently', () => {
     expect(buildPlaytrace(source({ pendingInputs: fill(1) })).pendingInputsTruncated).toBe(false);
     expect(
-      buildPlaytrace(source({ pendingInputs: fill(MAX_TOTAL_TOWER_COMMANDS + 1) }))
+      buildPlaytrace(source({ pendingInputs: fill(MAX_INPUTS_PER_TICK + 1) }))
         .pendingInputsTruncated,
     ).toBe(true);
   });
@@ -228,6 +237,15 @@ describe('the durable opt-out (ADR 0011 condition 2)', () => {
     };
   }
 
+  const settingsShapedOptOut = (data: unknown): string =>
+    encodeEnvelope({
+      saveVersion: SAVE_VERSION,
+      deviceId: 'device-a',
+      revision: 1,
+      updatedAt: 0,
+      data,
+    });
+
   const slotFor = (storage: WebStorageLike | null) =>
     createSaveSlot<StoredOptOut>({
       driver: createWebStorageDriver(storage),
@@ -287,13 +305,28 @@ describe('the durable opt-out (ADR 0011 condition 2)', () => {
     expect(recorder.buildExport().runs).toHaveLength(1);
   });
 
-  it('parseStoredOptOut coerces a junk value rather than trusting it', () => {
+  it('parseStoredOptOut REJECTS a malformed record rather than reading it as consent', () => {
+    // The bug this pins: coercing with `optOut === true` turned every malformed payload
+    // into a valid record reading `false` — so a truncated write or a hand-edited value
+    // came back as "happy to be uploaded". Corruption must never become permission.
     expect(parseStoredOptOut({ optOut: true })).toEqual({ optOut: true });
-    expect(parseStoredOptOut({ optOut: 'yes' })).toEqual({ optOut: false });
-    expect(parseStoredOptOut({})).toEqual({ optOut: false });
+    expect(parseStoredOptOut({ optOut: false })).toEqual({ optOut: false });
+    expect(parseStoredOptOut({ optOut: 'true' })).toBeUndefined();
+    expect(parseStoredOptOut({ optOut: 1 })).toBeUndefined();
+    expect(parseStoredOptOut({})).toBeUndefined();
     expect(parseStoredOptOut(null)).toBeUndefined();
     expect(parseStoredOptOut([])).toBeUndefined();
     expect(parseStoredOptOut(7)).toBeUndefined();
+  });
+
+  it('FAILS CLOSED on a malformed stored record — it does not read as opted IN', async () => {
+    // End to end through the slot: an unreadable choice routes to `incompatible`, which
+    // `loadPlaytraceOptOut` answers protectively. Asserted for both shapes a corrupted
+    // record realistically takes.
+    for (const data of [{}, { optOut: 'true' }]) {
+      const storage = fakeStorage({ [`${NS}${OPT_OUT_KEY}`]: settingsShapedOptOut(data) });
+      expect((await loadPlaytraceOptOut(slotFor(storage))).optedOut()).toBe(true);
+    }
   });
 });
 
@@ -348,9 +381,15 @@ describe('export mechanics', () => {
       value: { writeText },
       configurable: true,
     });
-    await browserDelivery(document).copy('payload');
-    expect(writeText).toHaveBeenCalledWith('payload');
-    Reflect.deleteProperty(window.navigator, 'clipboard');
+    try {
+      await browserDelivery(document).copy('payload');
+      expect(writeText).toHaveBeenCalledWith('payload');
+    } finally {
+      // In `finally`: a failed assertion above would otherwise leave a fake clipboard
+      // installed on the SHARED navigator, and the very next test — the one asserting
+      // that a missing clipboard rejects — would find it and pass for the wrong reason.
+      Reflect.deleteProperty(window.navigator, 'clipboard');
+    }
   });
 
   it('browser delivery REJECTS where there is no clipboard API, rather than pretending', async () => {
@@ -360,18 +399,29 @@ describe('export mechanics', () => {
   it('browser delivery saves via an object URL it revokes AFTER the click, not during', async () => {
     const createObjectURL = vi.fn(() => 'blob:fake');
     const revokeObjectURL = vi.fn();
-    vi.stubGlobal('URL', Object.assign(globalThis.URL, { createObjectURL, revokeObjectURL }));
+    // A SEPARATE object, never `Object.assign(globalThis.URL, …)`: that mutates the real
+    // URL constructor in place, so `vi.unstubAllGlobals()` restores a reference to an
+    // object that is still carrying these two spies. They then survive into every later
+    // test in the process — the leak being fixed here, not a hypothetical one.
+    const urlStub = Object.assign(
+      function URLStub(...args: ConstructorParameters<typeof URL>) {
+        return new globalThis.URL(...args);
+      } as unknown as typeof URL,
+      { createObjectURL, revokeObjectURL },
+    );
     const clicked: HTMLAnchorElement[] = [];
     const realClick = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
       clicked.push(this);
     };
+    vi.stubGlobal('URL', urlStub);
     try {
       browserDelivery(document).save('run.json', '{}');
     } finally {
       HTMLAnchorElement.prototype.click = realClick;
       vi.unstubAllGlobals();
     }
+    expect(globalThis.URL).not.toBe(urlStub); // the restore actually restored
     expect(clicked).toHaveLength(1);
     expect(clicked[0]!.download).toBe('run.json');
     expect(clicked[0]!.getAttribute('href')).toBe('blob:fake');

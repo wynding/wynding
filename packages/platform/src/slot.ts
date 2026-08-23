@@ -46,7 +46,9 @@ export interface SaveSlot<T> {
    *  `revision`, because the counter lives in the stored envelope and is re-read inside
    *  the critical section rather than cached here. */
   write(data: T): Promise<void>;
-  /** Remove this slot's payload. Leaves any quarantined original alone. */
+  /** Remove this slot's payload. Leaves any quarantined original alone, and REFUSES a
+   *  payload written by a newer `saveVersion` exactly as {@link SaveSlot.write} does —
+   *  a deletion the ADR forbids overwriting is worse, not better. */
   clear(): Promise<void>;
 }
 
@@ -97,10 +99,18 @@ export function createSaveSlot<T>(options: SaveSlotOptions<T>): SaveSlot<T> {
    * it, which is ADR 0008 §5's "fresh state is initialized ONLY AFTER the original is
    * safely preserved" with nothing destructive in the path at all: a `set` that rejects
    * propagates out of `load` and out of whatever operation called it, so a failed
-   * quarantine leaves the original exactly where it was. Re-quarantining the same bytes
-   * on a later read is idempotent — same key, same content.
+   * quarantine leaves the original exactly where it was.
+   *
+   * FIRST PRESERVED WINS. The write is conditional on the quarantine slot being empty,
+   * because "never deletes" has to survive a SECOND corruption: quarantine a corrupt
+   * payload, let a fresh write land, let that one corrupt too, and an unconditional copy
+   * would overwrite the first preserved original with the second — destroying data
+   * through the very mechanism that exists to keep it. Overwriting is a delete wearing a
+   * different verb. The earliest original is also the one most likely to explain how the
+   * slot went wrong in the first place.
    */
   async function quarantine(raw: string): Promise<void> {
+    if ((await driver.get(quarantineKey(key))) !== undefined) return;
     await driver.set(quarantineKey(key), raw);
   }
 
@@ -133,44 +143,67 @@ export function createSaveSlot<T>(options: SaveSlotOptions<T>): SaveSlot<T> {
     };
   }
 
+  /**
+   * THE ONE MUTATION PATH: lock → load/classify → guard → mutate.
+   *
+   * Every operation that changes this slot goes through here, and that is the point
+   * rather than a tidiness preference. `clear` used to take the lock and then delete
+   * WITHOUT the classification `write` performs, so a payload `write` politely refused to
+   * overwrite could be destroyed outright by `clear` — deletion being strictly the worse
+   * of the two. One path means a future operation cannot forget the guard, because there
+   * is nowhere else to put it.
+   *
+   * `verb` only shapes the message; the refusal is identical either way.
+   */
+  function mutate<R>(verb: string, run: (envelope: SaveEnvelope | null) => Promise<R>): Promise<R> {
+    return serialize(() =>
+      lock(`${key}:write`, async () => {
+        const { read, envelope } = await load();
+        // ONLY `future` refuses. A corrupt payload has been copied aside by `load` —
+        // successfully, or that would have rejected out of here — so retiring it now IS
+        // "fresh state initialised after the original is safely preserved" (ADR 0008 §5).
+        if (read.status === 'incompatible' && read.reason === 'future') {
+          throw new Error(
+            `refusing to ${verb} ${key}: it was written by a newer saveVersion ` +
+              `(ADR 0008 §5 preserves it read-only)`,
+          );
+        }
+        return run(envelope);
+      }),
+    );
+  }
+
   return {
     read(): Promise<SlotRead<T>> {
-      // UNDER THE LOCK, like `write` — not because a read mutates in the ordinary case,
-      // but because the corrupt branch does, and a mutation outside the lock would make
-      // this module's serialization claim false exactly where it matters most.
+      // UNDER THE LOCK, like every mutation — not because a read changes anything in the
+      // ordinary case, but because the corrupt branch does, and a mutation outside the
+      // lock would make this module's serialization claim false exactly where it matters
+      // most. No `future` guard here: a newer save must be REPORTED, not thrown at.
       return serialize(() => lock(`${key}:write`, async () => (await load()).read));
     },
     write(data: T): Promise<void> {
-      return serialize(() =>
-        lock(`${key}:write`, async () => {
-          const { read, envelope } = await load();
-          // ONLY `future` refuses. A corrupt payload has been copied aside by the line
-          // above — successfully, or that line would have rejected out of here — so
-          // overwriting it now IS "fresh state initialised after the original is safely
-          // preserved" (ADR 0008 §5). The overwrite is what retires it; nothing deletes.
-          if (read.status === 'incompatible' && read.reason === 'future') {
-            throw new Error(
-              `refusing to overwrite ${key}: it was written by a newer saveVersion ` +
-                `(ADR 0008 §5 preserves it read-only)`,
-            );
-          }
-          await driver.set(
-            key,
-            encodeEnvelope({
-              saveVersion: SAVE_VERSION,
-              deviceId,
-              // Re-read inside the critical section, never cached: a failed write leaves
-              // the stored envelope untouched, so the counter simply does not advance.
-              revision: (envelope?.revision ?? 0) + 1,
-              updatedAt: now(),
-              data,
-            }),
-          );
-        }),
+      return mutate('overwrite', (envelope) =>
+        driver.set(
+          key,
+          encodeEnvelope({
+            saveVersion: SAVE_VERSION,
+            deviceId,
+            // Re-read inside the critical section, never cached: a failed write leaves
+            // the stored envelope untouched, so the counter simply does not advance.
+            revision: (envelope?.revision ?? 0) + 1,
+            updatedAt: now(),
+            data,
+          }),
+        ),
       );
     },
     clear(): Promise<void> {
-      return serialize(() => lock(`${key}:write`, () => driver.remove(key)));
+      // Refuses a newer build's save for the same reason `write` does, and with more at
+      // stake: this one cannot be undone by the next write. Nothing in the shipped app
+      // calls `clear` today, so there is no wipe path that needs to override the refusal;
+      // if one ever arrives it gets its own explicitly-named destructive API rather than
+      // quietly widening this one.
+      return mutate('clear', () => driver.remove(key));
     },
   };
 }

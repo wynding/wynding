@@ -74,11 +74,8 @@ export const MAX_INPUTS_PER_TICK = 64;
  * that reaches the maze-invariant check runs a full grid-wide Dijkstra, and a rejected
  * placement is a free no-op (no bounty spent), so the economy cannot rate-limit
  * repeats — without this cap an attacker could pack minutes of CPU into one replay.
- *
- * EXPORTED (#133) so the playtrace capture bounds its pending-input buffer against the
- * same number rather than restating it. Two spellings of one bound is how they drift.
  */
-export const MAX_TOTAL_TOWER_COMMANDS = 1_000;
+const MAX_TOTAL_TOWER_COMMANDS = 1_000;
 
 /** A 64-char lowercase-hex SHA-256 digest. */
 const SHA256_HEX = /^[0-9a-f]{64}$/;

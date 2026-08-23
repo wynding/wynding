@@ -912,10 +912,18 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     modal: overlay.modal,
     isRunLive: () =>
       controller.uiState().started && !controller.isPaused() && !controller.isTerminal(),
-    // A PAUSED run is still a run the player has. This is the predicate that keeps Back
-    // from exiting out from under one — the same question the home link's interceptor
-    // asks before it navigates away.
-    isRunUnresolved: () => controller.uiState().started && !controller.isTerminal(),
+    // A PAUSED run is still a run the player has — and so is a board full of PENDING
+    // BUILDS on a run that has not started yet. This must be the same question the home
+    // link's interceptor asks (`!started && !hasPlan` → let the navigation through), or
+    // the two ways out of the app disagree about what counts as losing something: a
+    // player who queued six towers pre-start and pressed Back would have them thrown
+    // away, while the same player clicking the wordmark would be asked first.
+    isRunUnresolved: () => {
+      if (controller.isTerminal()) return false;
+      if (controller.uiState().started) return true;
+      const pending = controller.frame();
+      return pending.pendingAdds.length > 0 || pending.pendingSells.length > 0;
+    },
     showLeaveConfirm: (onConfirm) => {
       // The home link's own lifecycle, minus the parts that are about a link: pause
       // defensively (a no-op here — this row only fires on an already-paused run), put
@@ -928,7 +936,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     ensurePaused,
     abortGesture: () => input.abort(),
     refreshWakeLock: () => wakeLock.refresh(),
-    plugin: deps.capacitorApp ?? findCapacitorApp(view, hosted),
+    // `=== undefined`, not `??`: `capacitorApp` documents the same explicit-null
+    // convention `wakeLock` does (line ~230) — NULL means "this environment has no
+    // plugin, do not go looking", UNDEFINED means "find it yourself". `??` collapses the
+    // two, so a test passing `null` to prove the inert path would silently get the real
+    // discovery instead, and the assertion would pass for the wrong reason.
+    plugin: deps.capacitorApp === undefined ? findCapacitorApp(view, hosted) : deps.capacitorApp,
   });
 
   function onAction(action: UiAction): void {
@@ -1139,7 +1152,7 @@ async function bootInto(doc: Document, root: HTMLElement): Promise<AppHandle> {
   // ONE device identity for every slot this boot stamps (ADR 0008 §2's `deviceId` +
   // `revision` pair). Resolving it per slot would mint two ids on a fresh device and
   // make the pair meaningless as a per-device write order.
-  const deviceId = await resolveDeviceId(driver, ambientCrypto(view));
+  const deviceId = await resolveDeviceId(driver, ambientCrypto(view), lock);
   const settingsPersistence = await loadSettings({
     driver,
     prefersReducedMotion,

@@ -174,11 +174,29 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
   const { plugin } = deps;
   if (plugin === null) return { destroy: () => undefined };
 
+  /**
+   * ONE policy for every promise this module hands to the bridge.
+   *
+   * `void p` marks a promise as deliberately un-awaited; it does NOT handle a rejection,
+   * and every call here crosses into native code that can genuinely fail — a plugin not
+   * registered on this platform, a listener removed after the bridge tore down, an
+   * `exitApp` refused by the OS. Unhandled, each becomes an `unhandledrejection` on a
+   * page whose whole job is to keep rendering a game. Swallowed here instead, because
+   * there is no recovery any of these could drive: Back not exiting is a nuisance, a
+   * crashed page is not.
+   */
+  const bridge = <R>(p: Promise<R>, onResolve?: (value: R) => void): void => {
+    p.then(
+      (value) => onResolve?.(value),
+      () => undefined,
+    ).catch(() => undefined);
+  };
+
   let destroyed = false;
   const handles: PluginListenerHandleLike[] = [];
   const keep = (handle: PluginListenerHandleLike): void => {
     if (destroyed) {
-      void handle.remove();
+      bridge(handle.remove());
       return;
     }
     handles.push(handle);
@@ -204,11 +222,11 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
         // The run is already paused (that is what distinguishes this row from `pause`),
         // so the dialog opens over a still board. `showLeaveConfirm` owns the modal-open
         // lifecycle, gesture abort included, exactly as the home link's route does.
-        deps.showLeaveConfirm(() => void plugin.exitApp());
+        deps.showLeaveConfirm(() => bridge(plugin.exitApp()));
         return;
       case 'default':
         // Explicit, because registering a listener at all turned the OS default off.
-        void plugin.exitApp();
+        bridge(plugin.exitApp());
         return;
     }
   };
@@ -228,13 +246,13 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
     deps.refreshWakeLock();
   };
 
-  void plugin.addListener('backButton', onBack).then(keep);
-  void plugin.addListener('appStateChange', onStateChange).then(keep);
+  bridge(plugin.addListener('backButton', onBack), keep);
+  bridge(plugin.addListener('appStateChange', onStateChange), keep);
 
   return {
     destroy(): void {
       destroyed = true;
-      for (const handle of handles.splice(0)) void handle.remove();
+      for (const handle of handles.splice(0)) bridge(handle.remove());
     },
   };
 }

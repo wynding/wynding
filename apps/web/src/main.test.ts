@@ -2219,6 +2219,99 @@ describe('main — the screen wake lock (#140)', () => {
   });
 });
 
+describe('main — hardware Back never exits out from under work (#138)', () => {
+  /** The predicate `main.ts` hands the Back handler, observed through a fake plugin. */
+  function backApp() {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    let onBack: (() => void) | null = null;
+    const exitApp = vi.fn(async () => undefined);
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      capacitorApp: {
+        addListener: (async (name: string, listener: () => void) => {
+          if (name === 'backButton') onBack = listener;
+          return { remove: async () => undefined };
+        }) as never,
+        exitApp,
+      },
+    });
+    openApps.push(app);
+    return {
+      root,
+      exitApp,
+      back: (): void => onBack?.(),
+      frame: (): void => sched.frame((clock += 16)),
+    };
+  }
+
+  it('an explicit `capacitorApp: null` means "no plugin", not "go find one"', () => {
+    // `??` would have collapsed this: a test passing null to prove the inert path would
+    // silently get the real discovery instead and pass for the wrong reason. `wakeLock`
+    // documents the same convention, so honouring it here keeps the two deps readable as
+    // one rule rather than two exceptions.
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const bridge = { Plugins: { App: { addListener: vi.fn(), exitApp: vi.fn() } } };
+    (window as unknown as { Capacitor?: unknown }).Capacitor = bridge;
+    try {
+      const app = createApp(document, root, {
+        sceneFactory: () => fakeHandle,
+        schedule: manualSchedule().schedule,
+        now: () => 0,
+        seed: 1,
+        hosted: true, // the bridge WOULD be found...
+        capacitorApp: null, // ...but null says this environment has none
+      });
+      openApps.push(app);
+      expect(bridge.Plugins.App.addListener).not.toHaveBeenCalled();
+    } finally {
+      delete (window as unknown as { Capacitor?: unknown }).Capacitor;
+    }
+  });
+
+  it('exits when there is genuinely nothing to lose', async () => {
+    const h = backApp();
+    h.frame();
+    await vi.waitFor(() => {
+      h.back();
+      expect(h.exitApp).toHaveBeenCalled();
+    });
+  });
+
+  it('ASKS FIRST when a pre-start board carries pending builds', async () => {
+    // The predicate must be the home-link guard's own (`!started && !hasPlan` is what lets
+    // a navigation through), or the two ways out of the app disagree about what counts as
+    // losing something: towers queued pre-start would be thrown away by Back while the
+    // wordmark politely asked.
+    const h = backApp();
+    h.frame();
+    // The same pre-start planning path `planTowerWhileHeld` uses above: arm the basic
+    // Card, walk the keyboard cursor off the entrance, confirm. The run stays HELD — the
+    // buffer is a plan, not a run, which is exactly the state this row is about.
+    const board = h.root.querySelector<HTMLElement>('.wy-board')!;
+    const key = (code: string): void => {
+      board.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+    };
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+    for (let i = 0; i < 3; i++) key('ArrowRight');
+    for (let i = 0; i < 2; i++) key('ArrowUp');
+    key('Enter');
+    h.frame();
+    expect(Number(board.dataset.pendingAdds), 'the plan must actually exist').toBeGreaterThan(0);
+    expect(board.dataset.started, 'the run must still be HELD').toBe('false');
+
+    h.back();
+    await Promise.resolve();
+    expect(h.exitApp).not.toHaveBeenCalled();
+  });
+});
+
 describe('main — the playtrace capture and its export actions (#133)', () => {
   /** An app wired with an inspectable delivery and a pinned `runId` mint. */
   function playtraceApp(runIds: string[] = ['run-1', 'run-2', 'run-3']) {

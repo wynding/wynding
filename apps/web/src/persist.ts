@@ -162,24 +162,53 @@ export async function loadSettings(options: LoadSettingsOptions): Promise<Settin
  * still needed to stamp this session's envelopes, and the slot reads and writes that
  * follow are what actually discover, and report, that the store refuses. Resolved ONCE
  * per boot and shared across every slot.
+ *
+ * SERIALIZED, under the same cross-tab lock discipline the save slots use, and for the
+ * same reason. First run in two tabs is a real race: both read an empty key, both mint,
+ * both write, and the loser's envelopes are afterwards stamped with a `deviceId` that is
+ * no longer the device's — which makes the `deviceId` + `revision` pair, ADR 0008 §2's
+ * whole per-device write order, describe two devices that are one. The second read
+ * INSIDE the lock is what settles it: whichever tab takes the lock second finds the
+ * winner's id and adopts it instead of minting a second one.
+ *
+ * It does not share `slot.ts`'s mutation path, and that is a deliberate limit rather
+ * than an oversight: this key holds no envelope, so there is no `saveVersion` to
+ * classify and no `revision` to allocate — the shared strategy is the lock and the
+ * in-lock re-read, not the machinery built on top of them.
  */
 export async function resolveDeviceId(
   driver: StorageDriver,
   cryptoSource?: UuidCrypto | null,
+  lock: LockFn = (_name, fn) => fn(),
 ): Promise<string> {
-  try {
-    const existing = await driver.get(DEVICE_ID_KEY);
-    if (typeof existing === 'string' && existing !== '') return existing;
-  } catch {
-    /* unreadable — mint a session id below and let the slot report the store */
-  }
-  const minted = mintUuid(cryptoSource);
-  try {
-    await driver.set(DEVICE_ID_KEY, minted);
-  } catch {
-    /* unwritable — the settings write is what reports it */
-  }
-  return minted;
+  const read = async (): Promise<string | null> => {
+    try {
+      const existing = await driver.get(DEVICE_ID_KEY);
+      return typeof existing === 'string' && existing !== '' ? existing : null;
+    } catch {
+      /* unreadable — mint a session id and let the slot report the store */
+      return null;
+    }
+  };
+
+  // The cheap path first, outside the lock: on every boot after the first this key is
+  // already populated, and taking a cross-tab lock to discover that would tax the common
+  // case for a race that only exists once in a device's life.
+  const existing = await read();
+  if (existing !== null) return existing;
+
+  return lock(`${DEVICE_ID_KEY}:create`, async () => {
+    // Someone may have won the race between the read above and this lock being granted.
+    const winner = await read();
+    if (winner !== null) return winner;
+    const minted = mintUuid(cryptoSource);
+    try {
+      await driver.set(DEVICE_ID_KEY, minted);
+    } catch {
+      /* unwritable — the settings write is what reports it */
+    }
+    return minted;
+  });
 }
 
 /** The production driver: `localStorage`, which is also what the Capacitor WebView
