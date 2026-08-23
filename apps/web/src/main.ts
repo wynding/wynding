@@ -23,6 +23,7 @@ import {
   type SettingsPersistence,
 } from './persist';
 import { ambientCrypto, mintUuid } from './uuid';
+import { createBackHandler, findCapacitorApp, type CapacitorAppPlugin } from './back';
 import {
   browserDelivery,
   createPlaytraceRecorder,
@@ -90,6 +91,10 @@ export interface AppDeps {
   readonly playtraceDelivery?: PlaytraceDelivery;
   /** The per-run UUID mint (#133/ADR 0014 §4) — injected so a test can pin `runId`. */
   readonly mintRunId?: () => string;
+  /** Capacitor's App plugin (#138), for hardware Back and the native lifecycle. Injected
+   *  because jsdom has no Capacitor bridge; production discovers it off `window` and ONLY
+   *  when `hosted` is true (ADR 0012 — told, never inferred). */
+  readonly capacitorApp?: CapacitorAppPlugin | null;
   /** matchMedia lookup for viewport-gated features (the P5 rotate prompt, Story 11's
    *  install detection) — injectable for tests; defaults to `doc.defaultView.matchMedia`
    *  when available, or an always-non-matching stub otherwise (e.g. jsdom without a stub). */
@@ -898,6 +903,21 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   );
   view?.addEventListener('pagehide', onBackgrounded, { signal: lifecycle.signal });
 
+  /** Android's hardware Back, and the native app-lifecycle event that arrives with it
+   *  (#138, #134's sub-item). A no-op outside a Host: `findCapacitorApp` returns null
+   *  unless the app was TOLD it is hosted AND the bridge is actually there. It routes
+   *  into the SAME `ensurePaused` seam and the same gesture-abort order as every other
+   *  caller — one pause path, not a second one. */
+  const backHandler = createBackHandler({
+    modal: overlay.modal,
+    isRunLive: () =>
+      controller.uiState().started && !controller.isPaused() && !controller.isTerminal(),
+    ensurePaused,
+    abortGesture: () => input.abort(),
+    refreshWakeLock: () => wakeLock.refresh(),
+    plugin: deps.capacitorApp ?? findCapacitorApp(view, hosted),
+  });
+
   function onAction(action: UiAction): void {
     switch (action.type) {
       case 'togglePause':
@@ -1029,6 +1049,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       setFloatBand({ kind: 'none' }); // ...and the band grants beside them (#101)
       guardListener.abort(); // the home-link exit guard
       lifecycle.abort(); // the backgrounding listeners (#139)
+      backHandler.destroy(); // the native Back + lifecycle listeners (#138)
       // Releases a held lock AND disowns one still in flight, so a request that resolves
       // after teardown cannot leave the screen pinned awake (#140).
       wakeLock.destroy();

@@ -54,9 +54,25 @@ interface StackEntry {
   readonly dismissOnEscape: boolean;
 }
 
+/** How the active overlay answers a "go back" key — Escape, or Android's hardware Back
+ *  (#138). `dismiss` closes it; `consume` swallows the press without closing, which is
+ *  what a state-driven overlay does (results is over, rotate is cleared by the device
+ *  turning, not by a key). */
+export type ModalDismissal = 'dismiss' | 'consume';
+
 export interface ModalOwner {
   open(overlay: ModalOverlay, options: ModalOpenOptions): void;
   close(overlay: ModalOverlay): void;
+  /** How the ACTIVE (highest-priority open) overlay answers a back/dismiss key, or `null`
+   *  when nothing is open.
+   *
+   *  Derived from the SAME `dismissOnEscape` metadata the Escape handler reads, so the
+   *  hardware Back button (#138) and Escape can never disagree about an overlay — adding
+   *  a new overlay classifies it once, at its `open` call, for both. */
+  activeDismissal(): ModalDismissal | null;
+  /** Close the active overlay if it is dismissable; a no-op otherwise. The routing
+   *  decision belongs to the caller (`back.ts`'s table) — this is only the effect. */
+  dismissActive(): void;
   /** Detach the document-level Escape listener. */
   destroy(): void;
 }
@@ -145,6 +161,15 @@ export function createModalOwner(
   return {
     open,
     close,
+    activeDismissal(): ModalDismissal | null {
+      const active = activeEntry();
+      if (active === null) return null;
+      return active.dismissOnEscape ? 'dismiss' : 'consume';
+    },
+    dismissActive(): void {
+      const active = activeEntry();
+      if (active !== null && active.dismissOnEscape) close(active.overlay);
+    },
     destroy(): void {
       doc.removeEventListener('keydown', onKeydown, true);
       // Destroying with a non-empty stack must not strand the app: tear the stack down like

@@ -71,10 +71,10 @@ in place.)
 ## After a Capacitor dependency bump, re-sync Android
 
 `android/capacitor.settings.gradle` is generated with paths into the pnpm store that embed the
-resolved versions. Bumping `@capacitor/android` or `@capacitor/core` moves that directory and
-leaves the committed path dangling, which Gradle reports as a missing project directory with
-no hint about the cause. `pnpm run check:native` catches it in `verify` first; the fix is one
-command:
+resolved versions. Bumping `@capacitor/android`, `@capacitor/core` or `@capacitor/app` moves
+that directory and leaves the committed path dangling, which Gradle reports as a missing project
+directory with no hint about the cause. `pnpm run check:native` catches it in `verify` first;
+the fix is one command:
 
 ```shell
 pnpm --filter @wynding/mobile run sync:android
@@ -122,6 +122,25 @@ prompt is the fallback — that path is live, not dead code.
 
 Store distribution is covered by the AGPL §7 App Store Exception (see
 [LICENSE-EXCEPTIONS.md](../../LICENSE-EXCEPTIONS.md)), so anyone can ship store builds.
+
+## The hardware Back button
+
+`@capacitor/app` is installed here, in the package that builds the native projects, because
+installing it is what REGISTERS the plugin on both platforms. The handler is not here: it lives
+in `apps/web/src/back.ts`, with the rest of the input translation, and reaches the plugin through
+the bridge Capacitor puts on `window` rather than by importing the package. That keeps Capacitor
+code out of the open-web bundle, which ADR 0013 keeps as a separate artifact — the web build has
+no Back button to serve.
+
+What Back does, per state: a dismissable overlay (settings, the install instructions, the leave
+confirm) closes; the results dialog and the rotate prompt CONSUME it without closing; a live run
+pauses; and with nothing open and nothing running, the app exits. That last one is an explicit
+`exitApp()` call, because registering a `backButton` listener at all turns Capacitor's own
+handling off — without it, Back would be a dead key.
+
+The same module takes `appStateChange`, so backgrounding the app pauses a live run on the one
+platform where the web's `visibilitychange`/`pagehide` have historically been least reliable.
+Nothing resumes on return; the player resumes deliberately from the Dock.
 
 ## Persistence
 
