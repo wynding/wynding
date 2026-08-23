@@ -87,6 +87,8 @@ const FIXTURE_TEST = 'packages/perf/src/gate-fixture.test.ts';
 const ORACLE = 'packages/perf/src/oracle.ts';
 const ADR = 'docs/adr/0005-performance-budgets.md';
 const SPIKE = 'docs/design-notes/performance-spike.md';
+const ORACLE_TEST = 'packages/perf/src/oracle.test.ts';
+const SCENARIO = 'packages/perf/src/scenario.ts';
 const M2 = 'docs/milestones/m2.md';
 
 export const CLAIMS: readonly Claim[] = [
@@ -261,9 +263,12 @@ export const CLAIMS: readonly Claim[] = [
     basis: 'measured; the figure the 1.10 tolerance is chosen against',
     sites: [
       {
+        // Bound to the table ROW: `[^\\n]` cannot cross the line, so deleting or rewording
+        // this cell fails the site instead of falling through to the tolerance paragraph's
+        // identical `+/- 2.8%` two thousand characters later (Codex, PR #161).
         file: GATE,
         anchor: '\\| p50\\(subset\\) / p50\\(control\\) \\|',
-        pattern: '\\+/-\\s*([\\d.]+)%',
+        pattern: '^[^\\n]*?\\+/-\\s*([\\d.]+)%',
       },
       { file: GATE, anchor: 'rests on\\s*\\n \\*  the', pattern: '\\+/- ([\\d.]+)% row' },
       { file: GATE, anchor: 'because matched medians swing', pattern: '\\+/- ([\\d.]+)%' },
@@ -1183,6 +1188,480 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'A later 32-run interleaved series on that machine spanned',
         pattern: '\\*\\*(\\d+)%\\*\\*',
       },
+    ],
+  },
+
+  // ---------------------------------------------------------------------------------------
+  // THE TWO ARMS' WORKLOADS — the population gap and the DoT asymmetry.
+  // Codex found this whole family unrowed: `gate.ts` states all eight figures, and every
+  // one is duplicated into the oracle, the scenario builder, their tests, or the docs.
+  // ---------------------------------------------------------------------------------------
+  {
+    id: 'population-control-median',
+    claim: "the control arm's median live creeps",
+    value: '181',
+    numeric: 181,
+    basis:
+      "measured; a single-form twin cannot reproduce an area effect's slow coverage, so the control runs lighter",
+    sites: [
+      { file: GATE, anchor: 'measured median', pattern: '\\s*(\\d+) against' },
+      { file: SCENARIO, anchor: 'live-creep median from 160 to', pattern: '\\s*(\\d+)' },
+      { file: SCENARIO, anchor: "control's median live creeps is", pattern: '\\s*(\\d+) against' },
+      { file: SPIKE, anchor: 'median of \\*\\*', pattern: '(\\d+)\\*\\* live creeps' },
+    ],
+  },
+  {
+    id: 'population-stress-median',
+    claim: "the stress arm's median live creeps",
+    value: '224',
+    numeric: 224,
+    basis:
+      "measured; `oracle.ts`'s MEDIAN_LIVE_CREEPS_THRESHOLD of 200 is set below it as a drift tripwire",
+    sites: [
+      {
+        file: GATE,
+        anchor: "measured median 181 against the stress\\s*\\n// run's",
+        pattern: '\\s*(\\d+),',
+      },
+      { file: ORACLE, anchor: 'set below the measured', pattern: '\\s*(\\d+)\\)' },
+      { file: ORACLE, anchor: 'the real run measures a median of', pattern: '\\s*(\\d+)\\)' },
+      {
+        file: SCENARIO,
+        anchor: "median from 160 to 181\\s*\\n \\*  against the stress run's",
+        pattern: '\\s*(\\d+) \\(a population gap',
+      },
+      {
+        file: SCENARIO,
+        anchor: "control's median live creeps is 181 against the stress arm's",
+        pattern: '\\s*(\\d+)\\)',
+      },
+      { file: ADR, anchor: 'the two runs \\(304 peak creeps,', pattern: '\\s*(\\d+) median' },
+      { file: SPIKE, anchor: '\\| Live creeps\\s+\\| median \\*\\*', pattern: '(\\d+)\\*\\*' },
+      { file: M2, anchor: 'peak 304 concurrent creeps, median', pattern: '\\s*(\\d+),' },
+    ],
+  },
+  {
+    id: 'population-control-peak-slowed',
+    claim: "the control arm's peak slowed creeps",
+    value: '109',
+    numeric: 109,
+    basis:
+      'measured; the blast-borne slow COVERAGE the control cannot reproduce, which is why R is not blast cost alone',
+    sites: [
+      { file: GATE, anchor: 'peak slowed creeps', pattern: '\\s*(\\d+) against' },
+      { file: SCENARIO, anchor: 'peak slowed creeps from 0 to', pattern: '\\s*(\\d+) against' },
+      { file: SPIKE, anchor: 'and peaks at \\*\\*', pattern: '(\\d+)\\*\\*' },
+    ],
+  },
+  {
+    id: 'population-stress-peak',
+    claim: "the stress arm's peak concurrent live creeps",
+    value: '304',
+    numeric: 304,
+    basis: "the scene's full scheduled spawn count, all live at the sampled peak",
+    sites: [
+      { file: GATE, anchor: 'peak slowed creeps 109 against', pattern: '\\s*(\\d+) \\(' },
+      { file: ORACLE, anchor: 'a window of one tick at', pattern: '\\s*(\\d+) creeps' },
+      { file: ORACLE, anchor: 'DoT record: >= 100" \\(ceiling', pattern: '\\s*(\\d+),' },
+      { file: ORACLE_TEST, anchor: 'one tick at peak \\(', pattern: '(\\d+) live creeps' },
+      {
+        file: SCENARIO,
+        anchor: "0 peak slowed creeps against the stress run's",
+        pattern: '\\s*(\\d+)\\.',
+      },
+      { file: ADR, anchor: 'the two runs \\(', pattern: '(\\d+) peak creeps' },
+      {
+        file: SPIKE,
+        anchor: '\\| Live creeps\\s+\\| median \\*\\*224\\*\\*, peak \\*\\*',
+        pattern: '(\\d+)\\*\\*',
+      },
+      {
+        file: M2,
+        anchor: "Measured at the ADR's own worst case \\(peak",
+        pattern: '\\s*(\\d+) concurrent',
+      },
+    ],
+  },
+  {
+    id: 'dot-records-control-peak',
+    claim: "the control arm's peak resident DoT records",
+    value: '368',
+    numeric: 368,
+    basis:
+      "measured both arms, same board/seed/anchors/targeting — the control's thin slow coverage seeds a fresh pair per shot",
+    sites: [
+      {
+        file: GATE,
+        anchor: 'HEAVIER in the CONTROL arm —',
+        pattern: '\\s*(\\d+) peak resident records',
+      },
+      { file: ORACLE, anchor: '\\*      control\\s+', pattern: '(\\d+)\\s' },
+      { file: ORACLE, anchor: 'is 175 \\(stress\\) /', pattern: '\\s*(\\d+) \\(control\\)' },
+    ],
+  },
+  {
+    id: 'dot-records-stress-peak',
+    claim: "the stress arm's peak resident DoT records",
+    value: '175',
+    numeric: 175,
+    basis:
+      "measured; `stress-chill`'s AoE slow bunches creeps so venom towers refresh one cohort instead of seeding new pairs",
+    sites: [
+      { file: GATE, anchor: "against the stress\\s*\\n// arm's", pattern: '\\s*(\\d+),' },
+      { file: ORACLE, anchor: '\\*      stress\\s+', pattern: '(\\d+)\\s' },
+      { file: ORACLE, anchor: 'peak `dotRecords` is', pattern: '\\s*(\\d+) \\(stress\\)' },
+      {
+        file: ORACLE,
+        anchor: 'RECORD-DEPTH floor, which pins what this scene actually stresses\\.',
+        pattern: '\\s*(\\d+) records',
+      },
+      {
+        file: ORACLE_TEST,
+        anchor: "scene's measured stress-arm figures \\(",
+        pattern: '(\\d+) records',
+      },
+      {
+        file: ORACLE_TEST,
+        anchor: 'own default `dotRecords:',
+        pattern: '\\s*(\\d+)',
+      },
+      { file: ADR, anchor: '1,427 due-blast samples,', pattern: '\\s*(\\d+) DoT records' },
+    ],
+  },
+  {
+    id: 'dot-carriers-control-peak',
+    claim: "the control arm's peak DoT carriers",
+    value: '127',
+    numeric: 127,
+    basis:
+      'measured; it clears the deleted ">= 100 carriers" floor, which is how sticky targeting was ruled out as the cause',
+    sites: [
+      { file: GATE, anchor: "arm's 175, and", pattern: '\\s*(\\d+) peak DoT carriers' },
+      { file: ORACLE, anchor: '\\*      control\\s+\\d+\\s+', pattern: '(\\d+)\\s' },
+      { file: ORACLE, anchor: 'and the control reaches', pattern: '\\s*(\\d+) carriers' },
+      { file: ORACLE, anchor: "stress arm's dispersion \\(", pattern: '(\\d+) vs' },
+    ],
+  },
+  {
+    id: 'dot-carriers-stress-peak',
+    claim: "the stress arm's peak DoT carriers",
+    value: '19',
+    numeric: 19,
+    basis:
+      'measured; far below the deleted ">= 100" floor, which is why that floor was replaced rather than lowered',
+    sites: [
+      { file: GATE, anchor: 'peak DoT carriers against', pattern: '\\s*(\\d+) —' },
+      { file: ORACLE, anchor: "stress arm's measured peak is", pattern: '\\s*(\\d+) carriers' },
+      { file: ORACLE, anchor: '\\*      stress\\s+\\d+\\s+', pattern: '(\\d+)\\s' },
+      {
+        file: ORACLE_TEST,
+        anchor: 'measured stress-arm figures \\(175 records /',
+        pattern: '\\s*(\\d+) carriers',
+      },
+    ],
+  },
+
+  // ---------------------------------------------------------------------------------------
+  // THE SUPERSEDED PAIRING, and the fixture grid the swept values must not be read off
+  // ---------------------------------------------------------------------------------------
+  {
+    id: 'tolerance-superseded',
+    claim: 'the tolerance the p95/p50 pairing ran at, before M2-S6 tightened it',
+    value: '1.25',
+    numeric: 1.25,
+    basis:
+      'right for a statistic whose ratio swung +/- 15.5%; far too loose for one that swings +/- 2.8%',
+    sites: [
+      {
+        file: GATE,
+        anchor: 'in absolute ms" claim:\\s*\\n \\*  ',
+        pattern: '([\\d.]+) bounded a p95',
+      },
+      { file: GATE_TEST, anchor: 'Tightened', pattern: '\\s*([\\d.]+) ->' },
+      { file: ADR, anchor: '\\*\\*`TOLERANCE`', pattern: '\\s*([\\d.]+) .' },
+      { file: SPIKE, anchor: '`TOLERANCE` tightened \\*\\*', pattern: '([\\d.]+) .' },
+    ],
+  },
+  {
+    id: 'ci-failure-r',
+    claim: 'the `R` the M2-S6 CI failure came in at, on byte-identical work',
+    value: '1.8348',
+    numeric: 1.8348,
+    basis:
+      'run 4 of the four diagnostic runs under the old p95/p50 pairing — the failure that triggered the statistic change',
+    sites: [
+      {
+        file: GATE,
+        anchor: '\\| p95\\(subset\\) / p50\\(control\\) \\| [\\d.]+ [\\d.]+ [\\d.]+',
+        pattern: '\\s*([\\d.]+)',
+      },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'the M2-S6 CI failure\\s*\\n\\s*// at R =',
+        pattern: '\\s*([\\d.]+)',
+      },
+      {
+        file: ADR,
+        anchor: 'The trigger was a CI failure, not a preference: `R =',
+        pattern: '\\s*([\\d.]+)',
+      },
+      { file: SPIKE, anchor: 'CI returned `R =', pattern: '\\s*([\\d.]+)`' },
+    ],
+  },
+  {
+    id: 'paired-gap-lo',
+    claim: 'the low end of the gap between the median ratio and every tail ratio',
+    value: '4.2',
+    numeric: 4.2,
+    basis: 'paired over the same four runs, which is what makes the gap decisive at n = 4',
+    sites: [
+      { file: GATE, anchor: 'every tail ratio is\\s*\\n \\*  ', pattern: '([\\d.]+)x' },
+      { file: ADR, anchor: 'every tail ratio is', pattern: '\\s*([\\d.]+).–' },
+    ],
+  },
+  {
+    id: 'paired-gap-hi',
+    claim: 'the high end of the gap between the median ratio and every tail ratio',
+    value: '5.9',
+    numeric: 5.9,
+    basis:
+      'the same paired comparison; the load-bearing evidence for the statistic, ahead of the correlations',
+    sites: [
+      { file: GATE, anchor: 'every tail ratio is\\s*\\n \\*  [\\d.]+x-', pattern: '([\\d.]+)x' },
+      { file: ADR, anchor: 'every tail ratio is [\\d.]+.–', pattern: '([\\d.]+).' },
+    ],
+  },
+  {
+    id: 'tail-gap-p95-p99',
+    claim: 'the gap between p95/p95 and p99/p99 — inside four-sample noise, so not readable',
+    value: '1.41',
+    numeric: 1.41,
+    basis:
+      'why the honest reading is "the median ratio is quieter than any tail ratio", not a ranking among tails',
+    sites: [
+      { file: GATE, anchor: 'p99/p99 is', pattern: '\\s*([\\d.]+)x' },
+      { file: ADR, anchor: 'p95/p95 versus p99/p99 is', pattern: '\\s*([\\d.]+).' },
+      { file: SPIKE, anchor: 'Even at face value that', pattern: '\\s*([\\d.]+). gap' },
+    ],
+  },
+  {
+    id: 'concentrated-injection-share',
+    claim: 'the share of samples the CONCENTRATED injection touches (`dueBlasts >= 3`)',
+    value: '11',
+    numeric: 11,
+    basis:
+      'the shape an O(n^2) in blast membership scanning would take — real mass, but a minority',
+    sites: [
+      { file: GATE, anchor: 'injection at `dueBlasts >= 3` \\(~', pattern: '(\\d+)%' },
+      { file: FIXTURE_TEST, anchor: 'carries real mass \\(270 of 2,500, ~', pattern: '(\\d+)%' },
+      { file: ADR, anchor: "fixture's `dueBlasts >= 3` injection \\(~", pattern: '(\\d+)%' },
+    ],
+  },
+  {
+    id: 'k-concentrated',
+    claim: 'the injection strength the concentrated blind-spot figures are measured at',
+    value: '0.020',
+    numeric: 0.02,
+    basis: "`gate-fixture.test.ts`'s pinned measurement point for the `dueBlasts >= 3` injection",
+    sites: [
+      { file: GATE, anchor: 'scanning would take\\), measured at k =', pattern: '\\s*([\\d.]+),' },
+      { file: FIXTURE_TEST, anchor: 'Measured at k =', pattern: '\\s*([\\d.]+):' },
+      { file: ADR, anchor: 'this amendment\'s original "k =', pattern: '\\s*([\\d.]+) .' },
+    ],
+  },
+  {
+    id: 'k-broad-snr-point',
+    claim: 'the injection strength the BROAD signal-to-noise comparison is read at',
+    value: '0.010',
+    numeric: 0.01,
+    basis: 'the common case the gate primarily exists to catch, where the ordering reverses',
+    sites: [
+      { file: GATE, anchor: 'ordering reverses: at k =', pattern: '\\s*([\\d.]+) it is' },
+      { file: FIXTURE_TEST, anchor: 'the ratio reverses — at k =', pattern: "\\s*([\\d.]+) p50's" },
+      { file: ADR, anchor: 'original "k = 0\\.020 .', pattern: '\\s*([\\d.]+)"' },
+    ],
+  },
+  {
+    id: 'fixture-grid-lo',
+    claim:
+      "the lower of `gate-fixture.test.ts`'s two `KS` grid points bracketing the swept crossings",
+    value: '0.0075',
+    numeric: 0.0075,
+    basis: 'a grid point, right for the ORDERING the fixture asserts and wrong as a magnitude',
+    sites: [
+      { file: GATE, anchor: "grid\\. The grid's nearest points are", pattern: '\\s*([\\d.]+) and' },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'THE ADDED',
+        pattern: '\\s*([\\d.]+) POINT SITS CLOSE',
+      },
+      { file: ADR, anchor: 'grid, so its\\s*\\n\\s*pinned', pattern: '\\s*([\\d.]+) and' },
+    ],
+  },
+  {
+    id: 'grid-substitution-error',
+    claim: 'the ~24% gap misread off the grid instead of the sweep',
+    value: '23',
+    numeric: 23,
+    basis:
+      "rounding a swept value to the grid's precision reintroduces the error one decimal place lower",
+    sites: [
+      { file: GATE, anchor: "grid's precision turns the ~24% gap into", pattern: '\\s*(\\d+)%' },
+      {
+        file: ADR,
+        anchor: "printing the grid's 0\\.0075, which turns the ~24% gap into",
+        pattern: '\\s*(\\d+)%',
+      },
+    ],
+  },
+  {
+    id: 'claimed-doubling',
+    claim: 'the end-to-end gain an earlier draft claimed by quoting the grid',
+    value: '2.00',
+    numeric: 2.0,
+    basis: 'the substitution this file exists to prevent — the real swept answer is 1.67x',
+    sites: [
+      { file: GATE, anchor: 'gain\\s*\\n// into a claimed', pattern: '\\s*([\\d.]+)x' },
+      { file: FIXTURE_TEST, anchor: 'claim a', pattern: '\\s*([\\d.]+)x end-to-end' },
+      { file: ADR, anchor: 'a claimed', pattern: '\\s*([\\d.]+). where the swept' },
+    ],
+  },
+
+  // ---------------------------------------------------------------------------------------
+  // THE BASELINE'S ARITHMETIC — figures the escalation rule and the three limits rest on
+  // ---------------------------------------------------------------------------------------
+  {
+    id: 'skew-g1',
+    claim: "the 17-attempt cohort's sample skewness",
+    value: '1.36',
+    numeric: 1.36,
+    basis:
+      'left-skewed, which thins the upper tail in our favour but which the chi-square bound assumes away',
+    sites: [
+      { file: GATE, anchor: '\\(g1 = -', pattern: '([\\d.]+)\\)' },
+      { file: ADR, anchor: 'left-skewed \\(g1 = .', pattern: '([\\d.]+)\\)' },
+    ],
+  },
+  {
+    id: 'chi-square-quantile',
+    claim: 'the quantile branch (b) uses — two-sided, and naming it matters',
+    value: '97.5',
+    numeric: 97.5,
+    basis: 'a rule that does not say which bound it means is two rules',
+    sites: [
+      { file: GATE, anchor: 'tested it against the', pattern: '^[^\\n]*?([\\d.]+)% two-sided' },
+      {
+        file: ADR,
+        anchor: 'the same margin against the\\s*\\n\\s*',
+        pattern: '([\\d.]+)% two-sided',
+      },
+    ],
+  },
+  {
+    id: 'draft2-unsatisfiable-n',
+    claim: 'the sample count draft 2 would have needed to clear its own threshold',
+    value: '68',
+    numeric: 68,
+    basis: 'a rule whose own floor of >= 10 samples can never satisfy it is not a rule',
+    sites: [
+      { file: GATE, anchor: 'needing n around', pattern: '\\s*(\\d+) at this noise' },
+      { file: ADR, anchor: 'which is unsatisfiable below n .', pattern: '\\s*(\\d+)' },
+    ],
+  },
+  {
+    id: 'branch-crossover-n',
+    claim: 'the sample count at which the two escalation branches cross',
+    value: '18',
+    numeric: 18,
+    basis: 'below it branch (b) binds, so the operative threshold is not the advertised 3',
+    sites: [
+      { file: GATE, anchor: 'They cross at n =', pattern: '\\s*(\\d+)\\.' },
+      {
+        file: ADR,
+        anchor: 'The bound test is the stricter one below n =',
+        pattern: '\\s*(\\d+) —',
+      },
+    ],
+  },
+  {
+    id: 'floor-granularity',
+    claim: 'the margin flooring `R0` to a hundredth discards before the gate exists',
+    value: '0.01',
+    numeric: 0.01,
+    basis: "why draft 1's `TOLERANCE - 1` was the wrong quantity",
+    sites: [
+      { file: GATE, anchor: 'FLOORED, so up to', pattern: '\\s*([\\d.]+) of margin' },
+      { file: ADR, anchor: 'flooring `R0` discards up to', pattern: '\\s*([\\d.]+) before' },
+    ],
+  },
+  {
+    id: 'limit1-median-agreement',
+    claim: 'how closely two per-image baselines must agree for limit 1 to clear',
+    value: '0.02',
+    numeric: 0.02,
+    basis:
+      '~1 sigma at the spread measured here; compared on MEDIANS, never on the floored `R0` values',
+    sites: [
+      {
+        file: GATE,
+        anchor: 'MEDIANS agree to within \\|median_A - median_B\\| <=',
+        pattern: '\\s*([\\d.]+)',
+      },
+      {
+        file: ADR,
+        anchor: 'baseline under the same rule, medians agreeing within',
+        pattern: '\\s*([\\d.]+),',
+      },
+    ],
+  },
+  {
+    id: 'log-retention-days',
+    claim: 'the CI log retention that makes publishing the raw cohort necessary',
+    value: '90',
+    numeric: 90,
+    basis:
+      'no artifact upload, so the raw `R` values expire and only what is written down survives',
+    sites: [
+      { file: GATE, anchor: 'CI logs expire on a', pattern: '\\s*(\\d+)-day' },
+      {
+        file: ADR,
+        anchor: 'the raw `R` values live only in CI logs under a\\s*\\n\\s*',
+        pattern: '(\\d+)-day',
+      },
+    ],
+  },
+  {
+    id: 'local-r-quiet-high',
+    claim: 'the high end of `R` measured locally on a QUIET authoring machine',
+    value: '1.79',
+    numeric: 1.79,
+    basis: '8 runs, same commit — the upper end of the range a local run cannot transfer from',
+    sites: [
+      { file: GATE, anchor: 'authoring machine `R` sat at [\\d.]+-', pattern: '([\\d.]+) over' },
+      { file: SPIKE, anchor: 'on the same laptop, measured [\\d.]+.', pattern: '([\\d.]+) across' },
+    ],
+  },
+  {
+    id: 'local-r-loaded-high',
+    claim: 'the high end of `R` on the same machine under ordinary background load',
+    value: '2.36',
+    numeric: 2.36,
+    basis: '6 runs, same commit, same machine — ambient load alone moves the range this far',
+    sites: [
+      { file: GATE, anchor: 'the same command measured [\\d.]+-', pattern: '([\\d.]+) over' },
+      { file: SPIKE, anchor: 'quiet and [\\d.]+.', pattern: '([\\d.]+)\\s*\\nacross' },
+    ],
+  },
+  {
+    id: 'local-series-runs',
+    claim: 'the size of the interleaved local series behind the 56% span',
+    value: '32',
+    numeric: 32,
+    basis:
+      'an uncommitted review harness pooling both arms of an ordering A/B; only the ratio transfers',
+    sites: [
+      { file: GATE, anchor: 'over 6 runs; a later', pattern: '\\s*(\\d+)-run interleaved' },
+      { file: SPIKE, anchor: 'A later', pattern: '\\s*(\\d+)-run interleaved' },
     ],
   },
   {
