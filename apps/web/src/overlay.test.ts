@@ -3059,13 +3059,43 @@ describe('Panel auto-reveal latch (#69)', () => {
     const { overlay, shell } = setup();
     const spy = railScrollSpy(shell.rail);
     overlay.update(frameFor({ inspectSeq: 0 }));
-    // The click-then-arm-in-one-frame interleaving: the bump arrives while armed, where
-    // scrolling would move the Rail the pointer is interacting with.
+    // The click-then-arm-in-one-frame interleaving: the bump arrives while armed.
     overlay.update(frameFor({ armed: 'basic', inspectSeq: 1 }));
-    // A later selection with the SAME seq (e.g. the placement's auto-selection) must not
-    // cash in the stale bump.
+    // BASELINE 1, NOT 0, SINCE #145: the arm itself reveals wherever the Panel is not
+    // pinned, and jsdom applies no stylesheet so it never is. That one call belongs to the
+    // ARM; this test is about the BUMP, and the property it exists for is unchanged —
+    // a later selection carrying the SAME seq (e.g. a placement's auto-selection) must not
+    // cash in a bump that was already consumed.
+    const afterArm = spy.mock.calls.length;
+    expect(afterArm, 'the arm reveals exactly once').toBe(1);
     overlay.update(frameFor({ selection: SELECTION, inspectSeq: 1 }));
-    expect(spy).not.toHaveBeenCalled();
+    expect(spy, 'a stale bump must not be deferred to the next selection').toHaveBeenCalledTimes(
+      afterArm,
+    );
+  });
+
+  it('an ARM reveals ONCE where the pin is inactive, and never again while it stays armed (#145)', () => {
+    const { overlay, shell } = setup();
+    const spy = railScrollSpy(shell.rail);
+    overlay.update(frameFor({ inspectSeq: 0 }));
+
+    // The reveal is keyed on the arm TRANSITION, not on the armed STATE. `renderPanel` runs
+    // on every HUD memo-key change (~20×/s), so a state-keyed reveal would re-yank the Rail
+    // out from under a player who scrolled it, every frame, for as long as they stayed armed
+    // — the same per-frame hazard the `inspectSeq` latch exists to prevent one intent over.
+    overlay.update(frameFor({ armed: 'basic', inspectSeq: 0 }));
+    expect(spy).toHaveBeenCalledTimes(1);
+    overlay.update(frameFor({ armed: 'basic', inspectSeq: 0 }));
+    overlay.update(frameFor({ armed: 'basic', inspectSeq: 0 }));
+    expect(spy, 'staying armed must not re-scroll the Rail').toHaveBeenCalledTimes(1);
+
+    // Switching to a DIFFERENT tower is a fresh arm, and so is re-arming the SAME tower
+    // after a disarm — the latch tracks the armed id and is written even when it is null.
+    overlay.update(frameFor({ armed: 'slow', inspectSeq: 0 }));
+    expect(spy).toHaveBeenCalledTimes(2);
+    overlay.update(frameFor({ inspectSeq: 0 })); // disarm
+    overlay.update(frameFor({ armed: 'slow', inspectSeq: 0 }));
+    expect(spy, 're-arming the same tower after a disarm reveals again').toHaveBeenCalledTimes(3);
   });
 
   it('Play-again absorbs the seq reset — no stale reveal from the previous run identity', () => {

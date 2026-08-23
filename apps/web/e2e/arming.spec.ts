@@ -18,10 +18,23 @@ import { FOCUS_RGB, GRID, edgeColours, type Rect } from './layout-probe';
 //     the nine-Card catalog already does at Standard's default height before any Panel
 //     opens, and the opening Panel made worse — pushing the hotkey badge outside its
 //     Card's border box. The Rail is a scrollport; it must absorb overflow by scrolling,
-//     never by squashing. Auto-scroll is keyed on intent (`UiState.inspectSeq`): only a
-//     pointer click that lands on a tower reveals the Panel — arming, placing, and
-//     keyboard cursor-steps never move the Rail (`touch.spec.ts` pins the tap-toggle and
-//     the cached-Card-position-across-a-placement contracts on Compact).
+//     never by squashing.
+//
+// AUTO-SCROLL IS KEYED ON INTENT, AND THERE ARE EXACTLY TWO INTENTS (#145): a POINTER
+// INSPECT — a click that lands on a tower (`UiState.inspectSeq`) — or an ARM WHILE THE PIN
+// IS INACTIVE. Everything else still moves nothing: placing, keyboard cursor-steps, and
+// arming where the Panel IS pinned (Compact, and any narrow Rail — `revealPanel()` early-
+// returns there, which is what keeps `touch.spec.ts`'s tap-toggle and its
+// cached-Card-position-across-a-placement contracts intact on Compact).
+//
+// The arm half is NEW, and this file's 1000×720 case is written around it rather than
+// against it. Before #145 that case read "ONLY a pointer inspect reveals the Panel", and
+// the reason it could was that arming revealed NOWHERE — which on ordinary desktop windows
+// (~980–1279px, where neither pin arm matches) meant arming showed the player zero pixels
+// of the Panel it opened: at 1000×720 the Panel's flow offset was 750px inside a 676px
+// scrollport, byte-for-byte the defect `m2.md` item 12 describes. The invariant that
+// survives — and that the rewritten phases below still pin — is that a PLACEMENT must not
+// scroll: it is measured as a delta from the post-arm baseline rather than from zero.
 
 const STANDARD = { width: 1280, height: 720 };
 
@@ -184,7 +197,7 @@ test.describe('arming via hotkey — Standard layout', () => {
     ).toBe(true);
   });
 
-  test('1000×720: ONLY a pointer inspect reveals the Panel — placement and cursor-steps never scroll', async ({
+  test('1000×720: an ARM and a pointer inspect reveal the Panel — placement and cursor-steps never scroll', async ({
     page,
   }) => {
     // 1000px sits UNDER the two-column width gate, so this is the single-column Rail —
@@ -198,33 +211,84 @@ test.describe('arming via hotkey — Standard layout', () => {
     const railScrollTop = () =>
       page.evaluate(() => (document.querySelector('.wy-rail') as HTMLElement).scrollTop);
 
-    // Arm, then place via the keyboard cursor at (3,3) — smoke.spec's well-known buildable
-    // cell, the same arrow walk.
+    /** Where the Panel's heading sits relative to the Rail's scrollport, in page px. */
+    const headingVsRail = () =>
+      page.evaluate(() => {
+        const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
+        const heading = (
+          document.querySelector('.wy-panel-name') as HTMLElement
+        ).getBoundingClientRect();
+        return {
+          railTop: rail.top,
+          railBottom: rail.bottom,
+          top: heading.top,
+          bottom: heading.bottom,
+        };
+      });
+
+    // PHASE 1 — ARM. This viewport is unpinned Standard, so the arm itself must reveal
+    // (#145). Asserted from `railScrollTop === 0`: `.click()`ing a below-the-fold Card would
+    // auto-scroll the Rail on its own and let this pass with the defect fully intact, which
+    // is exactly how the 224px figure in S12a's plan came to be wrong.
+    expect(await railScrollTop(), 'the Rail must start unscrolled, or the arm proves nothing').toBe(
+      0,
+    );
     await page.keyboard.press('1');
     await expect(page.locator('.wy-panel')).toBeVisible();
+    await expect
+      .poll(railScrollTop, { message: 'an arm must scroll the Rail where the pin is inactive' })
+      .toBeGreaterThan(0);
+    // The SAME heading-visible invariant the inspect case pins below — the scroll is a means,
+    // a readable Panel heading is the end.
+    const armed = await headingVsRail();
+    expect(
+      armed.top,
+      "the armed Panel's heading must not sit above the scrollport",
+    ).toBeGreaterThanOrEqual(armed.railTop - 1);
+    expect(
+      armed.bottom,
+      "the armed Panel's heading must be inside the scrollport",
+    ).toBeLessThanOrEqual(armed.railBottom + 1);
+
+    // PHASE 2 — PLACE, via the keyboard cursor at (3,3), smoke.spec's well-known buildable
+    // cell and the same arrow walk. The placement's auto-selection is a BUILD act and must
+    // not scroll: the builder's next move is usually another Card, and `touch.spec.ts` pins
+    // that a Card's cached position stays valid across a placement. Measured as a DELTA from
+    // the post-arm baseline rather than against zero — the arm legitimately moved the Rail,
+    // and "a placement must not scroll" is a statement about the placement, not about where
+    // the Rail happened to be.
+    const afterArm = await railScrollTop();
     for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
     for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
     await page.keyboard.press('Enter');
     await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
+    expect(await railScrollTop(), 'a placement must not scroll the Rail').toBe(afterArm);
 
-    // The placement's auto-selection is a BUILD act and must not have scrolled the Rail:
-    // the builder's next move is usually another Card, and `touch.spec.ts` pins that a
-    // Card's cached position stays valid across a placement.
-    expect(await railScrollTop(), 'a placement must not scroll the Rail').toBe(0);
-
+    // PHASE 3 — CURSOR-STEP, the same assertion as before against the same baseline of 0.
     // Deselect, then step the keyboard cursor off the tower and back ONTO it. The cursor
     // SELECTS every tower it lands on (`aimAt`) — and held-arrow auto-repeat would re-fire
     // per step — so cursor navigation must not scroll the Rail either.
+    //
+    // REWOUND FIRST, because the arm in phase 1 legitimately left the Rail scrolled and the
+    // engine's own bookkeeping would otherwise be mistaken for a scroll. Measured 2026-08-22,
+    // Chromium: with the Rail at 306 the Escape below hides the Panel, shrinking max scroll to
+    // 74 and CLAMPING the reading to 74 — then re-selecting restores the content height and
+    // `scrollTop` returns to 306, having never been overwritten. A delta from the post-Escape
+    // reading therefore reports +232px of "scroll" that no code performed. Rewinding removes
+    // the confound instead of tolerating it: the property under test is whether the STEPS move
+    // the Rail, and from 0 they must leave it at 0 — exactly what this asserted pre-#145.
     await page.keyboard.press('Escape');
     await expect(page.locator('.wy-panel')).toBeHidden();
+    await page.evaluate(() => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 0));
+    expect(await railScrollTop(), 'the cursor-steps must be measured from a rewound Rail').toBe(0);
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowLeft');
     await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
     expect(await railScrollTop(), 'a cursor-step selection must not scroll the Rail').toBe(0);
 
-    // Now the deliberate act: a pointer click on the tower. Same selection, so the Panel
-    // subtree doesn't even rebuild — the reveal keys on `UiState.inspectSeq`, not on a
-    // panel-state transition — and the Rail scrolls until the Panel's heading is in view.
+    // PHASE 4 — POINTER INSPECT, unchanged. Same selection, so the Panel subtree doesn't even
+    // rebuild — the reveal keys on `UiState.inspectSeq`, not on a panel-state transition —
+    // and the Rail scrolls until the Panel's heading is in view.
     const box = (await page.locator('.wy-board').boundingBox()) as Rect;
     const projection = createProjection({
       cols: GRID.cols,
@@ -234,6 +298,12 @@ test.describe('arming via hotkey — Standard layout', () => {
       dpr: 1,
     });
     const cell = projection.cellToPixel(3, 3);
+    // Rewound to the top FIRST. The arm in phase 1 legitimately left the Rail scrolled, and
+    // "the inspect scrolled it" would otherwise be satisfied by that earlier scroll still
+    // being there — vacuous. Setting `scrollTop` touches no selection state, so the
+    // no-rebuild property this phase depends on is preserved.
+    await page.evaluate(() => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 0));
+    expect(await railScrollTop(), 'the inspect must be measured from a rewound Rail').toBe(0);
     await page.mouse.click(
       box.x + cell.x + projection.cellPx / 2,
       box.y + cell.y + projection.cellPx / 2,
@@ -249,18 +319,7 @@ test.describe('arming via hotkey — Standard layout', () => {
     // the top-align clamps to end-of-Rail and coincides with a naive scroll-to-end —
     // `compact.spec.ts`, where the Panel is TALLER than the scrollport, is the case that
     // discriminates the two (do not trim that one as "redundant" with this).
-    const name = await page.evaluate(() => {
-      const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
-      const heading = (
-        document.querySelector('.wy-panel-name') as HTMLElement
-      ).getBoundingClientRect();
-      return {
-        railTop: rail.top,
-        railBottom: rail.bottom,
-        top: heading.top,
-        bottom: heading.bottom,
-      };
-    });
+    const name = await headingVsRail();
     expect(
       name.top,
       "the Panel's heading must not sit above the scrollport",
@@ -269,4 +328,59 @@ test.describe('arming via hotkey — Standard layout', () => {
       name.railBottom + 1,
     );
   });
+
+  // THE BAND #145 CLOSES, measured as visible Panel PIXELS rather than as a scroll offset —
+  // "the Rail moved" is not the player's outcome, "I can see the Panel I just opened" is.
+  //
+  // 980–1279 is where NEITHER pin arm matches: the container-query arm needs a Rail content
+  // box ≤160px (160.4px at 980, 192px at 1279) and the Compact arm needs a viewport ≤500px
+  // tall. Every one of these measured 0 visible Panel px on `main`. The boundaries either
+  // side are pinned in the same loop precisely so the fix cannot be mistaken for having
+  // moved them: 970 is still served by the pin (`position: sticky`), and 1280 by the
+  // two-column Rail, where the Panel simply fits.
+  //
+  // ARMED BY HOTKEY FROM A REWOUND RAIL, always. A Playwright `.click()` on a below-the-fold
+  // Card auto-scrolls the Rail to reach it, which reveals the Panel as a side effect — that
+  // is how S12a's plan recorded 224px visible at 1000×720 for a case that actually showed 0.
+  for (const width of [970, 980, 1000, 1120, 1279, 1280]) {
+    test(`${width}×720: arming shows the player real Panel pixels`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 720 });
+      await page.goto('/');
+      await expect(page.locator('.wy-board')).toBeVisible();
+
+      await page.evaluate(
+        () => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 0),
+      );
+      await page.keyboard.press('9'); // frost-splash — the catalog's tallest Panel
+      await expect(page.locator('.wy-panel')).toBeVisible();
+
+      const visible = async (): Promise<number> =>
+        page.evaluate(() => {
+          const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
+          const panel = (
+            document.querySelector('.wy-panel') as HTMLElement
+          ).getBoundingClientRect();
+          return Math.max(0, Math.min(rail.bottom, panel.bottom) - Math.max(rail.top, panel.top));
+        });
+      // Polled: where the reveal scrolls, the Panel subtree is already built and visible
+      // before the scroll lands, so no locator state flip gates the frame being measured.
+      await expect
+        .poll(visible, { message: `${width}×720 shows zero Panel pixels on arm` })
+        .toBeGreaterThan(0);
+
+      // And the heading specifically — the "which tower is this?" question the Panel exists
+      // to answer. A sliver of the Panel's bottom edge is not an answer.
+      const heading = await page.evaluate(() => {
+        const rail = (document.querySelector('.wy-rail') as HTMLElement).getBoundingClientRect();
+        const h = (document.querySelector('.wy-panel-name') as HTMLElement).getBoundingClientRect();
+        return { railTop: rail.top, railBottom: rail.bottom, top: h.top, bottom: h.bottom };
+      });
+      expect(heading.top, 'the heading must not sit above the scrollport').toBeGreaterThanOrEqual(
+        heading.railTop - 1,
+      );
+      expect(heading.bottom, 'the heading must be inside the scrollport').toBeLessThanOrEqual(
+        heading.railBottom + 1,
+      );
+    });
+  }
 });

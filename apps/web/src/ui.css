@@ -931,13 +931,20 @@ a.wy-home:focus-visible {
 
      That reasoning is sound for CONDENSING, which answers wrapping. It does NOT carry to
      the PIN, and an earlier draft of this comment claimed it did — asserting the 164px band
-     was one "the existing scroll + reveal already serves". It is not: `revealPanel()` is
-     unreachable when arming, because both of its call sites are gated on
-     `ui.armed === null && ui.selection !== null`, and arming has no selection. No reveal
-     machinery serves that band at all. The pin's real condition is whether the Panel FITS
-     the Rail — a height relationship no container query can ask about — so the band from
-     ~980px to the two-column gate still shows zero Panel pixels on arm, exactly as `main`
-     does. Open, owner-gated, and recorded here rather than papered over.
+     was one "the existing scroll + reveal already serves". At the time it was not:
+     `revealPanel()` was unreachable when arming, because both of its call sites were gated
+     on `ui.armed === null && ui.selection !== null`, and arming has no selection. So no
+     reveal machinery served that band at all, and the pin's real condition — whether the
+     Panel FITS the Rail, a height relationship no container query can ask about — left the
+     band from ~980px to the two-column gate showing zero Panel pixels on arm, exactly as
+     `main` did.
+
+     #145 made the claim TRUE rather than widening the pin: an arm now reveals wherever the
+     pin is INACTIVE (`revealRequested`, `overlay.ts`), so the band is served by scroll +
+     reveal after all. Widening the pin here was the rejected alternative — it would spend
+     the browsable-Cards trade a pinned Panel costs on Standard desktop, which S12a's Act 1
+     declined to weigh there. This threshold therefore still answers WRAPPING only, and the
+     pin stays exactly where the measured curve put it.
 
      Like `.wy-preview-full` (#101), this RESTATES `.wy-sr-only`'s rules rather than
      composing that class on: `.wy-sr-only` is used as an IDENTITY by the

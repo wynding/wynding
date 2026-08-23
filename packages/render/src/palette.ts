@@ -56,7 +56,7 @@ export interface Palette {
    *  Not a timed status (see CONTEXT.md's Domain entry), so gated ≥ 3:1 like every
    *  other opaque cue (`palette.test.ts`) with no motion-cue caveat — same posture as
    *  `warded`. The wingspan draws entirely OUTSIDE the silhouette and outside every
-   *  other cue's radius — apex at r×2.9, tips at ≈ r×2.75 — so its contrast partner is
+   *  other cue's radius — apex at r×3.4, tips at ≈ r×3.23 — so its contrast partner is
    *  the board floor. Radii are NOT restated beyond that: the authoritative ordering,
    *  and the reason it must stay outside the ward, is derived at `creep-paint.ts`'s
    *  CUE-RADIUS ORDERING block. (An earlier version of this comment quoted r×1.1/r×1.3,
@@ -145,7 +145,13 @@ const DEFAULT: Palette = {
   // 0x8fb8f0 → 1.68). Choosing separation here would trade an enforced gate for an
   // unenforced one. Shape carries the distinction instead, decisively and per ADR 0003's
   // primary channel: a stun jolt is a RING at r×1.15; the airborne cue is two line
-  // strokes at r×2.6–2.9, a cell away. Same posture as `poisoned`'s own tritan note.
+  // strokes whose NEAREST point is r×3.23 (the wingtips), over a cell out from the creep
+  // centre — a separation no near-white pair can erase. Restated from the `airborne` key
+  // above, whose own note names `creep-paint.ts`'s CUE-RADIUS ORDERING as the authority
+  // precisely so a restatement cannot become a second source of truth. This line proved
+  // the point: #126 moved the strokes out from r×2.6–2.9 and this sentence went stale,
+  // caught by external review rather than by the move. Same posture as `poisoned`'s own
+  // tritan note.
   airborne: 0xdcf8ff,
   // Pale lavender (M2-S8) — clearing the floor at 7.64:1 composited at
   // `AURA_SHELL_ALPHA`, and byte-distinct from every cue the shell can share a surface

@@ -1419,6 +1419,13 @@ export function createOverlay(
   // boot's seq of 0 isn't mistaken for a fresh inspect (the `selection` guard covers that
   // case anyway; the null keeps the latch semantics explicit).
   let lastInspectSeq: number | null = null;
+  // The last armed tower id renderPanel consumed (#145). The arm-reveal below must fire on
+  // the arm TRANSITION, never on the armed STATE — `renderPanel` runs on every HUD memo-key
+  // change (~20×/s) and a state-keyed reveal would re-yank the Rail out from under a player
+  // who scrolled it, every frame, for as long as they stayed armed. Latched exactly like
+  // `lastInspectSeq`: read and written before the same-key early return, and written even
+  // when `ui.armed` is null so re-arming the SAME tower after a disarm reveals again.
+  let lastArmed: string | null = null;
   // The Panel's live Sell button, tracked across renders so a refund change on the SAME
   // selection can be patched in place (recreating the subtree would drop focus). `null`
   // whenever the Panel isn't showing a selection.
@@ -1459,17 +1466,25 @@ export function createOverlay(
 
   /** Scroll the Rail so the Panel's TOP edge lands at the top of its scrollport (#69).
    *
-   *  Reveal is keyed on the player's deliberate inspect act ALONE (`UiState.inspectSeq` —
-   *  a pointer click that lands on a tower), never inferred from panel-state transitions:
+   *  Reveal is keyed on DELIBERATE intent, never inferred from panel-state transitions, and
+   *  since #145 there are exactly two intents (see `revealRequested` in `renderPanel` for the
+   *  measurements behind the second):
+   *  - A pointer inspect — a click that lands on a tower (`UiState.inspectSeq`).
+   *  - An ARM while the pin is inactive. Arming is a request to read the Panel, and where
+   *    the Panel neither fits the Rail nor pins to it, not revealing showed the player zero
+   *    pixels of it.
+   *  Everything else still moves nothing:
    *  - The keyboard cursor also SELECTS every tower it steps over (`aimAt` via
    *    `moveCursor`), and held-arrow auto-repeat would re-yank the Rail per step —
    *    navigation is not a request to read the Panel.
    *  - A placement's auto-selection (armed→sel) is a build act whose next move is usually
    *    another Card, and `touch.spec.ts` pins that a Card's cached position stays valid
    *    across a placement.
-   *  - An ARMED Panel is opened from the Rail itself (a Card tap or its hotkey);
-   *    scrolling the Rail then yanks the tapped Card away from the pointer —
-   *    tap-again-to-disarm must keep hitting the same Card (`touch.spec.ts`).
+   *  - An arm while the Panel IS pinned — Compact, and any narrow Rail. The Panel is already
+   *    fully visible there, so scrolling would yank the tapped Card away from the pointer for
+   *    nothing, and tap-again-to-disarm must keep hitting the same Card (`touch.spec.ts`).
+   *    That case is enforced by this function's own early return, not by the call-site gate,
+   *    so it holds however the gate is later widened.
    *  The armed highlight, the board's focus ring, and the live region carry feedback for
    *  every non-revealing case.
    *
@@ -1505,6 +1520,34 @@ export function createOverlay(
     // already-selected tower re-reveals a Panel the player has scrolled away from.
     const inspectRequested = ui.inspectSeq !== lastInspectSeq;
     lastInspectSeq = ui.inspectSeq;
+    const armRequested = ui.armed !== null && ui.armed !== lastArmed;
+    lastArmed = ui.armed;
+    /** THE REVEAL INTENT (#145): a pointer inspect, OR an arm while the pin is inactive.
+     *
+     *  The second half is new, and it closes the band `m2.md` item 12 describes on ORDINARY
+     *  desktop windows. M2-S12a pinned the Panel to the Rail's bottom edge so that arming
+     *  actually shows it, but the pin has only two arms — a narrow Rail (`@container wy-rail
+     *  (max-width: 160px)`) and the Compact fork — and between roughly 980px and 1279px wide
+     *  NEITHER matches: measured against the built app, arming `frost-splash` by hotkey from
+     *  `railScrollTop === 0` put the Panel's flow offset at 750px inside a 676px scrollport
+     *  and showed the player ZERO pixels of it, across 55 swept viewports at 100% zoom (190
+     *  at 150%, 180 at 200%). A 10px change in window width flipped between fully solved and
+     *  completely unsolved.
+     *
+     *  Scroll-reveal rather than a wider pin, deliberately: widening the pin would spend the
+     *  browsable-Cards trade (a pinned Panel covers Cards) on Standard desktop, where S12a's
+     *  Act 1 explicitly declined to weigh it. Where the pin IS active this changes nothing —
+     *  `revealPanel()` early-returns there, so Compact's no-scroll-on-arm contract, and the
+     *  tap-again-to-disarm gesture it protects (`touch.spec.ts`), are untouched.
+     *
+     *  THE TRADE, stated: on unpinned Standard, arming now scrolls the Rail. Rail stability
+     *  while armed is spent for Panel visibility — the same exchange the pointer-inspect
+     *  reveal already makes, and `arming.spec.ts`'s 1000×720 case is rewritten around it.
+     *  `panelIsPinned()` is second so its `getComputedStyle` is reached only on an actual arm
+     *  transition, never on the same-key render-loop path. */
+    const revealRequested =
+      (inspectRequested && ui.armed === null && ui.selection !== null) ||
+      (armRequested && !panelIsPinned());
     if (key === lastPanelKey) {
       // Same Panel identity (same armed kind / selection) — the subtree is preserved to keep
       // focus, but the Sell refund can still change while the SAME tower stays selected (the
@@ -1541,7 +1584,7 @@ export function createOverlay(
           mutated = true;
         }
       }
-      if (inspectRequested && ui.armed === null && ui.selection !== null) {
+      if (revealRequested) {
         revealPanel();
         mutated = true; // an unpinned reveal scrolls the Rail, which moves `hasMore`
       }
@@ -1590,7 +1633,7 @@ export function createOverlay(
     }
     // The rebuild-path half of the auto-reveal — the WHY (and the acts that must never
     // scroll) is documented on `revealPanel` above.
-    if (inspectRequested && ui.armed === null && ui.selection !== null) revealPanel();
+    if (revealRequested) revealPanel();
     // THE recompute seam (M2-S12a P4). Placed here — after the final `hidden` assignment
     // and after any reveal scroll — rather than at the three `appendStatRows` calls: those
     // all run BEFORE `hidden` is written, so they would measure stale visibility, and the

@@ -213,6 +213,35 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
     // treats the drift as the non-essential motion cue and `poisoned` as opaque.
     expect(drift(0).alpha).toBe(0.5);
   });
+
+  it('pins the drift cue REACH — centre crest at r×2.4, and a DRAWN extent that the pip floor pushes past it (#126)', () => {
+    // The cue-radius ordering block used to enumerate only the ring-shaped cues, so the
+    // drift — the outermost TIMED cue in the renderer — was absent from both the argument
+    // and this suite. Centre alone is not the reach that collides: these are FILLED discs,
+    // so the extent is centre + drawn radius, and `DOT_PIP_MIN_PX` holds that radius at
+    // 1.5px while everything around it stays proportional.
+    const crest = dotTelegraphPaintOps(
+      { x: 0, y: 0, poisoned: true },
+      R,
+      false,
+      POISONED,
+      899.9999,
+    ).filter((o) => o.kind === 'drift');
+    expect(crest).toHaveLength(3);
+    for (const d of crest) {
+      expect(pipDistance(d, 0, 0)).toBeCloseTo(R * 2.4, 3); // the centre the block records
+      // …and the drawn edge, which reaches further. At R = 3.5 the floored 1.5px disc is
+      // 0.43r, so the extent is r×2.83 — past the ward, past the slow pulse, and past
+      // where the airborne apex used to sit relative to it.
+      expect((pipDistance(d, 0, 0) + d.r) / R).toBeCloseTo(2.4 + 1.5 / R, 3);
+      expect((pipDistance(d, 0, 0) + d.r) / R).toBeGreaterThan(2.4);
+    }
+    // At an ordinary cell the floor is not engaged and the extent settles at r×2.58.
+    const big = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, 20, false, POISONED, 899.9999)
+      .filter((o) => o.kind === 'drift')
+      .map((d) => (pipDistance(d, 0, 0) + d.r) / 20);
+    for (const ext of big) expect(ext).toBeCloseTo(2.58, 3);
+  });
 });
 
 // Driven from the REAL palette, like `POISONED` above.
@@ -338,11 +367,11 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
       {
         kind: 'wingspan',
         apexX: 5,
-        apexY: 6 - R * 2.9,
+        apexY: 6 - R * 3.4,
         leftX: 5 - R * 0.9,
-        leftY: 6 - R * 2.6,
+        leftY: 6 - R * 3.1,
         rightX: 5 + R * 0.9,
-        rightY: 6 - R * 2.6,
+        rightY: 6 - R * 3.1,
         colour: AIRBORNE,
         alpha: 1,
       },
@@ -364,7 +393,7 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     expect(airborne[0]!.kind).toBe('wingspan');
   });
 
-  it('clears the silhouette AND every timed telegraph ring AND the ward — every point at radius ≥ r×2.6', () => {
+  it('clears the silhouette AND every timed telegraph ring AND the ward — every point at radius ≥ r×3.22', () => {
     // The original version of this test only checked the SILHOUETTE (|y| > r, |x| > r),
     // which the old r×1.393 wingtips satisfied while sitting exactly on the slow ring at
     // r×1.4 and crossing the stun jolt at r×1.15 (ship-review, M2-S7). Radius from the
@@ -383,11 +412,113 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
       expect(radius(x, y)).toBeGreaterThan(1.4); // slow ring
       expect(radius(x, y)).toBeGreaterThan(1.8); // dot pips
       expect(radius(x, y)).toBeGreaterThan(2.0); // slow pulse ceiling
-      expect(radius(x, y)).toBeGreaterThan(2.2); // ward — the outermost prior cue
+      expect(radius(x, y)).toBeGreaterThan(2.2); // ward
+      // The drift's CENTRE crest (r×2.4) — the outermost timed cue, which the block this
+      // ladder mirrors used to omit entirely (#126). Its DRAWN extent goes further still;
+      // that is measured, not laddered, by the case below.
+      expect(radius(x, y)).toBeGreaterThan(2.4);
+      // …and the rung this title actually claims. Without it the whole body passes under
+      // the PRE-#126 geometry (tips at r×2.751, apex r×2.9), so the title's radius was an
+      // unpinned assertion — the same class of defect as the comment block this ladder
+      // mirrors. The bound is r×3.22, NOT the r×3.23 the prose rounds to: the wingtips are
+      // the minimum at √(0.9² + 3.1²) = 3.22800…, so "≥ 3.23" is false by 0.002 and would
+      // fail here. Approximations may round; a pinned bound may not.
+      expect(radius(x, y)).toBeGreaterThan(3.22);
       expect(y).toBeLessThan(0); // and it floats ABOVE the creep, not around it
     }
     expect(op!.leftX).toBeLessThan(0); // still a chevron: tips either side of the apex
     expect(op!.rightX).toBeGreaterThan(0);
+  });
+
+  // The lineWidth `board-draw.ts` strokes the wingspan with. Strokes are centred, so half
+  // of it spills INSIDE the geometric radius — the same correction this file's stun note
+  // makes for the jolt/slow pair, and the reason a radius ladder alone under-counts.
+  const AIRBORNE_STROKE_PX = 2;
+
+  /** Distance from a point to a line SEGMENT (not its infinite line — the chevron's
+   *  strokes stop at the apex and the tips, and treating them as infinite would report a
+   *  collision that is not drawn). */
+  const distToSegment = (
+    px: number,
+    py: number,
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+  ): number => {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  };
+
+  /** The worst (smallest) gap, in px, between any drift pip's FILLED DISC and either
+   *  drawn chevron stroke, over the whole 900ms sawtooth. Negative means they overlap. */
+  const worstDriftGap = (r: number): { gap: number; atMs: number } => {
+    const [wing] = airborneCuePaintOps({ x: 0, y: 0, airborne: true }, r, AIRBORNE);
+    let gap = Infinity;
+    let atMs = 0;
+    // 1ms steps across the sawtooth's full period — the drift's radius is monotonic in
+    // phase, so this brackets the crest without assuming where the crest is.
+    for (let ms = 0; ms < 900; ms++) {
+      for (const d of dotTelegraphPaintOps(
+        { x: 0, y: 0, poisoned: true },
+        r,
+        false,
+        POISONED,
+        ms,
+      )) {
+        if (d.kind !== 'drift') continue;
+        for (const [bx, by] of [
+          [wing!.leftX, wing!.leftY],
+          [wing!.rightX, wing!.rightY],
+        ]) {
+          const g =
+            distToSegment(d.x, d.y, wing!.apexX, wing!.apexY, bx!, by!) -
+            d.r -
+            AIRBORNE_STROKE_PX / 2;
+          if (g < gap) {
+            gap = g;
+            atMs = ms;
+          }
+        }
+      }
+    }
+    return { gap, atMs };
+  };
+
+  it('clears the DoT drift — the outermost timed cue — at the narrow cell floor, where the pip floor makes it widest (#126)', () => {
+    // THE CO-OCCURRENCE IS A VM CONTRACT, NOT A REACHABLE CONTENT STATE. `poisoned` and
+    // `airborne` are independent booleans on the render VM, so the builders must compose
+    // for a creep carrying both — that alone is what this asserts. In today's shipped
+    // rulesets a poisoned flyer cannot occur: every `dot` effect belongs to a GROUND-domain
+    // tower (`venom`, and `stress-venom` in the stress ruleset), and `combat.ts` rejects an
+    // impact whose domain does not cover the target's. `slow` is the both-domain effect
+    // since S7; an earlier version of this comment misattributed that to `venom`.
+    //
+    // Asserted anyway, and DELIBERATELY: the alternative — "safe, because shipped DoT
+    // sources are ground-only" — would pin content domain assignments inside a render test,
+    // the exact cross-layer coupling #126 exists to correct, and would go quietly wrong the
+    // day a ruleset ships an air-capable DoT. The geometry is real either way.
+    //
+    // The drift's outward crest lands straight above the creep (the 270° pip) — the one
+    // sector the chevron occupies — and its drawn disc is held at `DOT_PIP_MIN_PX` while
+    // the chevron's radius stays proportional, so the narrow floor is where they meet.
+    //
+    // MEASURED, never hand-computed: the numbers below are printed by this test, and it
+    // is the print that made #126 decidable. At the pre-#126 apex of r×2.9 both were
+    // NEGATIVE (r=3.5: −0.838px, r=3: −1.075px) — a real overlap, not a tight fit.
+    const supported = worstDriftGap(R); // R = 3.5, the CELL_PX_MIN_NARROW = 10 floor
+    const clamped = worstDriftGap(3); // the defensive `max(3, cellPx × 0.35)` clamp
+    console.log(
+      `[#126] airborne-vs-drift clearance: r=${R} → ${supported.gap.toFixed(3)}px (worst at ${supported.atMs}ms); r=3 → ${clamped.gap.toFixed(3)}px (worst at ${clamped.atMs}ms)`,
+    );
+    expect(supported.gap).toBeGreaterThan(0);
+    expect(clamped.gap).toBeGreaterThan(0);
+    // And it only gets easier as cells grow — the drift's extent is a ratio plus a pixel
+    // floor, so the floor's contribution shrinks relative to r.
+    for (const r of [5, 10, 20, 40]) expect(worstDriftGap(r).gap).toBeGreaterThan(0);
   });
 
   it('flips BELOW the creep when the upward cue would leave the viewport (Codex P2, PR #87)', () => {
