@@ -146,7 +146,8 @@ export interface SimState {
   /** Per wave: whether it has been settled (launched, spawns exhausted, 0 alive). */
   waveResolved: boolean[];
   /** Monotonic Σ early-call SCORE credit (forfeited entirely on a loss — `deriveScore`
-   *  reads it only in the `running`/`won` branches). */
+   *  reads it only in the `running`/`won` branches; since sv16 a loss forfeits the kill
+   *  bounty with it and scores 0 outright). */
   cumulativeEarlyCallCredit: number;
   cumulativeKillBounty: number; // monotonic Σ kill-bounties — the score accumulator
   leakedCount: number; // monotonic leak count (every wave) — presentation/telemetry
@@ -1137,14 +1138,20 @@ export function step(
  * single grading function for both the live HUD and either terminal contract):
  *   - `running` — Σ kill-bounties + Σ early-call credit (the live readout).
  *   - `won`     — Σ kill-bounties + Σ early-call credit + max(0, lives) × survivalMul.
- *   - `lost`    — Σ kill-bounties ONLY: the early-call credit (and any live-readout
- *     value it contributed) is forfeited entirely on a loss, by design — a loss can
- *     land below the last live readout.
+ *   - `lost`    — ZERO (#25, sv16). A LOSS SCORES NOTHING: the kill bounty is forfeited
+ *     alongside the early-call credit, so a terminal loss can land arbitrarily far below
+ *     the last live readout. This SUPERSEDES the sv6–sv15 contract, under which the lost
+ *     branch paid Σ kill-bounties (owner ruling, 2026-08-22) — it is the symmetric
+ *     partner of `deriveStars`' "only a loss earns 0", and it means no losing run can
+ *     OUT-SCORE a winning one. It does not make 0 a signature FOR a loss:
+ *     the schema admits `survivalMul: 0` and zero-bounty creeps, so a degenerate bundle
+ *     can mint a 0-scoring WIN. A consumer that must tell the two apart reads `stars`
+ *     (where the sv16 floor does make 0 exactly "a loss") or the phase.
  * Every term saturates (`satAdd`/`satMul`) rather than wraps.
  */
 export function deriveScore(state: SimState | PreviewState, ruleset: CompiledRuleset): number {
+  if (state.phase === 'lost') return 0;
   const kb = Number.isSafeInteger(state.cumulativeKillBounty) ? state.cumulativeKillBounty : 0;
-  if (state.phase === 'lost') return kb;
   const credit = Number.isSafeInteger(state.cumulativeEarlyCallCredit)
     ? state.cumulativeEarlyCallCredit
     : 0;
@@ -1154,15 +1161,28 @@ export function deriveScore(state: SimState | PreviewState, ruleset: CompiledRul
   return satAdd(running, satMul(lives, ruleset.scoring.survivalMul));
 }
 
-/** The casual star grade from lives remaining (a win only; a loss earns 0). */
+/** The casual star grade from lives remaining — and A WIN ALWAYS EARNS AT LEAST ONE
+ *  STAR (#25, sv16, owner ruling 2026-08-22). The `t2`/`t3` rungs grade a win exactly as
+ *  before; below `t2` the win FLOORS to 1 rather than falling through to 0, so "only a
+ *  loss earns 0" is an enforceable contract instead of a comment a `starThresholds` like
+ *  `[5, 7, 9]` could falsify. Shipped content authors `t1 = 1` and a win requires ≥ 1
+ *  life, so the floor changes nothing there; the bundle-independent guarantee is new.
+ *
+ *  A CONSEQUENCE WORTH STATING RATHER THAN LEAVING TO BE REDISCOVERED: `t1` no longer
+ *  gates anything. `lives >= t1 ? 1 : 0` yields 1 or 0, and the floor maps both to 1, so
+ *  the rung below `t2` is 1★ whatever `t1` says — `starThresholds[0]` is now an authored
+ *  value with no reader outside schema validation. The ladder is kept intact here, and
+ *  the floor written OVER it as a separate `Math.max`, because that is the ruling's own
+ *  shape and it keeps the floor independently removable: deleting `Math.max` must red the
+ *  below-`t1` case and nothing else. Collapsing the two would save a comparison and cost
+ *  that property. Whether a dead 1★ cutoff should stay in the schema is a content
+ *  question, deliberately not settled here. */
 export function deriveStars(state: SimState | PreviewState, ruleset: CompiledRuleset): number {
   if (state.phase !== 'won') return 0;
   const [t1, t2, t3] = ruleset.scoring.starThresholds;
   const lives = Number.isSafeInteger(state.lives) ? state.lives : 0; // guard, like deriveScore
-  if (lives >= t3) return 3;
-  if (lives >= t2) return 2;
-  if (lives >= t1) return 1;
-  return 0;
+  const graded = lives >= t3 ? 3 : lives >= t2 ? 2 : lives >= t1 ? 1 : 0;
+  return Math.max(1, graded);
 }
 
 /** Deterministic content-hash of the world — the per-tick determinism checksum. */

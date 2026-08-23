@@ -28,6 +28,7 @@ import {
   compileRuleset,
   deriveScore,
   deriveStars,
+  hashSimState,
   SIM_VERSION,
   type SimInput,
   type CompiledRuleset,
@@ -178,4 +179,93 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     expect(payload.stars).toBe(trueStars);
     expect(payload.score).not.toBe(999_999_999);
   });
+});
+
+describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, through the real handler', () => {
+  // The case the issue was filed about, and the one `packages/replay`'s own suite cannot
+  // state: not "does the validator reject padding" (it does, and that is pinned there over
+  // a LOSING replay), but "does a legitimately-WON run get a 422 for one inert trailing
+  // tick". It does, deliberately — owner ruling 2026-08-22, item 1: the narrower
+  // anti-cheat surface wins over tolerance for hypothetical other clients, and the shipped
+  // recorder truncates at the terminal transition so its own logs validate. Both halves
+  // live in ONE describe on purpose: the acceptance half is what proves the rejection half
+  // is about the PADDING and not about the run.
+  const ruleset = compileRuleset(bundle, BOARD_ID);
+
+  it('the recorder’s own truncated-at-terminal log is ACCEPTED, and graded exactly as the client graded it', async () => {
+    const client = runScript(ruleset, WINNER_A);
+    expect(client.state.phase).toBe('won');
+
+    // The recorder's contract, asserted as a property of the log rather than assumed:
+    // the log ends AT the terminal tick, so its length is the terminal tick index + 1.
+    expect(client.tickInputs).toHaveLength(client.state.tick);
+
+    const res = await handler({ body: JSON.stringify(replayFor(client.tickInputs)) });
+    expect(res.statusCode).toBe(200);
+    const payload = JSON.parse(res.body) as {
+      ok: boolean;
+      score: number;
+      stars: number;
+      finalHash: string;
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.score).toBe(deriveScore(client.state, ruleset));
+    expect(payload.stars).toBe(deriveStars(client.state, ruleset));
+    expect(payload.finalHash).toBe(hashSimState(client.state));
+    // NO `stars >= 1` FLOOR ASSERTION HERE, deliberately: the handler compiles the
+    // SHIPPED bundle, whose ladder starts at t1 = 1, and WINNER_A finishes on 10 lives
+    // for a clean 3★ — so such an assertion would pass identically at sv15 and witness
+    // nothing. The floor is only observable against an authored ladder that puts a win
+    // below its first rung, which `packages/sim`'s story5 suite does with `[5, 7, 9]`.
+    // The parity claim two lines up is what this leg is actually for.
+  }, 120_000);
+
+  it('a LOSING run that banked a real kill bounty comes back 0/0 through the wire — the sv16 forfeiture, end to end', async () => {
+    // The other half of ruling 2, on the path the ruling is ABOUT. `packages/sim` proves
+    // the lost branch directly and `packages/replay`'s own losing fixture banks nothing,
+    // so without this leg no test drives a bounty-banking loss through `validate()` — and
+    // the server is precisely the consumer the ruling names ("a leaderboard consumer
+    // ingesting `score`"). Ruling 3 got real-handler coverage below; this is ruling 2's.
+    //
+    // A 12-placement prefix of WINNER_A is measured, not guessed: enough defense to bank
+    // kills across the early arc, far too little to survive it. The guards below are what
+    // keep the fixture honest if content is retuned — they fail by NAME rather than
+    // letting the 0/0 assertions pass vacuously.
+    const client = runScript(ruleset, WINNER_A.slice(0, 12));
+    expect(client.state.phase).toBe('lost');
+    expect(client.state.cumulativeKillBounty).toBeGreaterThan(0); // there IS a forfeiture
+
+    const res = await handler({ body: JSON.stringify(replayFor(client.tickInputs)) });
+    expect(res.statusCode).toBe(200); // a loss is a VALID replay, not a rejected one
+    const payload = JSON.parse(res.body) as { ok: boolean; score: number; stars: number };
+    expect(payload.ok).toBe(true);
+    expect(payload.score).toBe(0);
+    expect(payload.stars).toBe(0);
+  }, 120_000);
+
+  it('the SAME winning log plus one inert trailing tick is rejected 422, with the exact reason', async () => {
+    const client = runScript(ruleset, WINNER_A);
+    expect(client.state.phase).toBe('won');
+    // The log ends AT the terminal tick, so its LENGTH is the first index a canonical log
+    // must not contain — the terminal tick index + 1. Named for what it is: `terminalTick`
+    // would have been off by one against the sibling test's own vocabulary above.
+    const firstPaddedTick = client.tickInputs.length;
+
+    // "Inert" is the whole point: the sim is frozen at a terminal state, so neither of
+    // these ticks could change the outcome even if it were simulated. They are rejected
+    // for being logged at all, not for what they contain.
+    for (const trailing of [[] as SimInput[], [{ kind: 'noop' }] as SimInput[]]) {
+      const padded = [...client.tickInputs, trailing];
+      const res = await handler({ body: JSON.stringify(replayFor(padded)) });
+      expect(res.statusCode).toBe(422);
+      const payload = JSON.parse(res.body) as { ok: boolean; error: string };
+      expect(payload.ok).toBe(false);
+      // The EXACT reason, not a substring match on 'termination' — the message names the
+      // offending tick index, which is the terminal tick index + 1, i.e. the log's own
+      // length: the first tick the canonical log must not contain.
+      expect(payload.error).toBe(
+        `tick ${String(firstPaddedTick)} is logged past match termination`,
+      );
+    }
+  }, 120_000);
 });

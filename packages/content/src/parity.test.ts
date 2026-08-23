@@ -148,6 +148,10 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
+    // Hands-off, so nothing was ever banked: this 0 is reached by BOTH routes at once —
+    // the arithmetic (no kills) and the sv16 lost branch — and would read 0 under the
+    // superseded contract too. Annotated so it is not mistaken for a forfeiture pin; the
+    // scenario below, and `wave-multi.test.ts`, are where the two are told apart.
     expect(deriveScore(state, ruleset)).toBe(0);
     expect(deriveStars(state, ruleset)).toBe(0);
   });
@@ -460,13 +464,21 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     expect(state.waveCursor).toBe(9);
     // cumulativeKillBounty is unchanged at 102 (see the derivation above).
     // cumulativeEarlyCallCredit is 3 since #70 — the same three early calls, but the
-    // opening one now pays nothing — and the lost-branch score formula forfeits even
-    // that entirely; see `deriveScore` below.
+    // opening one now pays nothing — and since sv16 the lost branch forfeits it AND the
+    // 102 kill bounty above it; see `deriveScore` below.
     expect(state.cumulativeKillBounty).toBe(102);
     expect(state.cumulativeEarlyCallCredit).toBe(3);
     expect(state.bounty).toBe(120);
-    // Lost score formula: kill-bounty ONLY — no early-call credit, no survival term.
-    expect(deriveScore(state, ruleset)).toBe(102);
+    // Re-pinned #25 (SIM_VERSION 15 → 16, measured): the ONLY line in this scenario that
+    // moves. Grading is derived FROM the terminal state and is no part of it, so both
+    // hashes above, the tick, the wave arrays and all three accumulators are byte-
+    // identical to sv15 — the whole diff of the bump is here. Lost score formula since
+    // sv16: ZERO. The 102 kill bounty is forfeited alongside the 3 early-call credit,
+    // and the state's own `cumulativeKillBounty` two lines up is what keeps that
+    // non-vacuous: this run really did bank 102 and really does grade 0.
+    //   score  102 → 0
+    //   stars    0 → 0 (unchanged — a loss never earned a star)
+    expect(deriveScore(state, ruleset)).toBe(0);
     expect(deriveStars(state, ruleset)).toBe(0);
   });
 });

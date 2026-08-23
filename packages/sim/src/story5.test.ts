@@ -169,13 +169,17 @@ describe('wave launch + countdown', () => {
 });
 
 describe('loss resolution', () => {
-  it('an undefended board leaks the whole wave → lives 0 → loss, score = kill-bounties only', () => {
+  it('an undefended board leaks the whole wave → lives 0 → loss, score 0', () => {
     const ruleset = testRuleset(OPEN, { waveCount: 10, waveSpacing: 5, startingLives: 10 });
     const s = runToEnd(ruleset, callEarly);
     expect(s.phase).toBe('lost');
     expect(s.lives).toBeLessThanOrEqual(0);
     expect(s.cumulativeKillBounty).toBe(0);
-    expect(deriveScore(s, ruleset)).toBe(0); // no kills, lives ≤ 0
+    // Undefended, so this fixture reaches 0 by BOTH routes at once — no kills to bank,
+    // and since sv16 a loss scores 0 whatever it banked. `wave-multi.test.ts`'s lost
+    // branch is where the two routes are told apart (it banks a real bounty and still
+    // grades 0); this one is the plain arithmetic case.
+    expect(deriveScore(s, ruleset)).toBe(0);
     expect(deriveStars(s, ruleset)).toBe(0); // a loss earns no star
   });
 });
@@ -191,6 +195,84 @@ describe('win resolution', () => {
     expect(s.cumulativeKillBounty).toBe(3); // three kills × bounty 1
     expect(deriveScore(s, ruleset)).toBe(3 + 10 * 25); // Σ kill-bounties + lives × survivalMul
     expect(deriveStars(s, ruleset)).toBe(3); // lives 10 ≥ 9
+  });
+});
+
+describe('deriveStars — A WIN ALWAYS EARNS AT LEAST ONE STAR (#25, sv16)', () => {
+  // Issue #25 item 2: with an authored ladder like `[5, 7, 9]`, a win on 3 lives used to
+  // grade 0 — indistinguishable from a loss, and a straight contradiction of the "only a
+  // loss earns 0" contract the ladder is documented under. Since sv16 a win floors at 1
+  // (owner ruling, 2026-08-22). The shipped bundle authors `t1 = 1`, where the floor is
+  // invisible, so these fixtures author `[5, 7, 9]` — the issue's own example — to make
+  // the whole ladder observable from BOTH sides of every threshold.
+  //
+  // Each fixture WINS with every life intact (1-hit creeps, a tower straddling the lane,
+  // `leakedCount === 0`), so `lives === startingLives` exactly and the star grade is read
+  // off a real played terminal, never a forged state.
+  const LADDER = [5, 7, 9] as const;
+
+  /** A clean win on exactly `startingLives` lives, graded against the `[5,7,9]` ladder. */
+  function wonWith(startingLives: number): { stars: number; lives: number } {
+    const bundle = testBundle(OPEN, { creepHp: 10, waveCount: 3, waveSpacing: 20, startingLives });
+    const ruleset = compileRuleset(
+      { ...bundle, scoring: { ...bundle.scoring, starThresholds: [...LADDER] } },
+      'test',
+    );
+    const s = runToEnd(ruleset, [{ kind: 'callWaveEarly' }, place(3, 1)]);
+    expect(s.phase).toBe('won'); // the fixture is a WIN, or it grades nothing meaningful
+    expect(s.leakedCount).toBe(0); // ...on exactly `startingLives` lives
+    expect(s.lives).toBe(startingLives);
+    return { stars: deriveStars(s, ruleset), lives: s.lives };
+  }
+
+  it('a win BELOW the 1★ threshold floors to 1 rather than falling through to 0', () => {
+    const { stars, lives } = wonWith(3); // 3 lives, ladder starts at 5
+    expect(lives).toBeLessThan(LADDER[0]); // genuinely below t1 — not a vacuous pass
+    expect(stars).toBe(1);
+  });
+
+  // Retitled from "grades per-threshold — the boundary is unmoved", which overclaimed:
+  // since the floor maps both sides of `t1` to 1★, NO fixture can witness that cutoff, and
+  // a title promising a boundary check would have been a promise the assertion cannot keep.
+  // The case is still worth pinning — it is the ruling's "at t1 exactly" clause — but what
+  // holds it up now is the floor, not the comparison.
+  it('a win exactly AT the old 1★ cutoff grades 1★ — now by the floor, not by the cutoff', () => {
+    expect(wonWith(LADDER[0]).stars).toBe(1); // 5 lives, t1 = 5
+  });
+
+  it('the ladder above t1 is untouched: t2 → 2★, t3 → 3★', () => {
+    expect(wonWith(LADDER[1]).stars).toBe(2); // 7 lives, t2 = 7
+    expect(wonWith(LADDER[2]).stars).toBe(3); // 9 lives, t3 = 9
+    expect(wonWith(LADDER[1] - 1).stars).toBe(1); // 6 lives — between t1 and t2, still 1★
+  });
+
+  it('a LOSS still earns 0 — the floor is a WIN floor, and 0 now means exactly one thing', () => {
+    const bundle = testBundle(OPEN, { waveCount: 10, waveSpacing: 5, startingLives: 3 });
+    const ruleset = compileRuleset(
+      { ...bundle, scoring: { ...bundle.scoring, starThresholds: [...LADDER] } },
+      'test',
+    );
+    const s = runToEnd(ruleset, callEarly); // undefended: the wave walks through
+    expect(s.phase).toBe('lost');
+    expect(deriveStars(s, ruleset)).toBe(0);
+  });
+
+  it('a WON state with a ragged lives accumulator still earns its star — the floor covers the guard', () => {
+    // `deriveStars` guards `lives` with `Number.isSafeInteger` and falls back to 0, which
+    // before sv16 dropped such a state to 0★ — indistinguishable from a loss. The floor now
+    // carries it to 1★ instead. Unreachable through `step` (loss priority means `won`
+    // implies lives >= 1), but `deriveScore`/`deriveStars` accept `PreviewState` and forged
+    // states by contract, and `render.test.ts` pins the same guard for the SCORE — so this
+    // pins the answer as intended rather than leaving it an accident of the floor.
+    const bundle = testBundle(OPEN, { creepHp: 10, waveCount: 3, waveSpacing: 20 });
+    const ruleset = compileRuleset(
+      { ...bundle, scoring: { ...bundle.scoring, starThresholds: [...LADDER] } },
+      'test',
+    );
+    const won = runToEnd(ruleset, [{ kind: 'callWaveEarly' }, place(3, 1)]);
+    expect(won.phase).toBe('won');
+    const ragged = { ...won, lives: Number.NaN };
+    expect(deriveStars(ragged, ruleset)).toBe(1);
   });
 });
 

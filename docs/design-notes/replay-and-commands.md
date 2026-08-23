@@ -75,7 +75,9 @@ _(Addresses Codex PR #6: "Bound untrusted replay dimensions before re-simulation
   supplies tick `t`'s commands (empty if absent); if the log ends before terminal, the sim
   continues with **empty inputs** until win, loss, or the ceiling.
 - A **timeout is not a scorable result** — the replay is rejected, not assigned a score.
-- Entries **at or beyond** the terminal tick are rejected (padding).
+- Entries **after** the terminal tick are rejected (padding) — command-bearing, `noop`-only
+  and empty alike — and the canonical log ends **at** that tick, which is logged like any
+  other. ("at or beyond", as this read before #25, would have condemned every valid replay.)
 - The **authoritative score is derived from the terminal state** of a win or loss; a
   client-supplied score is never trusted.
 

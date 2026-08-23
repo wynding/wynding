@@ -643,9 +643,9 @@ const CONTRACT_EXCLUSIONS: readonly {
       [G.dotBench, 1],
       [G.adr, 7],
       [G.spike, 6],
-      [G.m2, 37],
+      [G.m2, 53],
     ],
-    why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0", `dots: []`. Not a measurement.',
+    why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0", `dots: []`. Not a measurement. Re-censused 37 → 53 in m2.md by #25 (sv16), which makes the terminal GRADE of a loss zero and so states it repeatedly in §Scoring & star grade and in two story reconciliations ("a loss scores 0", "loss: 0", "score 0, stars 0", "0★ win"); the last 3 of those are the clause scoping the guarantee to the STAR readout, which names `survivalMul: 0` and a 0-scoring win as the reason score alone is not a loss signature. Still bare zero, still not a measurement, and none of the new copies is a perf figure.',
   },
   {
     value: '10',
@@ -880,11 +880,11 @@ const KNOWN_UNROWED: readonly {
     surfaces: [
       [G.adr, 4],
       [G.fixture, 1],
-      [G.m2, 14],
+      [G.m2, 15],
       [G.scenario, 1],
       [G.spike, 7],
     ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163. Re-censused 14 → 15 in m2.md by #25: the new copy is the sim behavior version `simVersion` 15, named as the contract sv16 supersedes — a numeral collision with this oracle figure, not a fifteenth copy of it.',
   },
   {
     value: '150',
@@ -1034,11 +1034,11 @@ const KNOWN_UNROWED: readonly {
     value: '16',
     surfaces: [
       [G.adr, 1],
-      [G.m2, 7],
+      [G.m2, 11],
       [G.oracle, 1],
       [G.spike, 3],
     ],
-    why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2.',
+    why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2. Re-censused 7 → 11 in m2.md by #25: the four new copies are the sim behavior version `simVersion` 16 this change bumps to, cited at each of the four places the change is stated: the two spec clauses in §Scoring & star grade and the two story reconciliations — a numeral collision with the wave-entry count, not four new copies of it.',
   },
   {
     value: '165',

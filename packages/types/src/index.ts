@@ -200,20 +200,27 @@ export interface BalanceConstants {
    *  (M2: 1/4). */
   readonly slowFloorNum: number; // int, 0 ≤ slowFloorNum ≤ slowFloorDen
   readonly slowFloorDen: number; // int 1..1e6
-  /** 0 = off; else bonus = ⌊ticksRemaining / earlyCallBountyDivisor⌋. Pinned to 0
-   *  by the M1/M2-S1 capability profile (`maxEarlyCallBountyDivisor: 0`) — S2
-   *  implements the divisor formula as its sim change. */
+  /** 0 = off; else bonus = ⌊ticksRemaining / earlyCallBountyDivisor⌋. The shipped bundle
+   *  authors 50; the "pinned to 0 by the M1/M2-S1 capability profile" this used to claim
+   *  lapsed when S2 implemented the divisor formula as its sim change. */
   readonly earlyCallBountyDivisor: number; // int 0..1e6
 }
 
 /** Scoring weights — the ladder measure (ADR 0006) + the casual star grade. */
 export interface ScoringConfig {
-  /** score = Σ kill-bounties + max(0, lives) × survivalMul. */
+  /** Weights the survival term of the WINNING score only — won = Σ kill-bounties +
+   *  Σ early-call credit + max(0, lives) × survivalMul. A loss scores 0 outright since
+   *  sv16 (#25), so this knob has no effect on a losing run's grade. */
   readonly survivalMul: number; // int 0..1e6
-  /** Non-decreasing lives cutoffs for [1★, 2★, 3★]; a loss earns 0 stars. */
+  /** Non-decreasing lives cutoffs for [1★, 2★, 3★]. Only a LOSS earns 0 stars: since
+   *  sv16 (#25) a win floors at 1★, so the [0] cutoff is NOT READ by `deriveStars` at
+   *  all — a win below it grades 1★ exactly as a win at it does. Authoring it lower or
+   *  higher changes no grade; [1] and [2] are the live rungs. Kept in the shape because
+   *  retiring a schema field is a content decision, not a grading one. */
   readonly starThresholds: readonly [number, number, number]; // positive ints ≤ 1e6, non-decreasing
-  /** 0 = off; else credit = ⌊ticksRemaining / earlyCallScoreDivisor⌋. Pinned to 0
-   *  by the M1/M2-S1 capability profile. */
+  /** 0 = off; else credit = ⌊ticksRemaining / earlyCallScoreDivisor⌋. The shipped bundle
+   *  authors 50; the "pinned to 0 by the M1/M2-S1 capability profile" this used to claim
+   *  lapsed when S2 implemented the divisor formula. */
   readonly earlyCallScoreDivisor: number; // int 0..1e6
 }
 

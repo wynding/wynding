@@ -214,7 +214,8 @@ const defaultCompileCache = new CompileCache();
  * bundle's digest must equal `replay.rulesetHash`, and `boardId` must resolve; (3)
  * re-run the log then empty ticks until a terminal `phase` or the bounded tick
  * ceiling (a run that never terminates is a timeout — rejected); (4) reject any log
- * input past the terminal transition (padding); (5) derive the score/stars from the
+ * TICK past the terminal transition — command-bearing, `noop`-only or empty alike
+ * (padding); (5) derive the score/stars from the
  * terminal state. The sim's freeze-on-terminal makes the final hash independent of
  * trailing empty ticks.
  *
@@ -312,10 +313,14 @@ export function validate(
     }
   }
 
-  // (3b/4) Re-run the log; reject any real COMMAND past the terminal transition. A
-  // trailing `noop` or empty tick is benign log padding (the sim is frozen, so it
-  // changes nothing) and must NOT reject a legitimately-won replay whose client kept
-  // logging (code-review) — only a meaningful command past termination is rejected.
+  // (3b/4) Re-run the log; reject ANY tick logged past the terminal transition —
+  // command-bearing, `noop`-only or empty alike. A canonical replay ENDS at its terminal
+  // tick, so padding past it is a malformed envelope, not a tolerable client quirk, and
+  // a legitimately-won replay carrying one inert trailing tick IS rejected (issue #25,
+  // owner ruling 2026-08-22: the narrower anti-cheat surface wins over tolerance for
+  // hypothetical other clients; the shipped recorder truncates at the terminal
+  // transition, so its logs validate). This comment previously claimed the opposite of
+  // the code below it; the code was always right.
   let state = createInitialState(replay.seed, ruleset);
   let terminalReached = false;
   for (let t = 0; t < replay.tickInputs.length; t++) {
