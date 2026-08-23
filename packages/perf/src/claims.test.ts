@@ -131,7 +131,31 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
  *  Signs are still read OFF the numeral, deliberately: a row valued -1.36 covers a prose 1.36,
  *  and the sign is enforced at the row's sites. `IS_NUMERAL` accepts a leading sign because it
  *  answers a different question — whether an already-extracted string is numeric. */
-const NUMERAL_BODY = String.raw`(?:\d[\d,_]*(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?`;
+const NUMERAL_BODY = String.raw`(?:\d(?:[\d,_]*\d)?(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?`;
+
+/** WHERE A NUMERAL MAY BEGIN, defined as "not part of the same numeral, and not part of a
+ *  NAME" rather than as the complement of a hand-listed word-char set. The old lookbehind was
+ *  that complement, and it treated `_` as a word character — so `_1.0065_`, which is just
+ *  markdown emphasis around a figure, was refused and the claim inside it never scanned
+ *  (Codex, PR #161).
+ *
+ *  The grammar decides where a numeral ENDS, and the scan is greedy and left-to-right, so
+ *  starting mid-numeral is impossible by construction: `1_000` is consumed whole from its
+ *  first digit and the scan resumes after it, never inside it. That leaves exactly one thing
+ *  a boundary must still refuse — a numeral that is the tail of an IDENTIFIER:
+ *
+ *    - preceded by a letter (`v1`, `p50`, `R0`); or
+ *    - preceded by an underscore that is itself part of an identifier (`foo_1`), which is
+ *      what tells `foo_1` apart from `_1.0065_` — the delimiter is the same character, and
+ *      only what sits BEFORE it says whether it is a name or emphasis.
+ *
+ *  A digit or a dot before the numeral is kept as a belt-and-braces guard on the same
+ *  mid-numeral case the greediness already covers.
+ *
+ *  Every other delimiter these documents put against a figure is therefore a boundary, with no
+ *  list to keep current: `*`, backtick, `(`, `[`, quotes and typographic quotes, en and em
+ *  dashes, `%`, `$`, `/`, `,`. Each is covered by a case in the delimiter test below. */
+const NUMERAL_BOUNDARY = String.raw`(?<![A-Za-z])(?<![A-Za-z0-9_]_)(?<![\d.])`;
 
 const IS_NUMERAL = new RegExp(String.raw`^[+-]?` + NUMERAL_BODY + String.raw`$`);
 
@@ -831,7 +855,7 @@ interface Numeral {
  *  Signs are still read OFF the numeral, deliberately and as before: a row valued -1.36 is what
  *  covers a prose 1.36, and the sign is enforced at the row's SITES, which capture it. An
  *  exponent's sign is part of the number rather than in front of it, so that one is read. */
-const NUMERAL = new RegExp(String.raw`(?<![A-Za-z_.\d])` + NUMERAL_BODY, 'g');
+const NUMERAL = new RegExp(NUMERAL_BOUNDARY + NUMERAL_BODY, 'g');
 
 /** One number, one spelling: `.00922`, `9.22e-3` and `0.00922` must reach `claimKey` alike. */
 function normalizeNumeral(cleaned: string): string {
@@ -1240,6 +1264,55 @@ describe("the numeral grammar is the language's, not a run of digits", () => {
         1,
       );
     }
+  });
+
+  // THE BOUNDARY AUDIT, one case per delimiter that can legitimately abut a figure in these
+  // documents. The rule is not a list of permitted delimiters — it is "not part of the same
+  // numeral, and not part of a name" — but the audit is written down as tests so the claim
+  // that every delimiter works is checkable rather than asserted.
+  it('reads a figure through every delimiter these documents put against one', () => {
+    const cases: readonly [string, string][] = [
+      ['_1.0065_', 'markdown underscore emphasis'],
+      ['**1.0065**', 'markdown bold'],
+      ['*1.0065*', 'markdown italic'],
+      ['`1.0065`', 'code span'],
+      ['(1.0065)', 'parentheses'],
+      ['[1.0065]', 'brackets'],
+      ['"1.0065"', 'quotes'],
+      ['\u201c1.0065\u201d', 'typographic quotes'],
+      ['\u20131.0065\u2013', 'en dashes'],
+      ['\u20141.0065\u2014', 'em dashes'],
+      ['$1.0065', 'currency'],
+      ['1.0065%', 'percent'],
+      ['R/1.0065', 'ratio'],
+      ['\u21921.0065', 'transition arrow'],
+      ['\u00d71.0065', 'times sign'],
+    ];
+    for (const [text, what] of cases) {
+      expect(
+        [...text.matchAll(NUMERAL)].map((m) => m[0]),
+        `${what}: ${text}`,
+      ).toContain('1.0065');
+    }
+  });
+
+  it('still refuses a numeral that is part of a NAME, not a figure', () => {
+    // The delimiter is the same character in `foo_1` and `_1.0065_`; only what sits BEFORE it
+    // says whether it is an identifier or emphasis.
+    for (const name of ['v1', 'p50', 'R0', 'foo_1', 'x_1_000', 'v1.2.3']) {
+      expect(
+        [...name.matchAll(NUMERAL)].map((m) => m[0]),
+        `${name} is a name`,
+      ).toEqual([]);
+    }
+  });
+
+  it('never ends a numeral on a separator', () => {
+    // `\d[\d,_]*` used to swallow a trailing comma or underscore, so a figure at the end of a
+    // clause carried punctuation into its raw spelling. The grammar decides where it ends.
+    expect([...'score 434, stars'.matchAll(NUMERAL)].map((m) => m[0])).toEqual(['434']);
+    expect([...'_1065_'.matchAll(NUMERAL)].map((m) => m[0])).toEqual(['1065']);
+    expect([...'1_000 exact'.matchAll(NUMERAL)].map((m) => m[0])).toEqual(['1_000']);
   });
 
   it('does not split an ordinary decimal into a bare fraction', () => {
