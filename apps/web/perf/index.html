@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!-- The SAME viewport metadata the play `index.html` carries (#148). On a device this
+         is not cosmetic: without it the WebView lays out at a ~980px virtual width and the
+         board is projected at a size the play build never uses, so every frame-time number
+         would describe a canvas we do not ship. Same reason `ui.css` stays in. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <!-- No manifest link, no icons, no service worker (unlike the production index.html):
          this page is a perf-only harness, never installed, never shipped. Its ONLY
          consumer is `vite.perf.config.ts` (see that file's header for why it cannot be

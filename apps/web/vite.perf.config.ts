@@ -1,4 +1,6 @@
-import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, type Plugin } from 'vite';
 
 // vite.perf.config.ts — the browser perf harness's OWN build (M2-S4b, PLAN step 22).
 //
@@ -18,7 +20,37 @@ import { defineConfig } from 'vite';
 // recorded-only this story"). This config and everything it builds exist to produce
 // numbers for a spike document (Phase 6), never to gate a merge — do not wire
 // `perf:e2e` into CI.
+/**
+ * Emit `perf/root.html` as the packaged output's ROOT `index.html` (#148).
+ *
+ * A Capacitor WebView loads the asset root, and `dist-perf` had none: Vite emits an HTML
+ * input beside its source path, so `perf/index.html` lands at `dist-perf/perf/index.html`
+ * and a packaged perf build booted to a 404 and a white screen.
+ *
+ * Emitted as an ASSET rather than added as a third rollup input, and the distinction is
+ * the point twice over. An input would land at `dist-perf/perf/root.html` — still not the
+ * root — and it would give the launcher a module graph of its own. It has none: it is
+ * static markup with two relative links, so it cannot pull either scene's bundle (or
+ * anything else) into the other's graph, and this file's structural guarantee stays exactly
+ * as strong as it was.
+ */
+function perfRootEntry(): Plugin {
+  return {
+    name: 'wynding-perf-root-entry',
+    generateBundle(_options, bundle) {
+      const source = readFileSync(fileURLToPath(new URL('./perf/root.html', import.meta.url)));
+      if ('index.html' in bundle) {
+        // Cannot happen today (neither input is named `index.html` at the root), and it must
+        // fail loudly rather than silently overwrite a real entry if it ever can.
+        throw new Error('perf root entry would overwrite an emitted index.html');
+      }
+      this.emitFile({ type: 'asset', fileName: 'index.html', source });
+    },
+  };
+}
+
 export default defineConfig({
+  plugins: [perfRootEntry()],
   build: {
     target: 'es2022',
     outDir: 'dist-perf',

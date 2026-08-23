@@ -44,10 +44,12 @@ Run from this directory (or with `pnpm --filter @wynding/mobile run <script>`).
 | `pnpm run assets:ios`     | Regenerate the source artwork, then the iOS icon/splash set. |
 | `pnpm run assets:android` | Same, for the Android resource set.                          |
 
-Plus the release pair, documented in full under **Release signing** below:
+Plus the perf variant and the release pair, each documented in full in its own section below:
 
 | Script                            | What it does                                      |
 | --------------------------------- | ------------------------------------------------- |
+| `pnpm run sync:perf`              | Build the perf artifact, stage it into Android.   |
+| `pnpm run perf:android`           | That, then assemble the `.perf` build.            |
 | `pnpm run keystore:android`       | Generate the upload keystore (once, ever).        |
 | `pnpm run release:android`        | Sync, then build a signed release **APK**.        |
 | `pnpm run release:android:bundle` | Sync, then build a signed release **AAB** (Play). |
@@ -87,6 +89,53 @@ the fix is one command:
 ```shell
 pnpm --filter @wynding/mobile run sync:android
 ```
+
+## The perf variant — Android
+
+A **second artifact**, never a second mode of the shipped one (#148). It packages
+`apps/web/dist-perf` — the perf harness, not the game — installs alongside the play build,
+and exists so #141 can measure on real hardware.
+
+```shell
+pnpm --filter @wynding/mobile run perf:android
+```
+
+That builds `dist-perf`, stages it, and assembles the `perf` build type. Then
+`adb install -r android/app/build/outputs/apk/perf/app-perf.apk` and open
+`chrome://inspect` on a desktop Chrome with the device attached. The WebView boots the root
+launcher, which links both scenes:
+
+| Scene   | Page                | Harness object              |
+| ------- | ------------------- | --------------------------- |
+| Stress  | `perf/index.html`   | `window.wyndingPerf`        |
+| Catalog | `perf/catalog.html` | `window.wyndingPerfCatalog` |
+
+Four things about it are deliberate:
+
+- **It installs alongside.** `applicationIdSuffix ".perf"` in `android/app/build.gradle`
+  (a build type — `cap add` bakes `applicationId` in once and editing the Capacitor config
+  afterwards re-stamps nothing). A measurement you cannot compare against the shipped app is
+  not a measurement of the shipped app. It carries its own label, "Wynding perf", so the two
+  home-screen icons are told apart.
+- **It is debug-signed** (`initWith debug`), so it needs no key material and `adb install`
+  just works. WebView debugging is on explicitly in `capacitor.perf.config.ts`, rather than
+  left to depend on which build type someone assembled.
+- **`ui.css` stays in, and so does the play viewport metadata.** The perf artifact renders
+  like the play artifact or it measures a canvas we do not ship. Isolating it was considered
+  and rejected for exactly that reason.
+- **It has a root entry.** A Capacitor WebView loads the asset root; `dist-perf`'s two
+  scene pages are emitted under `perf/`, so before that launcher existed a packaged perf
+  build booted to a 404 and a white screen.
+
+**The two variants share one payload slot, and the commands are what keep them apart.**
+`perf:android` stages `dist-perf` first; `release:android` runs `cap sync android` (which
+stages the Host build) first. So neither can package the other's leftovers — but a bare
+`./gradlew assembleRelease` after a perf run would, which is why the packaged commands are
+the documented path and a raw Gradle invocation is not.
+
+Nothing about this reaches the shipped app: `@wynding/perf`, the perf entries and
+`@wynding/content/stress` are unreachable from `vite.config.ts`'s module graph, and the play
+build output is byte-identical with and without everything in this section.
 
 ## Release signing — Android
 

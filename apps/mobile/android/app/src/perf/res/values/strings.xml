@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!--
+  The perf build type's own label (#148). A build-type source set (`src/perf/`) overrides
+  `src/main/`'s value for the SAME resource name, and only for this variant — so the play
+  build's `app_name` is untouched.
+
+  Worth the five lines: the perf variant installs alongside the play build under a `.perf`
+  applicationId suffix, and two home-screen icons reading "Wynding" is exactly how a
+  measurement gets run against the wrong app.
+
+  `package_name`/`custom_url_scheme` are deliberately NOT overridden here. They are
+  Capacitor's own plumbing and are keyed to the base `applicationId`, which the suffix does
+  not change in the manifest; re-stating them would be guessing at a contract this file does
+  not own.
+-->
+<resources>
+    <string name="app_name">Wynding perf</string>
+    <string name="title_activity_main">Wynding perf</string>
+</resources>

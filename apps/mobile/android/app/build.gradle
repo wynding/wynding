@@ -79,6 +79,35 @@ android {
             // below is what stops one being mistaken for a shippable build.
             signingConfig hasReleaseSigning ? signingConfigs.release : null
         }
+        // =============================================================================
+        // The PERF variant (#148) — the instrument #141 measures with.
+        //
+        // A BUILD TYPE, not a config override and not a second native project. `cap add`
+        // bakes `applicationId` into this file once and editing `capacitor.config.ts`
+        // afterwards re-stamps nothing (that file says so itself), so the only honest way
+        // to get a second installable identity out of one project is here.
+        //
+        // `.perf` is what makes it install ALONGSIDE the play build rather than replacing
+        // it — the point of the exercise, since a measurement you cannot compare against
+        // the shipped app is not a measurement of the shipped app.
+        //
+        // `initWith debug` inherits debug SIGNING and `debuggable true`, which is what
+        // makes `adb install` work with no key material and what lets the WebView be
+        // inspected. It is deliberately NOT derived from `release`: a perf build is never
+        // distributed, and giving it release signing would put the real key in the path of
+        // a routine measurement run.
+        //
+        // WHAT THIS DOES NOT DO is choose the payload. `src/main/assets/public` is shared
+        // with the play build, so the pairing is enforced by the COMMANDS instead — both
+        // `release:android` and `perf:android` sync their own artifact first, so neither
+        // can package the other's leftovers.
+        // =============================================================================
+        perf {
+            initWith debug
+            applicationIdSuffix ".perf"
+            versionNameSuffix "-perf"
+            matchingFallbacks = ['debug']
+        }
     }
 }
 
