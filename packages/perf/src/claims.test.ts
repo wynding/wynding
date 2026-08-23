@@ -143,6 +143,18 @@ function agrees(claim: Claim, stated: string): boolean {
   return claimKey(stated) === claimKey(String(claim.numeric));
 }
 
+/** Every key a row answers to. The scan reads numerals WITHOUT their sign (`-1.360` is
+ *  scanned as `1.360`), so a row valued `-1.36` must also answer to `n:1.36` or none of its
+ *  occurrences would ever match it — Codex demonstrated that by restating the skew as
+ *  `-1.360` and watching it skip. One rule, applied everywhere a row is keyed: the sweep, the
+ *  rowed set, and the accounting index. The SIGN is still enforced where it is stated, by the
+ *  row's sites, which capture it. */
+function claimKeysFor(claim: Claim): string[] {
+  const primary = claimKey(claim.value);
+  if (claim.numeric === undefined || claim.numeric >= 0) return [primary];
+  return [primary, claimKey(String(Math.abs(claim.numeric)))];
+}
+
 /** A site's human label. Several claims are stated TWICE in one file — `2.8%` appears three
  *  times in the spike alone — so the file name alone does not name a site, and a duplicate
  *  `it()` title would leave a reader unable to tell which copy failed. */
@@ -242,7 +254,7 @@ describe('no site can silently fall back to another occurrence', () => {
         }
         const blanked =
           original.slice(0, found.start) +
-          ' '.repeat(found.end - found.start) +
+          '\0'.repeat(found.end - found.start) +
           original.slice(found.end);
         const after = extract(site, blanked);
         if ('error' in after) return; // deleting the claim broke the site — correct.
@@ -491,16 +503,24 @@ const EXCLUDED = new Set(CONTRACT_EXCLUSIONS.map((e) => e.value));
 const OCCURRENCE_EXCEPTIONS: readonly {
   readonly file: string;
   readonly near: string;
+  /** The numeral this exception is allowed to excuse. Without it an exception is a blanket
+   *  suppressor: matching only preceding CONTEXT, it would excuse ANY unaccounted
+   *  high-information value that happened to follow the phrase — Codex demonstrated it by
+   *  restating k-new as `// Exactly 0.00922` and watching the suite stay green. An exception
+   *  now names what it excuses, so an unexpected numeral after the same phrase still fails. */
+  readonly value: string;
   readonly why: string;
 }[] = [
   {
     file: 'packages/perf/src/gate-fixture.test.ts',
     near: 'Exactly ',
+    value: '1.0000',
     why: 'A ratio that happens to equal 1.0000 exactly at the fixture boundary — not the committed `R0` of 1.00 restated.',
   },
   {
     file: 'packages/perf/src/gate-fixture.test.ts',
     near: 'p95 was ALREADY\\s*\\n\\s*// exactly ',
+    value: '1.0000',
     why: 'The same boundary ratio, quoted a second time in the paragraph explaining it. Still not `R0`.',
   },
 ];
@@ -641,13 +661,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     // A signed row also covers its MAGNITUDE here: the sweep's tokenizer reads numerals
     // without their sign, so a row valued -1.36 is what covers a prose `1.36`. The sign is
     // still enforced where it matters — at the row's sites, which capture it.
-    const rowed = new Set(
-      CLAIMS.flatMap((c) =>
-        c.numeric !== undefined && c.numeric < 0
-          ? [claimKey(c.value), claimKey(String(Math.abs(c.numeric)))]
-          : [claimKey(c.value)],
-      ),
-    );
+    const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
     const surface = new Set(PERF_SOURCES.flatMap((f) => scan(f).map((n) => claimKey(n.value))));
     const excluded = new Set([...EXCLUDED].map(claimKey));
     const where = new Map<string, Set<string>>();
@@ -684,7 +698,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   });
 
   it('every high-information occurrence of a rowed value sits at a listed site', () => {
-    const rowedValues = new Set(CLAIMS.map((c) => claimKey(c.value)));
+    const rowedValues = new Set(CLAIMS.flatMap(claimKeysFor));
 
     // Where the resolver actually reads each claim from.
     // Two indexes: by the claim's KEY, and by its exact SPELLING. Aliased values need both —
@@ -699,9 +713,10 @@ describe('the coverage contract is enforced, not merely asserted', () => {
         const found = extract(site);
         if ('error' in found) continue;
         const at = `${site.file}:${found.start}`;
-        const key = claimKey(claim.value);
-        if (!accountedByKey.has(key)) accountedByKey.set(key, new Set());
-        (accountedByKey.get(key) as Set<string>).add(at);
+        for (const key of claimKeysFor(claim)) {
+          if (!accountedByKey.has(key)) accountedByKey.set(key, new Set());
+          (accountedByKey.get(key) as Set<string>).add(at);
+        }
         if (!accountedBySpelling.has(claim.value)) accountedBySpelling.set(claim.value, new Set());
         (accountedBySpelling.get(claim.value) as Set<string>).add(at);
       }
@@ -724,7 +739,10 @@ describe('the coverage contract is enforced, not merely asserted', () => {
         const before = raw.slice(Math.max(0, n.at - 90), n.at);
         if (
           OCCURRENCE_EXCEPTIONS.some(
-            (e) => e.file === file && new RegExp(`${e.near}$`).test(before),
+            (e) =>
+              e.file === file &&
+              claimKey(e.value) === claimKey(n.value) &&
+              new RegExp(`${e.near}$`).test(before),
           )
         ) {
           continue;
