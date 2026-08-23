@@ -839,8 +839,8 @@ over exactly the corner this was opened about, and it would pass its own test wh
 its width to the band, and where no band clears the 64px legibility floor the ratified
 escape hatch — the in-flow hud home — takes it, at the cost of the status row's reserved
 40dvh. Measured across the pinned viewports at 100%/200% zoom, three combinations pay that
-cost in board size: **1000×720 at 100%** (cellPx 28 → 19), **1280×900 at 200%** (34 → 24)
-and **640×560 at 100%** (17 → 14). Everywhere else the float is kept and the grid is
+cost in board size: **1000×720 at 100%** (cellPx 28 → 19), **1280×900 at 200%** (34 → 25)
+and **640×560 at 100%** (17 → 15). Everywhere else the float is kept and the grid is
 unchanged. Those three combinations are pinned by name in `stage-stability.spec.ts`'s
 `PINNED_STANDARD` table, so this paragraph and that gate cannot drift apart: the sweep
 asserts the home each viewport lands in BEFORE it checks occlusion, because "occludes no
@@ -850,14 +850,34 @@ spending the board. The card itself is narrower than before — 67-102px at 100%
 the previous 119px — which is the price of the ratified rule at these viewport shapes, and
 the floor is the single number that trades one against the other.
 
-**A second-order residual, found while pinning the first and NOT fixed here.** On a WIDE
-Standard viewport the hud fallback is not content-invariant the way the narrow one is. The row
-reservation pins `.wy-hud`'s HEIGHT (measured 232px at 1000×720, unchanged by wave content),
-but the preview's in-flow form is `max-width: none`, so a four-entry wave widens the hud
-enough to WRAP the status row itself: measured at 1000×720, `.wy-status` 248 → 288px and the
-board 19 → 18 cellPx as wave 9 arrives. That is a mid-run re-projection of exactly the class
-`stage-stability.spec.ts` forbids — the 360×640 hud home is immune only because its status
-COLUMN is width-fixed. It is pre-existing behaviour of that home rather than anything this
-change introduced, but #101 is what routes wide viewports into it, so it is recorded here
-rather than left to be rediscovered. Fixing it means changing how that home is laid out,
-which is a product decision outside this issue's ratified scope.
+**One entry in that table is a genuine coin-flip, and says so.** 1280×900 at 200% sits with
+its dead band ON the 64px floor, so the deciding input is the host's font metrics: it parks
+on macOS and floats on CI's Linux runner, and both are correct. It is pinned as `'either'`
+rather than as a literal, because a literal there gates the font stack instead of the
+placement. Nothing is lost — an entry expecting `hud` could never catch over-parking anyway
+(the forced-over-park proof failed exactly the ten `stage` entries and passed all six `hud`
+ones), and the occlusion half still runs in whichever home it lands in.
+
+**The hud fallback's OTHER axis, found while pinning the first residual and fixed here
+(#164, Codex).** The row reservation pinned `.wy-hud`'s HEIGHT but left its WIDTH
+content-driven, and `.wy-status` is a wrapping flex row — so a wide enough preview grew the
+hud's max-content width until the row wrapped and the home link took a line of its own:
+measured at 1000×720, `.wy-status` 248 → 288px and the board 19 → 18 cellPx. That is a
+mid-run re-projection of exactly the class `stage-stability.spec.ts` forbids, arriving
+through the axis the pin did not cover. It stayed invisible because this home used to serve
+only narrow viewports, whose status COLUMN is width-fixed; #101 is what routes wide ones
+into it. Closed with `flex: 1 1 0` on the same `:has()` rule — a zero flex-basis takes the
+item's own content out of the row's sizing, so the hud measures the space left over rather
+than the text inside it — with the Compact fork resetting it to `flex: 0 1 auto`, since a
+zero basis with grow in that fork's status COLUMN would stretch the hud down the column.
+The card wraps within that width and scrolls inside the height already reserved.
+
+Two things worth stating about how it was pinned. **Shipped English does not currently
+trigger it**: #130's content diet left wave 9's real rows short enough that the walk to wave
+9 at 1000×720 passes even against the unfixed stylesheet — the invariant held by luck, not
+by construction, and a longer locale or a wider row restores the wrap. So the gate uses the
+over-long row fixture this file already uses as its conservative bound, which is what turns
+it red without the fix. **And the fix pays for itself**: making the hud stop reacting to its
+own content recovered a cell at two of the three fallback viewports (1280×900 at 200%,
+34 → 24 before, 34 → 25 now; 640×560 at 100%, 17 → 14 before, 17 → 15 now), which is why
+the numbers above moved.

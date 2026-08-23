@@ -632,16 +632,33 @@ a.wy-home:focus-visible {
    at every wider or taller shape probed. A static 7% beats a mid-run re-projection.
    #101 WIDENED WHO PAYS IT, and that is worth stating rather than leaving to the reader:
    this home is now the escape hatch for any Standard stage with no compliant dead band,
-   where the full 40dvh IS expensive — measured cellPx 28 → 19 at 1000×720 and 34 → 24 at
+   where the full 40dvh IS expensive — measured cellPx 28 → 19 at 1000×720 and 34 → 25 at
    1280×900/200%. `preview-place.ts` reaches for it last for exactly that reason; the
    number recorded above describes the narrow-stage case it was originally sized for.
    Keyed on `:has` (the
    `.wy-banner` precedent above) so it engages exactly when the node lives here — hidden
    or not, deliberately: `[hidden]` toggling must not resize the row either. The Compact
    fork restores content-sizing: its status COLUMN is width-fixed, so preview growth
-   there scrolls inside the hud and cannot touch the board. */
+   there scrolls inside the hud and cannot touch the board.
+
+   THE WIDTH NEEDED THE SAME TREATMENT, and until #101 nothing noticed (Codex, PR #164).
+   Pinning the height alone left the OTHER axis content-driven: `.wy-status` is a wrapping
+   flex row and this hud is an auto-basis item, so a four-entry wave's long rows grew the
+   hud's max-content width until the row wrapped and the home link took a line of its own.
+   Measured at 1000×720: `.wy-hud` held its 232px exactly as designed while `.wy-status`
+   went 248 → 288px and the board dropped 19 → 18 cellPx as wave 9 arrived — a mid-run
+   re-projection, i.e. precisely the defect the height pin above exists to prevent, arriving
+   through the axis it did not cover. It stayed invisible because this home used to serve
+   only narrow viewports, whose status COLUMN is width-fixed; #101 made it the escape hatch
+   for wide ones, where the row can wrap.
+   `flex: 1 1 0` is what closes it: a zero flex-basis takes the item's own content out of
+   the row's sizing entirely, so the hud measures the space left over rather than the text
+   inside it, and no wave can move it. The card then wraps within that width and scrolls
+   inside the height already reserved — the same "handle overflow IN PLACE, never by
+   resizing the row" contract the float form keeps with its own `--scroll` form. */
 .wy-hud:has(> .wy-wave-preview) {
   height: max(2.5rem, calc(40dvh - 3.5rem - var(--wy-safe-top)));
+  flex: 1 1 0;
 }
 
 .wy-wave-preview-title {
@@ -1713,9 +1730,14 @@ a.wy-home:focus-visible {
 
   /* The Standard row reservation does not apply here: the Compact status COLUMN is
      width-fixed, so hud content growth scrolls internally and cannot move the board —
-     content-sizing is safe and the column's own budget (contract §2) governs. */
+     content-sizing is safe and the column's own budget (contract §2) governs.
+     BOTH halves are reset, not just the height. `flex: 1 1 0` is a ROW measure: this fork's
+     status is a flex COLUMN, where a zero basis with grow would stretch the hud down the
+     whole column and shove the Dock off the bottom. Compact's in-flow home is unchanged by
+     #101 and this line is what keeps that true. */
   .wy-hud:has(> .wy-wave-preview) {
     height: auto;
+    flex: 0 1 auto;
   }
 }
 

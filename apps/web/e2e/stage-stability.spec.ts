@@ -433,14 +433,26 @@ test('the preview re-homes across the layout fork — Stage on Standard, chips c
  *  the other.
  *
  *  Read the `hud` rows as the ratified escape hatch firing where the dead space cannot hold
- *  a legible card, not as spare capacity. */
+ *  a legible card, not as spare capacity.
+ *
+ *  `'either'` is NOT a softened expectation — it is the honest one for a viewport whose dead
+ *  space lands within a cell of the 64px floor, where the deciding input is the host's font
+ *  metrics rather than anything this repo controls. Recorded because it was found the hard
+ *  way: 1280×900 at 200% parks on macOS and FLOATS on CI's Linux runner (`e2e` red on
+ *  e32165c, "Expected: hud / Received: stage"), and BOTH are correct — the status row is a
+ *  few pixels taller there, so the board is a cell smaller, so the letterbox is a cell wider,
+ *  so the band clears the floor. Pinning a literal there gates the font stack, not the
+ *  placement. It costs the over-park guard nothing: an entry expecting `hud` could never
+ *  catch over-parking in the first place (the forced-over-park proof failed exactly the ten
+ *  `stage` entries and passed all six `hud` ones), and the occlusion half below still runs
+ *  in whichever home it lands in. */
 const PINNED_STANDARD = [
   // the viewport #101 was reported at
   { width: 1512, height: 854, home: { 100: 'stage', 200: 'stage' } },
   { width: 1440, height: 900, home: { 100: 'stage', 200: 'stage' } },
   { width: 1366, height: 768, home: { 100: 'stage', 200: 'stage' } },
-  // the hidpi projects' fixed viewport — 20px of letterbox at 200%, under the floor
-  { width: 1280, height: 900, home: { 100: 'stage', 200: 'hud' } },
+  // the hidpi projects' fixed viewport — at 200% its band sits ON the floor; see `'either'`
+  { width: 1280, height: 900, home: { 100: 'stage', 200: 'either' } },
   // Playwright's Desktop Chrome default
   { width: 1280, height: 720, home: { 100: 'stage', 200: 'stage' } },
   // the board very nearly fills the Stage here: 18px of letterbox at 100%
@@ -452,7 +464,10 @@ const PINNED_STANDARD = [
 ] as const satisfies readonly {
   readonly width: number;
   readonly height: number;
-  readonly home: { readonly 100: 'stage' | 'hud'; readonly 200: 'stage' | 'hud' };
+  readonly home: {
+    readonly 100: 'stage' | 'hud' | 'either';
+    readonly 200: 'stage' | 'hud' | 'either';
+  };
 }[];
 
 for (const size of PINNED_STANDARD) {
@@ -483,13 +498,20 @@ for (const size of PINNED_STANDARD) {
       // table is what stops an over-parking regression from passing the disjointness check
       // below by simply having nothing on the board to be disjoint from.
       const home = await previewHome(page);
-      expect(
-        home,
-        home === 'hud'
-          ? 'the card fell back to the hud, which costs the board its 40dvh reservation — ' +
-              'if that is now correct here, re-measure and move the residual table with it'
-          : 'the card floated where the measured residual says the dead space cannot hold it',
-      ).toBe(expectedHome);
+      if (expectedHome === 'either') {
+        // A band ON the floor — the host's font metrics decide, and both answers are
+        // correct here (see the table's note). Still pinned to a REAL home, so a card that
+        // lost its parent entirely cannot pass; the occlusion half below runs regardless.
+        expect(home, 'the card must still be in one of its two homes').toMatch(/^(stage|hud)$/);
+      } else {
+        expect(
+          home,
+          home === 'hud'
+            ? 'the card fell back to the hud, which costs the board its 40dvh reservation — ' +
+                'if that is now correct here, re-measure and move the residual table with it'
+            : 'the card floated where the measured residual says the dead space cannot hold it',
+        ).toBe(expectedHome);
+      }
       if (home === 'hud') {
         // The ratified escape hatch. Nothing to measure — an in-flow card inside a
         // scrollport occludes nothing — but assert it is genuinely in flow so a float that
@@ -517,6 +539,65 @@ for (const size of PINNED_STANDARD) {
     });
   }
 }
+
+test('1000×720, walking to wave 9: the board never re-projects — the hud fallback is content-invariant on its WIDTH axis too (#101, Codex P2)', async ({
+  page,
+}) => {
+  // The height pin (`.wy-hud:has(> .wy-wave-preview)`) covered one axis. `.wy-status` is a
+  // wrapping flex row and the hud was an auto-basis item, so a four-entry wave grew the
+  // hud's max-content WIDTH until the row wrapped: measured `.wy-status` 248 → 288px and
+  // the board 19 → 18 cellPx as wave 9 arrived. That is the same mid-run re-projection the
+  // height pin exists to prevent, arriving through the axis it did not cover — invisible
+  // until #101 made this home the escape hatch for wide viewports, since the narrow ones it
+  // used to serve have a width-fixed status COLUMN.
+  //
+  // Deliberately asserted WITHOUT a precondition on the home. The contract is "wave content
+  // never moves the board", which must hold in both homes — and pinning the home here would
+  // make this test hostage to the 64px floor's boundary behaviour on a given font stack.
+  test.setTimeout(150_000);
+  await gotoAt(page, { width: 1000, height: 720 });
+  await expect(page.locator('.wy-wave-preview')).toBeVisible();
+
+  const gridBefore = await projectedGrid(page);
+  const statusBefore = await statusHeight(page);
+
+  // The real walk, not an injected fixture: wave 9 is the arc's densest preview (four
+  // entries) and its rows are the real localized strings, so this measures the width the
+  // shipped content actually demands.
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+  }
+  await expect(previewTitle).toHaveText('Wave 9 of 10');
+  await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
+
+  expect(await statusHeight(page), 'wave 9 resized the status row').toBe(statusBefore);
+  expect(await projectedGrid(page), 'wave 9 re-projected the board').toEqual(gridBefore);
+
+  // ...and then the CONSERVATIVE bound, which is what actually reproduces the defect and is
+  // the reason this fix is structural rather than contingent. Shipped English at this
+  // viewport happens not to demand enough width to wrap the row — #130's content diet
+  // shortened the real rows — so the walk above passes even against the unfixed stylesheet.
+  // That is luck, not a guarantee: the hud's width came from its own max-content, so the
+  // invariant held only while the strings stayed short. A longer locale, a wider row, or a
+  // future entry restores the wrap. These over-long rows are the same height/width fixture
+  // every other pin in this file uses for exactly that reason, and they are what turns this
+  // test red without `flex: 1 1 0`.
+  await page.evaluate(() => {
+    const list = document.querySelector('.wy-wave-preview-list')!;
+    for (let i = 0; i < 3; i++) {
+      const li = document.createElement('li');
+      li.textContent = '12 × Probe — ground, armor 0, leak cost 1, no immunities';
+      list.append(li);
+    }
+  });
+  await page.waitForTimeout(200);
+  expect(await statusHeight(page), 'over-long rows wrapped the status row').toBe(statusBefore);
+  expect(await projectedGrid(page), 'over-long rows re-projected the board').toEqual(gridBefore);
+});
 
 test('1512×854, wave 9 pending: a tower built in the corner the preview used to own is FULLY visible (#101)', async ({
   page,
