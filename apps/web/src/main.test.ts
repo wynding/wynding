@@ -1517,6 +1517,119 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     }
   });
 
+  /** Boot with `.wy-stage`/`.wy-board` reporting `geometry`, and with a ResizeObserver stub
+   *  whose callbacks the caller can fire by hand — the seam every re-decide in this block
+   *  needs, since jsdom has neither layout nor a real observer. */
+  function stagedApp(geometry: { width: number; height: number }) {
+    const fire: (() => void)[] = [];
+    const originalRO = (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+    (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      constructor(cb: () => void) {
+        fire.push(cb);
+      }
+      observe(): void {}
+      disconnect(): void {}
+    };
+    const originalRect = Element.prototype.getBoundingClientRect;
+    let stubbed = true;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (stubbed && (this.classList.contains('wy-stage') || this.classList.contains('wy-board'))) {
+        return {
+          width: geometry.width,
+          height: geometry.height,
+          top: 0,
+          left: 0,
+          right: geometry.width,
+          bottom: geometry.height,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return originalRect.call(this);
+    };
+    const h = homeApp();
+    return {
+      root: h.root,
+      app: h.app,
+      /** Drop the layout stub, so every box reads jsdom's zeroes — the "no signal" state. */
+      blind(): void {
+        stubbed = false;
+      },
+      /** Move the placement key (text zoom is one of its four inputs) and re-run the
+       *  observer, i.e. exactly what a real zoom change does. */
+      turnKeyOver(): void {
+        document.documentElement.style.fontSize = '20px';
+        for (const cb of [...fire]) cb();
+      },
+      restore(): void {
+        document.documentElement.style.fontSize = '';
+        Element.prototype.getBoundingClientRect = originalRect;
+        if (originalRO === undefined) {
+          delete (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+        } else {
+          (window as unknown as { ResizeObserver: unknown }).ResizeObserver = originalRO;
+        }
+      },
+    };
+  }
+
+  it('a parked card is never re-homed just to MEASURE — a key turnover that changes nothing touches no DOM (#101)', () => {
+    // The defect this forbids: an exploratory hud→stage→hud round trip flushes layout with
+    // the row reservation lifted, and a browser CLAMPS a scroll container's scrollTop the
+    // moment its content shrinks. A reader scrolled down the chips column would be yanked
+    // to the top by nothing more than a window resize. `main.ts` avoids it by measuring
+    // where it stands: from the hud home the Stage is shorter, so the letterbox reads WIDER
+    // than the float home would offer, which makes "no compliant band" an upper bound —
+    // and therefore a proof — rather than a guess needing a physical trial.
+    const h = stagedApp({ width: 259, height: 596 }); // the portrait-phone geometry: no band
+    try {
+      const hud = h.root.querySelector('.wy-hud')!;
+      const preview = h.root.querySelector('.wy-wave-preview')!;
+      expect(preview.parentElement).toBe(hud);
+
+      const observer = new MutationObserver(() => {});
+      observer.observe(hud, { childList: true });
+      // Positive calibration: the observer must be able to see a child move at all, or a
+      // "no records" result below would prove nothing about the code under test.
+      const probe = document.createElement('span');
+      hud.append(probe);
+      probe.remove();
+      expect(observer.takeRecords().length).toBeGreaterThan(0);
+
+      h.turnKeyOver();
+
+      expect(preview.parentElement, 'the card must still be parked').toBe(hud);
+      expect(observer.takeRecords(), 'the chips scrollport must not have been disturbed').toEqual(
+        [],
+      );
+      observer.disconnect();
+      h.app.destroy();
+    } finally {
+      h.restore();
+    }
+  });
+
+  it('NO SIGNAL while parked changes nothing — a degenerate box is not evidence of room (#101)', () => {
+    // `unmeasured` means "nothing was laid out", which is not the same claim as "there is
+    // room". Re-homing a deliberately parked card on it would be a move with nothing behind
+    // it, and it would spend the scrollport for free.
+    const h = stagedApp({ width: 259, height: 596 });
+    try {
+      const hud = h.root.querySelector('.wy-hud')!;
+      const preview = h.root.querySelector('.wy-wave-preview')!;
+      expect(preview.parentElement).toBe(hud);
+
+      h.blind(); // every box now reads jsdom's zeroes
+      h.turnKeyOver();
+
+      expect(preview.parentElement).toBe(hud);
+      h.app.destroy();
+    } finally {
+      h.restore();
+    }
+  });
+
   it('a stage with a letterbox margin keeps the float, pinned to the band and capped to it (#101)', () => {
     // The 1512×854 geometry, measured on the shipped build: a 1144×810 stage, a 28×24 grid
     // at 33px cells (924×792), leaving a 110px letterbox margin on each side. The card is

@@ -2113,7 +2113,13 @@ export function createOverlay(
       // means no announcement is at stake — this is about cursor stability and churn.)
       const summaryText = statusSummaryText(hud.statuses);
       setLabel(statusSummaryEl, summaryText);
-      statusSummaryEl.hidden = summaryText === '';
+      // BOTH writes gated, not just the text one. `hidden` is a reflected attribute, so an
+      // unconditional assignment sets it 20-40× a second — cheap, but it is an attribute
+      // mutation on a node inside the HUD every tick, which is exactly the churn class the
+      // comment above claims to be avoiding. A property read is cheaper than the write it
+      // skips, and it makes the claim true rather than nearly true.
+      const summaryHidden = summaryText === '';
+      if (statusSummaryEl.hidden !== summaryHidden) statusSummaryEl.hidden = summaryHidden;
       // Pause is HIDDEN (not disabled) pre-start (PLAN.md P4) — there's nothing to pause
       // yet, and a hidden control can't be tabbed to or announced as a false affordance.
       pauseBtn.hidden = !view.ui.started;

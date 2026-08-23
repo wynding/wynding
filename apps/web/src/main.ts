@@ -17,7 +17,7 @@ import { createSettings } from './settings';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
-import { placePreviewFloat, type PreviewFloat } from './preview-place';
+import { placePreviewFloat, type PreviewFloat, type PreviewFloatInput } from './preview-place';
 import { paintSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
@@ -362,29 +362,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  of stranding it on a stale band). */
   let hudLatchKey: string | null = null;
 
-  const applyPreviewHome = (): void => {
-    if (compactMq.matches) {
-      setFloatScroll(false); // the hud scrollport owns overflow in this home
-      setFloatBand({ kind: 'none' });
-      shell.placePreview('hud');
-      hudLatchKey = null; // re-measure on the way back out of Compact
-      return;
-    }
-    // Held by the latch: the Stage geometry visible from the hud home is the SHRUNKEN one,
-    // so re-deciding from it is the loop `previewHomeKey` describes. Nothing measured here.
-    if (hudLatchKey !== null && hudLatchKey === previewHomeKey()) return;
-
-    // MEASURED IN THE FLOAT HOME, ALWAYS. Restoring the Stage home first is what makes the
-    // geometry below the one the answer has to be true of. `getBoundingClientRect` flushes
-    // layout synchronously, so the reads see the restored Stage, not the pre-move one.
-    shell.placePreview('stage');
+  /** The placement's inputs, read off whatever frame the card is in right now. */
+  const measureStageFrame = (): PreviewFloatInput => {
     const stageBox = shell.stage.getBoundingClientRect();
     const boardBox = shell.board.getBoundingClientRect();
-    // THE RATIFIED PLACEMENT (#101, owner 2026-08-17): the float goes in true dead space —
-    // the letterbox margins, then the board's blocked border band — and never over a cell a
-    // tower could be built on. `preview-place.ts` owns the geometry and the reasoning; this
-    // decides only what to do with its answer.
-    const band = placePreviewFloat({
+    return {
       stageWidth: stageBox.width,
       stageHeight: stageBox.height,
       boardLeft: boardBox.x - stageBox.x,
@@ -392,7 +374,63 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       boardHeight: boardBox.height,
       cols: grid.width,
       rows: grid.height,
-    });
+    };
+  };
+
+  /** Send the card to its in-flow hud home and drop every float grant. Idempotent by
+   *  construction — `placePreview` moves conditionally and both grant setters are no-ops at
+   *  their cleared values — so calling it on an already-parked card mutates no DOM at all,
+   *  which is what lets the "stay put" path below cost the chips scrollport nothing. */
+  const parkPreviewInHud = (): void => {
+    setFloatScroll(false); // the hud scrollport owns overflow in this home
+    setFloatBand({ kind: 'none' });
+    shell.placePreview('hud');
+  };
+
+  const applyPreviewHome = (): void => {
+    if (compactMq.matches) {
+      parkPreviewInHud();
+      hudLatchKey = null; // re-measure on the way back out of Compact
+      return;
+    }
+    // Held by the latch: nothing the card can do moves this key, so nothing to re-decide.
+    if (hudLatchKey !== null && hudLatchKey === previewHomeKey()) return;
+
+    // MEASURE WHERE WE STAND — no exploratory re-home. Physically moving the live node just
+    // to measure would flush layout with the row reservation lifted, and a scroll container
+    // whose content shrinks has its `scrollTop` CLAMPED by the browser: a reader scrolled
+    // down the chips column would be yanked to the top by nothing more than a window resize.
+    //
+    // Measuring from the hud home is sound because it is OPTIMISTIC in a provable direction.
+    // Stage WIDTH is identical in both homes (the status row spans the shell and the Rail
+    // track is viewport-derived); only the height moves, and the reservation can only ADD to
+    // the status row, so `stageHeight_hud <= stageHeight_float`. `cellPx` is monotone
+    // non-decreasing in stage height, and BOTH tiers' band widths — `(W - cellPx*cols)/2`
+    // and that plus one `cellPx` — are monotone non-INcreasing in `cellPx` for any board
+    // wider than two cells. So the hud frame reports an UPPER BOUND on the dead space the
+    // float frame would offer, and an optimistic "no compliant band" is a PROOF of the real
+    // one. That is the common case (a resize while parked), and it now costs zero DOM moves.
+    const parked = previewEl.parentElement !== shell.stage;
+    let band = placePreviewFloat(measureStageFrame());
+    // NO SIGNAL while deliberately parked (a stage mid-resize reporting a degenerate box):
+    // learn nothing, change nothing. Re-homing a parked card on no evidence would be a move
+    // with nothing behind it — and it would spend the scrollport for free.
+    if (band.kind === 'unmeasured' && hudLatchKey !== null) return;
+    if (band.kind !== 'none' && parked) {
+      // Only a MAYBE — the bound above is one-sided. Take the home change we were going to
+      // take anyway, then read the truth in the frame that now actually exists, so a band
+      // computed against the shrunken Stage is never painted even for a frame.
+      const chipsScrollTop = shell.hudBox.scrollTop;
+      shell.placePreview('stage');
+      band = placePreviewFloat(measureStageFrame());
+      if (band.kind === 'none') {
+        parkPreviewInHud();
+        // The bounce ends where it started, so it must cost the reader nothing either.
+        shell.hudBox.scrollTop = chipsScrollTop;
+        hudLatchKey = previewHomeKey();
+        return;
+      }
+    }
     // NO COMPLIANT BAND — the hud home is the escape hatch the ratified plan names, and the
     // one that already carries the row RESERVATION (`ui.css`: `.wy-hud:has(>
     // .wy-wave-preview)` fixes the hud at its cap) so wave changes cannot re-project the
@@ -400,14 +438,13 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // narrow has no dead band wide enough for a legible card, so it lands here by
     // measurement rather than by a separate hand-picked threshold.
     if (band.kind === 'none') {
-      setFloatScroll(false);
-      setFloatBand(band);
-      shell.placePreview('hud');
+      parkPreviewInHud();
       hudLatchKey = previewHomeKey();
       return;
     }
-    // `unmeasured` (jsdom, or a stage mid-resize) is NO SIGNAL, not "no room": keep the
-    // float and leave the stylesheet's own default placement alone.
+    // `unmeasured` (jsdom, which lays nothing out) reaches here only from an UNLATCHED card:
+    // no signal, so keep the float and leave the stylesheet's own default placement alone.
+    shell.placePreview('stage');
     hudLatchKey = null;
     setFloatBand(band);
     setFloatScroll(!previewEl.hidden && previewEl.scrollHeight > previewEl.clientHeight);
