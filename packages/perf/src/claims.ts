@@ -12,14 +12,27 @@
 // compares it to the row. Disagreement is a test failure; so is a site whose anchor no
 // longer resolves. Anchor rot has to be LOUD, or the check itself rots vacuous.
 //
-// THE COVERAGE CONTRACT, stated as the obligation it is rather than as a hope. EVERY figure
-// that appears in more than one of the guarded files belongs to a row, and EVERY occurrence
-// of a rowed figure is a site of that row. A rowed claim with an unguarded restatement is
-// the same defect as no row at all — the stale copy is exactly the one nobody edits. Review
-// found both shapes present on the first pass (ten enumerated multi-file figures with no
-// row, and five rowed figures whose second and third copies were unguarded); the fix was to
-// close the gap, never to soften this paragraph to match it. A figure that genuinely lives
-// in one file only is out of scope: the table exists for claims with copies.
+// THE COVERAGE CONTRACT — and it is a TEST, not this paragraph. `claims.test.ts`'s
+// `the coverage contract is enforced` is the authority: every figure `gate.ts` states that
+// also appears in another guarded file must have a row, or a named exclusion saying why the
+// numeral is a collision rather than a shared claim. Read this paragraph as a description
+// of that test, never as the promise itself — a prose contract cannot fail, which is
+// precisely how the first two versions of it came to be wrong.
+//
+// Scope, stated exactly. IN: figures `gate.ts` states and some other guarded file repeats —
+// that is the propagation surface issue #86 names, and every occurrence of such a figure is
+// a site of its row, because a rowed claim with an unguarded restatement is the same defect
+// as no row at all. OUT: figures stated in only one file (nothing to propagate), and
+// figures the docs share among themselves without `gate.ts` participating — the p99/p95-era
+// baselines this file deliberately no longer states are ADR 0005's history to keep, not
+// this table's to guard.
+//
+// The contract was overstated twice before it was enforced, and both corrections are on
+// record rather than quietly folded in: ship-review found ten multi-file figures with no
+// row and five rowed figures whose second and third copies were unguarded; Codex then found
+// two whole families (the DoT records/carriers, and the creep populations) still missing,
+// at which point the sweep replaced the promise and immediately turned up 34 gaps rather
+// than two. Each time the fix was to close the gap, never to soften the claim to fit it.
 //
 // HOW TO CHANGE A NUMBER. Edit the row here, then every site it lists — the test tells you
 // when you have missed one. Adding a new copy of an existing claim means adding a site to
