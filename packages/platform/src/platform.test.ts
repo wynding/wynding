@@ -410,6 +410,49 @@ describe('the save slot — serialized writes and atomic revision allocation', (
     expect(held).toEqual(['settings:write']);
   });
 
+  it('TWO INSTANCES on the same driver+key share one queue — a handle is not a lock', async () => {
+    // `createSaveSlot` is a cheap handle and nothing stops a second consumer building its
+    // own for the same bytes. When the queue was per INSTANCE that made the within-context
+    // guarantee vacuous exactly where it matters: two handles to the same key could both
+    // read revision N and both write N+1. The queue now hangs off (driver, key) — the
+    // identity of the DATA — so a second instance joins the first's chain.
+    const storage = fakeStorage();
+    const driver = createWebStorageDriver(storage);
+    const mk = (): SaveSlot<string> =>
+      createSaveSlot<string>({
+        driver,
+        key: 'settings',
+        deviceId: 'device-a',
+        parse: (data) => (typeof data === 'string' ? data : undefined),
+        now: () => 1000,
+      });
+    const a = mk();
+    const b = mk();
+
+    // Interleaved and concurrent: with private chains these both read 0 and both write 1.
+    await Promise.all([a.write('a1'), b.write('b1'), a.write('a2'), b.write('b2')]);
+    expect(await mk().read()).toMatchObject({ revision: 4 });
+  });
+
+  it('first-preserved-wins holds ACROSS instances too', async () => {
+    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: '{first corruption' });
+    const driver = createWebStorageDriver(storage);
+    const mk = (): SaveSlot<string> =>
+      createSaveSlot<string>({
+        driver,
+        key: 'settings',
+        deviceId: 'device-a',
+        parse: (data) => (typeof data === 'string' ? data : undefined),
+        now: () => 1000,
+      });
+    // Two handles racing to classify the same corrupt payload must not clobber each
+    // other's quarantine — the shared queue is what makes the conditional write atomic.
+    await Promise.all([mk().read(), mk().read()]);
+    expect(storage.map.get(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe(
+      '{first corruption',
+    );
+  });
+
   it('revisions are per (device, SLOT) — independence is deliberate, not a bug', async () => {
     // Two slots on one device, written once each, both land on revision 1. That reads
     // like an ambiguous device-wide order, and it would be — if anything ever compared

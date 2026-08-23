@@ -2349,6 +2349,10 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     const saved: { filename: string; text: string }[] = [];
     let copyRejects = false;
     let saveThrows = false;
+    // A gate lets a test hold a Copy open across other presses, which is the only way to
+    // observe an out-of-order completion. `true` resolves the copy, `false` rejects it.
+    let copyGate: Promise<boolean> | null = null;
+    let copyGateSettled = false;
     let minted = 0;
     const app = createApp(document, root, {
       sceneFactory: () => fakeHandle,
@@ -2358,6 +2362,13 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       mintRunId: () => runIds[minted++] ?? `run-overflow-${String(minted)}`,
       playtraceDelivery: {
         copy: async (text: string) => {
+          if (copyGate !== null) {
+            const ok = await copyGate;
+            copyGateSettled = true;
+            if (!ok) throw new Error('clipboard refused');
+            copied.push(text);
+            return;
+          }
           if (copyRejects) throw new Error('clipboard refused');
           copied.push(text);
         },
@@ -2384,6 +2395,8 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       resultsButton,
       status: (): string => results.querySelector('.wy-verify')!.textContent ?? '',
       setCopyRejects: (v: boolean): void => void (copyRejects = v),
+      setCopyGate: (g: Promise<boolean>): void => void (copyGate = g),
+      copyGateSettled: (): boolean => copyGateSettled,
       setSaveThrows: (v: boolean): void => void (saveThrows = v),
       frame: (): void => sched.frame((clock += 16)),
       /** Drive the run to its terminal state so the results dialog opens. */
@@ -2419,6 +2432,50 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     expect(payload.runs[0]!.keybindings).toBeUndefined();
     expect(payload.runs[0]!.deviceId).toBeUndefined();
     await vi.waitFor(() => expect(h.status()).toBe('Run data copied to the clipboard.'));
+  });
+
+  it('a SUPERSEDED clipboard completion never clobbers a newer announcement', async () => {
+    // The results dialog has one live region and the clipboard is the one asynchronous
+    // writer, so a slow or refused Copy could land its announcement after a later Save had
+    // already written the region — announcing failure for an export that succeeded.
+    const h = playtraceApp();
+    h.resolve();
+
+    // Hold the Copy open, press Save (which is synchronous and lands first), then let the
+    // older Copy reject. The newer Save announcement must stand.
+    let releaseCopy!: (ok: boolean) => void;
+    h.setCopyGate(
+      new Promise<boolean>((resolve) => {
+        releaseCopy = resolve;
+      }),
+    );
+    h.resultsButton('Copy run data').click();
+    h.resultsButton('Save run data').click();
+    expect(h.status()).toContain('Run data saved as');
+
+    releaseCopy(false); // the OLDER request finally fails
+    await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
+    expect(h.status(), 'a stale completion overwrote a newer announcement').toContain(
+      'Run data saved as',
+    );
+  });
+
+  it("nothing in flight can write onto the NEXT run's results dialog", async () => {
+    const h = playtraceApp();
+    h.resolve();
+    let releaseCopy!: (ok: boolean) => void;
+    h.setCopyGate(
+      new Promise<boolean>((resolve) => {
+        releaseCopy = resolve;
+      }),
+    );
+    h.resultsButton('Copy run data').click();
+
+    h.resultsButton('Play again').click(); // the dialog goes away mid-flight
+    releaseCopy(true);
+    await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
+    // `hideResults` cleared the region; a stale success must not repopulate it.
+    expect(h.status()).toBe('');
   });
 
   it('says a refused clipboard FAILED rather than looking like a press that did nothing', async () => {

@@ -106,8 +106,29 @@ export interface CapacitorAppPlugin {
   exitApp(): Promise<void>;
 }
 
+/**
+ * The App plugin AS THE BRIDGE ACTUALLY HANDS IT OVER — which is not the typed shape
+ * above.
+ *
+ * Capacitor's legacy bridge (the one Android 8.5 installs on `window`) generates
+ * `addListener` to return the listener handle **synchronously**, not a promise, and the
+ * handle's `remove` likewise. Modern/other hosts return promises. Both are legitimate, and
+ * code downstream of this file should not have to know which it got — so nothing here
+ * assumes either. The return types are `unknown` on purpose: they are whatever the host
+ * decided, and the adapter below is what makes them uniform.
+ */
+interface RawCapacitorAppPlugin {
+  addListener(eventName: string, listener: (payload: never) => void): unknown;
+  exitApp(): unknown;
+}
+
 interface CapacitorBridge {
-  readonly Plugins?: { readonly App?: CapacitorAppPlugin };
+  readonly Plugins?: { readonly App?: RawCapacitorAppPlugin };
+}
+
+/** A listener handle as the host gave it — `remove` may or may not return a promise. */
+interface RawListenerHandle {
+  remove(): unknown;
 }
 
 /**
@@ -125,7 +146,29 @@ export function findCapacitorApp(
 ): CapacitorAppPlugin | null {
   if (!hosted) return null;
   const bridge = (view as unknown as { Capacitor?: CapacitorBridge } | null | undefined)?.Capacitor;
-  return bridge?.Plugins?.App ?? null;
+  const raw = bridge?.Plugins?.App;
+  if (raw === undefined || raw === null) return null;
+
+  // NORMALIZE AT THE BOUNDARY. Everything downstream treats these as promises, and on the
+  // legacy bridge they are not — `addListener` returns the handle synchronously, so the
+  // `.then` in `createBackHandler`'s `bridge()` helper would have thrown a TypeError on
+  // every hosted boot with the plugin installed. Back would have been dead on the actual
+  // device while every test passed, because the doubles all returned promises.
+  //
+  // `Promise.resolve` is the right tool precisely because it is SHAPE-TOTAL: given a
+  // promise it adopts it, given a thenable it assimilates it, given a plain value it wraps
+  // it. So this cannot be wrong for any host shape — including one neither of us has seen.
+  return {
+    addListener: (eventName: string, listener: (payload: never) => void) =>
+      Promise.resolve(raw.addListener(eventName, listener)).then(
+        (handle): PluginListenerHandleLike => ({
+          // The handle needs the same treatment for the same reason.
+          remove: () =>
+            Promise.resolve((handle as RawListenerHandle).remove()).then(() => undefined),
+        }),
+      ),
+    exitApp: () => Promise.resolve(raw.exitApp()).then(() => undefined),
+  } as CapacitorAppPlugin;
 }
 
 export interface BackHandlerDeps {

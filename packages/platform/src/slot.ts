@@ -107,6 +107,43 @@ export interface SaveSlotOptions<T> {
   readonly lock?: LockFn;
 }
 
+/**
+ * The serialized write queue, keyed by (driver, key) rather than owned by a slot instance.
+ *
+ * WHY IT IS NOT PER INSTANCE. It was, and that made the guarantee vacuous in exactly the
+ * situation it exists for: `createSaveSlot` twice on the same driver and key — which is
+ * ordinary, since a slot is a cheap handle and nothing stops a second consumer building
+ * its own — gave each one a private chain. Two handles to the SAME bytes could then both
+ * read revision `N` and both write `N + 1`, and both could clobber the other's quarantine.
+ * Serializing per instance serializes nothing that matters; the identity that matters is
+ * the data, so the queue hangs off the data's identity.
+ *
+ * A `WeakMap` on the driver so a discarded driver takes its queues with it, and a plain
+ * `Map` of keys inside — those are strings, and one per slot for the process's life.
+ *
+ * This is the WITHIN-CONTEXT half of the guarantee and it is unconditional. The
+ * cross-context half remains the host's (see this module's header): a `LockFn` that cannot
+ * exclude other tabs does not make this queue weaker, it just does not extend it.
+ *
+ * `.catch` on the STORED tail — not on the returned promise — keeps a rejected operation
+ * from poisoning the queue while still surfacing to its own caller.
+ */
+const QUEUES = new WeakMap<StorageDriver, Map<string, Promise<unknown>>>();
+
+function serializeOn<R>(driver: StorageDriver, key: string, op: () => Promise<R>): Promise<R> {
+  let byKey = QUEUES.get(driver);
+  if (byKey === undefined) {
+    byKey = new Map<string, Promise<unknown>>();
+    QUEUES.set(driver, byKey);
+  }
+  const next = (byKey.get(key) ?? Promise.resolve()).then(op, op);
+  byKey.set(
+    key,
+    next.catch(() => undefined),
+  );
+  return next;
+}
+
 /** Where a corrupt original is preserved before fresh state is initialised. */
 export const quarantineKey = (key: string): string => `${key}.quarantine`;
 
@@ -115,16 +152,7 @@ export function createSaveSlot<T>(options: SaveSlotOptions<T>): SaveSlot<T> {
   const now = options.now ?? ((): number => Date.now());
   const lock: LockFn = options.lock ?? (<R>(_n: string, fn: () => Promise<R>) => fn());
 
-  // The per-key serialized write queue. Every critical section links onto this chain, so
-  // two overlapping writes in THIS context can never both read `N` and write `N + 1`
-  // (a lost update). `.catch` on the stored tail — not on the returned promise — keeps a
-  // rejected operation from poisoning the queue while still surfacing to its own caller.
-  let chain: Promise<unknown> = Promise.resolve();
-  const serialize = <R>(op: () => Promise<R>): Promise<R> => {
-    const next = chain.then(op, op);
-    chain = next.catch(() => undefined);
-    return next;
-  };
+  const serialize = <R>(op: () => Promise<R>): Promise<R> => serializeOn(driver, key, op);
 
   /**
    * Copy an unreadable original aside.

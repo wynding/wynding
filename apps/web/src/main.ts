@@ -662,16 +662,38 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  it to a file or clipboard sends nothing anywhere"). Both report through the results
    *  dialog's one shared live region, and a failure says so rather than looking like a
    *  press that did nothing. */
+  /** The results dialog's ONE live region has ONE current request (#133 review round).
+   *
+   *  Only the clipboard action is asynchronous, which is exactly what made this subtle:
+   *  a slow or refused Copy could land its announcement AFTER a later Save had already
+   *  written the region — announcing a failure for an export that succeeded — or, worse,
+   *  after Play again had opened the next run's dialog, where a stale "could not export"
+   *  refers to a run that is no longer on screen. Every writer claims the region first,
+   *  and a completion that is no longer the current claim says nothing at all. */
+  let resultsStatusSeq = 0;
+  function claimResultsStatus(): (message: string) => void {
+    const token = ++resultsStatusSeq;
+    return (message: string): void => {
+      if (token === resultsStatusSeq) overlay.setResultsStatus(message);
+    };
+  }
+  /** Invalidate any in-flight claim without making one — used when the dialog goes away,
+   *  so nothing pending can write onto the next run's results. */
+  function abandonResultsStatus(): void {
+    resultsStatusSeq++;
+  }
+
   function exportPlaytrace(destination: 'clipboard' | 'file'): void {
+    const announce = claimResultsStatus();
     const payload = playtrace.buildExport();
     const text = formatPlaytraceExport(payload);
     if (destination === 'file') {
       const filename = playtraceFilename(payload.exportedAt);
       try {
         delivery.save(filename, text);
-        overlay.setResultsStatus(t('playtrace.saved', { filename }));
+        announce(t('playtrace.saved', { filename }));
       } catch {
-        overlay.setResultsStatus(t('playtrace.failed'));
+        announce(t('playtrace.failed'));
       }
       return;
     }
@@ -679,8 +701,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // context, a WebView without one), so the announcement waits for the outcome instead
     // of claiming success optimistically.
     delivery.copy(text).then(
-      () => overlay.setResultsStatus(t('playtrace.copied')),
-      () => overlay.setResultsStatus(t('playtrace.failed')),
+      () => announce(t('playtrace.copied')),
+      () => announce(t('playtrace.failed')),
     );
   }
 
@@ -983,6 +1005,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
         overlay.hideResults();
+        abandonResultsStatus(); // nothing in flight may write onto the next run's dialog
         // The modal owner restores focus to whatever was focused before the results
         // dialog opened (generic pre-modal capture); Play-again always wants the board
         // specifically — the natural next actionable place for a keyboard user — so this
@@ -1003,7 +1026,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         if (!r.ok) message = t('verify.fail', { reason: r.reason ?? '' });
         else if (r.matchedLive === false) message = t('verify.mismatch');
         else message = t('verify.ok');
-        overlay.setResultsStatus(message);
+        claimResultsStatus()(message);
         break;
       }
       case 'copyPlaytrace':

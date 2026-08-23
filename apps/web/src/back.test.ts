@@ -425,6 +425,97 @@ describe('createBackHandler — the wiring', () => {
   });
 });
 
+describe('the LEGACY bridge shape (#138 review round)', () => {
+  /** The Android Capacitor 8.5 bridge as it actually behaves: `addListener` returns the
+   *  handle SYNCHRONOUSLY, and so does `remove`. Every double in this file until now
+   *  returned promises, which is why a defect that would kill Back on every real device
+   *  sat behind a fully green suite. */
+  function legacyBridgeWindow() {
+    const listeners = new Map<string, (payload: never) => void>();
+    const removed: string[] = [];
+    const exited: number[] = [];
+    const App = {
+      // NOT async, and NOT returning a promise — the whole point.
+      addListener(name: string, listener: (payload: never) => void) {
+        listeners.set(name, listener);
+        return {
+          remove() {
+            removed.push(name);
+          },
+        };
+      },
+      exitApp() {
+        exited.push(1);
+      },
+    };
+    return {
+      view: { Capacitor: { Plugins: { App } } } as unknown as Window,
+      listeners,
+      removed,
+      exited,
+    };
+  }
+
+  it('drives Back end to end when the host answers SYNCHRONOUSLY', async () => {
+    const host = legacyBridgeWindow();
+    const plugin = findCapacitorApp(host.view, true);
+    expect(plugin).not.toBeNull();
+
+    const handle = createBackHandler({
+      modal: {
+        open: vi.fn(),
+        close: vi.fn(),
+        activeDismissal: () => null,
+        dismissActive: vi.fn(),
+        destroy: vi.fn(),
+      },
+      isRunLive: () => false,
+      isRunUnresolved: () => false,
+      showLeaveConfirm: vi.fn(),
+      ensurePaused: vi.fn(),
+      abortGesture: vi.fn(),
+      refreshWakeLock: vi.fn(),
+      plugin,
+    });
+
+    // Registration completes...
+    await vi.waitFor(() =>
+      expect([...host.listeners.keys()].sort()).toEqual(['appStateChange', 'backButton']),
+    );
+    // ...the press routes...
+    (host.listeners.get('backButton') as (e: { canGoBack: boolean }) => void)({
+      canGoBack: false,
+    });
+    await vi.waitFor(() => expect(host.exited).toHaveLength(1));
+    // ...and teardown reaches the synchronous `remove` too.
+    handle.destroy();
+    await vi.waitFor(() => expect(host.removed.sort()).toEqual(['appStateChange', 'backButton']));
+  });
+
+  it('normalizes a PROMISE-returning host identically — the adapter is shape-total', async () => {
+    // `Promise.resolve` adopts a promise, assimilates a thenable and wraps a plain value,
+    // so no host shape can throw through this boundary.
+    const removed: string[] = [];
+    const exited: number[] = [];
+    const App = {
+      addListener: async (name: string) => ({
+        remove: async () => {
+          removed.push(name);
+        },
+      }),
+      exitApp: async () => {
+        exited.push(1);
+      },
+    };
+    const plugin = findCapacitorApp({ Capacitor: { Plugins: { App } } } as unknown as Window, true);
+    const listenerHandle = await plugin!.addListener('backButton', () => undefined);
+    await plugin!.exitApp();
+    await listenerHandle.remove();
+    expect(exited).toHaveLength(1);
+    expect(removed).toEqual(['backButton']);
+  });
+});
+
 describe('findCapacitorApp — told, never inferred (ADR 0012)', () => {
   const bridged = { Capacitor: { Plugins: { App: { exitApp: vi.fn() } } } } as unknown as Window;
 
