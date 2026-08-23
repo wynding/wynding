@@ -469,86 +469,120 @@ const GUARDED_FILES: readonly string[] = [...PERF_SOURCES, ...GUARDED_DOCS];
  *  geometry are other stories' surfaces, which the header has said from the start — but it is
  *  a decision recorded with its price rather than a list that quietly happened to stop where
  *  it stopped. */
-const OFF_SURFACE: readonly { readonly file: string; readonly why: string }[] = [
+const OFF_SURFACE: readonly {
+  readonly file: string;
+  /** HOW MANY cross-file pairs this file would ADD to the sweep if it joined the surface —
+   *  recomputed every run and compared exactly, because a count in a `why` string is a prose
+   *  contract and a prose contract cannot fail. The partition test compared FILENAMES, so a
+   *  file already classified could acquire a cross-file claim and its recorded justification
+   *  quietly stop being true: an unlisted `1.0065` appended to `scenario.test.ts`, whose entry
+   *  claims zero, left all 780 tests green (Codex, PR #161).
+   *
+   *  `'circular'` is for the table itself, and it is not an escape hatch — the check asserts
+   *  that only the two table files may claim it. A count there would be self-referential and
+   *  would churn on every edit to the guard, which is a different thing from being unchecked. */
+  readonly pairs: number | 'circular';
+  readonly why: string;
+}[] = [
   {
     file: 'packages/perf/src/claims.ts',
+    pairs: 'circular',
     why: 'THE TABLE ITSELF. Every claim value appears here by construction, so guarding it would make every row a self-certifying two-file duplicate of itself. Circular, not merely noisy.',
   },
   {
     file: 'packages/perf/src/claims.test.ts',
+    pairs: 'circular',
     why: "The table's own guard, and it quotes claim values in exclusions, exceptions and fixtures. Same circularity as claims.ts.",
   },
   {
     file: 'packages/perf/src/layout.ts',
-    why: "Board geometry and anchor placement — the largest single off-surface holding at 25 cross-file pairs (cell counts, board dimensions, route lengths). The header has named board geometry as another surface's business since the contract was first written; it belongs to the content and sim tests, not to the perf gate.",
+    pairs: 25,
+    why: "Board geometry and anchor placement — the largest single off-surface holding by a wide margin (cell counts, board dimensions, route lengths; the count is in `pairs`). The header has named board geometry as another surface's business since the contract was first written; it belongs to the content and sim tests, not to the perf gate.",
   },
   {
     file: 'packages/perf/src/oracle-catalog.ts',
-    why: "The M2-S11 catalog scene's oracle — 8 cross-file pairs, all catalog-scene facts. A neighbouring surface, like the stress oracle's unrowed family in KNOWN_UNROWED, and tracked with it in #163.",
+    pairs: 8,
+    why: "The M2-S11 catalog scene's oracle, all of whose pairs are catalog-scene facts. A neighbouring surface, like the stress oracle's unrowed family in KNOWN_UNROWED, and tracked with it in #163.",
   },
   {
     file: 'packages/perf/src/oracle-catalog.test.ts',
-    why: 'Its test — 3 cross-file pairs, the same catalog-scene family as oracle-catalog.ts.',
+    pairs: 3,
+    why: 'Its test — the same catalog-scene family as oracle-catalog.ts.',
   },
   {
     file: 'packages/perf/src/layout-catalog.test.ts',
-    why: 'Catalog-scene layout — 5 cross-file pairs, all board geometry.',
+    pairs: 5,
+    why: 'Catalog-scene layout; every pair it holds is board geometry.',
   },
   {
     file: 'packages/perf/src/layering.test.ts',
-    why: 'Tower layering over the board — 1 cross-file pair, a board-geometry figure.',
+    pairs: 1,
+    why: 'Tower layering over the board; the pair it holds is a board-geometry figure.',
   },
   {
     file: 'packages/perf/src/run.ts',
-    why: 'The CLI entry point — 5 cross-file pairs, all CI wall-clock timings and plan-step references rather than gate claims.',
+    pairs: 5,
+    why: 'The CLI entry point; its pairs are CI wall-clock timings and plan-step references rather than gate claims.',
   },
   {
     file: 'packages/perf/src/run-catalog.ts',
-    why: 'The catalog CLI entry point — 1 cross-file pair, a catalog-scene figure.',
+    pairs: 1,
+    why: 'The catalog CLI entry point; the pair it holds is a catalog-scene figure.',
   },
   {
     file: 'packages/perf/src/generate.ts',
-    why: 'The scenario generator CLI — 1 cross-file pair, a board-geometry figure.',
+    pairs: 1,
+    why: 'The scenario generator CLI; the pair it holds is a board-geometry figure.',
   },
   {
     file: 'packages/perf/src/harness.ts',
-    why: "The measurement harness — 1 cross-file pair. Its figures are warm-up and sample window lengths, which are the harness's own parameters rather than claims the documents restate as gate facts.",
+    pairs: 1,
+    why: "The measurement harness. Its figures are warm-up and sample window lengths, which are the harness's own parameters rather than claims the documents restate as gate facts.",
   },
   {
     file: 'packages/perf/src/harness.test.ts',
-    why: 'Its test — 5 cross-file pairs, harness parameters and fixture timings.',
+    pairs: 5,
+    why: 'Its test — harness parameters and fixture timings.',
   },
   {
     file: 'packages/perf/src/scenario.test.ts',
-    why: 'Measured: ZERO cross-file pairs beyond what is already guarded. It does hold a SITE (the instrumented-run figure), which is the distinction the surface draws — the surface decides what SEEDS the sweep, while a row may bind an occurrence anywhere in the repository.',
+    pairs: 0,
+    why: 'Measured at zero beyond what is already guarded. It does hold a SITE (the instrumented-run figure), which is the distinction the surface draws — the surface decides what SEEDS the sweep, while a row may bind an occurrence anywhere in the repository.',
   },
   {
     file: 'packages/perf/src/dot-bench.test.ts',
-    why: "Measured: zero cross-file pairs. It covers only dot-bench.ts's pure structural helpers, and the numbers it uses are local fixtures.",
+    pairs: 0,
+    why: "Measured at zero. It covers only dot-bench.ts's pure structural helpers, and the numbers it uses are local fixtures.",
   },
   {
     file: 'packages/perf/src/escalation.ts',
-    why: "Measured: zero cross-file pairs. The escalation RULE's figures live in gate.ts's prose, which is guarded; this module implements it.",
+    pairs: 0,
+    why: "Measured at zero. The escalation RULE's figures live in gate.ts's prose, which is guarded; this module implements it.",
   },
   {
     file: 'packages/perf/src/escalation.test.ts',
-    why: 'Measured: zero cross-file pairs.',
+    pairs: 0,
+    why: 'Measured at zero. The escalation rule it exercises states its figures in gate.ts prose, which is guarded; this file only asserts against them.',
   },
   {
     file: 'packages/perf/src/stats.ts',
-    why: 'Measured: zero cross-file pairs. Percentile and median helpers; its constants are algorithmic, not measured.',
+    pairs: 1,
+    why: 'Percentile and median helpers; its constants are algorithmic, not measured. Its one pair is not a claim at all but a masking artifact — line 2 cites `step 21` without the `PLAN` qualifier round 27 began requiring, so the reference reads as a figure. Recorded rather than edited away, because `pairs` measures what putting this file on the surface would cost today.',
   },
   {
     file: 'packages/perf/src/stats.test.ts',
-    why: 'Measured: zero cross-file pairs. Hand-worked fixtures for the helpers above.',
+    pairs: 0,
+    why: 'Measured at zero. Hand-worked fixtures for the helpers above.',
   },
   {
     file: 'packages/perf/src/layout.test.ts',
-    why: 'Measured: zero cross-file pairs, despite layout.ts holding 25 — the test asserts structure rather than restating the geometry.',
+    pairs: 0,
+    why: 'Measured at zero, despite layout.ts holding 25 — the test asserts structure rather than restating the geometry.',
   },
   {
     file: 'packages/perf/src/index.ts',
-    why: 'Measured: zero cross-file pairs. The package barrel — re-exports, no figures of its own.',
+    pairs: 0,
+    why: 'Measured at zero. The package barrel — re-exports, no figures of its own.',
   },
 ];
 
@@ -1447,7 +1481,7 @@ const spaces = (m: string): string => ' '.repeat(m.length);
  *  The direction is fail-closed. Misreading a path as a measurement surfaces its numerals as
  *  LOUD unaccounted claims; misreading a measurement as a path blanks it SILENTLY, which is the
  *  failure this whole file exists to prevent. */
-const IS_BARE_NUMERAL = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`$`);
+const IS_BARE_NUMERAL = new RegExp(String.raw`^` + ANY_NUMERAL_BODY + String.raw`$`);
 
 /** The suffixes these documents hang on a figure without making it a name: the `x`/`×` factor
  *  style, and `%`. A segment of numeral-then-suffix is CLAIM-SHAPED — it is carrying a value,
@@ -1475,6 +1509,17 @@ const IS_BARE_NUMERAL = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`$`)
  *  across the 266 distinct path segments the guarded files actually contain, this widening
  *  changes the classification of exactly ZERO of them.
  *
+ *  IT IS BUILT FROM THE SCAN'S GRAMMAR, not from a decimal-only copy of it, and leaving it on
+ *  the decimal body was a deliberate decision in round 27 that was WRONG. When radix spellings
+ *  joined the tokenizer, this test was left behind on the reasoning that a radix spelling is a
+ *  code spelling which does not appear in slash notation — "and if one did, it would surface
+ *  loudly". It would not. A segment this test fails to recognise makes the whole token look
+ *  like a PATH, and a path is BLANKED: the direction was backwards, which is the exact failure
+ *  this rule's own comment warns about a paragraph below. `R/0x74cbb1` was masked whole and a
+ *  high-information restatement left both sweeps in silence (Codex, PR #161). One grammar
+ *  answers "is this a numeral" wherever the question is asked — round 15's lesson, relearned
+ *  in a new place because a second spelling of the grammar was allowed to exist at all.
+ *
  *  The one construction it does flip is an EXTENSIONLESS numeric-led directory name
  *  (`docs/adr/0005-performance-budgets` with no file on the end), which none of these files
  *  contains. That case errs LOUD — its numeral surfaces as an unaccounted claim someone must
@@ -1482,7 +1527,7 @@ const IS_BARE_NUMERAL = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`$`)
  *  claim-shaped surfaces its numerals, while a measurement misread as a path is blanked in
  *  silence, and only the second one is a guard that lies. */
 const IS_CLAIM_SHAPED = new RegExp(
-  String.raw`^[+\-\u2212\u2013]?` + NUMERAL_BODY + String.raw`[A-Za-z\u00d7%]*(?:-[A-Za-z]+)*$`,
+  String.raw`^[+\-\u2212\u2013]?` + ANY_NUMERAL_BODY + String.raw`[A-Za-z\u00d7%]*(?:-[A-Za-z]+)*$`,
 );
 
 function looksLikePath(m: string): boolean {
@@ -1820,6 +1865,74 @@ function occurrences(file: string): Numeral[] {
   return all;
 }
 
+/** WHERE A ROWED VALUE'S RESTATEMENT COUNTS AS DRIFT: every guarded file, PLUS the perf
+ *  sources deliberately left off the surface.
+ *
+ *  The SURFACE decides what SEEDS the sweep — which figures are perf-gate claims at all — and
+ *  that was never a licence for a figure already rowed to be restated, unbound, in a file the
+ *  sweep does not seed from. `scenario.test.ts` is off-surface and holds a SITE of its own, so
+ *  the two ideas were already separate here; the accounting half simply had not been told.
+ *  An unlisted `1.0065` appended there left all 780 tests green (Codex, PR #161).
+ *
+ *  The counted `pairs` census on `OFF_SURFACE` does not reach this, and the reason is worth
+ *  stating because it looks like it should: `pairs` counts UNROWED cross-file values, and a
+ *  rowed value is filtered out of the gap set by construction. The two halves catch different
+ *  things, which is why the finding named both.
+ *
+ *  The table's own two files are excluded, by the marker they already carry — they state every
+ *  claim value by construction, so accounting them against their own sites is circular. */
+const ACCOUNTED_FILES: readonly string[] = [
+  ...GUARDED_FILES,
+  ...OFF_SURFACE.filter((e) => e.pairs !== 'circular').map((e) => e.file),
+].filter((f, i, all) => all.indexOf(f) === i);
+
+/** THE SWEEP, as ONE function, because it is now asked two questions: what does the guarded
+ *  set fail to row, and what WOULD an off-surface file add if it joined. A second inline copy
+ *  of this loop to answer the second question is the defect this file has removed four times.
+ *
+ *  Everything keys by `claimKey`, so `12.340` in a source and `12.34` in a doc are one claim
+ *  rather than two strangers that never group (Codex, PR #161). A signed row also covers its
+ *  MAGNITUDE, since the tokenizer reads numerals without their sign — the sign is enforced at
+ *  the row's sites, which capture it. */
+function gapValues(sources: readonly string[], guarded: readonly string[]): string[] {
+  const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
+  const surface = new Set(sources.flatMap((f) => occurrences(f).map((n) => claimKey(n.value))));
+  const excluded = new Set([...EXCLUDED].map(claimKey));
+  const where = new Map<string, Set<string>>();
+  const spelling = new Map<string, string>();
+  for (const file of guarded) {
+    for (const n of occurrences(file)) {
+      const key = claimKey(n.value);
+      if (excluded.has(key)) continue;
+      // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values —
+      // and "bare" is a fact about the SPELLING. Asking the normalized value instead would read
+      // `9e0` as a bare 9 and drop it, when a numeral nobody writes casually is exactly what
+      // the filter must not drop.
+      if (/^\d+$/.test(n.raw) && Number(n.value) < 10) continue;
+      if (!surface.has(key)) continue;
+      if (!where.has(key)) where.set(key, new Set());
+      (where.get(key) as Set<string>).add(file);
+      if (!spelling.has(key)) spelling.set(key, n.value);
+    }
+  }
+  const gaps: string[] = [];
+  for (const [key, files] of where) {
+    if (files.size < COLLISION_THRESHOLD) continue;
+    if (rowed.has(key)) continue;
+    gaps.push(spelling.get(key) as string);
+  }
+  return gaps.sort();
+}
+
+/** How many cross-file pairs a file would ADD to the sweep if it joined the surface — the
+ *  number every `OFF_SURFACE` entry records, recomputed rather than remembered. */
+function marginalPairs(file: string): number {
+  const baseline = new Set(gapValues(PERF_SOURCES, GUARDED_FILES));
+  return gapValues([...PERF_SOURCES, file], [...GUARDED_FILES, file]).filter(
+    (v) => !baseline.has(v),
+  ).length;
+}
+
 describe('the coverage contract is enforced, not merely asserted', () => {
   // The surface was a hand-list and nothing could tell it was short. `dot-bench.ts` sat
   // outside it while restating the historical `R0`, so that copy could drift alone and stay
@@ -1848,6 +1961,40 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     }
   });
 
+  // A CLASSIFICATION IS A MEASUREMENT, AND A MEASUREMENT MUST BE RE-PROVED. The partition
+  // above compares filenames, so a file already classified could acquire a cross-file claim
+  // and its recorded justification quietly stop being true — an unlisted `1.0065` appended to
+  // `scenario.test.ts`, whose entry claims zero pairs, left all 780 tests green (Codex, PR
+  // #161). This is the fourth and last of this file's tables to be counted rather than merely
+  // matched, after the three escape tables.
+  it('re-proves every OFF_SURFACE classification, not just its filename', () => {
+    const stale: string[] = [];
+    for (const e of OFF_SURFACE) {
+      if (e.pairs === 'circular') {
+        expect(
+          ['packages/perf/src/claims.ts', 'packages/perf/src/claims.test.ts'],
+          `${e.file} claims circularity, which only the table itself may claim`,
+        ).toContain(e.file);
+        continue;
+      }
+      const found = marginalPairs(e.file);
+      if (found !== e.pairs) {
+        const base = new Set(gapValues(PERF_SOURCES, GUARDED_FILES));
+        const added = gapValues([...PERF_SOURCES, e.file], [...GUARDED_FILES, e.file]).filter(
+          (v) => !base.has(v),
+        );
+        stale.push(`  ${e.file}: recorded ${e.pairs}, found ${found} [${added.join(' ')}]`);
+      }
+    }
+    expect(
+      stale,
+      `these OFF_SURFACE entries no longer describe what leaving the file off the surface ` +
+        `costs. The count is the justification — a file that has GAINED a cross-file claim is ` +
+        `no longer the file that was classified. Re-measure the entry, or put the source on ` +
+        `the surface:\n${stale.join('\n')}`,
+    ).toEqual([]);
+  });
+
   // `G`'s friendly names are a third spelling of the same paths, and a third spelling is what
   // this file keeps having to delete. It cannot be derived (the names are the point), so it is
   // checked instead.
@@ -1861,36 +2008,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     // A signed row also covers its MAGNITUDE here: the sweep's tokenizer reads numerals
     // without their sign, so a row valued -1.36 is what covers a prose `1.36`. The sign is
     // still enforced where it matters — at the row's sites, which capture it.
-    const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
-    const surface = new Set(
-      PERF_SOURCES.flatMap((f) => occurrences(f).map((n) => claimKey(n.value))),
-    );
-    const excluded = new Set([...EXCLUDED].map(claimKey));
-    const where = new Map<string, Set<string>>();
-    const spelling = new Map<string, string>();
-    for (const file of GUARDED_FILES) {
-      for (const n of occurrences(file)) {
-        const key = claimKey(n.value);
-        if (excluded.has(key)) continue;
-        // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values —
-        // and "bare" is a fact about the SPELLING, found by the same sweep as the threshold
-        // above. Asking the normalized value instead would read `9e0` as a bare 9 and drop it,
-        // when a numeral nobody writes casually is exactly what the filter must not drop.
-        if (/^\d+$/.test(n.raw) && Number(n.value) < 10) continue;
-        if (!surface.has(key)) continue;
-        if (!where.has(key)) where.set(key, new Set());
-        (where.get(key) as Set<string>).add(file);
-        if (!spelling.has(key)) spelling.set(key, n.value);
-      }
-    }
-
-    const gaps: string[] = [];
-    for (const [key, files] of where) {
-      if (files.size < COLLISION_THRESHOLD) continue;
-      if (rowed.has(key)) continue;
-      gaps.push(spelling.get(key) as string);
-    }
-    gaps.sort();
+    const gaps = gapValues(PERF_SOURCES, GUARDED_FILES);
 
     expect(
       gaps,
@@ -1928,7 +2046,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     }
 
     const unaccounted: string[] = [];
-    for (const file of GUARDED_FILES) {
+    for (const file of ACCOUNTED_FILES) {
       const raw = read(file);
       for (const n of occurrences(file)) {
         if (!highInformation(n.raw, n.value)) continue;
@@ -2375,6 +2493,20 @@ describe('the reference masks blank references, not measurements', () => {
     expect(mask('the factor R/1.0065\u00d7 holds')).toContain('1.0065');
     expect(mask('the factor 2.8x/R holds')).toContain('2.8x');
     expect(mask('the share R/50% holds')).toContain('50%');
+  });
+
+  // The path-shape test is built from the SCAN's grammar now. Leaving it on the decimal body
+  // when radix spellings joined the tokenizer meant `R/0x74cbb1` had no claim-shaped segment,
+  // so the whole token read as a directory and was BLANKED — the silent direction, not the
+  // loud one the round-27 note claimed (Codex, PR #161).
+  it('never masks a token whose segment is a RADIX numeral', () => {
+    expect(mask('the ratio R/0x74cbb1 holds')).toContain('R/0x74cbb1');
+    expect(mask('the mask R/0b1010 holds')).toContain('0b1010');
+    expect(mask('the mode R/0o17 holds')).toContain('0o17');
+    expect(IS_CLAIM_SHAPED.test('0x74cbb1')).toBe(true);
+    expect(IS_BARE_NUMERAL.test('0x74cbb1')).toBe(true);
+    // and the control still holds: a document name is a name in every grammar
+    expect(mask('see docs/adr/0005-performance-budgets.md now')).not.toContain('0005');
   });
 
   // A HYPHENATED factor is the same construction as `x` and `×`, and admitting one spelling
