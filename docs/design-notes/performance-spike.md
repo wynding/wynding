@@ -2,9 +2,21 @@
 
 _Implements ADR 0005's "early spike" and its **Measurement methodology** clause. ADR 0005
 owns the budgets and the decision to validate them; this note is the_ how _and the_ what
-was measured. _Recorded by M2 Story 4b (2026-07-30). Re-measured and extended by every
-subsequent effect story (S5–S10); S11 runs the catalog-scale gate and the deferred
-real-device pass._
+was measured. _Recorded by M2 Story 4b (2026-07-30), extended at S5b, and last re-measured at
+S6 (`ef320a8`, 2026-08-05 — the change that made both gate arms medians). S11 added the
+catalog scene and its CI-run oracle ([below](#the-catalog-scene-m2-s11--what-was-measured-and-what-was-not-recorded));
+the deferred real-device pass is still outstanding._
+
+_(Corrected 2026-08-22, #114: this header claimed re-measurement "by every subsequent effect
+story (S5–S10)". The file's history refutes it — the only commits that ever changed a measured
+figure here are S4b (`09e0a4c`), S5b (`e1250c7`) and S6 (`ef320a8`). S7–S10 neither re-measured
+into this document nor extended it. Three later commits touched it without re-measuring: a
+2026-08-12 branch-protection wording fix (`0608f31`), and #86's two 2026-08-22 doc-repair
+commits (`1c57e94`, `fbb7614`), which restored deleted provenance and repointed dead pointers.
+A ledger that overstates its own currency is worse than one that admits a gap, because the
+reader trusts the claim and stops checking the date — which is why the first draft of this very
+correction, listing four commits instead of seven, is recorded here rather than quietly fixed:
+it was written from `git log` without `--follow`, and against a base that predated #86.)_
 
 **Read the three headline findings first — [What the spike found](#what-the-spike-found).**
 They are numbered to match ADR 0005's amendment, which cites them by number. All three were
@@ -633,6 +645,71 @@ a discrepancy:
    only which of the two reasons the artifact gives. Had the signal been applied, a low-end run
    _meeting_ its 30 fps floor would have fired it on nearly every frame — the same degeneracy
    the replacement trigger exists to remove.
+
+## The catalog scene, M2-S11 — what was measured, and what was not recorded
+
+Added 2026-08-22 (#114). This section exists because the ledger had **no catalog entry at
+all**, which left a reader unable to tell whether the catalog scene had ever been measured in
+a browser. It had. Its numbers were not kept, and that is recorded here rather than
+reconstructed.
+
+**The scene's geometry, placement table, starting bounty and oracle bounds are not restated
+here, deliberately.** Each is stated once — in `packages/perf/src/layout.ts` and
+`oracle-catalog.ts` — and bound across files by `claims.ts`. An earlier draft of this section
+copied them into prose, which is the exact drift `claims.ts` exists to stop, and its coverage
+contract caught it. So this section cites the source that owns each figure instead of repeating
+it. (The claim is those four categories, not "no numeral appears below": the tower count is
+named as a word just after this paragraph, which is the numeral-blindness the guard's own
+lexer notes. Naming the roster is the point of the sentence it sits in.)
+
+The catalog scene (`@wynding/content/catalog`, `apps/web/perf/main-perf-catalog.ts`) is a
+sibling of the stress scene, not a variant. It reuses the stress board, entrance/exit and
+anchor set unchanged, so its as-built route is the same pre-committed one measured above; what
+differs is the tower catalog, which is the **nine real `wynding-core` towers, verbatim**. What
+it measures is therefore the cost of the _shipped_ catalog at the stress scene's scale, rather
+than the cost of three synthetic stand-ins.
+
+### Headless — recorded, and now CI-run
+
+`pnpm run perf:catalog` is the catalog **live-run oracle** over real simulated state:
+engagement floors, observed detonation ticks, the leak probe, a tower count held across the
+whole sample window, and replay-validator acceptance. Its rows and their bounds live in
+`packages/perf/src/oracle-catalog.ts`. It reads no clock and draws no ambient randomness, so
+unlike the timed `perf` ratio it cannot flap — a red here is always a real regression. As of
+#114 it runs in CI's `perf` job, after the timed `pnpm run perf` step; the ordering is
+load-bearing and that job's own comment says why.
+
+Its S11 history belongs to ADR 0005's Ruling 4 and m2.md's S11 close-out, which own those
+figures: two proposed engagement floors measured under their estimates for a diagnosed reason,
+the scene was **not** retuned to fit the estimates, and the owner re-pinned both floors to the
+measured values on 2026-08-09. The oracle has passed every row since.
+
+### Browser — run, passed, and **not recorded**
+
+`apps/web/e2e-perf/catalog.perf.spec.ts` ran on both pinned profiles before 2026-08-10 (PR
+#93). The "two-scene spike" pass that story reports is a Playwright test count — one spec per
+scene across the two profiles — not a set of measurements. Being recorded-only, the spec
+asserts **no budget number**; what it hard-asserts is that the scene was genuinely at load
+before any number could be believed (towers standing, the starting bounty fully spent, a
+sustained live-creep floor, the sim still advancing, phase `running`, its input-latency
+samples collected, and zero page or console errors). Those passed on both profiles.
+
+**Its frame-time, fps, heap and input-latency figures are not in this document because they
+exist nowhere.** The spec assembles them into a `PERF-BROWSER-REPORT: {…}` line and
+`console.log`s it — never a file, never an assertion. The S11 run's stdout was not captured
+into any tracked file, and it is not in `.claude/qc-evidence/` either (searched: no
+`PERF-BROWSER-REPORT`, and no frame-time or fps figure for this scene in any of its records).
+The `WY_TRACE=1` traces it wrote were gitignored and are gone. So the honest state is: the
+catalog scene passed its load oracle in a browser on both profiles, and how fast it ran is
+unknown.
+
+Producing the missing row is one command — `WY_TRACE=1 pnpm -C apps/web run perf:e2e`, then
+transcribing the `catalog` report lines into a table beside
+[Frame time, heap and input latency](#frame-time-heap-and-input-latency--browser-emulated).
+It was deliberately **not** run as part of #114: that would produce a 2026-08-22 measurement
+on different hardware and file it under an S11 heading, which is the kind of provenance
+laundering this document exists to prevent. Closing the gap means taking a new, honestly dated
+measurement, not back-filling an old one.
 
 ## What emulation cannot tell us
 

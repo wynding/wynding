@@ -149,8 +149,13 @@ jobs:
   # run here is a real finding: do NOT read a route-length failure as the expected
   # waived shortfall, which is what this comment used to describe. A stale waiver —
   # a name on that list whose assertion has started passing — also fails, deliberately.
+  # Renamed 2026-08-22 (#114) for what the job now covers — the catalog oracle joined it, and a
+  # job named for two of its three checks is the same undersold-name defect #106 fixed on the
+  # e2e job. Safe to rename here where it was not there: `perf` is deliberately NOT a required
+  # check (stated in this job's own R0-guard note below and in `performance-spike.md`'s harness table),
+  # so no branch-protection context names it. Re-check that before renaming it again.
   perf:
-    name: perf (stress oracle + step() ratio gate)
+    name: perf (stress + catalog oracles, step() ratio gate)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -229,6 +234,48 @@ jobs:
             }
             console.log(`perf gate is enforced on main: R0 = ${r0}`);
           '
+      # The catalog scene's LIVE-RUN ORACLE (#114): `runCatalogScene` + `catalogAssertions`
+      # over real simulated state — the engagement floors, the observed detonation ticks, the
+      # real leak probe, a tower count held across the window, and replay-validator acceptance.
+      # (Row count, tick count and tower count are stated by `oracle-catalog.ts` and
+      # `layout.ts`; they are not restated here, because a figure copied into a second file is
+      # the drift `packages/perf/src/claims.ts` exists to catch.) Its STRUCTURAL invariants were
+      # already gated by `verify` (layout-catalog.test.ts, oracle-catalog.test.ts, content's
+      # catalog.test.ts); the live run was wired to no workflow and no hook, so a live-oracle
+      # regression was invisible until someone typed the command. Precedent for wiring exactly
+      # this class: `check:artifact-parity` above, added in PR #93 because it was "wired into no
+      # workflow, so the drift class could merge green".
+      #
+      # LAST IN THE JOB, AND UNCONDITIONAL — the position and the `if:` do different halves of
+      # the same job, and an earlier version of this comment claimed the position alone was
+      # "load-bearing in both directions", which was only half true.
+      #
+      #   POSITION. Never before the timed `perf` step: a 6,000-tick run ahead of it would load
+      #   the runner at exactly the moment timing is being measured. And after the R0 guard,
+      #   not between: that guard is the alarm for an unenforced gate on `main`, and a red
+      #   catalog oracle must not be what silences it.
+      #
+      #   `if: ${{ !cancelled() }}`. Without it, a failed earlier step SKIPS this one, and both
+      #   ways that happens are ways the trustworthy signal would be lost to an untrustworthy
+      #   one. The timed `perf` step is the single step in this repo whose flake ADR 0005
+      #   records and accepts — so a flake there would suppress the oracle that cannot flake.
+      #   And `R0 = null` is a legitimate, deliberate state during a re-baseline, in which the
+      #   guard above fails every push to `main`: catalog coverage on the default branch would
+      #   drop to zero for the duration. Cancellation is still honoured, so a superseded run
+      #   stops promptly.
+      #
+      # Separate `pnpm` invocations, so ADR 0005's process-isolation requirement is satisfied
+      # the same way it already is for `perf` itself.
+      #
+      # A RED HERE IS ALWAYS A REAL REGRESSION, even though the job as a whole is advisory
+      # (the owner's `perf` ruling). The flap rationale that keeps the timed ratio advisory does
+      # not apply to this step: `run-catalog.ts` reads no clock and draws no ambient randomness
+      # (its header says so, and `oracle-catalog.ts` is one untimed state-derived pass), so it
+      # cannot flap. Measured at 3.8s wall on an idle dev machine — cheaper than the ~4.6s timed
+      # run beside it.
+      - name: catalog scene live-run oracle (deterministic — a red here is real)
+        if: ${{ !cancelled() }}
+        run: pnpm run perf:catalog
 
   # Determinism gate, part 2: the sim's golden world-hash (determinism.test.ts) is
   # pinned to SIM_VERSION. A runtime test can't enforce that a golden *change* is
