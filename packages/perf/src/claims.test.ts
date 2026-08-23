@@ -577,19 +577,31 @@ interface Walked {
   readonly problems: ReadonlySet<string>;
 }
 
-/** A regex literal whose body holds a string opener, matched against the RAW source. It has to
- *  be found where it actually sits, because the walk desynchronises on precisely this
- *  construct and would blank the evidence before the search ran. Matches that land in a
- *  comment or a string are discarded by `codeAt` — which is the job the old comment-stripping
- *  `replace` was doing, done string-awarely (CodeRabbit). */
-const REGEX_HOLDING_OPENER = new RegExp(
-  String.raw`(?:^|[=(,:;[{!?&|+\-*%<>~^]|\breturn\b|\btypeof\b|\bcase\b|\bin\b|\bof\b|\bdo\b|=>|&&|\|\|)` +
-    String.raw`\s*\/(?![/*])` +
-    String.raw`(?:\\.|\[[^\]]*\]|[^/\n])*` +
-    `[${STRING_OPENERS.join('')}]` +
-    String.raw`(?:\\.|\[[^\]]*\]|[^/\n])*\/`,
-  'g',
-);
+/** Lex a regex literal opening at `i` — `isDivision` has already ruled out every other reading
+ *  — and return the index just past its closing `/`. Because the walk now RECOGNISES regexes
+ *  instead of stumbling into them, a quote inside one no longer desynchronises anything; it is
+ *  still refused, because `commentsOnly` shares this walk and the posture is to refuse what it
+ *  has no reason to lex. A regex body cannot cross a newline, so hitting one means the `/` was
+ *  not a regex after all and the classification is off — reported, never absorbed. */
+function scanRegexLiteral(src: string, i: number, problems: Set<string>): number {
+  i++;
+  let inClass = false;
+  while (i < src.length) {
+    const c = src[i] as string;
+    if (c === '\n') break;
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (c === '[') inClass = true;
+    else if (c === ']') inClass = false;
+    else if (c === '/' && !inClass) return i + 1;
+    else if (opensString(c)) problems.add('a regex literal containing a quote or backtick');
+    i++;
+  }
+  problems.add('an unterminated regex literal');
+  return i;
+}
 
 /** THE ONE WALKER, and the soundness conditions that make trusting it legitimate — stated so
  *  the next "can it lex X?" question has an answer instead of an investigation.
@@ -618,9 +630,19 @@ const REGEX_HOLDING_OPENER = new RegExp(
  *    3. A NESTED template literal — desynchronises backtick matching outright. Rejected, and
  *       detected by the walk's own brace and string tracking rather than by a regex, so
  *       nesting that opens AFTER a `}` in the same substitution is caught too (CodeRabbit).
- *    4. A regex literal holding a STRING OPENER — read as the start of a quoted region, which
- *       masks every comment after it. Rejected. All three openers count; the walk cannot tell
- *       them apart, so neither may the tripwire.
+ *    4. A regex literal — LEXED, by `scanRegexLiteral`, rather than blundered into. One
+ *       holding a STRING OPENER is still refused: `commentsOnly` shares this walk, and the
+ *       posture is to refuse what there is no reason to lex. All three openers count.
+ *
+ *  ONE ANSWER TO "CAN A REGEX START HERE". `isDivision` is the single place that decides, and
+ *  it decides from the grammar: a regex literal may open anywhere a value has NOT just ended,
+ *  and nowhere else. Both consumers ask it and no one keeps a list beside it. They used to —
+ *  the quote-bearing-regex detector carried its own alternation of opener characters and
+ *  keywords, which was NARROWER than the rule the substitution check already used. `throw`
+ *  sat in one and not the other, so `throw /'/;` went unrecognised, the quote opened a phantom
+ *  string, and the numeral in the trailing comment masked green (Codex). A second opinion that
+ *  must be kept in step is a defect waiting for its reproduction; there is now no second
+ *  opinion to keep in step.
  *
  *  THE SUBSTITUTION RULE, which ENDS the slash ambiguity instead of parsing around it. A `/`
  *  inside a substitution is a comment, a regex, or a division, and only the last is harmless.
@@ -629,8 +651,8 @@ const REGEX_HOLDING_OPENER = new RegExp(
  *  comment, was exactly Codex's reproduction. So:
  *
  *    - `//` or `/*` in a substitution is REJECTED outright; and
- *    - any other `/` in a substitution is REJECTED unless the previous significant token
- *      produces a value (`isDivision`), which is precisely where the grammar forbids a regex.
+ *    - any other `/` in a substitution is REJECTED unless `isDivision` — the same single
+ *      classifier — says a value has just ended, which is where the grammar forbids a regex.
  *
  *  A regex literal therefore cannot occur in an accepted substitution, and neither can a
  *  comment. So every brace inside a substitution and outside a string is a real code brace,
@@ -665,6 +687,8 @@ function walk(src: string): Walked {
       if (end === -1) problems.add('an unterminated block comment');
       const stop = end === -1 ? src.length : end + 2;
       for (; i < stop; i++) commentAt[i] = true;
+    } else if (c === '/' && !isDivision(src, i)) {
+      i = scanRegexLiteral(src, i, problems);
     } else if (c === '`') {
       i = walkTemplate(src, i, problems);
     } else if (opensString(c)) {
@@ -756,19 +780,13 @@ function walkSubstitution(src: string, from: number, problems: Set<string>): num
   return i;
 }
 
-/** Refuse a file the walk cannot lex soundly, before anything trusts the scan. */
+/** Refuse a file the walk cannot lex soundly, before anything trusts the scan. Every problem
+ *  comes from the walk itself — there is no second opinion to keep in step with it. */
 function rejectUnlexableSyntax(file: string, src: string): void {
-  const { codeAt, problems } = walk(src);
-  const what = new Set(problems);
-  for (const m of src.matchAll(REGEX_HOLDING_OPENER)) {
-    if (codeAt[m.index ?? 0] === true) {
-      what.add('a regex literal containing a quote or backtick');
-      break;
-    }
-  }
-  if (what.size > 0) {
+  const { problems } = walk(src);
+  if (problems.size > 0) {
     throw new Error(
-      `${file} contains syntax this scanner cannot lex (${[...what].join(' and ')}). Upgrade ` +
+      `${file} contains syntax this scanner cannot lex (${[...problems].join(' and ')}). Upgrade ` +
         `the walker before trusting the scan — a desynchronised lexer miscounts silently.`,
     );
   }
@@ -1040,8 +1058,11 @@ describe('the scanner refuses syntax it cannot lex', () => {
   // the same silent miscount as the quote case, unrejected (self-raised, PR #161).
   it('rejects a regex literal containing a backtick, not just a quote', () => {
     const src = 'const re = /' + '`' + '/;\n// 1.0065 hidden after it\n';
-    // The hiding is real: without the rejection, the comment is blanked out of the scan.
-    expect(commentsOnly(src)).not.toContain('1.0065');
+    // The hiding is GONE, not merely tripwired: the walk lexes the regex instead of blundering
+    // into it, so the backtick never opens a phantom template and the comment behind it
+    // survives the scan. Refusing the construct is now belt-and-braces rather than the only
+    // thing standing between this file and a silent miscount.
+    expect(commentsOnly(src)).toContain('1.0065');
     expect(() => rejectUnlexableSyntax('synthetic.ts', src)).toThrow(
       /regex literal containing a quote or backtick/,
     );
@@ -1101,6 +1122,27 @@ describe('the scanner refuses syntax it cannot lex', () => {
       '// a trailing comment with 1.0065 in it',
     ].join('\n');
     expect(() => rejectUnlexableSyntax('synthetic.ts', ordinary)).not.toThrow();
+  });
+
+  // Codex's round-13 reproduction. The quote-bearing-regex detector kept its OWN alternation
+  // of opener characters and keywords, narrower than the grammar rule the substitution check
+  // already used — `throw` was in one list and not the other. So this went unrecognised, the
+  // regex's quote opened a phantom string that swallowed the trailing comment, and its numeral
+  // masked green. The two lists are now one function, so the divergence cannot recur.
+  it('recognises a regex opening after EVERY keyword the grammar allows, not a chosen few', () => {
+    for (const opener of ['throw', 'return', 'case', 'typeof', 'void', 'in', 'of', 'yield']) {
+      const src = `${opener} /'/; // ' 1.0065\n`;
+      expect(
+        () => rejectUnlexableSyntax('synthetic.ts', src),
+        `a regex opening after \`${opener}\` must be recognised`,
+      ).toThrow(/regex literal containing a quote or backtick/);
+    }
+  });
+
+  it('leaves the numeral visible once the regex is lexed rather than blundered into', () => {
+    // The desynchronisation is gone at the root: the walk knows `/'/ ` is a regex, so the
+    // quote never opens a phantom string and the comment behind it is still prose.
+    expect(commentsOnly("throw /'/; // ' 1.0065\n")).toContain('1.0065');
   });
 
   // The narrowing is a grammar fact, not a guess: a regex cannot begin where a value just
