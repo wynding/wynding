@@ -307,15 +307,45 @@ interface RingEntry {
 export function createPlaytraceRecorder(options: PlaytraceRecorderOptions): PlaytraceRecorder {
   const maxRuns = options.maxRuns ?? MAX_RECENT_RUNS;
   const maxAgeMs = options.maxAgeMs ?? MAX_RECENT_AGE_MS;
-  const monotonicNow = options.monotonicNow ?? ((): number => performance.now());
+  // A lazy arrow, not `?? performance.now` — an unbound reference throws "Illegal
+  // invocation" in browsers. `NaN` where the global is absent rather than a ReferenceError
+  // at first capture: `NaN >= maxAgeMs` is false, so the monotonic branch goes inert and
+  // the wall belt governs, which is a degraded ring rather than a crash.
+  const monotonicNow =
+    options.monotonicNow ??
+    ((): number => (typeof performance === 'undefined' ? Number.NaN : performance.now()));
   let ring: RingEntry[] = [];
 
-  /** Has this entry outlived the bound under EITHER clock? A backward wall clock yields a
-   *  negative elapsed, which is treated as expired rather than as "no time has passed". */
+  /**
+   * Has this entry outlived the bound?
+   *
+   * MONOTONIC IS AUTHORITATIVE WHERE IT IS USABLE. It cannot be moved by a clock
+   * correction, so when it says an entry is fresh, the entry IS fresh and a backward wall
+   * step tells us nothing new. An earlier revision dropped every entry on any negative
+   * wall elapsed, which on Android — where `Date.now()` stepping back a few milliseconds
+   * at NTP sync or RTC wake is routine — would have wiped the whole ring in ordinary
+   * operation, for no privacy gain. The ratified rule scoped that clamp to entries
+   * surviving ACROSS SESSIONS; this ring is in-memory and dies with the page, so every
+   * entry has a monotonic origin and the clamp never applies.
+   *
+   * THE WALL CLOCK STILL EXPIRES, and that is why it is kept: `performance.now()` does not
+   * advance across system suspend on Apple platforms or `CLOCK_MONOTONIC`, so a WebView
+   * that sleeps eight hours wakes with a monotonic elapsed well under the bound. Wall time
+   * is what catches that. It may only ever EXPIRE an entry, never revive one.
+   *
+   * Where monotonic is unusable — absent global, or a source that regressed — the wall
+   * clock is all there is, and a negative elapsed then means we cannot tell how old this
+   * is, so it expires. That is the conservative direction, applied where it is the only
+   * information available rather than everywhere.
+   */
   const expired = (entry: RingEntry, now: number, monotonic: number): boolean => {
-    if (monotonic - entry.monotonicAt >= maxAgeMs) return true;
+    const monotonicElapsed = monotonic - entry.monotonicAt;
+    const monotonicUsable = Number.isFinite(monotonicElapsed) && monotonicElapsed >= 0;
+    if (monotonicUsable && monotonicElapsed >= maxAgeMs) return true;
     const wallElapsed = now - entry.trace.capturedAt;
-    return wallElapsed < 0 || wallElapsed >= maxAgeMs;
+    if (wallElapsed >= maxAgeMs) return true;
+    if (wallElapsed < 0) return !monotonicUsable;
+    return false;
   };
 
   /** Apply BOTH bounds. Age is evaluated against the caller's clocks, so a ring that sat

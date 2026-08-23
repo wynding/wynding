@@ -221,16 +221,78 @@ describe('the recent-runs ring — bounded by run count AND elapsed time', () =>
     expect(recorder.buildExport().runs).toEqual([]);
   });
 
-  it('treats a NEGATIVE wall elapsed as expired, not as "no time has passed"', async () => {
-    // Expired-if-either, with negative clamped to expiry-favouring. Where the two clocks
-    // disagree we cannot know which is right, and the privacy answer is to drop the run.
+  it('a backward wall step does NOT drop a run the monotonic clock says is fresh', async () => {
+    // Monotonic cannot be moved by a clock correction, so when it says the entry is fresh,
+    // it IS fresh. An earlier revision clamped ANY negative wall elapsed to expired, which
+    // on Android — where `Date.now()` stepping back a few ms at NTP sync or RTC wake is
+    // routine — would have wiped the whole ring in ordinary operation for no privacy gain.
     let wall = 1_000_000;
     const recorder = createPlaytraceRecorder({ now: () => wall, monotonicNow: () => 0 });
     recorder.capture(trace('run-1'));
     expect(recorder.recent()).toHaveLength(1);
 
-    wall -= 1; // the smallest possible backward step, monotonic unmoved
+    wall -= 1; // the smallest possible backward step, monotonic unmoved and fresh
+    expect(recorder.recent()).toHaveLength(1);
+  });
+
+  it('a backward wall step DOES expire when the monotonic clock is unusable', async () => {
+    // Where monotonic is absent or has itself regressed, wall time is all there is — and a
+    // negative elapsed then means we cannot tell how old the entry is, so it expires. The
+    // conservative direction, applied where it is the only information available.
+    let wall = 1_000_000;
+    const recorder = createPlaytraceRecorder({
+      now: () => wall,
+      monotonicNow: () => Number.NaN, // no usable monotonic source
+    });
+    recorder.capture(trace('run-1'));
+    expect(recorder.recent()).toHaveLength(1);
+
+    wall -= 1;
     expect(recorder.recent()).toEqual([]);
+  });
+
+  it('the WALL clock still expires a run the monotonic clock slept through', async () => {
+    // The belt's real justification: `performance.now()` does not advance across system
+    // suspend, so a WebView that sleeps eight hours wakes with a monotonic elapsed well
+    // under the bound. Wall time is what catches that.
+    let wall = 1_000_000;
+    const recorder = createPlaytraceRecorder({ now: () => wall, monotonicNow: () => 0 });
+    recorder.capture(trace('run-1'));
+    wall += MAX_RECENT_AGE_MS; // eight hours of suspend; monotonic never moved
+    expect(recorder.recent()).toEqual([]);
+  });
+
+  it('the count bound and the age bound compose, in that order', async () => {
+    // Neither bound had ever seen the other: the count test used a clock that expires
+    // nothing, and every age test used at most two runs. Age is filtered BEFORE the count
+    // trim, so an expired entry cannot occupy one of the surviving slots.
+    let mono = 0;
+    const recorder = createPlaytraceRecorder({
+      now: () => 1_000_000 + mono,
+      monotonicNow: () => mono,
+      maxRuns: 3,
+      maxAgeMs: 100,
+    });
+    recorder.capture(trace('old-1'));
+    recorder.capture(trace('old-2'));
+    mono = 150; // both of the above are now past the age bound
+    recorder.capture(trace('fresh-1'));
+    recorder.capture(trace('fresh-2'));
+    expect(recorder.recent().map((r) => r.runId)).toEqual(['fresh-1', 'fresh-2']);
+  });
+
+  it('uses a monotonic source BY DEFAULT, not the wall clock', async () => {
+    // The default is the fallback production lands on if `main.ts`'s wiring is ever
+    // dropped, and it was untested — swapping it to `Date.now()` survived every test.
+    const spy = vi.spyOn(performance, 'now');
+    try {
+      const recorder = createPlaytraceRecorder({ now: () => 1_000_000 });
+      recorder.capture(trace('run-1'));
+      recorder.recent();
+      expect(spy, 'the default bound is not reading a monotonic clock').toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('the monotonic bound expires a run whose wall clock has not moved at all', async () => {
@@ -244,11 +306,15 @@ describe('the recent-runs ring — bounded by run count AND elapsed time', () =>
     expect(recorder.recent()).toEqual([]);
   });
 
-  it('never exports a run older than the bound under EITHER clock', async () => {
+  it('never exports a run past the bound, under either clock', async () => {
+    // The export path is the one that would carry a run off-device, so the bound has to
+    // hold there specifically — `buildExport` prunes before assembling the payload.
     for (const [name, advance] of [
-      ['monotonic', (s: { wall: number; mono: number }) => (s.mono += MAX_RECENT_AGE_MS)],
-      ['wall', (s: { wall: number; mono: number }) => (s.wall += MAX_RECENT_AGE_MS)],
-      ['wall backward', (s: { wall: number; mono: number }) => (s.wall -= 1)],
+      ['monotonic elapsed', (s: { wall: number; mono: number }) => (s.mono += MAX_RECENT_AGE_MS)],
+      [
+        'wall elapsed (suspend)',
+        (s: { wall: number; mono: number }) => (s.wall += MAX_RECENT_AGE_MS),
+      ],
     ] as const) {
       const state = { wall: 1_000_000, mono: 0 };
       const recorder = createPlaytraceRecorder({
@@ -257,11 +323,24 @@ describe('the recent-runs ring — bounded by run count AND elapsed time', () =>
       });
       recorder.capture(trace('run-1'));
       advance(state);
-      expect(
-        recorder.buildExport().runs,
-        `${name} clock let an expired run reach the export`,
-      ).toEqual([]);
+      expect(recorder.buildExport().runs, `${name} let an expired run reach the export`).toEqual(
+        [],
+      );
     }
+  });
+
+  it('a backward wall clock alone does not empty an export the player asked for', async () => {
+    // The other half of the same rule, asserted so the trade is explicit rather than
+    // inherited: with monotonic saying the run is fresh, a clock correction must not turn
+    // Export into a silent empty payload.
+    const state = { wall: 1_000_000, mono: 0 };
+    const recorder = createPlaytraceRecorder({
+      now: () => state.wall,
+      monotonicNow: () => state.mono,
+    });
+    recorder.capture(trace('run-1'));
+    state.wall -= 1;
+    expect(recorder.buildExport().runs.map((r) => r.runId)).toEqual(['run-1']);
   });
 
   it('exports every run still inside the window, under a versioned wrapper', () => {

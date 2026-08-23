@@ -42,6 +42,7 @@ import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
 import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
+import { MAX_RECENT_AGE_MS } from './playtrace';
 import type { WakeLockApi } from './wakelock';
 import { fakeWakeLock } from './wakelock-fakes';
 
@@ -2411,6 +2412,9 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       copyOrder,
       setSaveThrows: (v: boolean): void => void (saveThrows = v),
       frame: (): void => sched.frame((clock += 16)),
+      /** Jump the frame clock without driving frames — `deps.now` is what the playtrace
+       *  ring measures its six-hour bound against. */
+      advance: (ms: number): void => void (clock += ms),
       /** Drive the run to its terminal state so the results dialog opens. */
       resolve(): void {
         this.frame();
@@ -2589,6 +2593,28 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     h.resultsButton('Copy run data').click();
     await vi.waitFor(() => expect(h.copied).toHaveLength(1));
     expect(parsePayload(h.copied[0]!).runs).toHaveLength(1);
+  });
+
+  it('WIRES the ring bound to the monotonic frame clock, not the wall clock', async () => {
+    // The wiring, not the recorder's contract. Every clock-regression test in
+    // `playtrace.test.ts` injects `monotonicNow` directly, so mutating this one line in
+    // `main.ts` to `Date.now()` — or deleting it — reinstated the exact defect the fix
+    // exists to close and survived the entire suite. This is the test that kills it: the
+    // harness clock is `deps.now`, so if the bound reads anything else it will not move.
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+    expect(parsePayload(h.copied[0]!).runs).toHaveLength(1);
+
+    // Advance the FRAME clock past the six-hour bound. Nothing touches the wall clock.
+    h.advance(MAX_RECENT_AGE_MS);
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(2));
+    expect(
+      parsePayload(h.copied[1]!).runs,
+      'the six-hour bound is not reading the monotonic frame clock',
+    ).toEqual([]);
   });
 
   it('pins the world hash to the capture boundary, and the tick count to the log length', async () => {

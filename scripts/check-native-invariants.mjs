@@ -437,45 +437,142 @@ if (gradle !== null) {
   // (`storePassword releaseStorePassword`, `storeFile file(releaseStoreFile)`) carry no
   // quotes and pass.
   //
-  // EVERY SPELLING GROOVY ACCEPTS, because a guard that knows one of them is a guard one
-  // autocomplete away from useless — the same lesson the determinism zone records about
-  // its own spellings, learned here twice in two review rounds. The forms: the space form
-  // (`storePassword "…"`), the assignment form (`storePassword = "…"`), the wrapped form
-  // (`storeFile file("…")`, with or without the `=`), and Groovy's SLASHY strings —
-  // `storePassword = /secret/` and dollar-slashy `$/secret/$`, which are ordinary string
-  // literals in this language and sailed straight past a quote-only matcher.
+  // WHAT A CREDENTIAL LOOKS LIKE, in every spelling this file can carry. Three review
+  // rounds have each found a spelling the previous revision did not know, so the rules are
+  // now enumerated as DATA and self-tested below rather than left to a prose argument
+  // about one regex — a fixture table is enumerable, and a reader can ask "where is
+  // `/* … */`?" of a table in a way nobody asks it of a paragraph.
   //
-  // Slashy detection cannot false-positive on division, because the match is anchored to
-  // statement position and must begin immediately after one of four signing property
-  // names (and an optional `=`/`file(`). A `/` anywhere else in the file is not reachable
-  // by this pattern, so arithmetic elsewhere is untouched.
+  // TWO VIEWS, because the two failure modes need opposite ones. Comments must never
+  // SATISFY a structural claim (so the wiring checks above read the stripped source), and
+  // a comment must never HIDE a secret (so this reads the raw source too). Both are
+  // scanned and the findings unioned — which is also what catches a credential sitting
+  // behind a same-line `/* note */`, where stripping is what restores it to statement
+  // position.
   //
-  // SCANNED ON THE RAW SOURCE, NOT THE STRIPPED VIEW — the two checks want opposite things
-  // from a comment and an earlier revision gave them the same view, which broke this one.
-  // Blanking comments is right for the WIRING checks above: a comment must never satisfy a
-  // structural claim. It is exactly wrong here: `// storePassword = "hunter2"` is a live
-  // credential sitting in a tracked file in a PUBLIC repo, and stripping erased it before
-  // the scan could see it. Verified by injection — a commented-out assignment passed all
-  // 38 checks. Commenting a secret out does not un-publish it.
-  //
-  // So the comment PREFIX is matched rather than removed: an optional `//` or block-comment
-  // `*` may sit between the line start and the property name. Everything else about the
-  // anchor is unchanged, which is what keeps the legitimate case green — a comment that
-  // merely NAMES a variable ("set WYNDING_KEYSTORE_PASSWORD in keystore.properties") has no
-  // signing property at statement position and no quoted value after it, so it cannot trip.
-  // Only a value-BEARING assignment does.
-  //
-  // The literal must be separated from the property name by `=` or whitespace, and that is
-  // load-bearing rather than cosmetic: without it the slashy branch matched a slash-
-  // SEPARATED LIST in prose — the comment `// storePassword/keyPassword/keyAlias/storeFile`
-  // reads as `storePassword` followed by `/`, i.e. the opening of a slashy string. Caught by
-  // running the legitimate-comment fixture, which went red. Neither spelling is valid Groovy
-  // assignment without a separator, so requiring one costs no real coverage.
-  const inlined = [
-    ...gradle.matchAll(
-      /^[ \t]*(?:\/\/[ \t]*|\*[ \t]*)?(storePassword|keyPassword|keyAlias|storeFile)(?:[ \t]*=[ \t]*|[ \t]+)(?:file[ \t]*\([ \t]*)?(?:["']|\$\/|\/)/gm,
+  // SECRETS AND NON-SECRETS ARE SCANNED DIFFERENTLY, and that asymmetry is the fix for
+  // this round's false positives. `storePassword`/`keyPassword` are the things that cannot
+  // be rotated once public, so for those ANY value-bearing assignment counts, quoted or
+  // not — `// storePassword=hunter2` is the shape a pasted `keystore.properties` line
+  // takes, and the README tells developers to write exactly that file. `storeFile` and
+  // `keyAlias` are a PATH and a NAME: documenting an example path in a comment is
+  // something this repo actively asks for, so those are scanned in executable code only.
+  const SECRET_PROPS = String.raw`storePassword|keyPassword`;
+  const NON_SECRET_PROPS = String.raw`keyAlias|storeFile`;
+  // `//`, `/*`, `/**`, or a ` * ` continuation line. The opener was missing and a one-line
+  // `/* storePassword = "x" */` sailed through the revision that claimed to close exactly
+  // this class.
+  const COMMENT = String.raw`(?:\/\/|\/\*+|\*+)`;
+  // `=`, `:` or `->`. Free-text notes use a colon far more often than an equals sign.
+  const SEP = String.raw`(?:[ \t]*(?:=|:|->)[ \t]*|[ \t]+)`;
+  // A quoted literal, but NOT an interpolation: `"${System.getenv('X')}"` is a reference to
+  // something out of band, which is the very thing this gate wants developers to write.
+  const QUOTED = String.raw`(?:file[ \t]*\([ \t]*)?["'](?!\$\{|<)`;
+
+  /** Every way a credential can appear, as one list. Order is irrelevant; coverage is not. */
+  const CREDENTIAL_PATTERNS = [
+    // A quoted literal after any signing property. The separator is OPTIONAL here —
+    // `storePassword"hunter2"` is unambiguously a published secret, and requiring one
+    // silently dropped that case for a round.
+    new RegExp(
+      String.raw`^[ \t]*${COMMENT}?[ \t]*(?:${SECRET_PROPS})[ \t]*(?:=|:|->)?[ \t]*${QUOTED}`,
+      'gm',
     ),
-  ].map((m) => m[0].trim());
+    // Groovy's slashy and dollar-slashy strings. The separator is REQUIRED here, because
+    // without it a slash-separated prose list (`storePassword/keyPassword/keyAlias`) reads
+    // as the opening of a slashy string and reddens a correct file.
+    new RegExp(String.raw`^[ \t]*${COMMENT}?[ \t]*(?:${SECRET_PROPS})${SEP}\$?\/`, 'gm'),
+    // An UNQUOTED value, in a comment only. Executable Groovy cannot express a bare literal
+    // (`storePassword releasePassword` is a variable reference and legitimate), but a
+    // comment has no syntax at all — so this is where a pasted properties line hides.
+    // `${…}` and `<placeholder>` are excluded as references rather than values.
+    //
+    // AN EXPLICIT SEPARATOR IS REQUIRED (`=`, `:` or `->`), and the gap that leaves is
+    // deliberate: `// storePassword hunter2`, with only a space, is not matched. Accepting
+    // whitespace here made ordinary prose a finding — ` * storePassword and keyAlias come
+    // from the environment` reads as the value `and` — and a guard that reddens correct
+    // comments gets disabled by the next person in a hurry. A pasted `keystore.properties`
+    // line always carries an `=`, which is the shape actually worth catching.
+    new RegExp(
+      String.raw`^[ \t]*${COMMENT}[ \t]*(?:${SECRET_PROPS})[ \t]*(?:=|:|->)[ \t]*(?!\$\{|<)\S`,
+      'gm',
+    ),
+    // Path and name properties: executable code only, any literal form.
+    new RegExp(
+      String.raw`^[ \t]*(?:${NON_SECRET_PROPS})[ \t]*(?:=|:|->)?[ \t]*(?:${QUOTED}|(?:file[ \t]*\([ \t]*)?\$?\/)`,
+      'gm',
+    ),
+  ];
+
+  /** Findings across both views, de-duplicated. */
+  const findCredentials = (raw, stripped) => {
+    const hits = new Set();
+    for (const source of [raw, stripped]) {
+      for (const re of CREDENTIAL_PATTERNS) {
+        re.lastIndex = 0;
+        for (const m of source.matchAll(re)) hits.add(m[0].trim());
+      }
+    }
+    return [...hits];
+  };
+
+  // THE GUARD TESTS ITSELF, every run, before it is trusted on the real file. None of the
+  // seven `check-*.mjs` scripts has a test today and `scripts/` is not a workspace package,
+  // so a conventional test file would not run under `turbo run test` — but this guard's
+  // failure mode is a published signing key, and it has already traded one covered spelling
+  // for another without anyone noticing. A table that runs in `verify` is what makes that
+  // impossible to do silently again.
+  const MUST_TRIP = [
+    ['line comment, quoted', '// storePassword = "hunter2"'],
+    ['block comment opener', '/* storePassword = "hunter2" */'],
+    ['javadoc opener', '/** keyPassword = "hunter2" */'],
+    ['block continuation', ' * storePassword = "hunter2"'],
+    ['same-line block comment before live code', '/* note */ storePassword = "hunter2"'],
+    ['unquoted in a comment', '// storePassword=hunter2'],
+    ['colon separator', '// storePassword: hunter2'],
+    ['arrow separator', '// keyPassword -> hunter2'],
+    ['no separator at all', '    storePassword"hunter2"'],
+    ['plain assignment', '    storePassword = "hunter2"'],
+    ['space form', '    storePassword "hunter2"'],
+    ['slashy', '    storePassword = /hunter2/'],
+    ['dollar-slashy', '    keyPassword = $/hunter2/$'],
+    ['keyAlias literal', '    keyAlias "wynding-upload"'],
+    ['storeFile literal', '    storeFile file("relative.jks")'],
+  ];
+  const MUST_PASS = [
+    ['names an env var', '// Set WYNDING_KEYSTORE_PASSWORD in keystore.properties.'],
+    [
+      'slash-separated prose',
+      '// storePassword/keyPassword/keyAlias/storeFile are read via signingValue.',
+    ],
+    ['block-comment prose', ' * storePassword and keyAlias come from the environment.'],
+    ['documented example path', '//   storeFile=/Users/you/keys/wynding-upload.jks'],
+    ['documented example path, quoted', '//   storeFile = "/Users/you/keys/w.jks"'],
+    ['placeholder', '//   storePassword "<your password>"'],
+    ['env interpolation', '    storePassword "${System.getenv(\'WYNDING_KEYSTORE_PASSWORD\')}"'],
+    ['variable reference', '    storePassword releaseStorePassword'],
+    ['file(variable)', '    storeFile file(releaseStoreFile)'],
+  ];
+  // Each fixture is offered BOTH views, exactly as the real file is — raw, and stripped.
+  // Passing the raw line twice made the same-line-block-comment fixture unreachable, since
+  // restoring that credential to statement position is precisely what stripping does.
+  const bothViews = (line) => findCredentials(line, stripGroovyComments(line));
+  const selfTestFailures = [
+    ...MUST_TRIP.filter(([, line]) => bothViews(line).length === 0).map(
+      ([name]) => `missed: ${name}`,
+    ),
+    ...MUST_PASS.filter(([, line]) => bothViews(line).length > 0).map(
+      ([name]) => `false positive: ${name}`,
+    ),
+  ];
+  expect(
+    selfTestFailures.length === 0,
+    `the credential matcher passes its own ${String(MUST_TRIP.length + MUST_PASS.length)} fixtures`,
+    `${selfTestFailures.join('\n   ')}\n   → The matcher below is not doing what this file ` +
+      `claims. Fix the pattern, not the fixture.`,
+  );
+
+  const inlined = findCredentials(gradle, code);
   expect(
     inlined.length === 0,
     'no signing credential is inlined in app/build.gradle',
