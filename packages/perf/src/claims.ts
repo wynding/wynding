@@ -48,7 +48,10 @@
 // disarmed by its own cache: `@wynding/perf#test` declares the three doc paths in its
 // `inputs` (root `turbo.json`) precisely so a docs-only edit busts this task's hash. Task-
 // scoped, not `globalDependencies`, which would bust every task in the repo on any docs
-// edit. If a doc path is added to a site below, add it there too.
+// edit; and spelled `$TURBO_ROOT$/docs/...`, the documented microsyntax for repo-root-relative
+// inputs, rather than `../../docs/...` — both hash identically today, but the traversal form
+// is undocumented and a future turbo could tighten it. If a doc path is added to a site below,
+// add it there too.
 //
 // ANCHORS ARE NAMES, NEVER LINE NUMBERS. Line-number citations are this file set's
 // demonstrated rot vector: ADR 0005 cited `gate.ts:917-923` for a block that had moved to
@@ -463,6 +466,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'purely descriptive margin',
         pattern: 'across BOTH readings on record, is \\*\\*([\\d.]+)\\*\\*',
       },
+      { file: GATE, anchor: 'runs \\(limit 1, and the', pattern: '\\s*([\\d.]+)' },
     ],
   },
 
@@ -605,6 +609,7 @@ export const CLAIMS: readonly Claim[] = [
       },
       { file: ADR, anchor: 'and the numerator barely moved \\(', pattern: '([\\d.]+) .' },
       { file: SPIKE, anchor: 'the numerator unmoved \\(', pattern: '([\\d.]+) .' },
+      { file: GATE, anchor: 'where the unrounded scale gives', pattern: '\\s*([\\d.]+) /' },
     ],
   },
   {
@@ -685,7 +690,8 @@ export const CLAIMS: readonly Claim[] = [
     claim: 'the low end of how much larger the tails are than the medians, per arm',
     value: '1.65',
     numeric: 1.65,
-    basis: 'control p50 12.31% against stress p95 17.35%, on the declared convention',
+    basis:
+      'stress p95 17.35% against stress p50 10.50%, on the declared convention — a WITHIN-arm\n      ratio, as ADR 0005 pairs them; an earlier basis named the cross-arm pairing, which computes\n      to 1.41 rather than 1.65 (Fable stand-in, PR #161)',
     sites: [
       { file: GATE, anchor: 'stress p95 17\\.35% — tails', pattern: '\\s*([\\d.]+)x' },
       { file: ADR, anchor: 'so more survives the division —', pattern: '\\*\\*([\\d.]+).' },
@@ -981,6 +987,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'and their medians are \\*\\*1\\.0063\\*\\* and',
         pattern: '\\*\\*([\\d.]+)\\*\\*',
       },
+      { file: GATE, anchor: '1\\.0017 1\\.0029 1\\.0029 1\\.0039', pattern: '\\s*([\\d.]+)' },
     ],
   },
   {
@@ -1018,6 +1025,8 @@ export const CLAIMS: readonly Claim[] = [
     sites: [
       { file: GATE, anchor: 'purely descriptive margin', pattern: 'own max is \\*{0,2}([\\d.]+)' },
       { file: ADR, anchor: 'purely descriptive margin', pattern: 'own max is \\*{0,2}([\\d.]+)' },
+      { file: GATE, anchor: '1\\.0168 1\\.0265 1\\.0355', pattern: '\\s*([\\d.]+)' },
+      { file: ADR, anchor: 'An earlier draft quoted', pattern: '\\s*([\\d.]+)' },
     ],
   },
   {
@@ -1419,6 +1428,11 @@ export const CLAIMS: readonly Claim[] = [
         pattern: '\\s*([\\d.]+)',
       },
       { file: SPIKE, anchor: 'CI returned `R =', pattern: '\\s*([\\d.]+)`' },
+      {
+        file: ADR,
+        anchor: 'that escalation rule fired: CI came in at `R = ',
+        pattern: '([\\d.]+)',
+      },
     ],
   },
   {
@@ -1480,6 +1494,14 @@ export const CLAIMS: readonly Claim[] = [
       { file: GATE, anchor: 'scanning would take\\), measured at k =', pattern: '\\s*([\\d.]+),' },
       { file: FIXTURE_TEST, anchor: 'Measured at k =', pattern: '\\s*([\\d.]+):' },
       { file: ADR, anchor: 'this amendment\'s original "k =', pattern: '\\s*([\\d.]+) .' },
+      { file: FIXTURE_TEST, anchor: 'an injection of at most 8 \\* ', pattern: '([\\d.]+)' },
+      {
+        file: ADR,
+        anchor: 'catching a broad blast-cost regression at `k = ',
+        pattern: '([\\d.]+)',
+      },
+      { file: SPIKE, anchor: 'broad blast-cost regression at\\n`k = ', pattern: '([\\d.]+)' },
+      { file: M2, anchor: 'catching a broad blast-cost regression at `k = ', pattern: '([\\d.]+)' },
     ],
   },
   {
@@ -1509,6 +1531,10 @@ export const CLAIMS: readonly Claim[] = [
         pattern: '\\s*([\\d.]+) POINT SITS CLOSE',
       },
       { file: ADR, anchor: 'grid, so its\\s*\\n\\s*pinned', pattern: '\\s*([\\d.]+) and' },
+      { file: FIXTURE_TEST, anchor: 'So .expect\\(k95\\)\\.toBe\\(', pattern: '([\\d.]+)' },
+      { file: FIXTURE_TEST, anchor: "while p95's ratio at k =", pattern: '\\s*([\\d.]+)' },
+      { file: FIXTURE_TEST, anchor: 'failure would be .expected', pattern: '\\s*([\\d.]+)' },
+      { file: ADR, anchor: "name while still printing the grid's", pattern: '\\s*([\\d.]+)' },
     ],
   },
   {
@@ -1675,6 +1701,117 @@ export const CLAIMS: readonly Claim[] = [
     sites: [
       { file: GATE, anchor: 'over 6 runs; a later', pattern: '\\s*(\\d+)-run interleaved' },
       { file: SPIKE, anchor: 'A later', pattern: '\\s*(\\d+)-run interleaved' },
+    ],
+  },
+
+  // ---------------------------------------------------------------------------------------
+  // THE SUPERSEDED p95 ERA — records the docs still quote from, whose raw table now lives in
+  // ADR 0005 rather than in `gate.ts` (#86 cut the gate file's superseded-era provenance).
+  // ---------------------------------------------------------------------------------------
+  {
+    id: 'fixture-grid-hi',
+    claim:
+      "the upper of `gate-fixture.test.ts`'s two `KS` grid points bracketing the swept crossings",
+    value: '0.0100',
+    numeric: 0.01,
+    basis:
+      "the grid's nearest point above the true 0.00922 — right for the ORDERING the fixture asserts, wrong as a magnitude",
+    sites: [
+      { file: GATE, anchor: 'nearest points are 0\\.0075 and', pattern: '\\s*([\\d.]+);' },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'not the threshold . p50.s\\s*\\n// ',
+        pattern: '([\\d.]+) below is the grid',
+      },
+      { file: ADR, anchor: 'pinned 0\\.0075 and', pattern: '\\s*([\\d.]+) are the nearest' },
+      { file: FIXTURE_TEST, anchor: "not the threshold — p50's\\s*\\n// ", pattern: '([\\d.]+)' },
+    ],
+  },
+  {
+    id: 'superseded-ceiling',
+    claim: 'the ceiling the p95/p50 era ran at — `R0` 1.42 x `TOLERANCE` 1.25',
+    value: '1.7750',
+    numeric: 1.775,
+    basis:
+      'superseded by the 1.1000 ceiling at M2-S6; kept because the docs still read the p95 era against it',
+    sites: [
+      { file: ADR, anchor: '1\\.427743 rounded down\\. Ceiling', pattern: '\\s*([\\d.]+)\\.' },
+      { file: ADR, anchor: 'Ceiling = 1\\.42 . 1\\.25 =', pattern: '\\s*\\*\\*([\\d.]+)\\*\\*' },
+      {
+        file: SPIKE,
+        anchor: 'attempts 1.5, `ubuntu-24\\.04`\\), ceiling',
+        pattern: '\\s*\\*\\*([\\d.]+)\\*\\*',
+      },
+      { file: M2, anchor: 'attempts 1.5, `ubuntu-24\\.04`; ceiling', pattern: '\\s*([\\d.]+)\\)' },
+      {
+        file: ADR,
+        anchor: 'came in at \\*\\*R = 1\\.7595\\s*\\n\\s*against the ',
+        pattern: '([\\d.]+)',
+      },
+      { file: ADR, anchor: 'not a preference: `R = 1\\.8348` against the ', pattern: '([\\d.]+)' },
+      { file: ADR, anchor: 'against `R0 = 1\\.42` / ceiling `', pattern: '([\\d.]+)' },
+      { file: ADR, anchor: 'CI came in at `R = 1\\.8348`\\nagainst the `', pattern: '([\\d.]+)' },
+      { file: ADR, anchor: 'provisional\\)\\. The `1\\.42` / `', pattern: '([\\d.]+)' },
+      { file: SPIKE, anchor: 'CI returned `R = 1\\.8348` against the `', pattern: '([\\d.]+)' },
+    ],
+  },
+  {
+    id: 'five-run-p95-spread',
+    claim: "the p95 ratio's spread over the five-attempt cohort, `(max - min) / min`",
+    value: '20.2',
+    numeric: 20.2,
+    basis: "computed from ADR 0005's restored five-attempt table — 1.5802 against 1.3146",
+    sites: [
+      {
+        file: ADR,
+        anchor: 'over the five R\\(p95\\) values is\\s*\\n\\s*',
+        pattern: '\\*\\*([\\d.]+)%\\*\\*',
+      },
+      { file: SPIKE, anchor: '`\\(max . min\\) / min` is', pattern: '\\s*\\*\\*([\\d.]+)%\\*\\*' },
+      {
+        file: M2,
+        anchor: "p95's spread across the five R values is",
+        pattern: '\\s*\\*\\*([\\d.]+)%\\*\\*',
+      },
+    ],
+  },
+  {
+    id: 'five-run-p99-spread',
+    claim:
+      "the p99 ratio's spread over the same five attempts — nearly half p95's, which the tail-noise diagnosis did not predict",
+    value: '11.1',
+    numeric: 11.1,
+    basis: "computed from the same restored table's audit p99 column — 2.0112 against 1.8100",
+    sites: [
+      {
+        file: ADR,
+        anchor:
+          'over the five R\\(p99\\) values, computed on the exact same five runs, it is\\s*\\n\\s*',
+        pattern: '\\*\\*([\\d.]+)%\\*\\*',
+      },
+      {
+        file: SPIKE,
+        anchor: 'for the five R\\(p95\\) values against',
+        pattern: '\\s*\\*\\*([\\d.]+)%\\*\\*',
+      },
+      { file: M2, anchor: 'nearly double the', pattern: '\\s*\\*\\*([\\d.]+)%\\*\\*' },
+    ],
+  },
+  {
+    id: 'denominator-faster',
+    claim:
+      'how much faster the control arm ran on the byte-identical work that failed the gate at M2-S6',
+    value: '23',
+    numeric: 23,
+    basis:
+      'the diagnosis that moved the gate: the numerator barely moved, so a faster DENOMINATOR failed the build',
+    sites: [
+      { file: ADR, anchor: 'DENOMINATOR: the control arm ran', pattern: '\\s*(\\d+)% faster' },
+      {
+        file: M2,
+        anchor: 'the numerator barely moved and the DENOMINATOR ran',
+        pattern: '\\s*(\\d+)% faster',
+      },
     ],
   },
   {

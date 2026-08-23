@@ -325,8 +325,44 @@ tell a budget that does not exist from one that could not be measured.
 
    **`R0` re-recorded at 1.42** — five CI samples on the post-P9 workload with the p95
    statistic (GitHub Actions run 30851346335, attempts 1–5, `ubuntu-24.04`), median
-   1.427743 rounded down. Ceiling 1.7750. Full table, provenance, and the comparison against
-   PR A's pre-P9 baselines are in `packages/perf/src/gate.ts`'s `R0` doc.
+   1.427743 rounded down. Ceiling 1.7750.
+
+   **The cohort itself, moved here from `gate.ts` when that file's rewrite cut its
+   superseded-era provenance (#86).** This is now the record's only home: the p95 era is
+   history, and history lives in this ADR rather than in the gate's doc comment — but the
+   figures below are still quoted (the 20.2%/11.1% finding immediately after this table is
+   computed from nothing else), and CI logs expire on a 90-day retention with no artifact
+   upload, so publishing the operands rather than only the ratios is what keeps them
+   checkable at all. Five distinct attempts with five distinct job ids — a first collection
+   pass returned one run read four times, and was re-verified before the table was written.
+
+   | attempt | job         | controlStat p50 | stressStat p95 | audit p99 | R (p95) | R (p99) |
+   | ------- | ----------- | --------------- | -------------- | --------- | ------- | ------- |
+   | 1       | 91811842462 | 0.378234        | 0.540021       | 0.713615  | 1.4277  | 1.8867  |
+   | 2       | 91815000367 | 0.394437        | 0.571298       | 0.719074  | 1.4484  | 1.8230  |
+   | 3       | 91815560758 | 0.374028        | 0.494694       | 0.699456  | 1.3226  | 1.8701  |
+   | 4       | 91816459609 | 0.376357        | 0.594722       | 0.756914  | 1.5802  | 2.0112  |
+   | 5       | 91817201212 | 0.390022        | 0.512714       | 0.705933  | 1.3146  | 1.8100  |
+
+   Median of the five R(p95) values, in the order taken (1.4277, 1.4484, 1.3226, 1.5802,
+   1.3146) and sorted (1.3146, 1.3226, 1.4277, 1.4484, 1.5802): **1.427743**, rounded DOWN
+   to the nearer hundredth → `R0` = 1.42. Down, not to-nearest: a lower `R0` makes the
+   ceiling stricter, so the rounding can only ever cost a false alarm, never hide a
+   regression. Ceiling = 1.42 × 1.25 = **1.7750**, and the max sample 1.5802 sits inside it.
+   Span (max/min) = 1.5802 / 1.3146 = **1.2021**, within `TOLERANCE`, so the pre-committed
+   "if the five span more than `TOLERANCE`" escalation did not fire. Fixed cohort: exactly
+   five samples, no sixth and no widened tolerance.
+
+   **PR A's pre-change baselines**, on the UNCHANGED workload with the OLD scene (run
+   30828066588, job 91734721525, `ubuntu-24.04` image 20260720.247.2) — kept beside the
+   cohort because the comparison between them is what "`R0` moved" means, and because both
+   statistics are recorded on both sides, so a p99-before is never compared against a
+   p95-after:
+
+   |          | controlStat p50 | due-blast p99 | due-blast p95 | R (p99) | R (p95) |
+   | -------- | --------------- | ------------- | ------------- | ------- | ------- |
+   | before-1 | 0.286896        | 0.718915      | 0.495136      | 2.5058  | 1.7258  |
+   | before-2 | 0.282686        | 0.703900      | 0.488650      | 2.4900  | 1.7286  |
 
    **A finding from that same five-sample cohort belongs on record here, plainly: p95's
    spread is nearly DOUBLE p99's.** `(max − min) / min` over the five R(p95) values is

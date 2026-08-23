@@ -263,11 +263,13 @@ eight, and the full record is the honest one to read this gate against:
 | 7   | 91029800584 | 23:15:44      | 93c3f90    | 2.5937     |
 | 8   | 91030969809 | 23:22:51      | f420491    | 2.6050     |
 
-The eight rows above are the population every figure in this section and in `gate.ts`'s `R0` doc
-is derived from — a snapshot taken when the ruling below was made, not a closed set. A ninth run
+The eight rows above are the population every figure in this section is derived from — `gate.ts`'s
+`R0` doc no longer derives from them, since #86's rewrite cut the p99 era and its current record is
+the 17-attempt cohort instead — a snapshot taken when the ruling below was made, not a closed set. A ninth run
 (`408412e`) has since measured **2.3355**, a new low that widens the observed span to 39.1% and
 changes no conclusion here. Every CI run adds a sample; do not re-derive the statistics per run,
-and if the set is ever recomputed, recompute **all four copies** of them together.
+and if the set is ever recomputed, recompute **all three surviving copies** of them together (this
+section, ADR 0005's Finding 3, and m2.md's S4 flags — `gate.ts`'s copy was the fourth and is gone).
 
 Samples 1–4 and 6 are the **same commit re-run five times**: 2.3585 → 3.2478, a **37.7% spread
 on byte-identical code**. Sample 6 is _above_ the 3.1125 ceiling; sample 5 is ~2.5% under it.
@@ -454,8 +456,8 @@ rate, move the job to a dedicated runner and re-record, or change the statistic 
 denominator carry tail alike.
 
 The full eight-sample record, the runner provenance, and why the obvious explanations do not hold
-are in [The CI regression gate](#the-ci-regression-gate) above and in
-`packages/perf/src/gate.ts`'s `R0` doc.
+are in [The CI regression gate](#the-ci-regression-gate) above — that section is now the record's
+only home, `gate.ts` having cut its p99-era provenance in #86.
 
 **AMENDED 2026-08-03 (M2-S5b P11).** The numerator moved from p99 to p95, and `R0` was
 re-recorded to **1.42** — the median of five CI samples on the POST-P9 workload (GitHub Actions
@@ -481,11 +483,44 @@ to p95 does not rest on it — it rests on the fixture result above. This does n
 cause of the spread. As recorded at the time, five samples of a different (post-P9) workload on one
 re-run runner are also not a controlled comparison against the historical eight-job, pre-P9
 population, so this neither vindicates nor condemns p95 on noise — it is what was measured. Full
-record in `packages/perf/src/gate.ts`'s `R0` doc and ADR 0005's amended Finding 3.
+record, including the five-attempt table the 20.2%/11.1% figures are computed from, in ADR 0005's
+amended Finding 3.
 
 **AMENDED 2026-08-05 (M2-S6 QC).** The numerator moved again, from p95 to a **p50** over the same
 due-blast subset, `TOLERANCE` tightened 1.25 → 1.10, and `R0` was re-recorded at **1.00** (ceiling
-1.1000) from 17 CI samples — run 31041932972, attempts 1–17, `ubuntu-24.04`. That baseline is
+1.1000) from 17 CI samples — run 31041932972, attempts 1–17, `ubuntu-24.04`. The sorted `R` values
+and the derived statistics live in `packages/perf/src/gate.ts`'s `R0` doc under PROVENANCE; the
+**per-arm operands** live here, moved out of that doc by #86's rewrite and kept because the point
+of publishing them was never to decorate the gate file. Publishing only `R` would repeat exactly
+the provenance failure that doc records against the four diagnostic runs, and CI logs expire on a
+90-day retention with no artifact upload — these attempts are dated 2026-08-05, so this table is
+the record once the logs go. Each cell is the reported 4 dp value while `R` was computed from
+unrounded milliseconds — the sorted `R` column stays in `gate.ts`'s PROVENANCE rather than being
+copied here, so the two records cannot drift — and recomputing `stress / control` from the printed
+operands differs by up to 2e-4 — within the 3.9e-4 that rounding two operands permits, and not an inconsistency.
+Attempts 1–5 are the cohort on which the escalation rule fired.
+
+| att | control p50 | stress p50 |
+| --- | ----------- | ---------- |
+| 1   | 0.3855      | 0.3992     |
+| 2   | 0.3642      | 0.3413     |
+| 3   | 0.3855      | 0.3862     |
+| 4   | 0.4025      | 0.4085     |
+| 5   | 0.3970      | 0.4007     |
+| 6   | 0.3928      | 0.3943     |
+| 7   | 0.4041      | 0.4053     |
+| 8   | 0.3963      | 0.4016     |
+| 9   | 0.4177      | 0.4204     |
+| 10  | 0.3775      | 0.3875     |
+| 11  | 0.3966      | 0.4110     |
+| 12  | 0.3983      | 0.3953     |
+| 13  | 0.4016      | 0.3826     |
+| 14  | 0.2990      | 0.3035     |
+| 15  | 0.3852      | 0.3863     |
+| 16  | 0.3758      | 0.3821     |
+| 17  | 0.2556      | 0.2516     |
+
+That baseline is
 **provisional**: the samples are attempts of a single workflow run on a single image, so it is not
 a runner-class calibration. The
 trigger was ADR 0005's 2026-08-04 escalation rule firing ("if CI breaches the ceiling, stop and

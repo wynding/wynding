@@ -21,9 +21,9 @@
       "dependsOn": ["^typecheck"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "../../docs/adr/0005-performance-budgets.md",
-        "../../docs/design-notes/performance-spike.md",
-        "../../docs/milestones/m2.md"
+        "$TURBO_ROOT$/docs/adr/0005-performance-budgets.md",
+        "$TURBO_ROOT$/docs/design-notes/performance-spike.md",
+        "$TURBO_ROOT$/docs/milestones/m2.md"
       ]
     },
     "clean": {

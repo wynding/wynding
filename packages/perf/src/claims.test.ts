@@ -81,7 +81,10 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
   if ('error' in located) return located;
   const window = site.within ?? DEFAULT_SITE_WINDOW;
   const region = text.slice(located.index, located.index + window);
-  const match = new RegExp(site.pattern).exec(region);
+  // `d` gives each group's real span. Without it the only way back to the capture's offset
+  // is `match[0].indexOf(captured)`, which binds the FIRST identical substring in the full
+  // match — the wrong span whenever the value repeats earlier in it (CodeRabbit, PR #161).
+  const match = new RegExp(site.pattern, 'd').exec(region);
   if (match === null) {
     return {
       error: `pattern /${site.pattern}/ found nothing within ${window} characters after the anchor in ${site.file}. Either the claim moved away from its anchor or its wording changed.`,
@@ -94,8 +97,10 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
     };
   }
   // Offsets of the CAPTURE inside the whole file, so a caller can blank exactly it.
-  const matchStart = located.index + (match.index ?? 0);
-  const capturedAt = matchStart + match[0].indexOf(captured);
+  const span = (match as RegExpExecArray & { indices?: (readonly [number, number] | undefined)[] })
+    .indices?.[1];
+  const relative = span !== undefined ? span[0] : (match.index ?? 0) + match[0].indexOf(captured);
+  const capturedAt = located.index + relative;
   return { value: captured, start: capturedAt, end: capturedAt + captured.length };
 }
 
@@ -222,14 +227,57 @@ describe('no site can silently fall back to another occurrence', () => {
     }
   }
 });
-
-// PROPERTY 3 — the coverage contract, swept rather than asserted.
+// PROPERTY 3 — coverage, swept over ALL PAIRS of guarded files and accounted per OCCURRENCE.
 //
-// SWEEP METHOD: take `gate.ts`'s comment prose, strip tokens that are references rather
-// than claims, and keep every numeral that also appears in the prose of another guarded
-// file. Each survivor must have a row. A figure `gate.ts` states in only one place is out
-// of scope by design — the table is for claims with copies.
-const SWEPT_FILES = [
+// Three review rounds hardened this check and each one's finding is why a piece of it exists:
+//
+//  - SHIP-REVIEW: the contract was a paragraph asking to be believed. A prose contract cannot
+//    fail, so it became a sweep.
+//  - CODEX: the sweep reduced the table to a set of VALUES, so once any row carried `17`,
+//    every `17` in a guarded file read as covered without anyone confirming it sat at a listed
+//    site — an unlisted restatement stayed green and could drift. Accounting is now per
+//    OCCURRENCE, against the exact capture offsets the resolver returns.
+//  - CODERABBIT: the sweep seeded from `gate.ts` alone, so a figure duplicated between ADR
+//    0005 and the spike with no `gate.ts` copy was never examined. It is now ALL-PAIRS: any
+//    value appearing in two guarded files needs a row, whoever states it.
+//
+// THE SCAN. One pass per file feeds both halves, and it is OFFSET-PRESERVING — every mask
+// replaces text with the same number of spaces — because the occurrence half compares byte
+// offsets against the resolver's capture offsets. For `.ts` files it keeps comment text and
+// blanks code, INCLUDING trailing comments (`const N = 500; // the floor`) which an earlier
+// line-oriented version dropped, and it does so with a small lexer that tracks string and
+// template literals so a `//` inside a string is not mistaken for a comment (CodeRabbit).
+// Then it blanks the token shapes that are references rather than claims.
+//
+// THE DISCIPLINE for occurrence accounting, stated because a bare numeral cannot always
+// identify a claim. Accounting is enforced for HIGH-INFORMATION occurrences — three or more
+// decimal places, or five or more digits — where the numeral is effectively self-identifying
+// (`1.0065`, `1.7750`, `0.00922`, `31041932972`). Below that threshold a numeral like `17` or
+// `1.10` occurs constantly for unrelated reasons (tick counts, list indices, percentages of
+// other things), and requiring every one of them to sit at a listed site would produce noise
+// rather than signal. Those values are still covered by the all-pairs half and by their rows'
+// declared sites; what is NOT claimed is that every low-information restatement is guarded.
+// That gap is real, bounded, and named here rather than papered over.
+
+/** The files whose prose the perf gate's claim set lives in. The SEED half — the six
+ *  `packages/perf` sources — defines the SURFACE: a figure is a perf-gate claim if the perf
+ *  package states it. The docs are guarded too, and all-pairs coverage runs across every
+ *  guarded file, so an ADR<->spike disagreement about a perf figure is caught even when
+ *  `gate.ts` never mentions it (CodeRabbit). What the surface deliberately excludes is the
+ *  rest of those documents' numeric content — device frame budgets, board geometry, wave
+ *  arithmetic — which belongs to other packages and other tests, and which this table has no
+ *  business annexing. */
+const PERF_SOURCES = [
+  'packages/perf/src/gate.ts',
+  'packages/perf/src/gate.test.ts',
+  'packages/perf/src/gate-fixture.test.ts',
+  'packages/perf/src/oracle.ts',
+  'packages/perf/src/oracle.test.ts',
+  'packages/perf/src/scenario.ts',
+] as const;
+
+const GUARDED_FILES = [
+  'packages/perf/src/gate.ts',
   'packages/perf/src/gate.test.ts',
   'packages/perf/src/gate-fixture.test.ts',
   'packages/perf/src/oracle.ts',
@@ -241,9 +289,10 @@ const SWEPT_FILES = [
 ] as const;
 
 /** Numerals the sweep must not treat as claims, each with the reason. Kept deliberately
- *  small: every entry is a hole, so an entry that stops being needed should be deleted.
- *  This is the same shape as `scripts/glossary-lint.config.json`'s exception list — a
- *  machine-checked contract with named, justified exceptions beats a prose promise. */
+ *  small: every entry is a hole, so an entry that stops being needed should be deleted —
+ *  which a test below enforces. Same shape as `scripts/glossary-lint.config.json`'s
+ *  exception list: a machine-checked contract with named, justified exceptions beats a
+ *  prose promise. */
 const CONTRACT_EXCLUSIONS: readonly { readonly value: string; readonly why: string }[] = [
   {
     value: '0',
@@ -278,96 +327,427 @@ const CONTRACT_EXCLUSIONS: readonly { readonly value: string; readonly why: stri
     why: 'Two different quantities that coincide: the gating p50 scores 0.8 on the CONCENTRATED injection and p95 scores 0.8 on the BROAD one. Each is stated beside the statistic it belongs to and beside its counterpart (2.2 and 3.9, both rowed), so the pair is guarded through those; the bare numeral cannot tell the two apart and a row keyed on it would bind the wrong sites together.',
   },
   {
+    value: '0.3863',
+    why: "A collision between two unrelated per-arm tables: gate.ts's 0.3863 is run 1's control p50 in the four-run diagnostic table, while the spike's is attempt 15's STRESS p50 in the 17-attempt operands table. Same numeral, different arm, different cohort.",
+  },
+  {
     value: '2.7',
     why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops.",
   },
 ];
+/** Figures a perf source PINS IN EXECUTABLE CODE — a threshold, a constant, a fixture
+ *  parameter. These are not holes: an assertion is a stronger guard than a prose row, and the
+ *  test below verifies each really does appear in the named file's CODE rather than only in
+ *  its comments, so moving one into prose alone re-opens the obligation. */
+const PINNED_IN_CODE: readonly {
+  readonly value: string;
+  readonly file: string;
+  readonly why: string;
+}[] = [
+  {
+    value: '0.1',
+    file: 'packages/perf/src/gate.test.ts',
+    why: "The boundary fixture's control sample value — an executable constant in the pinned boundary case.",
+  },
+  {
+    value: '0.2',
+    file: 'packages/perf/src/gate.test.ts',
+    why: "The boundary fixture's stress sample value, pinned in the same executable case.",
+  },
+  {
+    value: '0.99',
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    why: 'A fixture ratio asserted directly in code.',
+  },
+  {
+    value: '1.42',
+    file: 'packages/perf/src/gate.test.ts',
+    why: "The superseded baseline, pinned by the R0 test's own assertion that the value is 1.00 and not 1.42.",
+  },
+  {
+    value: '100',
+    file: 'packages/perf/src/oracle.ts',
+    why: 'A scene threshold asserted in executable code.',
+  },
+  {
+    value: '14',
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    why: 'A fixture size asserted in code.',
+  },
+  {
+    value: '1427',
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    why: 'The measured due-blast subset size, an executable constant (`N_SUBSET_MEASURED`).',
+  },
+  {
+    value: '15',
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    why: 'A fixture parameter in code.',
+  },
+  {
+    value: '150',
+    file: 'packages/perf/src/oracle.ts',
+    why: "The tower-count assertion's threshold, executable.",
+  },
+  { value: '20', file: 'packages/perf/src/oracle.test.ts', why: 'A test fixture value in code.' },
+  {
+    value: '200',
+    file: 'packages/perf/src/oracle.ts',
+    why: '`MEDIAN_LIVE_CREEPS_THRESHOLD`, an exported constant.',
+  },
+  {
+    value: '2000',
+    file: 'packages/perf/src/oracle.ts',
+    why: 'The sustained-sample threshold, executable.',
+  },
+  {
+    value: '2499',
+    file: 'packages/perf/src/oracle.test.ts',
+    why: 'A degenerate-window fixture length in code.',
+  },
+  {
+    value: '2500',
+    file: 'packages/perf/src/oracle.test.ts',
+    why: 'The sample-count fixture, executable.',
+  },
+  {
+    value: '270',
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    why: 'The concentrated-injection subset size, computed and asserted in code.',
+  },
+  {
+    value: '280',
+    file: 'packages/perf/src/oracle.ts',
+    why: 'The peak-live-creeps threshold, an exported constant.',
+  },
+  {
+    value: '3.0',
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    why: 'A fixture multiplier in code.',
+  },
+  { value: '300', file: 'packages/perf/src/gate-fixture.test.ts', why: 'A fixture size in code.' },
+  {
+    value: '329',
+    file: 'packages/perf/src/oracle.ts',
+    why: '`ROUTE_LENGTH_FLOOR`, an exported constant with its own assertion.',
+  },
+  {
+    value: '55',
+    file: 'packages/perf/src/scenario.ts',
+    why: 'The build-tick count for the catalog scene, executable.',
+  },
+];
+
+/** REAL unrowed shared claims, pinned so the set cannot grow silently.
+ *
+ *  These are the scene ORACLE's claim family — the stress scene's measured and derived facts,
+ *  duplicated between `oracle.ts`'s doc prose and the three documents. They are genuine
+ *  cross-file claims of exactly the kind this table exists for, and they are NOT collisions.
+ *  They are unrowed because they belong to the oracle's surface rather than the gate's, and
+ *  rowing them with verified sites is a body of work this PR sized and measured but did not
+ *  undertake — recorded here rather than absorbed silently, and asserted EXACTLY so a new gap
+ *  fails the build instead of joining the list. */
+const KNOWN_UNROWED: readonly { readonly value: string; readonly why: string }[] = [
+  { value: '0.9', why: 'A fixture ratio quoted in the spike; oracle-surface.' },
+  { value: '114', why: 'Peak armored live creeps — oracle.ts doc, ADR and spike.' },
+  {
+    value: '12',
+    why: 'Measured peak resident DoT records at the catalog scene — oracle/ADR/spike/m2.',
+  },
+  { value: '16', why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2.' },
+  { value: '165', why: 'Catalog-scene tower count — scenario.ts, ADR and m2.' },
+  { value: '1800', why: 'Catalog-scene tick figure — scenario.ts and the ADR.' },
+  { value: '19.2', why: "The control arm's population gap percentage — scenario.ts and spike." },
+  { value: '25', why: 'A fixture/threshold figure shared between the fixture test and the docs.' },
+  { value: '28.6', why: 'The pre-narrowing population gap percentage — scenario.ts and spike.' },
+  { value: '330', why: 'Route-length cap at ~150 towers — oracle.ts, ADR and m2.' },
+  { value: '36', why: 'Catalog-scene arithmetic shared between scenario.ts and m2.' },
+  { value: '40', why: 'Board dimension / threshold numeral shared across oracle and the docs.' },
+  { value: '400', why: 'Re-pinned stunned-samples floor — oracle.ts, ADR and m2.' },
+  { value: '450', why: 'An oracle threshold quoted in the ADR and m2.' },
+  { value: '459', why: 'The 40x40 route-length ceiling — oracle.ts, ADR, spike and m2.' },
+  { value: '600', why: 'The unreachable route target — oracle.ts, ADR, spike and m2.' },
+  { value: '80', why: 'Board-size figure in the route-cap table — oracle.ts and the docs.' },
+  { value: '9.2', why: 'DoT record depth per carrier at peak — oracle.ts doc prose.' },
+];
+
 const EXCLUDED = new Set(CONTRACT_EXCLUSIONS.map((e) => e.value));
 
-function proseOf(file: string): string {
-  const raw = read(file);
-  if (file.endsWith('.md')) return raw;
-  let inBlock = false;
-  const out: string[] = [];
-  for (const line of raw.split('\n')) {
-    const t = line.trim();
-    let isComment = false;
-    if (inBlock) {
-      isComment = true;
-      if (t.includes('*/')) inBlock = false;
-    } else if (t.startsWith('/*')) {
-      isComment = true;
-      if (!t.includes('*/')) inBlock = true;
-    } else if (t.startsWith('//')) isComment = true;
-    if (isComment) out.push(line);
+/** High-information occurrences that are NOT restatements of the row that shares their
+ *  numeral. Each names the file and the text immediately before the occurrence, so the
+ *  exemption is pinned to one place rather than to a value. */
+const OCCURRENCE_EXCEPTIONS: readonly {
+  readonly file: string;
+  readonly near: string;
+  readonly why: string;
+}[] = [
+  {
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    near: 'Exactly ',
+    why: 'A ratio that happens to equal 1.0000 exactly at the fixture boundary — not the committed `R0` of 1.00 restated.',
+  },
+  {
+    file: 'packages/perf/src/gate-fixture.test.ts',
+    near: 'p95 was ALREADY\\s*\\n\\s*// exactly ',
+    why: 'The same boundary ratio, quoted a second time in the paragraph explaining it. Still not `R0`.',
+  },
+];
+
+/** Blank everything in a `.ts` source except comment text, preserving length so byte offsets
+ *  stay comparable with the resolver's. Tracks string and template literals, so `//` inside a
+ *  string is code rather than a comment, and keeps TRAILING comments. */
+function commentsOnly(src: string): string {
+  const out = new Array<string>(src.length).fill(' ');
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const next = src[i + 1];
+    if (c === '/' && next === '/') {
+      while (i < src.length && src[i] !== '\n') {
+        out[i] = src[i] as string;
+        i++;
+      }
+    } else if (c === '/' && next === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end === -1 ? src.length : end + 2;
+      for (; i < stop; i++) out[i] = src[i] as string;
+    } else if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\\') i++;
+        i++;
+      }
+      i++;
+    } else {
+      if (c === '\n') out[i] = '\n';
+      i++;
+    }
   }
-  return out.join('\n');
+  return out.join('');
 }
 
-/** Strip the token shapes that are references, identifiers or structure — never claims. */
-function stripReferences(s: string): string {
-  return s
-    .replace(/\d{4}-\d{2}-\d{2}(\/\d{2})?/g, ' ') // ISO dates
-    .replace(/#\d+/g, ' ') // issue refs
-    .replace(/\b(ADR|PRD)\s+\d+/g, ' ') // document refs
-    .replace(/[\w./-]*\/[\w./-]+/g, ' ') // file paths (carry ADR/format numbers)
-    .replace(/\bubuntu-?\d[\w.]*/gi, ' ') // runner image / release ids
-    .replace(/\b(PLAN\s+)?step\s+\d+/gi, ' ') // plan step refs
-    .replace(/\bM\d+-S\d+\w*/g, ' ') // milestone/story refs
-    .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi, ' ') // commit shas
-    .replace(/\bp(50|95|99)\b/g, ' ') // percentile NAMES, not values
-    .replace(/^\s*\d+\.\s/gm, ' '); // ordered-list markers
+/** The inverse of `commentsOnly`: executable text with comments blanked. Used to verify that
+ *  a PINNED_IN_CODE figure is genuinely a constant rather than more prose. */
+function codeOnly(src: string): string {
+  const out = new Array<string>(src.length).fill(' ');
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const n = src[i + 1];
+    if (c === '/' && n === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+    } else if (c === '/' && n === '*') {
+      const e = src.indexOf('*/', i + 2);
+      i = e === -1 ? src.length : e + 2;
+    } else {
+      out[i] = src[i] as string;
+      i++;
+    }
+  }
+  return out.join('');
 }
 
-function numerals(text: string): string[] {
-  return (stripReferences(text).match(/(?<![A-Za-z_])\d[\d,_]*(?:\.\d+)?/g) ?? []).map((t) =>
-    t.replace(/[,_]/g, ''),
-  );
+const spaces = (m: string): string => ' '.repeat(m.length);
+
+/** The claim-bearing prose of a guarded file, masked to preserve every byte offset. */
+function scannedProse(file: string): string {
+  const raw = read(file);
+  const prose = file.endsWith('.md') ? raw : commentsOnly(raw);
+  return prose
+    .replace(/\d{4}-\d{2}-\d{2}(\/\d{2})?/g, spaces) // ISO dates
+    .replace(/#\d+/g, spaces) // issue refs
+    .replace(/\b(ADR|PRD)\s+\d+/g, spaces) // document refs
+    .replace(/[\w./-]*\/[\w./-]+/g, spaces) // file paths (carry ADR/format numbers)
+    .replace(/\bubuntu-?\d[\w.]*/gi, spaces) // runner image / release ids
+    .replace(/\b(PLAN\s+)?step\s+\d+/gi, spaces) // plan step refs
+    .replace(/\bM\d+-S\d+\w*/g, spaces) // milestone/story refs
+    .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi, spaces) // commit shas
+    .replace(/\bp(50|95|99)\b/g, spaces) // percentile NAMES, not values
+    .replace(/^[ \t]*\d+\.[ \t]/gm, spaces); // ordered-list markers
+}
+
+interface Numeral {
+  readonly raw: string;
+  readonly value: string;
+  readonly at: number;
+}
+
+function numeralsOf(file: string): Numeral[] {
+  const text = scannedProse(file);
+  const found: Numeral[] = [];
+  for (const m of text.matchAll(/(?<![A-Za-z_])\d[\d,_]*(?:\.\d+)?/g)) {
+    found.push({ raw: m[0], value: m[0].replace(/[,_]/g, ''), at: m.index ?? 0 });
+  }
+  return found;
+}
+
+/** Self-identifying: a numeral this specific is a restatement, not a coincidence. */
+function highInformation(raw: string): boolean {
+  const decimals = raw.includes('.') ? (raw.split('.')[1] as string).length : 0;
+  return decimals >= 3 || raw.replace(/[^\d]/g, '').length >= 5;
+}
+
+const scanCache = new Map<string, Numeral[]>();
+function scan(file: string): Numeral[] {
+  const hit = scanCache.get(file);
+  if (hit !== undefined) return hit;
+  const n = numeralsOf(file);
+  scanCache.set(file, n);
+  return n;
 }
 
 describe('the coverage contract is enforced, not merely asserted', () => {
-  it('every figure `gate.ts` states that also appears in another guarded file has a row', () => {
+  it('every figure the perf package states, and another guarded file repeats, has a row', () => {
     const rowed = new Set(
       CLAIMS.map((c) => Number(c.value))
         .filter((n) => Number.isFinite(n))
         .map(String),
     );
-    const stated = new Set(numerals(proseOf('packages/perf/src/gate.ts')));
-    const elsewhere = new Map<string, string[]>();
-    for (const file of SWEPT_FILES) {
-      for (const value of new Set(numerals(proseOf(file)))) {
-        elsewhere.set(value, [...(elsewhere.get(value) ?? []), file]);
+    const surface = new Set(PERF_SOURCES.flatMap((f) => scan(f).map((n) => n.value)));
+    const where = new Map<string, Set<string>>();
+    for (const file of GUARDED_FILES) {
+      for (const n of scan(file)) {
+        if (EXCLUDED.has(n.value)) continue;
+        // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values.
+        if (!n.value.includes('.') && Number(n.value) < 10) continue;
+        if (!surface.has(n.value)) continue;
+        if (!where.has(n.value)) where.set(n.value, new Set());
+        (where.get(n.value) as Set<string>).add(file);
       }
     }
 
     const gaps: string[] = [];
-    for (const value of stated) {
-      if (EXCLUDED.has(value)) continue;
-      // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values.
-      if (!value.includes('.') && Number(value) < 10) continue;
-      const where = elsewhere.get(value);
-      if (where === undefined) continue; // stated only in gate.ts — nothing to propagate to
+    for (const [value, files] of where) {
+      if (files.size < 2) continue;
       if (rowed.has(String(Number(value)))) continue;
-      gaps.push(`${value} (also in ${where.map((f) => f.split('/').pop()).join(', ')})`);
+      if (PINNED_IN_CODE.some((e) => e.value === value)) continue;
+      gaps.push(value);
     }
+    gaps.sort();
 
     expect(
       gaps,
-      `these figures are stated in gate.ts AND duplicated in a guarded file, but have no claim row — ` +
-        `add a row (with every site) or, if the numeral is a reference rather than a claim, an entry in CONTRACT_EXCLUSIONS:\n  ` +
-        gaps.join('\n  '),
+      'these figures are stated by the perf package AND repeated in another guarded file, but ' +
+        'have no claim row. Add a row (with every site); or a CONTRACT_EXCLUSIONS entry if the ' +
+        'numeral is a collision; or a PINNED_IN_CODE entry if an executable assertion already ' +
+        'guards it; or, if it is a real unrowed claim, KNOWN_UNROWED with the reason it is not ' +
+        `rowed yet:\n  ${gaps.join('\n  ')}`,
+    ).toEqual([...KNOWN_UNROWED.map((e) => e.value)].sort());
+  });
+
+  it('every high-information occurrence of a rowed value sits at a listed site', () => {
+    const rowedValues = new Set(
+      CLAIMS.map((c) => Number(c.value))
+        .filter((n) => Number.isFinite(n))
+        .map(String),
+    );
+
+    // Where the resolver actually reads each claim from.
+    const accounted = new Set<string>();
+    for (const claim of CLAIMS) {
+      for (const site of claim.sites) {
+        const found = extract(site);
+        if ('error' in found) continue;
+        accounted.add(`${site.file}:${found.start}`);
+      }
+    }
+
+    const unaccounted: string[] = [];
+    for (const file of GUARDED_FILES) {
+      const raw = read(file);
+      for (const n of scan(file)) {
+        if (!highInformation(n.raw)) continue;
+        if (!rowedValues.has(String(Number(n.value)))) continue;
+        if (accounted.has(`${file}:${n.at}`)) continue;
+        const before = raw.slice(Math.max(0, n.at - 90), n.at);
+        if (
+          OCCURRENCE_EXCEPTIONS.some(
+            (e) => e.file === file && new RegExp(`${e.near}$`).test(before),
+          )
+        ) {
+          continue;
+        }
+        const line = raw.slice(0, n.at).split('\n').length;
+        unaccounted.push(`${n.raw} at ${file}:${line}`);
+      }
+    }
+
+    expect(
+      unaccounted,
+      `these are restatements of a rowed value that no listed site reads — so editing one would ` +
+        `not fail anything, which is the drift this table exists to stop. Add the occurrence as a ` +
+        `site of its claim, or, if the numeral means something else there, an OCCURRENCE_EXCEPTIONS ` +
+        `entry naming the place:\n  ` +
+        unaccounted.join('\n  '),
     ).toEqual([]);
   });
 
   it('carries no unused exclusion — an exception that stops being needed is deleted', () => {
-    const stated = new Set(numerals(proseOf('packages/perf/src/gate.ts')));
+    const everywhere = new Set(GUARDED_FILES.flatMap((f) => scan(f).map((n) => n.value)));
     for (const e of CONTRACT_EXCLUSIONS) {
-      expect(stated.has(e.value), `CONTRACT_EXCLUSIONS entry "${e.value}" matches nothing`).toBe(
-        true,
-      );
+      expect(
+        everywhere.has(e.value),
+        `CONTRACT_EXCLUSIONS entry "${e.value}" matches nothing`,
+      ).toBe(true);
       expect(e.why.length, `CONTRACT_EXCLUSIONS entry "${e.value}" has no reason`).toBeGreaterThan(
         20,
       );
     }
+  });
+
+  it("every PINNED_IN_CODE figure really is pinned in that file's executable code", () => {
+    for (const e of PINNED_IN_CODE) {
+      const code = codeOnly(read(e.file));
+      const re = new RegExp(`(?<![\\w.])${e.value.replace('.', '\\.')}(?![\\d])`);
+      expect(
+        re.test(code) || re.test(code.replace(/[_,]/g, '')),
+        `PINNED_IN_CODE says ${e.value} is pinned in ${e.file}, but it does not appear in that file's code — ` +
+          `if it moved into prose, it needs a claim row instead`,
+      ).toBe(true);
+      expect(e.why.length, `PINNED_IN_CODE entry ${e.value} has no reason`).toBeGreaterThan(20);
+    }
+  });
+
+  it('records a reason for every known-unrowed claim', () => {
+    for (const e of KNOWN_UNROWED) {
+      expect(e.why.length, `KNOWN_UNROWED entry ${e.value} has no reason`).toBeGreaterThan(20);
+    }
+  });
+
+  it('carries no unused occurrence exception', () => {
+    for (const e of OCCURRENCE_EXCEPTIONS) {
+      const raw = read(e.file);
+      expect(
+        new RegExp(e.near).test(raw),
+        `OCCURRENCE_EXCEPTIONS entry for ${e.file} (/${e.near}/) matches nothing`,
+      ).toBe(true);
+      expect(
+        e.why.length,
+        `OCCURRENCE_EXCEPTIONS entry for ${e.file} has no reason`,
+      ).toBeGreaterThan(20);
+    }
+  });
+});
+
+// The resolver's capture-offset arithmetic, pinned. `match[0].indexOf(captured)` binds the
+// FIRST identical substring in the full match, which is the wrong span whenever the capture
+// repeats earlier in the match — and a wrong span silently mis-targets the blanking in
+// `no site can silently fall back`. The `d` flag gives the group's real span (CodeRabbit).
+describe('the resolver reads the capture group, not the first lookalike', () => {
+  it('takes the SECOND occurrence when that is what the group captured', () => {
+    const text = 'ANCHOR-XYZ 2.8 and 2.8 percent';
+    const site = {
+      file: 'packages/perf/src/gate.ts',
+      anchor: 'ANCHOR-XYZ',
+      pattern: ' 2\\.8 and (2\\.8)',
+    };
+    const found = extract(site, text);
+    expect('error' in found).toBe(false);
+    if ('error' in found) throw new Error('unreachable');
+    expect(found.value).toBe('2.8');
+    // The captured group is the SECOND "2.8", at index 19 — not the first at index 11.
+    expect(found.start).toBe(19);
+    expect(text.slice(found.start, found.end)).toBe('2.8');
   });
 });

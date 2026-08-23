@@ -283,8 +283,11 @@ export const TOLERANCE = 1.1;
  * Median **1.0065**, rounded DOWN to the nearer hundredth = **1.00**. Down, not to-nearest:
  * a lower `R0` makes the ceiling stricter, so the rounding can only ever cost a false alarm,
  * never hide a regression. The raw values are published because CI logs expire on a 90-day
- * retention with no artifact upload — every figure below is recomputable from these
- * seventeen numbers alone, which is the standard this record holds itself to.
+ * retention with no artifact upload — every figure this record derives FROM THIS COHORT is
+ * recomputable from these seventeen numbers alone, which is the standard it holds itself to.
+ * Figures below that come from elsewhere say so and name their source: the four diagnostic
+ * runs (limit 1, and the 1.0493 observed max), and consequence 1's local series, which lives
+ * in `performance-spike.md`. The per-arm operands behind these seventeen live there too.
  *
  * SEVENTEEN SAMPLES, NOT THE FIVE THE PROCEDURE ASKED FOR. At n = 5 the pre-committed span
  * rule fired. It was escalated to the owner rather than reinterpreted — that part was right
