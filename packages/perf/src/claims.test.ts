@@ -560,99 +560,172 @@ const G = {
 
 const CONTRACT_EXCLUSIONS: readonly {
   readonly value: string;
-  /** The guarded surfaces whose DIFFERENT meanings of this numeral justified the entry — the
-   *  census taken when it was written, re-verified every run. An exclusion is subtracted from
-   *  the sweep BEFORE the coverage census is built, so unlike a known-unrowed claim nothing
-   *  else re-checks it; without this field the only thing verified was that the numeral still
-   *  existed somewhere, and an entry whose collision had collapsed sat on, able to suppress a
-   *  future genuine cross-file duplicate (Codex, PR #161). */
-  readonly surfaces: readonly string[];
+  /** The guarded surfaces whose DIFFERENT meanings of this numeral justified the entry, EACH
+   *  WITH THE NUMBER OF OCCURRENCES it contributed — the census taken when it was written,
+   *  re-verified every run. An exclusion is subtracted from the sweep BEFORE the coverage
+   *  census is built, so unlike a known-unrowed claim nothing else re-checks it; without this
+   *  field the only thing verified was that the numeral still existed somewhere, and an entry
+   *  whose collision had collapsed sat on, able to suppress a future genuine cross-file
+   *  duplicate (Codex, PR #161).
+   *
+   *  THE COUNT is what makes the census describe the collision rather than merely locate it.
+   *  Recording only WHICH files hold the numeral let a file that was already listed acquire a
+   *  brand-new copy for free: adding a second `0.3863` to `gate.ts` and to the spike — both
+   *  already on that entry's surface list — left all 766 tests green, and the new pair could
+   *  then drift against each other inside a hole cut for an older, unrelated one (Codex, PR
+   *  #161). An exclusion excuses the collision it documents, not every future collision that
+   *  happens to wear the same numeral in the same files. */
+  readonly surfaces: readonly (readonly [file: string, occurrences: number])[];
   readonly why: string;
 }[] = [
   {
     value: '0',
     surfaces: [
-      G.gate,
-      G.gateTest,
-      G.fixture,
-      G.oracle,
-      G.oracleTest,
-      G.scenario,
-      G.dotBench,
-      G.adr,
-      G.spike,
-      G.m2,
+      [G.gate, 2],
+      [G.gateTest, 1],
+      [G.fixture, 3],
+      [G.oracle, 8],
+      [G.oracleTest, 4],
+      [G.scenario, 3],
+      [G.dotBench, 1],
+      [G.adr, 7],
+      [G.spike, 6],
+      [G.m2, 37],
     ],
     why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0", `dots: []`. Not a measurement.',
   },
   {
     value: '10',
-    surfaces: [G.gate, G.gateTest, G.adr, G.spike, G.m2],
+    surfaces: [
+      [G.gate, 9],
+      [G.gateTest, 1],
+      [G.adr, 20],
+      [G.spike, 8],
+      [G.m2, 39],
+    ],
     why: 'The tolerance percentage ("a 10% move in R"), the escalation rule\'s sample floor, and n = 10 all collide on one numeral; each is rowed or argued in its own words, and the digit alone identifies nothing.',
   },
   {
     value: '95',
-    surfaces: [G.gate, G.fixture, G.adr, G.m2],
+    surfaces: [
+      [G.gate, 3],
+      [G.fixture, 1],
+      [G.adr, 6],
+      [G.m2, 1],
+    ],
     why: 'Reads as the percentile name (p95) and as "95% power"/"95% CI" throughout; the percentile is a statistic identifier, not a claim value.',
   },
   {
     value: '50',
-    surfaces: [G.gate, G.oracle, G.scenario, G.dotBench, G.adr, G.spike, G.m2],
+    surfaces: [
+      [G.gate, 1],
+      [G.oracle, 9],
+      [G.scenario, 5],
+      [G.dotBench, 3],
+      [G.adr, 10],
+      [G.spike, 13],
+      [G.m2, 13],
+    ],
     why: 'Same collision as 95 — the p50 percentile name against "50% power" and the 50 venom towers, and now `dot-bench`\'s 50 ms tick as well. Four unrelated quantities on one numeral.',
   },
   {
     value: '60',
-    surfaces: [G.gate, G.oracle, G.adr, G.spike, G.m2],
+    surfaces: [
+      [G.gate, 1],
+      [G.oracle, 3],
+      [G.adr, 14],
+      [G.spike, 14],
+      [G.m2, 5],
+    ],
     why: "`splash`'s cadence-60 and the 60-tick DoT window are catalog facts owned by the content tests, not perf-gate claims.",
   },
   {
     value: '0.25',
-    surfaces: [G.gate, G.dotBench, G.adr],
+    surfaces: [
+      [G.gate, 1],
+      [G.dotBench, 1],
+      [G.adr, 1],
+    ],
     why: "A digit collision, not a shared claim: gate.ts's 0.25 and `dot-bench`'s are the SAME ms-per-1,000-records curve — dot-bench.ts states it and gate.ts cites it, which is a real pair — but ADR 0005's only 0.25 is `0.25σ`, the margin flooring discards. Rowing the numeral would bind the sigma to the curve. The curve slope itself is a single sentence in each of two perf sources and is left to them.",
   },
   {
     value: '1000',
-    surfaces: [G.gate, G.oracleTest, G.dotBench, G.adr, G.spike, G.m2],
+    surfaces: [
+      [G.gate, 1],
+      [G.oracleTest, 1],
+      [G.dotBench, 2],
+      [G.adr, 2],
+      [G.spike, 2],
+      [G.m2, 1],
+    ],
     why: "Another collision: gate.ts's and dot-bench.ts's 1,000 is the denominator of that same curve (and one of its swept table sizes); elsewhere it is `MAX_TOTAL_TOWER_COMMANDS`. Different quantities, same numeral.",
   },
   {
     value: '0.8',
-    surfaces: [G.gate, G.fixture, G.adr],
+    surfaces: [
+      [G.gate, 2],
+      [G.fixture, 2],
+      [G.adr, 2],
+    ],
     why: 'Two different quantities that coincide: the gating p50 scores 0.8 on the CONCENTRATED injection and p95 scores 0.8 on the BROAD one. Each is stated beside the statistic it belongs to and beside its counterpart (2.2 and 3.9, both rowed), so the pair is guarded through those; the bare numeral cannot tell the two apart and a row keyed on it would bind the wrong sites together.',
   },
   {
     value: '0.3863',
-    surfaces: [G.gate, G.spike],
+    surfaces: [
+      [G.gate, 1],
+      [G.spike, 1],
+    ],
     why: "A collision between two unrelated per-arm tables: gate.ts's 0.3863 is run 1's control p50 in the four-run diagnostic table, while the spike's is attempt 15's STRESS p50 in the 17-attempt operands table. Same numeral, different arm, different cohort.",
   },
   {
     value: '1.9',
-    surfaces: [G.fixture, G.adr],
+    surfaces: [
+      [G.fixture, 1],
+      [G.adr, 1],
+    ],
     why: "A collision the numeric normalisation itself surfaced: `gate-fixture.test.ts` states the blind spot's p99 movement as +1.9% (single-file, so not a shared claim), while ADR 0005's only 1.90 is `wy:draw` 1.90% of busy frame time in the browser-spike section. Different subsystems entirely; the two spellings never grouped until claimKey made 1.9 and 1.90 one key.",
   },
   {
     value: '2.7',
-    surfaces: [G.gate, G.dotBench, G.adr],
+    surfaces: [
+      [G.gate, 1],
+      [G.dotBench, 1],
+      [G.adr, 3],
+    ],
     why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops; dot-bench.ts's is the low end of the ~2.7-4.1 ms at-cap reading range it warns must never be treated as a constant. Three quantities, three units, one numeral.",
   },
   {
     value: '0.60',
-    surfaces: [G.dotBench, G.adr],
+    surfaces: [
+      [G.dotBench, 1],
+      [G.adr, 2],
+    ],
     why: "Collision surfaced the moment dot-bench.ts joined the guarded set: its 0.60 is the 1,000-record point on the DoT cost curve, in milliseconds; ADR 0005's only 0.60 is the low-end paint share, a percentage of busy frame time. Two units, no shared quantity.",
   },
   {
     value: '1.24',
-    surfaces: [G.dotBench, G.adr],
+    surfaces: [
+      [G.dotBench, 1],
+      [G.adr, 2],
+    ],
     why: "Same shape as 0.60: dot-bench.ts's 1.24 is the 4,000-record point on that curve in milliseconds, while ADR 0005's 1.24% is low-end GPU-process busy share. A row keyed on the numeral would bind a table-size reading to a GPU measurement.",
   },
   {
     value: '1000000',
-    surfaces: [G.dotBench, G.spike],
+    surfaces: [
+      [G.dotBench, 1],
+      [G.spike, 2],
+    ],
     why: "High-information and still a collision, which is why the information threshold is not on its own a claim test: dot-bench.ts's 1_000_000 is the `cadenceTicks` validation bound `validDotRecord` enforces, while the spike's 1,000,000 is the hp creeps carry and the lives the board starts with. A validator's ceiling and a scene's stat, sharing a round number.",
   },
   {
     value: '30',
-    surfaces: [G.oracle, G.adr, G.spike, G.m2],
+    surfaces: [
+      [G.oracle, 1],
+      [G.adr, 8],
+      [G.spike, 12],
+      [G.m2, 10],
+    ],
     why: "Collision, and revealed only when the file-path mask stopped eating compact ratios: oracle.ts's 30 is the DoT record window in `floor((240-1)/30)+1`, ADR 0005's is the ≥ 30 fps low-end floor, the spike's are a 30% slow and a 30% ambient-load swing, and m2.md's are tower range columns. Five unrelated quantities wearing one numeral; a row keyed on it would bind every one of those sites to the others.",
   },
 ];
@@ -1036,13 +1109,29 @@ const IS_BARE_NUMERAL = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`$`)
  *  what covers a prose 1.36 and the sign is enforced at the row's sites. Both typographic
  *  minuses count, matching what `claimKey` already normalises.
  *
- *  The suffix is shape-bounded, not length-bounded: letters, `×` and `%` only. That is what
- *  keeps `0005-performance-budgets.md` a path — its hyphen and extension are not suffix
- *  characters — while asking nothing about how long a unit may be, which is the guess round 16
- *  removed. And the direction stays fail-closed: a path misread as claim-shaped surfaces its
- *  numerals LOUDLY, while a measurement misread as a path is blanked in silence. */
+ *  The suffix is shape-bounded, not length-bounded: letters, `×` and `%`, and — since round 25
+ *  — HYPHEN-JOINED WORDS, which is how English writes a factor: `R/1.0065-fold` was blanked
+ *  whole because `1.0065-fold` was not claim-shaped, taking an unlisted high-information
+ *  restatement out of both sweeps in silence (Codex, PR #161). `-fold`, `-fold-style`, `-way`,
+ *  `-odd` are the same construction as `x` and `×`, and a rule that admits one spelling of a
+ *  factor and not another is the keyword list again.
+ *
+ *  WHAT STILL KEEPS A DOCUMENT NAME A PATH, stated as anatomy rather than as a list, because
+ *  widening a mask's escape hatch is exactly where a control belongs: a NAME carries an
+ *  EXTENSION, or a component that is not letters. `0005-performance-budgets.md` ends in `.md`
+ *  and `0001-core.md` in `.md`, so neither can close on `$`; `2026-08-03`'s components are
+ *  digits, not words; `-draft-notes.md` has no numeral to begin with. MEASURED, not hoped:
+ *  across the 266 distinct path segments the guarded files actually contain, this widening
+ *  changes the classification of exactly ZERO of them.
+ *
+ *  The one construction it does flip is an EXTENSIONLESS numeric-led directory name
+ *  (`docs/adr/0005-performance-budgets` with no file on the end), which none of these files
+ *  contains. That case errs LOUD — its numeral surfaces as an unaccounted claim someone must
+ *  answer for — and loud is the direction this rule has always taken: a path misread as
+ *  claim-shaped surfaces its numerals, while a measurement misread as a path is blanked in
+ *  silence, and only the second one is a guard that lies. */
 const IS_CLAIM_SHAPED = new RegExp(
-  String.raw`^[+\-\u2212\u2013]?` + NUMERAL_BODY + String.raw`[A-Za-z\u00d7%]*$`,
+  String.raw`^[+\-\u2212\u2013]?` + NUMERAL_BODY + String.raw`[A-Za-z\u00d7%]*(?:-[A-Za-z]+)*$`,
 );
 
 function looksLikePath(m: string): boolean {
@@ -1416,6 +1505,18 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // census rather than compared against it.
   it('carries no stale exclusion — every entry re-proves its own justification', () => {
     const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
+    // Every stale entry is reported, not just the first. A loop that throws on entry one hides
+    // entries two onward, and the table is a set — its drift should be readable in one run.
+    const fmt = (c: readonly (readonly [string, number])[]): string =>
+      [...c]
+        .sort()
+        .map(([f, n]) => `${f.split('/').pop() as string}x${n}`)
+        .join(' ');
+    const sameCensus = (
+      a: readonly (readonly [string, number])[],
+      b: readonly (readonly [string, number])[],
+    ): boolean => fmt(a) === fmt(b);
+    const mismatches: string[] = [];
     for (const e of CONTRACT_EXCLUSIONS) {
       const key = claimKey(e.value);
 
@@ -1424,15 +1525,17 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       //    acquiring it changed the collision the entry documents without failing anything
       //    (Codex, PR #161). A collision that GROWS needs re-justifying just as much as one that
       //    shrinks, because the entry's whole claim is that it describes what it cuts a hole for.
-      const surfaces = GUARDED_FILES.filter((f) =>
-        occurrences(f).some((n) => claimKey(n.value) === key),
+      //    And the census COUNTS, because "which files" was not the collision — it was only its
+      //    address. A file already on the list could acquire a brand-new copy of the numeral for
+      //    free, and the new pair could then drift inside a hole cut for an older one (Codex).
+      const census = GUARDED_FILES.map(
+        (f) => [f, occurrences(f).filter((n) => claimKey(n.value) === key).length] as const,
+      ).filter(([, n]) => n > 0);
+      mismatches.push(
+        ...(sameCensus(census, e.surfaces)
+          ? []
+          : [`  "${e.value}": recorded ${fmt(e.surfaces)}\n            but found ${fmt(census)}`]),
       );
-      expect(
-        [...surfaces].sort(),
-        `CONTRACT_EXCLUSIONS entry "${e.value}" no longer describes the collision it excuses. ` +
-          `The guarded surfaces stating it have changed; re-justify the entry against what is ` +
-          `there now, or delete it.`,
-      ).toEqual([...e.surfaces].sort());
 
       // 2. The collision still meets the THRESHOLD the coverage half uses. Below it there is no
       //    cross-file duplicate to suppress, so the hole is cutting nothing and only hiding.
@@ -1455,6 +1558,14 @@ describe('the coverage contract is enforced, not merely asserted', () => {
         20,
       );
     }
+
+    expect(
+      mismatches,
+      `these CONTRACT_EXCLUSIONS entries no longer describe the collision they excuse. Each hole ` +
+        `is cut for the occurrences its census records — a file acquiring a NEW copy of the ` +
+        `numeral changes the collision even though the file was already listed. Re-justify each ` +
+        `entry against what is there now, or delete it:\n${mismatches.join('\n')}`,
+    ).toEqual([]);
   });
 
   // WHY THIS ONE IS ONLY A REASON CHECK, decided deliberately rather than left as an omission.
@@ -1719,6 +1830,33 @@ describe('the reference masks blank references, not measurements', () => {
     expect(mask('the factor R/1.0065\u00d7 holds')).toContain('1.0065');
     expect(mask('the factor 2.8x/R holds')).toContain('2.8x');
     expect(mask('the share R/50% holds')).toContain('50%');
+  });
+
+  // A HYPHENATED factor is the same construction as `x` and `×`, and admitting one spelling
+  // while blanking another is the keyword list this rule keeps having to stop being.
+  // `R/1.0065-fold` was eaten whole, taking an unlisted high-information restatement out of
+  // both sweeps in silence (Codex, PR #161).
+  it('never masks a token whose segment is a HYPHENATED numeric factor', () => {
+    expect(mask('the factor R/1.0065-fold holds')).toContain('R/1.0065-fold');
+    expect(mask('the factor R/1.0065-fold-style holds')).toContain('1.0065-fold-style');
+    expect(mask('the factor 2.8-fold/R holds')).toContain('2.8-fold');
+    expect(mask('the factor R/-1.360-fold holds')).toContain('-1.360-fold');
+  });
+
+  // The control the widening needs, and it is anatomy rather than a list: a NAME carries an
+  // extension, or a component that is not letters. Measured across the 266 distinct path
+  // segments these files contain, the widening reclassifies exactly zero of them.
+  it('still blanks a document name whose hyphens are a slug, not a factor', () => {
+    expect(mask('see docs/adr/0005-performance-budgets.md now')).not.toContain('0005');
+    expect(mask('see ../../prd/0001-core.md now')).not.toContain('0001');
+    expect(mask('see docs/adr/0005-x.md now')).not.toContain('0005');
+    expect(mask('see docs/-draft-notes.md now')).not.toContain('draft');
+    // A hyphenated component of DIGITS is not a word, so a date-shaped path stays a path.
+    expect(IS_CLAIM_SHAPED.test('2026-08-03')).toBe(false);
+    // And the one construction the widening does flip is named rather than hidden: an
+    // extensionless numeric-led directory. It errs LOUD — the numeral surfaces as an
+    // unaccounted claim — which is the direction this rule has always chosen.
+    expect(IS_CLAIM_SHAPED.test('0005-performance-budgets')).toBe(true);
   });
 
   // A SIGNED segment is claim-shaped too. `NUMERAL_BODY` carries no sign — deliberately, since
