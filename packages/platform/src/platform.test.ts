@@ -184,10 +184,15 @@ describe('the save slot — serialized writes and atomic revision allocation', (
   });
 
   it('WITHOUT a real cross-context lock, concurrent contexts are last-write-wins', async () => {
-    // The narrowed guarantee, pinned so it stays honest. Two SLOTS over one store is two
-    // tabs: each has its own in-process queue, and `webLockFn(null)` — the fallback on a
-    // host with no Web Locks — excludes nothing between them. Both read revision 1 and
-    // both write 2; the later write wins and the earlier is lost.
+    // The narrowed guarantee, pinned so it stays honest. Two DRIVERS over one store is the
+    // faithful model of two tabs — a second document builds its own driver — and that is
+    // exactly what `stringSlot` produces, since it mints a fresh driver per call. Each
+    // driver gets its own queue, and `webLockFn(null)` — the fallback on a host with no Web
+    // Locks — excludes nothing between them. Both read revision 1 and both write 2; the
+    // later write wins and the earlier is lost.
+    //
+    // Saying "two slots" here would have been wrong since the queue became shared: two
+    // slots over ONE driver are serialized and would reach revision 3.
     //
     // This is a supported configuration, not a defect, and the shipped Host never reaches
     // it (the Capacitor WebView is modern Chromium in a secure context). What must not
@@ -435,22 +440,46 @@ describe('the save slot — serialized writes and atomic revision allocation', (
   });
 
   it('first-preserved-wins holds ACROSS instances too', async () => {
-    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: '{first corruption' });
-    const driver = createWebStorageDriver(storage);
+    // The two racing handles must classify DIFFERENT bytes, or this proves nothing. An
+    // earlier version gave both the same corrupt payload: the conditional quarantine write
+    // was fully defeated pre-fix (both saw an empty quarantine, both wrote) and the test
+    // passed anyway, because two identical payloads make last-write-wins indistinguishable
+    // from first-preserved-wins. It has to be the DRIVER that shifts under them — mutating
+    // the store after `read()` is too late, since the first `get` has not resolved yet.
+    const CORRUPT_A = '{first corruption';
+    const CORRUPT_B = '{second corruption';
+    const written = new Map<string, string>();
+    let gets = 0;
+    const shiftingDriver = {
+      get: (k: string): Promise<string | undefined> => {
+        if (k !== 'settings') return Promise.resolve(written.get(k));
+        gets += 1;
+        return Promise.resolve(gets === 1 ? CORRUPT_A : CORRUPT_B);
+      },
+      set: (k: string, v: string): Promise<void> => {
+        written.set(k, v);
+        return Promise.resolve();
+      },
+      remove: (k: string): Promise<void> => {
+        written.delete(k);
+        return Promise.resolve();
+      },
+    };
     const mk = (): SaveSlot<string> =>
       createSaveSlot<string>({
-        driver,
+        driver: shiftingDriver,
         key: 'settings',
         deviceId: 'device-a',
         parse: (data) => (typeof data === 'string' ? data : undefined),
         now: () => 1000,
       });
-    // Two handles racing to classify the same corrupt payload must not clobber each
-    // other's quarantine — the shared queue is what makes the conditional write atomic.
+
     await Promise.all([mk().read(), mk().read()]);
-    expect(storage.map.get(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe(
-      '{first corruption',
-    );
+
+    // The FIRST original survives. Pre-fix the second overwrote it — the literal data loss
+    // "first preserved wins" exists to prevent.
+    expect(written.get(quarantineKey('settings'))).toBe(CORRUPT_A);
+    expect(written.get(quarantineKey('settings'))).not.toBe(CORRUPT_B);
   });
 
   it('revisions are per (device, SLOT) — independence is deliberate, not a bug', async () => {

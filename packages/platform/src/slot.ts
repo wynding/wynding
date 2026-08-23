@@ -67,7 +67,14 @@ export function webLockFn(locks: LockManagerLike | null | undefined): LockFn {
   if (locks === null || locks === undefined) {
     return <R>(_name: string, fn: () => Promise<R>): Promise<R> => fn();
   }
-  return <R>(name: string, fn: () => Promise<R>): Promise<R> => locks.request(name, fn);
+  // `Promise.resolve` around the host's return, for the same reason `back.ts` normalizes
+  // Capacitor's: `locks` is discovered off the host at runtime, so its `request` is only
+  // promise-returning by convention. The signature above PROMISES a promise, and every
+  // consumer today survives merely because it awaits the result or feeds it into `.then`
+  // adoption — a future `.catch()`/`.finally()` on a `LockFn` result would break on any
+  // host that returns something else.
+  return <R>(name: string, fn: () => Promise<R>): Promise<R> =>
+    Promise.resolve(locks.request(name, fn));
 }
 
 export type SlotRead<T> =
@@ -115,15 +122,26 @@ export interface SaveSlotOptions<T> {
  * ordinary, since a slot is a cheap handle and nothing stops a second consumer building
  * its own — gave each one a private chain. Two handles to the SAME bytes could then both
  * read revision `N` and both write `N + 1`, and both could clobber the other's quarantine.
- * Serializing per instance serializes nothing that matters; the identity that matters is
- * the data, so the queue hangs off the data's identity.
+ *
+ * WHAT IT KEYS ON, STATED PRECISELY, because the obvious phrasing overclaims: the queue
+ * hangs off the DRIVER OBJECT and the key, not off the underlying bytes. A `StorageDriver`
+ * is opaque — it exposes no identity for its backing store — so two drivers over the same
+ * `localStorage` get two chains and can still lose an update (measured: four concurrent
+ * writes across two drivers land on revision 2, not 4). `createBrowserStorageDriver` is a
+ * factory, so that is a real shape rather than a hypothetical one; it is safe today only
+ * because `boot()` mints exactly one driver and threads it to every slot.
+ *
+ * THE CONTRACT THAT FOLLOWS: one driver per backing store per context. Consumers share a
+ * driver; they do not each build one. Nothing in the type system enforces that, which is
+ * why it is written here rather than left to be rediscovered.
  *
  * A `WeakMap` on the driver so a discarded driver takes its queues with it, and a plain
  * `Map` of keys inside — those are strings, and one per slot for the process's life.
  *
- * This is the WITHIN-CONTEXT half of the guarantee and it is unconditional. The
- * cross-context half remains the host's (see this module's header): a `LockFn` that cannot
- * exclude other tabs does not make this queue weaker, it just does not extend it.
+ * This is the WITHIN-CONTEXT half of the guarantee, and it holds for every consumer of one
+ * driver. The cross-context half remains the host's (see this module's header): a `LockFn`
+ * that cannot exclude other tabs does not make this queue weaker, it just does not extend
+ * it.
  *
  * `.catch` on the STORED tail — not on the returned promise — keeps a rejected operation
  * from poisoning the queue while still surfacing to its own caller.
@@ -137,9 +155,15 @@ function serializeOn<R>(driver: StorageDriver, key: string, op: () => Promise<R>
     QUEUES.set(driver, byKey);
   }
   const next = (byKey.get(key) ?? Promise.resolve()).then(op, op);
+  // The stored tail DROPS the value as well as the rejection. Keeping `next` itself pinned
+  // its fulfilment — for a `read`, the whole decoded payload — in a module-level map for as
+  // long as the driver lives, which on the web is the page.
   byKey.set(
     key,
-    next.catch(() => undefined),
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
   );
   return next;
 }

@@ -93,7 +93,13 @@ export interface AppDeps {
   readonly mintRunId?: () => string;
   /** Capacitor's App plugin (#138), for hardware Back and the native lifecycle. Injected
    *  because jsdom has no Capacitor bridge; production discovers it off `window` and ONLY
-   *  when `hosted` is true (ADR 0012 — told, never inferred). */
+   *  when `hosted` is true (ADR 0012 — told, never inferred).
+   *
+   *  AN INJECTED PLUGIN MUST ALREADY SATISFY THE PROMISE CONTRACT. This path bypasses
+   *  `findCapacitorApp`, which is where the legacy-bridge normalization lives — so a raw
+   *  synchronous plugin handed in here would reach `createBackHandler` unadapted. Test
+   *  doubles are promise-shaped and the native side has no reason to inject at all; if one
+   *  ever does, it must pass its plugin through `findCapacitorApp` rather than here. */
   readonly capacitorApp?: CapacitorAppPlugin | null;
   /** matchMedia lookup for viewport-gated features (the P5 rotate prompt, Story 11's
    *  install detection) — injectable for tests; defaults to `doc.defaultView.matchMedia`
@@ -246,6 +252,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // `ensurePaused` returns early; that is an accident of controller state, not an ordering
   // guarantee, and it should not be what keeps a phone held in portrait from failing to boot.
   let resultsShown = false;
+  /** The results dialog's live-region claim counter (#133 review round). Declared HERE,
+   *  beside `resultsShown`, for the reason the comment above gives: `refreshHud` can be
+   *  reached during construction, and a `let` declared further down would sit in its
+   *  temporal dead zone. */
+  let resultsStatusSeq = 0;
   let lastHudKey = '';
   // Install state changes (a captured `beforeinstallprompt`, a dismissal, an install) arrive
   // OUTSIDE the HUD memo key's inputs — nothing about the sim moved. Fold a revision counter
@@ -597,6 +608,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // the same `!resultsShown` edge means exactly one capture per run, never one per
       // frame the dialog is up.
       capturePlaytrace();
+      // Opening a dialog invalidates anything still in flight for the previous one. The
+      // invariant held via `resultsShown` + `playAgain` alone, but only by accident of
+      // there being one re-open path; enforcing it where the dialog actually opens means a
+      // second path cannot silently inherit a stale announcement.
+      abandonResultsStatus();
       overlay.showResults(hud);
       resultsShown = true;
     }
@@ -670,7 +686,6 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  after Play again had opened the next run's dialog, where a stale "could not export"
    *  refers to a run that is no longer on screen. Every writer claims the region first,
    *  and a completion that is no longer the current claim says nothing at all. */
-  let resultsStatusSeq = 0;
   function claimResultsStatus(): (message: string) => void {
     const token = ++resultsStatusSeq;
     return (message: string): void => {
@@ -684,15 +699,34 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   }
 
   function exportPlaytrace(destination: 'clipboard' | 'file'): void {
-    const announce = claimResultsStatus();
-    const payload = playtrace.buildExport();
-    const text = formatPlaytraceExport(payload);
+    // The claim is taken AFTER the work that can throw. Taken before, a failure in
+    // `buildExport`/`formatPlaytraceExport` — both outside the `try` below — would bump the
+    // token, silence any in-flight Copy, and announce nothing: the press would look like it
+    // did nothing while leaving the previous message standing as if it were this press's
+    // answer. That is the exact failure mode the live region exists to prevent.
+    let announce: (message: string) => void;
+    let payload: ReturnType<typeof playtrace.buildExport>;
+    let text: string;
+    try {
+      payload = playtrace.buildExport();
+      text = formatPlaytraceExport(payload);
+      announce = claimResultsStatus();
+    } catch (error) {
+      if (import.meta.env.DEV) console.warn('playtrace export could not be built:', error);
+      claimResultsStatus()(t('playtrace.failed'));
+      return;
+    }
     if (destination === 'file') {
       const filename = playtraceFilename(payload.exportedAt);
       try {
         delivery.save(filename, text);
         announce(t('playtrace.saved', { filename }));
-      } catch {
+      } catch (error) {
+        // BOUND, not discarded. A bare `catch {}` collapsed a missing window, a refused
+        // `createObjectURL`, a security policy blocking the click and any future refactor's
+        // TypeError into one identical string — leaving "Save does nothing" undebuggable
+        // with no artifact to look at.
+        if (import.meta.env.DEV) console.warn('playtrace save failed:', error);
         announce(t('playtrace.failed'));
       }
       return;
@@ -702,7 +736,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // of claiming success optimistically.
     delivery.copy(text).then(
       () => announce(t('playtrace.copied')),
-      () => announce(t('playtrace.failed')),
+      (error: unknown) => {
+        if (import.meta.env.DEV) console.warn('playtrace clipboard copy failed:', error);
+        announce(t('playtrace.failed'));
+      },
     );
   }
 

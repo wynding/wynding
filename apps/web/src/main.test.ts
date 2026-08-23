@@ -2353,6 +2353,8 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     // observe an out-of-order completion. `true` resolves the copy, `false` rejects it.
     let copyGate: Promise<boolean> | null = null;
     let copyGateSettled = false;
+    const copyGateQueue: Promise<boolean>[] = [];
+    const copyOrder: string[] = [];
     let minted = 0;
     const app = createApp(document, root, {
       sceneFactory: () => fakeHandle,
@@ -2362,6 +2364,14 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       mintRunId: () => runIds[minted++] ?? `run-overflow-${String(minted)}`,
       playtraceDelivery: {
         copy: async (text: string) => {
+          const queued = copyGateQueue.shift();
+          if (queued !== undefined) {
+            const ok = await queued;
+            copyOrder.push(ok ? 'resolve' : 'reject');
+            if (!ok) throw new Error('clipboard refused');
+            copied.push(text);
+            return;
+          }
           if (copyGate !== null) {
             const ok = await copyGate;
             copyGateSettled = true;
@@ -2397,6 +2407,8 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       setCopyRejects: (v: boolean): void => void (copyRejects = v),
       setCopyGate: (g: Promise<boolean>): void => void (copyGate = g),
       copyGateSettled: (): boolean => copyGateSettled,
+      pushCopyGate: (g: Promise<boolean>): void => void copyGateQueue.push(g),
+      copyOrder,
       setSaveThrows: (v: boolean): void => void (saveThrows = v),
       frame: (): void => sched.frame((clock += 16)),
       /** Drive the run to its terminal state so the results dialog opens. */
@@ -2476,6 +2488,62 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
     // `hideResults` cleared the region; a stale success must not repopulate it.
     expect(h.status()).toBe('');
+  });
+
+  it('a SLOW first Copy must not clobber a newer COPY announcement', async () => {
+    // Double-tap Copy, which is the most plausible on-device trigger: press 1 stalls (a
+    // permission prompt) and fails, press 2 succeeds. The single shared gate this harness
+    // used before could not express it — both presses awaited the same promise and settled
+    // FIFO, which makes the outcome identical with and without the token. A per-call queue
+    // is what lets the OLDER request finish LAST.
+    const h = playtraceApp();
+    h.resolve();
+    let releaseFirst!: (ok: boolean) => void;
+    let releaseSecond!: (ok: boolean) => void;
+    h.pushCopyGate(
+      new Promise<boolean>((r) => {
+        releaseFirst = r;
+      }),
+    );
+    h.pushCopyGate(
+      new Promise<boolean>((r) => {
+        releaseSecond = r;
+      }),
+    );
+    h.resultsButton('Copy run data').click(); // press 1 — will FAIL, slowly
+    h.resultsButton('Copy run data').click(); // press 2 — will SUCCEED, fast
+
+    releaseSecond(true);
+    await vi.waitFor(() => expect(h.copyOrder).toEqual(['resolve']));
+    await vi.waitFor(() => expect(h.status()).toBe('Run data copied to the clipboard.'));
+
+    releaseFirst(false); // the OLDER press finally fails
+    await vi.waitFor(() => expect(h.copyOrder).toEqual(['resolve', 'reject']));
+    expect(h.status(), 'a stale failure overwrote a newer success').toBe(
+      'Run data copied to the clipboard.',
+    );
+  });
+
+  it('an in-flight Copy must not clobber a VERIFY announcement', async () => {
+    // `verify` writes the same shared region, and its claim was added by this change with
+    // no coverage at all — so a slow Copy landing after a Verify press would have replaced
+    // an answer the player asked for with one about a different action entirely.
+    const h = playtraceApp();
+    h.resolve();
+    let releaseCopy!: (ok: boolean) => void;
+    h.setCopyGate(
+      new Promise<boolean>((r) => {
+        releaseCopy = r;
+      }),
+    );
+    h.resultsButton('Copy run data').click();
+    const verify = h.resultsButton('Verify this run');
+    verify.click();
+    const afterVerify = h.status();
+    expect(afterVerify).not.toBe('');
+    releaseCopy(true);
+    await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
+    expect(h.status(), 'a stale copy overwrote the verify announcement').toBe(afterVerify);
   });
 
   it('says a refused clipboard FAILED rather than looking like a press that did nothing', async () => {

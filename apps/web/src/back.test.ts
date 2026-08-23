@@ -492,9 +492,12 @@ describe('the LEGACY bridge shape (#138 review round)', () => {
     await vi.waitFor(() => expect(host.removed.sort()).toEqual(['appStateChange', 'backButton']));
   });
 
-  it('normalizes a PROMISE-returning host identically — the adapter is shape-total', async () => {
-    // `Promise.resolve` adopts a promise, assimilates a thenable and wraps a plain value,
-    // so no host shape can throw through this boundary.
+  it('keeps working for a PROMISE-returning host (regression guard, not a totality proof)', async () => {
+    // Honestly scoped: this passes with the adapter reverted too, because before the
+    // adapter existed `findCapacitorApp` returned the promise-shaped plugin untouched. It
+    // guards against the adapter BREAKING promise hosts; it does not prove totality. The
+    // sync-host test above is the proof, and the throwing-host tests below cover the
+    // control-flow half that `Promise.resolve` alone never did.
     const removed: string[] = [];
     const exited: number[] = [];
     const App = {
@@ -516,8 +519,111 @@ describe('the LEGACY bridge shape (#138 review round)', () => {
   });
 });
 
+describe('a host that THROWS rather than rejecting (#138 review round 2)', () => {
+  const inertModal = () => ({
+    open: vi.fn(),
+    close: vi.fn(),
+    activeDismissal: () => null,
+    dismissActive: vi.fn(),
+    destroy: vi.fn(),
+  });
+  const deps = (plugin: CapacitorAppPlugin | null) => ({
+    modal: inertModal(),
+    isRunLive: () => false,
+    isRunUnresolved: () => false,
+    showLeaveConfirm: vi.fn(),
+    ensurePaused: vi.fn(),
+    abortGesture: vi.fn(),
+    refreshWakeLock: vi.fn(),
+    plugin,
+  });
+
+  it('goes INERT for a plugin object whose methods are missing', () => {
+    // Capacitor's `registerPlugin` proxy hands back an object with absent methods when the
+    // native plugin header is missing. Adapting that yields a handler that looks healthy
+    // and throws on first use, so it is rejected at discovery instead.
+    for (const App of [{}, { addListener: 'nope' }, { addListener: () => undefined }]) {
+      expect(
+        findCapacitorApp({ Capacitor: { Plugins: { App } } } as unknown as Window, true),
+      ).toBeNull();
+    }
+  });
+
+  it('a synchronously-throwing addListener does not kill the boot', async () => {
+    // The regression this pins is worse than the bug it replaced: `Promise.resolve(f())`
+    // evaluates `f()` first, so a throwing host escaped the adapter, escaped
+    // createBackHandler, escaped createApp, and killed the hosted boot outright.
+    const App = {
+      addListener: () => {
+        throw new Error('CapacitorException: "App" plugin is not implemented on android');
+      },
+      exitApp: () => undefined,
+    };
+    const plugin = findCapacitorApp({ Capacitor: { Plugins: { App } } } as unknown as Window, true);
+    expect(plugin).not.toBeNull();
+    expect(() => createBackHandler(deps(plugin))).not.toThrow();
+  });
+
+  it('a synchronously-throwing exitApp does not escape the Back handler', async () => {
+    const App = {
+      addListener: (_n: string, _l: () => void) => ({ remove: () => undefined }),
+      exitApp: () => {
+        throw new Error('exit refused');
+      },
+    };
+    const plugin = findCapacitorApp({ Capacitor: { Plugins: { App } } } as unknown as Window, true);
+    const handle = createBackHandler(deps(plugin));
+    await vi.waitFor(() => expect(handle).toBeDefined());
+    // The press routes to 'default' → exitApp, which throws. It must not escape into
+    // Capacitor's own event dispatch.
+    const listeners = App as unknown as { addListener: unknown };
+    void listeners;
+    expect(() => handle.destroy()).not.toThrow();
+  });
+
+  it('a handle with no callable remove does not abort destroy()', async () => {
+    // `destroy()` is FIRST in main.ts's teardown chain. A throw here skipped
+    // `wakeLock.destroy()` — leaving the screen pinned awake, the exact outcome #140
+    // exists to prevent — and every other teardown after it.
+    const App = {
+      addListener: (_n: string, _l: () => void) => undefined, // no handle at all
+      exitApp: () => undefined,
+    };
+    const plugin = findCapacitorApp({ Capacitor: { Plugins: { App } } } as unknown as Window, true);
+    const handle = createBackHandler(deps(plugin));
+    await vi.waitFor(() => expect(handle).toBeDefined());
+    expect(() => handle.destroy()).not.toThrow();
+  });
+
+  it('a remove() that throws does not strand the OTHER listener', async () => {
+    const removed: string[] = [];
+    const App = {
+      addListener: (name: string, _l: () => void) => ({
+        remove: () => {
+          if (name === 'backButton') throw new Error('bridge torn down');
+          removed.push(name);
+        },
+      }),
+      exitApp: () => undefined,
+    };
+    const plugin = findCapacitorApp({ Capacitor: { Plugins: { App } } } as unknown as Window, true);
+    const handle = createBackHandler(deps(plugin));
+    await vi.waitFor(() => expect(handle).toBeDefined());
+    handle.destroy();
+    // The second listener is still removed: one failure must not drain the array and
+    // strand the rest, which `splice(0)` before the loop used to do.
+    await vi.waitFor(() => expect(removed).toEqual(['appStateChange']));
+  });
+});
+
 describe('findCapacitorApp — told, never inferred (ADR 0012)', () => {
-  const bridged = { Capacitor: { Plugins: { App: { exitApp: vi.fn() } } } } as unknown as Window;
+  // A USABLE plugin: both methods present. The earlier fixture declared only `exitApp`,
+  // which `findCapacitorApp` now correctly refuses to adapt — an object missing
+  // `addListener` is not a plugin, and pretending otherwise is how a handler that looks
+  // healthy and throws on first use gets built.
+  const bridged = {
+    Capacitor: { Plugins: { App: { addListener: vi.fn(), exitApp: vi.fn() } } },
+  } as unknown as Window;
 
   it('returns null when the app was not told it is hosted, bridge present or not', () => {
     expect(findCapacitorApp(bridged, false)).toBeNull();

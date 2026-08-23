@@ -148,26 +148,48 @@ export function findCapacitorApp(
   const bridge = (view as unknown as { Capacitor?: CapacitorBridge } | null | undefined)?.Capacitor;
   const raw = bridge?.Plugins?.App;
   if (raw === undefined || raw === null) return null;
+  // An object that is not a usable plugin goes INERT rather than being adapted. Capacitor's
+  // `registerPlugin` proxy hands back an object whose methods are absent when the native
+  // plugin header is missing, and adapting that produces a handler that looks healthy and
+  // throws on first use.
+  if (typeof raw.addListener !== 'function' || typeof raw.exitApp !== 'function') return null;
 
   // NORMALIZE AT THE BOUNDARY. Everything downstream treats these as promises, and on the
-  // legacy bridge they are not — `addListener` returns the handle synchronously, so the
-  // `.then` in `createBackHandler`'s `bridge()` helper would have thrown a TypeError on
-  // every hosted boot with the plugin installed. Back would have been dead on the actual
-  // device while every test passed, because the doubles all returned promises.
+  // legacy bridge they are not — `addListener` returns the handle synchronously, so a
+  // `.then` on that return threw a TypeError on every hosted boot with the plugin
+  // installed. Back was dead on the actual device while every test passed, because the
+  // doubles all returned promises.
   //
-  // `Promise.resolve` is the right tool precisely because it is SHAPE-TOTAL: given a
-  // promise it adopts it, given a thenable it assimilates it, given a plain value it wraps
-  // it. So this cannot be wrong for any host shape — including one neither of us has seen.
+  // ASYNC, NOT `Promise.resolve(raw.f())`. An earlier revision used the latter and claimed
+  // it "cannot be wrong for any host shape" — which was false, and the falseness is the
+  // whole lesson: `Promise.resolve` is total over VALUES, not over CONTROL FLOW. It
+  // normalizes what a call returns, and does nothing about a call that throws instead of
+  // returning. That gap is not theoretical on this bridge: a synchronous method reports
+  // failure by throwing, and Capacitor's own proxy throws `CapacitorException(…,
+  // Unimplemented)`. So the legacy success path was normalized and the legacy FAILURE path
+  // was left to escape — out of `createBackHandler`, out of `createApp`, killing the
+  // hosted boot outright, which is strictly worse than the dead Back it replaced.
+  //
+  // An `async` function converts a synchronous throw into a rejection, so the boundary is
+  // now total over both. Downstream `bridge()` absorbs the rejection, which is what it was
+  // built for.
   return {
-    addListener: (eventName: string, listener: (payload: never) => void) =>
-      Promise.resolve(raw.addListener(eventName, listener)).then(
-        (handle): PluginListenerHandleLike => ({
-          // The handle needs the same treatment for the same reason.
-          remove: () =>
-            Promise.resolve((handle as RawListenerHandle).remove()).then(() => undefined),
-        }),
-      ),
-    exitApp: () => Promise.resolve(raw.exitApp()).then(() => undefined),
+    addListener: async (eventName: string, listener: (payload: never) => void) => {
+      const handle = (await raw.addListener(eventName, listener)) as RawListenerHandle | undefined;
+      return {
+        remove: async (): Promise<void> => {
+          // A host may answer with no handle at all, or a bare id — neither has a callable
+          // `remove`, and invoking one anyway threw synchronously out of `destroy()`,
+          // taking the rest of the app's teardown chain with it.
+          const remove = handle?.remove;
+          if (typeof remove !== 'function') return;
+          await remove.call(handle);
+        },
+      } satisfies PluginListenerHandleLike;
+    },
+    exitApp: async (): Promise<void> => {
+      await raw.exitApp();
+    },
   } as CapacitorAppPlugin;
 }
 
@@ -218,28 +240,52 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
   if (plugin === null) return { destroy: () => undefined };
 
   /**
-   * ONE policy for every promise this module hands to the bridge.
+   * ONE policy for every call this module makes into the bridge.
    *
-   * `void p` marks a promise as deliberately un-awaited; it does NOT handle a rejection,
-   * and every call here crosses into native code that can genuinely fail — a plugin not
-   * registered on this platform, a listener removed after the bridge tore down, an
-   * `exitApp` refused by the OS. Unhandled, each becomes an `unhandledrejection` on a
-   * page whose whole job is to keep rendering a game. Swallowed here instead, because
-   * there is no recovery any of these could drive: Back not exiting is a nuisance, a
-   * crashed page is not.
+   * TAKES A THUNK, NOT A PROMISE. Given a promise, the call that produced it has already
+   * run in the caller's frame, so anything it threw on the way to returning is somewhere
+   * this helper can never reach — and on the legacy bridge, where these methods are
+   * synchronous, throwing is exactly how they report failure. `findCapacitorApp`'s adapter
+   * closes that at the boundary; the thunk closes it here too, so neither layer is the
+   * only thing standing between a native exception and a dead page.
+   *
+   * SWALLOWED, BUT NOT SILENT. There is no recovery any of these could drive — Back not
+   * exiting is a nuisance, a crashed page is not — so the rejection stops here. Discarding
+   * the error VALUE as well is a different thing and is not justified: a failed
+   * `addListener` is permanent for the session and fails OPEN (with no listener registered
+   * Capacitor handles Back itself, so Back exits the app and bypasses the leave confirm
+   * this module exists to provide), and a failed `remove` leaks a native listener. Neither
+   * is recoverable and both are worth being able to see, so DEV gets a diagnosis and
+   * production gets no console noise — the same posture `main.ts` takes for its
+   * fail-closed persistence and `controller.ts` for its dropped-DoT tripwire.
    */
-  const bridge = <R>(p: Promise<R>, onResolve?: (value: R) => void): void => {
-    p.then(
-      (value) => onResolve?.(value),
-      () => undefined,
-    ).catch(() => undefined);
+  const report = (what: string, error: unknown): void => {
+    if (import.meta.env.DEV) console.warn(`capacitor bridge ${what} failed:`, error);
+  };
+  const bridge = <R>(
+    what: string,
+    make: () => Promise<R>,
+    onResolve?: (value: R) => void,
+  ): void => {
+    try {
+      make()
+        .then(
+          (value) => onResolve?.(value),
+          (error: unknown) => report(what, error),
+        )
+        .catch((error: unknown) => report(what, error));
+    } catch (error) {
+      // Belt to the adapter's braces: a host that throws synchronously past both would
+      // otherwise take the page with it.
+      report(what, error);
+    }
   };
 
   let destroyed = false;
   const handles: PluginListenerHandleLike[] = [];
   const keep = (handle: PluginListenerHandleLike): void => {
     if (destroyed) {
-      bridge(handle.remove());
+      bridge('listener remove', () => handle.remove());
       return;
     }
     handles.push(handle);
@@ -265,11 +311,11 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
         // The run is already paused (that is what distinguishes this row from `pause`),
         // so the dialog opens over a still board. `showLeaveConfirm` owns the modal-open
         // lifecycle, gesture abort included, exactly as the home link's route does.
-        deps.showLeaveConfirm(() => bridge(plugin.exitApp()));
+        deps.showLeaveConfirm(() => bridge('exitApp', () => plugin.exitApp()));
         return;
       case 'default':
         // Explicit, because registering a listener at all turned the OS default off.
-        bridge(plugin.exitApp());
+        bridge('exitApp', () => plugin.exitApp());
         return;
     }
   };
@@ -289,13 +335,23 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
     deps.refreshWakeLock();
   };
 
-  bridge(plugin.addListener('backButton', onBack), keep);
-  bridge(plugin.addListener('appStateChange', onStateChange), keep);
+  bridge('addListener(backButton)', () => plugin.addListener('backButton', onBack), keep);
+  bridge(
+    'addListener(appStateChange)',
+    () => plugin.addListener('appStateChange', onStateChange),
+    keep,
+  );
 
   return {
     destroy(): void {
       destroyed = true;
-      for (const handle of handles.splice(0)) bridge(handle.remove());
+      // A LOCAL COPY, and one bridge call per handle. `splice(0)` drained the array
+      // before the loop, so a throw from the first `remove` both aborted the loop and
+      // destroyed the reference to the second listener — unremovable forever. It also
+      // propagated into `main.ts`'s teardown chain, skipping `wakeLock.destroy()` and
+      // leaving the screen pinned awake, which is the exact outcome #140 exists to
+      // prevent. Each removal is now independent and contained.
+      for (const handle of handles.splice(0)) bridge('listener remove', () => handle.remove());
     },
   };
 }
