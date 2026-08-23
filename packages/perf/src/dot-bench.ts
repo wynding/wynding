@@ -74,8 +74,8 @@
 // rows, not phantom targets the sweep would silently never match — exercising the
 // real lookup, not just the bucketing pass over an already-known-empty target set.
 //
-// CAP-ADJACENCY IS ASSERTED PER SAMPLE (the property most easily lost, PLAN step
-// 21's own warning): movement, leaks, deaths and expiry all drain a resident
+// CAP-ADJACENCY IS ASSERTED PER SAMPLE (the property most easily lost,
+// PLAN step 21's own warning): movement, leaks, deaths and expiry all drain a resident
 // `dots` table mid-window, which would quietly measure a smaller table than the
 // cap and publish that as if it were the cap. So: warm-up, window length and every
 // filler record's retention are pinned (`WARMUP_TICKS`/`SAMPLE_TICKS`, reused from
