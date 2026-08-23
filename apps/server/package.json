@@ -6,15 +6,18 @@
   "license": "AGPL-3.0-or-later",
   "description": "AWS Lambda score-validation handler: re-simulates a submitted replay.",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint src",
-    "test": "vitest run",
+    "build": "rm -rf dist && esbuild src/handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/handler.mjs --sourcemap && mkdir -p dist/rulesets && cp ../../packages/content/src/rulesets/*.json dist/rulesets/",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
+    "lint": "eslint src scripts",
+    "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
     "@wynding/content": "workspace:*",
     "@wynding/replay": "workspace:*",
     "@wynding/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
   }
 }

@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "tsc -b && mkdir -p dist/rulesets && cp src/rulesets/*.json dist/rulesets/",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint src",
     "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo"

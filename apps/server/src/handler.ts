@@ -7,6 +7,40 @@
 // Minimal API-Gateway-style event/result shapes are declared locally to keep the
 // stub free of an @types/aws-lambda dependency; swap them for the real types when
 // wiring the deployment (Function URL / API Gateway proxy integration).
+//
+// PACKAGING (#109). This module is the esbuild `--bundle` entry point: `pnpm -C
+// apps/server run build` emits ONE self-contained `dist/handler.mjs` and stages
+// `dist/rulesets/` beside it. It is bundled rather than `tsc`-compiled because every
+// `@wynding/*` package exports `./src/*.ts` — plain Node followed those into TypeScript
+// source and died on its extensionless relative specifiers, so the `tsc` output was a
+// file that existed and could not run. `pnpm run check:artifact-parity` now executes the
+// built artifact under plain `node`, which is what keeps that from silently returning.
+//
+// Two properties of that build script are load-bearing and easy to lose (Codex, PR #159).
+// It stages from `packages/content/src/rulesets/` — the COMMITTED files — not from that
+// package's `dist/`, so this build needs no other package built first: chained to
+// content's `dist/`, `pnpm -C apps/server run build` failed outright from a clean
+// checkout, a dependency only the root turbo run (`dependsOn: ["^build"]`) was hiding.
+// And it clears `dist/` before emitting, because turbo never empties an output
+// directory: a `handler.js` left by an older checkout would sit beside the `.mjs`, and a
+// packaging step that globs the directory could select the dead one. esbuild takes
+// ~20ms, so an exact artifact set costs nothing worth counting.
+//
+// `.mjs`, not `.js`, and the extension is load-bearing. A `.js` bundle is ESM here only
+// because THIS package's `package.json` says `"type": "module"` — a file that lives
+// OUTSIDE `dist/`. Zip `dist/` for Lambda (the natural packaging of a self-contained
+// artifact) and that declaration does not travel, leaving the artifact's module-ness to
+// whatever the runtime guesses. Measured, by copying `dist/` alone to an unrelated
+// directory: as `.mjs` it imports and answers under plain `node`; renamed to `.js` it
+// survives only on Node's ESM-syntax detection (default since 22.7 — not something the
+// artifact carries), and with that detection off the same bytes are parsed as CommonJS
+// and refused. AWS says the same thing from the other end: an ESM handler must be `.mjs`
+// or ship a `package.json` declaring `"type": "module"`.
+//
+// That is the same exists-but-cannot-run class this commit fixed, and leg 1f cannot see
+// it — the smoke imports the artifact in-repo, where this package's `package.json` is
+// still in scope. `.mjs` needs no such scope, so the artifact is self-describing wherever it
+// is copied.
 
 import { readFileSync } from 'node:fs';
 import { validate, type Replay } from '@wynding/replay';

@@ -40,6 +40,24 @@ describe('lambda handler', () => {
   it('rejects an empty/missing body with 400', async () => {
     const res = await handler({ body: null });
     expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ ok: false, error: 'missing replay payload' });
+  });
+
+  // The 400 guard has TWO arms and they are not interchangeable, so both are pinned by
+  // their error text as well as their status. Unparseable input dies in the `catch`
+  // around `JSON.parse`; input that parses to a non-object reaches the shape check one
+  // line later. Merging or reordering them — the tempting "both return 400 anyway"
+  // refactor — makes one of these two cases report the other's message.
+  it('rejects a body that is not JSON at all with 400 (the parse arm)', async () => {
+    const res = await handler({ body: '{' });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ ok: false, error: 'invalid JSON body' });
+  });
+
+  it('rejects valid JSON that is not a replay object with 400 (the shape arm)', async () => {
+    const res = await handler({ body: '42' });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body)).toEqual({ ok: false, error: 'missing replay payload' });
   });
 
   it('rejects a replay from a different sim version with 422', async () => {
