@@ -17,9 +17,13 @@
  *  deployed server runs neither this file nor a compiled copy of it: esbuild
  *  inlines the expression into `apps/server/dist/handler.mjs` (#109), where it
  *  resolves beside the BUNDLE — `apps/server/dist/rulesets/…`, staged there by
- *  that package's build from this package's `dist/rulesets/` (`cp` after `tsc
- *  -b`; tsc emits no assets, and without that copy a deployed server ENOENTs at
- *  cold start — Codex PR #66 P1).
+ *  that package's build straight from this package's COMMITTED `src/rulesets/`,
+ *  so the server builds standalone from a clean checkout (Codex, PR #159). This
+ *  package's own `cp src/rulesets/*.json dist/rulesets/` after `tsc -b` stays
+ *  where it is and is still gated: tsc emits no assets, and a dist-deployed
+ *  consumer of THIS package would ENOENT without it (Codex PR #66 P1).
+ *  `check:artifact-parity` byte-compares both copies against the bytes the
+ *  client bundle embeds, so the two independent copy steps cannot drift.
  *
  *  What does NOT happen is `dist/artifact.js` → `dist/rulesets/…`: this package's
  *  `exports` map points every subpath at `./src/*.ts`, so nothing ever loads the

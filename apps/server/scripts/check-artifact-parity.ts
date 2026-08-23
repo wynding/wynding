@@ -129,13 +129,20 @@ if (clientBundlePath === undefined || clientText === undefined) {
 }
 
 // --- Leg 1c: locate the built server artifact and its packaged rulesets -----------
-// TWO packaged copies, because the ruleset reaches the deployed artifact through two
-// hops and either can break: `packages/content`'s build copies `src/rulesets/*.json`
-// into its own `dist/rulesets/` (the Codex PR #66 P1 fix), and `apps/server`'s build
-// stages THAT copy beside its bundle (#109). The second is the one the artifact
-// actually opens at cold start — `@wynding/content/artifact`'s `BUNDLED_ARTIFACT_URL`
-// is `new URL('./rulesets/…', import.meta.url)`, and esbuild inlines that expression
-// into `dist/handler.mjs`, so `import.meta.url` resolves beside the BUNDLE.
+// TWO packaged copies, because two independent packaging steps copy the same committed
+// `packages/content/src/rulesets/*.json` and either can break: `packages/content`'s
+// build copies them into its own `dist/rulesets/` (the Codex PR #66 P1 fix), and
+// `apps/server`'s build stages them beside its bundle (#109). The server stages from
+// SOURCE, not from content's `dist/` — chaining the two made `pnpm -C apps/server run
+// build` fail from a clean checkout unless content had been built first, a dependency
+// only the root turbo run (`dependsOn: ["^build"]`) was hiding (Codex, PR #159). Both
+// copies are byte-compared below, so decoupling the steps costs no coverage: drift in
+// either one still reds this check.
+//
+// The server's copy is the one the artifact actually opens at cold start —
+// `@wynding/content/artifact`'s `BUNDLED_ARTIFACT_URL` is `new URL('./rulesets/…',
+// import.meta.url)`, and esbuild inlines that expression into `dist/handler.mjs`, so
+// `import.meta.url` resolves beside the BUNDLE.
 const serverHandlerPath = path.join(REPO_ROOT, 'apps/server/dist/handler.mjs');
 if (!existsSync(serverHandlerPath)) {
   fail(`missing server build output: ${serverHandlerPath} does not exist`);
@@ -160,7 +167,7 @@ const packagedCopies: readonly PackagedCopy[] = [
     label: 'server artifact',
     filePath: path.join(REPO_ROOT, 'apps/server/dist/rulesets', `${RULESET_ID}.json`),
     missingHint:
-      "apps/server's build script did not stage dist/rulesets/ beside the bundle — the deployed " +
+      "apps/server's build script did not stage src/rulesets/ beside the bundle — the deployed " +
       'artifact would ENOENT at cold start, which is exactly the #109 failure this leg exists to catch.',
   },
 ];
