@@ -1,5 +1,49 @@
 apply plugin: 'com.android.application'
 
+// =====================================================================================
+// RELEASE SIGNING (#137).
+//
+// NO KEY MATERIAL IS EVER WRITTEN IN THIS FILE. This repository is public, and an upload
+// or app-signing key that reaches a public remote cannot be rotated — only abandoned,
+// stranding every install that was ever signed with it. If a signing problem tempts you
+// to paste a password here to "just get a build out", that is the accident this block
+// exists to prevent; the fix is always to supply the values below out of band.
+//
+// TWO SOURCES, environment first. The environment wins so a value can be supplied for one
+// invocation without touching the disk at all; `keystore.properties` is the fallback for
+// a developer machine where typing four variables every time is the thing that leads to a
+// shell-history leak. That file lives beside this project at
+// `apps/mobile/android/keystore.properties`, is named in `android/.gitignore` (a rule
+// this repo deliberately UNCOMMENTED from the stock template), and
+// `scripts/check-native-invariants.mjs` asserts both that the ignore rule survives a
+// regeneration and that no literal password reaches this file.
+//
+// NOT `local.properties`: Android Studio owns that file and rewrites it with the SDK path,
+// so credentials there are one IDE action away from being clobbered — and it is not the
+// file the keystore ignore rules already name.
+//
+// WITHOUT ANY OF IT, the release build still CONFIGURES — CI has no keystore and must not
+// fail at configuration time — and then fails loudly at assemble time rather than quietly
+// emitting an unsigned APK that looks like a shippable one.
+// =====================================================================================
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { stream -> keystoreProperties.load(stream) }
+}
+
+def signingValue = { envName, propertyName ->
+    def fromEnv = System.getenv(envName)
+    return (fromEnv != null && !fromEnv.isEmpty()) ? fromEnv : keystoreProperties.getProperty(propertyName)
+}
+
+def releaseStoreFile = signingValue('WYNDING_KEYSTORE_FILE', 'storeFile')
+def releaseStorePassword = signingValue('WYNDING_KEYSTORE_PASSWORD', 'storePassword')
+def releaseKeyAlias = signingValue('WYNDING_KEY_ALIAS', 'keyAlias')
+def releaseKeyPassword = signingValue('WYNDING_KEY_PASSWORD', 'keyPassword')
+def hasReleaseSigning = releaseStoreFile != null && releaseStorePassword != null &&
+        releaseKeyAlias != null && releaseKeyPassword != null
+
 android {
     namespace = "net.wynding.game"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +60,45 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // `null` rather than a half-filled config: an unsigned release is a legitimate
+            // configuration-time state (CI, a fresh clone), and the assemble-time guard
+            // below is what stops one being mistaken for a shippable build.
+            signingConfig hasReleaseSigning ? signingConfigs.release : null
+        }
+    }
+}
+
+// Fail at ASSEMBLE time, not configuration time. `pnpm run check:native`, `./gradlew tasks`
+// and an Android Studio sync all configure this project on machines that have no keystore
+// and want none; only an actual attempt to produce a release artifact needs one. The
+// message names the two supply routes so the failure is self-servicing.
+tasks.matching { task ->
+    (task.name.startsWith('assemble') || task.name.startsWith('bundle')) &&
+            task.name.contains('Release')
+}.configureEach { task ->
+    task.doFirst {
+        if (!hasReleaseSigning) {
+            throw new GradleException(
+                "No release signing material. Supply WYNDING_KEYSTORE_FILE, " +
+                "WYNDING_KEYSTORE_PASSWORD, WYNDING_KEY_ALIAS and WYNDING_KEY_PASSWORD in the " +
+                "environment, or the same four as storeFile/storePassword/keyAlias/keyPassword " +
+                "in apps/mobile/android/keystore.properties (untracked). See apps/mobile/README.md " +
+                "— 'Release signing'. NEVER commit any of it: this repository is public."
+            )
         }
     }
 }

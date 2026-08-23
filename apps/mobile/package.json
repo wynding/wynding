@@ -12,6 +12,9 @@
     "sync:all": "pnpm --filter @wynding/web run build:host && cap sync",
     "open:ios": "cap open ios",
     "open:android": "cap open android",
+    "keystore:android": "keytool -genkeypair -v -keystore android/wynding-upload.jks -alias wynding-upload -keyalg RSA -keysize 4096 -validity 10000",
+    "release:android": "pnpm run sync:android && cd android && ./gradlew assembleRelease",
+    "release:android:bundle": "pnpm run sync:android && cd android && ./gradlew bundleRelease",
     "assets:ios": "pnpm --filter @wynding/web run gen:icons && capacitor-assets generate --ios --assetPath ../web/assets/native",
     "assets:android": "pnpm --filter @wynding/web run gen:icons && capacitor-assets generate --android --assetPath ../web/assets/native"
   },

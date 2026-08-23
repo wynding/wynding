@@ -44,6 +44,14 @@ Run from this directory (or with `pnpm --filter @wynding/mobile run <script>`).
 | `pnpm run assets:ios`     | Regenerate the source artwork, then the iOS icon/splash set. |
 | `pnpm run assets:android` | Same, for the Android resource set.                          |
 
+Plus the release pair, documented in full under **Release signing** below:
+
+| Script                            | What it does                                      |
+| --------------------------------- | ------------------------------------------------- |
+| `pnpm run keystore:android`       | Generate the upload keystore (once, ever).        |
+| `pnpm run release:android`        | Sync, then build a signed release **APK**.        |
+| `pnpm run release:android:bundle` | Sync, then build a signed release **AAB** (Play). |
+
 **There is no `build` task here, on purpose.** `build`, `typecheck`, `lint` and `test` are the
 names the root Turbo pipeline selects, and compiling a native app needs an SDK that CI does not
 have and that most contributors have only one of. The native commands sit under names Turbo
@@ -79,6 +87,101 @@ the fix is one command:
 ```shell
 pnpm --filter @wynding/mobile run sync:android
 ```
+
+## Release signing — Android
+
+**No key material is in this repository, and none may ever be.** It is public. An upload or
+app-signing key that reaches a public remote cannot be rotated, only abandoned — and abandoning
+it strands every install that was ever signed with it, because Android will refuse to update an
+app whose new signature does not match the old one. `android/app/build.gradle` therefore reads
+all four values from out of band, and `pnpm run check:native` fails the build if a literal ever
+appears there.
+
+### 1. Generate the keystore (once, ever)
+
+```shell
+pnpm --filter @wynding/mobile run keystore:android
+```
+
+`keytool` prompts for the passwords rather than taking them as flags — deliberately, so they do
+not land in shell history. It writes `android/wynding-upload.jks`, which `android/.gitignore`
+already covers with an active `*.jks` rule (a rule this repo uncommented from the stock template
+and `check:native` asserts on every run).
+
+Then do the two things the command cannot do for you:
+
+- **Back it up somewhere durable and off this machine.** A lost keystore is an app that can
+  never be updated again. Back up the passwords with it; a keystore you cannot open is a lost
+  keystore.
+- **Record where it lives and who can reach it**, somewhere that survives this laptop.
+
+### 2. Supply the material
+
+Either the environment, for one invocation:
+
+```shell
+export WYNDING_KEYSTORE_FILE="$HOME/keys/wynding-upload.jks"
+export WYNDING_KEYSTORE_PASSWORD='…'
+export WYNDING_KEY_ALIAS='wynding-upload'
+export WYNDING_KEY_PASSWORD='…'
+```
+
+…or `apps/mobile/android/keystore.properties` — untracked, and named by the same ignore rules:
+
+```properties
+storeFile=/absolute/path/to/wynding-upload.jks
+storePassword=…
+keyAlias=wynding-upload
+keyPassword=…
+```
+
+The environment wins where both are present. Use an **absolute** `storeFile` path; a relative
+one resolves against `android/app/`, which is rarely what anyone means.
+
+**Never put any of this into CI configuration, a CI log, or a commit.** Nothing in this repo's
+workflows builds a release, and nothing should start doing so without a separate decision about
+where the key would then live.
+
+### 3. Build
+
+```shell
+pnpm --filter @wynding/mobile run release:android          # APK
+pnpm --filter @wynding/mobile run release:android:bundle   # AAB, for Play
+```
+
+Each syncs the Host build first, so the artifact always packages current web code. Output:
+
+| Artifact | Path                                                       |
+| -------- | ---------------------------------------------------------- |
+| APK      | `android/app/build/outputs/apk/release/app-release.apk`    |
+| AAB      | `android/app/build/outputs/bundle/release/app-release.aab` |
+
+With no material supplied, the project still **configures** — CI has no keystore and must not
+fail at configuration time — and then fails at assemble time with a message naming both supply
+routes. It does not quietly emit an unsigned APK that looks shippable.
+
+### 4. Verify upgrade-in-place, on a real device
+
+Signing is only half a promise; the half that matters to a player is that build N+1 replaces
+build N **without wiping their settings**. Since #142 there is finally something to lose, which
+is exactly why this check is worth running rather than assuming. Do it once, on hardware, after
+the first signed build:
+
+1. Build N. Bump nothing; just build and `adb install -r app-release.apk`.
+2. Open the app. Change **both** settings — a colour-vision mode and Reduce motion — then force
+   quit and relaunch to confirm they persisted at all.
+3. Bump `versionCode` (and `versionName`) in `android/app/build.gradle`. Build N+1 with the
+   **same** keystore, same alias.
+4. `adb install -r` build N+1 over the top. It must succeed. A
+   `INSTALL_FAILED_UPDATE_INCOMPATIBLE` here means the two builds were signed with different
+   keys — stop and work out which one is the real key before doing anything else.
+5. Open it. **Both settings must still be set.** They live in the WebView's `localStorage`,
+   which survives an update but not an uninstall — so if they are gone, something reinstalled
+   rather than updated.
+6. Repeat step 4 with `adb install -r` from a _different_ keystore to see the failure once
+   deliberately, if you want the negative control. Uninstall afterwards.
+
+Steps 1–5 are the gate. Record the result in the UAT ledger.
 
 ## iOS signing — read this before opening Xcode
 

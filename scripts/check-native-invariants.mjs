@@ -326,6 +326,54 @@ for (const [dir, rules] of [
   );
 }
 
+// 2b. The release signing config reads its material from OUT OF BAND, and carries none.
+//
+// The ignore rules above are one half — "a keystore file cannot be committed". This is the
+// other: the build script that USES one must not inline what it needs. A pasted password in
+// `app/build.gradle` is a tracked file with a live credential in it, and it is exactly the
+// shortcut a signing failure invites at the worst moment ("just get a build out"). Asserted
+// as text, because that is what this SDK-free gate can see and it is enough: the four names
+// must be read from the environment or the untracked properties file, and no quoted literal
+// may sit on the right of a password/alias assignment.
+if (gradle !== null) {
+  const ENV_NAMES = [
+    'WYNDING_KEYSTORE_FILE',
+    'WYNDING_KEYSTORE_PASSWORD',
+    'WYNDING_KEY_ALIAS',
+    'WYNDING_KEY_PASSWORD',
+  ];
+  const missingEnv = ENV_NAMES.filter((n) => !gradle.includes(n));
+  expect(
+    missingEnv.length === 0,
+    'the release signing config reads every value from the environment',
+    `app/build.gradle never mentions ${missingEnv.join(', ')} — the signing config must take ` +
+      `its material out of band, never from a tracked file.`,
+  );
+  expect(
+    /rootProject\.file\(["']keystore\.properties["']\)/.test(gradle),
+    'the release signing config falls back to the untracked keystore.properties',
+    `app/build.gradle does not read rootProject.file("keystore.properties") — that file is the ` +
+      `gitignored home of a developer's own credentials (see the rules asserted above).`,
+  );
+  // A LITERAL on the right of any of these is the accident. Variable references
+  // (`storePassword releaseStorePassword`) carry no quotes and pass.
+  //
+  // ANCHORED TO STATEMENT POSITION (`^\s*`), and that is not defensive tidying: the
+  // unanchored form matched the word `keyPassword` inside this very file's own error
+  // MESSAGE — a guard one level too high, reddening correct code, which is worse than the
+  // gap it was widened to close. A real assignment always begins its line.
+  const inlined = [
+    ...gradle.matchAll(/^[ \t]*(storePassword|keyPassword|keyAlias|storeFile)[ \t]+["']/gm),
+  ].map((m) => m[0].trim());
+  expect(
+    inlined.length === 0,
+    'no signing credential is inlined in app/build.gradle',
+    `${inlined.join(', ')}\n   → This repository is PUBLIC. Move it to the environment or to ` +
+      `apps/mobile/android/keystore.properties (untracked). A published signing key cannot be ` +
+      `rotated, only abandoned — see this script's header.`,
+  );
+}
+
 // =====================================================================================
 // 3. Orientation — and the two settings that make it actually apply on a large screen.
 // =====================================================================================
