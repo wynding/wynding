@@ -48,6 +48,13 @@
   // `e2e-perf` above stays in THIS program for the opposite reason: its `declare global`
   // is deliberately meant to be cross-checked against `perf/main-perf.ts`, which is in
   // this program too. Same construct, opposite intent — hence the split.
+  //
+  // `exclude: []` (#108): `tsconfig.base.json` keeps `*.test.ts` out of the programs that
+  // EMIT, so no `dist/` ends up carrying compiled tests. This program is `noEmit` — Vite
+  // builds this app — so it has no such `dist/` to protect, and emptying the inherited
+  // `exclude` is what keeps `src/**/*.test.ts` type-checked in the one program that has
+  // this app's `lib` and `types: []`. (A child REPLACES `exclude`; it does not merge.)
+  "exclude": [],
   "include": ["src", "perf", "e2e-perf"],
   "references": [
     { "path": "../../packages/render" },

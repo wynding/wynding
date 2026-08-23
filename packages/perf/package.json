@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint src",
     "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo",

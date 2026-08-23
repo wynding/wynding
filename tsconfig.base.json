@@ -22,5 +22,26 @@
     "declarationMap": true,
     "sourceMap": true,
     "composite": true
-  }
+  },
+
+  // Test files never belong in a `dist/` tree. Every emitting package `include`s `src`,
+  // which swept `src/**/*.test.ts` into the build too — 60 compiled `*.test.js` (plus
+  // their `.d.ts`/maps) across the workspace's dist outputs, none of it shippable (#108).
+  // Excluding them HERE fixes every emitting package at once.
+  //
+  // Excluding a file also removes it from the TYPE CHECK, and dropping ~80 test files out
+  // of `tsc` would be a far worse trade than the one it buys: verified against a probe —
+  // `const x: number = 'nope'` in `packages/replay/src/replay.test.ts` — this line alone
+  // left `pnpm run typecheck` fully green. So every emitting package pairs it with a
+  // `tsconfig.tests.json`, run as a second `tsc --noEmit -p` by its `typecheck` script,
+  // the same two-program idiom `apps/web/tsconfig.e2e.json` already uses. The same probe
+  // is caught there.
+  //
+  // `exclude` is inherited by `extends` but REPLACED (not merged) by any child declaring
+  // its own, which is what the two check-only programs use to opt out: `apps/web` and
+  // `apps/server` write `"exclude": []` (both `noEmit`, so neither has a `dist/` to keep
+  // tests out of, and their tests stay checked in their one program without a second
+  // config). `apps/mobile`'s pre-existing `["ios", "android"]` shadows this line for the
+  // same reason it can afford to — no tests, nothing emitted.
+  "exclude": ["**/*.test.ts"]
 }

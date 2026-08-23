@@ -13,7 +13,8 @@ import {
   waveIndexForCreep,
   waveCountdownStartTick,
   waveLaunchTickObserved,
-  anchoredWallInputs,
+  wallInputsFromTick,
+  wallInputsFromObservedWave,
 } from './wave-lookup';
 
 const bundle = getBundledRuleset();
@@ -47,23 +48,34 @@ describe('the observed-transition readers on a fresh (pre-launch) state', () => 
   });
 });
 
-describe('anchoredWallInputs guards', () => {
+describe('wallInputsFromTick guards', () => {
+  it('throws up front on a non-positive spacingTicks (the modulo gate would never place)', () => {
+    expect(() => wallInputsFromTick([], 'basic', 0, 0)).toThrow(/must be positive/);
+    expect(() => wallInputsFromTick([], 'basic', 0, -5)).toThrow(/must be positive/);
+  });
+});
+
+describe('wallInputsFromObservedWave guards', () => {
   it('throws up front on a wave index outside the compiled schedule (both ends)', () => {
-    expect(() => anchoredWallInputs(ruleset, ruleset.waves.length, [], 'basic', 0)).toThrow(
+    expect(() => wallInputsFromObservedWave(ruleset, ruleset.waves.length, [], 'basic', 0)).toThrow(
       /outside the compiled schedule/,
     );
-    expect(() => anchoredWallInputs(ruleset, -1, [], 'basic', 0)).toThrow(
+    expect(() => wallInputsFromObservedWave(ruleset, -1, [], 'basic', 0)).toThrow(
       /outside the compiled schedule/,
     );
   });
 
   it('throws up front on a non-positive spacingTicks (the modulo gate would never place)', () => {
-    expect(() => anchoredWallInputs(ruleset, 1, [], 'basic', 0, 0)).toThrow(/must be positive/);
-    expect(() => anchoredWallInputs(ruleset, 1, [], 'basic', 0, -5)).toThrow(/must be positive/);
+    expect(() => wallInputsFromObservedWave(ruleset, 1, [], 'basic', 0, 0)).toThrow(
+      /must be positive/,
+    );
+    expect(() => wallInputsFromObservedWave(ruleset, 1, [], 'basic', 0, -5)).toThrow(
+      /must be positive/,
+    );
   });
 
   it('produces no inputs before the target wave’s countdown start is observed', () => {
-    const inputs = anchoredWallInputs(ruleset, 1, [{ col: 2, row: 10 }], 'basic', 0);
+    const inputs = wallInputsFromObservedWave(ruleset, 1, [{ col: 2, row: 10 }], 'basic', 0);
     const state = createInitialState(SEED, ruleset);
     expect(inputs(0, state)).toEqual([]);
   });

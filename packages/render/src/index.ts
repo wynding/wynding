@@ -23,6 +23,7 @@ export { drawFootprintMark } from './board-draw';
 export type { GraphicsLike } from './board-draw';
 export type {
   CreepVM,
+  CreepStatusCounts,
   TowerVM,
   RenderVM,
   HudVM,

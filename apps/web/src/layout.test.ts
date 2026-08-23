@@ -18,6 +18,7 @@ import {
   EXEMPT_FROM_DECLARATION,
   WALKED_CONTAINERS,
 } from './layout';
+import { PREVIEW_FLOAT_CAP_PX } from './preview-place';
 
 // `new URL('./ui.css', import.meta.url)` would normally suffice, but under the jsdom test
 // environment the global `URL` is jsdom's DOM implementation, not Node's — resolve via
@@ -222,6 +223,36 @@ describe('layout — the home link box model and visibility contract', () => {
     ).toContain('padding: 0.25rem');
     // The text stays hidden exactly as before; the mark alone carries the branding.
     expect(ruleBody(compact, '.wy-wordmark')).toContain('display: none');
+  });
+});
+
+// The wave preview's band grants (#101): three custom properties `main.ts` writes and
+// `ui.css` reads. The DEFAULTS are what a pre-measurement pass (jsdom, a stage mid-resize)
+// renders with, and one of them carries a number `preview-place.ts` mirrors — so, exactly
+// like COMPACT_QUERY above, the duplication is made safe by asserting it rather than by
+// trusting it.
+describe('layout — the wave preview’s band grants (#101)', () => {
+  const preview = ruleBody(css, '.wy-wave-preview');
+
+  it('reads all three band properties, each with its pre-measurement default', () => {
+    expect(preview).toContain('left: var(--wy-preview-left, 0.5rem)');
+    expect(preview).toContain('right: var(--wy-preview-right, auto)');
+    expect(preview).toContain('max-width: var(--wy-preview-max-w, min(256px, 45%))');
+  });
+
+  it('the stylesheet’s own width cap is the one preview-place.ts mirrors', () => {
+    // `preview-place.ts` clamps a band wider than the cap back to it, so the card can never
+    // be stretched past the box this stylesheet declares. A silent edit to either number
+    // would let a wide band grow the card beyond its declared cap with nothing failing.
+    expect(preview).toContain(`min(${PREVIEW_FLOAT_CAP_PX}px,`);
+  });
+
+  it('the reduced-weight companion form exists and is scoped to its own class', () => {
+    // Candidate 5 (#101) applies ONLY while the card borrows the board's blocked border
+    // ring; `main.ts` toggles the class. An unconditional edit into the base rule above
+    // would paint it over the letterbox band too, where there is no board underneath.
+    expect(ruleBody(css, '.wy-wave-preview--over-board')).toContain('border-style: dashed');
+    expect(preview).not.toContain('border-style: dashed');
   });
 });
 

@@ -26,11 +26,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   compileRuleset,
-  createInitialState,
-  step,
   deriveScore,
   deriveStars,
-  MAX_MATCH_TICKS,
   SIM_VERSION,
   type SimInput,
   type CompiledRuleset,
@@ -39,6 +36,7 @@ import {
 import { currentRulesetHash, type Replay } from '@wynding/replay';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { WINNER_A, type Placement } from '../../../packages/content/src/showcase-builds';
+import { runBuildScript } from '../../../packages/content/src/script-runner';
 import { handler } from './handler';
 
 // The seed WINNER A is tuned against (`packages/content/src/m2-golden.test.ts`'s
@@ -57,34 +55,19 @@ interface ClientRun {
 
 /** Replays a build script against the compiled shipped bundle exactly the way
  *  `m2-golden.test.ts`'s `runGolden()` does — greedily placing the next scripted tower
- *  the tick it becomes affordable — but records the CONCRETE per-tick input log
- *  actually applied, which is what a real client would submit as a `Replay`. Stops the
- *  instant the sim leaves `'running'`, so the log ends exactly at the terminal tick
- *  (`@wynding/replay`'s `validate()` rejects any tick logged past termination). */
+ *  the tick it becomes affordable (the shared core, `script-runner.ts`'s `runBuildScript`,
+ *  G1-b/#94) — but records the CONCRETE per-tick input log actually applied, which is what
+ *  a real client would submit as a `Replay`. Stops the instant the sim leaves `'running'`,
+ *  so the log ends exactly at the terminal tick (`@wynding/replay`'s `validate()` rejects
+ *  any tick logged past termination). */
 function runScript(ruleset: CompiledRuleset, script: readonly Placement[]): ClientRun {
-  let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-  let cursor = 0;
-  const tickInputs: SimInput[][] = [];
+  const tickInputs: (readonly SimInput[])[] = [];
 
-  for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-    const inputs: SimInput[] = [];
-    if (cursor < script.length) {
-      const next = script[cursor]!;
-      const cost = ruleset.towerById[next.towerId]?.cost;
-      if (cost === undefined) throw new Error(`unknown towerId '${next.towerId}' in script`);
-      if (state.bounty >= cost) {
-        inputs.push({
-          kind: 'placeTower',
-          anchor: { col: next.col, row: next.row },
-          towerId: next.towerId,
-        });
-      }
-    }
-    const towersBefore = state.towers.id.length;
-    state = step(state, ruleset, inputs);
-    if (state.towers.id.length > towersBefore && cursor < script.length) cursor++;
-    tickInputs.push(inputs);
-  }
+  const { state } = runBuildScript(ruleset, SCENARIO_SEED, script, {
+    afterStep: (_state, _ruleset, inputs) => {
+      tickInputs.push(inputs);
+    },
+  });
 
   return { state, tickInputs };
 }

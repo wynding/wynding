@@ -30,7 +30,7 @@
     "perf": "pnpm -C packages/perf run perf",
     "prepare": "node scripts/install-git-hooks.mjs",
     "verify": "pnpm run format:check && pnpm run i18n:check && pnpm run check:dependabot-config && pnpm run check:glossary && pnpm run check:native && pnpm run check:types-type-only && pnpm run lint:scripts && turbo run typecheck lint test",
-    "clean": "turbo run clean && rm -rf node_modules .turbo"
+    "clean": "turbo run clean && node scripts/clean-turbo-cache.mjs && rm -rf node_modules"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

@@ -64,6 +64,12 @@ export const EN = {
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
   "hud.score": "Score: {count}",
   "hud.stars": "Stars: {count} of 3",
+  "hud.statuses": "On the board: {statuses}",
+  "hud.statuses.airborne": "{count} airborne",
+  "hud.statuses.armored": "{count} armored",
+  "hud.statuses.poisoned": "{count} poisoned",
+  "hud.statuses.slowed": "{count} slowed",
+  "hud.statuses.stunned": "{count} stunned",
   "hud.wave.compact.countdown": "{s}s",
   "install.banner.dismiss": "Dismiss install suggestion",
   "install.banner.how": "Show me how",
@@ -223,6 +229,12 @@ export interface MessageParams {
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
   "hud.score": { "count": string | number };
   "hud.stars": { "count": string | number };
+  "hud.statuses": { "statuses": string | number };
+  "hud.statuses.airborne": { "count": string | number };
+  "hud.statuses.armored": { "count": string | number };
+  "hud.statuses.poisoned": { "count": string | number };
+  "hud.statuses.slowed": { "count": string | number };
+  "hud.statuses.stunned": { "count": string | number };
   "hud.wave.compact.countdown": { "s": string | number };
   "install.banner.dismiss": Record<never, never>;
   "install.banner.how": Record<never, never>;

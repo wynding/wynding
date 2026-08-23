@@ -15,8 +15,37 @@ import {
   type PreviewState,
   type CompiledRuleset,
 } from '@wynding/sim';
-import type { RenderVM, HudVM, HudPreview, PreviewEntryVM, CreepVM, TowerVM } from './types';
+import type {
+  RenderVM,
+  HudVM,
+  HudPreview,
+  PreviewEntryVM,
+  CreepVM,
+  TowerVM,
+  CreepStatusCounts,
+} from './types';
 import { clamp01 } from './num';
+
+/** The sim's own "slowed right now" rule (`slowMulFp !== 0`, M2-S3), as ONE definition
+ *  read by both consumers of it in this module — the per-creep telegraph flag
+ *  (`CreepVM.slowed`) and the board summary's count (`CreepStatusCounts.slowed`). Two
+ *  copies of a status rule is exactly how a cue and a count come to disagree about the
+ *  same creep. */
+function slowedNow(slowMulFp: number | undefined): boolean {
+  return Number.isSafeInteger(slowMulFp) && (slowMulFp as number) !== 0;
+}
+
+/** The sim's own "stunned right now" rule (`stunUntilTick !== 0 && stunUntilTick >= tick`
+ *  — the INCLUSIVE expiry `packages/sim`'s movement derivation uses, M2-S6), as one
+ *  definition shared by `CreepVM.stunned` and the board summary, for the same reason
+ *  `slowedNow` above is shared. */
+function stunnedNow(stunUntilTick: number | undefined, tick: number): boolean {
+  return (
+    Number.isSafeInteger(stunUntilTick) &&
+    (stunUntilTick as number) !== 0 &&
+    (stunUntilTick as number) >= tick
+  );
+}
 
 /** Project every live creep/tower of `state` into a render snapshot. */
 export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): RenderVM {
@@ -42,16 +71,11 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
     const denom =
       def !== undefined ? def.hp : Math.max(1, Number.isSafeInteger(hp) ? (hp as number) : 1);
     const hpFrac = Number.isSafeInteger(hp) ? clamp01((hp as number) / denom) : 0;
-    const slowMulFp = state.creeps.slowMulFp[i];
-    const stunUntilTick = state.creeps.stunUntilTick[i];
     // Same inclusive-expiry rule the sim's own movement derivation uses
     // (`index.ts`: `stunUntilTick !== 0 && stunUntilTick >= state.tick`) — a stun
     // applied through tick T still holds at tick T, so the render VM must agree with
     // the sim about whether "right now" is stunned, not merely echo a stale column.
-    const stunned =
-      Number.isSafeInteger(stunUntilTick) &&
-      (stunUntilTick as number) !== 0 &&
-      (stunUntilTick as number) >= state.tick;
+    const stunned = stunnedNow(state.creeps.stunUntilTick[i], state.tick);
     creeps.push({
       id: state.creeps.id[i] as number,
       creepId,
@@ -63,7 +87,7 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       x: p.x,
       y: p.y,
       hpFrac,
-      slowed: Number.isSafeInteger(slowMulFp) && (slowMulFp as number) !== 0,
+      slowed: slowedNow(state.creeps.slowMulFp[i]),
       poisoned: poisonedIds.has(state.creeps.id[i] as number),
       stunned,
       // Catalog join, like `hpFrac`'s denominator above — NOT sim state. `def` is
@@ -184,6 +208,52 @@ function derivePreview(
   };
 }
 
+/** Count every creep status on the board right now (#79) for the HUD's pollable board
+ *  summary. READ-ONLY over the sim's creep columns — no new sim state, no mutation, and
+ *  nothing written back into the render package's per-frame surface.
+ *
+ *  Deliberately NOT a field on `CreepVM`/`RenderVM`: this is HUD text refreshed at most
+ *  once per tick behind `deriveHud`'s memo, not a per-frame draw input, and widening the
+ *  60 fps snapshot for a DOM readout is how a render hot path acquires work it never
+ *  draws (ADR 0005).
+ *
+ *  ONE deliberate divergence from `deriveViewModel`'s creep walk, recorded rather than
+ *  papered over: that one additionally drops a row whose position is non-derivable
+ *  (`projectCreep(...) === null` — nothing to draw), which this cannot do because
+ *  `projectCreep` takes the MUTABLE `CreepArrays` while `deriveHud` must also accept a
+ *  `PreviewState`'s deep-readonly columns. The two can therefore disagree only about a
+ *  row that survived `coerceSoa` yet has forged geometry — unreachable from any state the
+ *  sim itself produces, and the summary's answer there (count it) is the safer of the
+ *  two: a creep the board declines to draw is still on the board. */
+function deriveCreepStatuses(
+  state: SimState | PreviewState,
+  ruleset: CompiledRuleset,
+): CreepStatusCounts {
+  // Built ONCE, not per creep — the same membership-set reason `deriveViewModel`'s own
+  // poisoned scan gives.
+  const poisonedIds = new Set<number>();
+  for (const rec of state.dots) poisonedIds.add(rec.targetId);
+
+  const creeps = state.creeps;
+  let slowed = 0;
+  let poisoned = 0;
+  let armored = 0;
+  let stunned = 0;
+  let airborne = 0;
+  for (let i = 0; i < creeps.id.length; i++) {
+    // The same catalog join `deriveViewModel` takes for `domain`/`warded`, with the same
+    // total-over-absent-definition posture: a forged/unresolved `creepId` contributes to
+    // neither the armored nor the airborne count rather than throwing.
+    const def = ruleset.creepById[creeps.creepId[i] as string];
+    if (slowedNow(creeps.slowMulFp[i])) slowed++;
+    if (poisonedIds.has(creeps.id[i] as number)) poisoned++;
+    if ((def?.armor ?? 0) !== 0) armored++;
+    if (stunnedNow(creeps.stunUntilTick[i], state.tick)) stunned++;
+    if (def?.domain === 'air') airborne++;
+  }
+  return { slowed, poisoned, armored, stunned, airborne };
+}
+
 /** Derive the HUD fields (countdown in whole seconds, score, stars, wave preview) from
  *  `state`. Also accepts a `PreviewState` — the controller's pending-aware presentation
  *  reads the HUD off a `previewInputs()` result while the run itself stays uncommitted;
@@ -219,5 +289,6 @@ export function deriveHud(state: SimState | PreviewState, ruleset: CompiledRules
     launchPending: state.launchPending,
     callable: waveAvailable && !state.launchPending,
     preview: derivePreview(state, ruleset),
+    statuses: deriveCreepStatuses(state, ruleset),
   };
 }

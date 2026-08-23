@@ -66,14 +66,16 @@ export interface ShellHud {
 /** The wave-preview surface (M2-S2, PLAN.md P3 step 17) — its OWN visible block in BOTH
  *  layouts, never chip-hosted (the Compact chip's `full` text is screen-reader-only, so
  *  entries stuffed into the wave chip would be invisible to sighted Compact users).
- *  TWO HOMES since the playtest round (`placePreview`): floating over the Stage on
- *  Standard stages ≥ 400px — click-through display in its RESTING form
+ *  TWO HOMES since the playtest round (`placePreview`): floating over the Stage wherever
+ *  the Stage has dead space wide enough to hold a legible card (#101 —
+ *  `preview-place.ts`) — click-through display in its RESTING form
  *  (`pointer-events: none`, no tab stop, read after the board in source order), flipped
  *  by `main.ts` to a labelled, focusable scroll form IN PLACE while its content exceeds
  *  its clamp, at any zoom — and inside `.wy-hud`'s focusable, keyboard-scrollable chips
- *  scrollport (contract §1) on Compact and on sub-400px stages (portrait phones are
- *  Standard), where the ui.css row reservation keeps the status row content-invariant
- *  and a long entry list stays keyboard-reachable by the scrollport's inheritance.
+ *  scrollport (contract §1) on Compact and wherever no compliant band exists (portrait
+ *  phones are Standard, and land here), where the ui.css row reservation keeps the status
+ *  row content-invariant and a long entry list stays keyboard-reachable by the
+ *  scrollport's inheritance.
  *  `overlay.ts` owns all three nodes' content/visibility every frame; the Shell only
  *  builds the scaffolding and moves the one node between its homes. */
 /** The wave preview's two supported homes (playtest round) — see `placePreview`. */
@@ -152,6 +154,10 @@ export interface ShellHandle {
   /** The chips list — the labelled, keyboard-reachable scrollport (contract §1). */
   readonly hudBox: HTMLElement;
   readonly hud: ShellHud;
+  /** The POLLABLE board summary (#79) — live creep-status counts, inside the labelled HUD
+   *  group where assistive tech already navigates, with `aria-live="off"` so it is read on
+   *  demand and never interrupts. `overlay.ts` owns its text and `hidden` state. */
+  readonly statusSummary: HTMLElement;
   readonly preview: ShellPreview;
   readonly dock: ShellDock;
   /** The Rail's Cards, one per catalog tower (M2-S3), in catalog order — widened from
@@ -168,10 +174,11 @@ export interface ShellHandle {
    *  the Stage, out of every layout flow, so the status row (the shell's content-sized
    *  first grid row) never resizes with it and the board never re-projects; `'hud'` — the
    *  bounded, keyboard-scrollable chips scrollport, used on Compact (fixed column width
-   *  already isolates the board) and on sub-400px Standard stages (with ui.css's row
-   *  reservation keeping that row content-invariant). One node, one AT surface:
-   *  reparented, never duplicated. `main.ts` decides which home from its `COMPACT_QUERY`
-   *  listener + the stage-width bucket. */
+   *  already isolates the board) and — since #101 — on any Standard stage with no dead
+   *  band wide enough for a legible card (with ui.css's row reservation keeping that row
+   *  content-invariant). One node, one AT surface: reparented, never duplicated.
+   *  `main.ts` decides which home from its `COMPACT_QUERY` listener + the measured
+   *  placement (`preview-place.ts`). */
   placePreview(home: PreviewHome): void;
   destroy(): void;
 }
@@ -423,7 +430,32 @@ export function createShell(
   previewList.className = 'wy-wave-preview-list';
   preview.append(previewTitle, previewList);
 
-  hudBox.append(lives.root, bounty.root, score.root, wave.root, preview, stars.root);
+  // --- The pollable board summary (#79). A haircut taken on evidence rather than
+  // preference: the owner playtest established that nothing in the design requires a
+  // per-creep response to a status, so an aggregate withholds no actionable information —
+  // and the app's ONE polite live region (`live`, below) is already occupied by placement /
+  // arm / sell feedback, the things a player is actually acting on. Piping a status that
+  // refreshes every 30 ticks per venom source through it would have status chatter stepping
+  // on build feedback under sustained fire.
+  //
+  // `aria-live="off"` is therefore the load-bearing attribute, not a default spelled out:
+  // this surface is POLLED (a screen-reader user navigates to it, like any other HUD text),
+  // never announced.
+  //
+  // VISUALLY HIDDEN, and that is a decision with a measured reason rather than an
+  // AT-only shrug: `.wy-hud` is the shell's content-sized status row, so a summary that
+  // took a layout box would resize that row every time the last poisoned creep died —
+  // re-projecting the board MID-RUN, the exact defect `stage-stability.spec.ts` exists to
+  // forbid and that #101 (this same round) is spending pixels to undo. Out of flow, it
+  // costs the board nothing at any zoom. Like `.wy-preview-full` it RESTATES `.wy-sr-only`'s
+  // rules in its own class rather than composing that one on: `.wy-sr-only` is used as an
+  // IDENTITY by `querySelector('.wy-sr-only')`, which resolves the live-region announcer.
+  const statusSummary = doc.createElement('p');
+  statusSummary.className = 'wy-status-summary';
+  statusSummary.setAttribute('aria-live', 'off');
+  statusSummary.hidden = true; // empty board is the safe pre-first-render default
+
+  hudBox.append(lives.root, bounty.root, score.root, wave.root, preview, stars.root, statusSummary);
 
   // --- Dock: a status child in BOTH layouts (contract §1's topology amendment) ---
   const dock = doc.createElement('div');
@@ -581,6 +613,7 @@ export function createShell(
     rail,
     hudBox,
     hud: { lives, bounty, score, wave, stars },
+    statusSummary,
     preview: { root: preview, title: previewTitle, list: previewList },
     dock: {
       root: dock,

@@ -25,19 +25,16 @@
 import { describe, it, expect } from 'vitest';
 import {
   compileRuleset,
-  createInitialState,
-  step,
   hashSimState,
   deriveScore,
   deriveStars,
-  MAX_MATCH_TICKS,
-  type SimInput,
   type SimState,
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
 import { waveIndexForCreep } from './wave-lookup';
 import { WINNER_A } from './showcase-builds';
+import { runBuildScript } from './script-runner';
 // The package's ONE fnv1a copy (test-digest.ts) — parity.test.ts digests through the
 // same function; a drifted duplicate would let both files keep passing while producing
 // different digests for the same trace.
@@ -62,45 +59,26 @@ interface GoldenRun {
 function runGolden(): GoldenRun {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
-  let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
-  let cursor = 0;
-  const trace: string[] = [];
   const bossWaveIndex = waveIndexForCreep(ruleset, 'boss');
+  const trace: string[] = [];
 
   const prevBossHp = new Map<number, number>();
   let bossDamagedMidRun = false;
 
-  for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
-    const inputs: SimInput[] = [];
-    if (cursor < WINNER_A.length) {
-      const next = WINNER_A[cursor]!;
-      const cost = ruleset.towerById[next.towerId]?.cost;
-      if (cost === undefined) throw new Error(`unknown towerId '${next.towerId}' in WINNER_A`);
-      if (state.bounty >= cost) {
-        inputs.push({
-          kind: 'placeTower',
-          anchor: { col: next.col, row: next.row },
-          towerId: next.towerId,
-        });
+  const { state } = runBuildScript(ruleset, SCENARIO_SEED, WINNER_A, {
+    afterStep: (state) => {
+      for (let i = 0; i < state.creeps.id.length; i++) {
+        if (state.creeps.creepId[i] !== 'boss') continue;
+        const id = state.creeps.id[i]!;
+        const hp = state.creeps.hp[i]!;
+        const prev = prevBossHp.get(id);
+        if (prev !== undefined && hp < prev) bossDamagedMidRun = true;
+        prevBossHp.set(id, hp);
       }
-    }
-    const towersBefore = state.towers.id.length;
 
-    state = step(state, ruleset, inputs);
-
-    if (state.towers.id.length > towersBefore && cursor < WINNER_A.length) cursor++;
-
-    for (let i = 0; i < state.creeps.id.length; i++) {
-      if (state.creeps.creepId[i] !== 'boss') continue;
-      const id = state.creeps.id[i]!;
-      const hp = state.creeps.hp[i]!;
-      const prev = prevBossHp.get(id);
-      if (prev !== undefined && hp < prev) bossDamagedMidRun = true;
-      prevBossHp.set(id, hp);
-    }
-
-    trace.push(hashSimState(state));
-  }
+      trace.push(hashSimState(state));
+    },
+  });
 
   return {
     state,

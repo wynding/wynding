@@ -27,24 +27,42 @@ export const BUILD_TICKS = 50;
  *  150, `stressAnchors()`'s full anchor count. */
 export const PLACEMENTS_PER_TICK = 3;
 
-/** Builds the `BUILD_TICKS`-tick, 150-input `tickInputs` prefix shared by both
- *  scenarios, each placement's `towerId` chosen by `towerId(index)`. */
-function buildTickInputs(towerId: (index: number) => string): SimInput[][] {
-  const anchors = stressAnchors();
+/** One scripted placement in a scene's build-tick prefix — the generic (anchor, towerId)
+ *  shape both `buildTickInputs`'s callers already produce: the stress/control/dot-bench
+ *  scenes zip `stressAnchors()` with a per-index towerId selector (`stressTickPlacements`
+ *  below), and the catalog scene's own `catalogPlacements()` is already a concrete list of
+ *  exactly this shape. */
+interface TickPlacement {
+  readonly anchor: { readonly col: number; readonly row: number };
+  readonly towerId: string;
+}
+
+/** Builds a `buildTicks`-tick, `PLACEMENTS_PER_TICK`-per-tick `tickInputs` prefix from
+ *  `placements`, in order — the shared core behind every scene's build phase
+ *  (G1-b, #94): the stress/control/dot-bench scenes (150 anchors) and the catalog scene
+ *  (165 placements, its own `CATALOG_BUILD_TICKS`) both collapse onto this rather than
+ *  each walking their own placement table. */
+function buildTickInputs(placements: readonly TickPlacement[], buildTicks: number): SimInput[][] {
   const tickInputs: SimInput[][] = [];
-  for (let tick = 0; tick < BUILD_TICKS; tick++) {
+  for (let tick = 0; tick < buildTicks; tick++) {
     const inputs: SimInput[] = [];
     for (let i = 0; i < PLACEMENTS_PER_TICK; i++) {
       const index = tick * PLACEMENTS_PER_TICK + i;
-      const anchor = anchors[index];
-      if (anchor === undefined) {
-        throw new Error(`stress layout has fewer than ${index + 1} anchors`);
+      const placement = placements[index];
+      if (placement === undefined) {
+        throw new Error(`buildTickInputs: no placement at index ${index}`);
       }
-      inputs.push({ kind: 'placeTower', anchor, towerId: towerId(index) });
+      inputs.push({ kind: 'placeTower', anchor: placement.anchor, towerId: placement.towerId });
     }
     tickInputs.push(inputs);
   }
   return tickInputs;
+}
+
+/** Zips `stressAnchors()` with a per-index towerId selector into the `TickPlacement` list
+ *  `buildTickInputs` takes — what the stress/control/dot-bench scenes hand it below. */
+function stressTickPlacements(towerId: (index: number) => string): TickPlacement[] {
+  return stressAnchors().map((anchor, index) => ({ anchor, towerId: towerId(index) }));
 }
 
 /** The stress scenario: 50 `stress-blast` + 50 `stress-chill` + 50 `stress-venom`, per
@@ -55,7 +73,7 @@ export function buildStressReplay(bundle: Ruleset): Replay {
     boardId: STRESS_BOARD_ID,
     rulesetHash: currentRulesetHash(bundle),
     simVersion: SIM_VERSION,
-    tickInputs: buildTickInputs(towerIdAt),
+    tickInputs: buildTickInputs(stressTickPlacements(towerIdAt), BUILD_TICKS),
   };
 }
 
@@ -108,12 +126,15 @@ export function buildControlReplay(bundle: Ruleset): Replay {
     boardId: STRESS_BOARD_ID,
     rulesetHash: currentRulesetHash(bundle),
     simVersion: SIM_VERSION,
-    tickInputs: buildTickInputs((index) => {
-      const stressId = towerIdAt(index);
-      if (stressId === 'stress-chill') return 'stress-chill-single';
-      if (stressId === 'stress-venom') return 'stress-venom';
-      return 'stress-single';
-    }),
+    tickInputs: buildTickInputs(
+      stressTickPlacements((index) => {
+        const stressId = towerIdAt(index);
+        if (stressId === 'stress-chill') return 'stress-chill-single';
+        if (stressId === 'stress-venom') return 'stress-venom';
+        return 'stress-single';
+      }),
+      BUILD_TICKS,
+    ),
   };
 }
 
@@ -148,8 +169,11 @@ export function buildDotFreeReplay(bundle: Ruleset): Replay {
     boardId: STRESS_BOARD_ID,
     rulesetHash: currentRulesetHash(bundle),
     simVersion: SIM_VERSION,
-    tickInputs: buildTickInputs((index) =>
-      towerIdAt(index) === 'stress-chill' ? 'stress-chill-single' : 'stress-single',
+    tickInputs: buildTickInputs(
+      stressTickPlacements((index) =>
+        towerIdAt(index) === 'stress-chill' ? 'stress-chill-single' : 'stress-single',
+      ),
+      BUILD_TICKS,
     ),
   };
 }
@@ -197,29 +221,11 @@ export function buildCatalogReplay(bundle: Ruleset): Replay {
         `${CATALOG_BUILD_TICKS} build ticks × ${PLACEMENTS_PER_TICK}/tick exactly`,
     );
   }
-  const tickInputs: SimInput[][] = [];
-  for (let tick = 0; tick < CATALOG_BUILD_TICKS; tick++) {
-    const inputs: SimInput[] = [];
-    for (let i = 0; i < PLACEMENTS_PER_TICK; i++) {
-      const placement = placements[tick * PLACEMENTS_PER_TICK + i];
-      if (placement === undefined) {
-        throw new Error(
-          `buildCatalogReplay: no placement at index ${tick * PLACEMENTS_PER_TICK + i}`,
-        );
-      }
-      inputs.push({
-        kind: 'placeTower',
-        anchor: placement.anchor,
-        towerId: placement.towerId,
-      });
-    }
-    tickInputs.push(inputs);
-  }
   return {
     seed: CATALOG_SEED,
     boardId: CATALOG_BOARD_ID,
     rulesetHash: currentRulesetHash(bundle),
     simVersion: SIM_VERSION,
-    tickInputs,
+    tickInputs: buildTickInputs(placements, CATALOG_BUILD_TICKS),
   };
 }
