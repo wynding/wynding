@@ -19,8 +19,8 @@
 // itself — a prose contract cannot fail, which is precisely how the first versions of it came
 // to be wrong.
 //
-// SCOPE, as the test implements it. The SURFACE is `PERF_SOURCES` — the six `packages/perf`
-// sources; a figure is a perf-gate claim if the perf package states it, in PROSE or as a
+// SCOPE, as the test implements it. The SURFACE is `PERF_SOURCES` — the `packages/perf`
+// sources on it; a figure is a perf-gate claim if the perf package states it, in PROSE or as a
 // numeric literal its code EXECUTES — both are occurrences, and the second was invisible to
 // the sweep until Codex found it (PR #161; see `codeLiterals`). Coverage is then
 // ALL-PAIRS across every file in `GUARDED_FILES`: any such figure appearing in two guarded
@@ -28,6 +28,13 @@
 // `gate.ts` copy involved. An earlier version of this paragraph said the contract was
 // `gate.ts`-anchored and that document-only pairs were out of scope; that described an
 // earlier, narrower test, and CodeRabbit was right that it contradicted the implementation.
+//
+// WHICH SOURCES ARE ON THE SURFACE IS NOT A HAND-LIST ANY MORE. It was one, and it was short:
+// `dot-bench.ts` sat outside it while already restating the historical `R0`, so that copy
+// could drift alone and stay green (Codex). Every `.ts` file under `packages/perf/src` is now
+// either on the surface or named in `OFF_SURFACE` with the reason and the measured price of
+// leaving it off; the partition is recomputed from the directory each run and compared
+// exactly, so a new source fails the build until someone classifies it.
 //
 // What the surface deliberately excludes is the rest of those documents' numeric content —
 // device frame budgets, board geometry, wave arithmetic — which belongs to other packages and
@@ -48,8 +55,9 @@
 // whole families still missing, then found rows were matched by VALUE rather than per
 // occurrence, then found an executable-pin exemption that guarded no prose copy, then found
 // the sweep could not see a value that lives only in CODE — so a literal copied into a document
-// duplicated invisibly; CodeRabbit found the sweep seeded from one file. Each time the fix was
-// to close the gap, never to soften the claim to fit it.
+// duplicated invisibly — then found the surface list itself was short by a whole source, and a
+// reference mask eating ordinary scientific notation; CodeRabbit found the sweep seeded from
+// one file. Each time the fix was to close the gap, never to soften the claim to fit it.
 //
 // HOW TO CHANGE A NUMBER. Edit the row here, then every site it lists — the test tells you
 // when you have missed one. Adding a new copy of an existing claim means adding a site to
@@ -122,6 +130,8 @@ const ADR = 'docs/adr/0005-performance-budgets.md';
 const SPIKE = 'docs/design-notes/performance-spike.md';
 const ORACLE_TEST = 'packages/perf/src/oracle.test.ts';
 const SCENARIO = 'packages/perf/src/scenario.ts';
+const SCENARIO_TEST = 'packages/perf/src/scenario.test.ts';
+const DOT_BENCH = 'packages/perf/src/dot-bench.ts';
 const M2 = 'docs/milestones/m2.md';
 
 export const CLAIMS: readonly Claim[] = [
@@ -1925,6 +1935,48 @@ export const CLAIMS: readonly Claim[] = [
         anchor: "`gate\\.ts`'s `R0` doc, under",
         pattern: '\\*\\*(THE TWO CONSEQUENCES)\\*\\*',
       },
+    ],
+  },
+
+  // ---------------------------------------------------------------------------------------
+  // DOT-BENCH'S SURFACE — the two cross-file claims that surfaced when `dot-bench.ts` joined
+  // the guarded set. Codex found the source omitted from both coverage lists while it already
+  // restated the historical `R0`: changing only the dot-bench copy to 1.68 left all 742 claim
+  // tests green. Both figures below are stated in a perf source AND in the documents, and
+  // neither had a row, which is exactly what the omission was hiding.
+  // ---------------------------------------------------------------------------------------
+  {
+    id: 'historical-r0',
+    claim: 'the `R0` first recorded on the authoring machine, before it failed to transfer to CI',
+    value: '1.69',
+    numeric: 1.69,
+    basis:
+      "8 runs on the authoring machine (range 1.663-1.795, sd 0.045); superseded by the runner-recorded 2.49, and kept because the failure to transfer is one of the story's results",
+    sites: [
+      { file: DOT_BENCH, anchor: 'untransferable .R0 = ', pattern: '([\\d.]+)' },
+      { file: ADR, anchor: 'authoring machine \\(', pattern: '([\\d.]+),' },
+      {
+        file: ADR,
+        anchor: 'that produced the untransferable',
+        pattern: '\\s*`R0 = ([\\d.]+)',
+      },
+      { file: SPIKE, anchor: 'R0 was first recorded at', pattern: '\\s*([\\d.]+) from' },
+      { file: SPIKE, anchor: 'on the runner \\(', pattern: '([\\d.]+) →' },
+      { file: M2, anchor: 're-recorded on the runner \\(', pattern: '([\\d.]+) →' },
+    ],
+  },
+  {
+    id: 'instrumented-run-seconds',
+    claim: 'what a sustained simulation costs locally under vitest `--coverage`',
+    value: '7.5',
+    numeric: 7.5,
+    basis:
+      'measured; ~0.65 s uninstrumented, so coverage is ~6.5x on top of the module runner — the reason a sim-heavy path is excluded from the coverage gate rather than made faster',
+    sites: [
+      { file: DOT_BENCH, anchor: 'of work cost ~', pattern: '([\\d.]+)s locally' },
+      { file: SCENARIO_TEST, anchor: 'this test cost ~', pattern: '([\\d.]+)s locally' },
+      { file: SPIKE, anchor: 'vitest, .--coverage. \\| ~', pattern: '([\\d.]+) s' },
+      { file: SPIKE, anchor: 'the instrumented ', pattern: '([\\d.]+) s' },
     ],
   },
 ];

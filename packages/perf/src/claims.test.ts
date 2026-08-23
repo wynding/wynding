@@ -32,7 +32,7 @@
 //     figures). A prose contract cannot fail, so it is a sweep now (`the coverage contract
 //     is enforced`).
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -401,8 +401,8 @@ describe('no site can silently fall back to another occurrence', () => {
 // That gap is real, bounded, and named here rather than papered over. It is ONE bar, and the
 // code class is admitted by it rather than by a second rule of its own.
 
-/** The files the perf gate's claim set lives in. The SEED half — the six `packages/perf`
- *  sources — defines the SURFACE: a figure is a perf-gate claim if the perf package states
+/** The files the perf gate's claim set lives in. The SEED half — the `packages/perf` sources
+ *  on the surface — defines it: a figure is a perf-gate claim if the perf package states
  *  it, in PROSE or as a numeric literal its code EXECUTES. The docs are guarded too, and
  *  all-pairs coverage runs across every guarded file, so an ADR<->spike disagreement about a
  *  perf figure is caught even when
@@ -417,19 +417,121 @@ const PERF_SOURCES = [
   'packages/perf/src/oracle.ts',
   'packages/perf/src/oracle.test.ts',
   'packages/perf/src/scenario.ts',
+  'packages/perf/src/dot-bench.ts',
 ] as const;
 
-const GUARDED_FILES = [
-  'packages/perf/src/gate.ts',
-  'packages/perf/src/gate.test.ts',
-  'packages/perf/src/gate-fixture.test.ts',
-  'packages/perf/src/oracle.ts',
-  'packages/perf/src/oracle.test.ts',
-  'packages/perf/src/scenario.ts',
+/** The documents the perf gate's figures are copied into. Adding one here means adding it to
+ *  `@wynding/perf#test`'s `inputs` in the root `turbo.json` too, or the cache disarms the
+ *  guard on a docs-only edit. */
+const GUARDED_DOCS = [
   'docs/adr/0005-performance-budgets.md',
   'docs/design-notes/performance-spike.md',
   'docs/milestones/m2.md',
 ] as const;
+
+/** DERIVED, never re-typed. These were two hand-lists that had to agree, and the round that
+ *  added `dot-bench.ts` had to edit both — a second copy of a list is the same defect as a
+ *  second copy of a rule, and this file has now been bitten by that four times. */
+const GUARDED_FILES: readonly string[] = [...PERF_SOURCES, ...GUARDED_DOCS];
+
+/** THE PERF SOURCES THIS TABLE DELIBERATELY DOES NOT GUARD, each with the reason.
+ *
+ *  `PERF_SOURCES` was a hand-list, and a hand-list is exactly how `dot-bench.ts` came to be
+ *  missing from it while already restating the historical `R0`: changing only the dot-bench
+ *  copy to 1.68 left all 742 claim tests green (Codex, PR #161). The list being WRONG was not
+ *  the defect — the defect was that nothing could tell it was wrong. So the package's sources
+ *  are now PARTITIONED: every `.ts` file under `packages/perf/src` is either on the surface or
+ *  named here, the partition is recomputed from the directory each run and compared exactly,
+ *  and a new file fails the build until someone classifies it.
+ *
+ *  THE RESIDUE IS MEASURED, not implied. Putting all of these on the surface would add 56
+ *  cross-file figure pairs, and the per-file counts below are what each one contributes. That
+ *  is a real body of work and a real scoping decision — the catalog scene and the board
+ *  geometry are other stories' surfaces, which the header has said from the start — but it is
+ *  a decision recorded with its price rather than a list that quietly happened to stop where
+ *  it stopped. */
+const OFF_SURFACE: readonly { readonly file: string; readonly why: string }[] = [
+  {
+    file: 'packages/perf/src/claims.ts',
+    why: 'THE TABLE ITSELF. Every claim value appears here by construction, so guarding it would make every row a self-certifying two-file duplicate of itself. Circular, not merely noisy.',
+  },
+  {
+    file: 'packages/perf/src/claims.test.ts',
+    why: "The table's own guard, and it quotes claim values in exclusions, exceptions and fixtures. Same circularity as claims.ts.",
+  },
+  {
+    file: 'packages/perf/src/layout.ts',
+    why: "Board geometry and anchor placement — the largest single off-surface holding at 25 cross-file pairs (cell counts, board dimensions, route lengths). The header has named board geometry as another surface's business since the contract was first written; it belongs to the content and sim tests, not to the perf gate.",
+  },
+  {
+    file: 'packages/perf/src/oracle-catalog.ts',
+    why: "The M2-S11 catalog scene's oracle — 8 cross-file pairs, all catalog-scene facts. A neighbouring surface, like the stress oracle's unrowed family in KNOWN_UNROWED, and tracked with it in #163.",
+  },
+  {
+    file: 'packages/perf/src/oracle-catalog.test.ts',
+    why: 'Its test — 3 cross-file pairs, the same catalog-scene family as oracle-catalog.ts.',
+  },
+  {
+    file: 'packages/perf/src/layout-catalog.test.ts',
+    why: 'Catalog-scene layout — 5 cross-file pairs, all board geometry.',
+  },
+  {
+    file: 'packages/perf/src/layering.test.ts',
+    why: 'Tower layering over the board — 1 cross-file pair, a board-geometry figure.',
+  },
+  {
+    file: 'packages/perf/src/run.ts',
+    why: 'The CLI entry point — 5 cross-file pairs, all CI wall-clock timings and plan-step references rather than gate claims.',
+  },
+  {
+    file: 'packages/perf/src/run-catalog.ts',
+    why: 'The catalog CLI entry point — 1 cross-file pair, a catalog-scene figure.',
+  },
+  {
+    file: 'packages/perf/src/generate.ts',
+    why: 'The scenario generator CLI — 1 cross-file pair, a board-geometry figure.',
+  },
+  {
+    file: 'packages/perf/src/harness.ts',
+    why: "The measurement harness — 1 cross-file pair. Its figures are warm-up and sample window lengths, which are the harness's own parameters rather than claims the documents restate as gate facts.",
+  },
+  {
+    file: 'packages/perf/src/harness.test.ts',
+    why: 'Its test — 5 cross-file pairs, harness parameters and fixture timings.',
+  },
+  {
+    file: 'packages/perf/src/scenario.test.ts',
+    why: 'Measured: ZERO cross-file pairs beyond what is already guarded. It does hold a SITE (the instrumented-run figure), which is the distinction the surface draws — the surface decides what SEEDS the sweep, while a row may bind an occurrence anywhere in the repository.',
+  },
+  {
+    file: 'packages/perf/src/dot-bench.test.ts',
+    why: "Measured: zero cross-file pairs. It covers only dot-bench.ts's pure structural helpers, and the numbers it uses are local fixtures.",
+  },
+  {
+    file: 'packages/perf/src/escalation.ts',
+    why: "Measured: zero cross-file pairs. The escalation RULE's figures live in gate.ts's prose, which is guarded; this module implements it.",
+  },
+  {
+    file: 'packages/perf/src/escalation.test.ts',
+    why: 'Measured: zero cross-file pairs.',
+  },
+  {
+    file: 'packages/perf/src/stats.ts',
+    why: 'Measured: zero cross-file pairs. Percentile and median helpers; its constants are algorithmic, not measured.',
+  },
+  {
+    file: 'packages/perf/src/stats.test.ts',
+    why: 'Measured: zero cross-file pairs. Hand-worked fixtures for the helpers above.',
+  },
+  {
+    file: 'packages/perf/src/layout.test.ts',
+    why: 'Measured: zero cross-file pairs, despite layout.ts holding 25 — the test asserts structure rather than restating the geometry.',
+  },
+  {
+    file: 'packages/perf/src/index.ts',
+    why: 'Measured: zero cross-file pairs. The package barrel — re-exports, no figures of its own.',
+  },
+];
 
 /** Numerals the sweep must not treat as claims, each with the reason. Kept deliberately
  *  small: every entry is a hole, so an entry that stops being needed should be deleted —
@@ -450,6 +552,7 @@ const G = {
   oracle: 'packages/perf/src/oracle.ts',
   oracleTest: 'packages/perf/src/oracle.test.ts',
   scenario: 'packages/perf/src/scenario.ts',
+  dotBench: 'packages/perf/src/dot-bench.ts',
   adr: 'docs/adr/0005-performance-budgets.md',
   spike: 'docs/design-notes/performance-spike.md',
   m2: 'docs/milestones/m2.md',
@@ -475,11 +578,12 @@ const CONTRACT_EXCLUSIONS: readonly {
       G.oracle,
       G.oracleTest,
       G.scenario,
+      G.dotBench,
       G.adr,
       G.spike,
       G.m2,
     ],
-    why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0". Not a measurement.',
+    why: 'Bare zero — "zero dropped applications", "0 leftover bounty", "R0", `dots: []`. Not a measurement.',
   },
   {
     value: '10',
@@ -493,8 +597,8 @@ const CONTRACT_EXCLUSIONS: readonly {
   },
   {
     value: '50',
-    surfaces: [G.gate, G.oracle, G.scenario, G.adr, G.spike, G.m2],
-    why: 'Same collision as 95 — the p50 percentile name against "50% power" and the 50 venom towers.',
+    surfaces: [G.gate, G.oracle, G.scenario, G.dotBench, G.adr, G.spike, G.m2],
+    why: 'Same collision as 95 — the p50 percentile name against "50% power" and the 50 venom towers, and now `dot-bench`\'s 50 ms tick as well. Four unrelated quantities on one numeral.',
   },
   {
     value: '60',
@@ -503,13 +607,13 @@ const CONTRACT_EXCLUSIONS: readonly {
   },
   {
     value: '0.25',
-    surfaces: [G.gate, G.adr],
-    why: "A digit collision, not a shared claim: gate.ts's 0.25 is `dot-bench`'s ms-per-1,000-records curve, while ADR 0005's only 0.25 is `0.25σ` — the margin flooring discards. Neither document states the other's quantity.",
+    surfaces: [G.gate, G.dotBench, G.adr],
+    why: "A digit collision, not a shared claim: gate.ts's 0.25 and `dot-bench`'s are the SAME ms-per-1,000-records curve — dot-bench.ts states it and gate.ts cites it, which is a real pair — but ADR 0005's only 0.25 is `0.25σ`, the margin flooring discards. Rowing the numeral would bind the sigma to the curve. The curve slope itself is a single sentence in each of two perf sources and is left to them.",
   },
   {
     value: '1000',
-    surfaces: [G.gate, G.oracleTest, G.adr, G.spike, G.m2],
-    why: "Another collision: gate.ts's 1,000 is the denominator of that same dot-bench curve; elsewhere it is `MAX_TOTAL_TOWER_COMMANDS`. Different quantities, same numeral.",
+    surfaces: [G.gate, G.oracleTest, G.dotBench, G.adr, G.spike, G.m2],
+    why: "Another collision: gate.ts's and dot-bench.ts's 1,000 is the denominator of that same curve (and one of its swept table sizes); elsewhere it is `MAX_TOTAL_TOWER_COMMANDS`. Different quantities, same numeral.",
   },
   {
     value: '0.8',
@@ -528,8 +632,23 @@ const CONTRACT_EXCLUSIONS: readonly {
   },
   {
     value: '2.7',
-    surfaces: [G.gate, G.adr],
-    why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops.",
+    surfaces: [G.gate, G.dotBench, G.adr],
+    why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops; dot-bench.ts's is the low end of the ~2.7-4.1 ms at-cap reading range it warns must never be treated as a constant. Three quantities, three units, one numeral.",
+  },
+  {
+    value: '0.60',
+    surfaces: [G.dotBench, G.adr],
+    why: "Collision surfaced the moment dot-bench.ts joined the guarded set: its 0.60 is the 1,000-record point on the DoT cost curve, in milliseconds; ADR 0005's only 0.60 is the low-end paint share, a percentage of busy frame time. Two units, no shared quantity.",
+  },
+  {
+    value: '1.24',
+    surfaces: [G.dotBench, G.adr],
+    why: "Same shape as 0.60: dot-bench.ts's 1.24 is the 4,000-record point on that curve in milliseconds, while ADR 0005's 1.24% is low-end GPU-process busy share. A row keyed on the numeral would bind a table-size reading to a GPU measurement.",
+  },
+  {
+    value: '1000000',
+    surfaces: [G.dotBench, G.spike],
+    why: "High-information and still a collision, which is why the information threshold is not on its own a claim test: dot-bench.ts's 1_000_000 is the `cadenceTicks` validation bound `validDotRecord` enforces, while the spike's 1,000,000 is the hp creeps carry and the lives the board starts with. A validator's ceiling and a scene's stat, sharing a round number.",
   },
   {
     value: '30',
@@ -930,6 +1049,65 @@ function looksLikePath(m: string): boolean {
   return /[A-Za-z]/.test(m) && !m.split('/').some((seg) => IS_CLAIM_SHAPED.test(seg));
 }
 
+/** THE REFERENCE MASKS, named as one function so the audit below exercises the REAL chain
+ *  rather than a copy of it — a second spelling of these ten regexes is precisely the defect
+ *  this file keeps finding in itself.
+ *
+ *  THE STANDING DOCTRINE, now stated once and applied by every mask that could collide with a
+ *  numeral: A CANDIDATE THAT PARSES AS A NUMERAL UNDER THE ONE GRAMMAR IS NOT A REFERENCE.
+ *  A mask is a hole by construction — whatever it blanks leaves the sweep entirely, escaping
+ *  both all-pairs coverage and per-occurrence accounting — so a mask that cannot tell a
+ *  reference from a measurement will eat the measurement, silently, which is the one failure
+ *  this file exists to prevent.
+ *
+ *  Every mask here is therefore in one of two shapes, and the audit below proves which:
+ *
+ *    - ANCHORED ON A NON-NUMERIC TOKEN it requires (`ADR`, `ubuntu`, `step`, `M`, `p`, `#`,
+ *      `issues/`), or on punctuation no numeral spelling contains (the date mask's hyphens,
+ *      the list marker's trailing `. `). Nothing that parses as a numeral can reach these.
+ *    - SHAPE-MATCHED, and therefore explicitly deferring to the grammar: the path mask, via
+ *      `looksLikePath`'s claim-shaped-segment prohibition, and the commit-SHA mask, via the
+ *      numeral test below.
+ *
+ *  The SHA mask was the last one still guessing. `[a-z0-9]{7,}` with a digit and a letter is
+ *  also the shape of ordinary scientific notation: `10000e0` is seven alphanumerics, and it
+ *  was blanked before the numeral scan ever ran, so a high-information claim written that way
+ *  bypassed BOTH sweeps — Codex planted it in a guarded comment and in ADR prose and all 742
+ *  tests stayed green (PR #161). A commit head is an identifier and `10000e0` is a quantity;
+ *  the grammar already knows the difference, so the mask asks it instead of guessing from
+ *  length and alphabet. `a1600c9` is still masked, because it does not parse. */
+function maskReferences(prose: string): string {
+  return (
+    prose
+      // Both date and path masks require a NON-NUMERIC shape. A mask made only of digits and
+      // separators cannot tell a reference from a measurement, and will eat the measurement:
+      // the path mask blanked `1.0065/1.0065` as though it were a directory, which took a
+      // restated ratio out of BOTH all-pairs coverage and per-occurrence accounting (Codex).
+      // The date mask has the same shape, so it is bounded to real months and days here rather
+      // than left to match any hyphenated numeric triple.
+      .replace(/\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:\/\d{2})?/g, spaces) // ISO dates
+      .replace(/#\d+|\b(?:issues|pull)\/\d+/g, spaces) // issue refs, in both spellings
+      .replace(/\b(ADR|PRD)\s+\d+/g, spaces) // document refs
+      // A path needs a LETTER somewhere. `docs/adr/0005-x.md` is a reference; `1.0065/1.0065`
+      // is a ratio wearing a slash, and masking it hid a claim in plain sight.
+      .replace(/[\w./-]*\/[\w./-]+/g, (m) => (looksLikePath(m) ? spaces(m) : m)) // file paths
+      .replace(/\bubuntu-?\d[\w.]*(?:\/[\d.]+)?/gi, spaces) // runner image / release ids
+      // Deliberately NOT tolerant of a hard line wrap. `step\n// 21` is a reference this misses,
+      // and the tolerance that would catch it — treating a comment continuation as whitespace —
+      // is fail-OPEN: `at each step\n// 500 records` would take a real claim with it. A missed
+      // reference surfaces LOUDLY as an uncovered figure; a masked measurement vanishes. So the
+      // mask stays narrow and the one wrapped reference was rewrapped at its source instead.
+      .replace(/\b(PLAN\s+)?step\s+\d+/gi, spaces) // plan step refs
+      .replace(/\bM\d+-S\d+\w*/g, spaces) // milestone/story refs
+      // A SHA is an identifier; a numeral is a quantity. The grammar decides, not the alphabet.
+      .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi, (m) =>
+        IS_NUMERAL.test(m) ? m : spaces(m),
+      ) // commit shas
+      .replace(/\bp(50|95|99)\b/g, spaces) // percentile NAMES, not values
+      .replace(/^[ \t]*\d+\.[ \t]/gm, spaces)
+  ); // ordered-list markers
+}
+
 /** The claim-bearing prose of a guarded file, masked to preserve every byte offset. */
 function scannedProse(file: string): string {
   const raw = read(file);
@@ -948,25 +1126,7 @@ function scannedProse(file: string): string {
     throw new Error(`commentsOnly changed the length of ${file} — every offset after the
       change would be wrong`);
   }
-  const masked = prose
-    // Both date and path masks require a NON-NUMERIC shape. A mask made only of digits and
-    // separators cannot tell a reference from a measurement, and will eat the measurement:
-    // the path mask blanked `1.0065/1.0065` as though it were a directory, which took a
-    // restated ratio out of BOTH all-pairs coverage and per-occurrence accounting (Codex).
-    // The date mask has the same shape, so it is bounded to real months and days here rather
-    // than left to match any hyphenated numeric triple.
-    .replace(/\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:\/\d{2})?/g, spaces) // ISO dates
-    .replace(/#\d+|\b(?:issues|pull)\/\d+/g, spaces) // issue refs, in both spellings
-    .replace(/\b(ADR|PRD)\s+\d+/g, spaces) // document refs
-    // A path needs a LETTER somewhere. `docs/adr/0005-x.md` is a reference; `1.0065/1.0065`
-    // is a ratio wearing a slash, and masking it hid a claim in plain sight.
-    .replace(/[\w./-]*\/[\w./-]+/g, (m) => (looksLikePath(m) ? spaces(m) : m)) // file paths
-    .replace(/\bubuntu-?\d[\w.]*(?:\/[\d.]+)?/gi, spaces) // runner image / release ids
-    .replace(/\b(PLAN\s+)?step\s+\d+/gi, spaces) // plan step refs
-    .replace(/\bM\d+-S\d+\w*/g, spaces) // milestone/story refs
-    .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi, spaces) // commit shas
-    .replace(/\bp(50|95|99)\b/g, spaces) // percentile NAMES, not values
-    .replace(/^[ \t]*\d+\.[ \t]/gm, spaces); // ordered-list markers
+  const masked = maskReferences(prose);
   if (masked.length !== raw.length) {
     throw new Error(`a reference mask changed the length of ${file} — offsets would be wrong`);
   }
@@ -1096,6 +1256,40 @@ function occurrences(file: string): Numeral[] {
 }
 
 describe('the coverage contract is enforced, not merely asserted', () => {
+  // The surface was a hand-list and nothing could tell it was short. `dot-bench.ts` sat
+  // outside it while restating the historical `R0`, so that copy could drift alone and stay
+  // green (Codex, PR #161). The package's sources are a PARTITION now — on the surface, or
+  // named in `OFF_SURFACE` with a reason — recomputed from the directory and compared exactly,
+  // so a file that is neither fails here rather than being silently unguarded.
+  it('accounts for every source in the perf package — the surface cannot be short by one', () => {
+    const present = readdirSync(join(REPO_ROOT, 'packages', 'perf', 'src'))
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => `packages/perf/src/${f}`)
+      .sort();
+    const accounted = [...PERF_SOURCES, ...OFF_SURFACE.map((e) => e.file)].sort();
+    expect(
+      accounted,
+      'every `.ts` file in `packages/perf/src` must be on the claim surface or named in ' +
+        '`OFF_SURFACE` with the reason it is not. A source that is neither is unguarded by ' +
+        'accident rather than by decision — which is exactly how `dot-bench.ts` was missed.',
+    ).toEqual(present);
+    // Neither list may claim the same file, or "which is it" has two answers.
+    expect(
+      PERF_SOURCES.filter((f) => OFF_SURFACE.some((e) => e.file === f)),
+      'a source cannot be both guarded and deliberately unguarded',
+    ).toEqual([]);
+    for (const e of OFF_SURFACE) {
+      expect(e.why.length, `OFF_SURFACE entry ${e.file} has no reason`).toBeGreaterThan(20);
+    }
+  });
+
+  // `G`'s friendly names are a third spelling of the same paths, and a third spelling is what
+  // this file keeps having to delete. It cannot be derived (the names are the point), so it is
+  // checked instead.
+  it('names only guarded files in the exclusion-census shorthand', () => {
+    expect(Object.values(G).filter((f) => !GUARDED_FILES.includes(f))).toEqual([]);
+  });
+
   it('every figure the perf package states, and another guarded file repeats, has a row', () => {
     // Everything here keys by `claimKey`, so `12.340` in a source and `12.34` in a doc are
     // one claim rather than two strangers that never group (Codex, PR #161).
@@ -1590,6 +1784,58 @@ describe('the reference masks blank references, not measurements', () => {
         ' '.repeat(x.length),
       ),
     ).not.toContain('22');
+  });
+
+  // THE AUDIT, run against the REAL chain rather than a copy of it. The doctrine is one line —
+  // a candidate that parses as a numeral under the one grammar is not a reference — and every
+  // mask is audited against it here rather than trusted to have been written with it in mind.
+  //
+  // The SHA mask was the one still guessing, from length and alphabet: `10000e0` is seven
+  // alphanumerics with a digit and a letter, which is also ordinary scientific notation, so it
+  // was blanked before the numeral scan ever ran. Codex put that value in a guarded comment and
+  // in ADR prose and all 742 tests stayed green (PR #161) — a high-information claim, restated
+  // across two files, invisible to both sweeps.
+  it('lets every numeral spelling through the whole mask chain', () => {
+    const spellings = [
+      '10000e0', // Codex's reproduction: scientific notation wearing the SHA shape
+      '1e100000',
+      '9.22e-3',
+      '1.0065',
+      '0.00922',
+      '.00922',
+      '1,427',
+      '1_000',
+      '31041932972',
+      '1.69',
+      '7.5',
+      '0.0075',
+    ];
+    for (const s of spellings) {
+      expect(maskReferences(`the value ${s} holds`), `a mask ate ${s}`).toContain(s);
+    }
+  });
+
+  // The control the audit above needs: each mask still blanks the reference it owns. Without
+  // this pair the "let numerals through" rule could be satisfied by masking nothing at all.
+  it('still blanks the reference every mask owns', () => {
+    const references: readonly [string, string][] = [
+      ['recorded 2026-08-03 on the runner', '2026-08-03'],
+      ['see #163 for the backlog', '163'],
+      ['see issues/163 for the backlog', '163'],
+      ['stated in ADR 0005 already', '0005'],
+      ['see docs/adr/0005-performance-budgets.md now', '0005'],
+      ['ran on ubuntu-24.04 that day', '24.04'],
+      ['PLAN step 21 is explicit here', '21'],
+      ['landed in M2-S5b already', 'S5b'],
+      ['at commit a1600c9 exactly', 'a1600c9'],
+      ['the p95 statistic is reported', '95'],
+      ['1. the first list item', '1.'],
+    ];
+    for (const [text, reference] of references) {
+      expect(maskReferences(text), `${reference} survived its mask in: ${text}`).not.toContain(
+        reference,
+      );
+    }
   });
 
   it('bounds the ISO-date mask to real months and days, not any numeric triple', () => {
