@@ -173,6 +173,59 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   // KEYBOARD-reachable, not a mouse-only overflow container. It is hosted inside the same
   // `.wy-hud` scrollport the chips already use (contract §1), so it inherits that
   // scrollport's keyboard reachability by construction; this test proves that end to end.
+  test('658×320: hosting the preview does not cost the chips scrollport its column (#101 regression guard)', async ({
+    page,
+  }) => {
+    // `.wy-hud:has(> .wy-wave-preview)` exists for the STANDARD row reservation, but it is
+    // unscoped, and on Compact the preview always lives in the hud — so that fork always
+    // wins here, at a higher specificity than `.wy-hud`'s own Compact rule. #101 added
+    // `flex: 1 1 0` to it (a row measure) and the Compact reset for it was briefly written
+    // as the `0 1 auto` INITIAL, which drops `flex-grow` to 0 and leaves the scrollport
+    // content-sized instead of filling the column it owns (CodeRabbit, PR #164). Nothing
+    // else in the suite would have noticed: the chips still render, still scroll, still
+    // stay disjoint from the Dock — the column simply stops being filled.
+    await gotoAt(page, PHONE);
+    const hud = page.locator('.wy-hud');
+    await expect(page.locator('.wy-wave-preview')).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.querySelector('.wy-wave-preview')!.parentElement?.className,
+      ),
+      'the premise: on Compact the preview lives in the hud, so the :has() fork applies',
+    ).toContain('wy-hud');
+
+    // The computed value, and then the consequence — a pinned declaration that stopped
+    // producing its effect would pass the first alone.
+    expect(await hud.evaluate((el) => getComputedStyle(el).flexGrow)).toBe('1');
+    const boxes = await page.evaluate(() => {
+      const r = (s: string): DOMRect =>
+        document.querySelector(s)!.getBoundingClientRect() as DOMRect;
+      return {
+        hud: r('.wy-hud'),
+        dock: r('.wy-dock'),
+        status: r('.wy-status'),
+        // The column's own gap, READ rather than assumed: it is the exact slack a filled
+        // scrollport is allowed to leave, and hardcoding a guess here would make this gate
+        // fail on a gap change that is not a regression at all.
+        gap: parseFloat(getComputedStyle(document.querySelector('.wy-status')!).rowGap) || 0,
+      };
+    });
+    // The hud fills the space between its own top and the Dock below it: content-sized, it
+    // would stop short by the height of everything it is not rendering.
+    expect(
+      boxes.dock.top - (boxes.hud.top + boxes.hud.height),
+      'the chips scrollport must still fill the column down to the Dock',
+    ).toBeLessThanOrEqual(boxes.gap + 1);
+    expect(boxes.status.height, 'the Compact status column runs the full viewport height').toBe(
+      PHONE.height,
+    );
+    // ...and it is still the SCROLLPORT while filling that space — the other half of what
+    // `flex: 1 1 auto` buys here. Deliberately NOT a "taller than N" check: any threshold
+    // there would be a number invented for this test rather than a property of the layout,
+    // and reaching the Dock already says "fills the column" exactly.
+    expect(await hud.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto');
+  });
+
   test('658×320: the wave preview is its own visible, sighted-readable surface, and stays keyboard-reachable when the chips scrollport overflows at 200% zoom', async ({
     page,
   }) => {

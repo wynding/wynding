@@ -69,6 +69,28 @@ export interface GridRect extends Rect {
   readonly cellPx: number;
 }
 
+/** The STRUCTURALLY BUILDABLE region of the projected grid, in page coordinates: the grid
+ *  inset by exactly one cell on every side.
+ *
+ *  DERIVED, not chosen. `packages/sim`'s `footprintBuildable` accepts a 2×2 footprint only
+ *  where all four cells are `buildable-open` base terrain, and `buildGrid` blocks the whole
+ *  outer ring (its two openings are `walkable-unbuildable`, also never buildable). So legal
+ *  anchors run `col ∈ [1, cols-3] × row ∈ [1, rows-3]`, and the union of the cells those
+ *  footprints cover is precisely cols 1..cols-2 × rows 1..rows-2.
+ *
+ *  "Structurally" is the whole point (owner ruling, #101, 2026-08-17): a cell a tower could
+ *  EVER be placed on, not one that happens to be empty. A rule keyed to currently-empty
+ *  would LOOSEN as the board fills — letting an overlay drift back over the corner the issue
+ *  was opened about, and pass its own test while doing it. */
+export function buildableRect(grid: GridRect): Rect {
+  return {
+    x: grid.x + grid.cellPx,
+    y: grid.y + grid.cellPx,
+    width: grid.width - 2 * grid.cellPx,
+    height: grid.height - 2 * grid.cellPx,
+  };
+}
+
 /** Measure the projected playable grid from `.wy-board`'s box. */
 export async function projectedGrid(page: Page): Promise<GridRect> {
   const box = await page.locator('.wy-board').boundingBox();
@@ -157,10 +179,12 @@ export async function assertRegionRelations(
     ).toBeNull();
   }
 
-  // The wave preview (playtest round) — the SECOND Stage overlay, held to the Dock's
-  // doctrine: a bounded corner clip, here the TOP-LEFT. Gated ONLY in its floating home
-  // (a `.wy-stage` parent): in the hud home (Compact; `main.ts`'s sub-400px width
-  // bucket on Standard) the node lives inside an `overflow-y: auto` scrollport, where
+  // The wave preview (playtest round) — the SECOND Stage overlay, and since #101 the one
+  // held to a STRICTER rule than the Dock beside it: the Dock may still clip the grid's
+  // bottom-left corner by design, while the preview may not touch a buildable cell at all.
+  // Gated ONLY in its floating home (a `.wy-stage` parent): in the hud home (Compact, or a
+  // Stage with no compliant dead band — `main.ts`'s ratified fallback) the node lives
+  // inside an `overflow-y: auto` scrollport, where
   // `boundingBox()` is a LAYOUT rect — a scrolled-out preview reports coordinates
   // anywhere, including a negative y over the grid, while occluding nothing. What governs
   // it there is `.wy-hud`'s own bounded-scroll contract (`smoke.spec.ts`'s zoom gates)
@@ -180,29 +204,31 @@ export async function assertRegionRelations(
   if (preview !== null && previewFloating) {
     const stageR = stage as Rect;
     expect(contains(stageR, preview), 'the floating preview must sit inside the Stage').toBe(true);
-    const previewOverlap = intersect(preview, grid);
-    if (previewOverlap !== null) {
-      // Both bounds are chosen to be FALSIFIABLE — properties the stylesheet does not
-      // already guarantee (the card's own `max-height: 40%` would make a height check
-      // tautological, so there deliberately isn't one):
-      //  - AREA: the clip may cost at most 40% of the playable grid — this is what the
-      //    card's `min(256px, 45%)` width cap exists to keep true on the tiniest
-      //    Standard stages (a 360-wide portrait window), and it fails if either cap is
-      //    loosened.
-      //  - WIDTH, end-bounded like the dock's band (a start-bound would be vacuous: the
-      //    card is anchored at the stage's left edge, so any overlap trivially STARTS in
-      //    the left half).
-      expect(
-        previewOverlap.width * previewOverlap.height,
-        `the floating preview clips ${Math.round(
-          (100 * (previewOverlap.width * previewOverlap.height)) / (grid.width * grid.height),
-        )}% of the grid (max 40%)`,
-      ).toBeLessThanOrEqual(grid.width * grid.height * 0.4);
-      expect(
-        previewOverlap.x + previewOverlap.width,
-        'the floating preview may only clip the grid inside its LEFT half',
-      ).toBeLessThanOrEqual(grid.x + grid.width / 2);
-    }
+    // THE RATIFIED RULE (#101, owner 2026-08-17), replacing the ≤40%-of-grid-AREA allowance
+    // this gate carried before it. That allowance was retired for cause rather than
+    // tightened: it PASSED while the playtest failed, and still passed at 3.5% coverage,
+    // because bounding an overlap by AREA says nothing about WHICH cells are covered — a
+    // card can sit well inside its budget and still cover the exact corner a player wanted
+    // to build on. The quantity that matters is buildable territory removed, so that is
+    // what is measured: ZERO intersection, no budget to sit inside.
+    //
+    // The card may still overlap the blocked border ring and the two openings; those are
+    // board terrain no tower can ever occupy, and `preview-place.ts` reaches for them only
+    // after the letterbox margins come up short.
+    const buildable = buildableRect(grid);
+    const clipped = intersect(preview, buildable);
+    expect(
+      clipped,
+      clipped === null
+        ? ''
+        : `the floating preview covers ${Math.round(clipped.width)}×${Math.round(
+            clipped.height,
+          )}px of STRUCTURALLY BUILDABLE board (${(clipped.width / grid.cellPx).toFixed(1)}×${(
+            clipped.height / grid.cellPx
+          ).toFixed(1)} cells) at [${Math.round(preview.x)},${Math.round(preview.y)} ${Math.round(
+            preview.width,
+          )}×${Math.round(preview.height)}]`,
+    ).toBeNull();
   }
 
   const dock = await regionRect(page, 'dock');
