@@ -498,7 +498,12 @@ the record once the logs go. Each cell is the reported 4 dp value while `R` was 
 unrounded milliseconds — the sorted `R` column stays in `gate.ts`'s PROVENANCE rather than being
 copied here, so the two records cannot drift — and recomputing `stress / control` from the printed
 operands differs by up to 2e-4 — within the 3.9e-4 that rounding two operands permits, and not an inconsistency.
-Attempts 1–5 are the cohort on which the escalation rule fired.
+The escalation rule did NOT fire on attempts 1–5 of this table: it fired on the FIVE-ATTEMPT
+cohort of the earlier run 30851346335, whose operands and 1.7750 ceiling ADR 0005 carries, and
+whose firing is the `R = 1.8348` reported below. Recomputing the escalation from rows 1–5 here
+would use five numbers from the wrong run — an earlier sentence in this paragraph said exactly
+that and was wrong. What attempts 1–5 of THIS run are is the first five of the seventeen the
+owner authorised after the escalation, not the cohort that triggered it.
 
 | att | control p50 | stress p50 |
 | --- | ----------- | ---------- |

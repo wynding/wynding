@@ -116,10 +116,26 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
  *  A numeric token normalises to its number; anything else — run ids, commit heads, image
  *  names, block names — is its own exact string, since `a1600c9` is not a quantity. */
 function claimKey(stated: string): string {
-  const bare = stated.replace(/[,_]/g, '');
+  // A leading typographic minus (U+2212) or en-dash is the same sign as an ASCII '-';
+  // ADR 0005 writes the cohort's skew as −1.36 while `gate.ts` writes -1.36.
+  const bare = stated.replace(/[,_]/g, '').replace(/^[\u2212\u2013]/, '-');
   const parsed = Number(bare);
   return /^[+-]?\d[\d.]*$/.test(bare) && Number.isFinite(parsed) ? `n:${parsed}` : `s:${stated}`;
 }
+
+/** Claim ids that share a `claimKey` with another row — `0.0100` (the fixture's upper grid
+ *  point), `0.010` (the broad injection's k) and `0.01` (the flooring granularity) are three
+ *  different claims that all normalise to 0.01. Numeric equivalence is the right default, but
+ *  where two claims alias it stops telling ATTRIBUTION apart: an occurrence spelled `0.0100`
+ *  must be accounted for by a `0.0100` site, not by a `0.010` one that merely normalises to the
+ *  same number. Agreement AT a declared site is unaffected — there the owning claim is already
+ *  known, and the executable `TOLERANCE` legitimately reads `1.1` for a row valued `1.10`
+ *  (CodeRabbit, PR #161). */
+const ALIASED_KEYS: ReadonlySet<string> = (() => {
+  const seen = new Map<string, number>();
+  for (const c of CLAIMS) seen.set(claimKey(c.value), (seen.get(claimKey(c.value)) ?? 0) + 1);
+  return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k));
+})();
 
 /** Whether a value stated at a site is the claim the row holds. */
 function agrees(claim: Claim, stated: string): boolean {
@@ -356,103 +372,6 @@ const CONTRACT_EXCLUSIONS: readonly { readonly value: string; readonly why: stri
     why: "Collision: gate.ts's ~2.7% is the sigma agreement between the n = 4 and n = 17 cohorts; ADR 0005's ×2.7 is the centring step in a flake-rate decomposition this file deliberately drops.",
   },
 ];
-/** Figures a perf source PINS IN EXECUTABLE CODE — a threshold, a constant, a fixture
- *  parameter. These are not holes: an assertion is a stronger guard than a prose row, and the
- *  test below verifies each really does appear in the named file's CODE rather than only in
- *  its comments, so moving one into prose alone re-opens the obligation. */
-const PINNED_IN_CODE: readonly {
-  readonly value: string;
-  readonly file: string;
-  readonly why: string;
-}[] = [
-  {
-    value: '0.1',
-    file: 'packages/perf/src/gate.test.ts',
-    why: "The boundary fixture's control sample value — an executable constant in the pinned boundary case.",
-  },
-  {
-    value: '0.2',
-    file: 'packages/perf/src/gate.test.ts',
-    why: "The boundary fixture's stress sample value, pinned in the same executable case.",
-  },
-  {
-    value: '0.99',
-    file: 'packages/perf/src/gate-fixture.test.ts',
-    why: 'A fixture ratio asserted directly in code.',
-  },
-  {
-    value: '100',
-    file: 'packages/perf/src/oracle.ts',
-    why: 'A scene threshold asserted in executable code.',
-  },
-  {
-    value: '14',
-    file: 'packages/perf/src/gate-fixture.test.ts',
-    why: 'A fixture size asserted in code.',
-  },
-  {
-    value: '1427',
-    file: 'packages/perf/src/gate-fixture.test.ts',
-    why: 'The measured due-blast subset size, an executable constant (`N_SUBSET_MEASURED`).',
-  },
-  {
-    value: '15',
-    file: 'packages/perf/src/gate-fixture.test.ts',
-    why: 'A fixture parameter in code.',
-  },
-  {
-    value: '150',
-    file: 'packages/perf/src/oracle.ts',
-    why: "The tower-count assertion's threshold, executable.",
-  },
-  { value: '20', file: 'packages/perf/src/oracle.test.ts', why: 'A test fixture value in code.' },
-  {
-    value: '200',
-    file: 'packages/perf/src/oracle.ts',
-    why: '`MEDIAN_LIVE_CREEPS_THRESHOLD`, an exported constant.',
-  },
-  {
-    value: '2000',
-    file: 'packages/perf/src/oracle.ts',
-    why: 'The sustained-sample threshold, executable.',
-  },
-  {
-    value: '2499',
-    file: 'packages/perf/src/oracle.test.ts',
-    why: 'A degenerate-window fixture length in code.',
-  },
-  {
-    value: '2500',
-    file: 'packages/perf/src/oracle.test.ts',
-    why: 'The sample-count fixture, executable.',
-  },
-  {
-    value: '270',
-    file: 'packages/perf/src/gate-fixture.test.ts',
-    why: 'The concentrated-injection subset size, computed and asserted in code.',
-  },
-  {
-    value: '280',
-    file: 'packages/perf/src/oracle.ts',
-    why: 'The peak-live-creeps threshold, an exported constant.',
-  },
-  {
-    value: '3.0',
-    file: 'packages/perf/src/gate-fixture.test.ts',
-    why: 'A fixture multiplier in code.',
-  },
-  { value: '300', file: 'packages/perf/src/gate-fixture.test.ts', why: 'A fixture size in code.' },
-  {
-    value: '329',
-    file: 'packages/perf/src/oracle.ts',
-    why: '`ROUTE_LENGTH_FLOOR`, an exported constant with its own assertion.',
-  },
-  {
-    value: '55',
-    file: 'packages/perf/src/scenario.ts',
-    why: 'The build-tick count for the catalog scene, executable.',
-  },
-];
 
 /** REAL unrowed shared claims, pinned so the set cannot grow silently.
  *
@@ -464,6 +383,78 @@ const PINNED_IN_CODE: readonly {
  *  undertake — recorded here rather than absorbed silently, and asserted EXACTLY so a new gap
  *  fails the build instead of joining the list. */
 const KNOWN_UNROWED: readonly { readonly value: string; readonly why: string }[] = [
+  {
+    value: '0.1',
+    why: 'its canonical value is an executable constant in gate.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '0.2',
+    why: 'its canonical value is an executable constant in gate.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '0.99',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '100',
+    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '14',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '1427',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '15',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '150',
+    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '20',
+    why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '200',
+    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '2000',
+    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '2499',
+    why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '2500',
+    why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '270',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '280',
+    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '3.0',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '300',
+    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
+  {
+    value: '55',
+    why: 'its canonical value is an executable constant in scenario.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
   { value: '0.9', why: 'A fixture ratio quoted in the spike; oracle-surface.' },
   { value: '114', why: 'Peak armored live creeps — oracle.ts doc, ADR and spike.' },
   {
@@ -476,6 +467,11 @@ const KNOWN_UNROWED: readonly { readonly value: string; readonly why: string }[]
   { value: '19.2', why: "The control arm's population gap percentage — scenario.ts and spike." },
   { value: '25', why: 'A fixture/threshold figure shared between the fixture test and the docs.' },
   { value: '28.6', why: 'The pre-narrowing population gap percentage — scenario.ts and spike.' },
+
+  {
+    value: '329',
+    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
+  },
   { value: '330', why: 'Route-length cap at ~150 towers — oracle.ts, ADR and m2.' },
   { value: '36', why: 'Catalog-scene arithmetic shared between scenario.ts and m2.' },
   { value: '40', why: 'Board dimension / threshold numeral shared across oracle and the docs.' },
@@ -512,6 +508,32 @@ const OCCURRENCE_EXCEPTIONS: readonly {
 /** Blank everything in a `.ts` source except comment text, preserving length so byte offsets
  *  stay comparable with the resolver's. Tracks string and template literals, so `//` inside a
  *  string is code rather than a comment, and keeps TRAILING comments. */
+/** The scanner is a small lexer, not a parser: it tracks line/block comments and string and
+ *  template literals. Two constructs would desynchronise it — a NESTED template literal (a
+ *  backtick inside `${...}`), and a regex literal containing a quote, which it would read as
+ *  the start of a string. Neither exists in the guarded files today, so this is a tripwire
+ *  rather than a fix: if one is introduced, the scan must be upgraded before it can be
+ *  trusted, because a desynchronised lexer miscounts SILENTLY — exactly the failure mode this
+ *  file exists to prevent (CodeRabbit, PR #161). */
+function rejectUnlexableSyntax(file: string, src: string): void {
+  const bare = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+  const nestedTemplate = /`[^`]*\$\{[^}]*`/.test(bare);
+  const quoteInRegex =
+    /[=(,:]\s*\/(?![/*])(?:\\.|\[[^\]]*\]|[^/\n])*['"](?:\\.|\[[^\]]*\]|[^/\n])*\//.test(bare);
+  if (nestedTemplate || quoteInRegex) {
+    const what = [
+      nestedTemplate ? 'a nested template literal' : '',
+      quoteInRegex ? 'a regex literal containing a quote' : '',
+    ]
+      .filter(Boolean)
+      .join(' and ');
+    throw new Error(
+      `${file} contains syntax this scanner cannot lex (${what}). Upgrade commentsOnly before ` +
+        `trusting the scan — a desynchronised lexer miscounts silently.`,
+    );
+  }
+}
+
 function commentsOnly(src: string): string {
   const out = new Array<string>(src.length).fill(' ');
   let i = 0;
@@ -543,49 +565,21 @@ function commentsOnly(src: string): string {
   return out.join('');
 }
 
-/** Executable text with comments AND string/template literals removed — what is left is what
- *  a numeric ASSERTION can actually be written in.
- *
- *  Stripping strings is the whole point. An earlier version kept them, so `1.42` counted as
- *  "pinned in code" on the strength of appearing in an `it()` TITLE while the assertion under
- *  it checked `R0 === 1.00` — nothing executable pinned 1.42 at all, and its copies in the
- *  ADR, the spike and m2 could drift green. Codex caught it; the audit that followed rechecked
- *  all 20 entries under this stricter reading and reclassified exactly that one, which is now
- *  a normal claim row (`superseded-r0`). */
-function assertionsOnly(src: string): string {
-  const out = new Array<string>(src.length).fill(' ');
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    const n = src[i + 1];
-    if (c === '/' && n === '/') {
-      while (i < src.length && src[i] !== '\n') i++;
-    } else if (c === '/' && n === '*') {
-      const e = src.indexOf('*/', i + 2);
-      i = e === -1 ? src.length : e + 2;
-    } else if (c === "'" || c === '"' || c === '`') {
-      const q = c;
-      i++;
-      while (i < src.length && src[i] !== q) {
-        if (src[i] === '\\') i++;
-        i++;
-      }
-      i++;
-    } else {
-      out[i] = src[i] as string;
-      i++;
-    }
-  }
-  return out.join('');
-}
-
 const spaces = (m: string): string => ' '.repeat(m.length);
 
 /** The claim-bearing prose of a guarded file, masked to preserve every byte offset. */
 function scannedProse(file: string): string {
   const raw = read(file);
+  if (!file.endsWith('.md')) rejectUnlexableSyntax(file, raw);
   const prose = file.endsWith('.md') ? raw : commentsOnly(raw);
-  return prose
+  // Every mask replaces text with the SAME number of spaces, because the occurrence half
+  // compares byte offsets against the resolver's. A length change would silently shift every
+  // offset after it, so it is asserted rather than assumed (CodeRabbit, PR #161).
+  if (prose.length !== raw.length) {
+    throw new Error(`commentsOnly changed the length of ${file} — every offset after the
+      change would be wrong`);
+  }
+  const masked = prose
     .replace(/\d{4}-\d{2}-\d{2}(\/\d{2})?/g, spaces) // ISO dates
     .replace(/#\d+/g, spaces) // issue refs
     .replace(/\b(ADR|PRD)\s+\d+/g, spaces) // document refs
@@ -596,6 +590,10 @@ function scannedProse(file: string): string {
     .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi, spaces) // commit shas
     .replace(/\bp(50|95|99)\b/g, spaces) // percentile NAMES, not values
     .replace(/^[ \t]*\d+\.[ \t]/gm, spaces); // ordered-list markers
+  if (masked.length !== raw.length) {
+    throw new Error(`a reference mask changed the length of ${file} — offsets would be wrong`);
+  }
+  return masked;
 }
 
 interface Numeral {
@@ -632,10 +630,18 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   it('every figure the perf package states, and another guarded file repeats, has a row', () => {
     // Everything here keys by `claimKey`, so `12.340` in a source and `12.34` in a doc are
     // one claim rather than two strangers that never group (Codex, PR #161).
-    const rowed = new Set(CLAIMS.map((c) => claimKey(c.value)));
+    // A signed row also covers its MAGNITUDE here: the sweep's tokenizer reads numerals
+    // without their sign, so a row valued -1.36 is what covers a prose `1.36`. The sign is
+    // still enforced where it matters — at the row's sites, which capture it.
+    const rowed = new Set(
+      CLAIMS.flatMap((c) =>
+        c.numeric !== undefined && c.numeric < 0
+          ? [claimKey(c.value), claimKey(String(Math.abs(c.numeric)))]
+          : [claimKey(c.value)],
+      ),
+    );
     const surface = new Set(PERF_SOURCES.flatMap((f) => scan(f).map((n) => claimKey(n.value))));
     const excluded = new Set([...EXCLUDED].map(claimKey));
-    const pinned = new Set(PINNED_IN_CODE.map((e) => claimKey(e.value)));
     const where = new Map<string, Set<string>>();
     const spelling = new Map<string, string>();
     for (const file of GUARDED_FILES) {
@@ -655,7 +661,6 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     for (const [key, files] of where) {
       if (files.size < 2) continue;
       if (rowed.has(key)) continue;
-      if (pinned.has(key)) continue;
       gaps.push(spelling.get(key) as string);
     }
     gaps.sort();
@@ -664,8 +669,8 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       gaps,
       'these figures are stated by the perf package AND repeated in another guarded file, but ' +
         'have no claim row. Add a row (with every site); or a CONTRACT_EXCLUSIONS entry if the ' +
-        'numeral is a collision; or a PINNED_IN_CODE entry if an executable assertion already ' +
-        'guards it; or, if it is a real unrowed claim, KNOWN_UNROWED with the reason it is not ' +
+        'numeral is a collision; or, if it is a real unrowed claim, a KNOWN_UNROWED entry with ' +
+        'the reason it is not ' +
         `rowed yet:\n  ${gaps.join('\n  ')}`,
     ).toEqual([...KNOWN_UNROWED.map((e) => e.value)].sort());
   });
@@ -688,7 +693,12 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       const raw = read(file);
       for (const n of scan(file)) {
         if (!highInformation(n.raw)) continue;
-        if (!rowedValues.has(claimKey(n.value))) continue;
+        const key = claimKey(n.value);
+        // Aliased keys are attributed by exact spelling, so a `0.0100` occurrence cannot be
+        // accounted for by a `0.010` site that merely normalises to the same number.
+        if (ALIASED_KEYS.has(key)) {
+          if (!CLAIMS.some((c) => c.value === n.value)) continue;
+        } else if (!rowedValues.has(key)) continue;
         if (accounted.has(`${file}:${n.at}`)) continue;
         const before = raw.slice(Math.max(0, n.at - 90), n.at);
         if (
@@ -723,19 +733,6 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       expect(e.why.length, `CONTRACT_EXCLUSIONS entry "${e.value}" has no reason`).toBeGreaterThan(
         20,
       );
-    }
-  });
-
-  it('every PINNED_IN_CODE figure is pinned by a real numeric expression, not a title string', () => {
-    for (const e of PINNED_IN_CODE) {
-      const code = assertionsOnly(read(e.file));
-      const re = new RegExp(`(?<![\\w.])${e.value.replace('.', '\\.')}(?![\\d])`);
-      expect(
-        re.test(code) || re.test(code.replace(/[_,]/g, '')),
-        `PINNED_IN_CODE says ${e.value} is pinned in ${e.file}, but it appears only in a comment or a ` +
-          `string literal there, which pins nothing. It needs a claim row instead`,
-      ).toBe(true);
-      expect(e.why.length, `PINNED_IN_CODE entry ${e.value} has no reason`).toBeGreaterThan(20);
     }
   });
 

@@ -12,27 +12,41 @@
 // compares it to the row. Disagreement is a test failure; so is a site whose anchor no
 // longer resolves. Anchor rot has to be LOUD, or the check itself rots vacuous.
 //
-// THE COVERAGE CONTRACT — and it is a TEST, not this paragraph. `claims.test.ts`'s
-// `the coverage contract is enforced` is the authority: every figure `gate.ts` states that
-// also appears in another guarded file must have a row, or a named exclusion saying why the
-// numeral is a collision rather than a shared claim. Read this paragraph as a description
-// of that test, never as the promise itself — a prose contract cannot fail, which is
-// precisely how the first two versions of it came to be wrong.
+// THE COVERAGE CONTRACT — and it is a TEST, not this paragraph. The authority is
+// `claims.test.ts`'s describe block `the coverage contract is enforced, not merely asserted`,
+// and specifically its case `every figure the perf package states, and another guarded file
+// repeats, has a row`. Read what follows as a description of that test, never as the promise
+// itself — a prose contract cannot fail, which is precisely how the first versions of it came
+// to be wrong.
 //
-// Scope, stated exactly. IN: figures `gate.ts` states and some other guarded file repeats —
-// that is the propagation surface issue #86 names, and every occurrence of such a figure is
-// a site of its row, because a rowed claim with an unguarded restatement is the same defect
-// as no row at all. OUT: figures stated in only one file (nothing to propagate), and
-// figures the docs share among themselves without `gate.ts` participating — the p99/p95-era
-// baselines this file deliberately no longer states are ADR 0005's history to keep, not
-// this table's to guard.
+// SCOPE, as the test implements it. The SURFACE is `PERF_SOURCES` — the six `packages/perf`
+// sources; a figure is a perf-gate claim if the perf package states it. Coverage is then
+// ALL-PAIRS across every file in `GUARDED_FILES`: any such figure appearing in two guarded
+// files needs a row, whoever states it, so an ADR<->spike disagreement is caught with no
+// `gate.ts` copy involved. An earlier version of this paragraph said the contract was
+// `gate.ts`-anchored and that document-only pairs were out of scope; that described an
+// earlier, narrower test, and CodeRabbit was right that it contradicted the implementation.
 //
-// The contract was overstated twice before it was enforced, and both corrections are on
-// record rather than quietly folded in: ship-review found ten multi-file figures with no
-// row and five rowed figures whose second and third copies were unguarded; Codex then found
-// two whole families (the DoT records/carriers, and the creep populations) still missing,
-// at which point the sweep replaced the promise and immediately turned up 34 gaps rather
-// than two. Each time the fix was to close the gap, never to soften the claim to fit it.
+// What the surface deliberately excludes is the rest of those documents' numeric content —
+// device frame budgets, board geometry, wave arithmetic — which belongs to other packages and
+// other tests. Measured: taking "all pairs" over every numeral in the three documents yields
+// 196 gaps against 39 on the perf surface, and annexing the other 157 would bind other groups'
+// documents to this table for no propagation benefit.
+//
+// THREE ESCAPES, each named and machine-checked rather than assumed: `CONTRACT_EXCLUSIONS`
+// for numerals that collide across unrelated claims, `OCCURRENCE_EXCEPTIONS` for a specific
+// occurrence that means something else, and `KNOWN_UNROWED` for figures that are real unrowed
+// shared claims — the scene ORACLE's family, a neighbouring surface — asserted EXACTLY so the
+// set cannot grow silently. That residue is owner-ruled to stand for this change and is
+// tracked in #163.
+//
+// The contract was overstated three times before it was enforced this way, and the corrections
+// are on record rather than quietly folded in: ship-review found ten multi-file figures with no
+// row and five rowed figures whose second and third copies were unguarded; Codex found two
+// whole families still missing, then found rows were matched by VALUE rather than per
+// occurrence, then found an executable-pin exemption that guarded no prose copy; CodeRabbit
+// found the sweep seeded from one file. Each time the fix was to close the gap, never to soften
+// the claim to fit it.
 //
 // HOW TO CHANGE A NUMBER. Edit the row here, then every site it lists — the test tells you
 // when you have missed one. Adding a new copy of an existing claim means adding a site to
@@ -1413,6 +1427,11 @@ export const CLAIMS: readonly Claim[] = [
       'run 4 of the four diagnostic runs under the old p95/p50 pairing — the failure that triggered the statistic change',
     sites: [
       {
+        file: SPIKE,
+        anchor: 'whose firing is the `R = ',
+        pattern: '([\\d.]+)`',
+      },
+      {
         file: GATE,
         anchor: '\\| p95\\(subset\\) / p50\\(control\\) \\| [\\d.]+ [\\d.]+ [\\d.]+',
         pattern: '\\s*([\\d.]+)',
@@ -1571,14 +1590,14 @@ export const CLAIMS: readonly Claim[] = [
   // ---------------------------------------------------------------------------------------
   {
     id: 'skew-g1',
-    claim: "the 17-attempt cohort's sample skewness",
-    value: '1.36',
-    numeric: 1.36,
+    claim: "the 17-attempt cohort's sample skewness, SIGN INCLUDED",
+    value: '-1.36',
+    numeric: -1.36,
     basis:
-      'left-skewed, which thins the upper tail in our favour but which the chi-square bound assumes away',
+      'left-skewed, which thins the upper tail in our favour but which the chi-square bound assumes away. The sign is part of the claim and is captured rather than matched by a wildcard: flipping it to +1.36 reverses the statistical meaning while the surrounding prose still says left-skewed, and an earlier magnitude-only capture let that pass (Codex, PR #161)',
     sites: [
-      { file: GATE, anchor: '\\(g1 = -', pattern: '([\\d.]+)\\)' },
-      { file: ADR, anchor: 'left-skewed \\(g1 = .', pattern: '([\\d.]+)\\)' },
+      { file: GATE, anchor: '\\(g1 = ', pattern: '(-?[\\d.]+)\\)' },
+      { file: ADR, anchor: 'left-skewed \\(g1 = ', pattern: '([\u2212-]?[\\d.]+)\\)' },
     ],
   },
   {
@@ -1735,6 +1754,11 @@ export const CLAIMS: readonly Claim[] = [
     basis:
       'superseded by the 1.1000 ceiling at M2-S6; kept because the docs still read the p95 era against it',
     sites: [
+      {
+        file: SPIKE,
+        anchor: 'whose operands and',
+        pattern: '\\s*([\\d.]+) ceiling',
+      },
       { file: ADR, anchor: '1\\.427743 rounded down\\. Ceiling', pattern: '\\s*([\\d.]+)\\.' },
       { file: ADR, anchor: 'Ceiling = 1\\.42 . 1\\.25 =', pattern: '\\s*\\*\\*([\\d.]+)\\*\\*' },
       {
