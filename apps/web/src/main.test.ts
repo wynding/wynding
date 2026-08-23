@@ -1633,6 +1633,32 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     }
   });
 
+  it('NO SIGNAL after a Compact→Standard hand-off leaves the card parked, never on the occluding default (#101, CodeRabbit)', () => {
+    // The seam a pre-move `parked` flag left open: crossing back out of Compact clears the
+    // latch, so a first Standard tick with a degenerate box used to fall through to
+    // `setFloatBand`, clear the grants, and drop the card on the stylesheet default — which
+    // is the pre-#101 placement over the buildable corner. "No signal moves nothing" is now
+    // unconditional, so the card stays where the Compact branch left it until a real
+    // measurement arrives.
+    const mq = compactMq(true); // boot INSIDE Compact
+    const h = homeApp({ matchMedia: mq.matchMedia });
+    try {
+      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
+      expect(preview.parentElement?.className).toBe('wy-hud');
+      // Cross back to Standard. jsdom lays nothing out, so this tick has no measurement —
+      // exactly the mid-resize case. The fork crossing itself is a legitimate re-home, so
+      // the card returns to the Standard starting placement; what must NOT happen is a band
+      // grant being written from a measurement that never existed.
+      mq.set(false);
+      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('');
+      expect(preview.style.getPropertyValue('--wy-preview-left')).toBe('');
+      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(false);
+      h.app.destroy();
+    } finally {
+      /* no stubs to restore */
+    }
+  });
+
   it('NO SIGNAL while parked changes nothing — a degenerate box is not evidence of room (#101)', () => {
     // `unmeasured` means "nothing was laid out", which is not the same claim as "there is
     // room". Re-homing a deliberately parked card on it would be a move with nothing behind

@@ -1732,12 +1732,18 @@ a.wy-home:focus-visible {
      width-fixed, so hud content growth scrolls internally and cannot move the board —
      content-sizing is safe and the column's own budget (contract §2) governs.
      BOTH halves are reset, not just the height. `flex: 1 1 0` is a ROW measure: this fork's
-     status is a flex COLUMN, where a zero basis with grow would stretch the hud down the
-     whole column and shove the Dock off the bottom. Compact's in-flow home is unchanged by
-     #101 and this line is what keeps that true. */
+     status is a flex COLUMN, where a zero BASIS makes the hud size to its content instead of
+     to the space left over — the opposite of what the column wants.
+     RESTORE `1 1 auto`, which is `.wy-hud`'s own Compact value above, NOT the `0 1 auto`
+     initial (CodeRabbit, PR #164). This selector outranks that base rule on specificity, and
+     on Compact the preview ALWAYS lives in the hud, so this fork always wins — writing the
+     initial here would drop `flex-grow` to 0 and leave the chips scrollport content-sized,
+     silently un-filling the column it is supposed to own. "Compact's in-flow home is
+     unchanged by #101" is only true if this line says so exactly; `compact.spec.ts` now pins
+     the grow so a third value cannot land here unnoticed. */
   .wy-hud:has(> .wy-wave-preview) {
     height: auto;
-    flex: 0 1 auto;
+    flex: 1 1 auto;
   }
 }
 

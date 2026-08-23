@@ -492,7 +492,18 @@ for (const size of PINNED_STANDARD) {
           list.append(li);
         }
       });
-      await page.waitForTimeout(200); // the ResizeObserver's re-placement
+      // POLL for the settled home rather than sleeping at it (the `expect.poll` precedent
+      // this file already uses at the 140%-zoom pins). The re-placement is a
+      // ResizeObserver tick, so a fixed 200ms was a bet on the runner's mood: too short
+      // under load and this reads a half-settled home, too long and every one of sixteen
+      // cases pays for it. Polling to the EXPECTED value is safe here because the assertion
+      // that follows is the real gate — a home that never arrives fails it on timeout with
+      // the same message, and a home that arrives and then moves would fail the occlusion
+      // half. In the `either` case there is nothing to poll toward, so settle on a real
+      // parent instead.
+      await expect
+        .poll(() => previewHome(page), { message: 'the re-placement never settled' })
+        .toMatch(expectedHome === 'either' ? /^(stage|hud)$/ : new RegExp(`^${expectedHome}$`));
 
       // LIVENESS FIRST, before any branch reads it. Asserting the home against the measured
       // table is what stops an over-parking regression from passing the disjointness check

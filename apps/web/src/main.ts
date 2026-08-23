@@ -387,11 +387,27 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     shell.placePreview('hud');
   };
 
+  /** True while the Compact branch owns the card, so leaving Compact can be told apart from
+   *  an ordinary Standard tick. */
+  let compactOwned = compactMq.matches;
+
   const applyPreviewHome = (): void => {
     if (compactMq.matches) {
       parkPreviewInHud();
       hudLatchKey = null; // re-measure on the way back out of Compact
+      compactOwned = true;
       return;
+    }
+    if (compactOwned) {
+      // LEAVING COMPACT IS A FRESH START for Standard, so it restores the same starting
+      // placement `init` does. Without this the card would stay in the hud wherever the very
+      // first Standard tick has no measurement to act on — since "no signal moves nothing"
+      // below is now unconditional, nothing else would ever move it back. The transient is
+      // bounded and self-correcting: the ResizeObserver fires with a real box immediately
+      // after a fork crossing (the crossing IS a resize), so the default placement lasts at
+      // most that one tick, and every steady state reaches this function with a measurement.
+      compactOwned = false;
+      shell.placePreview('stage');
     }
     // Held by the latch: nothing the card can do moves this key, so nothing to re-decide.
     if (hudLatchKey !== null && hudLatchKey === previewHomeKey()) return;
@@ -412,22 +428,38 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // one. That is the common case (a resize while parked), and it now costs zero DOM moves.
     const parked = previewEl.parentElement !== shell.stage;
     let band = placePreviewFloat(measureStageFrame());
-    // NO SIGNAL while deliberately parked (a stage mid-resize reporting a degenerate box):
-    // learn nothing, change nothing. Re-homing a parked card on no evidence would be a move
-    // with nothing behind it — and it would spend the scrollport for free.
-    if (band.kind === 'unmeasured' && hudLatchKey !== null) return;
-    if (band.kind !== 'none' && parked) {
+    // NO SIGNAL MOVES NOTHING, EVER — one rule, checked before anything else can act on it
+    // (CodeRabbit, PR #164). A degenerate box means "nothing was laid out", which is not the
+    // claim "there is room" and not the claim "there is none"; the only honest response to
+    // no evidence is to leave the card exactly where it is, with the grants it already
+    // carries. The starting placement is chosen ONCE, at init, so this branch never has to
+    // double as a default — see the `placePreview('stage')` beside `applyPreviewHome()`.
+    //
+    // Two earlier shapes of this guard each covered one caller and left the other exposed:
+    // first `hudLatchKey !== null` (the parked card), then `!parked` beside it (the floating
+    // one). The second was still wrong, because `parked` is sampled BEFORE the exploratory
+    // move below and the re-measurement can land here with it stale — a Compact→Standard
+    // hand-off with a momentarily degenerate box would then fall straight through to
+    // `setFloatBand`, clear the grants, and drop the card on the pre-#101 default over the
+    // buildable corner. One unconditional rule has no such seam.
+    if (band.kind === 'unmeasured') return;
+    if (band.kind === 'band' && parked) {
       // Only a MAYBE — the bound above is one-sided. Take the home change we were going to
       // take anyway, then read the truth in the frame that now actually exists, so a band
       // computed against the shrunken Stage is never painted even for a frame.
       const chipsScrollTop = shell.hudBox.scrollTop;
       shell.placePreview('stage');
       band = placePreviewFloat(measureStageFrame());
-      if (band.kind === 'none') {
+      if (band.kind !== 'band') {
+        // UNDO, keyed on the RE-measurement rather than on anything sampled before the move.
+        // Two different reasons to land here and they must not be conflated: `none` is
+        // evidence (the one-sided bound did its job) and latches; `unmeasured` is the box
+        // going degenerate between the two reads, which is no evidence at all and must leave
+        // the latch open so the next real tick decides.
         parkPreviewInHud();
         // The bounce ends where it started, so it must cost the reader nothing either.
         shell.hudBox.scrollTop = chipsScrollTop;
-        hudLatchKey = previewHomeKey();
+        hudLatchKey = band.kind === 'none' ? previewHomeKey() : null;
         return;
       }
     }
@@ -442,25 +474,18 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       hudLatchKey = previewHomeKey();
       return;
     }
-    // NO SIGNAL WHILE ALREADY FLOATING — the other half of the guard the parked card got
-    // above, and the more damaging half. `setFloatBand` CLEARS the three band grants for any
-    // non-band answer, and the stylesheet's own defaults behind them are the pre-#101
-    // placement: `left: 0.5rem`, `max-width: min(256px, 45%)` — the card parked on the
-    // board's top-left corner, over the very cells this issue was opened about. So a single
-    // transient degenerate box (a stage mid-resize) would snap the card back onto buildable
-    // ground for a tick. Keeping the last valid band is the only honest response to no
-    // evidence: it is still the answer to the last question actually asked.
-    //
-    // The boot path is deliberately NOT caught by this. At boot the card is still in the
-    // slot `shell.ts` built it into (`.wy-hud`), so `parked` is true and the guard does not
-    // fire — which is what lets jsdom, where nothing is ever laid out, still reach the
-    // documented float default below.
-    if (band.kind === 'unmeasured' && !parked) return;
+    // Only a real band reaches here — `unmeasured` returned above and `none` parked.
     shell.placePreview('stage');
     hudLatchKey = null;
     setFloatBand(band);
     setFloatScroll(!previewEl.hidden && previewEl.scrollHeight > previewEl.clientHeight);
   };
+  // THE STARTING PLACEMENT, chosen here rather than inside the loop. `shell.ts` builds the
+  // preview into its hud slot, and `applyPreviewHome` now treats "no measurement" as "move
+  // nothing" without exception — so the Standard default has to be stated once, explicitly,
+  // instead of falling out of a branch that also has to answer mid-resize questions. jsdom,
+  // which lays nothing out and therefore never measures anything, gets exactly this.
+  shell.placePreview('stage');
   applyPreviewHome();
   compactMq.addEventListener('change', applyPreviewHome);
   // Observing BOTH boxes: content and zoom changes resize the preview (the scroll-form
