@@ -418,23 +418,47 @@ test('the preview re-homes across the layout fork — Stage on Standard, chips c
 // passed at 3.5% coverage, because bounding an overlap by area says nothing about WHICH
 // cells are covered.
 
-/** Every Standard viewport this suite pins, plus the reported one. Compact viewports are
- *  excluded on purpose — there the preview is in its in-flow hud home, where a layout rect
- *  inside a scrollport says nothing about occlusion (`layout-probe.ts` records why). */
+/** Every Standard viewport this suite pins, plus the reported one, EACH WITH THE HOME IT
+ *  MUST LAND IN at 100% and 200% zoom. Compact viewports are excluded on purpose — there the
+ *  preview is in its in-flow hud home, where a layout rect inside a scrollport says nothing
+ *  about occlusion (`layout-probe.ts` records why).
+ *
+ *  THE `home` COLUMN IS THE LIVENESS HALF OF THIS GATE, and it exists because the
+ *  disjointness assertion alone cannot fail in the direction that matters. Parking every
+ *  viewport in the hud satisfies "occludes no buildable cell" perfectly — an in-flow card
+ *  occludes nothing — so a regression that over-parked the card would sail through all
+ *  sixteen combinations while costing the board up to a third of its cells. That cost is the
+ *  residual this PR measures, so the measurement is what gets pinned: these values ARE the
+ *  residual table in `docs/accessibility-checklist.md`, and a change to either has to move
+ *  the other.
+ *
+ *  Read the `hud` rows as the ratified escape hatch firing where the dead space cannot hold
+ *  a legible card, not as spare capacity. */
 const PINNED_STANDARD = [
-  { width: 1512, height: 854 }, // the viewport #101 was reported at
-  { width: 1440, height: 900 },
-  { width: 1366, height: 768 },
-  { width: 1280, height: 900 }, // the hidpi projects' fixed viewport
-  { width: 1280, height: 720 }, // Playwright's Desktop Chrome default
-  { width: 1000, height: 720 },
-  { width: 640, height: 560 }, // coarse-pointer landscape tablet — Standard
-  { width: 360, height: 640 }, // portrait phone — Standard by height
-];
+  // the viewport #101 was reported at
+  { width: 1512, height: 854, home: { 100: 'stage', 200: 'stage' } },
+  { width: 1440, height: 900, home: { 100: 'stage', 200: 'stage' } },
+  { width: 1366, height: 768, home: { 100: 'stage', 200: 'stage' } },
+  // the hidpi projects' fixed viewport — 20px of letterbox at 200%, under the floor
+  { width: 1280, height: 900, home: { 100: 'stage', 200: 'hud' } },
+  // Playwright's Desktop Chrome default
+  { width: 1280, height: 720, home: { 100: 'stage', 200: 'stage' } },
+  // the board very nearly fills the Stage here: 18px of letterbox at 100%
+  { width: 1000, height: 720, home: { 100: 'hud', 200: 'stage' } },
+  // coarse-pointer landscape tablet — Standard
+  { width: 640, height: 560, home: { 100: 'hud', 200: 'hud' } },
+  // portrait phone — Standard by height
+  { width: 360, height: 640, home: { 100: 'hud', 200: 'hud' } },
+] as const satisfies readonly {
+  readonly width: number;
+  readonly height: number;
+  readonly home: { readonly 100: 'stage' | 'hud'; readonly 200: 'stage' | 'hud' };
+}[];
 
 for (const size of PINNED_STANDARD) {
-  for (const zoom of [100, 200]) {
-    test(`${size.width}×${size.height} at ${zoom}% zoom: the preview occludes no structurally buildable cell (#101)`, async ({
+  for (const zoom of [100, 200] as const) {
+    const expectedHome = size.home[zoom];
+    test(`${size.width}×${size.height} at ${zoom}% zoom: the preview takes its ${expectedHome} home and occludes no structurally buildable cell (#101)`, async ({
       page,
     }) => {
       await gotoAt(page, size);
@@ -455,7 +479,17 @@ for (const size of PINNED_STANDARD) {
       });
       await page.waitForTimeout(200); // the ResizeObserver's re-placement
 
+      // LIVENESS FIRST, before any branch reads it. Asserting the home against the measured
+      // table is what stops an over-parking regression from passing the disjointness check
+      // below by simply having nothing on the board to be disjoint from.
       const home = await previewHome(page);
+      expect(
+        home,
+        home === 'hud'
+          ? 'the card fell back to the hud, which costs the board its 40dvh reservation — ' +
+              'if that is now correct here, re-measure and move the residual table with it'
+          : 'the card floated where the measured residual says the dead space cannot hold it',
+      ).toBe(expectedHome);
       if (home === 'hud') {
         // The ratified escape hatch. Nothing to measure — an in-flow card inside a
         // scrollport occludes nothing — but assert it is genuinely in flow so a float that
@@ -467,7 +501,6 @@ for (const size of PINNED_STANDARD) {
         ).toBe('static');
         return;
       }
-      expect(home, 'the preview must be in one of its two homes').toBe('stage');
 
       const grid = await projectedGrid(page);
       const card = (await page.locator('.wy-wave-preview').boundingBox()) as Rect;

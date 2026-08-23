@@ -841,6 +841,23 @@ escape hatch — the in-flow hud home — takes it, at the cost of the status ro
 40dvh. Measured across the pinned viewports at 100%/200% zoom, three combinations pay that
 cost in board size: **1000×720 at 100%** (cellPx 28 → 19), **1280×900 at 200%** (34 → 24)
 and **640×560 at 100%** (17 → 14). Everywhere else the float is kept and the grid is
-unchanged. The card itself is narrower than before — 67-102px at 100% zoom against the
-previous 119px — which is the price of the ratified rule at these viewport shapes, and the
-floor is the single number that trades one against the other.
+unchanged. Those three combinations are pinned by name in `stage-stability.spec.ts`'s
+`PINNED_STANDARD` table, so this paragraph and that gate cannot drift apart: the sweep
+asserts the home each viewport lands in BEFORE it checks occlusion, because "occludes no
+buildable cell" is satisfied perfectly by parking every viewport in the hud, and a
+regression that did so would otherwise pass all sixteen combinations while quietly
+spending the board. The card itself is narrower than before — 67-102px at 100% zoom against
+the previous 119px — which is the price of the ratified rule at these viewport shapes, and
+the floor is the single number that trades one against the other.
+
+**A second-order residual, found while pinning the first and NOT fixed here.** On a WIDE
+Standard viewport the hud fallback is not content-invariant the way the narrow one is. The row
+reservation pins `.wy-hud`'s HEIGHT (measured 232px at 1000×720, unchanged by wave content),
+but the preview's in-flow form is `max-width: none`, so a four-entry wave widens the hud
+enough to WRAP the status row itself: measured at 1000×720, `.wy-status` 248 → 288px and the
+board 19 → 18 cellPx as wave 9 arrives. That is a mid-run re-projection of exactly the class
+`stage-stability.spec.ts` forbids — the 360×640 hud home is immune only because its status
+COLUMN is width-fixed. It is pre-existing behaviour of that home rather than anything this
+change introduced, but #101 is what routes wide viewports into it, so it is recorded here
+rather than left to be rediscovered. Fixing it means changing how that home is laid out,
+which is a product decision outside this issue's ratified scope.

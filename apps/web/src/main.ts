@@ -442,8 +442,20 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       hudLatchKey = previewHomeKey();
       return;
     }
-    // `unmeasured` (jsdom, which lays nothing out) reaches here only from an UNLATCHED card:
-    // no signal, so keep the float and leave the stylesheet's own default placement alone.
+    // NO SIGNAL WHILE ALREADY FLOATING — the other half of the guard the parked card got
+    // above, and the more damaging half. `setFloatBand` CLEARS the three band grants for any
+    // non-band answer, and the stylesheet's own defaults behind them are the pre-#101
+    // placement: `left: 0.5rem`, `max-width: min(256px, 45%)` — the card parked on the
+    // board's top-left corner, over the very cells this issue was opened about. So a single
+    // transient degenerate box (a stage mid-resize) would snap the card back onto buildable
+    // ground for a tick. Keeping the last valid band is the only honest response to no
+    // evidence: it is still the answer to the last question actually asked.
+    //
+    // The boot path is deliberately NOT caught by this. At boot the card is still in the
+    // slot `shell.ts` built it into (`.wy-hud`), so `parked` is true and the guard does not
+    // fire — which is what lets jsdom, where nothing is ever laid out, still reach the
+    // documented float default below.
+    if (band.kind === 'unmeasured' && !parked) return;
     shell.placePreview('stage');
     hudLatchKey = null;
     setFloatBand(band);

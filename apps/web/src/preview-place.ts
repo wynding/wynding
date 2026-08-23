@@ -45,6 +45,26 @@ export const PREVIEW_FLOAT_GAP_PX = 8;
  *  asserts the stylesheet still carries this number, so the two cannot drift. */
 export const PREVIEW_FLOAT_CAP_PX = 256;
 
+/** How much wider the right band must be before it actually beats the left one, in CSS px.
+ *
+ *  A TIE TOLERANCE, not a preference weight, and it is load-bearing rather than cosmetic.
+ *  `.wy-board` is `inset: 0` inside `.wy-stage`, so the letterbox is the projection's own:
+ *  with `rem = stageWidth - cellPx*cols`, the grid starts at `floor(rem/2)` and the two
+ *  bands come out at `floor(rem/2) + borrow - gap` and `ceil(rem/2) + borrow - gap`. Their
+ *  difference is therefore `ceil(rem/2) - floor(rem/2)`, which is **0 for an even integer
+ *  remainder, 1 for an odd one, and under 2 for any fractional one** — so the right band is
+ *  never narrower, and a bare `leftRoom >= rightRoom` test hands it every odd remainder.
+ *  "Ties go left" then described only the even half of reality.
+ *
+ *  The failure that makes this a defect rather than a nit: dragging a window horizontally
+ *  moves `rem` one pixel at a time, so its parity ALTERNATES, so the card would jump from
+ *  one side of the Stage to the other on consecutive ResizeObserver ticks — a strobe across
+ *  the board for the whole drag. A tolerance strictly greater than the largest possible
+ *  difference removes the parity from the decision entirely: the side stops depending on a
+ *  bit that flips every pixel. Every fixture this suite had happened to land on an even
+ *  remainder, which is why sixteen green viewport sweeps never witnessed it. */
+export const PREVIEW_FLOAT_SIDE_BIAS_PX = 2;
+
 /** The narrowest card this module will place. Below it the float is abandoned for the hud
  *  home: at 64 px even the content diet's shortest row ("10 × Creep") wraps per word at
  *  100% zoom, and a card that cannot render one row is not a surface — it is a smear over
@@ -93,8 +113,9 @@ export type PreviewFloat =
  *  grid cell at all), then the board's BLOCKED BORDER band (one cell of permanently
  *  unbuildable terrain — the ring, and the two openings that sit in it), then nothing, at
  *  which point `main.ts` sends the card to its in-flow hud home. Within a tier the WIDER of
- *  the two side bands wins, since the whole constraint here is horizontal room; a tie goes
- *  left, the card's historical corner and the side away from the Rail. */
+ *  the two side bands wins, since the whole constraint here is horizontal room — but only
+ *  by a margin worth having: anything inside `PREVIEW_FLOAT_SIDE_BIAS_PX` counts as a tie
+ *  and goes left, the card's historical corner and the side away from the Rail. */
 export function placePreviewFloat(input: PreviewFloatInput): PreviewFloat {
   const { stageWidth, stageHeight, boardLeft, boardWidth, boardHeight, cols, rows } = input;
   if (stageWidth <= 0 || stageHeight <= 0 || boardWidth <= 0 || boardHeight <= 0) {
@@ -117,8 +138,13 @@ export function placePreviewFloat(input: PreviewFloatInput): PreviewFloat {
     const borrow = overBoard ? projection.cellPx : 0;
     const leftRoom = gridLeft + borrow - PREVIEW_FLOAT_GAP_PX;
     const rightRoom = stageWidth - (gridRight - borrow) - PREVIEW_FLOAT_GAP_PX;
-    const side = leftRoom >= rightRoom ? 'left' : 'right';
-    const room = Math.floor(Math.max(leftRoom, rightRoom));
+    const side = leftRoom + PREVIEW_FLOAT_SIDE_BIAS_PX >= rightRoom ? 'left' : 'right';
+    // The room of the band actually CHOSEN, never `max(left, right)`. With a tie tolerance
+    // in play those two stop agreeing — left can now win while right is up to 2px wider —
+    // and a cap taken from the other side's room would let the card reach exactly that far
+    // past its own band, i.e. onto the buildable cells this whole module exists to keep
+    // clear. The bug the tolerance would otherwise introduce, closed in the same line.
+    const room = Math.floor(side === 'left' ? leftRoom : rightRoom);
     if (room >= PREVIEW_FLOAT_MIN_W_PX) {
       return {
         kind: 'band',

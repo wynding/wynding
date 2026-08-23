@@ -80,6 +80,41 @@ describe('preview-place — the compliant band (#101)', () => {
     expect(wide).toMatchObject({ kind: 'band', maxWidth: PREVIEW_FLOAT_CAP_PX });
   });
 
+  it('an ODD letterbox remainder still goes left — the side must not ride on a parity bit', () => {
+    // The defect this pins. `.wy-board` is `inset: 0`, so the bands are `floor(rem/2)` and
+    // `ceil(rem/2)` either side of the grid: they differ by ONE whenever the remainder is
+    // odd, and the right one is always the wider. A bare `leftRoom >= rightRoom` therefore
+    // sends the card RIGHT — beside the Rail — on every odd remainder, which is half of all
+    // window widths. Worse, dragging a window horizontally alternates that parity once per
+    // pixel, so the card would strobe from one side of the Stage to the other for the whole
+    // drag. Every other fixture in this file happens to land on an even remainder, which is
+    // exactly how sixteen green viewport sweeps missed it.
+    //
+    // 1145×810: 24 rows at 33px = 792, 28 cols at 33px = 924, so rem = 221 — ODD.
+    const odd = placePreviewFloat(stage(1145, 810));
+    expect(odd).toMatchObject({ kind: 'band', side: 'left', overBoard: false });
+    // The even neighbour must agree, or the side is still parity-sensitive: one pixel of
+    // window width may change the card's WIDTH by a pixel, never which side it is on.
+    expect(placePreviewFloat(stage(1144, 810))).toMatchObject({ side: 'left' });
+    expect(placePreviewFloat(stage(1146, 810))).toMatchObject({ side: 'left' });
+
+    // ...and the cap follows the band actually chosen. `floor(221/2) = 110` on the left
+    // against 111 on the right: taking the wider side's room while sitting on the narrower
+    // one would push the card a pixel past its own band, onto a buildable cell.
+    expect(odd).toMatchObject({ maxWidth: 110 - PREVIEW_FLOAT_GAP_PX });
+  });
+
+  it('a fractional stage width — the vw-sized Rail’s real output — does not flip the side either', () => {
+    // `--wy-rail-w`'s `18vw` arm produces fractional Rail widths, so the Stage is routinely
+    // fractional too and the remainder is never a clean integer. The band difference is
+    // then anywhere in [0, 2), which is precisely what the tolerance is sized against.
+    for (const width of [1144.4, 1144.6, 1145.2, 1145.8, 1146.5]) {
+      expect(placePreviewFloat(stage(width, 810)), `stage width ${width}`).toMatchObject({
+        side: 'left',
+      });
+    }
+  });
+
   it('follows the WIDER band and ties go LEFT — the card’s historical corner, away from the Rail', () => {
     const centred = placePreviewFloat(stage(1144, 810));
     expect(centred).toMatchObject({ side: 'left' });

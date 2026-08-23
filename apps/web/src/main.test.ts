@@ -1610,6 +1610,29 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     }
   });
 
+  it('NO SIGNAL while FLOATING keeps the band — it must not snap back to the occluding default (#101)', () => {
+    // The grants' fallbacks in `ui.css` are the PRE-#101 placement (`left: 0.5rem`,
+    // `max-width: min(256px, 45%)`) — the card on the board's top-left corner, over exactly
+    // the cells this issue is about. So clearing them on a transient degenerate box does not
+    // merely lose the band, it re-creates the defect for a tick.
+    const h = stagedApp({ width: 1144, height: 810 }); // the 1512×854 Stage: a real band
+    try {
+      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
+      expect(preview.parentElement?.className).toBe('wy-stage');
+      const band = preview.style.getPropertyValue('--wy-preview-max-w');
+      expect(band).not.toBe('');
+
+      h.blind(); // every box now reads jsdom's zeroes, mid-resize style
+      h.turnKeyOver();
+
+      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe(band);
+      expect(preview.style.getPropertyValue('--wy-preview-left')).toBe('8px');
+      h.app.destroy();
+    } finally {
+      h.restore();
+    }
+  });
+
   it('NO SIGNAL while parked changes nothing — a degenerate box is not evidence of room (#101)', () => {
     // `unmeasured` means "nothing was laid out", which is not the same claim as "there is
     // room". Re-homing a deliberately parked card on it would be a move with nothing behind
