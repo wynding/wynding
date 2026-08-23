@@ -127,11 +127,14 @@ Four things about it are deliberate:
   scene pages are emitted under `perf/`, so before that launcher existed a packaged perf
   build booted to a 404 and a white screen.
 
-**The two variants share one payload slot, and the commands are what keep them apart.**
-`perf:android` stages `dist-perf` first; `release:android` runs `cap sync android` (which
-stages the Host build) first. So neither can package the other's leftovers — but a bare
-`./gradlew assembleRelease` after a perf run would, which is why the packaged commands are
-the documented path and a raw Gradle invocation is not.
+**The two variants share one payload slot, and two things keep them apart.** The commands
+first: `perf:android` stages `dist-perf`, `release:android` runs `cap sync android` (which
+stages the Host build), each before assembling — so neither can package the other's
+leftovers. And then a mechanical backstop for the case the commands cannot cover, a raw
+`./gradlew assembleRelease` straight after a perf run: the release assemble refuses if the
+staged `capacitor.config.json` declares `webContentsDebuggingEnabled`, which only
+`sync:perf` ever writes. Shipping the perf harness as the game is exactly the
+silently-wrong-artifact shape ADR 0013 exists to narrow, so it fails loudly instead.
 
 Nothing about this reaches the shipped app: `@wynding/perf`, the perf entries and
 `@wynding/content/stress` are unreachable from `vite.config.ts`'s module graph, and the play

@@ -320,7 +320,12 @@ export function browserDelivery(doc: Document): PlaytraceDelivery {
       // download in every engine that supports `download`, and appending would put a
       // stray node inside the results dialog's tab order for a frame.
       link.click();
-      view.URL.revokeObjectURL(url);
+      // DEFERRED past the click, per MDN's own note on `createObjectURL`: revoking
+      // synchronously can invalidate the blob before the engine has actually started
+      // fetching it, and the download then silently does nothing. A task boundary is
+      // enough — the click's default action is queued by the time this returns — and it
+      // still revokes, so the blob is not leaked for the page's lifetime.
+      view.setTimeout(() => view.URL.revokeObjectURL(url), 0);
     },
   };
 }

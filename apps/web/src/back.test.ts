@@ -16,39 +16,129 @@ import {
  * Every state the app can be in when Back is pressed, and the action it must produce.
  * Written out rather than derived, so a change to `routeBack` has to be argued for here
  * before it can pass.
+ *
+ * THE LAST TWO ROWS SUPERSEDE THE RATIFIED PLAN'S COARSER ONE, deliberately and by
+ * EXTENDING an already-ratified decision rather than overturning it. The plan said
+ * "nothing to dismiss + nothing running → allow the default (leave the app)", which
+ * silently counted a PAUSED run as nothing — so pausing and then pressing Back threw the
+ * run away without asking. `main.ts` had already settled that question for the other way
+ * out of the app: the home link intercepts its own activation and routes through a leave
+ * confirm whenever a run or a pending plan exists. Back is the same act by a different
+ * control, so the row splits into "no unresolved run → default" and "an unresolved run,
+ * nothing else → the SAME leave confirm". Recorded here because a reader holding the plan
+ * should be able to see that the divergence was chosen, and why.
  */
 const TABLE: {
   readonly name: string;
   readonly modal: 'dismiss' | 'consume' | null;
   readonly runLive: boolean;
+  readonly runUnresolved: boolean;
   readonly expected: BackAction;
 }[] = [
-  { name: 'settings open, run live', modal: 'dismiss', runLive: true, expected: 'dismissModal' },
-  { name: 'settings open, no run', modal: 'dismiss', runLive: false, expected: 'dismissModal' },
-  { name: 'results open, run over', modal: 'consume', runLive: false, expected: 'consume' },
-  { name: 'rotate open, run live', modal: 'consume', runLive: true, expected: 'consume' },
-  { name: 'rotate open, run paused', modal: 'consume', runLive: false, expected: 'consume' },
-  { name: 'nothing open, run live', modal: null, runLive: true, expected: 'pause' },
-  { name: 'nothing open, nothing running', modal: null, runLive: false, expected: 'default' },
+  {
+    name: 'settings open, run live',
+    modal: 'dismiss',
+    runLive: true,
+    runUnresolved: true,
+    expected: 'dismissModal',
+  },
+  {
+    // Settings AUTO-PAUSES the run it opens over, so this is the common case, not an
+    // exotic one — and the dismissal still outranks it.
+    name: 'settings open over a PAUSED run',
+    modal: 'dismiss',
+    runLive: false,
+    runUnresolved: true,
+    expected: 'dismissModal',
+  },
+  {
+    name: 'settings open, no run',
+    modal: 'dismiss',
+    runLive: false,
+    runUnresolved: false,
+    expected: 'dismissModal',
+  },
+  {
+    name: 'results open, run over',
+    modal: 'consume',
+    runLive: false,
+    runUnresolved: false,
+    expected: 'consume',
+  },
+  {
+    name: 'rotate open, run live',
+    modal: 'consume',
+    runLive: true,
+    runUnresolved: true,
+    expected: 'consume',
+  },
+  {
+    name: 'rotate open, run paused',
+    modal: 'consume',
+    runLive: false,
+    runUnresolved: true,
+    expected: 'consume',
+  },
+  {
+    name: 'nothing open, run live',
+    modal: null,
+    runLive: true,
+    runUnresolved: true,
+    expected: 'pause',
+  },
+  {
+    name: 'nothing open, run PAUSED (not resolved)',
+    modal: null,
+    runLive: false,
+    runUnresolved: true,
+    expected: 'leaveConfirm',
+  },
+  {
+    name: 'nothing open, no unresolved run',
+    modal: null,
+    runLive: false,
+    runUnresolved: false,
+    expected: 'default',
+  },
 ];
 
 describe('routeBack — the decision table (#138)', () => {
   for (const row of TABLE) {
     it(`${row.name} → ${row.expected}`, () => {
-      expect(routeBack({ modal: row.modal, runLive: row.runLive })).toBe(row.expected);
+      expect(
+        routeBack({ modal: row.modal, runLive: row.runLive, runUnresolved: row.runUnresolved }),
+      ).toBe(row.expected);
     });
   }
 
   it('covers every reachable combination — no state falls off the table', () => {
     for (const modal of ['dismiss', 'consume', null] as const) {
-      for (const runLive of [true, false]) {
-        expect(TABLE.some((r) => r.modal === modal && r.runLive === runLive)).toBe(true);
+      // `runLive` implies `runUnresolved`, so live-but-resolved is not a state that exists.
+      for (const [runLive, runUnresolved] of [
+        [true, true],
+        [false, true],
+        [false, false],
+      ] as const) {
+        expect(
+          TABLE.some(
+            (r) => r.modal === modal && r.runLive === runLive && r.runUnresolved === runUnresolved,
+          ),
+          `no row for modal=${String(modal)} live=${String(runLive)} unresolved=${String(runUnresolved)}`,
+        ).toBe(true);
       }
     }
   });
 
   it('a dismissable overlay outranks a live run — Back closes it, it does not pause', () => {
-    expect(routeBack({ modal: 'dismiss', runLive: true })).toBe('dismissModal');
+    expect(routeBack({ modal: 'dismiss', runLive: true, runUnresolved: true })).toBe(
+      'dismissModal',
+    );
+  });
+
+  it('NEVER exits out from under an unresolved run, paused or not', () => {
+    for (const runLive of [true, false]) {
+      expect(routeBack({ modal: null, runLive, runUnresolved: true })).not.toBe('default');
+    }
   });
 });
 
@@ -80,7 +170,9 @@ describe('the real overlays classify as the table expects', () => {
     // Registered exactly as `overlay.ts` registers it: state-driven, no `dismissOnEscape`.
     m.open(overlay(), { priority: 'results' });
     expect(m.activeDismissal()).toBe('consume');
-    expect(routeBack({ modal: m.activeDismissal(), runLive: false })).toBe('consume');
+    expect(routeBack({ modal: m.activeDismissal(), runLive: false, runUnresolved: false })).toBe(
+      'consume',
+    );
   });
 
   it('ROTATE IS CONSUMED, NOT DISMISSED — it is reachable, and only the device clears it', () => {
@@ -92,7 +184,9 @@ describe('the real overlays classify as the table expects', () => {
     expect(m.activeDismissal()).toBe('consume');
     // The failure this prevents: falling through to app exit from a screen the player
     // cannot otherwise leave.
-    expect(routeBack({ modal: m.activeDismissal(), runLive: true })).not.toBe('default');
+    expect(routeBack({ modal: m.activeDismissal(), runLive: true, runUnresolved: true })).not.toBe(
+      'default',
+    );
   });
 
   it('reads the HIGHEST-PRIORITY open overlay, not the last one opened', () => {
@@ -157,9 +251,17 @@ describe('createBackHandler — the wiring', () => {
     };
   }
 
-  function harness(options: { runLive?: boolean; dismissal?: 'dismiss' | 'consume' | null } = {}) {
+  function harness(
+    options: {
+      runLive?: boolean;
+      /** Defaults to `runLive` — a live run is always unresolved. */
+      runUnresolved?: boolean;
+      dismissal?: 'dismiss' | 'consume' | null;
+    } = {},
+  ) {
     const fake = fakePlugin();
     const calls = { ensurePaused: 0, abortGesture: 0, dismissActive: 0, refreshWakeLock: 0 };
+    const leaveConfirms: (() => void)[] = [];
     const handle = createBackHandler({
       modal: {
         open: vi.fn(),
@@ -169,12 +271,14 @@ describe('createBackHandler — the wiring', () => {
         destroy: vi.fn(),
       },
       isRunLive: () => options.runLive === true,
+      isRunUnresolved: () => options.runUnresolved ?? options.runLive === true,
+      showLeaveConfirm: (onConfirm) => void leaveConfirms.push(onConfirm),
       ensurePaused: () => void calls.ensurePaused++,
       abortGesture: () => void calls.abortGesture++,
       refreshWakeLock: () => void calls.refreshWakeLock++,
       plugin: fake.plugin,
     });
-    return { ...fake, calls, handle };
+    return { ...fake, calls, leaveConfirms, handle };
   }
 
   it('registers for both the Back button and the native lifecycle', async () => {
@@ -212,14 +316,47 @@ describe('createBackHandler — the wiring', () => {
     h.handle.destroy();
   });
 
-  it('nothing to dismiss and nothing running: Back EXPLICITLY exits', async () => {
+  it('nothing to dismiss and NO UNRESOLVED RUN: Back EXPLICITLY exits', async () => {
     // Explicit because registering a listener at all turns Capacitor's own handling off —
     // without this call Back would be a dead key.
-    const h = harness({ runLive: false });
+    const h = harness({ runLive: false, runUnresolved: false });
     await vi.waitFor(() => expect(h.registered()).toContain('backButton'));
     h.back();
     expect(h.exitApp).toHaveBeenCalledTimes(1);
+    expect(h.leaveConfirms).toHaveLength(0);
     h.handle.destroy();
+  });
+
+  it('a PAUSED run asks before exiting, and exits only when the confirm commits', async () => {
+    // The ruling this pins: a paused run is still a run the player has, so Back routes
+    // through the same leave confirm the home link uses rather than throwing it away.
+    const h = harness({ runLive: false, runUnresolved: true });
+    await vi.waitFor(() => expect(h.registered()).toContain('backButton'));
+    h.back();
+    expect(h.exitApp).not.toHaveBeenCalled();
+    expect(h.leaveConfirms).toHaveLength(1);
+    // Nothing else happened: no second pause, no dismissal of a dialog that is not open.
+    expect(h.calls).toMatchObject({ ensurePaused: 0, dismissActive: 0 });
+
+    h.leaveConfirms[0]!(); // the player commits
+    expect(h.exitApp).toHaveBeenCalledTimes(1);
+    h.handle.destroy();
+  });
+
+  it('Stay is just not committing — the confirm never exits on its own', async () => {
+    const h = harness({ runLive: false, runUnresolved: true });
+    await vi.waitFor(() => expect(h.registered()).toContain('backButton'));
+    h.back();
+    // A second Back lands on the now-open, dismissable confirm — which the modal row
+    // handles as a dismissal. Simulated here by the dismissal the real dialog registers.
+    const dismissable = harness({ dismissal: 'dismiss', runUnresolved: true });
+    await vi.waitFor(() => expect(dismissable.registered()).toContain('backButton'));
+    dismissable.back();
+    expect(dismissable.calls.dismissActive).toBe(1);
+    expect(dismissable.exitApp).not.toHaveBeenCalled();
+    expect(h.exitApp).not.toHaveBeenCalled();
+    h.handle.destroy();
+    dismissable.handle.destroy();
   });
 
   it('backgrounding pauses (#134) and returning to the foreground does NOT resume', async () => {
@@ -259,6 +396,8 @@ describe('createBackHandler — the wiring', () => {
         destroy: vi.fn(),
       },
       isRunLive: () => true,
+      isRunUnresolved: () => true,
+      showLeaveConfirm: vi.fn(),
       ensurePaused: vi.fn(),
       abortGesture: vi.fn(),
       refreshWakeLock: vi.fn(),

@@ -357,7 +357,7 @@ describe('export mechanics', () => {
     await expect(browserDelivery(document).copy('payload')).rejects.toThrow(/clipboard/);
   });
 
-  it('browser delivery saves via an object URL it then revokes', () => {
+  it('browser delivery saves via an object URL it revokes AFTER the click, not during', async () => {
     const createObjectURL = vi.fn(() => 'blob:fake');
     const revokeObjectURL = vi.fn();
     vi.stubGlobal('URL', Object.assign(globalThis.URL, { createObjectURL, revokeObjectURL }));
@@ -377,6 +377,10 @@ describe('export mechanics', () => {
     expect(clicked[0]!.getAttribute('href')).toBe('blob:fake');
     // Detached: never appended to the document, so it cannot enter the dialog's tab order.
     expect(clicked[0]!.isConnected).toBe(false);
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:fake');
+    // NOT YET revoked: a synchronous revoke can invalidate the blob before the engine has
+    // begun fetching it, and the download then silently does nothing.
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    // ...but it IS revoked, on the next task, so the blob is not leaked for the page's life.
+    await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:fake'));
   });
 });

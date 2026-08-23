@@ -19,7 +19,7 @@
 
 import type { ModalOwner } from './modal';
 
-/** The four outcomes a Back press can have. */
+/** The five outcomes a Back press can have. */
 export type BackAction =
   /** A dismissable overlay is open (settings, the install instructions, the leave
    *  confirm) — Back closes it, matching its Escape semantics. */
@@ -28,7 +28,10 @@ export type BackAction =
   | 'consume'
   /** Nothing is open and a run is live and unpaused — Back pauses it. */
   | 'pause'
-  /** Nothing to dismiss and nothing running — leave the app. */
+  /** Nothing is open, and a run is under way but already paused — Back offers the leave
+   *  confirm rather than exiting out from under it. */
+  | 'leaveConfirm'
+  /** Nothing to dismiss and no run to lose — leave the app. */
   | 'default';
 
 export interface BackRouteInput {
@@ -38,6 +41,9 @@ export interface BackRouteInput {
   readonly modal: 'dismiss' | 'consume' | null;
   /** Started, not paused, not resolved — the same predicate `ensurePaused` guards on. */
   readonly runLive: boolean;
+  /** Started and not resolved — TRUE FOR A PAUSED RUN TOO, which is the whole difference
+   *  between this and `runLive`. A paused run is a run the player still has. */
+  readonly runUnresolved: boolean;
 }
 
 /**
@@ -56,11 +62,23 @@ export interface BackRouteInput {
  *               overlay cleared only by the device turning — so Back must be CONSUMED.
  *               Treating it as unreachable would let a press fall through to app exit
  *               from a screen the player cannot otherwise leave.
+ *
+ * THE LAST TWO ROWS SPLIT WHAT "NOTHING RUNNING" USED TO COVER, and the split is a
+ * ruling rather than a refinement. "A live run pauses, anything else exits" quietly
+ * treated a PAUSED run as nothing to lose — so a player who paused, then pressed Back,
+ * lost the run without being asked. `main.ts` already decided this question for the
+ * other way out of the app: the home link intercepts its own activation and routes
+ * through a leave confirm whenever there is a run or a pending plan. The hardware path
+ * is the same act by a different control, so it gets the same doctrine. Back exits
+ * immediately only when there is genuinely no unresolved run; otherwise it asks, and the
+ * confirm's own Back press dismisses it (it registers dismissable) — which reads as
+ * "Stay", the safe default landing exactly where a second press lands.
  */
 export function routeBack(input: BackRouteInput): BackAction {
   if (input.modal === 'dismiss') return 'dismissModal';
   if (input.modal === 'consume') return 'consume';
-  return input.runLive ? 'pause' : 'default';
+  if (input.runLive) return 'pause';
+  return input.runUnresolved ? 'leaveConfirm' : 'default';
 }
 
 /** What `App.addListener` hands back. */
@@ -115,6 +133,12 @@ export interface BackHandlerDeps {
   readonly modal: ModalOwner;
   /** Started, not paused, not resolved. */
   readonly isRunLive: () => boolean;
+  /** Started and not resolved — a paused run included. */
+  readonly isRunUnresolved: () => boolean;
+  /** Open the leave-this-run confirm, calling back on commit. The SAME dialog the home
+   *  link's interceptor uses (`main.ts`), not a second one: one way to be asked whether
+   *  you meant to abandon a run, whichever control started the asking. */
+  readonly showLeaveConfirm: (onConfirm: () => void) => void;
   /** The ONE app-level pause seam. This module is a CALLER of it, never a second pause
    *  path — the same discipline the settings dialog, the rotate prompt and the
    *  backgrounding listeners already follow. */
@@ -161,7 +185,12 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
   };
 
   const onBack = (): void => {
-    switch (routeBack({ modal: deps.modal.activeDismissal(), runLive: deps.isRunLive() })) {
+    const action = routeBack({
+      modal: deps.modal.activeDismissal(),
+      runLive: deps.isRunLive(),
+      runUnresolved: deps.isRunUnresolved(),
+    });
+    switch (action) {
       case 'dismissModal':
         deps.modal.dismissActive();
         return;
@@ -170,6 +199,12 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
       case 'pause':
         deps.abortGesture();
         deps.ensurePaused();
+        return;
+      case 'leaveConfirm':
+        // The run is already paused (that is what distinguishes this row from `pause`),
+        // so the dialog opens over a still board. `showLeaveConfirm` owns the modal-open
+        // lifecycle, gesture abort included, exactly as the home link's route does.
+        deps.showLeaveConfirm(() => void plugin.exitApp());
         return;
       case 'default':
         // Explicit, because registering a listener at all turned the OS default off.

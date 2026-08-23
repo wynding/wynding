@@ -33,7 +33,8 @@ export type SlotRead<T> =
   | { readonly status: 'absent' }
   /** ADR 0008 §5, surfaced rather than silently repaired. `future` is permanent for as
    *  long as the newer payload sits there — it is never overwritten. `corrupt` has
-   *  already been quarantined by the time you see it, and the slot is then empty. */
+   *  already been copied to the quarantine key by the time you see it; the original stays
+   *  at its own key until a write replaces it, so nothing is ever deleted. */
   | { readonly status: 'incompatible'; readonly reason: 'future' | 'corrupt' };
 
 export interface SaveSlot<T> {
@@ -82,37 +83,48 @@ export function createSaveSlot<T>(options: SaveSlotOptions<T>): SaveSlot<T> {
   };
 
   /**
-   * Copy an unreadable original aside, THEN empty the slot.
+   * Copy an unreadable original aside.
    *
-   * The order is the whole of ADR 0008 §5's "fresh state is initialized only after the
-   * original is safely preserved": a `set` that rejects propagates out of `load` and
-   * therefore out of whatever operation called it, so the corrupt payload is still
-   * sitting at `key` and no fresh write ever reached it. Removing it only after the copy
-   * lands is what lets the next write start clean instead of refusing forever.
+   * TAKES THE BYTES IT WAS CLASSIFIED FROM, and never re-reads the key. An earlier
+   * revision fetched the payload again in here, which was a lost-update bug with the
+   * quarantine on the wrong side of it: between the classifying read and this one,
+   * another context could land a perfectly good envelope, and the re-read would then
+   * copy THAT to the quarantine slot — overwriting the corrupt original it exists to
+   * preserve, with data that was never corrupt. Passing `raw` down makes the two
+   * physically the same bytes.
+   *
+   * IT ALSO NEVER DELETES. The corrupt payload stays at `key` until a write overwrites
+   * it, which is ADR 0008 §5's "fresh state is initialized ONLY AFTER the original is
+   * safely preserved" with nothing destructive in the path at all: a `set` that rejects
+   * propagates out of `load` and out of whatever operation called it, so a failed
+   * quarantine leaves the original exactly where it was. Re-quarantining the same bytes
+   * on a later read is idempotent — same key, same content.
    */
-  async function quarantine(): Promise<void> {
-    const raw = await driver.get(key);
-    if (raw === undefined) return; // vanished under us — nothing left to preserve
+  async function quarantine(raw: string): Promise<void> {
     await driver.set(quarantineKey(key), raw);
-    await driver.remove(key);
   }
 
-  /** Read + classify. Runs inside the critical section on the write path, so the
-   *  classification and the write it guards cannot be separated by another writer. */
+  /** Read + classify. Callers run it INSIDE the `${key}:write` lock — both of them, since
+   *  the corrupt branch mutates — so the classification and anything it guards cannot be
+   *  separated by another writer. It never takes that lock itself: Web Locks are not
+   *  reentrant, so a lock request in here would deadlock against the one `write` holds. */
   async function load(): Promise<{ read: SlotRead<T>; envelope: SaveEnvelope | null }> {
-    const decoded = decodeEnvelope(await driver.get(key));
+    const raw = await driver.get(key);
+    const decoded = decodeEnvelope(raw);
     if (decoded.status === 'absent') return { read: { status: 'absent' }, envelope: null };
     if (decoded.status === 'future') {
       return { read: { status: 'incompatible', reason: 'future' }, envelope: null };
     }
+    // Both incompatible branches below are reached only with `raw` defined — `absent` is
+    // the only classification a missing key can produce.
     if (decoded.status === 'corrupt') {
-      await quarantine();
+      await quarantine(raw as string);
       return { read: { status: 'incompatible', reason: 'corrupt' }, envelope: null };
     }
     const data = parse(decoded.envelope.data);
     if (data === undefined) {
       // Envelope-shaped but not THIS slot's data. Unmigratable is unmigratable.
-      await quarantine();
+      await quarantine(raw as string);
       return { read: { status: 'incompatible', reason: 'corrupt' }, envelope: null };
     }
     return {
@@ -123,15 +135,19 @@ export function createSaveSlot<T>(options: SaveSlotOptions<T>): SaveSlot<T> {
 
   return {
     read(): Promise<SlotRead<T>> {
-      return serialize(async () => (await load()).read);
+      // UNDER THE LOCK, like `write` — not because a read mutates in the ordinary case,
+      // but because the corrupt branch does, and a mutation outside the lock would make
+      // this module's serialization claim false exactly where it matters most.
+      return serialize(() => lock(`${key}:write`, async () => (await load()).read));
     },
     write(data: T): Promise<void> {
       return serialize(() =>
         lock(`${key}:write`, async () => {
           const { read, envelope } = await load();
-          // ONLY `future` refuses. A corrupt payload has been quarantined by the line
-          // above and the slot is now empty, which is exactly when fresh state may be
-          // initialised (ADR 0008 §5).
+          // ONLY `future` refuses. A corrupt payload has been copied aside by the line
+          // above — successfully, or that line would have rejected out of here — so
+          // overwriting it now IS "fresh state initialised after the original is safely
+          // preserved" (ADR 0008 §5). The overwrite is what retires it; nothing deletes.
           if (read.status === 'incompatible' && read.reason === 'future') {
             throw new Error(
               `refusing to overwrite ${key}: it was written by a newer saveVersion ` +

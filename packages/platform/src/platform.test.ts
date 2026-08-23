@@ -238,6 +238,68 @@ describe('the save slot — serialized writes and atomic revision allocation', (
     expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBeUndefined();
     expect(storage.map.get(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe('{not json');
   });
+
+  it('quarantines the bytes it CLASSIFIED, never a re-read (the two-tab race)', async () => {
+    // The race this pins: tab A reads a corrupt payload, and before it can preserve that
+    // payload, tab B writes a perfectly good envelope over the key. A quarantine that
+    // re-read the key would then copy TAB B'S VALID DATA into the quarantine slot —
+    // destroying the corrupt original it exists to preserve, and destroying it with
+    // something that was never corrupt. The driver below IS that interleave: the first
+    // `get` answers corrupt, every later one answers the valid envelope tab B wrote.
+    const valid = encodeEnvelope({
+      saveVersion: SAVE_VERSION,
+      deviceId: 'device-b',
+      revision: 4,
+      updatedAt: 0,
+      data: 'tab B got here first',
+    });
+    const CORRUPT = '{not json';
+    const written = new Map<string, string>();
+    let gets = 0;
+    const racingDriver = {
+      get: (k: string): Promise<string | undefined> => {
+        if (k !== 'settings') return Promise.resolve(written.get(k));
+        gets += 1;
+        return Promise.resolve(gets === 1 ? CORRUPT : valid);
+      },
+      set: (k: string, v: string): Promise<void> => {
+        written.set(k, v);
+        return Promise.resolve();
+      },
+      remove: (k: string): Promise<void> => {
+        written.delete(k);
+        return Promise.resolve();
+      },
+    };
+    const slot = createSaveSlot<string>({
+      driver: racingDriver,
+      key: 'settings',
+      deviceId: 'device-a',
+      parse: (data) => (typeof data === 'string' ? data : undefined),
+      now: () => 1000,
+    });
+
+    expect(await slot.read()).toEqual({ status: 'incompatible', reason: 'corrupt' });
+    // The CORRUPT bytes are what was preserved — not tab B's envelope.
+    expect(written.get(quarantineKey('settings'))).toBe(CORRUPT);
+    expect(written.get(quarantineKey('settings'))).not.toBe(valid);
+    // And tab B's valid write survives: the read path deletes nothing at all.
+    expect(written.has('settings')).toBe(false); // never written by US
+    expect(gets).toBe(1); // one read, so there is no second value to be confused by
+  });
+
+  it('takes the cross-context lock on the READ path too, since its corrupt branch mutates', async () => {
+    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: '{not json' });
+    const held: string[] = [];
+    const slot = stringSlot(storage, {
+      lock: async (name, fn) => {
+        held.push(name);
+        return fn();
+      },
+    });
+    await slot.read();
+    expect(held).toEqual(['settings:write']);
+  });
 });
 
 describe('webLockFn', () => {

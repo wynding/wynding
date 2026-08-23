@@ -912,6 +912,19 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     modal: overlay.modal,
     isRunLive: () =>
       controller.uiState().started && !controller.isPaused() && !controller.isTerminal(),
+    // A PAUSED run is still a run the player has. This is the predicate that keeps Back
+    // from exiting out from under one — the same question the home link's interceptor
+    // asks before it navigates away.
+    isRunUnresolved: () => controller.uiState().started && !controller.isTerminal(),
+    showLeaveConfirm: (onConfirm) => {
+      // The home link's own lifecycle, minus the parts that are about a link: pause
+      // defensively (a no-op here — this row only fires on an already-paused run), put
+      // focus somewhere real so the modal owner has something to restore to on Stay, and
+      // hand the dialog its commit action. `showLeave` aborts any in-flight gesture.
+      ensurePaused();
+      shell.home.focus();
+      overlay.showLeave(onConfirm);
+    },
     ensurePaused,
     abortGesture: () => input.abort(),
     refreshWakeLock: () => wakeLock.refresh(),

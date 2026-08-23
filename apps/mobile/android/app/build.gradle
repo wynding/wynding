@@ -114,7 +114,19 @@ android {
 // Fail at ASSEMBLE time, not configuration time. `pnpm run check:native`, `./gradlew tasks`
 // and an Android Studio sync all configure this project on machines that have no keystore
 // and want none; only an actual attempt to produce a release artifact needs one. The
-// message names the two supply routes so the failure is self-servicing.
+// messages name the fix so each failure is self-servicing.
+//
+// The second check closes the ONE footgun the perf variant (#148) introduces. Both
+// variants package from the same `src/main/assets/public` slot, so a release assembled
+// straight after a perf sync would ship the perf HARNESS as the game — the
+// silently-wrong-artifact shape ADR 0013 exists to narrow, and a raw `./gradlew
+// assembleRelease` bypasses the npm scripts that otherwise keep the pairing honest (each
+// stages its own artifact first). `sync-perf.mjs` is the only thing that writes an
+// `android` block into the staged `capacitor.config.json`, and `cap sync` — the play
+// path — never does, so its presence is an exact, mechanical answer to "which payload is
+// staged right now?".
+def stagedCapacitorConfig = file("src/main/assets/capacitor.config.json")
+
 tasks.matching { task ->
     (task.name.startsWith('assemble') || task.name.startsWith('bundle')) &&
             task.name.contains('Release')
@@ -127,6 +139,17 @@ tasks.matching { task ->
                 "environment, or the same four as storeFile/storePassword/keyAlias/keyPassword " +
                 "in apps/mobile/android/keystore.properties (untracked). See apps/mobile/README.md " +
                 "— 'Release signing'. NEVER commit any of it: this repository is public."
+            )
+        }
+        if (stagedCapacitorConfig.exists() &&
+                stagedCapacitorConfig.text.contains("webContentsDebuggingEnabled")) {
+            throw new GradleException(
+                "The staged web payload is the PERF artifact, not the Host build: " +
+                "src/main/assets/capacitor.config.json declares webContentsDebuggingEnabled, " +
+                "which only `pnpm run sync:perf` writes. Assembling a release now would ship " +
+                "the perf harness as the game. Re-stage the Host build first:\\n" +
+                "  pnpm --filter @wynding/mobile run sync:android\\n" +
+                "(or just use `pnpm run release:android`, which does it for you)."
             )
         }
     }
