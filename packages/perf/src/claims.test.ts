@@ -131,7 +131,13 @@ function extract(site: ClaimSite, text = read(site.file)): Extracted {
  *  Signs are still read OFF the numeral, deliberately: a row valued -1.36 covers a prose 1.36,
  *  and the sign is enforced at the row's sites. `IS_NUMERAL` accepts a leading sign because it
  *  answers a different question — whether an already-extracted string is numeric. */
-const NUMERAL_BODY = String.raw`(?:\d(?:[\d,_]*\d)?(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?`;
+/** A run of digits, separators allowed INSIDE but never at either end. Named once, because the
+ *  integer part had it and the fractional and exponent parts did not — so `1.006_5` keyed as
+ *  1.006, a different claim from the one it restates, and `1.0e1_0` as 1.0e1 (Codex, PR #161).
+ *  Every part of a numeral is the same kind of thing; it is spelled once and used three times. */
+const DIGIT_RUN = String.raw`\d(?:[\d,_]*\d)?`;
+
+const NUMERAL_BODY = String.raw`(?:${DIGIT_RUN}(?:\.${DIGIT_RUN})?|\.${DIGIT_RUN})(?:[eE][+-]?${DIGIT_RUN})?`;
 
 /** WHERE A NUMERAL MAY BEGIN, defined as "not part of the same numeral, and not part of a
  *  NAME" rather than as the complement of a hand-listed word-char set. The old lookbehind was
@@ -845,8 +851,20 @@ const spaces = (m: string): string => ' '.repeat(m.length);
  *  failure this whole file exists to prevent. */
 const IS_BARE_NUMERAL = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`$`);
 
+/** The suffixes these documents hang on a figure without making it a name: the `x`/`×` factor
+ *  style, and `%`. A segment of numeral-then-suffix is CLAIM-SHAPED — it is carrying a value,
+ *  not naming a directory — so it forces its token into the scan exactly as a bare numeral
+ *  does. `R/1.0065x` was masking as a path because no segment of it was BARE (Codex).
+ *
+ *  The suffix is shape-bounded, not length-bounded: letters, `×` and `%` only. That is what
+ *  keeps `0005-performance-budgets.md` a path — its hyphen and extension are not suffix
+ *  characters — while asking nothing about how long a unit may be, which is the guess round 16
+ *  removed. And the direction stays fail-closed: a path misread as claim-shaped surfaces its
+ *  numerals LOUDLY, while a measurement misread as a path is blanked in silence. */
+const IS_CLAIM_SHAPED = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`[A-Za-z\u00d7%]*$`);
+
 function looksLikePath(m: string): boolean {
-  return /[A-Za-z]/.test(m) && !m.split('/').some((seg) => IS_BARE_NUMERAL.test(seg));
+  return /[A-Za-z]/.test(m) && !m.split('/').some((seg) => IS_CLAIM_SHAPED.test(seg));
 }
 
 /** The claim-bearing prose of a guarded file, masked to preserve every byte offset. */
@@ -1275,6 +1293,15 @@ describe('the reference masks blank references, not measurements', () => {
   // scientific spellings, so these masked as paths and vanished silently (Codex, PR #161).
   // A bare-numeral segment ANYWHERE, not merely in front. `R/1.0065` is a compact algebraic
   // ratio whose value sat inside a token the mask read as a directory (Codex, PR #161).
+  // A suffixed numeric factor has no BARE segment, so the mask ate it. A segment of
+  // numeral-then-suffix is claim-shaped: it carries a value rather than naming a directory.
+  it('never masks a token whose segment is a numeral with a conventional suffix', () => {
+    expect(mask('the factor R/1.0065x holds')).toContain('R/1.0065x');
+    expect(mask('the factor R/1.0065\u00d7 holds')).toContain('1.0065');
+    expect(mask('the factor 2.8x/R holds')).toContain('2.8x');
+    expect(mask('the share R/50% holds')).toContain('50%');
+  });
+
   it('never masks a token with a bare-numeral segment, wherever the segment sits', () => {
     expect(mask('the ratio R/1.0065 holds')).toContain('R/1.0065');
     expect(mask('the ratio ceiling/1.7750 holds')).toContain('ceiling/1.7750');
@@ -1353,7 +1380,19 @@ describe("the numeral grammar is the language's, not a run of digits", () => {
 
   // One definition, three consumers. If they ever disagree again, this fails first.
   it('answers "is this a numeral" identically everywhere it is asked', () => {
-    for (const spelling of ['0.00922', '.00922', '9.22e-3', '1,427', '1.0065', '900000']) {
+    for (const spelling of [
+      '0.00922',
+      '.00922',
+      '9.22e-3',
+      '1,427',
+      '1.0065',
+      '900000',
+      // Separators belong to EVERY part of a numeral, not just the integer part.
+      '1.006_5',
+      '1.006,5',
+      '1.0e1_0',
+      '.00_922',
+    ]) {
       expect(IS_NUMERAL.test(spelling), `IS_NUMERAL rejected ${spelling}`).toBe(true);
       expect(IS_BARE_NUMERAL.test(spelling), `IS_BARE_NUMERAL missed ${spelling}`).toBe(true);
       expect([...`x ${spelling} y`.matchAll(NUMERAL)], `NUMERAL missed ${spelling}`).toHaveLength(
@@ -1409,6 +1448,19 @@ describe("the numeral grammar is the language's, not a run of digits", () => {
     expect([...'score 434, stars'.matchAll(NUMERAL)].map((m) => m[0])).toEqual(['434']);
     expect([...'_1065_'.matchAll(NUMERAL)].map((m) => m[0])).toEqual(['1065']);
     expect([...'1_000 exact'.matchAll(NUMERAL)].map((m) => m[0])).toEqual(['1_000']);
+  });
+
+  // The integer part accepted separators and the fractional and exponent parts did not, so
+  // `1.006_5` keyed as 1.006 — a different claim from the one it restates (Codex, PR #161).
+  it('accepts separators in every part of a numeral, and strips them alike', () => {
+    const value = (t: string): string =>
+      normalizeNumeral(([...t.matchAll(NUMERAL)][0] as RegExpMatchArray)[0].replace(/[,_]/g, ''));
+    expect(value('k = 1.006_5')).toBe('1.0065');
+    expect(value('k = 1.006,5')).toBe('1.0065');
+    expect(value('n = 1.0e1_0')).toBe('10000000000');
+    expect(value('k = .00_922')).toBe('0.00922');
+    // and every spelling of the one number still reaches one key
+    expect(claimKey(value('k = 1.006_5'))).toBe(claimKey('1.0065'));
   });
 
   it('does not split an ordinary decimal into a bare fraction', () => {
