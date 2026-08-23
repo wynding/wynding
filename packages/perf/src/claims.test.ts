@@ -856,12 +856,20 @@ const IS_BARE_NUMERAL = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`$`)
  *  not naming a directory — so it forces its token into the scan exactly as a bare numeral
  *  does. `R/1.0065x` was masking as a path because no segment of it was BARE (Codex).
  *
+ *  A leading SIGN is part of the shape too. `R/-1.360` was masked because `NUMERAL_BODY`
+ *  carries no sign, so no segment of it looked claim-shaped (Codex). This is the SEGMENT
+ *  test only: the tokenizer still reads signs OFF a numeral, because a row valued -1.36 is
+ *  what covers a prose 1.36 and the sign is enforced at the row's sites. Both typographic
+ *  minuses count, matching what `claimKey` already normalises.
+ *
  *  The suffix is shape-bounded, not length-bounded: letters, `×` and `%` only. That is what
  *  keeps `0005-performance-budgets.md` a path — its hyphen and extension are not suffix
  *  characters — while asking nothing about how long a unit may be, which is the guess round 16
  *  removed. And the direction stays fail-closed: a path misread as claim-shaped surfaces its
  *  numerals LOUDLY, while a measurement misread as a path is blanked in silence. */
-const IS_CLAIM_SHAPED = new RegExp(String.raw`^` + NUMERAL_BODY + String.raw`[A-Za-z\u00d7%]*$`);
+const IS_CLAIM_SHAPED = new RegExp(
+  String.raw`^[+\-\u2212\u2013]?` + NUMERAL_BODY + String.raw`[A-Za-z\u00d7%]*$`,
+);
 
 function looksLikePath(m: string): boolean {
   return /[A-Za-z]/.test(m) && !m.split('/').some((seg) => IS_CLAIM_SHAPED.test(seg));
@@ -1075,20 +1083,29 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // the collision could collapse to one surface, or the value could later be rowed, and the
   // entry stayed, still armed to suppress a future genuine cross-file duplicate (Codex, PR
   // #161). Each entry now re-proves its own recorded justification every run.
+  //
+  // With the census compared EXACTLY, the two tables converge on one shape: a recorded set,
+  // recomputed from the guarded files each run and compared whole, so drift in either direction
+  // fails. `KNOWN_UNROWED` has always had that shape — which is why it needs no census of its
+  // own — and this is what it looks like for a table whose entries are SUBTRACTED from the
+  // census rather than compared against it.
   it('carries no stale exclusion — every entry re-proves its own justification', () => {
     const rowed = new Set(CLAIMS.flatMap(claimKeysFor));
     for (const e of CONTRACT_EXCLUSIONS) {
       const key = claimKey(e.value);
 
-      // 1. The census is CURRENT: every surface it names still states the numeral.
-      for (const file of e.surfaces) {
-        expect(
-          scan(file).some((n) => claimKey(n.value) === key),
-          `CONTRACT_EXCLUSIONS entry "${e.value}" names ${file} among the colliding surfaces ` +
-            `that justified it, but that file no longer states the numeral. The collision it ` +
-            `documents has changed — re-justify the entry against what is there now, or delete it.`,
-        ).toBe(true);
-      }
+      // 1. The census is EXACT — recomputed from the guarded files and compared whole. Checking
+      //    only that each NAMED surface still states the numeral was one-way: a further file
+      //    acquiring it changed the collision the entry documents without failing anything
+      //    (Codex, PR #161). A collision that GROWS needs re-justifying just as much as one that
+      //    shrinks, because the entry's whole claim is that it describes what it cuts a hole for.
+      const surfaces = GUARDED_FILES.filter((f) => scan(f).some((n) => claimKey(n.value) === key));
+      expect(
+        [...surfaces].sort(),
+        `CONTRACT_EXCLUSIONS entry "${e.value}" no longer describes the collision it excuses. ` +
+          `The guarded surfaces stating it have changed; re-justify the entry against what is ` +
+          `there now, or delete it.`,
+      ).toEqual([...e.surfaces].sort());
 
       // 2. The collision still meets the THRESHOLD the coverage half uses. Below it there is no
       //    cross-file duplicate to suppress, so the hole is cutting nothing and only hiding.
@@ -1300,6 +1317,26 @@ describe('the reference masks blank references, not measurements', () => {
     expect(mask('the factor R/1.0065\u00d7 holds')).toContain('1.0065');
     expect(mask('the factor 2.8x/R holds')).toContain('2.8x');
     expect(mask('the share R/50% holds')).toContain('50%');
+  });
+
+  // A SIGNED segment is claim-shaped too. `NUMERAL_BODY` carries no sign — deliberately, since
+  // the tokenizer reads signs off a numeral — so a signed segment looked like nothing at all
+  // and the token was eaten (Codex, PR #161).
+  it('never masks a token whose segment is a SIGNED numeral', () => {
+    expect(mask('the skew R/-1.360 holds')).toContain('R/-1.360');
+    expect(mask('the skew R/+1.360 holds')).toContain('+1.360');
+    expect(mask('the skew R/\u22121.360 holds')).toContain('1.360');
+    expect(mask('the skew R/\u20131.360 holds')).toContain('1.360');
+    // sign and suffix together
+    expect(mask('the factor R/-1.360x holds')).toContain('-1.360x');
+  });
+
+  it('does not read a hyphenated path segment as a signed numeral', () => {
+    // The control that makes the sign safe: a leading `-` opens a numeral, but
+    // `-performance-budgets.md` is not one, and a hyphen INSIDE a segment is not a sign.
+    expect(mask('see docs/adr/0005-performance-budgets.md now')).not.toContain('0005');
+    expect(mask('see ../adr/0005-performance-budgets.md now')).not.toContain('0005');
+    expect(mask('see docs/-draft-notes.md now')).not.toContain('draft');
   });
 
   it('never masks a token with a bare-numeral segment, wherever the segment sits', () => {
