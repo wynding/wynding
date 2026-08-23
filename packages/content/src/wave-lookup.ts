@@ -15,8 +15,47 @@
 //      the script's own early-call decisions. `SimState.waveLaunchTick` already records
 //      exactly this, per-wave, as the sim runs — this module reads it, never derives it
 //      from static content.
+//
+// `wallInputsFromTick`/`wallInputsFromObservedWave` below are two DISTINCT placement-
+// schedule builders sharing job 2's shape — a STATIC literal tick vs. an OBSERVED wave
+// transition — consolidated here (G1-b, #94) from three byte-identical per-file copies of
+// the static-tick half (`story-armored-wave`/`story-finale`/`story-flying-wave.test.ts`).
 
 import type { CompiledRuleset, SimInput, SimState } from '@wynding/sim';
+
+/**
+ * Builds a stateless `(tick) => SimInput[]` placement schedule: one tower of `towerId`
+ * placed every `spacingTicks` ticks (default 10), in `anchors` order, starting at
+ * `startTick` (default 0) — the STATIC-TICK twin of `wallInputsFromObservedWave` below,
+ * for scripts that anchor to a literal tick (e.g. tick 0, "build this immediately") rather
+ * than an observed wave transition. Returns a NEW closure (its own cursor) on every call,
+ * so callers never share placement state even when they build on the same anchor array
+ * (mirrors `wallInputsFromObservedWave`'s own convention).
+ */
+export function wallInputsFromTick(
+  anchors: readonly { readonly col: number; readonly row: number }[],
+  towerId: string,
+  startTick = 0,
+  spacingTicks = 10,
+): (tick: number) => SimInput[] {
+  // Same up-front-throw philosophy as `wallInputsFromObservedWave`'s own guard: a
+  // non-positive spacing makes the modulo gate below unsatisfiable (`NaN === 0` at
+  // spacingTicks 0, never true) and the wall would silently never place — the exact
+  // quiet failure this module exists to prevent. Now that this is a shared export
+  // presented as that function's twin, the two must not diverge on this guard.
+  if (spacingTicks <= 0) {
+    throw new Error(`wallInputsFromTick: spacingTicks must be positive, got ${spacingTicks}`);
+  }
+  let next = 0;
+  return (tick: number): SimInput[] => {
+    const out: SimInput[] = [];
+    if (tick >= startTick && (tick - startTick) % spacingTicks === 0 && next < anchors.length) {
+      out.push({ kind: 'placeTower', anchor: anchors[next]!, towerId });
+      next++;
+    }
+    return out;
+  };
+}
 
 /**
  * The first wave index, in the COMPILED schedule (`ruleset.waves`, never raw JSON
@@ -68,9 +107,9 @@ export function waveLaunchTickObserved(state: SimState, waveIndex: number): numb
  * the countdown-start tick itself. Before the target wave's countdown has started, this
  * produces no inputs. Returns a NEW closure (its own cursor/arming state) on every call,
  * so callers never share placement state even when they build on the same anchor array
- * (mirrors `story-armored-wave.test.ts`'s existing `anchorWallInputs` convention).
+ * (mirrors `wallInputsFromTick`'s own convention above).
  */
-export function anchoredWallInputs(
+export function wallInputsFromObservedWave(
   ruleset: CompiledRuleset,
   waveIndex: number,
   anchors: readonly { readonly col: number; readonly row: number }[],
@@ -83,14 +122,16 @@ export function anchoredWallInputs(
   // build — the exact quiet failure this module exists to prevent.
   if (waveIndex < 0 || waveIndex >= ruleset.waves.length) {
     throw new Error(
-      `anchoredWallInputs: wave index ${waveIndex} outside the compiled schedule (0..${ruleset.waves.length - 1})`,
+      `wallInputsFromObservedWave: wave index ${waveIndex} outside the compiled schedule (0..${ruleset.waves.length - 1})`,
     );
   }
   // Same up-front-throw philosophy as the bounds check: a non-positive spacing would
   // make the modulo gate below unsatisfiable (or divide by zero) and the wall would
   // silently never place — the exact quiet failure this module exists to prevent.
   if (spacingTicks <= 0) {
-    throw new Error(`anchoredWallInputs: spacingTicks must be positive, got ${spacingTicks}`);
+    throw new Error(
+      `wallInputsFromObservedWave: spacingTicks must be positive, got ${spacingTicks}`,
+    );
   }
   let next = 0;
   let armedAt: number | null = null;

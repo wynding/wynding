@@ -41,7 +41,11 @@ import {
   type Grid,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
-import { waveIndexForCreep, anchoredWallInputs, waveLaunchTickObserved } from './wave-lookup';
+import {
+  waveIndexForCreep,
+  wallInputsFromObservedWave,
+  waveLaunchTickObserved,
+} from './wave-lookup';
 
 /** Fixed-point cell size (`FP_ONE`, `@wynding/engine`), inlined rather than imported —
  *  same reasoning as `story-flying-wave.test.ts`'s own inlined constant: pulling in the
@@ -607,7 +611,13 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
         anchor,
         towerId: 'basic',
       }));
-      const mineWall = anchoredWallInputs(ruleset, armoredWaveIndex, [ARMORED_MINE], 'mine', 250);
+      const mineWall = wallInputsFromObservedWave(
+        ruleset,
+        armoredWaveIndex,
+        [ARMORED_MINE],
+        'mine',
+        250,
+      );
       // Run past the `armored` wave's OBSERVED launch and its full traversal — 600 ticks
       // of margin past the OBSERVED launch transition (S11 P2), the same margin the prior
       // static `RUN_TICKS_ARMORED = 2000` literal carried (launch 1400 + 600) under the
