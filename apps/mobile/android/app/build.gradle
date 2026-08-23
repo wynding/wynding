@@ -111,10 +111,26 @@ android {
     }
 }
 
-// Fail at ASSEMBLE time, not configuration time. `pnpm run check:native`, `./gradlew tasks`
-// and an Android Studio sync all configure this project on machines that have no keystore
-// and want none; only an actual attempt to produce a release artifact needs one. The
-// messages name the fix so each failure is self-servicing.
+// Fail before ANY release artifact is written — and at execution time, not configuration
+// time. `pnpm run check:native`, `./gradlew tasks` and an Android Studio sync all
+// configure this project on machines that have no keystore and want none; only an actual
+// attempt to produce a release artifact needs one. The messages name the fix so each
+// failure is self-servicing.
+//
+// A STANDALONE TASK THE PACKAGING TASKS DEPEND ON, not a `doFirst` on `assembleRelease`.
+// That distinction is the whole correctness of this guard and it was wrong before: Gradle
+// runs a lifecycle task's own actions AFTER its dependencies have run, so `assembleRelease`
+// had already driven packaging and signing by the time a `doFirst` here fired. The build
+// failed, loudly — and left a fully-written, seemingly usable release artifact on disk
+// next to the failure. A guard that fires after the thing it guards is a report, not a gate.
+//
+// ATTACHED TO THE PACKAGE/SIGN TASKS THEMSELVES rather than to `preReleaseBuild`. Both are
+// upstream of every artifact, but these are the tasks that actually WRITE one, so the
+// dependency edge is on the operation being prevented rather than on something that
+// merely happens to precede it today. It covers both artifact paths without naming
+// either: `packageRelease` (APK), `packageReleaseBundle` and `signReleaseBundle` (AAB) all
+// match, and `assembleRelease`/`bundleRelease` reach an artifact only through them. The
+// `perf` build type is untouched — its tasks carry `Perf`, not `Release`.
 //
 // The second check closes the ONE footgun the perf variant (#148) introduces. Both
 // variants package from the same `src/main/assets/public` slot, so a release assembled
@@ -127,11 +143,10 @@ android {
 // staged right now?".
 def stagedCapacitorConfig = file("src/main/assets/capacitor.config.json")
 
-tasks.matching { task ->
-    (task.name.startsWith('assemble') || task.name.startsWith('bundle')) &&
-            task.name.contains('Release')
-}.configureEach { task ->
-    task.doFirst {
+def validateReleaseArtifact = tasks.register('validateReleaseArtifact') {
+    it.group = 'verification'
+    it.description = 'Refuses a release build that would be unsigned, mis-signed, or packaged from the perf payload.'
+    it.doLast {
         if (!hasReleaseSigning) {
             throw new GradleException(
                 "No release signing material. Supply WYNDING_KEYSTORE_FILE, " +
@@ -169,6 +184,16 @@ tasks.matching { task ->
             )
         }
     }
+}
+
+// The edge that makes the task above a GATE rather than a report. A failed dependency
+// fails the build before its dependents run, so no packaging or signing task can start
+// until the validation has passed.
+tasks.matching { task ->
+    (task.name.startsWith('package') || task.name.startsWith('sign')) &&
+            task.name.contains('Release')
+}.configureEach { task ->
+    task.dependsOn(validateReleaseArtifact)
 }
 
 repositories {

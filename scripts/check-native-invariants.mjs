@@ -437,18 +437,25 @@ if (gradle !== null) {
   // (`storePassword releaseStorePassword`, `storeFile file(releaseStoreFile)`) carry no
   // quotes and pass.
   //
-  // THREE SPELLINGS, because Groovy accepts all three and an earlier version of this
-  // matched only the first: the space form (`storePassword "…"`), the assignment form
-  // (`storePassword = "…"`), and the wrapped form (`storeFile file("…")`, with or without
-  // the `=`). A guard that knows one spelling of three is a guard one autocomplete away
-  // from useless — the same lesson the determinism zone records about its own spellings.
+  // EVERY SPELLING GROOVY ACCEPTS, because a guard that knows one of them is a guard one
+  // autocomplete away from useless — the same lesson the determinism zone records about
+  // its own spellings, learned here twice in two review rounds. The forms: the space form
+  // (`storePassword "…"`), the assignment form (`storePassword = "…"`), the wrapped form
+  // (`storeFile file("…")`, with or without the `=`), and Groovy's SLASHY strings —
+  // `storePassword = /secret/` and dollar-slashy `$/secret/$`, which are ordinary string
+  // literals in this language and sailed straight past a quote-only matcher.
+  //
+  // Slashy detection cannot false-positive on division, because the match is anchored to
+  // statement position and must begin immediately after one of four signing property
+  // names (and an optional `=`/`file(`). A `/` anywhere else in the file is not reachable
+  // by this pattern, so arithmetic elsewhere is untouched.
   //
   // Still anchored to statement position, which is now safe rather than merely narrow:
   // comments are blanked above, so the false positive that forced the anchor — the word
   // `keyPassword` inside this file's own error MESSAGE — cannot recur from a comment.
   const inlined = [
     ...code.matchAll(
-      /^[ \t]*(storePassword|keyPassword|keyAlias|storeFile)[ \t]*=?[ \t]*(?:file[ \t]*\([ \t]*)?["']/gm,
+      /^[ \t]*(storePassword|keyPassword|keyAlias|storeFile)[ \t]*=?[ \t]*(?:file[ \t]*\([ \t]*)?(?:["']|\$\/|\/)/gm,
     ),
   ].map((m) => m[0].trim());
   expect(
@@ -457,6 +464,49 @@ if (gradle !== null) {
     `${inlined.join(', ')}\n   → This repository is PUBLIC. Move it to the environment or to ` +
       `apps/mobile/android/keystore.properties (untracked). A published signing key cannot be ` +
       `rotated, only abandoned — see this script's header.`,
+  );
+
+  // 2c. The release guard is WIRED AS A PREREQUISITE, not as an afterthought.
+  //
+  // What this can and cannot prove is worth stating, because the gap is the interesting
+  // part. Gradle runs a lifecycle task's own actions AFTER its dependencies, so a guard
+  // written as `assembleRelease.doFirst { … }` fires only once packaging and signing have
+  // already written an artifact — the build fails loudly and leaves a usable release
+  // sitting next to the failure. That is a report, not a gate, and it is exactly the
+  // shape this project shipped until it was caught in review.
+  //
+  // Proving the EXECUTION ORDER needs a real Gradle run, which this SDK-free gate cannot
+  // do (see the header). What it can pin is the WIRING SHAPE, which is where the defect
+  // lives: a standalone validation task must exist, packaging/signing tasks must depend
+  // on it, and the old doFirst-on-an-aggregate-lifecycle-task shape must not come back.
+  expect(
+    /tasks\.register\(\s*['"]validateReleaseArtifact['"]/.test(code),
+    'the release guard is a standalone task',
+    `app/build.gradle does not register a \`validateReleaseArtifact\` task. The guard must be ` +
+      `a task packaging can depend on, not an action on the task that packages.`,
+  );
+  expect(
+    /dependsOn\(\s*validateReleaseArtifact\s*\)/.test(code),
+    'packaging and signing DEPEND ON the release guard',
+    `nothing in app/build.gradle declares \`dependsOn(validateReleaseArtifact)\`. Without that ` +
+      `edge the validation is not a prerequisite of anything and cannot stop an artifact ` +
+      `being written.`,
+  );
+  // Matched on PROXIMITY, not on a single `assembleRelease` token, because neither the
+  // shape being banned nor a hand-written fixture of it ever spells the name that way:
+  // the real one was `startsWith('assemble') … contains('Release') … .doFirst`, with the
+  // two halves in separate string literals. A detector keyed on the concatenated name
+  // matched neither — verified by injecting the old shape and watching this pass — so it
+  // keys on `assemble`/`bundle` appearing within a window of a `.doFirst` instead.
+  const aggregateDoFirst = [...code.matchAll(/(?:assemble|bundle)[\s\S]{0,600}?\.doFirst/g)].map(
+    (m) => `${m[0].slice(0, 40).replace(/\s+/g, ' ')}…doFirst`,
+  );
+  expect(
+    aggregateDoFirst.length === 0,
+    'the release guard is not a doFirst on an aggregate lifecycle task',
+    `${aggregateDoFirst.join(', ')}\n   → Gradle runs a lifecycle task's own actions AFTER its ` +
+      `dependencies, so this fires once packaging and signing have already written an ` +
+      `artifact. Attach the validation to the package/sign tasks with \`dependsOn\` instead.`,
   );
 }
 

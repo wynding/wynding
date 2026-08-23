@@ -279,11 +279,24 @@ describe('the save slot — serialized writes and atomic revision allocation', (
   });
 
   it('clear() surfaces an I/O failure rather than reporting a removal that did not happen', async () => {
-    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: 'x' });
-    const slot = stringSlot(storage, { parse: () => 'x' });
+    // A VALID envelope, so the only thing that can reject is `removeItem`. Seeding a
+    // non-JSON payload sent `load()` down the corrupt branch first, which quarantined
+    // before `remove` ran — the test then covered two paths and proved neither, and the
+    // `parse` override never even executed.
+    const stored = encodeEnvelope({
+      saveVersion: SAVE_VERSION,
+      deviceId: 'device-a',
+      revision: 1,
+      updatedAt: 0,
+      data: 'x',
+    });
+    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: stored });
+    const slot = stringSlot(storage);
     storage.failRemoves = true;
     await expect(slot.clear()).rejects.toBeInstanceOf(StorageError);
-    expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBe('x');
+    expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBe(stored);
+    // And nothing was quarantined on the way — this path never classified anything corrupt.
+    expect(storage.map.has(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe(false);
   });
 
   it('the FIRST quarantined original wins — a second corruption never overwrites it', async () => {

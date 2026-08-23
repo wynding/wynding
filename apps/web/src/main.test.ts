@@ -2228,6 +2228,16 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
     let clock = 0;
     let onBack: (() => void) | null = null;
     const exitApp = vi.fn(async () => undefined);
+    // Registration is ASYNCHRONOUS — `createBackHandler` awaits `addListener` — so a
+    // `back()` issued before it settles reaches no listener and does nothing. That is a
+    // real property of the wiring, and a test that polls around it (a `vi.waitFor` loop
+    // wrapped over the press) cannot tell a correct no-op from a press that was simply
+    // dropped, nor catch a press that exits TWICE. So the double publishes the moment
+    // registration completes and every test awaits it exactly once.
+    let markRegistered!: () => void;
+    const registered = new Promise<void>((resolve) => {
+      markRegistered = resolve;
+    });
     const app = createApp(document, root, {
       sceneFactory: () => fakeHandle,
       schedule: sched.schedule,
@@ -2235,7 +2245,14 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
       seed: 1,
       capacitorApp: {
         addListener: (async (name: string, listener: () => void) => {
-          if (name === 'backButton') onBack = listener;
+          // The listener is published only once this promise has had a chance to settle,
+          // which is what makes the double model the real bridge instead of a synchronous
+          // stand-in that would make the ordering assertions below vacuous.
+          await Promise.resolve();
+          if (name === 'backButton') {
+            onBack = listener;
+            markRegistered();
+          }
           return { remove: async () => undefined };
         }) as never,
         exitApp,
@@ -2245,6 +2262,8 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
     return {
       root,
       exitApp,
+      registered,
+      isRegistered: (): boolean => onBack !== null,
       back: (): void => onBack?.(),
       frame: (): void => sched.frame((clock += 16)),
     };
@@ -2275,13 +2294,19 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
     }
   });
 
-  it('exits when there is genuinely nothing to lose', async () => {
+  it('exits when there is genuinely nothing to lose — after ONE press', async () => {
     const h = backApp();
     h.frame();
-    await vi.waitFor(() => {
-      h.back();
-      expect(h.exitApp).toHaveBeenCalled();
-    });
+    // The ordering, asserted rather than polled around: before registration settles a
+    // press reaches nothing at all.
+    expect(h.isRegistered()).toBe(false);
+    h.back();
+    expect(h.exitApp).not.toHaveBeenCalled();
+
+    await h.registered;
+    h.back();
+    // EXACTLY once. A retry loop around the press could not have caught a double exit.
+    expect(h.exitApp).toHaveBeenCalledTimes(1);
   });
 
   it('ASKS FIRST when a pre-start board carries pending builds', async () => {
@@ -2290,6 +2315,7 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
     // losing something: towers queued pre-start would be thrown away by Back while the
     // wordmark politely asked.
     const h = backApp();
+    await h.registered; // so `not.toHaveBeenCalled()` below proves the predicate, not a dropped press
     h.frame();
     // The same pre-start planning path `planTowerWhileHeld` uses above: arm the basic
     // Card, walk the keyboard cursor off the entrance, confirm. The run stays HELD — the
