@@ -746,6 +746,23 @@ export const CLAIMS: readonly Claim[] = [
   // SENSITIVITY — the swept `k` values and what they buy
   // ---------------------------------------------------------------------------------------
   {
+    // Surfaced the moment masks were made tokenizer-aligned: the plan-step mask had been
+    // taking the `1` out of `step 1e-5` and leaving `e-5`, so the step size was invisible in
+    // all three files that state it. Codex demonstrated the bite with a constructed sentence;
+    // this is the same bug already living in the repository (PR #161).
+    id: 'sweep-step',
+    claim: 'the step size of the continuous sweep the `k` figures come from',
+    value: '1e-5',
+    numeric: 1e-5,
+    basis:
+      "the sweep is continuous at this resolution, which is what makes its crossings magnitudes rather than the `KS` grid's buckets",
+    sites: [
+      { file: GATE, anchor: 'SWEEP \\(step ', pattern: '([\\de.+-]+)\\)' },
+      { file: FIXTURE_TEST, anchor: 'continuous sweep \\(step ', pattern: '([\\de.+-]+),' },
+      { file: ADR, anchor: '\\(step ', pattern: '([\\de.+-]+),' },
+    ],
+  },
+  {
     id: 'k-new',
     claim: "the injection strength at which the gating p50 fires on the fixture's broad injection",
     value: '0.00922',

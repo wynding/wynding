@@ -1165,36 +1165,93 @@ function looksLikePath(m: string): boolean {
  *  tests stayed green (PR #161). A commit head is an identifier and `10000e0` is a quantity;
  *  the grammar already knows the difference, so the mask asks it instead of guessing from
  *  length and alphabet. `a1600c9` is still masked, because it does not parse. */
+/** THE MASKS, as data, so the aligner below can put every one of them behind the same rule
+ *  rather than each being trusted to have been written with it in mind. */
+const REFERENCE_MASKS: readonly { readonly what: string; readonly re: RegExp }[] = [
+  // Both date and path masks require a NON-NUMERIC shape. A mask made only of digits and
+  // separators cannot tell a reference from a measurement, and will eat the measurement:
+  // the path mask blanked `1.0065/1.0065` as though it were a directory, which took a
+  // restated ratio out of BOTH all-pairs coverage and per-occurrence accounting (Codex).
+  // The date mask has the same shape, so it is bounded to real months and days here rather
+  // than left to match any hyphenated numeric triple.
+  { what: 'ISO dates', re: /\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:\/\d{2})?/g },
+  { what: 'issue refs, in both spellings', re: /#\d+|\b(?:issues|pull)\/\d+/g },
+  { what: 'document refs', re: /\b(ADR|PRD)\s+\d+/g },
+  // A path needs a LETTER somewhere. `docs/adr/0005-x.md` is a reference; `1.0065/1.0065`
+  // is a ratio wearing a slash, and masking it hid a claim in plain sight.
+  { what: 'file paths', re: /[\w./-]*\/[\w./-]+/g },
+  { what: 'runner image / release ids', re: /\bubuntu-?\d[\w.]*(?:\/[\d.]+)?/gi },
+  // Deliberately NOT tolerant of a hard line wrap. `step\n// 21` is a reference this misses,
+  // and the tolerance that would catch it — treating a comment continuation as whitespace —
+  // is fail-OPEN: `at each step\n// 500 records` would take a real claim with it. A missed
+  // reference surfaces LOUDLY as an uncovered figure; a masked measurement vanishes. So the
+  // mask stays narrow and the one wrapped reference was rewrapped at its source instead.
+  { what: 'plan step refs', re: /\b(PLAN\s+)?step\s+\d+/gi },
+  { what: 'milestone/story refs', re: /\bM\d+-S\d+\w*/g },
+  { what: 'commit shas', re: /\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi },
+  { what: 'percentile NAMES, not values', re: /\bp(50|95|99)\b/g },
+  { what: 'ordered-list markers', re: /^[ \t]*\d+\.[ \t]/gm },
+];
+
+/** Where the TOKENIZER finds numerals, which is the authority every mask now defers to. */
+function numeralSpans(text: string): readonly (readonly [number, number])[] {
+  return [...text.matchAll(NUMERAL)].map(
+    (m) => [m.index ?? 0, (m.index ?? 0) + m[0].length] as const,
+  );
+}
+
+/** Whether a span would consume PART of a numeral — overlapping one without containing it. */
+function bitesANumeral(
+  from: number,
+  to: number,
+  spans: readonly (readonly [number, number])[],
+): boolean {
+  return spans.some(([s, e]) => s < to && from < e && !(from <= s && e <= to));
+}
+
+/** THE REFERENCE MASKS, and THE RULE THAT NOW BINDS ALL OF THEM.
+ *
+ *  THE TOKENIZER READS FIRST, AND NO MASK MAY BITE INTO WHAT IT FOUND. A mask either takes a
+ *  numeral WHOLE or leaves it entirely alone; it may never consume part of one. The plan-step
+ *  mask was doing exactly that: in `at each step 1.0065 ms` its `\d+` took the `1` and stopped
+ *  at the decimal point, so `step 1` was blanked and `.0065` survived — re-keyed as 0.0065,
+ *  a different claim from the rowed 1.0065 it restates. Codex put that sentence in
+ *  `scenario.ts` and all 768 tests stayed green (PR #161).
+ *
+ *  This is the same lesson the slash classifier and the numeral grammar each taught in their
+ *  own rounds, arriving now for the masks: there is ONE authority on where a numeral starts and
+ *  ends, and every other rule is downstream of it. Fixing the one mask by demanding its `PLAN`
+ *  qualifier would have left the other nine free to make the same bite, so the rule is
+ *  structural — every mask runs through `maskReferences`, and a match that would split a
+ *  numeral YIELDS.
+ *
+ *  YIELDING IS THE FAIL-CLOSED ARM, and the direction is the one this file always takes: an
+ *  unmasked reference surfaces its numerals LOUDLY as figures someone must account for, while a
+ *  masked measurement vanishes in silence. Taking the whole token instead would blank the
+ *  measurement, which is the failure being fixed.
+ *
+ *  What this does NOT claim to prevent is a mask CREATING a numeral where the tokenizer saw
+ *  none — blanking the `p` of `p50.5` leaves `.5` readable. That direction invents a claim
+ *  rather than hiding one, so it errs loud, and loud is answerable.
+ *
+ *  THE STANDING DOCTRINE the individual masks still carry, from round 24: a candidate that
+ *  PARSES as a numeral under the one grammar is not a reference. `10000e0` is a quantity even
+ *  though it wears the commit-SHA shape; `a1600c9` is not, because it does not parse. */
 function maskReferences(prose: string): string {
-  return (
-    prose
-      // Both date and path masks require a NON-NUMERIC shape. A mask made only of digits and
-      // separators cannot tell a reference from a measurement, and will eat the measurement:
-      // the path mask blanked `1.0065/1.0065` as though it were a directory, which took a
-      // restated ratio out of BOTH all-pairs coverage and per-occurrence accounting (Codex).
-      // The date mask has the same shape, so it is bounded to real months and days here rather
-      // than left to match any hyphenated numeric triple.
-      .replace(/\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:\/\d{2})?/g, spaces) // ISO dates
-      .replace(/#\d+|\b(?:issues|pull)\/\d+/g, spaces) // issue refs, in both spellings
-      .replace(/\b(ADR|PRD)\s+\d+/g, spaces) // document refs
-      // A path needs a LETTER somewhere. `docs/adr/0005-x.md` is a reference; `1.0065/1.0065`
-      // is a ratio wearing a slash, and masking it hid a claim in plain sight.
-      .replace(/[\w./-]*\/[\w./-]+/g, (m) => (looksLikePath(m) ? spaces(m) : m)) // file paths
-      .replace(/\bubuntu-?\d[\w.]*(?:\/[\d.]+)?/gi, spaces) // runner image / release ids
-      // Deliberately NOT tolerant of a hard line wrap. `step\n// 21` is a reference this misses,
-      // and the tolerance that would catch it — treating a comment continuation as whitespace —
-      // is fail-OPEN: `at each step\n// 500 records` would take a real claim with it. A missed
-      // reference surfaces LOUDLY as an uncovered figure; a masked measurement vanishes. So the
-      // mask stays narrow and the one wrapped reference was rewrapped at its source instead.
-      .replace(/\b(PLAN\s+)?step\s+\d+/gi, spaces) // plan step refs
-      .replace(/\bM\d+-S\d+\w*/g, spaces) // milestone/story refs
-      // A SHA is an identifier; a numeral is a quantity. The grammar decides, not the alphabet.
-      .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{7,}\b/gi, (m) =>
-        IS_NUMERAL.test(m) ? m : spaces(m),
-      ) // commit shas
-      .replace(/\bp(50|95|99)\b/g, spaces) // percentile NAMES, not values
-      .replace(/^[ \t]*\d+\.[ \t]/gm, spaces)
-  ); // ordered-list markers
+  const spans = numeralSpans(prose);
+  let out = prose;
+  for (const { re, what } of REFERENCE_MASKS) {
+    out = out.replace(re, (m: string, ...rest: unknown[]) => {
+      // The offset is the last argument before the whole string (and before `groups`, which
+      // these patterns never produce), whatever number of capture groups a mask declares.
+      const at = rest.find((a) => typeof a === 'number') as number;
+      if (bitesANumeral(at, at + m.length, spans)) return m;
+      if (what === 'file paths') return looksLikePath(m) ? spaces(m) : m;
+      if (what === 'commit shas') return IS_NUMERAL.test(m) ? m : spaces(m);
+      return spaces(m);
+    });
+  }
+  return out;
 }
 
 /** The claim-bearing prose of a guarded file, masked to preserve every byte offset. */
@@ -1263,10 +1320,31 @@ function numeralsOf(file: string): Numeral[] {
   return found;
 }
 
-/** Self-identifying: a numeral this specific is a restatement, not a coincidence. */
-function highInformation(raw: string): boolean {
-  const decimals = raw.includes('.') ? (raw.split('.')[1] as string).length : 0;
-  return decimals >= 3 || raw.replace(/[^\d]/g, '').length >= 5;
+/** How specific ONE spelling of a number is: three or more decimal places, or five or more
+ *  digits. Decimals are counted on the MANTISSA, because `1.1000e0` pins four of them and the
+ *  exponent is not precision. */
+function isSpecific(spelling: string): boolean {
+  const mantissa = spelling.split(/[eE]/)[0] as string;
+  const decimals = mantissa.includes('.') ? (mantissa.split('.')[1] as string).length : 0;
+  return decimals >= 3 || spelling.replace(/[^\d]/g, '').length >= 5;
+}
+
+/** Self-identifying: a numeral this specific is a restatement, not a coincidence.
+ *
+ *  JUDGED ON THE SPELLING AS WRITTEN **AND** ON THE VALUE IT DENOTES, and satisfied by either,
+ *  because normalization is a KEYING step and was never meant to be a judgment. Asking only the
+ *  normalized value let `1.1000e0` — which pins four decimal places — arrive as `1.1` and be
+ *  waved through as low-information, so an unlisted restatement of the rowed `1.1000` sat in a
+ *  guarded source with all 768 tests green (Codex, PR #161).
+ *
+ *  The mirror of that defect is why this asks BOTH rather than swapping one for the other:
+ *  `1e10` is three characters and denotes eleven digits, so a spelling-only test would wave
+ *  THAT through instead. Information is a property of what was written and of what it means,
+ *  and the threshold takes the greater — which is the fail-closed arm, since the cost of
+ *  over-admitting is a numeral someone must account for and the cost of under-admitting is a
+ *  restatement free to drift. */
+function highInformation(spelling: string, value: string = spelling): boolean {
+  return isSpecific(spelling) || isSpecific(value);
 }
 
 const scanCache = new Map<string, Numeral[]>();
@@ -1324,7 +1402,7 @@ function codeLiterals(file: string): Numeral[] {
   const found: Numeral[] = [];
   for (const lit of walk(raw).numericLiterals) {
     const value = literalValue(lit.text);
-    if (value === undefined || !highInformation(value)) continue;
+    if (value === undefined || !highInformation(lit.text, value)) continue;
     const at = lit.signAt ?? lit.start;
     found.push({ raw: raw.slice(at, lit.end), value, at, alsoAt: lit.start });
   }
@@ -1396,8 +1474,11 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       for (const n of occurrences(file)) {
         const key = claimKey(n.value);
         if (excluded.has(key)) continue;
-        // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values.
-        if (!n.value.includes('.') && Number(n.value) < 10) continue;
+        // Bare integers under 10 are prose ("one of two arms", "n = 4"), never claim values —
+        // and "bare" is a fact about the SPELLING, found by the same sweep as the threshold
+        // above. Asking the normalized value instead would read `9e0` as a bare 9 and drop it,
+        // when a numeral nobody writes casually is exactly what the filter must not drop.
+        if (/^\d+$/.test(n.raw) && Number(n.value) < 10) continue;
         if (!surface.has(key)) continue;
         if (!where.has(key)) where.set(key, new Set());
         (where.get(key) as Set<string>).add(file);
@@ -1452,7 +1533,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     for (const file of GUARDED_FILES) {
       const raw = read(file);
       for (const n of occurrences(file)) {
-        if (!highInformation(n.value)) continue;
+        if (!highInformation(n.raw, n.value)) continue;
         const key = claimKey(n.value);
         if (!rowedValues.has(key)) continue;
         const at = `${file}:${n.at}`;
@@ -1747,6 +1828,17 @@ describe('the values the code EXECUTES are occurrences too', () => {
   // what keeps `slowedCreeps: 120` out of a sweep it would only add coincidences to — and the
   // one real sub-threshold pair the census found is ROWED instead, so the bar is not what is
   // guarding it.
+  // Normalization is a KEYING step and was never a judgment. Asking it whether a numeral is
+  // self-identifying let `1.1000e0` arrive as `1.1` and be waved through (Codex, PR #161); the
+  // mirror, asking only the spelling, would wave `1e10` through instead. Both are asked.
+  it('judges information on the spelling AND the value, taking the greater', () => {
+    expect(highInformation('1.1000e0', '1.1'), 'the spelling pins four decimals').toBe(true);
+    expect(highInformation('1e10', '10000000000'), 'the value denotes eleven digits').toBe(true);
+    expect(highInformation('0.00922', '0.00922')).toBe(true);
+    expect(highInformation('120', '120')).toBe(false);
+    expect(highInformation('1.1', '1.1')).toBe(false);
+  });
+
   it('admits only what the occurrence half already calls self-identifying', () => {
     expect(literalsOf('const k = 0.0075;').every((v) => highInformation(v as string))).toBe(true);
     expect(highInformation('120')).toBe(false);
@@ -1922,6 +2014,51 @@ describe('the reference masks blank references, not measurements', () => {
         ' '.repeat(x.length),
       ),
     ).not.toContain('22');
+  });
+
+  // THE ALIGNMENT INVARIANT, checked over the whole guarded corpus rather than on examples.
+  // A mask may take a numeral WHOLE or leave it alone; it may never consume part of one. The
+  // plan-step mask was doing exactly that — `\d+` took the `1` of `1e-5` and stopped at the
+  // `e`, so three files' statement of the sweep's step size read as a blank followed by `e-5`
+  // and the figure was invisible (Codex demonstrated the bite with `at each step 1.0065 ms`;
+  // the same bug was already in the repository at `step 1e-5`).
+  //
+  // Audited across the ten masks on this corpus: EIGHT never bite. Two did — the plan-step
+  // mask at three live sites, which actually blanked; and the file-path mask, which matched
+  // `000/2` out of `2,000/2,500` in `oracle.ts` and was saved only by its own letter
+  // requirement declining the replacement. One guard away from the same defect, which is why
+  // the rule is structural rather than a fix to the mask that happened to be caught.
+  it('never lets a mask consume PART of a numeral, across every guarded file', () => {
+    const partial: string[] = [];
+    for (const file of GUARDED_FILES) {
+      const raw = read(file);
+      const prose = file.endsWith('.md') ? raw : commentsOnly(raw);
+      const masked = maskReferences(prose);
+      for (const [from, to] of numeralSpans(prose)) {
+        const before = prose.slice(from, to);
+        const after = masked.slice(from, to);
+        if (after !== before && after.trim() !== '') {
+          partial.push(`${file}: ${JSON.stringify(before)} became ${JSON.stringify(after)}`);
+        }
+      }
+    }
+    expect(
+      partial,
+      `a mask consumed PART of a numeral. The tokenizer decides where a numeral starts and ` +
+        `ends, and every mask is downstream of that: take the whole token or leave it. A half-` +
+        `eaten numeral re-keys as a DIFFERENT claim, which is drift wearing a mask's ` +
+        `authority:\n  ${partial.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('yields rather than splitting a numeral that follows a reference word', () => {
+    // Codex's reproduction, and the live case it turned out to describe.
+    expect(maskReferences('at each step 1.0065 ms')).toContain('1.0065');
+    expect(maskReferences('SWEEP (step 1e-5) over')).toContain('1e-5');
+    // The reference is still masked whenever it wraps a numeral WHOLE — yielding is not
+    // surrender, it is the narrower of the two honest answers.
+    expect(maskReferences('PLAN step 21 is explicit')).not.toContain('21');
+    expect(maskReferences('see step 4 below')).not.toContain('4');
   });
 
   // THE AUDIT, run against the REAL chain rather than a copy of it. The doctrine is one line —
