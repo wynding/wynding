@@ -22,6 +22,7 @@
   "dependencies": {
     "@wynding/content": "workspace:*",
     "@wynding/engine": "workspace:*",
+    "@wynding/platform": "workspace:*",
     "@wynding/render": "workspace:*",
     "@wynding/replay": "workspace:*",
     "@wynding/sim": "workspace:*"

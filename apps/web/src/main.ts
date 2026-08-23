@@ -14,6 +14,13 @@ import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
+import {
+  browserLockFn,
+  createBrowserStorageDriver,
+  loadSettings,
+  type SettingsPersistence,
+} from './persist';
+import { ambientCrypto } from './uuid';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
@@ -51,6 +58,13 @@ export interface AppDeps {
    *  separate from `now` (a monotonic frame clock) so a fresh run varies per reload. */
   readonly seedSource?: () => number;
   readonly prefersReducedMotion?: boolean;
+  /** ADR 0008's persistence seam, already hydrated (#142). `boot()` reads storage BEFORE
+   *  calling in here — see `persist.ts`'s header for the measurement that decided that —
+   *  so this stays a synchronous constructor and every consumer below it keeps a
+   *  synchronous settings API. Absent means "no persistence", which is what the unit
+   *  tests and the perf harness run with: settings then seed from
+   *  `prefersReducedMotion` alone and nothing is written. */
+  readonly settingsPersistence?: SettingsPersistence;
   /** matchMedia lookup for viewport-gated features (the P5 rotate prompt, Story 11's
    *  install detection) — injectable for tests; defaults to `doc.defaultView.matchMedia`
    *  when available, or an always-non-matching stub otherwise (e.g. jsdom without a stub). */
@@ -92,7 +106,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // The host declaration, resolved ONCE (ADR 0012). Read here rather than at each consumer
   // so the three #146 surfaces below can never disagree about the one fact all of them read.
   const hosted = deps.hosted === true;
-  const settings = createSettings({ reducedMotion: deps.prefersReducedMotion ?? false });
+  const settings = createSettings(
+    deps.settingsPersistence?.seed ?? { reducedMotion: deps.prefersReducedMotion ?? false },
+  );
   const keymap = createKeymap();
   const controller = (deps.controllerFactory ?? createController)(deps.seed);
   const seedSource = deps.seedSource ?? (() => Date.now() >>> 0);
@@ -254,6 +270,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   };
   paintSwatches();
   const unsubscribe = settings.subscribe((s) => {
+    // Write-through (#142). First, and unconditionally: persistence must not depend on
+    // which of the two settings moved, and it must not be skipped by the memo below.
+    deps.settingsPersistence?.write(s);
     // The swatches' one palette input — repainted only when the mode actually moved, so a
     // reduced-motion toggle never repaints nine canvases for nothing.
     const modeChanged = s.colourMode !== colourMode;
@@ -946,19 +965,51 @@ function rafScheduler(onFrame: (nowMs: number) => void): () => void {
  *  `SceneFactory`, so it is used directly — the assignment type-checks the arity. */
 const phaserSceneFactory: SceneFactory = mountScene;
 
-/** Boot the app against the real browser globals. Returns `null` on a missing `#app`
- *  rather than throwing — `./boot-entry.ts` is the module that decides a missing root
- *  is fatal for the shipped app; this module has no auto-run of its own (QC round-1
- *  fix 1) precisely so that importing `createApp`/`boot` — as `apps/web/perf/
- *  main-perf.ts` does, to drive the real app against the stress bundle instead of the
- *  shipped ruleset — never has the side effect of also booting a second, production
- *  app into `#app`. */
-export function boot(doc: Document): AppHandle | null {
+/** Boot the app against the real browser globals. Returns `null` — SYNCHRONOUSLY, before
+ *  anything is awaited — on a missing `#app`, rather than throwing: `./boot-entry.ts` is
+ *  the module that decides a missing root is fatal for the shipped app, and it must be
+ *  able to make that a plain thrown error rather than an unhandled rejection. This module
+ *  has no auto-run of its own (QC round-1 fix 1) precisely so that importing
+ *  `createApp`/`boot` — as `apps/web/perf/main-perf.ts` does, to drive the real app
+ *  against the stress bundle instead of the shipped ruleset — never has the side effect
+ *  of also booting a second, production app into `#app`.
+ *
+ *  The promise is #142's: settings are read back through ADR 0008's async
+ *  `StorageDriver` and the app is constructed with what they say, so nothing renders in
+ *  the default palette and then flips. The wait is a measured 0.00075 ms — see
+ *  `persist.ts`'s header — and resolves in a microtask, which drains before the first
+ *  paint, so it costs no frame. */
+export function boot(doc: Document): Promise<AppHandle> | null {
   const root = doc.getElementById('app');
   if (root === null) return null;
+  return bootInto(doc, root);
+}
+
+async function bootInto(doc: Document, root: HTMLElement): Promise<AppHandle> {
+  const view = doc.defaultView;
   const prefersReducedMotion =
-    typeof doc.defaultView?.matchMedia === 'function' &&
-    doc.defaultView.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    typeof view?.matchMedia === 'function' &&
+    view.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const settingsPersistence = await loadSettings({
+    driver: createBrowserStorageDriver(view),
+    prefersReducedMotion,
+    crypto: ambientCrypto(view),
+    lock: browserLockFn(view),
+    onUnavailable: (error) => {
+      // Fail-closed is not the same as silent: persistence has shut off for the session
+      // and the player's settings will not survive a reload. There is no UI for that
+      // today, so DEV gets the diagnosis and production gets no console noise — the same
+      // posture `controller.ts` takes for its dropped-DoT tripwire. The MESSAGE only,
+      // not the Error: this fires under jsdom (which has no `localStorage`) on every
+      // unit test that boots, and a stack per boot buries real output.
+      if (import.meta.env.DEV) {
+        console.warn(
+          'settings will not persist this session:',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    },
+  });
   return createApp(doc, root, {
     sceneFactory: phaserSceneFactory,
     schedule: rafScheduler,
@@ -967,6 +1018,7 @@ export function boot(doc: Document): AppHandle | null {
     // relative value that clusters across reloads, collapsing the RNG's variety.
     seed: Date.now() >>> 0,
     prefersReducedMotion,
+    settingsPersistence,
     storage: dismissalStorage(),
     // ADR 0012: the web build is TOLD it is hosted and never infers. The fact is a
     // build-time constant baked into the Host build (ADR 0013), so this is the one place

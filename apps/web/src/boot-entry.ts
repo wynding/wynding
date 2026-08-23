@@ -22,7 +22,16 @@
 import { boot } from './main';
 
 // A missing/mis-IDed #app mount point is a hard, visible failure (a blank page with a
-// thrown error), never a silent no-op.
-if (boot(document) === null) {
+// thrown error), never a silent no-op. `boot()` reports that case SYNCHRONOUSLY, as a
+// null return, precisely so this stays a thrown error: since #142 the rest of the boot
+// is a promise (settings are hydrated through ADR 0008's async `StorageDriver` before
+// the first render), and folding the missing-root check into it would have downgraded
+// the loudest failure the app has into an unhandled rejection.
+const booting = boot(document);
+if (booting === null) {
   throw new Error('missing #app root element');
 }
+// Deliberately UNHANDLED on the failure path: a boot that throws should reach the
+// console and `unhandledrejection` exactly as an uncaught error would, not be swallowed
+// into a blank page that looks fine.
+void booting;

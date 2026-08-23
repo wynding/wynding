@@ -123,6 +123,14 @@ prompt is the fallback — that path is live, not dead code.
 Store distribution is covered by the AGPL §7 App Store Exception (see
 [LICENSE-EXCEPTIONS.md](../../LICENSE-EXCEPTIONS.md)), so anyone can ship store builds.
 
-The persistence seam (async `StorageDriver`) is DESIGNED (ADR 0008), but no shared platform
-implementation exists yet — saves working identically across web, mobile and desktop is a future
-consumer of that seam, not something wired up here today.
+## Persistence
+
+The async `StorageDriver` seam (ADR 0008) now exists, in `packages/platform`, and the app's
+accessibility settings ride it — so a colour-vision mode or a reduced-motion choice made inside
+this Host survives a relaunch. The baseline adapter is `localStorage`-backed, which the
+Capacitor WebView provides; swapping in a Capacitor-Preferences adapter is a change to
+`createBrowserStorageDriver` in `apps/web/src/persist.ts` and to nothing else, which is what the
+seam is for.
+
+Campaign progress and best scores are the seam's other two ADR 0008 §3 consumers and are Phase 2
+— they land as new slots, not as a redesign.

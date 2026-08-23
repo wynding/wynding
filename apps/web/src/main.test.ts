@@ -1325,11 +1325,13 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
 });
 
 describe('main — boot()', () => {
-  it('returns null when there is no #app root', () => {
+  it('returns null SYNCHRONOUSLY when there is no #app root', () => {
+    // Synchronously, not as a rejected promise: `boot-entry.ts` turns this into a thrown
+    // error, which an async signature would have downgraded to an unhandled rejection.
     expect(boot(document)).toBeNull();
   });
 
-  it('boots against real browser globals (rAF + scene) when #app exists', () => {
+  it('boots against real browser globals (rAF + scene) when #app exists', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     let called = false;
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => {
@@ -1341,14 +1343,14 @@ describe('main — boot()', () => {
     });
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
-    const handle = boot(document);
+    const handle = await boot(document);
     expect(handle).not.toBeNull();
     expect(mountMock).toHaveBeenCalledOnce();
     handle!.destroy();
     vi.unstubAllGlobals();
   });
 
-  it('honours prefers-reduced-motion at boot', () => {
+  it('honours prefers-reduced-motion at boot', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     vi.stubGlobal('requestAnimationFrame', () => 1);
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
@@ -1361,7 +1363,7 @@ describe('main — boot()', () => {
       removeEventListener: () => {},
     });
 
-    const handle = boot(document);
+    const handle = await boot(document);
     expect(handle).not.toBeNull();
     handle!.destroy();
     delete (window as unknown as { matchMedia?: unknown }).matchMedia;

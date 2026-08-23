@@ -4,6 +4,7 @@
   "references": [
     { "path": "packages/types" },
     { "path": "packages/engine" },
+    { "path": "packages/platform" },
     { "path": "packages/sim" },
     { "path": "packages/content" },
     { "path": "packages/replay" },

@@ -90,6 +90,9 @@ importers:
       '@wynding/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@wynding/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@wynding/render':
         specifier: workspace:*
         version: link:../../packages/render
@@ -151,6 +154,8 @@ importers:
       '@wynding/types':
         specifier: workspace:*
         version: link:../types
+
+  packages/platform: {}
 
   packages/render:
     dependencies:

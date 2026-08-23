@@ -61,6 +61,7 @@
     { "path": "../../packages/sim" },
     { "path": "../../packages/content" },
     { "path": "../../packages/engine" },
+    { "path": "../../packages/platform" },
     { "path": "../../packages/replay" },
     { "path": "../../packages/perf" }
   ]
