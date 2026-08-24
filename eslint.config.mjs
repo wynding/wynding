@@ -41,6 +41,61 @@ const NONDETERMINISTIC_MODULE_PATHS = [
   },
 ];
 
+// The deterministic core's forbidden SYNTAX, hoisted for the same reason the module paths
+// above were: the layering zones match these files too and set the same rule name, and flat
+// config replaces rather than merges. Kept verbatim from the determinism zone.
+const NONDETERMINISTIC_SYNTAX = [
+  {
+    // `Math` reached through a global object needs the NONDETERMINISTIC member named,
+    // not the namespace: matching `globalThis.Math` wholesale rejected
+    // `globalThis.Math.floor(3 / 2)`, which is perfectly deterministic (Codex,
+    // #111's PR — the fourth false positive this zone produced, and the same lesson
+    // as the type-only check's: a guard matching one level too high reds correct
+    // code, which is worse than the gap it was widened to close).
+    //
+    // `Date` is NOT here, and the difference is the point. `Math` has deterministic
+    // members worth keeping; `Date` has none this zone allows, and the bare global is
+    // already restricted whole (`no-restricted-globals` above). So it belongs in the
+    // namespace-level selector below — where naming only `.now` left `new
+    // globalThis.Date()` and `globalThis.Date.parse(...)` linting clean (Codex,
+    // #111's PR). Keeping it in one selector is also what stops a single
+    // `globalThis.Date.now()` reporting twice.
+    selector:
+      "MemberExpression[object.object.name=/^(globalThis|window|global|self)$/][object.property.name='Math'][property.name='random']",
+    message:
+      'No ambient randomness in the deterministic core — use the seeded Rng from @wynding/engine.',
+  },
+  {
+    // Node's `process` timing/scheduling surface: `process.nextTick(...)` schedules
+    // work outside the initiating step, `process.hrtime.bigint()` is ambient timing.
+    // Both typecheck here because @types/node is auto-included.
+    selector: "MemberExpression[object.name='process'][property.name=/^(nextTick|hrtime|uptime)$/]",
+    message:
+      'No wall-clock scheduler or ambient timing in the deterministic core — use the tick counter.',
+  },
+  {
+    selector: 'ImportExpression[source.value=/^(node:)?(crypto|timers|timers\\u002Fpromises)$/]',
+    message:
+      'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
+  },
+  {
+    // Global-OBJECT access is a third spelling `no-restricted-globals` cannot see:
+    // `globalThis.crypto.getRandomValues(...)` and `globalThis.setTimeout(...)` contain
+    // no bare identifier for that rule to match, so both typecheck AND lint clean
+    // without this. `window`/`global`/`self` are covered for the same reason — none of
+    // them exists in these packages today, which is exactly the point: the guard should
+    // still hold the day someone adds a DOM-ish or Node-ish shim, not depend on their
+    // absence. `Date` is in the property list for the same reason `performance` is —
+    // both are restricted as bare globals above, and the object form is the spelling
+    // that dodges that rule — and it covers `new globalThis.Date()` and
+    // `globalThis.Date.parse(...)` too, which naming `.now` alone did not.
+    selector:
+      'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|process|Date)$/]',
+    message:
+      'No ambient crypto, wall-clock or scheduler access in the deterministic core — use the seeded Rng from @wynding/engine and the tick counter.',
+  },
+];
+
 // ---------------------------------------------------------------------------------------
 // LAYERING ZONES (#112) — ADR 0001's dependency graph, enforced rather than merely stated.
 //
@@ -115,7 +170,19 @@ const NONDETERMINISTIC_MODULE_PATHS = [
 /** ADR 0001's layering graph, left (roots) to right (most-downstream package):
  *  `{types, engine} <- sim <- {render, replay, content} <- perf <- apps`. */
 const LAYERS = [
-  ['@wynding/types', '@wynding/engine'],
+  // `@wynding/platform` sits here on the strength of its own stated position (ADR 0008 §1,
+  // restated in `packages/platform/src/index.ts`): "a sibling leaf the apps depend on and the
+  // sim never imports. It has no workspace dependencies at all." Zero workspace dependencies
+  // is exactly what a root is, so the generated zone forbids it every other package — which is
+  // the half of its contract this table can express.
+  //
+  // THE OTHER HALF IS NOT ENCODED HERE, and saying so is the point: "only apps may import it"
+  // is not a left-to-right statement, so nothing stops `packages/sim` reaching it. That was
+  // equally true before these zones existed, so this is not a regression — but it is a real gap
+  // in a package whose header calls the rule "structural rather than remembered", and it wants
+  // its own zone rather than a silent assumption. Flagged for the owner rather than invented
+  // during a rebase.
+  ['@wynding/types', '@wynding/engine', '@wynding/platform'],
   ['@wynding/sim'],
   ['@wynding/render', '@wynding/replay', '@wynding/content'],
   ['@wynding/perf'],
@@ -316,6 +383,17 @@ function neverShippedContent(message) {
  *  WHOSE FORBIDDEN SET COMES OUT EMPTY IS SKIPPED: part 2 wins for non-test files, so a
  *  restriction added to part 1 alone would silently vanish for exactly the files that ship
  *  (CodeRabbit, PR #167). Spreading one array cannot drift. */
+/** What `apps/web/src` may never reach. One array, read by both the static and the dynamic
+ *  rule below, so the two cannot describe different sets. */
+const WEB_NEVER_SHIPPED = [
+  ...neverShippedPerf(
+    'Nothing shipped may import @wynding/perf (ADR 0001, AGENTS.md). The perf-only browser entry lives in apps/web/perf/, built by vite.perf.config.ts into dist-perf.',
+  ),
+  ...neverShippedContent(
+    'A synthetic perf ceiling (1,000,000-hp creeps), deliberately absent from the registry — it must never reach the client build. See packages/content/src/stress.ts and catalog.ts.',
+  ),
+];
+
 const SERVER_BASE_RESTRICTIONS = [
   ...neverShippedPerf('Nothing shipped may import @wynding/perf (ADR 0001, AGENTS.md).'),
   ...importableSpecifiers('@wynding/render').map((name) => ({
@@ -324,6 +402,44 @@ const SERVER_BASE_RESTRICTIONS = [
   })),
   ...neverShippedContent('A synthetic perf bundle is not shippable content.'),
 ];
+
+/** Part 1 plus the main `@wynding/content` entry — the non-test server set. One array again,
+ *  read by both the static and the dynamic rule. */
+const SERVER_SHIPPED_RESTRICTIONS = [
+  ...SERVER_BASE_RESTRICTIONS,
+  {
+    name: '@wynding/content',
+    message:
+      "Import @wynding/content/artifact instead — the main registry entry drags the bundler-embedded ?raw ruleset text into the server's module graph (apps/server/src/handler.ts's header).",
+  },
+];
+
+/** The same forbidden list again, as `no-restricted-syntax` selectors that match the DYNAMIC
+ *  form.
+ *
+ *  `no-restricted-imports` does not inspect `ImportExpression` AT ALL — this file has said so
+ *  since #111, three paragraphs into the determinism zone, and the layering zones were written
+ *  on top of that note without acting on it. So `await import('@wynding/types')` from
+ *  `packages/engine/src` passed the lint, passed tsc, and passed `layering.test.ts` (whose
+ *  regex only covers the three never-shipped specifiers, not the graph) — measured, all three
+ *  green, before this existed. Codex found it on PR #167 and it was a real unguarded hole in
+ *  the root boundary, not defence-in-depth.
+ *
+ *  DERIVED FROM THE SAME ARRAY, deliberately, rather than written as a second list: the two
+ *  rules cannot drift because there is one source. Each entry keeps its own message, so the
+ *  dynamic form reads exactly like the static one.
+ *
+ *  WHAT IT STILL DOES NOT MATCH, stated because the gap next door is documented and this one
+ *  should be too: a no-substitution template literal — ``import(`@wynding/types`)`` — parses as
+ *  a `TemplateLiteral`, which has no `source.value` for the selector to compare, so it slips
+ *  past. That is the same spelling `layering.test.ts` leaves open by choice, and for the shipped
+ *  trees `check:build-layering` closes it by asking Vite. Between roots there is no artifact to
+ *  ask, so this one stays open and named. */
+const dynamicImportRestrictions = (restricted) =>
+  restricted.map(({ name, message }) => ({
+    selector: `ImportExpression[source.value=${JSON.stringify(name)}]`,
+    message,
+  }));
 
 /** One flat-config object per layered package: everything strictly downstream of it is an
  *  import error, with the determinism specifiers merged in for the four core packages (see
@@ -368,6 +484,17 @@ function layeringZone(specifier, layerIndex) {
     files: [`packages/${specifier.slice('@wynding/'.length)}/src/**`],
     rules: {
       'no-restricted-imports': ['error', { paths: restricted }],
+      'no-restricted-syntax': [
+        'error',
+        ...(alsoDeterministic ? NONDETERMINISTIC_SYNTAX : []),
+        // `paths`, NOT `restricted`: the determinism specifiers already have their own
+        // `ImportExpression` selector inside `NONDETERMINISTIC_SYNTAX`, so deriving a second one
+        // from them made `await import('node:crypto')` report TWICE — measured, in the probe for
+        // this very change. That is the defect the `patterns`-group note in the determinism zone
+        // records from #111 ("every static violation reported TWICE"), reintroduced by the fix
+        // for a different gap. Only the LAYERING paths need a dynamic twin generated here.
+        ...dynamicImportRestrictions(paths),
+      ],
     },
   };
 }
@@ -493,60 +620,12 @@ export default tseslint.config(
       // semantics — a bare `timers` matches that path segment anywhere — so a relative
       // `./timers` or `./crypto/thing` was rejected with a message simply wrong about what
       // the import did. `paths` matches whole specifiers and has neither problem.
-      'no-restricted-syntax': [
-        'error',
-        {
-          // `Math` reached through a global object needs the NONDETERMINISTIC member named,
-          // not the namespace: matching `globalThis.Math` wholesale rejected
-          // `globalThis.Math.floor(3 / 2)`, which is perfectly deterministic (Codex,
-          // #111's PR — the fourth false positive this zone produced, and the same lesson
-          // as the type-only check's: a guard matching one level too high reds correct
-          // code, which is worse than the gap it was widened to close).
-          //
-          // `Date` is NOT here, and the difference is the point. `Math` has deterministic
-          // members worth keeping; `Date` has none this zone allows, and the bare global is
-          // already restricted whole (`no-restricted-globals` above). So it belongs in the
-          // namespace-level selector below — where naming only `.now` left `new
-          // globalThis.Date()` and `globalThis.Date.parse(...)` linting clean (Codex,
-          // #111's PR). Keeping it in one selector is also what stops a single
-          // `globalThis.Date.now()` reporting twice.
-          selector:
-            "MemberExpression[object.object.name=/^(globalThis|window|global|self)$/][object.property.name='Math'][property.name='random']",
-          message:
-            'No ambient randomness in the deterministic core — use the seeded Rng from @wynding/engine.',
-        },
-        {
-          // Node's `process` timing/scheduling surface: `process.nextTick(...)` schedules
-          // work outside the initiating step, `process.hrtime.bigint()` is ambient timing.
-          // Both typecheck here because @types/node is auto-included.
-          selector:
-            "MemberExpression[object.name='process'][property.name=/^(nextTick|hrtime|uptime)$/]",
-          message:
-            'No wall-clock scheduler or ambient timing in the deterministic core — use the tick counter.',
-        },
-        {
-          selector:
-            'ImportExpression[source.value=/^(node:)?(crypto|timers|timers\\u002Fpromises)$/]',
-          message:
-            'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
-        },
-        {
-          // Global-OBJECT access is a third spelling `no-restricted-globals` cannot see:
-          // `globalThis.crypto.getRandomValues(...)` and `globalThis.setTimeout(...)` contain
-          // no bare identifier for that rule to match, so both typecheck AND lint clean
-          // without this. `window`/`global`/`self` are covered for the same reason — none of
-          // them exists in these packages today, which is exactly the point: the guard should
-          // still hold the day someone adds a DOM-ish or Node-ish shim, not depend on their
-          // absence. `Date` is in the property list for the same reason `performance` is —
-          // both are restricted as bare globals above, and the object form is the spelling
-          // that dodges that rule — and it covers `new globalThis.Date()` and
-          // `globalThis.Date.parse(...)` too, which naming `.now` alone did not.
-          selector:
-            'MemberExpression[object.name=/^(globalThis|window|global|self)$/][property.name=/^(crypto|setTimeout|setInterval|setImmediate|queueMicrotask|performance|process|Date)$/]',
-          message:
-            'No ambient crypto, wall-clock or scheduler access in the deterministic core — use the seeded Rng from @wynding/engine and the tick counter.',
-        },
-      ],
+      // WHERE THIS ZONE'S `no-restricted-syntax` LIVES NOW: hoisted to
+      // `NONDETERMINISTIC_SYNTAX` at the top of this file and spliced into the layering zones
+      // for these same four packages, for exactly the reason the `no-restricted-imports` note
+      // above gives. The layering zones now set `no-restricted-syntax` too — they have to, to
+      // reach dynamic `import()` — and one configuration per rule name per file means leaving
+      // these here would have let #167 round 2 silently delete the determinism selectors.
     },
   },
   // ADR 0001's layering graph, one zone per layered package — see the LAYERS block at the
@@ -574,16 +653,10 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
-          paths: [
-            ...neverShippedPerf(
-              'Nothing shipped may import @wynding/perf (ADR 0001, AGENTS.md). The perf-only browser entry lives in apps/web/perf/, built by vite.perf.config.ts into dist-perf.',
-            ),
-            ...neverShippedContent(
-              'A synthetic perf ceiling (1,000,000-hp creeps), deliberately absent from the registry — it must never reach the client build. See packages/content/src/stress.ts and catalog.ts.',
-            ),
-          ],
+          paths: WEB_NEVER_SHIPPED,
         },
       ],
+      'no-restricted-syntax': ['error', ...dynamicImportRestrictions(WEB_NEVER_SHIPPED)],
     },
   },
   {
@@ -606,6 +679,7 @@ export default tseslint.config(
           paths: SERVER_BASE_RESTRICTIONS,
         },
       ],
+      'no-restricted-syntax': ['error', ...dynamicImportRestrictions(SERVER_BASE_RESTRICTIONS)],
     },
   },
   {
@@ -635,16 +709,10 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
-          paths: [
-            ...SERVER_BASE_RESTRICTIONS,
-            {
-              name: '@wynding/content',
-              message:
-                "Import @wynding/content/artifact instead — the main registry entry drags the bundler-embedded ?raw ruleset text into the server's module graph (apps/server/src/handler.ts's header).",
-            },
-          ],
+          paths: SERVER_SHIPPED_RESTRICTIONS,
         },
       ],
+      'no-restricted-syntax': ['error', ...dynamicImportRestrictions(SERVER_SHIPPED_RESTRICTIONS)],
     },
   },
   {
