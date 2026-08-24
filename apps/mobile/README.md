@@ -287,9 +287,12 @@ the bridge Capacitor puts on `window` rather than by importing the package. That
 code out of the open-web bundle, which ADR 0013 keeps as a separate artifact — the web build has
 no Back button to serve.
 
-What Back does, per state: a dismissable overlay (settings, the install instructions, the leave
-confirm) closes; the results dialog and the rotate prompt CONSUME it without closing; a live run
-pauses; and with nothing open and nothing running, the app exits. That last one is an explicit
+What Back does, per state, in the order `routeBack` tests: a dismissable overlay (settings, the
+install instructions, the leave confirm) closes; the RESULTS dialog EXITS, because the run is
+over and a hosted player has no other way out — the wordmark is a non-interactive `span` (ADR 0012) and the dialog itself offers only Play again, Verify, Copy and Save; the rotate prompt
+CONSUMES it without closing; a live run pauses; an unresolved run — one already started and now
+paused, or a pre-start board carrying pending builds — opens the leave confirm; and with nothing
+open and nothing to lose, the app exits. That last one is an explicit
 `exitApp()` call, because registering a `backButton` listener at all turns Capacitor's own
 handling off — without it, Back would be a dead key.
 

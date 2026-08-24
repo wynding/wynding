@@ -2240,6 +2240,11 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
       markRegistered = resolve;
     });
     const app = createApp(document, root, {
+      // HOSTED, because that is the only configuration where hardware Back exists at all:
+      // `main.ts` discovers the plugin only when hosted, so a `hosted: false` harness with a
+      // live `capacitorApp` is a shape production cannot reach. It also renders the wordmark
+      // as a `span` and skips the home-link guard, which is what makes the trap tests real.
+      hosted: true,
       sceneFactory: () => fakeHandle,
       schedule: sched.schedule,
       now: () => clock,
@@ -2321,6 +2326,17 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
     for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
     expect(results.hidden, 'the run must actually have resolved').toBe(false);
+
+    // THE PREMISES, asserted rather than narrated — without these the test proves only
+    // that `exitApp` was called, not that Back is the player's one way out.
+    expect(h.root.querySelector('a.wy-home'), 'hosted wordmark must not be a link').toBeNull();
+    const exits = [...results.querySelectorAll('button')].filter((b) =>
+      /leave|exit|close|quit|home|back/i.test(`${b.textContent ?? ''} ${b.className}`),
+    );
+    expect(
+      exits.map((b) => b.textContent),
+      'the dialog must offer no way out',
+    ).toEqual([]);
 
     h.back();
     expect(h.exitApp).toHaveBeenCalledTimes(1);

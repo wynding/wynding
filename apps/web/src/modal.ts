@@ -46,29 +46,36 @@ export interface ModalOpenOptions {
    *  only ever closed by the state that opened them. Defaults to false: an overlay that has
    *  not thought about it does not get a dismissal path for free. */
   readonly dismissOnEscape?: boolean;
+  /** Does hardware Back EXIT THE APP from this overlay? True for exactly one overlay today,
+   *  the results dialog: the run is over and inside a Host there is no other way out.
+   *
+   *  DECLARED HERE RATHER THAN INFERRED FROM `priority`, which is what the first cut did.
+   *  Inferring meant "anything at `results` priority quits the app", an invariant held up by
+   *  a comment — and ADR 0014 records a survey overlay already being talked out of that same
+   *  priority once. Registering there is a design question; silently gaining the power to
+   *  close the app should not be its answer.
+   *
+   *  Defaults to false, and `dismissOnEscape` WINS if both are set: an overlay Escape can
+   *  close is `dismissable` to Back too, which is the whole of the agreement below. */
+  readonly backExits?: boolean;
 }
 
 interface StackEntry {
   readonly overlay: ModalOverlay;
   readonly priority: ModalPriority;
   readonly dismissOnEscape: boolean;
+  readonly backExits: boolean;
 }
-
-/** How the active overlay answers a "go back" key — Escape, or Android's hardware Back
- *  (#138). `dismiss` closes it; `consume` swallows the press without closing, which is
- *  what a state-driven overlay does (results is over, rotate is cleared by the device
- *  turning, not by a key). */
-export type ModalDismissal = 'dismiss' | 'consume';
 
 /** What the active overlay means to the hardware Back button (#138).
  *
- *  `dismissable` and `consuming` are the two {@link ModalDismissal} answers under other
- *  names. `results` is split out of `consuming` because it is the one overlay whose
+ *  `dismissable` closes, `consuming` swallows the press. `exit` is split out of `consuming`
+ *  because the results dialog is the one overlay whose
  *  correct Back behaviour is neither: the run is OVER, and inside a Host there is nothing
  *  else to leave through — the wordmark is a non-interactive `span` (ADR 0012) and the
  *  dialog offers only Play again, Verify, Copy and Save. Consuming Back there traps a
  *  player who simply does not want another run. */
-export type ModalBackState = 'dismissable' | 'results' | 'consuming';
+export type ModalBackState = 'dismissable' | 'exit' | 'consuming';
 
 export interface ModalOwner {
   open(overlay: ModalOverlay, options: ModalOpenOptions): void;
@@ -144,6 +151,7 @@ export function createModalOwner(
       overlay,
       priority: openOptions.priority,
       dismissOnEscape: openOptions.dismissOnEscape === true,
+      backExits: openOptions.backExits === true,
     });
     applyActive();
   }
@@ -161,9 +169,10 @@ export function createModalOwner(
   }
 
   /** Dismiss the active overlay if it is dismissable; a no-op otherwise. ONE
-   *  implementation, shared by Escape below and by hardware Back (#138) — the doc on
-   *  `activeDismissal` promises the two can never disagree about an overlay, and two
-   *  copies of this rule is exactly how that promise would quietly stop being true. */
+   *  implementation, shared by Escape below and by hardware Back (#138) — `activeBackState`
+   *  above promises the two keys agree about DISMISSAL (they diverge only on exit, which
+   *  Escape has no analogue for), and two copies of this rule is exactly how that promise
+   *  would quietly stop being true. */
   function dismissActive(): void {
     const active = activeEntry();
     if (active !== null && active.dismissOnEscape) close(active.overlay);
@@ -189,10 +198,12 @@ export function createModalOwner(
     activeBackState(): ModalBackState | null {
       const active = activeEntry();
       if (active === null) return null;
+      // ORDER IS LOAD-BEARING, and a test pins it: `dismissOnEscape` is checked FIRST so
+      // that anything Escape closes is `dismissable` to Back as well. Reversed, an overlay
+      // declaring both would have Escape close it while Back quit the app — exactly the
+      // disagreement the doc above says cannot happen.
       if (active.dismissOnEscape) return 'dismissable';
-      // `results` priority is the results dialog and nothing else — `overlay.ts` opens it
-      // at that priority from exactly one place, the terminal transition.
-      return active.priority === 'results' ? 'results' : 'consuming';
+      return active.backExits ? 'exit' : 'consuming';
     },
     dismissActive,
     destroy(): void {

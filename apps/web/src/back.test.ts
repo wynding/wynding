@@ -83,28 +83,29 @@ const TABLE: {
     // THE ROW THIS ROUND ADDED. Consuming here trapped a hosted player: the run is over,
     // the wordmark is a non-interactive span (ADR 0012), and the dialog offers only Play
     // again / Verify / Copy / Save. Back is the only way out, so it has to be one.
-    name: 'RESULTS open, run over',
-    modal: 'results',
+    name: 'EXIT overlay open, run over',
+    modal: 'exit',
     runLive: false,
     runUnresolved: false,
     expected: 'default',
   },
   {
-    // Unreachable today — `showResults` only fires at the terminal transition, where
-    // `isRunUnresolved` is false — but the table owes an answer for every state, and
-    // exiting stays right: a resolved run has nothing to confirm losing.
-    name: 'RESULTS open, run somehow unresolved',
-    modal: 'results',
+    // Unreachable today (`showResults` fires only where `isRunUnresolved` is false), so
+    // these two rows are about what happens IF that ever breaks. They ask for the confirm
+    // rather than the exit, which keeps the file's own `NEVER exits out from under an
+    // unresolved run` invariant true of every row in the table rather than of most of them.
+    name: 'EXIT overlay open, run somehow unresolved',
+    modal: 'exit',
     runLive: false,
     runUnresolved: true,
-    expected: 'default',
+    expected: 'leaveConfirm',
   },
   {
-    name: 'RESULTS open, run somehow live',
-    modal: 'results',
+    name: 'EXIT overlay open, run somehow live',
+    modal: 'exit',
     runLive: true,
     runUnresolved: true,
-    expected: 'default',
+    expected: 'leaveConfirm',
   },
   {
     name: 'nothing open, run live',
@@ -129,6 +130,21 @@ const TABLE: {
   },
 ];
 
+/** EVERY member of `ModalBackState`, sourced from the TYPE rather than retyped by hand.
+ *
+ *  The first cut listed the states in a literal, which meant the completeness check below
+ *  was exhaustive over that literal and not over the union — adding a fourth state left it
+ *  green and silent, which is precisely the change class that produced this round's bug.
+ *  `satisfies` makes a new member a COMPILE error here, before any test runs; `routeBack`'s
+ *  own `satisfies null` catches the same widening in the code this guards. */
+const ALL_BACK_STATES = {
+  dismissable: true,
+  exit: true,
+  consuming: true,
+} satisfies Record<ModalBackState, true>;
+
+const BACK_STATES = [...(Object.keys(ALL_BACK_STATES) as ModalBackState[]), null];
+
 describe('routeBack — the decision table (#138)', () => {
   for (const row of TABLE) {
     it(`${row.name} → ${row.expected}`, () => {
@@ -139,7 +155,7 @@ describe('routeBack — the decision table (#138)', () => {
   }
 
   it('covers every reachable combination — no state falls off the table', () => {
-    for (const modal of ['dismissable', 'results', 'consuming', null] as const) {
+    for (const modal of BACK_STATES) {
       // `runLive` implies `runUnresolved`, so live-but-resolved is not a state that exists.
       for (const [runLive, runUnresolved] of [
         [true, true],
@@ -194,10 +210,11 @@ describe('the real overlays classify as the table expects', () => {
 
   it('RESULTS IS ITS OWN ROW — not dismissable, and not consumed either: Back EXITS', () => {
     const m = owner();
-    // Registered exactly as `overlay.ts` registers it: state-driven, no `dismissOnEscape`.
-    m.open(overlay(), { priority: 'results' });
+    // Registered exactly as `overlay.ts` registers it: state-driven, no `dismissOnEscape`,
+    // and declaring that Back leaves the app.
+    m.open(overlay(), { priority: 'results', backExits: true });
     // Classified apart from rotate, which is what makes the exit row reachable at all.
-    expect(m.activeBackState()).toBe('results');
+    expect(m.activeBackState()).toBe('exit');
     expect(routeBack({ modal: m.activeBackState(), runLive: false, runUnresolved: false })).toBe(
       'default',
     );
@@ -209,10 +226,54 @@ describe('the real overlays classify as the table expects', () => {
     // future caller cannot close a state-driven dialog through the back door.
     const m = owner();
     const results = overlay();
-    m.open(results, { priority: 'results' });
+    m.open(results, { priority: 'results', backExits: true });
     m.dismissActive();
     expect(results.hide).not.toHaveBeenCalled();
-    expect(m.activeBackState()).toBe('results');
+    expect(m.activeBackState()).toBe('exit');
+  });
+
+  it('EXIT IS DECLARED, NOT INHERITED FROM PRIORITY — results priority alone does not quit', () => {
+    // The invariant that used to be a comment. ADR 0014 records a survey overlay being
+    // talked out of `results` priority once; if a later one lands there, it must not gain
+    // the power to close the app just by sharing a priority string with the results dialog.
+    const m = owner();
+    m.open(overlay(), { priority: 'results' });
+    expect(m.activeBackState()).toBe('consuming');
+    expect(routeBack({ modal: m.activeBackState(), runLive: false, runUnresolved: false })).toBe(
+      'consume',
+    );
+  });
+
+  it('DISMISSABLE WINS over backExits — the two keys cannot be made to disagree', () => {
+    // Pins the order inside `activeBackState`. Reversed, an overlay declaring both would
+    // have Escape close it while Back quit the app, which is the one disagreement the
+    // module's doc promises is impossible.
+    const m = owner();
+    m.open(overlay(), { priority: 'results', dismissOnEscape: true, backExits: true });
+    expect(m.activeBackState()).toBe('dismissable');
+  });
+
+  it('THE AGREEMENT AS A RULE, not three examples: dismissable IFF dismissActive closes', () => {
+    // `modal.ts` claims Back and Escape share the dismissal classification exactly. That is
+    // a biconditional over every overlay, so test it as one — the per-overlay cases above
+    // are instances, and an instance cannot catch the case nobody thought to write.
+    for (const dismissOnEscape of [true, false]) {
+      for (const backExits of [true, false]) {
+        for (const priority of ['results', 'rotate', 'settings'] as const) {
+          const m = owner();
+          const o = overlay();
+          m.open(o, { priority, dismissOnEscape, backExits });
+          const classifiedDismissable = m.activeBackState() === 'dismissable';
+          m.dismissActive();
+          const actuallyClosed = vi.mocked(o.hide).mock.calls.length > 0;
+          expect(
+            actuallyClosed,
+            `dismissable=${String(classifiedDismissable)} but closed=${String(actuallyClosed)} ` +
+              `for ${priority} (escape=${String(dismissOnEscape)} exits=${String(backExits)})`,
+          ).toBe(classifiedDismissable);
+        }
+      }
+    }
   });
 
   it('ROTATE IS CONSUMED, NOT DISMISSED — it is reachable, and only the device clears it', () => {
@@ -222,8 +283,14 @@ describe('the real overlays classify as the table expects', () => {
     const m = owner();
     m.open(overlay(), { priority: 'rotate' });
     expect(m.activeBackState()).toBe('consuming');
-    // The failure this prevents: falling through to app exit from a screen the player
-    // cannot otherwise leave.
+    // The failure this prevents: falling through to APP EXIT from a screen the player
+    // cannot otherwise leave. It only prevents it at (false, false) — with the consuming
+    // branch gone, a live run routes to `pause`, so asserting there would pass for a
+    // reason unrelated to the failure named. The rotate prompt reaches (false, false)
+    // every time the device is turned before a run starts.
+    expect(routeBack({ modal: m.activeBackState(), runLive: false, runUnresolved: false })).toBe(
+      'consume',
+    );
     expect(routeBack({ modal: m.activeBackState(), runLive: true, runUnresolved: true })).not.toBe(
       'default',
     );
@@ -233,9 +300,9 @@ describe('the real overlays classify as the table expects', () => {
     const m = owner();
     const settings = overlay();
     m.open(settings, { priority: 'settings', dismissOnEscape: true });
-    m.open(overlay(), { priority: 'results' });
+    m.open(overlay(), { priority: 'results', backExits: true });
     // Results outranks settings, so Back must answer for results.
-    expect(m.activeBackState()).toBe('results');
+    expect(m.activeBackState()).toBe('exit');
   });
 
   it('dismissActive closes a dismissable overlay and leaves a consuming one alone', () => {

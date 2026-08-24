@@ -2235,7 +2235,7 @@ export function createOverlay(
       results.setAttribute('aria-label', heading);
       resultsStatus.textContent = '';
       // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
-      modal.open(resultsOverlay, { priority: 'results' });
+      modal.open(resultsOverlay, { priority: 'results', backExits: true });
     },
     hideResults(): void {
       resultsStatus.textContent = '';
