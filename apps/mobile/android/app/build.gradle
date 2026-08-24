@@ -1,5 +1,49 @@
 apply plugin: 'com.android.application'
 
+// =====================================================================================
+// RELEASE SIGNING (#137).
+//
+// NO KEY MATERIAL IS EVER WRITTEN IN THIS FILE. This repository is public, and an upload
+// or app-signing key that reaches a public remote cannot be rotated — only abandoned,
+// stranding every install that was ever signed with it. If a signing problem tempts you
+// to paste a password here to "just get a build out", that is the accident this block
+// exists to prevent; the fix is always to supply the values below out of band.
+//
+// TWO SOURCES, environment first. The environment wins so a value can be supplied for one
+// invocation without touching the disk at all; `keystore.properties` is the fallback for
+// a developer machine where typing four variables every time is the thing that leads to a
+// shell-history leak. That file lives beside this project at
+// `apps/mobile/android/keystore.properties`, is named in `android/.gitignore` (a rule
+// this repo deliberately UNCOMMENTED from the stock template), and
+// `scripts/check-native-invariants.mjs` asserts both that the ignore rule survives a
+// regeneration and that no literal password reaches this file.
+//
+// NOT `local.properties`: Android Studio owns that file and rewrites it with the SDK path,
+// so credentials there are one IDE action away from being clobbered — and it is not the
+// file the keystore ignore rules already name.
+//
+// WITHOUT ANY OF IT, the release build still CONFIGURES — CI has no keystore and must not
+// fail at configuration time — and then fails loudly at assemble time rather than quietly
+// emitting an unsigned APK that looks like a shippable one.
+// =====================================================================================
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { stream -> keystoreProperties.load(stream) }
+}
+
+def signingValue = { envName, propertyName ->
+    def fromEnv = System.getenv(envName)
+    return (fromEnv != null && !fromEnv.isEmpty()) ? fromEnv : keystoreProperties.getProperty(propertyName)
+}
+
+def releaseStoreFile = signingValue('WYNDING_KEYSTORE_FILE', 'storeFile')
+def releaseStorePassword = signingValue('WYNDING_KEYSTORE_PASSWORD', 'storePassword')
+def releaseKeyAlias = signingValue('WYNDING_KEY_ALIAS', 'keyAlias')
+def releaseKeyPassword = signingValue('WYNDING_KEY_PASSWORD', 'keyPassword')
+def hasReleaseSigning = releaseStoreFile != null && releaseStorePassword != null &&
+        releaseKeyAlias != null && releaseKeyPassword != null
+
 android {
     namespace = "net.wynding.game"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,12 +60,140 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // `null` rather than a half-filled config: an unsigned release is a legitimate
+            // configuration-time state (CI, a fresh clone), and the assemble-time guard
+            // below is what stops one being mistaken for a shippable build.
+            signingConfig hasReleaseSigning ? signingConfigs.release : null
+        }
+        // =============================================================================
+        // The PERF variant (#148) — the instrument #141 measures with.
+        //
+        // A BUILD TYPE, not a config override and not a second native project. `cap add`
+        // bakes `applicationId` into this file once and editing `capacitor.config.ts`
+        // afterwards re-stamps nothing (that file says so itself), so the only honest way
+        // to get a second installable identity out of one project is here.
+        //
+        // `.perf` is what makes it install ALONGSIDE the play build rather than replacing
+        // it — the point of the exercise, since a measurement you cannot compare against
+        // the shipped app is not a measurement of the shipped app.
+        //
+        // `initWith debug` inherits debug SIGNING and `debuggable true`, which is what
+        // makes `adb install` work with no key material and what lets the WebView be
+        // inspected. It is deliberately NOT derived from `release`: a perf build is never
+        // distributed, and giving it release signing would put the real key in the path of
+        // a routine measurement run.
+        //
+        // WHAT THIS DOES NOT DO is choose the payload. `src/main/assets/public` is shared
+        // with the play build, so the pairing is enforced by the COMMANDS instead — both
+        // `release:android` and `perf:android` sync their own artifact first, so neither
+        // can package the other's leftovers.
+        // =============================================================================
+        perf {
+            initWith debug
+            applicationIdSuffix ".perf"
+            versionNameSuffix "-perf"
+            matchingFallbacks = ['debug']
         }
     }
+}
+
+// Fail before ANY release artifact is written — and at execution time, not configuration
+// time. `pnpm run check:native`, `./gradlew tasks` and an Android Studio sync all
+// configure this project on machines that have no keystore and want none; only an actual
+// attempt to produce a release artifact needs one. The messages name the fix so each
+// failure is self-servicing.
+//
+// A STANDALONE TASK THE PACKAGING TASKS DEPEND ON, not a `doFirst` on `assembleRelease`.
+// That distinction is the whole correctness of this guard and it was wrong before: Gradle
+// runs a lifecycle task's own actions AFTER its dependencies have run, so `assembleRelease`
+// had already driven packaging and signing by the time a `doFirst` here fired. The build
+// failed, loudly — and left a fully-written, seemingly usable release artifact on disk
+// next to the failure. A guard that fires after the thing it guards is a report, not a gate.
+//
+// ATTACHED TO THE PACKAGE/SIGN TASKS THEMSELVES rather than to `preReleaseBuild`. Both are
+// upstream of every artifact, but these are the tasks that actually WRITE one, so the
+// dependency edge is on the operation being prevented rather than on something that
+// merely happens to precede it today. It covers both artifact paths without naming
+// either: `packageRelease` (APK), `packageReleaseBundle` and `signReleaseBundle` (AAB) all
+// match, and `assembleRelease`/`bundleRelease` reach an artifact only through them. The
+// `perf` build type is untouched — its tasks carry `Perf`, not `Release`.
+//
+// The second check closes the ONE footgun the perf variant (#148) introduces. Both
+// variants package from the same `src/main/assets/public` slot, so a release assembled
+// straight after a perf sync would ship the perf HARNESS as the game — the
+// silently-wrong-artifact shape ADR 0013 exists to narrow, and a raw `./gradlew
+// assembleRelease` bypasses the npm scripts that otherwise keep the pairing honest (each
+// stages its own artifact first). `sync-perf.mjs` is the only thing that writes an
+// `android` block into the staged `capacitor.config.json`, and `cap sync` — the play
+// path — never does, so its presence is an exact, mechanical answer to "which payload is
+// staged right now?".
+def stagedCapacitorConfig = file("src/main/assets/capacitor.config.json")
+
+def validateReleaseArtifact = tasks.register('validateReleaseArtifact') {
+    it.group = 'verification'
+    it.description = 'Refuses a release build that would be unsigned, mis-signed, or packaged from the perf payload.'
+    it.doLast {
+        if (!hasReleaseSigning) {
+            throw new GradleException(
+                "No release signing material. Supply WYNDING_KEYSTORE_FILE, " +
+                "WYNDING_KEYSTORE_PASSWORD, WYNDING_KEY_ALIAS and WYNDING_KEY_PASSWORD in the " +
+                "environment, or the same four as storeFile/storePassword/keyAlias/keyPassword " +
+                "in apps/mobile/android/keystore.properties (untracked). See apps/mobile/README.md " +
+                "— 'Release signing'. NEVER commit any of it: this repository is public."
+            )
+        }
+        // The README requires an ABSOLUTE storeFile, and this is what makes that a rule
+        // rather than advice. A relative path resolves against `android/app/`, which is
+        // almost never where anyone keeps a keystore — so the honest outcomes are a
+        // confusing "file not found" or, far worse, silently signing with a DIFFERENT
+        // keystore that happens to sit at that relative path. A key mismatch only shows up
+        // as INSTALL_FAILED_UPDATE_INCOMPATIBLE on a player's device, long after release.
+        if (!new File(releaseStoreFile).isAbsolute()) {
+            throw new GradleException(
+                "Release keystore path must be ABSOLUTE, got '" + releaseStoreFile + "'. " +
+                "A relative path resolves against apps/mobile/android/app/, not your working " +
+                "directory — and would silently sign with whatever keystore happens to sit " +
+                "there. Supply an absolute path in WYNDING_KEYSTORE_FILE or as storeFile in " +
+                "apps/mobile/android/keystore.properties. See apps/mobile/README.md — " +
+                "'Release signing'."
+            )
+        }
+        if (stagedCapacitorConfig.exists() &&
+                stagedCapacitorConfig.text.contains("webContentsDebuggingEnabled")) {
+            throw new GradleException(
+                "The staged web payload is the PERF artifact, not the Host build: " +
+                "src/main/assets/capacitor.config.json declares webContentsDebuggingEnabled, " +
+                "which only `pnpm run sync:perf` writes. Assembling a release now would ship " +
+                "the perf harness as the game. Re-stage the Host build first:\\n" +
+                "  pnpm --filter @wynding/mobile run sync:android\\n" +
+                "(or just use `pnpm run release:android`, which does it for you)."
+            )
+        }
+    }
+}
+
+// The edge that makes the task above a GATE rather than a report. A failed dependency
+// fails the build before its dependents run, so no packaging or signing task can start
+// until the validation has passed.
+tasks.matching { task ->
+    (task.name.startsWith('package') || task.name.startsWith('sign')) &&
+            task.name.contains('Release')
+}.configureEach { task ->
+    task.dependsOn(validateReleaseArtifact)
 }
 
 repositories {

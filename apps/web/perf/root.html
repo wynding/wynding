@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The SAME viewport metadata the play `index.html` carries (#148). The perf artifact
+         must render like the play artifact or it measures a canvas we do not ship — same
+         reason `ui.css` stays in. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Wynding perf harness</title>
+    <style>
+      /* Deliberately self-contained: this page loads no module and imports no stylesheet,
+         so it cannot pull anything into either scene's graph. It exists to be a root. */
+      body {
+        margin: 0;
+        padding: 2rem;
+        background: #0d1b2a;
+        color: #e6edf3;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+      }
+      h1 {
+        font-size: 1.25rem;
+      }
+      ul {
+        padding-left: 1.25rem;
+      }
+      li {
+        margin: 0.75rem 0;
+      }
+      a {
+        color: #7fd1ff;
+      }
+      code {
+        color: #9fb3c8;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- WHY THIS FILE EXISTS. A Capacitor WebView loads the asset ROOT, and `dist-perf`
+         had no root: its two entries are emitted at `perf/index.html` and
+         `perf/catalog.html`, so a packaged perf build booted to a 404 and a white screen.
+         `vite.perf.config.ts` emits THIS page as `dist-perf/index.html`, which closes that
+         without hard-coding either scene as the one the harness is about — both are
+         reachable, and adding a third scene means adding a link here. -->
+    <h1>Wynding perf harness</h1>
+    <p>Perf-only. Never shipped, never installed as the game.</p>
+    <ul>
+      <li><a href="./perf/index.html">Stress scene</a> — drives <code>window.wyndingPerf</code></li>
+      <li>
+        <a href="./perf/catalog.html">Catalog scene</a> — drives
+        <code>window.wyndingPerfCatalog</code>
+      </li>
+    </ul>
+    <p>
+      Drive either from desktop Chrome at <code>chrome://inspect</code> once the device is attached.
+    </p>
+  </body>
+</html>

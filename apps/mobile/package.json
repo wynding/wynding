@@ -6,17 +6,23 @@
   "description": "Capacitor Host that packages the Wynding Host build (iOS / iPadOS / Android).",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint capacitor.config.ts",
+    "lint": "eslint capacitor.config.ts capacitor.perf.config.ts scripts",
     "sync:ios": "pnpm --filter @wynding/web run build:host && cap sync ios",
     "sync:android": "pnpm --filter @wynding/web run build:host && cap sync android",
     "sync:all": "pnpm --filter @wynding/web run build:host && cap sync",
     "open:ios": "cap open ios",
     "open:android": "cap open android",
+    "sync:perf": "pnpm --filter @wynding/web run build:perf && node scripts/sync-perf.mjs",
+    "perf:android": "pnpm run sync:perf && cd android && ./gradlew assemblePerf",
+    "keystore:android": "keytool -genkeypair -v -keystore android/wynding-upload.jks -alias wynding-upload -keyalg RSA -keysize 4096 -validity 10000",
+    "release:android": "pnpm run sync:android && cd android && ./gradlew assembleRelease",
+    "release:android:bundle": "pnpm run sync:android && cd android && ./gradlew bundleRelease",
     "assets:ios": "pnpm --filter @wynding/web run gen:icons && capacitor-assets generate --ios --assetPath ../web/assets/native",
     "assets:android": "pnpm --filter @wynding/web run gen:icons && capacitor-assets generate --android --assetPath ../web/assets/native"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0"
   },

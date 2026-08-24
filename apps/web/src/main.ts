@@ -9,11 +9,34 @@
 // covered, and only `packages/render/src/scene.ts` (Phaser/WebGL) is coverage-excluded.
 
 import './ui.css';
+import { createSaveSlot } from '@wynding/platform';
 import { createController, type Controller } from './controller';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
 import { createSettings } from './settings';
+import {
+  browserLockFn,
+  createBrowserStorageDriver,
+  loadSettings,
+  resolveDeviceId,
+  type SettingsPersistence,
+} from './persist';
+import { ambientCrypto, mintUuid } from './uuid';
+import { createBackHandler, findCapacitorApp, type CapacitorAppPlugin } from './back';
+import {
+  browserDelivery,
+  createPlaytraceRecorder,
+  formatPlaytraceExport,
+  loadPlaytraceOptOut,
+  OPT_OUT_KEY,
+  parseStoredOptOut,
+  playtraceFilename,
+  type PlaytraceDelivery,
+  type PlaytraceOptOut,
+  type PlaytraceViewport,
+  type StoredOptOut,
+} from './playtrace';
 import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
@@ -51,6 +74,33 @@ export interface AppDeps {
    *  separate from `now` (a monotonic frame clock) so a fresh run varies per reload. */
   readonly seedSource?: () => number;
   readonly prefersReducedMotion?: boolean;
+  /** ADR 0008's persistence seam, already hydrated (#142). `boot()` reads storage BEFORE
+   *  calling in here — see `persist.ts`'s header for the measurement that decided that —
+   *  so this stays a synchronous constructor and every consumer below it keeps a
+   *  synchronous settings API. Absent means "no persistence", which is what the unit
+   *  tests and the perf harness run with: settings then seed from
+   *  `prefersReducedMotion` alone and nothing is written. */
+  readonly settingsPersistence?: SettingsPersistence;
+  /** ADR 0011's durable opt-out, hydrated by `boot()` off the same seam as settings
+   *  (#133). Absent means "no durable store", which is what unit tests and the perf
+   *  harness run with. It gates FUTURE automatic upload only — local capture and export
+   *  are ungated by the ADR's own reasoning, so nothing on this page reads it yet. */
+  readonly playtraceOptOut?: PlaytraceOptOut;
+  /** Where an exported playtrace goes. Injected because a clipboard permission and
+   *  `URL.createObjectURL` are both absent under jsdom. */
+  readonly playtraceDelivery?: PlaytraceDelivery;
+  /** The per-run UUID mint (#133/ADR 0014 §4) — injected so a test can pin `runId`. */
+  readonly mintRunId?: () => string;
+  /** Capacitor's App plugin (#138), for hardware Back and the native lifecycle. Injected
+   *  because jsdom has no Capacitor bridge; production discovers it off `window` and ONLY
+   *  when `hosted` is true (ADR 0012 — told, never inferred).
+   *
+   *  AN INJECTED PLUGIN MUST ALREADY SATISFY THE PROMISE CONTRACT. This path bypasses
+   *  `findCapacitorApp`, which is where the legacy-bridge normalization lives — so a raw
+   *  synchronous plugin handed in here would reach `createBackHandler` unadapted. Test
+   *  doubles are promise-shaped and the native side has no reason to inject at all; if one
+   *  ever does, it must pass its plugin through `findCapacitorApp` rather than here. */
+  readonly capacitorApp?: CapacitorAppPlugin | null;
   /** matchMedia lookup for viewport-gated features (the P5 rotate prompt, Story 11's
    *  install detection) — injectable for tests; defaults to `doc.defaultView.matchMedia`
    *  when available, or an always-non-matching stub otherwise (e.g. jsdom without a stub). */
@@ -92,7 +142,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // The host declaration, resolved ONCE (ADR 0012). Read here rather than at each consumer
   // so the three #146 surfaces below can never disagree about the one fact all of them read.
   const hosted = deps.hosted === true;
-  const settings = createSettings({ reducedMotion: deps.prefersReducedMotion ?? false });
+  const settings = createSettings(
+    deps.settingsPersistence?.seed ?? { reducedMotion: deps.prefersReducedMotion ?? false },
+  );
   const keymap = createKeymap();
   const controller = (deps.controllerFactory ?? createController)(deps.seed);
   const seedSource = deps.seedSource ?? (() => Date.now() >>> 0);
@@ -105,6 +157,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // source is coarse): mix in a monotonic run counter so consecutive runs never repeat.
   let runCounter = 0;
   const nextSeed = (): number => ((seedSource() >>> 0) ^ Math.imul(++runCounter, 0x9e3779b1)) >>> 0;
+  /** ADR 0014 §4's per-run instance identity: a render-layer UUID minted at each run
+   *  start. The sim neither reads nor produces it, so nothing about it is a sim change.
+   *  It is minted HERE, beside the seed, because this is the one place per-run state is
+   *  already minted — and `beginRun` returns the seed so the two can never drift apart. */
+  const mintRunId = deps.mintRunId ?? ((): string => mintUuid(ambientCrypto(doc.defaultView)));
+  let runId = mintRunId();
+  const beginRun = (): number => {
+    runId = mintRunId();
+    return nextSeed();
+  };
 
   // Pinned DOM topology (PLAN.md P1): #app > .wy-shell (status + main/stage/board+dock +
   // rail) as siblings of the results/settings/rotate overlays — the Shell is the ONLY node
@@ -124,6 +186,29 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       return { matches: false, addEventListener: () => {}, removeEventListener: () => {} };
     });
   const view = doc.defaultView;
+
+  // --- The playtrace recorder (#133, ADR 0011) ---
+  // Declared HERE, above the overlay/rotate wiring, and not beside the `compactMq` the
+  // wave preview uses, for the reason the `resultsShown` declaration a few lines below
+  // spells out: `createRotate` calls `evaluate()` eagerly at construction, that reaches
+  // `ensurePaused()` and can reach `refreshHud()`, and a `const` declared after that
+  // wiring would sit in its temporal dead zone. The viewport bucket is therefore resolved
+  // LAZILY, at capture time — once per results dialog, not per frame — rather than by
+  // holding a MediaQueryList this early.
+  const playtraceViewport = (): PlaytraceViewport =>
+    matchMediaFn(COMPACT_QUERY).matches ? 'compact' : 'standard';
+  const playtrace = createPlaytraceRecorder({
+    // Wall clock for the exported TIMESTAMPS only.
+    now: () => Date.now(),
+    // ...and the monotonic frame clock for the six-hour bound itself. `deps.now` is
+    // `performance.now` in production, which cannot regress — the wall clock can, and a
+    // backward step made every run eligible indefinitely, silently defeating ADR 0011 §3's
+    // bounded-linkage promise.
+    monotonicNow: () => deps.now(),
+    optOut: deps.playtraceOptOut,
+  });
+  const delivery = deps.playtraceDelivery ?? browserDelivery(doc);
+
   const install: InstallHandle = createInstall({
     storage: deps.storage ?? createStorageAdapter(view),
     matchMedia: matchMediaFn,
@@ -171,6 +256,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // `ensurePaused` returns early; that is an accident of controller state, not an ordering
   // guarantee, and it should not be what keeps a phone held in portrait from failing to boot.
   let resultsShown = false;
+  /** The results dialog's live-region claim counter (#133 review round). Declared HERE,
+   *  beside `resultsShown`, for the reason the comment above gives: `refreshHud` can be
+   *  reached during construction, and a `let` declared further down would sit in its
+   *  temporal dead zone. */
+  let resultsStatusSeq = 0;
   let lastHudKey = '';
   // Install state changes (a captured `beforeinstallprompt`, a dismissal, an install) arrive
   // OUTSIDE the HUD memo key's inputs — nothing about the sim moved. Fold a revision counter
@@ -254,6 +344,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   };
   paintSwatches();
   const unsubscribe = settings.subscribe((s) => {
+    // Write-through (#142). First, and unconditionally: persistence must not depend on
+    // which of the two settings moved, and it must not be skipped by the memo below.
+    deps.settingsPersistence?.write(s);
     // The swatches' one palette input — repainted only when the mode actually moved, so a
     // reduced-motion toggle never repaints nine canvases for nothing.
     const modeChanged = s.colourMode !== colourMode;
@@ -514,6 +607,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       refund: controller.refundForSelection(),
     });
     if (controller.isTerminal() && !resultsShown) {
+      // Capture BEFORE the dialog opens (#133). The controller is frozen at the terminal
+      // transition, so nothing can move between here and the export — and capturing on
+      // the same `!resultsShown` edge means exactly one capture per run, never one per
+      // frame the dialog is up.
+      capturePlaytrace();
+      // Opening a dialog invalidates anything still in flight for the previous one. The
+      // invariant held via `resultsShown` + `playAgain` alone, but only by accident of
+      // there being one re-open path; enforcing it where the dialog actually opens means a
+      // second path cannot silently inherit a stale announcement.
+      abandonResultsStatus();
       overlay.showResults(hud);
       resultsShown = true;
     }
@@ -555,6 +658,93 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     if (!controller.uiState().started || controller.isPaused() || controller.isTerminal()) return;
     controller.pause();
     refreshHud();
+  }
+
+  /** Fold the just-finished run into the recent-runs ring (#133).
+   *
+   *  The three capture facts come from ONE `controller.capture()` call rather than three
+   *  reads, so `ticksCompleted`, the world hash pinned to that boundary, and the pending
+   *  buffer can never describe different moments. */
+  function capturePlaytrace(): void {
+    const snapshot = controller.capture();
+    playtrace.capture({
+      runId,
+      replay: controller.buildReplay(),
+      ticksCompleted: snapshot.ticksCompleted,
+      stateHash: snapshot.stateHash,
+      pendingInputs: snapshot.pendingInputs,
+      viewport: playtraceViewport(),
+    });
+  }
+
+  /** The two export actions. Local only — nothing leaves the device, which is why neither
+   *  consults the opt-out (ADR 0011: "Building a playtrace and letting the player export
+   *  it to a file or clipboard sends nothing anywhere"). Both report through the results
+   *  dialog's one shared live region, and a failure says so rather than looking like a
+   *  press that did nothing. */
+  /** The results dialog's ONE live region has ONE current request (#133 review round).
+   *
+   *  Only the clipboard action is asynchronous, which is exactly what made this subtle:
+   *  a slow or refused Copy could land its announcement AFTER a later Save had already
+   *  written the region — announcing a failure for an export that succeeded — or, worse,
+   *  after Play again had opened the next run's dialog, where a stale "could not export"
+   *  refers to a run that is no longer on screen. Every writer claims the region first,
+   *  and a completion that is no longer the current claim says nothing at all. */
+  function claimResultsStatus(): (message: string) => void {
+    const token = ++resultsStatusSeq;
+    return (message: string): void => {
+      if (token === resultsStatusSeq) overlay.setResultsStatus(message);
+    };
+  }
+  /** Invalidate any in-flight claim without making one — used when the dialog goes away,
+   *  so nothing pending can write onto the next run's results. */
+  function abandonResultsStatus(): void {
+    resultsStatusSeq++;
+  }
+
+  function exportPlaytrace(destination: 'clipboard' | 'file'): void {
+    // The claim is taken AFTER the work that can throw. Taken before, a failure in
+    // `buildExport`/`formatPlaytraceExport` — both outside the `try` below — would bump the
+    // token, silence any in-flight Copy, and announce nothing: the press would look like it
+    // did nothing while leaving the previous message standing as if it were this press's
+    // answer. That is the exact failure mode the live region exists to prevent.
+    let announce: (message: string) => void;
+    let payload: ReturnType<typeof playtrace.buildExport>;
+    let text: string;
+    try {
+      payload = playtrace.buildExport();
+      text = formatPlaytraceExport(payload);
+      announce = claimResultsStatus();
+    } catch (error) {
+      if (import.meta.env.DEV) console.warn('playtrace export could not be built:', error);
+      claimResultsStatus()(t('playtrace.failed'));
+      return;
+    }
+    if (destination === 'file') {
+      const filename = playtraceFilename(payload.exportedAt);
+      try {
+        delivery.save(filename, text);
+        announce(t('playtrace.saved', { filename }));
+      } catch (error) {
+        // BOUND, not discarded. A bare `catch {}` collapsed a missing window, a refused
+        // `createObjectURL`, a security policy blocking the click and any future refactor's
+        // TypeError into one identical string — leaving "Save does nothing" undebuggable
+        // with no artifact to look at.
+        if (import.meta.env.DEV) console.warn('playtrace save failed:', error);
+        announce(t('playtrace.failed'));
+      }
+      return;
+    }
+    // The clipboard write is async and can be REFUSED (no permission, a non-secure
+    // context, a WebView without one), so the announcement waits for the outcome instead
+    // of claiming success optimistically.
+    delivery.copy(text).then(
+      () => announce(t('playtrace.copied')),
+      (error: unknown) => {
+        if (import.meta.env.DEV) console.warn('playtrace clipboard copy failed:', error);
+        announce(t('playtrace.failed'));
+      },
+    );
   }
 
   /** The Pause CONTROL's path (Dock button + keymapped pause key) — a toggle either way, so
@@ -776,6 +966,47 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   );
   view?.addEventListener('pagehide', onBackgrounded, { signal: lifecycle.signal });
 
+  /** Android's hardware Back, and the native app-lifecycle event that arrives with it
+   *  (#138, #134's sub-item). A no-op outside a Host: `findCapacitorApp` returns null
+   *  unless the app was TOLD it is hosted AND the bridge is actually there. It routes
+   *  into the SAME `ensurePaused` seam and the same gesture-abort order as every other
+   *  caller — one pause path, not a second one. */
+  const backHandler = createBackHandler({
+    modal: overlay.modal,
+    isRunLive: () =>
+      controller.uiState().started && !controller.isPaused() && !controller.isTerminal(),
+    // A PAUSED run is still a run the player has — and so is a board full of PENDING
+    // BUILDS on a run that has not started yet. This must be the same question the home
+    // link's interceptor asks (`!started && !hasPlan` → let the navigation through), or
+    // the two ways out of the app disagree about what counts as losing something: a
+    // player who queued six towers pre-start and pressed Back would have them thrown
+    // away, while the same player clicking the wordmark would be asked first.
+    isRunUnresolved: () => {
+      if (controller.isTerminal()) return false;
+      if (controller.uiState().started) return true;
+      const pending = controller.frame();
+      return pending.pendingAdds.length > 0 || pending.pendingSells.length > 0;
+    },
+    showLeaveConfirm: (onConfirm) => {
+      // The home link's own lifecycle, minus the parts that are about a link: pause
+      // defensively (a no-op here — this row only fires on an already-paused run), put
+      // focus somewhere real so the modal owner has something to restore to on Stay, and
+      // hand the dialog its commit action. `showLeave` aborts any in-flight gesture.
+      ensurePaused();
+      shell.home.focus();
+      overlay.showLeave(onConfirm);
+    },
+    ensurePaused,
+    abortGesture: () => input.abort(),
+    refreshWakeLock: () => wakeLock.refresh(),
+    // `=== undefined`, not `??`: `capacitorApp` documents the same explicit-null
+    // convention `wakeLock` does (line ~230) — NULL means "this environment has no
+    // plugin, do not go looking", UNDEFINED means "find it yourself". `??` collapses the
+    // two, so a test passing `null` to prove the inert path would silently get the real
+    // discovery instead, and the assertion would pass for the wrong reason.
+    plugin: deps.capacitorApp === undefined ? findCapacitorApp(view, hosted) : deps.capacitorApp,
+  });
+
   function onAction(action: UiAction): void {
     switch (action.type) {
       case 'togglePause':
@@ -810,10 +1041,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.escape();
         break;
       case 'playAgain':
-        controller.startRun(nextSeed());
+        // A fresh seed AND a fresh `runId`, minted together — this is the run-start edge.
+        controller.startRun(beginRun());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
         overlay.hideResults();
+        abandonResultsStatus(); // nothing in flight may write onto the next run's dialog
         // The modal owner restores focus to whatever was focused before the results
         // dialog opened (generic pre-modal capture); Play-again always wants the board
         // specifically — the natural next actionable place for a keyboard user — so this
@@ -834,9 +1067,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         if (!r.ok) message = t('verify.fail', { reason: r.reason ?? '' });
         else if (r.matchedLive === false) message = t('verify.mismatch');
         else message = t('verify.ok');
-        overlay.setVerifyMessage(message);
+        claimResultsStatus()(message);
         break;
       }
+      case 'copyPlaytrace':
+        exportPlaytrace('clipboard');
+        break;
+      case 'savePlaytrace':
+        exportPlaytrace('file');
+        break;
     }
   }
 
@@ -900,6 +1139,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       setFloatBand({ kind: 'none' }); // ...and the band grants beside them (#101)
       guardListener.abort(); // the home-link exit guard
       lifecycle.abort(); // the backgrounding listeners (#139)
+      backHandler.destroy(); // the native Back + lifecycle listeners (#138)
       // Releases a held lock AND disowns one still in flight, so a request that resolves
       // after teardown cannot leave the screen pinned awake (#140).
       wakeLock.destroy();
@@ -946,27 +1186,81 @@ function rafScheduler(onFrame: (nowMs: number) => void): () => void {
  *  `SceneFactory`, so it is used directly — the assignment type-checks the arity. */
 const phaserSceneFactory: SceneFactory = mountScene;
 
-/** Boot the app against the real browser globals. Returns `null` on a missing `#app`
- *  rather than throwing — `./boot-entry.ts` is the module that decides a missing root
- *  is fatal for the shipped app; this module has no auto-run of its own (QC round-1
- *  fix 1) precisely so that importing `createApp`/`boot` — as `apps/web/perf/
- *  main-perf.ts` does, to drive the real app against the stress bundle instead of the
- *  shipped ruleset — never has the side effect of also booting a second, production
- *  app into `#app`. */
-export function boot(doc: Document): AppHandle | null {
+/** Boot the app against the real browser globals. Returns `null` — SYNCHRONOUSLY, before
+ *  anything is awaited — on a missing `#app`, rather than throwing: `./boot-entry.ts` is
+ *  the module that decides a missing root is fatal for the shipped app, and it must be
+ *  able to make that a plain thrown error rather than an unhandled rejection. This module
+ *  has no auto-run of its own (QC round-1 fix 1) precisely so that importing
+ *  `createApp`/`boot` — as `apps/web/perf/main-perf.ts` does, to drive the real app
+ *  against the stress bundle instead of the shipped ruleset — never has the side effect
+ *  of also booting a second, production app into `#app`.
+ *
+ *  The promise is #142's: settings are read back through ADR 0008's async
+ *  `StorageDriver` and the app is constructed with what they say, so nothing renders in
+ *  the default palette and then flips. The wait is a measured 0.00075 ms — see
+ *  `persist.ts`'s header — and resolves in a microtask, which drains before the first
+ *  paint, so it costs no frame. */
+export function boot(doc: Document): Promise<AppHandle> | null {
   const root = doc.getElementById('app');
   if (root === null) return null;
+  return bootInto(doc, root);
+}
+
+async function bootInto(doc: Document, root: HTMLElement): Promise<AppHandle> {
+  const view = doc.defaultView;
   const prefersReducedMotion =
-    typeof doc.defaultView?.matchMedia === 'function' &&
-    doc.defaultView.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    typeof view?.matchMedia === 'function' &&
+    view.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const driver = createBrowserStorageDriver(view);
+  const lock = browserLockFn(view);
+  // ONE device identity for every slot this boot stamps (ADR 0008 §2's `deviceId` +
+  // `revision` pair). Resolving it per slot would mint two ids on a fresh device and
+  // make the pair meaningless as a per-device write order.
+  const deviceId = await resolveDeviceId(driver, ambientCrypto(view), lock);
+  const settingsPersistence = await loadSettings({
+    driver,
+    prefersReducedMotion,
+    deviceId,
+    lock,
+    onUnavailable: (error) => {
+      // Fail-closed is not the same as silent: persistence has shut off for the session
+      // and the player's settings will not survive a reload. There is no UI for that
+      // today, so DEV gets the diagnosis and production gets no console noise — the same
+      // posture `controller.ts` takes for its dropped-DoT tripwire. The MESSAGE only,
+      // not the Error: this fires under jsdom (which has no `localStorage`) on every
+      // unit test that boots, and a stack per boot buries real output.
+      if (import.meta.env.DEV) {
+        console.warn(
+          'settings will not persist this session:',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    },
+  });
+  // ADR 0011's durable opt-out, on the SAME seam and hydrated in the same pass (#133).
+  // It is read here rather than lazily so the fail-closed default is settled before the
+  // app exists, and so a future upload path can never find it un-hydrated. Its slot is
+  // its own — a separate key beside `settings`, not a field inside it, because ADR 0011
+  // forbids settings from carrying it and ADR 0008 §5's rules apply per slot.
+  const playtraceOptOut = await loadPlaytraceOptOut(
+    createSaveSlot<StoredOptOut>({
+      driver,
+      key: OPT_OUT_KEY,
+      deviceId,
+      parse: parseStoredOptOut,
+      lock,
+    }),
+  );
   return createApp(doc, root, {
     sceneFactory: phaserSceneFactory,
     schedule: rafScheduler,
     now: () => performance.now(),
+    playtraceOptOut,
     // Wall-clock seed (wide entropy). performance.now() would be a small navigation-
     // relative value that clusters across reloads, collapsing the RNG's variety.
     seed: Date.now() >>> 0,
     prefersReducedMotion,
+    settingsPersistence,
     storage: dismissalStorage(),
     // ADR 0012: the web build is TOLD it is hosted and never infers. The fact is a
     // build-time constant baked into the Host build (ADR 0013), so this is the one place

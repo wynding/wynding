@@ -25,9 +25,11 @@ export const EN = {
   "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
   "controls.callWave": "Call wave",
   "controls.callWave.pending": "Launching…",
+  "controls.copyRun": "Copy run data",
   "controls.pause": "Pause",
   "controls.playAgain": "Play again",
   "controls.resume": "Resume",
+  "controls.saveRun": "Save run data",
   "controls.settings": "Settings",
   "controls.speed": "Speed: {factor}x",
   "controls.start": "Start",
@@ -128,6 +130,9 @@ export const EN = {
   "panel.triggerRange": "Trigger range: {tiles} tiles",
   "panel.upgrade": "Max level",
   "panel.upgrade.desc": "This tower has no further upgrades in this build.",
+  "playtrace.copied": "Run data copied to the clipboard.",
+  "playtrace.failed": "Could not export the run data.",
+  "playtrace.saved": "Run data saved as {filename}.",
   "preview.label": "Wave preview",
   "results.lost": "The creeps broke through.",
   "results.summary": "Score {score} — {stars} of 3 stars",
@@ -190,9 +195,11 @@ export interface MessageParams {
   "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
   "controls.callWave": Record<never, never>;
   "controls.callWave.pending": Record<never, never>;
+  "controls.copyRun": Record<never, never>;
   "controls.pause": Record<never, never>;
   "controls.playAgain": Record<never, never>;
   "controls.resume": Record<never, never>;
+  "controls.saveRun": Record<never, never>;
   "controls.settings": Record<never, never>;
   "controls.speed": { "factor": string | number };
   "controls.start": Record<never, never>;
@@ -293,6 +300,9 @@ export interface MessageParams {
   "panel.triggerRange": { "tiles": string | number };
   "panel.upgrade": Record<never, never>;
   "panel.upgrade.desc": Record<never, never>;
+  "playtrace.copied": Record<never, never>;
+  "playtrace.failed": Record<never, never>;
+  "playtrace.saved": { "filename": string | number };
   "preview.label": Record<never, never>;
   "results.lost": Record<never, never>;
   "results.summary": { "score": string | number; "stars": string | number };

@@ -326,6 +326,319 @@ for (const [dir, rules] of [
   );
 }
 
+/**
+ * Blank out Groovy comments, preserving every byte position that is not a comment.
+ *
+ * STRING-AWARE ON PURPOSE. A naive `//`-to-end-of-line strip would truncate any string
+ * containing a URL or a path, and truncation is the DANGEROUS direction here: text that
+ * vanishes cannot be scanned, so an inlined credential could hide behind one and the gate
+ * would pass. This walks the source tracking quote state instead, so only real comments go.
+ *
+ * Comments become SPACES rather than being deleted, and newlines survive, so line and
+ * column positions are unchanged — which is what lets the statement-position anchors in
+ * the caller keep meaning what they say.
+ *
+ * Groovy's triple-quoted and dollar-slashy strings are not modelled; neither appears in
+ * the file this reads. If one ever does, the failure mode is a false POSITIVE (a comment
+ * left un-blanked, reddening correct code), never a false pass — the right way round for
+ * a gate whose whole job is refusing to miss a secret.
+ */
+function stripGroovyComments(source) {
+  const BACKSLASH = String.fromCharCode(92);
+  let out = '';
+  let i = 0;
+  let quote = null; // "'" or '"' while inside a string
+  while (i < source.length) {
+    const c = source[i];
+    const next = source[i + 1];
+    if (quote !== null) {
+      out += c;
+      if (c === BACKSLASH && i + 1 < source.length) {
+        out += next; // an escaped char cannot close the string
+        i += 2;
+        continue;
+      }
+      if (c === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      out += c;
+      i += 1;
+      continue;
+    }
+    if (c === '/' && next === '/') {
+      while (i < source.length && source[i] !== '\n') {
+        out += ' ';
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) {
+        out += source[i] === '\n' ? '\n' : ' ';
+        i += 1;
+      }
+      out += '  '; // the closing */
+      i += 2;
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
+// 2b. The release signing config reads its material from OUT OF BAND, and carries none.
+//
+// The ignore rules above are one half — "a keystore file cannot be committed". This is the
+// other: the build script that USES one must not inline what it needs. A pasted password in
+// `app/build.gradle` is a tracked file with a live credential in it, and it is exactly the
+// shortcut a signing failure invites at the worst moment ("just get a build out"). Asserted
+// as text, because that is what this SDK-free gate can see and it is enough: the four names
+// must be read from the environment or the untracked properties file, and no quoted literal
+// may sit on the right of a password/alias assignment.
+if (gradle !== null) {
+  const ENV_NAMES = [
+    'WYNDING_KEYSTORE_FILE',
+    'WYNDING_KEYSTORE_PASSWORD',
+    'WYNDING_KEY_ALIAS',
+    'WYNDING_KEY_PASSWORD',
+  ];
+  // EVERY CHECK BELOW READS EXECUTABLE GRADLE, NEVER RAW TEXT. Both halves of this
+  // invariant were satisfiable by a comment before: an env name merely MENTIONED anywhere
+  // passed the presence test, so deleting the real `signingValue(...)` call and leaving
+  // the name in a comment left the gate green while the config read nothing; and a
+  // credential parked in a commented-out line was invisible to the literal scan while
+  // still sitting in a tracked file in a public repo. `code` is the file with comments
+  // blanked out, so what is asserted is what Gradle would actually run.
+  const code = stripGroovyComments(gradle);
+
+  // Each name must appear INSIDE a `signingValue(...)` call — the one function that reads
+  // the environment. Presence anywhere was never the claim; being wired up is.
+  const missingEnv = ENV_NAMES.filter(
+    (n) => !new RegExp(`signingValue\\(\\s*["']${n}["']`).test(code),
+  );
+  expect(
+    missingEnv.length === 0,
+    'the release signing config reads every value from the environment',
+    `app/build.gradle has no signingValue('<name>', …) call for ${missingEnv.join(', ')} — ` +
+      `the signing config must take its material out of band, never from a tracked file. ` +
+      `(A mention in a comment does not count: this reads executable statements only.)`,
+  );
+  expect(
+    /rootProject\.file\(["']keystore\.properties["']\)/.test(code),
+    'the release signing config falls back to the untracked keystore.properties',
+    `app/build.gradle does not read rootProject.file("keystore.properties") — that file is the ` +
+      `gitignored home of a developer's own credentials (see the rules asserted above).`,
+  );
+  // A QUOTED LITERAL assigned to any signing property is the accident. Variable references
+  // (`storePassword releaseStorePassword`, `storeFile file(releaseStoreFile)`) carry no
+  // quotes and pass.
+  //
+  // WHAT A CREDENTIAL LOOKS LIKE, in every spelling this file can carry. Three review
+  // rounds have each found a spelling the previous revision did not know, so the rules are
+  // now enumerated as DATA and self-tested below rather than left to a prose argument
+  // about one regex — a fixture table is enumerable, and a reader can ask "where is
+  // `/* … */`?" of a table in a way nobody asks it of a paragraph.
+  //
+  // TWO VIEWS, because the two failure modes need opposite ones. Comments must never
+  // SATISFY a structural claim (so the wiring checks above read the stripped source), and
+  // a comment must never HIDE a secret (so this reads the raw source too). Both are
+  // scanned and the findings unioned — which is also what catches a credential sitting
+  // behind a same-line `/* note */`, where stripping is what restores it to statement
+  // position.
+  //
+  // SECRETS AND NON-SECRETS ARE SCANNED DIFFERENTLY, and that asymmetry is the fix for
+  // this round's false positives. `storePassword`/`keyPassword` are the things that cannot
+  // be rotated once public, so for those ANY value-bearing assignment counts, quoted or
+  // not — `// storePassword=hunter2` is the shape a pasted `keystore.properties` line
+  // takes, and the README tells developers to write exactly that file. `storeFile` and
+  // `keyAlias` are a PATH and a NAME: documenting an example path in a comment is
+  // something this repo actively asks for, so those are scanned in executable code only.
+  const SECRET_PROPS = String.raw`storePassword|keyPassword`;
+  const NON_SECRET_PROPS = String.raw`keyAlias|storeFile`;
+  // `//`, `/*`, `/**`, or a ` * ` continuation line. The opener was missing and a one-line
+  // `/* storePassword = "x" */` sailed through the revision that claimed to close exactly
+  // this class.
+  const COMMENT = String.raw`(?:\/\/|\/\*+|\*+)`;
+  // `=`, `:` or `->`. Free-text notes use a colon far more often than an equals sign.
+  const SEP = String.raw`(?:[ \t]*(?:=|:|->)[ \t]*|[ \t]+)`;
+  // A quoted literal, but NOT an interpolation: `"${System.getenv('X')}"` is a reference to
+  // something out of band, which is the very thing this gate wants developers to write.
+  const QUOTED = String.raw`(?:file[ \t]*\([ \t]*)?["'](?!\$\{|<)`;
+
+  /** Every way a credential can appear, as one list. Order is irrelevant; coverage is not. */
+  const CREDENTIAL_PATTERNS = [
+    // A quoted literal after any signing property. The separator is OPTIONAL here —
+    // `storePassword"hunter2"` is unambiguously a published secret, and requiring one
+    // silently dropped that case for a round.
+    new RegExp(
+      String.raw`^[ \t]*${COMMENT}?[ \t]*(?:${SECRET_PROPS})[ \t]*(?:=|:|->)?[ \t]*${QUOTED}`,
+      'gm',
+    ),
+    // Groovy's slashy and dollar-slashy strings. The separator is REQUIRED here, because
+    // without it a slash-separated prose list (`storePassword/keyPassword/keyAlias`) reads
+    // as the opening of a slashy string and reddens a correct file.
+    new RegExp(String.raw`^[ \t]*${COMMENT}?[ \t]*(?:${SECRET_PROPS})${SEP}\$?\/`, 'gm'),
+    // An UNQUOTED value, in a comment only. Executable Groovy cannot express a bare literal
+    // (`storePassword releasePassword` is a variable reference and legitimate), but a
+    // comment has no syntax at all — so this is where a pasted properties line hides.
+    // `${…}` and `<placeholder>` are excluded as references rather than values.
+    //
+    // AN EXPLICIT SEPARATOR IS REQUIRED (`=`, `:` or `->`), and the gap that leaves is
+    // deliberate: `// storePassword hunter2`, with only a space, is not matched. Accepting
+    // whitespace here made ordinary prose a finding — ` * storePassword and keyAlias come
+    // from the environment` reads as the value `and` — and a guard that reddens correct
+    // comments gets disabled by the next person in a hurry. A pasted `keystore.properties`
+    // line always carries an `=`, which is the shape actually worth catching.
+    new RegExp(
+      String.raw`^[ \t]*${COMMENT}[ \t]*(?:${SECRET_PROPS})[ \t]*(?:=|:|->)[ \t]*(?!\$\{|<)\S`,
+      'gm',
+    ),
+    // Path and name properties: executable code only, any literal form.
+    new RegExp(
+      String.raw`^[ \t]*(?:${NON_SECRET_PROPS})[ \t]*(?:=|:|->)?[ \t]*(?:${QUOTED}|(?:file[ \t]*\([ \t]*)?\$?\/)`,
+      'gm',
+    ),
+  ];
+
+  /** Findings across both views, de-duplicated. */
+  const findCredentials = (raw, stripped) => {
+    const hits = new Set();
+    for (const source of [raw, stripped]) {
+      for (const re of CREDENTIAL_PATTERNS) {
+        re.lastIndex = 0;
+        for (const m of source.matchAll(re)) hits.add(m[0].trim());
+      }
+    }
+    return [...hits];
+  };
+
+  // THE GUARD TESTS ITSELF, every run, before it is trusted on the real file. None of the
+  // seven `check-*.mjs` scripts has a test today and `scripts/` is not a workspace package,
+  // so a conventional test file would not run under `turbo run test` — but this guard's
+  // failure mode is a published signing key, and it has already traded one covered spelling
+  // for another without anyone noticing. A table that runs in `verify` is what makes that
+  // impossible to do silently again.
+  const MUST_TRIP = [
+    ['line comment, quoted', '// storePassword = "hunter2"'],
+    ['block comment opener', '/* storePassword = "hunter2" */'],
+    ['javadoc opener', '/** keyPassword = "hunter2" */'],
+    ['block continuation', ' * storePassword = "hunter2"'],
+    ['same-line block comment before live code', '/* note */ storePassword = "hunter2"'],
+    ['unquoted in a comment', '// storePassword=hunter2'],
+    ['colon separator', '// storePassword: hunter2'],
+    ['arrow separator', '// keyPassword -> hunter2'],
+    ['no separator at all', '    storePassword"hunter2"'],
+    ['plain assignment', '    storePassword = "hunter2"'],
+    ['space form', '    storePassword "hunter2"'],
+    ['slashy', '    storePassword = /hunter2/'],
+    ['dollar-slashy', '    keyPassword = $/hunter2/$'],
+    ['keyAlias literal', '    keyAlias "wynding-upload"'],
+    ['storeFile literal', '    storeFile file("relative.jks")'],
+  ];
+  const MUST_PASS = [
+    ['names an env var', '// Set WYNDING_KEYSTORE_PASSWORD in keystore.properties.'],
+    [
+      'slash-separated prose',
+      '// storePassword/keyPassword/keyAlias/storeFile are read via signingValue.',
+    ],
+    ['block-comment prose', ' * storePassword and keyAlias come from the environment.'],
+    ['documented example path', '//   storeFile=/Users/you/keys/wynding-upload.jks'],
+    ['documented example path, quoted', '//   storeFile = "/Users/you/keys/w.jks"'],
+    ['placeholder', '//   storePassword "<your password>"'],
+    ['env interpolation', '    storePassword "${System.getenv(\'WYNDING_KEYSTORE_PASSWORD\')}"'],
+    ['variable reference', '    storePassword releaseStorePassword'],
+    ['file(variable)', '    storeFile file(releaseStoreFile)'],
+  ];
+  // Each fixture is offered BOTH views, exactly as the real file is — raw, and stripped.
+  // Passing the raw line twice made the same-line-block-comment fixture unreachable, since
+  // restoring that credential to statement position is precisely what stripping does.
+  const bothViews = (line) => findCredentials(line, stripGroovyComments(line));
+  const selfTestFailures = [
+    ...MUST_TRIP.filter(([, line]) => bothViews(line).length === 0).map(
+      ([name]) => `missed: ${name}`,
+    ),
+    ...MUST_PASS.filter(([, line]) => bothViews(line).length > 0).map(
+      ([name]) => `false positive: ${name}`,
+    ),
+  ];
+  expect(
+    selfTestFailures.length === 0,
+    `the credential matcher passes its own ${String(MUST_TRIP.length + MUST_PASS.length)} fixtures`,
+    `${selfTestFailures.join('\n   ')}\n   → The matcher below is not doing what this file ` +
+      `claims. Fix the pattern, not the fixture.`,
+  );
+
+  const inlined = findCredentials(gradle, code);
+  expect(
+    inlined.length === 0,
+    'no signing credential is inlined in app/build.gradle',
+    `${inlined.join(', ')}\n   → This repository is PUBLIC. Move it to the environment or to ` +
+      `apps/mobile/android/keystore.properties (untracked). A published signing key cannot be ` +
+      `rotated, only abandoned — see this script's header.`,
+  );
+
+  // 2c. The release guard is WIRED AS A PREREQUISITE, not as an afterthought.
+  //
+  // What this can and cannot prove is worth stating, because the gap is the interesting
+  // part. Gradle runs a lifecycle task's own actions AFTER its dependencies, so a guard
+  // written as `assembleRelease.doFirst { … }` fires only once packaging and signing have
+  // already written an artifact — the build fails loudly and leaves a usable release
+  // sitting next to the failure. That is a report, not a gate, and it is exactly the
+  // shape this project shipped until it was caught in review.
+  //
+  // Proving the EXECUTION ORDER needs a real Gradle run, which this SDK-free gate cannot
+  // do (see the header). What it can pin is the WIRING SHAPE, which is where the defect
+  // lives: a standalone validation task must exist, packaging/signing tasks must depend
+  // on it, and the old doFirst-on-an-aggregate-lifecycle-task shape must not come back.
+  expect(
+    /tasks\.register\(\s*['"]validateReleaseArtifact['"]/.test(code),
+    'the release guard is a standalone task',
+    `app/build.gradle does not register a \`validateReleaseArtifact\` task. The guard must be ` +
+      `a task packaging can depend on, not an action on the task that packages.`,
+  );
+  // BOUND TO THE RELEASE SELECTION, not merely present in the file. Asking only whether
+  // `dependsOn(validateReleaseArtifact)` appears anywhere let an UNRELATED task's edge
+  // stand in for the real one: delete the package/sign wiring, add
+  // `tasks.named('preBuild').configure { it.dependsOn(validateReleaseArtifact) }`, and the
+  // check passed while nothing guarded packaging at all — verified by injecting exactly
+  // that. It is the same defect this file already learned about one level down (see the
+  // proximity note below): presence of a token is not evidence of the wiring it implies.
+  //
+  // So the edge must sit INSIDE a `tasks.matching { … package/sign … Release … }
+  // .configureEach { … }` block, which is the only shape that puts the dependency on the
+  // tasks that write an artifact.
+  expect(
+    /tasks\.matching[\s\S]{0,300}?(?:package|sign)[\s\S]{0,300}?Release[\s\S]{0,300}?\.configureEach[\s\S]{0,300}?dependsOn\(\s*validateReleaseArtifact\s*\)/.test(
+      code,
+    ),
+    'the release guard is wired to the package/sign tasks themselves',
+    `app/build.gradle does not declare \`dependsOn(validateReleaseArtifact)\` inside a ` +
+      `\`tasks.matching { … package/sign … Release … }.configureEach\` block. An edge on some ` +
+      `other task does not stop a release artifact being written — only an edge on the tasks ` +
+      `that write one does.`,
+  );
+  // Matched on PROXIMITY, not on a single `assembleRelease` token, because neither the
+  // shape being banned nor a hand-written fixture of it ever spells the name that way:
+  // the real one was `startsWith('assemble') … contains('Release') … .doFirst`, with the
+  // two halves in separate string literals. A detector keyed on the concatenated name
+  // matched neither — verified by injecting the old shape and watching this pass — so it
+  // keys on `assemble`/`bundle` appearing within a window of a `.doFirst` instead.
+  const aggregateDoFirst = [...code.matchAll(/(?:assemble|bundle)[\s\S]{0,600}?\.doFirst/g)].map(
+    (m) => `${m[0].slice(0, 40).replace(/\s+/g, ' ')}…doFirst`,
+  );
+  expect(
+    aggregateDoFirst.length === 0,
+    'the release guard is not a doFirst on an aggregate lifecycle task',
+    `${aggregateDoFirst.join(', ')}\n   → Gradle runs a lifecycle task's own actions AFTER its ` +
+      `dependencies, so this fires once packaging and signing have already written an ` +
+      `artifact. Attach the validation to the package/sign tasks with \`dependsOn\` instead.`,
+  );
+}
+
 // =====================================================================================
 // 3. Orientation — and the two settings that make it actually apply on a large screen.
 // =====================================================================================

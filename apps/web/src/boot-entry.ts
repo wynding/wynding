@@ -22,7 +22,23 @@
 import { boot } from './main';
 
 // A missing/mis-IDed #app mount point is a hard, visible failure (a blank page with a
-// thrown error), never a silent no-op.
-if (boot(document) === null) {
+// thrown error), never a silent no-op. `boot()` reports that case SYNCHRONOUSLY, as a
+// null return, precisely so this stays a thrown error: since #142 the rest of the boot
+// is a promise (settings are hydrated through ADR 0008's async `StorageDriver` before
+// the first render), and folding the missing-root check into it would have downgraded
+// the loudest failure the app has into an unhandled rejection.
+const booting = boot(document);
+if (booting === null) {
   throw new Error('missing #app root element');
 }
+// A boot that FAILS must be as loud as a boot that never started. `void` marks a promise
+// as deliberately un-awaited; it does not handle a rejection, so an async boot failure
+// would have surfaced only as a bare `unhandledrejection` whose message some consoles
+// truncate and whose stack points into the microtask queue rather than at the app.
+// Rethrowing from a timeout puts it on the global error path instead — the same place the
+// missing-root `throw` above lands — with the original cause attached.
+booting.catch((cause: unknown) => {
+  setTimeout(() => {
+    throw new Error('Wynding failed to boot', { cause });
+  });
+});

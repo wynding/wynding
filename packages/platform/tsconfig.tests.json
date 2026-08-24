@@ -1,0 +1,13 @@
+{
+  // The test files `tsconfig.base.json` excludes from the EMITTING program, type-checked
+  // here in a second, check-only one — the same idiom every other emitting package uses.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true
+  },
+  "include": ["src"],
+  "exclude": []
+}

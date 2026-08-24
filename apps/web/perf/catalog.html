@@ -2,6 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!-- The same viewport metadata the play `index.html` and the stress page carry (#148) —
+         see `perf/index.html` for why it is load-bearing on a device rather than cosmetic. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <!-- The CATALOG scene's perf page (M2-S11 P7). A SECOND page beside `index.html`,
          not a query parameter on it: each scene gets its own entry module so a run of
          one never loads the other's bundle, and so `vite.perf.config.ts` can name both

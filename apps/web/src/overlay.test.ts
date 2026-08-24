@@ -3087,11 +3087,23 @@ describe('overlay — results dialog', () => {
     const resBtns = [...overlay.resultsEl.querySelectorAll<HTMLButtonElement>('.wy-btn')];
     const playAgain = resBtns[0]!;
     const verify = resBtns[1]!;
+    const copyRun = resBtns[2]!;
+    const saveRun = resBtns[3]!;
     verify.click();
+    copyRun.click();
+    saveRun.click();
     playAgain.click();
-    expect(actions.map((a) => a.type)).toEqual(['verify', 'playAgain']);
+    expect(actions.map((a) => a.type)).toEqual([
+      'verify',
+      'copyPlaytrace',
+      'savePlaytrace',
+      'playAgain',
+    ]);
+    // Play again keeps its primary styling; the export actions are secondary, like Verify.
+    expect(playAgain.className).toContain('wy-primary');
+    for (const b of [verify, copyRun, saveRun]) expect(b.className).not.toContain('wy-primary');
 
-    overlay.setVerifyMessage('checked');
+    overlay.setResultsStatus('checked');
     expect(overlay.resultsEl.querySelector('.wy-verify')!.textContent).toBe('checked');
     overlay.hideResults();
     expect(overlay.resultsEl.hidden).toBe(true);

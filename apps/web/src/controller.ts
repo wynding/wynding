@@ -174,6 +174,13 @@ export interface VerifyResult {
   readonly matchedLive?: boolean;
 }
 
+/** The three facts a playtrace capture pins to one moment. See {@link Controller.capture}. */
+export interface CaptureSnapshot {
+  readonly ticksCompleted: number;
+  readonly stateHash: string;
+  readonly pendingInputs: readonly SimInput[];
+}
+
 export interface Controller {
   readonly ruleset: CompiledRuleset;
   /** Feed wall-clock ms since the last frame; scales by speed unless paused. */
@@ -284,6 +291,16 @@ export interface Controller {
   isTerminal(): boolean;
   /** Assemble the recorded replay envelope. */
   buildReplay(): Replay;
+  /** The playtrace capture boundary (#133). All three fields are read TOGETHER so they
+   *  cannot disagree about which moment they describe.
+   *
+   *  `ticksCompleted` is a COUNT, not an index: `step()` increments the tick AFTER
+   *  applying that tick's inputs, so a state reading `tick === N` has applied exactly
+   *  `tickInputs[0..N-1]` — N entries — and `0` is legal (nothing stepped yet).
+   *  `stateHash` is `hashSimState` at exactly that boundary, which is deliberately NOT
+   *  the replay validator's terminal `finalHash`. `pendingInputs` is a frozen clone of
+   *  the current tick's buffer — commands issued but not yet committed. */
+  capture(): CaptureSnapshot;
   /** Dev-only: re-simulate the recorded log and confirm it reproduces the live score. */
   verifyRun(): VerifyResult;
 }
@@ -1519,6 +1536,17 @@ export function createController(
     },
     isTerminal: () => isTerminalPhase(state.phase),
     buildReplay: doBuildReplay,
+    capture: (): CaptureSnapshot => ({
+      // `state.tick` IS the count of recorded entries applied: `onTick` pushes this
+      // tick's inputs and then steps, and `step()` increments the tick. So
+      // `state.tick === tickInputs.length` holds at every boundary, including after the
+      // terminal freeze (which returns before pushing anything further).
+      ticksCompleted: state.tick,
+      stateHash: hashSimState(state),
+      // The live buffer is cloned and deep-frozen, exactly as a recorded tick is: a
+      // consumer holding the capture must not be able to reach into the next step().
+      pendingInputs: freezeRecorded(buffer),
+    }),
     verifyRun(): VerifyResult {
       // Terminal guard: validate() completes an unfinished log with empty ticks, so a
       // mid-run call would otherwise report a misleading hash/score mismatch. A distinct

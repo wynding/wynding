@@ -42,6 +42,7 @@ import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
 import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
+import { MAX_RECENT_AGE_MS } from './playtrace';
 import type { WakeLockApi } from './wakelock';
 import { fakeWakeLock } from './wakelock-fakes';
 
@@ -1363,11 +1364,13 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
 });
 
 describe('main — boot()', () => {
-  it('returns null when there is no #app root', () => {
+  it('returns null SYNCHRONOUSLY when there is no #app root', () => {
+    // Synchronously, not as a rejected promise: `boot-entry.ts` turns this into a thrown
+    // error, which an async signature would have downgraded to an unhandled rejection.
     expect(boot(document)).toBeNull();
   });
 
-  it('boots against real browser globals (rAF + scene) when #app exists', () => {
+  it('boots against real browser globals (rAF + scene) when #app exists', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     let called = false;
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => {
@@ -1379,14 +1382,14 @@ describe('main — boot()', () => {
     });
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
-    const handle = boot(document);
+    const handle = await boot(document);
     expect(handle).not.toBeNull();
     expect(mountMock).toHaveBeenCalledOnce();
     handle!.destroy();
     vi.unstubAllGlobals();
   });
 
-  it('honours prefers-reduced-motion at boot', () => {
+  it('honours prefers-reduced-motion at boot', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     vi.stubGlobal('requestAnimationFrame', () => 1);
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
@@ -1399,7 +1402,7 @@ describe('main — boot()', () => {
       removeEventListener: () => {},
     });
 
-    const handle = boot(document);
+    const handle = await boot(document);
     expect(handle).not.toBeNull();
     handle!.destroy();
     delete (window as unknown as { matchMedia?: unknown }).matchMedia;
@@ -2252,5 +2255,448 @@ describe('main — the screen wake lock (#140)', () => {
       pauseBtn.getAttribute('aria-pressed'),
       'a listener outlived destroy() and paused a torn-down run',
     ).toBe('false');
+  });
+});
+
+describe('main — hardware Back never exits out from under work (#138)', () => {
+  /** The predicate `main.ts` hands the Back handler, observed through a fake plugin. */
+  function backApp() {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    let onBack: (() => void) | null = null;
+    const exitApp = vi.fn(async () => undefined);
+    // Registration is ASYNCHRONOUS — `createBackHandler` awaits `addListener` — so a
+    // `back()` issued before it settles reaches no listener and does nothing. That is a
+    // real property of the wiring, and a test that polls around it (a `vi.waitFor` loop
+    // wrapped over the press) cannot tell a correct no-op from a press that was simply
+    // dropped, nor catch a press that exits TWICE. So the double publishes the moment
+    // registration completes and every test awaits it exactly once.
+    let markRegistered!: () => void;
+    const registered = new Promise<void>((resolve) => {
+      markRegistered = resolve;
+    });
+    const app = createApp(document, root, {
+      // HOSTED, because that is the only configuration where hardware Back exists at all:
+      // `main.ts` discovers the plugin only when hosted, so a `hosted: false` harness with a
+      // live `capacitorApp` is a shape production cannot reach. It also renders the wordmark
+      // as a `span` and skips the home-link guard, which is what makes the trap tests real.
+      hosted: true,
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      capacitorApp: {
+        addListener: (async (name: string, listener: () => void) => {
+          // The listener is published only once this promise has had a chance to settle,
+          // which is what makes the double model the real bridge instead of a synchronous
+          // stand-in that would make the ordering assertions below vacuous.
+          await Promise.resolve();
+          if (name === 'backButton') {
+            onBack = listener;
+            markRegistered();
+          }
+          return { remove: async () => undefined };
+        }) as never,
+        exitApp,
+      },
+    });
+    openApps.push(app);
+    return {
+      root,
+      exitApp,
+      registered,
+      isRegistered: (): boolean => onBack !== null,
+      back: (): void => onBack?.(),
+      frame: (): void => sched.frame((clock += 16)),
+    };
+  }
+
+  it('an explicit `capacitorApp: null` means "no plugin", not "go find one"', () => {
+    // `??` would have collapsed this: a test passing null to prove the inert path would
+    // silently get the real discovery instead and pass for the wrong reason. `wakeLock`
+    // documents the same convention, so honouring it here keeps the two deps readable as
+    // one rule rather than two exceptions.
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const bridge = { Plugins: { App: { addListener: vi.fn(), exitApp: vi.fn() } } };
+    (window as unknown as { Capacitor?: unknown }).Capacitor = bridge;
+    try {
+      const app = createApp(document, root, {
+        sceneFactory: () => fakeHandle,
+        schedule: manualSchedule().schedule,
+        now: () => 0,
+        seed: 1,
+        hosted: true, // the bridge WOULD be found...
+        capacitorApp: null, // ...but null says this environment has none
+      });
+      openApps.push(app);
+      expect(bridge.Plugins.App.addListener).not.toHaveBeenCalled();
+    } finally {
+      delete (window as unknown as { Capacitor?: unknown }).Capacitor;
+    }
+  });
+
+  it('exits when there is genuinely nothing to lose — after ONE press', async () => {
+    const h = backApp();
+    h.frame();
+    // The ordering, asserted rather than polled around: before registration settles a
+    // press reaches nothing at all.
+    expect(h.isRegistered()).toBe(false);
+    h.back();
+    expect(h.exitApp).not.toHaveBeenCalled();
+
+    await h.registered;
+    h.back();
+    // EXACTLY once. A retry loop around the press could not have caught a double exit.
+    expect(h.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it('a TERMINAL results dialog lets Back exit — a hosted player is not trapped', async () => {
+    // The trap: inside a Host the wordmark is a non-interactive span (ADR 0012) and the
+    // results dialog offers only Play again / Verify / Copy / Save. With Back consumed
+    // there, a player who simply does not want another run had no way out at all.
+    const h = backApp();
+    await h.registered;
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    const results = h.root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    expect(results.hidden, 'the run must actually have resolved').toBe(false);
+
+    // THE PREMISES, asserted rather than narrated — without these the test proves only
+    // that `exitApp` was called, not that Back is the player's one way out.
+    expect(h.root.querySelector('a.wy-home'), 'hosted wordmark must not be a link').toBeNull();
+    const exits = [...results.querySelectorAll('button')].filter((b) =>
+      /leave|exit|close|quit|home|back/i.test(`${b.textContent ?? ''} ${b.className}`),
+    );
+    expect(
+      exits.map((b) => b.textContent),
+      'the dialog must offer no way out',
+    ).toEqual([]);
+
+    h.back();
+    expect(h.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it('ASKS FIRST when a pre-start board carries pending builds', async () => {
+    // The predicate must be the home-link guard's own (`!started && !hasPlan` is what lets
+    // a navigation through), or the two ways out of the app disagree about what counts as
+    // losing something: towers queued pre-start would be thrown away by Back while the
+    // wordmark politely asked.
+    const h = backApp();
+    await h.registered; // so `not.toHaveBeenCalled()` below proves the predicate, not a dropped press
+    h.frame();
+    // The same pre-start planning path `planTowerWhileHeld` uses above: arm the basic
+    // Card, walk the keyboard cursor off the entrance, confirm. The run stays HELD — the
+    // buffer is a plan, not a run, which is exactly the state this row is about.
+    const board = h.root.querySelector<HTMLElement>('.wy-board')!;
+    const key = (code: string): void => {
+      board.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+    };
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+    for (let i = 0; i < 3; i++) key('ArrowRight');
+    for (let i = 0; i < 2; i++) key('ArrowUp');
+    key('Enter');
+    h.frame();
+    expect(Number(board.dataset.pendingAdds), 'the plan must actually exist').toBeGreaterThan(0);
+    expect(board.dataset.started, 'the run must still be HELD').toBe('false');
+
+    h.back();
+    await Promise.resolve();
+    expect(h.exitApp).not.toHaveBeenCalled();
+  });
+});
+
+describe('main — the playtrace capture and its export actions (#133)', () => {
+  /** An app wired with an inspectable delivery and a pinned `runId` mint. */
+  function playtraceApp(runIds: string[] = ['run-1', 'run-2', 'run-3']) {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const copied: string[] = [];
+    const saved: { filename: string; text: string }[] = [];
+    let copyRejects = false;
+    let saveThrows = false;
+    // A gate lets a test hold a Copy open across other presses, which is the only way to
+    // observe an out-of-order completion. `true` resolves the copy, `false` rejects it.
+    let copyGate: Promise<boolean> | null = null;
+    let copyGateSettled = false;
+    const copyGateQueue: Promise<boolean>[] = [];
+    const copyOrder: string[] = [];
+    let minted = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      mintRunId: () => runIds[minted++] ?? `run-overflow-${String(minted)}`,
+      playtraceDelivery: {
+        copy: async (text: string) => {
+          const queued = copyGateQueue.shift();
+          if (queued !== undefined) {
+            const ok = await queued;
+            copyOrder.push(ok ? 'resolve' : 'reject');
+            if (!ok) throw new Error('clipboard refused');
+            copied.push(text);
+            return;
+          }
+          if (copyGate !== null) {
+            const ok = await copyGate;
+            copyGateSettled = true;
+            if (!ok) throw new Error('clipboard refused');
+            copied.push(text);
+            return;
+          }
+          if (copyRejects) throw new Error('clipboard refused');
+          copied.push(text);
+        },
+        save: (filename: string, text: string) => {
+          if (saveThrows) throw new Error('download refused');
+          saved.push({ filename, text });
+        },
+      },
+    });
+    openApps.push(app);
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    const resultsButton = (label: string): HTMLButtonElement => {
+      const btn = [...results.querySelectorAll<HTMLButtonElement>('.wy-btn')].find(
+        (b) => b.textContent === label,
+      );
+      if (btn === undefined) throw new Error(`no results button named ${label}`);
+      return btn;
+    };
+    return {
+      root,
+      results,
+      copied,
+      saved,
+      resultsButton,
+      status: (): string => results.querySelector('.wy-verify')!.textContent ?? '',
+      setCopyRejects: (v: boolean): void => void (copyRejects = v),
+      setCopyGate: (g: Promise<boolean>): void => void (copyGate = g),
+      copyGateSettled: (): boolean => copyGateSettled,
+      pushCopyGate: (g: Promise<boolean>): void => void copyGateQueue.push(g),
+      copyOrder,
+      setSaveThrows: (v: boolean): void => void (saveThrows = v),
+      frame: (): void => sched.frame((clock += 16)),
+      /** Jump the frame clock without driving frames — `deps.now` is what the playtrace
+       *  ring measures its six-hour bound against. */
+      advance: (ms: number): void => void (clock += ms),
+      /** Drive the run to its terminal state so the results dialog opens. */
+      resolve(): void {
+        this.frame();
+        dockButton(root, 'Start').click();
+        for (let i = 0; i < 4000 && results.hidden; i++) this.frame();
+        expect(results.hidden, 'the run must actually have resolved').toBe(false);
+      },
+    };
+  }
+
+  const parsePayload = (
+    text: string,
+  ): { playtraceVersion: number; runs: Record<string, unknown>[] } =>
+    JSON.parse(text) as { playtraceVersion: number; runs: Record<string, unknown>[] };
+
+  it('copies a payload carrying the run identity, and says so in the live region', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+
+    const payload = parsePayload(h.copied[0]!);
+    expect(payload.playtraceVersion).toBe(1);
+    expect(payload.runs).toHaveLength(1);
+    expect(payload.runs[0]!.runId).toBe('run-1');
+    expect(payload.runs[0]!.boardId).toEqual(expect.any(String));
+    expect(payload.runs[0]!.viewport).toBe('standard');
+    // ADR 0011's payload ban, asserted at the app boundary and not only in the unit.
+    expect(payload.runs[0]!.colourMode).toBeUndefined();
+    expect(payload.runs[0]!.reducedMotion).toBeUndefined();
+    expect(payload.runs[0]!.keybindings).toBeUndefined();
+    expect(payload.runs[0]!.deviceId).toBeUndefined();
+    await vi.waitFor(() => expect(h.status()).toBe('Run data copied to the clipboard.'));
+  });
+
+  it('a SUPERSEDED clipboard completion never clobbers a newer announcement', async () => {
+    // The results dialog has one live region and the clipboard is the one asynchronous
+    // writer, so a slow or refused Copy could land its announcement after a later Save had
+    // already written the region — announcing failure for an export that succeeded.
+    const h = playtraceApp();
+    h.resolve();
+
+    // Hold the Copy open, press Save (which is synchronous and lands first), then let the
+    // older Copy reject. The newer Save announcement must stand.
+    let releaseCopy!: (ok: boolean) => void;
+    h.setCopyGate(
+      new Promise<boolean>((resolve) => {
+        releaseCopy = resolve;
+      }),
+    );
+    h.resultsButton('Copy run data').click();
+    h.resultsButton('Save run data').click();
+    expect(h.status()).toContain('Run data saved as');
+
+    releaseCopy(false); // the OLDER request finally fails
+    await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
+    expect(h.status(), 'a stale completion overwrote a newer announcement').toContain(
+      'Run data saved as',
+    );
+  });
+
+  it("nothing in flight can write onto the NEXT run's results dialog", async () => {
+    const h = playtraceApp();
+    h.resolve();
+    let releaseCopy!: (ok: boolean) => void;
+    h.setCopyGate(
+      new Promise<boolean>((resolve) => {
+        releaseCopy = resolve;
+      }),
+    );
+    h.resultsButton('Copy run data').click();
+
+    h.resultsButton('Play again').click(); // the dialog goes away mid-flight
+    releaseCopy(true);
+    await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
+    // `hideResults` cleared the region; a stale success must not repopulate it.
+    expect(h.status()).toBe('');
+  });
+
+  it('a SLOW first Copy must not clobber a newer COPY announcement', async () => {
+    // Double-tap Copy, which is the most plausible on-device trigger: press 1 stalls (a
+    // permission prompt) and fails, press 2 succeeds. The single shared gate this harness
+    // used before could not express it — both presses awaited the same promise and settled
+    // FIFO, which makes the outcome identical with and without the token. A per-call queue
+    // is what lets the OLDER request finish LAST.
+    const h = playtraceApp();
+    h.resolve();
+    let releaseFirst!: (ok: boolean) => void;
+    let releaseSecond!: (ok: boolean) => void;
+    h.pushCopyGate(
+      new Promise<boolean>((r) => {
+        releaseFirst = r;
+      }),
+    );
+    h.pushCopyGate(
+      new Promise<boolean>((r) => {
+        releaseSecond = r;
+      }),
+    );
+    h.resultsButton('Copy run data').click(); // press 1 — will FAIL, slowly
+    h.resultsButton('Copy run data').click(); // press 2 — will SUCCEED, fast
+
+    releaseSecond(true);
+    await vi.waitFor(() => expect(h.copyOrder).toEqual(['resolve']));
+    await vi.waitFor(() => expect(h.status()).toBe('Run data copied to the clipboard.'));
+
+    releaseFirst(false); // the OLDER press finally fails
+    await vi.waitFor(() => expect(h.copyOrder).toEqual(['resolve', 'reject']));
+    expect(h.status(), 'a stale failure overwrote a newer success').toBe(
+      'Run data copied to the clipboard.',
+    );
+  });
+
+  it('an in-flight Copy must not clobber a VERIFY announcement', async () => {
+    // `verify` writes the same shared region, and its claim was added by this change with
+    // no coverage at all — so a slow Copy landing after a Verify press would have replaced
+    // an answer the player asked for with one about a different action entirely.
+    const h = playtraceApp();
+    h.resolve();
+    let releaseCopy!: (ok: boolean) => void;
+    h.setCopyGate(
+      new Promise<boolean>((r) => {
+        releaseCopy = r;
+      }),
+    );
+    h.resultsButton('Copy run data').click();
+    const verify = h.resultsButton('Verify this run');
+    verify.click();
+    const afterVerify = h.status();
+    expect(afterVerify).not.toBe('');
+    releaseCopy(true);
+    await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
+    expect(h.status(), 'a stale copy overwrote the verify announcement').toBe(afterVerify);
+  });
+
+  it('says a refused clipboard FAILED rather than looking like a press that did nothing', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.setCopyRejects(true);
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.status()).toBe('Could not export the run data.'));
+    expect(h.copied).toEqual([]);
+  });
+
+  it('saves a named file, and reports a refused download too', () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Save run data').click();
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.filename).toMatch(/^wynding-playtrace-\d+\.json$/);
+    expect(h.status()).toContain('Run data saved as wynding-playtrace-');
+
+    h.setSaveThrows(true);
+    h.resultsButton('Save run data').click();
+    expect(h.status()).toBe('Could not export the run data.');
+  });
+
+  it('mints a NEW runId per run, and the ring keeps the earlier one (#98)', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Play again').click();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+
+    const runs = parsePayload(h.copied[0]!).runs;
+    // BOTH runs are in the export — which is the whole point of the ring: a player who
+    // notices a problem one run later still has the run that caused it.
+    expect(runs.map((r) => r.runId)).toEqual(['run-1', 'run-2']);
+  });
+
+  it('captures ONCE per run, not once per frame the dialog is up', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    for (let i = 0; i < 20; i++) h.frame();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+    expect(parsePayload(h.copied[0]!).runs).toHaveLength(1);
+  });
+
+  it('WIRES the ring bound to the monotonic frame clock, not the wall clock', async () => {
+    // The wiring, not the recorder's contract. Every clock-regression test in
+    // `playtrace.test.ts` injects `monotonicNow` directly, so mutating this one line in
+    // `main.ts` to `Date.now()` — or deleting it — reinstated the exact defect the fix
+    // exists to close and survived the entire suite. This is the test that kills it: the
+    // harness clock is `deps.now`, so if the bound reads anything else it will not move.
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+    expect(parsePayload(h.copied[0]!).runs).toHaveLength(1);
+
+    // Advance the FRAME clock past the six-hour bound. Nothing touches the wall clock.
+    h.advance(MAX_RECENT_AGE_MS);
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(2));
+    expect(
+      parsePayload(h.copied[1]!).runs,
+      'the six-hour bound is not reading the monotonic frame clock',
+    ).toEqual([]);
+  });
+
+  it('pins the world hash to the capture boundary, and the tick count to the log length', async () => {
+    const h = playtraceApp();
+    h.resolve();
+    h.resultsButton('Copy run data').click();
+    await vi.waitFor(() => expect(h.copied).toHaveLength(1));
+    const run = parsePayload(h.copied[0]!).runs[0]!;
+    // #99 note 1: the count IS the number of recorded entries, so an analyzer stepping
+    // that many lands on exactly the state `stateHash` describes.
+    expect(run.ticksCompleted).toBe((run.tickInputs as unknown[]).length);
+    expect(run.stateHash).toMatch(/^[0-9a-f]+$/);
+    expect(run.pendingInputsTruncated).toBe(false);
   });
 });
