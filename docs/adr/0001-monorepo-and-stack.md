@@ -46,8 +46,10 @@ strictly to the right. _(Corrected 2026-08-12: `types` and `engine` are both roo
 **This graph is enforced by a lint rule generated from it** — `eslint.config.mjs`'s
 layering zones, which derive each zone's forbidden set from the layer table above, and
 each package's subpath spellings from that package's own `exports` map. (Generated is
-exact, and its limit is worth stating: the two zones guarding the shipped **apps** are
-hand-written, because they carry the never-ship invariant rather than the graph.)
+exact, and its limit is worth stating: the zones guarding the shipped **apps** — three
+config objects over two apps — name their packages by hand, because they carry the
+never-ship invariant rather than the graph. Their forbidden _specifiers_ are still read
+from the manifests, so a newly added subpath cannot slip past them either.)
 
 Until 2026-08-22 this ADR said instead that "boundaries are enforced by the package
 dependency graph", which overstated what pnpm and tsc give you. What they actually catch
@@ -79,9 +81,11 @@ now hold it — no one of them sufficient, and the third is not a formality:
    tree-shakes per module — can still pass. Vite resolving the specifier is necessary,
    not sufficient.
 3. **At the source, cheaply:** `packages/perf/src/layering.test.ts`, the context-free grep
-   over every shipped `src` tree. It is the only one of the three that covers
-   `apps/server` and dynamic or comment-interrupted `import()` of the three never-shipped
-   specifiers.
+   over every shipped `src` tree. It is the only one of the three that READS `apps/server`
+   as text — guard 1 covers the server too, but only for specifier-shaped imports, and
+   guard 2 does not read it at all — and, there, the only one that sees a dynamic or
+   comment-interrupted `import()`. In the web build guard 2 covers those spellings, the
+   template literal included, having asked Vite.
 
 Planning docs (PRDs, ADRs, `CONTEXT.md`) live **in** the repo under `docs/`, public
 and versioned with the code.

@@ -1,8 +1,8 @@
 // Flat ESLint config for the Wynding monorepo.
 // Non-type-checked recommended rules only — fast, and independent of each
 // package's TS program (type-aware linting can be layered in later).
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import js from '@eslint/js';
 import globals from 'globals';
@@ -56,8 +56,9 @@ const NONDETERMINISTIC_MODULE_PATHS = [
 //     PERMITS — `apps/web/src` importing `@wynding/perf` is a LEFTWARD edge, since `perf` sits
 //     upstream of `apps`, and it is a declared devDependency today for the perf sandbox. It
 //     would typecheck, lint and bundle into the shipped app without a murmur. That is the
-//     never-ship invariant, not the graph, and the two hand-written app zones at the bottom
-//     of this file are what carry it.
+//     never-ship invariant, not the graph, and the app zones at the bottom of this file are
+//     what carry it — three config objects over two apps (`apps/web/src`, and
+//     `apps/server/src` split into a tests-included part and a non-test part).
 //
 // An earlier draft called the second one a back-edge, contradicting ADR 0001's own definition
 // two sentences after stating it. Both are the kind a hurried refactor or a helpful bot
@@ -68,17 +69,27 @@ const NONDETERMINISTIC_MODULE_PATHS = [
 // DERIVED from it, and each package's subpath spellings are read out of that package's own
 // `exports` map at config load. So `@wynding/content/catalog` became forbidden the moment
 // the subpath was added to `packages/content/package.json` — nobody had to remember to widen
-// a list here — with one honest exception: the two APP zones at the bottom are hand-written
-// literals, because they carry the never-ship invariant rather than the graph. Their package
-// names are spelled out there; their subpaths still go through `importableSpecifiers`, so a
-// newly added subpath cannot slip past them either.
+// a list here. The APP zones at the bottom carry the never-ship invariant rather than the
+// graph, so they name their packages explicitly, and the server zone's `@wynding/content` entry
+// stays a literal because that restriction is on one ENTRY POINT rather than on a package. What
+// holds for the rest is TOTALITY rather than derivation — the weaker word, and the true one:
+// `neverShippedPerf` expands perf's exports map, and `neverShippedContent` returns the synthetic
+// subpaths OF content's map, having first asserted that map partitions into shippable and
+// synthetic with nothing left over. So no content subpath can appear without someone
+// classifying it. Two drafts of this paragraph overstated that: the first claimed derivation
+// while `./stress` and `./catalog` sat hand-typed in all three zones (CodeRabbit, PR #167), the
+// second still said "every specifier" while the server's content entry was a literal
+// (ship-review). The claim is narrowed to what is actually enforced.
 // `assertLayersCoverWorkspace` fails the lint outright if a new `packages/*`
 // appears that the graph does not place, because a package this table has never heard of
 // would otherwise be silently unguarded and importable from anywhere.
 //
 // WHAT IS FORBIDDEN IS A BACK-EDGE, NOT A SIBLING. Each layer may depend on anything to its
 // LEFT; edges within a layer are permitted and do exist (`render`'s and `replay`'s tests
-// import `@wynding/content`). A zone therefore forbids the layers strictly to its RIGHT.
+// import `@wynding/content`). A zone therefore forbids the layers strictly to its RIGHT — with
+// ONE carve-out, at layer 0: the roots forbid each other too, because a root is declared to
+// depend on nothing in the workspace at all. The root block inside `layeringZone` says why that
+// cannot be generalised into a blanket same-layer rule.
 //
 // WHAT THIS DOES NOT CATCH, stated plainly because two other guards are sized around it:
 //   - `no-restricted-imports` does NOT inspect dynamic `import()` expressions at all
@@ -172,7 +183,12 @@ function importableSpecifiers(specifier) {
 function assertLayersCoverWorkspace() {
   const placed = new Set(LAYERS.flat());
   const missing = readdirSync(join(REPO_ROOT, 'packages'), { withFileTypes: true })
+    // A directory is only a PACKAGE if it has a manifest. Without this filter the two
+    // directions of this function are mutually unsatisfiable for a stray non-package
+    // directory: leaving it out fails the forward check ("Place it"), placing it fails the
+    // reverse one ("Remove it"). Loud both ways, with no green state to reach.
     .filter((entry) => entry.isDirectory())
+    .filter((entry) => existsSync(join(REPO_ROOT, 'packages', entry.name, 'package.json')))
     .map((entry) => `@wynding/${entry.name}`)
     .filter((specifier) => !placed.has(specifier));
   if (missing.length > 0) {
@@ -181,6 +197,48 @@ function assertLayersCoverWorkspace() {
         "ADR 0001's layering graph (the LAYERS table above). Place it — and amend ADR 0001 " +
         'first if the graph itself changed. An unplaced package is an unguarded one.',
     );
+  }
+  // AND THE REVERSE DIRECTION. A `LAYERS` entry whose directory does not exist — a rename, a
+  // typo — otherwise surfaced as a raw ENOENT from `readFileSync` deep inside
+  // `importableSpecifiers`, which tells the reader nothing about which table is wrong. The
+  // manifest's own `name` is checked against the directory too, because `packages/foo`
+  // declaring `@wynding/bar` would make every zone below point at a package nobody imports
+  // under that spelling.
+  // A DUPLICATE ENTRY IS THE ONE TABLE BUG THE CHECKS ABOVE CANNOT SEE, because `placed` is a
+  // Set and the duplicate is gone before anything counts it. Nothing else notices either: the
+  // directory exists and the manifest name matches. But zone generation then emits TWO config
+  // objects with the identical `files` glob, and last-writer-wins means the later (weaker) row
+  // silently replaces the earlier (stronger) one — `@wynding/sim` listed in both layer 1 and
+  // layer 2 would stop being guarded against render/replay/content, with no diagnostic
+  // anywhere. That is this file's signature hazard, arriving through the very table added to
+  // catch table bugs (ship-review, PR #167).
+  const duplicated = LAYERS.flat().filter((s, i, all) => all.indexOf(s) !== i);
+  if (duplicated.length > 0) {
+    throw new Error(
+      `eslint.config.mjs: ${[...new Set(duplicated)].join(', ')} appears in more than one row ` +
+        'of the LAYERS table. Two zones with the same files glob would be emitted, and the ' +
+        "later one wins — silently narrowing the earlier row's forbidden set to the weaker " +
+        'of the two.',
+    );
+  }
+  for (const specifier of placed) {
+    const manifestPath = join(packageDir(specifier), 'package.json');
+    if (!existsSync(manifestPath)) {
+      throw new Error(
+        `eslint.config.mjs: ${specifier} is placed in ADR 0001's layering graph but ` +
+          `${relative(REPO_ROOT, manifestPath)} does not exist. Remove it from the LAYERS ` +
+          'table, or restore the package — a zone generated for a package that is not there ' +
+          'guards nothing.',
+      );
+    }
+    const declared = JSON.parse(readFileSync(manifestPath, 'utf8')).name;
+    if (declared !== specifier) {
+      throw new Error(
+        `eslint.config.mjs: ${relative(REPO_ROOT, manifestPath)} declares "${declared}", but ` +
+          `the LAYERS table places it as "${specifier}". The zones key off the directory and ` +
+          'the restrictions key off the name, so a mismatch guards one and forbids the other.',
+      );
+    }
   }
 }
 assertLayersCoverWorkspace();
@@ -196,6 +254,77 @@ assertLayersCoverWorkspace();
 const neverShippedPerf = (message) =>
   importableSpecifiers('@wynding/perf').map((name) => ({ name, message }));
 
+/** `@wynding/content`'s exports map, PARTITIONED — every subpath is either shippable or a
+ *  synthetic perf bundle, and the partition is asserted TOTAL against the manifest. */
+const CONTENT_SHIPPABLE = ['.', './artifact'];
+const CONTENT_SYNTHETIC = ['./stress', './catalog'];
+
+/** The never-shippable content subpaths, checked against the manifest rather than trusted.
+ *
+ *  These two were hand-typed into all three app zones, and the header above claimed the zones
+ *  were derived rather than retyped — true of the package names, not of these (CodeRabbit, PR
+ *  #167). Encoding the set once is the smaller half of the fix. The larger half is the
+ *  assertion: content's exports map must partition EXACTLY into `CONTENT_SHIPPABLE` and
+ *  `CONTENT_SYNTHETIC`, so a third synthetic bundle — the realistic next event, this package
+ *  already having grown from one to two — cannot be added without either landing in the
+ *  forbidden set or being deliberately classified as shippable. That is narrower than it first
+ *  looks and is worth stating exactly: a new subpath placed in `CONTENT_SHIPPABLE` is neither
+ *  forbidden nor a lint failure. What is closed is the SILENT path — adding a synthetic bundle
+ *  and simply never mentioning it here. */
+function neverShippedContent(message) {
+  const manifest = JSON.parse(
+    readFileSync(join(packageDir('@wynding/content'), 'package.json'), 'utf8'),
+  );
+  // The string sugar is a shape `importableSpecifiers` accepts as legal, and treating it as an
+  // object here reported fourteen numeric "subpaths" as unclassified when the honest diagnosis
+  // is that ./stress and ./catalog are gone. Normalising first keeps the RIGHT error reachable.
+  const subpaths =
+    typeof manifest.exports === 'string' ? ['.'] : Object.keys(manifest.exports ?? {});
+  const unclassified = subpaths.filter(
+    (key) => !CONTENT_SHIPPABLE.includes(key) && !CONTENT_SYNTHETIC.includes(key),
+  );
+  if (unclassified.length > 0) {
+    throw new Error(
+      `eslint.config.mjs: @wynding/content exports ${unclassified.join(', ')}, which this file ` +
+        'classifies as neither shippable nor synthetic. Add it to CONTENT_SHIPPABLE or to ' +
+        'CONTENT_SYNTHETIC — an unclassified content subpath is one nobody decided about, and ' +
+        'the app zones would simply not mention it.',
+    );
+  }
+  const vanished = CONTENT_SYNTHETIC.filter((key) => !subpaths.includes(key));
+  if (vanished.length > 0) {
+    throw new Error(
+      `eslint.config.mjs: CONTENT_SYNTHETIC lists ${vanished.join(', ')}, which @wynding/content ` +
+        'no longer exports. Drop it here too — a restriction on a specifier that cannot be ' +
+        'imported is dead weight that reads like cover.',
+    );
+  }
+  // Filtered from the MANIFEST rather than mapped from the constant. The assertions above
+  // already make the two equal, so the list is identical today — but the manifest is now the
+  // actual source instead of a thing the constant was checked against, which is what the
+  // header claims and what the doctrine applied to perf requires.
+  return subpaths
+    .filter((key) => CONTENT_SYNTHETIC.includes(key))
+    .map((key) => ({ name: `@wynding/content/${key.slice('./'.length)}`, message }));
+}
+
+/** The restrictions every `apps/server/src` file carries, tests included — hoisted so part 2
+ *  below is a SUPERSET by construction rather than by two lists happening to agree.
+ *
+ *  Part 2 re-typed all of this verbatim, which is the last-writer-wins hazard this file
+ *  documents under WHERE THIS ZONE'S `no-restricted-imports` LIVES NOW, and again under A ZONE
+ *  WHOSE FORBIDDEN SET COMES OUT EMPTY IS SKIPPED: part 2 wins for non-test files, so a
+ *  restriction added to part 1 alone would silently vanish for exactly the files that ship
+ *  (CodeRabbit, PR #167). Spreading one array cannot drift. */
+const SERVER_BASE_RESTRICTIONS = [
+  ...neverShippedPerf('Nothing shipped may import @wynding/perf (ADR 0001, AGENTS.md).'),
+  ...importableSpecifiers('@wynding/render').map((name) => ({
+    name,
+    message: 'apps/server is headless — it re-simulates replays and draws nothing.',
+  })),
+  ...neverShippedContent('A synthetic perf bundle is not shippable content.'),
+];
+
 /** One flat-config object per layered package: everything strictly downstream of it is an
  *  import error, with the determinism specifiers merged in for the four core packages (see
  *  `NONDETERMINISTIC_MODULE_PATHS`). Returns null when the package has nothing to forbid —
@@ -208,6 +337,25 @@ function layeringZone(specifier, layerIndex) {
       message: `${forbidden} is downstream of ${specifier} in the ADR 0001 layering graph — this import is a back-edge. Move the shared code upstream, or re-argue the graph in ADR 0001 first.`,
     })),
   );
+  // ROOTS MAY IMPORT NOTHING IN THE WORKSPACE — INCLUDING EACH OTHER, and that last clause is
+  // the whole of this block. "Downstream" alone left the two roots exempt from one another, so
+  // `engine` declaring `@wynding/types` passed the lint AND the acyclic check (one edge is not
+  // a cycle) AND `tsc`, while contradicting the invariant AGENTS.md states in as many words:
+  // `engine` depends only on `@noble/hashes`. Same-layer edges are permitted everywhere ELSE —
+  // `render`'s and `replay`'s tests import `@wynding/content` today — which is exactly why
+  // this cannot be a blanket same-layer rule and has to name the roots (Codex, PR #167).
+  const siblingRoots =
+    layerIndex === 0
+      ? LAYERS[0]
+          .filter((root) => root !== specifier)
+          .flatMap((root) =>
+            importableSpecifiers(root).map((name) => ({
+              name,
+              message: `${specifier} is a ROOT of the ADR 0001 layering graph — it may import nothing else in the workspace, ${root} included. Roots depend only on third-party packages (AGENTS.md, Hard rules).`,
+            })),
+          )
+      : [];
+  paths.push(...siblingRoots);
   const alsoDeterministic = [
     '@wynding/engine',
     '@wynding/sim',
@@ -430,16 +578,9 @@ export default tseslint.config(
             ...neverShippedPerf(
               'Nothing shipped may import @wynding/perf (ADR 0001, AGENTS.md). The perf-only browser entry lives in apps/web/perf/, built by vite.perf.config.ts into dist-perf.',
             ),
-            {
-              name: '@wynding/content/stress',
-              message:
-                'The 40x40 stress bundle is a synthetic perf ceiling, deliberately absent from the registry — it must never reach the client build (packages/content/src/stress.ts).',
-            },
-            {
-              name: '@wynding/content/catalog',
-              message:
-                'The 40x40 catalog bundle is a synthetic perf ceiling, deliberately absent from the registry — it must never reach the client build (packages/content/src/catalog.ts).',
-            },
+            ...neverShippedContent(
+              'A synthetic perf ceiling (1,000,000-hp creeps), deliberately absent from the registry — it must never reach the client build. See packages/content/src/stress.ts and catalog.ts.',
+            ),
           ],
         },
       ],
@@ -462,21 +603,7 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
-          paths: [
-            ...neverShippedPerf('Nothing shipped may import @wynding/perf (ADR 0001, AGENTS.md).'),
-            ...importableSpecifiers('@wynding/render').map((name) => ({
-              name,
-              message: 'apps/server is headless — it re-simulates replays and draws nothing.',
-            })),
-            {
-              name: '@wynding/content/stress',
-              message: 'The synthetic stress bundle is not shippable content.',
-            },
-            {
-              name: '@wynding/content/catalog',
-              message: 'The synthetic catalog bundle is not shippable content.',
-            },
-          ],
+          paths: SERVER_BASE_RESTRICTIONS,
         },
       ],
     },
@@ -509,23 +636,11 @@ export default tseslint.config(
         'error',
         {
           paths: [
-            ...neverShippedPerf('Nothing shipped may import @wynding/perf (ADR 0001, AGENTS.md).'),
-            ...importableSpecifiers('@wynding/render').map((name) => ({
-              name,
-              message: 'apps/server is headless — it re-simulates replays and draws nothing.',
-            })),
+            ...SERVER_BASE_RESTRICTIONS,
             {
               name: '@wynding/content',
               message:
                 "Import @wynding/content/artifact instead — the main registry entry drags the bundler-embedded ?raw ruleset text into the server's module graph (apps/server/src/handler.ts's header).",
-            },
-            {
-              name: '@wynding/content/stress',
-              message: 'The synthetic stress bundle is not shippable content.',
-            },
-            {
-              name: '@wynding/content/catalog',
-              message: 'The synthetic catalog bundle is not shippable content.',
             },
           ],
         },

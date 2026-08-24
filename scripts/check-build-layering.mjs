@@ -228,10 +228,15 @@ function requireBuilt(dir) {
         'marker and report a pass, which is why this is a failure instead.',
     );
   }
-  const entry = join(full, ...ENTRY[dir].split('/'));
+  // `ENTRY` coverage is asserted in `assertMarkerTableIntact`, before either build, so by here
+  // the row exists. It is a TABLE invariant, not a per-directory one, and checking it lazily put
+  // the diagnosis in the wrong place: a `SHIPPED_DIRS` entry with no `ENTRY` row and no build
+  // reported "does not exist after the build above", blaming the build for a table bug.
+  const expected = ENTRY[dir];
+  const entry = join(full, ...expected.split('/'));
   if (!existsSync(entry)) {
     fail(
-      `${relative(REPO_ROOT, full)} has no ${ENTRY[dir]} after the build above — the build ` +
+      `${relative(REPO_ROOT, full)} has no ${expected} after the build above — the build ` +
         'wrote somewhere this check is not looking, so its output cannot be vouched for.',
     );
   }
@@ -252,6 +257,19 @@ function assertMarkerTableIntact() {
     fail(
       `no marker represents ${missing.join(', ')} any more. A forbidden module with no marker ` +
         'is unguarded, and this check would still report a pass.',
+    );
+  }
+  // EVERY DIRECTORY THIS RUN WILL SCAN NEEDS AN `ENTRY` ROW, and this is a table invariant, so
+  // it is asserted here — before either build — rather than lazily inside `requireBuilt`, where
+  // a missing row surfaced as "does not exist after the build above" and blamed the build for a
+  // bug in this file. `Object.hasOwn`, not `=== undefined`: `ENTRY['constructor']` is not
+  // undefined, and a guard should not have a spelling that walks past it.
+  const unlisted = [...SHIPPED_DIRS, FORBIDDEN_DIR].filter((dir) => !Object.hasOwn(ENTRY, dir));
+  if (unlisted.length > 0) {
+    fail(
+      `no ENTRY row for ${unlisted.join(', ')} — this script cannot say what a finished build of ` +
+        'those looks like, so it cannot vouch for the output it would scan. Add the row beside ' +
+        'SHIPPED_DIRS.',
     );
   }
 }
