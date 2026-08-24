@@ -15,11 +15,22 @@
 // dependencies, so a root-level script has no way to import `@wynding/sim` et al. at all.
 //
 // Hence a dedicated workspace package, downstream of everything it needs and upstream
-// of nothing that ships. There is no automated dependency-direction lint for this (the
-// repo's one custom rule, `eslint-rules/no-ui-literals.mjs`, checks something else
-// entirely) — the "nothing shipped may import this" invariant is held by review, PLUS
-// `layering.test.ts` (QC: this package's dev-only reverse dependency), which greps
-// `apps/web/src/**` for an import of this package or of `@wynding/content/stress`.
+// of nothing that ships. THREE guards hold the "nothing shipped may import this"
+// invariant, as of #112/#129 — this comment used to say there was no automated
+// dependency-direction lint at all, which was true when it was written and is not now:
+//   - `eslint.config.mjs`'s APP ZONES — `apps/web/src` and `apps/server/src`. Not the
+//     generated layering zones, and the distinction is #112's whole point: the graph
+//     PERMITS `apps <- perf` (perf is upstream of apps), so a generated zone has no
+//     reason to forbid this import. The app zones carry the narrower never-ship
+//     invariant, and they are why a DECLARED devDependency of `apps/web` — the import
+//     nothing else in the toolchain objects to — goes red;
+//   - `pnpm run check:build-layering`, which asserts over the BUILT web app that no
+//     emitted file carries this package's or the synthetic bundles' markers — the
+//     authority, because it asks Vite rather than reading source text;
+//   - `layering.test.ts` (QC: this package's dev-only reverse dependency), the cheap grep
+//     over every shipped `src` tree, which is the arm that still covers `apps/server`
+//     (which `check:build-layering` does not scan — esbuild bundles it, but that check reads
+//     the web app's output only) and dynamic `import()` spellings.
 //
 // QC corrected a stale claim here: this file used to say the invariant was held "by
 // this package's own total absence of reverse dependencies" — no longer true.

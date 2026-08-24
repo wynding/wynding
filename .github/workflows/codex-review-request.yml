@@ -84,8 +84,8 @@ jobs:
       # Only the KNOWN 403 goes quiet; everything else in this step still fails the job
       # loudly, as it should. `codex-freshness` still goes red separately and honestly
       # when no verdict covers the head; that status is the one that matters. REVERT the
-      # warning-downgrade in the `else` branch below the moment the PAT lands and the POST
-      # can succeed again.
+      # warning-downgrade branch below (the `elif`, not the `else` — the `else` is the
+      # loud-failure path) the moment the PAT lands and the POST can succeed again.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
         run: |
           set -euo pipefail
@@ -117,15 +117,32 @@ jobs:
               printf '%s\n' "$post_out"
               if [ "$post_ec" -eq 0 ]; then
                 echo "Requested a Codex review of the new head."
-              elif printf '%s\n' "$post_out" | grep -qE 'HTTP 403|Resource not accessible by integration'; then
-                # CONFIRMED 403 shape, matching the #154 probe verbatim — the known,
-                # admin-owned token cap. Downgrade to a warning; do not fail the job.
-                echo "::warning::auto-trigger POST failed (HTTP 403 — org-level token cap suspected; see #154 probe + #72 §3). Post '@codex review' manually."
+              elif printf '%s\n' "$post_out" | grep -qF 'Resource not accessible by integration'; then
+                # THE KNOWN CAP, matched on the #154 probe's verbatim message. An `HTTP 403`
+                # alternative stood beside this one and was removed: it matched ANY 403 `gh`
+                # can emit — a secondary rate limit, SSO/SAML enforcement, an IP allow-list —
+                # so a fresh, actionable failure earned the same silent downgrade as the
+                # admin-owned cap, which is exactly what this step's header promises does not
+                # happen. The narrow string is what the probe actually returned and what #154
+                # and `codex-freshness.yml` both quote. `-qF` rather than `-qE`: one fixed
+                # string now, so no regex surface to widen it again by accident.
+                #
+                # ONE RESIDUAL CASE THIS STRING CANNOT SEPARATE, stated rather than papered
+                # over: GitHub returns the SAME message when a token simply lacks the scope,
+                # so if `issues: write` (the `permissions:` block above) is ever narrowed,
+                # that self-inflicted, one-line-fixable regression would be downgraded here
+                # wearing the org cap's clothes. The header's "what remains is an org-level
+                # token cap" was a finding about the state of the repo at the #154 probe, not
+                # a property of the string. Bounded by `codex-freshness` going red on its own
+                # when no verdict lands; re-check the permissions block before believing this
+                # warning. A grep of this file for the scope was considered and rejected — it
+                # would fire on any reformat, putting a flake inside a guard.
+                echo "::warning::auto-trigger POST failed with the known org-level token cap (Resource not accessible by integration; see #154 probe + #72 §3). Post '@codex review' manually."
               else
-                # NOT the known 403 shape — a different, fresh problem (a 500, a network
-                # blip, an auth issue, anything else `gh` might exit 1 for). This is not
-                # the token cap, so it gets no graceful downgrade: fail loudly.
-                echo "auto-trigger POST failed with a non-403 error (exit $post_ec) — not the known token cap. Failing." >&2
+                # Anything else — INCLUDING ANY OTHER 403. A 403 that is not the cap above
+                # has a different cause and a different owner, so it gets no graceful
+                # downgrade and fails as loudly as a 500, a network blip or an auth error.
+                echo "auto-trigger POST failed with an unrecognised error (exit $post_ec) — not the known token cap. Failing." >&2
                 exit "$post_ec"
               fi
               ;;

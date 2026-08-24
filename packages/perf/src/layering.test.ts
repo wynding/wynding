@@ -1,9 +1,30 @@
-// layering.test.ts — a cheap regression catch for the layering invariant `index.ts`'s
-// header states (QC: this package's dev-only reverse dependency): "nothing shipped may import `@wynding/perf` or
-// `@wynding/content/stress`". `apps/web` genuinely DEV-depends on this package now
-// (`apps/web/perf/main-perf.ts`, the perf-only browser entry point) — the production
-// graph is still clean, but a stated guarantee with nothing checking it is not a
+// layering.test.ts — the cheap, belt-and-suspenders arm of the layering invariant `index.ts`'s
+// header states (QC: this package's dev-only reverse dependency): "nothing shipped may import
+// `@wynding/perf` or `@wynding/content/stress`". `apps/web` genuinely DEV-depends on this
+// package now (`apps/web/perf/main-perf.ts`, the perf-only browser entry point) — the
+// production graph is still clean, but a stated guarantee with nothing checking it is not a
 // guarantee, it is a hope.
+//
+// IT IS NO LONGER THE PRIMARY GUARD, AND NO LONGER THE ONLY ONE. Two now sit in front of it,
+// and this file was kept rather than deleted (#112/#129) because it costs milliseconds, runs
+// in the unit-test path, where neither of them does, and fails differently from both:
+//
+//   1. `eslint.config.mjs`'s LAYERING ZONES — ADR 0001's graph compiled into per-zone
+//      `no-restricted-imports`. They catch a DECLARED back-edge at the point of writing, with
+//      a message naming the rule, which is the earliest and most useful moment. They match
+//      package specifiers only, and not inside a dynamic `import()`.
+//   2. `pnpm run check:build-layering` — the reachability check over BUILD OUTPUT (e2e job).
+//      It asks Vite, so it sees reaches spelled as paths: all six in #129's escape table, and
+//      the template literal below. It is the authoritative one for the web app; it is also the
+//      slow one, needing three real builds, and it reads STRING-SHAPED markers, so a reach
+//      that drags in no marker-bearing string can still pass it.
+//
+// This file's own contribution, stated exactly: it is the only one of the three that reads
+// EVERY shipped `src` tree as text, so it still fires for `apps/server` (which guard 2 does
+// not scan — esbuild bundles it, but that check reads the web app's output only) and for a
+// dynamic or comment-interrupted `import()` of the three never-shipped specifiers (which
+// guard 1 cannot see). Where all three overlap it is the cheapest, and a failure here is a
+// one-line fix rather than a build to read.
 //
 // `@wynding/content/catalog` (`packages/content/src/catalog.ts:10-11`) is the same
 // must-not-ship class as `./stress`: a synthetic perf bundle, deliberately absent from
@@ -18,10 +39,12 @@
 // interrupting the call, all the same.
 //
 // What it does NOT catch is every PATH-shaped reach at the same modules, because it does not
-// resolve paths at all: `../../content/src/stress` from a sibling package, `./catalog`
-// re-exported inside `packages/content`, `../perf/main-perf` or the Vite root-relative
-// `/perf/main-perf` from the web app, or a shipped module importing a `.test.ts` helper that
-// imports one of them. Those are demonstrated with probes in #129, which owns the real check.
+// resolve paths at all: `../../../packages/content/src/stress` from an app,
+// `../../content/src/stress` from a sibling package, `./catalog` re-exported inside
+// `packages/content`, `../perf/main-perf` or the Vite root-relative `/perf/main-perf` from the
+// web app, or a shipped module importing a `.test.ts` helper that imports one of them. All six
+// were measured green here and RED under `check:build-layering`, which is the check that owns
+// them.
 //
 // One SPECIFIER-shaped escape is also left open, deliberately, and saying so is the point of
 // this paragraph — an earlier draft claimed the specifier side was airtight, and it was not.
@@ -33,18 +56,21 @@
 // reddening documentation. A template-literal import specifier is not the accident this file
 // exists to catch; a comment mentioning a package name is an everyday act.
 //
-// This file is deliberately NOT grown to cover them. An earlier revision chased those
-// spellings through enumeration, then workspace discovery, then full specifier resolution
-// with each package's `exports` map, and a reviewer defeated every version — because all
-// three kept scanning TEXT, and the set of spellings Vite and tsc accept is strictly larger
-// than any scanner written by hand. #129 proposes asking the bundler instead, which is both
-// complete and less code than the resolver it would replace.
+// This file is deliberately NOT grown to cover them, and that decision is now settled rather
+// than merely deferred. An earlier revision chased those spellings through enumeration, then
+// workspace discovery, then full specifier resolution with each package's `exports` map, and a
+// reviewer defeated every version — because all three kept scanning TEXT, and the set of
+// spellings Vite and tsc accept is strictly larger than any scanner written by hand. #129
+// asked the bundler instead, which is both complete and less code than the resolver it
+// replaces. Do not re-grow this file toward it; add to the marker table there.
 //
-// One honest caveat, so nobody mistakes this for sufficient: unlike the determinism lint
-// zone — which can afford an open spelling set because the determinism golden and replay
-// byte-identity catch the CONSEQUENCE — this invariant has no structural backstop today.
-// The `pnpm size` budget is far too loose to notice a shipped synthetic bundle. This test is
-// the only line of defence, and it is a grep. That gap is the reason #129 exists.
+// The caveat this header used to end on is DISCHARGED, and the note is kept because the
+// reasoning still governs. Unlike the determinism lint zone — which can afford an open
+// spelling set because the determinism golden and replay byte-identity catch the CONSEQUENCE —
+// this invariant had no structural backstop: `pnpm size`'s 3 MB budget is far too loose to
+// notice a shipped synthetic bundle, so this grep was the only line of defence and it was a
+// grep. `check:build-layering` is that backstop, and it catches the consequence the same way:
+// it reads the artifact, not the intent.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

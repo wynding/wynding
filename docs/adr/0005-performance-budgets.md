@@ -101,8 +101,16 @@ Accepted cost: the numbers are a **ceiling**, not a description of real M2 play,
 document says so at the top.
 
 **(b) The real low-end Android device pass moves to S11**, where it joins the catalog-scale
-stress gate. S4 measures under Chrome emulation only, which keeps the story unblocked by
-hardware.
+work. S4 measures under Chrome emulation only, which keeps the story unblocked by
+hardware. _(2026-08-23, #114: S11 shipped **two** catalog-scale things, and this clause is
+easy to misread as one. The `perf:catalog` **oracle** is state-derived and untimed, and it is
+the one that joined CI's `perf` job. The timed catalog-scale **measurement** did land as well —
+`apps/web/e2e-perf/catalog.perf.spec.ts`, the browser frame-time spike — still under the pinned
+emulation profiles. What did **not** happen is the real-hardware device pass this clause moves
+here: its absence was re-accepted at the S11 close-out and it is still outstanding. This clause
+is dated 2026-07-30, so it describes what was planned, not what landed. Two interim wordings
+were wrong in opposite directions — one called the oracle a "CI-run oracle" here, twelve days
+before it was; the other denied a timed catalog measurement existed at all.)_
 
 **(c) Until that pass runs, the pinned emulation profiles ARE the reference device** this ADR
 says the spike fixes. Both profiles are recorded in full in the spike document; the
@@ -711,8 +719,16 @@ justification inverts:
    `startingBounty` — an equality `layout.ts` documents as an independent proof that every
    placement was accepted. A fourth arm forces re-deriving the split, the costs, and that
    invariant, for a mechanic whose marginal cost is ~1.25 applications per tick.
-3. **S11 is the pinned catch-all.** m2.md already owns a "final catalog-scale ADR 0005 stress
-   gate" at S11, over the finished catalog.
+3. **S11 is the pinned catch-all.** m2.md already assigns the catalog-scale measurement to S11,
+   over the finished catalog. _(Corrected 2026-08-22, #114: this bullet used to attribute a
+   quoted sentence to m2.md calling S11's catalog work a final ADR 0005 stress **gate** — a
+   sentence m2.md does not contain, naming a gate the catalog scene never became. What S11
+   shipped is the `perf:catalog` oracle, now run in CI's `perf` job; its row count is not
+   repeated here. (Nor is that count pinned anywhere executable — `oracle-catalog.test.ts`
+   asserts only a lower bound, and two of the rows are appended by `run-catalog.ts` rather than
+   by `oracle-catalog.ts`. So the copies of it already in this file are unbound prose, and this
+   bullet declines to add another.) The quotation marks were the tell: a quoted citation is
+   checkable, and this one had rotted.)_
 
 **What the exception does NOT claim.** The unchanged scene contains no stun tower, so it
 executes **none** of the new stun paths — no RNG draw, no `applyStun`, no active-stun write, no

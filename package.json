@@ -24,6 +24,7 @@
     "check:native": "node scripts/check-native-invariants.mjs",
     "check:types-type-only": "node scripts/check-types-type-only.mjs",
     "check:artifact-parity": "tsx apps/server/scripts/check-artifact-parity.ts",
+    "check:build-layering": "node scripts/check-build-layering.mjs",
     "perf:catalog": "pnpm -C packages/perf run perf:catalog",
     "lint:scripts": "eslint scripts eslint-rules",
     "size": "node scripts/size-limit.mjs",

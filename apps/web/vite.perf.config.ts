@@ -18,8 +18,17 @@ import { defineConfig, type Plugin } from 'vite';
 //
 // RECORDED-ONLY (PLAN "Out of scope": "Any fps/memory/input-latency CI gate —
 // recorded-only this story"). This config and everything it builds exist to produce
-// numbers for a spike document (Phase 6), never to gate a merge — do not wire
+// numbers for a spike document (Phase 6) — do not wire
 // `perf:e2e` into CI.
+//
+// ONE CI CONSUMER EXISTS, and it is not a gate on these numbers. Since #129,
+// `scripts/check-build-layering.mjs` BUILDS this config in the e2e job and uses `dist-perf`
+// as its positive control: because these two entry points deliberately reach
+// `@wynding/perf`, `@wynding/content/stress` and `./catalog`, they are where the check
+// proves its markers still match something before asserting they are absent from `dist`.
+// Nothing here is measured or asserted against a budget by that check — but this file is
+// no longer "never" part of a merge gate, and an earlier version of this header said it was.
+
 /**
  * Emit `perf/root.html` as the packaged output's ROOT `index.html` (#148).
  *

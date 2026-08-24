@@ -48,7 +48,7 @@
 // figure "speaks to neither device budget directly". A reading from fast hardware is a LOWER
 // BOUND on device cost: it can prove a breach, NEVER compliance. So 20,000's breach holds a
 // fortiori on anything slower, while the shipped cap's low-end standing is simply UNMEASURED
-// until a real device is measured (S5b's browser re-measure, S11's catalog-scale gate).
+// until a real device is measured (S5b's browser re-measure, S11's catalog-scale oracle).
 // Readings at the cap have ranged ~2.7-4.1 ms across sessions on UNCHANGED code (a
 // same-machine, same-minute A/B read 4.059 vs 4.054 ms across a rewrite), so treat this as
 // "a few ms on a dev laptop", never as a constant, and never compare figures across sessions.
