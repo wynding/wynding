@@ -60,16 +60,32 @@ interface StackEntry {
  *  turning, not by a key). */
 export type ModalDismissal = 'dismiss' | 'consume';
 
+/** What the active overlay means to the hardware Back button (#138).
+ *
+ *  `dismissable` and `consuming` are the two {@link ModalDismissal} answers under other
+ *  names. `results` is split out of `consuming` because it is the one overlay whose
+ *  correct Back behaviour is neither: the run is OVER, and inside a Host there is nothing
+ *  else to leave through — the wordmark is a non-interactive `span` (ADR 0012) and the
+ *  dialog offers only Play again, Verify, Copy and Save. Consuming Back there traps a
+ *  player who simply does not want another run. */
+export type ModalBackState = 'dismissable' | 'results' | 'consuming';
+
 export interface ModalOwner {
   open(overlay: ModalOverlay, options: ModalOpenOptions): void;
   close(overlay: ModalOverlay): void;
-  /** How the ACTIVE (highest-priority open) overlay answers a back/dismiss key, or `null`
-   *  when nothing is open.
+  /** Which routing row the ACTIVE (highest-priority open) overlay selects for hardware
+   *  Back, or `null` when nothing is open.
    *
-   *  Derived from the SAME `dismissOnEscape` metadata the Escape handler reads, so the
-   *  hardware Back button (#138) and Escape can never disagree about an overlay — adding
-   *  a new overlay classifies it once, at its `open` call, for both. */
-  activeDismissal(): ModalDismissal | null;
+   *  Derived from the SAME `dismissOnEscape` metadata the Escape handler reads, plus the
+   *  priority this module already owns — so an overlay is still classified once, at its
+   *  `open` call, and a new one cannot be forgotten by one key and remembered by the other.
+   *
+   *  BACK AND ESCAPE AGREE ON DISMISSAL AND DIVERGE ON EXIT, which is not a wrinkle to
+   *  tidy away. They share this classification exactly; what differs is that Back has an
+   *  exit row and Escape has no analogue for it — a keyboard cannot quit an app, and a
+   *  desktop player pressing Escape on the results dialog must not lose the page. The
+   *  `results` row exists for the platform where Back IS the way out. */
+  activeBackState(): ModalBackState | null;
   /** Close the active overlay if it is dismissable; a no-op otherwise. The routing
    *  decision belongs to the caller (`back.ts`'s table) — this is only the effect. */
   dismissActive(): void;
@@ -170,10 +186,13 @@ export function createModalOwner(
   return {
     open,
     close,
-    activeDismissal(): ModalDismissal | null {
+    activeBackState(): ModalBackState | null {
       const active = activeEntry();
       if (active === null) return null;
-      return active.dismissOnEscape ? 'dismiss' : 'consume';
+      if (active.dismissOnEscape) return 'dismissable';
+      // `results` priority is the results dialog and nothing else — `overlay.ts` opens it
+      // at that priority from exactly one place, the terminal transition.
+      return active.priority === 'results' ? 'results' : 'consuming';
     },
     dismissActive,
     destroy(): void {

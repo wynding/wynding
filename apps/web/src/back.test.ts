@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createModalOwner, type ModalOverlay } from './modal';
+import { createModalOwner, type ModalBackState, type ModalOverlay } from './modal';
 import {
   createBackHandler,
   findCapacitorApp,
@@ -30,14 +30,14 @@ import {
  */
 const TABLE: {
   readonly name: string;
-  readonly modal: 'dismiss' | 'consume' | null;
+  readonly modal: ModalBackState | null;
   readonly runLive: boolean;
   readonly runUnresolved: boolean;
   readonly expected: BackAction;
 }[] = [
   {
     name: 'settings open, run live',
-    modal: 'dismiss',
+    modal: 'dismissable',
     runLive: true,
     runUnresolved: true,
     expected: 'dismissModal',
@@ -46,38 +46,65 @@ const TABLE: {
     // Settings AUTO-PAUSES the run it opens over, so this is the common case, not an
     // exotic one — and the dismissal still outranks it.
     name: 'settings open over a PAUSED run',
-    modal: 'dismiss',
+    modal: 'dismissable',
     runLive: false,
     runUnresolved: true,
     expected: 'dismissModal',
   },
   {
     name: 'settings open, no run',
-    modal: 'dismiss',
+    modal: 'dismissable',
     runLive: false,
     runUnresolved: false,
     expected: 'dismissModal',
   },
   {
-    name: 'results open, run over',
-    modal: 'consume',
+    name: 'rotate open, no run yet',
+    modal: 'consuming',
     runLive: false,
     runUnresolved: false,
     expected: 'consume',
   },
   {
     name: 'rotate open, run live',
-    modal: 'consume',
+    modal: 'consuming',
     runLive: true,
     runUnresolved: true,
     expected: 'consume',
   },
   {
     name: 'rotate open, run paused',
-    modal: 'consume',
+    modal: 'consuming',
     runLive: false,
     runUnresolved: true,
     expected: 'consume',
+  },
+  {
+    // THE ROW THIS ROUND ADDED. Consuming here trapped a hosted player: the run is over,
+    // the wordmark is a non-interactive span (ADR 0012), and the dialog offers only Play
+    // again / Verify / Copy / Save. Back is the only way out, so it has to be one.
+    name: 'RESULTS open, run over',
+    modal: 'results',
+    runLive: false,
+    runUnresolved: false,
+    expected: 'default',
+  },
+  {
+    // Unreachable today — `showResults` only fires at the terminal transition, where
+    // `isRunUnresolved` is false — but the table owes an answer for every state, and
+    // exiting stays right: a resolved run has nothing to confirm losing.
+    name: 'RESULTS open, run somehow unresolved',
+    modal: 'results',
+    runLive: false,
+    runUnresolved: true,
+    expected: 'default',
+  },
+  {
+    name: 'RESULTS open, run somehow live',
+    modal: 'results',
+    runLive: true,
+    runUnresolved: true,
+    expected: 'default',
   },
   {
     name: 'nothing open, run live',
@@ -112,7 +139,7 @@ describe('routeBack — the decision table (#138)', () => {
   }
 
   it('covers every reachable combination — no state falls off the table', () => {
-    for (const modal of ['dismiss', 'consume', null] as const) {
+    for (const modal of ['dismissable', 'results', 'consuming', null] as const) {
       // `runLive` implies `runUnresolved`, so live-but-resolved is not a state that exists.
       for (const [runLive, runUnresolved] of [
         [true, true],
@@ -130,7 +157,7 @@ describe('routeBack — the decision table (#138)', () => {
   });
 
   it('a dismissable overlay outranks a live run — Back closes it, it does not pause', () => {
-    expect(routeBack({ modal: 'dismiss', runLive: true, runUnresolved: true })).toBe(
+    expect(routeBack({ modal: 'dismissable', runLive: true, runUnresolved: true })).toBe(
       'dismissModal',
     );
   });
@@ -156,23 +183,36 @@ describe('the real overlays classify as the table expects', () => {
   }
 
   it('nothing open → null', () => {
-    expect(owner().activeDismissal()).toBeNull();
+    expect(owner().activeBackState()).toBeNull();
   });
 
   it('settings DISMISSES — the same answer it gives Escape', () => {
     const m = owner();
     m.open(overlay(), { priority: 'settings', dismissOnEscape: true });
-    expect(m.activeDismissal()).toBe('dismiss');
+    expect(m.activeBackState()).toBe('dismissable');
   });
 
-  it('RESULTS IS NOT DISMISSABLE — the run is over, so Back is consumed', () => {
+  it('RESULTS IS ITS OWN ROW — not dismissable, and not consumed either: Back EXITS', () => {
     const m = owner();
     // Registered exactly as `overlay.ts` registers it: state-driven, no `dismissOnEscape`.
     m.open(overlay(), { priority: 'results' });
-    expect(m.activeDismissal()).toBe('consume');
-    expect(routeBack({ modal: m.activeDismissal(), runLive: false, runUnresolved: false })).toBe(
-      'consume',
+    // Classified apart from rotate, which is what makes the exit row reachable at all.
+    expect(m.activeBackState()).toBe('results');
+    expect(routeBack({ modal: m.activeBackState(), runLive: false, runUnresolved: false })).toBe(
+      'default',
     );
+  });
+
+  it('the results dialog is still NOT dismissable — Back exits, it does not close it', () => {
+    // The distinction the new row must not blur: exiting the app and dismissing the dialog
+    // are different actions, and `dismissActive()` must still refuse this overlay so a
+    // future caller cannot close a state-driven dialog through the back door.
+    const m = owner();
+    const results = overlay();
+    m.open(results, { priority: 'results' });
+    m.dismissActive();
+    expect(results.hide).not.toHaveBeenCalled();
+    expect(m.activeBackState()).toBe('results');
   });
 
   it('ROTATE IS CONSUMED, NOT DISMISSED — it is reachable, and only the device clears it', () => {
@@ -181,10 +221,10 @@ describe('the real overlays classify as the table expects', () => {
     // exactly as `rotate.ts` registers it — no `dismissOnEscape`.
     const m = owner();
     m.open(overlay(), { priority: 'rotate' });
-    expect(m.activeDismissal()).toBe('consume');
+    expect(m.activeBackState()).toBe('consuming');
     // The failure this prevents: falling through to app exit from a screen the player
     // cannot otherwise leave.
-    expect(routeBack({ modal: m.activeDismissal(), runLive: true, runUnresolved: true })).not.toBe(
+    expect(routeBack({ modal: m.activeBackState(), runLive: true, runUnresolved: true })).not.toBe(
       'default',
     );
   });
@@ -195,7 +235,7 @@ describe('the real overlays classify as the table expects', () => {
     m.open(settings, { priority: 'settings', dismissOnEscape: true });
     m.open(overlay(), { priority: 'results' });
     // Results outranks settings, so Back must answer for results.
-    expect(m.activeDismissal()).toBe('consume');
+    expect(m.activeBackState()).toBe('results');
   });
 
   it('dismissActive closes a dismissable overlay and leaves a consuming one alone', () => {
@@ -204,13 +244,13 @@ describe('the real overlays classify as the table expects', () => {
     m.open(settings, { priority: 'settings', dismissOnEscape: true });
     m.dismissActive();
     expect(settings.hide).toHaveBeenCalled();
-    expect(m.activeDismissal()).toBeNull();
+    expect(m.activeBackState()).toBeNull();
 
-    const results = overlay();
-    m.open(results, { priority: 'results' });
+    const rotate = overlay();
+    m.open(rotate, { priority: 'rotate' });
     m.dismissActive();
-    expect(results.hide).not.toHaveBeenCalled();
-    expect(m.activeDismissal()).toBe('consume');
+    expect(rotate.hide).not.toHaveBeenCalled();
+    expect(m.activeBackState()).toBe('consuming');
   });
 });
 
@@ -256,13 +296,13 @@ describe('createBackHandler — the wiring', () => {
       runLive?: boolean;
       /** Defaults to `runLive` — a live run is always unresolved. */
       runUnresolved?: boolean;
-      dismissal?: 'dismiss' | 'consume' | null;
+      dismissal?: ModalBackState | null;
     } = {},
   ) {
     const fake = fakePlugin();
     const calls = { ensurePaused: 0, abortGesture: 0, dismissActive: 0, refreshWakeLock: 0 };
     const leaveConfirms: (() => void)[] = [];
-    let dismissal: 'dismiss' | 'consume' | null = options.dismissal ?? null;
+    let dismissal: ModalBackState | null = options.dismissal ?? null;
     const handle = createBackHandler({
       modal: {
         open: vi.fn(),
@@ -270,7 +310,7 @@ describe('createBackHandler — the wiring', () => {
         // MUTABLE, so a test can drive one handler through a real sequence of presses
         // where the modal state CHANGES between them — which is what actually happens
         // when a Back press opens the leave confirm and the next press meets it.
-        activeDismissal: () => dismissal,
+        activeBackState: () => dismissal,
         dismissActive: () => void calls.dismissActive++,
         destroy: vi.fn(),
       },
@@ -288,7 +328,7 @@ describe('createBackHandler — the wiring', () => {
       leaveConfirms,
       handle,
       /** Move the modal state, as opening or closing a dialog really would. */
-      setDismissal: (v: 'dismiss' | 'consume' | null): void => void (dismissal = v),
+      setDismissal: (v: ModalBackState | null): void => void (dismissal = v),
     };
   }
 
@@ -299,7 +339,7 @@ describe('createBackHandler — the wiring', () => {
   });
 
   it('a dismissable overlay: Back closes it, and nothing pauses or exits', async () => {
-    const h = harness({ dismissal: 'dismiss', runLive: true });
+    const h = harness({ dismissal: 'dismissable', runLive: true });
     await vi.waitFor(() => expect(h.registered()).toContain('backButton'));
     h.back();
     expect(h.calls.dismissActive).toBe(1);
@@ -309,7 +349,7 @@ describe('createBackHandler — the wiring', () => {
   });
 
   it('a consuming overlay: Back does NOTHING — and above all does not exit the app', async () => {
-    const h = harness({ dismissal: 'consume', runLive: true });
+    const h = harness({ dismissal: 'consuming', runLive: true });
     await vi.waitFor(() => expect(h.registered()).toContain('backButton'));
     h.back();
     expect(h.calls).toMatchObject({ dismissActive: 0, ensurePaused: 0, abortGesture: 0 });
@@ -368,7 +408,7 @@ describe('createBackHandler — the wiring', () => {
 
     // The confirm is now open, and it registers dismissable (settings priority,
     // `dismissOnEscape: true` — see `overlay.ts`'s `showLeave`).
-    h.setDismissal('dismiss');
+    h.setDismissal('dismissable');
     h.back(); // press two: the dismissable row wins → Stay
     expect(h.calls.dismissActive).toBe(1);
     expect(h.exitApp).not.toHaveBeenCalled();
@@ -409,7 +449,7 @@ describe('createBackHandler — the wiring', () => {
       modal: {
         open: vi.fn(),
         close: vi.fn(),
-        activeDismissal: () => null,
+        activeBackState: () => null,
         dismissActive: vi.fn(),
         destroy: vi.fn(),
       },
@@ -465,7 +505,7 @@ describe('the LEGACY bridge shape (#138 review round)', () => {
       modal: {
         open: vi.fn(),
         close: vi.fn(),
-        activeDismissal: () => null,
+        activeBackState: () => null,
         dismissActive: vi.fn(),
         destroy: vi.fn(),
       },
@@ -523,7 +563,7 @@ describe('a host that THROWS rather than rejecting (#138 review round 2)', () =>
   const inertModal = () => ({
     open: vi.fn(),
     close: vi.fn(),
-    activeDismissal: () => null,
+    activeBackState: () => null,
     dismissActive: vi.fn(),
     destroy: vi.fn(),
   });

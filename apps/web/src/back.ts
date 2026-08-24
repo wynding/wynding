@@ -17,7 +17,7 @@
 // the default" is not passivity here: leaving the app has to be an explicit `exitApp()`,
 // or Back would become a dead key the moment this module is wired up.
 
-import type { ModalOwner } from './modal';
+import type { ModalBackState, ModalOwner } from './modal';
 
 /** The five outcomes a Back press can have. */
 export type BackAction =
@@ -35,10 +35,10 @@ export type BackAction =
   | 'default';
 
 export interface BackRouteInput {
-  /** How the active overlay answers a back key, or `null` when none is open — read
-   *  straight off `modal.ts`, the stack's owner, so this table can never disagree with
-   *  the one Escape uses. */
-  readonly modal: 'dismiss' | 'consume' | null;
+  /** Which row the active overlay selects, or `null` when none is open — read straight
+   *  off `modal.ts`, the stack's owner, so this table cannot drift from the classification
+   *  Escape shares. */
+  readonly modal: ModalBackState | null;
   /** Started, not paused, not resolved — the same predicate `ensurePaused` guards on. */
   readonly runLive: boolean;
   /** Started and not resolved — TRUE FOR A PAUSED RUN TOO, which is the whole difference
@@ -54,6 +54,11 @@ export interface BackRouteInput {
  *
  *   `results` — the run is OVER. Dismissing would imply it can be resumed; Play again and
  *               the home link are the real affordances, and they are right there.
+ *   `results` — the run is OVER, and Back EXITS. This row was `consume` and that trapped
+ *               the player: the reasoning below ("Play again and the home link are the real
+ *               affordances, and they are right there") is true on the open web and false
+ *               inside a Host, where the wordmark is a non-interactive `span`. Escape still
+ *               consumes here; see `modal.ts` on why the two keys diverge on exit alone.
  *   `rotate`  — REACHABLE on device, despite both native projects locking landscape.
  *               `rotate.ts:27-34` documents the live case: Android 16 (API 36, which
  *               Capacitor 8 targets) IGNORES `android:screenOrientation` on `sw600dp`+
@@ -75,8 +80,16 @@ export interface BackRouteInput {
  * "Stay", the safe default landing exactly where a second press lands.
  */
 export function routeBack(input: BackRouteInput): BackAction {
-  if (input.modal === 'dismiss') return 'dismissModal';
-  if (input.modal === 'consume') return 'consume';
+  if (input.modal === 'dismissable') return 'dismissModal';
+  // The RESULTS row, and why it is `default` rather than `consume` or `leaveConfirm`. The
+  // run is over, so there is nothing to confirm losing — `leaveConfirm` guards unresolved
+  // state and would be asking about a run that no longer exists. And consuming trapped the
+  // player: inside a Host the wordmark is a non-interactive `span` (ADR 0012) and this
+  // dialog offers only Play again, Verify, Copy and Save, so Back was the only way out and
+  // it did nothing. Exiting matches what Back already does from an idle board, which is the
+  // same situation — nothing open, nothing to lose.
+  if (input.modal === 'results') return 'default';
+  if (input.modal === 'consuming') return 'consume';
   if (input.runLive) return 'pause';
   return input.runUnresolved ? 'leaveConfirm' : 'default';
 }
@@ -293,7 +306,7 @@ export function createBackHandler(deps: BackHandlerDeps): BackHandle {
 
   const onBack = (): void => {
     const action = routeBack({
-      modal: deps.modal.activeDismissal(),
+      modal: deps.modal.activeBackState(),
       runLive: deps.isRunLive(),
       runUnresolved: deps.isRunUnresolved(),
     });

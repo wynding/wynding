@@ -2310,6 +2310,22 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
     expect(h.exitApp).toHaveBeenCalledTimes(1);
   });
 
+  it('a TERMINAL results dialog lets Back exit — a hosted player is not trapped', async () => {
+    // The trap: inside a Host the wordmark is a non-interactive span (ADR 0012) and the
+    // results dialog offers only Play again / Verify / Copy / Save. With Back consumed
+    // there, a player who simply does not want another run had no way out at all.
+    const h = backApp();
+    await h.registered;
+    h.frame();
+    dockButton(h.root, 'Start').click();
+    const results = h.root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    expect(results.hidden, 'the run must actually have resolved').toBe(false);
+
+    h.back();
+    expect(h.exitApp).toHaveBeenCalledTimes(1);
+  });
+
   it('ASKS FIRST when a pre-start board carries pending builds', async () => {
     // The predicate must be the home-link guard's own (`!started && !hasPlan` is what lets
     // a navigation through), or the two ways out of the app disagree about what counts as
