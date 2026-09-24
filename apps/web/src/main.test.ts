@@ -2758,7 +2758,11 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       const stage = h.root.querySelector('.wy-stage')!;
       const observer = instances.find((i) => i.observed.includes(dock));
       expect(observer, 'the Dock must be observed').toBeDefined();
-      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage, ...dock.children]));
+      // ...and the bottom-inset probe: in scroll form an inset change only MOVES the Dock.
+      const probe = h.root.querySelector('.wy-inset-probe');
+      expect(probe, 'the inset probe must be mounted').not.toBeNull();
+      expect(probe!.getAttribute('aria-hidden')).toBe('true');
+      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage, ...dock.children, probe!]));
       expect(dock.children.length).toBeGreaterThan(1);
 
       // The scroll cue follows the scrollport: a scroll re-points it, no frame needed.
@@ -2785,6 +2789,7 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       h.app.destroy();
       expect(cancelled).toContain(frames.length);
       expect(observer!.disconnected).toBe(true);
+      expect(h.root.querySelector('.wy-inset-probe'), 'the probe is removed').toBeNull();
       for (const p of ['--wy-dock-reserve', '--wy-dock-max-h', '--wy-dock-row-h']) {
         expect(prop(p), p).toBe('');
       }

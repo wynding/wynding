@@ -638,6 +638,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // already held at its bound does not change size when that happens — its controls do
   // (a hidden control's box collapses to nothing), so they are what reports the change.
   for (const control of Array.from(shell.dock.root.children)) dockResizeObserver?.observe(control);
+  // ...and the bottom SAFE-AREA INSET. In scroll form the inset lifts the Dock by `bottom`,
+  // which MOVES it without resizing any box above, so a runtime inset change (a native write
+  // of `--safe-area-inset-bottom`, or `env()` changing) would leave the reserve stale and the
+  // lifted Dock over buildable cells again. An inert probe sized BY the inset turns that change
+  // into a resize the same observer sees.
+  const insetProbe = doc.createElement('div');
+  insetProbe.className = 'wy-inset-probe';
+  insetProbe.setAttribute('aria-hidden', 'true');
+  root.append(insetProbe); // beside the shell, outside the layout regions it declares
+  dockResizeObserver?.observe(insetProbe);
   // The scroll cue points down while rows remain below the scrollport, up at the end.
   const dockScroll = new AbortController();
   shell.dock.root.addEventListener('scroll', () => syncDockCue(shell.dock.root), {
@@ -1196,6 +1206,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       dockScroll.abort();
       if (dockFrame !== 0) view?.cancelAnimationFrame(dockFrame);
       clearDockReserve(dockTargets);
+      insetProbe.remove();
       setFloatScroll(false); // the preview grants this module owns, cleared by its owner
       setFloatBand({ kind: 'none' }); // ...and the band grants beside them (#101)
       guardListener.abort(); // the home-link exit guard

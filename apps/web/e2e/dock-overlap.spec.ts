@@ -750,6 +750,53 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     await assertTabWalkShowsEachControl(page, 'with a bottom inset');
   });
 
+  test('540×556 at 100%, a bottom inset that ARRIVES after the Dock scrolls: the reserve follows it', async ({
+    page,
+  }) => {
+    // Codex P2 on #169: in scroll form the inset lifts the Dock by `bottom`, which MOVES it
+    // without resizing any observed box — so an inset written after the scroll form engaged
+    // (a native write of `--safe-area-inset-bottom`, or `env()` changing) must still re-sync
+    // the reserve, or the lifted Dock covers buildable cells by the inset delta.
+    await gotoCase(page, { width: 540, height: 556, zoom: 100 });
+    await page.getByRole('button', { name: 'Start', exact: true }).click();
+    await settle(page);
+    await expect(page.locator('.wy-dock'), 'the started Dock must scroll here').toHaveClass(
+      /wy-dock--scroll/,
+    );
+    await assertNoBuildableCellUnderDock(page);
+    const reserveBefore = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.querySelector('.wy-shell')!).getPropertyValue(
+          '--wy-dock-reserve',
+        ),
+      ),
+    );
+    for (const inset of [24]) {
+      await page.evaluate(
+        (v) => document.documentElement.style.setProperty('--safe-area-inset-bottom', `${v}px`),
+        inset,
+      );
+      await settle(page);
+      await assertNoBuildableCellUnderDock(page);
+      await assertNoPartialControl(page, `after a ${inset}px inset arrived`);
+      await assertFloorOrException(
+        page,
+        { width: 540, height: 556, zoom: 100 },
+        `after a ${inset}px inset arrived`,
+      );
+    }
+    const reserveAfter = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.querySelector('.wy-shell')!).getPropertyValue(
+          '--wy-dock-reserve',
+        ),
+      ),
+    );
+    expect(reserveAfter, 'the reserve must grow with the arriving inset').toBeGreaterThan(
+      reserveBefore,
+    );
+  });
+
   test('540×556 at 100%, forced colors: the scroll cue survives, inked in the system CanvasText', async ({
     page,
   }) => {

@@ -265,7 +265,7 @@ describe('layout — the safe-area seam (#136)', () => {
   // Every inset read now goes through a `--wy-safe-*` token rather than `env()` directly,
   // because `env()` cannot be set from a test and a custom property can — `insets.spec.ts`
   // drives the rendered consequences through the same property Capacitor writes. These source
-  // assertions are what scale to all twenty-one call sites; the rendered spec covers six
+  // assertions are what scale to all twenty-two call sites; the rendered spec covers six
   // mechanisms and structurally cannot reach the rest.
   const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const AXES = ['top', 'right', 'bottom', 'left'] as const;
@@ -362,7 +362,9 @@ describe('layout — the safe-area seam (#136)', () => {
   });
 
   it('the three guards together account for every token read', () => {
-    // 16 axis-named + 3 vertical bounds + 2 track tokens = the 21 call sites (20 before #153
+    // 16 axis-named + 3 vertical bounds + 2 track tokens + the inset probe = the 22 call sites
+    // (the probe joined in #152's review round: an out-of-flow `height` that exists only to
+    // make the bottom inset observable, pinned by its own test below). Before it, 21 (20 before #153
     // too, by a different route: #153 added the Compact Rail's two top-inset reads, making
     // 22, and its third round routed the Rail's two scroll reserves through the named
     // paddings, removing two — see the axis-named guard above; the #152 hardening's scrolling
@@ -370,22 +372,26 @@ describe('layout — the safe-area seam (#136)', () => {
     // partition means a NEW read cannot land in the gap between the guards: it either matches
     // one of them or fails this. Each guard's own count pins its share; this pins the whole.
     const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
-    expect(reads).toHaveLength(21);
+    expect(reads).toHaveLength(22);
   });
 
   it('vertical bounds read a VERTICAL axis token', () => {
     // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which three
-    // of the twenty-one call sites are not: two `max-height` bounds and one `height`, all
+    // of the twenty-two call sites are not: two `max-height` bounds and one `height`, all
     // subtracting `--wy-safe-top`. Two of those sit behind `:has()` selectors that are not
     // exercised at page load (`.wy-shell:has(.wy-banner:not([hidden]))` and
     // `.wy-hud:has(> .wy-wave-preview)`), so a top→left slip there would shrink the HUD by the
     // wrong inset with the entire suite green — the exact failure the guard exists to catch,
     // in the one place it could not see.
+    // The inset PROBE is not a bound: it reads the BOTTOM inset on purpose and is pinned by
+    // its own test below, so its one rule is set aside here — by selector, so any other
+    // `height` reading an inset still lands in this guard.
+    const bounds = uncommented.replace(/\.wy-inset-probe\s*\{[^}]*\}/, '');
     const re = /(?:max-)?height\s*:([^;]+);/g;
     const wrong: string[] = [];
     let seen = 0;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(uncommented)) !== null) {
+    while ((m = re.exec(bounds)) !== null) {
       const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(m[1] as string);
       if (token === null) continue;
       seen += 1;
@@ -399,6 +405,20 @@ describe('layout — the safe-area seam (#136)', () => {
     }
     expect(seen, 'expected the three vertical bounds that read an inset').toBe(3);
     expect(wrong).toEqual([]);
+  });
+
+  it('the inset probe is sized by the BOTTOM inset alone, and lays out nothing', () => {
+    // `main.ts` observes this probe so a runtime bottom-inset change re-syncs the Standard
+    // Dock's reserve (#152): in scroll form the inset only MOVES the Dock, which no observed
+    // box reports. Wrong axis = a stale reserve on exactly the change it exists to catch; in
+    // flow = a stray grid cell in the shell.
+    const rules = uncommented.match(/\.wy-inset-probe\s*\{[^}]*\}/g) ?? [];
+    expect(rules, 'exactly one .wy-inset-probe rule').toHaveLength(1);
+    const body = rules[0] as string;
+    expect(body).toMatch(/[{;\s]height\s*:\s*var\(--wy-safe-bottom\)\s*;/);
+    expect(body).toMatch(/position\s*:\s*absolute\s*;/);
+    expect(body).toMatch(/visibility\s*:\s*hidden\s*;/);
+    expect(body).toMatch(/pointer-events\s*:\s*none\s*;/);
   });
 
   it('--wy-compact-col grows its track by the left inset (`.wy-status` pads left)', () => {

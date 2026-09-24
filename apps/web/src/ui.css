@@ -190,6 +190,21 @@ body {
   min-height: 0;
 }
 
+/* The bottom safe-area inset, made observable (#152). An inert, out-of-flow probe whose only
+   size is the inset: `main.ts` observes it, so a runtime inset change (which in the Standard
+   Dock's scroll form only MOVES the Dock) still re-syncs the Dock's reserve. Mounted beside
+   the shell (not inside the layout regions it declares), absolutely positioned so it lays
+   out nothing, and hidden from paint, hit tests and AT. */
+.wy-inset-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: var(--wy-safe-bottom);
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .wy-status {
   display: flex;
   align-items: center;
