@@ -28,7 +28,9 @@
         "$TURBO_ROOT$/packages/engine/src/game-loop.ts",
         "$TURBO_ROOT$/packages/platform/package.json",
         "$TURBO_ROOT$/packages/render/package.json",
-        "$TURBO_ROOT$/scripts/build-layering-attribution.mjs"
+        "$TURBO_ROOT$/scripts/build-layering-attribution.mjs",
+        "$TURBO_ROOT$/apps/*/src/**",
+        "$TURBO_ROOT$/packages/*/src/**"
       ]
     },
     "clean": {

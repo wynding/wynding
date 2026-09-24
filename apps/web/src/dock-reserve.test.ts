@@ -285,7 +285,6 @@ describe('syncDockReserve (#152)', () => {
     syncDockReserve(r, false);
     expect(prop(r.shell, DOCK_PROPS.maxHeight)).toBe('44px');
     expect(prop(r.shell, DOCK_PROPS.reserve)).toBe('72px');
-    expect(388 - 72).toBeGreaterThanOrEqual(24 * 12);
   });
 
   it('writes ONE row height for every row: the tallest visible control, read at its natural height', () => {

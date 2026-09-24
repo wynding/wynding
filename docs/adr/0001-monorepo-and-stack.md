@@ -77,7 +77,8 @@ now hold it — no one of them sufficient, and the third is not a formality:
    paths and `@noble/hashes`, and its manifest's runtime fields (`dependencies`,
    `peerDependencies`, `optionalDependencies`) may declare nothing else. The one relaxation
    is for tests: `devDependencies` may also declare the test runner (`vitest`,
-   `@vitest/coverage-v8`), and `*.test.ts` files — only those — may import it.
+   `@vitest/coverage-v8`), and within the zone (`packages/engine/src/**`) `*.test.ts` files — only
+   those — may import it.
 2. **At the artifact:** `pnpm run check:build-layering` (#129), which asks the bundler
    rather than the source text — no file the shipped **web** build emits may carry the
    never-shipped modules' markers, so a reach spelled as a relative path, a re-export, a
