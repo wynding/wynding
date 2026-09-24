@@ -463,60 +463,115 @@ const GUARDED_FILES: readonly string[] = [...PERF_SOURCES, ...GUARDED_DOCS];
  *  named here, the partition is recomputed from the directory each run and compared exactly,
  *  and a new file fails the build until someone classifies it.
  *
- *  THE RESIDUE IS MEASURED, not implied. Putting all of these on the surface would add 56
- *  cross-file figure pairs, and the per-file counts below are what each one contributes. That
- *  is a real body of work and a real scoping decision — the catalog scene and the board
- *  geometry are other stories' surfaces, which the header has said from the start — but it is
- *  a decision recorded with its price rather than a list that quietly happened to stop where
- *  it stopped. */
+ *  THE RESIDUE IS MEASURED, not implied. Each entry below records, value by value and copy by
+ *  copy, the unrowed cross-file figures the file would bring to the sweep if it joined the
+ *  surface. That is a real body of work and a real scoping decision — the catalog scene and the
+ *  board geometry are other stories' surfaces, which the header has said from the start — but
+ *  it is a decision recorded with its price rather than a list that quietly happened to stop
+ *  where it stopped. */
 const OFF_SURFACE: readonly {
   readonly file: string;
-  /** HOW MANY cross-file pairs this file would ADD to the sweep if it joined the surface —
-   *  recomputed every run and compared exactly, because a count in a `why` string is a prose
-   *  contract and a prose contract cannot fail. The partition test compared FILENAMES, so a
-   *  file already classified could acquire a cross-file claim and its recorded justification
-   *  quietly stop being true: an unlisted `1.0065` appended to `scenario.test.ts`, whose entry
-   *  claims zero, left all 780 tests green (Codex, PR #161).
+  /** WHAT THIS FILE HOLDS OF THE GAP SET, counted: every unrowed, unexcluded cross-file value
+   *  the sweep would report with this file joined to the surface, EACH WITH HOW MANY TIMES THIS
+   *  FILE STATES IT — recomputed every run by `heldGapValues` and compared exactly, because a
+   *  count in a `why` string is a prose contract and a prose contract cannot fail. The partition
+   *  test compared FILENAMES, so a file already classified could acquire a cross-file claim and
+   *  its recorded justification quietly stop being true: an unlisted `1.0065` appended to
+   *  `scenario.test.ts`, whose entry claimed zero, left all 780 tests green (Codex, PR #161).
+   *
+   *  THIS WAS A SCALAR, and the scalar had the hole the two escape tables had before it. It
+   *  counted the DISTINCT values the file would ADD, found by subtracting the baseline gap set
+   *  BY VALUE — so a value the baseline already acknowledged was invisible however many copies
+   *  of it the file gained: a further `1427` appended to `scenario.test.ts` left every claim test
+   *  green (#163's rider). Taking the gap set WITH THE FILE JOINED keeps the values the file
+   *  alone would introduce alongside the already-acknowledged ones it also states, and counting
+   *  the file's own copies of each is what makes a second copy a change. The distinct-value
+   *  count the scalar recorded is just the length of this list, so nothing it measured is lost.
    *
    *  `'circular'` is for the table itself, and it is not an escape hatch — the check asserts
-   *  that only the two table files may claim it. A count there would be self-referential and
+   *  that only the two table files may claim it. A census there would be self-referential and
    *  would churn on every edit to the guard, which is a different thing from being unchecked. */
-  readonly pairs: number | 'circular';
+  readonly holds: readonly (readonly [value: string, occurrences: number])[] | 'circular';
   readonly why: string;
 }[] = [
   {
     file: 'packages/perf/src/claims.ts',
-    pairs: 'circular',
+    holds: 'circular',
     why: 'THE TABLE ITSELF. Every claim value appears here by construction, so guarding it would make every row a self-certifying two-file duplicate of itself. Circular, not merely noisy.',
   },
   {
     file: 'packages/perf/src/claims.test.ts',
-    pairs: 'circular',
+    holds: 'circular',
     why: "The table's own guard, and it quotes claim values in exclusions, exceptions and fixtures. Same circularity as claims.ts.",
   },
   {
     file: 'packages/perf/src/layout.ts',
-    pairs: 25,
-    why: "Board geometry and anchor placement — the largest single off-surface holding by a wide margin (cell counts, board dimensions, route lengths; the count is in `pairs`). The header has named board geometry as another surface's business since the contract was first written; it belongs to the content and sim tests, not to the perf gate.",
+    holds: [
+      ['115', 1],
+      ['120', 3],
+      ['140', 1],
+      ['144', 3],
+      ['149.0', 1],
+      ['1601', 1],
+      ['160', 1],
+      ['2.25', 3],
+      ['21', 1],
+      ['256', 1],
+      ['28', 3],
+      ['290', 1],
+      ['310', 1],
+      ['31', 1],
+      ['34', 1],
+      ['3554', 2],
+      ['35', 1],
+      ['39', 1],
+      ['44', 1],
+      ['45', 1],
+      ['59', 2],
+      ['64', 1],
+      ['65', 1],
+      ['75', 1],
+      ['84', 1],
+    ],
+    why: "Board geometry and anchor placement — the largest single off-surface holding by a wide margin (cell counts, board dimensions, route lengths; the census is in `holds`). The header has named board geometry as another surface's business since the contract was first written; it belongs to the content and sim tests, not to the perf gate.",
   },
   {
     file: 'packages/perf/src/oracle-catalog.ts',
-    pairs: 8,
-    why: "The M2-S11 catalog scene's oracle, all of whose pairs are catalog-scene facts. A neighbouring surface, like the stress oracle's unrowed family in KNOWN_UNROWED, and tracked with it in #163.",
+    holds: [
+      ['1055', 3],
+      ['1601', 1],
+      ['256', 2],
+      ['27', 2],
+      ['3554', 2],
+      ['434', 1],
+      ['531', 1],
+      ['72', 2],
+    ],
+    why: "The M2-S11 catalog scene's oracle, all of whose held values are catalog-scene facts. A neighbouring surface: #163 rowed the STRESS oracle's family, which lives in on-surface sources, and left this file's classification as it stood.",
   },
   {
     file: 'packages/perf/src/oracle-catalog.test.ts',
-    pairs: 3,
+    holds: [
+      ['1.5', 9],
+      ['1055', 1],
+      ['120', 1],
+    ],
     why: 'Its test — the same catalog-scene family as oracle-catalog.ts.',
   },
   {
     file: 'packages/perf/src/layout-catalog.test.ts',
-    pairs: 5,
+    holds: [
+      ['120', 1],
+      ['256', 1],
+      ['28', 2],
+      ['290', 1],
+      ['576', 1],
+    ],
     why: 'Catalog-scene layout; every pair it holds is board geometry.',
   },
   {
     file: 'packages/perf/src/layering.test.ts',
-    pairs: 1,
+    holds: [['160', 1]],
     why: 'Tower layering over the board; the pair it holds is a board-geometry figure.',
   },
   {
@@ -526,67 +581,79 @@ const OFF_SURFACE: readonly {
   },
   {
     file: 'packages/perf/src/run.ts',
-    pairs: 5,
+    holds: [
+      ['21.2', 1],
+      ['21', 1],
+      ['2700', 1],
+      ['28.1', 1],
+      ['576', 1],
+    ],
     why: 'The CLI entry point; its pairs are CI wall-clock timings and plan-step references rather than gate claims.',
   },
   {
     file: 'packages/perf/src/run-catalog.ts',
-    pairs: 1,
+    holds: [['27', 1]],
     why: 'The catalog CLI entry point; the pair it holds is a catalog-scene figure.',
   },
   {
     file: 'packages/perf/src/generate.ts',
-    pairs: 1,
+    holds: [['256', 1]],
     why: 'The scenario generator CLI; the pair it holds is a board-geometry figure.',
   },
   {
     file: 'packages/perf/src/harness.ts',
-    pairs: 1,
+    holds: [['2.3', 1]],
     why: "The measurement harness. Its figures are warm-up and sample window lengths, which are the harness's own parameters rather than claims the documents restate as gate facts.",
   },
   {
     file: 'packages/perf/src/harness.test.ts',
-    pairs: 5,
+    holds: [
+      ['1.068', 2],
+      ['1.51', 3],
+      ['250', 1],
+      ['2700', 1],
+      ['45', 1],
+    ],
     why: 'Its test — harness parameters and fixture timings.',
   },
   {
     file: 'packages/perf/src/scenario.test.ts',
-    pairs: 0,
+    holds: [],
     why: 'Measured at zero beyond what is already guarded. It does hold a SITE (the instrumented-run figure), which is the distinction the surface draws — the surface decides what SEEDS the sweep, while a row may bind an occurrence anywhere in the repository.',
   },
   {
     file: 'packages/perf/src/dot-bench.test.ts',
-    pairs: 0,
+    holds: [],
     why: "Measured at zero. It covers only dot-bench.ts's pure structural helpers, and the numbers it uses are local fixtures.",
   },
   {
     file: 'packages/perf/src/escalation.ts',
-    pairs: 0,
+    holds: [],
     why: "Measured at zero. The escalation RULE's figures live in gate.ts's prose, which is guarded; this module implements it.",
   },
   {
     file: 'packages/perf/src/escalation.test.ts',
-    pairs: 0,
+    holds: [],
     why: 'Measured at zero. The escalation rule it exercises states its figures in gate.ts prose, which is guarded; this file only asserts against them.',
   },
   {
     file: 'packages/perf/src/stats.ts',
-    pairs: 1,
-    why: 'Percentile and median helpers; its constants are algorithmic, not measured. Its one pair is not a claim at all but a masking artifact — line 2 cites `step 21` without the `PLAN` qualifier round 27 began requiring, so the reference reads as a figure. Recorded rather than edited away, because `pairs` measures what putting this file on the surface would cost today.',
+    holds: [['21', 1]],
+    why: 'Percentile and median helpers; its constants are algorithmic, not measured. Its one held value is not a claim at all but a masking artifact — line 2 cites `step 21` without the `PLAN` qualifier round 27 began requiring, so the reference reads as a figure. Recorded rather than edited away, because `holds` measures what putting this file on the surface would cost today.',
   },
   {
     file: 'packages/perf/src/stats.test.ts',
-    pairs: 0,
+    holds: [],
     why: 'Measured at zero. Hand-worked fixtures for the helpers above.',
   },
   {
     file: 'packages/perf/src/layout.test.ts',
-    pairs: 0,
-    why: 'Measured at zero, despite layout.ts holding 25 — the test asserts structure rather than restating the geometry.',
+    holds: [],
+    why: 'Measured at zero, despite layout.ts holding 25 values — the test asserts structure rather than restating the geometry.',
   },
   {
     file: 'packages/perf/src/index.ts',
-    pairs: 0,
+    holds: [],
     why: 'Measured at zero. The package barrel — re-exports, no figures of its own.',
   },
 ];
@@ -786,17 +853,67 @@ const CONTRACT_EXCLUSIONS: readonly {
     ],
     why: "Collision, and revealed only when the file-path mask stopped eating compact ratios: oracle.ts's 30 is the DoT record window in `floor((240-1)/30)+1`, ADR 0005's is the ≥ 30 fps low-end floor, the spike's are a 30% slow and a 30% ambient-load swing, and m2.md's are tower range columns. Five unrelated quantities wearing one numeral; a row keyed on it would bind every one of those sites to the others.",
   },
+  // THE FIVE COLLISIONS #163 FOUND INSIDE `KNOWN_UNROWED`. That table was the scene oracle's
+  // family, held as a block when PR #161 sized it; rowing the family meant reading every copy,
+  // and these five turned out to be no shared claim at all — every surface states a DIFFERENT
+  // quantity. A row would have bound unrelated sites together, so each is reclassified here with
+  // the census it already carried, rather than rowed to make the gap disappear.
+  {
+    value: '0.1',
+    surfaces: [
+      [G.adr, 1],
+      [G.fixture, 2],
+      [G.gateTest, 1],
+    ],
+    why: "Collision: gate.test.ts's 0.1 is a synthetic `controlStat` fixture input, gate-fixture.test.ts's is the lower bound of the fixture's uniform ms draw (`[0.100, 0.160)`), and ADR 0005's only 0.10 is the `unclassified` share of busy time in the browser trace breakdown. Three unrelated quantities; reclassified from KNOWN_UNROWED by #163.",
+  },
+  {
+    value: '0.9',
+    surfaces: [
+      [G.fixture, 12],
+      [G.spike, 2],
+    ],
+    why: "Collision: every gate-fixture.test.ts copy is the rate parameter of the fixture's `1 + floor(-ln(u1) * 0.9)` due-blast draw, while the spike's are an input-latency reading (0.9 ms) and the tail of `p99.9`. Reclassified from KNOWN_UNROWED by #163.",
+  },
+  {
+    value: '14',
+    surfaces: [
+      [G.fixture, 1],
+      [G.spike, 2],
+    ],
+    why: "Collision: gate-fixture.test.ts's 14 is a shift width in the fixture's hash-to-float PRNG (`t ^ t>>>14`), while the spike's are the host machine's core count and attempt 14's row in the operands table. Reclassified from KNOWN_UNROWED by #163.",
+  },
+  {
+    value: '36',
+    surfaces: [
+      [G.m2, 3],
+      [G.scenario, 1],
+    ],
+    why: "Collision: scenario.ts's ~36% is the control arm's peak slowed creeps as a share of the stress arm's (109 of 304), while m2.md's 36 is the `armored` creep's HP in the catalog tables. Reclassified from KNOWN_UNROWED by #163.",
+  },
+  {
+    value: '450',
+    surfaces: [
+      [G.adr, 1],
+      [G.m2, 1],
+      [G.oracle, 1],
+    ],
+    why: "Collision: oracle.ts's 450 is the insertion-time DoT record ceiling (a transient ninth record per venom source, x 50), ADR 0005's is its \"450-entity scene\" (300 creeps + 150 towers), and m2.md's is a story's recorded score. Three quantities; reclassified from KNOWN_UNROWED by #163.",
+  },
 ];
 
-/** REAL unrowed shared claims, pinned so the set cannot grow silently.
+/** REAL unrowed shared claims, pinned so the set cannot grow silently — and, since #163, EMPTY.
  *
- *  These are the scene ORACLE's claim family — the stress scene's measured and derived facts,
- *  duplicated between `oracle.ts`'s doc prose and the three documents. They are genuine
- *  cross-file claims of exactly the kind this table exists for, and they are NOT collisions.
- *  They are unrowed because they belong to the oracle's surface rather than the gate's, and
- *  rowing them with verified sites is a body of work this PR sized and measured but did not
- *  undertake — recorded here rather than absorbed silently, and asserted EXACTLY so a new gap
- *  fails the build instead of joining the list. */
+ *  This held the scene ORACLE's claim family — the stress scene's measured and derived facts,
+ *  duplicated between `oracle.ts`'s doc prose and the three documents — which PR #161 sized and
+ *  measured but did not row. #163 rowed it: every genuine shared claim now has a row in
+ *  `claims.ts` (section "THE SCENE ORACLE'S FAMILY") with its sites verified against the text,
+ *  and the five entries that turned out to be numeral collisions rather than claims moved to
+ *  `CONTRACT_EXCLUSIONS` with the census they already carried.
+ *
+ *  The table stays, empty, because it is the named place a future acknowledged gap goes — and
+ *  because the coverage case compares the gap set to it EXACTLY, an empty table is itself an
+ *  assertion: any cross-file figure without a row now fails the build. */
 const KNOWN_UNROWED: readonly {
   readonly value: string;
   /** The guarded surfaces stating it, EACH WITH ITS OCCURRENCE COUNT — recomputed and compared
@@ -819,400 +936,7 @@ const KNOWN_UNROWED: readonly {
    *  making them alike. */
   readonly surfaces: readonly (readonly [file: string, occurrences: number])[];
   readonly why: string;
-}[] = [
-  {
-    value: '0.1',
-    surfaces: [
-      [G.adr, 1],
-      [G.fixture, 2],
-      [G.gateTest, 1],
-    ],
-    why: 'its canonical value is an executable constant in gate.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '0.2',
-    surfaces: [
-      [G.adr, 2],
-      [G.gateTest, 1],
-      [G.m2, 1],
-      [G.spike, 1],
-    ],
-    why: 'its canonical value is an executable constant in gate.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '0.99',
-    surfaces: [
-      [G.adr, 5],
-      [G.fixture, 1],
-      [G.spike, 1],
-    ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '100',
-    surfaces: [
-      [G.adr, 3],
-      [G.fixture, 1],
-      [G.gateTest, 1],
-      [G.m2, 4],
-      [G.oracle, 7],
-      [G.oracleTest, 1],
-      [G.scenario, 2],
-      [G.spike, 6],
-    ],
-    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '14',
-    surfaces: [
-      [G.fixture, 1],
-      [G.spike, 2],
-    ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '1427',
-    surfaces: [
-      [G.adr, 1],
-      [G.fixture, 3],
-      [G.m2, 1],
-      [G.spike, 2],
-    ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '15',
-    surfaces: [
-      [G.adr, 4],
-      [G.fixture, 1],
-      [G.m2, 15],
-      [G.scenario, 1],
-      [G.spike, 7],
-    ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163. Re-censused 14 → 15 in m2.md by #25: the new copy is the sim behavior version `simVersion` 15, named as the contract sv16 supersedes — a numeral collision with this oracle figure, not a fifteenth copy of it.',
-  },
-  {
-    value: '150',
-    surfaces: [
-      [G.adr, 14],
-      [G.dotBench, 1],
-      [G.fixture, 1],
-      [G.m2, 9],
-      [G.oracle, 9],
-      [G.scenario, 5],
-      [G.spike, 13],
-    ],
-    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '20',
-    surfaces: [
-      [G.adr, 5],
-      [G.dotBench, 1],
-      [G.m2, 16],
-      [G.oracle, 1],
-      [G.spike, 8],
-    ],
-    why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '200',
-    surfaces: [
-      [G.adr, 3],
-      [G.m2, 3],
-      [G.oracle, 5],
-      [G.oracleTest, 1],
-      [G.spike, 4],
-    ],
-    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '2000',
-    surfaces: [
-      [G.dotBench, 1],
-      [G.m2, 1],
-      [G.oracle, 2],
-    ],
-    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '2499',
-    surfaces: [
-      [G.oracle, 1],
-      [G.spike, 1],
-    ],
-    why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '2500',
-    surfaces: [
-      [G.adr, 1],
-      [G.fixture, 8],
-      [G.m2, 1],
-      [G.oracle, 1],
-      [G.scenario, 1],
-      [G.spike, 2],
-    ],
-    why: 'its canonical value is an executable constant in oracle.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '270',
-    surfaces: [
-      [G.adr, 1],
-      [G.fixture, 2],
-      [G.m2, 1],
-      [G.oracle, 1],
-      [G.spike, 2],
-    ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '280',
-    surfaces: [
-      [G.m2, 1],
-      [G.oracle, 1],
-      [G.oracleTest, 1],
-      [G.spike, 1],
-    ],
-    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '3.0',
-    surfaces: [
-      [G.adr, 17],
-      [G.fixture, 4],
-      [G.gate, 12],
-      [G.m2, 35],
-      [G.oracle, 2],
-      [G.scenario, 3],
-      [G.spike, 18],
-    ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '300',
-    surfaces: [
-      [G.adr, 3],
-      [G.m2, 11],
-      [G.oracle, 1],
-      [G.spike, 3],
-    ],
-    why: 'its canonical value is an executable constant in gate-fixture.test.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '55',
-    surfaces: [
-      [G.adr, 1],
-      [G.scenario, 1],
-    ],
-    why: 'its canonical value is an executable constant in scenario.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '0.9',
-    surfaces: [
-      [G.fixture, 12],
-      [G.spike, 2],
-    ],
-    why: 'A fixture ratio quoted in the spike; oracle-surface.',
-  },
-  {
-    value: '114',
-    surfaces: [
-      [G.adr, 3],
-      [G.oracle, 2],
-      [G.spike, 1],
-    ],
-    why: 'Peak armored live creeps — oracle.ts doc, ADR and spike.',
-  },
-  {
-    value: '12',
-    surfaces: [
-      [G.adr, 5],
-      [G.m2, 9],
-      [G.oracle, 1],
-      [G.scenario, 1],
-      [G.spike, 1],
-    ],
-    why: 'Measured peak resident DoT records at the catalog scene — oracle/ADR/spike/m2.',
-  },
-  {
-    value: '16',
-    surfaces: [
-      [G.adr, 1],
-      [G.m2, 11],
-      [G.oracle, 1],
-      [G.spike, 3],
-    ],
-    why: 'Wave-entry count for the stress schedule — oracle/ADR/spike/m2. Re-censused 7 → 11 in m2.md by #25: the four new copies are the sim behavior version `simVersion` 16 this change bumps to, cited at each of the four places the change is stated: the two spec clauses in §Scoring & star grade and the two story reconciliations — a numeral collision with the wave-entry count, not four new copies of it.',
-  },
-  {
-    value: '165',
-    surfaces: [
-      [G.adr, 3],
-      [G.m2, 2],
-      [G.scenario, 4],
-    ],
-    why: "Catalog-scene tower count — scenario.ts, ADR and m2. The scenario.ts count went 3 -> 4 when main's test-support consolidation (#94) restated it as `(165 placements, its own `CATALOG_BUILD_TICKS`)`; re-censused rather than rowed, because it is another statement of the same acknowledged gap and rowing the oracle surface is #163's work. This entry is also the counted census earning its keep on its first run: the copy landed on main while this branch compared VALUES, so every round before this one saw the identical gap set and passed.",
-  },
-  {
-    value: '1800',
-    surfaces: [
-      [G.adr, 2],
-      [G.scenario, 1],
-    ],
-    why: 'Catalog-scene tick figure — scenario.ts and the ADR.',
-  },
-  {
-    value: '19.2',
-    surfaces: [
-      [G.scenario, 1],
-      [G.spike, 1],
-    ],
-    why: "The control arm's population gap percentage — scenario.ts and spike.",
-  },
-  {
-    value: '25',
-    surfaces: [
-      [G.adr, 6],
-      [G.fixture, 1],
-      [G.m2, 9],
-      [G.spike, 2],
-    ],
-    why: 'A fixture/threshold figure shared between the fixture test and the docs.',
-  },
-  {
-    value: '28.6',
-    surfaces: [
-      [G.scenario, 1],
-      [G.spike, 1],
-    ],
-    why: 'The pre-narrowing population gap percentage — scenario.ts and spike.',
-  },
-
-  {
-    value: '329',
-    surfaces: [
-      [G.adr, 8],
-      [G.m2, 4],
-      [G.oracle, 8],
-      [G.oracleTest, 5],
-      [G.spike, 14],
-    ],
-    why: 'its canonical value is an executable constant in oracle.ts, which is evidence for the CODE occurrence but binds none of the prose copies in the guarded documents — the PINNED_IN_CODE exemption it used to carry claimed otherwise and let a doc copy drift green (Codex, PR #161). Oracle-surface, tracked in #163.',
-  },
-  {
-    value: '330',
-    surfaces: [
-      [G.adr, 1],
-      [G.m2, 1],
-      [G.oracle, 1],
-    ],
-    why: 'Route-length cap at ~150 towers — oracle.ts, ADR and m2.',
-  },
-  {
-    value: '36',
-    surfaces: [
-      [G.m2, 3],
-      [G.scenario, 1],
-    ],
-    why: 'Catalog-scene arithmetic shared between scenario.ts and m2.',
-  },
-  {
-    value: '40',
-    surfaces: [
-      [G.adr, 9],
-      [G.m2, 10],
-      [G.oracle, 4],
-      [G.spike, 8],
-    ],
-    why: 'Board dimension / threshold numeral shared across oracle and the docs.',
-  },
-  {
-    value: '400',
-    surfaces: [
-      [G.adr, 1],
-      [G.m2, 4],
-      [G.oracle, 2],
-    ],
-    why: 'Re-pinned stunned-samples floor — oracle.ts, ADR and m2.',
-  },
-  {
-    value: '450',
-    surfaces: [
-      [G.adr, 1],
-      [G.m2, 1],
-      [G.oracle, 1],
-    ],
-    why: 'An oracle threshold quoted in the ADR and m2.',
-  },
-  {
-    value: '459',
-    surfaces: [
-      [G.adr, 1],
-      [G.m2, 1],
-      [G.oracle, 1],
-      [G.spike, 1],
-    ],
-    why: 'The 40x40 route-length ceiling — oracle.ts, ADR, spike and m2.',
-  },
-  {
-    value: '600',
-    surfaces: [
-      [G.adr, 4],
-      [G.m2, 4],
-      [G.oracle, 6],
-      [G.oracleTest, 2],
-      [G.spike, 6],
-    ],
-    why: 'The unreachable route target — oracle.ts, ADR, spike and m2.',
-  },
-  {
-    value: '80',
-    surfaces: [
-      [G.adr, 2],
-      [G.m2, 2],
-      [G.oracle, 2],
-      [G.spike, 2],
-    ],
-    why: 'Board-size figure in the route-cap table — oracle.ts and the docs.',
-  },
-  {
-    value: '9.2',
-    surfaces: [
-      [G.oracle, 1],
-      [G.oracleTest, 1],
-    ],
-    why: 'DoT record depth per carrier at peak — oracle.ts doc prose.',
-  },
-  {
-    value: '298',
-    surfaces: [
-      [G.adr, 1],
-      [G.oracle, 1],
-      [G.spike, 1],
-    ],
-    why: "its canonical statement is oracle.ts's compact `307/298/308/329` series of band-only layout cell counts, which the FILE-PATH MASK blanked whole because the series has no letter in it - so three of the four values were invisible to this sweep while 329, which also appears standalone, was not. ADR 0005 and the spike both restate it longhand per board size. Oracle-surface, tracked in #163.",
-  },
-  {
-    value: '307',
-    surfaces: [
-      [G.adr, 1],
-      [G.oracle, 1],
-      [G.spike, 2],
-    ],
-    why: "its canonical statement is oracle.ts's compact `307/298/308/329` series of band-only layout cell counts, which the FILE-PATH MASK blanked whole because the series has no letter in it - so three of the four values were invisible to this sweep while 329, which also appears standalone, was not. ADR 0005 and the spike both restate it longhand per board size. Oracle-surface, tracked in #163.",
-  },
-  {
-    value: '308',
-    surfaces: [
-      [G.adr, 1],
-      [G.m2, 1],
-      [G.oracle, 1],
-      [G.spike, 1],
-    ],
-    why: "same band-only cell-count series as 298 and 307, hidden by the same file-path mask, and restated longhand in ADR 0005 and the spike. It ALSO coincides with m2.md's `of 308 total` bounty spend, which is an unrelated quantity - so rowing this one will need explicit sites rather than a bare value. Oracle-surface, tracked in #163.",
-  },
-];
+}[] = [];
 
 const EXCLUDED = new Set(CONTRACT_EXCLUSIONS.map((e) => e.value));
 
@@ -1879,8 +1603,8 @@ function occurrences(file: string): Numeral[] {
  *  the two ideas were already separate here; the accounting half simply had not been told.
  *  An unlisted `1.0065` appended there left all 780 tests green (Codex, PR #161).
  *
- *  The counted `pairs` census on `OFF_SURFACE` does not reach this, and the reason is worth
- *  stating because it looks like it should: `pairs` counts UNROWED cross-file values, and a
+ *  The counted `holds` census on `OFF_SURFACE` does not reach this, and the reason is worth
+ *  stating because it looks like it should: `holds` counts UNROWED cross-file values, and a
  *  rowed value is filtered out of the gap set by construction. The two halves catch different
  *  things, which is why the finding named both.
  *
@@ -1888,7 +1612,7 @@ function occurrences(file: string): Numeral[] {
  *  claim value by construction, so accounting them against their own sites is circular. */
 const ACCOUNTED_FILES: readonly string[] = [
   ...GUARDED_FILES,
-  ...OFF_SURFACE.filter((e) => e.pairs !== 'circular').map((e) => e.file),
+  ...OFF_SURFACE.filter((e) => e.holds !== 'circular').map((e) => e.file),
 ].filter((f, i, all) => all.indexOf(f) === i);
 
 /** THE SWEEP, as ONE function, because it is now asked two questions: what does the guarded
@@ -1929,14 +1653,32 @@ function gapValues(sources: readonly string[], guarded: readonly string[]): stri
   return gaps.sort();
 }
 
-/** How many cross-file pairs a file would ADD to the sweep if it joined the surface — the
- *  number every `OFF_SURFACE` entry records, recomputed rather than remembered. */
-function marginalPairs(file: string): number {
-  const baseline = new Set(gapValues(PERF_SOURCES, GUARDED_FILES));
-  return gapValues([...PERF_SOURCES, file], [...GUARDED_FILES, file]).filter(
-    (v) => !baseline.has(v),
-  ).length;
+/** What a file HOLDS of the gap set — the census every `OFF_SURFACE` entry records,
+ *  recomputed rather than remembered.
+ *
+ *  The gap set is taken WITH THE FILE JOINED, not as the difference from the baseline: a
+ *  difference by VALUE drops every value the baseline already acknowledges, and with it every
+ *  further copy the file gains of one (#163's rider). Joining keeps both kinds — the values the
+ *  file alone would introduce, and the acknowledged ones it also states — and each is then
+ *  counted over THIS FILE's occurrences, keyed exactly as the escape tables' censuses are, so a
+ *  new copy of a value already listed changes the census rather than hiding in it. A joined
+ *  gap the file does not itself state (one it merely inherits from the baseline) is not
+ *  something it holds, and is left out. */
+function heldGapValues(file: string): (readonly [value: string, occurrences: number])[] {
+  const mine = occurrences(file);
+  return gapValues([...PERF_SOURCES, file], [...GUARDED_FILES, file])
+    .map((v) => [v, mine.filter((n) => claimKey(n.value) === claimKey(v)).length] as const)
+    .filter(([, n]) => n > 0);
 }
+
+/** The census vocabulary for a held-value list: `value x count`, in one sorted line. */
+const fmtHolds = (h: readonly (readonly [string, number])[]): string =>
+  h.length === 0
+    ? '(nothing)'
+    : h
+        .map(([v, n]) => `${v}x${n}`)
+        .sort()
+        .join(' ');
 
 describe('the coverage contract is enforced, not merely asserted', () => {
   // The surface was a hand-list and nothing could tell it was short. `dot-bench.ts` sat
@@ -1969,34 +1711,35 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // A CLASSIFICATION IS A MEASUREMENT, AND A MEASUREMENT MUST BE RE-PROVED. The partition
   // above compares filenames, so a file already classified could acquire a cross-file claim
   // and its recorded justification quietly stop being true — an unlisted `1.0065` appended to
-  // `scenario.test.ts`, whose entry claims zero pairs, left all 780 tests green (Codex, PR
-  // #161). This is the fourth and last of this file's tables to be counted rather than merely
-  // matched, after the three escape tables.
+  // `scenario.test.ts`, whose entry claimed zero, left all 780 tests green (Codex, PR #161).
+  // This is the fourth and last of this file's tables to be counted rather than merely matched,
+  // after the three escape tables — and, since #163, counted PER VALUE AND PER COPY, since a
+  // distinct-value count could not see a second copy of a value the baseline already held.
   it('re-proves every OFF_SURFACE classification, not just its filename', () => {
     const stale: string[] = [];
     for (const e of OFF_SURFACE) {
-      if (e.pairs === 'circular') {
+      if (e.holds === 'circular') {
         expect(
           ['packages/perf/src/claims.ts', 'packages/perf/src/claims.test.ts'],
           `${e.file} claims circularity, which only the table itself may claim`,
         ).toContain(e.file);
         continue;
       }
-      const found = marginalPairs(e.file);
-      if (found !== e.pairs) {
-        const base = new Set(gapValues(PERF_SOURCES, GUARDED_FILES));
-        const added = gapValues([...PERF_SOURCES, e.file], [...GUARDED_FILES, e.file]).filter(
-          (v) => !base.has(v),
+      const recorded = fmtHolds(e.holds);
+      const found = fmtHolds(heldGapValues(e.file));
+      if (found !== recorded) {
+        const name = e.file.split('/').pop() as string;
+        stale.push(
+          `  ${name}: recorded ${recorded}\n${' '.repeat(name.length + 4)}but found ${found}`,
         );
-        stale.push(`  ${e.file}: recorded ${e.pairs}, found ${found} [${added.join(' ')}]`);
       }
     }
     expect(
       stale,
       `these OFF_SURFACE entries no longer describe what leaving the file off the surface ` +
-        `costs. The count is the justification — a file that has GAINED a cross-file claim is ` +
-        `no longer the file that was classified. Re-measure the entry, or put the source on ` +
-        `the surface:\n${stale.join('\n')}`,
+        `costs. The census is the justification — a file that has GAINED a cross-file claim, ` +
+        `or a further copy of one it already held, is no longer the file that was classified. ` +
+        `Re-measure the entry, or put the source on the surface:\n${stale.join('\n')}`,
     ).toEqual([]);
   });
 
