@@ -12,7 +12,7 @@
 // `.wy-dock`'s bottom padding is zeroed in Compact (ui.css `padding-bottom: 0`), `.wy-hud`'s
 // `max-height` becomes `none` there, and `.wy-hud:has(> .wy-wave-preview)`'s height becomes
 // `auto`. Each assertion below therefore sits at the layout where its mechanism is live.
-// Source-level completeness across all twenty-two call sites is `layout.test.ts`'s job; this file
+// Source-level completeness across all twenty call sites is `layout.test.ts`'s job; this file
 // covers six MECHANISMS (the sixth, #153, is the Compact Rail paying the top inset) and
 // structurally cannot reach the rest.
 import { test, expect, type Page } from '@playwright/test';
@@ -199,7 +199,36 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
             ? 0
             : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset),
         railBottom: rail.bottom,
+        // The pinned Panel's top edge and its fade band, when a Panel is open and PINNED
+        // (sticky); null otherwise. The band is read from the PAINTED pseudo-element, never
+        // the token, and counts as an occluder only while it is actually painted: at maximum
+        // scroll `wy-rail-has-more` is false and the band draws nothing (compact.spec.ts
+        // reads it the same way).
+        panel: (() => {
+          const p = document.querySelector('.wy-panel') as HTMLElement;
+          if (p.hidden || getComputedStyle(p).position !== 'sticky') return null;
+          const band = getComputedStyle(p, '::before');
+          const top = p.getBoundingClientRect().top;
+          const painted = band.display !== 'none' && band.opacity !== '0';
+          return { top, fadeTop: painted ? top - parseFloat(band.height) : top };
+        })(),
       };
+    });
+
+  /** Let a focus-driven scroll come to rest: four consecutive unchanged animation frames
+   *  (compact.spec.ts's `settleScroll` rationale). A reading taken mid-flight belongs to a
+   *  world the Card never rests in. */
+  const settleRail = (page: Page) =>
+    page.evaluate(async () => {
+      const rail = document.querySelector('.wy-rail') as HTMLElement;
+      const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+      let prev = Number.NaN;
+      let stable = 0;
+      for (let i = 0; i < 120 && stable < 4; i++) {
+        await frame();
+        stable = rail.scrollTop === prev ? stable + 1 : 0;
+        prev = rail.scrollTop;
+      }
     });
 
   test('a top inset keeps the first Card clear of the system bar', async ({ page }) => {
@@ -252,21 +281,36 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
   // The WALKS. Entered from the keyboard (the arming hotkey, or nothing) so `:focus-visible`
   // is live from the first stop, then moved ONLY by real key traversal.
   //
-  // TWO GUARANTEES, scoped by state (owner-logged at QC, 2026-09-24):
-  // - UNARMED: the focused Card AND its ring clear the inset, in both directions.
-  // - ARMED: the Compact Panel is pinned over the Rail's bottom, and its focus reserve can
-  //   leave a snapport SHORTER than a Card (66px vs 76.4px at 658×320 and a 24px inset), so
-  //   the browser centres the Card and the ring cannot fit. The guarantee there is the
-  //   focused Card's BODY clearing the inset, at 100% zoom; the ring is best-effort. Nothing
-  //   is claimed for armed at 200% — that is the pre-existing S12a geometry.
-  for (const armed of [false, true]) {
-    for (const inset of [0, TOP]) {
+  // THE OWNER'S FULL RULING ("inset + ring"), armed or not, at default text size: every
+  // focused Card AND its ring clear the inset, in both directions. Armed, the Compact Panel
+  // is pinned over the Rail's bottom, so the walk ALSO asserts the Card clears the Panel:
+  // its ring's bottom at or above the Panel's top edge, and its body at or above the fade
+  // band's top while that band is painted. That second half is what makes the pinned focus
+  // reserve observable here — with the reserve deleted, a ring-top-only walk stayed green
+  // while Cards parked under the Panel (tops 211 / 196 against a Panel top of 144).
+  // The reserve was once 60% of the Rail's PADDING box, over-covering the Panel by 24px at a
+  // 24px inset and leaving a snapport shorter than a Card, so the ring could not fit armed.
+  // It is now exactly what the Panel covers (ui.css `.wy-rail-panel-pinned`).
+  //
+  // With no tower armed the guarantee also holds at DOUBLED text zoom. Armed at doubled zoom
+  // nothing is claimed: Cards are ~189px tall against ~121px of room above the Panel — the
+  // pre-existing S12a geometry.
+  const WALKS: { armed: boolean; zoom: 100 | 200; insets: readonly number[] }[] = [
+    { armed: false, zoom: 100, insets: [0, TOP] },
+    { armed: true, zoom: 100, insets: [0, TOP] },
+    { armed: false, zoom: 200, insets: [TOP] },
+  ];
+  for (const { armed, zoom, insets } of WALKS) {
+    for (const inset of insets) {
       for (const direction of ['Tab', 'Shift+Tab'] as const) {
-        const what = armed ? 'Card body clears' : 'Card AND its ring clear';
-        test(`${armed ? 'armed' : 'unarmed'}, ${inset}px top inset, ${direction}: every focused ${what} the inset`, async ({
+        const state = armed ? 'armed' : 'unarmed';
+        const extra = armed ? ' and the pinned Panel' : '';
+        test(`${state}, ${zoom}% text, ${inset}px top inset, ${direction}: every focused Card AND its ring clear the inset${extra}`, async ({
           page,
         }) => {
           await gotoAt(page, PHONE);
+          // compact.spec.ts's text-zoom posture: the root font doubles, so every rem does.
+          if (zoom === 200) await page.addStyleTag({ content: ':root{font-size:200%}' });
           await inject(page, { top: `${inset}px` });
           const cards = page.locator('.wy-card');
           const n = await cards.count();
@@ -276,19 +320,18 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
             await page.keyboard.press('Digit1');
             await expect(page.locator('.wy-card[aria-pressed="true"]')).toHaveCount(1);
             await expect(page.locator('.wy-panel')).toBeVisible();
+            // PINNED, not merely open: the focus reserve is keyed on this class, and a walk
+            // over an unpinned Panel would assert nothing about it.
+            await expect(page.locator('.wy-rail')).toHaveClass(/wy-rail-panel-pinned/);
           }
           await (direction === 'Tab' ? cards.first() : cards.last()).focus();
           const seen: number[] = [];
           for (let step = 0; step < n; step++) {
             if (step > 0) await page.keyboard.press(direction);
+            await settleRail(page);
             const f = await focusedCard(page);
             expect(f.isCard, `step ${step}: focus left the Cards`).toBe(true);
             seen.push(f.index);
-            expect(
-              f.top,
-              `Card ${f.index} top ${f.top.toFixed(1)} sits under the ${inset}px inset`,
-            ).toBeGreaterThanOrEqual(inset);
-            if (armed) continue;
             expect(f.ring, `Card ${f.index}: no focus ring painted`).toBeGreaterThan(0);
             expect(
               f.top - f.ring,
@@ -300,6 +343,17 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
               f.bottom + f.ring,
               `Card ${f.index} ring bottom ${(f.bottom + f.ring).toFixed(1)} is clipped by the Rail`,
             ).toBeLessThanOrEqual(f.railBottom + 0.5);
+            if (!armed) continue;
+            expect(f.panel, 'the armed Panel must be pinned').not.toBeNull();
+            const panel = f.panel!;
+            expect(
+              f.bottom + f.ring,
+              `Card ${f.index} ring bottom ${(f.bottom + f.ring).toFixed(1)} sits under the pinned Panel (top ${panel.top.toFixed(1)})`,
+            ).toBeLessThanOrEqual(panel.top);
+            expect(
+              f.bottom,
+              `Card ${f.index} bottom ${f.bottom.toFixed(1)} sits under the painted fade band (top ${panel.fadeTop.toFixed(1)})`,
+            ).toBeLessThanOrEqual(panel.fadeTop);
           }
           expect(new Set(seen).size, 'every Card must be reached').toBe(n);
         });

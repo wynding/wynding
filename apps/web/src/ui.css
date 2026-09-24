@@ -85,14 +85,19 @@
      which sample computed color/backgroundColor rather than composited alpha, actually
      measure the dimmed state. */
   --wy-fg-dim: #9ba2ae;
-  /* The pinned Panel's cap (M2-S12a P3), as a FRACTION OF THE RAIL, and the single source
-     for both `max-height` and the focus reserve, so the reserve can never under-cover the
-     Panel. 60% is `.wy-banner`'s `25dvh` posture applied to a container: enough to read a
-     tower at a glance, never enough to swallow the Rail. Measured: 182.4px in a 320px-tall
-     Rail (the percentage resolves against the Rail's CONTENT box, 304px — not its 320px
-     border box, which is why the reserve below deliberately adds the Rail's own bottom
-     padding rather than assuming the two bases match). */
-  --wy-panel-cap: 60%;
+  /* The pinned Panel's cap (M2-S12a P3), as a FRACTION OF THE RAIL'S CONTENT BOX, and the
+     single source for both `max-height` and the focus reserve, so the reserve can never
+     under-cover the Panel. 0.6 is `.wy-banner`'s `25dvh` posture applied to a container:
+     enough to read a tower at a glance, never enough to swallow the Rail. Measured: 182.4px
+     in a 320px-tall Rail — the Panel's percentage `max-height` resolves against the Rail's
+     CONTENT box (304px), not its 320px padding box.
+     A bare NUMBER, not a percentage, because the two consumers resolve percentages against
+     DIFFERENT boxes (`max-height` against the content box, `scroll-padding` against the
+     padding box). As `60%` the reserve could only take 60% of the padding box, which
+     over-covered the Panel by 60% of the Rail's vertical padding — 24px once the Compact
+     Rail paid a 24px top inset (#153), enough to squeeze the armed snapport below one Card.
+     A number lets each consumer scale the box it actually means (see the reserve). */
+  --wy-panel-cap: 0.6;
   /* The scroll fade's band height (M2-S12a P4). A token because THREE rules must agree: the
      fade paints it, and both focus reserves must clear it — a focused Card parked flush
      against the scrollport's bottom edge sits under a gradient that ends fully opaque, which
@@ -909,7 +914,7 @@ a.wy-home:focus-visible {
      under the opaque end of its gradient (ADR 0003's visible-focus requirement). The pinned
      reserve below supersedes this and adds the same band on top of the Panel's cap.
 
-     `+ 0.5rem + var(--wy-safe-bottom)` is this element's OWN bottom padding, and
+     `var(--wy-rail-padding-bottom)` is this element's OWN bottom padding, and
      it is required here for the same reason the pinned reserve spells out: the band is a
      flex item, so it is laid out in the CONTENT box and its bottom edge is the content
      box's, while `scroll-padding` measures from the PADDING box. Reserving the bare band
@@ -918,10 +923,18 @@ a.wy-home:focus-visible {
      295.6 / 295.7, putting 7.6px of each — its bottom border and the entire lower leg of its
      3px focus outline — under a gradient that ends fully opaque. 15.6-16.4px at 200% text
      zoom, and the whole band once a real bottom inset (~21px, iPhone in landscape) counts. */
-  scroll-padding-bottom: calc(var(--wy-rail-fade-h) + 0.5rem + var(--wy-safe-bottom));
+  scroll-padding-bottom: calc(var(--wy-rail-fade-h) + var(--wy-rail-padding-bottom));
+  /* The Rail's two VERTICAL paddings are named, because the pinned Panel's focus reserve
+     (`.wy-rail-panel-pinned`, below) must subtract both to find the content box the Panel's
+     cap is a fraction of — one value per padding, spent by `padding-*` and read by the
+     reserves, so the two can never drift. The Compact fork overrides the top one to pay the
+     top inset (#153); Standard's `.wy-status` already pays it above row 3. */
+  --wy-rail-padding-top: 0.5rem;
+  --wy-rail-padding-bottom: calc(0.5rem + var(--wy-safe-bottom));
   padding: 0.5rem;
+  padding-top: var(--wy-rail-padding-top);
   padding-right: calc(0.5rem + var(--wy-safe-right));
-  padding-bottom: calc(0.5rem + var(--wy-safe-bottom));
+  padding-bottom: var(--wy-rail-padding-bottom);
   background: var(--wy-surface);
   display: flex;
   flex-direction: column;
@@ -1061,7 +1074,7 @@ a.wy-home:focus-visible {
   .wy-panel {
     position: sticky;
     bottom: 0;
-    max-height: var(--wy-panel-cap);
+    max-height: calc(var(--wy-panel-cap) * 100%);
     border-top-color: var(--wy-panel-edge);
     /* Scoped to the PINNED arms, never the base rule. A flex or grid item with a z-index
        other than `auto` forms a stacking context and joins z-index paint order even at
@@ -1203,21 +1216,34 @@ a.wy-home:focus-visible {
 
    Reserves the CAP, never the live height: a class toggle is synchronous, so there is no
    frame in which a focused Card can be occluded, where an observer tracking the live
-   height necessarily lags the resize it exists to track. `+ 0.5rem` is the Rail's own
-   bottom padding, which sits between the Panel's bottom edge and the scrollport's — the
-   two percentages resolve against different boxes (`max-height` against the Rail's content
-   box, `scroll-padding` against its padding box), so this is the term that makes
-   over-reserving a guarantee rather than an arithmetic coincidence. Over-reserving only
-   seats a focused Card slightly higher; under-reserving hides it.
+   height necessarily lags the resize it exists to track. A Panel shorter than its cap is
+   therefore over-reserved, which only seats a focused Card higher; under-reserving hides it.
 
-   `var(--wy-safe-bottom)` is part of that term because it is part of the padding it
-   mirrors (see `.wy-rail` above). Omitting it does not fail immediately — it just makes the
-   surplus `9.6 − 0.4·inset` px, which stays positive until roughly a 24px inset and so
-   survives an iPhone in landscape (21px) by about a pixel. That is precisely the arithmetic
-   coincidence this comment claims not to be relying on. */
+   The reserve is exactly what a Panel AT its cap covers, measured up from the scrollport's
+   bottom edge: the Rail's bottom padding (between the Panel's bottom edge and the
+   scrollport's), the Panel itself, and the fade band riding its top edge. The Panel's
+   `max-height` is `cap × 100%` of the Rail's CONTENT box, while `scroll-padding`
+   percentages resolve against the PADDING box, so the Panel term is rebuilt here from the
+   padding box minus the two vertical paddings — the same named values `.wy-rail` spends.
+   An earlier form reserved the cap of the PADDING box, over-covering by the cap's share of
+   both paddings: 9.6px at zero inset, and 24px once the Compact Rail paid a 24px top inset
+   (#153) — enough to leave an armed snapport of 66px against a 76.4px Card, so the browser
+   centred the Card and its ring sat under the system bar. Measured at 658×320 with a 24px
+   inset: the Panel's top at 144px for every tower (168px tall, at its cap), 224px reserved
+   against the 200px actually covered.
+
+   The trailing `1px` is the same whole-pixel rounding allowance the Compact
+   `scroll-padding-top` carries, and measured the same way: Cards are 58.4 / 76.4px tall,
+   the browser parks `scrollTop` on the NEAREST whole pixel, and an exact reserve left the
+   second Card 0.2px inside the fade band at 658×320 (it needed 27.2px of scroll and got
+   27). The old over-cover had silently absorbed that; an exact one cannot.
+
+   `var(--wy-safe-bottom)` reaches this through `--wy-rail-padding-bottom`, because it is part
+   of the padding that term mirrors (see `.wy-rail` above). */
 .wy-rail-panel-pinned {
   scroll-padding-bottom: calc(
-    var(--wy-panel-cap) + 0.5rem + var(--wy-safe-bottom) + var(--wy-rail-fade-h)
+    var(--wy-panel-cap) * (100% - var(--wy-rail-padding-top) - var(--wy-rail-padding-bottom)) +
+      var(--wy-rail-padding-bottom) + var(--wy-rail-fade-h) + 1px
   );
 }
 
@@ -1792,28 +1818,32 @@ a.wy-home:focus-visible {
      own `padding-top` already spends the inset; a second payment would push every Card down
      for nothing. Hence this fork, never the base `.wy-rail` rule.
 
-     `padding-top` places the Cards AT REST: byte-identical to the base `padding: 0.5rem` at
-     zero inset. Measured cost at 658×320: the at-rest fully-visible Cards drop 4 → 3 once the
+     `--wy-rail-padding-top` (spent by the base rule's `padding-top`, and read by the pinned
+     focus reserve) places the Cards AT REST: byte-identical to the base 0.5rem at zero
+     inset. Measured cost at 658×320: the at-rest fully-visible Cards drop 4 → 3 once the
      inset reaches ~19px, and the scroll extent grows by exactly the inset (358 → 382px at 24).
 
      `scroll-padding-top` places a Card that FOCUS scrolls to. Padding does not do that: focus
      scrolling aligns to the scroll snapport, which is the padding box inset by
      `scroll-padding`, so without this a Shift+Tab walk parked Cards at −0.4 … 21.8px — under
      a 24px bar. The reserve is the inset plus the ring's painted band (width + offset), so
-     the Card AND its ring clear the bar in both Tab directions — with no tower ARMED. Armed,
-     the pinned Panel's focus reserve (`.wy-rail-panel-pinned`) can leave a snapport shorter
-     than a Card (66px vs 76.4px at 658×320 and a 24px inset), the browser centres the Card,
-     and only its BODY is guaranteed clear of the inset (at 100% zoom; the ring is
-     best-effort, and armed at 200% is the pre-existing S12a geometry). THE ONE ZERO-INSET CHANGE,
-     accepted by the owner: the reserve is then the ring band alone, which ends today's
-     ~0.4px clip of the ring's top leg on a Card parked flush with the Rail's top edge.
+     the Card AND its ring clear the bar in both Tab directions — armed or not at default
+     text size, and unarmed at 200%. Armed, that depends on the pinned Panel's focus reserve
+     (`.wy-rail-panel-pinned`) leaving a snapport taller than a Card plus this band: it
+     reserves exactly what the Panel covers, which at 658×320 and a 24px inset leaves 89px
+     for a 76.4px Card. (It once reserved 24px more than that, leaving 66px; the browser then
+     centred the Card and its ring sat under the bar.) Armed at 200% is the pre-existing S12a
+     geometry — a ~189px Card against ~121px of room — and nothing is claimed there.
+     THE ONE ZERO-INSET CHANGE, accepted by the owner: the reserve is then the ring band
+     alone, which ends today's ~0.4px clip of the ring's top leg on a Card parked flush with
+     the Rail's top edge.
      The trailing `1px` is rounding, and measured: the Cards' edges fall on fractional pixels
      (they are 58.4 / 76.4px tall) while the browser parks `scrollTop` on a whole pixel, so
      the exact band alone left rings 0.2–0.4px short (ring tops at −0.4 / 23.8px).
      The bottom edge needs no mirror: the fade reserve (`scroll-padding-bottom`, above) already
      clears the ring there — measured, not assumed (`insets.spec.ts`). */
   .wy-rail {
-    padding-top: calc(0.5rem + var(--wy-safe-top));
+    --wy-rail-padding-top: calc(0.5rem + var(--wy-safe-top));
     scroll-padding-top: calc(
       var(--wy-safe-top) + var(--wy-card-ring-w) + var(--wy-card-ring-offset) + 1px
     );
@@ -1833,7 +1863,7 @@ a.wy-home:focus-visible {
   .wy-panel {
     position: sticky;
     bottom: 0;
-    max-height: var(--wy-panel-cap);
+    max-height: calc(var(--wy-panel-cap) * 100%);
     border-top-color: var(--wy-panel-edge);
     /* Scoped to the PINNED arms, never the base rule. A flex or grid item with a z-index
        other than `auto` forms a stacking context and joins z-index paint order even at

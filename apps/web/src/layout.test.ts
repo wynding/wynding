@@ -265,7 +265,7 @@ describe('layout — the safe-area seam (#136)', () => {
   // Every inset read now goes through a `--wy-safe-*` token rather than `env()` directly,
   // because `env()` cannot be set from a test and a custom property can — `insets.spec.ts`
   // drives the rendered consequences through the same property Capacitor writes. These source
-  // assertions are what scale to all twenty-two call sites; the rendered spec covers six
+  // assertions are what scale to all twenty call sites; the rendered spec covers six
   // mechanisms and structurally cannot reach the rest.
   const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const AXES = ['top', 'right', 'bottom', 'left'] as const;
@@ -327,21 +327,34 @@ describe('layout — the safe-area seam (#136)', () => {
     // top inset at rest) and `scroll-padding-top` (focus scrolling parks a Card and its ring
     // below the inset). Both are `-top` longhands reading `--wy-safe-top`, so both are matched
     // AND axis-checked here — a slip to another axis on either would fail `wrong` above.
-    expect(seen, 'expected the seventeen axis-named sites that read an inset').toBe(17);
+    //
+    // 17 → 15 (#153 round 3, 2026-09-24): the pinned Panel's focus reserve had to subtract
+    // the Rail's vertical paddings, so `.wy-rail` now NAMES them — `--wy-rail-padding-top`
+    // (overridden by the Compact fork to pay the top inset) and `--wy-rail-padding-bottom`
+    // — and every consumer reads those instead of re-spelling `0.5rem + inset`. The two
+    // declarations that carry an inset (`--wy-rail-padding-bottom: … var(--wy-safe-bottom)`
+    // and the Compact `--wy-rail-padding-top: … var(--wy-safe-top)`) are still matched and
+    // axis-checked here, because the regex is unanchored and each custom property's NAME ends
+    // in its axis longhand; they replace the two `padding-*` sites they took over one for
+    // one. The two scroll reserves (`.wy-rail`'s fade reserve and `.wy-rail-panel-pinned`)
+    // stopped reading `--wy-safe-bottom` directly, which is the net loss of two.
+    expect(seen, 'expected the fifteen axis-named sites that read an inset').toBe(15);
   });
 
   it('the three guards together account for every token read', () => {
-    // 17 axis-named + 3 vertical bounds + 2 track tokens = the 22 call sites (20 until #153
-    // added the Compact Rail's two top-inset reads, both axis-named). Asserting the
+    // 15 axis-named + 3 vertical bounds + 2 track tokens = the 20 call sites (20 before #153
+    // too, by a different route: #153 added the Compact Rail's two top-inset reads, making
+    // 22, and its third round routed the Rail's two scroll reserves through the named
+    // paddings, removing two — see the axis-named guard above). Asserting the
     // partition means a NEW read cannot land in the gap between the guards: it either matches
     // one of them or fails this. Each guard's own count pins its share; this pins the whole.
     const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
-    expect(reads).toHaveLength(22);
+    expect(reads).toHaveLength(20);
   });
 
   it('vertical bounds read a VERTICAL axis token', () => {
     // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which three
-    // of the twenty-two call sites are not: two `max-height` bounds and one `height`, all
+    // of the twenty call sites are not: two `max-height` bounds and one `height`, all
     // subtracting `--wy-safe-top`. Two of those sit behind `:has()` selectors that are not
     // exercised at page load (`.wy-shell:has(.wy-banner:not([hidden]))` and
     // `.wy-hud:has(> .wy-wave-preview)`), so a top→left slip there would shrink the HUD by the
