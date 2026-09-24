@@ -1800,7 +1800,11 @@ a.wy-home:focus-visible {
      scrolling aligns to the scroll snapport, which is the padding box inset by
      `scroll-padding`, so without this a Shift+Tab walk parked Cards at −0.4 … 21.8px — under
      a 24px bar. The reserve is the inset plus the ring's painted band (width + offset), so
-     the Card AND its ring clear the bar in both Tab directions. THE ONE ZERO-INSET CHANGE,
+     the Card AND its ring clear the bar in both Tab directions — with no tower ARMED. Armed,
+     the pinned Panel's focus reserve (`.wy-rail-panel-pinned`) can leave a snapport shorter
+     than a Card (66px vs 76.4px at 658×320 and a 24px inset), the browser centres the Card,
+     and only its BODY is guaranteed clear of the inset (at 100% zoom; the ring is
+     best-effort, and armed at 200% is the pre-existing S12a geometry). THE ONE ZERO-INSET CHANGE,
      accepted by the owner: the reserve is then the ring band alone, which ends today's
      ~0.4px clip of the ring's top leg on a Card parked flush with the Rail's top edge.
      The trailing `1px` is rounding, and measured: the Cards' edges fall on fractional pixels

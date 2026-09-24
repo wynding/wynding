@@ -173,27 +173,31 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
   // fix was for.
   const TOP = 24;
 
-  /** Every Card's box, and its ring box (the border box grown by the ring's painted band:
-   *  width + offset, read from the live `:focus-visible` style), relative to the Rail. */
-  const RING_PX = async (page: Page): Promise<number> =>
-    page.evaluate(() => {
-      const root = getComputedStyle(document.documentElement);
-      return (
-        parseFloat(root.getPropertyValue('--wy-card-ring-w')) +
-        parseFloat(root.getPropertyValue('--wy-card-ring-offset'))
-      );
-    });
+  /** The shipped catalog's Card count. Asserted, not just read, so a walk or reachability
+   *  loop can never pass vacuously over a Rail that rendered fewer Cards. */
+  const CARD_COUNT = 9;
 
+  /** The focused element's box plus its RING band, read from that element's own computed
+   *  style while it is focused — `outline-width + outline-offset`, i.e. what
+   *  `.wy-card:focus-visible` actually paints — never from the tokens the reserve is built
+   *  from. A literal ring change in that rule therefore moves this measurement even though
+   *  it would leave the reserve behind, which is the drift this is here to catch. The band is
+   *  0 when no ring is painted (outline-style none), which the callers reject. */
   const focusedCard = (page: Page) =>
     page.evaluate(() => {
       const el = document.activeElement as HTMLElement;
       const b = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
       const rail = document.querySelector('.wy-rail')!.getBoundingClientRect();
       return {
         isCard: el.classList.contains('wy-card'),
         index: [...document.querySelectorAll('.wy-card')].indexOf(el),
         top: b.top,
         bottom: b.bottom,
+        ring:
+          cs.outlineStyle === 'none'
+            ? 0
+            : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset),
         railBottom: rail.bottom,
       };
     });
@@ -227,6 +231,7 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
 
     await inject(page, { top: `${TOP}px` });
     const n = (await atRest()).total;
+    expect(n, 'the shipped catalog renders nine Cards').toBe(CARD_COUNT);
     // Scroll-reachable: scrolling each Card into view shows it whole and clear of the bar.
     for (let i = 0; i < n; i++) {
       const card = page.locator('.wy-card').nth(i);
@@ -244,38 +249,61 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
     }
   });
 
-  for (const inset of [0, TOP]) {
-    for (const direction of ['Tab', 'Shift+Tab'] as const) {
-      test(`${inset}px top inset, ${direction}: every focused Card AND its ring clear the inset and the Rail's edges`, async ({
-        page,
-      }) => {
-        await gotoAt(page, PHONE);
-        await inject(page, { top: `${inset}px` });
-        const ring = await RING_PX(page);
-        expect(ring, 'the ring band must be a real, positive reserve').toBeGreaterThan(0);
-        const cards = page.locator('.wy-card');
-        const n = await cards.count();
-        // Enter at the walk's starting end, then move ONLY by real key traversal.
-        await (direction === 'Tab' ? cards.first() : cards.last()).focus();
-        const seen: number[] = [];
-        for (let step = 0; step < n; step++) {
-          if (step > 0) await page.keyboard.press(direction);
-          const f = await focusedCard(page);
-          expect(f.isCard, `step ${step}: focus left the Cards`).toBe(true);
-          seen.push(f.index);
-          expect(
-            f.top - ring,
-            `Card ${f.index} ring top ${(f.top - ring).toFixed(1)} sits under the ${inset}px inset`,
-            // No sub-pixel tolerance: the reserve carries its own rounding allowance (ui.css),
-            // and a 0.4px clip is exactly the zero-inset defect this also fixes.
-          ).toBeGreaterThanOrEqual(inset);
-          expect(
-            f.bottom + ring,
-            `Card ${f.index} ring bottom ${(f.bottom + ring).toFixed(1)} is clipped by the Rail`,
-          ).toBeLessThanOrEqual(f.railBottom + 0.5);
-        }
-        expect(new Set(seen).size, 'every Card must be reached').toBe(n);
-      });
+  // The WALKS. Entered from the keyboard (the arming hotkey, or nothing) so `:focus-visible`
+  // is live from the first stop, then moved ONLY by real key traversal.
+  //
+  // TWO GUARANTEES, scoped by state (owner-logged at QC, 2026-09-24):
+  // - UNARMED: the focused Card AND its ring clear the inset, in both directions.
+  // - ARMED: the Compact Panel is pinned over the Rail's bottom, and its focus reserve can
+  //   leave a snapport SHORTER than a Card (66px vs 76.4px at 658×320 and a 24px inset), so
+  //   the browser centres the Card and the ring cannot fit. The guarantee there is the
+  //   focused Card's BODY clearing the inset, at 100% zoom; the ring is best-effort. Nothing
+  //   is claimed for armed at 200% — that is the pre-existing S12a geometry.
+  for (const armed of [false, true]) {
+    for (const inset of [0, TOP]) {
+      for (const direction of ['Tab', 'Shift+Tab'] as const) {
+        const what = armed ? 'Card body clears' : 'Card AND its ring clear';
+        test(`${armed ? 'armed' : 'unarmed'}, ${inset}px top inset, ${direction}: every focused ${what} the inset`, async ({
+          page,
+        }) => {
+          await gotoAt(page, PHONE);
+          await inject(page, { top: `${inset}px` });
+          const cards = page.locator('.wy-card');
+          const n = await cards.count();
+          expect(n, 'the shipped catalog renders nine Cards').toBe(CARD_COUNT);
+          if (armed) {
+            // The arming HOTKEY, not a click: keyboard modality keeps `:focus-visible` live.
+            await page.keyboard.press('Digit1');
+            await expect(page.locator('.wy-card[aria-pressed="true"]')).toHaveCount(1);
+            await expect(page.locator('.wy-panel')).toBeVisible();
+          }
+          await (direction === 'Tab' ? cards.first() : cards.last()).focus();
+          const seen: number[] = [];
+          for (let step = 0; step < n; step++) {
+            if (step > 0) await page.keyboard.press(direction);
+            const f = await focusedCard(page);
+            expect(f.isCard, `step ${step}: focus left the Cards`).toBe(true);
+            seen.push(f.index);
+            expect(
+              f.top,
+              `Card ${f.index} top ${f.top.toFixed(1)} sits under the ${inset}px inset`,
+            ).toBeGreaterThanOrEqual(inset);
+            if (armed) continue;
+            expect(f.ring, `Card ${f.index}: no focus ring painted`).toBeGreaterThan(0);
+            expect(
+              f.top - f.ring,
+              `Card ${f.index} ring top ${(f.top - f.ring).toFixed(1)} sits under the ${inset}px inset`,
+              // No sub-pixel tolerance: the reserve carries its own rounding allowance
+              // (ui.css), and a 0.4px clip is exactly the zero-inset defect this also fixes.
+            ).toBeGreaterThanOrEqual(inset);
+            expect(
+              f.bottom + f.ring,
+              `Card ${f.index} ring bottom ${(f.bottom + f.ring).toFixed(1)} is clipped by the Rail`,
+            ).toBeLessThanOrEqual(f.railBottom + 0.5);
+          }
+          expect(new Set(seen).size, 'every Card must be reached').toBe(n);
+        });
+      }
     }
   }
 });

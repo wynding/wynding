@@ -265,7 +265,7 @@ describe('layout — the safe-area seam (#136)', () => {
   // Every inset read now goes through a `--wy-safe-*` token rather than `env()` directly,
   // because `env()` cannot be set from a test and a custom property can — `insets.spec.ts`
   // drives the rendered consequences through the same property Capacitor writes. These source
-  // assertions are what scale to all twenty-two call sites; the rendered spec covers five
+  // assertions are what scale to all twenty-two call sites; the rendered spec covers six
   // mechanisms and structurally cannot reach the rest.
   const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const AXES = ['top', 'right', 'bottom', 'left'] as const;
