@@ -810,7 +810,11 @@ describe('9/14. chain-lock is permitted (Rob, 2026-08-04): two stun towers, offs
     expect(s.tick).toBe(MAX_MATCH_TICKS);
     expect(isTerminalPhase(s.phase)).toBe(false);
     expect(s.phase).toBe('running');
-  });
+    // An explicit budget, not vitest's 5s default for short tests: this case steps the whole
+    // MAX_MATCH_TICKS match by design (~0.5s bare, ~1s under v8 coverage locally), and a CI
+    // runner executing every package's suite in parallel pushed it past 5s once (PR #169).
+    // The assertions are unchanged; only the wall-clock allowance fits the work.
+  }, 30_000);
 });
 
 describe("10. blast draw order follows blastMembers' creep-id ascending order — provably, not vacuously", () => {
