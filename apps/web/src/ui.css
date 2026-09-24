@@ -496,11 +496,17 @@ a.wy-home:focus-visible {
      8 + 96 = 104, one row 8 + 44 = 52 — so one row, board 321.6px, 13px cells.
 
      THE FLOOR EXCEPTION — the ONLY one (owner ruling 2, "control wins"). The Dock never shows
-     fewer than one whole row. Where the Stage is too short for that row AND the board's floor —
-     Stage < board rows × floor + offset + H(1): heavy zoom on a Standard window barely over the
-     Compact trigger, e.g. 900×501 at 175% — the row wins and the board's cells drop below 12px.
-     Everywhere else the floor holds, and `dock-overlap.spec.ts` asserts both halves. Only the
-     FIRST row beats the floor; every further row scrolls.
+     fewer than one whole row, and a row is as tall as the TALLEST visible control (every row is
+     one height — see below; owner ruling on #152, 2026-09-24: "one full Dock row" means that
+     uniform, tallest-control row). Where one such row does not fit beside the board's floor —
+     Stage < board rows × floor + offset + H(1), H(1) measured at the uniform height — the row
+     wins and the board's cells drop below 12px. That covers windows just above the Compact
+     trigger at heavy zoom (900×501 at 175%) AND ordinary phone portrait sizes at 200–300% text,
+     where a two-line label (Call wave once a run starts, and others at 320px) sets the row:
+     320×560 at 200% goes to 11px cells, as do e.g. 460×640 at 300% and 300×501 at 175%. The
+     owner accepted that cost. Everywhere else the floor holds, and `dock-overlap.spec.ts`
+     asserts both halves plus the row height itself. Only ONE row may beat the floor; every
+     further row scrolls.
 
      `border-box` makes the bound the RENDERED height, bottom safe-area padding included —
      under `content-box` that inset would ride on top of it and eat into the board. (It also

@@ -31,9 +31,13 @@
 // exactly that rounded value. So the board keeps `rows × floor` at any fractional Stage
 // height, and it falls short only where ruling 2 says it may.
 //
-// Only the first row may overrule the floor (ruling 2, "control wins"): where the Stage is too
-// short for one row and the floor both, the row wins and the board yields — the single floor
-// exception, recorded in `ui.css`.
+// Only ONE row may overrule the floor (ruling 2, "control wins"), and that row is as tall as
+// the TALLEST visible control (owner ruling on #152, 2026-09-24: "one full Dock row" is the
+// uniform, tallest-control row — see EVERY ROW IS ONE HEIGHT below). Where one row at that
+// height does not fit beside the floor, the row wins and the board yields — the single floor
+// exception, recorded in `ui.css`. It is not confined to windows just above the Compact
+// trigger: on ordinary phone portrait sizes at 200–300% text a two-line label sets the row
+// and the cells drop to ~11px (320×560 at 200%), which the owner accepted.
 //
 // EVERY ROW IS ONE HEIGHT (round-2 QC). A label can wrap — "Call wave" takes two lines at
 // 320px wide and 200% text while its neighbours take one — so left alone a row can be nearly
@@ -51,8 +55,8 @@
 // A bound of k < n rows is the SCROLL FORM (`wy-dock--scroll`): a vertical scrollport that
 // ends exactly at row k's bottom edge — row k+1 begins a row gap further down, wholly out of
 // sight — and snaps to row starts, so at rest a row is either wholly visible or wholly
-// scrolled out. A single row taller than the room the floor leaves is ruling 2's exception:
-// that one row is shown whole and the board yields. Its scroll cue is drawn in a gutter beside the rows (`ui.css`), so it costs
+// scrolled out. A single row (at the uniform height) taller than the room the floor leaves is
+// ruling 2's exception: that one row is shown whole and the board yields. Its scroll cue is drawn in a gutter beside the rows (`ui.css`), so it costs
 // the board no height; `wy-dock--more-below` / `--more-above` say which chevrons it shows.
 //
 // Compact owns none of this: its Dock is an in-flow block in the status COLUMN, a grid track
