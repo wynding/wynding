@@ -141,6 +141,8 @@ const HARNESS = 'packages/perf/src/harness.ts';
  *  reason the documents are: an edit there must bust this task's cache. */
 const STRESS_RULESET = 'packages/content/src/rulesets/stress-40x40.json';
 const GAME_LOOP = 'packages/engine/src/game-loop.ts';
+const RUN = 'packages/perf/src/run.ts';
+const LAYOUT = 'packages/perf/src/layout.ts';
 
 const GATE_CLAIMS: readonly Claim[] = [
   // ---------------------------------------------------------------------------------------
@@ -2079,6 +2081,13 @@ export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
         anchor: 'peak 304 concurrent creeps, median 224,',
         pattern: '^\\s*(\\d+) towers',
       },
+      {
+        file: RUN,
+        anchor:
+          "'control: accepted tower placements',\\s*\\n\\s*controlResult\\.towersPlacedAfterBuild,",
+        pattern: '^\\s*(\\d+),',
+      },
+      { file: RUN, anchor: 'controlResult\\.towersPlacedAfterBuild ===', pattern: '^\\s*(\\d+),' },
     ],
   },
   {
@@ -2172,6 +2181,12 @@ export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
       { file: STRESS_RULESET, anchor: '"id": "stress-blast",', pattern: '^\\s*"cost": (\\d+),' },
       { file: STRESS_RULESET, anchor: '"id": "stress-chill",', pattern: '^\\s*"cost": (\\d+),' },
       { file: STRESS_RULESET, anchor: '"id": "stress-venom",', pattern: '^\\s*"cost": (\\d+),' },
+      { file: STRESS_RULESET, anchor: '"id": "stress-single",', pattern: '^\\s*"cost": (\\d+),' },
+      {
+        file: STRESS_RULESET,
+        anchor: '"id": "stress-chill-single",',
+        pattern: '^\\s*"cost": (\\d+),',
+      },
     ],
   },
   {
@@ -2779,6 +2794,7 @@ export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
       },
       { file: ADR, anchor: 'the ten detonations \\(', pattern: '^(\\d+) →' },
       { file: M2, anchor: 'the ten detonations \\(', pattern: '^(\\d+) →' },
+      { file: LAYOUT, anchor: 'export const CATALOG_TOWER_COUNT =', pattern: '^\\s*(\\d+);' },
     ],
   },
   {

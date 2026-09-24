@@ -44,6 +44,7 @@ import {
   type Claim,
   type ClaimSite,
 } from './claims';
+import { MS_PER_TICK } from '@wynding/sim';
 import { R0, TOLERANCE } from './gate';
 
 /** `packages/perf/src/` -> repo root. Sites are repo-relative because claims cross package
@@ -309,6 +310,24 @@ describe('the executable constants agree with their rows', () => {
 
   it('`R0`', () => {
     expect(CLAIMS.find((c) => c.id === 'r0')?.numeric).toBe(R0);
+  });
+
+  // THE TICK, which cannot be a row of its own: its value is 50, and `50` is a CONTRACT_EXCLUSION
+  // (the p50 name, "50% power", 50 venom towers) that the table forbids a row to shadow. So the
+  // `tick-rate-hz` row (20 Hz) is bound to BOTH executable 50 ms constants by arithmetic
+  // instead — `sim`'s, which the simulation steps by, imported; and the engine loop's default,
+  // read from its source because `perf` does not depend on `engine`. 1000 / 50 = 20.
+  it('`MS_PER_TICK` and the engine loop default are the 20 Hz the tick-rate row states', () => {
+    const hz = CLAIMS.find((c) => c.id === 'tick-rate-hz')?.numeric;
+    expect(hz).toBe(20);
+    expect(1000 / MS_PER_TICK, '`@wynding/sim` MS_PER_TICK').toBe(hz);
+    const loop = extract({
+      file: 'packages/engine/src/game-loop.ts',
+      anchor: 'export const DEFAULT_MS_PER_TICK =',
+      pattern: String.raw`^\s*(\d+);`,
+    });
+    if ('error' in loop) throw new Error(`engine DEFAULT_MS_PER_TICK: ${loop.error}`);
+    expect(1000 / Number(loop.value), '`@wynding/engine` DEFAULT_MS_PER_TICK').toBe(hz);
   });
 
   it('the ceiling row is `R0` x `TOLERANCE`', () => {
@@ -950,7 +969,7 @@ const KNOWN_UNROWED: readonly {
  *  accounting binds every OTHER copy of a rowed value — but only a high-information one (three
  *  or more decimals, five or more digits). Every figure in the scene oracle's family is below
  *  that bar. While the family sat in `KNOWN_UNROWED`, each value carried a counted census per
- *  guarded file, so any copy added, removed or edited went red. Rowing it without keeping that
+ *  guarded file, so any PROSE copy added, removed or edited went red. Rowing it without keeping that
  *  census traded a guard over every copy for a guard over the listed ones: appending `1427` to
  *  `gate.ts` (PR #161's own probe), or restating the spike's "Towers placed **150**" as 151,
  *  went green (orchestrator QC of #163).
@@ -963,9 +982,17 @@ const KNOWN_UNROWED: readonly {
  *
  *  WHAT IT DOES AND DOES NOT CLAIM. It does not say every counted occurrence is the claim —
  *  many are collisions (a `150` that is a board count, a `20` that is a table cell). It says the
- *  set of copies is KNOWN, so a new one, a lost one, or an edited one must be looked at: add it as
- *  a site of its row if it restates the claim, or re-census if it is a collision. That is the
- *  same promise `KNOWN_UNROWED` made, kept now that the rows exist.
+ *  set of PROSE copies is KNOWN, so a new one, a lost one, or an edited one must be looked at: add
+ *  it as a site of its row if it restates the claim, or re-census if it is a collision. That is
+ *  the same promise `KNOWN_UNROWED` made, kept now that the rows exist.
+ *
+ *  KNOWN LIMIT — CODE IS NOT COUNTED. The census reads `occurrences()`, which is comment and
+ *  document prose (`scan()` blanks code and string literals) plus only the HIGH-information
+ *  numeric literals code executes (`codeLiterals()`). Every value here is low-information, so a
+ *  copy living in executable code or inside a string literal — `towersPlacedAfterBuild === 150`,
+ *  `CATALOG_TOWER_COUNT = 165` — is invisible to it. Such copies are guarded only where they are
+ *  a declared SITE (those two are). Counting low-information code literals in general is a
+ *  separate, parked follow-up to #163, not something this census claims to do.
  *
  *  WHICH VALUES: exactly the low-information values of `SCENE_ORACLE_CLAIMS`, asserted both ways,
  *  so a row added to that family without a census entry fails, and so does a stale entry. */
@@ -2369,7 +2396,8 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // and this table's whole claim is that its holes are named and current.
   // THE SCENE ORACLE'S ROWS KEEP THE CENSUS `KNOWN_UNROWED` HELD — see `ROWED_CENSUS`. Every
   // value in that family is below the accounting half's information bar, so without this an
-  // unlisted copy of a rowed value in any guarded file could be added or edited in silence.
+  // unlisted PROSE copy of a rowed value in any guarded file could be added or edited in silence.
+  // Low-information copies in executable code are not counted — see the known limit on the table.
   it('keeps a counted census of every low-information scene-oracle value', () => {
     const family = new Set(
       SCENE_ORACLE_CLAIMS.filter((c) => !highInformation(c.value)).map((c) => claimKey(c.value)),
@@ -2398,7 +2426,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     expect(
       mismatches,
       `these scene-oracle values have gained, lost or changed a copy. Each is below the ` +
-        `accounting bar, so the census is the only thing that sees an unlisted copy. If the ` +
+        `accounting bar, so the census is the only thing that sees an unlisted prose copy. If the ` +
         `copy restates the claim, add it as a site of its row; if it is a collision, re-census ` +
         `the entry:\n${mismatches.join('\n')}`,
     ).toEqual([]);
