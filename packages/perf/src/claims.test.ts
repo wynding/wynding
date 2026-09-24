@@ -46,6 +46,7 @@ import {
 } from './claims';
 import { MS_PER_TICK } from '@wynding/sim';
 import { R0, TOLERANCE } from './gate';
+import { PEAK_DOT_RECORDS_FLOOR } from './oracle-catalog';
 
 /** `packages/perf/src/` -> repo root. Sites are repo-relative because claims cross package
  *  and doc boundaries; resolving from `import.meta.url` keeps that independent of cwd. */
@@ -328,6 +329,35 @@ describe('the executable constants agree with their rows', () => {
     });
     if ('error' in loop) throw new Error(`engine DEFAULT_MS_PER_TICK: ${loop.error}`);
     expect(1000 / Number(loop.value), '`@wynding/engine` DEFAULT_MS_PER_TICK').toBe(hz);
+  });
+
+  // THE CATALOG DoT FLOOR, which cannot be a row of its own: its value is 10, and `10` is a
+  // CONTRACT_EXCLUSION the table forbids a row to shadow. So the enforced constant is bound to
+  // every document statement of the re-pinned floor instead (ADR 0005 and m2.md), the same way
+  // the tick is bound above; changing either side alone goes red.
+  it('`PEAK_DOT_RECORDS_FLOOR` is the re-pinned catalog DoT floor the docs state', () => {
+    const statements = [
+      {
+        file: 'docs/adr/0005-performance-budgets.md',
+        anchor: 'the owner re-pinned the floors to the measurement-backed ≥ 400 and ≥',
+        pattern: String.raw`^\s*(\d+),`,
+      },
+      {
+        file: 'docs/milestones/m2.md',
+        anchor: 'Rob re-pinned the floors to the measurement-backed ≥ 400 and ≥',
+        pattern: String.raw`^\s*(\d+)\b`,
+      },
+      {
+        file: 'docs/milestones/m2.md',
+        anchor: String.raw`measured → floors\s*400/`,
+        pattern: String.raw`^(\d+),`,
+      },
+    ];
+    for (const site of statements) {
+      const got = extract(site);
+      if ('error' in got) throw new Error(`${site.file} @ /${site.anchor}/: ${got.error}`);
+      expect(Number(got.value), `${site.file} @ /${site.anchor}/`).toBe(PEAK_DOT_RECORDS_FLOOR);
+    }
   });
 
   it('the ceiling row is `R0` x `TOLERANCE`', () => {

@@ -2896,6 +2896,14 @@ export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
         pattern: '^\\s*(\\d+) and',
       },
       { file: M2, anchor: 'measured → floors', pattern: '^\\s*(\\d+)/10' },
+      // The executable threshold the catalog oracle enforces, so the canonical claim and the
+      // enforced floor cannot diverge (`oracle-catalog.ts` is off-surface, so nothing else
+      // would see it).
+      {
+        file: 'packages/perf/src/oracle-catalog.ts',
+        anchor: 'export const STUNNED_SAMPLES_FLOOR =',
+        pattern: '^\\s*(\\d+);',
+      },
     ],
   },
 
