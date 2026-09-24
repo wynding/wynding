@@ -326,6 +326,9 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
           }
           await (direction === 'Tab' ? cards.first() : cards.last()).focus();
           const seen: number[] = [];
+          // Steps where the fade band was actually painted: without at least one, the fade
+          // assertion below would silently reduce to the Panel-top one above it.
+          let fadePainted = 0;
           for (let step = 0; step < n; step++) {
             if (step > 0) await page.keyboard.press(direction);
             await settleRail(page);
@@ -354,8 +357,15 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
               f.bottom,
               `Card ${f.index} bottom ${f.bottom.toFixed(1)} sits under the painted fade band (top ${panel.fadeTop.toFixed(1)})`,
             ).toBeLessThanOrEqual(panel.fadeTop);
+            if (panel.fadeTop < panel.top) fadePainted++;
           }
           expect(new Set(seen).size, 'every Card must be reached').toBe(n);
+          if (armed) {
+            expect(
+              fadePainted,
+              'the fade band never painted, so its assertion checked nothing',
+            ).toBeGreaterThan(0);
+          }
         });
       }
     }
