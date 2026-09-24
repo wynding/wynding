@@ -41,7 +41,7 @@ import { createKeymap } from './keymap';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
 import { placePreviewFloat, type PreviewFloat, type PreviewFloatInput } from './preview-place';
-import { clearDockReserve, syncDockReserve } from './dock-reserve';
+import { clearDockReserve, syncDockCue, syncDockReserve } from './dock-reserve';
 import { paintSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
@@ -601,19 +601,23 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   previewResizeObserver?.observe(shell.preview.root);
   previewResizeObserver?.observe(shell.stage);
 
-  // THE STANDARD DOCK'S FOOTPRINT (#152) — `dock-reserve.ts` owns the measurement, `ui.css`
-  // spends it. The board's row count is the one geometry input CSS cannot derive (the cell
-  // floor is a stylesheet token; the rows are board data), so it is written once here.
-  const dockTargets = { shell: shell.root, stage: shell.stage, dock: shell.dock.root };
-  shell.root.style.setProperty('--wy-board-rows', String(grid.height));
+  // THE STANDARD DOCK'S FOOTPRINT (#152) — `dock-reserve.ts` owns the measurement and the
+  // whole-row bound, `ui.css` spends them. The board's row count is the one geometry input no
+  // stylesheet can hold (the cell floor is a stylesheet token; the rows are board data).
+  const dockTargets = {
+    shell: shell.root,
+    stage: shell.stage,
+    dock: shell.dock.root,
+    rows: grid.height,
+  };
   const syncDock = (): void => syncDockReserve(dockTargets, compactMq.matches);
   syncDock();
   // No `compactMq` listener of its own: crossing the fork re-lays out BOTH observed boxes (the
   // Dock goes from a floating row to an in-column block, the Stage loses the status row), so
   // the observer below already runs the pass that clears or re-measures.
   //
-  // Deferred a frame out of the observer callback, deliberately. A pass writes the bound's
-  // inputs, which can resize the observed Dock itself; doing that INSIDE the callback leaves a
+  // Deferred a frame out of the observer callback, deliberately. A pass writes the bound,
+  // which can resize the observed Dock itself; doing that INSIDE the callback leaves a
   // same-depth notification undelivered and raises the browser's "ResizeObserver loop"
   // error. One coalesced frame later the resize is an ordinary new observation, and the pass
   // it triggers converges (it writes the values already in force, which resizes nothing).
@@ -630,6 +634,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       : null;
   dockResizeObserver?.observe(shell.dock.root);
   dockResizeObserver?.observe(shell.stage);
+  // ...and each CONTROL. Start giving way to Pause + Call wave re-wraps the rows, and a Dock
+  // already held at its bound does not change size when that happens — its controls do
+  // (a hidden control's box collapses to nothing), so they are what reports the change.
+  for (const control of Array.from(shell.dock.root.children)) dockResizeObserver?.observe(control);
+  // The scroll cue points down while rows remain below the scrollport, up at the end.
+  const dockScroll = new AbortController();
+  shell.dock.root.addEventListener('scroll', () => syncDockCue(shell.dock.root), {
+    passive: true,
+    signal: dockScroll.signal,
+  });
 
   const unsubscribeInstall = install.onChange(() => {
     installRev++;
@@ -1176,12 +1190,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       unsubscribe();
       compactMq.removeEventListener('change', applyPreviewHome);
       previewResizeObserver?.disconnect();
-      // The Dock footprint (#152): observer, pending frame, listener, and every property and
+      // The Dock footprint (#152): observer, scroll listener, pending frame, and every property and
       // class it wrote — cleared by its owner, like the preview grants below.
       dockResizeObserver?.disconnect();
+      dockScroll.abort();
       if (dockFrame !== 0) view?.cancelAnimationFrame(dockFrame);
       clearDockReserve(dockTargets);
-      shell.root.style.removeProperty('--wy-board-rows');
       setFloatScroll(false); // the preview grants this module owns, cleared by its owner
       setFloatBand({ kind: 'none' }); // ...and the band grants beside them (#101)
       guardListener.abort(); // the home-link exit guard

@@ -265,7 +265,7 @@ describe('layout — the safe-area seam (#136)', () => {
   // Every inset read now goes through a `--wy-safe-*` token rather than `env()` directly,
   // because `env()` cannot be set from a test and a custom property can — `insets.spec.ts`
   // drives the rendered consequences through the same property Capacitor writes. These source
-  // assertions are what scale to all twenty call sites; the rendered spec covers six
+  // assertions are what scale to all twenty-one call sites; the rendered spec covers six
   // mechanisms and structurally cannot reach the rest.
   const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const AXES = ['top', 'right', 'bottom', 'left'] as const;
@@ -305,7 +305,16 @@ describe('layout — the safe-area seam (#136)', () => {
   it('every axis-named property reads its MATCHING axis token', () => {
     // Catches a transposition at a call site (e.g. `padding-left: … var(--wy-safe-right)`),
     // which no rendered assertion covers for the sites `insets.spec.ts` cannot reach.
-    const re = /(?:scroll-)?(?:padding|margin|inset)-(top|right|bottom|left)\s*:([^;]+);/g;
+    //
+    // The `padding|margin|inset-` prefix is OPTIONAL (#152 hardening), so the bare physical
+    // offsets (`bottom: …`) are axis-named sites too. Every match of the older, prefix-required
+    // form is still matched, at the same place: the scan is leftmost-first, so wherever a prefix
+    // is present the match starts at it. Deliberately unanchored on the left, as before — the
+    // named Rail paddings (`--wy-rail-padding-bottom: …`) are matched by their names' axis
+    // suffix and must stay counted. Names that merely END in an axis and read no inset
+    // (`border-top`, the `--wy-safe-*` declarations themselves, which read `env()`) match the
+    // shape but fall out at the `token === null` skip below, exactly as they always did.
+    const re = /(?:(?:scroll-)?(?:padding|margin|inset)-)?(top|right|bottom|left)\s*:([^;]+);/g;
     const wrong: string[] = [];
     let seen = 0;
     let m: RegExpExecArray | null;
@@ -338,23 +347,35 @@ describe('layout — the safe-area seam (#136)', () => {
     // in its axis longhand; they replace the two `padding-*` sites they took over one for
     // one. The two scroll reserves (`.wy-rail`'s fade reserve and `.wy-rail-panel-pinned`)
     // stopped reading `--wy-safe-bottom` directly, which is the net loss of two.
-    expect(seen, 'expected the fifteen axis-named sites that read an inset').toBe(15);
+    //
+    // 15 → 16 (#152 hardening): the Standard Dock's scroll form moves the bottom inset from its
+    // padding to its float offset — `.wy-shell .wy-dock--scroll { bottom: calc(
+    // var(--wy-dock-offset) + var(--wy-safe-bottom)) }` — because inside a scrollport that
+    // padding is a see-through band the next row of controls shows through. A bare `bottom`
+    // longhand, matched and axis-checked since the prefix became optional (above). The census,
+    // by rule: `.wy-status` top/left/right (3) and `.wy-banner` left/right (2); the scrolling
+    // Dock's `bottom` (1); the base `.wy-dock` bottom/left (2); `.wy-rail`'s named
+    // `--wy-rail-padding-bottom` and its `padding-right` (2); then the Compact fork — `.wy-banner`
+    // bottom (1), `.wy-status` top/left/bottom (3), and `.wy-rail`'s named
+    // `--wy-rail-padding-top` and `scroll-padding-top` (2) — sixteen.
+    expect(seen, 'expected the sixteen axis-named sites that read an inset').toBe(16);
   });
 
   it('the three guards together account for every token read', () => {
-    // 15 axis-named + 3 vertical bounds + 2 track tokens = the 20 call sites (20 before #153
+    // 16 axis-named + 3 vertical bounds + 2 track tokens = the 21 call sites (20 before #153
     // too, by a different route: #153 added the Compact Rail's two top-inset reads, making
     // 22, and its third round routed the Rail's two scroll reserves through the named
-    // paddings, removing two — see the axis-named guard above). Asserting the
+    // paddings, removing two — see the axis-named guard above; the #152 hardening's scrolling
+    // Standard Dock added one, its `bottom`). Asserting the
     // partition means a NEW read cannot land in the gap between the guards: it either matches
     // one of them or fails this. Each guard's own count pins its share; this pins the whole.
     const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
-    expect(reads).toHaveLength(20);
+    expect(reads).toHaveLength(21);
   });
 
   it('vertical bounds read a VERTICAL axis token', () => {
     // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which three
-    // of the twenty call sites are not: two `max-height` bounds and one `height`, all
+    // of the twenty-one call sites are not: two `max-height` bounds and one `height`, all
     // subtracting `--wy-safe-top`. Two of those sit behind `:has()` selectors that are not
     // exercised at page load (`.wy-shell:has(.wy-banner:not([hidden]))` and
     // `.wy-hud:has(> .wy-wave-preview)`), so a top→left slip there would shrink the HUD by the

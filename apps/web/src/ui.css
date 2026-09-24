@@ -438,7 +438,7 @@ a.wy-home:focus-visible {
      unreachable by pointer. On a landscape tablet a tap there hit the Start button and began
      the wave instead of placing the armed tower. The board now STOPS at the Dock's top edge:
      `dock-reserve.ts` measures everything from that edge down to the Stage's bottom (the Dock
-     plus its 0.5rem float offset) into `--wy-dock-reserve`, and the letterbox is laid out in
+     plus its float offset) into `--wy-dock-reserve`, and the letterbox is laid out in
      what remains. No playable cell renders beneath the Dock at any size (`dock-overlap.spec.ts`,
      `assertNoBuildableCellUnderDock`). Measured cost at 100% zoom: 2 cellPx at 1024×768,
      1280×720, 1280×800, 1440×900 and 1920×1080; 3 at 640×560 with the install banner up; none
@@ -447,16 +447,23 @@ a.wy-home:focus-visible {
      Nothing about the Dock itself moves: same parent, same `z-index: 1`, same paint order,
      same (recorded) focus order.
 
+     ACCEPTED: the board can re-project at Start. The reserve follows the Dock, and pressing
+     Start swaps one control for two (Pause + Call wave), so where the cluster wraps into a
+     new row that fits the budget below, the board gives up that row's height the moment the
+     run begins — measured at 1080×600, 200% zoom: 14px cells before Start, 12px after. The
+     alternative, reserving the started Dock from boot, would cost every pre-start board the
+     same height for a row it does not yet have.
+
      `.wy-main .wy-board`, NOT `.wy-board`, and that is load-bearing: this block sits ABOVE the
      base `.wy-board` rule, whose `inset: 0` would win an equal-specificity tie on source order
      and silently put the board back under the Dock. This block cannot simply move below it —
      `layout.test.ts` pins its prelude to exactly one occurrence.
 
-     The fallback is the 100%-zoom, single-row Dock (44px controls, 0.5rem offset): what the
+     The fallback is the 100%-zoom, single-row Dock (44px controls, 8px offset): what the
      board reserves before the first measurement lands, so the common case never re-projects
      on boot. */
   .wy-main .wy-board {
-    bottom: var(--wy-dock-reserve, calc(0.5rem + 44px));
+    bottom: var(--wy-dock-reserve, calc(min(0.5rem, 8px) + 44px));
   }
 
   /* The reserved band is Stage, not board, so give it the board's own backdrop — the band
@@ -465,59 +472,130 @@ a.wy-home:focus-visible {
     background: var(--wy-board-bg);
   }
 
-  /* --- THE STANDARD DOCK'S BOUNDED HEIGHT (#152, owner ruling arm 1) ---
-     A reserve alone is unbounded: the Dock is text-sized, and at heavy zoom it wraps into
-     rows (measured at 640×560, banner up, 200% text: 162px tall) that would push the board
-     below its cell floor. So the Standard Dock gets its own bounded height and scrollport,
-     exactly as the Compact Dock already has (`max-height: 70%; overflow-y: auto` there).
+  /* --- THE STANDARD DOCK'S BOUNDED HEIGHT: WHOLE ROWS (#152, owner rulings) ---
+     A reserve alone is unbounded: the Dock is text-sized, it wraps into rows under zoom, and
+     it wraps again the moment a run starts (Start gives way to Pause + Call wave — measured at
+     540×556, 100% zoom: 44px → 96px). Every extra row the reserve pays for is board height, so
+     the Standard Dock gets its own bounded height and scrollport, as the Compact Dock already
+     has (`max-height: 70%; overflow-y: auto` there).
 
-     THE BOUND IS DERIVED, not chosen. The board keeps the Stage minus the reserve, and the
-     reserve is the Dock's height plus its 0.5rem offset, so the Dock may be at most
+     THE BOUND IS WHOLE ROWS, chosen by `dock-reserve.ts` (only a layout pass can see where the
+     wrapped rows fall) and written as `--wy-dock-max-h`:
 
-         Stage height − 0.5rem − (board rows × cell floor)
+         room = Stage height − board rows × --wy-cell-floor      the most the reserve may take
+         H(k) = bottom of row k + bottom (safe-area) padding      the Dock showing k rows
+         k    = the most rows with float offset + H(k) ≤ room      (all of them: no bound)
 
-     tall before the board drops under `--wy-cell-floor` — at 640×560 / banner / 200% that is
-     364 − 16 − 24 × 12 = 60px. `--wy-stage-h` and `--wy-board-rows` are written by
-     `main.ts`/`dock-reserve.ts` (CSS cannot see either); the fallbacks describe a Stage the
-     full viewport tall and the shipped 24-row board, i.e. a bound that never binds.
+     ROUNDING. The projection FLOORS `height / rows`, so a board 0.4px under 288 is an 11px
+     cell: every px the floor was promised has to survive the rounding. The reserve is rounded
+     up only to the layout engine's 1/64px unit — never to a whole px — and a row count is
+     accepted only if that rounded reserve fits the Stage's exact remainder. An earlier CSS-only
+     bound (Stage − offset − rows × floor, then a whole-px reserve) left 287.6px at 540×556 after
+     Start; a whole-px reserve alone still leaves 287.6px at 540×506 at 90% text, where the
+     offset is 7.2px. Worked, 540×556 after Start: Stage 373.61 → room 85.61; both rows need
+     8 + 96 = 104, one row 8 + 44 = 52 — so one row, board 321.6px, 13px cells.
+
+     THE FLOOR EXCEPTION — the ONLY one (owner ruling 2, "control wins"). The Dock never shows
+     fewer than one whole row. Where the Stage is too short for that row AND the board's floor —
+     Stage < board rows × floor + offset + H(1): heavy zoom on a Standard window barely over the
+     Compact trigger, e.g. 900×501 at 175% — the row wins and the board's cells drop below 12px.
+     Everywhere else the floor holds, and `dock-overlap.spec.ts` asserts both halves. Only the
+     FIRST row beats the floor; every further row scrolls.
+
      `border-box` makes the bound the RENDERED height, bottom safe-area padding included —
      under `content-box` that inset would ride on top of it and eat into the board. (It also
      makes `max-width` below count the left-inset padding, so on a left-notched device the
      Dock no longer overhangs the Rail by the inset — which is what that rule always said.)
 
-     THE FLOOR: one whole control. `--wy-dock-min-h` is the tallest visible control plus the
-     Dock's block padding, measured, so a focused control always fits its scrollport. Where
-     the Stage is too short for both (Stage < board floor + offset + one control — heavy zoom
-     on a Standard window barely over the Compact trigger), the control wins and the board
-     yields: the cell floor is pinned for the supported sizes, while a Dock too short for one
-     whole control would leave a focused control partly out of sight.
-
-     ACCEPTED COST (owner, #152): at heavy zoom a horizontally-wrapping cluster sits in a
-     vertical scrollport, and some controls need scrolling to reach. The bound only binds on
-     short Standard viewports at heavy zoom; at 100% zoom it did not bind at any size measured
-     (the tightest, 640×560 with the banner up, leaves it 112px against a 44px Dock). */
-  .wy-dock {
+     The float offset and the row gap are px-capped (P3 on #152): at 200% text zoom `0.5rem`
+     is 16px of Stage per use, paid out of the board for spacing, not for controls. Identical
+     at 100% zoom. `.wy-shell .wy-dock`, not `.wy-dock`, for the `.wy-main .wy-board` reason
+     above: the base `.wy-dock` rule sits BELOW this block and would win `bottom` and `gap` on
+     source order. */
+  .wy-shell .wy-dock {
+    --wy-dock-offset: min(0.5rem, 8px);
+    /* The scroll cue's gutter (below): a chevron's width plus its margins, fixed px because
+       zoom does not grow a glyph's job. */
+    --wy-dock-cue-w: 16px;
     box-sizing: border-box;
-    max-height: max(
-      var(--wy-dock-min-h, 44px),
-      calc(var(--wy-stage-h, 100dvh) - 0.5rem - var(--wy-board-rows, 24) * var(--wy-cell-floor))
-    );
+    bottom: var(--wy-dock-offset);
+    gap: min(0.5rem, 8px);
+    max-height: var(--wy-dock-max-h, none);
   }
 
-  /* The scroll form, set by `dock-reserve.ts` exactly while the content exceeds the bound
-     (the `.wy-wave-preview--scroll` precedent). NOT unconditional, because `overflow: auto`
-     clips ink overflow even when nothing scrolls: the Dock's box is flush with its controls,
-     so a permanent scrollport would clip every Dock focus ring at 100% zoom, the one state
-     that must look exactly as before. Toggling it changes no geometry — the box is already
-     at its bound — so the toggle cannot feed back into the observer that drives it.
+  /* THE SCROLL FORM, set by `dock-reserve.ts` exactly while the bound holds fewer rows than the
+     Dock has (the `.wy-wave-preview--scroll` precedent). NOT unconditional, because `overflow:
+     auto` clips ink overflow even when nothing scrolls: the Dock's box is flush with its
+     controls, so a permanent scrollport would clip every Dock focus ring at 100% zoom.
+
+     NO CONTROL IS EVER PARTLY VISIBLE AT REST (owner ruling 1). The bound ends exactly at row
+     k's bottom edge and row k+1 begins a row gap below it, so the resting scrollport shows k
+     whole rows and nothing of the next. It snaps to row starts (`mandatory`), so a flick, a
+     wheel or a focus scroll settles on a row edge rather than halfway through a control, and
+     the end of the range lands on whole rows too (the content ends at the last row's bottom
+     edge, exactly as the bound ends at row k's).
+
+     The bottom safe-area inset moves from PADDING to the float OFFSET here. Inside a
+     scrollport that padding would be a see-through band below row k, and whenever the inset is
+     deeper than the row gap the next row would show through it. Lifting the whole box by the
+     inset instead keeps the controls just as clear of the system bar, and the Stage band the
+     reserve pays for is unchanged — `dock-reserve.ts` measures the offset and the padding, so
+     it sees the same sum either way.
 
      Keyboard access needs nothing extra: every child is a native button, so the scrollport
      is reached by tabbing to its controls (axe `scrollable-region-focusable` is satisfied by
-     focusable content), and focusing a control scrolls it into the scrollport. Inside it the
-     ring is drawn INSIDE the border box — the `.wy-home` fix, for the same reason: an outset
-     ring on a box flush with a clipping edge loses its outer segments. */
-  .wy-dock--scroll {
+     focusable content). Inside it the ring is drawn INSIDE the border box — the `.wy-home`
+     fix, for the same reason: an outset ring on a box flush with a clipping edge loses its
+     outer segments.
+
+     THE SCROLL CUE (owner ruling 1). A scrollport is invisible to a finger — touch scrollbars
+     are overlays that appear only DURING a scroll — so the scroll form carries its own cue, in
+     a gutter to the right of the rows (`padding-right`): width is what the Dock has to spare,
+     where every px of height is the board's. The cue is the Dock's own background, which does
+     not scroll with its content (`background-attachment: scroll`), so it stays put while the
+     rows move past it:
+       - a TRACK: a 2px line down the gutter, the edge that says "this cluster continues";
+       - a CHEVRON at each end that has rows beyond it — down at the bottom while rows remain
+         below (`wy-dock--more-below`), up at the top while rows remain above
+         (`wy-dock--more-above`), both mid-range.
+     Shape and position carry the meaning, never colour alone (the dual-encoding rule), and both
+     are `--wy-accent` on the Stage's `--wy-board-bg`, gated ≥ 3:1 in `ui-contrast.test.ts`. The
+     cue is decorative to AT — it is a background, not content: every control it points at is a
+     native button already in the tab order, which focusing scrolls into view. */
+  .wy-shell .wy-dock--scroll {
+    --wy-cue-down: conic-gradient(from -40deg at 50% 100%, var(--wy-accent) 80deg, transparent 0);
+    --wy-cue-up: conic-gradient(from 140deg at 50% 0, var(--wy-accent) 80deg, transparent 0);
+    --wy-cue-track: linear-gradient(var(--wy-accent), var(--wy-accent));
+    --wy-cue-x: calc(var(--wy-dock-cue-w) / 2 - 1px);
+    bottom: calc(var(--wy-dock-offset) + var(--wy-safe-bottom));
+    padding-bottom: 0;
     overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    padding-right: var(--wy-dock-cue-w);
+    background: var(--wy-cue-track) right var(--wy-cue-x) top 0 / 2px 100% no-repeat;
+  }
+
+  .wy-shell .wy-dock--scroll.wy-dock--more-below {
+    background:
+      var(--wy-cue-down) right 2px bottom 0 / 12px 8px no-repeat,
+      var(--wy-cue-track) right var(--wy-cue-x) top 0 / 2px calc(100% - 10px) no-repeat;
+  }
+
+  .wy-shell .wy-dock--scroll.wy-dock--more-above {
+    background:
+      var(--wy-cue-up) right 2px top 0 / 12px 8px no-repeat,
+      var(--wy-cue-track) right var(--wy-cue-x) bottom 0 / 2px calc(100% - 10px) no-repeat;
+  }
+
+  .wy-shell .wy-dock--scroll.wy-dock--more-below.wy-dock--more-above {
+    background:
+      var(--wy-cue-up) right 2px top 0 / 12px 8px no-repeat,
+      var(--wy-cue-down) right 2px bottom 0 / 12px 8px no-repeat,
+      var(--wy-cue-track) right var(--wy-cue-x) top 10px / 2px calc(100% - 20px) no-repeat;
+  }
+
+  .wy-dock--scroll .wy-btn {
+    scroll-snap-align: start;
   }
 
   .wy-dock--scroll .wy-btn:focus-visible {
@@ -528,8 +606,8 @@ a.wy-home:focus-visible {
      the label, never the box around it), so one control stays shorter than the bound it has
      to fit inside. Identical at 100% zoom, where the 44px `min-height` governs both forms.
      Above ~116% text zoom the rem padding began growing the control; capped, it stays at 44px
-     until ~174%, and at 200% a control measures 49px instead of 73px — inside the 60px bound
-     above. Compact sets its own `padding: 0.25rem` in its fork. */
+     until ~174%, and at 200% a control measures 49px instead of 73px. Compact sets its own
+     `padding: 0.25rem` in its fork. */
   .wy-dock .wy-btn {
     padding-block: min(0.5rem, 4px);
   }

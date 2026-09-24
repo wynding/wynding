@@ -2703,9 +2703,11 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
 
 describe('main — the Standard Dock footprint wiring (#152)', () => {
   // `dock-reserve.test.ts` owns the measurement; this pins the WIRING main.ts adds around it:
-  // the board-rows input, the observer (both boxes), the one-frame coalescing that keeps the
-  // pass out of the observer callback, and a teardown that leaves nothing behind.
-  it('writes the rows input, re-syncs once per frame after a resize, and clears everything on destroy', () => {
+  // the observer (both boxes AND every control — a Dock held at its bound does not resize when
+  // Start gives way to Pause + Call wave, its controls do), the one-frame coalescing that keeps
+  // the pass out of the observer callback, the scroll cue's listener, and a teardown that
+  // leaves nothing behind.
+  it('syncs at boot, re-syncs once per frame after a resize, follows scrolls, and clears everything on destroy', () => {
     const instances: { cb: () => void; observed: Element[]; disconnected: boolean }[] = [];
     const originalRO = (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
     (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
@@ -2748,15 +2750,23 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
     try {
       const h = homeApp();
       const prop = (name: string): string => h.shell.style.getPropertyValue(name);
-      expect(prop('--wy-board-rows')).toMatch(/^[1-9]\d*$/);
-      expect(prop('--wy-stage-h')).toBe('400px'); // the synchronous first pass
-      expect(prop('--wy-dock-reserve')).not.toBe('');
+      // The synchronous first pass. jsdom lays out no Dock, so its top edge reads 0 and the
+      // reserve is the whole Stage — the value is jsdom's, the point is that it was written.
+      expect(prop('--wy-dock-reserve')).toBe('400px');
 
-      const dock = h.root.querySelector('.wy-dock')!;
+      const dock = h.root.querySelector<HTMLElement>('.wy-dock')!;
       const stage = h.root.querySelector('.wy-stage')!;
       const observer = instances.find((i) => i.observed.includes(dock));
       expect(observer, 'the Dock must be observed').toBeDefined();
-      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage]));
+      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage, ...dock.children]));
+      expect(dock.children.length).toBeGreaterThan(1);
+
+      // The scroll cue follows the scrollport: a scroll re-points it, no frame needed.
+      dock.classList.add('wy-dock--scroll');
+      Object.defineProperty(dock, 'scrollHeight', { configurable: true, value: 96 });
+      Object.defineProperty(dock, 'clientHeight', { configurable: true, value: 44 });
+      dock.dispatchEvent(new Event('scroll'));
+      expect(dock.classList.contains('wy-dock--more-below')).toBe(true);
 
       // A burst of notifications is ONE pass, one frame later — never inside the callback.
       stageHeight = 500;
@@ -2764,9 +2774,9 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       observer!.cb();
       observer!.cb();
       expect(frames.length - before).toBe(1);
-      expect(prop('--wy-stage-h')).toBe('400px');
+      expect(prop('--wy-dock-reserve')).toBe('400px');
       frames[frames.length - 1]!(0);
-      expect(prop('--wy-stage-h')).toBe('500px');
+      expect(prop('--wy-dock-reserve')).toBe('500px');
       // ...and the frame slot is released, so the next resize schedules again.
       observer!.cb();
       expect(frames.length - before).toBe(2);
@@ -2775,9 +2785,12 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       h.app.destroy();
       expect(cancelled).toContain(frames.length);
       expect(observer!.disconnected).toBe(true);
-      for (const p of ['--wy-board-rows', '--wy-stage-h', '--wy-dock-reserve', '--wy-dock-min-h']) {
-        expect(prop(p), p).toBe('');
-      }
+      for (const p of ['--wy-dock-reserve', '--wy-dock-max-h']) expect(prop(p), p).toBe('');
+      expect(dock.classList.contains('wy-dock--more-below')).toBe(false);
+      // ...and the scroll listener is gone with it.
+      dock.classList.add('wy-dock--scroll');
+      dock.dispatchEvent(new Event('scroll'));
+      expect(dock.classList.contains('wy-dock--more-below')).toBe(false);
     } finally {
       Element.prototype.getBoundingClientRect = originalRect;
       window.requestAnimationFrame = originalRaf;
