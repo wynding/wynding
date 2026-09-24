@@ -12,8 +12,9 @@
 // `.wy-dock`'s bottom padding is zeroed in Compact (ui.css `padding-bottom: 0`), `.wy-hud`'s
 // `max-height` becomes `none` there, and `.wy-hud:has(> .wy-wave-preview)`'s height becomes
 // `auto`. Each assertion below therefore sits at the layout where its mechanism is live.
-// Source-level completeness across all twenty call sites is `layout.test.ts`'s job; this file
-// covers five MECHANISMS and structurally cannot reach the rest.
+// Source-level completeness across all twenty-two call sites is `layout.test.ts`'s job; this file
+// covers six MECHANISMS (the sixth, #153, is the Compact Rail paying the top inset) and
+// structurally cannot reach the rest.
 import { test, expect, type Page } from '@playwright/test';
 import { TARGET_MIN_PX } from './targets';
 
@@ -162,6 +163,121 @@ test.describe('safe-area seam — subtractive bound and the target floor (Standa
       expect(c.bottom).toBeLessThanOrEqual(limit + 1);
     }
   });
+});
+
+test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', () => {
+  // The Compact Rail's track starts at y=0 (it shares row 1 with the status column), so the
+  // top inset is the Rail's to pay. These tests assert CONTENT — where the Cards and their
+  // focus rings land — never the padding track: a test of this shape once passed with its
+  // mechanism deleted because it measured the box that held the fix instead of the thing the
+  // fix was for.
+  const TOP = 24;
+
+  /** Every Card's box, and its ring box (the border box grown by the ring's painted band:
+   *  width + offset, read from the live `:focus-visible` style), relative to the Rail. */
+  const RING_PX = async (page: Page): Promise<number> =>
+    page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement);
+      return (
+        parseFloat(root.getPropertyValue('--wy-card-ring-w')) +
+        parseFloat(root.getPropertyValue('--wy-card-ring-offset'))
+      );
+    });
+
+  const focusedCard = (page: Page) =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const b = el.getBoundingClientRect();
+      const rail = document.querySelector('.wy-rail')!.getBoundingClientRect();
+      return {
+        isCard: el.classList.contains('wy-card'),
+        index: [...document.querySelectorAll('.wy-card')].indexOf(el),
+        top: b.top,
+        bottom: b.bottom,
+        railBottom: rail.bottom,
+      };
+    });
+
+  test('a top inset keeps the first Card clear of the system bar', async ({ page }) => {
+    await gotoAt(page, PHONE);
+    const firstCardTop = () =>
+      page.evaluate(() => document.querySelector('.wy-card')!.getBoundingClientRect().top);
+    await inject(page, { top: `${TOP}px` });
+    expect(await firstCardTop()).toBeGreaterThanOrEqual(TOP);
+  });
+
+  test('the restated S12a commitment at rest: 4 of 9 Cards at zero inset, every Card scroll-reachable at a nonzero one', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    const atRest = () =>
+      page.evaluate(() => {
+        const rail = document.querySelector('.wy-rail') as HTMLElement;
+        const rr = rail.getBoundingClientRect();
+        const cards = [...document.querySelectorAll('.wy-card')].map((c) =>
+          c.getBoundingClientRect(),
+        );
+        return {
+          total: cards.length,
+          fullyVisible: cards.filter((b) => b.top >= rr.top - 0.5 && b.bottom <= rr.bottom + 0.5)
+            .length,
+        };
+      });
+    expect((await atRest()).fullyVisible, 'zero inset: the at-rest count is unchanged').toBe(4);
+
+    await inject(page, { top: `${TOP}px` });
+    const n = (await atRest()).total;
+    // Scroll-reachable: scrolling each Card into view shows it whole and clear of the bar.
+    for (let i = 0; i < n; i++) {
+      const card = page.locator('.wy-card').nth(i);
+      await card.evaluate((el) => el.scrollIntoView({ block: 'nearest' }));
+      const r = await card.evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        const rail = document.querySelector('.wy-rail')!.getBoundingClientRect();
+        return { top: b.top, bottom: b.bottom, railBottom: rail.bottom };
+      });
+      expect(
+        r.top,
+        `Card ${i} scrolled into view must clear the ${TOP}px bar`,
+      ).toBeGreaterThanOrEqual(TOP - 0.5);
+      expect(r.bottom, `Card ${i} must fit the Rail`).toBeLessThanOrEqual(r.railBottom + 0.5);
+    }
+  });
+
+  for (const inset of [0, TOP]) {
+    for (const direction of ['Tab', 'Shift+Tab'] as const) {
+      test(`${inset}px top inset, ${direction}: every focused Card AND its ring clear the inset and the Rail's edges`, async ({
+        page,
+      }) => {
+        await gotoAt(page, PHONE);
+        await inject(page, { top: `${inset}px` });
+        const ring = await RING_PX(page);
+        expect(ring, 'the ring band must be a real, positive reserve').toBeGreaterThan(0);
+        const cards = page.locator('.wy-card');
+        const n = await cards.count();
+        // Enter at the walk's starting end, then move ONLY by real key traversal.
+        await (direction === 'Tab' ? cards.first() : cards.last()).focus();
+        const seen: number[] = [];
+        for (let step = 0; step < n; step++) {
+          if (step > 0) await page.keyboard.press(direction);
+          const f = await focusedCard(page);
+          expect(f.isCard, `step ${step}: focus left the Cards`).toBe(true);
+          seen.push(f.index);
+          expect(
+            f.top - ring,
+            `Card ${f.index} ring top ${(f.top - ring).toFixed(1)} sits under the ${inset}px inset`,
+            // No sub-pixel tolerance: the reserve carries its own rounding allowance (ui.css),
+            // and a 0.4px clip is exactly the zero-inset defect this also fixes.
+          ).toBeGreaterThanOrEqual(inset);
+          expect(
+            f.bottom + ring,
+            `Card ${f.index} ring bottom ${(f.bottom + ring).toFixed(1)} is clipped by the Rail`,
+          ).toBeLessThanOrEqual(f.railBottom + 0.5);
+        }
+        expect(new Set(seen).size, 'every Card must be reached').toBe(n);
+      });
+    }
+  }
 });
 
 test.describe('safe-area seam — a malformed inset degrades, it does not delete geometry', () => {

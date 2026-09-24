@@ -132,6 +132,14 @@
      Dock may never eat into. Fixed px, not rem, for the reason the Card swatch gives: board
      cells do not scale with text zoom. */
   --wy-cell-floor: 12px;
+  /* The Card's focus-ring geometry (#153): a token rather than two literals because the Compact
+     Rail's `scroll-padding-top` must reserve exactly the band the ring paints OUTSIDE the Card
+     (width + offset) — a focused Card parked flush with the scrollport's top edge otherwise has
+     its ring's top leg clipped by the scrollport, or hidden under the system bar at a nonzero
+     inset. Other focus rings in this file use the same 3px/2px by convention; only the Card's
+     consumes the tokens, because only the Card's placement is reserved against them. */
+  --wy-card-ring-w: 3px;
+  --wy-card-ring-offset: 2px;
 }
 
 html,
@@ -954,8 +962,8 @@ a.wy-home:focus-visible {
 }
 
 .wy-card:focus-visible {
-  outline: 3px solid var(--wy-focus);
-  outline-offset: 2px;
+  outline: var(--wy-card-ring-w) solid var(--wy-focus);
+  outline-offset: var(--wy-card-ring-offset);
 }
 
 .wy-card[aria-pressed='true'] {
@@ -1775,6 +1783,36 @@ a.wy-home:focus-visible {
     --wy-rail-w: calc(min(9rem, 28vw) + var(--wy-safe-right));
 
     grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
+  }
+
+  /* The Rail PAYS THE TOP INSET here, and only here (#153, owner ruling arm 3 + "inset and
+     ring", 2026-09-24). In Compact the Rail's track starts at y=0 — `.wy-main` shares row 1
+     with the status column — so on a device with a top system bar the first Card sat under
+     it. Standard does not pay it: there `.wy-main` is grid row 3, below `.wy-status`, whose
+     own `padding-top` already spends the inset; a second payment would push every Card down
+     for nothing. Hence this fork, never the base `.wy-rail` rule.
+
+     `padding-top` places the Cards AT REST: byte-identical to the base `padding: 0.5rem` at
+     zero inset. Measured cost at 658×320: the at-rest fully-visible Cards drop 4 → 3 once the
+     inset reaches ~19px, and the scroll extent grows by exactly the inset (358 → 382px at 24).
+
+     `scroll-padding-top` places a Card that FOCUS scrolls to. Padding does not do that: focus
+     scrolling aligns to the scroll snapport, which is the padding box inset by
+     `scroll-padding`, so without this a Shift+Tab walk parked Cards at −0.4 … 21.8px — under
+     a 24px bar. The reserve is the inset plus the ring's painted band (width + offset), so
+     the Card AND its ring clear the bar in both Tab directions. THE ONE ZERO-INSET CHANGE,
+     accepted by the owner: the reserve is then the ring band alone, which ends today's
+     ~0.4px clip of the ring's top leg on a Card parked flush with the Rail's top edge.
+     The trailing `1px` is rounding, and measured: the Cards' edges fall on fractional pixels
+     (they are 58.4 / 76.4px tall) while the browser parks `scrollTop` on a whole pixel, so
+     the exact band alone left rings 0.2–0.4px short (ring tops at −0.4 / 23.8px).
+     The bottom edge needs no mirror: the fade reserve (`scroll-padding-bottom`, above) already
+     clears the ring there — measured, not assumed (`insets.spec.ts`). */
+  .wy-rail {
+    padding-top: calc(0.5rem + var(--wy-safe-top));
+    scroll-padding-top: calc(
+      var(--wy-safe-top) + var(--wy-card-ring-w) + var(--wy-card-ring-offset) + 1px
+    );
   }
 
   /* The pinned Panel's SECOND arm (M2-S12a P3) — see the full rationale beside the
