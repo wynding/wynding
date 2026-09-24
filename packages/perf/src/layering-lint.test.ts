@@ -159,6 +159,7 @@ describe(
         "import x from '@noble/hashes-extra';\nexport { x };\n",
       );
       expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('@wynding/engine may import only relative paths');
     });
 
     it('the test runner is allowed in tests only', async () => {
@@ -174,7 +175,18 @@ describe(
         ENGINE_TEST,
         "import { parse } from 'yaml';\nimport { t } from '@wynding/types';\nexport { parse, t };\n",
       );
+      // Pinned by TEXT, not just by count: two reports of any kind would satisfy a bare
+      // `toHaveLength(2)`, so a test object that lost the `@wynding/types` back-edge restriction
+      // could hide behind a duplicated off-allowlist report. Exactly one of each is required.
       expect(messages).toHaveLength(2);
+      expect(
+        messages.filter((message) =>
+          message.includes('@wynding/engine may import only relative paths'),
+        ),
+      ).toHaveLength(1);
+      expect(
+        messages.filter((message) => message.includes('is a ROOT of the ADR 0001 layering graph')),
+      ).toHaveLength(1);
     });
 
     it('a back-edge still reports once, with its specific message, not also as off-allowlist', async () => {

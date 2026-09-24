@@ -26,6 +26,8 @@
         "$TURBO_ROOT$/docs/milestones/m2.md",
         "$TURBO_ROOT$/packages/content/src/rulesets/stress-40x40.json",
         "$TURBO_ROOT$/packages/engine/src/game-loop.ts",
+        "$TURBO_ROOT$/packages/platform/package.json",
+        "$TURBO_ROOT$/packages/render/package.json",
         "$TURBO_ROOT$/scripts/build-layering-attribution.mjs"
       ]
     },
