@@ -41,6 +41,47 @@ const NONDETERMINISTIC_MODULE_PATHS = [
   },
 ];
 
+// ---------------------------------------------------------------------------------------
+// SPECIFIER SITES THE SYNTAX RULE MUST INSPECT (#168). `no-restricted-imports` sees
+// `import … from`, `export … from` and `import x = require()` — every form whose specifier the
+// grammar forces to be a plain string literal. It sees neither of the two CALL-shaped forms,
+// which take an arbitrary expression: dynamic `import(…)` and `require(…)` (@types/node declares
+// a global `require`, so the latter typechecks in every package and esbuild bundles it). Those
+// are matched here, at the syntax level, by every zone below.
+//
+// THE POLICY FOR A CALL-SHAPED SPECIFIER, decided once and applied in every zone:
+//   - A CONSTANT specifier — a string literal, or a template literal with NO substitutions — is
+//     one value, and is judged exactly like the equivalent string literal. ``import(`@wynding/perf`)``
+//     used to slip past because the selectors compared `source.value`, which a `TemplateLiteral`
+//     does not have; `constantSpecifier` compares the template's cooked text as well.
+//   - A NON-CONSTANT specifier — a template WITH substitutions, a concatenation, an identifier,
+//     a call — cannot be checked against a zone at all, so in any zone that restricts imports it
+//     is an error in its own right (`NON_CONSTANT_SPECIFIER`). ``import(`@wynding/${'types'}`)``
+//     is the case that motivated it, but naming the `@wynding/` scope alone would leave
+//     `import('@wynding/' + name)` and `import(name)` open, so the rule is "constant, or say
+//     why not" rather than a prefix match.
+//   - ONE CARVE-OUT: a template whose leading text is explicitly RELATIVE (`./`, `../`) —
+//     ``import(`./locales/${lang}.json`)``, the ordinary lazy-loading idiom. A relative reach is
+//     path-shaped, and path-shaped reaches were never this rule's to catch (see WHAT THIS DOES
+//     NOT CATCH under LAYERING ZONES); a bare-package reach cannot begin with `./`, so the
+//     carve-out cannot be used to name a workspace package.
+// No such call exists under any linted `src` tree today, so the policy costs nothing now and is
+// cheap to loosen if a real need argues for it.
+const SPECIFIER_SITES =
+  ":matches(ImportExpression > .source, CallExpression[callee.type='Identifier'][callee.name='require'] > .arguments)";
+
+/** A selector for a CONSTANT specifier at any call-shaped site whose value matches `value` — an
+ *  esquery attribute value: a quoted string for an exact match, or a `/regex/`. The regex source
+ *  must spell `/` as `\u002F`, because esquery's regex token cannot contain a slash. */
+const constantSpecifier = (value) =>
+  `${SPECIFIER_SITES}:matches(Literal[value=${value}], TemplateLiteral[expressions.length=0][quasis.0.value.cooked=${value}])`;
+
+const NON_CONSTANT_SPECIFIER = {
+  selector: `${SPECIFIER_SITES}:not(Literal):not(TemplateLiteral[expressions.length=0]):not(TemplateLiteral[quasis.0.value.cooked=/^\\.\\.?\\u002F/])`,
+  message:
+    'This import()/require() specifier is not a constant, so the layering zones cannot check where it points. Spell it as a string literal (a relative template such as `./locales/${x}.json` is allowed) — see SPECIFIER SITES in eslint.config.mjs (#168).',
+};
+
 // The deterministic core's forbidden SYNTAX, hoisted for the same reason the module paths
 // above were: the layering zones match these files too and set the same rule name, and flat
 // config replaces rather than merges. Kept verbatim from the determinism zone.
@@ -74,7 +115,9 @@ const NONDETERMINISTIC_SYNTAX = [
       'No wall-clock scheduler or ambient timing in the deterministic core — use the tick counter.',
   },
   {
-    selector: 'ImportExpression[source.value=/^(node:)?(crypto|timers|timers\\u002Fpromises)$/]',
+    // `constantSpecifier`, not `ImportExpression[source.value=…]`: the same template-literal and
+    // `require()` spellings the layering selectors had to learn (#168, SPECIFIER SITES above).
+    selector: constantSpecifier('/^(node:)?(crypto|timers|timers\\u002Fpromises)$/'),
     message:
       'No ambient crypto or wall-clock scheduler in the deterministic core — use the seeded Rng from @wynding/engine.',
   },
@@ -149,11 +192,14 @@ const NONDETERMINISTIC_SYNTAX = [
 // WHAT THIS DOES NOT CATCH, stated plainly because two other guards are sized around it:
 //   - `no-restricted-imports` does NOT inspect dynamic `import()` expressions at all
 //     (ESLint 9, verified against a probe — see the determinism zone's note, which had to
-//     match its specifiers a second time at the syntax level for the same reason). So
-//     `await import('@wynding/perf')` is not seen here.
+//     match its specifiers a second time at the syntax level for the same reason). So each
+//     zone ALSO carries `no-restricted-syntax` selectors for the call-shaped forms
+//     (`dynamicImportRestrictions`, SPECIFIER SITES): a constant specifier — string or
+//     no-substitution template — is judged by name, and a non-constant one is rejected
+//     outright (#168). That rule is itself a specifier matcher, with the limit below.
 //   - It matches SPECIFIERS, so a path-shaped reach at the same module
 //     (`../../../packages/content/src/stress`) is not seen here either.
-// Both are covered downstream: `packages/perf/src/layering.test.ts` greps shipped source
+// Both are also covered downstream: `packages/perf/src/layering.test.ts` greps shipped source
 // context-free for the three never-shipped specifiers in any import syntax, and
 // `pnpm run check:build-layering` (#129) asks the BUNDLER — no emitted file of the shipped
 // web build may carry those modules' markers, whatever spelling reached them.
@@ -429,22 +475,109 @@ const SERVER_SHIPPED_RESTRICTIONS = [
  *  rules cannot drift because there is one source. Each entry keeps its own message, so the
  *  dynamic form reads exactly like the static one.
  *
- *  WHAT IT STILL DOES NOT MATCH, stated because the gap next door is documented and this one
- *  should be too: a no-substitution template literal — ``import(`@wynding/types`)`` — parses as
- *  a `TemplateLiteral`, which has no `source.value` for the selector to compare, so it slips
- *  past. That is the same spelling `layering.test.ts` leaves open by choice, and for the shipped
- *  trees `check:build-layering` closes it by asking Vite. Between roots there is no artifact to
- *  ask, so this one stays open and named. */
-const dynamicImportRestrictions = (restricted) =>
-  restricted.map(({ name, message }) => ({
-    selector: `ImportExpression[source.value=${JSON.stringify(name)}]`,
+ *  THE TEMPLATE-LITERAL GAP THIS USED TO NAME IS CLOSED (#168). The selector compared
+ *  `source.value`, which a `TemplateLiteral` does not have, so ``import(`@wynding/types`)`` — no
+ *  substitutions, one constant value — slipped past every zone, and ``import(`@wynding/perf`)``
+ *  linted clean under `apps/server/src` (verified: eslint exited 0). `constantSpecifier` now
+ *  judges a no-substitution template exactly like the string literal it equals, at `import()`
+ *  and `require()` alike. A template WITH substitutions is not judged by name at all: it is not a
+ *  constant, and `NON_CONSTANT_SPECIFIER` — which every zone calling this adds beside it —
+ *  rejects it outright. SPECIFIER SITES at the top of this file states the policy and its one
+ *  carve-out. */
+const dynamicImportRestrictions = (restricted) => [
+  ...restricted.map(({ name, message }) => ({
+    selector: constantSpecifier(JSON.stringify(name)),
     message,
-  }));
+  })),
+  NON_CONSTANT_SPECIFIER,
+];
+
+// ---------------------------------------------------------------------------------------
+// THIRD-PARTY ALLOWLISTS (#168). The zones above enforce WORKSPACE edges only; AGENTS.md also
+// states a third-party one — `engine` depends only on `@noble/hashes` — and nothing enforced
+// it: `import { parse } from 'yaml'` in `packages/engine/src` passed the lint (the zone forbade
+// `@wynding/*` and the Node determinism specifiers, not arbitrary packages) and passed tsc
+// (`yaml` is a hoisted root devDependency). Two halves close it, both reading the ONE table
+// below:
+//   - the MANIFEST: `assertThirdPartyAllowlists` fails the lint at config load if the package's
+//     `package.json` declares anything outside the list — the same load-time throw as
+//     `assertLayersCoverWorkspace`, so no zone is generated over a manifest already breaking it;
+//   - the SOURCE: the package's layering zone becomes an ALLOWLIST — any specifier that is not
+//     relative and not an allowed package (or a subpath of one) is an error, statically through
+//     a `no-restricted-imports` `regex` pattern and at call sites through `constantSpecifier`.
+//     Node built-ins are not on the list, so `node:fs` is rejected too: the engine is node-free.
+//
+// `testOnly` is the one relaxation, scoped by FILE: `*.test.ts` may also import the test runner
+// (hoisted from the repo root, as for every package). It is a second, generated config object
+// for the test files rather than an `ignores`, for the reason the server zone below gives —
+// `ignores` would drop every OTHER restriction from those files too. Generated from the same
+// function, the two objects differ only in the allowlist.
+//
+// Specifiers the zone already restricts BY NAME (`@wynding/*`, the determinism specifiers) are
+// EXCLUDED from the allowlist pattern, so a back-edge still reports once, with its specific
+// message, rather than twice — the double report #111's `patterns` group was removed for.
+const THIRD_PARTY_ALLOWLISTS = {
+  '@wynding/engine': { runtime: ['@noble/hashes'], testOnly: ['vitest', '@vitest/coverage-v8'] },
+};
+
+const MANIFEST_DEPENDENCY_FIELDS = [
+  'dependencies',
+  'peerDependencies',
+  'optionalDependencies',
+  'devDependencies',
+];
+
+/** Fails the lint if an allowlisted package's manifest declares a dependency outside its list —
+ *  the runtime fields against `runtime`, `devDependencies` against `runtime` plus `testOnly`. */
+function assertThirdPartyAllowlists() {
+  for (const [specifier, { runtime, testOnly }] of Object.entries(THIRD_PARTY_ALLOWLISTS)) {
+    const manifestPath = join(packageDir(specifier), 'package.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const outside = MANIFEST_DEPENDENCY_FIELDS.flatMap((field) => {
+      const allowed = field === 'devDependencies' ? [...runtime, ...testOnly] : runtime;
+      return Object.keys(manifest[field] ?? {})
+        .filter((dependency) => !allowed.includes(dependency))
+        .map((dependency) => `${field}.${dependency}`);
+    });
+    if (outside.length > 0) {
+      throw new Error(
+        `eslint.config.mjs: ${relative(REPO_ROOT, manifestPath)} declares ${outside.join(', ')}, ` +
+          `outside ${specifier}'s third-party allowlist (${runtime.join(', ')}; tests may add ` +
+          `${testOnly.join(', ')}). AGENTS.md's Hard rules state that list — change it there and ` +
+          'in THIRD_PARTY_ALLOWLISTS together, or drop the dependency.',
+      );
+    }
+  }
+}
+assertThirdPartyAllowlists();
+
+/** Escapes `text` for a regex SOURCE that must also survive as an esquery regex token, which
+ *  cannot contain `/` — so slashes are spelled `\u002F`, which both engines read as `/`. */
+const regexSource = (text) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll('/', '\\u002F');
+
+/** The allowlist half of a zone: one extra `no-restricted-imports` pattern and one extra
+ *  `no-restricted-syntax` selector, both matching every specifier that is not relative, not an
+ *  allowed package or a subpath of one, and not already restricted by name. */
+function allowlistRestrictions(specifier, allowed, alreadyRestricted) {
+  const exempt = [
+    '\\.\\.?\\u002F',
+    ...allowed.map((name) => `${regexSource(name)}(?:\\u002F|$)`),
+    ...alreadyRestricted.map((name) => `${regexSource(name)}$`),
+  ];
+  const source = `^(?!${exempt.join('|')})`;
+  const message = `${specifier} may import only relative paths and ${allowed.join(', ')} (AGENTS.md, Hard rules). A new third-party or Node dependency here needs THIRD_PARTY_ALLOWLISTS in eslint.config.mjs and AGENTS.md changed first (#168).`;
+  return {
+    pattern: { regex: source, message },
+    syntax: { selector: constantSpecifier(`/${source}/`), message },
+  };
+}
 
 /** One flat-config object per layered package: everything strictly downstream of it is an
  *  import error, with the determinism specifiers merged in for the four core packages (see
  *  `NONDETERMINISTIC_MODULE_PATHS`). Returns null when the package has nothing to forbid —
- *  see the skipped-when-empty note above. */
+ *  see the skipped-when-empty note above. A package in `THIRD_PARTY_ALLOWLISTS` gets TWO
+ *  objects — all its files, then its tests with `testOnly` added — identical but for that. */
 function layeringZone(specifier, layerIndex) {
   const downstream = LAYERS.slice(layerIndex + 1).flat();
   const paths = downstream.flatMap((forbidden) =>
@@ -480,10 +613,14 @@ function layeringZone(specifier, layerIndex) {
   ].includes(specifier);
   const restricted = [...(alsoDeterministic ? NONDETERMINISTIC_MODULE_PATHS : []), ...paths];
   if (restricted.length === 0) return null;
-  return {
-    files: [`packages/${specifier.slice('@wynding/'.length)}/src/**`],
+  const dir = `packages/${specifier.slice('@wynding/'.length)}/src`;
+  const zone = (files, allowlist) => ({
+    files,
     rules: {
-      'no-restricted-imports': ['error', { paths: restricted }],
+      'no-restricted-imports': [
+        'error',
+        { paths: restricted, ...(allowlist ? { patterns: [allowlist.pattern] } : {}) },
+      ],
       'no-restricted-syntax': [
         'error',
         ...(alsoDeterministic ? NONDETERMINISTIC_SYNTAX : []),
@@ -494,9 +631,22 @@ function layeringZone(specifier, layerIndex) {
         // records from #111 ("every static violation reported TWICE"), reintroduced by the fix
         // for a different gap. Only the LAYERING paths need a dynamic twin generated here.
         ...dynamicImportRestrictions(paths),
+        ...(allowlist ? [allowlist.syntax] : []),
       ],
     },
-  };
+  });
+  const thirdParty = THIRD_PARTY_ALLOWLISTS[specifier];
+  if (thirdParty === undefined) return zone([`${dir}/**`]);
+  const byName = restricted.map(({ name }) => name);
+  return [
+    zone([`${dir}/**`], allowlistRestrictions(specifier, thirdParty.runtime, byName)),
+    // Tests second, so last-writer-wins gives them the WIDER allowlist and nothing else changes:
+    // every other entry is generated from the same `restricted` array.
+    zone(
+      [`${dir}/**/*.test.ts`],
+      allowlistRestrictions(specifier, [...thirdParty.runtime, ...thirdParty.testOnly], byName),
+    ),
+  ];
 }
 
 export default tseslint.config(

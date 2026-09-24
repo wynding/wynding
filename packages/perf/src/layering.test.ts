@@ -10,9 +10,11 @@
 // in the unit-test path, where neither of them does, and fails differently from both:
 //
 //   1. `eslint.config.mjs`'s LAYERING ZONES — ADR 0001's graph compiled into per-zone
-//      `no-restricted-imports`. They catch a DECLARED back-edge at the point of writing, with
-//      a message naming the rule, which is the earliest and most useful moment. They match
-//      package specifiers only, and not inside a dynamic `import()`.
+//      `no-restricted-imports`, plus `no-restricted-syntax` selectors for `import()` and
+//      `require()` (constant specifiers judged by name, template literals included; any
+//      non-constant specifier rejected — #168). They catch a DECLARED back-edge at the point of
+//      writing, with a message naming the rule, which is the earliest and most useful moment.
+//      They match package specifiers only.
 //   2. `pnpm run check:build-layering` — the reachability check over BUILD OUTPUT (e2e job).
 //      It asks Vite, so it sees reaches spelled as paths: all six in #129's escape table, and
 //      the template literal below. It is the authoritative one for the web app; it is also the
@@ -21,10 +23,12 @@
 //
 // This file's own contribution, stated exactly: it is the only one of the three that reads
 // EVERY shipped `src` tree as text, so it still fires for `apps/server` (which guard 2 does
-// not scan — esbuild bundles it, but that check reads the web app's output only) and for a
-// dynamic or comment-interrupted `import()` of the three never-shipped specifiers (which
-// guard 1 cannot see). Where all three overlap it is the cheapest, and a failure here is a
-// one-line fix rather than a build to read.
+// not scan — esbuild bundles it, but that check reads the web app's output only), and it does
+// so without depending on `eslint.config.mjs` at all, so a zone that config stops generating
+// does not blind it. (It once also claimed dynamic `import()` as ground guard 1 could not see;
+// guard 1 has matched call-shaped specifiers since PR #167, template literals since #168.)
+// Where all three overlap it is the cheapest, and a failure here is a one-line fix rather than
+// a build to read.
 //
 // `@wynding/content/catalog` (`packages/content/src/catalog.ts:10-11`) is the same
 // must-not-ship class as `./stress`: a synthetic perf bundle, deliberately absent from
@@ -54,7 +58,10 @@
 // these packages in backticked prose (`packages/content/src/stress.ts`, `catalog.ts`,
 // `stress.test.ts`), and every future comment would owe the same tax, so the guard would start
 // reddening documentation. A template-literal import specifier is not the accident this file
-// exists to catch; a comment mentioning a package name is an everyday act.
+// exists to catch; a comment mentioning a package name is an everyday act. It is not unguarded
+// either: the lint zones reject it in every shipped `src` tree, reading the AST rather than the
+// text, so prose in comments costs nothing there (#168); `check:build-layering` sees it in the
+// web build.
 //
 // This file is deliberately NOT grown to cover them, and that decision is now settled rather
 // than merely deferred. An earlier revision chased those spellings through enumeration, then

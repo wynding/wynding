@@ -520,6 +520,11 @@ const OFF_SURFACE: readonly {
     why: 'Tower layering over the board; the pair it holds is a board-geometry figure.',
   },
   {
+    file: 'packages/perf/src/layering-lint.test.ts',
+    pairs: 0,
+    why: "The lint half of the package-layering guard (#168): ESLint fixtures run against eslint.config.mjs. It asserts import restrictions, not perf figures, so it has nothing for the gate's claim table to guard.",
+  },
+  {
     file: 'packages/perf/src/run.ts',
     pairs: 5,
     why: 'The CLI entry point; its pairs are CI wall-clock timings and plan-step references rather than gate claims.',
