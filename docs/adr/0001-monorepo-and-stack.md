@@ -74,7 +74,10 @@ now hold it — no one of them sufficient, and the third is not a formality:
    a constant specifier — string or no-substitution template literal — is judged by name,
    and a non-constant one is rejected outright (#168). It reads specifiers, never paths.
    The `engine` zone is also an **allowlist** (#168): its sources may import only relative
-   paths and `@noble/hashes`, and its manifest may declare nothing else.
+   paths and `@noble/hashes`, and its manifest's runtime fields (`dependencies`,
+   `peerDependencies`, `optionalDependencies`) may declare nothing else. The one relaxation
+   is for tests: `devDependencies` may also declare the test runner (`vitest`,
+   `@vitest/coverage-v8`), and `*.test.ts` files — only those — may import it.
 2. **At the artifact:** `pnpm run check:build-layering` (#129), which asks the bundler
    rather than the source text — no file the shipped **web** build emits may carry the
    never-shipped modules' markers, so a reach spelled as a relative path, a re-export, a
