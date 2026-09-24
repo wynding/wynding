@@ -43,7 +43,11 @@ beforeAll(async () => {
  *  filtered out, so a fixture is judged only on what these zones say about it. */
 async function restrictions(file: string, code: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, { filePath: join(REPO_ROOT, file) });
-  return (result?.messages ?? [])
+  // A parse error or an ignored-file warning carries a null ruleId and would filter to `[]`,
+  // letting a `toEqual([])` fixture pass without anything having been linted.
+  expect(result, `no lint result for ${file}`).toBeDefined();
+  expect(result!.messages.filter((message) => message.ruleId === null)).toEqual([]);
+  return result!.messages
     .filter((message) => message.ruleId !== null && RESTRICTION_RULES.has(message.ruleId))
     .map((message) => message.message);
 }

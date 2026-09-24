@@ -480,7 +480,13 @@ function check() {
       if (found === null) unmapped.push(where);
       else origins.push(...found.map((origin) => origin ?? '(no source)'));
     }
-    const bound = origins.filter((origin) => origin.startsWith(marker.emittedBy));
+    const bound = origins.filter((origin) =>
+      // A directory binding (trailing '/') owns everything under it; a file binding is exact,
+      // so `stress.ts` does not also claim `stress.tsx`.
+      marker.emittedBy.endsWith('/')
+        ? origin.startsWith(marker.emittedBy)
+        : origin === marker.emittedBy,
+    );
     if (bound.length > 0) bindings.set(marker.text, [...new Set(bound)]);
     else misbound.push({ marker, origins: [...new Set(origins)], unmapped });
   }
