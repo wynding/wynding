@@ -498,8 +498,9 @@ a.wy-home:focus-visible {
      wrapped rows fall) and written as `--wy-dock-max-h`:
 
          room = Stage height − board rows × --wy-cell-floor      the most the reserve may take
-         H(k) = bottom of row k + bottom (safe-area) padding      the Dock showing k rows
-         k    = the most rows with float offset + H(k) ≤ room      (all of them: no bound)
+         H(k) = bottom of row k                                   the bound for k rows
+         k    = the most rows with float offset + bottom inset + H(k) ≤ room
+                                                                  (all of them: no bound)
 
      ROUNDING. The projection FLOORS `height / rows`, so a board 0.4px under 288 is an 11px
      cell: every px the floor was promised has to survive the rounding. The reserve is rounded
@@ -523,8 +524,10 @@ a.wy-home:focus-visible {
      asserts both halves plus the row height itself. Only ONE row may beat the floor; every
      further row scrolls.
 
-     `border-box` makes the bound the RENDERED height, bottom safe-area padding included —
-     under `content-box` that inset would ride on top of it and eat into the board. (It also
+     `border-box` makes the bound the RENDERED height. The bound is only ever written for the
+     scroll form, which carries no bottom padding (the safe-area inset moves to its offset —
+     see THE SCROLL FORM), so it ends exactly at row k's edge and never includes the inset;
+     `dock-reserve.ts` charges the inset to the fit check instead, once. (It also
      makes `max-width` below count the left-inset padding, so on a left-notched device the
      Dock no longer overhangs the Rail by the inset — which is what that rule always said.)
 

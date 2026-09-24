@@ -47,6 +47,10 @@ function rig(opts: {
   offset?: number;
   controls: [number, number][];
   padBottom?: number;
+  /** The bottom safe-area inset, modelled as `ui.css` places it: the unbounded Dock's bottom
+   *  PADDING, which the scroll form (`wy-dock--scroll`) zeroes and adds to its float offset
+   *  instead. Replaces `padBottom`, which stays put in both forms. */
+  inset?: number;
   rows?: number;
   floor?: string | null;
 }): Rig {
@@ -56,14 +60,29 @@ function rig(opts: {
   shell.append(stage, dock);
   document.body.append(shell);
   if (opts.floor !== null) shell.style.setProperty(CELL_FLOOR_TOKEN, opts.floor ?? '12px');
-  const padBottom = opts.padBottom ?? 0;
-  dock.style.paddingBottom = `${padBottom}px`;
+  const inset = opts.inset ?? 0;
+  const scrolled = (): boolean => dock.classList.contains(DOCK_SCROLL_CLASS);
+  const padBottom = (): number => (opts.padBottom ?? 0) + (scrolled() ? 0 : inset);
+  const restyle = (): void => void (dock.style.paddingBottom = `${padBottom()}px`);
+  restyle();
+  // The class is the stylesheet's switch, so every write to it re-applies the padding rule.
+  const classes = dock.classList;
+  for (const method of ['add', 'remove', 'toggle'] as const) {
+    const original = classes[method].bind(classes) as (...args: never[]) => unknown;
+    Object.defineProperty(classes, method, {
+      value: (...args: never[]) => {
+        const out = original(...args);
+        restyle();
+        return out;
+      },
+    });
+  }
   const stageTop = opts.stageTop ?? 0;
   const stageBottom = stageTop + opts.stageHeight;
-  const dockBottom = stageBottom - (opts.offset ?? 8);
-  const natural =
+  const dockBottom = (): number => stageBottom - (opts.offset ?? 8) - (scrolled() ? inset : 0);
+  const natural = (): number =>
     Math.max(0, ...opts.controls.map(([top, h]) => top + h)) +
-    (opts.controls.length ? padBottom : 0);
+    (opts.controls.length ? padBottom() : 0);
   const r: Rig = {
     shell,
     stage,
@@ -74,16 +93,16 @@ function rig(opts: {
   };
   const height = (): number => {
     const max = parseFloat(shell.style.getPropertyValue(DOCK_PROPS.maxHeight));
-    return Number.isFinite(max) ? Math.min(natural, max) : natural;
+    return Number.isFinite(max) ? Math.min(natural(), max) : natural();
   };
-  const dockTop = (): number => dockBottom - height();
+  const dockTop = (): number => dockBottom() - height();
   stage.getBoundingClientRect = () => rect(stageTop, opts.stageHeight);
   dock.getBoundingClientRect = () => rect(dockTop(), height());
   Object.defineProperty(dock, 'scrollTop', {
     get: () => r.scrollTop,
     set: (v: number) => void (r.scrollTop = v),
   });
-  Object.defineProperty(dock, 'scrollHeight', { get: () => natural });
+  Object.defineProperty(dock, 'scrollHeight', { get: () => natural() });
   Object.defineProperty(dock, 'clientHeight', { get: () => height() });
   for (const [top, h] of opts.controls) {
     const b = document.createElement('button');
@@ -148,12 +167,18 @@ describe('chooseDockRows (#152)', () => {
       shown: 2,
       height: 96,
     });
-    // The bottom padding (the safe-area inset) is part of the Dock's rendered height.
+    // The bottom padding (the safe-area inset, measured on the unbounded Dock) is part of the
+    // Stage band the reserve pays for — so it counts in the FIT (8 + 20 + 96 = 124)...
     expect(chooseDockRows({ rows, room: 124, offset: 8, padBottom: 20 })).toEqual({
       shown: 2,
-      height: 116,
+      // ...but never in the BOUND: the scroll form has no bottom padding (the inset moves to
+      // its offset), so a bound of 96 + 20 would show 20 − 8 = 12px of row 3 under it.
+      height: 96,
     });
-    expect(chooseDockRows({ rows, room: 123.9, offset: 8, padBottom: 20 }).shown).toBe(1);
+    expect(chooseDockRows({ rows, room: 123.9, offset: 8, padBottom: 20 })).toEqual({
+      shown: 1,
+      height: 44,
+    });
   });
 
   it('never fewer than one row: the floor exception (owner ruling 2, "control wins")', () => {
@@ -242,6 +267,25 @@ describe('syncDockReserve (#152)', () => {
     syncDockReserve(r, false);
     // Unbounded, the Dock would be 96px tall and the reserve 104.
     expect(prop(r.shell, DOCK_PROPS.reserve)).toBe('52px');
+  });
+
+  it('entering the scroll form with a bottom inset bounds at the row edge, not row edge + inset', () => {
+    // An unbounded Dock of two 44px rows (8px gap) over a 20px inset, on a Stage whose room
+    // (388 − 288 = 100) fits one row's band (8 + 20 + 44 = 72) but not two (8 + 20 + 96 = 124).
+    // The pass starts UNBOUNDED, so it measures the inset as bottom padding — and the scroll form
+    // it switches to has none. A bound of 44 + 20 would show 12px of row 2 for a frame and
+    // reserve 92.
+    const r = rig({ stageHeight: 388, controls: TWO_ROWS, inset: 20 });
+    syncDockReserve(r, false);
+    expect(r.dock.classList.contains(DOCK_SCROLL_CLASS)).toBe(true);
+    expect(prop(r.shell, DOCK_PROPS.maxHeight)).toBe('44px');
+    expect(r.dock.getBoundingClientRect().height).toBe(44); // row 1, whole, and nothing of row 2
+    expect(prop(r.shell, DOCK_PROPS.reserve)).toBe('72px'); // 8 + 20 + 44: the inset once
+    // The next pass reads the scroll form (inset now inside the offset) and writes the same.
+    syncDockReserve(r, false);
+    expect(prop(r.shell, DOCK_PROPS.maxHeight)).toBe('44px');
+    expect(prop(r.shell, DOCK_PROPS.reserve)).toBe('72px');
+    expect(388 - 72).toBeGreaterThanOrEqual(24 * 12);
   });
 
   it('writes ONE row height for every row: the tallest visible control, read at its natural height', () => {

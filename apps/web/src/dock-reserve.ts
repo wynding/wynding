@@ -19,8 +19,17 @@
 // rows of controls, because only a layout pass can see where the wrapped rows fall:
 //
 //   room    = Stage height − board rows × cell floor             the most the reserve may take
-//   H(k)    = bottom of row k + bottom padding                   the Dock showing k whole rows
-//   k       = the most rows with offset + H(k) ≤ room, and never fewer than ONE
+//   H(k)    = bottom of row k                                    the scroll form's bound
+//   k       = the most rows with offset + inset + H(k) ≤ room, and never fewer than ONE
+//
+// THE INSET IS PAID FOR ONCE, WHEREVER IT LIVES. The bottom safe-area inset is the unbounded
+// Dock's bottom PADDING, but the scroll form moves it to the float OFFSET (`ui.css`, THE SCROLL
+// FORM), so a pass measures it as `padBottom` from one state and inside `offset` from the other
+// — their sum is the same Stage band either way, which is what the fit check charges. The
+// BOUND is different: it is only ever written for the scroll form, whose box has no bottom
+// padding, so it ends at row k's edge and never carries the inset. Adding the inset to it — as
+// a pass entering the scroll form from the unbounded Dock once did — let `inset − gap` px of
+// row k+1 show under the bound for a frame, and over-counted the reserve by the inset.
 //
 // ROUNDING (the QC P1 defect). The board is what the Stage has left after the reserve, and the
 // projection FLOORS `height / rows`: a board 0.4px short of 288 is an 11px cell, not a 12px
@@ -139,7 +148,12 @@ export function measureDockRows(dock: HTMLElement): DockRow[] {
 }
 
 /** How many whole rows the Dock may show (see the header): the most whose reserve fits the
- *  room, never fewer than one. `n` rows means no bound at all. Exported for its unit tests. */
+ *  room, never fewer than one. `n` rows means no bound at all. `height` is the scroll form's
+ *  bound for that many rows — row k's bottom edge, with NO bottom padding, because the scroll
+ *  form has none (the inset rides on its offset instead; see THE INSET IS PAID FOR ONCE). The
+ *  fit check still charges `padBottom`: from the unbounded state that is where the inset is
+ *  measured, and from the scroll form it is zero and the inset is inside `offset`. Exported for
+ *  its unit tests. */
 export function chooseDockRows(o: {
   readonly rows: readonly DockRow[];
   readonly room: number;
@@ -148,9 +162,11 @@ export function chooseDockRows(o: {
 }): { readonly shown: number; readonly height: number } {
   const n = o.rows.length;
   if (n === 0) return { shown: 0, height: 0 };
-  const height = (k: number): number => ceil64(o.rows[k - 1]!.bottom + o.padBottom);
+  const height = (k: number): number => ceil64(o.rows[k - 1]!.bottom);
   for (let k = n; k > 1; k--) {
-    if (ceil64(o.offset + height(k)) <= o.room) return { shown: k, height: height(k) };
+    if (ceil64(o.offset + o.padBottom + height(k)) <= o.room) {
+      return { shown: k, height: height(k) };
+    }
   }
   return { shown: 1, height: height(1) };
 }
