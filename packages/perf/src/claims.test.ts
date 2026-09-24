@@ -576,7 +576,7 @@ const OFF_SURFACE: readonly {
   },
   {
     file: 'packages/perf/src/layering-lint.test.ts',
-    pairs: 0,
+    holds: [],
     why: "The lint half of the package-layering guard (#168): ESLint fixtures run against eslint.config.mjs. It asserts import restrictions, not perf figures, so it has nothing for the gate's claim table to guard.",
   },
   {
