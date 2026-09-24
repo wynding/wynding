@@ -563,9 +563,10 @@ a.wy-home:focus-visible {
      cue is decorative to AT — it is a background, not content: every control it points at is a
      native button already in the tab order, which focusing scrolls into view. */
   .wy-shell .wy-dock--scroll {
-    --wy-cue-down: conic-gradient(from -40deg at 50% 100%, var(--wy-accent) 80deg, transparent 0);
-    --wy-cue-up: conic-gradient(from 140deg at 50% 0, var(--wy-accent) 80deg, transparent 0);
-    --wy-cue-track: linear-gradient(var(--wy-accent), var(--wy-accent));
+    --wy-cue-ink: var(--wy-accent);
+    --wy-cue-down: conic-gradient(from -40deg at 50% 100%, var(--wy-cue-ink) 80deg, transparent 0);
+    --wy-cue-up: conic-gradient(from 140deg at 50% 0, var(--wy-cue-ink) 80deg, transparent 0);
+    --wy-cue-track: linear-gradient(var(--wy-cue-ink), var(--wy-cue-ink));
     --wy-cue-x: calc(var(--wy-dock-cue-w) / 2 - 1px);
     bottom: calc(var(--wy-dock-offset) + var(--wy-safe-bottom));
     padding-bottom: 0;
@@ -598,6 +599,22 @@ a.wy-home:focus-visible {
     scroll-snap-align: start;
   }
 
+  /* The cue under FORCED COLORS (#152, round-2 QC). The UA drops authored background images in
+     forced-colors mode, and the cue is one, so it vanished. `forced-color-adjust: none` keeps
+     it on the Dock's own box only — its controls opt back in, so they still take the system
+     palette — and the cue is inked in `CanvasText`, the colour the user's theme puts on its
+     `Canvas`, which is what shows through the Dock's transparent box. */
+  @media (forced-colors: active) {
+    .wy-shell .wy-dock--scroll {
+      --wy-cue-ink: CanvasText;
+      forced-color-adjust: none;
+    }
+
+    .wy-shell .wy-dock--scroll > * {
+      forced-color-adjust: auto;
+    }
+  }
+
   .wy-dock--scroll .wy-btn:focus-visible {
     outline-offset: -3px;
   }
@@ -610,6 +627,19 @@ a.wy-home:focus-visible {
      `padding: 0.25rem` in its fork. */
   .wy-dock .wy-btn {
     padding-block: min(0.5rem, 4px);
+  }
+
+  /* EVERY DOCK ROW IS ONE HEIGHT (#152, round-2 QC). Standard labels may wrap — at 320px wide
+     and 200% text "Call wave" takes two lines and its neighbours one — and the whole-row bound
+     above only holds if every row is as tall as every other: a bound sized to the first k rows
+     would leave slivers at other snap positions, and a row taller than the scrollport could
+     never be whole. `dock-reserve.ts` measures the tallest control's natural height into
+     `--wy-dock-row-h`; as every control's `min-height` it raises the short ones to match, and
+     each flex line is exactly that tall. Wrapping stays allowed — `nowrap` would push a long
+     translation out of the Dock instead. At 100% zoom every control is 44px and nothing
+     changes. `.wy-shell` for specificity: the base `.wy-btn` 44px floor sits below this block. */
+  .wy-shell .wy-dock .wy-btn {
+    min-height: max(44px, var(--wy-dock-row-h, 0px));
   }
 }
 

@@ -244,6 +244,32 @@ describe('syncDockReserve (#152)', () => {
     expect(prop(r.shell, DOCK_PROPS.reserve)).toBe('52px');
   });
 
+  it('writes ONE row height for every row: the tallest visible control, read at its natural height', () => {
+    // 320×640 at 200% after Start: "Call wave" wraps to two lines (86px), its neighbours do
+    // not (49px). A stale, larger value from an earlier pass must not ratchet: it is lifted
+    // before the controls are read.
+    const r = rig({
+      stageHeight: 464,
+      controls: [
+        [0, 49],
+        [57, 86.3],
+        [151, 49],
+        [208, 120],
+      ],
+    });
+    r.buttons[3]!.hidden = true; // a hidden control takes no part
+    let liftedBeforeRead: boolean | undefined; // at the FIRST read, the tallest-control scan
+    const read = r.buttons[1]!.getBoundingClientRect.bind(r.buttons[1]);
+    r.buttons[1]!.getBoundingClientRect = () => {
+      liftedBeforeRead ??= prop(r.shell, DOCK_PROPS.rowHeight) === '';
+      return read();
+    };
+    r.shell.style.setProperty(DOCK_PROPS.rowHeight, '200px');
+    syncDockReserve(r, false);
+    expect(liftedBeforeRead).toBe(true);
+    expect(prop(r.shell, DOCK_PROPS.rowHeight)).toBe(`${ceil64(86.3)}px`);
+  });
+
   it('a Dock that fits carries no bound and no scroll form', () => {
     const r = rig({ stageHeight: 700, controls: TWO_ROWS });
     r.shell.style.setProperty(DOCK_PROPS.maxHeight, '44px'); // stale, from a shorter Stage

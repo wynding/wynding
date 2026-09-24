@@ -313,6 +313,14 @@ const HARDENED: readonly DockCase[] = [
   // leaves these boards 287.6px tall — 11px cells — with no exception to excuse it.
   { width: 540, height: 506, zoom: 90 },
   { width: 360, height: 591, zoom: 90 },
+  // UNEQUAL LABELS (round-2 QC). At phone widths under heavy text zoom a Dock label wraps
+  // ("Call wave", "Speed: 1x" take two lines) while its neighbours do not, so a row can be
+  // nearly twice as tall as the one above it. 320×640 at 200% is in scope twice over: WCAG
+  // 1.4.10 reflow at 320px, and ADR 0003's 200% text commitment.
+  { width: 320, height: 640, zoom: 200 },
+  { width: 320, height: 640, zoom: 250 },
+  { width: 360, height: 640, zoom: 250 },
+  { width: 320, height: 900, zoom: 300 },
 ];
 
 interface Reach {
@@ -348,6 +356,21 @@ async function dockControlReach(page: Page): Promise<Reach[]> {
         };
       }),
   );
+}
+
+/** The no-partial-control claim, allowed to SETTLE first: a focus scroll or a flick is followed
+ *  by a snap, and the claim is about where the scrollport comes to rest. */
+async function assertNoPartialControlOnceSettled(page: Page, when: string): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        (await dockControlReach(page))
+          .filter((c) => c.hits > 0 && c.hits < c.probes)
+          .map((c) => `${c.name}: ${c.hits}/${c.probes}px reachable`),
+      { message: `${when}: Dock controls partly visible at rest` },
+    )
+    .toEqual([]);
+  await assertNoPartialControl(page, when);
 }
 
 /** Owner ruling 1: at rest, every Dock control is wholly reachable or wholly out of sight —
@@ -458,6 +481,8 @@ async function assertTabWalkShowsEachControl(page: Page, phase: string): Promise
       )
       .toMatch(/^(\d+)\/\1$/);
     await expect(control).toBeInViewport({ ratio: 1 });
+    // ...and where the focus scroll comes to rest, no OTHER control is left as a sliver.
+    await assertNoPartialControlOnceSettled(page, `${phase}, Tab stop ${i} ("${name}")`);
   }
 }
 
@@ -465,12 +490,15 @@ async function assertTabWalkShowsEachControl(page: Page, phase: string): Promise
  *  rows carry cue colour at all (the TRACK), and how many near each end are WIDE (≥ 6px across
  *  — a CHEVRON; the 2px track never is). Colour is how the probe finds the cue; the claim is
  *  its shape and its place. */
-async function cuePixels(page: Page): Promise<{ track: number; top: number; bottom: number }> {
+async function cuePixels(
+  page: Page,
+  ink?: readonly number[],
+): Promise<{ track: number; top: number; bottom: number }> {
   const box = (await regionRect(page, 'dock')) as Rect;
   const accent = await page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--wy-accent').trim(),
   );
-  const want = [1, 3, 5].map((i) => parseInt(accent.slice(i, i + 2), 16));
+  const want = ink ?? [1, 3, 5].map((i) => parseInt(accent.slice(i, i + 2), 16));
   const png = PNG.sync.read(await page.screenshot({ scale: 'css' }));
   const isCue = (x: number, y: number): boolean => {
     const i = (png.width * y + x) << 2;
@@ -497,7 +525,7 @@ async function cuePixels(page: Page): Promise<{ track: number; top: number; bott
 /** Owner ruling 1's cue: shown exactly in the scroll form, pointing where rows remain. (A
  *  Dock that does not scroll has no gutter to sample — its last control sits flush with its
  *  right edge — so there the claim is that it paints nothing behind its controls.) */
-async function assertScrollCue(page: Page, phase: string): Promise<void> {
+async function assertScrollCue(page: Page, phase: string, ink?: readonly number[]): Promise<void> {
   const state = await page.locator('.wy-dock').evaluate((el) => ({
     scrolls: el.scrollHeight > el.clientHeight + 1,
     below: el.scrollHeight - el.clientHeight - el.scrollTop > 1,
@@ -509,7 +537,7 @@ async function assertScrollCue(page: Page, phase: string): Promise<void> {
     expect(state.background, `${phase}: a Dock that does not scroll must show no cue`).toBe('none');
     return;
   }
-  const px = await cuePixels(page);
+  const px = await cuePixels(page, ink);
   expect(px.track, `${phase}: the scroll cue's track must run down the gutter`).toBeGreaterThan(
     state.height / 2,
   );
@@ -542,6 +570,16 @@ async function assertPhase(page: Page, c: DockCase, phase: string): Promise<void
   await settle(page);
   await assertNoPartialControl(page, `${phase}, after the Tab walk`);
   await assertScrollCue(page, `${phase}, after the Tab walk`);
+  // The END of the scroll range is a resting place too, and must show whole rows only.
+  const dock = page.locator('.wy-dock');
+  if (await dock.evaluate((el) => el.scrollHeight > el.clientHeight + 1)) {
+    await dock.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+    await settle(page);
+    await assertNoPartialControlOnceSettled(page, `${phase}, at the end of the scroll range`);
+    await assertScrollCue(page, `${phase}, at the end of the scroll range`);
+    await dock.evaluate((el) => el.scrollTo({ top: 0 }));
+    await settle(page);
+  }
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 }
@@ -650,6 +688,36 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     await assertFloorOrException(page, { width: 540, height: 556, zoom: 100 }, 'with an inset');
     await assertNoBuildableCellUnderDock(page);
     await assertTabWalkShowsEachControl(page, 'with a bottom inset');
+  });
+
+  test('540×556 at 100%, forced colors: the scroll cue survives, inked in the system CanvasText', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ forcedColors: 'active' });
+    await gotoCase(page, { width: 540, height: 556, zoom: 100 });
+    expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+    await page.getByRole('button', { name: 'Start', exact: true }).click();
+    await settle(page);
+    const dock = page.locator('.wy-dock');
+    await expect(dock, 'the started Dock must scroll here').toHaveClass(/wy-dock--scroll/);
+    // The colour the user's theme gives CanvasText, resolved by the browser — never assumed.
+    const ink = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'CanvasText';
+      document.body.append(probe);
+      const rgb = getComputedStyle(probe).color.match(/\d+/g)!.slice(0, 3).map(Number);
+      probe.remove();
+      return rgb;
+    });
+    expect(
+      await dock.evaluate((el) => getComputedStyle(el).backgroundImage),
+      'forced colors must not strip the cue',
+    ).not.toBe('none');
+    await assertScrollCue(page, 'forced colors, at the top', ink);
+    await dock.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+    await settle(page);
+    await assertScrollCue(page, 'forced colors, at the end of the range', ink);
+    await assertNoPartialControl(page, 'forced colors');
   });
 
   test('540×556 at 100%: no point of the started Dock reaches a control that is not wholly in view', async ({

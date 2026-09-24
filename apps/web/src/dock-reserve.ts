@@ -35,10 +35,24 @@
 // short for one row and the floor both, the row wins and the board yields — the single floor
 // exception, recorded in `ui.css`.
 //
+// EVERY ROW IS ONE HEIGHT (round-2 QC). A label can wrap — "Call wave" takes two lines at
+// 320px wide and 200% text while its neighbours take one — so left alone a row can be nearly
+// twice the height of the row above it. Then a bound sized to the first k rows is not a bound
+// on any other k rows: a snapped scroll position shows a sliver of the next row, a row taller
+// than the scrollport is never whole, and the end of the range is not a row start. So each
+// pass first measures the tallest control's NATURAL height (with the previous equaliser
+// lifted) and writes it as `--wy-dock-row-h`, which `ui.css` spends as every Standard Dock
+// control's `min-height`: flex lines stretch to their tallest item, so every row is then
+// exactly that tall. With rows of height h and gaps of g, k rows span k·h + (k−1)·g, every
+// snap position is a multiple of h + g, and the range ends at (n − k)(h + g) — itself a row
+// start. Labels of any length keep this: a longer translation raises h for every row alike.
+// Nowrap was the alternative, and would overflow the Dock on a long label instead.
+//
 // A bound of k < n rows is the SCROLL FORM (`wy-dock--scroll`): a vertical scrollport that
 // ends exactly at row k's bottom edge — row k+1 begins a row gap further down, wholly out of
 // sight — and snaps to row starts, so at rest a row is either wholly visible or wholly
-// scrolled out. Its scroll cue is drawn in a gutter beside the rows (`ui.css`), so it costs
+// scrolled out. A single row taller than the room the floor leaves is ruling 2's exception:
+// that one row is shown whole and the board yields. Its scroll cue is drawn in a gutter beside the rows (`ui.css`), so it costs
 // the board no height; `wy-dock--more-below` / `--more-above` say which chevrons it shows.
 //
 // Compact owns none of this: its Dock is an in-flow block in the status COLUMN, a grid track
@@ -58,6 +72,7 @@ export const DOCK_MORE_ABOVE_CLASS = 'wy-dock--more-above';
 export const DOCK_PROPS = {
   reserve: '--wy-dock-reserve',
   maxHeight: '--wy-dock-max-h',
+  rowHeight: '--wy-dock-row-h',
 } as const;
 
 /** The stylesheet token this module READS (on `.wy-shell`, inherited from `:root`): the
@@ -162,6 +177,17 @@ export function syncDockReserve(t: DockReserveTargets, compact: boolean): void {
   const dockCs = view?.getComputedStyle(t.dock);
   const floor = px(shellCs?.getPropertyValue(CELL_FLOOR_TOKEN));
   const padBottom = px(dockCs?.paddingBottom);
+  const style = t.shell.style;
+
+  // One row height for every row (see the header). Lifted first, so the tallest control is
+  // read at its natural height rather than at the height the last pass imposed — a shorter
+  // label (Start coming back, a smaller zoom) must be able to lower it again.
+  style.removeProperty(DOCK_PROPS.rowHeight);
+  let tallest = 0;
+  for (const btn of Array.from(t.dock.children) as HTMLElement[]) {
+    if (!btn.hidden) tallest = Math.max(tallest, btn.getBoundingClientRect().height);
+  }
+  if (tallest > 0) style.setProperty(DOCK_PROPS.rowHeight, `${ceil64(tallest)}px`);
 
   // The float offset — the Stage band below the Dock, which the reserve pays for too. Measured
   // rather than read from `bottom`, so it is whatever the layout really resolved.
@@ -170,7 +196,6 @@ export function syncDockReserve(t: DockReserveTargets, compact: boolean): void {
   const rows = measureDockRows(t.dock);
   const { shown, height } = chooseDockRows({ rows, room, offset, padBottom });
 
-  const style = t.shell.style;
   if (shown < rows.length) {
     style.setProperty(DOCK_PROPS.maxHeight, `${height}px`);
     t.dock.classList.add(DOCK_SCROLL_CLASS);

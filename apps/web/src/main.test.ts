@@ -2785,7 +2785,9 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       h.app.destroy();
       expect(cancelled).toContain(frames.length);
       expect(observer!.disconnected).toBe(true);
-      for (const p of ['--wy-dock-reserve', '--wy-dock-max-h']) expect(prop(p), p).toBe('');
+      for (const p of ['--wy-dock-reserve', '--wy-dock-max-h', '--wy-dock-row-h']) {
+        expect(prop(p), p).toBe('');
+      }
       expect(dock.classList.contains('wy-dock--more-below')).toBe(false);
       // ...and the scroll listener is gone with it.
       dock.classList.add('wy-dock--scroll');
