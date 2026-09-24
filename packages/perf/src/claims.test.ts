@@ -37,7 +37,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { CLAIMS, DEFAULT_SITE_WINDOW, type Claim, type ClaimSite } from './claims';
+import {
+  CLAIMS,
+  DEFAULT_SITE_WINDOW,
+  SCENE_ORACLE_CLAIMS,
+  type Claim,
+  type ClaimSite,
+} from './claims';
 import { R0, TOLERANCE } from './gate';
 
 /** `packages/perf/src/` -> repo root. Sites are repo-relative because claims cross package
@@ -938,6 +944,424 @@ const KNOWN_UNROWED: readonly {
   readonly why: string;
 }[] = [];
 
+/** THE COUNTED CENSUS OF EVERY LOW-INFORMATION VALUE THE SCENE ORACLE'S ROWS HOLD.
+ *
+ *  WHY A ROWED VALUE STILL NEEDS ONE. A row binds its listed SITES, and per-occurrence
+ *  accounting binds every OTHER copy of a rowed value — but only a high-information one (three
+ *  or more decimals, five or more digits). Every figure in the scene oracle's family is below
+ *  that bar. While the family sat in `KNOWN_UNROWED`, each value carried a counted census per
+ *  guarded file, so any copy added, removed or edited went red. Rowing it without keeping that
+ *  census traded a guard over every copy for a guard over the listed ones: appending `1427` to
+ *  `gate.ts` (PR #161's own probe), or restating the spike's "Towers placed **150**" as 151,
+ *  went green (orchestrator QC of #163).
+ *
+ *  So the census stays, in the shape the escape tables use: per file, per value, the number of
+ *  occurrences keyed by `claimKey`, recomputed every run and compared EXACTLY. It is taken over
+ *  `ACCOUNTED_FILES` — the guarded files AND the off-surface sources — which is wider than the
+ *  `KNOWN_UNROWED` census it replaces, so a copy appended to an off-surface file such as
+ *  `scenario.test.ts` changes it too.
+ *
+ *  WHAT IT DOES AND DOES NOT CLAIM. It does not say every counted occurrence is the claim —
+ *  many are collisions (a `150` that is a board count, a `20` that is a table cell). It says the
+ *  set of copies is KNOWN, so a new one, a lost one, or an edited one must be looked at: add it as
+ *  a site of its row if it restates the claim, or re-census if it is a collision. That is the
+ *  same promise `KNOWN_UNROWED` made, kept now that the rows exist.
+ *
+ *  WHICH VALUES: exactly the low-information values of `SCENE_ORACLE_CLAIMS`, asserted both ways,
+ *  so a row added to that family without a census entry fails, and so does a stale entry. */
+const ROWED_CENSUS: readonly {
+  readonly value: string;
+  readonly census: readonly (readonly [file: string, occurrences: number])[];
+}[] = [
+  {
+    value: '150',
+    census: [
+      [G.fixture, 1],
+      [G.oracle, 9],
+      [G.scenario, 5],
+      [G.dotBench, 1],
+      [G.adr, 14],
+      [G.spike, 13],
+      [G.m2, 9],
+      ['packages/perf/src/layout.ts', 19],
+      ['packages/perf/src/oracle-catalog.ts', 1],
+      ['packages/perf/src/oracle-catalog.test.ts', 1],
+      ['packages/perf/src/layout-catalog.test.ts', 1],
+      ['packages/perf/src/harness.ts', 1],
+      ['packages/perf/src/harness.test.ts', 3],
+      ['packages/perf/src/scenario.test.ts', 1],
+      ['packages/perf/src/layout.test.ts', 2],
+    ],
+  },
+  {
+    value: '300',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 3],
+      [G.spike, 3],
+      [G.m2, 11],
+      ['packages/perf/src/layout-catalog.test.ts', 1],
+    ],
+  },
+  {
+    value: '40',
+    census: [
+      [G.oracle, 4],
+      [G.adr, 9],
+      [G.spike, 8],
+      [G.m2, 10],
+      ['packages/perf/src/layout.ts', 8],
+      ['packages/perf/src/oracle-catalog.test.ts', 1],
+    ],
+  },
+  {
+    value: '16',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 3],
+      [G.m2, 11],
+    ],
+  },
+  {
+    value: '12',
+    census: [
+      [G.oracle, 1],
+      [G.scenario, 1],
+      [G.adr, 5],
+      [G.spike, 1],
+      [G.m2, 9],
+      ['packages/perf/src/layout.ts', 4],
+      ['packages/perf/src/oracle-catalog.ts', 1],
+      ['packages/perf/src/layout-catalog.test.ts', 1],
+      ['packages/perf/src/harness.ts', 1],
+      ['packages/perf/src/harness.test.ts', 2],
+    ],
+  },
+  {
+    value: '1800',
+    census: [
+      [G.scenario, 1],
+      [G.adr, 2],
+      ['packages/perf/src/layout.ts', 1],
+    ],
+  },
+  {
+    value: '3',
+    census: [
+      [G.gate, 12],
+      [G.fixture, 4],
+      [G.oracle, 2],
+      [G.scenario, 3],
+      [G.adr, 17],
+      [G.spike, 18],
+      [G.m2, 35],
+      ['packages/perf/src/layout.ts', 6],
+      ['packages/perf/src/oracle-catalog.ts', 1],
+      ['packages/perf/src/oracle-catalog.test.ts', 1],
+      ['packages/perf/src/layering.test.ts', 1],
+      ['packages/perf/src/run.ts', 5],
+      ['packages/perf/src/run-catalog.ts', 2],
+      ['packages/perf/src/harness.test.ts', 1],
+      ['packages/perf/src/scenario.test.ts', 1],
+      ['packages/perf/src/stats.test.ts', 1],
+    ],
+  },
+  {
+    value: '100',
+    census: [
+      [G.gateTest, 1],
+      [G.fixture, 1],
+      [G.oracle, 7],
+      [G.oracleTest, 1],
+      [G.scenario, 2],
+      [G.adr, 3],
+      [G.spike, 6],
+      [G.m2, 4],
+      ['packages/perf/src/layout.ts', 6],
+      ['packages/perf/src/oracle-catalog.ts', 2],
+      ['packages/perf/src/layout-catalog.test.ts', 2],
+      ['packages/perf/src/run-catalog.ts', 1],
+      ['packages/perf/src/harness.ts', 1],
+      ['packages/perf/src/harness.test.ts', 2],
+      ['packages/perf/src/scenario.test.ts', 1],
+      ['packages/perf/src/stats.ts', 1],
+      ['packages/perf/src/stats.test.ts', 4],
+    ],
+  },
+  {
+    value: '20',
+    census: [
+      [G.oracle, 1],
+      [G.dotBench, 1],
+      [G.adr, 5],
+      [G.spike, 8],
+      [G.m2, 16],
+      ['packages/perf/src/layout.ts', 7],
+      ['packages/perf/src/oracle-catalog.ts', 1],
+      ['packages/perf/src/oracle-catalog.test.ts', 9],
+      ['packages/perf/src/layout-catalog.test.ts', 2],
+      ['packages/perf/src/run.ts', 2],
+      ['packages/perf/src/harness.test.ts', 1],
+      ['packages/perf/src/scenario.test.ts', 1],
+    ],
+  },
+  {
+    value: '329',
+    census: [
+      [G.oracle, 8],
+      [G.oracleTest, 5],
+      [G.adr, 8],
+      [G.spike, 14],
+      [G.m2, 4],
+      ['packages/perf/src/layout.ts', 5],
+      ['packages/perf/src/oracle-catalog.ts', 2],
+      ['packages/perf/src/oracle-catalog.test.ts', 1],
+      ['packages/perf/src/run-catalog.ts', 1],
+      ['packages/perf/src/layout.test.ts', 2],
+    ],
+  },
+  {
+    value: '600',
+    census: [
+      [G.oracle, 6],
+      [G.oracleTest, 2],
+      [G.adr, 4],
+      [G.spike, 6],
+      [G.m2, 4],
+      ['packages/perf/src/layout.test.ts', 2],
+    ],
+  },
+  {
+    value: '330',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '459',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '270',
+    census: [
+      [G.fixture, 2],
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 2],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '307',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 2],
+      ['packages/perf/src/layout.ts', 1],
+    ],
+  },
+  {
+    value: '298',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '308',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '80',
+    census: [
+      [G.oracle, 2],
+      [G.adr, 2],
+      [G.spike, 2],
+      [G.m2, 2],
+      ['packages/perf/src/layout.ts', 2],
+    ],
+  },
+  {
+    value: '280',
+    census: [
+      [G.oracle, 1],
+      [G.oracleTest, 1],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '200',
+    census: [
+      [G.oracle, 5],
+      [G.oracleTest, 1],
+      [G.adr, 3],
+      [G.spike, 4],
+      [G.m2, 3],
+      ['packages/perf/src/harness.ts', 1],
+      ['packages/perf/src/harness.test.ts', 1],
+    ],
+  },
+  {
+    value: '2499',
+    census: [
+      [G.oracle, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '2500',
+    census: [
+      [G.fixture, 8],
+      [G.oracle, 1],
+      [G.scenario, 1],
+      [G.adr, 1],
+      [G.spike, 2],
+      [G.m2, 1],
+      ['packages/perf/src/oracle-catalog.ts', 2],
+      ['packages/perf/src/harness.ts', 1],
+      ['packages/perf/src/harness.test.ts', 1],
+      ['packages/perf/src/stats.ts', 1],
+    ],
+  },
+  {
+    value: '2000',
+    census: [
+      [G.oracle, 2],
+      [G.dotBench, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '1427',
+    census: [
+      [G.fixture, 3],
+      [G.adr, 1],
+      [G.spike, 2],
+      [G.m2, 1],
+      ['packages/perf/src/run.ts', 2],
+      ['packages/perf/src/stats.test.ts', 3],
+    ],
+  },
+  {
+    value: '114',
+    census: [
+      [G.oracle, 2],
+      [G.adr, 3],
+      [G.spike, 1],
+      ['packages/perf/src/layout.ts', 1],
+      ['packages/perf/src/oracle-catalog.ts', 1],
+    ],
+  },
+  {
+    value: '400',
+    census: [
+      [G.oracle, 2],
+      [G.adr, 1],
+      [G.m2, 4],
+    ],
+  },
+  {
+    value: '9.2',
+    census: [
+      [G.oracle, 1],
+      [G.oracleTest, 1],
+    ],
+  },
+  {
+    value: '15',
+    census: [
+      [G.fixture, 1],
+      [G.scenario, 1],
+      [G.adr, 4],
+      [G.spike, 7],
+      [G.m2, 15],
+      ['packages/perf/src/layout.ts', 10],
+      ['packages/perf/src/oracle-catalog.test.ts', 5],
+      ['packages/perf/src/layout-catalog.test.ts', 1],
+      ['packages/perf/src/scenario.test.ts', 1],
+    ],
+  },
+  {
+    value: '165',
+    census: [
+      [G.scenario, 4],
+      [G.adr, 3],
+      [G.m2, 2],
+      ['packages/perf/src/layout.ts', 5],
+      ['packages/perf/src/oracle-catalog.ts', 3],
+      ['packages/perf/src/oracle-catalog.test.ts', 1],
+      ['packages/perf/src/scenario.test.ts', 1],
+    ],
+  },
+  {
+    value: '55',
+    census: [
+      [G.scenario, 1],
+      [G.adr, 1],
+      ['packages/perf/src/layout.ts', 1],
+      ['packages/perf/src/oracle-catalog.ts', 2],
+      ['packages/perf/src/oracle-catalog.test.ts', 1],
+      ['packages/perf/src/scenario.test.ts', 1],
+    ],
+  },
+  {
+    value: '28.6',
+    census: [
+      [G.scenario, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '19.2',
+    census: [
+      [G.scenario, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '0.2',
+    census: [
+      [G.gateTest, 1],
+      [G.adr, 2],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '0.99',
+    census: [
+      [G.fixture, 1],
+      [G.adr, 5],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '25',
+    census: [
+      [G.fixture, 1],
+      [G.adr, 6],
+      [G.spike, 2],
+      [G.m2, 9],
+      ['packages/perf/src/layout.ts', 2],
+    ],
+  },
+];
+
 const EXCLUDED = new Set(CONTRACT_EXCLUSIONS.map((e) => e.value));
 
 /** ONE CENSUS VOCABULARY, because both escape tables now record the same thing and a second
@@ -1664,9 +2088,13 @@ function gapValues(sources: readonly string[], guarded: readonly string[]): stri
  *  new copy of a value already listed changes the census rather than hiding in it. A joined
  *  gap the file does not itself state (one it merely inherits from the baseline) is not
  *  something it holds, and is left out. */
-function heldGapValues(file: string): (readonly [value: string, occurrences: number])[] {
+function heldGapValues(
+  file: string,
+  sources: readonly string[] = PERF_SOURCES,
+  guarded: readonly string[] = GUARDED_FILES,
+): (readonly [value: string, occurrences: number])[] {
   const mine = occurrences(file);
-  return gapValues([...PERF_SOURCES, file], [...GUARDED_FILES, file])
+  return gapValues([...sources, file], [...guarded, file])
     .map((v) => [v, mine.filter((n) => claimKey(n.value) === claimKey(v)).length] as const)
     .filter(([, n]) => n > 0);
 }
@@ -1939,6 +2367,70 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // the excused figure away and the exception stayed "used", still armed to suppress a future
   // unlisted occurrence of that value after the same phrase (Codex). Stale exceptions are rot,
   // and this table's whole claim is that its holes are named and current.
+  // THE SCENE ORACLE'S ROWS KEEP THE CENSUS `KNOWN_UNROWED` HELD — see `ROWED_CENSUS`. Every
+  // value in that family is below the accounting half's information bar, so without this an
+  // unlisted copy of a rowed value in any guarded file could be added or edited in silence.
+  it('keeps a counted census of every low-information scene-oracle value', () => {
+    const family = new Set(
+      SCENE_ORACLE_CLAIMS.filter((c) => !highInformation(c.value)).map((c) => claimKey(c.value)),
+    );
+    const listed = ROWED_CENSUS.map((e) => claimKey(e.value));
+    expect(new Set(listed).size, 'ROWED_CENSUS lists a value twice').toBe(listed.length);
+    expect(
+      [...listed].sort(),
+      'ROWED_CENSUS must list exactly the low-information values of SCENE_ORACLE_CLAIMS — a ' +
+        'family row without a census leaves its unlisted copies unguarded, and an entry with ' +
+        'no row is stale',
+    ).toEqual([...family].sort());
+
+    const mismatches: string[] = [];
+    for (const e of ROWED_CENSUS) {
+      const key = claimKey(e.value);
+      const census = ACCOUNTED_FILES.map(
+        (f) => [f, occurrences(f).filter((n) => claimKey(n.value) === key).length] as const,
+      ).filter(([, n]) => n > 0);
+      if (!sameCensus(census, e.census)) {
+        mismatches.push(
+          `  "${e.value}": recorded ${fmtCensus(e.census)}\n            but found ${fmtCensus(census)}`,
+        );
+      }
+    }
+    expect(
+      mismatches,
+      `these scene-oracle values have gained, lost or changed a copy. Each is below the ` +
+        `accounting bar, so the census is the only thing that sees an unlisted copy. If the ` +
+        `copy restates the claim, add it as a site of its row; if it is a collision, re-census ` +
+        `the entry:\n${mismatches.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  // BOTH ARMS OF `heldGapValues`, on a synthetic world, because since #163 the real guarded set
+  // has no acknowledged gap left for the second arm to meet. `ack` is a cross-file gap BEFORE
+  // the off-surface file joins (the kind `KNOWN_UNROWED` would list); `new` exists only because
+  // the file joins. The old by-value subtraction saw `new` and never `ack`.
+  it('counts both a value the file introduces and further copies of an acknowledged one', () => {
+    const src = 'fixture/held/src.md';
+    const doc = 'fixture/held/doc.md';
+    const off = 'fixture/held/off.md';
+    const offMore = 'fixture/held/off-more.md';
+    fileCache.set(src, 'the source states 7777 and 8888.\n');
+    fileCache.set(doc, 'the document restates 7777.\n');
+    fileCache.set(off, 'the off-surface file says 8888, and 7777 once.\n');
+    fileCache.set(offMore, 'the off-surface file says 8888, and 7777 once, and 7777 again.\n');
+
+    expect(gapValues([src], [src, doc]), 'the acknowledged baseline').toEqual(['7777']);
+    expect(heldGapValues(off, [src], [src, doc])).toEqual([
+      ['7777', 1],
+      ['8888', 1],
+    ]);
+    // A further copy of the ACKNOWLEDGED value — invisible to a by-value difference — changes
+    // the census.
+    expect(heldGapValues(offMore, [src], [src, doc])).toEqual([
+      ['7777', 2],
+      ['8888', 1],
+    ]);
+  });
+
   it('excuses exactly the occurrences it was written for, and no more', () => {
     for (const e of OCCURRENCE_EXCEPTIONS) {
       const raw = read(e.file);

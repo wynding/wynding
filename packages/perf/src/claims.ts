@@ -135,8 +135,14 @@ const SCENARIO = 'packages/perf/src/scenario.ts';
 const SCENARIO_TEST = 'packages/perf/src/scenario.test.ts';
 const DOT_BENCH = 'packages/perf/src/dot-bench.ts';
 const M2 = 'docs/milestones/m2.md';
+const HARNESS = 'packages/perf/src/harness.ts';
+/** Outside the perf package, because a few scene-oracle rows rest on a constant another
+ *  package declares. Both are listed in `@wynding/perf#test`'s turbo `inputs` for the same
+ *  reason the documents are: an edit there must bust this task's cache. */
+const STRESS_RULESET = 'packages/content/src/rulesets/stress-40x40.json';
+const GAME_LOOP = 'packages/engine/src/game-loop.ts';
 
-export const CLAIMS: readonly Claim[] = [
+const GATE_CLAIMS: readonly Claim[] = [
   // ---------------------------------------------------------------------------------------
   // THE GATE'S COMMITTED CONSTANTS
   // ---------------------------------------------------------------------------------------
@@ -1998,7 +2004,14 @@ export const CLAIMS: readonly Claim[] = [
       { file: SPIKE, anchor: 'the instrumented ', pattern: '([\\d.]+) s' },
     ],
   },
+];
 
+/** THE SCENE ORACLE'S FAMILY, as its own list because it carries a duty the gate's rows do not:
+ *  every low-information value here also has a COUNTED CENSUS in `claims.test.ts`
+ *  (`ROWED_CENSUS`), since per-occurrence accounting only reaches high-information numerals and
+ *  every figure in this family is below that bar. `claims.test.ts` asserts the census covers
+ *  exactly this list's low-information values, so a row added here without one fails. */
+export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
   // ---------------------------------------------------------------------------------------
   // THE SCENE ORACLE'S FAMILY (#163) — the stress scene's measured and derived facts, stated
   // in `oracle.ts` (and its neighbours `scenario.ts` and `gate-fixture.test.ts`) and copied
@@ -2048,6 +2061,23 @@ export const CLAIMS: readonly Claim[] = [
         file: M2,
         anchor: 'Every other oracle assertion cleared:\\s*\\n\\s*\\d+/',
         pattern: '^(\\d+) placements',
+      },
+      { file: SPIKE, anchor: 'Towers placed \\*\\*', pattern: '^(\\d+)\\*\\*' },
+      { file: SPIKE, anchor: 'CONTROL run — phase,', pattern: '^\\s*(\\d+) towers' },
+      {
+        file: ADR,
+        anchor: 'roughly 1\\.25 applications per tick against',
+        pattern: '^\\s*(\\d+) towers',
+      },
+      {
+        file: ADR,
+        anchor: 'The existing scene runs that loop',
+        pattern: '^\\s*(\\d+) towers deep',
+      },
+      {
+        file: M2,
+        anchor: 'peak 304 concurrent creeps, median 224,',
+        pattern: '^\\s*(\\d+) towers',
       },
     ],
   },
@@ -2139,6 +2169,9 @@ export const CLAIMS: readonly Claim[] = [
         anchor: "breaks the scene's second oracle\\*\\* — the `150 ×",
         pattern: '^\\s*(\\d+) =',
       },
+      { file: STRESS_RULESET, anchor: '"id": "stress-blast",', pattern: '^\\s*"cost": (\\d+),' },
+      { file: STRESS_RULESET, anchor: '"id": "stress-chill",', pattern: '^\\s*"cost": (\\d+),' },
+      { file: STRESS_RULESET, anchor: '"id": "stress-venom",', pattern: '^\\s*"cost": (\\d+),' },
     ],
   },
   {
@@ -2155,6 +2188,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: "breaks the scene's second oracle\\*\\* — the `150 × 12 =",
         pattern: '^\\s*(\\d+) ==',
       },
+      { file: STRESS_RULESET, anchor: '"startingBounty":', pattern: '^\\s*(\\d+),' },
     ],
   },
   {
@@ -2231,6 +2265,7 @@ export const CLAIMS: readonly Claim[] = [
         pattern: '^\\s*(\\d+)-tick countdown',
       },
       { file: SPIKE, anchor: 'the rest of the', pattern: '^\\s*(\\d+)-tick\\s' },
+      { file: STRESS_RULESET, anchor: '"countdownTicks":', pattern: '^\\s*(\\d+),' },
     ],
   },
   {
@@ -2251,6 +2286,7 @@ export const CLAIMS: readonly Claim[] = [
       { file: SPIKE, anchor: '\\(200 expected at', pattern: '^\\s*(\\d+) Hz' },
       { file: SPIKE, anchor: '~200 expected at', pattern: '^\\s*(\\d+) Hz' },
       { file: M2, anchor: 'the sim held its', pattern: '^\\s*(\\d+) Hz cadence' },
+      { file: GAME_LOOP, anchor: 'Default simulation cadence:', pattern: '^\\s*(\\d+) Hz' },
     ],
   },
 
@@ -2283,6 +2319,20 @@ export const CLAIMS: readonly Claim[] = [
         pattern: '^(\\d+)\\*\\*',
       },
       { file: M2, anchor: "The stress scene's route is", pattern: '^\\s*(\\d+) cells' },
+      { file: ORACLE, anchor: '`ROUTE_LENGTH_FLOOR` \\(', pattern: '^(\\d+),' },
+      { file: ADR, anchor: '175 DoT records,\\s*\\n\\s*route length', pattern: '^\\s*(\\d+)\\)' },
+      {
+        file: ADR,
+        anchor: 'the scripted route is still exactly\\s*\\n\\*\\*',
+        pattern: '^(\\d+)\\*\\*',
+      },
+      { file: SPIKE, anchor: '\\| Route length\\s+\\| \\*\\*', pattern: '^(\\d+) cells' },
+      {
+        file: SPIKE,
+        anchor: 'Route length is \\*\\*one\\*\\* un-waivable assertion at the measured',
+        pattern: '^\\s*(\\d+),',
+      },
+      { file: M2, anchor: 'un-waivable route assertion at', pattern: '^\\s*(\\d+) with' },
     ],
   },
   {
@@ -2549,6 +2599,12 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'due-blast samples \\(floor 500\\),',
         pattern: '^\\s*([\\d,]+) qualifying',
       },
+      { file: HARNESS, anchor: 'export const SAMPLE_TICKS =', pattern: '^\\s*([\\d_]+);' },
+      {
+        file: HARNESS,
+        anchor: 'The sustained sampling window: ticks 200\\.\\.2699 \\(',
+        pattern: '^([\\d,]+) ticks',
+      },
     ],
   },
   {
@@ -2598,6 +2654,11 @@ export const CLAIMS: readonly Claim[] = [
         pattern: '^([\\d,]+)\\)',
       },
       { file: M2, anchor: '\\(floor 100\\), \\*\\*', pattern: '^([\\d,]+)\\*\\*' },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'a 0\\.12% margin \\(0\\.21% at\\s*\\n// n =',
+        pattern: '^\\s*([\\d,]+),',
+      },
     ],
   },
 
@@ -2671,6 +2732,7 @@ export const CLAIMS: readonly Claim[] = [
         anchor: 'The oracle now carries',
         pattern: '^\\s*\\*\\*(\\d+)\\*\\* rows on the stress arm',
       },
+      { file: ADR, anchor: 'p99 0\\.726 ms\\)\\. All', pattern: '^\\s*(\\d+) stress-arm' },
     ],
   },
   {
@@ -2710,6 +2772,13 @@ export const CLAIMS: readonly Claim[] = [
         pattern: '^\\s*(\\d+) placements',
       },
       { file: M2, anchor: 'towers hold \\*\\*==', pattern: '^\\s*(\\d+) across' },
+      {
+        file: SCENARIO,
+        anchor: 'scenes \\(150 anchors\\) and the catalog scene\\s+\\*\\s+\\(',
+        pattern: '^(\\d+) placements',
+      },
+      { file: ADR, anchor: 'the ten detonations \\(', pattern: '^(\\d+) →' },
+      { file: M2, anchor: 'the ten detonations \\(', pattern: '^(\\d+) →' },
     ],
   },
   {
@@ -2885,3 +2954,6 @@ export const CLAIMS: readonly Claim[] = [
     ],
   },
 ];
+
+/** Every row, gate and scene oracle alike — what the resolver, the sweep and the accounting read. */
+export const CLAIMS: readonly Claim[] = [...GATE_CLAIMS, ...SCENE_ORACLE_CLAIMS];
