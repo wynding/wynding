@@ -64,7 +64,10 @@
 // every marker below must be found in `dist-perf` — the perf-only build, whose two entry
 // points (`apps/web/perf/main-perf.ts`, `main-perf-catalog.ts`) import all three forbidden
 // modules on purpose. That build is this check's positive control, and a marker missing from
-// it fails the run just as loudly as a marker found in `dist`.
+// it fails the run just as loudly as a marker found in `dist`. Presence alone is not the whole
+// control, though: a marker must also be EMITTED BY the module it is bound to, read off the
+// perf build's sourcemaps (`emittedBy` in the table below, #168), or a string with a second
+// carrier keeps leg 1 green after the perf build has stopped reaching the module at all.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -88,30 +91,60 @@ const FORBIDDEN_MODULES = ['@wynding/perf', '@wynding/content/stress', '@wynding
 // Markers are chosen from what is provably unique to the forbidden artifacts — verified in
 // both directions when this check was written: each is present in `dist-perf` (asserted below
 // on every run, so it stays true) and absent from `dist`/`dist-host`.
+//
+// `emittedBy` BINDS A MARKER TO THE MODULE THAT MUST EMIT IT (#168), and presence alone was
+// not enough. Leg 1 used to ask only "is this string somewhere in `dist-perf`?", and two of
+// the three markers for the perf arm had a second carrier: `wy:window:start` is emitted by the
+// perf ENTRIES (`apps/web/perf/**`), not by `@wynding/perf`, and `stress-blast` is also a tower
+// id inside the stress ruleset JSON that `@wynding/content/stress` inlines. So if both perf
+// entries stopped importing `@wynding/perf`, every marker would still be found and leg 1 would
+// go on certifying a positive control that no longer reached the module it controls for —
+// while `module` sat in the table feeding only the coverage count. Now a marker with an
+// `emittedBy` passes leg 1 only if at least one occurrence of it in the perf build's emitted
+// JavaScript MAPS BACK, through that chunk's sourcemap, to a source file under `emittedBy`.
+// `assertMarkerTableIntact` also requires every forbidden module to own at least one marker
+// whose `emittedBy` lies inside that module (its package directory, or for a subpath the exact
+// file its `exports` entry names), so removing the `@wynding/perf` import from the perf
+// entries fails leg 1: `stress-blast` then survives only in the base64 ruleset, which maps to
+// nothing, and `packages/perf/src/layout.ts` emits nothing.
+//
+// `emittedBy: null` is a marker that cannot be bound this way, and says why in `unbound`:
+// `cat-heavy` lives only in the emitted ruleset ASSET, which has no sourcemap. It is still
+// required to be present (leg 1) and absent (leg 2) — it simply cannot carry the binding.
 const MARKERS = [
   {
     text: 'stress-40x40',
     module: '@wynding/content/stress',
+    emittedBy: 'packages/content/src/stress.ts',
     why: "the stress bundle's ruleset id and board id (packages/content/src/stress.ts), which is also the `rulesetId` inside stress-40x40.json and the name that file is emitted under",
   },
   {
     text: 'catalog-40x40',
     module: '@wynding/content/catalog',
+    emittedBy: 'packages/content/src/catalog.ts',
     why: "the catalog bundle's ruleset id and board id (packages/content/src/catalog.ts), likewise its own `rulesetId` and emitted asset name",
   },
   {
     text: 'stress-blast',
     module: '@wynding/perf',
+    emittedBy: 'packages/perf/src/layout.ts',
     why: "a tower id that exists only in the stress bundle and in @wynding/perf's `towerIdAt` placement table (packages/perf/src/layout.ts) — the sentinel for perf MODULE CODE reaching a chunk, since a string literal survives minification where an identifier does not",
   },
   {
     text: 'cat-heavy',
     module: '@wynding/content/catalog',
+    emittedBy: null,
+    unbound:
+      'found only in the emitted catalog ruleset asset (a .json with no sourcemap), so no emitted position can be attributed to a source module',
     why: 'a creep id unique to the catalog bundle — catches the catalog ruleset JSON reaching the shipped output as an emitted or inlined asset even when no id constant ships beside it',
   },
   {
     text: 'wy:window:start',
     module: '@wynding/perf',
+    // The perf ENTRIES, not the package: the mark is a `performance.mark` call in both
+    // `main-perf.ts` and `main-perf-catalog.ts`. That is exactly why it cannot be the
+    // `@wynding/perf` arm's binding — `stress-blast` is.
+    emittedBy: 'apps/web/perf/',
     why: "the sampling-window trace mark emitted by the perf-only browser entries (apps/web/perf/**) — the sentinel for #129's probes 4 and 5, an app-internal reach at `../perf/main-perf` or the Vite root-relative `/perf/main-perf`",
   },
 ];
@@ -188,6 +221,9 @@ function scannableText(file) {
 // the source text of `oracle-catalog.ts` rather than anything emitted. Rename the creep id in
 // the ruleset JSON, leave the identifier in that source file, and the old check stayed green
 // forever on text no build can ship. All five markers still pass with maps excluded.
+// (The `emittedBy` binding below does open the perf build's maps, but only to ATTRIBUTE an
+// occurrence already found in emitted code — it reads `mappings` and `sources`, never
+// `sourcesContent`, so a map still cannot make a marker count as present.)
 const EMITTED = (file) => !file.endsWith('.map');
 
 /** Every marker found in `dir`, with the emitted files each was found in. */
@@ -203,6 +239,103 @@ function markersIn(dir) {
     }
   }
   return found;
+}
+
+// --- Sourcemap attribution (leg 1's `emittedBy` binding) ---------------------------------
+// A minimal Source Map v3 reader: decode `mappings` (base64 VLQ) into per-line segments, then
+// attribute a generated position to the source of the last segment at or before it. Written
+// here rather than imported because no sourcemap library is a declared dependency of the repo
+// root, and this is thirty lines against a stable, fifteen-year-old format.
+const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** `mappings` -> one array per generated line of `[generatedColumn, sourceIndex]` pairs,
+ *  ascending by column. Segments with no source (length 1) are kept as `[column, -1]` so a
+ *  position after one is attributed to NOTHING rather than to the previous source. */
+function decodeMappings(mappings) {
+  const lines = [];
+  // Only the source index is needed; line, column and name deltas are decoded and ignored.
+  let source = 0;
+  for (const line of mappings.split(';')) {
+    const segments = [];
+    let column = 0;
+    for (const segment of line === '' ? [] : line.split(',')) {
+      const fields = [];
+      let value = 0;
+      let shift = 0;
+      for (const char of segment) {
+        const digit = BASE64.indexOf(char);
+        if (digit === -1) fail(`malformed sourcemap: '${char}' is not a base64 VLQ digit`);
+        value += (digit & 31) * 2 ** shift;
+        if (digit & 32) {
+          shift += 5;
+        } else {
+          fields.push(value % 2 === 1 ? -((value - 1) / 2) : value / 2);
+          value = 0;
+          shift = 0;
+        }
+      }
+      column += fields[0];
+      if (fields.length >= 4) {
+        source += fields[1];
+        segments.push([column, source]);
+      } else {
+        segments.push([column, -1]);
+      }
+    }
+    lines.push(segments);
+  }
+  return lines;
+}
+
+/** For every occurrence of `text` in an emitted JS `file`, the repo-relative source module its
+ *  sourcemap attributes it to (or `null` when the position maps to no source). Returns `null`
+ *  outright when the file has no sibling `.map` — the caller reports that, because an
+ *  unattributable chunk is a reason leg 1 cannot bind, not a reason it passes. */
+function originsOf(file, text) {
+  const mapFile = `${file}.map`;
+  if (!existsSync(mapFile)) return null;
+  const map = JSON.parse(readFileSync(mapFile, 'utf8'));
+  const lines = decodeMappings(map.mappings);
+  const base = join(dirname(mapFile), map.sourceRoot ?? '');
+  const sources = map.sources.map((source) =>
+    relative(REPO_ROOT, join(base, source)).split(sep).join('/'),
+  );
+  const origins = [];
+  readAll(file)
+    .split('\n')
+    .forEach((line, lineIndex) => {
+      for (let at = line.indexOf(text); at !== -1; at = line.indexOf(text, at + 1)) {
+        let owner = -1;
+        for (const [column, source] of lines[lineIndex] ?? []) {
+          if (column > at) break;
+          owner = source;
+        }
+        origins.push(owner === -1 ? null : (sources[owner] ?? null));
+      }
+    });
+  return origins;
+}
+
+/** Where a forbidden module LIVES in the repo, derived from its package's `exports` map so the
+ *  binding below cannot name a file the package does not actually export. A bare package name
+ *  owns its whole package directory (its code is spread across many files, and tree-shaking
+ *  decides which ship); a subpath owns exactly the file its `exports` entry points at. */
+function moduleHome(specifier) {
+  const [scope, name, ...rest] = specifier.split('/');
+  if (scope !== '@wynding' || name === undefined || name === '') {
+    fail(`cannot place ${specifier}: FORBIDDEN_MODULES may name only @wynding/* packages.`);
+  }
+  const packageDir = `packages/${name}`;
+  if (rest.length === 0) return `${packageDir}/`;
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, packageDir, 'package.json'), 'utf8'));
+  const target = manifest.exports?.[`./${rest.join('/')}`];
+  if (typeof target !== 'string') {
+    fail(
+      `${specifier} is in FORBIDDEN_MODULES but ${packageDir}/package.json exports no ` +
+        `'./${rest.join('/')}' string entry — the table names a module that does not exist.`,
+    );
+  }
+  return `${packageDir}/${target.replace(/^\.\//, '')}`;
 }
 
 /** The entry file each build must have produced. Its absence means the build wrote somewhere
@@ -259,6 +392,36 @@ function assertMarkerTableIntact() {
         'is unguarded, and this check would still report a pass.',
     );
   }
+  // EVERY BINDING IS DECLARED, AND EVERY FORBIDDEN MODULE OWNS ONE (#168). A marker must either
+  // name the source that emits it or say why it cannot, so a new row cannot silently opt out of
+  // the binding by omission. And coverage is counted over BOUND markers inside each module's own
+  // home: a module represented only by markers another module emits (the perf arm, before this)
+  // is one whose positive control can go vacuous with every string still present.
+  const undeclared = MARKERS.filter(
+    (marker) =>
+      !(typeof marker.emittedBy === 'string' && marker.emittedBy !== '') &&
+      !(marker.emittedBy === null && typeof marker.unbound === 'string'),
+  );
+  if (undeclared.length > 0) {
+    fail(
+      `marker(s) ${undeclared.map((marker) => marker.text).join(', ')} declare neither an ` +
+        '`emittedBy` source nor `emittedBy: null` with an `unbound` reason. Bind each marker to ' +
+        'the module that must emit it, or say why it cannot be bound.',
+    );
+  }
+  const unowned = FORBIDDEN_MODULES.filter((module) => {
+    const home = moduleHome(module);
+    return !MARKERS.some(
+      (marker) => marker.module === module && marker.emittedBy?.startsWith(home) === true,
+    );
+  });
+  if (unowned.length > 0) {
+    fail(
+      `${unowned.join(', ')} has no marker bound to its own source (${unowned.map(moduleHome).join(', ')}). ` +
+        "Leg 1 would then prove only that SOMETHING emits that module's markers, which is how " +
+        'the perf arm went vacuous-capable (#168). Give it a marker whose `emittedBy` lies inside it.',
+    );
+  }
   // EVERY DIRECTORY THIS RUN WILL SCAN NEEDS AN `ENTRY` ROW, and this is a table invariant, so
   // it is asserted here — before either build — rather than lazily inside `requireBuilt`, where
   // a missing row surfaced as "does not exist after the build above" and blamed the build for a
@@ -302,13 +465,58 @@ function check() {
         'is unique in the current output) or the perf build stopped reaching that module.',
     );
   }
+  // --- Leg 1, bound: and each must be emitted by the module it is bound to (#168) ----------
+  // Presence above proves a string is in the forbidden build; this proves WHO put it there.
+  // Only emitted JavaScript can be attributed (assets carry no sourcemap), so a bound marker
+  // needs at least one occurrence in a `.js` chunk whose sourcemap maps it under `emittedBy`.
+  const bindings = new Map();
+  const misbound = [];
+  for (const marker of MARKERS.filter((candidate) => candidate.emittedBy !== null)) {
+    const origins = [];
+    const unmapped = [];
+    for (const where of forbiddenHits.get(marker.text) ?? []) {
+      if (!where.endsWith('.js')) continue;
+      const found = originsOf(join(REPO_ROOT, ...where.split('/')), marker.text);
+      if (found === null) unmapped.push(where);
+      else origins.push(...found.map((origin) => origin ?? '(no source)'));
+    }
+    const bound = origins.filter((origin) => origin.startsWith(marker.emittedBy));
+    if (bound.length > 0) bindings.set(marker.text, [...new Set(bound)]);
+    else misbound.push({ marker, origins: [...new Set(origins)], unmapped });
+  }
+  if (misbound.length > 0) {
+    fail(
+      `these markers are present in apps/web/${FORBIDDEN_DIR} but NOT emitted by the module ` +
+        'they are bound to:\n\n' +
+        misbound
+          .map(
+            ({ marker, origins, unmapped }) =>
+              `  - ${marker.text} (bound to ${marker.emittedBy}, guarding ${marker.module})\n` +
+              `      emitted by: ${origins.length > 0 ? origins.join(', ') : 'no attributable JS occurrence'}` +
+              (unmapped.length > 0 ? `\n      no sourcemap for: ${unmapped.join(', ')}` : ''),
+          )
+          .join('\n') +
+        '\n\nThe string survives from some OTHER carrier, so this positive control no longer ' +
+        'proves the perf build reaches the module it guards — most likely an entry under ' +
+        'apps/web/perf/ stopped importing it. Restore the import, or re-bind the marker to the ' +
+        'module that genuinely emits it now. (If "no sourcemap" is listed, vite.perf.config.ts ' +
+        'must keep `sourcemap: true`: the binding reads it.)',
+    );
+  }
   console.log(
     `\ncheck:build-layering — ${String(MARKERS.length)} markers, all present in the forbidden ` +
       `build (apps/web/${FORBIDDEN_DIR}):`,
   );
   for (const marker of MARKERS) {
     const where = forbiddenHits.get(marker.text) ?? [];
-    console.log(`  ${marker.text} — ${String(where.length)} emitted file(s): ${where.join(', ')}`);
+    const binding =
+      marker.emittedBy === null
+        ? `unbound (${marker.unbound})`
+        : `emitted by ${(bindings.get(marker.text) ?? []).join(', ')}`;
+    console.log(
+      `  ${marker.text} — ${String(where.length)} emitted file(s): ${where.join(', ')}\n` +
+        `      ${binding}`,
+    );
   }
 
   // --- Leg 2: and they must be nowhere in the shipped output -----------------------------
