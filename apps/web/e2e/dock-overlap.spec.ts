@@ -293,8 +293,9 @@ interface DockCase {
   readonly banner?: boolean;
   readonly coarse?: boolean;
   /** Owner ruling 2's single floor exception is EXPECTED here: the Stage is too short for one
-   *  whole Dock row and the board's floor both, so the row wins. Every other case must NOT
-   *  meet the exception's condition — the test proves the condition, not just the outcome. */
+   *  whole Dock row — at the uniform, tallest-control height (owner ruling, 2026-09-24) — and
+   *  the board's floor both, so the row wins. Every other case must NOT meet the exception's
+   *  condition — the test proves the condition, not just the outcome. */
   readonly exception?: boolean;
 }
 
@@ -321,6 +322,12 @@ const HARDENED: readonly DockCase[] = [
   { width: 320, height: 640, zoom: 250 },
   { width: 360, height: 640, zoom: 250 },
   { width: 320, height: 900, zoom: 300 },
+  // THE EXCEPTION ON AN ORDINARY PHONE (owner ruling, 2026-09-24: "one full Dock row" is the
+  // TALLEST control's row). At 320px and 200% text a wrapped two-line label sets every row's
+  // height (86px, measured 2026-09-24, before and after Start), one such row no longer fits
+  // beside the 12px floor, and the row wins: the board drops to 11px rows. Accepted, not a
+  // defect — and the exception's condition, not just its outcome, is asserted in both phases.
+  { width: 320, height: 560, zoom: 200, exception: true },
 ];
 
 interface Reach {
@@ -456,6 +463,58 @@ async function assertFloorOrException(page: Page, c: DockCase, phase: string): P
   ).toBeGreaterThanOrEqual(Math.min(CELL_PX_MIN, Math.floor(g.boardW / GRID.cols)));
 }
 
+/** The owner's reading of "one full Dock row" (2026-09-24): the row is as tall as the TALLEST
+ *  visible control, and no taller. `assertFloorOrException` takes its row from the rendered
+ *  (equalised) layout, so an inflated row height would read there as the floor exception and
+ *  pass; this oracle pins that height independently of the code that writes it.
+ *
+ *  Each visible control's NATURAL height is measured with the equaliser switched off on the
+ *  control itself — an inline `min-height: 0` and `align-self: flex-start`, both `!important`,
+ *  so neither the row-height `min-height` nor the flex line's stretch can reach it — and all of
+ *  it is restored inside the same task, so no frame ever renders the probe. The expected row is
+ *  ADR 0003's 44px target floor or the tallest natural control, whichever is taller; every
+ *  visible control must render at exactly that height (one layout unit of rounding), and so
+ *  must the `--wy-dock-row-h` handed to the stylesheet. */
+async function assertRowHeightIsTallestControl(page: Page, phase: string): Promise<void> {
+  const m = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll<HTMLElement>('.wy-dock .wy-btn')].filter(
+      (el) => !el.hidden && el.getClientRects().length > 0,
+    );
+    const rendered = btns.map((el) => ({
+      name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '',
+      height: el.getBoundingClientRect().height,
+    }));
+    const saved = btns.map((el) => el.style.cssText);
+    for (const el of btns) {
+      el.style.setProperty('min-height', '0', 'important');
+      el.style.setProperty('align-self', 'flex-start', 'important');
+    }
+    const natural = btns.map((el) => el.getBoundingClientRect().height);
+    btns.forEach((el, i) => (el.style.cssText = saved[i]!));
+    const shell = document.querySelector<HTMLElement>('.wy-shell')!;
+    return {
+      rendered,
+      tallest: Math.max(...natural),
+      rowVar: getComputedStyle(shell).getPropertyValue('--wy-dock-row-h').trim(),
+    };
+  });
+  const want = Math.max(TARGET_MIN_PX, m.tallest);
+  const UNIT = 1 / 64 + 0.01;
+  for (const c of m.rendered) {
+    expect(
+      Math.abs(c.height - want),
+      `${phase}: Dock control "${c.name}" renders ${c.height.toFixed(3)}px; one Dock row is ` +
+        `max(${TARGET_MIN_PX}, tallest natural control ${m.tallest.toFixed(3)}) = ` +
+        `${want.toFixed(3)}px`,
+    ).toBeLessThanOrEqual(UNIT);
+  }
+  expect(m.rowVar, `${phase}: --wy-dock-row-h must be written in the Standard layout`).not.toBe('');
+  expect(
+    Math.abs(parseFloat(m.rowVar) - want),
+    `${phase}: --wy-dock-row-h ${m.rowVar} vs the tallest control's row ${want.toFixed(3)}px`,
+  ).toBeLessThanOrEqual(UNIT);
+}
+
 /** Tab into the Dock from the chips scrollport and walk every visible control. Each must be
  *  the next Tab stop and, focused, be WHOLLY reachable (hit-tested) — scrolled into view, never
  *  left under an edge. */
@@ -561,6 +620,7 @@ async function gotoCase(page: Page, c: DockCase): Promise<void> {
 
 async function assertPhase(page: Page, c: DockCase, phase: string): Promise<void> {
   await assertNoBuildableCellUnderDock(page);
+  await assertRowHeightIsTallestControl(page, phase);
   await assertFloorOrException(page, c, phase);
   await assertNoPartialControl(page, phase);
   await assertScrollCue(page, phase);
@@ -713,6 +773,50 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
       await dock.evaluate((el) => getComputedStyle(el).backgroundImage),
       'forced colors must not strip the cue',
     ).not.toBe('none');
+    // The Dock's own box opts OUT of forced colors (so the cue survives); its controls must
+    // not follow it out. Each visible control's text and fill must be the user's system
+    // colours — resolved by the browser through a probe, never assumed — not the authored
+    // theme a control would keep if it inherited the Dock's `forced-color-adjust: none`.
+    const controlColours = await page.evaluate(() => {
+      const resolve = (prop: 'color' | 'backgroundColor', value: string): string => {
+        const probe = document.createElement('span');
+        probe.style[prop] = value;
+        document.body.append(probe);
+        const out = getComputedStyle(probe)[prop];
+        probe.remove();
+        return out;
+      };
+      const rgb = (c: string): string => (c.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).join(',');
+      const text = ['CanvasText', 'ButtonText'].map((v) => rgb(resolve('color', v)));
+      const fill = ['Canvas', 'ButtonFace'].map((v) => rgb(resolve('backgroundColor', v)));
+      return [...document.querySelectorAll<HTMLElement>('.wy-dock .wy-btn')]
+        .filter((el) => !el.hidden && el.getClientRects().length > 0)
+        .map((el) => {
+          const cs = getComputedStyle(el);
+          return {
+            name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '',
+            color: cs.color,
+            background: cs.backgroundColor,
+            systemText: text.includes(rgb(cs.color)),
+            systemFill: fill.includes(rgb(cs.backgroundColor)),
+            text,
+            fill,
+          };
+        });
+    });
+    expect(controlColours.length).toBeGreaterThan(1);
+    for (const c of controlColours) {
+      expect(
+        c.systemText,
+        `forced colors: Dock control "${c.name}" text ${c.color} must be a system colour ` +
+          `(CanvasText/ButtonText resolve to ${c.text.join(' | ')})`,
+      ).toBe(true);
+      expect(
+        c.systemFill,
+        `forced colors: Dock control "${c.name}" fill ${c.background} must be a system colour ` +
+          `(Canvas/ButtonFace resolve to ${c.fill.join(' | ')})`,
+      ).toBe(true);
+    }
     await assertScrollCue(page, 'forced colors, at the top', ink);
     await dock.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
     await settle(page);
