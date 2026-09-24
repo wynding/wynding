@@ -2700,3 +2700,93 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     expect(run.pendingInputsTruncated).toBe(false);
   });
 });
+
+describe('main — the Standard Dock footprint wiring (#152)', () => {
+  // `dock-reserve.test.ts` owns the measurement; this pins the WIRING main.ts adds around it:
+  // the board-rows input, the observer (both boxes), the one-frame coalescing that keeps the
+  // pass out of the observer callback, and a teardown that leaves nothing behind.
+  it('writes the rows input, re-syncs once per frame after a resize, and clears everything on destroy', () => {
+    const instances: { cb: () => void; observed: Element[]; disconnected: boolean }[] = [];
+    const originalRO = (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+    (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      readonly observed: Element[] = [];
+      disconnected = false;
+      constructor(readonly cb: () => void) {
+        instances.push(this);
+      }
+      observe(el: Element): void {
+        this.observed.push(el);
+      }
+      disconnect(): void {
+        this.disconnected = true;
+      }
+    };
+    const frames: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = (cb: FrameRequestCallback): number => frames.push(cb);
+    const cancelled: number[] = [];
+    window.cancelAnimationFrame = (id: number): void => void cancelled.push(id);
+    let stageHeight = 400;
+    const originalRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains('wy-stage')) {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          width: 600,
+          height: stageHeight,
+          right: 600,
+          bottom: stageHeight,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return originalRect.call(this);
+    };
+    try {
+      const h = homeApp();
+      const prop = (name: string): string => h.shell.style.getPropertyValue(name);
+      expect(prop('--wy-board-rows')).toMatch(/^[1-9]\d*$/);
+      expect(prop('--wy-stage-h')).toBe('400px'); // the synchronous first pass
+      expect(prop('--wy-dock-reserve')).not.toBe('');
+
+      const dock = h.root.querySelector('.wy-dock')!;
+      const stage = h.root.querySelector('.wy-stage')!;
+      const observer = instances.find((i) => i.observed.includes(dock));
+      expect(observer, 'the Dock must be observed').toBeDefined();
+      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage]));
+
+      // A burst of notifications is ONE pass, one frame later — never inside the callback.
+      stageHeight = 500;
+      const before = frames.length;
+      observer!.cb();
+      observer!.cb();
+      expect(frames.length - before).toBe(1);
+      expect(prop('--wy-stage-h')).toBe('400px');
+      frames[frames.length - 1]!(0);
+      expect(prop('--wy-stage-h')).toBe('500px');
+      // ...and the frame slot is released, so the next resize schedules again.
+      observer!.cb();
+      expect(frames.length - before).toBe(2);
+
+      // Teardown with a pass still pending: cancelled, disconnected, and every write undone.
+      h.app.destroy();
+      expect(cancelled).toContain(frames.length);
+      expect(observer!.disconnected).toBe(true);
+      for (const p of ['--wy-board-rows', '--wy-stage-h', '--wy-dock-reserve', '--wy-dock-min-h']) {
+        expect(prop(p), p).toBe('');
+      }
+    } finally {
+      Element.prototype.getBoundingClientRect = originalRect;
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCaf;
+      if (originalRO === undefined) {
+        delete (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+      } else {
+        (window as unknown as { ResizeObserver: unknown }).ResizeObserver = originalRO;
+      }
+    }
+  });
+});

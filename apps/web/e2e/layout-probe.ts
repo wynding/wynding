@@ -148,6 +148,11 @@ export function contains(outer: Rect, inner: Rect): boolean {
 
 /** Rob's border-overlap design, pinned numerically (contract §5): the Standard Dock is an
  *  absolute overlay that may clip the projected grid's BOTTOM-LEFT corner and nothing else.
+ *
+ *  Since #152 this is the LOOSER of two Dock relations, kept because every existing caller
+ *  measures through it: the board now stops at the Dock's top edge, and
+ *  `assertNoBuildableCellUnderDock` below holds the strict claim (no buildable cell under the
+ *  Dock at all), which `dock-overlap.spec.ts` asserts across the Standard sizes.
  */
 export const STANDARD_DOCK_OVERLAP_MAX_PX = 64;
 
@@ -252,6 +257,39 @@ export async function assertRegionRelations(
       grid.x + grid.width / 2,
     );
   }
+}
+
+/** The Standard Dock covers NO structurally buildable cell (#152, owner ruling) — the relation
+ *  that replaced "may clip the grid's bottom-left corner" for the Dock, and it is ABSOLUTE:
+ *  no viewport, zoom level or banner state is exempt.
+ *
+ *  Why the old allowance was not enough: an overlay's paint is not the harm, its HIT TEST is.
+ *  The Dock sits above the board (`z-index: 1`), so a tap on any cell beneath it lands on a
+ *  Dock control instead — on the landscape tablet it was reported on, the Start button, which
+ *  began the wave rather than placing the armed tower. A budget in px cannot describe "no
+ *  tap is ever swallowed"; zero intersection can.
+ *
+ *  Measured against `buildableRect` (the grid inset by one cell) for the same reason the
+ *  floating preview is: the outer ring is blocked terrain no tower can ever occupy. The fix
+ *  (`--wy-dock-reserve`) keeps the whole grid clear of the Dock anyway, so this is the
+ *  weaker of the two claims it satisfies — and the one the defect is about.
+ *
+ *  The Dock rect is its border box, which is also its scrollport when the bounded Dock
+ *  scrolls, so a scrolled-out control can neither hide an overlap nor fake one. */
+export async function assertNoBuildableCellUnderDock(page: Page): Promise<void> {
+  const grid = await projectedGrid(page);
+  const dock = await regionRect(page, 'dock');
+  expect(dock, 'the dock region must be present').not.toBeNull();
+  const covered = intersect(dock as Rect, buildableRect(grid));
+  expect(
+    covered,
+    covered === null
+      ? ''
+      : `the Dock covers ${Math.round(covered.width)}×${Math.round(covered.height)}px of ` +
+          `STRUCTURALLY BUILDABLE board (${(covered.width / grid.cellPx).toFixed(1)}×${(
+            covered.height / grid.cellPx
+          ).toFixed(1)} cells at cellPx ${grid.cellPx})`,
+  ).toBeNull();
 }
 
 /** Contract §5's undeclared-child detection: every VISIBLE layout child of `.wy-shell` /
