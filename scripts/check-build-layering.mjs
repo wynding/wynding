@@ -73,6 +73,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  isWithin,
+  MalformedSourcemap,
+  originsOf as attributeOrigins,
+} from './build-layering-attribution.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WEB_DIR = join(REPO_ROOT, 'apps', 'web');
@@ -242,78 +247,18 @@ function markersIn(dir) {
 }
 
 // --- Sourcemap attribution (leg 1's `emittedBy` binding) ---------------------------------
-// A minimal Source Map v3 reader: decode `mappings` (base64 VLQ) into per-line segments, then
-// attribute a generated position to the source of the last segment at or before it. Written
-// here rather than imported because no sourcemap library is a declared dependency of the repo
-// root, and this is thirty lines against a stable, fifteen-year-old format.
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-/** `mappings` -> one array per generated line of `[generatedColumn, sourceIndex]` pairs,
- *  ascending by column. Segments with no source (length 1) are kept as `[column, -1]` so a
- *  position after one is attributed to NOTHING rather than to the previous source. */
-function decodeMappings(mappings) {
-  const lines = [];
-  // Only the source index is needed; line, column and name deltas are decoded and ignored.
-  let source = 0;
-  for (const line of mappings.split(';')) {
-    const segments = [];
-    let column = 0;
-    for (const segment of line === '' ? [] : line.split(',')) {
-      const fields = [];
-      let value = 0;
-      let shift = 0;
-      for (const char of segment) {
-        const digit = BASE64.indexOf(char);
-        if (digit === -1) fail(`malformed sourcemap: '${char}' is not a base64 VLQ digit`);
-        value += (digit & 31) * 2 ** shift;
-        if (digit & 32) {
-          shift += 5;
-        } else {
-          fields.push(value % 2 === 1 ? -((value - 1) / 2) : value / 2);
-          value = 0;
-          shift = 0;
-        }
-      }
-      column += fields[0];
-      if (fields.length >= 4) {
-        source += fields[1];
-        segments.push([column, source]);
-      } else {
-        segments.push([column, -1]);
-      }
-    }
-    lines.push(segments);
-  }
-  return lines;
-}
-
-/** For every occurrence of `text` in an emitted JS `file`, the repo-relative source module its
- *  sourcemap attributes it to (or `null` when the position maps to no source). Returns `null`
- *  outright when the file has no sibling `.map` — the caller reports that, because an
- *  unattributable chunk is a reason leg 1 cannot bind, not a reason it passes. */
+// The reader lives in `build-layering-attribution.mjs` so it can be unit-tested without two
+// Vite builds. It decodes each chunk as UTF-8, NOT through `readAll`'s latin1: a sourcemap's
+// generated column is a UTF-16 code-unit offset, and a latin1 index is a BYTE offset, so any
+// non-ASCII character before a marker on a minified line would shift it onto another source's
+// segment. (`scannableText` keeps latin1 — presence scanning needs every byte, not positions.)
 function originsOf(file, text) {
-  const mapFile = `${file}.map`;
-  if (!existsSync(mapFile)) return null;
-  const map = JSON.parse(readFileSync(mapFile, 'utf8'));
-  const lines = decodeMappings(map.mappings);
-  const base = join(dirname(mapFile), map.sourceRoot ?? '');
-  const sources = map.sources.map((source) =>
-    relative(REPO_ROOT, join(base, source)).split(sep).join('/'),
-  );
-  const origins = [];
-  readAll(file)
-    .split('\n')
-    .forEach((line, lineIndex) => {
-      for (let at = line.indexOf(text); at !== -1; at = line.indexOf(text, at + 1)) {
-        let owner = -1;
-        for (const [column, source] of lines[lineIndex] ?? []) {
-          if (column > at) break;
-          owner = source;
-        }
-        origins.push(owner === -1 ? null : (sources[owner] ?? null));
-      }
-    });
-  return origins;
+  try {
+    return attributeOrigins(file, text, REPO_ROOT);
+  } catch (error) {
+    if (error instanceof MalformedSourcemap) fail(error.message);
+    throw error;
+  }
 }
 
 /** Where a forbidden module LIVES in the repo, derived from its package's `exports` map so the
@@ -412,7 +357,10 @@ function assertMarkerTableIntact() {
   const unowned = FORBIDDEN_MODULES.filter((module) => {
     const home = moduleHome(module);
     return !MARKERS.some(
-      (marker) => marker.module === module && marker.emittedBy?.startsWith(home) === true,
+      (marker) =>
+        marker.module === module &&
+        typeof marker.emittedBy === 'string' &&
+        isWithin(marker.emittedBy, home),
     );
   });
   if (unowned.length > 0) {
@@ -480,13 +428,10 @@ function check() {
       if (found === null) unmapped.push(where);
       else origins.push(...found.map((origin) => origin ?? '(no source)'));
     }
-    const bound = origins.filter((origin) =>
-      // A directory binding (trailing '/') owns everything under it; a file binding is exact,
-      // so `stress.ts` does not also claim `stress.tsx`.
-      marker.emittedBy.endsWith('/')
-        ? origin.startsWith(marker.emittedBy)
-        : origin === marker.emittedBy,
-    );
+    // A directory binding (trailing '/') owns everything under it; a file binding is exact,
+    // so `stress.ts` does not also claim `stress.tsx` — the same `isWithin` the table
+    // invariant uses, so the two ownership sites cannot disagree.
+    const bound = origins.filter((origin) => isWithin(origin, marker.emittedBy));
     if (bound.length > 0) bindings.set(marker.text, [...new Set(bound)]);
     else misbound.push({ marker, origins: [...new Set(origins)], unmapped });
   }

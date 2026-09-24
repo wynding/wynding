@@ -630,6 +630,11 @@ const OFF_SURFACE: readonly {
     why: 'Tower layering over the board; the pair it holds is a board-geometry figure.',
   },
   {
+    file: 'packages/perf/src/build-layering-attribution.test.ts',
+    holds: [],
+    why: "The sourcemap reader behind check:build-layering's `emittedBy` binding, on synthetic chunks. It asserts attribution columns and path containment, not perf figures, so it has nothing for the gate's claim table to guard.",
+  },
+  {
     file: 'packages/perf/src/layering-lint.test.ts',
     holds: [],
     why: "The lint half of the package-layering guard (#168): ESLint fixtures run against eslint.config.mjs. It asserts import restrictions, not perf figures, so it has nothing for the gate's claim table to guard.",
@@ -1069,6 +1074,7 @@ const ROWED_CENSUS: readonly {
       [G.m2, 10],
       ['packages/perf/src/layout.ts', 8],
       ['packages/perf/src/oracle-catalog.test.ts', 1],
+      ['packages/perf/src/build-layering-attribution.test.ts', 1],
     ],
   },
   {
@@ -1078,6 +1084,7 @@ const ROWED_CENSUS: readonly {
       [G.adr, 1],
       [G.spike, 3],
       [G.m2, 11],
+      ['packages/perf/src/build-layering-attribution.test.ts', 3],
     ],
   },
   {
@@ -1161,6 +1168,7 @@ const ROWED_CENSUS: readonly {
       ['packages/perf/src/run.ts', 2],
       ['packages/perf/src/harness.test.ts', 1],
       ['packages/perf/src/scenario.test.ts', 1],
+      ['packages/perf/src/build-layering-attribution.test.ts', 1],
     ],
   },
   {
