@@ -82,6 +82,53 @@ const NON_CONSTANT_SPECIFIER = {
     'This import()/require() specifier is not a constant, so the layering zones cannot check where it points. Spell it as a string literal (a relative template such as `./locales/${x}.json` is allowed) — see SPECIFIER SITES in eslint.config.mjs (#168).',
 };
 
+// ALIASED `require` (#171). `SPECIFIER_SITES` matches a call whose callee IS the identifier
+// `require`, so every other way to reach the same loader walked past it, and each of these linted
+// clean in `apps/server/src` (verified in a scratch copy): `(0, require)('@wynding/perf')`,
+// `const r = require; r(…)`, `globalThis.require(…)`, `module.require(…)` and
+// `createRequire(import.meta.url)(…)`. None of them has a specifier this file can judge, so,
+// like a non-constant specifier, each is an error in its own right. The three selectors are:
+//   - `require` as a VALUE: any reference that is not the callee of a call. Names that are not
+//     references are skipped: an object-literal key (`{ require: 1 }`), a class or interface
+//     member, and a member name (`x.require`), which is the next selector's.
+//   - `.require` as a MEMBER, whatever its object (`globalThis`, `module`, `window`), and the
+//     same member read by destructuring (`const { require: r } = globalThis`).
+//   - `createRequire` in any position, its import included (renamed or not): naming it at all
+//     is the reach.
+// Still not caught, and listed so no one mistakes this for a sandbox: a computed member
+// (`globalThis['req' + 'uire']`), `Reflect.get(globalThis, 'require')` and `eval`. Nothing under a linted `src` uses any of these
+// forms today, so the rule costs nothing now. The downstream guards named under WHAT THIS DOES
+// NOT CATCH below still hold whatever spelling reaches a module.
+const ALIASED_REQUIRE_MESSAGE =
+  'An aliased or indirect `require` (the value passed around, `.require` on an object, or ' +
+  '`createRequire`) has no specifier the layering zones can check. Call `require()` with a ' +
+  'string literal, or use `import`. See ALIASED `require` in eslint.config.mjs (#171).';
+const ALIASED_REQUIRE = [
+  {
+    selector:
+      "Identifier[name='require']:not(CallExpression > Identifier.callee):not(MemberExpression > Identifier.property):not(ObjectExpression > Property > Identifier.key):not(ObjectPattern > Property > Identifier.key):not(MethodDefinition > Identifier.key):not(PropertyDefinition > Identifier.key):not(TSPropertySignature > Identifier.key)",
+    message: ALIASED_REQUIRE_MESSAGE,
+  },
+  {
+    selector: "MemberExpression > Identifier.property[name='require']",
+    message: ALIASED_REQUIRE_MESSAGE,
+  },
+  // Destructuring reads the member by KEY: `const { require: r } = globalThis`.
+  { selector: "ObjectPattern > Property[key.name='require']", message: ALIASED_REQUIRE_MESSAGE },
+  // An import specifier holds TWO identifiers (imported and local), so the import is matched
+  // once as a whole and every other `createRequire` identifier once each.
+  {
+    // `imported` is an Identifier, or a string Literal in `import { 'createRequire' as cr }`.
+    selector:
+      "ImportSpecifier:matches([imported.name='createRequire'], [imported.value='createRequire'])",
+    message: ALIASED_REQUIRE_MESSAGE,
+  },
+  {
+    selector: "Identifier[name='createRequire']:not(ImportSpecifier > Identifier)",
+    message: ALIASED_REQUIRE_MESSAGE,
+  },
+];
+
 // The deterministic core's forbidden SYNTAX, hoisted for the same reason the module paths
 // above were: the layering zones match these files too and set the same rule name, and flat
 // config replaces rather than merges. Kept verbatim from the determinism zone.
@@ -198,7 +245,12 @@ const NONDETERMINISTIC_SYNTAX = [
 //     no-substitution template — is judged by name, and a non-constant one is rejected
 //     outright (#168). That rule is itself a specifier matcher, with the limit below.
 //   - It matches SPECIFIERS, so a path-shaped reach at the same module
-//     (`../../../packages/content/src/stress`) is not seen here either.
+//     (`../../../packages/content/src/stress`) is not seen here either. The one exception is
+//     an allowlisted zone (the engine's), whose relative imports must stay in its own flat
+//     `src` (#171, see `allowlistRestrictions`).
+//   - Indirect loaders are rejected (ALIASED `require`, #171), but a computed member
+//     (`globalThis['req' + 'uire']`), `Reflect.get` and `eval` still pass, as does a relative template with
+//     substitutions in the engine (`import(\`./${x}\`)`, the SPECIFIER SITES carve-out).
 // Both are also covered downstream: `packages/perf/src/layering.test.ts` greps shipped source
 // context-free for the three never-shipped specifiers in any import syntax, and
 // `pnpm run check:build-layering` (#129) asks the BUNDLER — no emitted file of the shipped
@@ -490,6 +542,7 @@ const dynamicImportRestrictions = (restricted) => [
     message,
   })),
   NON_CONSTANT_SPECIFIER,
+  ...ALIASED_REQUIRE,
 ];
 
 // ---------------------------------------------------------------------------------------
@@ -527,29 +580,65 @@ const MANIFEST_DEPENDENCY_FIELDS = [
   'devDependencies',
 ];
 
-/** Fails the lint if an allowlisted package's manifest declares a dependency outside its list —
- *  the runtime fields against `runtime`, `devDependencies` against `runtime` plus `testOnly`. */
-function assertThirdPartyAllowlists() {
-  for (const [specifier, { runtime, testOnly }] of Object.entries(THIRD_PARTY_ALLOWLISTS)) {
-    const manifestPath = join(packageDir(specifier), 'package.json');
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const manifestPathOf = (specifier) => join(packageDir(specifier), 'package.json');
+
+/** The manifest half of each allowlist, as data: for every allowlisted package, the declared
+ *  dependencies outside its list (`field.name`), the runtime fields checked against `runtime`
+ *  and `devDependencies` against `runtime` plus `testOnly`. Exported, with the manifest reader
+ *  and the table injectable, so `layering-lint.test.ts` can feed it a fake manifest (#171): the
+ *  real one is clean, so without that nothing proved this finds anything. */
+export function thirdPartyAllowlistViolations(
+  readManifest = (specifier) => JSON.parse(readFileSync(manifestPathOf(specifier), 'utf8')),
+  allowlists = THIRD_PARTY_ALLOWLISTS,
+) {
+  return Object.entries(allowlists).flatMap(([specifier, { runtime, testOnly }]) => {
+    const manifest = readManifest(specifier);
     const outside = MANIFEST_DEPENDENCY_FIELDS.flatMap((field) => {
       const allowed = field === 'devDependencies' ? [...runtime, ...testOnly] : runtime;
       return Object.keys(manifest[field] ?? {})
         .filter((dependency) => !allowed.includes(dependency))
         .map((dependency) => `${field}.${dependency}`);
     });
-    if (outside.length > 0) {
+    return outside.length > 0 ? [{ specifier, runtime, testOnly, outside }] : [];
+  });
+}
+
+/** Fails the lint if an allowlisted package's manifest declares a dependency outside its list.
+ *  Its top-level call below is pinned by `layering-lint.test.ts`, since deleting it would
+ *  otherwise leave every test green. */
+function assertThirdPartyAllowlists() {
+  const [first] = thirdPartyAllowlistViolations();
+  if (first === undefined) return;
+  const { specifier, runtime, testOnly, outside } = first;
+  throw new Error(
+    `eslint.config.mjs: ${relative(REPO_ROOT, manifestPathOf(specifier))} declares ${outside.join(', ')}, ` +
+      `outside ${specifier}'s third-party allowlist (${runtime.join(', ')}; tests may add ` +
+      `${testOnly.join(', ')}). AGENTS.md's Hard rules state that list — change it there and ` +
+      'in THIRD_PARTY_ALLOWLISTS together, or drop the dependency.',
+  );
+}
+assertThirdPartyAllowlists();
+
+/** Fails the lint if an allowlisted package's `src` grows a subdirectory. Its zone exempts only
+ *  SAME-DIRECTORY relative specifiers (see `allowlistRestrictions`), which is exactly right for a
+ *  flat `src` and wrong the moment a file there legitimately needs `../`: the rule would then
+ *  reject real code, and the natural fix (re-allowing `..`) would reopen the path escape #171
+ *  closed. So the premise is checked, and the error says what to do instead. */
+function assertAllowlistedSrcIsFlat() {
+  for (const specifier of Object.keys(THIRD_PARTY_ALLOWLISTS)) {
+    const src = join(packageDir(specifier), 'src');
+    const dirs = readdirSync(src, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+    if (dirs.length > 0) {
       throw new Error(
-        `eslint.config.mjs: ${relative(REPO_ROOT, manifestPath)} declares ${outside.join(', ')}, ` +
-          `outside ${specifier}'s third-party allowlist (${runtime.join(', ')}; tests may add ` +
-          `${testOnly.join(', ')}). AGENTS.md's Hard rules state that list — change it there and ` +
-          'in THIRD_PARTY_ALLOWLISTS together, or drop the dependency.',
+        `eslint.config.mjs: ${relative(REPO_ROOT, src)} has subdirectories ` +
+          `(${dirs.map((d) => d.name).join(', ')}), but ${specifier}'s zone allows only ` +
+          'same-directory relative imports. Teach allowlistRestrictions which `..` stay inside ' +
+          'src before adding one; do not simply re-allow `..` (#171).',
       );
     }
   }
 }
-assertThirdPartyAllowlists();
+assertAllowlistedSrcIsFlat();
 
 /** Escapes `text` for a regex SOURCE that must also survive as an esquery regex token, which
  *  cannot contain `/` — so slashes are spelled `\u002F`, which both engines read as `/`. */
@@ -561,12 +650,18 @@ const regexSource = (text) =>
  *  allowed package or a subpath of one, and not already restricted by name. */
 function allowlistRestrictions(specifier, allowed, alreadyRestricted) {
   const exempt = [
-    '\\.\\.?\\u002F',
+    // SAME-DIRECTORY RELATIVE ONLY (#171): `./` with no `..` segment and no `node_modules`
+    // anywhere after it. The first form of this exemption was any `./` or `../`, and both
+    // `'../../../node_modules/yaml/dist/index.js'` and `'../../types/src/index'` linted clean
+    // in `packages/engine/src`: a third-party package and a sibling root, reached by path
+    // instead of by name. Keyed to the package's `src` being FLAT, where no legitimate import
+    // needs `..`; `assertAllowlistedSrcIsFlat` fails the lint if that stops being true.
+    '\\.\\u002F(?!.*\\.\\.)(?!.*node_modules)',
     ...allowed.map((name) => `${regexSource(name)}(?:\\u002F|$)`),
     ...alreadyRestricted.map((name) => `${regexSource(name)}$`),
   ];
   const source = `^(?!${exempt.join('|')})`;
-  const message = `${specifier} may import only relative paths and ${allowed.join(', ')} (AGENTS.md, Hard rules). A new third-party or Node dependency here needs THIRD_PARTY_ALLOWLISTS in eslint.config.mjs and AGENTS.md changed first (#168).`;
+  const message = `${specifier} may import only same-directory relative paths (no \`..\`, no node_modules) and ${allowed.join(', ')} (AGENTS.md, Hard rules). A new third-party or Node dependency here needs THIRD_PARTY_ALLOWLISTS in eslint.config.mjs and AGENTS.md changed first (#168).`;
   return {
     pattern: { regex: source, message },
     syntax: { selector: constantSpecifier(`/${source}/`), message },

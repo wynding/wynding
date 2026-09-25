@@ -143,6 +143,7 @@ const STRESS_RULESET = 'packages/content/src/rulesets/stress-40x40.json';
 const GAME_LOOP = 'packages/engine/src/game-loop.ts';
 const RUN = 'packages/perf/src/run.ts';
 const LAYOUT = 'packages/perf/src/layout.ts';
+const ORACLE_CATALOG = 'packages/perf/src/oracle-catalog.ts';
 
 const GATE_CLAIMS: readonly Claim[] = [
   // ---------------------------------------------------------------------------------------
@@ -2008,11 +2009,11 @@ const GATE_CLAIMS: readonly Claim[] = [
   },
 ];
 
-/** THE SCENE ORACLE'S FAMILY, as its own list because it carries a duty the gate's rows do not:
- *  every low-information value here also has a COUNTED CENSUS in `claims.test.ts`
- *  (`ROWED_CENSUS`), since per-occurrence accounting only reaches high-information numerals and
- *  every figure in this family is below that bar. `claims.test.ts` asserts the census covers
- *  exactly this list's low-information values, so a row added here without one fails. */
+/** THE SCENE ORACLE'S FAMILY, as its own list. Its low-information values carried the first
+ *  COUNTED CENSUS in `claims.test.ts` (`ROWED_CENSUS`), since per-occurrence accounting only
+ *  reaches high-information numerals; since #170 the census covers every low-information
+ *  numeric row in `CLAIMS`, this family and the gate's alike, so filing a row under either list
+ *  cannot skip it. */
 export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
   // ---------------------------------------------------------------------------------------
   // THE SCENE ORACLE'S FAMILY (#163) — the stress scene's measured and derived facts, stated
@@ -2900,7 +2901,7 @@ export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
       // enforced floor cannot diverge (`oracle-catalog.ts` is off-surface, so nothing else
       // would see it).
       {
-        file: 'packages/perf/src/oracle-catalog.ts',
+        file: ORACLE_CATALOG,
         anchor: 'export const STUNNED_SAMPLES_FLOOR =',
         pattern: '^\\s*(\\d+);',
       },

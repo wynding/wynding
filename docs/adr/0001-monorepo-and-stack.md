@@ -72,9 +72,11 @@ now hold it — no one of them sufficient, and the third is not a formality:
 1. **At the source:** the per-zone `no-restricted-imports` above, in `verify`'s lint,
    with `no-restricted-syntax` twins for the call-shaped forms (`import()`, `require()`):
    a constant specifier — string or no-substitution template literal — is judged by name,
-   and a non-constant one is rejected outright (#168). It reads specifiers, never paths.
-   The `engine` zone is also an **allowlist** (#168): its sources may import only relative
-   paths and `@noble/hashes`, and its manifest's runtime fields (`dependencies`,
+   and a non-constant one is rejected outright (#168), as is any aliased or indirect
+   `require` (#171). It reads specifiers, never paths.
+   The `engine` zone is also an **allowlist** (#168): its sources may import only
+   same-directory relative paths (no `..` segment and no `node_modules`, #171; its `src`
+   is flat, and the lint fails at load if that changes) and `@noble/hashes`, and its manifest's runtime fields (`dependencies`,
    `peerDependencies`, `optionalDependencies`) may declare nothing else. The one relaxation
    is for tests: `devDependencies` may also declare the test runner (`vitest`,
    `@vitest/coverage-v8`), and within the zone (`packages/engine/src/**`) `*.test.ts` files — only
