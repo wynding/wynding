@@ -2704,7 +2704,9 @@ function occurrences(file: string): Numeral[] {
 }
 
 /** Spelled like a MEASUREMENT: three or more significant digits, or two or more decimal places
- *  (`150`, `329`, `0.02`, `12.31`, `1.10`), judged on the spelling as written. */
+ *  (`150`, `329`, `0.02`, `12.31`, `1.10`). The census asks it of a literal's spelling AND of its
+ *  decimal value, because a radix spelling hides its digits: `0x4d2` is 1234, which this reads as
+ *  `42` from the spelling alone (Codex, PR #174). */
 function measurementLike(spelling: string): boolean {
   const mantissa = spelling.replace(/^[+-]/, '').replace(/[,_]/g, '').split(/[eE]/)[0] as string;
   const decimals = mantissa.includes('.') ? (mantissa.split('.')[1] as string).length : 0;
@@ -2728,7 +2730,10 @@ const censusCache = new Map<string, Numeral[]>();
 function censusOccurrences(file: string): Numeral[] {
   const hit = censusCache.get(file);
   if (hit !== undefined) return hit;
-  const found = [...scan(file), ...literalNumerals(file, (text) => measurementLike(text))];
+  const found = [
+    ...scan(file),
+    ...literalNumerals(file, (text, value) => measurementLike(text) || measurementLike(value)),
+  ];
   if (!file.endsWith('.md')) {
     const raw = read(file);
     const walked = walk(raw);
@@ -3139,6 +3144,14 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       unhashed,
       'add these to @wynding/perf#test inputs in turbo.json, spelled $TURBO_ROOT$/<path>',
     ).toEqual([]);
+  });
+
+  it('the census counts a radix spelling of a measurement by its value', () => {
+    expect(measurementLike('0x4d2') || measurementLike('1234')).toBe(true);
+    const file = 'fixture/census/radix.ts';
+    fileCache.set(file, 'export const copy = 0x4d2;\nexport const loop = 0x3;\n');
+    const values = censusOccurrences(file).map((n) => n.value);
+    expect(values).toEqual(['1234']);
   });
 
   it('a census compares full paths, so a same-basename path in another directory differs', () => {

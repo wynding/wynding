@@ -251,7 +251,8 @@ describe(
         await restrictions(
           SERVER,
           "export const a = require('./ok');\nexport const b = { require: 1 };\n" +
-            'export class C { require(): void {} }\nexport interface I { require: number }\n',
+            'export class C { require(): void {} }\nexport interface I { require: number }\n' +
+            'export interface M { require(): void }\n',
         ),
       ).toEqual([]);
     });

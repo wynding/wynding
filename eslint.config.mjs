@@ -106,7 +106,7 @@ const ALIASED_REQUIRE_MESSAGE =
 const ALIASED_REQUIRE = [
   {
     selector:
-      "Identifier[name='require']:not(CallExpression > Identifier.callee):not(MemberExpression > Identifier.property):not(ObjectExpression > Property > Identifier.key):not(ObjectPattern > Property > Identifier.key):not(MethodDefinition > Identifier.key):not(PropertyDefinition > Identifier.key):not(TSPropertySignature > Identifier.key)",
+      "Identifier[name='require']:not(CallExpression > Identifier.callee):not(MemberExpression > Identifier.property):not(ObjectExpression > Property > Identifier.key):not(ObjectPattern > Property > Identifier.key):not(MethodDefinition > Identifier.key):not(PropertyDefinition > Identifier.key):not(TSPropertySignature > Identifier.key):not(TSMethodSignature > Identifier.key)",
     message: ALIASED_REQUIRE_MESSAGE,
   },
   {
