@@ -69,8 +69,16 @@ undeclared imports; what the tooling adds is protection against _declared_ viola
 which is exactly the kind a hurried refactor or a helpful bot produces. **Three** guards
 now hold it — no one of them sufficient, and the third is not a formality:
 
-1. **At the source:** the per-zone `no-restricted-imports` above, in `verify`'s lint. It
-   reads specifiers, and does not inspect dynamic `import()` at all.
+1. **At the source:** the per-zone `no-restricted-imports` above, in `verify`'s lint,
+   with `no-restricted-syntax` twins for the call-shaped forms (`import()`, `require()`):
+   a constant specifier — string or no-substitution template literal — is judged by name,
+   and a non-constant one is rejected outright (#168). It reads specifiers, never paths.
+   The `engine` zone is also an **allowlist** (#168): its sources may import only relative
+   paths and `@noble/hashes`, and its manifest's runtime fields (`dependencies`,
+   `peerDependencies`, `optionalDependencies`) may declare nothing else. The one relaxation
+   is for tests: `devDependencies` may also declare the test runner (`vitest`,
+   `@vitest/coverage-v8`), and within the zone (`packages/engine/src/**`) `*.test.ts` files — only
+   those — may import it.
 2. **At the artifact:** `pnpm run check:build-layering` (#129), which asks the bundler
    rather than the source text — no file the shipped **web** build emits may carry the
    never-shipped modules' markers, so a reach spelled as a relative path, a re-export, a
@@ -82,10 +90,9 @@ now hold it — no one of them sufficient, and the third is not a formality:
    not sufficient.
 3. **At the source, cheaply:** `packages/perf/src/layering.test.ts`, the context-free grep
    over every shipped `src` tree. It is the only one of the three that READS `apps/server`
-   as text — guard 1 covers the server too, but only for specifier-shaped imports, and
-   guard 2 does not read it at all — and, there, the only one that sees a dynamic or
-   comment-interrupted `import()`. In the web build guard 2 covers those spellings, the
-   template literal included, having asked Vite.
+   as text without depending on the lint config — guard 1 covers the server too, but only
+   for specifier-shaped imports, and guard 2 does not read it at all. In the web build
+   guard 2 also covers path-shaped spellings, having asked Vite.
 
 Planning docs (PRDs, ADRs, `CONTEXT.md`) live **in** the repo under `docs/`, public
 and versioned with the code.

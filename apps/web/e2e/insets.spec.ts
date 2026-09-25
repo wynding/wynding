@@ -13,7 +13,8 @@
 // `max-height` becomes `none` there, and `.wy-hud:has(> .wy-wave-preview)`'s height becomes
 // `auto`. Each assertion below therefore sits at the layout where its mechanism is live.
 // Source-level completeness across all twenty call sites is `layout.test.ts`'s job; this file
-// covers five MECHANISMS and structurally cannot reach the rest.
+// covers six MECHANISMS (the sixth, #153, is the Compact Rail paying the top inset) and
+// structurally cannot reach the rest.
 import { test, expect, type Page } from '@playwright/test';
 import { TARGET_MIN_PX } from './targets';
 
@@ -162,6 +163,213 @@ test.describe('safe-area seam — subtractive bound and the target floor (Standa
       expect(c.bottom).toBeLessThanOrEqual(limit + 1);
     }
   });
+});
+
+test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', () => {
+  // The Compact Rail's track starts at y=0 (it shares row 1 with the status column), so the
+  // top inset is the Rail's to pay. These tests assert CONTENT — where the Cards and their
+  // focus rings land — never the padding track: a test of this shape once passed with its
+  // mechanism deleted because it measured the box that held the fix instead of the thing the
+  // fix was for.
+  const TOP = 24;
+
+  /** The shipped catalog's Card count. Asserted, not just read, so a walk or reachability
+   *  loop can never pass vacuously over a Rail that rendered fewer Cards. */
+  const CARD_COUNT = 9;
+
+  /** The focused element's box plus its RING band, read from that element's own computed
+   *  style while it is focused — `outline-width + outline-offset`, i.e. what
+   *  `.wy-card:focus-visible` actually paints — never from the tokens the reserve is built
+   *  from. A literal ring change in that rule therefore moves this measurement even though
+   *  it would leave the reserve behind, which is the drift this is here to catch. The band is
+   *  0 when no ring is painted (outline-style none), which the callers reject. */
+  const focusedCard = (page: Page) =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const b = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const rail = document.querySelector('.wy-rail')!.getBoundingClientRect();
+      return {
+        isCard: el.classList.contains('wy-card'),
+        index: [...document.querySelectorAll('.wy-card')].indexOf(el),
+        top: b.top,
+        bottom: b.bottom,
+        ring:
+          cs.outlineStyle === 'none'
+            ? 0
+            : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset),
+        railBottom: rail.bottom,
+        // The pinned Panel's top edge and its fade band, when a Panel is open and PINNED
+        // (sticky); null otherwise. The band is read from the PAINTED pseudo-element, never
+        // the token, and counts as an occluder only while it is actually painted: at maximum
+        // scroll `wy-rail-has-more` is false and the band draws nothing (compact.spec.ts
+        // reads it the same way).
+        panel: (() => {
+          const p = document.querySelector('.wy-panel') as HTMLElement;
+          if (p.hidden || getComputedStyle(p).position !== 'sticky') return null;
+          const band = getComputedStyle(p, '::before');
+          const top = p.getBoundingClientRect().top;
+          const painted = band.display !== 'none' && band.opacity !== '0';
+          return { top, fadeTop: painted ? top - parseFloat(band.height) : top };
+        })(),
+      };
+    });
+
+  /** Let a focus-driven scroll come to rest: four consecutive unchanged animation frames
+   *  (compact.spec.ts's `settleScroll` rationale). A reading taken mid-flight belongs to a
+   *  world the Card never rests in. */
+  const settleRail = (page: Page) =>
+    page.evaluate(async () => {
+      const rail = document.querySelector('.wy-rail') as HTMLElement;
+      const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+      let prev = Number.NaN;
+      let stable = 0;
+      for (let i = 0; i < 120 && stable < 4; i++) {
+        await frame();
+        stable = rail.scrollTop === prev ? stable + 1 : 0;
+        prev = rail.scrollTop;
+      }
+    });
+
+  test('a top inset keeps the first Card clear of the system bar', async ({ page }) => {
+    await gotoAt(page, PHONE);
+    const firstCardTop = () =>
+      page.evaluate(() => document.querySelector('.wy-card')!.getBoundingClientRect().top);
+    await inject(page, { top: `${TOP}px` });
+    expect(await firstCardTop()).toBeGreaterThanOrEqual(TOP);
+  });
+
+  test('the restated S12a commitment at rest: 4 of 9 Cards at zero inset, every Card scroll-reachable at a nonzero one', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    const atRest = () =>
+      page.evaluate(() => {
+        const rail = document.querySelector('.wy-rail') as HTMLElement;
+        const rr = rail.getBoundingClientRect();
+        const cards = [...document.querySelectorAll('.wy-card')].map((c) =>
+          c.getBoundingClientRect(),
+        );
+        return {
+          total: cards.length,
+          fullyVisible: cards.filter((b) => b.top >= rr.top - 0.5 && b.bottom <= rr.bottom + 0.5)
+            .length,
+        };
+      });
+    expect((await atRest()).fullyVisible, 'zero inset: the at-rest count is unchanged').toBe(4);
+
+    await inject(page, { top: `${TOP}px` });
+    const n = (await atRest()).total;
+    expect(n, 'the shipped catalog renders nine Cards').toBe(CARD_COUNT);
+    // Scroll-reachable: scrolling each Card into view shows it whole and clear of the bar.
+    for (let i = 0; i < n; i++) {
+      const card = page.locator('.wy-card').nth(i);
+      await card.evaluate((el) => el.scrollIntoView({ block: 'nearest' }));
+      const r = await card.evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        const rail = document.querySelector('.wy-rail')!.getBoundingClientRect();
+        return { top: b.top, bottom: b.bottom, railBottom: rail.bottom };
+      });
+      expect(
+        r.top,
+        `Card ${i} scrolled into view must clear the ${TOP}px bar`,
+      ).toBeGreaterThanOrEqual(TOP - 0.5);
+      expect(r.bottom, `Card ${i} must fit the Rail`).toBeLessThanOrEqual(r.railBottom + 0.5);
+    }
+  });
+
+  // The WALKS. Entered from the keyboard (the arming hotkey, or nothing) so `:focus-visible`
+  // is live from the first stop, then moved ONLY by real key traversal.
+  //
+  // THE OWNER'S FULL RULING ("inset + ring"), armed or not, at default text size: every
+  // focused Card AND its ring clear the inset, in both directions. Armed, the Compact Panel
+  // is pinned over the Rail's bottom, so the walk ALSO asserts the Card clears the Panel:
+  // its ring's bottom at or above the Panel's top edge, and its body at or above the fade
+  // band's top while that band is painted. That second half is what makes the pinned focus
+  // reserve observable here — with the reserve deleted, a ring-top-only walk stayed green
+  // while Cards parked under the Panel (tops 211 / 196 against a Panel top of 144).
+  // The reserve was once 60% of the Rail's PADDING box, over-covering the Panel by 24px at a
+  // 24px inset and leaving a snapport shorter than a Card, so the ring could not fit armed.
+  // It is now exactly what the Panel covers (ui.css `.wy-rail-panel-pinned`).
+  //
+  // With no tower armed the guarantee also holds at DOUBLED text zoom. Armed at doubled zoom
+  // nothing is claimed: Cards are ~189px tall against ~121px of room above the Panel — the
+  // pre-existing S12a geometry.
+  const WALKS: { armed: boolean; zoom: 100 | 200; insets: readonly number[] }[] = [
+    { armed: false, zoom: 100, insets: [0, TOP] },
+    { armed: true, zoom: 100, insets: [0, TOP] },
+    { armed: false, zoom: 200, insets: [TOP] },
+  ];
+  for (const { armed, zoom, insets } of WALKS) {
+    for (const inset of insets) {
+      for (const direction of ['Tab', 'Shift+Tab'] as const) {
+        const state = armed ? 'armed' : 'unarmed';
+        const extra = armed ? ' and the pinned Panel' : '';
+        test(`${state}, ${zoom}% text, ${inset}px top inset, ${direction}: every focused Card AND its ring clear the inset${extra}`, async ({
+          page,
+        }) => {
+          await gotoAt(page, PHONE);
+          // compact.spec.ts's text-zoom posture: the root font doubles, so every rem does.
+          if (zoom === 200) await page.addStyleTag({ content: ':root{font-size:200%}' });
+          await inject(page, { top: `${inset}px` });
+          const cards = page.locator('.wy-card');
+          const n = await cards.count();
+          expect(n, 'the shipped catalog renders nine Cards').toBe(CARD_COUNT);
+          if (armed) {
+            // The arming HOTKEY, not a click: keyboard modality keeps `:focus-visible` live.
+            await page.keyboard.press('Digit1');
+            await expect(page.locator('.wy-card[aria-pressed="true"]')).toHaveCount(1);
+            await expect(page.locator('.wy-panel')).toBeVisible();
+            // PINNED, not merely open: the focus reserve is keyed on this class, and a walk
+            // over an unpinned Panel would assert nothing about it.
+            await expect(page.locator('.wy-rail')).toHaveClass(/wy-rail-panel-pinned/);
+          }
+          await (direction === 'Tab' ? cards.first() : cards.last()).focus();
+          const seen: number[] = [];
+          // Steps where the fade band was actually painted: without at least one, the fade
+          // assertion below would silently reduce to the Panel-top one above it.
+          let fadePainted = 0;
+          for (let step = 0; step < n; step++) {
+            if (step > 0) await page.keyboard.press(direction);
+            await settleRail(page);
+            const f = await focusedCard(page);
+            expect(f.isCard, `step ${step}: focus left the Cards`).toBe(true);
+            seen.push(f.index);
+            expect(f.ring, `Card ${f.index}: no focus ring painted`).toBeGreaterThan(0);
+            expect(
+              f.top - f.ring,
+              `Card ${f.index} ring top ${(f.top - f.ring).toFixed(1)} sits under the ${inset}px inset`,
+              // No sub-pixel tolerance: the reserve carries its own rounding allowance
+              // (ui.css), and a 0.4px clip is exactly the zero-inset defect this also fixes.
+            ).toBeGreaterThanOrEqual(inset);
+            expect(
+              f.bottom + f.ring,
+              `Card ${f.index} ring bottom ${(f.bottom + f.ring).toFixed(1)} is clipped by the Rail`,
+            ).toBeLessThanOrEqual(f.railBottom + 0.5);
+            if (!armed) continue;
+            expect(f.panel, 'the armed Panel must be pinned').not.toBeNull();
+            const panel = f.panel!;
+            expect(
+              f.bottom + f.ring,
+              `Card ${f.index} ring bottom ${(f.bottom + f.ring).toFixed(1)} sits under the pinned Panel (top ${panel.top.toFixed(1)})`,
+            ).toBeLessThanOrEqual(panel.top);
+            expect(
+              f.bottom,
+              `Card ${f.index} bottom ${f.bottom.toFixed(1)} sits under the painted fade band (top ${panel.fadeTop.toFixed(1)})`,
+            ).toBeLessThanOrEqual(panel.fadeTop);
+            if (panel.fadeTop < panel.top) fadePainted++;
+          }
+          expect(new Set(seen).size, 'every Card must be reached').toBe(n);
+          if (armed) {
+            expect(
+              fadePainted,
+              'the fade band never painted, so its assertion checked nothing',
+            ).toBeGreaterThan(0);
+          }
+        });
+      }
+    }
+  }
 });
 
 test.describe('safe-area seam — a malformed inset degrades, it does not delete geometry', () => {

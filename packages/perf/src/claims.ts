@@ -45,9 +45,11 @@
 // THREE ESCAPES, each named and machine-checked rather than assumed: `CONTRACT_EXCLUSIONS`
 // for numerals that collide across unrelated claims, `OCCURRENCE_EXCEPTIONS` for a specific
 // occurrence that means something else, and `KNOWN_UNROWED` for figures that are real unrowed
-// shared claims — the scene ORACLE's family, a neighbouring surface — asserted EXACTLY so the
-// set cannot grow silently. That residue is owner-ruled to stand for this change and is
-// tracked in #163.
+// shared claims, asserted EXACTLY so the set cannot grow silently. That last one is EMPTY: it
+// held the scene ORACLE's family until #163 rowed it (the section of that name below), and the
+// five entries that proved to be numeral collisions rather than claims moved to
+// `CONTRACT_EXCLUSIONS`. An empty table compared exactly means every cross-file figure on the
+// surface has a row or a named collision.
 //
 // The contract was overstated three times before it was enforced this way, and the corrections
 // are on record rather than quietly folded in: ship-review found ten multi-file figures with no
@@ -133,8 +135,16 @@ const SCENARIO = 'packages/perf/src/scenario.ts';
 const SCENARIO_TEST = 'packages/perf/src/scenario.test.ts';
 const DOT_BENCH = 'packages/perf/src/dot-bench.ts';
 const M2 = 'docs/milestones/m2.md';
+const HARNESS = 'packages/perf/src/harness.ts';
+/** Outside the perf package, because a few scene-oracle rows rest on a constant another
+ *  package declares. Both are listed in `@wynding/perf#test`'s turbo `inputs` for the same
+ *  reason the documents are: an edit there must bust this task's cache. */
+const STRESS_RULESET = 'packages/content/src/rulesets/stress-40x40.json';
+const GAME_LOOP = 'packages/engine/src/game-loop.ts';
+const RUN = 'packages/perf/src/run.ts';
+const LAYOUT = 'packages/perf/src/layout.ts';
 
-export const CLAIMS: readonly Claim[] = [
+const GATE_CLAIMS: readonly Claim[] = [
   // ---------------------------------------------------------------------------------------
   // THE GATE'S COMMITTED CONSTANTS
   // ---------------------------------------------------------------------------------------
@@ -1997,3 +2007,977 @@ export const CLAIMS: readonly Claim[] = [
     ],
   },
 ];
+
+/** THE SCENE ORACLE'S FAMILY, as its own list because it carries a duty the gate's rows do not:
+ *  every low-information value here also has a COUNTED CENSUS in `claims.test.ts`
+ *  (`ROWED_CENSUS`), since per-occurrence accounting only reaches high-information numerals and
+ *  every figure in this family is below that bar. `claims.test.ts` asserts the census covers
+ *  exactly this list's low-information values, so a row added here without one fails. */
+export const SCENE_ORACLE_CLAIMS: readonly Claim[] = [
+  // ---------------------------------------------------------------------------------------
+  // THE SCENE ORACLE'S FAMILY (#163) — the stress scene's measured and derived facts, stated
+  // in `oracle.ts` (and its neighbours `scenario.ts` and `gate-fixture.test.ts`) and copied
+  // into ADR 0005, the spike and m2.md. PR #161 measured this family and held it in
+  // `KNOWN_UNROWED`; these rows retire that holding. Where one numeral carries two genuine
+  // shared claims (150 is both the placed-tower count and the ADR's "~150 towers" figure; 100
+  // is the slowed floor, the AoE tower count and the countdown), each claim is its own row, so
+  // a site binds the claim it states and not merely a digit that happens to match.
+  // ---------------------------------------------------------------------------------------
+
+  // THE SCENE'S AUTHORED SHAPE
+  {
+    id: 'stress-towers-placed',
+    claim: 'accepted tower placements the stress scene must reach — its full anchor count',
+    value: '150',
+    numeric: 150,
+    basis:
+      "authored: `stressAnchors()`'s anchor count, `BUILD_TICKS` x `PLACEMENTS_PER_TICK`; the oracle asserts it EXACTLY",
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'export const TOWERS_PLACED_THRESHOLD =',
+        pattern: '^\\s*(\\d+);',
+      },
+      {
+        file: ORACLE,
+        anchor: 'Accepted tower placements must be EXACTLY',
+        pattern: '^\\s*(\\d+) ',
+      },
+      {
+        file: SCENARIO,
+        anchor: '`BUILD_TICKS \\* PLACEMENTS_PER_TICK` =',
+        pattern: '^\\s+\\*\\s+(\\d+),',
+      },
+      {
+        file: SPIKE,
+        anchor: '\\| Towers placed\\s+\\| \\*\\*exactly',
+        pattern: '^ (\\d+)\\*\\*',
+      },
+      { file: SPIKE, anchor: 'carries the same checks \\(', pattern: '^(\\d+) towers' },
+      {
+        file: M2,
+        anchor: 'Every other oracle assertion cleared:',
+        pattern: '^\\s*(\\d+)/\\d+ placements',
+      },
+      {
+        file: M2,
+        anchor: 'Every other oracle assertion cleared:\\s*\\n\\s*\\d+/',
+        pattern: '^(\\d+) placements',
+      },
+      { file: SPIKE, anchor: 'Towers placed \\*\\*', pattern: '^(\\d+)\\*\\*' },
+      { file: SPIKE, anchor: 'CONTROL run — phase,', pattern: '^\\s*(\\d+) towers' },
+      {
+        file: ADR,
+        anchor: 'roughly 1\\.25 applications per tick against',
+        pattern: '^\\s*(\\d+) towers',
+      },
+      {
+        file: ADR,
+        anchor: 'The existing scene runs that loop',
+        pattern: '^\\s*(\\d+) towers deep',
+      },
+      {
+        file: M2,
+        anchor: 'peak 304 concurrent creeps, median 224,',
+        pattern: '^\\s*(\\d+) towers',
+      },
+      {
+        file: RUN,
+        anchor:
+          "'control: accepted tower placements',\\s*\\n\\s*controlResult\\.towersPlacedAfterBuild,",
+        pattern: '^\\s*(\\d+),',
+      },
+      { file: RUN, anchor: 'controlResult\\.towersPlacedAfterBuild ===', pattern: '^\\s*(\\d+),' },
+    ],
+  },
+  {
+    id: 'adr-tower-figure',
+    claim: "ADR 0005's worst-case tower figure — the budget the route arithmetic is measured at",
+    value: '150',
+    numeric: 150,
+    basis: "declared by ADR 0005's worst-case load, alongside ~300 concurrent creeps",
+    sites: [
+      { file: ADR, anchor: 'concurrent creeps \\+ ~', pattern: '^(\\d+) towers' },
+      { file: SPIKE, anchor: 'concurrent creeps \\+ ~', pattern: '^(\\d+) towers' },
+      {
+        file: ORACLE,
+        anchor: "is not reachable at ADR 0005's\\s+\\*\\s+own ~",
+        pattern: '^(\\d+)-tower figure',
+      },
+      { file: ADR, anchor: "ADR's own ~", pattern: '^(\\d+)-tower figure' },
+      {
+        file: SPIKE,
+        anchor: "cannot be met at ADR 0005's own\\s*\\n~",
+        pattern: '^(\\d+)-tower figure',
+      },
+      { file: M2, anchor: "ADR 0005's own ~", pattern: '^(\\d+)-tower figure' },
+    ],
+  },
+  {
+    id: 'adr-concurrency-target',
+    claim: "ADR 0005's worst-case concurrent-creep target",
+    value: '300',
+    numeric: 300,
+    basis:
+      "declared by ADR 0005; the oracle's 280 peak floor is this target less headroom for a wave's ebb",
+    sites: [
+      { file: ADR, anchor: 'sustain\\s*\\n\\s*\\*\\*~', pattern: '^(\\d+) concurrent' },
+      { file: ADR, anchor: '117 creeps against "~', pattern: '^(\\d+) concurrent' },
+      { file: ORACLE, anchor: '0005\'s "~', pattern: '^(\\d+) concurrent' },
+      { file: SPIKE, anchor: 'ADR 0005 asks for "~', pattern: '^(\\d+) concurrent' },
+      {
+        file: SPIKE,
+        anchor: "117 creeps, against the ADR's ~",
+        pattern: '^(\\d+) concurrent',
+      },
+    ],
+  },
+  {
+    id: 'stress-board-side',
+    claim: 'the side of the synthetic square board the stress scene runs on',
+    value: '40',
+    numeric: 40,
+    basis: 'authored: the shipped board cannot host 150 towers at a 2x2 footprint',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'and on the committed\\s+\\*\\s+',
+        pattern: '^(\\d+)×40 board',
+      },
+      { file: ADR, anchor: 'runs on a purpose-built synthetic ', pattern: '^(\\d+)×40' },
+      { file: SPIKE, anchor: 'purpose-built synthetic ', pattern: '^(\\d+)×40' },
+      { file: SPIKE, anchor: '\\| Board\\s+\\| ', pattern: '^(\\d+) × 40' },
+      { file: M2, anchor: 'purpose-built synthetic ', pattern: '^(\\d+)×40' },
+    ],
+  },
+  {
+    id: 'stress-wave-entries',
+    claim: "the stress schedule's wave entries — 19 creeps each, 304 scheduled",
+    value: '16',
+    numeric: 16,
+    basis: 'authored: the per-wave entry cap, which is why the catalog scene is a new scene',
+    sites: [
+      { file: ORACLE, anchor: 'staggered spawns \\(', pattern: '^(\\d+) × 19' },
+      { file: SPIKE, anchor: '\\| Creeps scheduled \\| ', pattern: '^(\\d+) entries' },
+      { file: M2, anchor: 'already at its', pattern: '^\\s*(\\d+)-entry' },
+    ],
+  },
+  {
+    id: 'stress-tower-cost',
+    claim: "what each of the stress scene's three tower kinds costs",
+    value: '12',
+    numeric: 12,
+    basis:
+      "authored equal, so 150 x cost equals `startingBounty` exactly — the scene's second placement oracle",
+    sites: [
+      { file: ORACLE, anchor: 'placements × cost', pattern: '^\\s*(\\d+) exactly' },
+      { file: SCENARIO, anchor: 'total cost \\(150 ×', pattern: '^\\s*(\\d+) =' },
+      { file: ADR, anchor: 'and all three towers cost', pattern: '^\\s*(\\d+) so' },
+      {
+        file: ADR,
+        anchor: "breaks the scene's second oracle\\*\\* — the `150 ×",
+        pattern: '^\\s*(\\d+) =',
+      },
+      { file: STRESS_RULESET, anchor: '"id": "stress-blast",', pattern: '^\\s*"cost": (\\d+),' },
+      { file: STRESS_RULESET, anchor: '"id": "stress-chill",', pattern: '^\\s*"cost": (\\d+),' },
+      { file: STRESS_RULESET, anchor: '"id": "stress-venom",', pattern: '^\\s*"cost": (\\d+),' },
+      { file: STRESS_RULESET, anchor: '"id": "stress-single",', pattern: '^\\s*"cost": (\\d+),' },
+      {
+        file: STRESS_RULESET,
+        anchor: '"id": "stress-chill-single",',
+        pattern: '^\\s*"cost": (\\d+),',
+      },
+    ],
+  },
+  {
+    id: 'stress-build-cost',
+    claim: "the stress scene's whole build spend, equal to its starting bounty",
+    value: '1800',
+    numeric: 1800,
+    basis: 'derived: 150 placements x cost 12',
+    sites: [
+      { file: SCENARIO, anchor: 'total cost \\(150 × 12 =', pattern: '^\\s*(\\d+)\\)' },
+      { file: ADR, anchor: 'so that `150 × 12 =', pattern: '^\\s*(\\d+)`' },
+      {
+        file: ADR,
+        anchor: "breaks the scene's second oracle\\*\\* — the `150 × 12 =",
+        pattern: '^\\s*(\\d+) ==',
+      },
+      { file: STRESS_RULESET, anchor: '"startingBounty":', pattern: '^\\s*(\\d+),' },
+    ],
+  },
+  {
+    id: 'placements-per-tick',
+    claim: 'tower placements issued per build tick, in both scenes and in the browser harness',
+    value: '3',
+    numeric: 3,
+    basis: 'authored; the catalog scene keeps it and lengthens its prefix instead',
+    sites: [
+      {
+        file: SCENARIO,
+        anchor: 'export const PLACEMENTS_PER_TICK =',
+        pattern: '^\\s*(\\d+);',
+      },
+      {
+        file: SCENARIO,
+        anchor: 'SAME `PLACEMENTS_PER_TICK` \\(',
+        pattern: '^(\\d+)\\)',
+      },
+      { file: ADR, anchor: 'placements at the pinned', pattern: '^\\s*(\\d+)/tick' },
+      {
+        file: SPIKE,
+        anchor: '`armTower` \\+ `clickAt`,',
+        pattern: '^\\s*(\\d+) per tick',
+      },
+    ],
+  },
+  {
+    id: 'aoe-tower-count',
+    claim: 'AoE-producing towers in the stress scene since M2-S5b P9 (down from 150)',
+    value: '100',
+    numeric: 100,
+    basis:
+      'authored: P9 split the anchors three ways and gave 50 of them to `stress-venom`, which forced the R0 re-record',
+    sites: [
+      {
+        file: FIXTURE_TEST,
+        anchor: 'AoE-producing tower population from 150 to',
+        pattern: '^\\s*(\\d+),',
+      },
+      {
+        file: ADR,
+        anchor: 'the AoE-producing tower population fell 150 →',
+        pattern: '^\\s*(\\d+) —',
+      },
+      { file: SPIKE, anchor: 'AoE-producing towers \\(', pattern: '^(\\d+), down' },
+      {
+        file: SPIKE,
+        anchor: 'the AoE-producing tower count fell 150 →',
+        pattern: '^\\s*(\\d+)\\)',
+      },
+      {
+        file: M2,
+        anchor: 'the AoE-producing tower count fell 150 →',
+        pattern: '^\\s*(\\d+)\\)',
+      },
+    ],
+  },
+  {
+    id: 'wave-countdown-ticks',
+    claim: "the first wave's countdown, inside which the whole build prefix lands",
+    value: '100',
+    numeric: 100,
+    basis: 'authored in the stress ruleset; both build prefixes (50 and 55 ticks) fit inside it',
+    sites: [
+      {
+        file: SCENARIO,
+        anchor: "anchors landing inside the wave's",
+        pattern: '^\\s*(\\d+)-tick countdown',
+      },
+      {
+        file: SCENARIO,
+        anchor: "Still comfortably inside the wave's",
+        pattern: '^\\s*(\\d+)-tick countdown',
+      },
+      { file: SPIKE, anchor: 'the rest of the', pattern: '^\\s*(\\d+)-tick\\s' },
+      { file: STRESS_RULESET, anchor: '"countdownTicks":', pattern: '^\\s*(\\d+),' },
+    ],
+  },
+  {
+    id: 'tick-rate-hz',
+    claim: "the sim's fixed tick rate",
+    value: '20',
+    numeric: 20,
+    basis:
+      'declared by the engine: a 50 ms fixed timestep, which the spike measured the sim holding',
+    sites: [
+      {
+        file: ADR,
+        anchor: 'the sim advances \\*\\*only in whole fixed',
+        pattern: '^\\s*(\\d+) Hz ticks',
+      },
+      { file: ADR, anchor: '~200 expected at', pattern: '^\\s*(\\d+) Hz' },
+      { file: SPIKE, anchor: 'A tick is \\*\\*50 ms\\*\\* at', pattern: '^\\s*(\\d+) Hz' },
+      { file: SPIKE, anchor: '\\(200 expected at', pattern: '^\\s*(\\d+) Hz' },
+      { file: SPIKE, anchor: '~200 expected at', pattern: '^\\s*(\\d+) Hz' },
+      { file: M2, anchor: 'the sim held its', pattern: '^\\s*(\\d+) Hz cadence' },
+      { file: GAME_LOOP, anchor: 'Default simulation cadence:', pattern: '^\\s*(\\d+) Hz' },
+    ],
+  },
+
+  // THE ROUTE — the floor, the figure it replaced, and the measurements behind the ruling
+  {
+    id: 'route-floor',
+    claim:
+      "`ROUTE_LENGTH_FLOOR` — the scripted maze's entrance-to-exit route, a zero-slack tripwire",
+    value: '329',
+    numeric: 329,
+    basis:
+      'measured: what the committed layout achieves (307 from eight bands plus 22 from six tail baffles); re-pinned by owner ruling 2026-07-31',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'export const ROUTE_LENGTH_FLOOR =',
+        pattern: '^\\s*(\\d+);',
+      },
+      { file: ORACLE, anchor: 'route floor: \\*\\*', pattern: '^(\\d+) cells' },
+      {
+        file: ORACLE_TEST,
+        anchor: 'expect\\(ROUTE_LENGTH_FLOOR\\)\\.toBe\\(',
+        pattern: '^(\\d+)\\)',
+      },
+      { file: ADR, anchor: 'The scripted route is', pattern: '^\\s*(\\d+) cells' },
+      { file: SPIKE, anchor: 'the scripted route is', pattern: '^\\s*(\\d+) cells' },
+      {
+        file: SPIKE,
+        anchor: 'The committed 150-tower layout measures \\*\\*',
+        pattern: '^(\\d+)\\*\\*',
+      },
+      { file: M2, anchor: "The stress scene's route is", pattern: '^\\s*(\\d+) cells' },
+      { file: ORACLE, anchor: '`ROUTE_LENGTH_FLOOR` \\(', pattern: '^(\\d+),' },
+      { file: ADR, anchor: '175 DoT records,\\s*\\n\\s*route length', pattern: '^\\s*(\\d+)\\)' },
+      {
+        file: ADR,
+        anchor: 'the scripted route is still exactly\\s*\\n\\*\\*',
+        pattern: '^(\\d+)\\*\\*',
+      },
+      { file: SPIKE, anchor: '\\| Route length\\s+\\| \\*\\*', pattern: '^(\\d+) cells' },
+      {
+        file: SPIKE,
+        anchor: 'Route length is \\*\\*one\\*\\* un-waivable assertion at the measured',
+        pattern: '^\\s*(\\d+),',
+      },
+      { file: M2, anchor: 'un-waivable route assertion at', pattern: '^\\s*(\\d+) with' },
+    ],
+  },
+  {
+    id: 'route-floor-superseded',
+    claim: 'the route floor S4b committed before measuring, and the ruling replaced',
+    value: '600',
+    numeric: 600,
+    basis:
+      'committed pre-measurement; unreachable at ~150 towers on any board and at any tower count on 40x40',
+    sites: [
+      { file: ORACLE, anchor: 'RE-PINNED FROM', pattern: '^\\s*(\\d+) BY OWNER' },
+      { file: ORACLE_TEST, anchor: 'pre-measurement', pattern: '^\\s*(\\d+) to the' },
+      {
+        file: ADR,
+        anchor: 'cells against a committed floor of',
+        pattern: '^\\s*(\\d+) —',
+      },
+      {
+        file: SPIKE,
+        anchor: 'cells against a committed floor of',
+        pattern: '^\\s*(\\d+) \\(ruled',
+      },
+      {
+        file: M2,
+        anchor: 'cells against a committed floor of',
+        pattern: '^\\s*(\\d+) —',
+      },
+    ],
+  },
+  {
+    id: 'route-cap-at-adr-figure',
+    claim: 'where ~150 towers cap the route on any board size',
+    value: '330',
+    numeric: 330,
+    basis: 'derived: a 2x2 tower buys about 2.2 cells of route; confirmed by the band-only sweep',
+    sites: [
+      { file: ORACLE, anchor: 'capping\\s+\\*\\s+near', pattern: '^\\s*(\\d+);' },
+      { file: ADR, anchor: '150 towers cap near', pattern: '^\\s*(\\d+)\\s' },
+      { file: M2, anchor: '150 towers cap near', pattern: '^\\s*(\\d+) on' },
+    ],
+  },
+  {
+    id: 'route-ceiling-40x40',
+    claim: 'the longest route the 40x40 board admits at any tower count',
+    value: '459',
+    numeric: 459,
+    basis: 'measured: twelve bands is all that fits at the 2-cell wall / 1-cell corridor pitch',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'twelve bands is all that fits,\\s+\\*\\s+capping at',
+        pattern: '^\\s*(\\d+)\\.',
+      },
+      {
+        file: ADR,
+        anchor: 'twelve bands is all that fits, capping at',
+        pattern: '^\\s*(\\d+) —',
+      },
+      { file: SPIKE, anchor: 'budget caps at \\*\\*', pattern: '^(\\d+)\\*\\*' },
+      { file: M2, anchor: 'the ceiling is', pattern: '^\\s*(\\d+)\\)' },
+    ],
+  },
+  {
+    id: 'route-towers-for-600',
+    claim: 'roughly how many towers the superseded 600-cell route would need',
+    value: '270',
+    numeric: 270,
+    basis: 'derived from the same ~2.2 cells of route per tower, on a board larger than 40x40',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'larger board and roughly',
+        pattern: '^\\s*(\\d+) towers',
+      },
+      {
+        file: ADR,
+        anchor: 'a larger board and\\s*\\n\\s*roughly',
+        pattern: '^\\s*(\\d+) towers',
+      },
+      { file: SPIKE, anchor: 'would need roughly', pattern: '^\\s*(\\d+) towers' },
+      {
+        file: SPIKE,
+        anchor: 'would need a larger board and roughly',
+        pattern: '^\\s*(\\d+) towers',
+      },
+      { file: M2, anchor: 'larger board and roughly', pattern: '^\\s*(\\d+) towers' },
+    ],
+  },
+  {
+    id: 'band-route-40',
+    claim: 'the band-only route on a 40x40 board under a 150-tower budget',
+    value: '307',
+    numeric: 307,
+    basis: 'measured (144 towers used); the committed layout adds six tail baffles to reach 329',
+    sites: [
+      { file: ORACLE, anchor: 'near 330; measured', pattern: '^\\s*(\\d+)/' },
+      { file: ADR, anchor: 'budget: 40×40 →', pattern: '^\\s*(\\d+),' },
+      { file: SPIKE, anchor: 'budget: 40×40 →', pattern: '^\\s*(\\d+) \\(' },
+      { file: SPIKE, anchor: 'cells:', pattern: '^\\s*(\\d+) from the eight' },
+    ],
+  },
+  {
+    id: 'band-route-50',
+    claim: 'the band-only route on a 50x50 board under a 150-tower budget',
+    value: '298',
+    numeric: 298,
+    basis: 'measured (138 towers used)',
+    sites: [
+      { file: ORACLE, anchor: 'near 330; measured \\d+/', pattern: '^(\\d+)/' },
+      { file: ADR, anchor: '50×50 →', pattern: '^\\s*(\\d+),' },
+      { file: SPIKE, anchor: '50×50 →', pattern: '^\\s*(\\d+) \\(' },
+    ],
+  },
+  {
+    id: 'band-route-60',
+    claim: 'the band-only route on a 60x60 board under a 150-tower budget',
+    value: '308',
+    numeric: 308,
+    basis: 'measured (140 towers used)',
+    sites: [
+      { file: ORACLE, anchor: 'near 330; measured \\d+/\\d+/', pattern: '^(\\d+)/' },
+      { file: ADR, anchor: '60×60 →', pattern: '^\\s*(\\d+),' },
+      { file: SPIKE, anchor: '60×60 →', pattern: '^\\s*(\\d+) \\(' },
+    ],
+  },
+  {
+    id: 'band-board-largest',
+    claim: 'the side of the largest board the band-only sweep measured',
+    value: '80',
+    numeric: 80,
+    basis: 'measured sweep; quadrupling the board area bought nothing, so the budget binds',
+    sites: [
+      { file: ORACLE, anchor: 'on 40×40/50×50/60×60/', pattern: '^(\\d+)×' },
+      { file: ADR, anchor: '60×60 → 308, ', pattern: '^(\\d+)×' },
+      { file: SPIKE, anchor: '60×60 → 308 \\(140\\), ', pattern: '^(\\d+)×' },
+    ],
+  },
+
+  // THE POPULATION FLOORS, and the window they are asserted over
+  {
+    id: 'peak-live-floor',
+    claim: '`PEAK_LIVE_CREEPS_THRESHOLD` — peak concurrent live creeps the window must reach',
+    value: '280',
+    numeric: 280,
+    basis: "committed before measurement: ADR 0005's ~300 less headroom for a wave's ebb",
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'export const PEAK_LIVE_CREEPS_THRESHOLD =',
+        pattern: '^\\s*(\\d+);',
+      },
+      {
+        file: ORACLE,
+        anchor: 'over the sampled window, must be at least',
+        pattern: '^\\s*(\\d+) —',
+      },
+      { file: ORACLE_TEST, anchor: '\\(peak = 304 >=', pattern: '^\\s*(\\d+)\\)' },
+      { file: SPIKE, anchor: '0 leftover bounty, ≥', pattern: '^\\s*(\\d+) creeps' },
+      { file: M2, anchor: 'peak 304 concurrent \\(floor', pattern: '^\\s*(\\d+)\\)' },
+    ],
+  },
+  {
+    id: 'median-live-floor',
+    claim: '`MEDIAN_LIVE_CREEPS_THRESHOLD` — median live creeps across the window',
+    value: '200',
+    numeric: 200,
+    basis:
+      'a regression tripwire pinned below the measured 224, not a pre-committed target; far above the ~1 a degenerate window produces',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'export const MEDIAN_LIVE_CREEPS_THRESHOLD =',
+        pattern: '^\\s*(\\d+);',
+      },
+      {
+        file: ORACLE,
+        anchor: '`MEDIAN_LIVE_CREEPS_THRESHOLD` \\(',
+        pattern: '^(\\d+),',
+      },
+      {
+        file: ORACLE,
+        anchor: 'MEDIAN live creeps across the window must be at least',
+        pattern: '^\\s*(\\d+) ',
+      },
+      { file: SPIKE, anchor: 'route floor and the', pattern: '^\\s*(\\d+) median-creep' },
+      { file: M2, anchor: 'median 224 \\(floor', pattern: '^\\s*(\\d+)\\)' },
+    ],
+  },
+  {
+    id: 'peak-slowed-floor',
+    claim: '`PEAK_SLOWED_CREEPS_THRESHOLD` — creeps carrying an active slow at peak',
+    value: '100',
+    numeric: 100,
+    basis:
+      "committed before measurement: a scene with no live status effects is not ADR 0005's active mix",
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'export const PEAK_SLOWED_CREEPS_THRESHOLD =',
+        pattern: '^\\s*(\\d+);',
+      },
+      {
+        file: ORACLE,
+        anchor: 'At peak, at least',
+        pattern: '^\\s*(\\d+) creeps must carry',
+      },
+      {
+        file: M2,
+        anchor: 'peak 304 under status\\s*\\n\\s*\\(floor',
+        pattern: '^\\s*(\\d+)\\)',
+      },
+    ],
+  },
+  {
+    id: 'degenerate-window-ticks',
+    claim: 'the one-creep ticks in the synthetic window that passes every peak-based check',
+    value: '2499',
+    numeric: 2499,
+    basis:
+      'constructed: one peak tick plus the rest of the 2,500-tick window at one creep, which is why a median floor exists',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'a window of one tick at 304 creeps followed by',
+        pattern: '^\\s*([\\d,]+) ticks',
+      },
+      {
+        file: SPIKE,
+        anchor: 'a window of one tick at 304 creeps and',
+        pattern: '^\\s*([\\d,]+) at',
+      },
+    ],
+  },
+  {
+    id: 'sample-window',
+    claim: 'the sustained sampled window, in ticks — the sample count every floor is out of',
+    value: '2500',
+    numeric: 2500,
+    basis: "`harness.ts`'s `SAMPLE_TICKS`, after a 200-tick warm-up",
+    sites: [
+      { file: FIXTURE_TEST, anchor: 'const N_FULL =', pattern: '^\\s*([\\d_]+);' },
+      {
+        file: ORACLE,
+        anchor: 'fewer than\\s+\\*\\s+2,000/',
+        pattern: '^([\\d,]+) qualifying',
+      },
+      {
+        file: SCENARIO,
+        anchor: 'Measured over the identical',
+        pattern: '^\\s*([\\d,]+)-tick',
+      },
+      {
+        file: SPIKE,
+        anchor: 'then a sustained window of \\*\\*',
+        pattern: '^([\\d,]+) ticks',
+      },
+      {
+        file: SPIKE,
+        anchor: '### `step\\(\\)` time — headless, unthrottled',
+        pattern: '^\\s*([\\d,]+) sustained samples',
+      },
+      {
+        file: M2,
+        anchor: 'due-blast samples \\(floor 500\\),',
+        pattern: '^\\s*([\\d,]+) qualifying',
+      },
+      { file: HARNESS, anchor: 'export const SAMPLE_TICKS =', pattern: '^\\s*([\\d_]+);' },
+      {
+        file: HARNESS,
+        anchor: 'The sustained sampling window: ticks 200\\.\\.2699 \\(',
+        pattern: '^([\\d,]+) ticks',
+      },
+    ],
+  },
+  {
+    id: 'qualifying-floor',
+    claim: '`QUALIFYING_SAMPLES_THRESHOLD` — samples on a running, populated board',
+    value: '2000',
+    numeric: 2000,
+    basis: 'committed before measurement: the headline "was the sim doing sustained work" floor',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'export const QUALIFYING_SAMPLES_THRESHOLD =',
+        pattern: '^\\s*([\\d_]+);',
+      },
+      {
+        file: ORACLE,
+        anchor: '/\\*\\* At least(?= [\\d,]+ samples must QUALIFY)',
+        pattern: '^\\s*([\\d,]+) samples',
+      },
+      { file: ORACLE, anchor: 'fewer than\\s+\\*\\s+', pattern: '^([\\d,]+)/' },
+      { file: M2, anchor: 'qualifying \\(floor', pattern: '^\\s*([\\d,]+)\\)' },
+    ],
+  },
+  {
+    id: 'due-blast-subset-n',
+    claim: "the stress run's measured due-blast subset — the sample the gate's numerator is over",
+    value: '1427',
+    numeric: 1427,
+    basis:
+      'measured post-M2-S5b P9, when the AoE-producing tower count fell 150 -> 100 (the pre-P9 plan figure was 1671)',
+    sites: [
+      {
+        file: FIXTURE_TEST,
+        anchor: '`pnpm run perf` reports',
+        pattern: '^\\s*(\\d+)\\)',
+      },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'the instrumented run now measures',
+        pattern: '^\\s+\\*\\s+(\\d+)\\.',
+      },
+      { file: ADR, anchor: '224 median,', pattern: '^\\s*([\\d,]+) due-blast' },
+      { file: SPIKE, anchor: 'sustained samples;', pattern: '^\\s*([\\d,]+) of them' },
+      {
+        file: SPIKE,
+        anchor: 'Stress — due-blast ticks \\(n=',
+        pattern: '^([\\d,]+)\\)',
+      },
+      { file: M2, anchor: '\\(floor 100\\), \\*\\*', pattern: '^([\\d,]+)\\*\\*' },
+      {
+        file: FIXTURE_TEST,
+        anchor: 'a 0\\.12% margin \\(0\\.21% at\\s*\\n// n =',
+        pattern: '^\\s*([\\d,]+),',
+      },
+    ],
+  },
+
+  // THE DoT AND ARMOR FLOORS' ARITHMETIC
+  {
+    id: 'armored-spawns',
+    claim: '`stress-armored` creeps among the 304 scheduled spawns',
+    value: '114',
+    numeric: 114,
+    basis:
+      "authored by M2-S5b P9 (`layout.ts`'s wave-entry doc); the armored-live floor of 50 sits well under it",
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'at least\\s+\\*\\s+50\\.',
+        pattern: '^\\s*(\\d+) `stress-armored`',
+      },
+      { file: ORACLE, anchor: 'at its measured peak \\(', pattern: '^(\\d+)\\)' },
+      { file: ADR, anchor: 'and an armored population \\(', pattern: '^(\\d+) of' },
+      {
+        file: SPIKE,
+        anchor: 'a `stress-armored` population — ',
+        pattern: '^(\\d+) of',
+      },
+    ],
+  },
+  {
+    id: 'dot-records-ceiling',
+    claim: 'the post-sweep arithmetic ceiling on concurrent DoT records',
+    value: '400',
+    numeric: 400,
+    basis: 'derived: floor((240-1)/30)+1 = 8 live records per source x 50 venom towers',
+    sites: [
+      {
+        file: ORACLE,
+        anchor: 'give an arithmetic ceiling of',
+        pattern: '^\\s+\\*\\s+(\\d+) concurrent',
+      },
+      {
+        file: ORACLE,
+        anchor: "`PEAK_DOT_RECORDS_THRESHOLD`'s neighbourhood:",
+        pattern: '^\\s*(\\d+) post-sweep',
+      },
+    ],
+  },
+  {
+    id: 'dot-depth-at-peak',
+    claim: "the stress arm's DoT record depth per carrier at its peak-records tick, rounded",
+    value: '9.2',
+    numeric: 9.2,
+    basis: 'derived: 175 records over 19 carriers; the depth floor of 6 sits under it',
+    sites: [
+      { file: ORACLE, anchor: '19 carriers is ~', pattern: '^([\\d.]+) records' },
+      { file: ORACLE_TEST, anchor: 'depth ~', pattern: '^([\\d.]+)' },
+    ],
+  },
+  {
+    id: 'stress-oracle-rows',
+    claim: 'rows the oracle carries on the stress arm (gated plus reported)',
+    value: '16',
+    numeric: 16,
+    basis: 'counted in `oracle.ts` and `run.ts` after M2-S5b P9/P10 added five gated rows',
+    sites: [
+      {
+        file: SPIKE,
+        anchor: 'genuinely advancing across the window\\)\\.',
+        pattern: '^\\s*\\*\\*(\\d+)\\*\\* assertions',
+      },
+      {
+        file: M2,
+        anchor: 'The oracle now carries',
+        pattern: '^\\s*\\*\\*(\\d+)\\*\\* rows on the stress arm',
+      },
+      { file: ADR, anchor: 'p99 0\\.726 ms\\)\\. All', pattern: '^\\s*(\\d+) stress-arm' },
+    ],
+  },
+  {
+    id: 'stress-oracle-gated-rows',
+    claim: 'of those stress-arm rows, the ones that gate',
+    value: '15',
+    numeric: 15,
+    basis: 'counted: every stress-arm row but the reported-not-gated `dotCarriers`',
+    sites: [
+      {
+        file: SPIKE,
+        anchor: 'assertions on the stress run \\(',
+        pattern: '^(\\d+) gated',
+      },
+      { file: M2, anchor: 'rows on the stress arm \\(', pattern: '^(\\d+) gated' },
+    ],
+  },
+
+  // THE CATALOG SCENE (M2-S11 P7) — the fourth scene's shape and re-pinned floors
+  {
+    id: 'catalog-tower-count',
+    claim: 'placements in the catalog scene — the 150 anchors plus the mine pads',
+    value: '165',
+    numeric: 165,
+    basis: 'authored by the P7 amendment; live towers hold flat at it across every sampled tick',
+    sites: [
+      { file: SCENARIO, anchor: '`CATALOG_TOWER_COUNT` \\(', pattern: '^(\\d+)\\)' },
+      {
+        file: SCENARIO,
+        anchor: 'catalog towers over',
+        pattern: '^\\s*(\\d+)\\s',
+      },
+      { file: ADR, anchor: 'strengthens to \\*\\*==', pattern: '^\\s*(\\d+) at' },
+      {
+        file: ADR,
+        anchor: 'extension rather than warm-up\\. Build',
+        pattern: '^\\s*(\\d+) placements',
+      },
+      { file: M2, anchor: 'towers hold \\*\\*==', pattern: '^\\s*(\\d+) across' },
+      {
+        file: SCENARIO,
+        anchor: 'scenes \\(150 anchors\\) and the catalog scene\\s+\\*\\s+\\(',
+        pattern: '^(\\d+) placements',
+      },
+      { file: ADR, anchor: 'the ten detonations \\(', pattern: '^(\\d+) →' },
+      { file: M2, anchor: 'the ten detonations \\(', pattern: '^(\\d+) →' },
+      { file: LAYOUT, anchor: 'export const CATALOG_TOWER_COUNT =', pattern: '^\\s*(\\d+);' },
+    ],
+  },
+  {
+    id: 'catalog-mine-count',
+    claim: 'mine pads the catalog scene places off the anchor set',
+    value: '15',
+    numeric: 15,
+    basis: 'authored by the P7 amendment: no route-neutral pad exists near the early route',
+    sites: [
+      {
+        file: SCENARIO,
+        anchor: 'seven attacking kinds,\\s+\\*\\s+then',
+        pattern: '^\\s*(\\d+) `mine`',
+      },
+      {
+        file: ADR,
+        anchor: 'force the applied amendment:\\s*\\nthe',
+        pattern: '^\\s*(\\d+) mines',
+      },
+      { file: ADR, anchor: 'mines stand on', pattern: '^\\s*(\\d+) authored' },
+      {
+        file: M2,
+        anchor: 'forced the applied amendment: the',
+        pattern: '^\\s*(\\d+) mines',
+      },
+    ],
+  },
+  {
+    id: 'catalog-build-ticks',
+    claim: "the catalog scene's build-tick prefix",
+    value: '55',
+    numeric: 55,
+    basis: 'derived: 165 placements at 3 per tick',
+    sites: [
+      {
+        file: SCENARIO,
+        anchor: 'export const CATALOG_BUILD_TICKS =',
+        pattern: '^\\s*(\\d+);',
+      },
+      {
+        file: SCENARIO,
+        anchor: 'prefix LENGTH differs: 165 / 3 = \\*\\*',
+        pattern: '^(\\d+)\\*\\*',
+      },
+      { file: ADR, anchor: 'at the pinned 3/tick =', pattern: '^\\s*(\\d+) ticks' },
+    ],
+  },
+  {
+    id: 'catalog-dot-records-measured',
+    claim: "the catalog scene's measured peak resident DoT records",
+    value: '12',
+    numeric: 12,
+    basis:
+      'measured: the ground family travels as a ~27-cell convoy, so only ~6 venom towers engage at once',
+    sites: [
+      {
+        file: ADR,
+        anchor: 'peak resident DoT\\s*\\nrecords measured',
+        pattern: '^\\s*(\\d+) against',
+      },
+      {
+        file: M2,
+        anchor: 'proposed ≥ 1000, peak DoT records',
+        pattern: '^\\s*(\\d+) vs',
+      },
+      { file: M2, anchor: 'by owner ruling \\(531/', pattern: '^(\\d+) measured' },
+    ],
+  },
+  {
+    id: 'catalog-dot-records-proposed',
+    claim: 'the peak DoT records floor the catalog scene proposed before measuring',
+    value: '20',
+    numeric: 20,
+    basis: 'estimated pre-measurement assuming all sources engage simultaneously; re-pinned to 10',
+    sites: [
+      {
+        file: ADR,
+        anchor: 'records measured 12 against the proposed ≥',
+        pattern: '^\\s*(\\d+)\\.',
+      },
+      { file: M2, anchor: 'peak DoT records 12 vs ≥', pattern: '^\\s*(\\d+)\\.' },
+    ],
+  },
+  {
+    id: 'catalog-stunned-floor',
+    claim: "the catalog scene's re-pinned stunned-samples floor",
+    value: '400',
+    numeric: 400,
+    basis: 'owner ruling 2026-08-09, measurement-backed: 531 measured against a proposed 1000',
+    sites: [
+      {
+        file: ADR,
+        anchor: 'the owner re-pinned the floors to the measurement-backed ≥',
+        pattern: '^\\s*(\\d+) and',
+      },
+      {
+        file: M2,
+        anchor: 'Rob re-pinned the floors to the measurement-backed ≥',
+        pattern: '^\\s*(\\d+) and',
+      },
+      { file: M2, anchor: 'measured → floors', pattern: '^\\s*(\\d+)/10' },
+      // The executable threshold the catalog oracle enforces, so the canonical claim and the
+      // enforced floor cannot diverge (`oracle-catalog.ts` is off-surface, so nothing else
+      // would see it).
+      {
+        file: 'packages/perf/src/oracle-catalog.ts',
+        anchor: 'export const STUNNED_SAMPLES_FLOOR =',
+        pattern: '^\\s*(\\d+);',
+      },
+    ],
+  },
+
+  // THE POPULATION GAP between the arms — the residual a single-form twin cannot close
+  {
+    id: 'population-gap-before',
+    claim: "the control arm's population gap before round 1 matched the chill pair's slow",
+    value: '28.6',
+    numeric: 28.6,
+    basis: "derived: control median 160 against the stress arm's 224",
+    sites: [
+      { file: SCENARIO, anchor: 'a population gap of ~', pattern: '^([\\d.]+)%' },
+      {
+        file: SPIKE,
+        anchor: 'narrowed the population gap from −',
+        pattern: '^([\\d.]+)%',
+      },
+    ],
+  },
+  {
+    id: 'population-gap-after',
+    claim: "the control arm's population gap after round 1's fix",
+    value: '19.2',
+    numeric: 19.2,
+    basis: "derived: control median 181 against the stress arm's 224",
+    sites: [
+      { file: SCENARIO, anchor: '% down to ~', pattern: '^([\\d.]+)%' },
+      { file: SPIKE, anchor: '% to\\s*\\n−', pattern: '^([\\d.]+)%' },
+    ],
+  },
+
+  // THE SPIKE'S HEADLINE READINGS the documents restate
+  {
+    id: 'step-cost-low',
+    claim: "the low end of `step()`'s measured cost per 50 ms tick in the browser spike",
+    value: '0.2',
+    numeric: 0.2,
+    basis: 'measured across both emulated profiles; the sim is not the bottleneck',
+    sites: [
+      { file: ADR, anchor: '`step\\(\\)` costs', pattern: '^\\s*([\\d.]+)–0\\.32' },
+      { file: SPIKE, anchor: '`step\\(\\)` costs', pattern: '^\\s*([\\d.]+)–0\\.32' },
+      { file: M2, anchor: '`step\\(\\)` costs', pattern: '^\\s*([\\d.]+)–0\\.32' },
+    ],
+  },
+  {
+    id: 'arm-median-correlation',
+    claim: "the four-run cohort's cross-arm correlation of the MEDIANS",
+    value: '0.99',
+    numeric: 0.99,
+    basis:
+      'measured over four byte-identical CI runs; the only correlation whose 95% CI excludes zero',
+    sites: [
+      {
+        file: ADR,
+        anchor: 'cross-arm correlation \\*\\*\\+',
+        pattern: '^([\\d.]+)\\*\\*',
+      },
+      { file: ADR, anchor: 'on top of the \\+0\\.88-versus-\\+', pattern: '^([\\d.]+) ' },
+      { file: ADR, anchor: 'Only the \\+', pattern: '^([\\d.]+) excludes' },
+      { file: SPIKE, anchor: "the arms' medians co-move \\(\\+", pattern: '^([\\d.]+)\\)' },
+    ],
+  },
+  {
+    id: 'within-band-strawman',
+    claim: 'the symmetric "within N%" rule ADR 0005 rejects for its two-directional budgets',
+    value: '25',
+    numeric: 25,
+    basis: 'declared by ADR 0005 as the rule it does NOT use; the spike restates the rejection',
+    sites: [
+      { file: ADR, anchor: 'a single "within', pattern: '^\\s*(\\d+)%" rule' },
+      { file: SPIKE, anchor: 'a single "within', pattern: '^\\s*(\\d+)%" rule' },
+    ],
+  },
+];
+
+/** Every row, gate and scene oracle alike — what the resolver, the sweep and the accounting read. */
+export const CLAIMS: readonly Claim[] = [...GATE_CLAIMS, ...SCENE_ORACLE_CLAIMS];

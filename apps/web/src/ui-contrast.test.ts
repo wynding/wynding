@@ -103,6 +103,9 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // is ADR 0003's 3:1 UI-boundary case. axe cannot evaluate a rendered boundary, so this
       // is the only thing standing between the design and an invisible edge.
       ['panel-edge', 'surface'],
+      // #152: the Standard Dock's scroll cue (track + chevrons) is drawn in `--wy-accent` in
+      // the Dock's gutter, over the Stage's board backdrop — the only thing behind it.
+      ['accent', 'board-bg'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
