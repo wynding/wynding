@@ -302,6 +302,10 @@ describe(
 describe('the config-load assertions (#171 §3)', () => {
   type Allowlists = Record<string, { runtime: string[]; testOnly: string[] }>;
   type Violation = { specifier: string; outside: string[] };
+  let assertAllowlists: (
+    readManifest: (specifier: string) => Record<string, Record<string, string> | undefined>,
+    allowlists?: Allowlists,
+  ) => void;
   let violations: (
     readManifest: (specifier: string) => Record<string, Record<string, string> | undefined>,
     allowlists?: Allowlists,
@@ -311,9 +315,11 @@ describe('the config-load assertions (#171 §3)', () => {
     // A non-literal specifier: the config is plain .mjs and this package's tsconfig does not
     // type it, so it is loaded as an untyped module and narrowed here.
     const url = pathToFileURL(join(REPO_ROOT, 'eslint.config.mjs')).href;
-    ({ thirdPartyAllowlistViolations: violations } = (await import(url)) as {
-      thirdPartyAllowlistViolations: typeof violations;
-    });
+    ({ thirdPartyAllowlistViolations: violations, assertThirdPartyAllowlists: assertAllowlists } =
+      (await import(url)) as {
+        thirdPartyAllowlistViolations: typeof violations;
+        assertThirdPartyAllowlists: typeof assertAllowlists;
+      });
   }, CONFIG_LOAD_MS);
 
   const TABLE: Allowlists = {
@@ -341,6 +347,15 @@ describe('the config-load assertions (#171 §3)', () => {
         TABLE,
       )[0]!.outside,
     ).toEqual(['peerDependencies.yaml', 'optionalDependencies.x']);
+  });
+
+  it('the assertion throws on a violating manifest, naming the dependency, and passes a clean one', () => {
+    expect(() => assertAllowlists(() => ({ dependencies: { yaml: '2' } }), TABLE)).toThrow(
+      /declares dependencies\.yaml, outside @wynding\/engine's third-party allowlist/,
+    );
+    expect(() =>
+      assertAllowlists(() => ({ dependencies: { '@noble/hashes': '1' } }), TABLE),
+    ).not.toThrow();
   });
 
   it('the real manifests are clean', () => {

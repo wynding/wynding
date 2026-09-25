@@ -580,6 +580,7 @@ const MANIFEST_DEPENDENCY_FIELDS = [
   'devDependencies',
 ];
 
+/** `@wynding/x` -> the absolute path of its `package.json`. */
 const manifestPathOf = (specifier) => join(packageDir(specifier), 'package.json');
 
 /** The manifest half of each allowlist, as data: for every allowlisted package, the declared
@@ -604,10 +605,11 @@ export function thirdPartyAllowlistViolations(
 }
 
 /** Fails the lint if an allowlisted package's manifest declares a dependency outside its list.
- *  Its top-level call below is pinned by `layering-lint.test.ts`, since deleting it would
- *  otherwise leave every test green. */
-function assertThirdPartyAllowlists() {
-  const [first] = thirdPartyAllowlistViolations();
+ *  Exported with the same injectable reader and table, so its error path is tested against a fake
+ *  manifest too; its top-level call below is pinned by `layering-lint.test.ts`, since deleting it
+ *  would otherwise leave every test green. */
+export function assertThirdPartyAllowlists(readManifest, allowlists) {
+  const [first] = thirdPartyAllowlistViolations(readManifest, allowlists);
   if (first === undefined) return;
   const { specifier, runtime, testOnly, outside } = first;
   throw new Error(

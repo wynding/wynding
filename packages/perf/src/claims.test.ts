@@ -1014,10 +1014,12 @@ const KNOWN_UNROWED: readonly {
   readonly why: string;
 }[] = [];
 
-/** THE TWO LOW-INFORMATION ROWS WITH NO CENSUS, each with its reason, asserted exactly (a
- *  stale entry fails like a stale census). Both values key to a single digit, so a census of
- *  either counts every plain `1` or `2` across nineteen files (262 and 198 prose copies,
- *  measured for #170) and would record no claim at all. Each is guarded another way. */
+/** THE LOW-INFORMATION ROWS WITH NO CENSUS, each with its reason, asserted exactly (a stale
+ *  entry fails like a stale census). Two key to a single digit, so a census of either counts
+ *  every plain `1` or `2` across nineteen files (262 and 198 prose copies, measured for #170)
+ *  and records no claim at all. The third is SIGNED, and every census source reads numerals
+ *  unsigned, so its census could never find a copy (CodeRabbit, PR #174); an always-empty
+ *  census now fails on its own. Each is guarded another way. */
 const CENSUS_EXEMPT: readonly {
   readonly id: string;
   readonly value: string;
@@ -1032,6 +1034,11 @@ const CENSUS_EXEMPT: readonly {
     id: 'claimed-doubling',
     value: '2.00',
     why: 'a historical figure quoted only to be refuted, pinned by its three sites, each spelled `2.00x` or `2.00×`',
+  },
+  {
+    id: 'skew-g1',
+    value: '-1.36',
+    why: 'signed: every census source reads numerals unsigned, so a census keyed to -1.36 is always empty. Its two sites capture the sign, which is where a flipped sign fails',
   },
 ];
 
@@ -1913,10 +1920,6 @@ const ROWED_CENSUS: readonly {
     ],
   },
   {
-    value: '-1.36',
-    census: [],
-  },
-  {
     value: '97.5',
     census: [
       [G.gate, 3],
@@ -2668,13 +2671,19 @@ function literalValue(text: string): string | undefined {
  *  cannot identify a claim on its own, so it is guarded by its row's declared sites rather
  *  than by the sweep. One bar, two classes, one admission. */
 function codeLiterals(file: string): Numeral[] {
+  return literalNumerals(file, (text, value) => highInformation(text, value));
+}
+
+/** A code file's numeric literals as occurrences, admitted by `admit` (spelling, value). The one
+ *  literal-reading loop both `codeLiterals` and the census use, so they cannot drift apart. */
+function literalNumerals(file: string, admit: (text: string, value: string) => boolean): Numeral[] {
   if (file.endsWith('.md')) return [];
   const raw = read(file);
   rejectUnlexableSyntax(file, raw);
   const found: Numeral[] = [];
   for (const lit of walk(raw).numericLiterals) {
     const value = literalValue(lit.text);
-    if (value === undefined || !highInformation(lit.text, value)) continue;
+    if (value === undefined || !admit(lit.text, value)) continue;
     const at = lit.signAt ?? lit.start;
     found.push({ raw: raw.slice(at, lit.end), value, at, alsoAt: lit.start });
   }
@@ -2719,24 +2728,16 @@ const censusCache = new Map<string, Numeral[]>();
 function censusOccurrences(file: string): Numeral[] {
   const hit = censusCache.get(file);
   if (hit !== undefined) return hit;
-  const found = [...scan(file)];
+  const found = [...scan(file), ...literalNumerals(file, (text) => measurementLike(text))];
   if (!file.endsWith('.md')) {
     const raw = read(file);
-    rejectUnlexableSyntax(file, raw);
     const walked = walk(raw);
-    for (const lit of walked.numericLiterals) {
-      const value = literalValue(lit.text);
-      if (value === undefined || !measurementLike(lit.text)) continue;
-      const at = lit.signAt ?? lit.start;
-      found.push({ raw: raw.slice(at, lit.end), value, at });
-    }
-    // The string and template TEXT, as a same-length projection: everything the walk marks
-    // neither comment nor code is literal data. Newlines are kept so the masks see lines.
-    let literals = '';
-    for (let i = 0; i < raw.length; i++) {
-      const inLiteral = !walked.commentAt[i] && !walked.codeAt[i];
-      literals += inLiteral || raw[i] === '\n' ? raw[i] : ' ';
-    }
+    // The string, template and regex-literal TEXT, as a same-length projection: everything the
+    // walk marks neither comment nor code is literal data (a regex literal included, so
+    // `/\d{100}/` counts as a 100). Newlines are kept so the masks see lines.
+    const literals = Array.from(raw, (ch, i) =>
+      (!walked.commentAt[i] && !walked.codeAt[i]) || ch === '\n' ? ch : ' ',
+    ).join('');
     for (const m of maskReferences(literals).matchAll(NUMERAL)) {
       if (!measurementLike(m[0])) continue;
       const cleaned = m[0].replace(/[,_]/g, '');
@@ -3108,6 +3109,7 @@ describe('the coverage contract is enforced, not merely asserted', () => {
       tasks: Record<string, { inputs?: readonly string[] }>;
     };
     const inputs = turbo.tasks['@wynding/perf#test']?.inputs ?? [];
+    /** A `$TURBO_ROOT$/…` input glob as an anchored regex: `*` is one path segment, `**` any. */
     const toRegex = (input: string): RegExp => {
       const source = input
         .slice('$TURBO_ROOT$/'.length)
@@ -3167,6 +3169,13 @@ describe('the coverage contract is enforced, not merely asserted', () => {
         'family row without a census leaves its unlisted copies unguarded, and an entry with ' +
         'no row is stale',
     ).toEqual([...family].sort());
+
+    // A census that records no copy at all cannot fail (a site is a copy), so it is a sign the
+    // value is unreadable to the census, as a signed value was (CodeRabbit, PR #174).
+    expect(
+      ROWED_CENSUS.filter((e) => e.census.length === 0).map((e) => e.value),
+      'these census entries are empty; exempt the row in CENSUS_EXEMPT with the reason',
+    ).toEqual([]);
 
     const mismatches: string[] = [];
     for (const e of ROWED_CENSUS) {
