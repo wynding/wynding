@@ -521,11 +521,20 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
         const rail = document.querySelector('.wy-rail') as HTMLElement;
         const railTop = rail.getBoundingClientRect().top + rail.clientTop;
         const cardTop = document.querySelector('.wy-card')!.getBoundingClientRect().top;
-        return { railTop, cardOffset: cardTop - railTop };
+        const statusPadTop = parseFloat(
+          getComputedStyle(document.querySelector('.wy-status') as HTMLElement).paddingTop,
+        );
+        return { railTop, cardOffset: cardTop - railTop, statusPadTop };
       });
     const before = await atRest();
     await inject(page, { top: `${TOP}px` });
     const after = await atRest();
+    // The premise first: an inset that never landed (a renamed property, a token chain that
+    // stopped resolving) would leave the Card offset unchanged too, and prove nothing.
+    expect(
+      after.statusPadTop - before.statusPadTop,
+      'the status row must pay the injected inset, or this test checks nothing',
+    ).toBeCloseTo(TOP, 1);
     expect(after.railTop, 'the Rail sits below the row that paid the inset').toBeGreaterThanOrEqual(
       TOP,
     );
