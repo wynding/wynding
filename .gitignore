@@ -14,6 +14,7 @@ node_modules/
 dist/
 dist-perf/
 dist-host/
+dist-e2e/
 build/
 *.tsbuildinfo
 

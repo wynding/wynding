@@ -117,6 +117,10 @@ export default defineConfig({
   // 4175. It matters more than it looks — with `reuseExistingServer` true locally, a
   // leftover preview from an aborted `perf:e2e` would not clash loudly but be ADOPTED, and
   // the host arm would silently assert against the perf bundle instead of `dist-host`.
+  //
+  // 4176 is the survey harness's (#158): ADR 0014's survey is offered only where a transport
+  // is injected and production injects none, so `survey.spec.ts` runs against its own build
+  // (`vite.e2e.config.ts` → `dist-e2e`) that boots the real app with a fake transport.
   webServer: [
     {
       command: 'pnpm run build:web && pnpm exec vite preview --port 4173 --strictPort',
@@ -128,6 +132,13 @@ export default defineConfig({
       command:
         'pnpm run build:host && pnpm exec vite preview --outDir dist-host --port 4175 --strictPort',
       url: 'http://localhost:4175',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command:
+        'pnpm run build:e2e && pnpm exec vite preview --config vite.e2e.config.ts --port 4176 --strictPort',
+      url: 'http://localhost:4176/e2e-harness/survey.html',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

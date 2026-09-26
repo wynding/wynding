@@ -43,6 +43,13 @@ import { createApp, boot, type Scheduler } from './main';
 import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
 import { MAX_RECENT_AGE_MS } from './playtrace';
+import {
+  validateSurveyPayload,
+  type SurveyAsk,
+  type SurveyPayload,
+  type SurveySendResult,
+  type SurveyTransport,
+} from './survey';
 import type { WakeLockApi } from './wakelock';
 import { fakeWakeLock } from './wakelock-fakes';
 
@@ -1407,6 +1414,30 @@ describe('main — boot()', () => {
     handle!.destroy();
     delete (window as unknown as { matchMedia?: unknown }).matchMedia;
     vi.unstubAllGlobals();
+  });
+
+  it('builds the survey only when a transport is injected (ADR 0014: the transport is the switch)', async () => {
+    try {
+      vi.stubGlobal('requestAnimationFrame', () => 1);
+      vi.stubGlobal('cancelAnimationFrame', vi.fn());
+      const surveyChildren = async (options?: Parameters<typeof boot>[1]): Promise<number> => {
+        document.body.innerHTML = '<div id="app"></div>';
+        const handle = await boot(document, options);
+        const count = document.querySelector('.wy-survey')!.childElementCount;
+        handle!.destroy();
+        return count;
+      };
+      expect(await surveyChildren(), 'the shipped entry passes nothing').toBe(0);
+      const transport = { send: vi.fn(async () => 'accepted' as const) };
+      expect(await surveyChildren({ surveyTransport: transport })).toBeGreaterThan(0);
+      // An explicit gameVersion stands in for the build's (the e2e harness's second deploy).
+      expect(
+        await surveyChildren({ surveyTransport: transport, gameVersion: 'a'.repeat(40) }),
+      ).toBeGreaterThan(0);
+      expect(transport.send).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -2808,5 +2839,174 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
         (window as unknown as { ResizeObserver: unknown }).ResizeObserver = originalRO;
       }
     }
+  });
+});
+
+describe('main — the end-of-run survey (#158, ADR 0014)', () => {
+  const GAME_VERSION = 'fedcba9876543210fedcba9876543210fedcba98';
+
+  interface Sent {
+    readonly payload: SurveyPayload;
+    readonly signal: AbortSignal;
+    resolve(result: SurveySendResult): void;
+  }
+
+  function surveyApp(options: { transport?: boolean } = {}) {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const sent: Sent[] = [];
+    const commits: boolean[] = [];
+    const ask: SurveyAsk = {
+      offered: () => true,
+      refresh: async () => {},
+      commit: async (dontAskAgain) => void commits.push(dontAskAgain),
+    };
+    const transport: SurveyTransport = {
+      send: (payload, signal) => new Promise((resolve) => sent.push({ payload, signal, resolve })),
+    };
+    let runs = 0;
+    let ids = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      mintRunId: () => `00000000-0000-4000-8000-${String(++runs).padStart(12, '0')}`,
+      mintSurveyId: () => `00000000-0000-4000-9000-${String(++ids).padStart(12, '0')}`,
+      gameVersion: GAME_VERSION,
+      ...(options.transport === false ? {} : { surveyTransport: transport, surveyAsk: ask }),
+      playtraceDelivery: { copy: async () => {}, save: () => {} },
+    });
+    openApps.push(app);
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    const button = (label: string): HTMLButtonElement => {
+      const btn = [...results.querySelectorAll<HTMLButtonElement>('button')].find(
+        (b) => b.textContent === label,
+      );
+      if (btn === undefined) throw new Error(`no results button named ${label}`);
+      return btn;
+    };
+    return {
+      root,
+      results,
+      sent,
+      commits,
+      button,
+      status: (): string => results.querySelector('.wy-verify')!.textContent ?? '',
+      slot: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey')!,
+      frame: (): void => sched.frame((clock += 16)),
+      resolve(): void {
+        this.frame();
+        dockButton(root, 'Start').click();
+        for (let i = 0; i < 4000 && results.hidden; i++) this.frame();
+        expect(results.hidden, 'the run must actually have resolved').toBe(false);
+      },
+    };
+  }
+
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+
+  it('offers nothing without a transport — production’s switch is the transport’s absence', async () => {
+    const h = surveyApp({ transport: false });
+    h.resolve();
+    await settle();
+    expect(h.slot().hidden).toBe(true);
+    expect(h.slot().childElementCount).toBe(0);
+  });
+
+  it('sends a payload describing the finished run, holding the region and locking its other writers', async () => {
+    const h = surveyApp();
+    h.resolve();
+    await vi.waitFor(() => expect(h.slot().hidden).toBe(false));
+    expect(document.activeElement, 'Play again keeps initial focus').toBe(h.button('Play again'));
+
+    h.button('Give feedback').click();
+    h.results.querySelector<HTMLInputElement>('fieldset input[value="4"]')!.click();
+    h.button('Send').click();
+    expect(h.sent).toHaveLength(1);
+    const { payload } = h.sent[0]!;
+    expect(validateSurveyPayload(payload).ok).toBe(true);
+    expect(payload.run).toMatchObject({
+      runId: '00000000-0000-4000-8000-000000000001',
+      sessionId: '00000000-0000-4000-9000-000000000001',
+      gameVersion: GAME_VERSION,
+      outcome: 'lost',
+      seed: 1,
+    });
+    expect(payload.answers.rating).toBe(4);
+
+    expect(h.status()).toBe('Sending your feedback…');
+    for (const label of ['Verify this run', 'Copy run data', 'Save run data']) {
+      expect(h.button(label).getAttribute('aria-disabled'), label).toBe('true');
+    }
+    h.button('Verify this run').click(); // locked: says nothing over the survey's claim
+    expect(h.status()).toBe('Sending your feedback…');
+
+    h.sent[0]!.resolve('accepted');
+    await settle();
+    expect(h.status()).toBe(
+      'Thanks for the feedback. Reference: 00000000-0000-4000-9000-000000000001.',
+    );
+    expect(h.button('Verify this run').getAttribute('aria-disabled')).toBe('false');
+    expect(document.activeElement).toBe(h.button('Play again'));
+    expect(h.slot().hidden, 'Give feedback is retired').toBe(true);
+    await settle();
+    expect(h.commits).toEqual([false]);
+    // A released region belongs to the next owner.
+    h.button('Verify this run').click();
+    expect(h.status()).toMatch(/^Verif/);
+  });
+
+  it('the payload’s run identity matches the replay and capture the results dialog is about', async () => {
+    const h = surveyApp();
+    h.resolve();
+    await vi.waitFor(() => expect(h.slot().hidden).toBe(false));
+    h.button('Give feedback').click();
+    h.results.querySelector<HTMLInputElement>('fieldset input[value="2"]')!.click();
+    h.button('Send').click();
+    const run = h.sent[0]!.payload.run;
+    const reference = createController(1);
+    expect(run.boardId).toBe(reference.buildReplay().boardId);
+    expect(run.rulesetHash).toBe(reference.buildReplay().rulesetHash);
+    expect(run.simVersion).toBe(reference.buildReplay().simVersion);
+    expect(run.finalTick).toBeGreaterThan(0);
+    expect(run.finalHash).toMatch(/^[0-9a-f]{8}$/);
+    expect(run.replayDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('Play again mid-send cancels the operation, clears the region, unlocks, and commits nothing', async () => {
+    const h = surveyApp();
+    h.resolve();
+    await vi.waitFor(() => expect(h.slot().hidden).toBe(false));
+    h.button('Give feedback').click();
+    h.results.querySelector<HTMLInputElement>('fieldset input[value="5"]')!.click();
+    const dontAsk = [...h.results.querySelectorAll('label')].find(
+      (l) => l.textContent === "Don't ask again",
+    );
+    dontAsk!.querySelector('input')!.click();
+    expect(dontAsk!.querySelector('input')!.checked, 'the dismissal really is armed').toBe(true);
+    h.button('Send').click();
+    h.button('Play again').click();
+
+    expect(h.sent[0]!.signal.aborted).toBe(true);
+    expect(h.status()).toBe('');
+    expect(h.button('Verify this run').getAttribute('aria-disabled')).toBe('false');
+    h.sent[0]!.resolve('accepted'); // a late answer to the aborted request
+    await settle();
+    expect(h.status(), 'no result from the last run lands on this one').toBe('');
+    expect(h.commits, 'not even an armed dismissal is committed').toEqual([]);
+
+    // The next run's dialog offers the survey afresh, with an empty draft.
+    h.resolve();
+    await vi.waitFor(() => expect(h.slot().hidden).toBe(false));
+    h.button('Give feedback').click();
+    expect(
+      h.results.querySelectorAll<HTMLInputElement>('input:checked'),
+      'nothing of the last draft carries over',
+    ).toHaveLength(0);
   });
 });

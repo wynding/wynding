@@ -1657,6 +1657,105 @@ a.wy-home:focus-visible {
   font-size: 1rem;
 }
 
+/* ADR 0014's survey, expanded in place inside the results dialog. The expanded form is
+   taller than a compact landscape viewport, so the dialog scrolls — and it must centre only
+   while it fits, or its top (title, Play again) is clipped out of reach. Auto margins on the
+   first and last child do that in every engine; `justify-content: safe center` would too,
+   but older WebKit (the Capacitor WebView) drops it and falls back to the unsafe `center`. */
+.wy-results {
+  overflow-y: auto;
+  justify-content: flex-start;
+}
+
+.wy-results > :first-child {
+  margin-top: auto;
+}
+
+.wy-results > :last-child {
+  margin-bottom: auto;
+}
+
+.wy-survey {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, 30rem);
+}
+
+.wy-survey[hidden],
+.wy-survey-form[hidden] {
+  display: none;
+}
+
+.wy-survey-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+}
+
+.wy-survey-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  border: 1px solid #33465f;
+  border-radius: 6px;
+}
+
+.wy-survey-scale legend {
+  padding: 0 0.25rem;
+}
+
+.wy-survey-scale label,
+.wy-survey-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.wy-survey-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.wy-survey-text textarea {
+  font: inherit;
+  color: var(--wy-fg);
+  background: #0e1a2b;
+  /* The input's boundary needs 3:1 against the backdrop (ADR 0003, WCAG 1.4.11) — the
+     token is gated in `ui-contrast.test.ts`. */
+  border: 1px solid var(--wy-panel-edge);
+  border-radius: 6px;
+  padding: 0.5rem;
+  resize: vertical;
+}
+
+/* In flight (§6) the choices and the text refuse edits; show it, not only announce it. */
+.wy-survey-form input[aria-disabled='true'],
+.wy-survey-form input[aria-disabled='true'] + span,
+.wy-survey-text textarea:read-only {
+  color: var(--wy-fg-dim);
+  cursor: not-allowed;
+}
+
+.wy-survey-note {
+  margin: 0;
+  color: var(--wy-fg-dim);
+  font-size: 0.9rem;
+}
+
+.wy-survey-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
 /* --- Rotate prompt (P5): phones/tablets in portrait only — gated at runtime on
    `(orientation: portrait)` AND `(pointer: coarse)`, PLAN.md P5. --- */
 

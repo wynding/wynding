@@ -91,6 +91,21 @@ export interface Overlay {
    *  since #133 the two export actions). `showResults`/`hideResults` both clear it, so a
    *  result from one run can never land on the next run's dialog. */
   setResultsStatus(message: string): void;
+  /** What the shared status region reads now. */
+  resultsStatusText(): string;
+  /** The results dialog's survey slot (ADR 0014 §1): an empty container between the
+   *  secondary actions and the status region. `survey-form.ts` fills it; the overlay only
+   *  places it, so a build with no survey carries an empty, unrendered node. */
+  readonly resultsSurveySlot: HTMLElement;
+  /** ADR 0014 §6's single-owner handoff, enforced by control state: while the survey holds
+   *  the shared status region (a send in flight), every OTHER action that writes it —
+   *  Verify, and #133's two exports — is `aria-disabled` and its press does nothing. A press
+   *  mid-send would overwrite "Sending…" and then be overwritten by the outcome, or, since
+   *  each writer claims the region, silence the outcome entirely. */
+  setResultsWritersLocked(locked: boolean): void;
+  /** Focus Play again — where an accepted Send sends focus, since it retires the control
+   *  the player was on (ADR 0014 §1). */
+  focusPlayAgain(): void;
   destroy(): void;
 }
 
@@ -720,10 +735,28 @@ export function createOverlay(
   resultsStatus.className = 'wy-verify';
   resultsStatus.setAttribute('role', 'status');
   resultsStatus.setAttribute('aria-live', 'polite');
+  // ADR 0014 §1's survey, expanded IN PLACE: its slot joins the tab order after the other
+  // secondary actions and before the status region it reports through.
+  const surveySlot = doc.createElement('div');
+  surveySlot.className = 'wy-survey';
+  surveySlot.hidden = true; // until a survey renders into it — most builds never do
+  // The status region's other writers, locked while the survey holds it (§6). Same
+  // `aria-disabled` + click-site suppression as the Dock's primary control; unlike Send's
+  // suppressed press, these stay SILENT, because the region they would announce into is
+  // exactly the one the survey owns until its outcome lands.
+  const regionWriters = [verifyBtn, copyRunBtn, saveRunBtn];
+  const writerLocked = (btn: HTMLButtonElement): boolean =>
+    btn.getAttribute('aria-disabled') === 'true';
   playAgainBtn.addEventListener('click', () => onAction({ type: 'playAgain' }));
-  verifyBtn.addEventListener('click', () => onAction({ type: 'verify' }));
-  copyRunBtn.addEventListener('click', () => onAction({ type: 'copyPlaytrace' }));
-  saveRunBtn.addEventListener('click', () => onAction({ type: 'savePlaytrace' }));
+  verifyBtn.addEventListener('click', () => {
+    if (!writerLocked(verifyBtn)) onAction({ type: 'verify' });
+  });
+  copyRunBtn.addEventListener('click', () => {
+    if (!writerLocked(copyRunBtn)) onAction({ type: 'copyPlaytrace' });
+  });
+  saveRunBtn.addEventListener('click', () => {
+    if (!writerLocked(saveRunBtn)) onAction({ type: 'savePlaytrace' });
+  });
   results.append(
     resultTitle,
     resultSummary,
@@ -731,6 +764,7 @@ export function createOverlay(
     verifyBtn,
     copyRunBtn,
     saveRunBtn,
+    surveySlot,
     resultsStatus,
   );
 
@@ -2243,6 +2277,16 @@ export function createOverlay(
     },
     setResultsStatus(message: string): void {
       resultsStatus.textContent = message;
+    },
+    resultsStatusText(): string {
+      return resultsStatus.textContent ?? '';
+    },
+    resultsSurveySlot: surveySlot,
+    setResultsWritersLocked(locked: boolean): void {
+      for (const btn of regionWriters) btn.setAttribute('aria-disabled', String(locked));
+    },
+    focusPlayAgain(): void {
+      playAgainBtn.focus();
     },
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI
