@@ -30,8 +30,16 @@ export interface SurveyFormHost {
    *  deletion request quotes. */
   reference(): string;
   /** Claim the results dialog's one status region. The writer goes quiet once anything
-   *  claims after it, or the dialog closes. */
+   *  claims after it, or the dialog closes. Only a SEND claims: it holds the region across
+   *  its request and must own the outcome announcement (§6). */
   claimStatus(): (message: string) => void;
+  /** Write the region WITHOUT claiming it — for the survey's immediate, final messages (the
+   *  rating prompt, the clear on opening and on Not now). A claim would silence a pending
+   *  asynchronous writer (#133's Copy, awaiting the clipboard) whose result the player is
+   *  still owed; an unclaimed write lets that result land after it instead. */
+  writeStatus(message: string): void;
+  /** What the region shows now — so Not now clears only the survey's OWN message. */
+  statusText(): string;
   /** The region is held (a send in flight) or released (its outcome announced): the
    *  dialog's other writers are locked exactly while it is held (§6). */
   setRegionHeld(held: boolean): void;
@@ -131,8 +139,10 @@ export function createSurveyForm(
   // may still have been stored, and the player needs the id to ask for its deletion.
   const referenceEl = doc.createElement('p');
   referenceEl.className = 'wy-survey-note';
+  referenceEl.id = `${groupPrefix}-reference`;
   const privacyEl = doc.createElement('p');
   privacyEl.className = 'wy-survey-note';
+  privacyEl.id = `${groupPrefix}-privacy`;
   privacyEl.textContent = t('survey.privacy');
 
   const actions = doc.createElement('div');
@@ -144,6 +154,10 @@ export function createSurveyForm(
   notNowBtn.type = 'button';
   notNowBtn.className = 'wy-btn';
   notNowBtn.textContent = t('survey.notNow');
+  // §7: Send references the notice — and the reference a deletion request quotes — AT the
+  // point of submission, so a player who tabs straight to it (or lands back on it as Try
+  // again) hears both, not just "Send".
+  sendBtn.setAttribute('aria-describedby', `${referenceEl.id} ${privacyEl.id}`);
   // A MODIFIER, not an action (§3): it arms the dismissal the next Not now / Send commits.
   const dontAsk = checkbox(t('survey.dontAskAgain'));
   actions.append(sendBtn, notNowBtn, dontAsk.label);
@@ -162,6 +176,13 @@ export function createSurveyForm(
   /** False from a dialog opening until its ask refresh settles: nothing shows until the
    *  model has decided presence against current storage. */
   let ready = false;
+  /** The survey's last message in the region, so a collapse clears it only while it is still
+   *  what the region shows — never a Verify or export result written since. */
+  let ownMessage: string | null = null;
+  const say = (message: string): void => {
+    ownMessage = message;
+    host.writeStatus(message);
+  };
   /** Identifies the current dialog, so a refresh that settles after the dialog closed (or a
    *  newer one opened) cannot begin a survey on the wrong one. */
   let dialogSeq = 0;
@@ -266,7 +287,7 @@ export function createSurveyForm(
     if (!survey.open()) return;
     // Opening TAKES the region, and taking clears (§6): a Verify result still showing has
     // no pending outcome to lose.
-    host.claimStatus()('');
+    say('');
     render();
     rating.inputs[0]?.focus();
   });
@@ -274,6 +295,9 @@ export function createSurveyForm(
   notNowBtn.addEventListener('click', () => {
     if (notNowBtn.getAttribute('aria-disabled') === 'true') return;
     void survey.notNow();
+    // Every collapse but an accepted Send clears the survey's message (§6): a rating prompt
+    // or a failure notice is about a submission that is no longer pending.
+    if (ownMessage !== null && ownMessage !== '' && host.statusText() === ownMessage) say('');
     render();
     // Give feedback stays present and live on this dialog (§3), so it is a real target.
     openBtn.focus();
@@ -292,13 +316,14 @@ export function createSurveyForm(
     if (attempt.kind === 'needsRating') {
       // §2's deliberate divergence from the Dock: an explicit submit attempt gets an answer.
       // A button's keyboard activation IS this click, so the keymap route is the same path.
-      host.claimStatus()(t('survey.needsRating'));
+      say(t('survey.needsRating'));
       return;
     }
     if (attempt.kind === 'refused') return;
     // TAKE the region at Send and HOLD it across the request (§6).
     const announce = host.claimStatus();
-    announce(t('survey.sending'));
+    ownMessage = t('survey.sending');
+    announce(ownMessage);
     host.setRegionHeld(true);
     render();
     void attempt.done.then((result) => {
@@ -307,7 +332,8 @@ export function createSurveyForm(
       if (result === 'cancelled') return;
       // RELEASE on the outcome announcement — accepted, rejected and offline alike.
       host.setRegionHeld(false);
-      announce(OUTCOME[result]());
+      ownMessage = OUTCOME[result]();
+      announce(ownMessage);
       const focusWasHere = slot.contains(doc.activeElement);
       render();
       // An accepted Send retires the control the player was on, so focus goes to Play

@@ -372,6 +372,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       },
       reference: () => sessionIdentity.current(),
       claimStatus: () => claimResultsStatus(),
+      writeStatus: (message) => overlay.setResultsStatus(message),
+      statusText: () => overlay.resultsStatusText(),
       setRegionHeld: (held) => overlay.setResultsWritersLocked(held),
       focusPlayAgain: () => overlay.focusPlayAgain(),
     });

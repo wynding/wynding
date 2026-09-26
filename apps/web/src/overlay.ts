@@ -91,6 +91,8 @@ export interface Overlay {
    *  since #133 the two export actions). `showResults`/`hideResults` both clear it, so a
    *  result from one run can never land on the next run's dialog. */
   setResultsStatus(message: string): void;
+  /** What the shared status region reads now. */
+  resultsStatusText(): string;
   /** The results dialog's survey slot (ADR 0014 §1): an empty container between the
    *  secondary actions and the status region. `survey-form.ts` fills it; the overlay only
    *  places it, so a build with no survey carries an empty, unrendered node. */
@@ -2275,6 +2277,9 @@ export function createOverlay(
     },
     setResultsStatus(message: string): void {
       resultsStatus.textContent = message;
+    },
+    resultsStatusText(): string {
+      return resultsStatus.textContent ?? '';
     },
     resultsSurveySlot: surveySlot,
     setResultsWritersLocked(locked: boolean): void {

@@ -92,6 +92,8 @@ function setup(options: { offered?: boolean } = {}) {
         if (mine === seq) status = message;
       };
     },
+    writeStatus: (message) => void (status = message),
+    statusText: () => status,
     setRegionHeld: (h) => void held.push(h),
     focusPlayAgain: () => playAgain.focus(),
   };
@@ -137,6 +139,8 @@ function setup(options: { offered?: boolean } = {}) {
     pending,
     held,
     status: () => status,
+    /** Another writer of the shared region (Verify, or an export), claiming as main.ts does. */
+    otherWriter: () => host.claimStatus(),
     setOffered: (v: boolean) => void (offered = v),
     setRefreshGate: (g: Promise<void> | null) => void (refreshGate = g),
     button,
@@ -246,6 +250,57 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     h.radios(0)[0]!.click();
     h.button('Give feedback').click(); // already open: hidden, and refused
     expect(h.survey.state().answers.rating, 'reopening never resets the draft').toBe(1);
+  });
+
+  it('Send carries the privacy notice and the reference as its description (§7)', async () => {
+    const h = setup();
+    await h.expand();
+    const ids = (h.button('Send').getAttribute('aria-describedby') ?? '').split(' ');
+    expect(ids).toHaveLength(2);
+    const described = ids.map((id) => h.doc.getElementById(id)?.textContent ?? '');
+    expect(described[0]).toBe(
+      `Reference: ${REFERENCE}. Quote it if you ask for this feedback to be deleted.`,
+    );
+    expect(described[1]).toContain('privacy notice');
+  });
+
+  it('never silences a pending export: its prompts and clears write without claiming', async () => {
+    const h = setup();
+    await h.open();
+    const copy = h.otherWriter(); // a Copy awaiting the clipboard
+    h.button('Give feedback').click(); // clears the region...
+    h.button('Send').click(); // ...and prompts for a rating...
+    expect(h.status()).toBe('Choose a rating to send your feedback.');
+    copy('Run data copied to the clipboard.'); // ...and the export's result still lands
+    expect(h.status()).toBe('Run data copied to the clipboard.');
+  });
+
+  it('Not now clears the survey’s own message, and only its own', async () => {
+    const h = setup();
+    await h.expand();
+    h.button('Send').click();
+    h.button('Not now').click();
+    expect(h.status(), 'a stale rating prompt is cleared').toBe('');
+
+    h.button('Give feedback').click();
+    h.button('Send').click();
+    h.otherWriter()('Verified: replay re-simulated to the same outcome.');
+    h.button('Not now').click();
+    expect(h.status(), 'a Verify result written since is kept').toBe(
+      'Verified: replay re-simulated to the same outcome.',
+    );
+  });
+
+  it('Not now after a failed send clears the failure notice', async () => {
+    const h = setup();
+    await h.expand();
+    h.radios(0)[0]!.click();
+    h.button('Send').click();
+    h.last().resolve('rejected');
+    await flush();
+    expect(h.status()).toBe("Couldn't send your feedback.");
+    h.button('Not now').click();
+    expect(h.status()).toBe('');
   });
 
   it('forwards every answer to the model', async () => {
