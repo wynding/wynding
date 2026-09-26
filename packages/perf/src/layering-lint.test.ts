@@ -244,6 +244,10 @@ describe(
       ['a dynamic import of node:module', "export const m = import('node:module');\n"],
       ['a require of module', "export const m = require('module');\n"],
       [
+        'a template-spelled dynamic import of node:module',
+        'export const m = import(`node:module`);\n',
+      ],
+      [
         'a namespace createRequire',
         "import * as m from 'node:module';\nexport const a = m.createRequire(import.meta.url);\n",
       ],
@@ -280,6 +284,7 @@ describe(
             "import { require as local } from './local';\nexport const l = local;\n" +
             'export interface X { createRequire(): void }\nexport const o = { createRequire: 1 };\n' +
             'export function createRequire(): number { return 1; }\n' +
+            "export function localLoad(): unknown {\n  function require(x: string): string { return x; }\n  return require('module');\n}\n" +
             "import type { createRequire as T1 } from 'node:module';\n" +
             "import { type createRequire as T2 } from 'node:module';\nexport type T = T1 | T2;\n",
         ),

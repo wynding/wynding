@@ -46,6 +46,17 @@ function unwrap(node) {
   return current;
 }
 
+/** A constant string specifier's value (a string literal or a no-substitution template, the two
+ *  spellings the zones' SPECIFIER SITES treat as one), or undefined for anything else. */
+function constantString(node) {
+  const target = unwrap(node);
+  if (target?.type === 'Literal' && typeof target.value === 'string') return target.value;
+  if (target?.type === 'TemplateLiteral' && target.expressions.length === 0) {
+    return target.quasis[0]?.value.cooked ?? undefined;
+  }
+  return undefined;
+}
+
 const noAliasedRequire = {
   meta: {
     type: 'problem',
@@ -141,16 +152,14 @@ const noAliasedRequire = {
       // then `m.createRequire`), so the load itself is the report. Nothing a zone ships has a
       // runtime use for that module; a static import stays allowed and is tracked above.
       ImportExpression(node) {
-        const source = unwrap(node.source);
-        if (source?.type === 'Literal' && MODULE_SPECIFIERS.has(source.value)) report(node);
+        if (MODULE_SPECIFIERS.has(constantString(node.source) ?? '')) report(node);
       },
       CallExpression(node) {
-        const [first] = node.arguments;
         if (
           node.callee.type === 'Identifier' &&
           node.callee.name === 'require' &&
-          first?.type === 'Literal' &&
-          MODULE_SPECIFIERS.has(first.value)
+          isGlobal(node.callee) &&
+          MODULE_SPECIFIERS.has(constantString(node.arguments[0]) ?? '')
         ) {
           report(node);
         }
