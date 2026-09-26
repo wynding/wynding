@@ -473,6 +473,28 @@ describe('loadSurveyAsk — once per gameVersion, and a dismissal that sticks (�
     expect((await loadSurveyAsk(slotFor(storage), SHA)).offered()).toBe(false); // rollback to A
   });
 
+  it('a long-lived tab’s stale snapshot never outranks newer durable history at the cap', async () => {
+    const storage = fakeStorage();
+    const version = (n: number): string => n.toString(16).padStart(40, '0');
+    const cap = MAX_ANSWERED_VERSIONS;
+    for (let n = 1; n <= cap; n++) {
+      await (await loadSurveyAsk(slotFor(storage), version(n))).commit(false);
+    }
+    // A tab loads [v1…v32] and stays open while later versions fill the history.
+    const stale = await loadSurveyAsk(slotFor(storage), version(cap));
+    for (let n = cap + 1; n <= 2 * cap; n++) {
+      await (await loadSurveyAsk(slotFor(storage), version(n))).commit(false);
+    }
+    await stale.commit(false); // recommits v32 from its old snapshot
+    const history = (await stored(storage))?.answeredVersions ?? [];
+    expect(history).toEqual([
+      ...Array.from({ length: cap - 1 }, (_, i) => version(cap + 2 + i)),
+      version(cap),
+    ]);
+    expect((await loadSurveyAsk(slotFor(storage), version(2 * cap))).offered()).toBe(false);
+    expect((await loadSurveyAsk(slotFor(storage), version(1))).offered()).toBe(true); // not resurrected
+  });
+
   it('remembers a bounded history, most recent kept, re-committing without duplicating', async () => {
     const storage = fakeStorage();
     const version = (n: number): string => n.toString(16).padStart(40, '0');

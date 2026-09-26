@@ -422,17 +422,17 @@ export async function loadSurveyAsk(
   return {
     offered: () => !stored.dismissed && !stored.answeredVersions.includes(gameVersion),
     async commit(dontAskAgain: boolean): Promise<void> {
-      /** The history to keep: `base` (oldest first), then any of THIS instance's entries it
-       *  lacks, then this version moved to the most-recent end, capped. */
-      const merged = (base: readonly string[]): StoredSurveyAsk => {
-        const union = [...base, ...stored.answeredVersions.filter((v) => !base.includes(v))];
-        return {
-          dismissed: dontAskAgain,
-          answeredVersions: [...union.filter((v) => v !== gameVersion), gameVersion].slice(
-            -MAX_ANSWERED_VERSIONS,
-          ),
-        };
-      };
+      /** The history to keep: `base` in its own order (oldest first) with THIS version moved
+       *  to the most-recent end, capped. Only this version is added — this instance commits
+       *  nothing else — so a stale snapshot never outranks what `base` says is recent (Codex,
+       *  PR #175: merging a long-lived tab's whole loaded list resurrected evicted versions
+       *  and evicted genuinely newer ones). */
+      const merged = (base: readonly string[]): StoredSurveyAsk => ({
+        dismissed: dontAskAgain,
+        answeredVersions: [...base.filter((v) => v !== gameVersion), gameVersion].slice(
+          -MAX_ANSWERED_VERSIONS,
+        ),
+      });
       // In memory first, so the session honours it whatever the write does (§3).
       stored = merged(stored.answeredVersions);
       try {
