@@ -57,6 +57,14 @@ function constantString(node) {
   return undefined;
 }
 
+/** True inside a `typeof x` TYPE query, which is erased and cannot call anything. */
+function inTypeQuery(node) {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'TSTypeQuery') return true;
+  }
+  return false;
+}
+
 const noAliasedRequire = {
   meta: {
     type: 'problem',
@@ -103,7 +111,7 @@ const noAliasedRequire = {
           for (const reference of scope.references) {
             const id = reference.identifier;
             if (id.name !== 'require' || reference.isValueReference === false) continue;
-            if (!isGlobal(id)) continue;
+            if (!isGlobal(id) || inTypeQuery(id)) continue;
             const parent = id.parent;
             if (parent?.type === 'CallExpression' && parent.callee === id) continue;
             report(id);
@@ -164,12 +172,17 @@ const noAliasedRequire = {
           report(node);
         }
       },
-      // A value RE-EXPORT from `module` (`export { createRequire } from 'node:module'`,
-      // `export * from 'module'`) hands the loader factory to any file that imports the barrel,
-      // where none of this can see it, so the re-export itself is the report.
+      // A value RE-EXPORT of `createRequire` (`export { createRequire } from 'node:module'`, or
+      // any `export * from 'module'`, which includes it) hands the loader factory to any file
+      // that imports the barrel, where none of this can see it, so the re-export is the report.
+      // A named re-export of anything else (`builtinModules`, `isBuiltin`) is not a loader.
       ExportNamedDeclaration(node) {
         if (node.exportKind === 'type' || !MODULE_SPECIFIERS.has(node.source?.value ?? '')) return;
-        if (node.specifiers.some((spec) => spec.exportKind !== 'type')) report(node);
+        const names = (spec) =>
+          spec.local.type === 'Identifier' ? spec.local.name : spec.local.value;
+        for (const spec of node.specifiers) {
+          if (spec.exportKind !== 'type' && names(spec) === 'createRequire') report(spec);
+        }
       },
       ExportAllDeclaration(node) {
         if (node.exportKind !== 'type' && MODULE_SPECIFIERS.has(node.source.value)) report(node);

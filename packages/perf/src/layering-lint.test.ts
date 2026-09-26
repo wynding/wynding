@@ -287,6 +287,8 @@ describe(
             'export interface X { createRequire(): void }\nexport const o = { createRequire: 1 };\n' +
             'export function createRequire(): number { return 1; }\n' +
             "export type { createRequire as T3 } from 'node:module';\n" +
+            "export { builtinModules, isBuiltin } from 'node:module';\n" +
+            'export type Loader = typeof require;\n' +
             "export function localLoad(): unknown {\n  function require(x: string): string { return x; }\n  return require('module');\n}\n" +
             "import type { createRequire as T1 } from 'node:module';\n" +
             "import { type createRequire as T2 } from 'node:module';\nexport type T = T1 | T2;\n",
