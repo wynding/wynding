@@ -2,8 +2,8 @@
 // that the layering zones cannot judge by specifier. `require('x')` called directly is left to
 // the zones' SPECIFIER SITES, which read its specifier. Everything else that reaches the loader
 // has no specifier to read: the loader passed around as a value (`(0, require)(…)`,
-// `const r = require`), read off a host object (`globalThis.require`, the same member
-// destructured), or reached through Node's `module` builtin.
+// `const r = require`), read as a member of any object (`globalThis.require`, `host.require`,
+// the same key destructured), or reached through Node's `module` builtin.
 //
 // THE `module` BUILTIN IS REPORTED WHERE IT ENTERS, NOT WHERE IT IS USED. Its exports carry the
 // loader many ways over (`createRequire`, `Module.createRequire`, `Module.prototype.require`,
@@ -32,13 +32,11 @@
 // module.
 
 const MESSAGE =
-  'An aliased or indirect `require` (the value passed around, `.require` on a host object, or ' +
+  'An aliased or indirect `require` (the value passed around, a `.require` member, or ' +
   "Node's `module` builtin or CommonJS `module` object) has no specifier the layering zones can " +
   'check. Call `require()` with a string literal, or use `import`. See ' +
   'eslint-rules/no-aliased-require.mjs (#171).';
 
-/** The global objects the loader can be read off. (The CommonJS `module` is reported whole.) */
-const HOSTS = new Set(['globalThis', 'global', 'window', 'self']);
 /** The exports of `module` known to be INERT, the only ones a zone may import or re-export. Every
  *  other one reaches the loader: `createRequire`, `Module` and the default (`.createRequire`,
  *  `.prototype.require`; Codex, PR #174), and, because the ESM named exports are every own
@@ -121,11 +119,6 @@ const noAliasedRequire = {
       const variable = resolve(identifier);
       return variable === null || (variable.scope.type === 'global' && variable.defs.length === 0);
     };
-    /** True when `node` is a global host object (`globalThis`, `module`, …). */
-    const isHost = (node) => {
-      const target = unwrap(node);
-      return target?.type === 'Identifier' && HOSTS.has(target.name) && isGlobal(target);
-    };
     /** True when `node` is `getBuiltinModule` (Codex, PR #174), which hands back any builtin's
      *  namespace, `module` included. It is judged BY NAME off any object (`process`,
      *  `globalThis.process`, an alias or import of either, its `default`), because `process`
@@ -199,6 +192,45 @@ const noAliasedRequire = {
       const current = outermost(node);
       return current.parent?.type === 'CallExpression' && current.parent.callee === current;
     };
+    /** True when the object chain under `node` starts at something already reported where it
+     *  enters (the CommonJS `module`, or a binding imported from `module`/`node:module`), so its
+     *  `.require` is not reported a second time (`module.require`, `new Module().require`). */
+    const rootAlreadyReported = (node) => {
+      let current = unwrap(node);
+      for (;;) {
+        if (current?.type === 'MemberExpression') current = unwrap(current.object);
+        else if (current?.type === 'ChainExpression') current = unwrap(current.expression);
+        else if (current?.type === 'CallExpression' || current?.type === 'NewExpression') {
+          // A reported `getBuiltinModule('node:module')` (or non-constant) call is a root too.
+          if (current.type === 'CallExpression' && isBuiltinLoader(current.callee)) {
+            const specifier = constantString(current.arguments[0]);
+            if (specifier === undefined || MODULE_SPECIFIERS.has(specifier)) return true;
+          }
+          current = unwrap(current.callee);
+        } else break;
+      }
+      if (current?.type !== 'Identifier') return false;
+      if (current.name === 'module' && isGlobal(current)) return true;
+      return (resolve(current)?.defs ?? []).some(
+        (def) =>
+          def.type === 'ImportBinding' && MODULE_SPECIFIERS.has(def.parent?.source?.value ?? ''),
+      );
+    };
+    /** True when member `node` is only WRITTEN (`o.require = x`, `o.require++`, `delete o.require`),
+     *  which reads no loader. A compound or logical assignment (`??=`, `||=`, `+=`) READS the old
+     *  value first and can hand it on, so it is not a write here. A write through a destructuring
+     *  target (`[o.require] = …`) still reports, which fails closed. */
+    const isWrite = (node) => {
+      const current = outermost(node);
+      const parent = current.parent;
+      return (
+        (parent?.type === 'AssignmentExpression' &&
+          parent.operator === '=' &&
+          parent.left === current) ||
+        (parent?.type === 'UpdateExpression' && parent.argument === current) ||
+        (parent?.type === 'UnaryExpression' && parent.operator === 'delete')
+      );
+    };
     const report = (node) => context.report({ node, messageId: 'aliased' });
 
     return {
@@ -240,17 +272,25 @@ const noAliasedRequire = {
           }
         }
       },
-      // `.require` read off a host object, in either member form.
+      // `.require` read off ANY object, in either member form, and the same key destructured
+      // from any source. Judged by name, not by the object, because a host (`globalThis`, `global`,
+      // `window`, `self`) can be aliased without end (`const host = globalThis`; Codex, PR #174),
+      // exactly as `getBuiltinModule` is judged. No zoned source reads a member named `require`
+      // for anything else; a `typeof` feature check stays clean.
       MemberExpression(node) {
         const name = memberName(node);
-        if (name === 'require' && isHost(node.object)) report(node);
+        if (
+          name === 'require' &&
+          !isWrite(node) &&
+          !isTypeofOperand(node) &&
+          !rootAlreadyReported(node.object)
+        ) {
+          report(node);
+        }
         // `getBuiltinModule` read as a value (`.bind`, `.call`, stored, exported) rather than
         // called directly, where the call's specifier is checked.
         if (name === 'getBuiltinModule' && !isCallee(node)) report(node);
       },
-      // The same member DESTRUCTURED, wherever a pattern takes its value: a declaration
-      // (`const { require: r } = globalThis`), an assignment (`({ require: r } = globalThis)`) or
-      // a parameter default (`function f({ require: r } = globalThis)`).
       ObjectPattern(node) {
         const parent = node.parent;
         const source =
@@ -260,7 +300,7 @@ const noAliasedRequire = {
                 parent.left === node
               ? parent.right
               : null;
-        if (!source || !isHost(source)) return;
+        if (source && rootAlreadyReported(source)) return;
         for (const property of node.properties) {
           if (property.type === 'Property' && propertyKey(property) === 'require') {
             report(property);

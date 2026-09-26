@@ -373,6 +373,27 @@ describe(
         "const { getBuiltinModule: g = undefined } = process;\nexport const m = g?.('module');\n",
       ],
       [
+        'require off an alias of globalThis',
+        "const host = globalThis;\nexport const a = (host as { require: (s: string) => unknown }).require('@wynding/perf');\n",
+      ],
+      [
+        'require destructured off an alias of globalThis',
+        'const host = globalThis as never;\nconst { require: r } = host;\nexport const a = r;\n',
+      ],
+      ['require destructured off the CommonJS module', 'export const { require: r } = module;\n'],
+      [
+        'require destructured off the Module prototype',
+        "import { Module } from 'node:module';\nexport const { require: r } = Module.prototype;\n",
+      ],
+      [
+        'require off a getBuiltinModule namespace',
+        "export const a = process.getBuiltinModule('module').require;\n",
+      ],
+      [
+        'require read by a logical assignment',
+        'export const r = ((globalThis as { require?: unknown }).require ??= 0);\n',
+      ],
+      [
         'require off the Module prototype',
         "import { Module } from 'node:module';\nexport const a = Module.prototype.require('@wynding/perf');\n",
       ],
@@ -467,7 +488,9 @@ describe(
         await restrictions(
           SERVER,
           "export const hasRequire = typeof require !== 'undefined';\n" +
-            "export const hasRequire2 = typeof (require as unknown) !== 'undefined';\n",
+            "export const hasRequire2 = typeof (require as unknown) !== 'undefined';\n" +
+            "export const hasRequire3 = typeof globalThis.require === 'function';\n" +
+            'const o: { require?: number } = {};\no.require = 1;\ndelete o.require;\n',
         ),
       ).toEqual([]);
     });
