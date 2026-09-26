@@ -37,13 +37,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import {
-  CLAIMS,
-  DEFAULT_SITE_WINDOW,
-  SCENE_ORACLE_CLAIMS,
-  type Claim,
-  type ClaimSite,
-} from './claims';
+import { CLAIMS, DEFAULT_SITE_WINDOW, type Claim, type ClaimSite } from './claims';
 import { MS_PER_TICK } from '@wynding/sim';
 import { R0, TOLERANCE } from './gate';
 import { PEAK_DOT_RECORDS_FLOOR } from './oracle-catalog';
@@ -743,6 +737,28 @@ const G = {
   m2: 'docs/milestones/m2.md',
 } as const;
 
+/** The OFF-SURFACE sources a census cites, named once like `G` and kept out of it: `G` is the
+ *  guarded surface and these are not on it. A census compares FULL paths (#170), and a path
+ *  typed as a literal is how a mistyped entry could once compare equal to the real file by
+ *  sharing its basename and count. */
+const O = {
+  buildLayeringAttributionTest: 'packages/perf/src/build-layering-attribution.test.ts',
+  dotBenchTest: 'packages/perf/src/dot-bench.test.ts',
+  harnessTest: 'packages/perf/src/harness.test.ts',
+  harness: 'packages/perf/src/harness.ts',
+  layeringTest: 'packages/perf/src/layering.test.ts',
+  layoutCatalogTest: 'packages/perf/src/layout-catalog.test.ts',
+  layoutTest: 'packages/perf/src/layout.test.ts',
+  layout: 'packages/perf/src/layout.ts',
+  oracleCatalogTest: 'packages/perf/src/oracle-catalog.test.ts',
+  oracleCatalog: 'packages/perf/src/oracle-catalog.ts',
+  runCatalog: 'packages/perf/src/run-catalog.ts',
+  run: 'packages/perf/src/run.ts',
+  scenarioTest: 'packages/perf/src/scenario.test.ts',
+  statsTest: 'packages/perf/src/stats.test.ts',
+  stats: 'packages/perf/src/stats.ts',
+} as const;
+
 const CONTRACT_EXCLUSIONS: readonly {
   readonly value: string;
   /** The guarded surfaces whose DIFFERENT meanings of this numeral justified the entry, EACH
@@ -998,7 +1014,85 @@ const KNOWN_UNROWED: readonly {
   readonly why: string;
 }[] = [];
 
-/** THE COUNTED CENSUS OF EVERY LOW-INFORMATION VALUE THE SCENE ORACLE'S ROWS HOLD.
+/** THE LOW-INFORMATION ROWS WITH NO KEYED CENSUS, each with its reason, asserted exactly (a
+ *  stale entry fails like a stale census). Two key to a single digit, so a keyed census of
+ *  either counts every plain `1` or `2` across nineteen files (262 and 198 prose copies,
+ *  measured for #170) and records no claim at all. The third is SIGNED, and every census source
+ *  reads numerals unsigned, so its keyed census could never find a copy (CodeRabbit, PR #174);
+ *  an always-empty census now fails on its own. Each keeps a MEASUREMENT-SPELLED census in its
+ *  place (`isExemptCopy`), so an unlisted copy of the value still goes red (Codex, PR #174). */
+const CENSUS_EXEMPT: readonly {
+  readonly id: string;
+  readonly value: string;
+  readonly why: string;
+  /** The row's MEASUREMENT-SPELLED census: per file, how many numerals state the value (sign
+   *  dropped) in a measurement's spelling (`isExemptCopy`). Exempt from the keyed census is not
+   *  exempt from accounting: an unlisted `1.00`, `1.00e0` or `100e-2` appended to a perf source
+   *  must still go red (Codex, PR #174), while a plain `1` is not a copy. */
+  readonly census: readonly (readonly [file: string, occurrences: number])[];
+}[] = [
+  {
+    id: 'r0',
+    value: '1.00',
+    why: 'bound to the executable `R0` in gate.ts (the "matches the executable constant" test), so a drifted copy at a site fails there',
+    census: [
+      [G.adr, 10],
+      [G.spike, 2],
+      [G.m2, 2],
+      [G.fixture, 2],
+      [G.gateTest, 3],
+      [G.gate, 4],
+    ],
+  },
+  {
+    id: 'claimed-doubling',
+    value: '2.00',
+    why: 'a historical figure quoted only to be refuted, pinned by its three sites, each spelled `2.00x` or `2.00×`',
+    census: [
+      [G.adr, 1],
+      [G.fixture, 1],
+      [G.gate, 1],
+      [O.oracleCatalogTest, 1],
+    ],
+  },
+  {
+    id: 'skew-g1',
+    value: '-1.36',
+    why: 'signed: every census source reads numerals unsigned, so a census keyed to -1.36 is always empty. Its two sites capture the sign, which is where a flipped sign fails',
+    census: [
+      [G.adr, 1],
+      [G.gate, 1],
+    ],
+  },
+];
+
+/** THE EXEMPT CENSUS'S TEST: an occurrence is a copy of an exempt value when it has the value
+ *  (sign dropped, as every census source reads it) AND is spelled like a measurement. The key
+ *  alone (`1`, `2`) would count every plain digit, which is why the rows are exempt; the exact
+ *  spelling alone missed `1.00e0` and `100e-2`, which state the same value (Codex, PR #174). */
+const unsigned = (numeral: string): string => numeral.replace(/^[-\u2212\u2013+]/, '');
+const isExemptCopy = (n: Numeral, value: string): boolean =>
+  claimKey(unsigned(n.value)) === claimKey(unsigned(value)) && measurementLike(unsigned(n.raw));
+
+/** The census family: every NUMERIC claim whose value is below the information bar, from BOTH
+ *  families (#170). It was the scene oracle's rows alone, so a low-information gate row
+ *  (`population-stress-peak` 304, `stress-seed` 1234) had no census at all, and a new
+ *  low-information scene row filed under `GATE_CLAIMS` skipped the check by convention. Deduped
+ *  by claim key, since two rows may state one value. */
+function censusFamily(): readonly Claim[] {
+  const seen = new Set<string>();
+  return CLAIMS.filter((c) => {
+    if (c.numeric === undefined || highInformation(c.value)) return false;
+    if (CENSUS_EXEMPT.some((e) => e.id === c.id)) return false;
+    const key = claimKey(c.value);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** THE COUNTED CENSUS OF EVERY LOW-INFORMATION VALUE THE TABLE'S ROWS HOLD (both families since
+ *  #170; see `censusFamily`).
  *
  *  WHY A ROWED VALUE STILL NEEDS ONE. A row binds its listed SITES, and per-occurrence
  *  accounting binds every OTHER copy of a rowed value — but only a high-information one (three
@@ -1021,95 +1115,25 @@ const KNOWN_UNROWED: readonly {
  *  it as a site of its row if it restates the claim, or re-census if it is a collision. That is
  *  the same promise `KNOWN_UNROWED` made, kept now that the rows exist.
  *
- *  KNOWN LIMIT — CODE IS NOT COUNTED. The census reads `occurrences()`, which is comment and
- *  document prose (`scan()` blanks code and string literals) plus only the HIGH-information
- *  numeric literals code executes (`codeLiterals()`). Every value here is low-information, so a
- *  copy living in executable code or inside a string literal — `towersPlacedAfterBuild === 150`,
- *  `CATALOG_TOWER_COUNT = 165` — is invisible to it. Such copies are guarded only where they are
- *  a declared SITE (those two are). Counting low-information code literals in general is a
- *  separate, parked follow-up to #163, not something this census claims to do.
+ *  CODE AND STRINGS ARE COUNTED TOO, down to a bar (#170). The census reads `censusOccurrences`:
+ *  all prose numerals, plus every numeric literal and string or template numeral spelled like a
+ *  measurement (three or more significant digits, or two or more decimal places). So a copy such
+ *  as `towersPlacedAfterBuild === 150` or `'route 329 cells'` is counted wherever it appears, not
+ *  only where it is a declared site. Below that bar (a code `3` or `20`) a copy is still guarded
+ *  only as a declared site; `censusOccurrences` says why the bar sits there.
  *
- *  WHICH VALUES: exactly the low-information values of `SCENE_ORACLE_CLAIMS`, asserted both ways,
- *  so a row added to that family without a census entry fails, and so does a stale entry. */
+ *  KNOWN LIMIT: COUNTS, NOT POSITIONS. Swapping two copies within one file, or moving a copy
+ *  within a file, leaves every count unchanged and stays green (#170 §3). A count is what a
+ *  census can hold without pinning every copy's location, which would churn on any edit.
+ *
+ *  WHICH VALUES: exactly the family `censusFamily` derives (every low-information numeric row
+ *  in `CLAIMS`, minus `CENSUS_EXEMPT`), asserted both ways, so a row added without a census entry
+ *  fails, and so does a stale entry. REGENERATING IT: the failure message prints each changed
+ *  entry's found census by full path. */
 const ROWED_CENSUS: readonly {
   readonly value: string;
   readonly census: readonly (readonly [file: string, occurrences: number])[];
 }[] = [
-  {
-    value: '150',
-    census: [
-      [G.fixture, 1],
-      [G.oracle, 9],
-      [G.scenario, 5],
-      [G.dotBench, 1],
-      [G.adr, 14],
-      [G.spike, 13],
-      [G.m2, 9],
-      ['packages/perf/src/layout.ts', 19],
-      ['packages/perf/src/oracle-catalog.ts', 1],
-      ['packages/perf/src/oracle-catalog.test.ts', 1],
-      ['packages/perf/src/layout-catalog.test.ts', 1],
-      ['packages/perf/src/harness.ts', 1],
-      ['packages/perf/src/harness.test.ts', 3],
-      ['packages/perf/src/scenario.test.ts', 1],
-      ['packages/perf/src/layout.test.ts', 2],
-    ],
-  },
-  {
-    value: '300',
-    census: [
-      [G.oracle, 1],
-      [G.adr, 3],
-      [G.spike, 3],
-      [G.m2, 11],
-      ['packages/perf/src/layout-catalog.test.ts', 1],
-    ],
-  },
-  {
-    value: '40',
-    census: [
-      [G.oracle, 4],
-      [G.adr, 9],
-      [G.spike, 8],
-      [G.m2, 10],
-      ['packages/perf/src/layout.ts', 8],
-      ['packages/perf/src/oracle-catalog.test.ts', 1],
-      ['packages/perf/src/build-layering-attribution.test.ts', 1],
-    ],
-  },
-  {
-    value: '16',
-    census: [
-      [G.oracle, 1],
-      [G.adr, 1],
-      [G.spike, 3],
-      [G.m2, 11],
-      ['packages/perf/src/build-layering-attribution.test.ts', 3],
-    ],
-  },
-  {
-    value: '12',
-    census: [
-      [G.oracle, 1],
-      [G.scenario, 1],
-      [G.adr, 5],
-      [G.spike, 1],
-      [G.m2, 9],
-      ['packages/perf/src/layout.ts', 4],
-      ['packages/perf/src/oracle-catalog.ts', 1],
-      ['packages/perf/src/layout-catalog.test.ts', 1],
-      ['packages/perf/src/harness.ts', 1],
-      ['packages/perf/src/harness.test.ts', 2],
-    ],
-  },
-  {
-    value: '1800',
-    census: [
-      [G.scenario, 1],
-      [G.adr, 2],
-      ['packages/perf/src/layout.ts', 1],
-    ],
-  },
   {
     value: '3',
     census: [
@@ -1120,37 +1144,107 @@ const ROWED_CENSUS: readonly {
       [G.adr, 17],
       [G.spike, 18],
       [G.m2, 35],
-      ['packages/perf/src/layout.ts', 6],
-      ['packages/perf/src/oracle-catalog.ts', 1],
-      ['packages/perf/src/oracle-catalog.test.ts', 1],
-      ['packages/perf/src/layering.test.ts', 1],
-      ['packages/perf/src/run.ts', 5],
-      ['packages/perf/src/run-catalog.ts', 2],
-      ['packages/perf/src/harness.test.ts', 1],
-      ['packages/perf/src/scenario.test.ts', 1],
-      ['packages/perf/src/stats.test.ts', 1],
+      [O.layout, 6],
+      [O.oracleCatalog, 1],
+      [O.oracleCatalogTest, 1],
+      [O.layeringTest, 1],
+      [O.run, 5],
+      [O.runCatalog, 2],
+      [O.harnessTest, 1],
+      [O.scenarioTest, 1],
+      [O.statsTest, 1],
     ],
   },
   {
-    value: '100',
+    value: '11',
     census: [
+      [G.gate, 1],
       [G.gateTest, 1],
       [G.fixture, 1],
-      [G.oracle, 7],
-      [G.oracleTest, 1],
-      [G.scenario, 2],
       [G.adr, 3],
-      [G.spike, 6],
+      [G.spike, 3],
+      [G.m2, 6],
+      [O.layout, 1],
+      [O.layeringTest, 1],
+      [O.runCatalog, 1],
+    ],
+  },
+  {
+    value: '12',
+    census: [
+      [G.oracle, 1],
+      [G.scenario, 1],
+      [G.adr, 5],
+      [G.spike, 1],
+      [G.m2, 9],
+      [O.layout, 4],
+      [O.oracleCatalog, 1],
+      [O.layoutCatalogTest, 1],
+      [O.harness, 1],
+      [O.harnessTest, 2],
+    ],
+  },
+  {
+    value: '15',
+    census: [
+      [G.fixture, 1],
+      [G.scenario, 1],
+      [G.adr, 4],
+      [G.spike, 7],
+      [G.m2, 15],
+      [O.layout, 10],
+      [O.oracleCatalogTest, 5],
+      [O.layoutCatalogTest, 1],
+      [O.scenarioTest, 1],
+    ],
+  },
+  {
+    value: '16',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 3],
+      [G.m2, 11],
+      [O.buildLayeringAttributionTest, 3],
+    ],
+  },
+  {
+    value: '17',
+    census: [
+      [G.gate, 10],
+      [G.gateTest, 5],
+      [G.oracleTest, 1],
+      [G.adr, 13],
+      [G.spike, 5],
       [G.m2, 4],
-      ['packages/perf/src/layout.ts', 6],
-      ['packages/perf/src/oracle-catalog.ts', 2],
-      ['packages/perf/src/layout-catalog.test.ts', 2],
-      ['packages/perf/src/run-catalog.ts', 1],
-      ['packages/perf/src/harness.ts', 1],
-      ['packages/perf/src/harness.test.ts', 2],
-      ['packages/perf/src/scenario.test.ts', 1],
-      ['packages/perf/src/stats.ts', 1],
-      ['packages/perf/src/stats.test.ts', 4],
+    ],
+  },
+  {
+    value: '18',
+    census: [
+      [G.gate, 2],
+      [G.adr, 1],
+      [G.m2, 2],
+      [O.runCatalog, 1],
+      [O.harness, 1],
+      [O.layoutTest, 1],
+    ],
+  },
+  {
+    value: '19',
+    census: [
+      [G.gate, 1],
+      [G.oracle, 6],
+      [G.oracleTest, 1],
+      [G.spike, 1],
+      [G.m2, 1],
+      [O.layout, 4],
+      [O.oracleCatalog, 5],
+      [O.oracleCatalogTest, 11],
+      [O.layoutCatalogTest, 2],
+      [O.run, 1],
+      [O.harness, 1],
+      [O.layoutTest, 1],
     ],
   },
   {
@@ -1161,63 +1255,254 @@ const ROWED_CENSUS: readonly {
       [G.adr, 5],
       [G.spike, 8],
       [G.m2, 16],
-      ['packages/perf/src/layout.ts', 7],
-      ['packages/perf/src/oracle-catalog.ts', 1],
-      ['packages/perf/src/oracle-catalog.test.ts', 9],
-      ['packages/perf/src/layout-catalog.test.ts', 2],
-      ['packages/perf/src/run.ts', 2],
-      ['packages/perf/src/harness.test.ts', 1],
-      ['packages/perf/src/scenario.test.ts', 1],
-      ['packages/perf/src/build-layering-attribution.test.ts', 1],
+      [O.layout, 7],
+      [O.oracleCatalog, 1],
+      [O.oracleCatalogTest, 9],
+      [O.layoutCatalogTest, 2],
+      [O.buildLayeringAttributionTest, 1],
+      [O.run, 2],
+      [O.harnessTest, 1],
+      [O.scenarioTest, 1],
     ],
   },
   {
-    value: '329',
+    value: '23',
     census: [
-      [G.oracle, 8],
-      [G.oracleTest, 5],
-      [G.adr, 8],
-      [G.spike, 14],
-      [G.m2, 4],
-      ['packages/perf/src/layout.ts', 5],
-      ['packages/perf/src/oracle-catalog.ts', 2],
-      ['packages/perf/src/oracle-catalog.test.ts', 1],
-      ['packages/perf/src/run-catalog.ts', 1],
-      ['packages/perf/src/layout.test.ts', 2],
-    ],
-  },
-  {
-    value: '600',
-    census: [
-      [G.oracle, 6],
-      [G.oracleTest, 2],
-      [G.adr, 4],
-      [G.spike, 6],
-      [G.m2, 4],
-      ['packages/perf/src/layout.test.ts', 2],
-    ],
-  },
-  {
-    value: '330',
-    census: [
-      [G.oracle, 1],
-      [G.adr, 1],
+      [G.gate, 1],
+      [G.adr, 2],
+      [G.spike, 7],
       [G.m2, 1],
+      [O.layout, 5],
+      [O.oracleCatalog, 2],
+      [O.layoutCatalogTest, 1],
+      [O.runCatalog, 3],
     ],
   },
   {
-    value: '459',
+    value: '24',
     census: [
+      [G.gate, 2],
+      [G.fixture, 1],
       [G.oracle, 1],
+      [G.adr, 4],
+      [G.spike, 2],
+      [G.m2, 5],
+      [O.layout, 1],
+      [O.oracleCatalog, 1],
+      [O.layoutCatalogTest, 1],
+    ],
+  },
+  {
+    value: '25',
+    census: [
+      [G.fixture, 1],
+      [G.adr, 6],
+      [G.spike, 2],
+      [G.m2, 9],
+      [O.layout, 2],
+    ],
+  },
+  {
+    value: '32',
+    census: [
+      [G.gate, 1],
+      [G.fixture, 1],
       [G.adr, 1],
+      [G.spike, 2],
+      [G.m2, 1],
+      [O.run, 1],
+    ],
+  },
+  {
+    value: '40',
+    census: [
+      [G.oracle, 4],
+      [G.adr, 9],
+      [G.spike, 8],
+      [G.m2, 10],
+      [O.layout, 8],
+      [O.oracleCatalogTest, 1],
+      [O.buildLayeringAttributionTest, 1],
+    ],
+  },
+  {
+    value: '55',
+    census: [
+      [G.scenario, 1],
+      [G.adr, 1],
+      [O.layout, 1],
+      [O.oracleCatalog, 2],
+      [O.oracleCatalogTest, 1],
+      [O.scenarioTest, 1],
+    ],
+  },
+  {
+    value: '56',
+    census: [
+      [G.gate, 1],
       [G.spike, 1],
       [G.m2, 1],
+      [O.run, 1],
+    ],
+  },
+  {
+    value: '68',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '80',
+    census: [
+      [G.oracle, 2],
+      [G.adr, 2],
+      [G.spike, 2],
+      [G.m2, 2],
+      [O.layout, 2],
+    ],
+  },
+  {
+    value: '90',
+    census: [
+      [G.gate, 1],
+      [G.adr, 3],
+      [G.spike, 1],
+      [G.m2, 1],
+      [O.layout, 3],
+    ],
+  },
+  {
+    value: '100',
+    census: [
+      [G.gateTest, 6],
+      [G.fixture, 2],
+      [G.oracle, 8],
+      [G.oracleTest, 7],
+      [G.scenario, 2],
+      [G.adr, 3],
+      [G.spike, 6],
+      [G.m2, 4],
+      [O.layout, 7],
+      [O.oracleCatalog, 5],
+      [O.layoutCatalogTest, 5],
+      [O.runCatalog, 3],
+      [O.harness, 1],
+      [O.harnessTest, 2],
+      [O.scenarioTest, 1],
+      [O.stats, 3],
+      [O.statsTest, 9],
+    ],
+  },
+  {
+    value: '109',
+    census: [
+      [G.gate, 1],
+      [G.scenario, 1],
+      [G.spike, 1],
+      [O.layout, 1],
+    ],
+  },
+  {
+    value: '114',
+    census: [
+      [G.oracle, 2],
+      [G.adr, 3],
+      [G.spike, 1],
+      [O.layout, 1],
+      [O.oracleCatalog, 2],
+      [O.oracleCatalogTest, 2],
+    ],
+  },
+  {
+    value: '127',
+    census: [
+      [G.gate, 1],
+      [G.oracle, 3],
+      [O.run, 1],
+    ],
+  },
+  {
+    value: '150',
+    census: [
+      [G.gateTest, 2],
+      [G.fixture, 1],
+      [G.oracle, 11],
+      [G.oracleTest, 6],
+      [G.scenario, 5],
+      [G.dotBench, 1],
+      [G.adr, 14],
+      [G.spike, 13],
+      [G.m2, 9],
+      [O.layout, 21],
+      [O.oracleCatalog, 1],
+      [O.oracleCatalogTest, 1],
+      [O.layoutCatalogTest, 18],
+      [O.run, 2],
+      [O.harness, 1],
+      [O.harnessTest, 4],
+      [O.scenarioTest, 7],
+      [O.layoutTest, 8],
+    ],
+  },
+  {
+    value: '165',
+    census: [
+      [G.scenario, 4],
+      [G.adr, 3],
+      [G.m2, 2],
+      [O.layout, 6],
+      [O.oracleCatalog, 3],
+      [O.oracleCatalogTest, 1],
+      [O.layoutCatalogTest, 6],
+      [O.scenarioTest, 2],
+    ],
+  },
+  {
+    value: '175',
+    census: [
+      [G.gate, 1],
+      [G.oracle, 3],
+      [G.oracleTest, 5],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '181',
+    census: [
+      [G.gate, 1],
+      [G.scenario, 2],
+      [G.spike, 2],
+      [O.run, 2],
+    ],
+  },
+  {
+    value: '200',
+    census: [
+      [G.oracle, 6],
+      [G.oracleTest, 5],
+      [G.adr, 3],
+      [G.spike, 4],
+      [G.m2, 3],
+      [O.harness, 2],
+      [O.harnessTest, 1],
+    ],
+  },
+  {
+    value: '224',
+    census: [
+      [G.gate, 1],
+      [G.oracle, 3],
+      [G.scenario, 2],
+      [G.adr, 1],
+      [G.spike, 3],
+      [G.m2, 2],
     ],
   },
   {
     value: '270',
     census: [
-      [G.fixture, 2],
+      [G.fixture, 3],
       [G.oracle, 1],
       [G.adr, 1],
       [G.spike, 2],
@@ -1225,12 +1510,12 @@ const ROWED_CENSUS: readonly {
     ],
   },
   {
-    value: '307',
+    value: '280',
     census: [
-      [G.oracle, 1],
-      [G.adr, 1],
-      [G.spike, 2],
-      ['packages/perf/src/layout.ts', 1],
+      [G.oracle, 2],
+      [G.oracleTest, 3],
+      [G.spike, 1],
+      [G.m2, 1],
     ],
   },
   {
@@ -1239,6 +1524,43 @@ const ROWED_CENSUS: readonly {
       [G.oracle, 1],
       [G.adr, 1],
       [G.spike, 1],
+    ],
+  },
+  {
+    value: '300',
+    census: [
+      [G.gateTest, 1],
+      [G.fixture, 1],
+      [G.oracle, 1],
+      [G.oracleTest, 3],
+      [G.adr, 3],
+      [G.spike, 3],
+      [G.m2, 11],
+      [O.oracleCatalog, 1],
+      [O.layoutCatalogTest, 1],
+    ],
+  },
+  {
+    value: '304',
+    census: [
+      [G.gate, 1],
+      [G.oracle, 3],
+      [G.oracleTest, 4],
+      [G.scenario, 2],
+      [G.adr, 2],
+      [G.spike, 11],
+      [G.m2, 3],
+      [O.oracleCatalog, 1],
+      [O.harnessTest, 4],
+    ],
+  },
+  {
+    value: '307',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 2],
+      [O.layout, 1],
     ],
   },
   {
@@ -1251,85 +1573,34 @@ const ROWED_CENSUS: readonly {
     ],
   },
   {
-    value: '80',
+    value: '329',
     census: [
-      [G.oracle, 2],
-      [G.adr, 2],
-      [G.spike, 2],
-      [G.m2, 2],
-      ['packages/perf/src/layout.ts', 2],
+      [G.oracle, 9],
+      [G.oracleTest, 10],
+      [G.adr, 8],
+      [G.spike, 14],
+      [G.m2, 4],
+      [O.layout, 5],
+      [O.oracleCatalog, 3],
+      [O.oracleCatalogTest, 2],
+      [O.layoutCatalogTest, 3],
+      [O.runCatalog, 1],
+      [O.layoutTest, 4],
     ],
   },
   {
-    value: '280',
+    value: '330',
     census: [
       [G.oracle, 1],
-      [G.oracleTest, 1],
-      [G.spike, 1],
-      [G.m2, 1],
-    ],
-  },
-  {
-    value: '200',
-    census: [
-      [G.oracle, 5],
-      [G.oracleTest, 1],
-      [G.adr, 3],
-      [G.spike, 4],
-      [G.m2, 3],
-      ['packages/perf/src/harness.ts', 1],
-      ['packages/perf/src/harness.test.ts', 1],
-    ],
-  },
-  {
-    value: '2499',
-    census: [
-      [G.oracle, 1],
-      [G.spike, 1],
-    ],
-  },
-  {
-    value: '2500',
-    census: [
-      [G.fixture, 8],
-      [G.oracle, 1],
-      [G.scenario, 1],
       [G.adr, 1],
-      [G.spike, 2],
       [G.m2, 1],
-      ['packages/perf/src/oracle-catalog.ts', 2],
-      ['packages/perf/src/harness.ts', 1],
-      ['packages/perf/src/harness.test.ts', 1],
-      ['packages/perf/src/stats.ts', 1],
     ],
   },
   {
-    value: '2000',
+    value: '368',
     census: [
+      [G.gate, 1],
       [G.oracle, 2],
-      [G.dotBench, 1],
-      [G.m2, 1],
-    ],
-  },
-  {
-    value: '1427',
-    census: [
-      [G.fixture, 3],
-      [G.adr, 1],
-      [G.spike, 2],
-      [G.m2, 1],
-      ['packages/perf/src/run.ts', 2],
-      ['packages/perf/src/stats.test.ts', 3],
-    ],
-  },
-  {
-    value: '114',
-    census: [
-      [G.oracle, 2],
-      [G.adr, 3],
-      [G.spike, 1],
-      ['packages/perf/src/layout.ts', 1],
-      ['packages/perf/src/oracle-catalog.ts', 1],
     ],
   },
   {
@@ -1338,6 +1609,427 @@ const ROWED_CENSUS: readonly {
       [G.oracle, 2],
       [G.adr, 1],
       [G.m2, 4],
+      [O.oracleCatalog, 1],
+      [O.oracleCatalogTest, 1],
+      [O.dotBenchTest, 1],
+    ],
+  },
+  {
+    value: '459',
+    census: [
+      [G.oracle, 1],
+      [G.adr, 1],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '500',
+    census: [
+      [G.gate, 3],
+      [G.fixture, 3],
+      [G.oracle, 4],
+      [G.oracleTest, 4],
+      [G.dotBench, 1],
+      [G.spike, 2],
+      [G.m2, 4],
+      [O.oracleCatalogTest, 3],
+      [O.run, 1],
+    ],
+  },
+  {
+    value: '600',
+    census: [
+      [G.oracle, 6],
+      [G.oracleTest, 2],
+      [G.adr, 4],
+      [G.spike, 6],
+      [G.m2, 4],
+      [O.layoutTest, 2],
+    ],
+  },
+  {
+    value: '1234',
+    census: [
+      [G.scenario, 1],
+      [G.spike, 1],
+      [O.oracleCatalogTest, 2],
+      [O.scenarioTest, 1],
+    ],
+  },
+  {
+    value: '1427',
+    census: [
+      [G.fixture, 4],
+      [G.adr, 1],
+      [G.spike, 2],
+      [G.m2, 1],
+      [O.run, 2],
+      [O.statsTest, 4],
+    ],
+  },
+  {
+    value: '1800',
+    census: [
+      [G.scenario, 1],
+      [G.adr, 2],
+      [O.layout, 1],
+    ],
+  },
+  {
+    value: '2000',
+    census: [
+      [G.oracle, 3],
+      [G.oracleTest, 3],
+      [G.dotBench, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '2499',
+    census: [
+      [G.oracle, 1],
+      [G.oracleTest, 3],
+      [G.spike, 1],
+      [O.oracleCatalogTest, 1],
+    ],
+  },
+  {
+    value: '2500',
+    census: [
+      [G.fixture, 9],
+      [G.oracle, 1],
+      [G.oracleTest, 25],
+      [G.scenario, 1],
+      [G.adr, 1],
+      [G.spike, 2],
+      [G.m2, 1],
+      [O.oracleCatalog, 3],
+      [O.oracleCatalogTest, 2],
+      [O.harness, 2],
+      [O.harnessTest, 1],
+      [O.stats, 1],
+    ],
+  },
+  {
+    value: '1.10',
+    census: [
+      [G.gate, 9],
+      [G.gateTest, 5],
+      [G.fixture, 4],
+      [G.adr, 19],
+      [G.spike, 7],
+      [G.m2, 6],
+    ],
+  },
+  {
+    value: '2.8',
+    census: [
+      [G.gate, 4],
+      [G.fixture, 2],
+      [G.adr, 3],
+      [G.spike, 3],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '15.5',
+    census: [
+      [G.gate, 1],
+      [G.fixture, 1],
+      [G.adr, 1],
+      [G.spike, 2],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '16.4',
+    census: [
+      [G.gate, 1],
+      [G.fixture, 1],
+      [G.adr, 3],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '11.7',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '12.31',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '31.41',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '10.50',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '17.35',
+    census: [
+      [G.gate, 2],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '1.65',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '2.55',
+    census: [
+      [G.gate, 1],
+      [G.adr, 3],
+      [G.spike, 2],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '1.67',
+    census: [
+      [G.gate, 2],
+      [G.fixture, 1],
+      [G.adr, 2],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '35.5',
+    census: [
+      [G.gate, 1],
+      [G.fixture, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '2.2',
+    census: [
+      [G.gate, 2],
+      [G.fixture, 2],
+      [G.oracle, 1],
+      [G.adr, 5],
+      [G.spike, 1],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '3.9',
+    census: [
+      [G.gate, 1],
+      [G.fixture, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '4.8',
+    census: [
+      [G.gate, 1],
+      [G.adr, 2],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '1.45',
+    census: [
+      [G.gate, 1],
+      [G.adr, 2],
+    ],
+  },
+  {
+    value: '9.51',
+    census: [
+      [G.gate, 1],
+      [G.adr, 2],
+    ],
+  },
+  {
+    value: '3.61',
+    census: [
+      [G.gate, 1],
+      [G.adr, 3],
+    ],
+  },
+  {
+    value: '2.37',
+    census: [
+      [G.gate, 1],
+      [G.adr, 4],
+    ],
+  },
+  {
+    value: '3.65',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '3.04',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '9.3',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '13.6',
+    census: [
+      [G.gate, 1],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '1.66',
+    census: [
+      [G.gate, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '2.21',
+    census: [
+      [G.gate, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '1.25',
+    census: [
+      [G.gate, 1],
+      [G.gateTest, 1],
+      [G.adr, 9],
+      [G.spike, 5],
+    ],
+  },
+  {
+    value: '4.2',
+    census: [
+      [G.gate, 1],
+      [G.adr, 2],
+    ],
+  },
+  {
+    value: '5.9',
+    census: [
+      [G.gate, 1],
+      [G.adr, 2],
+    ],
+  },
+  {
+    value: '1.41',
+    census: [
+      [G.gate, 1],
+      [G.adr, 2],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '97.5',
+    census: [
+      [G.gate, 3],
+      [G.adr, 1],
+    ],
+  },
+  {
+    value: '0.01',
+    census: [
+      [G.gate, 3],
+      [G.fixture, 9],
+      [G.adr, 4],
+    ],
+  },
+  {
+    value: '0.02',
+    census: [
+      [G.gate, 2],
+      [G.fixture, 15],
+      [G.adr, 5],
+      [G.spike, 1],
+      [G.m2, 2],
+    ],
+  },
+  {
+    value: '1.79',
+    census: [
+      [G.gate, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '2.36',
+    census: [
+      [G.gate, 1],
+      [G.spike, 1],
+    ],
+  },
+  {
+    value: '20.2',
+    census: [
+      [G.adr, 5],
+      [G.spike, 2],
+      [G.m2, 2],
+    ],
+  },
+  {
+    value: '11.1',
+    census: [
+      [G.adr, 3],
+      [G.spike, 2],
+      [G.m2, 2],
+    ],
+  },
+  {
+    value: '1.42',
+    census: [
+      [G.gateTest, 2],
+      [G.adr, 9],
+      [G.spike, 2],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '1.69',
+    census: [
+      [G.dotBench, 1],
+      [G.adr, 3],
+      [G.spike, 2],
+      [G.m2, 1],
+    ],
+  },
+  {
+    value: '7.5',
+    census: [
+      [G.dotBench, 1],
+      [G.spike, 2],
+      [O.scenarioTest, 1],
     ],
   },
   {
@@ -1345,43 +2037,6 @@ const ROWED_CENSUS: readonly {
     census: [
       [G.oracle, 1],
       [G.oracleTest, 1],
-    ],
-  },
-  {
-    value: '15',
-    census: [
-      [G.fixture, 1],
-      [G.scenario, 1],
-      [G.adr, 4],
-      [G.spike, 7],
-      [G.m2, 15],
-      ['packages/perf/src/layout.ts', 10],
-      ['packages/perf/src/oracle-catalog.test.ts', 5],
-      ['packages/perf/src/layout-catalog.test.ts', 1],
-      ['packages/perf/src/scenario.test.ts', 1],
-    ],
-  },
-  {
-    value: '165',
-    census: [
-      [G.scenario, 4],
-      [G.adr, 3],
-      [G.m2, 2],
-      ['packages/perf/src/layout.ts', 5],
-      ['packages/perf/src/oracle-catalog.ts', 3],
-      ['packages/perf/src/oracle-catalog.test.ts', 1],
-      ['packages/perf/src/scenario.test.ts', 1],
-    ],
-  },
-  {
-    value: '55',
-    census: [
-      [G.scenario, 1],
-      [G.adr, 1],
-      ['packages/perf/src/layout.ts', 1],
-      ['packages/perf/src/oracle-catalog.ts', 2],
-      ['packages/perf/src/oracle-catalog.test.ts', 1],
-      ['packages/perf/src/scenario.test.ts', 1],
     ],
   },
   {
@@ -1410,19 +2065,9 @@ const ROWED_CENSUS: readonly {
   {
     value: '0.99',
     census: [
-      [G.fixture, 1],
+      [G.fixture, 2],
       [G.adr, 5],
       [G.spike, 1],
-    ],
-  },
-  {
-    value: '25',
-    census: [
-      [G.fixture, 1],
-      [G.adr, 6],
-      [G.spike, 2],
-      [G.m2, 9],
-      ['packages/perf/src/layout.ts', 2],
     ],
   },
 ];
@@ -1432,11 +2077,12 @@ const EXCLUDED = new Set(CONTRACT_EXCLUSIONS.map((e) => e.value));
 /** ONE CENSUS VOCABULARY, because both escape tables now record the same thing and a second
  *  spelling of "same census" is how every previous round of this file began. Every stale entry
  *  is reported rather than the first, since a table is a set and its drift should be readable
- *  in one run. */
+ *  in one run. Keyed by the FULL path (#170): it was the basename, so a mistyped path compared
+ *  equal to the real file whenever the two shared a basename and a count. */
 const fmtCensus = (c: readonly (readonly [string, number])[]): string =>
   [...c]
     .sort()
-    .map(([f, n]) => `${f.split('/').pop() as string}x${n}`)
+    .map(([f, n]) => `${f}x${n}`)
     .join(' ');
 
 const sameCensus = (
@@ -2057,13 +2703,19 @@ function literalValue(text: string): string | undefined {
  *  cannot identify a claim on its own, so it is guarded by its row's declared sites rather
  *  than by the sweep. One bar, two classes, one admission. */
 function codeLiterals(file: string): Numeral[] {
+  return literalNumerals(file, (text, value) => highInformation(text, value));
+}
+
+/** A code file's numeric literals as occurrences, admitted by `admit` (spelling, value). The one
+ *  literal-reading loop both `codeLiterals` and the census use, so they cannot drift apart. */
+function literalNumerals(file: string, admit: (text: string, value: string) => boolean): Numeral[] {
   if (file.endsWith('.md')) return [];
   const raw = read(file);
   rejectUnlexableSyntax(file, raw);
   const found: Numeral[] = [];
   for (const lit of walk(raw).numericLiterals) {
     const value = literalValue(lit.text);
-    if (value === undefined || !highInformation(lit.text, value)) continue;
+    if (value === undefined || !admit(lit.text, value)) continue;
     const at = lit.signAt ?? lit.start;
     found.push({ raw: raw.slice(at, lit.end), value, at, alsoAt: lit.start });
   }
@@ -2081,6 +2733,61 @@ function occurrences(file: string): Numeral[] {
   const all = [...scan(file), ...codeLiterals(file)];
   occurrenceCache.set(file, all);
   return all;
+}
+
+/** Spelled like a MEASUREMENT: three or more significant digits, or two or more decimal places
+ *  (`150`, `329`, `0.02`, `12.31`, `1.10`). The census asks it of a literal's spelling AND of its
+ *  decimal value, because a radix spelling hides its digits: `0x4d2` is 1234, which this reads as
+ *  `42` from the spelling alone (Codex, PR #174). */
+function measurementLike(spelling: string): boolean {
+  const mantissa = spelling.replace(/^[+-]/, '').replace(/[,_]/g, '').split(/[eE]/)[0] as string;
+  const decimals = mantissa.includes('.') ? (mantissa.split('.')[1] as string).length : 0;
+  return decimals >= 2 || mantissa.replace(/\D/g, '').replace(/^0+/, '').length >= 3;
+}
+
+/** EVERY COPY OF A VALUE THAT COULD BE A CLAIM, for the counted census alone (#170).
+ *  `occurrences` admits code literals only above the information bar, which is right for the
+ *  sweep and wrong for a census of values that are all below it: a copy in executable code
+ *  (`export const probe = 329;`) or in a string (`'route 329 cells'`) was invisible to the
+ *  census and guarded only where it happened to be a declared site. This takes the prose
+ *  numerals (as the census always did), and the numeric literals and string or template
+ *  numerals that are spelled like a measurement (`measurementLike`).
+ *
+ *  WHY THAT BAR, measured rather than chosen: counting EVERY literal made the census 547 file
+ *  entries holding 2,318 copies, 569 of them code literals, dominated by loop bounds and indices
+ *  (`1`, `2`, `3`) that restate nothing. That census would change on almost any edit to a perf
+ *  source and say nothing when it did. Below the bar a code copy stays guarded only where it is
+ *  a declared site, which is the limit the table has always stated for it. */
+const censusCache = new Map<string, Numeral[]>();
+function censusOccurrences(file: string): Numeral[] {
+  const hit = censusCache.get(file);
+  if (hit !== undefined) return hit;
+  const found = [
+    ...scan(file),
+    ...literalNumerals(file, (text, value) => measurementLike(text) || measurementLike(value)),
+  ];
+  if (!file.endsWith('.md')) {
+    const raw = read(file);
+    const walked = walk(raw);
+    // The string, template and regex-literal TEXT, as a same-length projection: everything the
+    // walk marks neither comment nor code is literal data (a regex literal included, so
+    // `/\d{100}/` counts as a 100). Newlines are kept so the masks see lines. Indexed by UTF-16
+    // unit, as the walk's masks are: iterating code points would drift one index per
+    // supplementary character and blank a numeral's digit (CodeRabbit, PR #174).
+    const literals = raw
+      .split('')
+      .map((ch, i) => ((!walked.commentAt[i] && !walked.codeAt[i]) || ch === '\n' ? ch : ' '))
+      .join('');
+    for (const m of maskReferences(literals).matchAll(NUMERAL)) {
+      const cleaned = m[0].replace(/[,_]/g, '');
+      const value = normalizeNumeral(cleaned);
+      // Spelling OR value, as for code literals: `'seed 0x4d2'` states 1234 (Codex, PR #174).
+      if (!measurementLike(m[0]) && !measurementLike(value)) continue;
+      found.push({ raw: m[0], value, at: m.index ?? 0 });
+    }
+  }
+  censusCache.set(file, found);
+  return found;
 }
 
 /** WHERE A ROWED VALUE'S RESTATEMENT COUNTS AS DRIFT: every guarded file, PLUS the perf
@@ -2432,28 +3139,133 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // the excused figure away and the exception stayed "used", still armed to suppress a future
   // unlisted occurrence of that value after the same phrase (Codex). Stale exceptions are rot,
   // and this table's whole claim is that its holes are named and current.
-  // THE SCENE ORACLE'S ROWS KEEP THE CENSUS `KNOWN_UNROWED` HELD — see `ROWED_CENSUS`. Every
-  // value in that family is below the accounting half's information bar, so without this an
-  // unlisted PROSE copy of a rowed value in any guarded file could be added or edited in silence.
-  // Low-information copies in executable code are not counted — see the known limit on the table.
-  it('keeps a counted census of every low-information scene-oracle value', () => {
-    const family = new Set(
-      SCENE_ORACLE_CLAIMS.filter((c) => !highInformation(c.value)).map((c) => claimKey(c.value)),
+  // THE ROWS KEEP THE CENSUS `KNOWN_UNROWED` HELD — see `ROWED_CENSUS`. Every value in the
+  // family is below the accounting half's information bar, so without this an unlisted copy of a
+  // rowed value in any accounted file could be added or edited in silence.
+  // TURBO MUST HASH EVERY FILE THIS GUARD READS (#170 §4). A file outside this package that the
+  // task's `inputs` do not cover is disarmed by the cache: edit it and `@wynding/perf#test` is
+  // replayed from a stale hash, green. The inputs were kept in step with the sites by hand.
+  // `$TURBO_DEFAULT$` covers this package itself; everything else must match an input glob.
+  it("every file the table reads outside this package is in @wynding/perf#test's turbo inputs", () => {
+    const turbo = JSON.parse(read('turbo.json')) as {
+      tasks: Record<string, { inputs?: readonly string[] }>;
+    };
+    const inputs = turbo.tasks['@wynding/perf#test']?.inputs ?? [];
+    /** A `$TURBO_ROOT$/…` input glob as an anchored regex: `*` is one path segment, `**` any. */
+    const toRegex = (input: string): RegExp => {
+      const source = input
+        .slice('$TURBO_ROOT$/'.length)
+        .split('/')
+        .map((part) =>
+          part === '**' ? '.*' : part.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'),
+        )
+        .join('/')
+        .replace('/.*', '(?:/.*)?');
+      return new RegExp(`^${source}$`);
+    };
+    const globs = inputs.filter((i) => i.startsWith('$TURBO_ROOT$/')).map(toRegex);
+    // A negated input (`!$TURBO_ROOT$/...`) un-hashes what a glob hashed, so it counts against.
+    const negated = inputs
+      .filter((i) => i.startsWith('!$TURBO_ROOT$/'))
+      .map((i) => toRegex(i.slice(1)));
+    const read_ = new Set<string>([
+      ...ACCOUNTED_FILES,
+      ...CLAIMS.flatMap((c) => c.sites.map((site) => site.file)),
+    ]);
+    const outside = [...read_].filter((f) => !f.startsWith('packages/perf/')).sort();
+    expect(outside.length, 'the table reads nothing outside its package?').toBeGreaterThan(0);
+    const unhashed = outside.filter(
+      (f) => !globs.some((g) => g.test(f)) || negated.some((g) => g.test(f)),
     );
+    expect(
+      unhashed,
+      'add these to @wynding/perf#test inputs in turbo.json, spelled $TURBO_ROOT$/<path>',
+    ).toEqual([]);
+  });
+
+  it('the census counts a radix spelling of a measurement by its value', () => {
+    expect(measurementLike('0x4d2') || measurementLike('1234')).toBe(true);
+    const file = 'fixture/census/radix.ts';
+    fileCache.set(
+      file,
+      "export const copy = 0x4d2;\nexport const loop = 0x3;\nexport const text = 'seed 0x4d2';\n",
+    );
+    const values = censusOccurrences(file).map((n) => n.value);
+    expect(values).toEqual(['1234', '1234']);
+  });
+
+  it('the census projects string text by UTF-16 unit, so astral characters shift nothing', () => {
+    const file = 'fixture/census/astral.ts';
+    fileCache.set(
+      file,
+      "export const a = '\u{1F600}\u{1F600}\u{1F600}';\nexport const b = '329';\n",
+    );
+    expect(censusOccurrences(file).map((n) => n.raw)).toEqual(['329']);
+  });
+
+  it('a census compares full paths, so a same-basename path in another directory differs', () => {
+    expect(sameCensus([['packages/perf/src/x.ts', 1]], [['packages/perf/src/x.ts', 1]])).toBe(true);
+    expect(sameCensus([['packages/perf/src/x.ts', 1]], [['packages/sim/src/x.ts', 1]])).toBe(false);
+  });
+
+  it('keeps a measurement-spelled census of every CENSUS_EXEMPT value', () => {
+    const mismatches: string[] = [];
+    for (const e of CENSUS_EXEMPT) {
+      const spelling = unsigned(e.value);
+      const census = ACCOUNTED_FILES.map(
+        (f) => [f, censusOccurrences(f).filter((n) => isExemptCopy(n, e.value)).length] as const,
+      ).filter(([, n]) => n > 0);
+      expect(census.length, `${e.id}: an empty census cannot fail`).toBeGreaterThan(0);
+      if (!sameCensus(census, e.census)) {
+        mismatches.push(
+          `  ${e.id} "${spelling}": recorded ${fmtCensus(e.census)}\n            but found ${fmtCensus(census)}`,
+        );
+      }
+    }
+    expect(
+      mismatches,
+      `these exempt values have gained, lost or changed a measurement-spelled copy. If the ` +
+        `copy restates the claim, add it as a site of its row; if it is a collision, re-census ` +
+        `the entry:\n${mismatches.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('keeps every CENSUS_EXEMPT entry current: a real, numeric, low-information row', () => {
+    const ids = CENSUS_EXEMPT.map((e) => e.id);
+    expect(new Set(ids).size, 'CENSUS_EXEMPT lists a row twice').toBe(ids.length);
+    for (const e of CENSUS_EXEMPT) {
+      const row = CLAIMS.find((c) => c.id === e.id);
+      expect(row, `CENSUS_EXEMPT names ${e.id}, which is no row`).toBeDefined();
+      expect(row!.value, `${e.id}'s value changed; re-judge its exemption`).toBe(e.value);
+      expect(row!.numeric, `${e.id} is not numeric, so it needs no exemption`).toBeDefined();
+      expect(highInformation(e.value), `${e.id} is high-information, so it needs none`).toBe(false);
+      expect(e.why.length).toBeGreaterThan(40);
+    }
+  });
+
+  it('keeps a counted census of every low-information claim value', () => {
+    const family = new Set(censusFamily().map((c) => claimKey(c.value)));
     const listed = ROWED_CENSUS.map((e) => claimKey(e.value));
     expect(new Set(listed).size, 'ROWED_CENSUS lists a value twice').toBe(listed.length);
     expect(
       [...listed].sort(),
-      'ROWED_CENSUS must list exactly the low-information values of SCENE_ORACLE_CLAIMS — a ' +
+      'ROWED_CENSUS must list exactly the low-information numeric values of CLAIMS — a ' +
         'family row without a census leaves its unlisted copies unguarded, and an entry with ' +
         'no row is stale',
     ).toEqual([...family].sort());
+
+    // A census that records no copy at all cannot fail (a site is a copy), so it is a sign the
+    // value is unreadable to the census, as a signed value was (CodeRabbit, PR #174).
+    expect(
+      ROWED_CENSUS.filter((e) => e.census.length === 0).map((e) => e.value),
+      'these census entries are empty; exempt the row in CENSUS_EXEMPT with the reason',
+    ).toEqual([]);
 
     const mismatches: string[] = [];
     for (const e of ROWED_CENSUS) {
       const key = claimKey(e.value);
       const census = ACCOUNTED_FILES.map(
-        (f) => [f, occurrences(f).filter((n) => claimKey(n.value) === key).length] as const,
+        (f) => [f, censusOccurrences(f).filter((n) => claimKey(n.value) === key).length] as const,
       ).filter(([, n]) => n > 0);
       if (!sameCensus(census, e.census)) {
         mismatches.push(
