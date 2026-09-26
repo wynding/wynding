@@ -461,6 +461,17 @@ describe(
       ).toEqual([]);
     });
 
+    // Its own file: the fixture above declares a local `require`, which would shadow the global.
+    it('leaves a typeof feature check of the global require alone', async () => {
+      expect(
+        await restrictions(
+          SERVER,
+          "export const hasRequire = typeof require !== 'undefined';\n" +
+            "export const hasRequire2 = typeof (require as unknown) !== 'undefined';\n",
+        ),
+      ).toEqual([]);
+    });
+
     it('applies in the deterministic core too', async () => {
       const messages = await restrictions(
         'packages/sim/src/lint-fixture.ts',

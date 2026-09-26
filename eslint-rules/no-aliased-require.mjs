@@ -233,7 +233,7 @@ const noAliasedRequire = {
               continue;
             }
             if (id.name !== 'require' || reference.isValueReference === false) continue;
-            if (!isGlobal(id) || inTypeQuery(id)) continue;
+            if (!isGlobal(id) || inTypeQuery(id) || isTypeofOperand(id)) continue;
             const parent = id.parent;
             if (parent?.type === 'CallExpression' && parent.callee === id) continue;
             report(id);
