@@ -406,6 +406,14 @@ describe('loadSurveyAsk — once per gameVersion, and a dismissal that sticks (�
     expect((await loadSurveyAsk(slotFor(storage), OTHER_SHA)).offered()).toBe(true); // "forever" cleared
   });
 
+  it('a quick check → uncheck: the later commit is the one on disk, and writes are serialized', async () => {
+    const storage = fakeStorage();
+    const ask = await loadSurveyAsk(slotFor(storage), SHA);
+    await Promise.all([ask.commit(true), ask.commit(false)]); // both in flight at once
+    expect(await stored(storage)).toEqual({ dismissed: false, answeredVersions: [SHA] });
+    expect((await loadSurveyAsk(slotFor(storage), OTHER_SHA)).offered()).toBe(true);
+  });
+
   it('fails toward not asking — IN MEMORY — when storage cannot be written', async () => {
     const storage = fakeStorage();
     storage.failWrites = true;
@@ -443,6 +451,26 @@ describe('loadSurveyAsk — once per gameVersion, and a dismissal that sticks (�
     await (await loadSurveyAsk(slotFor(storage), OTHER_SHA)).commit(false); // answer B
     expect((await loadSurveyAsk(slotFor(storage), SHA)).offered()).toBe(false); // back to A
     expect((await loadSurveyAsk(slotFor(storage), OTHER_SHA)).offered()).toBe(false);
+  });
+
+  it('two tabs straddling a deploy both keep their answered version — commits merge, not overwrite', async () => {
+    const storage = fakeStorage();
+    const driver = createWebStorageDriver(storage);
+    const slot = (): ReturnType<typeof slotFor> =>
+      createSaveSlot<StoredSurveyAsk>({
+        driver,
+        key: SURVEY_ASK_KEY,
+        deviceId: 'device-a',
+        parse: parseStoredSurveyAsk,
+        now: () => 0,
+      });
+    // Both load the same empty snapshot before either commits.
+    const tabA = await loadSurveyAsk(slot(), SHA);
+    const tabB = await loadSurveyAsk(slot(), OTHER_SHA);
+    await tabA.commit(false);
+    await tabB.commit(false);
+    expect((await stored(storage))?.answeredVersions).toEqual([SHA, OTHER_SHA]);
+    expect((await loadSurveyAsk(slotFor(storage), SHA)).offered()).toBe(false); // rollback to A
   });
 
   it('remembers a bounded history, most recent kept, re-committing without duplicating', async () => {

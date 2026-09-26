@@ -422,14 +422,31 @@ export async function loadSurveyAsk(
   return {
     offered: () => !stored.dismissed && !stored.answeredVersions.includes(gameVersion),
     async commit(dontAskAgain: boolean): Promise<void> {
-      // This version moves to the most-recent end; the oldest fall off past the cap.
-      const answeredVersions = [
-        ...stored.answeredVersions.filter((v) => v !== gameVersion),
-        gameVersion,
-      ].slice(-MAX_ANSWERED_VERSIONS);
-      stored = { dismissed: dontAskAgain, answeredVersions };
+      /** The history to keep: `base` (oldest first), then any of THIS instance's entries it
+       *  lacks, then this version moved to the most-recent end, capped. */
+      const merged = (base: readonly string[]): StoredSurveyAsk => {
+        const union = [...base, ...stored.answeredVersions.filter((v) => !base.includes(v))];
+        return {
+          dismissed: dontAskAgain,
+          answeredVersions: [...union.filter((v) => v !== gameVersion), gameVersion].slice(
+            -MAX_ANSWERED_VERSIONS,
+          ),
+        };
+      };
+      // In memory first, so the session honours it whatever the write does (§3).
+      stored = merged(stored.answeredVersions);
       try {
-        await slot.write(stored);
+        // Merged against what is stored NOW, inside the slot's write lock (Codex, PR #175):
+        // two tabs straddling a deploy each loaded the same old snapshot, and a plain write
+        // from the later one would erase the version the earlier one recorded — so a later
+        // rollback to it would ask again. `dismissed` is still this commit's checkbox state:
+        // it is the player's latest explicit answer.
+        //
+        // The written value is deliberately NOT adopted back into memory: an earlier commit's
+        // write resolving after a newer one (the same-dialog undo, pressed quickly) would put
+        // the superseded answer back. Memory already holds this commit's answer, and the
+        // other tabs' versions the merge picks up do not concern this instance's version.
+        await slot.update((current) => merged(current?.answeredVersions ?? []));
       } catch {
         // Honoured in memory for the session; nothing more is promised (§3).
       }

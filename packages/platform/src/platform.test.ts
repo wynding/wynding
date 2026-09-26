@@ -251,6 +251,83 @@ describe('the save slot — serialized writes and atomic revision allocation', (
     expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBe(stored);
   });
 
+  it('update: one read-modify-write critical section that sees the current value', async () => {
+    const storage = fakeStorage();
+    const slot = stringSlot(storage);
+    await expect(slot.update((current) => `${current ?? ''}a`)).resolves.toBe('a');
+    await expect(slot.update((current) => `${current ?? ''}b`)).resolves.toBe('ab');
+    expect(await slot.read()).toEqual({ status: 'ok', data: 'ab', revision: 2 });
+  });
+
+  it('update: overlapping updates COMPOSE — none is lost to a stale read', async () => {
+    const storage = fakeStorage();
+    const slot = stringSlot(storage);
+    await Promise.all(['a', 'b', 'c'].map((c) => slot.update((current) => `${current ?? ''}${c}`)));
+    expect(await slot.read()).toEqual({ status: 'ok', data: 'abc', revision: 3 });
+  });
+
+  it('update: with a cross-context lock, two contexts (two drivers) compose too', async () => {
+    // Two drivers over one store is the faithful two-tab model (see the last-write-wins test
+    // below). A lock that really excludes — here a promise-chain mutex standing in for Web
+    // Locks — is what extends the guarantee across them, and `update` keeps it because the
+    // read happens inside that lock.
+    const storage = fakeStorage();
+    let tail: Promise<unknown> = Promise.resolve();
+    const mutex = <R>(_name: string, fn: () => Promise<R>): Promise<R> => {
+      const run = tail.then(fn, fn);
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    };
+    const tabA = stringSlot(storage, { lock: mutex });
+    const tabB = stringSlot(storage, { lock: mutex });
+    await Promise.all([
+      tabA.update((current) => `${current ?? ''}a`),
+      tabB.update((current) => `${current ?? ''}b`),
+    ]);
+    expect(await tabA.read()).toMatchObject({ status: 'ok', revision: 2 });
+    const read = await tabA.read();
+    expect(read.status === 'ok' ? [...read.data].sort().join('') : '').toBe('ab');
+  });
+
+  it('update: absent or corrupt reads as undefined, and a corrupt original is quarantined first', async () => {
+    const seen: (string | undefined)[] = [];
+    await stringSlot(fakeStorage()).update((current) => {
+      seen.push(current);
+      return 'x';
+    });
+    const corrupt = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: '{not json' });
+    await stringSlot(corrupt).update((current) => {
+      seen.push(current);
+      return 'fresh';
+    });
+    expect(seen).toEqual([undefined, undefined]);
+    expect(corrupt.map.get(`${STORAGE_NAMESPACE}${quarantineKey('settings')}`)).toBe('{not json');
+    expect(await stringSlot(corrupt).read()).toMatchObject({ data: 'fresh', revision: 1 });
+  });
+
+  it('update: refuses a NEWER save exactly as write does, without calling fn', async () => {
+    const stored = encodeEnvelope({
+      saveVersion: SAVE_VERSION + 1,
+      deviceId: 'device-b',
+      revision: 9,
+      updatedAt: 0,
+      data: 'from the future',
+    });
+    const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: stored });
+    let called = false;
+    await expect(
+      stringSlot(storage).update(() => {
+        called = true;
+        return 'mine';
+      }),
+    ).rejects.toThrow(/refusing to update settings/);
+    expect(called).toBe(false);
+    expect(storage.map.get(`${STORAGE_NAMESPACE}settings`)).toBe(stored);
+  });
+
   it('quarantines a corrupt original BEFORE fresh state is written, never discarding it', async () => {
     const storage = fakeStorage({ [`${STORAGE_NAMESPACE}settings`]: '{not json' });
     const slot = stringSlot(storage);
