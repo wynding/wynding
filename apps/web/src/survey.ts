@@ -345,25 +345,37 @@ export function createSessionIdentity(options: {
 
 // --- §3: once per gameVersion, and a dismissal that sticks ----------------------------------
 
-/** What the survey slot stores: whether "don't ask again" is committed, and which
- *  `gameVersion`'s ask a Not now or an accepted Send has consumed. */
+/** What the survey slot stores: whether "don't ask again" is committed, and every
+ *  `gameVersion` whose ask a Not now or an accepted Send has consumed — most recent last. */
 export interface StoredSurveyAsk {
   readonly dismissed: boolean;
-  readonly answeredVersion: string | null;
+  readonly answeredVersions: readonly string[];
 }
+
+/**
+ * How many answered versions the slot remembers. Not one, because §4's rollback rule needs
+ * history: rolling back to a prior revision must restore THAT version's consumed ask, so
+ * answering A, then B, then rolling back to A must not ask again. Not unbounded either, since
+ * one entry per answered deployment would grow forever. A rollback past this many newer
+ * answered revisions re-asks once, which is the benign direction.
+ */
+export const MAX_ANSWERED_VERSIONS = 32;
 
 /** The survey slot's bare key — its own slot beside `settings` and `playtrace`. */
 export const SURVEY_ASK_KEY = 'survey';
 
 export function parseStoredSurveyAsk(data: unknown): StoredSurveyAsk | undefined {
   if (!isRecord(data)) return undefined;
-  const { dismissed, answeredVersion } = data as {
+  const { dismissed, answeredVersions } = data as {
     dismissed?: unknown;
-    answeredVersion?: unknown;
+    answeredVersions?: unknown;
   };
   if (typeof dismissed !== 'boolean') return undefined;
-  if (answeredVersion !== null && typeof answeredVersion !== 'string') return undefined;
-  return { dismissed, answeredVersion };
+  if (!Array.isArray(answeredVersions)) return undefined;
+  if (!answeredVersions.every((v): v is string => typeof v === 'string')) return undefined;
+  // Over-long history is TRIMMED, not rejected: rejecting would also lose a stored
+  // `dismissed: true` if the cap is ever lowered, and the oldest entries are the ones to go.
+  return { dismissed, answeredVersions: answeredVersions.slice(-MAX_ANSWERED_VERSIONS) };
 }
 
 export interface SurveyAsk {
@@ -400,7 +412,7 @@ export async function loadSurveyAsk(
   if (!isSubmittableGameVersion(gameVersion)) {
     return { offered: () => false, commit: async () => {} };
   }
-  let stored: StoredSurveyAsk = { dismissed: false, answeredVersion: null };
+  let stored: StoredSurveyAsk = { dismissed: false, answeredVersions: [] };
   try {
     const read = await slot.read();
     if (read.status === 'ok') stored = read.data;
@@ -408,9 +420,14 @@ export async function loadSurveyAsk(
     // Unreadable: offer, and let a commit try the write anyway.
   }
   return {
-    offered: () => !stored.dismissed && stored.answeredVersion !== gameVersion,
+    offered: () => !stored.dismissed && !stored.answeredVersions.includes(gameVersion),
     async commit(dontAskAgain: boolean): Promise<void> {
-      stored = { dismissed: dontAskAgain, answeredVersion: gameVersion };
+      // This version moves to the most-recent end; the oldest fall off past the cap.
+      const answeredVersions = [
+        ...stored.answeredVersions.filter((v) => v !== gameVersion),
+        gameVersion,
+      ].slice(-MAX_ANSWERED_VERSIONS);
+      stored = { dismissed: dontAskAgain, answeredVersions };
       try {
         await slot.write(stored);
       } catch {

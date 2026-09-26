@@ -10,6 +10,7 @@ import {
 import { UNKNOWN_GAME_VERSION } from '../build-config';
 import { createController } from './controller';
 import {
+  MAX_ANSWERED_VERSIONS,
   SESSION_MAX_AGE_MS,
   SESSION_MAX_RUNS,
   SURVEY_ASK_KEY,
@@ -397,9 +398,9 @@ describe('loadSurveyAsk — once per gameVersion, and a dismissal that sticks (�
     const storage = fakeStorage();
     const ask = await loadSurveyAsk(slotFor(storage), SHA);
     await ask.commit(true); // check → commit via Not now
-    expect(await stored(storage)).toEqual({ dismissed: true, answeredVersion: SHA });
+    expect(await stored(storage)).toEqual({ dismissed: true, answeredVersions: [SHA] });
     await ask.commit(false); // reopen → uncheck → commit again
-    expect(await stored(storage)).toEqual({ dismissed: false, answeredVersion: SHA });
+    expect(await stored(storage)).toEqual({ dismissed: false, answeredVersions: [SHA] });
     // The two cross-reload observables, which together separate the two rules:
     expect((await loadSurveyAsk(slotFor(storage), SHA)).offered()).toBe(false); // Not now's
     expect((await loadSurveyAsk(slotFor(storage), OTHER_SHA)).offered()).toBe(true); // "forever" cleared
@@ -436,26 +437,59 @@ describe('loadSurveyAsk — once per gameVersion, and a dismissal that sticks (�
     expect((await loadSurveyAsk(slotFor(corrupt), SHA)).offered()).toBe(true);
   });
 
+  it('a rollback restores the prior revision’s consumed ask (§4) — answered versions are history', async () => {
+    const storage = fakeStorage();
+    await (await loadSurveyAsk(slotFor(storage), SHA)).commit(false); // answer A
+    await (await loadSurveyAsk(slotFor(storage), OTHER_SHA)).commit(false); // answer B
+    expect((await loadSurveyAsk(slotFor(storage), SHA)).offered()).toBe(false); // back to A
+    expect((await loadSurveyAsk(slotFor(storage), OTHER_SHA)).offered()).toBe(false);
+  });
+
+  it('remembers a bounded history, most recent kept, re-committing without duplicating', async () => {
+    const storage = fakeStorage();
+    const version = (n: number): string => n.toString(16).padStart(40, '0');
+    for (let n = 1; n <= MAX_ANSWERED_VERSIONS + 1; n++) {
+      await (await loadSurveyAsk(slotFor(storage), version(n))).commit(false);
+    }
+    const history = (await stored(storage))?.answeredVersions ?? [];
+    expect(history).toHaveLength(MAX_ANSWERED_VERSIONS);
+    expect(history[history.length - 1]).toBe(version(MAX_ANSWERED_VERSIONS + 1));
+    expect((await loadSurveyAsk(slotFor(storage), version(1))).offered()).toBe(true); // evicted
+    expect((await loadSurveyAsk(slotFor(storage), version(2))).offered()).toBe(false);
+    // Committing an already-answered version moves it to the recent end, once.
+    await (await loadSurveyAsk(slotFor(storage), version(2))).commit(false);
+    const after = (await stored(storage))?.answeredVersions ?? [];
+    expect(after.filter((v) => v === version(2))).toHaveLength(1);
+    expect(after[after.length - 1]).toBe(version(2));
+  });
+
   it('parseStoredSurveyAsk accepts only the declared shape', () => {
-    expect(parseStoredSurveyAsk({ dismissed: true, answeredVersion: SHA })).toEqual({
+    expect(parseStoredSurveyAsk({ dismissed: true, answeredVersions: [SHA] })).toEqual({
       dismissed: true,
-      answeredVersion: SHA,
+      answeredVersions: [SHA],
     });
-    expect(parseStoredSurveyAsk({ dismissed: false, answeredVersion: null })).toEqual({
+    expect(parseStoredSurveyAsk({ dismissed: false, answeredVersions: [] })).toEqual({
       dismissed: false,
-      answeredVersion: null,
+      answeredVersions: [],
     });
     for (const bad of [
       null,
       [],
       7,
       {},
-      { dismissed: 'true', answeredVersion: null },
+      { dismissed: 'true', answeredVersions: [] },
       { dismissed: false },
-      { dismissed: false, answeredVersion: 3 },
+      { dismissed: false, answeredVersions: SHA },
+      { dismissed: false, answeredVersions: [3] },
     ]) {
       expect(parseStoredSurveyAsk(bad)).toBeUndefined();
     }
+    // An over-long history is trimmed to the most recent, keeping the dismissal.
+    const long = Array.from({ length: MAX_ANSWERED_VERSIONS + 2 }, (_, n) => String(n));
+    expect(parseStoredSurveyAsk({ dismissed: true, answeredVersions: long })).toEqual({
+      dismissed: true,
+      answeredVersions: long.slice(2),
+    });
     // End to end: a malformed record through the slot reads as never-answered.
     const envelope = encodeEnvelope({
       saveVersion: SAVE_VERSION,
