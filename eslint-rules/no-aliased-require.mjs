@@ -164,6 +164,16 @@ const noAliasedRequire = {
           report(node);
         }
       },
+      // A value RE-EXPORT from `module` (`export { createRequire } from 'node:module'`,
+      // `export * from 'module'`) hands the loader factory to any file that imports the barrel,
+      // where none of this can see it, so the re-export itself is the report.
+      ExportNamedDeclaration(node) {
+        if (node.exportKind === 'type' || !MODULE_SPECIFIERS.has(node.source?.value ?? '')) return;
+        if (node.specifiers.some((spec) => spec.exportKind !== 'type')) report(node);
+      },
+      ExportAllDeclaration(node) {
+        if (node.exportKind !== 'type' && MODULE_SPECIFIERS.has(node.source.value)) report(node);
+      },
       // `createRequire` imported by name (identifier or string), renamed or not. A TYPE-ONLY
       // import is erased and cannot mint a loader, so it is left alone.
       ImportSpecifier(node) {
