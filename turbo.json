@@ -5,6 +5,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["WYNDING_GAME_VERSION"],
       "outputs": ["dist/**", "dist-host/**"]
     },
     "typecheck": {

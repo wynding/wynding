@@ -80,7 +80,8 @@ const FULL_SHA_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 /**
  * Resolve the build's `gameVersion`. An explicit `WYNDING_GAME_VERSION` wins (a CI that knows
- * the SHA it checked out); otherwise `readHead` supplies `git rev-parse HEAD`. Anything that is
+ * the SHA it checked out, and answers for it); otherwise `readHead` supplies HEAD of a clean
+ * worktree ({@link readCleanHead}). Anything that is
  * not a full lowercase SHA (40 hex, or 64 in a SHA-256 repository) resolves to {@link UNKNOWN_GAME_VERSION} rather than being
  * trusted. Injected rather than shelling out here, so this module keeps importing nothing.
  */
@@ -90,6 +91,29 @@ export function resolveGameVersion(
 ): string {
   const candidate = (envValue ?? readHead() ?? '').trim().toLowerCase();
   return FULL_SHA_RE.test(candidate) ? candidate : UNKNOWN_GAME_VERSION;
+}
+
+/** The worktree-cleanliness query {@link readCleanHead} runs. */
+export const CLEAN_STATUS_ARGS = '--no-optional-locks status --porcelain --untracked-files=normal';
+
+/**
+ * `git rev-parse HEAD`, but only for a CLEAN worktree: a build of uncommitted source is not
+ * the revision HEAD names, so claiming HEAD would give distinct game code that revision's
+ * survey identity and ask history (Codex, PR #175 — reachable through the local mobile
+ * `sync:*` / `release:android*` scripts, which build without a cleanliness check). Any
+ * tracked change or untracked, non-ignored file makes it undefined, as does git failing.
+ * `git` runs one git command (its arguments) and returns stdout, throwing on failure;
+ * injected so this module keeps importing nothing.
+ */
+export function readCleanHead(git: (args: string) => string): string | undefined {
+  try {
+    // Untracked files counted whatever the user's `status.showUntrackedFiles`; no optional
+    // index lock, so a build never collides with a git command running beside it.
+    if (git(CLEAN_STATUS_ARGS).trim() !== '') return undefined;
+    return git('rev-parse HEAD');
+  } catch {
+    return undefined;
+  }
 }
 
 /** The `define` entry a build carries for `gameVersion`. */

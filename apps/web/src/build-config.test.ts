@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CLEAN_STATUS_ARGS,
   GAME_VERSION_DEFINE_KEY,
   HOST_MODE,
   HOSTED_DEFINE_KEY,
   UNKNOWN_GAME_VERSION,
   gameVersionDefine,
   hostedDefine,
+  readCleanHead,
   resolveGameVersion,
   webBuildConfig,
 } from '../build-config';
@@ -83,6 +85,28 @@ describe('build-config — gameVersion (ADR 0014 §4)', () => {
       expect(resolveGameVersion(value, () => SHA)).toBe(UNKNOWN_GAME_VERSION);
     }
     expect(resolveGameVersion(undefined, () => undefined)).toBe(UNKNOWN_GAME_VERSION);
+  });
+
+  it('claims HEAD only for a clean worktree — uncommitted source is not that revision', () => {
+    const repo =
+      (status: string) =>
+      (args: string): string => {
+        if (args === CLEAN_STATUS_ARGS) return status;
+        if (args === 'rev-parse HEAD') return `${SHA}\n`;
+        throw new Error(`unexpected git ${args}`);
+      };
+    expect(readCleanHead(repo(''))).toBe(`${SHA}\n`);
+    expect(readCleanHead(repo(' M apps/web/src/main.ts\n'))).toBeUndefined(); // tracked edit
+    expect(readCleanHead(repo('?? apps/web/src/new.ts\n'))).toBeUndefined(); // untracked file
+    expect(
+      readCleanHead(() => {
+        throw new Error('not a git repository');
+      }),
+    ).toBeUndefined();
+    // End to end: a dirty build resolves to unknown, so it can never submit a survey.
+    expect(resolveGameVersion(undefined, () => readCleanHead(repo(' M x\n')))).toBe(
+      UNKNOWN_GAME_VERSION,
+    );
   });
 
   it('emits the version as a JSON-encoded string literal under its own key', () => {

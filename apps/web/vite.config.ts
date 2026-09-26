@@ -3,20 +3,14 @@ import { defineConfig } from 'vite';
 import {
   gameVersionDefine,
   hostedDefine,
+  readCleanHead,
   resolveGameVersion,
   webBuildConfig,
 } from './build-config';
 
-/** `git rev-parse HEAD`, or undefined where there is no repository to ask. */
-function readGitHead(): string | undefined {
-  try {
-    return execSync('git rev-parse HEAD', {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch {
-    return undefined;
-  }
+/** Run one git command and return its stdout; throws where there is no repository to ask. */
+function git(args: string): string {
+  return execSync(`git ${args}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 }
 
 // The web app is a thin PWA shell. Workspace packages resolve to their TS source
@@ -34,7 +28,9 @@ export default defineConfig(({ mode }) => {
     define: {
       ...hostedDefine(hosted),
       // ADR 0014 §4: the survey's `gameVersion` — the full commit SHA of this build's source.
-      ...gameVersionDefine(resolveGameVersion(process.env['WYNDING_GAME_VERSION'], readGitHead)),
+      ...gameVersionDefine(
+        resolveGameVersion(process.env['WYNDING_GAME_VERSION'], () => readCleanHead(git)),
+      ),
     },
     build: {
       target: 'es2022',
