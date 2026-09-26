@@ -383,6 +383,15 @@ export interface SurveyAsk {
    *  nothing — reading this records nothing (§3: "never on mere display"). */
   offered(): boolean;
   /**
+   * Re-read the stored ask state, so a dialog opening after it settles sees what OTHER tabs
+   * committed since this one loaded (Codex, PR #175: two tabs loaded before either answered,
+   * and the second kept offering after the first said "don't ask again"). Await it before
+   * `beginDialog` decides presence. Never rejects: an unreadable store keeps the last state
+   * known; an absent or unusable record reads as never-answered, as at load. A refresh that
+   * a newer one overtook is discarded, and none can undo this instance's own commit.
+   */
+  refresh(): Promise<void>;
+  /**
    * The committing write, from exactly two actions: Not now and an ACCEPTED Send. Consumes
    * this `gameVersion`'s ask and writes the "don't ask again" checkbox's CURRENT state —
    * including clearing a dismissal already stored, so unchecking and committing is a real
@@ -410,17 +419,31 @@ export async function loadSurveyAsk(
   // No revision identity, no survey: see `isSubmittableGameVersion`. Nothing is read or
   // written for such a build, so it cannot disturb the ask state of a real one.
   if (!isSubmittableGameVersion(gameVersion)) {
-    return { offered: () => false, commit: async () => {} };
+    return { offered: () => false, refresh: async () => {}, commit: async () => {} };
   }
+  /** The durable state as last read. */
   let stored: StoredSurveyAsk = { dismissed: false, answeredVersions: [] };
-  try {
-    const read = await slot.read();
-    if (read.status === 'ok') stored = read.data;
-  } catch {
-    // Unreadable: offer, and let a commit try the write anyway.
+  /** Whether THIS instance committed. Every commit consumes this version's ask, so it is
+   *  honoured in memory whatever the write or a later read says (§3). */
+  let committed = false;
+  /** Identifies the latest refresh, so an overtaken read cannot land after a newer one. */
+  let reads = 0;
+  async function refresh(): Promise<void> {
+    const mine = ++reads;
+    try {
+      const read = await slot.read();
+      if (mine !== reads) return;
+      stored = read.status === 'ok' ? read.data : { dismissed: false, answeredVersions: [] };
+    } catch {
+      // Unreadable: keep the last state known. At load that is never-answered, so the
+      // feature is offered, and a commit still tries the write.
+    }
   }
+  await refresh();
   return {
-    offered: () => !stored.dismissed && !stored.answeredVersions.includes(gameVersion),
+    offered: () =>
+      !committed && !stored.dismissed && !stored.answeredVersions.includes(gameVersion),
+    refresh,
     async commit(dontAskAgain: boolean): Promise<void> {
       /** The history to keep: `base` in its own order (oldest first) with THIS version moved
        *  to the most-recent end, capped. Only this version is added — this instance commits
@@ -434,7 +457,7 @@ export async function loadSurveyAsk(
         ),
       });
       // In memory first, so the session honours it whatever the write does (§3).
-      stored = merged(stored.answeredVersions);
+      committed = true;
       try {
         // Merged against what is stored NOW, inside the slot's write lock (Codex, PR #175):
         // two tabs straddling a deploy each loaded the same old snapshot, and a plain write
@@ -444,8 +467,8 @@ export async function loadSurveyAsk(
         //
         // The written value is deliberately NOT adopted back into memory: an earlier commit's
         // write resolving after a newer one (the same-dialog undo, pressed quickly) would put
-        // the superseded answer back. Memory already holds this commit's answer, and the
-        // other tabs' versions the merge picks up do not concern this instance's version.
+        // the superseded answer back. Memory already records this commit, and what the
+        // other tabs wrote reaches this instance through `refresh`.
         await slot.update((current) => merged(current?.answeredVersions ?? []));
       } catch {
         // Honoured in memory for the session; nothing more is promised (§3).
@@ -503,7 +526,8 @@ export type SurveySendAttempt =
 export interface Survey {
   state(): SurveyState;
   /** A results dialog opened: start a fresh survey for it. Presence is decided here, from the
-   *  ask state, and recorded nowhere. */
+   *  ask state, and recorded nowhere. The caller awaits `ask.refresh()` first, so another
+   *  tab's answer counts. */
   beginDialog(): void;
   /** `hideResults()` — every run-start path. Cancels the whole in-flight operation, collapses,
    *  and COMMITS NOTHING, not even an armed "don't ask again" (§3). */

@@ -429,6 +429,8 @@ describe('loadSurveyAsk — once per gameVersion, and a dismissal that sticks (�
     const storage = fakeStorage();
     const ask = await loadSurveyAsk(slotFor(storage), UNKNOWN_GAME_VERSION);
     expect(ask.offered()).toBe(false);
+    await ask.refresh();
+    expect(ask.offered()).toBe(false);
     await ask.commit(true);
     expect(storage.map.size).toBe(0);
     expect((await loadSurveyAsk(slotFor(storage), SHA)).offered()).toBe(true);
@@ -493,6 +495,71 @@ describe('loadSurveyAsk — once per gameVersion, and a dismissal that sticks (�
     ]);
     expect((await loadSurveyAsk(slotFor(storage), version(2 * cap))).offered()).toBe(false);
     expect((await loadSurveyAsk(slotFor(storage), version(1))).offered()).toBe(true); // not resurrected
+  });
+
+  it('refresh: a tab sees what another tab committed after both loaded', async () => {
+    const storage = fakeStorage();
+    const tabA = await loadSurveyAsk(slotFor(storage), SHA);
+    const tabB = await loadSurveyAsk(slotFor(storage), SHA);
+    const tabC = await loadSurveyAsk(slotFor(storage), OTHER_SHA);
+    await tabA.commit(true); // Not now with "don't ask again"
+    expect(tabB.offered()).toBe(true); // its snapshot predates the commit
+    await tabB.refresh();
+    await tabC.refresh();
+    expect(tabB.offered()).toBe(false); // this version consumed
+    expect(tabC.offered()).toBe(false); // the dismissal reaches every version
+    // Another tab's undo reaches it too, but this version stays consumed.
+    await tabA.commit(false);
+    await tabB.refresh();
+    await tabC.refresh();
+    expect(tabB.offered()).toBe(false);
+    expect(tabC.offered()).toBe(true);
+    // A record cleared from under it reads as never-answered, as at load.
+    storage.map.clear();
+    await tabB.refresh();
+    expect(tabB.offered()).toBe(true);
+  });
+
+  it('refresh never undoes this instance’s commit, keeps the last state when unreadable, and drops overtaken reads', async () => {
+    const storage = fakeStorage();
+    const ask = await loadSurveyAsk(slotFor(storage), SHA);
+    storage.failWrites = true;
+    await ask.commit(false); // unwritten: memory only
+    await ask.refresh();
+    expect(ask.offered()).toBe(false);
+    storage.failWrites = false;
+
+    await (await loadSurveyAsk(slotFor(storage), SHA)).commit(true); // durable dismissal
+    const other = await loadSurveyAsk(slotFor(storage), OTHER_SHA);
+    expect(other.offered()).toBe(false);
+    storage.failReads = true;
+    await other.refresh();
+    expect(other.offered()).toBe(false); // unreadable: the last state known, not a re-ask
+    storage.failReads = false;
+
+    // Two refreshes in flight: the older one settling last must not win.
+    const slot = slotFor(storage);
+    let openGate = (): void => {};
+    const gate = new Promise<void>((resolve) => (openGate = resolve));
+    const realRead = slot.read.bind(slot);
+    let calls = 0;
+    const gated = {
+      ...slot,
+      // Call 2 reads NOW (the cleared store) but settles only when the gate opens.
+      read: async () => {
+        const result = await realRead();
+        if (++calls === 2) await gate;
+        return result;
+      },
+    };
+    const tab = await loadSurveyAsk(gated, OTHER_SHA); // call 1: dismissed
+    storage.map.clear();
+    const older = tab.refresh(); // call 2: reads absent, delivered late
+    await (await loadSurveyAsk(slotFor(storage), SHA)).commit(true); // dismiss again
+    await tab.refresh(); // call 3: dismissed
+    openGate();
+    await older;
+    expect(tab.offered()).toBe(false);
   });
 
   it('remembers a bounded history, most recent kept, re-committing without duplicating', async () => {
@@ -568,6 +635,7 @@ function harness(options: { offered?: boolean } = {}) {
   const commits: boolean[] = [];
   const ask: SurveyAsk = {
     offered: () => options.offered ?? true,
+    refresh: async () => {},
     commit: vi.fn(async (dontAskAgain: boolean) => {
       commits.push(dontAskAgain);
     }),
@@ -723,7 +791,11 @@ describe('createSurvey — what consumes the ask (§3)', () => {
   it('a transport that throws SYNCHRONOUSLY still settles as rejected — never stuck sending', async () => {
     const commits: boolean[] = [];
     const survey = createSurvey({
-      ask: { offered: () => true, commit: async (d) => void commits.push(d) },
+      ask: {
+        offered: () => true,
+        refresh: async () => {},
+        commit: async (d) => void commits.push(d),
+      },
       transport: {
         send: () => {
           throw new Error('sync boom');
@@ -759,6 +831,7 @@ describe('createSurvey — what consumes the ask (§3)', () => {
     const survey = createSurvey({
       ask: {
         offered: () => true,
+        refresh: async () => {},
         commit: () => {
           commitCalls++;
           return new Promise<void>(() => {}); // a hung driver
