@@ -7,6 +7,12 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "dist-host/**"]
     },
+    "@wynding/web#build": {
+      "dependsOn": ["^build"],
+      "env": ["WYNDING_GAME_VERSION"],
+      "cache": false,
+      "outputs": ["dist/**", "dist-host/**"]
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "outputs": ["dist/**", "*.tsbuildinfo"]

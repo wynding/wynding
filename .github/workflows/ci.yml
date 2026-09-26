@@ -45,7 +45,8 @@ jobs:
       # byte+hash-compares the client bundle's embedded ruleset against the packaged
       # server copy, over BUILT artifacts. Deliberately not part of the turbo `test`
       # task (test depends only on ^typecheck — it would read stale dist); it re-invokes
-      # the build itself, which is a turbo cache hit right after the step above.
+      # the build itself (server: a turbo cache hit right after the step above; web: never
+      # cached, since its bundle embeds the git revision — see `turbo.json`).
       - run: pnpm run check:artifact-parity
       # Initial-load budget gate (ADR 0005): the built app's initial JS must be
       # ≤ 3 MB gzipped. Runs after the build so the dist output exists.

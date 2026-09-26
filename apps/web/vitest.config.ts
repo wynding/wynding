@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { hostedDefine, webBuildConfig } from './build-config';
+import { gameVersionDefine, hostedDefine, webBuildConfig } from './build-config';
 
 // Story 6 coverage gate for the app/orchestration layer. jsdom so the DOM overlay +
 // input modules are exercised for real. Every source module is covered at the 90%
@@ -28,7 +28,12 @@ export default defineConfig({
   // unit tests run the UNHOSTED default: the hosted paths are exercised the way they always
   // have been, by passing `hosted` into `createApp`/`createShell` directly. The key comes
   // from `build-config.ts` so it cannot drift from the one Vite defines.
-  define: hostedDefine(webBuildConfig('test').hosted),
+  define: {
+    ...hostedDefine(webBuildConfig('test').hosted),
+    // A fixed, well-formed `gameVersion` (ADR 0014 §4) rather than this checkout's HEAD, so no
+    // unit test's result depends on which commit it ran at.
+    ...gameVersionDefine('0123456789abcdef0123456789abcdef01234567'),
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],

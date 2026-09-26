@@ -95,6 +95,13 @@ export interface SaveSlot<T> {
    *  `revision`, because the counter lives in the stored envelope and is re-read inside
    *  the critical section rather than cached here. */
   write(data: T): Promise<void>;
+  /** Read-modify-write as ONE critical section: `fn` receives the slot's current data (or
+   *  `undefined` when absent or unreadable — a corrupt original is quarantined first, as
+   *  `write` does) and returns what to store. Use it whenever the new value depends on the
+   *  old one: a `read` then a `write` lets another handle or tab land a write in between,
+   *  and the second write would silently drop it. Resolves with what was stored; refuses a
+   *  newer build's save exactly as `write` does. */
+  update(fn: (current: T | undefined) => T): Promise<T>;
   /** Remove this slot's payload. Leaves any quarantined original alone, and REFUSES a
    *  payload written by a newer `saveVersion` exactly as {@link SaveSlot.write} does —
    *  a deletion the ADR forbids overwriting is worse, not better. */
@@ -290,6 +297,26 @@ export function createSaveSlot<T>(options: SaveSlotOptions<T>): SaveSlot<T> {
           }),
         ),
       );
+    },
+    update(fn: (current: T | undefined) => T): Promise<T> {
+      return mutate('update', async (envelope) => {
+        // `envelope` is non-null only for a payload `load` already parsed as this slot's
+        // shape, so re-parsing it cannot yield `undefined` — but staying on `parse` keeps
+        // `fn` from ever seeing data this slot did not check.
+        const current = envelope === null ? undefined : parse(envelope.data);
+        const next = fn(current);
+        await driver.set(
+          key,
+          encodeEnvelope({
+            saveVersion: SAVE_VERSION,
+            deviceId,
+            revision: (envelope?.revision ?? 0) + 1,
+            updatedAt: now(),
+            data: next,
+          }),
+        );
+        return next;
+      });
     },
     clear(): Promise<void> {
       // Refuses a newer build's save for the same reason `write` does, and with more at

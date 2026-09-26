@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { HOST_MODE, HOSTED_DEFINE_KEY, hostedDefine, webBuildConfig } from '../build-config';
+import {
+  CLEAN_STATUS_ARGS,
+  GAME_VERSION_DEFINE_KEY,
+  HOST_MODE,
+  HOSTED_DEFINE_KEY,
+  UNKNOWN_GAME_VERSION,
+  gameVersionDefine,
+  hostedDefine,
+  readCleanHead,
+  resolveGameVersion,
+  webBuildConfig,
+} from '../build-config';
 
 // The mode → artifact mapping, pinned directly (ADR 0013). Both halves are asserted: where a
 // build is WRITTEN and what it DECLARES, for both modes — a suite that checked only one of
@@ -52,5 +63,58 @@ describe('build-config — the mode → artifact mapping', () => {
       const { outDir, hosted } = webBuildConfig(mode);
       expect(hosted).toBe(outDir === 'dist-host');
     }
+  });
+});
+
+// ADR 0014 §4's `gameVersion`: the full commit SHA is the identity — never a tag, never an
+// abbreviation — because §3's once-per-version ask rests on one revision being spelled one way.
+describe('build-config — gameVersion (ADR 0014 §4)', () => {
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+
+  it('takes the full SHA from git HEAD, trimmed and lower-cased', () => {
+    expect(resolveGameVersion(undefined, () => `${SHA.toUpperCase()}\n`)).toBe(SHA);
+  });
+
+  it('lets an explicit WYNDING_GAME_VERSION win over git', () => {
+    const other = 'fedcba9876543210fedcba9876543210fedcba98';
+    expect(resolveGameVersion(other, () => SHA)).toBe(other);
+  });
+
+  it('never trusts a tag, a short SHA or nothing at all — those read as unknown', () => {
+    for (const value of ['v1.2.0', SHA.slice(0, 12), '', 'not a sha']) {
+      expect(resolveGameVersion(value, () => SHA)).toBe(UNKNOWN_GAME_VERSION);
+    }
+    expect(resolveGameVersion(undefined, () => undefined)).toBe(UNKNOWN_GAME_VERSION);
+  });
+
+  it('claims HEAD only for a clean worktree — uncommitted source is not that revision', () => {
+    const repo =
+      (status: string) =>
+      (args: string): string => {
+        if (args === CLEAN_STATUS_ARGS) return status;
+        if (args === 'rev-parse HEAD') return `${SHA}\n`;
+        throw new Error(`unexpected git ${args}`);
+      };
+    expect(readCleanHead(repo(''))).toBe(`${SHA}\n`);
+    expect(readCleanHead(repo(' M apps/web/src/main.ts\n'))).toBeUndefined(); // tracked edit
+    expect(readCleanHead(repo('?? apps/web/src/new.ts\n'))).toBeUndefined(); // untracked file
+    expect(
+      readCleanHead(() => {
+        throw new Error('not a git repository');
+      }),
+    ).toBeUndefined();
+    // End to end: a dirty build resolves to unknown, so it can never submit a survey.
+    expect(resolveGameVersion(undefined, () => readCleanHead(repo(' M x\n')))).toBe(
+      UNKNOWN_GAME_VERSION,
+    );
+  });
+
+  it('emits the version as a JSON-encoded string literal under its own key', () => {
+    expect(gameVersionDefine(SHA)).toEqual({ [GAME_VERSION_DEFINE_KEY]: `"${SHA}"` });
+    expect(GAME_VERSION_DEFINE_KEY).not.toBe(HOSTED_DEFINE_KEY);
+  });
+
+  it('reaches the unit-test build through vitest.config.ts', () => {
+    expect(import.meta.env.WYNDING_GAME_VERSION).toBe(SHA);
   });
 });
