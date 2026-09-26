@@ -19,6 +19,10 @@ interface ImportMetaEnv {
   // the define would typecheck and ship an unhosted Host build. `e2e/hosted.spec.ts` is
   // what catches that, by testing the artifact's BEHAVIOUR rather than this name.
   readonly WYNDING_HOSTED: boolean;
+  // ADR 0014 §4's `gameVersion`: the full commit SHA of the build's source, or `'unknown'`
+  // where none could be resolved (`build-config.ts`). Supplied by `vite.config.ts` and
+  // `vitest.config.ts`'s `define`, like `WYNDING_HOSTED`.
+  readonly WYNDING_GAME_VERSION: string;
 }
 interface ImportMeta {
   readonly env: ImportMetaEnv;

@@ -1,5 +1,23 @@
+import { execSync } from 'node:child_process';
 import { defineConfig } from 'vite';
-import { hostedDefine, webBuildConfig } from './build-config';
+import {
+  gameVersionDefine,
+  hostedDefine,
+  resolveGameVersion,
+  webBuildConfig,
+} from './build-config';
+
+/** `git rev-parse HEAD`, or undefined where there is no repository to ask. */
+function readGitHead(): string | undefined {
+  try {
+    return execSync('git rev-parse HEAD', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return undefined;
+  }
+}
 
 // The web app is a thin PWA shell. Workspace packages resolve to their TS source
 // (see each package's `exports`), so Vite transpiles them directly — no prebuild.
@@ -13,7 +31,11 @@ import { hostedDefine, webBuildConfig } from './build-config';
 export default defineConfig(({ mode }) => {
   const { outDir, hosted } = webBuildConfig(mode);
   return {
-    define: hostedDefine(hosted),
+    define: {
+      ...hostedDefine(hosted),
+      // ADR 0014 §4: the survey's `gameVersion` — the full commit SHA of this build's source.
+      ...gameVersionDefine(resolveGameVersion(process.env['WYNDING_GAME_VERSION'], readGitHead)),
+    },
     build: {
       target: 'es2022',
       outDir,

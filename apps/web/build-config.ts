@@ -57,3 +57,42 @@ export function webBuildConfig(mode: string): WebBuildConfig {
 export function hostedDefine(hosted: boolean): Record<string, string> {
   return { [HOSTED_DEFINE_KEY]: JSON.stringify(hosted) };
 }
+
+/**
+ * ADR 0014 §4's `gameVersion`, as a build-time constant through the same `define` mechanism
+ * as the hosted declaration (ADR 0013). `hostedDefine` is the precedent, not the carrier —
+ * this is its own key.
+ *
+ * THE IDENTITY IS THE FULL COMMIT SHA, never a tag and never an abbreviation: a tag's
+ * visibility differs between checkouts of one commit, and a short SHA lengthens as the
+ * repository grows colliding prefixes — either would mint a fresh `gameVersion` for a revision
+ * that already had one and re-ask a player §3 promised not to. So the boundary is a distinct
+ * deployed source revision: a rebuild, redeploy or rollback reuses the revision it came from.
+ */
+export const GAME_VERSION_DEFINE_KEY = 'import.meta.env.WYNDING_GAME_VERSION';
+
+/** What a build carries when no full SHA can be resolved (a source tarball, no git). It can
+ *  never pass the survey payload's `gameVersion` check, so such a build cannot submit one. */
+export const UNKNOWN_GAME_VERSION = 'unknown';
+
+/** SHA-1 (40 hex), or a SHA-256 repository's object id (64 hex). */
+const FULL_SHA_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+/**
+ * Resolve the build's `gameVersion`. An explicit `WYNDING_GAME_VERSION` wins (a CI that knows
+ * the SHA it checked out); otherwise `readHead` supplies `git rev-parse HEAD`. Anything that is
+ * not a full lowercase SHA (40 hex, or 64 in a SHA-256 repository) resolves to {@link UNKNOWN_GAME_VERSION} rather than being
+ * trusted. Injected rather than shelling out here, so this module keeps importing nothing.
+ */
+export function resolveGameVersion(
+  envValue: string | undefined,
+  readHead: () => string | undefined,
+): string {
+  const candidate = (envValue ?? readHead() ?? '').trim().toLowerCase();
+  return FULL_SHA_RE.test(candidate) ? candidate : UNKNOWN_GAME_VERSION;
+}
+
+/** The `define` entry a build carries for `gameVersion`. */
+export function gameVersionDefine(gameVersion: string): Record<string, string> {
+  return { [GAME_VERSION_DEFINE_KEY]: JSON.stringify(gameVersion) };
+}
