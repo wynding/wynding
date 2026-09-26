@@ -244,6 +244,12 @@ describe(
       ['a dynamic import of node:module', "export const m = import('node:module');\n"],
       ['a require of module', "export const m = require('module');\n"],
       ['a named re-export from node:module', "export { createRequire } from 'node:module';\n"],
+      ['a Module re-export from node:module', "export { Module } from 'node:module';\n"],
+      ['a default re-export from module', "export { default as M } from 'module';\n"],
+      [
+        'createRequire read off an imported Module',
+        "import { Module } from 'node:module';\nexport const a = Module.createRequire;\n",
+      ],
       ['a star re-export from module', "export * from 'module';\n"],
       [
         'a template-spelled dynamic import of node:module',

@@ -28,6 +28,9 @@ const MESSAGE =
 
 /** The global objects the loader can be read off. */
 const HOSTS = new Set(['globalThis', 'global', 'window', 'self', 'module']);
+/** The exports of `module` that carry the loader factory: `createRequire` itself, and `Module`
+ *  and the default export, which both expose it as `.createRequire` (Codex, PR #174). */
+const LOADER_EXPORTS = new Set(['createRequire', 'Module', 'default']);
 /** The module that exports `createRequire`. */
 const MODULE_SPECIFIERS = new Set(['module', 'node:module']);
 
@@ -175,13 +178,14 @@ const noAliasedRequire = {
       // A value RE-EXPORT of `createRequire` (`export { createRequire } from 'node:module'`, or
       // any `export * from 'module'`, which includes it) hands the loader factory to any file
       // that imports the barrel, where none of this can see it, so the re-export is the report.
-      // A named re-export of anything else (`builtinModules`, `isBuiltin`) is not a loader.
+      // `Module` and the default export carry it too. A named re-export of anything else
+      // (`builtinModules`, `isBuiltin`) is not a loader.
       ExportNamedDeclaration(node) {
         if (node.exportKind === 'type' || !MODULE_SPECIFIERS.has(node.source?.value ?? '')) return;
         const names = (spec) =>
           spec.local.type === 'Identifier' ? spec.local.name : spec.local.value;
         for (const spec of node.specifiers) {
-          if (spec.exportKind !== 'type' && names(spec) === 'createRequire') report(spec);
+          if (spec.exportKind !== 'type' && LOADER_EXPORTS.has(names(spec))) report(spec);
         }
       },
       ExportAllDeclaration(node) {
