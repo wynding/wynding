@@ -252,7 +252,9 @@ describe(
           SERVER,
           "export const a = require('./ok');\nexport const b = { require: 1 };\n" +
             'export class C { require(): void {} }\nexport interface I { require: number }\n' +
-            'export interface M { require(): void }\n',
+            'export interface M { require(): void }\n' +
+            'export function require(x: string): string { return x; }\n' +
+            'export const f = (require: string): number => 1;\n',
         ),
       ).toEqual([]);
     });

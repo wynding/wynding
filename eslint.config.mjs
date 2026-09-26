@@ -90,7 +90,11 @@ const NON_CONSTANT_SPECIFIER = {
 // like a non-constant specifier, each is an error in its own right. The three selectors are:
 //   - `require` as a VALUE: any reference that is not the callee of a call. Names that are not
 //     references are skipped: an object-literal key (`{ require: 1 }`), a class or interface
-//     member, and a member name (`x.require`), which is the next selector's.
+//     member, and a member name (`x.require`), which is the next selector's. So are DECLARED
+//     bindings: a local `function require(x)`, a parameter or a `const require` (Codex, #174).
+//     The rule reads spellings, not scopes: a use of such a local binding as a value is still
+//     reported, since telling it from Node's loader would need scope resolution, and a shipped
+//     module shadowing `require` is worth a second look anyway.
 //   - `.require` as a MEMBER, whatever its object (`globalThis`, `module`, `window`), and the
 //     same member read by destructuring (`const { require: r } = globalThis`).
 //   - `createRequire` in any position, its import included (renamed or not): naming it at all
@@ -106,7 +110,7 @@ const ALIASED_REQUIRE_MESSAGE =
 const ALIASED_REQUIRE = [
   {
     selector:
-      "Identifier[name='require']:not(CallExpression > Identifier.callee):not(MemberExpression > Identifier.property):not(ObjectExpression > Property > Identifier.key):not(ObjectPattern > Property > Identifier.key):not(MethodDefinition > Identifier.key):not(PropertyDefinition > Identifier.key):not(TSPropertySignature > Identifier.key):not(TSMethodSignature > Identifier.key)",
+      "Identifier[name='require']:not(CallExpression > Identifier.callee):not(MemberExpression > Identifier.property):not(ObjectExpression > Property > Identifier.key):not(ObjectPattern > Property > Identifier.key):not(MethodDefinition > Identifier.key):not(PropertyDefinition > Identifier.key):not(TSPropertySignature > Identifier.key):not(TSMethodSignature > Identifier.key):not(:function > Identifier.id):not(:function > Identifier.params):not(VariableDeclarator > Identifier.id)",
     message: ALIASED_REQUIRE_MESSAGE,
   },
   {
