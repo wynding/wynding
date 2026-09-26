@@ -90,9 +90,10 @@ const NON_CONSTANT_SPECIFIER = {
 // ALIASED `require` (#171) is not a selector here but a rule of its own,
 // `eslint-rules/no-aliased-require.mjs`, enabled for every zone below. `SPECIFIER_SITES` judges a
 // direct `require('x')` call; that rule rejects every other way to reach the loader
-// (`(0, require)(…)`, `const r = require`, `globalThis.require`, `module.require`,
-// `createRequire`). It is scope-resolved, because a spelling-based selector kept mistaking local
-// bindings, keys and members named `require` for the loader (PR #174).
+// (`(0, require)(…)`, `const r = require`, `globalThis.require`, the CommonJS `module` object,
+// a value import of Node's `module` builtin, `getBuiltinModule('node:module')`). It is
+// scope-resolved, because a spelling-based selector kept mistaking local bindings, keys and
+// members named `require` for the loader (PR #174).
 
 // The deterministic core's forbidden SYNTAX, hoisted for the same reason the module paths
 // above were: the layering zones match these files too and set the same rule name, and flat

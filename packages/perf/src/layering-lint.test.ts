@@ -373,6 +373,24 @@ describe(
         "const { getBuiltinModule: g = undefined } = process;\nexport const m = g?.('module');\n",
       ],
       [
+        'require off the Module prototype',
+        "import { Module } from 'node:module';\nexport const a = Module.prototype.require('@wynding/perf');\n",
+      ],
+      [
+        'require off a Module instance',
+        "import { Module as M } from 'node:module';\nexport const a = new M('x').require('@wynding/perf');\n",
+      ],
+      [
+        'a named internal loader export of node:module',
+        "import { _load } from 'node:module';\nexport const fs = _load('node:fs', null, false);\n",
+      ],
+      ['a register re-export from node:module', "export { register } from 'node:module';\n"],
+      ['the CommonJS module constructor', 'export const M = module.constructor;\n'],
+      [
+        "the CommonJS module's parent",
+        "export const a = module.parent?.require('@wynding/perf');\n",
+      ],
+      [
         'an exported destructured Module',
         "import * as m from 'node:module';\nexport const { Module: M } = m;\n",
       ],
@@ -429,7 +447,10 @@ describe(
             "export const hasBuiltins2 = typeof globalThis.process?.getBuiltinModule === 'function';\n" +
             "export function localGet(getBuiltinModule: (s: string) => unknown): unknown {\n  return getBuiltinModule('node:module');\n}\n" +
             'export const { ...rest } = { Module: 1 };\nexport const s = rest.Module;\n' +
-            "import * as ns from 'node:module';\nexport const { builtinModules } = ns;\n" +
+            "import { builtinModules as bms } from 'node:module';\nexport const { length } = bms;\n" +
+            'export function localModule(module: { id: string }): string {\n  return module.id;\n}\n' +
+            "export const isCommonJs = typeof module !== 'undefined';\n" +
+            "export { isBuiltin as isNodeBuiltin, SourceMap } from 'node:module';\n" +
             "import type { Module as TM } from 'node:module';\nexport type { TM };\n" +
             "import { type Module as TM2 } from 'node:module';\nexport { TM2 };\n" +
             "import type * as TNS from 'node:module';\nexport { TNS };\n" +
