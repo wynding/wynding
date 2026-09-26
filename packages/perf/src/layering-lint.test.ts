@@ -21,7 +21,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-const RESTRICTION_RULES = new Set(['no-restricted-imports', 'no-restricted-syntax']);
+const RESTRICTION_RULES = new Set([
+  'no-restricted-imports',
+  'no-restricted-syntax',
+  'wynding/no-aliased-require',
+]);
 
 /** The engine zone's off-allowlist message, by its leading text. */
 const OFF_ALLOWLIST = '@wynding/engine may import only same-directory relative paths';
@@ -254,7 +258,14 @@ describe(
             'export class C { require(): void {} }\nexport interface I { require: number }\n' +
             'export interface M { require(): void }\n' +
             'export function require(x: string): string { return x; }\n' +
-            'export const f = (require: string): number => 1;\n',
+            'export const f = (require: string): number => 1;\n' +
+            'export function g(...require: string[]): string[] { return require; }\n' +
+            'export function h(require = 1): number { return require; }\n' +
+            'export const [require2, require] = [1, 2];\n' +
+            'export function k(): void { try { /* */ } catch (require) { void require; } }\n' +
+            "import { require as local } from './local';\nexport const l = local;\n" +
+            'export interface X { createRequire(): void }\nexport const o = { createRequire: 1 };\n' +
+            'export function createRequire(): number { return 1; }\n',
         ),
       ).toEqual([]);
     });

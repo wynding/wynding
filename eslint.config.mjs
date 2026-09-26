@@ -7,9 +7,14 @@ import { fileURLToPath } from 'node:url';
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
-import wynding from './eslint-rules/no-ui-literals.mjs';
+import noAliasedRequire from './eslint-rules/no-aliased-require.mjs';
+import uiLiterals from './eslint-rules/no-ui-literals.mjs';
 
 const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
+
+/** The repo's own rules, as ONE plugin object: flat config requires every config object that
+ *  names the `wynding` plugin to pass the same object. */
+const wynding = { rules: { ...uiLiterals.rules, 'no-aliased-require': noAliasedRequire } };
 
 // The deterministic core's forbidden Node specifiers. Hoisted out of the determinism zone
 // below because `no-restricted-imports` is ONE rule slot per file: flat config replaces a
@@ -82,56 +87,12 @@ const NON_CONSTANT_SPECIFIER = {
     'This import()/require() specifier is not a constant, so the layering zones cannot check where it points. Spell it as a string literal (a relative template such as `./locales/${x}.json` is allowed) — see SPECIFIER SITES in eslint.config.mjs (#168).',
 };
 
-// ALIASED `require` (#171). `SPECIFIER_SITES` matches a call whose callee IS the identifier
-// `require`, so every other way to reach the same loader walked past it, and each of these linted
-// clean in `apps/server/src` (verified in a scratch copy): `(0, require)('@wynding/perf')`,
-// `const r = require; r(…)`, `globalThis.require(…)`, `module.require(…)` and
-// `createRequire(import.meta.url)(…)`. None of them has a specifier this file can judge, so,
-// like a non-constant specifier, each is an error in its own right. The three selectors are:
-//   - `require` as a VALUE: any reference that is not the callee of a call. Names that are not
-//     references are skipped: an object-literal key (`{ require: 1 }`), a class or interface
-//     member, and a member name (`x.require`), which is the next selector's. So are DECLARED
-//     bindings: a local `function require(x)`, a parameter or a `const require` (Codex, #174).
-//     The rule reads spellings, not scopes: a use of such a local binding as a value is still
-//     reported, since telling it from Node's loader would need scope resolution, and a shipped
-//     module shadowing `require` is worth a second look anyway.
-//   - `.require` as a MEMBER, whatever its object (`globalThis`, `module`, `window`), and the
-//     same member read by destructuring (`const { require: r } = globalThis`).
-//   - `createRequire` in any position, its import included (renamed or not): naming it at all
-//     is the reach.
-// Still not caught, and listed so no one mistakes this for a sandbox: a computed member
-// (`globalThis['req' + 'uire']`), `Reflect.get(globalThis, 'require')` and `eval`. Nothing under a linted `src` uses any of these
-// forms today, so the rule costs nothing now. The downstream guards named under WHAT THIS DOES
-// NOT CATCH below still hold whatever spelling reaches a module.
-const ALIASED_REQUIRE_MESSAGE =
-  'An aliased or indirect `require` (the value passed around, `.require` on an object, or ' +
-  '`createRequire`) has no specifier the layering zones can check. Call `require()` with a ' +
-  'string literal, or use `import`. See ALIASED `require` in eslint.config.mjs (#171).';
-const ALIASED_REQUIRE = [
-  {
-    selector:
-      "Identifier[name='require']:not(CallExpression > Identifier.callee):not(MemberExpression > Identifier.property):not(ObjectExpression > Property > Identifier.key):not(ObjectPattern > Property > Identifier.key):not(MethodDefinition > Identifier.key):not(PropertyDefinition > Identifier.key):not(TSPropertySignature > Identifier.key):not(TSMethodSignature > Identifier.key):not(:function > Identifier.id):not(:function > Identifier.params):not(VariableDeclarator > Identifier.id)",
-    message: ALIASED_REQUIRE_MESSAGE,
-  },
-  {
-    selector: "MemberExpression > Identifier.property[name='require']",
-    message: ALIASED_REQUIRE_MESSAGE,
-  },
-  // Destructuring reads the member by KEY: `const { require: r } = globalThis`.
-  { selector: "ObjectPattern > Property[key.name='require']", message: ALIASED_REQUIRE_MESSAGE },
-  // An import specifier holds TWO identifiers (imported and local), so the import is matched
-  // once as a whole and every other `createRequire` identifier once each.
-  {
-    // `imported` is an Identifier, or a string Literal in `import { 'createRequire' as cr }`.
-    selector:
-      "ImportSpecifier:matches([imported.name='createRequire'], [imported.value='createRequire'])",
-    message: ALIASED_REQUIRE_MESSAGE,
-  },
-  {
-    selector: "Identifier[name='createRequire']:not(ImportSpecifier > Identifier)",
-    message: ALIASED_REQUIRE_MESSAGE,
-  },
-];
+// ALIASED `require` (#171) is not a selector here but a rule of its own,
+// `eslint-rules/no-aliased-require.mjs`, enabled for every zone below. `SPECIFIER_SITES` judges a
+// direct `require('x')` call; that rule rejects every other way to reach the loader
+// (`(0, require)(…)`, `const r = require`, `globalThis.require`, `module.require`,
+// `createRequire`). It is scope-resolved, because a spelling-based selector kept mistaking local
+// bindings, keys and members named `require` for the loader (PR #174).
 
 // The deterministic core's forbidden SYNTAX, hoisted for the same reason the module paths
 // above were: the layering zones match these files too and set the same rule name, and flat
@@ -252,9 +213,9 @@ const NONDETERMINISTIC_SYNTAX = [
 //     (`../../../packages/content/src/stress`) is not seen here either. The one exception is
 //     an allowlisted zone (the engine's), whose relative imports must stay in its own flat
 //     `src` (#171, see `allowlistRestrictions`).
-//   - Indirect loaders are rejected (ALIASED `require`, #171), but a computed member
-//     (`globalThis['req' + 'uire']`), `Reflect.get` and `eval` still pass, as does a relative template with
-//     substitutions in the engine (`import(\`./${x}\`)`, the SPECIFIER SITES carve-out).
+//   - Indirect loaders are rejected (`no-aliased-require`, #171), but a computed member
+//     (`globalThis['req' + 'uire']`), `Reflect.get` and `eval` still pass, as does a relative
+//     template with substitutions in the engine (`import(\`./${x}\`)`, SPECIFIER SITES).
 // Both are also covered downstream: `packages/perf/src/layering.test.ts` greps shipped source
 // context-free for the three never-shipped specifiers in any import syntax, and
 // `pnpm run check:build-layering` (#129) asks the BUNDLER — no emitted file of the shipped
@@ -546,7 +507,6 @@ const dynamicImportRestrictions = (restricted) => [
     message,
   })),
   NON_CONSTANT_SPECIFIER,
-  ...ALIASED_REQUIRE,
 ];
 
 // ---------------------------------------------------------------------------------------
@@ -884,6 +844,15 @@ export default tseslint.config(
   ...LAYERS.flatMap((layer, index) =>
     layer.flatMap((specifier) => layeringZone(specifier, index) ?? []),
   ),
+  {
+    // No aliased loader in any ZONED source (#171): every layered package but perf, whose zone
+    // is empty (A ZONE WHOSE FORBIDDEN SET COMES OUT EMPTY), plus the shipped web and server
+    // apps. Its own rule name, so no zone's `no-restricted-syntax` can clobber it.
+    files: ['packages/*/src/**', 'apps/web/src/**', 'apps/server/src/**'],
+    ignores: ['packages/perf/src/**'],
+    plugins: { wynding },
+    rules: { 'wynding/no-aliased-require': 'error' },
+  },
   {
     // THE SHIPPED WEB APP. `apps/web/src/**` is the production graph: `index.html` loads
     // `/src/boot-entry.ts` and Vite follows it from there. `apps/web/perf/**` is deliberately
