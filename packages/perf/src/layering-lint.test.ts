@@ -316,6 +316,14 @@ describe(
         "import * as m from 'node:module';\nexport const { createRequire } = m;\n",
       ],
       [
+        'an exported object rest of a module namespace',
+        "import * as m from 'node:module';\nexport const { ...host } = m;\n",
+      ],
+      [
+        'createRequire off a local object rest of a module namespace',
+        "import * as m from 'node:module';\nconst { builtinModules, ...host } = m;\nexport const a = [builtinModules, host.createRequire];\n",
+      ],
+      [
         'an exported destructured Module',
         "import * as m from 'node:module';\nexport const { Module: M } = m;\n",
       ],
@@ -365,6 +373,7 @@ describe(
             "import * as lm from './local';\nexport const q = lm.Module.createRequire;\n" +
             "import { builtinModules as bm, isBuiltin as ib } from 'node:module';\nexport { bm, ib };\n" +
             'export const r = ib.createRequire;\n' +
+            'export const { ...rest } = { Module: 1 };\nexport const s = rest.Module;\n' +
             "import * as ns from 'node:module';\nexport const { builtinModules } = ns;\n" +
             "import type { Module as TM } from 'node:module';\nexport type { TM };\n" +
             "import { type Module as TM2 } from 'node:module';\nexport { TM2 };\n" +

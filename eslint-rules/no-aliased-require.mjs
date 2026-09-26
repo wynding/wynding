@@ -144,6 +144,14 @@ const noAliasedRequire = {
         if (def.type === 'Variable' && def.node.id === def.name) {
           return isLoaderBearing(def.node.init, seen);
         }
+        // An object REST off a loader-bearing object keeps every export it did not name, so it
+        // is the exports again (`const { ...host } = m`; Codex, PR #174).
+        if (
+          def.name.parent?.type === 'RestElement' &&
+          def.name.parent.parent?.type === 'ObjectPattern'
+        ) {
+          return patternIsLoaderBearing(def.name.parent.parent, seen);
+        }
         // A default on the binding itself (`{ Module: M = m.Module }`, `function f(M = m)`).
         let value = def.name;
         if (value.parent?.type === 'AssignmentPattern' && value.parent.left === value) {
