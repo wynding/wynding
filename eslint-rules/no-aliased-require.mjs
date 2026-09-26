@@ -168,10 +168,9 @@ const noAliasedRequire = {
         );
       });
     };
-    /** True when `node` is the callee of the call it sits in (`f(x)`, `(f as T)(x)`, `f!(x)`, not
-     *  `f.call(x)`), or only tested by a value `typeof` (the Node-version guard,
-     *  `typeof process.getBuiltinModule === 'function'`), which cannot hand the function on. */
-    const isCallee = (node) => {
+    /** The outermost node `node` stands for once its value-preserving wrappers are climbed
+     *  (`x as T`, `x!`, `x satisfies T`, `<T>x`, an optional chain). */
+    const outermost = (node) => {
       let current = node;
       while (
         current.parent &&
@@ -184,9 +183,21 @@ const noAliasedRequire = {
       ) {
         current = current.parent;
       }
-      const parent = current.parent;
-      if (parent?.type === 'UnaryExpression' && parent.operator === 'typeof') return true;
-      return parent?.type === 'CallExpression' && parent.callee === current;
+      return current;
+    };
+    /** True when `node` is only tested by a value `typeof` (a feature check such as
+     *  `typeof module !== 'undefined'` or `typeof process.getBuiltinModule === 'function'`), which
+     *  cannot hand the value on, through any wrapper (Codex, PR #174). */
+    const isTypeofOperand = (node) => {
+      const parent = outermost(node).parent;
+      return parent?.type === 'UnaryExpression' && parent.operator === 'typeof';
+    };
+    /** True when `node` is the callee of the call it sits in (`f(x)`, `(f as T)(x)`, `f!(x)`, not
+     *  `f.call(x)`), or only a `typeof` operand. */
+    const isCallee = (node) => {
+      if (isTypeofOperand(node)) return true;
+      const current = outermost(node);
+      return current.parent?.type === 'CallExpression' && current.parent.callee === current;
     };
     const report = (node) => context.report({ node, messageId: 'aliased' });
 
@@ -216,7 +227,7 @@ const noAliasedRequire = {
               reference.isValueReference !== false &&
               isGlobal(id) &&
               !inTypeQuery(id) &&
-              !(id.parent?.type === 'UnaryExpression' && id.parent.operator === 'typeof')
+              !isTypeofOperand(id)
             ) {
               report(id);
               continue;

@@ -450,6 +450,7 @@ describe(
             "import { builtinModules as bms } from 'node:module';\nexport const { length } = bms;\n" +
             'export function localModule(module: { id: string }): string {\n  return module.id;\n}\n' +
             "export const isCommonJs = typeof module !== 'undefined';\n" +
+            "export const isCommonJs2 = typeof (module as object) !== 'undefined';\n" +
             "export { isBuiltin as isNodeBuiltin, SourceMap } from 'node:module';\n" +
             "import type { Module as TM } from 'node:module';\nexport type { TM };\n" +
             "import { type Module as TM2 } from 'node:module';\nexport { TM2 };\n" +
