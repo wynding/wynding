@@ -28,6 +28,7 @@
 import { canonicalJson, sha256Hex } from '@wynding/engine';
 import type { SaveSlot } from '@wynding/platform';
 import type { Replay } from '@wynding/replay';
+import { isFullCommitSha } from '../build-config';
 
 /** Payload schema version. Distinct from `simVersion` and from `PLAYTRACE_VERSION`. */
 export const SURVEY_VERSION = 1;
@@ -158,12 +159,10 @@ const MAX_STARS = 3;
  * validation. The survey is therefore not offered at all in such a build.
  */
 export function isSubmittableGameVersion(gameVersion: string): boolean {
-  return FULL_SHA_RE.test(gameVersion);
+  return isFullCommitSha(gameVersion);
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** A full commit SHA — SHA-1 (40 hex) or a SHA-256 repository's object id (64 hex). */
-const FULL_SHA_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 const WORLD_HASH_RE = /^[0-9a-f]{8}$/;
 /** `RulesetBoard.id`'s own pattern (`packages/sim/src/ruleset-schema.ts`). */

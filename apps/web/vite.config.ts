@@ -28,6 +28,8 @@ export default defineConfig(({ mode }) => {
     define: {
       ...hostedDefine(hosted),
       // ADR 0014 §4: the survey's `gameVersion` — the full commit SHA of this build's source.
+      // Git state is not a turbo input, so `turbo.json` never caches `@wynding/web#build`: a
+      // cache hit would restore a bundle carrying another revision's SHA (Codex, PR #175).
       ...gameVersionDefine(
         resolveGameVersion(process.env['WYNDING_GAME_VERSION'], () => readCleanHead(git)),
       ),
