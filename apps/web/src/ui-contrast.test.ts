@@ -106,6 +106,9 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // #152: the Standard Dock's scroll cue (track + chevrons) is drawn in `--wy-accent` in
       // the Dock's gutter, over the Stage's board backdrop — the only thing behind it.
       ['accent', 'board-bg'],
+      // #158: the survey textarea's edge, over the results dialog's backdrop. The backdrop
+      // is near-black and darker than `bg`, so `bg` is the conservative stand-in.
+      ['panel-edge', 'bg'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);

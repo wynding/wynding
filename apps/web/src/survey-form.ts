@@ -180,8 +180,12 @@ export function createSurveyForm(
    *  what the region shows — never a Verify or export result written since. */
   let ownMessage: string | null = null;
   const say = (message: string): void => {
-    ownMessage = message;
-    host.writeStatus(message);
+    // A polite live region does not re-announce an unchanged node, so a second press of a
+    // rating-less Send would say nothing. The overlay's own region uses the same fix: a
+    // trailing space when the text would collide, which reads identically to a human.
+    const next = message !== '' && host.statusText() === message ? `${message} ` : message;
+    ownMessage = next;
+    host.writeStatus(next);
   };
   /** Identifies the current dialog, so a refresh that settles after the dialog closed (or a
    *  newer one opened) cannot begin a survey on the wrong one. */
@@ -199,6 +203,9 @@ export function createSurveyForm(
     const { phase } = state;
     const shown = ready && phase !== 'absent' && phase !== 'retired';
     slot.hidden = !shown;
+    // Presence is DECIDED once the ask refresh settles — shown or not. Exposed so a test can
+    // tell "absent" from "not decided yet", which `hidden` alone cannot.
+    slot.toggleAttribute('data-ready', ready);
     const expanded = phase === 'open' || phase === 'sending';
     openBtn.hidden = expanded;
     form.hidden = !expanded;
@@ -350,6 +357,9 @@ export function createSurveyForm(
       const mine = ++dialogSeq;
       ready = false;
       survey.endDialog();
+      // A new dialog starts with the region free, whatever path reached it: a send cancelled
+      // here announces nothing, so nothing else would ever release its hold.
+      host.setRegionHeld(false);
       render();
       void host.refreshAsk().then(() => {
         if (mine !== dialogSeq) return;

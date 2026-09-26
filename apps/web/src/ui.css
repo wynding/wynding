@@ -1658,11 +1658,21 @@ a.wy-home:focus-visible {
 }
 
 /* ADR 0014's survey, expanded in place inside the results dialog. The expanded form is
-   taller than a compact landscape viewport, so the dialog scrolls — and centres only while
-   it fits (`safe`), or its top would be clipped out of reach. */
+   taller than a compact landscape viewport, so the dialog scrolls — and it must centre only
+   while it fits, or its top (title, Play again) is clipped out of reach. Auto margins on the
+   first and last child do that in every engine; `justify-content: safe center` would too,
+   but older WebKit (the Capacitor WebView) drops it and falls back to the unsafe `center`. */
 .wy-results {
   overflow-y: auto;
-  justify-content: safe center;
+  justify-content: flex-start;
+}
+
+.wy-results > :first-child {
+  margin-top: auto;
+}
+
+.wy-results > :last-child {
+  margin-bottom: auto;
 }
 
 .wy-survey {
@@ -1717,10 +1727,20 @@ a.wy-home:focus-visible {
   font: inherit;
   color: var(--wy-fg);
   background: #0e1a2b;
-  border: 1px solid #33465f;
+  /* The input's boundary needs 3:1 against the backdrop (ADR 0003, WCAG 1.4.11) — the
+     token is gated in `ui-contrast.test.ts`. */
+  border: 1px solid var(--wy-panel-edge);
   border-radius: 6px;
   padding: 0.5rem;
   resize: vertical;
+}
+
+/* In flight (§6) the choices and the text refuse edits; show it, not only announce it. */
+.wy-survey-form input[aria-disabled='true'],
+.wy-survey-form input[aria-disabled='true'] + span,
+.wy-survey-text textarea:read-only {
+  color: var(--wy-fg-dim);
+  cursor: not-allowed;
 }
 
 .wy-survey-note {

@@ -483,7 +483,12 @@ export type SurveySendResult = 'accepted' | 'rejected' | 'offline';
 
 /** Where a submission goes. The mechanism is the endpoint ADR's (`wynding-site`); this is the
  *  shape the client needs from it. `signal` is the operation token (§1) — a run start aborts
- *  it, and a transport must stop waiting when it does. A thrown error reads as `rejected`. */
+ *  it, and a transport must stop waiting when it does. A thrown error reads as `rejected`.
+ *
+ *  A transport MUST ALSO SETTLE IN BOUNDED TIME — time out a hung request and resolve
+ *  `offline`. The survey holds the results dialog's status region for as long as a send is
+ *  in flight, with Verify and the exports locked, so a promise that never settles would
+ *  keep them locked until the next run start. */
 export interface SurveyTransport {
   send(payload: SurveyPayload, signal: AbortSignal): Promise<SurveySendResult>;
 }

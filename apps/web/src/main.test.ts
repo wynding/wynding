@@ -2981,7 +2981,11 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
     await vi.waitFor(() => expect(h.slot().hidden).toBe(false));
     h.button('Give feedback').click();
     h.results.querySelector<HTMLInputElement>('fieldset input[value="5"]')!.click();
-    h.results.querySelector<HTMLInputElement>('input[type=checkbox]:last-of-type')!.click();
+    const dontAsk = [...h.results.querySelectorAll('label')].find(
+      (l) => l.textContent === "Don't ask again",
+    );
+    dontAsk!.querySelector('input')!.click();
+    expect(dontAsk!.querySelector('input')!.checked, 'the dismissal really is armed').toBe(true);
     h.button('Send').click();
     h.button('Play again').click();
 

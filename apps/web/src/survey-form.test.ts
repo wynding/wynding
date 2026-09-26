@@ -199,7 +199,8 @@ describe('survey form — presence (ADR 0014 §1, §3)', () => {
     release();
     await flush();
     await flush();
-    expect(h.survey.state().phase).not.toBe('open');
+    expect(h.survey.state().phase).toBe('absent');
+    expect(h.slot.hasAttribute('data-ready'), 'never decided').toBe(false);
     expect(h.slot.hidden).toBe(true);
   });
 
@@ -232,7 +233,7 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     expect(send.getAttribute('aria-disabled')).toBe('true');
     send.focus();
     send.click();
-    expect(h.status()).toBe('Choose a rating to send your feedback.');
+    expect(h.status()).toBe('Answer "How was it?" to send your feedback.');
     expect(h.pending).toHaveLength(0);
     expect(h.doc.activeElement, 'focus stays put').toBe(send);
     h.radios(0)[3]!.click();
@@ -270,7 +271,7 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     const copy = h.otherWriter(); // a Copy awaiting the clipboard
     h.button('Give feedback').click(); // clears the region...
     h.button('Send').click(); // ...and prompts for a rating...
-    expect(h.status()).toBe('Choose a rating to send your feedback.');
+    expect(h.status()).toBe('Answer "How was it?" to send your feedback.');
     copy('Run data copied to the clipboard.'); // ...and the export's result still lands
     expect(h.status()).toBe('Run data copied to the clipboard.');
   });
@@ -301,6 +302,30 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     expect(h.status()).toBe("Couldn't send your feedback.");
     h.button('Not now').click();
     expect(h.status()).toBe('');
+  });
+
+  it('a repeated rating prompt is re-announced (the node really changes)', async () => {
+    const h = setup();
+    await h.expand();
+    h.button('Send').click();
+    const first = h.status();
+    h.button('Send').click();
+    expect(h.status()).not.toBe(first);
+    expect(h.status().trim()).toBe(first);
+    h.button('Not now').click();
+    expect(h.status(), 'the collapse still recognises its own message').toBe('');
+  });
+
+  it('marks presence as decided once the refresh settles, shown or not', async () => {
+    const shown = setup();
+    await shown.open();
+    expect(shown.slot.hasAttribute('data-ready')).toBe(true);
+    shown.form.dialogClosed();
+    expect(shown.slot.hasAttribute('data-ready')).toBe(false);
+    const absent = setup({ offered: false });
+    absent.form.dialogOpened();
+    await vi.waitFor(() => expect(absent.slot.hasAttribute('data-ready')).toBe(true));
+    expect(absent.slot.hidden).toBe(true);
   });
 
   it('forwards every answer to the model', async () => {
@@ -353,6 +378,7 @@ describe('survey form — a send in flight (§6)', () => {
   async function sending() {
     const h = setup();
     await h.expand();
+    h.held.splice(0); // the dialog opening's own release; these tests count from Send
     h.radios(0)[2]!.click();
     h.textarea().value = 'hello';
     h.textarea().dispatchEvent(new Event('input'));
@@ -385,6 +411,13 @@ describe('survey form — a send in flight (§6)', () => {
   it('suppresses a choice’s DEFAULT ACTION at keydown and click — not at input/change', async () => {
     const h = await sending();
     const radio = h.radios(0)[2]!;
+    // No `change` may fire at all: the model refusing a change and the render putting it
+    // back would leave the same final state, so the state alone cannot prove the lock.
+    const changes = vi.fn();
+    h.formEl().addEventListener('change', changes);
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    h.radios(0)[0]!.dispatchEvent(click);
+    expect(click.defaultPrevented, 'the click’s default action is cancelled').toBe(true);
     for (const k of [' ', 'ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown']) {
       expect(key(radio, k).defaultPrevented, k).toBe(true);
     }
@@ -397,6 +430,7 @@ describe('survey form — a send in flight (§6)', () => {
     const broke = h.checkboxes()[0]!;
     broke.click();
     await vi.waitFor(() => expect(broke.checked).toBe(false));
+    expect(changes).not.toHaveBeenCalled();
     expect(h.survey.state().answers).toMatchObject({ rating: 3, somethingBroke: false });
   });
 
@@ -466,6 +500,13 @@ describe('survey form — a send in flight (§6)', () => {
     expect(h.status(), 'nothing lands after the cancel').toBe('Sending your feedback…');
     expect(h.held).toEqual([true, false]);
     expect(h.commits, 'a run start commits nothing').toEqual([]);
+  });
+
+  it('a dialog opening releases a hold that nothing else would', async () => {
+    const h = await sending();
+    h.form.dialogOpened(); // a re-open path that skipped dialogClosed
+    expect(h.last().signal.aborted).toBe(true);
+    expect(h.held.at(-1)).toBe(false);
   });
 
   it('destroy empties the slot', () => {

@@ -53,6 +53,20 @@ const rating = (page: Page, n: number) =>
     .getByRole('group', { name: /How was it/ })
     .getByRole('radio', { name: String(n) });
 
+/** Presence is decided only once the dialog's ask refresh settles (`data-ready`); before
+ *  that the slot is hidden whatever the answer, so a `toBeHidden` alone proves nothing. */
+async function presenceDecided(page: Page): Promise<void> {
+  await expect(results(page).locator('.wy-survey[data-ready]')).toHaveCount(1);
+}
+
+/** Wait for the ask's durable write (a commit is async, under Web Locks) before navigating
+ *  away — otherwise the next page could read the store before the write lands. */
+async function stored(page: Page, fragment: string): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('wynding:survey') ?? ''))
+    .toContain(fragment);
+}
+
 async function axeClean(page: Page, when: string): Promise<void> {
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, `axe violations ${when}`).toEqual([]);
@@ -81,7 +95,7 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     await expect(send).toHaveAttribute('aria-disabled', 'true');
     await send.focus();
     await page.keyboard.press('Enter');
-    await expect(status(page)).toHaveText('Choose a rating to send your feedback.');
+    await expect(status(page)).toHaveText('Answer "How was it?" to send your feedback.');
     await expect(send).toBeFocused();
     expect((await harness(page)).sent).toHaveLength(0);
 
@@ -106,6 +120,7 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     await results(page).getByRole('button', { name: 'Play again' }).click();
     await playToResults(page);
     await expect(results(page).getByRole('button', { name: 'Play again' })).toBeFocused();
+    await presenceDecided(page);
     await expect(giveFeedback(page)).toBeHidden();
   });
 
@@ -140,11 +155,21 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     await expect(verify).toHaveAttribute('aria-disabled', 'true');
     await verify.click({ force: true }); // aria-disabled: Playwright will not click it unforced
     await expect(status(page), 'a locked Verify says nothing').toHaveText('Sending your feedback…');
+    // Count `change` events from here on: the render-from-model fallback would put a changed
+    // choice back, so the final state alone cannot prove the edit was PREVENTED (§6).
+    await page.evaluate(() => {
+      const w = window as unknown as { __changes: number };
+      w.__changes = 0;
+      document
+        .querySelector('.wy-survey-form')!
+        .addEventListener('change', () => void w.__changes++);
+    });
     await text.focus();
     await page.keyboard.type('zzz');
     await expect(text).toHaveValue('abc');
     await rating(page, 3).focus();
     await page.keyboard.press('ArrowRight');
+    await expect(rating(page, 3), 'an unprevented Arrow would move focus too').toBeFocused();
     await expect(rating(page, 3)).toBeChecked();
     await expect(rating(page, 4)).not.toBeChecked();
     await rating(page, 5).click({ force: true });
@@ -154,6 +179,10 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     await broke.focus();
     await page.keyboard.press('Space');
     await expect(broke).not.toBeChecked();
+    expect(
+      await page.evaluate(() => (window as unknown as { __changes: number }).__changes),
+      'no edit got as far as a change event',
+    ).toBe(0);
     await axeClean(page, 'with a send in flight');
 
     // Play again is reachable mid-send, and cancels the whole operation (§1).
@@ -187,6 +216,7 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     await expect(dontAsk, 'the draft survives a collapse on the same dialog').toBeChecked();
     await dontAsk.uncheck();
     await results(page).getByRole('button', { name: 'Not now' }).click();
+    await stored(page, '"dismissed":false');
 
     // Version B: offered (the dismissal was cleared). Now dismiss for good.
     await page.goto(`${HARNESS}?version=${VERSION_B}`);
@@ -195,12 +225,41 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     await giveFeedback(page).click();
     await dontAsk.check();
     await results(page).getByRole('button', { name: 'Not now' }).click();
+    await stored(page, '"dismissed":true');
 
     // Version C: never asked again.
     await page.goto(`${HARNESS}?version=${VERSION_C}`);
     await playToResults(page);
     await expect(results(page).getByRole('button', { name: 'Play again' })).toBeFocused();
+    await presenceDecided(page);
     await expect(giveFeedback(page)).toBeHidden();
     expect((await harness(page)).sent).toHaveLength(0);
+  });
+
+  test.describe('on a short landscape viewport', () => {
+    test.use({ viewport: { width: 740, height: 360 } });
+
+    test('the expanded survey scrolls, and the dialog’s top stays reachable', async ({ page }) => {
+      await page.goto(HARNESS);
+      await playToResults(page);
+      await giveFeedback(page).click();
+      const dialog = results(page);
+      const overflows = await dialog.evaluate((el) => el.scrollHeight > el.clientHeight);
+      expect(overflows, 'the case under test: the form is taller than the viewport').toBe(true);
+      // Scrolled to the top, the heading is fully on screen — not centred into negative
+      // overflow, where no scroll position could ever reach it.
+      await dialog.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+      const heading = await dialog.getByRole('heading').boundingBox();
+      expect(heading, 'the heading renders').not.toBeNull();
+      expect(heading!.y).toBeGreaterThanOrEqual(0);
+      await expect(dialog.getByRole('button', { name: 'Play again' })).toBeInViewport();
+      // ...and the bottom of the form is reachable by scrolling.
+      const send = dialog.getByRole('button', { name: 'Send' });
+      await send.scrollIntoViewIfNeeded();
+      await expect(send).toBeInViewport();
+      await axeClean(page, 'expanded on a short viewport');
+    });
   });
 });
