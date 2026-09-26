@@ -13,10 +13,10 @@
 // resolves it to the GLOBAL `require` (a configured global, or no binding at all), so a local
 // binding of that name, and every non-reference position, is simply not the loader.
 //
-// Still not caught, and named so no one mistakes this for a sandbox: a computed member
-// (`globalThis['req' + 'uire']`), `Reflect.get(globalThis, 'require')`, `eval`, and a loader
-// handed through a value the rule cannot follow (returned from a function, stored on an app
-// object). This is a lint against ACCIDENTAL reaches, like the determinism zone beside it; the
+// Still not caught, and named so no one mistakes this for a sandbox: a computed member whose
+// key is not a constant string (`globalThis['req' + 'uire']`), `Reflect.get(globalThis,
+// 'require')`, `eval`, and a loader handed through a value the rule cannot follow (returned from
+// a function, stored on an app object, bound by `let` and reassigned). This is a lint against ACCIDENTAL reaches, like the determinism zone beside it; the
 // set of deliberate spellings does not terminate. The zones' downstream guards
 // (`layering.test.ts` and the build-layering check) still hold whatever spelling reaches a
 // module.
@@ -33,6 +33,9 @@ const HOSTS = new Set(['globalThis', 'global', 'window', 'self', 'module']);
 const LOADER_EXPORTS = new Set(['createRequire', 'Module', 'default']);
 /** The module that exports `createRequire`. */
 const MODULE_SPECIFIERS = new Set(['module', 'node:module']);
+/** The members of that module's exports that carry `createRequire` themselves (`m.Module`,
+ *  `m.default`, and either of those again), so a chain through them is still the factory. */
+const LOADER_HOLDERS = new Set(['Module', 'default']);
 
 /** Unwraps TypeScript's value-preserving wrappers (`x as T`, `x!`, `x satisfies T`) and parens. */
 function unwrap(node) {
@@ -58,6 +61,18 @@ function constantString(node) {
     return target.quasis[0]?.value.cooked ?? undefined;
   }
   return undefined;
+}
+
+/** A member's constant name: `a.b`, or a computed `a['b']` whose key is a constant string. */
+function memberName(node) {
+  if (!node.computed) return node.property.type === 'Identifier' ? node.property.name : undefined;
+  return constantString(node.property);
+}
+
+/** A destructuring property's constant key (`{ a }`, `{ 'a': x }`, `{ ['a']: x }`). */
+function propertyKey(property) {
+  if (property.computed) return constantString(property.key);
+  return property.key.type === 'Identifier' ? property.key.name : property.key.value;
 }
 
 /** True inside a `typeof x` TYPE query, which is erased and cannot call anything. */
@@ -96,12 +111,78 @@ const noAliasedRequire = {
       const target = unwrap(node);
       return target?.type === 'Identifier' && HOSTS.has(target.name) && isGlobal(target);
     };
-    /** True when `identifier` is bound by an import from `module`/`node:module`. */
-    const isModuleImport = (identifier) => {
-      const variable = resolve(identifier);
-      return (variable?.defs ?? []).some(
-        (def) =>
-          def.type === 'ImportBinding' && MODULE_SPECIFIERS.has(def.parent?.source?.value ?? ''),
+    /** True when `node` evaluates to the `module` exports or to a member of them that carries
+     *  `createRequire` (Codex, PR #174): an import from the module (`import * as m`, the default
+     *  import, `import { Module }`), `Module` or `default` read off one (`m.Module`,
+     *  `m.default.Module`), or a variable or parameter bound to either, directly, by a default or
+     *  by destructuring (`const M = m.Module`, `const { Module: { createRequire } } = m`,
+     *  `function f({ Module: M } = m)`). */
+    const isLoaderBearing = (node, seen = new Set()) => {
+      const target = unwrap(node);
+      if (!target || seen.has(target)) return false;
+      seen.add(target);
+      if (target.type === 'MemberExpression') {
+        return LOADER_HOLDERS.has(memberName(target) ?? '') && isLoaderBearing(target.object, seen);
+      }
+      if (target.type !== 'Identifier') return false;
+      const variable = resolve(target);
+      return (variable?.defs ?? []).some((def) => {
+        if (def.type === 'ImportBinding') {
+          if (!MODULE_SPECIFIERS.has(def.parent?.source?.value ?? '')) return false;
+          // A type-only import is erased and carries nothing.
+          if (def.parent.importKind === 'type' || def.node.importKind === 'type') return false;
+          // The namespace and the default are the exports; a named import only when it is a
+          // holder (`Module`, or `default` by name). `builtinModules` and the rest are not.
+          if (def.node.type !== 'ImportSpecifier') return true;
+          const imported =
+            def.node.imported.type === 'Identifier'
+              ? def.node.imported.name
+              : def.node.imported.value;
+          return LOADER_HOLDERS.has(imported);
+        }
+        if (def.type !== 'Variable' && def.type !== 'Parameter') return false;
+        if (def.type === 'Variable' && def.node.id === def.name) {
+          return isLoaderBearing(def.node.init, seen);
+        }
+        // A default on the binding itself (`{ Module: M = m.Module }`, `function f(M = m)`).
+        let value = def.name;
+        if (value.parent?.type === 'AssignmentPattern' && value.parent.left === value) {
+          if (isLoaderBearing(value.parent.right, seen)) return true;
+          value = value.parent;
+        }
+        // Destructured: the binding's property must be a holder, off a loader-bearing object.
+        const property = value.parent;
+        return (
+          property?.type === 'Property' &&
+          property.value === value &&
+          LOADER_HOLDERS.has(propertyKey(property) ?? '') &&
+          patternIsLoaderBearing(property.parent, seen)
+        );
+      });
+    };
+    /** True when the object `pattern` destructures is loader-bearing: its declaration, assignment
+     *  or default source, or, for a nested pattern, a holder property of a loader-bearing one. */
+    const patternIsLoaderBearing = (pattern, seen = new Set()) => {
+      const parent = pattern?.parent;
+      if (!parent) return false;
+      if (parent.type === 'VariableDeclarator' && parent.id === pattern) {
+        return isLoaderBearing(parent.init, seen);
+      }
+      if (parent.type === 'AssignmentExpression' && parent.left === pattern) {
+        return isLoaderBearing(parent.right, seen);
+      }
+      let value = pattern;
+      if (parent.type === 'AssignmentPattern' && parent.left === pattern) {
+        if (isLoaderBearing(parent.right, seen)) return true;
+        value = parent;
+      }
+      const property = value.parent;
+      return (
+        property?.type === 'Property' &&
+        property.value === value &&
+        LOADER_HOLDERS.has(propertyKey(property) ?? '') &&
+        property.parent?.type === 'ObjectPattern' &&
+        patternIsLoaderBearing(property.parent, seen)
       );
     };
     const report = (node) => context.report({ node, messageId: 'aliased' });
@@ -123,20 +204,15 @@ const noAliasedRequire = {
       },
       // `.require` read off a host object, in either member form.
       MemberExpression(node) {
-        if (node.computed || node.property.type !== 'Identifier') return;
-        if (node.property.name === 'require' && isHost(node.object)) report(node);
-        if (
-          node.property.name === 'createRequire' &&
-          node.object.type === 'Identifier' &&
-          isModuleImport(node.object)
-        ) {
-          report(node);
-        }
+        const name = memberName(node);
+        if (name === 'require' && isHost(node.object)) report(node);
+        if (name === 'createRequire' && isLoaderBearing(node.object)) report(node);
       },
       // The same members DESTRUCTURED, wherever a pattern takes its value: a declaration
       // (`const { require: r } = globalThis`), an assignment (`({ require: r } = globalThis)`) or
-      // a parameter default (`function f({ require: r } = globalThis)`), and `createRequire` off a
-      // namespace import of `module` (`const { createRequire: cr } = m`).
+      // a parameter default (`function f({ require: r } = globalThis)`), and `createRequire` off
+      // anything loader-bearing (`const { createRequire: cr } = m`, or nested through a holder:
+      // `const { Module: { createRequire } } = m`).
       ObjectPattern(node) {
         const parent = node.parent;
         const source =
@@ -146,13 +222,12 @@ const noAliasedRequire = {
                 parent.left === node
               ? parent.right
               : null;
-        if (!source) return;
-        const target = unwrap(source);
-        const fromHost = isHost(target);
-        const fromModule = target?.type === 'Identifier' && isModuleImport(target);
+        const fromHost = source ? isHost(source) : false;
+        const fromModule = patternIsLoaderBearing(node);
+        if (!fromHost && !fromModule) return;
         for (const property of node.properties) {
-          if (property.type !== 'Property' || property.computed) continue;
-          const key = property.key.type === 'Identifier' ? property.key.name : property.key.value;
+          if (property.type !== 'Property') continue;
+          const key = propertyKey(property);
           if ((fromHost && key === 'require') || (fromModule && key === 'createRequire')) {
             report(property);
           }
@@ -180,8 +255,34 @@ const noAliasedRequire = {
       // that imports the barrel, where none of this can see it, so the re-export is the report.
       // `Module` and the default export carry it too. A named re-export of anything else
       // (`builtinModules`, `isBuiltin`) is not a loader.
+      //
+      // A LOCAL export of a loader-bearing binding hands the factory on the same way
+      // (`import m from 'node:module'; export { m }`, `export const M = m.Module`,
+      // `export default m`), so it is reported too (CodeRabbit, PR #174).
+      ExportDefaultDeclaration(node) {
+        if (isLoaderBearing(node.declaration)) report(node);
+      },
+      TSExportAssignment(node) {
+        if (isLoaderBearing(node.expression)) report(node);
+      },
       ExportNamedDeclaration(node) {
-        if (node.exportKind === 'type' || !MODULE_SPECIFIERS.has(node.source?.value ?? '')) return;
+        if (node.exportKind === 'type') return;
+        if (!node.source) {
+          for (const spec of node.specifiers) {
+            if (spec.exportKind !== 'type' && isLoaderBearing(spec.local)) report(spec);
+          }
+          // Each exported BINDING is judged, not the declarator: `export const { Module: M } = m`
+          // exports a holder, `export const { builtinModules } = m` does not, and
+          // `export const { createRequire } = m` is already reported by `ObjectPattern` above.
+          for (const declarator of node.declaration?.declarations ?? []) {
+            for (const variable of sourceCode.getDeclaredVariables(declarator)) {
+              const binding = variable.identifiers[0];
+              if (binding && isLoaderBearing(binding)) report(binding);
+            }
+          }
+          return;
+        }
+        if (!MODULE_SPECIFIERS.has(node.source.value)) return;
         const names = (spec) =>
           spec.local.type === 'Identifier' ? spec.local.name : spec.local.value;
         for (const spec of node.specifiers) {

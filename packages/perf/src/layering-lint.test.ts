@@ -259,6 +259,71 @@ describe(
         'a namespace createRequire',
         "import * as m from 'node:module';\nexport const a = m.createRequire(import.meta.url);\n",
       ],
+      [
+        'createRequire off a namespace Module',
+        "import * as m from 'node:module';\nexport const a = m.Module.createRequire(import.meta.url);\n",
+      ],
+      [
+        'createRequire off a namespace default',
+        "import * as m from 'node:module';\nexport const a = m.default.createRequire;\n",
+      ],
+      [
+        'createRequire off a default import',
+        "import mod from 'node:module';\nexport const a = mod.createRequire;\n",
+      ],
+      [
+        'createRequire computed off a namespace Module',
+        "import * as m from 'node:module';\nexport const a = m['Module']['createRequire'];\n",
+      ],
+      [
+        'createRequire off a const alias of Module',
+        "import * as m from 'node:module';\nconst M = m.Module;\nexport const a = M.createRequire;\n",
+      ],
+      [
+        'createRequire off a destructured Module',
+        "import * as m from 'node:module';\nconst { Module: M } = m;\nexport const a = M.createRequire;\n",
+      ],
+      [
+        'createRequire destructured through Module',
+        "import * as m from 'node:module';\nconst { Module: { createRequire: cr } } = m;\nexport const a = cr;\n",
+      ],
+      [
+        'createRequire off a Module destructured in a parameter default',
+        "import * as m from 'node:module';\nexport function f({ Module: M } = m): unknown {\n  return M.createRequire;\n}\n",
+      ],
+      [
+        'createRequire off a binding defaulted to Module',
+        "import * as m from 'node:module';\nconst { Module: M = m.Module } = {} as never;\nexport const a = M.createRequire;\n",
+      ],
+      [
+        'a local re-export of a default module import',
+        "import mod from 'node:module';\nexport { mod };\n",
+      ],
+      [
+        'a local re-export of a module namespace, renamed',
+        "import * as m from 'node:module';\nexport { m as loaderHost };\n",
+      ],
+      [
+        'an exported const alias of Module',
+        "import * as m from 'node:module';\nexport const M = m.Module;\n",
+      ],
+      [
+        'a default export of a module import',
+        "import mod from 'node:module';\nexport default mod;\n",
+      ],
+      [
+        'createRequire destructured in an exported declaration',
+        "import * as m from 'node:module';\nexport const { createRequire } = m;\n",
+      ],
+      [
+        'an exported destructured Module',
+        "import * as m from 'node:module';\nexport const { Module: M } = m;\n",
+      ],
+      [
+        'an export assignment of a module import',
+        "import mod from 'node:module';\nexport = mod;\n",
+      ],
+      ['a computed globalThis require', "export const a = globalThis['require'];\n"],
     ])('rejects %s, once', async (_form, code) => {
       const messages = await restrictions(SERVER, code);
       expect(messages).toHaveLength(1);
@@ -296,6 +361,14 @@ describe(
             "export { builtinModules, isBuiltin } from 'node:module';\n" +
             'export type Loader = typeof require;\n' +
             "export function localLoad(): unknown {\n  function require(x: string): string { return x; }\n  return require('module');\n}\n" +
+            'export const n = { Module: { createRequire: 1 } };\nexport const p = n.Module.createRequire;\n' +
+            "import * as lm from './local';\nexport const q = lm.Module.createRequire;\n" +
+            "import { builtinModules as bm, isBuiltin as ib } from 'node:module';\nexport { bm, ib };\n" +
+            'export const r = ib.createRequire;\n' +
+            "import * as ns from 'node:module';\nexport const { builtinModules } = ns;\n" +
+            "import type { Module as TM } from 'node:module';\nexport type { TM };\n" +
+            "import { type Module as TM2 } from 'node:module';\nexport { TM2 };\n" +
+            "import type * as TNS from 'node:module';\nexport { TNS };\n" +
             "import type { createRequire as T1 } from 'node:module';\n" +
             "import { type createRequire as T2 } from 'node:module';\nexport type T = T1 | T2;\n",
         ),

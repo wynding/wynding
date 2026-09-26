@@ -1014,33 +1014,60 @@ const KNOWN_UNROWED: readonly {
   readonly why: string;
 }[] = [];
 
-/** THE LOW-INFORMATION ROWS WITH NO CENSUS, each with its reason, asserted exactly (a stale
- *  entry fails like a stale census). Two key to a single digit, so a census of either counts
- *  every plain `1` or `2` across nineteen files (262 and 198 prose copies, measured for #170)
- *  and records no claim at all. The third is SIGNED, and every census source reads numerals
- *  unsigned, so its census could never find a copy (CodeRabbit, PR #174); an always-empty
- *  census now fails on its own. Each is guarded another way. */
+/** THE LOW-INFORMATION ROWS WITH NO KEYED CENSUS, each with its reason, asserted exactly (a
+ *  stale entry fails like a stale census). Two key to a single digit, so a keyed census of
+ *  either counts every plain `1` or `2` across nineteen files (262 and 198 prose copies,
+ *  measured for #170) and records no claim at all. The third is SIGNED, and every census source
+ *  reads numerals unsigned, so its keyed census could never find a copy (CodeRabbit, PR #174);
+ *  an always-empty census now fails on its own. Each keeps an EXACT-SPELLING census in its
+ *  place, so an unlisted copy spelled as the row still goes red (Codex, PR #174). */
 const CENSUS_EXEMPT: readonly {
   readonly id: string;
   readonly value: string;
   readonly why: string;
+  /** The row's EXACT-SPELLING census (sign dropped, as every census source reads it): per file,
+   *  how many numerals are written exactly as the value is. Exempt from the keyed census is not
+   *  exempt from accounting: an unlisted `1.00` appended to a perf source must still go red
+   *  (Codex, PR #174), and the spelling is specific where the key (`1`, `2`) is not. */
+  readonly census: readonly (readonly [file: string, occurrences: number])[];
 }[] = [
   {
     id: 'r0',
     value: '1.00',
     why: 'bound to the executable `R0` in gate.ts (the "matches the executable constant" test), so a drifted copy at a site fails there',
+    census: [
+      [G.adr, 10],
+      [G.spike, 2],
+      [G.m2, 2],
+      [G.gateTest, 3],
+      [G.gate, 4],
+    ],
   },
   {
     id: 'claimed-doubling',
     value: '2.00',
     why: 'a historical figure quoted only to be refuted, pinned by its three sites, each spelled `2.00x` or `2.00×`',
+    census: [
+      [G.adr, 1],
+      [G.fixture, 1],
+      [G.gate, 1],
+      [O.oracleCatalogTest, 1],
+    ],
   },
   {
     id: 'skew-g1',
     value: '-1.36',
     why: 'signed: every census source reads numerals unsigned, so a census keyed to -1.36 is always empty. Its two sites capture the sign, which is where a flipped sign fails',
+    census: [
+      [G.adr, 1],
+      [G.gate, 1],
+    ],
   },
 ];
+
+/** A numeral as written, minus its sign and digit separators: the key of the exact-spelling
+ *  census, where `1.00` and `1` differ and `-1.36` and `1.36` do not. */
+const exactSpelling = (raw: string): string => raw.replace(/^[-\u2212+]/, '').replace(/[,_]/g, '');
 
 /** The census family: every NUMERIC claim whose value is below the information bar, from BOTH
  *  families (#170). It was the scene oracle's rows alone, so a low-information gate row
@@ -3174,6 +3201,32 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   it('a census compares full paths, so a same-basename path in another directory differs', () => {
     expect(sameCensus([['packages/perf/src/x.ts', 1]], [['packages/perf/src/x.ts', 1]])).toBe(true);
     expect(sameCensus([['packages/perf/src/x.ts', 1]], [['packages/sim/src/x.ts', 1]])).toBe(false);
+  });
+
+  it('keeps an exact-spelling census of every CENSUS_EXEMPT value', () => {
+    const mismatches: string[] = [];
+    for (const e of CENSUS_EXEMPT) {
+      const spelling = exactSpelling(e.value);
+      const census = ACCOUNTED_FILES.map(
+        (f) =>
+          [
+            f,
+            censusOccurrences(f).filter((n) => exactSpelling(n.raw) === spelling).length,
+          ] as const,
+      ).filter(([, n]) => n > 0);
+      expect(census.length, `${e.id}: an empty census cannot fail`).toBeGreaterThan(0);
+      if (!sameCensus(census, e.census)) {
+        mismatches.push(
+          `  ${e.id} "${spelling}": recorded ${fmtCensus(e.census)}\n            but found ${fmtCensus(census)}`,
+        );
+      }
+    }
+    expect(
+      mismatches,
+      `these exempt values have gained, lost or changed a copy spelled exactly as the row. If the ` +
+        `copy restates the claim, add it as a site of its row; if it is a collision, re-census ` +
+        `the entry:\n${mismatches.join('\n')}`,
+    ).toEqual([]);
   });
 
   it('keeps every CENSUS_EXEMPT entry current: a real, numeric, low-information row', () => {
