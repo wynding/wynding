@@ -14,9 +14,12 @@
 // binding of that name, and every non-reference position, is simply not the loader.
 //
 // Still not caught, and named so no one mistakes this for a sandbox: a computed member
-// (`globalThis['req' + 'uire']`), `Reflect.get(globalThis, 'require')`, `eval`, and
-// `require('module').createRequire`. The zones' downstream guards (`layering.test.ts` and the
-// build-layering check) still hold whatever spelling reaches a module.
+// (`globalThis['req' + 'uire']`), `Reflect.get(globalThis, 'require')`, `eval`, and a loader
+// handed through a value the rule cannot follow (returned from a function, stored on an app
+// object). This is a lint against ACCIDENTAL reaches, like the determinism zone beside it; the
+// set of deliberate spellings does not terminate. The zones' downstream guards
+// (`layering.test.ts` and the build-layering check) still hold whatever spelling reaches a
+// module.
 
 const MESSAGE =
   'An aliased or indirect `require` (the value passed around, `.require` on a host object, or ' +
@@ -131,6 +134,25 @@ const noAliasedRequire = {
           if ((fromHost && key === 'require') || (fromModule && key === 'createRequire')) {
             report(property);
           }
+        }
+      },
+      // `module` loaded at RUNTIME (`import('node:module')`, `require('module')`): the namespace
+      // that comes back cannot be followed to its `createRequire` (`const m = await import(…)`,
+      // then `m.createRequire`), so the load itself is the report. Nothing a zone ships has a
+      // runtime use for that module; a static import stays allowed and is tracked above.
+      ImportExpression(node) {
+        const source = unwrap(node.source);
+        if (source?.type === 'Literal' && MODULE_SPECIFIERS.has(source.value)) report(node);
+      },
+      CallExpression(node) {
+        const [first] = node.arguments;
+        if (
+          node.callee.type === 'Identifier' &&
+          node.callee.name === 'require' &&
+          first?.type === 'Literal' &&
+          MODULE_SPECIFIERS.has(first.value)
+        ) {
+          report(node);
         }
       },
       // `createRequire` imported by name (identifier or string), renamed or not. A TYPE-ONLY

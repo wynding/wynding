@@ -2744,9 +2744,11 @@ function censusOccurrences(file: string): Numeral[] {
       (!walked.commentAt[i] && !walked.codeAt[i]) || ch === '\n' ? ch : ' ',
     ).join('');
     for (const m of maskReferences(literals).matchAll(NUMERAL)) {
-      if (!measurementLike(m[0])) continue;
       const cleaned = m[0].replace(/[,_]/g, '');
-      found.push({ raw: m[0], value: normalizeNumeral(cleaned), at: m.index ?? 0 });
+      const value = normalizeNumeral(cleaned);
+      // Spelling OR value, as for code literals: `'seed 0x4d2'` states 1234 (Codex, PR #174).
+      if (!measurementLike(m[0]) && !measurementLike(value)) continue;
+      found.push({ raw: m[0], value, at: m.index ?? 0 });
     }
   }
   censusCache.set(file, found);
@@ -3149,9 +3151,12 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   it('the census counts a radix spelling of a measurement by its value', () => {
     expect(measurementLike('0x4d2') || measurementLike('1234')).toBe(true);
     const file = 'fixture/census/radix.ts';
-    fileCache.set(file, 'export const copy = 0x4d2;\nexport const loop = 0x3;\n');
+    fileCache.set(
+      file,
+      "export const copy = 0x4d2;\nexport const loop = 0x3;\nexport const text = 'seed 0x4d2';\n",
+    );
     const values = censusOccurrences(file).map((n) => n.value);
-    expect(values).toEqual(['1234']);
+    expect(values).toEqual(['1234', '1234']);
   });
 
   it('a census compares full paths, so a same-basename path in another directory differs', () => {

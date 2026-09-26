@@ -241,6 +241,8 @@ describe(
         'a createRequire destructured off a module namespace',
         "import * as m from 'node:module';\nconst { createRequire: cr } = m;\nexport const a = cr;\n",
       ],
+      ['a dynamic import of node:module', "export const m = import('node:module');\n"],
+      ['a require of module', "export const m = require('module');\n"],
       [
         'a namespace createRequire',
         "import * as m from 'node:module';\nexport const a = m.createRequire(import.meta.url);\n",
