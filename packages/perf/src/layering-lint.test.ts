@@ -230,6 +230,18 @@ describe(
         "import { 'createRequire' as cr } from 'node:module';\nexport const a = cr;\n",
       ],
       [
+        'a require destructured in an assignment',
+        'let r: unknown;\n({ require: r } = globalThis as never);\nexport const a = r;\n',
+      ],
+      [
+        'a require destructured in a parameter default',
+        'export function f({ require: r } = globalThis as never): unknown {\n  return r;\n}\n',
+      ],
+      [
+        'a createRequire destructured off a module namespace',
+        "import * as m from 'node:module';\nconst { createRequire: cr } = m;\nexport const a = cr;\n",
+      ],
+      [
         'a namespace createRequire',
         "import * as m from 'node:module';\nexport const a = m.createRequire(import.meta.url);\n",
       ],
@@ -265,7 +277,9 @@ describe(
             'export function k(): void { try { /* */ } catch (require) { void require; } }\n' +
             "import { require as local } from './local';\nexport const l = local;\n" +
             'export interface X { createRequire(): void }\nexport const o = { createRequire: 1 };\n' +
-            'export function createRequire(): number { return 1; }\n',
+            'export function createRequire(): number { return 1; }\n' +
+            "import type { createRequire as T1 } from 'node:module';\n" +
+            "import { type createRequire as T2 } from 'node:module';\nexport type T = T1 | T2;\n",
         ),
       ).toEqual([]);
     });

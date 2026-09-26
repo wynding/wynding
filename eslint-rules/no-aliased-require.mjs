@@ -108,22 +108,35 @@ const noAliasedRequire = {
           report(node);
         }
       },
-      // `const { require: r } = globalThis`: the same member, destructured.
-      VariableDeclarator(node) {
-        if (node.id.type !== 'ObjectPattern' || !isHost(node.init)) return;
-        for (const property of node.id.properties) {
-          if (
-            property.type === 'Property' &&
-            !property.computed &&
-            property.key.type === 'Identifier' &&
-            property.key.name === 'require'
-          ) {
+      // The same members DESTRUCTURED, wherever a pattern takes its value: a declaration
+      // (`const { require: r } = globalThis`), an assignment (`({ require: r } = globalThis)`) or
+      // a parameter default (`function f({ require: r } = globalThis)`), and `createRequire` off a
+      // namespace import of `module` (`const { createRequire: cr } = m`).
+      ObjectPattern(node) {
+        const parent = node.parent;
+        const source =
+          parent?.type === 'VariableDeclarator' && parent.id === node
+            ? parent.init
+            : (parent?.type === 'AssignmentExpression' || parent?.type === 'AssignmentPattern') &&
+                parent.left === node
+              ? parent.right
+              : null;
+        if (!source) return;
+        const target = unwrap(source);
+        const fromHost = isHost(target);
+        const fromModule = target?.type === 'Identifier' && isModuleImport(target);
+        for (const property of node.properties) {
+          if (property.type !== 'Property' || property.computed) continue;
+          const key = property.key.type === 'Identifier' ? property.key.name : property.key.value;
+          if ((fromHost && key === 'require') || (fromModule && key === 'createRequire')) {
             report(property);
           }
         }
       },
-      // `createRequire` imported by name (identifier or string), renamed or not.
+      // `createRequire` imported by name (identifier or string), renamed or not. A TYPE-ONLY
+      // import is erased and cannot mint a loader, so it is left alone.
       ImportSpecifier(node) {
+        if (node.importKind === 'type' || node.parent.importKind === 'type') return;
         const imported =
           node.imported.type === 'Identifier' ? node.imported.name : node.imported.value;
         if (imported === 'createRequire' && MODULE_SPECIFIERS.has(node.parent.source.value)) {
