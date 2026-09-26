@@ -324,6 +324,55 @@ describe(
         "import * as m from 'node:module';\nconst { builtinModules, ...host } = m;\nexport const a = [builtinModules, host.createRequire];\n",
       ],
       [
+        'getBuiltinModule of node:module, imported',
+        "import { getBuiltinModule } from 'node:process';\nexport const m = getBuiltinModule('node:module');\n",
+      ],
+      [
+        'getBuiltinModule of module, off the global process',
+        "export const m = process.getBuiltinModule('module');\n",
+      ],
+      [
+        'getBuiltinModule with a non-constant specifier',
+        'export const load = (s: string): unknown => process.getBuiltinModule(s);\n',
+      ],
+      [
+        'getBuiltinModule renamed by destructuring',
+        "const { getBuiltinModule: g } = process;\nexport const m = g('node:module');\n",
+      ],
+      [
+        'getBuiltinModule off a namespace import of process',
+        "import * as proc from 'node:process';\nexport const m = proc.getBuiltinModule(`node:module`);\n",
+      ],
+      [
+        'getBuiltinModule off an alias of process',
+        "const p = process;\nexport const m = p.getBuiltinModule('module');\n",
+      ],
+      [
+        'getBuiltinModule off the default of a process namespace',
+        "import * as p from 'node:process';\nexport const m = p.default.getBuiltinModule('module');\n",
+      ],
+      [
+        'getBuiltinModule exported as a value',
+        'export const g = globalThis.process.getBuiltinModule;\n',
+      ],
+      ['getBuiltinModule bound', 'export const g = process.getBuiltinModule.bind(process);\n'],
+      [
+        'getBuiltinModule through .call',
+        "export const m = process.getBuiltinModule.call(process, 'module');\n",
+      ],
+      [
+        'a getBuiltinModule re-export from node:process',
+        "export { getBuiltinModule } from 'node:process';\n",
+      ],
+      [
+        'a local export of an imported getBuiltinModule',
+        "import { getBuiltinModule as g } from 'node:process';\nexport { g };\n",
+      ],
+      [
+        'getBuiltinModule destructured with a default',
+        "const { getBuiltinModule: g = undefined } = process;\nexport const m = g?.('module');\n",
+      ],
+      [
         'an exported destructured Module',
         "import * as m from 'node:module';\nexport const { Module: M } = m;\n",
       ],
@@ -373,6 +422,12 @@ describe(
             "import * as lm from './local';\nexport const q = lm.Module.createRequire;\n" +
             "import { builtinModules as bm, isBuiltin as ib } from 'node:module';\nexport { bm, ib };\n" +
             'export const r = ib.createRequire;\n' +
+            "export const fsx = process.getBuiltinModule('node:fs');\n" +
+            "export const fsy = (process.getBuiltinModule as (s: string) => unknown)('node:fs');\n" +
+            "export const fsz = process.getBuiltinModule!('node:fs');\n" +
+            "export const hasBuiltins = typeof process.getBuiltinModule === 'function';\n" +
+            "export const hasBuiltins2 = typeof globalThis.process?.getBuiltinModule === 'function';\n" +
+            "export function localGet(getBuiltinModule: (s: string) => unknown): unknown {\n  return getBuiltinModule('node:module');\n}\n" +
             'export const { ...rest } = { Module: 1 };\nexport const s = rest.Module;\n' +
             "import * as ns from 'node:module';\nexport const { builtinModules } = ns;\n" +
             "import type { Module as TM } from 'node:module';\nexport type { TM };\n" +

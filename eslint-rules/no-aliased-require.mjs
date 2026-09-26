@@ -33,6 +33,10 @@ const HOSTS = new Set(['globalThis', 'global', 'window', 'self', 'module']);
 const LOADER_EXPORTS = new Set(['createRequire', 'Module', 'default']);
 /** The module that exports `createRequire`. */
 const MODULE_SPECIFIERS = new Set(['module', 'node:module']);
+/** The module whose `getBuiltinModule` hands back any builtin's namespace, `module` included. */
+const PROCESS_SPECIFIERS = new Set(['process', 'node:process']);
+/** The exports of `process` that carry `getBuiltinModule`: the function and the default. */
+const PROCESS_LOADER_EXPORTS = new Set(['getBuiltinModule', 'default']);
 /** The members of that module's exports that carry `createRequire` themselves (`m.Module`,
  *  `m.default`, and either of those again), so a chain through them is still the factory. */
 const LOADER_HOLDERS = new Set(['Module', 'default']);
@@ -193,6 +197,68 @@ const noAliasedRequire = {
         patternIsLoaderBearing(property.parent, seen)
       );
     };
+    /** True when `node` is `getBuiltinModule` (Codex, PR #174), which hands back any builtin's
+     *  namespace, `module` included. It is judged BY NAME off any object (`process`,
+     *  `globalThis.process`, an alias or import of either, its `default`), because `process`
+     *  itself can be aliased without end; or as a binding: a named import from `node:process`, a
+     *  variable bound to it, or a destructured `getBuiltinModule` key, renamed or defaulted. */
+    const isBuiltinLoader = (node, seen = new Set()) => {
+      const target = unwrap(node);
+      if (!target || seen.has(target)) return false;
+      seen.add(target);
+      if (target.type === 'MemberExpression') return memberName(target) === 'getBuiltinModule';
+      if (target.type !== 'Identifier') return false;
+      return (resolve(target)?.defs ?? []).some((def) => {
+        if (def.type === 'ImportBinding') {
+          if (def.node.type !== 'ImportSpecifier') return false;
+          if (def.parent.importKind === 'type' || def.node.importKind === 'type') return false;
+          const imported =
+            def.node.imported.type === 'Identifier'
+              ? def.node.imported.name
+              : def.node.imported.value;
+          return (
+            imported === 'getBuiltinModule' &&
+            PROCESS_SPECIFIERS.has(def.parent?.source?.value ?? '')
+          );
+        }
+        if (def.type !== 'Variable' && def.type !== 'Parameter') return false;
+        if (def.type === 'Variable' && def.node.id === def.name) {
+          return isBuiltinLoader(def.node.init, seen);
+        }
+        let value = def.name;
+        if (value.parent?.type === 'AssignmentPattern' && value.parent.left === value) {
+          if (isBuiltinLoader(value.parent.right, seen)) return true;
+          value = value.parent;
+        }
+        const property = value.parent;
+        return (
+          property?.type === 'Property' &&
+          property.value === value &&
+          property.parent?.type === 'ObjectPattern' &&
+          propertyKey(property) === 'getBuiltinModule'
+        );
+      });
+    };
+    /** True when `node` is the callee of the call it sits in (`f(x)`, `(f as T)(x)`, `f!(x)`, not
+     *  `f.call(x)`), or only tested by a value `typeof` (the Node-version guard,
+     *  `typeof process.getBuiltinModule === 'function'`), which cannot hand the function on. */
+    const isCallee = (node) => {
+      let current = node;
+      while (
+        current.parent &&
+        (current.parent.type === 'ChainExpression' ||
+          current.parent.type === 'TSAsExpression' ||
+          current.parent.type === 'TSNonNullExpression' ||
+          current.parent.type === 'TSSatisfiesExpression' ||
+          current.parent.type === 'TSTypeAssertion') &&
+        current.parent.expression === current
+      ) {
+        current = current.parent;
+      }
+      const parent = current.parent;
+      if (parent?.type === 'UnaryExpression' && parent.operator === 'typeof') return true;
+      return parent?.type === 'CallExpression' && parent.callee === current;
+    };
     const report = (node) => context.report({ node, messageId: 'aliased' });
 
     return {
@@ -202,6 +268,18 @@ const noAliasedRequire = {
         for (const scope of sourceCode.scopeManager.scopes) {
           for (const reference of scope.references) {
             const id = reference.identifier;
+            // `getBuiltinModule` bound to a name and used as anything but a direct call (passed,
+            // bound, re-exported) escapes the specifier check below, so the use is the report.
+            if (
+              id.name !== 'require' &&
+              reference.isRead() &&
+              !isCallee(id) &&
+              !inTypeQuery(id) &&
+              isBuiltinLoader(id)
+            ) {
+              report(id);
+              continue;
+            }
             if (id.name !== 'require' || reference.isValueReference === false) continue;
             if (!isGlobal(id) || inTypeQuery(id)) continue;
             const parent = id.parent;
@@ -215,6 +293,9 @@ const noAliasedRequire = {
         const name = memberName(node);
         if (name === 'require' && isHost(node.object)) report(node);
         if (name === 'createRequire' && isLoaderBearing(node.object)) report(node);
+        // `getBuiltinModule` read as a value (`.bind`, `.call`, stored, exported) rather than
+        // called directly, where the call's specifier is checked.
+        if (name === 'getBuiltinModule' && !isCallee(node)) report(node);
       },
       // The same members DESTRUCTURED, wherever a pattern takes its value: a declaration
       // (`const { require: r } = globalThis`), an assignment (`({ require: r } = globalThis)`) or
@@ -241,7 +322,8 @@ const noAliasedRequire = {
           }
         }
       },
-      // `module` loaded at RUNTIME (`import('node:module')`, `require('module')`): the namespace
+      // `module` loaded at RUNTIME (`import('node:module')`, `require('module')`,
+      // `process.getBuiltinModule('node:module')`): the namespace
       // that comes back cannot be followed to its `createRequire` (`const m = await import(…)`,
       // then `m.createRequire`), so the load itself is the report. Nothing a zone ships has a
       // runtime use for that module; a static import stays allowed and is tracked above.
@@ -249,6 +331,12 @@ const noAliasedRequire = {
         if (MODULE_SPECIFIERS.has(constantString(node.source) ?? '')) report(node);
       },
       CallExpression(node) {
+        // `getBuiltinModule('node:module')` returns the same namespace as a runtime import, and
+        // a non-constant specifier could be that one, so either is the report.
+        if (isBuiltinLoader(node.callee)) {
+          const specifier = constantString(node.arguments[0]);
+          if (specifier === undefined || MODULE_SPECIFIERS.has(specifier)) report(node);
+        }
         if (
           node.callee.type === 'Identifier' &&
           node.callee.name === 'require' &&
@@ -290,15 +378,24 @@ const noAliasedRequire = {
           }
           return;
         }
-        if (!MODULE_SPECIFIERS.has(node.source.value)) return;
         const names = (spec) =>
           spec.local.type === 'Identifier' ? spec.local.name : spec.local.value;
+        // `getBuiltinModule` re-exported from `node:process` (or the default, which carries it)
+        // leaves the specifier check behind the same way.
+        const carried = MODULE_SPECIFIERS.has(node.source.value)
+          ? LOADER_EXPORTS
+          : PROCESS_SPECIFIERS.has(node.source.value)
+            ? PROCESS_LOADER_EXPORTS
+            : null;
+        if (!carried) return;
         for (const spec of node.specifiers) {
-          if (spec.exportKind !== 'type' && LOADER_EXPORTS.has(names(spec))) report(spec);
+          if (spec.exportKind !== 'type' && carried.has(names(spec))) report(spec);
         }
       },
       ExportAllDeclaration(node) {
-        if (node.exportKind !== 'type' && MODULE_SPECIFIERS.has(node.source.value)) report(node);
+        if (node.exportKind === 'type') return;
+        const source = node.source.value;
+        if (MODULE_SPECIFIERS.has(source) || PROCESS_SPECIFIERS.has(source)) report(node);
       },
       // `createRequire` imported by name (identifier or string), renamed or not. A TYPE-ONLY
       // import is erased and cannot mint a loader, so it is left alone.
