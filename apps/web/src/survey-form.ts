@@ -302,7 +302,9 @@ export function createSurveyForm(
 
   notNowBtn.addEventListener('click', () => {
     if (notNowBtn.getAttribute('aria-disabled') === 'true') return;
-    void survey.notNow();
+    // The model's commit never rejects, but an injected ask is not ours to trust: a rejection
+    // must not surface as an unhandled one. The accepted-Send path guards the same way.
+    survey.notNow().catch(() => {});
     // Every collapse but an accepted Send clears the survey's message (§6): a rating prompt
     // or a failure notice is about a submission that is no longer pending.
     if (ownMessage !== null && ownMessage !== '' && host.statusText() === ownMessage) say('');

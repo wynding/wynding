@@ -1417,24 +1417,27 @@ describe('main — boot()', () => {
   });
 
   it('builds the survey only when a transport is injected (ADR 0014: the transport is the switch)', async () => {
-    vi.stubGlobal('requestAnimationFrame', () => 1);
-    vi.stubGlobal('cancelAnimationFrame', vi.fn());
-    const surveyChildren = async (options?: Parameters<typeof boot>[1]): Promise<number> => {
-      document.body.innerHTML = '<div id="app"></div>';
-      const handle = await boot(document, options);
-      const count = document.querySelector('.wy-survey')!.childElementCount;
-      handle!.destroy();
-      return count;
-    };
-    expect(await surveyChildren(), 'the shipped entry passes nothing').toBe(0);
-    const transport = { send: vi.fn(async () => 'accepted' as const) };
-    expect(await surveyChildren({ surveyTransport: transport })).toBeGreaterThan(0);
-    // An explicit gameVersion stands in for the build's (the e2e harness's second deploy).
-    expect(
-      await surveyChildren({ surveyTransport: transport, gameVersion: 'a'.repeat(40) }),
-    ).toBeGreaterThan(0);
-    expect(transport.send).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+    try {
+      vi.stubGlobal('requestAnimationFrame', () => 1);
+      vi.stubGlobal('cancelAnimationFrame', vi.fn());
+      const surveyChildren = async (options?: Parameters<typeof boot>[1]): Promise<number> => {
+        document.body.innerHTML = '<div id="app"></div>';
+        const handle = await boot(document, options);
+        const count = document.querySelector('.wy-survey')!.childElementCount;
+        handle!.destroy();
+        return count;
+      };
+      expect(await surveyChildren(), 'the shipped entry passes nothing').toBe(0);
+      const transport = { send: vi.fn(async () => 'accepted' as const) };
+      expect(await surveyChildren({ surveyTransport: transport })).toBeGreaterThan(0);
+      // An explicit gameVersion stands in for the build's (the e2e harness's second deploy).
+      expect(
+        await surveyChildren({ surveyTransport: transport, gameVersion: 'a'.repeat(40) }),
+      ).toBeGreaterThan(0);
+      expect(transport.send).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

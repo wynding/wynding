@@ -328,6 +328,15 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     expect(absent.slot.hidden).toBe(true);
   });
 
+  it('a commit that rejects on Not now never surfaces as an unhandled rejection', async () => {
+    const h = setup();
+    h.ask.commit = () => Promise.reject(new Error('storage exploded'));
+    await h.expand();
+    h.button('Not now').click();
+    await flush();
+    expect(h.formEl().hidden).toBe(true);
+  });
+
   it('forwards every answer to the model', async () => {
     const h = setup();
     await h.expand();
