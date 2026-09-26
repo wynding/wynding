@@ -565,6 +565,13 @@ the survey while a Verify result is displayed simply **takes** the region under 
 handoff, and taking clears. That is safe because Verify's write is synchronous and final at press
 time — there is no pending outcome of its own to lose, unlike a send in flight.
 
+_Implementation note (#158):_ the local export's Copy action, added beside Verify after this ADR,
+**is** asynchronous — it announces when the clipboard write settles. So the survey's immediate
+messages (the clear on opening, the prompt for the missing answer, the clear on Not now) are
+written **without claiming** the region: a pending Copy keeps its claim and its result still
+lands. Only Send takes and holds the region, and while it does, Verify and both export actions are
+locked by the same control-state rule.
+
 **Success, failure and offline each get a player-visible, non-blocking result.** None of them
 ever blocks Play again. Silence on
 failure is the specific defect to avoid — a player who pressed Send and heard nothing has to

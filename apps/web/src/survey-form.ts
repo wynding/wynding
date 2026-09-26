@@ -292,8 +292,9 @@ export function createSurveyForm(
 
   openBtn.addEventListener('click', () => {
     if (!survey.open()) return;
-    // Opening TAKES the region, and taking clears (§6): a Verify result still showing has
-    // no pending outcome to lose.
+    // Opening CLEARS the region without claiming it (§6): a Verify result still showing has
+    // no pending outcome to lose, and a Copy still awaiting the clipboard keeps its claim,
+    // so its result lands after this. Only Send takes the region.
     say('');
     render();
     rating.inputs[0]?.focus();

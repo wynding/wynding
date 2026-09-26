@@ -236,6 +236,10 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     expect((await harness(page)).sent).toHaveLength(0);
   });
 
+  // What this proves is the SCROLL CONTRACT: the form overflows, the top stays reachable, the
+  // bottom scrolls into view. It runs in Chromium only, which also supports `safe center`, so
+  // it cannot by itself catch the older-WebKit fallback that made `ui.css` centre with auto
+  // margins instead; it catches a regression back to plain `center` in any engine.
   test.describe('on a short landscape viewport', () => {
     test.use({ viewport: { width: 740, height: 360 } });
 
