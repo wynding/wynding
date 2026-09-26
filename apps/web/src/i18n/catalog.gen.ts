@@ -151,6 +151,24 @@ export const EN = {
   "settings.reducedMotion": "Reduce motion",
   "settings.title": "Settings",
   "settings.unbound": "Unbound",
+  "survey.accepted": "Thanks for the feedback. Reference: {reference}.",
+  "survey.difficulty": "How hard was it? (1 = easy, 5 = very hard)",
+  "survey.dontAskAgain": "Don't ask again",
+  "survey.group": "Feedback on this run",
+  "survey.needsRating": "Choose a rating to send your feedback.",
+  "survey.notNow": "Not now",
+  "survey.offline": "You're offline, so your feedback wasn't sent.",
+  "survey.open": "Give feedback",
+  "survey.privacy": "Sending shares your answers and this run's details under the Wynding site privacy notice.",
+  "survey.rating": "How was it? (1 = poor, 5 = great)",
+  "survey.reference": "Reference: {reference}. Quote it if you ask for this feedback to be deleted.",
+  "survey.rejected": "Couldn't send your feedback.",
+  "survey.scaleValue": "{value}",
+  "survey.send": "Send",
+  "survey.sending": "Sending your feedback…",
+  "survey.somethingBroke": "Something broke",
+  "survey.text": "Anything else?",
+  "survey.tryAgain": "Try again",
   "tower.antiair.name": "Anti-Air Tower",
   "tower.basic.name": "Basic Tower",
   "tower.beacon.name": "Beacon",
@@ -321,6 +339,24 @@ export interface MessageParams {
   "settings.reducedMotion": Record<never, never>;
   "settings.title": Record<never, never>;
   "settings.unbound": Record<never, never>;
+  "survey.accepted": { "reference": string | number };
+  "survey.difficulty": Record<never, never>;
+  "survey.dontAskAgain": Record<never, never>;
+  "survey.group": Record<never, never>;
+  "survey.needsRating": Record<never, never>;
+  "survey.notNow": Record<never, never>;
+  "survey.offline": Record<never, never>;
+  "survey.open": Record<never, never>;
+  "survey.privacy": Record<never, never>;
+  "survey.rating": Record<never, never>;
+  "survey.reference": { "reference": string | number };
+  "survey.rejected": Record<never, never>;
+  "survey.scaleValue": { "value": string | number };
+  "survey.send": Record<never, never>;
+  "survey.sending": Record<never, never>;
+  "survey.somethingBroke": Record<never, never>;
+  "survey.text": Record<never, never>;
+  "survey.tryAgain": Record<never, never>;
   "tower.antiair.name": Record<never, never>;
   "tower.basic.name": Record<never, never>;
   "tower.beacon.name": Record<never, never>;

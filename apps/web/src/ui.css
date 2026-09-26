@@ -1657,6 +1657,85 @@ a.wy-home:focus-visible {
   font-size: 1rem;
 }
 
+/* ADR 0014's survey, expanded in place inside the results dialog. The expanded form is
+   taller than a compact landscape viewport, so the dialog scrolls — and centres only while
+   it fits (`safe`), or its top would be clipped out of reach. */
+.wy-results {
+  overflow-y: auto;
+  justify-content: safe center;
+}
+
+.wy-survey {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, 30rem);
+}
+
+.wy-survey[hidden],
+.wy-survey-form[hidden] {
+  display: none;
+}
+
+.wy-survey-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+}
+
+.wy-survey-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  border: 1px solid #33465f;
+  border-radius: 6px;
+}
+
+.wy-survey-scale legend {
+  padding: 0 0.25rem;
+}
+
+.wy-survey-scale label,
+.wy-survey-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.wy-survey-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.wy-survey-text textarea {
+  font: inherit;
+  color: var(--wy-fg);
+  background: #0e1a2b;
+  border: 1px solid #33465f;
+  border-radius: 6px;
+  padding: 0.5rem;
+  resize: vertical;
+}
+
+.wy-survey-note {
+  margin: 0;
+  color: var(--wy-fg-dim);
+  font-size: 0.9rem;
+}
+
+.wy-survey-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
 /* --- Rotate prompt (P5): phones/tablets in portrait only — gated at runtime on
    `(orientation: portrait)` AND `(pointer: coarse)`, PLAN.md P5. --- */
 

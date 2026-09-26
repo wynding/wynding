@@ -10,7 +10,7 @@
 
 import './ui.css';
 import { createSaveSlot } from '@wynding/platform';
-import { createController, type Controller } from './controller';
+import { createController, type CaptureSnapshot, type Controller } from './controller';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
@@ -38,6 +38,20 @@ import {
   type StoredOptOut,
 } from './playtrace';
 import { createKeymap } from './keymap';
+import {
+  buildSurveyPayload,
+  createSessionIdentity,
+  createSurvey,
+  loadSurveyAsk,
+  parseStoredSurveyAsk,
+  replayDigest,
+  SURVEY_ASK_KEY,
+  type StoredSurveyAsk,
+  type SurveyAsk,
+  type SurveyTransport,
+} from './survey';
+import { createSurveyForm, type SurveyForm } from './survey-form';
+import type { Replay } from '@wynding/replay';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
 import { placePreviewFloat, type PreviewFloat, type PreviewFloatInput } from './preview-place';
@@ -53,7 +67,7 @@ import {
 } from './install';
 import { t } from './i18n/t';
 import { mount as mountScene, type BoardGeometry } from '@wynding/render/scene';
-import type { RenderHandle, RenderOverlay } from '@wynding/render';
+import type { HudVM, RenderHandle, RenderOverlay } from '@wynding/render';
 
 /** Constructs the Phaser board handle (injected so tests can fake it). The geometry
  *  shape is the scene's own `BoardGeometry` — one authoritative declaration. */
@@ -92,6 +106,20 @@ export interface AppDeps {
   readonly playtraceDelivery?: PlaytraceDelivery;
   /** The per-run UUID mint (#133/ADR 0014 §4) — injected so a test can pin `runId`. */
   readonly mintRunId?: () => string;
+  /** ADR 0014's end-of-run survey — AND ITS FEATURE SWITCH. The survey is offered only
+   *  where a transport is injected, and production injects none until `wynding-site` has
+   *  the endpoint and the privacy notice §7 makes a ship gate: one fact, not a second flag
+   *  that could disagree with it. Needs `surveyAsk` too; either alone offers nothing. */
+  readonly surveyTransport?: SurveyTransport;
+  /** The survey's ask state (§3), hydrated by `boot()` off the same seam as settings. */
+  readonly surveyAsk?: SurveyAsk;
+  /** The build's `gameVersion` (§4). Defaults to the build-time define. */
+  readonly gameVersion?: string;
+  /** Wall clock for the survey session's age (ADR 0011 §3); the monotonic half is `now`.
+   *  Defaults to `Date.now`. */
+  readonly wallNow?: () => number;
+  /** The survey's opaque id mint (session id and idempotency keys). Defaults to v4 UUIDs. */
+  readonly mintSurveyId?: () => string;
   /** Capacitor's App plugin (#138), for hardware Back and the native lifecycle. Injected
    *  because jsdom has no Capacitor bridge; production discovers it off `window` and ONLY
    *  when `hosted` is true (ADR 0012 — told, never inferred).
@@ -164,8 +192,19 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  already minted — and `beginRun` returns the seed so the two can never drift apart. */
   const mintRunId = deps.mintRunId ?? ((): string => mintUuid(ambientCrypto(doc.defaultView)));
   let runId = mintRunId();
+  /** ADR 0011 §3's session id, which the survey carries and shows as its reference (§7):
+   *  in memory only, rotated by run count and age. Every run start counts, the first too. */
+  const mintSurveyId =
+    deps.mintSurveyId ?? ((): string => mintUuid(ambientCrypto(doc.defaultView)));
+  const sessionIdentity = createSessionIdentity({
+    mint: mintSurveyId,
+    now: deps.wallNow ?? (() => Date.now()),
+    monotonicNow: () => deps.now(),
+  });
+  sessionIdentity.beginRun();
   const beginRun = (): number => {
     runId = mintRunId();
+    sessionIdentity.beginRun();
     return nextSeed();
   };
 
@@ -262,6 +301,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  reached during construction, and a `let` declared further down would sit in its
    *  temporal dead zone. */
   let resultsStatusSeq = 0;
+  /** The finished run the open results dialog is about — captured ONCE at the terminal edge
+   *  (with the playtrace), which the survey's payload is built from. Null between runs. */
+  let terminalRun: {
+    readonly replay: Replay;
+    readonly snapshot: CaptureSnapshot;
+    readonly hud: HudVM;
+  } | null = null;
+  /** The survey form, or null where no survey is offered. Assigned after the overlay
+   *  exists; declared here for the temporal-dead-zone reason above. */
+  let surveyForm: SurveyForm | null = null;
   let lastHudKey = '';
   // Install state changes (a captured `beforeinstallprompt`, a dismissal, an install) arrive
   // OUTSIDE the HUD memo key's inputs — nothing about the sim moved. Fold a revision counter
@@ -286,6 +335,47 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     () => input.abort(),
     install,
   );
+  // ADR 0014: the survey exists only with BOTH a transport (the switch) and its ask state.
+  if (deps.surveyTransport !== undefined && deps.surveyAsk !== undefined) {
+    const ask = deps.surveyAsk;
+    const gameVersion = deps.gameVersion ?? import.meta.env.WYNDING_GAME_VERSION;
+    const survey = createSurvey({ ask, transport: deps.surveyTransport, mintKey: mintSurveyId });
+    surveyForm = createSurveyForm(doc, overlay.resultsSurveySlot, {
+      survey,
+      refreshAsk: () => ask.refresh(),
+      compose(idempotencyKey) {
+        // The form only exists on an open dialog, and the dialog only opens after the
+        // terminal capture below — so a null here is a wiring bug, not a state to handle.
+        if (terminalRun === null) throw new Error('survey: no finished run to describe');
+        const { replay, snapshot, hud } = terminalRun;
+        return buildSurveyPayload({
+          answers: survey.state().answers,
+          idempotencyKey,
+          run: {
+            runId,
+            sessionId: sessionIdentity.current(),
+            gameVersion,
+            simVersion: replay.simVersion,
+            rulesetHash: replay.rulesetHash,
+            boardId: replay.boardId,
+            seed: replay.seed,
+            outcome: hud.won ? 'won' : 'lost',
+            score: hud.score,
+            stars: hud.stars,
+            waveCursor: hud.waveCursor,
+            finalTick: snapshot.ticksCompleted,
+            finalHash: snapshot.stateHash,
+            // Synchronous (§4): the digest completes inside the Send handler.
+            replayDigest: replayDigest(replay.tickInputs),
+          },
+        });
+      },
+      reference: () => sessionIdentity.current(),
+      claimStatus: () => claimResultsStatus(),
+      setRegionHeld: (held) => overlay.setResultsWritersLocked(held),
+      focusPlayAgain: () => overlay.focusPlayAgain(),
+    });
+  }
   const rotate = doc.createElement('div');
   rotate.className = 'wy-rotate';
   root.append(
@@ -676,13 +766,14 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // transition, so nothing can move between here and the export — and capturing on
       // the same `!resultsShown` edge means exactly one capture per run, never one per
       // frame the dialog is up.
-      capturePlaytrace();
+      capturePlaytrace(hud);
       // Opening a dialog invalidates anything still in flight for the previous one. The
       // invariant held via `resultsShown` + `playAgain` alone, but only by accident of
       // there being one re-open path; enforcing it where the dialog actually opens means a
       // second path cannot silently inherit a stale announcement.
       abandonResultsStatus();
       overlay.showResults(hud);
+      surveyForm?.dialogOpened();
       resultsShown = true;
     }
     // Every input to the wake lock's predicate except document visibility moves through this
@@ -730,11 +821,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  The three capture facts come from ONE `controller.capture()` call rather than three
    *  reads, so `ticksCompleted`, the world hash pinned to that boundary, and the pending
    *  buffer can never describe different moments. */
-  function capturePlaytrace(): void {
+  function capturePlaytrace(hud: HudVM): void {
     const snapshot = controller.capture();
+    const replay = controller.buildReplay();
+    // The survey describes this same capture (ADR 0014 §4), so the two can never disagree
+    // about which moment the run ended at.
+    terminalRun = { replay, snapshot, hud };
     playtrace.capture({
       runId,
-      replay: controller.buildReplay(),
+      replay,
       ticksCompleted: snapshot.ticksCompleted,
       stateHash: snapshot.stateHash,
       pendingInputs: snapshot.pendingInputs,
@@ -1111,6 +1206,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
         overlay.hideResults();
+        // ADR 0014 §1: the single run-start choke point cancels the whole submission
+        // operation, releases the region, and commits nothing.
+        surveyForm?.dialogClosed();
+        terminalRun = null;
         abandonResultsStatus(); // nothing in flight may write onto the next run's dialog
         // The modal owner restores focus to whatever was focused before the results
         // dialog opened (generic pre-modal capture); Play-again always wants the board
@@ -1221,6 +1320,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       rotateHandle.destroy();
       input.destroy();
       handle.destroy();
+      surveyForm?.destroy();
       overlay.destroy();
       shell.destroy();
       // Remove the rotate element too — overlay.destroy()/shell.destroy() only remove
@@ -1272,13 +1372,28 @@ const phaserSceneFactory: SceneFactory = mountScene;
  *  the default palette and then flips. The wait is a measured 0.00075 ms — see
  *  `persist.ts`'s header — and resolves in a microtask, which drains before the first
  *  paint, so it costs no frame. */
-export function boot(doc: Document): Promise<AppHandle> | null {
+export function boot(doc: Document, options: BootOptions = {}): Promise<AppHandle> | null {
   const root = doc.getElementById('app');
   if (root === null) return null;
-  return bootInto(doc, root);
+  return bootInto(doc, root, options);
 }
 
-async function bootInto(doc: Document, root: HTMLElement): Promise<AppHandle> {
+/** What a caller other than the shipped entry may add to a boot. The shipped entry
+ *  (`boot-entry.ts`) passes nothing, so production boots with no survey (ADR 0014: the
+ *  transport IS the switch). The e2e survey harness (`e2e-harness/`) is the one caller
+ *  that injects one, from a separate build the shipped app cannot reach. */
+export interface BootOptions {
+  readonly surveyTransport?: SurveyTransport;
+  /** Overrides the build-time `gameVersion` — the harness's way to stand in for a second
+   *  deploy without a second build. */
+  readonly gameVersion?: string;
+}
+
+async function bootInto(
+  doc: Document,
+  root: HTMLElement,
+  options: BootOptions,
+): Promise<AppHandle> {
   const view = doc.defaultView;
   const prefersReducedMotion =
     typeof view?.matchMedia === 'function' &&
@@ -1323,8 +1438,29 @@ async function bootInto(doc: Document, root: HTMLElement): Promise<AppHandle> {
       lock,
     }),
   );
+  // ADR 0014 §3's ask state — read ONLY where a survey can be offered. With no transport
+  // (production today) the survey slot is never created, read or written.
+  const gameVersion = options.gameVersion ?? import.meta.env.WYNDING_GAME_VERSION;
+  const surveyAsk =
+    options.surveyTransport === undefined
+      ? undefined
+      : await loadSurveyAsk(
+          // Its own slot, beside `settings` and the playtrace opt-out, and through the
+          // Web Locks `lock`: the ask's read-modify-write merges across tabs only under it.
+          createSaveSlot<StoredSurveyAsk>({
+            driver,
+            key: SURVEY_ASK_KEY,
+            deviceId,
+            parse: parseStoredSurveyAsk,
+            lock,
+          }),
+          gameVersion,
+        );
   return createApp(doc, root, {
     sceneFactory: phaserSceneFactory,
+    surveyTransport: options.surveyTransport,
+    surveyAsk,
+    gameVersion,
     schedule: rafScheduler,
     now: () => performance.now(),
     playtraceOptOut,

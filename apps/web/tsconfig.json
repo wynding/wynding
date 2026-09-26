@@ -55,7 +55,10 @@
   // `exclude` is what keeps `src/**/*.test.ts` type-checked in the one program that has
   // this app's `lib` and `types: []`. (A child REPLACES `exclude`; it does not merge.)
   "exclude": [],
-  "include": ["src", "perf", "e2e-perf"],
+  // `e2e-harness` joins for `perf`'s reason: Vite builds it (`vite.e2e.config.ts`) and does
+  // not typecheck. It names its test hook through a cast, never a `declare global`, so the
+  // barrier described above holds for it too.
+  "include": ["src", "perf", "e2e-perf", "e2e-harness"],
   "references": [
     { "path": "../../packages/render" },
     { "path": "../../packages/sim" },
