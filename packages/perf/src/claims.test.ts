@@ -2739,10 +2739,13 @@ function censusOccurrences(file: string): Numeral[] {
     const walked = walk(raw);
     // The string, template and regex-literal TEXT, as a same-length projection: everything the
     // walk marks neither comment nor code is literal data (a regex literal included, so
-    // `/\d{100}/` counts as a 100). Newlines are kept so the masks see lines.
-    const literals = Array.from(raw, (ch, i) =>
-      (!walked.commentAt[i] && !walked.codeAt[i]) || ch === '\n' ? ch : ' ',
-    ).join('');
+    // `/\d{100}/` counts as a 100). Newlines are kept so the masks see lines. Indexed by UTF-16
+    // unit, as the walk's masks are: iterating code points would drift one index per
+    // supplementary character and blank a numeral's digit (CodeRabbit, PR #174).
+    const literals = raw
+      .split('')
+      .map((ch, i) => ((!walked.commentAt[i] && !walked.codeAt[i]) || ch === '\n' ? ch : ' '))
+      .join('');
     for (const m of maskReferences(literals).matchAll(NUMERAL)) {
       const cleaned = m[0].replace(/[,_]/g, '');
       const value = normalizeNumeral(cleaned);
@@ -3157,6 +3160,15 @@ describe('the coverage contract is enforced, not merely asserted', () => {
     );
     const values = censusOccurrences(file).map((n) => n.value);
     expect(values).toEqual(['1234', '1234']);
+  });
+
+  it('the census projects string text by UTF-16 unit, so astral characters shift nothing', () => {
+    const file = 'fixture/census/astral.ts';
+    fileCache.set(
+      file,
+      "export const a = '\u{1F600}\u{1F600}\u{1F600}';\nexport const b = '329';\n",
+    );
+    expect(censusOccurrences(file).map((n) => n.raw)).toEqual(['329']);
   });
 
   it('a census compares full paths, so a same-basename path in another directory differs', () => {
