@@ -19,6 +19,7 @@ packages/
   render   Phaser 3 presentation layer (reads sim state)
   content  board / wave data
   replay   replay format + re-simulation validator
+  feedback end-of-run survey wire contract (payload + validation), shared with the endpoint
   types    shared types
   perf     ADR 0005 perf gate + stress scenes — most-downstream, never shipped
 apps/

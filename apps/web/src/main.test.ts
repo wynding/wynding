@@ -43,13 +43,8 @@ import { createApp, boot, type Scheduler } from './main';
 import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
 import { MAX_RECENT_AGE_MS } from './playtrace';
-import {
-  validateSurveyPayload,
-  type SurveyAsk,
-  type SurveyPayload,
-  type SurveySendResult,
-  type SurveyTransport,
-} from './survey';
+import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
+import { type SurveyAsk, type SurveySendResult, type SurveyTransport } from './survey';
 import type { WakeLockApi } from './wakelock';
 import { fakeWakeLock } from './wakelock-fakes';
 

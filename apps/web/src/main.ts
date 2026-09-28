@@ -38,13 +38,12 @@ import {
   type StoredOptOut,
 } from './playtrace';
 import { createKeymap } from './keymap';
+import { buildSurveyPayload, replayDigest } from '@wynding/feedback';
 import {
-  buildSurveyPayload,
   createSessionIdentity,
   createSurvey,
   loadSurveyAsk,
   parseStoredSurveyAsk,
-  replayDigest,
   SURVEY_ASK_KEY,
   type StoredSurveyAsk,
   type SurveyAsk,

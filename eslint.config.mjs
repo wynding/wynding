@@ -232,7 +232,7 @@ const NONDETERMINISTIC_SYNTAX = [
 // than set to nothing.
 
 /** ADR 0001's layering graph, left (roots) to right (most-downstream package):
- *  `{types, engine} <- sim <- {render, replay, content} <- perf <- apps`. */
+ *  `{types, engine} <- sim <- {render, replay, content, feedback} <- perf <- apps`. */
 const LAYERS = [
   // `@wynding/platform` sits here on the strength of its own stated position (ADR 0008 §1,
   // restated in `packages/platform/src/index.ts`): "a sibling leaf the apps depend on and the
@@ -248,7 +248,10 @@ const LAYERS = [
   // during a rebase.
   ['@wynding/types', '@wynding/engine', '@wynding/platform'],
   ['@wynding/sim'],
-  ['@wynding/render', '@wynding/replay', '@wynding/content'],
+  // `@wynding/feedback` (#158): the survey's wire contract, shared by `apps/web` and the
+  // feedback endpoint. It needs `engine` (the digest) and a type from `replay`, a same-layer
+  // edge this layer already permits.
+  ['@wynding/render', '@wynding/replay', '@wynding/content', '@wynding/feedback'],
   ['@wynding/perf'],
 ];
 

@@ -92,6 +92,8 @@ You can scope any task to one package with Turbo's filter, e.g.
 - `packages/render` — the Phaser 3 presentation layer (reads sim state).
 - `packages/content` — board and wave data.
 - `packages/replay` — the replay format and its re-simulation validator.
+- `packages/feedback` — the end-of-run survey's wire contract (payload and validation),
+  shared by the web client and the feedback endpoint.
 - `packages/types` — shared types.
 - `apps/web` — the PWA (Vite). `apps/server` — the score-validation Lambda.
   `apps/mobile` (Capacitor) and `apps/desktop` (Tauri) wrap the web build.
