@@ -2,11 +2,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createSurveyForm, type SurveyFormHost } from './survey-form';
 import {
   buildSurveyPayload,
-  createSurvey,
   SURVEY_TEXT_MAX,
-  type SurveyAsk,
   type SurveyPayload,
   type SurveyRunIdentity,
+} from '@wynding/feedback';
+import {
+  createSurvey,
+  type SurveyAsk,
   type SurveySendResult,
   type SurveyTransport,
 } from './survey';

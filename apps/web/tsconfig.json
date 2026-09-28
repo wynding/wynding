@@ -65,6 +65,7 @@
     { "path": "../../packages/content" },
     { "path": "../../packages/engine" },
     { "path": "../../packages/platform" },
+    { "path": "../../packages/feedback" },
     { "path": "../../packages/replay" },
     { "path": "../../packages/perf" }
   ]

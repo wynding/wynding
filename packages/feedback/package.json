@@ -1,0 +1,25 @@
+{
+  "name": "@wynding/feedback",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The end-of-run survey's wire contract: payload types, the allowlisted builder and the server-side validation, shared by the web client and the feedback endpoint.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sha": "./src/sha.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b && tsc --noEmit -p tsconfig.tests.json",
+    "lint": "eslint src",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@wynding/engine": "workspace:*",
+    "@wynding/replay": "workspace:*"
+  }
+}

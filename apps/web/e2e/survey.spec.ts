@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { validateSurveyPayload, type SurveyPayload, type SurveySendResult } from '../src/survey';
+import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
+import { type SurveySendResult } from '../src/survey';
 
 // survey.spec.ts — ADR 0014's end-of-run survey in a real browser (#158), carrying the axe
 // audit §6 makes an acceptance criterion.

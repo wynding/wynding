@@ -34,14 +34,16 @@ The decisive reason for a monorepo over separate repos: `apps/server` re-simulat
 replays using the **same `packages/sim`** the client runs. Sharing one versioned
 package — rather than syncing two repos — is what keeps client and server
 simulations identical. The boundary is the package dependency graph:
-`{types, engine} <- sim <- {render, replay, content} <- perf <- apps` — read as
+`{types, engine} <- sim <- {render, replay, content, feedback} <- perf <- apps` — read as
 layering shorthand: each layer MAY depend on anything to its left, not that every
 drawn edge exists (`perf`, for instance, does not import `render`). Edges WITHIN a
 layer are permitted and do exist — `render`'s and `replay`'s tests import
 `@wynding/content`. What the graph forbids is a **back-edge**: an import of anything
 strictly to the right. _(Corrected 2026-08-12: `types` and `engine` are both roots —
 `engine` declares no dependency on `@wynding/types` (its only dependency is
-`@noble/hashes`) — and `perf` was missing from the graph entirely.)_
+`@noble/hashes`) — and `perf` was missing from the graph entirely. Amended 2026-09-28:
+`feedback`, the end-of-run survey's wire contract shared by `apps/web` and the feedback
+endpoint, joins `replay`'s layer ([#158](https://github.com/wynding/wynding/issues/158)).)_
 
 **This graph is enforced by a lint rule generated from it** — `eslint.config.mjs`'s
 layering zones, which derive each zone's forbidden set from the layer table above, and

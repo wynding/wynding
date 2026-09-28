@@ -9,13 +9,8 @@
 // parallel copy, so what the player sees can only ever be the state the model holds.
 
 import { t } from './i18n/t';
-import {
-  SURVEY_TEXT_MAX,
-  type Survey,
-  type SurveyPayload,
-  type SurveyScale,
-  type SurveySendResult,
-} from './survey';
+import { SURVEY_TEXT_MAX, type SurveyPayload, type SurveyScale } from '@wynding/feedback';
+import { type Survey, type SurveySendResult } from './survey';
 
 /** What the form needs from the app (`main.ts`), and nothing else. */
 export interface SurveyFormHost {

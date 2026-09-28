@@ -93,6 +93,9 @@ importers:
       '@wynding/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@wynding/feedback':
+        specifier: workspace:*
+        version: link:../../packages/feedback
       '@wynding/platform':
         specifier: workspace:*
         version: link:../../packages/platform
@@ -142,6 +145,15 @@ importers:
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
+
+  packages/feedback:
+    dependencies:
+      '@wynding/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@wynding/replay':
+        specifier: workspace:*
+        version: link:../replay
 
   packages/perf:
     dependencies:

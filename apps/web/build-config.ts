@@ -10,14 +10,17 @@
 // Why its own file and not an export from `vite.config.ts`: that file is outside this
 // package's tsc program (`tsconfig.json` includes `src`, `perf`, `e2e-perf`), and a Vitest
 // import of it would pull Vite's Node-side config types into a DOM-lib program with
-// `types: []`. This module imports nothing, so every consumer — `vite.config.ts`,
-// `vitest.config.ts`, the tests, and the shipped `src/survey.ts` — can read the same
-// values. Keep it that way: an import added here (a Node one especially) would land in the
-// client bundle; git access is injected (`readCleanHead`'s `git`) for exactly that reason.
+// `types: []`. This module imports only `@wynding/feedback/sha` (the full-SHA rule, which
+// imports nothing itself), so every consumer (`vite.config.ts`, `vitest.config.ts`, the
+// tests) can read the same values. Keep it that way: an import added here (a Node one
+// especially) would reach the configs and the tests; git access is injected
+// (`readCleanHead`'s `git`) for exactly that reason.
 //
 // Nothing here knows what a Host *is*. It knows only that one mode declares and the other
 // does not, which is the whole of ADR 0012 constraint 1 (the web build never learns *which*
 // host it is in).
+
+import { isFullCommitSha } from '@wynding/feedback/sha';
 
 /** The Vite mode that produces a Host build. `pnpm run build:host` passes it. */
 export const HOST_MODE = 'host';
@@ -76,15 +79,6 @@ export const GAME_VERSION_DEFINE_KEY = 'import.meta.env.WYNDING_GAME_VERSION';
 /** What a build carries when no full SHA can be resolved (a source tarball, no git). It can
  *  never pass the survey payload's `gameVersion` check, so such a build cannot submit one. */
 export const UNKNOWN_GAME_VERSION = 'unknown';
-
-/** SHA-1 (40 hex), or a SHA-256 repository's object id (64 hex). */
-const FULL_SHA_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-
-/** Whether `value` is a full lowercase commit SHA: the one `gameVersion` identity rule, shared
- *  by what a build embeds and what the survey accepts (`survey.ts`). */
-export function isFullCommitSha(value: string): boolean {
-  return FULL_SHA_RE.test(value);
-}
 
 /**
  * Resolve the build's `gameVersion`. An explicit `WYNDING_GAME_VERSION` wins (a CI that knows

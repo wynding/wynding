@@ -26,6 +26,7 @@
     "@wynding/engine": "workspace:*",
     "@wynding/platform": "workspace:*",
     "@wynding/render": "workspace:*",
+    "@wynding/feedback": "workspace:*",
     "@wynding/replay": "workspace:*",
     "@wynding/sim": "workspace:*"
   },

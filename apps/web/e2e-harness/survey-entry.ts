@@ -13,7 +13,8 @@
 // `gameVersion`, §3).
 
 import { boot } from '../src/main';
-import type { SurveyPayload, SurveySendResult, SurveyTransport } from '../src/survey';
+import type { SurveyPayload } from '@wynding/feedback';
+import type { SurveySendResult, SurveyTransport } from '../src/survey';
 
 /** How the next send settles: at once with a result, or `hold` until the spec releases it. */
 type Mode = SurveySendResult | 'hold';
