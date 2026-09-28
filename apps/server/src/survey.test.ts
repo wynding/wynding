@@ -417,6 +417,16 @@ describe('createSsmGetParameter — the production SSM read', () => {
     });
   });
 
+  it('bounds every SSM attempt, and aborts rather than warns, well inside the 10 s Lambda timeout', () => {
+    const { maxAttempts, requestHandler: h } = SSM_CLIENT_CONFIG;
+    expect(maxAttempts).toBe(2);
+    expect(h.connectionTimeout).toBe(1000);
+    expect(h.requestTimeout).toBe(2000);
+    expect(h.throwOnRequestTimeout).toBe(true);
+    // Worst case: every attempt spends its whole connect + request budget.
+    expect(maxAttempts * (h.connectionTimeout + h.requestTimeout)).toBeLessThan(8_000);
+  });
+
   it("silences the HTTP handler's own logger (the log carries fixed codes only)", () => {
     const { logger } = SSM_CLIENT_CONFIG.requestHandler;
     const spies = (['debug', 'info', 'warn', 'error', 'log'] as const).map((m) =>
@@ -430,7 +440,7 @@ describe('createSsmGetParameter — the production SSM read', () => {
     }
   });
 
-  it('gives up on a stalled SSM endpoint well inside the 10 s Lambda timeout', async () => {
+  it('gives up on a stalled SSM endpoint with a timeout error, logging nothing', async () => {
     // A server that accepts the connection and never answers: the case a request timeout that
     // only warns would leave hanging until the Lambda timeout.
     const server = createServer(() => {});
@@ -443,12 +453,10 @@ describe('createSsmGetParameter — the production SSM read', () => {
       endpoint: `http://127.0.0.1:${port}`,
       credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
     });
-    const started = Date.now();
     try {
       await expect(createSsmGetParameter(() => client)('/wynding/origin')).rejects.toMatchObject({
         name: 'TimeoutError',
       });
-      expect(Date.now() - started).toBeLessThan(8_000);
       // Nothing free-text reaches the log on the way.
       expect(warn).not.toHaveBeenCalled();
     } finally {
