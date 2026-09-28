@@ -6,6 +6,7 @@ import {
   type SurveyPayload,
 } from '@wynding/feedback';
 import {
+  createLambdaEntry,
   createSurveyHandler,
   handler,
   ORIGIN_SECRET_HEADER,
@@ -250,10 +251,18 @@ describe('readSurveyConfig — off unless switched on and fully configured', () 
     expect(readSurveyConfig({ ...full, DAILY_CEILING: '7' })?.dailyCeiling).toBe(7);
   });
 
-  it('reads the origin secret on its own, whether or not the survey is on', () => {
-    expect(readOriginSecret({ ORIGIN_SECRET: SECRET })).toBe(SECRET);
-    expect(readOriginSecret({ ORIGIN_SECRET: SECRET, SURVEY_ENABLED: 'false' })).toBe(SECRET);
-    expect(readOriginSecret({})).toBe('');
+  it('reads the origin secret from the named parameter, whether or not the survey is on', async () => {
+    const get = vi.fn(async (name: string) => (name === '/wynding/origin' ? SECRET : undefined));
+    const named = { ORIGIN_SECRET_PARAM: '/wynding/origin' };
+    expect(await readOriginSecret(named, get)).toBe(SECRET);
+    expect(await readOriginSecret({ ...named, SURVEY_ENABLED: 'false' }, get)).toBe(SECRET);
+    expect(get).toHaveBeenCalledWith('/wynding/origin');
+    // No parameter named, or a parameter with no value: none configured.
+    expect(await readOriginSecret({ ORIGIN_SECRET_PARAM: '/wynding/empty' }, get)).toBe('');
+    get.mockClear();
+    expect(await readOriginSecret({}, get)).toBe('');
+    expect(await readOriginSecret({ ORIGIN_SECRET_PARAM: '' }, get)).toBe('');
+    expect(get).not.toHaveBeenCalled();
   });
 
   it('is null (disabled) for any missing or malformed setting', () => {
@@ -275,6 +284,59 @@ describe('readSurveyConfig — off unless switched on and fully configured', () 
 });
 
 describe('the Lambda entry point', () => {
+  const ENV = {
+    ORIGIN_SECRET_PARAM: '/wynding/origin',
+    SURVEY_ENABLED: 'true',
+    TABLE_NAME: 'wynding-feedback',
+    PRIVACY_NOTICE_VERSION: '2026-09-28',
+  };
+
+  function entry(getParameter: (name: string) => Promise<string | undefined>) {
+    const logs: string[] = [];
+    const tables: string[] = [];
+    const run = createLambdaEntry({
+      env: ENV,
+      getParameter: vi.fn(getParameter),
+      createStore: (tableName) => {
+        tables.push(tableName);
+        return { put: async () => 'stored' as const };
+      },
+      now: () => NOW,
+      log: (l) => logs.push(l),
+    });
+    return { run, logs, tables };
+  }
+
+  it('reads the secret once per execution environment, then serves with it', async () => {
+    const get = vi.fn(async () => SECRET);
+    const e = entry(get);
+    expect((await e.run(event())).statusCode).toBe(200);
+    expect((await e.run(event())).statusCode).toBe(200);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(e.tables).toEqual(['wynding-feedback']);
+    expect((await e.run(event({ headers: { [ORIGIN_SECRET_HEADER]: 'wrong' } }))).statusCode).toBe(
+      403,
+    );
+  });
+
+  it('answers 503 when the secret cannot be read, and tries again on the next request', async () => {
+    let fail = true;
+    const get = vi.fn(async () => {
+      if (fail) throw new Error('AccessDenied: arn:aws:ssm:...');
+      return SECRET;
+    });
+    const e = entry(get);
+    const first = await e.run(event());
+    expect(first.statusCode).toBe(503);
+    expect(statusOf(first.body)).toBe('error');
+    // The fixed code only: never the SDK's error message.
+    expect(e.logs).toEqual(['{"survey":"error"}']);
+    expect(e.tables).toEqual([]);
+    fail = false;
+    expect((await e.run(event())).statusCode).toBe(200);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
   it('reads its configuration from the environment, and is off without it', async () => {
     const saved = process.env['SURVEY_ENABLED'];
     delete process.env['SURVEY_ENABLED'];

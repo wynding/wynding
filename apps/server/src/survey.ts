@@ -10,7 +10,9 @@
 //   2. CloudFront's origin secret header, compared in constant time (403). The API Gateway
 //      invoke URL is public; this is what makes the API usable only through CloudFront. It
 //      comes BEFORE the kill switch, so a direct caller cannot even learn whether the survey
-//      is switched on. (With no secret configured, nobody can be authenticated: 503.)
+//      is switched on. (With no secret configured, nobody can be authenticated: 503.) The
+//      secret is an SSM SecureString, read once per execution environment, so it is never in
+//      the function's configuration or in the deploy workflow that writes that configuration.
 //   3. The kill switch (503): the handler is OFF unless `SURVEY_ENABLED` is exactly `true`,
 //      and it is also off if any other setting is missing, so a half-configured deploy
 //      refuses rather than half-works.
@@ -27,6 +29,7 @@
 // "ceiling reached" metric filter and alarm count.
 
 import { timingSafeEqual } from 'node:crypto';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
 import { createDynamoSurveyStore, type SurveyStore } from './survey-store';
 
@@ -72,10 +75,19 @@ export interface SurveyConfig {
   readonly dailyCeiling: number;
 }
 
+/** Reads one SecureString parameter, decrypted. `undefined` when it has no value. */
+export type GetParameter = (name: string) => Promise<string | undefined>;
+
 /** The origin secret, read on its own: the handler checks it before the kill switch, so it
- *  must be available whether or not the survey is switched on. Empty means none configured. */
-export function readOriginSecret(env: Readonly<Record<string, string | undefined>>): string {
-  return env['ORIGIN_SECRET'] ?? '';
+ *  must be available whether or not the survey is switched on. `ORIGIN_SECRET_PARAM` names the
+ *  SSM parameter; empty means none configured. A failed read rejects (and is retried). */
+export async function readOriginSecret(
+  env: Readonly<Record<string, string | undefined>>,
+  getParameter: GetParameter,
+): Promise<string> {
+  const name = env['ORIGIN_SECRET_PARAM'] ?? '';
+  if (name === '') return '';
+  return (await getParameter(name)) ?? '';
 }
 
 /** Read the configuration from the Lambda environment. Returns null (and so disables the
@@ -191,20 +203,51 @@ export function createSurveyHandler(deps: {
   };
 }
 
-/** The Lambda entry point: configured from the environment on first use (a cold start), so
- *  importing this module has no side effects. */
-let configured: ((event: HttpApiEvent) => Promise<HttpApiResult>) | null = null;
+type SurveyHandler = (event: HttpApiEvent) => Promise<HttpApiResult>;
 
-export async function handler(event: HttpApiEvent): Promise<HttpApiResult> {
-  if (configured === null) {
-    const config = readSurveyConfig(process.env);
-    configured = createSurveyHandler({
-      originSecret: readOriginSecret(process.env),
-      config,
-      store: createDynamoSurveyStore({ tableName: config?.tableName ?? '' }),
-      now: () => Date.now(),
-      log: (line) => console.log(line),
-    });
-  }
-  return configured(event);
+/** The Lambda entry point, configured on first use (a cold start) so importing this module has
+ *  no side effects. A configuration that fails (the SSM read) is NOT cached: that request gets
+ *  a 503 and the next one tries again. Exported as a factory so tests can supply the seams. */
+export function createLambdaEntry(deps: {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly getParameter: GetParameter;
+  readonly createStore: (tableName: string) => SurveyStore;
+  readonly now: () => number;
+  readonly log: (line: string) => void;
+}): SurveyHandler {
+  let configured: SurveyHandler | null = null;
+  return async (event) => {
+    if (configured === null) {
+      let originSecret: string;
+      try {
+        originSecret = await readOriginSecret(deps.env, deps.getParameter);
+      } catch {
+        deps.log(JSON.stringify({ survey: 'error' }));
+        return respond(503, 'error');
+      }
+      const config = readSurveyConfig(deps.env);
+      configured = createSurveyHandler({
+        originSecret,
+        config,
+        store: deps.createStore(config?.tableName ?? ''),
+        now: deps.now,
+        log: deps.log,
+      });
+    }
+    return configured(event);
+  };
 }
+
+let ssm: SSMClient | null = null;
+
+export const handler: SurveyHandler = createLambdaEntry({
+  env: process.env,
+  getParameter: async (name) => {
+    ssm ??= new SSMClient({});
+    const out = await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: true }));
+    return out.Parameter?.Value;
+  },
+  createStore: (tableName) => createDynamoSurveyStore({ tableName }),
+  now: () => Date.now(),
+  log: (line) => console.log(line),
+});
