@@ -52,7 +52,8 @@ export type SurveyOutcome =
   | 'invalid'
   | 'ceiling'
   | 'throttled'
-  | 'error';
+  | 'error'
+  | 'config_error';
 
 /** The slice of an API Gateway HTTP API (payload v2) event this handler reads. */
 export interface HttpApiEvent {
@@ -80,7 +81,7 @@ export type GetParameter = (name: string) => Promise<string | undefined>;
 
 /** The origin secret, read on its own: the handler checks it before the kill switch, so it
  *  must be available whether or not the survey is switched on. `ORIGIN_SECRET_PARAM` names the
- *  SSM parameter; empty means none configured. A failed read rejects (and is retried). */
+ *  SSM parameter; empty means none configured. A failed read rejects (retried after a backoff). */
 export async function readOriginSecret(
   env: Readonly<Record<string, string | undefined>>,
   getParameter: GetParameter,
@@ -205,9 +206,17 @@ export function createSurveyHandler(deps: {
 
 type SurveyHandler = (event: HttpApiEvent) => Promise<HttpApiResult>;
 
+/** After a failed SSM read, how long before another is attempted. Requests in between answer
+ *  503 without calling SSM, so strangers hammering the public invoke URL during a
+ *  misconfiguration cannot turn each request into an SSM call (the account's GetParameter
+ *  throughput is shared with other functions). */
+export const SECRET_RETRY_BACKOFF_MS = 10_000;
+
 /** The Lambda entry point, configured on first use (a cold start) so importing this module has
- *  no side effects. A configuration that fails (the SSM read) is NOT cached: that request gets
- *  a 503 and the next one tries again. Exported as a factory so tests can supply the seams. */
+ *  no side effects. The method is checked first, so only a POST can cause the SSM read. A read
+ *  that fails is NOT cached: requests answer 503 `config_error`, and the read is tried again
+ *  once SECRET_RETRY_BACKOFF_MS has passed. Exported as a factory so tests can supply the
+ *  seams. */
 export function createLambdaEntry(deps: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly getParameter: GetParameter;
@@ -216,14 +225,22 @@ export function createLambdaEntry(deps: {
   readonly log: (line: string) => void;
 }): SurveyHandler {
   let configured: SurveyHandler | null = null;
+  let retryAfter = 0;
+  const fail = (statusCode: number, outcome: SurveyOutcome): HttpApiResult => {
+    deps.log(JSON.stringify({ survey: outcome }));
+    return respond(statusCode, outcome);
+  };
   return async (event) => {
     if (configured === null) {
+      // The same first check the handler makes, before anything costs an SSM call.
+      if (event.requestContext?.http?.method !== 'POST') return fail(405, 'method');
+      if (deps.now() < retryAfter) return fail(503, 'config_error');
       let originSecret: string;
       try {
         originSecret = await readOriginSecret(deps.env, deps.getParameter);
       } catch {
-        deps.log(JSON.stringify({ survey: 'error' }));
-        return respond(503, 'error');
+        retryAfter = deps.now() + SECRET_RETRY_BACKOFF_MS;
+        return fail(503, 'config_error');
       }
       const config = readSurveyConfig(deps.env);
       configured = createSurveyHandler({
@@ -238,15 +255,29 @@ export function createLambdaEntry(deps: {
   };
 }
 
-let ssm: SSMClient | null = null;
+/** The production SSM read: one attempt plus one retry, each bounded, so an unreachable
+ *  endpoint fails fast into the fixed `config_error` answer instead of hanging until the
+ *  Lambda timeout. The client is built on first use. Exported so the request shape is
+ *  testable with a stand-in client. */
+export const SSM_CLIENT_CONFIG = {
+  maxAttempts: 2,
+  requestHandler: { connectionTimeout: 1000, requestTimeout: 2000 },
+} as const;
+
+export function createSsmGetParameter(
+  makeClient: () => Pick<SSMClient, 'send'> = () => new SSMClient(SSM_CLIENT_CONFIG),
+): GetParameter {
+  let client: Pick<SSMClient, 'send'> | null = null;
+  return async (name) => {
+    client ??= makeClient();
+    const out = await client.send(new GetParameterCommand({ Name: name, WithDecryption: true }));
+    return out.Parameter?.Value;
+  };
+}
 
 export const handler: SurveyHandler = createLambdaEntry({
   env: process.env,
-  getParameter: async (name) => {
-    ssm ??= new SSMClient({});
-    const out = await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: true }));
-    return out.Parameter?.Value;
-  },
+  getParameter: createSsmGetParameter(),
   createStore: (tableName) => createDynamoSurveyStore({ tableName }),
   now: () => Date.now(),
   log: (line) => console.log(line),

@@ -5,13 +5,17 @@ import {
   SURVEY_TEXT_MAX,
   type SurveyPayload,
 } from '@wynding/feedback';
+import { GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   createLambdaEntry,
+  createSsmGetParameter,
   createSurveyHandler,
   handler,
   ORIGIN_SECRET_HEADER,
   readOriginSecret,
   readSurveyConfig,
+  SECRET_RETRY_BACKOFF_MS,
+  SSM_CLIENT_CONFIG,
   SURVEY_MAX_BODY_BYTES,
   type HttpApiEvent,
   type SurveyConfig,
@@ -291,55 +295,92 @@ describe('the Lambda entry point', () => {
     PRIVACY_NOTICE_VERSION: '2026-09-28',
   };
 
-  function entry(getParameter: (name: string) => Promise<string | undefined>) {
+  function entry(
+    getParameter: (name: string) => Promise<string | undefined>,
+    env: Readonly<Record<string, string | undefined>> = ENV,
+  ) {
     const logs: string[] = [];
     const tables: string[] = [];
+    let clock = NOW;
+    const get = vi.fn(getParameter);
     const run = createLambdaEntry({
-      env: ENV,
-      getParameter: vi.fn(getParameter),
+      env,
+      getParameter: get,
       createStore: (tableName) => {
         tables.push(tableName);
         return { put: async () => 'stored' as const };
       },
-      now: () => NOW,
+      now: () => clock,
       log: (l) => logs.push(l),
     });
-    return { run, logs, tables };
+    return { run, logs, tables, get, advance: (ms: number) => (clock += ms) };
   }
 
   it('reads the secret once per execution environment, then serves with it', async () => {
-    const get = vi.fn(async () => SECRET);
-    const e = entry(get);
+    const e = entry(async () => SECRET);
     expect((await e.run(event())).statusCode).toBe(200);
     expect((await e.run(event())).statusCode).toBe(200);
-    expect(get).toHaveBeenCalledTimes(1);
+    expect(e.get).toHaveBeenCalledTimes(1);
+    expect(e.get).toHaveBeenCalledWith('/wynding/origin');
     expect(e.tables).toEqual(['wynding-feedback']);
     expect((await e.run(event({ headers: { [ORIGIN_SECRET_HEADER]: 'wrong' } }))).statusCode).toBe(
       403,
     );
   });
 
-  it('answers 503 when the secret cannot be read, and tries again on the next request', async () => {
+  it('answers 503 config_error when the secret cannot be read, and retries only after the backoff', async () => {
     let fail = true;
-    const get = vi.fn(async () => {
+    const e = entry(async () => {
       if (fail) throw new Error('AccessDenied: arn:aws:ssm:...');
       return SECRET;
     });
-    const e = entry(get);
     const first = await e.run(event());
     expect(first.statusCode).toBe(503);
-    expect(statusOf(first.body)).toBe('error');
+    expect(statusOf(first.body)).toBe('config_error');
     // The fixed code only: never the SDK's error message.
-    expect(e.logs).toEqual(['{"survey":"error"}']);
+    expect(e.logs).toEqual(['{"survey":"config_error"}']);
     expect(e.tables).toEqual([]);
     fail = false;
+    // Inside the backoff: still 503, and no second SSM call.
+    e.advance(SECRET_RETRY_BACKOFF_MS - 1);
+    expect(statusOf((await e.run(event())).body)).toBe('config_error');
+    expect(e.get).toHaveBeenCalledTimes(1);
+    // After it: read again, and serve.
+    e.advance(1);
     expect((await e.run(event())).statusCode).toBe(200);
-    expect(get).toHaveBeenCalledTimes(2);
+    expect(e.get).toHaveBeenCalledTimes(2);
   });
 
-  it('reads its configuration from the environment, and is off without it', async () => {
-    const saved = process.env['SURVEY_ENABLED'];
-    delete process.env['SURVEY_ENABLED'];
+  it('checks the method before anything can cost an SSM read', async () => {
+    const e = entry(async () => {
+      throw new Error('never reached');
+    });
+    const res = await e.run(event({ requestContext: { http: { method: 'GET' } } }));
+    expect(res.statusCode).toBe(405);
+    expect(e.logs).toEqual(['{"survey":"method"}']);
+    expect(e.get).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a parameter with no value (disabled, for the life of the environment)', async () => {
+    const e = entry(async () => undefined);
+    const res = await e.run(event());
+    expect(res.statusCode).toBe(503);
+    expect(statusOf(res.body)).toBe('disabled');
+    await e.run(event());
+    expect(e.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('is switched off by SURVEY_ENABLED even with a valid secret', async () => {
+    const e = entry(async () => SECRET, { ...ENV, SURVEY_ENABLED: undefined });
+    const res = await e.run(event());
+    expect(res.statusCode).toBe(503);
+    expect(e.logs).toEqual(['{"survey":"disabled"}']);
+    expect(e.tables).toEqual(['']);
+  });
+
+  it('with no secret parameter configured, answers 503 without calling SSM (the real entry point)', async () => {
+    const saved = process.env['ORIGIN_SECRET_PARAM'];
+    delete process.env['ORIGIN_SECRET_PARAM'];
     const logged = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const res = await handler(event());
@@ -347,8 +388,40 @@ describe('the Lambda entry point', () => {
       expect(logged).toHaveBeenCalledWith('{"survey":"disabled"}');
     } finally {
       logged.mockRestore();
-      if (saved !== undefined) process.env['SURVEY_ENABLED'] = saved;
+      if (saved !== undefined) process.env['ORIGIN_SECRET_PARAM'] = saved;
     }
+  });
+});
+
+describe('createSsmGetParameter — the production SSM read', () => {
+  it('asks for the named parameter decrypted, builds its client once, and unwraps the value', async () => {
+    const sent: unknown[] = [];
+    let value: string | undefined = SECRET;
+    const makeClient = vi.fn(() => ({
+      send: vi.fn(async (command: unknown) => {
+        sent.push(command);
+        return value === undefined ? {} : { Parameter: { Value: value } };
+      }),
+    }));
+    const get = createSsmGetParameter(makeClient as never);
+    expect(await get('/wynding/origin')).toBe(SECRET);
+    value = undefined;
+    expect(await get('/wynding/origin')).toBeUndefined();
+    expect(makeClient).toHaveBeenCalledTimes(1);
+    expect(sent[0]).toBeInstanceOf(GetParameterCommand);
+    expect((sent[0] as GetParameterCommand).input).toEqual({
+      Name: '/wynding/origin',
+      WithDecryption: true,
+    });
+  });
+
+  it('bounds the real client: one retry, short timeouts, well inside the 10 s Lambda timeout', () => {
+    const { maxAttempts, requestHandler } = SSM_CLIENT_CONFIG;
+    expect(maxAttempts).toBe(2);
+    // Worst case: every attempt spends the full connect + request budget.
+    const worstMs =
+      maxAttempts * (requestHandler.connectionTimeout + requestHandler.requestTimeout);
+    expect(worstMs).toBeLessThan(10_000);
   });
 });
 
