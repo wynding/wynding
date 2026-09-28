@@ -136,7 +136,7 @@ const MAX_STARS = 3;
 
 /**
  * Whether `gameVersion` is a real revision identity — a full commit SHA (§4). A build that
- * could not resolve one carries `'unknown'` (`build-config.ts`): every such build would share
+ * could not resolve one carries `'unknown'` (`apps/web/build-config.ts`): every such build would share
  * one version, so one Not now would silence all of them, and every send would fail
  * validation. The survey is therefore not offered at all in such a build.
  */
