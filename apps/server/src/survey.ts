@@ -259,9 +259,20 @@ export function createLambdaEntry(deps: {
  *  endpoint fails fast into the fixed `config_error` answer instead of hanging until the
  *  Lambda timeout. The client is built on first use. Exported so the request shape is
  *  testable with a stand-in client. */
+const ignore = (): void => undefined;
+const silent = { debug: ignore, info: ignore, warn: ignore, error: ignore };
+
 export const SSM_CLIENT_CONFIG = {
   maxAttempts: 2,
-  requestHandler: { connectionTimeout: 1000, requestTimeout: 2000 },
+  requestHandler: {
+    connectionTimeout: 1000,
+    requestTimeout: 2000,
+    // Without this the request timeout only WARNS (to the console, a free-text log line)
+    // and the request keeps waiting until the Lambda timeout.
+    throwOnRequestTimeout: true,
+    // And the handler's own warnings stay out of the log, which carries fixed codes only.
+    logger: silent,
+  },
 } as const;
 
 export function createSsmGetParameter(

@@ -5,7 +5,9 @@ import {
   SURVEY_TEXT_MAX,
   type SurveyPayload,
 } from '@wynding/feedback';
-import { GetParameterCommand } from '@aws-sdk/client-ssm';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import {
   createLambdaEntry,
   createSsmGetParameter,
@@ -415,14 +417,45 @@ describe('createSsmGetParameter — the production SSM read', () => {
     });
   });
 
-  it('bounds the real client: one retry, short timeouts, well inside the 10 s Lambda timeout', () => {
-    const { maxAttempts, requestHandler } = SSM_CLIENT_CONFIG;
-    expect(maxAttempts).toBe(2);
-    // Worst case: every attempt spends the full connect + request budget.
-    const worstMs =
-      maxAttempts * (requestHandler.connectionTimeout + requestHandler.requestTimeout);
-    expect(worstMs).toBeLessThan(10_000);
+  it("silences the HTTP handler's own logger (the log carries fixed codes only)", () => {
+    const { logger } = SSM_CLIENT_CONFIG.requestHandler;
+    const spies = (['debug', 'info', 'warn', 'error', 'log'] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    try {
+      for (const level of ['debug', 'info', 'warn', 'error'] as const) logger[level]();
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
+
+  it('gives up on a stalled SSM endpoint well inside the 10 s Lambda timeout', async () => {
+    // A server that accepts the connection and never answers: the case a request timeout that
+    // only warns would leave hanging until the Lambda timeout.
+    const server = createServer(() => {});
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = new SSMClient({
+      ...SSM_CLIENT_CONFIG,
+      region: 'us-west-2',
+      endpoint: `http://127.0.0.1:${port}`,
+      credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+    });
+    const started = Date.now();
+    try {
+      await expect(createSsmGetParameter(() => client)('/wynding/origin')).rejects.toThrow();
+      expect(Date.now() - started).toBeLessThan(8_000);
+      // Nothing free-text reaches the log on the way.
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      client.destroy();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 15_000);
 });
 
 describe('survey store — the transaction (ADR 0001 §3, §6, §7)', () => {
