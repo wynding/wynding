@@ -154,13 +154,13 @@ describe('createFetchTransport', () => {
 
   it('calls fetch as a plain function, never as a method of its options', async () => {
     // A native fetch called with the options object as its receiver throws in browsers.
-    let receiver: unknown = 'unset';
+    const receivers: unknown[] = [];
     const fetch = function (this: unknown) {
-      receiver = this;
+      receivers.push(this);
       return Promise.resolve({ ok: true });
     };
     await createFetchTransport({ fetch }).send(PAYLOAD, new AbortController().signal);
-    expect(receiver).toBeUndefined();
+    expect(receivers).toEqual([undefined]);
   });
 
   it('uses the real timers by default, and honours an endpoint override', async () => {
