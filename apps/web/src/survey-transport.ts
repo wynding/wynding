@@ -1,0 +1,72 @@
+// survey-transport.ts — the survey's real transport: a fetch to the feedback endpoint
+// (wynding-site ADR 0001). NOT injected anywhere yet: the survey stays off until the endpoint
+// is deployed and the shipped build passes this to `boot()` (ADR 0001's last follow-up step).
+//
+// The status mapping is the endpoint ADR's §4, and it is deliberately coarse:
+//   2xx                      accepted (a stored submission, or a duplicate of one)
+//   any other HTTP status    rejected (invalid, throttled, over the day's ceiling, disabled)
+//   no answer in time, or    offline
+//   a network failure
+// The timeout is the client's half of the bounded-settle requirement: the survey holds the
+// results dialog's status region while a send is in flight, so a request that never settles
+// must not keep it held.
+
+import type { SurveyPayload } from '@wynding/feedback';
+import type { SurveySendResult, SurveyTransport } from './survey';
+
+/** Same origin: the web game is served from wynding.net, and the API is `/api/*` there. */
+export const SURVEY_ENDPOINT = '/api/feedback/survey';
+
+/** How long a send may take before it reads as offline. */
+export const SURVEY_TIMEOUT_MS = 10_000;
+
+type Fetch = (input: string, init: RequestInit) => Promise<Pick<Response, 'ok'>>;
+
+export function createFetchTransport(options: {
+  readonly fetch: Fetch;
+  readonly endpoint?: string;
+  readonly timeoutMs?: number;
+  /** Timer seam for tests; defaults to the global timers. */
+  readonly setTimeout?: (fn: () => void, ms: number) => unknown;
+  readonly clearTimeout?: (handle: unknown) => void;
+}): SurveyTransport {
+  const endpoint = options.endpoint ?? SURVEY_ENDPOINT;
+  const timeoutMs = options.timeoutMs ?? SURVEY_TIMEOUT_MS;
+  const arm = options.setTimeout ?? ((fn, ms) => globalThis.setTimeout(fn, ms));
+  const disarm =
+    options.clearTimeout ??
+    ((handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>));
+
+  return {
+    async send(payload: SurveyPayload, signal: AbortSignal): Promise<SurveySendResult> {
+      // A run start that already happened needs no request at all.
+      if (signal.aborted) return 'offline';
+      // One controller for both reasons to stop: the survey's operation token (a run start)
+      // and the timeout. Combined by hand rather than `AbortSignal.any`, which older WebKit
+      // (the Capacitor WebView) lacks.
+      const request = new AbortController();
+      const stop = (): void => request.abort();
+      signal.addEventListener('abort', stop, { once: true });
+      const timer = arm(stop, timeoutMs);
+      try {
+        const response = await options.fetch(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: request.signal,
+          // Nothing about the player rides the request: no cookies, no credentials.
+          credentials: 'omit',
+          cache: 'no-store',
+        });
+        return response.ok ? 'accepted' : 'rejected';
+      } catch {
+        // A timeout, a network failure, or the run-start abort (whose result the survey
+        // discards anyway): none of them reached a verdict from the server.
+        return 'offline';
+      } finally {
+        disarm(timer);
+        signal.removeEventListener('abort', stop);
+      }
+    },
+  };
+}
