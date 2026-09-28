@@ -255,10 +255,6 @@ export function createLambdaEntry(deps: {
   };
 }
 
-/** The production SSM read: one attempt plus one retry, each bounded, so an unreachable
- *  endpoint fails fast into the fixed `config_error` answer instead of hanging until the
- *  Lambda timeout. The client is built on first use. Exported so the request shape is
- *  testable with a stand-in client. */
 const ignore = (): void => undefined;
 const silent = { debug: ignore, info: ignore, warn: ignore, error: ignore };
 
@@ -275,6 +271,10 @@ export const SSM_CLIENT_CONFIG = {
   },
 } as const;
 
+/** The production SSM read: one attempt plus one retry, each bounded, so an unreachable
+ *  endpoint fails fast into the fixed `config_error` answer instead of hanging until the
+ *  Lambda timeout. The client is built on first use. Exported so the request shape is
+ *  testable with a stand-in client. */
 export function createSsmGetParameter(
   makeClient: () => Pick<SSMClient, 'send'> = () => new SSMClient(SSM_CLIENT_CONFIG),
 ): GetParameter {

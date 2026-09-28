@@ -445,7 +445,9 @@ describe('createSsmGetParameter — the production SSM read', () => {
     });
     const started = Date.now();
     try {
-      await expect(createSsmGetParameter(() => client)('/wynding/origin')).rejects.toThrow();
+      await expect(createSsmGetParameter(() => client)('/wynding/origin')).rejects.toMatchObject({
+        name: 'TimeoutError',
+      });
       expect(Date.now() - started).toBeLessThan(8_000);
       // Nothing free-text reaches the log on the way.
       expect(warn).not.toHaveBeenCalled();
