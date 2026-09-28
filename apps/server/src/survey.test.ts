@@ -7,6 +7,7 @@ import {
 } from '@wynding/feedback';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import {
   createLambdaEntry,
@@ -466,6 +467,78 @@ describe('createSsmGetParameter — the production SSM read', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   }, 15_000);
+});
+
+describe('survey store, through the real DynamoDB client (cancellation parsing)', () => {
+  // The duplicate and ceiling answers depend on the SDK filling `CancellationReasons` from the
+  // wire. The other store tests hand-build that error, so these send real DynamoDB error bodies
+  // through the pinned client and its deserializer.
+  async function storeAnswering(status: number, body: object) {
+    const server = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(status, {
+          'content-type': 'application/x-amz-json-1.0',
+          'x-amzn-requestid': 'test',
+        });
+        res.end(JSON.stringify(body));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const client = new DynamoDBClient({
+      region: 'us-west-2',
+      endpoint: `http://127.0.0.1:${port}`,
+      credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+      maxAttempts: 1,
+    });
+    const store = createDynamoSurveyStore({ tableName: 'wynding-feedback', client });
+    const close = async (): Promise<void> => {
+      client.destroy();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    };
+    return { store, close };
+  }
+
+  const cancelled = (codes: string[]) => ({
+    __type: 'com.amazonaws.dynamodb.v20120810#TransactionCanceledException',
+    Message: `Transaction cancelled, please refer cancellation reasons for specific reasons [${codes.join(', ')}]`,
+    CancellationReasons: codes.map((Code) => ({ Code })),
+  });
+
+  const submission: SurveySubmission = {
+    idempotencyKey: UUID(3),
+    sessionId: UUID(2),
+    runId: UUID(1),
+    payloadJson: '{"x":1}',
+    noticeVersion: '2026-09-28',
+    receivedAtMs: NOW,
+    dailyCeiling: 50,
+  };
+
+  it.each([
+    [['ConditionalCheckFailed', 'None'], 'duplicate'],
+    [['ConditionalCheckFailed', 'ConditionalCheckFailed'], 'duplicate'],
+    [['None', 'ConditionalCheckFailed'], 'ceiling'],
+    [['None', 'TransactionConflict'], 'throttled'],
+  ] as const)('reads %j off the wire as %s', async (codes, expected) => {
+    const { store, close } = await storeAnswering(400, cancelled([...codes]));
+    try {
+      expect(await store.put(submission)).toBe(expected);
+    } finally {
+      await close();
+    }
+  });
+
+  it('stores on a successful transaction', async () => {
+    const { store, close } = await storeAnswering(200, {});
+    try {
+      expect(await store.put(submission)).toBe('stored');
+    } finally {
+      await close();
+    }
+  });
 });
 
 describe('survey store — the transaction (ADR 0001 §3, §6, §7)', () => {
