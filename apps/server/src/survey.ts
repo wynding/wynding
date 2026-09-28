@@ -8,7 +8,9 @@
 // In order, before anything is stored (ADR 0001 §4):
 //   1. POST only (405). API Gateway routes nothing else here; this is the belt to that.
 //   2. CloudFront's origin secret header, compared in constant time (403). The API Gateway
-//      invoke URL is public; this is what makes the API usable only through CloudFront.
+//      invoke URL is public; this is what makes the API usable only through CloudFront. It
+//      comes BEFORE the kill switch, so a direct caller cannot even learn whether the survey
+//      is switched on. (With no secret configured, nobody can be authenticated: 503.)
 //   3. The kill switch (503): the handler is OFF unless `SURVEY_ENABLED` is exactly `true`,
 //      and it is also off if any other setting is missing, so a half-configured deploy
 //      refuses rather than half-works.
@@ -66,9 +68,14 @@ export interface HttpApiResult {
 /** What the handler needs from its environment, already parsed. `null` = misconfigured. */
 export interface SurveyConfig {
   readonly tableName: string;
-  readonly originSecret: string;
   readonly noticeVersion: string;
   readonly dailyCeiling: number;
+}
+
+/** The origin secret, read on its own: the handler checks it before the kill switch, so it
+ *  must be available whether or not the survey is switched on. Empty means none configured. */
+export function readOriginSecret(env: Readonly<Record<string, string | undefined>>): string {
+  return env['ORIGIN_SECRET'] ?? '';
 }
 
 /** Read the configuration from the Lambda environment. Returns null (and so disables the
@@ -78,12 +85,11 @@ export function readSurveyConfig(
 ): SurveyConfig | null {
   if (env['SURVEY_ENABLED'] !== 'true') return null;
   const tableName = env['TABLE_NAME'] ?? '';
-  const originSecret = env['ORIGIN_SECRET'] ?? '';
   const noticeVersion = env['PRIVACY_NOTICE_VERSION'] ?? '';
   const ceiling = Number(env['DAILY_CEILING'] ?? '50');
-  if (tableName === '' || originSecret === '' || noticeVersion === '') return null;
+  if (tableName === '' || noticeVersion === '') return null;
   if (!Number.isSafeInteger(ceiling) || ceiling <= 0) return null;
-  return { tableName, originSecret, noticeVersion, dailyCeiling: ceiling };
+  return { tableName, noticeVersion, dailyCeiling: ceiling };
 }
 
 function respond(statusCode: number, outcome: SurveyOutcome): HttpApiResult {
@@ -103,6 +109,19 @@ function sameSecret(given: string | undefined, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** The body as text, or null when it is over the cap. Sized BEFORE anything is copied or
+ *  decoded, so an oversized request costs no allocation of its own size. */
+function decodeBody(event: HttpApiEvent): string | null {
+  const raw = event.body ?? '';
+  if (event.isBase64Encoded !== true) {
+    return Buffer.byteLength(raw, 'utf8') > SURVEY_MAX_BODY_BYTES ? null : raw;
+  }
+  // Base64 inflates by 4/3: anything longer than the cap's encoding cannot decode under it.
+  if (raw.length > Math.ceil(SURVEY_MAX_BODY_BYTES / 3) * 4 + 4) return null;
+  const bytes = Buffer.from(raw, 'base64');
+  return bytes.length > SURVEY_MAX_BODY_BYTES ? null : bytes.toString('utf8');
+}
+
 function header(event: HttpApiEvent, name: string): string | undefined {
   // API Gateway HTTP APIs lower-case header names; a direct caller might not.
   const headers = event.headers ?? {};
@@ -113,12 +132,13 @@ function header(event: HttpApiEvent, name: string): string | undefined {
 }
 
 export function createSurveyHandler(deps: {
+  readonly originSecret: string;
   readonly config: SurveyConfig | null;
   readonly store: SurveyStore;
   readonly now: () => number;
   readonly log: (line: string) => void;
 }): (event: HttpApiEvent) => Promise<HttpApiResult> {
-  const { config, store, now, log } = deps;
+  const { originSecret, config, store, now, log } = deps;
   const finish = (statusCode: number, outcome: SurveyOutcome): HttpApiResult => {
     log(JSON.stringify({ survey: outcome }));
     return respond(statusCode, outcome);
@@ -126,18 +146,17 @@ export function createSurveyHandler(deps: {
 
   return async (event) => {
     if (event.requestContext?.http?.method !== 'POST') return finish(405, 'method');
-    if (config === null) return finish(503, 'disabled');
-    if (!sameSecret(header(event, ORIGIN_SECRET_HEADER), config.originSecret)) {
+    if (originSecret === '') return finish(503, 'disabled');
+    if (!sameSecret(header(event, ORIGIN_SECRET_HEADER), originSecret)) {
       return finish(403, 'forbidden');
     }
+    if (config === null) return finish(503, 'disabled');
 
-    const raw = event.body ?? '';
-    const bytes =
-      event.isBase64Encoded === true ? Buffer.from(raw, 'base64') : Buffer.from(raw, 'utf8');
-    if (bytes.length > SURVEY_MAX_BODY_BYTES) return finish(413, 'too_large');
+    const text = decodeBody(event);
+    if (text === null) return finish(413, 'too_large');
     let data: unknown;
     try {
-      data = JSON.parse(bytes.toString('utf8'));
+      data = JSON.parse(text);
     } catch {
       return finish(400, 'bad_json');
     }
@@ -180,6 +199,7 @@ export async function handler(event: HttpApiEvent): Promise<HttpApiResult> {
   if (configured === null) {
     const config = readSurveyConfig(process.env);
     configured = createSurveyHandler({
+      originSecret: readOriginSecret(process.env),
       config,
       store: createDynamoSurveyStore({ tableName: config?.tableName ?? '' }),
       now: () => Date.now(),

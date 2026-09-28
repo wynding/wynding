@@ -9,6 +9,7 @@ import {
   createSurveyHandler,
   handler,
   ORIGIN_SECRET_HEADER,
+  readOriginSecret,
   readSurveyConfig,
   SURVEY_MAX_BODY_BYTES,
   type HttpApiEvent,
@@ -32,7 +33,6 @@ const UUID = (n: number): string => `00000000-0000-4000-8000-${n.toString(16).pa
 const SECRET = 'origin-secret-value';
 const CONFIG: SurveyConfig = {
   tableName: 'wynding-feedback',
-  originSecret: SECRET,
   noticeVersion: '2026-09-28',
   dailyCeiling: 50,
 };
@@ -71,7 +71,11 @@ function event(overrides: Partial<HttpApiEvent> = {}, body: unknown = payload())
   };
 }
 
-function setup(outcome: PutOutcome | Error = 'stored', config: SurveyConfig | null = CONFIG) {
+function setup(
+  outcome: PutOutcome | Error = 'stored',
+  config: SurveyConfig | null = CONFIG,
+  originSecret = SECRET,
+) {
   const puts: SurveySubmission[] = [];
   const logs: string[] = [];
   const store = {
@@ -81,7 +85,13 @@ function setup(outcome: PutOutcome | Error = 'stored', config: SurveyConfig | nu
       return outcome;
     }),
   };
-  const run = createSurveyHandler({ config, store, now: () => NOW, log: (l) => logs.push(l) });
+  const run = createSurveyHandler({
+    originSecret,
+    config,
+    store,
+    now: () => NOW,
+    log: (l) => logs.push(l),
+  });
   return { run, puts, logs, store };
 }
 
@@ -148,12 +158,23 @@ describe('survey handler — what reaches storage (ADR 0001 §4)', () => {
     expect(h.puts).toHaveLength(1);
   });
 
-  it('is off (503) when disabled or misconfigured, before looking at anything else', async () => {
+  it('is off (503) when disabled or misconfigured, to a caller that has the secret', async () => {
     const h = setup('stored', null);
     const res = await h.run(event());
     expect(res.statusCode).toBe(503);
     expect(statusOf(res.body)).toBe('disabled');
     expect(h.puts).toHaveLength(0);
+  });
+
+  it('checks the secret BEFORE the kill switch: a direct caller cannot learn whether it is on', async () => {
+    const disabled = setup('stored', null);
+    const res = await disabled.run(event({ headers: {} }));
+    expect(res.statusCode).toBe(403);
+    expect(statusOf(res.body)).toBe('forbidden');
+    // With no secret configured nobody can be authenticated, so nobody gets in.
+    const noSecret = setup('stored', CONFIG, '');
+    expect((await noSecret.run(event())).statusCode).toBe(503);
+    expect(noSecret.puts).toHaveLength(0);
   });
 
   it('refuses an oversized body (413), a non-JSON body and an invalid payload (400)', async () => {
@@ -167,6 +188,24 @@ describe('survey handler — what reaches storage (ADR 0001 §4)', () => {
     expect(h.puts).toHaveLength(0);
   });
 
+  it('caps BYTES, not characters, and sizes a body before decoding it', async () => {
+    const h = setup();
+    // Under the cap in UTF-16 code units, over it in UTF-8 bytes (3 bytes per character).
+    const multibyte = JSON.stringify({ ...payload(), padding: '\u20ac'.repeat(6000) });
+    expect(multibyte.length).toBeLessThan(SURVEY_MAX_BODY_BYTES);
+    expect(Buffer.byteLength(multibyte)).toBeGreaterThan(SURVEY_MAX_BODY_BYTES);
+    expect((await h.run(event({}, multibyte))).statusCode).toBe(413);
+    // Base64: over the cap once decoded, and far over it before.
+    const over = Buffer.from('x'.repeat(SURVEY_MAX_BODY_BYTES + 1)).toString('base64');
+    expect((await h.run(event({ body: over, isBase64Encoded: true }))).statusCode).toBe(413);
+    const huge = 'A'.repeat(SURVEY_MAX_BODY_BYTES * 2);
+    expect((await h.run(event({ body: huge, isBase64Encoded: true }))).statusCode).toBe(413);
+    // Exactly at the cap is allowed through to parsing (and fails there, as non-JSON).
+    const exact = 'x'.repeat(SURVEY_MAX_BODY_BYTES);
+    expect((await h.run(event({}, exact))).statusCode).toBe(400);
+    expect(h.puts).toHaveLength(0);
+  });
+
   it('accepts a maximal honest survey, and a base64-encoded body', async () => {
     const h = setup();
     const control = '\u0001'.repeat(SURVEY_TEXT_MAX); // JSON-escapes to 6 bytes each
@@ -175,6 +214,10 @@ describe('survey handler — what reaches storage (ADR 0001 §4)', () => {
     expect((await h.run(event({}, big))).statusCode).toBe(200);
     const encoded = Buffer.from(JSON.stringify(payload())).toString('base64');
     expect((await h.run(event({ body: encoded, isBase64Encoded: true }))).statusCode).toBe(200);
+    // The maximal survey base64-encoded: over the cap as sent, under it once decoded.
+    const bigEncoded = Buffer.from(big).toString('base64');
+    expect(bigEncoded.length).toBeGreaterThan(SURVEY_MAX_BODY_BYTES);
+    expect((await h.run(event({ body: bigEncoded, isBase64Encoded: true }))).statusCode).toBe(200);
   });
 
   it('logs exactly one fixed outcome code per request — never the payload or the reason', async () => {
@@ -199,13 +242,18 @@ describe('readSurveyConfig — off unless switched on and fully configured', () 
   const full = {
     SURVEY_ENABLED: 'true',
     TABLE_NAME: 'wynding-feedback',
-    ORIGIN_SECRET: SECRET,
     PRIVACY_NOTICE_VERSION: '2026-09-28',
   };
 
   it('reads a complete environment, with the ceiling defaulting to 50', () => {
     expect(readSurveyConfig(full)).toEqual(CONFIG);
     expect(readSurveyConfig({ ...full, DAILY_CEILING: '7' })?.dailyCeiling).toBe(7);
+  });
+
+  it('reads the origin secret on its own, whether or not the survey is on', () => {
+    expect(readOriginSecret({ ORIGIN_SECRET: SECRET })).toBe(SECRET);
+    expect(readOriginSecret({ ORIGIN_SECRET: SECRET, SURVEY_ENABLED: 'false' })).toBe(SECRET);
+    expect(readOriginSecret({})).toBe('');
   });
 
   it('is null (disabled) for any missing or malformed setting', () => {
@@ -216,7 +264,6 @@ describe('readSurveyConfig — off unless switched on and fully configured', () 
       { ...full, TABLE_NAME: '' },
       { ...full, TABLE_NAME: undefined },
       { ...full, PRIVACY_NOTICE_VERSION: undefined },
-      { ...full, ORIGIN_SECRET: undefined },
       { ...full, PRIVACY_NOTICE_VERSION: '' },
       { ...full, DAILY_CEILING: '0' },
       { ...full, DAILY_CEILING: '2.5' },

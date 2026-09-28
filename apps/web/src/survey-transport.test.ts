@@ -139,6 +139,30 @@ describe('createFetchTransport', () => {
     expect(f.fetch).not.toHaveBeenCalled();
   });
 
+  it('removes its abort listener from the operation signal on every path', async () => {
+    for (const end of ['respond', 'networkError'] as const) {
+      const f = controllableFetch();
+      const operation = new AbortController();
+      const removed = vi.spyOn(operation.signal, 'removeEventListener');
+      const sent = createFetchTransport({ fetch: f.fetch }).send(PAYLOAD, operation.signal);
+      if (end === 'respond') f.respond(true);
+      else f.networkError();
+      await sent;
+      expect(removed, end).toHaveBeenCalledWith('abort', expect.any(Function));
+    }
+  });
+
+  it('calls fetch as a plain function, never as a method of its options', async () => {
+    // A native fetch called with the options object as its receiver throws in browsers.
+    let receiver: unknown = 'unset';
+    const fetch = function (this: unknown) {
+      receiver = this;
+      return Promise.resolve({ ok: true });
+    };
+    await createFetchTransport({ fetch }).send(PAYLOAD, new AbortController().signal);
+    expect(receiver).toBeUndefined();
+  });
+
   it('uses the real timers by default, and honours an endpoint override', async () => {
     const f = controllableFetch();
     const sent = createFetchTransport({

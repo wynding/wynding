@@ -30,6 +30,10 @@ export function createFetchTransport(options: {
   readonly setTimeout?: (fn: () => void, ms: number) => unknown;
   readonly clearTimeout?: (handle: unknown) => void;
 }): SurveyTransport {
+  // Held as a plain function, never called as `options.fetch(...)`: a native `fetch` invoked
+  // with `options` as its receiver throws "Illegal invocation" in browsers, which the catch
+  // below would silently turn into "offline" on every send.
+  const doFetch = options.fetch;
   const endpoint = options.endpoint ?? SURVEY_ENDPOINT;
   const timeoutMs = options.timeoutMs ?? SURVEY_TIMEOUT_MS;
   const arm = options.setTimeout ?? ((fn, ms) => globalThis.setTimeout(fn, ms));
@@ -49,7 +53,7 @@ export function createFetchTransport(options: {
       signal.addEventListener('abort', stop, { once: true });
       const timer = arm(stop, timeoutMs);
       try {
-        const response = await options.fetch(endpoint, {
+        const response = await doFetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(payload),
