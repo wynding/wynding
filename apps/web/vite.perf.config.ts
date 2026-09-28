@@ -23,9 +23,10 @@ import { defineConfig, type Plugin } from 'vite';
 //
 // ONE CI CONSUMER EXISTS, and it is not a gate on these numbers. Since #129,
 // `scripts/check-build-layering.mjs` BUILDS this config in the e2e job and uses `dist-perf`
-// as its positive control: because these two entry points deliberately reach
-// `@wynding/perf`, `@wynding/content/stress` and `./catalog`, they are where the check
-// proves its markers still match something before asserting they are absent from `dist`.
+// as the positive control for the markers of its three package arms (the survey harness's
+// `dist-e2e` is the other control): because these two entry points deliberately reach
+// `@wynding/perf`, `@wynding/content/stress` and `./catalog`, they are where the check proves
+// those markers still match something before asserting they are absent from `dist`.
 // Nothing here is measured or asserted against a budget by that check — but this file is
 // no longer "never" part of a merge gate, and an earlier version of this header said it was.
 

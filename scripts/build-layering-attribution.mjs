@@ -2,8 +2,8 @@
 // binding (#168): reading a Source Map v3 and saying which source module an emitted occurrence
 // of a marker came from, plus the one containment relation both of that script's ownership
 // sites share. Split out of the check itself only so it can be unit-tested
-// (`packages/perf/src/build-layering-attribution.test.ts`) without running two Vite builds —
-// the check runs `check()` at its top level, so importing it would start them.
+// (`packages/perf/src/build-layering-attribution.test.ts`) without running the check's Vite
+// builds — the check runs `check()` at its top level, so importing it would start them.
 //
 // Written here rather than imported because no sourcemap library is a declared dependency of
 // the repo root, and this is a few dozen lines against a stable, fifteen-year-old format.
