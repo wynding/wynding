@@ -82,6 +82,10 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       ['fg', 'bg'],
       ['fg', 'surface'],
       ['on-accent', 'accent'],
+      // #158: the survey's privacy-notice link is accent TEXT over the results dialog's
+      // backdrop, which is near-black and darker than `bg`, so `bg` is the conservative
+      // stand-in (the rule itself is gated below).
+      ['accent', 'bg'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
@@ -114,5 +118,14 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
       expect(ratio, `${fg} on ${bg} = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(3.0);
     }
+  });
+
+  it('styles the survey privacy link in the accent, visited too (#158)', () => {
+    // Without the rule the link falls back to the UA's link blue, about 2:1 on the dialog,
+    // and axe cannot measure it there. The accent pair itself is gated above.
+    const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = /\.wy-survey-note a,\s*\.wy-survey-note a:visited\s*\{([^}]*)\}/.exec(uncommented);
+    expect(rule, 'missing .wy-survey-note a / a:visited rule in ui.css').not.toBeNull();
+    expect(rule![1]).toMatch(/color:\s*var\(--wy-accent\)/);
   });
 });

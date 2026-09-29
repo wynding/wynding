@@ -3,11 +3,11 @@
 // into `dist-e2e`, a directory nothing that ships reads.
 //
 // Why a harness at all: ADR 0014's survey is offered only where a transport is injected,
-// and production injects none until `wynding-site` has the endpoint. The shipped page
-// therefore has no survey to test — by design — so the e2e and axe gates run against the
-// REAL `boot()` here, with one difference: a fake transport the spec drives through
-// `window.__wySurvey`. Everything else (storage, locks, the dialog, the form) is the
-// production path.
+// and the shipped entry injects one only on https://wynding.net. The shipped page served
+// from localhost therefore has no survey to test — by design — so the e2e and axe gates run
+// against the REAL `boot()` here, with one difference: a fake transport the spec drives
+// through `window.__wySurvey`. Everything else (storage, locks, the dialog, the form) is
+// the production path.
 //
 // `?version=<sha>` stands in for a second deploy without a second build (the ask is per
 // `gameVersion`, §3).

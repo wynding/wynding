@@ -1441,7 +1441,7 @@ async function bootInto(
     }),
   );
   // ADR 0014 §3's ask state — read ONLY where a survey can be offered. With no transport
-  // (production today) the survey slot is never created, read or written.
+  // (any origin but https://wynding.net) the survey slot is never created, read or written.
   const gameVersion = options.gameVersion ?? import.meta.env.WYNDING_GAME_VERSION;
   const surveyAsk =
     options.surveyTransport === undefined
@@ -1473,9 +1473,9 @@ async function bootInto(
     settingsPersistence,
     storage: dismissalStorage(),
     // ADR 0012: the web build is TOLD it is hosted and never infers. The fact is a
-    // build-time constant baked into the Host build (ADR 0013), so this is the one place
-    // in production code that reads it — every consumer downstream takes it as an injected
-    // dependency off `AppDeps`, which is what keeps them reachable in jsdom.
+    // build-time constant baked into the Host build (ADR 0013). This and `boot-entry.ts`
+    // (the survey switch) are the only production reads — every consumer downstream takes
+    // it as an injected dependency off `AppDeps`, which is what keeps them reachable in jsdom.
     hosted: import.meta.env.WYNDING_HOSTED === true,
   });
 }

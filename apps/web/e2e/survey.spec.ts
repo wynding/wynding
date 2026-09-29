@@ -7,8 +7,9 @@ import { type SurveySendResult } from '../src/survey';
 // audit §6 makes an acceptance criterion.
 //
 // It runs against the survey HARNESS (`e2e-harness/`, served on 4176), not the shipped page:
-// the survey is offered only where a transport is injected, and production injects none
-// until the endpoint exists — so the shipped page has no survey, by design. The harness
+// the survey is offered only where a transport is injected, and the shipped entry injects
+// one only on https://wynding.net — so the shipped page served from localhost has no survey,
+// by design. The harness
 // boots the real `boot()` with a fake transport this spec drives through `window.__wySurvey`;
 // storage, Web Locks, the dialog and the form are all the production path.
 //
