@@ -160,6 +160,7 @@ export const EN = {
   "survey.offline": "You're offline, so your feedback wasn't sent.",
   "survey.open": "Give feedback",
   "survey.privacy": "Sending shares your answers and this run's details under the Wynding site privacy notice.",
+  "survey.privacyLink": "Read the privacy notice",
   "survey.rating": "How was it? (1 = poor, 5 = great)",
   "survey.reference": "Reference: {reference}. Quote it if you ask for this feedback to be deleted.",
   "survey.rejected": "Couldn't send your feedback.",
@@ -348,6 +349,7 @@ export interface MessageParams {
   "survey.offline": Record<never, never>;
   "survey.open": Record<never, never>;
   "survey.privacy": Record<never, never>;
+  "survey.privacyLink": Record<never, never>;
   "survey.rating": Record<never, never>;
   "survey.reference": { "reference": string | number };
   "survey.rejected": Record<never, never>;

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildSurveyPayload, replayDigest, type SurveyPayload } from '@wynding/feedback';
-import { createFetchTransport, SURVEY_ENDPOINT, SURVEY_TIMEOUT_MS } from './survey-transport';
+import {
+  createFetchTransport,
+  shippedSurveyTransport,
+  SURVEY_ENDPOINT,
+  SURVEY_TIMEOUT_MS,
+} from './survey-transport';
 
 // The fetch transport (wynding-site ADR 0001 §4): what it sends, and how every way a request
 // can end maps onto the survey's three outcomes.
@@ -172,5 +177,37 @@ describe('createFetchTransport', () => {
     }).send(PAYLOAD, new AbortController().signal);
     expect(f.calls[0]!.input).toBe('/elsewhere');
     expect(await sent).toBe('offline'); // the 5 ms real timer fired
+  });
+});
+
+describe('shippedSurveyTransport — where the shipped build switches the survey on', () => {
+  const fetch = vi.fn(async () => ({ ok: true }));
+  const at = (protocol: string, hostname: string, hosted = false) =>
+    shippedSurveyTransport({ location: { protocol, hostname }, hosted, fetch });
+
+  it('is on for the web game served from wynding.net over https, and sends there', async () => {
+    const transport = at('https:', 'wynding.net');
+    expect(transport).toBeDefined();
+    expect(await transport!.send(PAYLOAD, new AbortController().signal)).toBe('accepted');
+    expect(fetch).toHaveBeenCalledWith(
+      SURVEY_ENDPOINT,
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('is off everywhere the endpoint does not answer', () => {
+    for (const [protocol, hostname, hosted] of [
+      ['https:', 'wynding.net', true], // a native host (ADR 0012), however it is served
+      ['http:', 'wynding.net', false],
+      ['https:', 'www.wynding.net', false], // the router redirects www to the apex
+      ['http:', 'localhost', false], // dev server, preview build, e2e
+      ['https:', 'localhost', false], // Capacitor's WebView origin
+      ['tauri:', 'localhost', false],
+      ['https:', 'wynding.net.example.com', false],
+    ] as const) {
+      expect(at(protocol, hostname, hosted), `${protocol}//${hostname} hosted=${hosted}`).toBe(
+        undefined,
+      );
+    }
   });
 });

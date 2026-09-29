@@ -20,6 +20,7 @@
 // (the unit tests import `boot`/`createApp` from `./main` directly), so the browser
 // auto-boot below always applies.
 import { boot } from './main';
+import { shippedSurveyTransport } from './survey-transport';
 
 // A missing/mis-IDed #app mount point is a hard, visible failure (a blank page with a
 // thrown error), never a silent no-op. `boot()` reports that case SYNCHRONOUSLY, as a
@@ -27,7 +28,15 @@ import { boot } from './main';
 // is a promise (settings are hydrated through ADR 0008's async `StorageDriver` before
 // the first render), and folding the missing-root check into it would have downgraded
 // the loudest failure the app has into an unhandled rejection.
-const booting = boot(document);
+// ADR 0014's survey, switched on only where its endpoint answers (see
+// `shippedSurveyTransport`). `fetch` is passed as a plain function; the transport never
+// calls it with a receiver.
+const surveyTransport = shippedSurveyTransport({
+  location: window.location,
+  hosted: import.meta.env.WYNDING_HOSTED === true,
+  fetch: (input, init) => window.fetch(input, init),
+});
+const booting = boot(document, surveyTransport === undefined ? {} : { surveyTransport });
 if (booting === null) {
   throw new Error('missing #app root element');
 }

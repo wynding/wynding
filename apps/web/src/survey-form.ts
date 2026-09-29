@@ -12,6 +12,9 @@ import { t } from './i18n/t';
 import { SURVEY_TEXT_MAX, type SurveyPayload, type SurveyScale } from '@wynding/feedback';
 import { type Survey, type SurveySendResult } from './survey';
 
+/** The privacy notice the survey is sent under (wynding-site ADR 0001 §5). */
+export const PRIVACY_HREF = '/privacy';
+
 /** What the form needs from the app (`main.ts`), and nothing else. */
 export interface SurveyFormHost {
   readonly survey: Survey;
@@ -138,7 +141,14 @@ export function createSurveyForm(
   const privacyEl = doc.createElement('p');
   privacyEl.className = 'wy-survey-note';
   privacyEl.id = `${groupPrefix}-privacy`;
-  privacyEl.textContent = t('survey.privacy');
+  // The notice lives on the site (wynding-site `/privacy`). Root-absolute like the home
+  // link, and a new tab, so reading it never navigates away from a half-written survey.
+  const privacyLink = doc.createElement('a');
+  privacyLink.href = PRIVACY_HREF;
+  privacyLink.target = '_blank';
+  privacyLink.rel = 'noopener';
+  privacyLink.textContent = t('survey.privacyLink');
+  privacyEl.append(t('survey.privacy'), ' ', privacyLink);
 
   const actions = doc.createElement('div');
   actions.className = 'wy-survey-actions';

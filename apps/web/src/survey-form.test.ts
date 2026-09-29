@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createSurveyForm, type SurveyFormHost } from './survey-form';
+import { createSurveyForm, PRIVACY_HREF, type SurveyFormHost } from './survey-form';
 import {
   buildSurveyPayload,
   SURVEY_TEXT_MAX,
@@ -265,6 +265,20 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
       `Reference: ${REFERENCE}. Quote it if you ask for this feedback to be deleted.`,
     );
     expect(described[1]).toContain('privacy notice');
+  });
+
+  it('links the privacy notice, in a new tab so the draft survives', async () => {
+    const h = setup();
+    await h.expand();
+    const link = h.slot.querySelector<HTMLAnchorElement>('a[href]');
+    expect(link?.getAttribute('href')).toBe(PRIVACY_HREF);
+    expect(PRIVACY_HREF).toBe('/privacy');
+    expect(link?.target).toBe('_blank');
+    expect(link?.rel).toBe('noopener');
+    expect(link?.textContent).toBe('Read the privacy notice');
+    // It sits inside the note Send is described by, so the description still names it.
+    const privacyId = (h.button('Send').getAttribute('aria-describedby') ?? '').split(' ')[1];
+    expect(link?.closest('p')?.id).toBe(privacyId);
   });
 
   it('never silences a pending export: its prompts and clears write without claiming', async () => {
