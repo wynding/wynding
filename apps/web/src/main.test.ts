@@ -1422,7 +1422,7 @@ describe('main — boot()', () => {
         handle!.destroy();
         return count;
       };
-      expect(await surveyChildren(), 'the shipped entry passes nothing').toBe(0);
+      expect(await surveyChildren(), 'no transport, no survey').toBe(0);
       const transport = { send: vi.fn(async () => 'accepted' as const) };
       expect(await surveyChildren({ surveyTransport: transport })).toBeGreaterThan(0);
       // An explicit gameVersion stands in for the build's (the e2e harness's second deploy).

@@ -1,6 +1,6 @@
 // survey-transport.ts — the survey's real transport: a fetch to the feedback endpoint
-// (wynding-site ADR 0001). NOT injected anywhere yet: the survey stays off until the endpoint
-// is deployed and the shipped build passes this to `boot()` (ADR 0001's last follow-up step).
+// (wynding-site ADR 0001). `shippedSurveyTransport` decides where the shipped build injects
+// it: only the web game served from wynding.net, where the endpoint is same-origin.
 //
 // The status mapping is the endpoint ADR's §4, and it is deliberately coarse:
 //   2xx                      accepted (a stored submission, or a duplicate of one)
@@ -73,4 +73,24 @@ export function createFetchTransport(options: {
       }
     },
   };
+}
+
+/** The one origin the endpoint answers: it is same-origin behind the site's CloudFront, with
+ *  no CORS for anything else (wynding-site ADR 0001 §1). */
+export const SURVEY_ORIGIN_HOST = 'wynding.net';
+
+/** The shipped build's survey switch (ADR 0014: the transport IS the switch). A transport
+ *  only for the open-web game served from wynding.net over https. Not for a native host
+ *  (ADR 0012: its WebView serves the game from its own origin, and the endpoint's CORS
+ *  allowlist for host origins is added when a host ships a transport), and not for a dev
+ *  server, a preview build or an e2e run on localhost, where the POST could only fail. */
+export function shippedSurveyTransport(options: {
+  readonly location: Pick<Location, 'protocol' | 'hostname'>;
+  readonly hosted: boolean;
+  readonly fetch: Fetch;
+}): SurveyTransport | undefined {
+  if (options.hosted) return undefined;
+  if (options.location.protocol !== 'https:') return undefined;
+  if (options.location.hostname !== SURVEY_ORIGIN_HOST) return undefined;
+  return createFetchTransport({ fetch: options.fetch });
 }

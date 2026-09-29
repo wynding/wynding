@@ -119,7 +119,8 @@ export default defineConfig({
   // the host arm would silently assert against the perf bundle instead of `dist-host`.
   //
   // 4176 is the survey harness's (#158): ADR 0014's survey is offered only where a transport
-  // is injected and production injects none, so `survey.spec.ts` runs against its own build
+  // is injected, and the shipped entry injects one only on https://wynding.net, so
+  // `survey.spec.ts` runs against its own build
   // (`vite.e2e.config.ts` → `dist-e2e`) that boots the real app with a fake transport.
   webServer: [
     {

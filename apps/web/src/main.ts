@@ -106,9 +106,10 @@ export interface AppDeps {
   /** The per-run UUID mint (#133/ADR 0014 §4) — injected so a test can pin `runId`. */
   readonly mintRunId?: () => string;
   /** ADR 0014's end-of-run survey — AND ITS FEATURE SWITCH. The survey is offered only
-   *  where a transport is injected, and production injects none until `wynding-site` has
-   *  the endpoint and the privacy notice §7 makes a ship gate: one fact, not a second flag
-   *  that could disagree with it. Needs `surveyAsk` too; either alone offers nothing. */
+   *  where a transport is injected: the shipped entry injects one only for the web game
+   *  served from wynding.net (`shippedSurveyTransport`), where the endpoint and the §7
+   *  privacy notice live. One fact, not a second flag that could disagree with it. Needs
+   *  `surveyAsk` too; either alone offers nothing. */
   readonly surveyTransport?: SurveyTransport;
   /** The survey's ask state (§3), hydrated by `boot()` off the same seam as settings. */
   readonly surveyAsk?: SurveyAsk;
@@ -1379,10 +1380,10 @@ export function boot(doc: Document, options: BootOptions = {}): Promise<AppHandl
   return bootInto(doc, root, options);
 }
 
-/** What a caller other than the shipped entry may add to a boot. The shipped entry
- *  (`boot-entry.ts`) passes nothing, so production boots with no survey (ADR 0014: the
- *  transport IS the switch). The e2e survey harness (`e2e-harness/`) is the one caller
- *  that injects one, from a separate build the shipped app cannot reach. */
+/** What a caller may add to a boot. The shipped entry (`boot-entry.ts`) passes a survey
+ *  transport only when served from wynding.net (`shippedSurveyTransport`), so every other
+ *  origin boots with no survey (ADR 0014: the transport IS the switch). The e2e survey
+ *  harness (`e2e-harness/`) injects its own, from a separate build. */
 export interface BootOptions {
   readonly surveyTransport?: SurveyTransport;
   /** Overrides the build-time `gameVersion` — the harness's way to stand in for a second
@@ -1440,7 +1441,7 @@ async function bootInto(
     }),
   );
   // ADR 0014 §3's ask state — read ONLY where a survey can be offered. With no transport
-  // (production today) the survey slot is never created, read or written.
+  // (any origin but https://wynding.net) the survey slot is never created, read or written.
   const gameVersion = options.gameVersion ?? import.meta.env.WYNDING_GAME_VERSION;
   const surveyAsk =
     options.surveyTransport === undefined
@@ -1472,9 +1473,9 @@ async function bootInto(
     settingsPersistence,
     storage: dismissalStorage(),
     // ADR 0012: the web build is TOLD it is hosted and never infers. The fact is a
-    // build-time constant baked into the Host build (ADR 0013), so this is the one place
-    // in production code that reads it — every consumer downstream takes it as an injected
-    // dependency off `AppDeps`, which is what keeps them reachable in jsdom.
+    // build-time constant baked into the Host build (ADR 0013). This and `boot-entry.ts`
+    // (the survey switch) are the only production reads — every consumer downstream takes
+    // it as an injected dependency off `AppDeps`, which is what keeps them reachable in jsdom.
     hosted: import.meta.env.WYNDING_HOSTED === true,
   });
 }

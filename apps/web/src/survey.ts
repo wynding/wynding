@@ -15,10 +15,10 @@
 //   ADR 0011 §3       `createSessionIdentity` — the bounded, never-persisted `sessionId`.
 //
 // NOTHING HERE SENDS ANYTHING ON ITS OWN. A `SurveyTransport` is injected, and the survey is
-// only offered where one exists: until `wynding-site` has the endpoint and the privacy notice
-// the ADR makes a ship gate (§7), production passes none and the results dialog shows no Give
-// feedback button at all. That injection IS the feature switch — there is no second flag that
-// could disagree with it.
+// only offered where one exists: the shipped entry injects one only for the web game served
+// from https://wynding.net (`shippedSurveyTransport`), where the endpoint and the §7 privacy
+// notice live; everywhere else the results dialog shows no Give feedback button at all. That
+// injection IS the feature switch — there is no second flag that could disagree with it.
 
 import {
   isSubmittableGameVersion,

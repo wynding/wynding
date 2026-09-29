@@ -1749,6 +1749,17 @@ a.wy-home:focus-visible {
   font-size: 0.9rem;
 }
 
+/* The privacy-notice link (#158, wynding-site ADR 0001 step 7). Without a rule it renders
+   in the UA's default link blue, about 2:1 on the results dialog, and axe cannot see it
+   there (the canvas behind the dialog makes `color-contrast` incomplete). `--wy-accent` is
+   gated at >= 4.5:1 on `--wy-bg` in `ui-contrast.test.ts`, and the dialog is darker still.
+   `:visited` keeps it: the UA's visited purple is as low-contrast as its blue. */
+.wy-survey-note a,
+.wy-survey-note a:visited {
+  color: var(--wy-accent);
+  text-decoration: underline;
+}
+
 .wy-survey-actions {
   display: flex;
   flex-wrap: wrap;
