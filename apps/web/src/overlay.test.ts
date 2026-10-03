@@ -3772,28 +3772,35 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
     expect(dial.getAttribute('aria-hidden')).toBe('true'); // decoration in every state
   });
 
-  it('notes the early-call bonus exactly where the lower bound of the ticks left pays one', () => {
+  it('notes the early-call bonus over the shipped countdown exactly where every tick count the second can hold pays one', () => {
     const { overlay, shell } = setup();
     const primary = shell.dock.primary;
     const divisor = ruleset.balance.earlyCallBountyDivisor;
     expect(divisor).toBeGreaterThan(0);
-    // The sim pays floor(rem / divisor) from the ticks still remaining, and the HUD sees only
-    // ceil(rem × MS_PER_TICK / 1000). The FEWEST ticks a given second can hold:
-    const minTicks = (s: number): number => ((s - 1) * 1000) / MS_PER_TICK + 1;
+    // Independent of the gate's algebra (#181 QC round 2), as below: the HUD shows
+    // ceil(rem × MS_PER_TICK / 1000), so list every count of remaining ticks that rounds UP to
+    // the shown second and pay each the sim's way, floor(rem / divisor). The note is a promise:
+    // it shows only where every one of them pays.
+    const paysAt = (s: number): boolean => {
+      const rems: number[] = [];
+      for (let rem = 1; Math.ceil((rem * MS_PER_TICK) / 1000) <= s; rem++) {
+        if (Math.ceil((rem * MS_PER_TICK) / 1000) === s) rems.push(rem);
+      }
+      return rems.length > 0 && rems.every((rem) => Math.floor(rem / divisor) >= 1);
+    };
     for (let s = 1; s <= totalSeconds(1); s++) {
       overlay.update(view({ countdownSeconds: s, waveCursor: 1 }));
-      const pays = Math.floor(minTicks(s) / divisor) >= 1;
-      expect(primary.getAttribute('title'), `${s}s`).toBe(pays ? NOTE : null);
+      expect(primary.getAttribute('title'), `${s}s`).toBe(paysAt(s) ? NOTE : null);
     }
-    // The boundary, named: the first second whose fewest ticks still pay, and the one below
-    // it, where some of its ticks would pay nothing — so the note says nothing there.
-    const firstPaying = Math.ceil(((divisor - 1) * MS_PER_TICK) / 1000) + 1;
-    overlay.update(view({ countdownSeconds: firstPaying, waveCursor: 1 }));
-    expect(primary.getAttribute('title')).toBe(NOTE);
-    overlay.update(view({ countdownSeconds: firstPaying - 1, waveCursor: 1 }));
-    expect(primary.getAttribute('title')).toBeNull();
-    // Shipped content: 50 ticks — 4 seconds says it, 3 does not.
-    if (divisor === 50 && MS_PER_TICK === 50) expect(firstPaying).toBe(4);
+    // The boundary the accessibility checklist states for shipped content — the note falls
+    // silent from 3s — held unconditionally, so a retune of the divisor fails HERE and the
+    // checklist is re-stated, rather than the claim going stale behind a skipped assertion.
+    let firstPaying = 1;
+    while (!paysAt(firstPaying)) firstPaying++;
+    expect(
+      { divisor, msPerTick: MS_PER_TICK, firstPaying },
+      'docs/accessibility-checklist.md: "shipped content: from 3s" — re-state it on a retune',
+    ).toEqual({ divisor: 50, msPerTick: 50, firstPaying: 4 });
   });
 
   it('notes the bonus iff EVERY tick count the shown second can hold would pay one — enumerated, across divisors', () => {
