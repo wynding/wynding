@@ -25,7 +25,7 @@ import {
   type FrameSpec,
 } from './art-frames';
 import { artBounds } from './art-geometry';
-import type { ArtColourResolver, ArtGraphics } from './art-paint';
+import type { ArtColourResolver } from './art-paint';
 import type { ArtShape } from './art-ir';
 import { creepRadius } from './board-draw';
 import { CREEP_SHAPE_VALUES } from './creep-paint';
@@ -43,36 +43,10 @@ import {
 } from './tower-art';
 import { TOWER_FOOTPRINT_MARKS, TOWER_LOOKS, towerLookKey } from './tower-paint';
 import { resolvePalette } from './palette';
-
-interface Recorded {
-  readonly method: string;
-  readonly args: unknown[];
-}
-
-function recorder(): ArtGraphics & { calls: Recorded[] } {
-  const calls: Recorded[] = [];
-  const record =
-    (method: string) =>
-    (...args: unknown[]): void => {
-      calls.push({ method, args });
-    };
-  return {
-    calls,
-    fillStyle: record('fillStyle'),
-    lineStyle: record('lineStyle'),
-    fillRect: record('fillRect'),
-    fillRoundedRect: record('fillRoundedRect'),
-    strokeRoundedRect: record('strokeRoundedRect'),
-    fillTriangle: record('fillTriangle'),
-    fillCircle: record('fillCircle'),
-    strokeCircle: record('strokeCircle'),
-    fillPoints: record('fillPoints'),
-    lineBetween: record('lineBetween'),
-    flush: record('flush'),
-    art: record('art'),
-    fade: record('fade'),
-  };
-}
+import {
+  recordingArtGraphics as recorder,
+  type Call as Recorded,
+} from './test-support/recording-graphics';
 
 interface ArtCall {
   readonly shapes: readonly ArtShape[];

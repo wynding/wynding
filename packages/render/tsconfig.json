@@ -7,5 +7,9 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src"],
+  // The base config's test-file exclude, restated because a child's `exclude` replaces
+  // its parent's, plus the shared test fakes (`src/test-support/`): test code, never
+  // built into `dist/`. `tsconfig.tests.json` still type-checks both.
+  "exclude": ["**/*.test.ts", "src/test-support/**"],
   "references": [{ "path": "../content" }, { "path": "../sim" }, { "path": "../types" }]
 }

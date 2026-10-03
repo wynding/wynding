@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { borderCells, boardPaintOps, drawBoard } from './board-cells';
-import type { GraphicsLike } from './board-draw';
+import { recordingGraphics as recorder, type Call } from './test-support/recording-graphics';
 import { resolvePalette } from './palette';
 
 const GEOMETRY = {
@@ -84,28 +84,6 @@ describe('boardPaintOps', () => {
 });
 
 describe('drawBoard — the plan, executed board-locally', () => {
-  type Call = { method: string; args: unknown[] };
-  const recorder = (): GraphicsLike & { calls: Call[] } => {
-    const calls: Call[] = [];
-    const record =
-      (method: string) =>
-      (...args: unknown[]): void => {
-        calls.push({ method, args });
-      };
-    return {
-      calls,
-      fillStyle: record('fillStyle'),
-      lineStyle: record('lineStyle'),
-      fillRect: record('fillRect'),
-      fillRoundedRect: record('fillRoundedRect'),
-      strokeRoundedRect: record('strokeRoundedRect'),
-      fillTriangle: record('fillTriangle'),
-      fillCircle: record('fillCircle'),
-      strokeCircle: record('strokeCircle'),
-      fillPoints: record('fillPoints'),
-      lineBetween: record('lineBetween'),
-    };
-  };
   const pal = resolvePalette('default');
   const CELL = 10;
   const draw = (): Call[] => {

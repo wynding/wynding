@@ -14,7 +14,6 @@ import {
   resetBoardFrame,
   type BoardFrameInput,
   type BoardTargets,
-  type LayerGraphics,
 } from './board-frame';
 import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
 import { AURA_SHELL_ALPHA } from './board-draw';
@@ -24,34 +23,8 @@ import { createProjection, type Projection } from './projection';
 import type { CreepPlacement, FrameAnchor, SpritePlacement } from './placement';
 import { createScorchTracker } from './scorches';
 import type { LiveSpark } from './sparks';
+import { recordingLayer, type Call } from './test-support/recording-graphics';
 import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
-
-type Call = { method: string; args: unknown[] };
-
-/** A recording live layer: every call in order. */
-function recordingLayer(): LayerGraphics & { calls: Call[] } {
-  const calls: Call[] = [];
-  const record =
-    (method: string) =>
-    (...args: unknown[]): void => {
-      calls.push({ method, args });
-    };
-  return {
-    calls,
-    clear: record('clear'),
-    fillStyle: record('fillStyle'),
-    lineStyle: record('lineStyle'),
-    fillRect: record('fillRect'),
-    strokeRect: record('strokeRect'),
-    fillRoundedRect: record('fillRoundedRect'),
-    strokeRoundedRect: record('strokeRoundedRect'),
-    fillTriangle: record('fillTriangle'),
-    fillCircle: record('fillCircle'),
-    strokeCircle: record('strokeCircle'),
-    fillPoints: record('fillPoints'),
-    lineBetween: record('lineBetween'),
-  };
-}
 
 /** Each drawing call of a layer as `method colour` — the fill or line colour in force. */
 function drawn(layer: { calls: Call[] }): string[] {

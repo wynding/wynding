@@ -135,6 +135,22 @@ export function placeScorches(
 /** One creep: its silhouette sprite, plus everything its live cues need. */
 export interface CreepPlacement extends SpritePlacement, CreepCueInput {}
 
+/** What `placeCreeps` reads of a creep: its interpolated position and the state its
+ *  frame and cues are keyed on. */
+export type CreepPlacementInput = Pick<
+  CreepVM,
+  | 'x'
+  | 'y'
+  | 'hpFrac'
+  | 'creepId'
+  | 'domain'
+  | 'slowed'
+  | 'poisoned'
+  | 'stunned'
+  | 'warded'
+  | 'boss'
+>;
+
 /**
  * Every creep silhouette this frame, in draw order (the order of `interpolated`, so a later
  * creep's body still covers an earlier one's, as before). The frame is keyed on the
@@ -143,19 +159,7 @@ export interface CreepPlacement extends SpritePlacement, CreepCueInput {}
  * its health pip and status cues are drawn around.
  */
 export function placeCreeps(
-  interpolated: readonly Pick<
-    CreepVM,
-    | 'x'
-    | 'y'
-    | 'hpFrac'
-    | 'creepId'
-    | 'domain'
-    | 'slowed'
-    | 'poisoned'
-    | 'stunned'
-    | 'warded'
-    | 'boss'
-  >[],
+  interpolated: readonly CreepPlacementInput[],
   pal: Palette,
   projection: Projection,
   frames: ReadonlyMap<string, FrameAnchor>,

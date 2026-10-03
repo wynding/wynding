@@ -4,58 +4,14 @@
 // same-colour rects fill as one path, so the bake leaves no seams between them).
 
 import { describe, it, expect } from 'vitest';
-import { canvasGraphics, cssColour, type Canvas2DLike } from './canvas-graphics';
+import { canvasGraphics, cssColour } from './canvas-graphics';
+import { fakeContext as sharedContext, type CtxOp as Op } from './test-support/fake-context';
 
-type Op = { op: string; args: unknown[] };
-
-/** A recording `Canvas2DLike`: every method call AND every style write, in order. Style
- *  writes are recorded as `set:<prop>` so a test can see which style a fill or stroke ran
- *  under. Its `arc` rejects a negative radius the way a real 2D context does (the HTML
- *  spec's `IndexSizeError`), so a path that would throw in a browser throws here too. */
-function fakeContext(): Canvas2DLike & { ops: Op[] } {
-  const ops: Op[] = [];
-  const call =
-    (op: string) =>
-    (...args: unknown[]): void => {
-      if (op === 'arc' && (args[2] as number) < 0) {
-        throw new RangeError(`IndexSizeError: arc radius ${String(args[2])} is negative`);
-      }
-      ops.push({ op, args });
-    };
-  const state: Record<string, unknown> = {
-    fillStyle: '#000000',
-    strokeStyle: '#000000',
-    lineWidth: 1,
-    lineCap: 'butt',
-    lineJoin: 'miter',
-  };
-  const ctx = {
-    ops,
-    beginPath: call('beginPath'),
-    closePath: call('closePath'),
-    moveTo: call('moveTo'),
-    lineTo: call('lineTo'),
-    arc: call('arc'),
-    rect: call('rect'),
-    fill: call('fill'),
-    stroke: call('stroke'),
-    fillRect: call('fillRect'),
-    save: call('save'),
-    restore: call('restore'),
-    setTransform: call('setTransform'),
-    clip: call('clip'),
-  } as unknown as Canvas2DLike & { ops: Op[] };
-  for (const prop of Object.keys(state)) {
-    Object.defineProperty(ctx, prop, {
-      get: () => state[prop],
-      set: (v: unknown) => {
-        state[prop] = v;
-        ops.push({ op: `set:${prop}`, args: [v] });
-      },
-    });
-  }
-  return ctx;
-}
+/** A recording context: every method call AND every style write, in order. Style writes are
+ *  recorded as `set:<prop>` so a test can see which style a fill or stroke ran under. Its
+ *  `arc` rejects a negative radius the way a real 2D context does (the HTML spec's
+ *  `IndexSizeError`), so a path that would throw in a browser throws here too. */
+const fakeContext = (): ReturnType<typeof sharedContext> => sharedContext({ recordStyles: true });
 
 const names = (ops: readonly Op[]): string[] => ops.map((o) => o.op);
 const HALF_PI = Math.PI / 2;

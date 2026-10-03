@@ -19,78 +19,23 @@ import {
 } from './bake';
 import type { ColourMode } from './types';
 import { atlasFrameSpecs, PLATE_FRAME_KEY } from './art-frames';
-import type { ArtCanvas2DLike } from './art-paint';
+import {
+  fakeContext as sharedContext,
+  fakePath as makePath,
+  type CtxOp as Op,
+} from './test-support/fake-context';
 import { boardPaintOps } from './board-cells';
 import { resolvePalette } from './palette';
 import { HEAD_ART } from './tower-art';
 import type { TowerFootprintMark } from './tower-paint';
-
-type Op = { op: string; args: unknown[]; composite?: GlobalCompositeOperation };
 
 /** A recording 2D context — the slice the art painter draws through, which includes the
  *  board bake's. Every fill and stroke records the composite operation it ran under, and
  *  `save`/`restore` stack that operation as a real context does. Its `arc` and `ellipse`
  *  reject a negative radius as a real 2D context does (the HTML spec's `IndexSizeError`) —
  *  so a bake that would throw in a browser throws here too. */
-function fakeContext(): ArtCanvas2DLike & { ops: Op[] } {
-  const ops: Op[] = [];
-  let composite: GlobalCompositeOperation = 'source-over';
-  const saved: GlobalCompositeOperation[] = [];
-  const call =
-    (op: string) =>
-    (...args: unknown[]): void => {
-      const radii = op === 'arc' ? args.slice(2, 3) : op === 'ellipse' ? args.slice(2, 4) : [];
-      if (radii.some((r) => (r as number) < 0)) {
-        throw new RangeError(`IndexSizeError: ${op} radius ${radii.join(', ')} is negative`);
-      }
-      ops.push({ op, args });
-    };
-  const draw =
-    (op: string) =>
-    (...args: unknown[]): void => {
-      ops.push({ op, args, composite });
-    };
-  const ctx = {
-    ops,
-    fillStyle: '',
-    strokeStyle: '',
-    lineWidth: 1,
-    lineCap: 'butt' as CanvasLineCap,
-    lineJoin: 'miter' as CanvasLineJoin,
-    get globalCompositeOperation(): GlobalCompositeOperation {
-      return composite;
-    },
-    set globalCompositeOperation(v: GlobalCompositeOperation) {
-      composite = v;
-    },
-    beginPath: call('beginPath'),
-    closePath: call('closePath'),
-    moveTo: call('moveTo'),
-    lineTo: call('lineTo'),
-    arc: call('arc'),
-    ellipse: call('ellipse'),
-    rect: call('rect'),
-    fill: draw('fill'),
-    stroke: draw('stroke'),
-    fillRect: draw('fillRect'),
-    setLineDash: call('setLineDash'),
-    transform: call('transform'),
-    save: (...args: unknown[]): void => {
-      saved.push(composite);
-      ops.push({ op: 'save', args });
-    },
-    restore: (...args: unknown[]): void => {
-      composite = saved.pop() ?? composite;
-      ops.push({ op: 'restore', args });
-    },
-    setTransform: call('setTransform'),
-    clip: call('clip'),
-  };
-  return ctx;
-}
-
-/** A stand-in `Path2D` factory: the "path" carries the string it was made from. */
-const makePath = (d: string): Path2D => ({ d }) as unknown as Path2D;
+const fakeContext = (): ReturnType<typeof sharedContext> =>
+  sharedContext({ recordComposite: true });
 
 /** Each frame's ops, split where the context's save/restore nesting returns to the top —
  *  the bake opens one save per frame and every art call nests its own inside it. */

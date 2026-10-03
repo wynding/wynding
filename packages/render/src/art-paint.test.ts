@@ -5,70 +5,18 @@
 // after, and `fade` as clip-scoped group opacity.
 
 import { describe, it, expect } from 'vitest';
-import { artGraphics, paintArtShapes, type ArtCanvas2DLike } from './art-paint';
+import { artGraphics, paintArtShapes } from './art-paint';
 import type { ArtColour, ArtShape } from './art-ir';
+import {
+  fakeContext as sharedContext,
+  fakePath,
+  type CtxOp as Op,
+} from './test-support/fake-context';
 
-type Op = { op: string; args: unknown[] };
-
-/** A recording `ArtCanvas2DLike`: every method call AND every state write, in order. Writes
- *  are recorded as `set:<prop>`; `arc`/`ellipse` throw on a negative radius, exactly as a
+/** A recording context: every method call AND every state write, in order. Writes are
+ *  recorded as `set:<prop>`; `arc`/`ellipse` throw on a negative radius, exactly as a
  *  real context's IndexSizeError would. */
-function fakeContext(): ArtCanvas2DLike & { ops: Op[] } {
-  const ops: Op[] = [];
-  const call =
-    (op: string) =>
-    (...args: unknown[]): void => {
-      ops.push({ op, args });
-    };
-  const radiusChecked =
-    (op: string, radii: readonly number[]) =>
-    (...args: unknown[]): void => {
-      for (const i of radii) {
-        if ((args[i] as number) < 0) throw new RangeError(`${op}: negative radius`);
-      }
-      ops.push({ op, args });
-    };
-  const ctx = {
-    ops,
-    beginPath: call('beginPath'),
-    closePath: call('closePath'),
-    moveTo: call('moveTo'),
-    lineTo: call('lineTo'),
-    arc: radiusChecked('arc', [2]),
-    ellipse: radiusChecked('ellipse', [2, 3]),
-    rect: call('rect'),
-    fill: call('fill'),
-    stroke: call('stroke'),
-    fillRect: call('fillRect'),
-    save: call('save'),
-    restore: call('restore'),
-    setTransform: call('setTransform'),
-    transform: call('transform'),
-    clip: call('clip'),
-    setLineDash: call('setLineDash'),
-  } as unknown as ArtCanvas2DLike & { ops: Op[] };
-  for (const prop of [
-    'fillStyle',
-    'strokeStyle',
-    'lineWidth',
-    'lineCap',
-    'lineJoin',
-    'globalCompositeOperation',
-  ]) {
-    let value: unknown;
-    Object.defineProperty(ctx, prop, {
-      get: () => value,
-      set: (v: unknown) => {
-        value = v;
-        ops.push({ op: `set:${prop}`, args: [v] });
-      },
-    });
-  }
-  return ctx;
-}
-
-/** A Path2D stand-in that remembers its path string. */
-const fakePath = (d: string): Path2D => ({ d }) as unknown as Path2D;
+const fakeContext = (): ReturnType<typeof sharedContext> => sharedContext({ recordStyles: true });
 
 const COLOURS: Readonly<Record<string, number>> = { role: 0xf4a940, ink: 0x0b0e14, aura: 0xc9b6ff };
 const colour = (token: ArtColour): number => {

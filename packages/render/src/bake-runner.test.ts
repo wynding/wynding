@@ -14,7 +14,7 @@ import {
 } from './bake-runner';
 import { layoutAtlas, layoutBoard, type BakeInputs } from './bake';
 import { pendingFrameKey } from './art-frames';
-import type { ArtCanvas2DLike } from './art-paint';
+import { fakeContext as sharedContext, fakePath } from './test-support/fake-context';
 import { resolvePalette, roleColour } from './palette';
 import { TOWER_ROLES } from './tower-paint';
 import type { ColourMode } from './types';
@@ -53,46 +53,8 @@ interface FakeCanvas {
 /** A 2D context — the slice the art painter draws through — that keeps the `fillStyle`s it is
  *  given and, when `throws` is set, throws it from its first drawing call. Its `arc` and
  *  `ellipse` reject a negative radius as a real context does. */
-function fakeContext(fills: string[], throws: Error | null): ArtCanvas2DLike {
-  const op =
-    (name: string) =>
-    (...args: unknown[]) => {
-      if (throws !== null) throw throws;
-      const radii = name === 'arc' ? args.slice(2, 3) : name === 'ellipse' ? args.slice(2, 4) : [];
-      if (radii.some((r) => (r as number) < 0)) throw new RangeError('IndexSizeError');
-    };
-  let fillStyle: ArtCanvas2DLike['fillStyle'] = '';
-  return {
-    get fillStyle() {
-      return fillStyle;
-    },
-    set fillStyle(value) {
-      fills.push(String(value));
-      fillStyle = value;
-    },
-    strokeStyle: '',
-    lineWidth: 1,
-    lineCap: 'butt',
-    lineJoin: 'miter',
-    globalCompositeOperation: 'source-over',
-    beginPath: op('beginPath'),
-    closePath: op('closePath'),
-    moveTo: op('moveTo'),
-    lineTo: op('lineTo'),
-    arc: op('arc'),
-    ellipse: op('ellipse'),
-    rect: op('rect'),
-    fill: op('fill'),
-    stroke: op('stroke'),
-    fillRect: op('fillRect'),
-    save: op('save'),
-    restore: op('restore'),
-    setTransform: op('setTransform'),
-    transform: op('transform'),
-    setLineDash: op('setLineDash'),
-    clip: op('clip'),
-  };
-}
+const fakeContext = (fills: string[], throws: Error | null): ReturnType<typeof sharedContext> =>
+  sharedContext({ recordOps: false, fills, throws });
 
 interface LogLine {
   readonly level: 'warn' | 'error' | 'info';
@@ -176,7 +138,7 @@ function fakeHost() {
       events.push(`show ${art.boardKey} ${art.atlasKey}`);
       if ((state.shows.shift() ?? 'ok') === 'throw') throw state.showError;
     },
-    makePath: (d) => ({ d }) as unknown as Path2D,
+    makePath: fakePath,
     log: { warn: log('warn'), error: log('error'), info: log('info') },
   };
   const of = (level: LogLine['level']): LogLine[] => logs.filter((l) => l.level === level);

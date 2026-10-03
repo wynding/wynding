@@ -25,7 +25,7 @@
 // boost glow, and its containment test measures the glow from the drawn frames instead.
 
 import { describe, it, expect } from 'vitest';
-import { drawAuraShells, drawCreepCues, drawSelection, type GraphicsLike } from './board-draw';
+import { drawAuraShells, drawCreepCues, drawSelection } from './board-draw';
 import {
   atlasFrameSpecs,
   artUnit,
@@ -34,7 +34,6 @@ import {
   type FrameSpec,
 } from './art-frames';
 import { flattenPath, parsePath } from './art-geometry';
-import type { ArtGraphics } from './art-paint';
 import { strokeWidthAt, type ArtShape } from './art-ir';
 import {
   ART_BOX,
@@ -44,51 +43,19 @@ import {
   PENDING_PLATE_ALPHA,
   PLATE_RECT,
 } from './tower-art';
-import { placeCreeps, placeTowers } from './placement';
+import { placeCreeps, placeTowers, type CreepPlacementInput as CreepIn } from './placement';
 import { layerDepth } from './layers';
 import { createProjection } from './projection';
 import { resolvePalette } from './palette';
-import type { CreepVM, RenderVM, RenderOverlay, TowerVM } from './types';
-
-type Call = { method: string; args: unknown[] };
-
-/** A minimal fake `GraphicsLike` that RECORDS every call instead of drawing anything —
- *  exactly the set of methods the board's draw functions call. Satisfies `GraphicsLike`
- *  directly — no cast needed, and (since a real `Phaser.GameObjects.Graphics` satisfies
- *  `GraphicsLike` structurally too, and the bake's Canvas2D adapter implements it) this is
- *  the same shape every real drawing surface hands these functions. */
-function fakeGraphics(): GraphicsLike & { calls: Call[] } {
-  const calls: Call[] = [];
-  const record =
-    (method: string) =>
-    (...args: unknown[]): void => {
-      calls.push({ method, args });
-    };
-  return {
-    calls,
-    fillStyle: record('fillStyle'),
-    lineStyle: record('lineStyle'),
-    fillRect: record('fillRect'),
-    fillRoundedRect: record('fillRoundedRect'),
-    strokeRoundedRect: record('strokeRoundedRect'),
-    fillTriangle: record('fillTriangle'),
-    fillCircle: record('fillCircle'),
-    strokeCircle: record('strokeCircle'),
-    fillPoints: record('fillPoints'),
-    lineBetween: record('lineBetween'),
-  };
-}
-
-/** `fakeGraphics` plus the art kit's calls — what an atlas frame painter draws into. */
-function fakeArtGraphics(): ArtGraphics & { calls: Call[] } {
-  const g = fakeGraphics();
-  const record =
-    (method: string) =>
-    (...args: unknown[]): void => {
-      g.calls.push({ method, args });
-    };
-  return { ...g, flush: record('flush'), art: record('art'), fade: record('fade') };
-}
+import type { RenderVM, RenderOverlay, TowerVM } from './types';
+// A recording `GraphicsLike` (`fakeGraphics`) records every call instead of drawing; the
+// art variant (`fakeArtGraphics`) adds the art kit's calls, what an atlas frame painter
+// draws into. Both satisfy the real interfaces directly — `test-support/`.
+import {
+  recordingArtGraphics as fakeArtGraphics,
+  recordingGraphics as fakeGraphics,
+  type Call,
+} from './test-support/recording-graphics';
 
 const count = (calls: readonly Call[], method: string): number =>
   calls.filter((c) => c.method === method).length;
@@ -238,20 +205,6 @@ function drawnPending(towerId: string): Call[] {
   expect(placed.pending).toHaveLength(1);
   return paintFrame((placed.pending[0] as { frame: string }).frame);
 }
-
-type CreepIn = Pick<
-  CreepVM,
-  | 'x'
-  | 'y'
-  | 'hpFrac'
-  | 'creepId'
-  | 'domain'
-  | 'slowed'
-  | 'poisoned'
-  | 'stunned'
-  | 'warded'
-  | 'boss'
->;
 
 // Off the diagonal (x ≠ y) on purpose: a cue or pip drawn with its coordinates swapped must
 // land somewhere else, or the centre tests below could not see it.
