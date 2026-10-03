@@ -13,6 +13,11 @@ import { GRID } from './layout-probe';
 // all froze. These drive the two real ways a board gets that small and require the run to
 // keep ticking with no error of any kind — the bake reports a failure on the console rather
 // than throwing, so a console error fails these too.
+//
+// Each waits for the RENDERER to have taken the tiny size in before going on: the canvas's
+// inline width is written only by the renderer's own sizing, which starts when Phaser is READY.
+// Without that wait, a READY that came late enough would let the tiny phase pass before the
+// renderer ever drew it, and the test would pass against the very bug it is for.
 
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -80,10 +85,13 @@ function rgb(hex: number): [number, number, number] {
 async function expectBoardDrawnAtFullSize(page: Page): Promise<void> {
   const want = rgb(resolvePalette('default').border);
   await expect
-    .poll(async () => {
-      const got = await cellColour(page, GRID.cols - 1, 2);
-      return got.every((c, k) => Math.abs(c - (want[k] as number)) <= 24);
-    })
+    .poll(
+      async () => {
+        const got = await cellColour(page, GRID.cols - 1, 2);
+        return got.every((c, k) => Math.abs(c - (want[k] as number)) <= 24);
+      },
+      { timeout: 20_000 },
+    )
     .toBe(true);
 }
 
@@ -98,6 +106,7 @@ test.describe('a board too small to draw never stops the game (#181)', () => {
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await expect(board).toHaveAttribute('data-started', 'true');
     await expectTicking(board);
+    await expectBoardDrawnAtFullSize(page); // the renderer is up and drawing
 
     const original = page.viewportSize();
     expect(original).not.toBeNull();
@@ -109,6 +118,22 @@ test.describe('a board too small to draw never stops the game (#181)', () => {
           const r = el.getBoundingClientRect();
           return r.width < 56 || r.height < 48;
         }),
+      )
+      .toBe(true);
+    // … and the renderer has taken that size in: its sizing writes the board's width to the
+    // canvas's inline style. Compared as numbers: the style reads back serialized to about six
+    // significant digits, so a long fraction would never match its own source string.
+    await expect
+      .poll(
+        () =>
+          board.evaluate((el) => {
+            const inline = el.querySelector('canvas')?.style.width ?? '';
+            return (
+              inline.endsWith('px') &&
+              Math.abs(parseFloat(inline) - el.getBoundingClientRect().width) < 0.01
+            );
+          }),
+        { timeout: 20_000 },
       )
       .toBe(true);
     await frames(page, 10);
@@ -138,6 +163,14 @@ test.describe('a board too small to draw never stops the game (#181)', () => {
     const board = page.locator('.wy-board');
     await expect(page.locator('.wy-board canvas')).toBeAttached();
     await expect(board).toBeHidden();
+    // The renderer is up and has sized itself to the hidden board: its sizing writes the
+    // canvas's inline width, '0px' for a 0×0 board.
+    await expect
+      .poll(
+        () => page.locator('.wy-board canvas').evaluate((c: HTMLCanvasElement) => c.style.width),
+        { timeout: 20_000 },
+      )
+      .toBe('0px');
     await frames(page, 10);
 
     await page.evaluate(() => {
