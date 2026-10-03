@@ -86,7 +86,7 @@ export const PLATE_RECT = { x: 3, y: 3, w: 58, h: 58, rx: 9 } as const;
  *  pixels, never thinner than its one CSS px rounded UP (two pixels at dpr 1.25 or 1.5),
  *  else the whole number nearest its design width. Any width that rounding adds goes
  *  outward, so its plate side keeps its place; each edge then moves to the nearest place on
- *  the pixel grid, under half a pixel away — or, where that would cross the footprint's
+ *  the pixel grid, at most half a pixel away — or, where that would cross the footprint's
  *  edge, inward to the first place inside it. Without it, a one-pixel rim whose centre fell
  *  inside a pixel was smeared across two half-lit ones — 2.19:1 at 10px cells on a dpr 1
  *  screen (QC round 2, A4). And it needs the board's canvas shown pixel for pixel, which

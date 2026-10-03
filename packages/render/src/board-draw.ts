@@ -193,9 +193,9 @@ export function drawSelection(
     // floor-side edge is what carries the cue. (A fractional dpr moves those bands, the rim
     // being on whole device pixels. At small cells a side of the rim can land on the
     // footprint's outermost pixel, which the stroke covers: at dpr 1 only at 10px cells, but
-    // at a fractional dpr, where the rim is widened outward to two pixels or more, at many
-    // sizes — docs/accessibility-checklist.md lists them. Where a neighbouring tower's rim
-    // does the same, the floor beyond the stroke gives way to that rim.) It stays clear of a
+    // at other dprs at more sizes, on the near side or the far —
+    // docs/accessibility-checklist.md lists them. Where a neighbouring tower's rim does the
+    // same, the floor beyond the stroke gives way to that rim.) It stays clear of a
     // neighbour: the next footprint starts beyond this one's edge. These relations hold only
     // because `c` is snapped exactly as the tower sprite's corner is.
     g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);

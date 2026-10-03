@@ -759,7 +759,7 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     for (const span of [w!, h!]) {
       expect(span + 2 * half).toBeLessThanOrEqual(PROJECTION.cellPx * 2); // never past it
     }
-    // The rim read here IS the plate's, moved under half a pixel onto the pixel grid.
+    // The rim read here IS the plate's, moved at most half a pixel onto the pixel grid.
     expect(Math.abs(rim.x - PLATE_RECT.x) * u).toBeLessThanOrEqual(0.5 + 1e-9);
     expect(rim.x).not.toBe(PLATE_RECT.x); // (and at this size it did move)
   });

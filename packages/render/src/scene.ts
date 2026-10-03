@@ -101,7 +101,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // raw dpr over 2) it is scaled up by design. (Chromium's device-scale EMULATION,
   // Playwright's `deviceScaleFactor`, lays the page out in CSS px and scales its picture
   // instead, so at a fractional dpr it resamples the canvas whatever its size.) World (0, 0)
-  // lands on the device pixel the box's left edge snaps to, under half a pixel from its CSS
+  // lands on the device pixel the box's left edge snaps to, at most half a pixel from its CSS
   // position, as it did when the store was scaled into the box.
   //
   // Because that count depends on the box's position, it is re-read on every sync, and the
