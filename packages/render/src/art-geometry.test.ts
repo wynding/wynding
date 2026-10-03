@@ -119,6 +119,29 @@ describe('parsePath', () => {
       { c: 'M', x: 10, y: 10 },
       { c: 'L', x: 50, y: 50 },
     ]);
+    expect(parsePath('M10\t10\fL50\r\n50')).toEqual([
+      { c: 'M', x: 10, y: 10 },
+      { c: 'L', x: 50, y: 50 },
+    ]);
+    // Whitespace is SVG's own — not the no-break, byte-order, vertical-tab or ideographic
+    // spaces JS's `\s` admits.
+    for (const space of [' ', '﻿', '\u000b', '　']) {
+      expect(() => parsePath(`M10${space}10L50 50`), JSON.stringify(space)).toThrow(/unreadable/);
+    }
+    // An arc flag is the one character 0 or 1: never 2, 1.0, -1 or 1e5 ...
+    for (const flags of ['2 1', '1.0 1', '-1 1', '0 2', '1e5 1']) {
+      expect(() => parsePath(`M10 50A40 40 0 ${flags} 90 50`), flags).toThrow(/arc flag/);
+    }
+    // ... and may be packed against what follows it, as the grammar allows.
+    const arc = { c: 'A', rx: 40, ry: 40, rotation: 0, x: 90, y: 50 };
+    expect(parsePath('M10 50A40 40 0 0190 50')[1]).toEqual({ ...arc, large: false, sweep: true });
+    expect(parsePath('M10 50A40 40 0 11,90 50')[1]).toEqual({ ...arc, large: true, sweep: true });
+    expect(parsePath('M10 50A40 40 0 0 1.5 50')[1]).toEqual({
+      ...arc,
+      large: false,
+      sweep: true,
+      x: 0.5,
+    });
   });
 });
 

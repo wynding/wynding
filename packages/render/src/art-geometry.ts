@@ -48,6 +48,8 @@ export type PathCommand =
 
 const COMMAND_LETTERS = 'MmLlHhVvCcSsQqTtAaZz';
 const TOKEN = /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+/** A whole token that is a number without a sign — what may follow a packed arc flag. */
+const UNSIGNED_NUMBER = /^(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
 
 /** Whether `token` is a number rather than a command letter. */
 const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
@@ -60,18 +62,23 @@ const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
  *
  * NEVER MORE LENIENT THAN `Path2D`, which is what paints the art: a browser drops path data
  * from its first error on, so data it would draw as nothing must not measure as a shape
- * here. So the path must open with a moveto (`'L50 50'` and `'h40'` paint nothing), and a
- * comma may only separate two numbers, once (`'M10,,10L50 50'` and `',M10 10L50 50'` paint
- * nothing either) — the SVG grammar's `comma-wsp`.
+ * here. So the path must open with a moveto (`'L50 50'` and `'h40'` paint nothing); a comma
+ * may only separate two numbers, once (`'M10,,10L50 50'` and `',M10 10L50 50'` paint nothing
+ * either) — the SVG grammar's `comma-wsp`; whitespace is SVG's own (space, tab, line feed,
+ * form feed, carriage return — not the no-break or ideographic spaces JS's `\s` admits); and
+ * an arc flag is the one character `0` or `1`, which may be packed against what follows it
+ * (`'A40 40 0 0190 50'` is flags 0 and 1, then 90 50).
  */
 export function parsePath(d: string): PathCommand[] {
   /** What may stand between the token `before` and the token `after` (either missing at the
    *  ends of the string): whitespace, and one comma only between two numbers. */
   const checkGap = (gap: string, before: string | undefined, after: string | undefined): void => {
-    if (!/^[\s,]*$/.test(gap)) throw new Error(`unreadable path data: '${d}'`);
+    if (!/^[ \t\n\f\r,]*$/.test(gap)) throw new Error(`unreadable path data: '${d}'`);
     if (!gap.includes(',')) return;
     if (
       gap.indexOf(',') !== gap.lastIndexOf(',') ||
+      // (A leading comma is caught twice over: here, and by the moveto rule below, since
+      // what follows it is either a command letter or numbers before any moveto.)
       before === undefined ||
       after === undefined ||
       !isNumber(before) ||
@@ -107,6 +114,20 @@ export function parsePath(d: string): PathCommand[] {
       throw new Error(`path data ends early: '${d}'`);
     }
     return Number(t);
+  };
+  /** An arc flag: the one character `0` or `1` at the front of the next token. What follows
+   *  it in a packed token (`'0190'`) is left to be read as the next token — and must be a
+   *  number itself (`'1e5'` leaves `'e5'`, which is not). */
+  const flag = (): boolean => {
+    const t = tokens[i];
+    if (t === undefined || (t[0] !== '0' && t[0] !== '1')) {
+      throw new Error(`an arc flag must be 0 or 1: '${d}'`);
+    }
+    const rest = t.slice(1);
+    if (rest === '') i++;
+    else if (UNSIGNED_NUMBER.test(rest)) tokens[i] = rest;
+    else throw new Error(`an arc flag must be 0 or 1: '${d}'`);
+    return t[0] === '1';
   };
   while (i < tokens.length) {
     const t = tokens[i] as string;
@@ -170,8 +191,8 @@ export function parsePath(d: string): PathCommand[] {
       const rx = num();
       const ry = num();
       const rotation = num();
-      const large = num() !== 0;
-      const sweep = num() !== 0;
+      const large = flag();
+      const sweep = flag();
       cx = ox + num();
       cy = oy + num();
       out.push({ c: 'A', rx, ry, rotation, large, sweep, x: cx, y: cy });
