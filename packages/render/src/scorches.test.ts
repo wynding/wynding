@@ -216,6 +216,11 @@ describe('createScorchTracker — detection', () => {
     t.update(frame({ sparks: [landing(m)], renderTick: 11.6 }));
     t.update(frame({ sparks: [landing(m)], renderTick: 12.1 }));
     expect(t.live(12.1)).toHaveLength(2);
+    // Both owed landings were settled, the first of them out of two: so when the mine is
+    // rebuilt and goes off seen only by its landing, that scorches a third time.
+    t.update(frame({ towers: [m], renderTick: 40 }));
+    t.update(frame({ sparks: [landing(m)], renderTick: 42.5 }));
+    expect(t.live(42.5)).toHaveLength(3);
   });
 
   it('scorches a mine rebuilt on the same spot when it goes off again', () => {

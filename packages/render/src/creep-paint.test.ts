@@ -11,6 +11,7 @@ import {
   stunTelegraphPaintOps,
   wardPaintOps,
   airborneCuePaintOps,
+  AIRBORNE_OUTLINE_SHIFT_PX,
 } from './creep-paint';
 import { resolvePalette } from './palette';
 import { ART_INK } from './tower-art';
@@ -579,6 +580,15 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     const [op] = airborneCuePaintOps({ x: 100, y, airborne: true }, R, AIRBORNE, 0);
     expect(op!.apexY).toBeGreaterThan(y);
     for (const v of [op!.apexY, op!.leftY, op!.rightY]) expect(v).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not flip once the apex and its outline’s shift fit — the boundary from the other side', () => {
+    // A hundredth of a pixel more than the apex (r × 3.4) and the outline's shift need: the
+    // chevron stays above its creep, its apex on the canvas.
+    const y = R * 3.4 + AIRBORNE_OUTLINE_SHIFT_PX + 0.01;
+    const [op] = airborneCuePaintOps({ x: 100, y, airborne: true }, R, AIRBORNE, 0);
+    expect(op!.apexY).toBeLessThan(y);
+    expect(op!.apexY).toBeGreaterThanOrEqual(0);
   });
 
   it('does NOT flip when there is room above — the default stays upward', () => {
