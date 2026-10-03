@@ -83,8 +83,11 @@ export interface Palette {
    *  Not a timed status (see CONTEXT.md's Domain entry), so gated ≥ 3:1 like every
    *  other opaque cue (`palette.test.ts`) with no motion-cue caveat — same posture as
    *  `warded`. The wingspan draws entirely OUTSIDE the silhouette and outside every
-   *  other cue's radius — apex at r×3.4, tips at ≈ r×3.23 — so its contrast partner is
-   *  the board floor. Radii are NOT restated beyond that: the authoritative ordering,
+   *  other cue's radius — apex at r×3.4, tips at ≈ r×3.23, each moved out a further
+   *  1.25px for its ink outline (≈ r×3.76 and r×3.57 at r = 3.5) — so its contrast
+   *  partners are what lies there: the board floor, and a tower in the next cell up — its
+   *  plate and rim under the light stroke, its role-coloured head under the ink outline,
+   *  each pair gated. Radii are NOT restated beyond that: the authoritative ordering,
    *  and the reason it must stay outside the ward, is derived at `creep-paint.ts`'s
    *  CUE-RADIUS ORDERING block. (An earlier version of this comment quoted r×1.1/r×1.3,
    *  the draft ship-review rejected for sitting on the slow ring — a reader auditing
@@ -166,11 +169,13 @@ const DEFAULT: Palette = {
   // Pale ice-blue (M2-S7) — distinct from every other cue in this table, and gated on
   // contrast against the surfaces it is actually drawn over: the floor (14.82:1) and, since
   // the visual pass drew towers as a plate with a head, the plate (11.59:1) and its rim
-  // `tower` (3.63:1) — see `palette.test.ts`. The light role-coloured HEADS it can also
-  // cross are not gated and cannot be: the wingspan clears none of the light ones (1.05:1
-  // over the default support white), and no single colour clears both them and the dark
-  // plate — a residual recorded in docs/accessibility-checklist.md, carried by shape, with
-  // the cue's own redraw (C4) to come.
+  // `tower` (3.63:1) — see `palette.test.ts`. Over the light role-coloured HEADS it can
+  // also cross, this light stroke cannot read and is not gated: it clears none of the light
+  // ones (1.05:1 over the default support white), and no single colour clears both them and
+  // the dark plate. So the cue carries an ink outline (`ART_INK`), which is gated ≥ 3:1
+  // against every role colour in every mode: the light core reads on the dark surfaces, the
+  // ink edge on a light head (docs/accessibility-checklist.md; the cue's own redraw, C4,
+  // is to come).
   //
   // WHY IT IS NOT THE ELECTRIC CYAN THIS SHIPPED AS FIRST (0x33ccff): that measured
   // 1.83:1 against `tower` 0x009e73 and 2.77:1 against 0x0072b2, both under this repo's
@@ -189,10 +194,12 @@ const DEFAULT: Palette = {
   // against `tower` needs a very light colour, and every candidate that separates from
   // `stunned` falls under it (measured against the old green body: 0x9ad0ff → 2.09,
   // 0xb0d8ff → 2.30, 0x8fb8f0 → 1.68; against today's plate rim: 2.47, 2.71, 1.98).
-  // Choosing separation here would trade an enforced gate for an unenforced one. Shape carries the distinction instead, decisively and per ADR 0003's
-  // primary channel: a stun jolt is a RING at r×1.15; the airborne cue is two line
-  // strokes whose NEAREST point is r×3.23 (the wingtips), over a cell out from the creep
-  // centre — a separation no near-white pair can erase. Restated from the `airborne` key
+  // Choosing separation here would trade an enforced gate for an unenforced one. Shape
+  // carries the distinction instead, decisively and per ADR 0003's primary channel: a stun
+  // jolt is a RING at r×1.15; the airborne cue is two line strokes whose NEAREST point is
+  // the wingtips — r×3.23 plus the 1.25px the chevron moved out for its ink outline, r×3.57
+  // at r = 3.5 — over a cell out from the creep centre: a separation no near-white pair can
+  // erase. Restated from the `airborne` key
   // above, whose own note names `creep-paint.ts`'s CUE-RADIUS ORDERING as the authority
   // precisely so a restatement cannot become a second source of truth. This line proved
   // the point: #126 moved the strokes out from r×2.6–2.9 and this sentence went stale,

@@ -519,7 +519,9 @@ export interface AirborneCuePaintOp {
 // (1) The clearances are RATIOS while `r` floors at 3px and the stroke/pip widths do not,
 //     so the tightest pair is whichever one the pixel floors bite hardest — and #126 MOVED
 //     which pair that is. It used to be airborne-vs-ward, ~1.2px at the clamp; with the tips
-//     now at r×3.23 that gap is ≈3.1px and no longer the constraint. The tight pair is now
+//     now at r×3.23, and moved out a further `AIRBORNE_OUTLINE_SHIFT_PX` for the outline,
+//     that gap is 1.26px (r = 3) / 1.78px (r = 3.5) between the DRAWN edges, outline
+//     included, and no longer the constraint. The tight pair is now
 //     airborne-vs-drift: +0.348px (r = 3) / +0.823px (r = 3.5) for the light stroke alone,
 //     and — since the ink outline widened the drawn cue by 1px each side and the chevron
 //     moved out `AIRBORNE_OUTLINE_SHIFT_PX` to make room for it — +0.534px / +1.008px for
@@ -536,12 +538,14 @@ export interface AirborneCuePaintOp {
 //     radius both clears every same-creep cue AND stays inside the cell. The #126 move
 //     from r×2.9 to r×3.4 deepens this residual without changing its CHARACTER — 1.19
 //     cellPx still lands in the row-10 cell (leaving it would take 1.5), so it is the same
-//     one cell, further into it. SHAPE still carries the load there,
+//     one cell, further into it. Except at the 10px floor: there the ink outline's drawn
+//     top (its 1px run past the apex, and its half-width) reaches 1.536 cells, 0.36px
+//     into the cell beyond. SHAPE still carries the load there,
 //     not colour: the cell it lands in is usually a tower footprint, so no footprint mark
 //     may be this glyph — `antiair` (the tower that co-occurs with flyers by definition)
 //     therefore draws the `'arrow'` mark, a shafted arrow, rather than the bare "^" it
-//     first shipped as (since the visual pass, #181, the arrow is antiair's head, `HEAD_ART` in
-//     `tower-art.ts`). WHAT IS GATED (`palette.test.ts`), exactly: the light stroke
+//     first shipped as (since the visual pass, #181, the arrow is antiair's head,
+//     `HEAD_ART` in `tower-art.ts`). WHAT IS GATED (`palette.test.ts`), exactly: the light stroke
 //     (`pal.airborne`) ≥ 3:1 against the floor, the plate and the plate's rim (`tower`) —
 //     the dark surfaces it lands on — and its INK OUTLINE (`ART_INK`, drawn under it 1px
 //     wider on each side and 1px past each end) ≥ 3:1 against every role colour and the

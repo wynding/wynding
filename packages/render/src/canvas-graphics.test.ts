@@ -183,9 +183,12 @@ describe('canvasGraphics — Phaser Graphics semantics over a 2D context', () =>
   });
 
   it('never hands arc() a negative radius — a rect smaller than its 2px inset strokes at radius 0', () => {
-    // The 1px-cell fallback (a board under ~56×48 CSS px, or hidden): a 2×2 footprint is
-    // 2px, so the pending outline's `strokeRoundedRect(x + 2, y + 2, size - 4, size - 4, 6)`
-    // is −2 × −2, and half its shorter side is −1. A real context throws on that.
+    // The adapter stands in for Phaser's `Graphics`, which strokes a degenerate rounded
+    // rect without complaint, so it must too: a real context throws on a negative radius.
+    // Nothing baked strokes one today — the call that could, a Pending build's inset
+    // outline (`strokeRoundedRect(x + 2, y + 2, size - 4, size - 4, 6)`, −2 × −2 on the
+    // 1px-cell fallback's 2px footprint, half its shorter side −1), became tower art in the
+    // visual pass — but any painter handed this surface may.
     const ctx = fakeContext();
     expect(() => canvasGraphics(ctx).strokeRoundedRect(3, 3, -2, -2, 6)).not.toThrow();
     const radii = ctx.ops.filter((o) => o.op === 'arc').map((o) => o.args[2]);
