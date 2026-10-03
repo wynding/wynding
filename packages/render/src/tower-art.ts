@@ -436,8 +436,10 @@ export const ART_FLASH = 0xfff6d8;
 /** An aiming head's muzzle flash: a disc of radius `r` design units, centred `reach` units out
  *  from the footprint centre along the head's facing — just past the tip of every aiming
  *  head, where the frame draws it (centre (32, 6) with the head pointing up) — at `alpha`
- *  the instant the shot leaves. */
-export const MUZZLE_FLASH = { reach: 26, r: 6, alpha: 0.95 } as const;
+ *  the instant the shot leaves. As it fades it shrinks to `fadeR`, so it dies away as a
+ *  small spark rather than a full disc greying out over the dark plate (the frame draws only
+ *  the instant of the shot). */
+export const MUZZLE_FLASH = { reach: 26, r: 6, fadeR: 3, alpha: 0.95 } as const;
 
 /** The ring pulse a head that does NOT aim shows when it fires: two rings about the footprint
  *  centre in the tower's role colour, around the head and inside the plate — each a radius

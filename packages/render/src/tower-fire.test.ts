@@ -287,7 +287,7 @@ describe('fireFeedbackPaintOps — the muzzle flash and the ring pulse', () => {
     return { x: c.x + projection.cellPx, y: c.y + projection.cellPx };
   };
 
-  it('flashes an aiming tower at its muzzle, just past its tip, in warm white, fading', () => {
+  it('flashes an aiming tower at its muzzle, just past its tip, in warm white, shrinking as it fades', () => {
     const basic = tower(1, 'basic', 4);
     const c = centre(basic);
     const [op, ...rest] = fireFeedbackPaintOps(
@@ -316,6 +316,8 @@ describe('fireFeedbackPaintOps — the muzzle flash and the ring pulse', () => {
       projection,
     );
     expect(half[0]!.alpha).toBeCloseTo(MUZZLE_FLASH.alpha / 2, 12);
+    expect(half[0]!.r).toBeCloseTo(((MUZZLE_FLASH.r + MUZZLE_FLASH.fadeR) / 2) * unit, 12);
+    expect(MUZZLE_FLASH.fadeR).toBeLessThan(MUZZLE_FLASH.r);
   });
 
   it('puts the flash where the head faces — turned a quarter right, it is right of the centre', () => {

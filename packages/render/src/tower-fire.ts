@@ -233,11 +233,13 @@ export function fireFeedbackPaintOps(
     if (aims) {
       const a = aim.angleOf(t.id);
       const reach = MUZZLE_FLASH.reach * unit;
+      // It shrinks as it fades: `r` at the shot, `fadeR` as it goes.
+      const r = MUZZLE_FLASH.fadeR + (MUZZLE_FLASH.r - MUZZLE_FLASH.fadeR) * k;
       out.push({
         kind: 'flash',
         x: cx + Math.sin(a) * reach,
         y: cy - Math.cos(a) * reach,
-        r: Math.max(MIN_FLASH_PX, MUZZLE_FLASH.r * unit),
+        r: Math.max(MIN_FLASH_PX, r * unit),
         colour: ART_FLASH,
         alpha: MUZZLE_FLASH.alpha * k,
       });
