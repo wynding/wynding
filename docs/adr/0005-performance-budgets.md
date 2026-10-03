@@ -1080,3 +1080,68 @@ S11's PR regardless of this re-acceptance; it remains an owner decision on real-
 evidence this milestone does not yet have. See `docs/milestones/m2.md`'s Open questions and
 `docs/accessibility-checklist.md`'s Story 11 conformance audit for the same ruling recorded
 in each document's own convention.
+
+## Amendment — 2026-10-02 (visual pass V2, #181) — the S10 decision is taken: static art is baked
+
+The S10 Finding above ended on an open architecture question, left as an owner decision: the
+frame budget was being spent CPU-tessellating `Graphics` geometry inside Phaser's own render
+loop (`batchLine`/`batchQuad`/`batchFillPath`/`batchStrokePath`). **The owner took that decision
+on 2026-10-02 by picking item V2 of the visual pass (#181)**: draw the board and the towers once
+into cached textures, and keep per-frame drawing for what moves. This entry records what that
+changed and what it measured. It changes no budget, no trigger, `R0`, `TOLERANCE` or the CI
+ratio gate, and amends no earlier finding or ruling.
+
+**What is baked.** Two textures, painted with Canvas2D through the same `GraphicsLike` geometry
+code that drew the art every frame before (`packages/render/src/canvas-graphics.ts`), so the
+board looks the same by construction rather than by a second copy of the shapes:
+
+- the **board** — floor, border ring, entrance, exit — one texture sized to the board in device
+  pixels, shown as one image;
+- one **atlas** — every tower footprint mark as committed, buffed (with the recipient ✦) and
+  pending, and every creep silhouette shape at normal and low-health tint, standard and boss
+  size — shown by pooled sprites placed each frame.
+
+Both are repainted only when the cell size, the effective dpr or the colour mode changes,
+never per frame; a texture that would exceed the renderer's maximum size is baked at a lower
+scale instead of failing.
+
+**What stays live.** Everything that moves or comes and goes is still drawn each frame, into
+three `Graphics` objects at fixed depths (`packages/render/src/layers.ts`): the aura shells
+under the towers; the selection cue and tracers between the pending builds and the creeps;
+health pips, status cues, the build ghost and sparks over everything. ADR 0003's cue
+vocabulary — the choice the S10 Finding said the frame budget may be paying for — is otherwise
+untouched: the cue rings, chevrons and pips are still stroked `Graphics`; what moved into
+textures is the static art underneath them.
+
+**Measured before/after.** The record-only browser perf suite (`playwright.perf.config.ts`: the
+`catalog` and `stress` scenes on the `mid-range` and `low-end` emulation profiles), run twice
+at the base commit (`9c3b524`) before any change and twice at the branch head, back to back on
+one machine: Chrome 149.0.7827.55, `ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro,
+Unspecified Version)`. Frame time in milliseconds; each cell gives run 1 / run 2.
+
+| scene   | profile   | p50 before    | p50 after   | p95 before    | p95 after   | p99 before    | p99 after   |
+| ------- | --------- | ------------- | ----------- | ------------- | ----------- | ------------- | ----------- |
+| catalog | mid-range | 26.4 / 26.3   | 8.3 / 8.3   | 34.6 / 34.7   | 10.2 / 10.2 | 35.2 / 35.1   | 10.3 / 10.3 |
+| stress  | mid-range | 33.4 / 33.4   | 16.5 / 16.7 | 41.6 / 41.7   | 18.5 / 25.2 | 43.1 / 43.2   | 24.9 / 26.5 |
+| catalog | low-end   | 93.3 / 92.8   | 23.9 / 23.4 | 101.7 / 101.1 | 32.5 / 31.8 | 109.7 / 108.2 | 34.4 / 33.7 |
+| stress  | low-end   | 110.3 / 108.7 | 50.5 / 51.5 | 118.2 / 118.1 | 59.6 / 59.8 | 141.0 / 125.0 | 66.7 / 74.5 |
+
+Frames sampled in the 10 s window rose accordingly (catalog mid-range 354 / 351 → 1201 / 1200;
+stress mid-range 295 / 295 → 641 / 598; catalog low-end 105 / 106 → 452 / 464; stress low-end
+89 / 90 → 190 / 187). The medians agree within about 2% run to run on both sides, so the change
+is far outside run-to-run noise; the stress scene's tails are noisier (its mid-range p95 after
+reads 18.5 and 25.2). The catalog scene on mid-range now sits at 8.3 ms, one refresh of the
+120 Hz display, so that figure is the display's floor rather than the remaining cost. Both
+perf scenes were screenshotted at the head build to confirm every tower and creep is still
+drawn — a bake that silently drew nothing would also make frames cheap.
+
+**Missed-refresh proportion: not available from these runs.** The suite evaluates it only for
+the stress scene on mid-range, and the display cadence calibrated at 8.3 ms (a 120 Hz panel),
+outside the calibration band, so all four runs report it NOT EVALUATED (low-end: not
+applicable by design; catalog: not computed) — the same condition the S10 Finding recorded.
+The stress scene's p95-breach signal still fires on both profiles after the change (mid-range
+p95 18.5 / 25.2 ms against the 16.7 ms budget; low-end 59.6 / 59.8 ms against 33.3 ms).
+
+**What this evidence is.** Emulation on one development machine — the same class of evidence
+as the S10 Finding, with the 6× / 2× CPU throttles slowing JavaScript but not the GPU. It does
+not stand in for the real-device pass that ruling 6 above still holds open.
