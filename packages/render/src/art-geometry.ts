@@ -47,9 +47,9 @@ export type PathCommand =
   | { readonly c: 'Z' };
 
 const COMMAND_LETTERS = 'MmLlHhVvCcSsQqTtAaZz';
-const TOKEN = /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+const TOKEN = /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?/g;
 /** A whole token that is a number without a sign — what may follow a packed arc flag. */
-const UNSIGNED_NUMBER = /^(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+const UNSIGNED_NUMBER = /^(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?$/;
 
 /** Whether `token` is a number rather than a command letter. */
 const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
@@ -65,9 +65,11 @@ const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
  * here. So the path must open with a moveto (`'L50 50'` and `'h40'` paint nothing); a comma
  * may only separate two numbers, once (`'M10,,10L50 50'` and `',M10 10L50 50'` paint nothing
  * either) — the SVG grammar's `comma-wsp`; whitespace is SVG's own (space, tab, line feed,
- * form feed, carriage return — not the no-break or ideographic spaces JS's `\s` admits); and
- * an arc flag is the one character `0` or `1`, which may be packed against what follows it
- * (`'A40 40 0 0190 50'` is flags 0 and 1, then 90 50).
+ * form feed, carriage return — not the no-break or ideographic spaces JS's `\s` admits); a
+ * decimal point is followed by a digit (`'L90. 50'` and `'L1.e1 50'` paint nothing), and a
+ * number fits a 32-bit float, which is what the browser reads it into (`'L1e39 50'` paints
+ * nothing); and an arc flag is the one character `0` or `1`, which may be packed against
+ * what follows it (`'A40 40 0 0190 50'` is flags 0 and 1, then 90 50).
  */
 export function parsePath(d: string): PathCommand[] {
   /** What may stand between the token `before` and the token `after` (either missing at the
@@ -113,7 +115,12 @@ export function parsePath(d: string): PathCommand[] {
     if (t === undefined || COMMAND_LETTERS.includes(t)) {
       throw new Error(`path data ends early: '${d}'`);
     }
-    return Number(t);
+    const v = Number(t);
+    // A browser reads path data into 32-bit floats, and a number that overflows one ends it.
+    if (!Number.isFinite(Math.fround(v))) {
+      throw new Error(`a number too large for path data: '${d}'`);
+    }
+    return v;
   };
   /** An arc flag: the one character `0` or `1` at the front of the next token. What follows
    *  it in a packed token (`'0190'`) is left to be read as the next token — and must be a

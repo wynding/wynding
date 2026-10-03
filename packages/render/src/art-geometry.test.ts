@@ -143,6 +143,19 @@ describe('parsePath', () => {
       sweep: true,
       x: 0.5,
     });
+    // A decimal point is followed by a digit — packed behind an arc flag too ...
+    for (const bad of ['M10 10L90. 50', 'M10 10L1.e1 50', 'M10 50A40 40 0 0 190. 50']) {
+      expect(() => parsePath(bad), bad).toThrow(/unreadable/);
+    }
+    // ... and a number fits the 32-bit float a browser reads it into.
+    for (const bad of ['M10 10L1e39 50', 'M10 10L50 -3.5e38']) {
+      expect(() => parsePath(bad), bad).toThrow(/too large/);
+    }
+    // Numbers it can hold read however they are written.
+    expect(parsePath('M.5 1e1L1e38-.25')).toEqual([
+      { c: 'M', x: 0.5, y: 10 },
+      { c: 'L', x: 1e38, y: -0.25 },
+    ]);
   });
 });
 
