@@ -2577,6 +2577,29 @@ describe('overlay — accessibility semantics', () => {
     expect(shell.root.hasAttribute('inert')).toBe(false); // restored on close
   });
 
+  it('opens on the HEADING where Play again is not wholly in view at the top of the panel (#181 H2)', () => {
+    // A short window at heavy text zoom puts Play again below the panel's fold, where focusing
+    // it would scroll the outcome out of view: the ARIA dialog pattern focuses a static element
+    // at the top instead. jsdom has no layout, so the geometry is stubbed: a 300px scrollport
+    // starting at y=100, and Play again at y=450.
+    const { overlay } = setup();
+    const body = overlay.resultsEl.querySelector<HTMLElement>('.wy-results-body')!;
+    const heading = overlay.resultsEl.querySelector<HTMLElement>('h2')!;
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-btn')!;
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 300 });
+    body.getBoundingClientRect = () => new DOMRect(0, 100, 400, 300);
+    playAgain.getBoundingClientRect = () => new DOMRect(0, 450, 200, 48);
+    overlay.showResults(hud({ won: true }), runStats());
+    expect(document.activeElement).toBe(heading);
+    expect(heading.tabIndex, 'focusable by script, never a Tab stop').toBe(-1);
+    overlay.hideResults();
+
+    // ...and back in view, Play again keeps initial focus (ADR 0014 §1).
+    playAgain.getBoundingClientRect = () => new DOMRect(0, 340, 200, 48);
+    overlay.showResults(hud({ won: true }), runStats());
+    expect(document.activeElement).toBe(playAgain);
+  });
+
   it('restores focus to the pre-modal element when the results dialog closes', () => {
     const { overlay, settingsBtn } = setup();
     settingsBtn.focus();

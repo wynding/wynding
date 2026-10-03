@@ -306,14 +306,19 @@ export function createSurveyForm(
     render();
   });
 
-  openBtn.addEventListener('click', () => {
+  openBtn.addEventListener('click', (event) => {
     if (!survey.open()) return;
     // Opening CLEARS the region without claiming it (§6): a Verify result still showing has
     // no pending outcome to lose, and a Copy still awaiting the clipboard keeps its claim,
     // so its result lands after this. Only Send takes the region.
     say('');
     render();
-    rating.inputs[0]?.focus();
+    // Focus moves to the first question (§1). A POINTER press (`detail` counts its clicks)
+    // moves it without scrolling: the form opens below the action row, and scrolling the
+    // dialog here would carry the row away from under the pointer, so a double-click's second
+    // press would land on an answer (#181 H2). A keyboard press (`detail` 0) lets the browser
+    // bring the question into view, as it always has.
+    rating.inputs[0]?.focus(event.detail > 0 ? { preventScroll: true } : undefined);
   });
 
   notNowBtn.addEventListener('click', () => {

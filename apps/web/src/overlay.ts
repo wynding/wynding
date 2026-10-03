@@ -773,7 +773,10 @@ export function createOverlay(
   const resultsOverlay: ModalOverlay = {
     show(): void {
       results.hidden = false;
-      playAgainBtn.focus();
+      // Play again keeps initial focus (ADR 0014 §1) wherever it is wholly in view as the panel
+      // opens. Where it is not — a short window at heavy text zoom — focusing it would scroll
+      // the outcome out of view, so the heading takes focus instead (#181 H2, `results-panel.ts`).
+      resultsPanel.focusOnOpen();
     },
     hide(): void {
       results.hidden = true;

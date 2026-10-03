@@ -2014,14 +2014,16 @@ a.wy-home:focus-visible {
 }
 
 /* The panel's RESTING place: a spacer above it, sized by `results-panel.ts` (`settle`) to
-   centre the panel as it stands with nothing open below its action row. Opening the Run data
-   group or the survey form then grows the panel DOWNWARD from there — a centred panel would
-   slide up by half its growth and move the control the pointer just pressed. Only the spacer
-   ever shrinks, so it gives way when the open panel needs the room; the panel itself is capped
-   by `max-height` alone and never squeezed (its body scrolls instead). */
+   centre the panel as it stands with nothing open below its action row, and FIXED: it never
+   gives way. The panel is capped to the room left below it, so whatever opens — the Run data
+   group, the survey form, a status message — grows the panel downward into that room and then
+   scrolls inside its body. Nothing moves under a control the player has just pressed: a panel
+   that moved instead (re-centred, or pushed up to fit) would put another control under the
+   pointer for a double-click's second press. */
 .wy-results::before {
   content: '';
-  flex: 0 1 var(--wy-results-rest, 0px);
+  flex: none;
+  height: var(--wy-results-rest, 0px);
 }
 
 .wy-results-panel {
@@ -2031,7 +2033,7 @@ a.wy-home:focus-visible {
   flex-direction: column;
   box-sizing: border-box;
   width: min(100%, 32.5rem);
-  max-height: 100%;
+  max-height: calc(100% - var(--wy-results-rest, 0px));
   border: 1.5px solid var(--wy-results-edge);
   border-radius: 14px;
   background: var(--wy-results-panel);
@@ -2039,7 +2041,7 @@ a.wy-home:focus-visible {
 }
 
 /* The outcome band: the frame's 5px line along the panel's top edge, inset by the corner
-   radius and round-capped — gold for a win, red for a loss. Decoration: the heading carries
+   radius and round-capped — yellow for a win, red for a loss. Decoration: the heading carries
    the outcome. Offsets are from the padding box, inside the 1.5px border. */
 .wy-results-panel::before {
   content: '';
@@ -2058,11 +2060,15 @@ a.wy-home:focus-visible {
 }
 
 /* The scroller. Its inline size is the panel's, never its content's, so it can be the
-   container the tiles' Compact row queries. */
+   container the tiles' Compact row and the stars query. Its scrollbar's gutter is always
+   reserved: where scrollbars take room, something opening below the row would otherwise narrow
+   the body the moment it overflows, and reflow the row out from under the pointer. Reserved on
+   both edges, so the centred heading, stars and score stay centred on the panel and its band. */
 .wy-results-body {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
   container: wy-results / inline-size;
   padding: 1.75rem clamp(1rem, 6vw, 2.75rem) 1.25rem;
   /* The panel's radius inside its border, so a scrollbar keeps to the rounded corners. */
@@ -2077,6 +2083,14 @@ a.wy-home:focus-visible {
   line-height: 1.2;
 }
 
+/* The heading takes first focus where Play again is below the fold (`results-panel.ts`), so it
+   wears the app's focus ring, as every control does, rather than the browser's default. */
+.wy-results-title:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .wy-results-subtitle {
   margin: 0.5rem 0 0;
   font-size: 0.875rem;
@@ -2087,18 +2101,22 @@ a.wy-home:focus-visible {
   margin-top: 1.25rem;
 }
 
+/* The stars and their gaps are capped by the body's width (`cqi`, its inline-size container) as
+   well as by type size: three stars and two gaps take at most 74% of the row, so heavy text
+   zoom on a narrow window shrinks them rather than pushing the first one off the body's left
+   edge, where a centred row that overflows cannot be scrolled to. */
 .wy-results-stars {
   display: flex;
   justify-content: center;
-  gap: 0.625rem;
+  gap: min(0.625rem, 4cqi);
 }
 
 /* The HUD's star (`hud-icons.ts`) at the frame's results size. An unearned star keeps the
    shape — outlined, unfilled — so the grade reads by shape and not by colour alone (ADR 0003);
    its outline is the gated `--wy-panel-edge`, not the frame's 2.2:1 slate. */
 .wy-results-stars .wy-icon {
-  width: 2.75rem;
-  height: 2.75rem;
+  width: min(2.75rem, 22cqi);
+  height: min(2.75rem, 22cqi);
 }
 
 .wy-results-star[data-earned='false'] .wy-icon-body {
@@ -2202,6 +2220,16 @@ a.wy-home:focus-visible {
   font-weight: 700;
 }
 
+/* While its form is open the survey hides Give feedback (ADR 0014 §1), and here the button
+   keeps its box, invisibly. An emptied slot would let Play again widen under the pointer that
+   just pressed Give feedback, and a double-click's second press would start a new run. It is
+   hidden from sight, focus and assistive tech alike, and a press on its place lands on
+   nothing. */
+.wy-survey-opener > .wy-btn[hidden] {
+  display: inline-block;
+  visibility: hidden;
+}
+
 /* The Run data toggle: the frame's quieter secondary button, with a chevron that turns over
    while the group is open — instantly, so there is no motion for reduced motion to stop. */
 .wy-results-more {
@@ -2292,10 +2320,15 @@ a.wy-home:focus-visible {
 }
 
 /* A narrow panel (a narrow window, heavy text zoom) stacks the tiles, so a label and its
-   number never have to share less than a whole row. */
+   number never have to share less than a whole row — and where even a whole row is too narrow,
+   the number wraps at its spaces ("8 / 10") rather than overflowing the body. */
 @container wy-results (max-width: 16rem) {
   .wy-results-stats {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wy-results-stat dd {
+    white-space: normal;
   }
 }
 
@@ -2834,17 +2867,19 @@ a.wy-home:focus-visible {
     font-size: 0.8125rem;
   }
 
+  /* The stars and the score share a line where it fits, and stack where it does not. */
   .wy-results-grade {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: center;
-    gap: 1.25rem;
+    gap: 0.25rem 1.25rem;
     margin-top: 0.5rem;
   }
 
   .wy-results-stars .wy-icon {
-    width: 1.875rem;
-    height: 1.875rem;
+    width: min(1.875rem, 22cqi);
+    height: min(1.875rem, 22cqi);
   }
 
   .wy-results-score {

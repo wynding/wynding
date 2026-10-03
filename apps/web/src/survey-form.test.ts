@@ -252,6 +252,28 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     expect(h.textarea().maxLength).toBe(SURVEY_TEXT_MAX);
   });
 
+  it('a POINTER press focuses the first question without scrolling; a keyboard press may scroll (#181 H2)', async () => {
+    // The form opens below the results dialog's action row. Scrolling the dialog to the first
+    // question on a pointer press would carry the row out from under the pointer, and a
+    // double-click's second press would land on an answer — so only a keyboard press (whose
+    // synthesized click has `detail` 0) leaves the browser free to scroll.
+    const pointer = setup();
+    await pointer.open();
+    const pointerFocus = vi.spyOn(pointer.radios(0)[0]!, 'focus');
+    pointer
+      .button('Give feedback')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    expect(pointerFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+
+    const keyboard = setup();
+    await keyboard.open();
+    const keyboardFocus = vi.spyOn(keyboard.radios(0)[0]!, 'focus');
+    keyboard
+      .button('Give feedback')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
+    expect(keyboardFocus).toHaveBeenCalledExactlyOnceWith(undefined);
+  });
+
   it('Send is aria-disabled with no rating, and pressing it announces what is missing', async () => {
     const h = setup();
     await h.expand();

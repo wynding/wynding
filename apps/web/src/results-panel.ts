@@ -3,16 +3,19 @@
 // initial focus, Back/Escape behaviour and the shared status region's writers — and wires the
 // actions; this module owns what is IN the dialog and how it reads.
 //
-// What the panel shows, top to bottom: the outcome heading under a thin top band (gold for a
-// win, red for a loss — decoration; the heading carries the outcome), a subtitle naming the
+// What the panel shows, top to bottom: the outcome heading under a thin top band (yellow for
+// a win, red for a loss — decoration; the heading carries the outcome), a subtitle naming the
 // waves, three stars and the score, the run's numbers in a 2×2 grid of labelled tiles, and one
 // row of actions — Play again, the survey's Give feedback where the survey is offered, and Run
 // data: a DISCLOSURE (a button that shows and hides a group, not an ARIA menu) holding Verify,
 // Copy and Save. The survey form expands below the row, and the status region closes the panel.
 //
-// Where the panel stands: centred on the dialog by its size with nothing open below the action
-// row, and KEPT there while something opens — the Run data group, the survey form and a status
-// message all grow it downward (`settle` below, `ui.css`'s `.wy-results::before`).
+// Where the panel stands: centred on the dialog by its height with nothing open below the
+// action row, and FIXED there. The Run data group, the survey form and a status message grow it
+// downward into the room below, then scroll inside its body, so nothing ever moves under a
+// control the player has just pressed (`settle` below; `ui.css`'s `.wy-results::before`). It
+// opens with Play again focused, unless Play again is not wholly in view at the top of the
+// panel (a short window at heavy text zoom): then the heading takes focus (`focusOnOpen`).
 //
 // One sentence carries the score and the stars to assistive tech (`results.summary`, today's
 // string): it is the dialog's description, and the visual stars and score are `aria-hidden`
@@ -87,6 +90,9 @@ export interface ResultsPanel {
   readonly status: HTMLElement;
   /** Fill the panel for one finished run, with the disclosure collapsed. */
   render(outcome: ResultsOutcome): void;
+  /** The dialog has just been shown: place the panel, then give it its first focus — Play
+   *  again (ADR 0014 §1), or the heading where Play again is not wholly in view at the top. */
+  focusOnOpen(): void;
   /** Show or hide the Run data group, keeping `aria-expanded` in step. */
   setRunDataExpanded(expanded: boolean): void;
   /** Stop following the dialog's size (the overlay's teardown). */
@@ -134,6 +140,9 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
 
   const title = doc.createElement('h2');
   title.className = 'wy-results-title';
+  // Focusable by script only, never by Tab: the ARIA dialog pattern's first focus where the
+  // first control would scroll the start of the content out of view (`focusOnOpen`).
+  title.tabIndex = -1;
   const subtitle = doc.createElement('p');
   subtitle.className = 'wy-results-subtitle';
   const description = doc.createElement('p');
@@ -230,13 +239,14 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
 
   dialog.append(root);
 
-  // The panel's RESTING place: the spacer above it centres the panel by its height with
-  // nothing open below the action row, and holds while something opens there — the Run data
-  // group, the survey form, a status message — so each grows the panel DOWNWARD. A panel
-  // centred by its CURRENT height would slide up by half of every growth and move the toggle
-  // the pointer just pressed: a double-click on Run data would land its second click on Verify.
-  // When the open panel no longer fits below its resting place, the spacer gives way (it can
-  // only shrink; the panel never does — `max-height` alone caps it, and its body scrolls).
+  // The panel's RESTING place: a spacer above it (`ui.css`, `.wy-results::before`) centres the
+  // panel by its height with nothing open below the action row, and caps it to the room left
+  // below (`max-height`). The spacer never gives way: whatever opens below the row — the Run
+  // data group, the survey form, a status message — grows the panel downward into that room and
+  // then scrolls inside its body. A panel that moved instead (centred by its current height, or
+  // pushed up to fit) would carry the control the pointer just pressed away from under it, and
+  // a double-click's second press would land on whatever moved there: Verify, a download, a
+  // survey answer.
   const view = doc.defaultView;
   function settle(): void {
     if (view === null || dialog.hidden) return;
@@ -258,13 +268,25 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
       dialog.style.setProperty(REST_PROPERTY, rest);
     }
   }
-  // Re-settled whenever the dialog (the viewport) or the panel changes size. Writing the spacer
-  // moves the panel without resizing either box, so a settle never feeds the observer back.
-  // jsdom has neither the observer nor layout: there, the spacer keeps its 0 default.
+  // Re-settled only when the CLOSED panel or the room for it changes size: the dialog (the
+  // viewport) and every part from the heading to the action row (a text-zoom reflow, Give
+  // feedback arriving once the survey decides). Nothing that opens is observed — the group, the
+  // form and the status region all sit below the row — so opening something can never move the
+  // panel. Writing the spacer resizes none of the observed boxes (only the panel's height, which
+  // is not observed), so a settle never feeds the observer back. jsdom has neither the observer
+  // nor layout: there, the spacer keeps its 0 default.
   const RO = view?.ResizeObserver;
   const restObserver = typeof RO === 'function' ? new RO(() => settle()) : null;
-  restObserver?.observe(dialog);
-  restObserver?.observe(root);
+  for (const box of [dialog, title, subtitle, grade, statList, actions]) {
+    restObserver?.observe(box);
+  }
+
+  /** Whether `el` stands wholly inside the body's scrollport as the body is scrolled now. */
+  function wholeInView(el: HTMLElement): boolean {
+    const box = el.getBoundingClientRect();
+    const port = body.getBoundingClientRect();
+    return box.top >= port.top && box.bottom <= port.top + body.clientHeight;
+  }
 
   function setRunDataExpanded(expanded: boolean): void {
     runDataToggle.setAttribute('aria-expanded', String(expanded));
@@ -306,6 +328,20 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
       // A new dialog starts collapsed: the run data belongs to the run it was opened for.
       setRunDataExpanded(false);
       body.scrollTop = 0;
+    },
+    focusOnOpen(): void {
+      // Placed now rather than at the observer's next pass: where Play again stands decides
+      // which element takes focus.
+      settle();
+      body.scrollTop = 0;
+      if (wholeInView(playAgain)) {
+        playAgain.focus();
+      } else {
+        // Play again is below the fold (a short window at heavy text zoom), and focusing it
+        // would scroll the outcome out of view. The ARIA dialog pattern's answer: focus a static
+        // element at the top — the heading — and let Tab reach Play again.
+        title.focus({ preventScroll: true });
+      }
     },
     setRunDataExpanded,
     destroy(): void {

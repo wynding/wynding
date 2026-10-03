@@ -1,5 +1,14 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import {
+  boxOf,
+  expectSameBox,
+  openResults,
+  toggleOf,
+  twoFrames,
+  type Box,
+  type Run,
+} from './results-harness';
 
 // results-panel.spec.ts — the results panel (#181 H2) in a real browser, on finished runs.
 //
@@ -8,15 +17,16 @@ import AxeBuilder from '@axe-core/playwright';
 // (`?run=win`, the content suite's winning showcase build) or a LOSS (`?run=loss`, its 12-tower
 // prefix) — then boots the real app on that finished run, so the dialog opens on the first
 // frame with the run's own outcome, score, stars and numbers. `&survey=1` offers the survey,
-// so Give feedback takes its place in the action row.
+// so Give feedback takes its place in the action row; `&text=200` opens it at 200% text.
 //
 // What only a browser can prove, and the unit suites cannot: the disclosure's keyboard
-// behaviour and tab order, the treatments as painted, axe over both of its states, the panel's
-// fit at the four sizes the campaign checks, and where it rests while something opens.
+// behaviour and tab order, the treatments as painted, axe over every state, the panel's fit at
+// the campaign's sizes and at 200% text, and that nothing moves or appears under a control the
+// player has just pressed — driven with the real pointer (`page.mouse`), which, unlike a
+// locator's click, never scrolls anything into view first. The same, where a scrollbar takes
+// room, is `results-panel-scrollbar.spec.ts`'s: it needs a browser started with scrollbars.
 
-const HARNESS = 'http://localhost:4176/e2e-harness/results.html';
-
-type Run = 'win' | 'loss';
+type Size = { readonly width: number; readonly height: number };
 
 /** What each scripted run reads. The numbers are `controller.test.ts`'s, which derives them
  *  from the pure sim independently of the counters the panel reads; the score and the stars are
@@ -54,29 +64,29 @@ const EXPECTED: Record<
   },
 };
 
-const SIZES = [
-  { width: 1440, height: 900 },
+const DESKTOP: Size = { width: 1440, height: 900 };
+
+/** The campaign's four fit sizes. */
+const FIT_SIZES: readonly Size[] = [
+  DESKTOP,
   { width: 1280, height: 720 },
   { width: 740, height: 360 },
   { width: 658, height: 320 }, // Galaxy S9+ landscape — Compact
-] as const;
+];
+
+/** Where QC round 1 caught the panel moving under the pointer: the open Run data group or
+ *  survey form did not fit below the panel's resting place (1280×720, 1366×657, 1536×730,
+ *  658×320), or did and still lifted the row (1440×900, 1920×960). */
+const POINTER_SIZES: readonly Size[] = [
+  { width: 1280, height: 720 },
+  { width: 1366, height: 657 },
+  { width: 1536, height: 730 },
+  DESKTOP,
+  { width: 1920, height: 960 },
+  { width: 658, height: 320 },
+];
 
 const ITEMS = ['Verify this run', 'Copy run data', 'Save run data'] as const;
-
-async function openResults(page: Page, run: Run): Promise<Locator> {
-  await page.goto(`${HARNESS}?run=${run}&survey=1`);
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible({ timeout: 30_000 });
-  await expect(dialog.getByRole('button', { name: 'Give feedback' })).toBeVisible();
-  // Two frames: the panel's resting place is settled by a ResizeObserver pass.
-  await page.evaluate(
-    () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
-  );
-  return dialog;
-}
-
-const toggleOf = (dialog: Locator): Locator =>
-  dialog.getByRole('button', { name: 'Run data', exact: true });
 
 async function axeClean(page: Page, when: string): Promise<void> {
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
@@ -95,11 +105,58 @@ async function resolveColour(page: Page, value: string): Promise<string> {
   }, value);
 }
 
+/** Whether the element `selector` (or the focused element) is wholly inside the panel body's
+ *  scrollport, and the body wholly inside the viewport — i.e. on screen, not scrolled away. */
+async function wholeOnScreen(page: Page, selector: string | null): Promise<boolean> {
+  return page.evaluate((sel) => {
+    const el = sel === null ? document.activeElement : document.querySelector(sel);
+    if (el === null) return false;
+    const body = document.querySelector('.wy-results-body')!;
+    const port = body.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const portBottom = port.top + body.clientHeight;
+    return (
+      r.top >= port.top - 0.5 &&
+      r.bottom <= portBottom + 0.5 &&
+      port.top >= 0 &&
+      portBottom <= innerHeight &&
+      r.left >= 0 &&
+      r.right <= innerWidth
+    );
+  }, selector);
+}
+
+/** Where the panel stands, and what overflows: everything the fit test reads in one pass. */
+async function geometry(page: Page): Promise<{
+  panel: { left: number; top: number; right: number; bottom: number };
+  restTop: number;
+  restBottom: number;
+  dialogOverflow: [number, number];
+  bodyOverflow: [number, number];
+}> {
+  return page.evaluate(() => {
+    const dialogEl = document.querySelector<HTMLElement>('.wy-results')!;
+    const panel = document.querySelector('.wy-results-panel')!.getBoundingClientRect();
+    const body = document.querySelector('.wy-results-body')!;
+    const pad = getComputedStyle(dialogEl);
+    return {
+      panel: { left: panel.left, top: panel.top, right: panel.right, bottom: panel.bottom },
+      restTop: parseFloat(pad.paddingTop),
+      restBottom: innerHeight - parseFloat(pad.paddingBottom),
+      dialogOverflow: [
+        dialogEl.scrollWidth - dialogEl.clientWidth,
+        dialogEl.scrollHeight - dialogEl.clientHeight,
+      ],
+      bodyOverflow: [body.scrollWidth - body.clientWidth, body.scrollHeight - body.clientHeight],
+    };
+  });
+}
+
 for (const run of ['win', 'loss'] as const) {
   test(`the ${run} treatment: its band, heading, subtitle, stars, score and the run’s numbers`, async ({
     page,
   }) => {
-    await page.setViewportSize(SIZES[0]);
+    await page.setViewportSize(DESKTOP);
     const dialog = await openResults(page, run);
     const want = EXPECTED[run];
 
@@ -149,11 +206,11 @@ for (const run of ['win', 'loss'] as const) {
     expect(painted.band).toBe(
       await resolveColour(page, run === 'win' ? 'var(--wy-stars)' : 'var(--wy-loss)'),
     );
-    const gold = await resolveColour(page, 'var(--wy-stars)');
+    const yellow = await resolveColour(page, 'var(--wy-stars)');
     const dim = await resolveColour(page, 'var(--wy-star-empty)');
     const edge = await resolveColour(page, 'var(--wy-panel-edge)');
     painted.starFills.forEach((fill, i) => {
-      expect(fill, `star ${String(i + 1)}`).toBe(i < want.stars ? gold : dim);
+      expect(fill, `star ${String(i + 1)}`).toBe(i < want.stars ? yellow : dim);
     });
     // An unearned star keeps its shape by its outline: the grade never reads by colour alone.
     for (const stroke of painted.starStrokes.slice(want.stars)) expect(stroke).toBe(edge);
@@ -169,7 +226,7 @@ for (const run of ['win', 'loss'] as const) {
 test('Run data is a disclosure: click, Enter and Space toggle it, aria-expanded keeps step, and its actions join the tab order only while open', async ({
   page,
 }) => {
-  await page.setViewportSize(SIZES[0]);
+  await page.setViewportSize(DESKTOP);
   const dialog = await openResults(page, 'win');
   const playAgain = dialog.getByRole('button', { name: 'Play again' });
   const feedback = dialog.getByRole('button', { name: 'Give feedback' });
@@ -245,7 +302,7 @@ test('Run data is a disclosure: click, Enter and Space toggle it, aria-expanded 
 test('the panel is axe-clean with Run data closed and open, on a win and a loss', async ({
   page,
 }) => {
-  await page.setViewportSize(SIZES[0]);
+  await page.setViewportSize(DESKTOP);
   for (const run of ['win', 'loss'] as const) {
     const dialog = await openResults(page, run);
     await axeClean(page, `${run}, Run data closed`);
@@ -255,107 +312,245 @@ test('the panel is axe-clean with Run data closed and open, on a win and a loss'
   }
 });
 
-/** Where the panel stands, and what overflows: everything the fit test reads in one pass. */
-async function geometry(page: Page): Promise<{
-  panel: { left: number; top: number; right: number; bottom: number };
-  restTop: number;
-  restBottom: number;
-  dialogOverflow: [number, number];
-  bodyOverflow: [number, number];
-}> {
-  return page.evaluate(() => {
-    const dialogEl = document.querySelector<HTMLElement>('.wy-results')!;
-    const panel = document.querySelector('.wy-results-panel')!.getBoundingClientRect();
-    const body = document.querySelector('.wy-results-body')!;
-    const pad = getComputedStyle(dialogEl);
-    return {
-      panel: { left: panel.left, top: panel.top, right: panel.right, bottom: panel.bottom },
-      restTop: parseFloat(pad.paddingTop),
-      restBottom: innerHeight - parseFloat(pad.paddingBottom),
-      dialogOverflow: [
-        dialogEl.scrollWidth - dialogEl.clientWidth,
-        dialogEl.scrollHeight - dialogEl.clientHeight,
-      ],
-      bodyOverflow: [body.scrollWidth - body.clientWidth, body.scrollHeight - body.clientHeight],
-    };
-  });
-}
-
-for (const size of SIZES) {
-  test(`fits at ${String(size.width)}×${String(size.height)}: whole while closed, reachable while open, and Run data opens downward`, async ({
+for (const size of [
+  { width: 1280, height: 720 },
+  { width: 658, height: 320 },
+] as const) {
+  test(`axe-clean at ${String(size.width)}×${String(size.height)} with the survey form open, with Give feedback keeping its place`, async ({
     page,
   }) => {
     await page.setViewportSize(size);
-    for (const run of ['win', 'loss'] as const) {
-      const dialog = await openResults(page, run);
-      const toggle = toggleOf(dialog);
-      const inViewport = (g: Awaited<ReturnType<typeof geometry>>, when: string): void => {
-        expect(g.panel.left, `${run} ${when}: left edge`).toBeGreaterThanOrEqual(0);
-        expect(g.panel.right, `${run} ${when}: right edge`).toBeLessThanOrEqual(size.width);
-        expect(g.panel.top, `${run} ${when}: top edge`).toBeGreaterThanOrEqual(0);
-        expect(g.panel.bottom, `${run} ${when}: bottom edge`).toBeLessThanOrEqual(size.height);
-        expect(g.dialogOverflow, `${run} ${when}: the dialog itself never scrolls`).toEqual([0, 0]);
-        expect(g.bodyOverflow[0], `${run} ${when}: no sideways scroll`).toBeLessThanOrEqual(0);
-      };
-
-      // Closed: the whole panel fits, with nothing to scroll, and it rests centred.
-      const closed = await geometry(page);
-      inViewport(closed, 'closed');
-      expect(closed.bodyOverflow[1], `${run} closed: the panel fits whole`).toBeLessThanOrEqual(0);
-      // The resting spacer is a whole number of pixels, floored, so the panel may sit up to a
-      // pixel above true centre: the two gaps differ by less than two pixels, never more.
-      const above = closed.panel.top - closed.restTop;
-      const below = closed.restBottom - closed.panel.bottom;
-      expect(above - below, `${run} closed: centred`).toBeLessThanOrEqual(0.5);
-      expect(above - below, `${run} closed: centred`).toBeGreaterThan(-2);
-      for (const name of ['Play again', 'Give feedback']) {
-        await expect(dialog.getByRole('button', { name })).toBeInViewport();
-      }
-      await expect(dialog.getByRole('heading')).toBeInViewport();
-      await expect(toggle).toBeInViewport();
-
-      // Open: the group grows the panel DOWNWARD from its resting place. The toggle moves only
-      // where the open panel cannot fit below it, and then only as far as it must — the panel's
-      // foot lands on the dialog's — and never down.
-      const before = await toggle.boundingBox();
-      await toggle.click();
-      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-      const after = await toggle.boundingBox();
-      const open = await geometry(page);
-      inViewport(open, 'open');
-      const dy = (after?.y ?? NaN) - (before?.y ?? NaN);
-      expect(dy, `${run}: the toggle never moves down`).toBeLessThanOrEqual(0.5);
-      if (Math.abs(dy) > 0.5) {
-        expect(
-          Math.abs(open.panel.bottom - open.restBottom),
-          `${run}: gave way only as far as it must`,
-        ).toBeLessThanOrEqual(1);
-      }
-      for (const name of ITEMS) {
-        const item = dialog.getByRole('button', { name });
-        await item.scrollIntoViewIfNeeded();
-        await expect(item).toBeInViewport();
-      }
-    }
+    const dialog = await openResults(page, 'win');
+    await dialog.getByRole('button', { name: 'Give feedback' }).click();
+    await expect(dialog.getByRole('button', { name: 'Send' })).toBeAttached();
+    // Kept as a box for the row's sake, but out of sight, the tab order and the tree.
+    await expect(dialog.getByRole('button', { name: 'Give feedback' })).toBeHidden();
+    await axeClean(page, 'with the survey form open');
+    await toggleOf(dialog).click();
+    await axeClean(page, 'with the survey form and Run data open');
   });
 }
 
-test('at 1440×900 the Run data toggle stays where it was pressed, and so does Verify when it reports', async ({
+for (const text of [100, 200] as const) {
+  for (const size of FIT_SIZES) {
+    test(`fits at ${String(size.width)}×${String(size.height)}, ${String(text)}% text: opens on the outcome, never scrolls sideways, and Run data opens without moving its toggle`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      for (const run of ['win', 'loss'] as const) {
+        const dialog = await openResults(page, run, text);
+        const toggle = toggleOf(dialog);
+        const onScreen = (g: Awaited<ReturnType<typeof geometry>>, when: string): void => {
+          expect(g.panel.left, `${run} ${when}: left edge`).toBeGreaterThanOrEqual(0);
+          expect(g.panel.right, `${run} ${when}: right edge`).toBeLessThanOrEqual(size.width);
+          expect(g.panel.top, `${run} ${when}: top edge`).toBeGreaterThanOrEqual(0);
+          expect(g.panel.bottom, `${run} ${when}: bottom edge`).toBeLessThanOrEqual(size.height);
+          expect(g.dialogOverflow, `${run} ${when}: the dialog itself never scrolls`).toEqual([
+            0, 0,
+          ]);
+          expect(g.bodyOverflow[0], `${run} ${when}: no sideways scroll`).toBeLessThanOrEqual(0);
+        };
+
+        // Opened at the TOP of the panel's scroll range — nothing scrolled to reach a first
+        // focus — with the outcome heading on screen, and whatever took focus on screen too:
+        // Play again where it is wholly in view there, else the heading (the ARIA dialog
+        // pattern's static first focus).
+        const closed = await geometry(page);
+        onScreen(closed, 'closed');
+        expect(
+          await dialog.locator('.wy-results-body').evaluate((b) => b.scrollTop),
+          `${run}: opens at the top`,
+        ).toBe(0);
+        expect(await wholeOnScreen(page, '.wy-results-title'), `${run}: the heading`).toBe(true);
+        expect(await wholeOnScreen(page, null), `${run}: focus is never hidden`).toBe(true);
+        const playAgainInView = await wholeOnScreen(page, '.wy-results .wy-primary');
+        const focused = playAgainInView
+          ? dialog.getByRole('button', { name: 'Play again' })
+          : dialog.getByRole('heading', { level: 2 });
+        await expect(focused).toBeFocused();
+        if (text === 100) {
+          // At 100% the closed panel fits whole and rests centred (the spacer is a floored
+          // pixel count, so the panel may sit up to a pixel high), with Play again focused.
+          expect(playAgainInView, `${run}: Play again in view`).toBe(true);
+          expect(closed.bodyOverflow[1], `${run}: fits whole`).toBeLessThanOrEqual(0);
+          const above = closed.panel.top - closed.restTop;
+          const below = closed.restBottom - closed.panel.bottom;
+          expect(above - below, `${run}: centred`).toBeLessThanOrEqual(0.5);
+          expect(above - below, `${run}: centred`).toBeGreaterThan(-2);
+        }
+
+        // Run data, pressed with the real pointer (brought into view first where 200% text puts
+        // it below the fold): its toggle does not move — not by a fraction of a pixel, at any
+        // size, whether or not the open group fits below the panel's resting place.
+        await toggle.scrollIntoViewIfNeeded();
+        const before = await boxOf(page, '.wy-results-more');
+        await page.mouse.click(before.x + before.width / 2, before.y + before.height / 2);
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        expectSameBox(await boxOf(page, '.wy-results-more'), before, `${run}: Run data`);
+        onScreen(await geometry(page), 'open');
+
+        // The open group is reachable by Tab (keyboard focus may scroll the body to it)...
+        await expect(toggle).toBeFocused();
+        for (const name of ITEMS) {
+          await page.keyboard.press('Tab');
+          await expect(dialog.getByRole('button', { name })).toBeFocused();
+          expect(await wholeOnScreen(page, null), `${run}: ${name} scrolled into view`).toBe(true);
+        }
+        // ...and by scrolling.
+        await dialog.locator('.wy-results-body').evaluate((b) => (b.scrollTop = 0));
+        for (const name of ITEMS) {
+          const item = dialog.getByRole('button', { name });
+          await item.scrollIntoViewIfNeeded();
+          await expect(item).toBeInViewport();
+        }
+      }
+    });
+  }
+}
+
+for (const size of POINTER_SIZES) {
+  test(`at ${String(size.width)}×${String(size.height)} nothing moves or activates under a pressed control: Run data and Give feedback, clicked and double-clicked`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    let downloads = 0;
+    page.on('download', () => void downloads++);
+    const dialog = await openResults(page, 'win');
+    const toggle = toggleOf(dialog);
+    const feedback = dialog.getByRole('button', { name: 'Give feedback' });
+    const status = dialog.getByRole('status');
+    const answered = (): Promise<number> => dialog.locator('.wy-survey-form input:checked').count();
+    const toggleBox = await boxOf(page, '.wy-results-more');
+    const feedbackBox = await boxOf(page, '.wy-survey-opener > .wy-btn');
+    const centreX = (b: Box): number => b.x + b.width / 2;
+    const at = (b: Box, f: number): number => b.y + b.height * f;
+    const nothingElse = async (what: string): Promise<void> => {
+      await expect(dialog, `${what}: no new run`).toBeVisible();
+      await expect(status, `${what}: no Verify, no export`).toHaveText('');
+      expect(await answered(), `${what}: no survey answer`).toBe(0);
+      expect(downloads, `${what}: no download`).toBe(0);
+    };
+
+    // One click each: the pressed control keeps its box, to within half a pixel.
+    await page.mouse.click(centreX(toggleBox), at(toggleBox, 0.5));
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expectSameBox(await boxOf(page, '.wy-results-more'), toggleBox, 'Run data, opened');
+    await page.mouse.click(centreX(toggleBox), at(toggleBox, 0.5));
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expectSameBox(await boxOf(page, '.wy-results-more'), toggleBox, 'Run data, closed');
+
+    await page.mouse.click(centreX(feedbackBox), at(feedbackBox, 0.5));
+    await expect(dialog.getByRole('radio', { name: '1' }).first()).toBeFocused();
+    expectSameBox(
+      await boxOf(page, '.wy-survey-opener > .wy-btn'),
+      feedbackBox,
+      'Give feedback, opened',
+    );
+    expect(
+      await dialog.locator('.wy-results-body').evaluate((b) => b.scrollTop),
+      'opening the form scrolled nothing',
+    ).toBe(0);
+    await dialog.getByRole('button', { name: 'Not now' }).click();
+    await expect(feedback).toBeFocused();
+    expectSameBox(
+      await boxOf(page, '.wy-survey-opener > .wy-btn'),
+      feedbackBox,
+      'Give feedback, closed',
+    );
+
+    // Double-clicks, high and low on each control: the second press lands where the first did.
+    for (const f of [0.1, 0.5, 0.75, 0.9]) {
+      await page.mouse.dblclick(centreX(toggleBox), at(toggleBox, f));
+      await expect(toggle, `Run data double-clicked at ${String(f)}`).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      await nothingElse(`Run data double-clicked at ${String(f)}`);
+      expectSameBox(await boxOf(page, '.wy-results-more'), toggleBox, 'Run data');
+    }
+    for (const f of [0.1, 0.5, 0.75, 0.9]) {
+      await page.mouse.dblclick(centreX(feedbackBox), at(feedbackBox, f));
+      await expect(feedback, `Give feedback double-clicked at ${String(f)}`).toBeHidden();
+      await nothingElse(`Give feedback double-clicked at ${String(f)}`);
+      await dialog.getByRole('button', { name: 'Not now' }).click();
+      await expect(feedback).toBeVisible();
+      expectSameBox(await boxOf(page, '.wy-survey-opener > .wy-btn'), feedbackBox, 'Give feedback');
+    }
+
+    // The open form is reachable by scrolling, and by Tab from the question focus landed on.
+    await page.mouse.click(centreX(feedbackBox), at(feedbackBox, 0.5));
+    const send = dialog.getByRole('button', { name: 'Send' });
+    await send.scrollIntoViewIfNeeded();
+    await expect(send).toBeInViewport();
+    await dialog.getByRole('radio', { name: '1' }).first().focus();
+    for (let i = 0; i < 12 && !(await send.evaluate((s) => s === document.activeElement)); i++) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(send).toBeFocused();
+    await expect(send).toBeInViewport();
+  });
+}
+
+test('at 200% text on a phone-width window the panel never scrolls sideways, and every star stays inside it', async ({
   page,
 }) => {
-  await page.setViewportSize(SIZES[0]);
+  // The narrow sizes QC round 1 measured overflowing (a fixed-size star row; a value that would
+  // not wrap), and a sweep across the widths where the tiles change columns.
+  for (const size of [
+    { width: 360, height: 640 },
+    { width: 320, height: 568 },
+    { width: 480, height: 640 },
+    { width: 640, height: 640 },
+    { width: 800, height: 640 },
+    { width: 1000, height: 640 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const run of ['win', 'loss'] as const) {
+      await openResults(page, run, 200);
+      const fit = await page.evaluate(() => {
+        const body = document.querySelector('.wy-results-body')!;
+        const port = body.getBoundingClientRect();
+        const stars = [...document.querySelectorAll('.wy-results-star')].map((s) =>
+          s.getBoundingClientRect(),
+        );
+        return {
+          sideways: body.scrollWidth - body.clientWidth,
+          starsInside: stars.every((s) => s.left >= port.left && s.right <= port.right),
+        };
+      });
+      const at = `${String(size.width)}×${String(size.height)} ${run}`;
+      expect(fit.sideways, `${at}: no sideways scroll`).toBeLessThanOrEqual(0);
+      expect(fit.starsInside, `${at}: every star inside the body`).toBe(true);
+    }
+  }
+});
+
+test('the panel re-settles when the window resizes: opened at 1280×720, centred again at 1440×900', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openResults(page, 'win');
+  await page.setViewportSize(DESKTOP);
+  await twoFrames(page);
+  const g = await geometry(page);
+  const above = g.panel.top - g.restTop;
+  const below = g.restBottom - g.panel.bottom;
+  expect(above - below, 'centred on the new window').toBeLessThanOrEqual(0.5);
+  expect(above - below, 'centred on the new window').toBeGreaterThan(-2);
+});
+
+test('at 1440×900 Verify’s report grows the panel downward: the button stays where it was pressed', async ({
+  page,
+}) => {
+  await page.setViewportSize(DESKTOP);
   const dialog = await openResults(page, 'win');
-  const toggle = toggleOf(dialog);
-  const before = await toggle.boundingBox();
-  await toggle.click();
+  await toggleOf(dialog).click();
   const verify = dialog.getByRole('button', { name: ITEMS[0] });
   await expect(verify).toBeVisible();
-  expect((await toggle.boundingBox())?.y).toBeCloseTo(before?.y ?? NaN, 1);
-  // A status message grows the panel downward too: Verify's report moves nothing above it.
-  const verifyBefore = await verify.boundingBox();
+  const before = await verify.boundingBox();
   await verify.click();
   await expect(dialog.getByRole('status')).toContainText('Verified');
-  expect((await verify.boundingBox())?.y).toBeCloseTo(verifyBefore?.y ?? NaN, 1);
+  expect((await verify.boundingBox())?.y).toBeCloseTo(before?.y ?? NaN, 1);
 });
 
 test('forced colors: the stars, the outcome band and the chevron take the user’s system colours', async ({
@@ -366,7 +561,7 @@ test('forced colors: the stars, the outcome band and the chevron take the user�
   // forced-colors test does, and checked against the system colours themselves: under emulated
   // forced colors axe-core reads the authored text colours (`hud-strip.spec.ts` says why).
   await page.emulateMedia({ forcedColors: 'active' });
-  await page.setViewportSize(SIZES[0]);
+  await page.setViewportSize(DESKTOP);
   for (const run of ['win', 'loss'] as const) {
     const dialog = await openResults(page, run);
     expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);

@@ -296,6 +296,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // `ensurePaused` returns early; that is an accident of controller state, not an ordering
   // guarantee, and it should not be what keeps a phone held in portrait from failing to boot.
   let resultsShown = false;
+  /** Whether the finished run is already in the playtrace ring — set at the terminal edge's
+   *  capture, cleared by Play again. Declared HERE, beside `resultsShown`, for the same
+   *  temporal-dead-zone reason. Separate from `resultsShown` because that one is set only once
+   *  the dialog is open: a throw between the capture and the open leaves it false, and the next
+   *  `refreshHud` walks the edge again — which must not fold the same run into the ring twice. */
+  let runCaptured = false;
   /** The results dialog's live-region claim counter (#133 review round). Declared HERE,
    *  beside `resultsShown`, for the reason the comment above gives: `refreshHud` can be
    *  reached during construction, and a `let` declared further down would sit in its
@@ -543,19 +549,25 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       refund: controller.refundForSelection(),
     });
     if (controller.isTerminal() && !resultsShown) {
+      // The panel's run numbers (#181 H2), read first: a read-only view of the frozen
+      // controller, so they describe the run the dialog is about, and nothing below has
+      // happened yet if reading them fails.
+      const stats = controller.runStats();
       // Capture BEFORE the dialog opens (#133). The controller is frozen at the terminal
-      // transition, so nothing can move between here and the export — and capturing on
-      // the same `!resultsShown` edge means exactly one capture per run, never one per
-      // frame the dialog is up.
-      capturePlaytrace(hud);
+      // transition, so nothing can move between here and the export. Exactly ONE capture per
+      // run, whatever follows: if a step below throws, `resultsShown` stays false and the next
+      // `refreshHud` (an input handler's) walks this edge again, so the capture keeps its own
+      // guard rather than riding the dialog's.
+      if (!runCaptured) {
+        runCaptured = true;
+        capturePlaytrace(hud);
+      }
       // Opening a dialog invalidates anything still in flight for the previous one. The
       // invariant held via `resultsShown` + `playAgain` alone, but only by accident of
       // there being one re-open path; enforcing it where the dialog actually opens means a
       // second path cannot silently inherit a stale announcement.
       abandonResultsStatus();
-      // The panel's run numbers (#181 H2) are read here, on the same terminal edge as the
-      // capture above: the controller is frozen, so they describe the run the dialog is about.
-      overlay.showResults(hud, controller.runStats());
+      overlay.showResults(hud, stats);
       surveyForm?.dialogOpened();
       resultsShown = true;
     }
@@ -1000,6 +1012,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         // explicit focus wins regardless of what was focused beforehand.
         board.focus();
         resultsShown = false;
+        runCaptured = false; // the next run is captured at its own terminal edge
         lastHudKey = '';
         // Repaint the HUD NOW rather than waiting for the next scheduled frame (#53): the
         // fresh run is held (un-ticking) at wave 1's initial countdown, so until a frame

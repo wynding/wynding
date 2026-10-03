@@ -296,6 +296,94 @@ describe('main — the results panel reads the finished run (#181 H2)', () => {
   });
 });
 
+describe('main — the terminal edge captures each run once, even when it throws (#181 H2)', () => {
+  /** An undefended run whose terminal edge throws ONCE: reading the run stats, or — after the
+   *  capture — the survey's ask refresh, which the edge reaches once the dialog is showing. */
+  function brokenEdgeApp(step: 'runStats' | 'afterCapture') {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const copied: string[] = [];
+    let armed = true;
+    const fail = (): never => {
+      armed = false;
+      throw new Error('the terminal edge broke');
+    };
+    const survey: SurveyAsk = {
+      offered: () => true,
+      refresh: () => (armed ? fail() : Promise.resolve()),
+      commit: async () => {},
+    };
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      controllerFactory: (seed) => {
+        const controller = createController(seed);
+        if (step !== 'runStats') return controller;
+        const read = controller.runStats;
+        return Object.assign(controller, { runStats: () => (armed ? fail() : read()) });
+      },
+      playtraceDelivery: { copy: async (text: string) => void copied.push(text), save: () => {} },
+      ...(step === 'afterCapture'
+        ? {
+            gameVersion: 'fedcba9876543210fedcba9876543210fedcba98',
+            surveyTransport: { send: async () => 'accepted' as const },
+            surveyAsk: survey,
+          }
+        : {}),
+    });
+    openApps.push(app);
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    /** Play the run out; the frame that reaches the terminal edge throws, once. */
+    const runToBrokenEdge = (): void => {
+      sched.frame((clock += 16));
+      dockButton(root, 'Start').click();
+      let thrown: unknown = null;
+      for (let i = 0; i < 4000 && thrown === null; i++) {
+        try {
+          sched.frame((clock += 300));
+        } catch (error) {
+          thrown = error;
+        }
+      }
+      expect((thrown as Error | null)?.message).toBe('the terminal edge broke');
+    };
+    /** The runs the playtrace ring holds, read through Copy run data. */
+    const capturedRuns = async (): Promise<number> => {
+      const press = (label: string): void =>
+        [...results.querySelectorAll<HTMLButtonElement>('button')]
+          .find((b) => b.textContent === label)!
+          .click();
+      press('Run data');
+      press('Copy run data');
+      await vi.waitFor(() => expect(copied).toHaveLength(1));
+      return (JSON.parse(copied[0]!) as { runs: unknown[] }).runs.length;
+    };
+    return { root, results, runToBrokenEdge, capturedRuns };
+  }
+
+  it('a throw reading the run stats opens nothing; the next refresh opens the dialog with the run captured once', async () => {
+    const h = brokenEdgeApp('runStats');
+    h.runToBrokenEdge();
+    expect(h.results.hidden, 'the broken edge opened nothing').toBe(true);
+    // The frame loop's HUD key has not moved, so only an input handler refreshes the HUD now.
+    dockButton(h.root, 'Pause').click();
+    expect(h.results.hidden).toBe(false);
+    expect(await h.capturedRuns()).toBe(1);
+  });
+
+  it('a throw AFTER the capture (the survey’s ask refresh) still leaves the run captured once', async () => {
+    const h = brokenEdgeApp('afterCapture');
+    h.runToBrokenEdge();
+    dockButton(h.root, 'Pause').click(); // walks the edge again: the dialog's open is retried
+    expect(h.results.hidden).toBe(false);
+    expect(await h.capturedRuns()).toBe(1);
+  });
+});
+
 describe('main — Score chip across a run and Play-again (#53)', () => {
   /** The Score chip's displayed number, read off the chip's full ICU message node (the
    *  accessible text) rather than the chip's raw textContent, which also carries the
@@ -2616,7 +2704,10 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       button,
       buttonState,
       status: (): string => results.querySelector('.wy-verify')!.textContent ?? '',
+      /** The FORM's slot, below the action row (#181 H2). */
       slot: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey')!,
+      /** Give feedback's own slot, in the action row (#181 H2). */
+      opener: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey-opener')!,
       frame: (): void => sched.frame((clock += 16)),
       resolve(): void {
         this.frame();
@@ -2635,8 +2726,11 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
     const h = surveyApp({ transport: false });
     h.resolve();
     await settle();
+    // Both slots (#181 H2): no form below the row, and no Give feedback in it.
     expect(h.slot().hidden).toBe(true);
     expect(h.slot().childElementCount).toBe(0);
+    expect(h.opener().hidden).toBe(true);
+    expect(h.opener().childElementCount).toBe(0);
   });
 
   it('sends a payload describing the finished run, holding the region and locking its other writers', async () => {
@@ -2677,7 +2771,9 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
     );
     expect(h.button('Verify this run').getAttribute('aria-disabled')).toBe('false');
     expect(document.activeElement).toBe(h.button('Play again'));
-    expect(h.slot().hidden, 'Give feedback is retired').toBe(true);
+    // Retired with the form (#181 H2): Give feedback lives in its own slot in the action row.
+    expect(h.opener().hidden, 'Give feedback is retired').toBe(true);
+    expect(h.slot().hidden, 'the form is retired').toBe(true);
     await settle();
     expect(h.commits).toEqual([false]);
     // A released region belongs to the next owner.

@@ -13,7 +13,10 @@
 // the outcome, score, stars and stats are the run's.
 //
 // `&survey=1` adds an always-offered survey with a transport that accepts every send, so the
-// panel's Give feedback can be checked (and seen) beside Play again and Run data.
+// panel's Give feedback can be checked (and seen) beside Play again and Run data. `&text=200`
+// sets the e2e suite's text zoom (`compact.spec.ts`'s `:root { font-size: 200% }`) BEFORE the
+// app mounts: the dialog opens on the first frame, so a zoom applied after load would come too
+// late for where the panel opens and what takes focus.
 
 import { createApp } from '../src/main';
 import { createController } from '../src/controller';
@@ -40,6 +43,11 @@ function rafScheduler(onFrame: (nowMs: number) => void): () => void {
 }
 
 const params = new URLSearchParams(window.location.search);
+if (params.get('text') === '200') {
+  const zoom = document.createElement('style');
+  zoom.textContent = ':root { font-size: 200% }';
+  document.head.append(zoom);
+}
 const plan = params.get('run') === 'loss' ? WINNER_A.slice(0, 12) : WINNER_A;
 
 let offered = true;
