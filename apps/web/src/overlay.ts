@@ -2002,13 +2002,16 @@ export function createOverlay(
    *  focusable region — the `.wy-hud` scrollport's own discipline, since a scrollable region
    *  must be operable without a pointer — and it drops all three the moment the line fits.
    *  Kept while the strip itself holds focus, so a resize can never pull the tab stop out from
-   *  under a keyboard user; the `focusout` listener settles it once focus moves on. Changes no
-   *  geometry, so it cannot feed the observer that drives it. */
+   *  under a keyboard user; the `focusout` listener settles it once focus moves on, and says so
+   *  through `focusLeaving` — the Rail's reason (`syncRailAffordances`): during a `focusout`
+   *  the document's `activeElement` can still be the outgoing strip, so inferring it there
+   *  would retain the very stop the listener exists to release. Changes no geometry, so it
+   *  cannot feed the observer that drives it. */
   const STRIP_SCROLL_CLASS = 'wy-wave-preview--scroll';
-  function syncStripScroll(): void {
+  function syncStripScroll(focusLeaving = false): void {
     const strip = previewEl.root;
     const scrollable = !strip.hidden && strip.scrollWidth > strip.clientWidth + 1;
-    if (!scrollable && doc.activeElement === strip) return;
+    if (!scrollable && !focusLeaving && doc.activeElement === strip) return;
     if (strip.classList.contains(STRIP_SCROLL_CLASS) === scrollable) return;
     strip.classList.toggle(STRIP_SCROLL_CLASS, scrollable);
     if (scrollable) {
@@ -2268,7 +2271,8 @@ export function createOverlay(
   }
   syncRailAffordances();
   // Focus leaving the strip settles a tab stop the retention rule in `syncStripScroll` kept.
-  previewEl.root.addEventListener('focusout', () => syncStripScroll(), {
+  // Wrapped, never the listener itself: the event object is truthy (the Rail's note above).
+  previewEl.root.addEventListener('focusout', () => syncStripScroll(true), {
     signal: railAffordanceAbort.signal,
   });
 

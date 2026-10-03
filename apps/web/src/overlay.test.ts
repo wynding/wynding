@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { HudVM, PreviewEntryVM } from '@wynding/render';
-import { compileRuleset } from '@wynding/sim';
+import {
+  COLOUR_MODES,
+  creepShapeFor,
+  resolvePalette,
+  type HudVM,
+  type PreviewEntryVM,
+} from '@wynding/render';
+import { compileRuleset, MS_PER_TICK } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { createOverlay, type UiAction, type HudView } from './overlay';
 import type { ModalOverlay } from './modal';
 import { createShell, dockButtonParts } from './shell';
+import { hexColour, ringDash } from './hud-icons';
 import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
 import { createController, type UiState } from './controller';
@@ -154,11 +161,20 @@ describe('overlay — HUD readout', () => {
     expect(text).toContain('Bounty: 80');
     expect(text).toContain('Wave in 25s');
     // Dual-form chips (Story 11 contract §4): the aria-hidden glance form carries the icon
-    // + value; the full ICU message stays the accessible text, never sentence-split.
+    // + value; the full ICU message stays the accessible text, never sentence-split. Since
+    // #181 (H1) the icon is inline SVG and carries no text, so each glance reads as its value
+    // alone — written to the value leaf, beside an icon no refresh ever replaces.
     expect(shell.hud.lives.full.textContent).toBe('Lives: 10');
-    expect(shell.hud.lives.glance.textContent).toBe('♥ 10');
-    expect(shell.hud.bounty.glance.textContent).toBe('◈ 80');
+    expect(shell.hud.lives.glance.textContent).toBe('10');
+    expect(shell.hud.bounty.glance.textContent).toBe('80');
     expect(shell.hud.wave.glance.textContent).toBe('25s');
+    expect(shell.hud.score.full.textContent).toBe('Score: 0');
+    expect(shell.hud.score.value.textContent).toBe('0');
+    expect(shell.hud.stars.full.textContent).toBe('Stars: 0 of 3');
+    expect(shell.hud.stars.value.textContent).toBe('0');
+    for (const chip of Object.values(shell.hud)) {
+      expect(chip.glance.firstElementChild!.tagName.toLowerCase()).toBe('svg');
+    }
 
     // Once every wave has launched, `countdownSeconds` is null — the chip hides entirely
     // (its own preview surface carries the last-wave marker instead — see the dedicated
@@ -202,7 +218,7 @@ describe('overlay — HUD readout', () => {
       refund: 0,
     });
     expect(shell.hud.lives.full.textContent).toBe('Lives: -1');
-    expect(shell.hud.lives.glance.textContent).toBe('♥ -1');
+    expect(shell.hud.lives.glance.textContent).toBe('-1');
   });
 
   it('reflects pause/speed state on the controls', () => {
@@ -315,12 +331,18 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     );
   });
 
-  // --- The glance form (#101) --------------------------------------------------------
+  // --- The glance form (#101, reshaped by #181 L1) ------------------------------------------
   // M2-S10 ruling 3 ("name the boring value rather than omit the slot") was NARROWED to the
   // accessible form above by owner ruling 2026-08-16: the surface is read as a threat-
-  // signature glance while a wave runs, and four clauses a row tripled the height of a card
-  // that floats over the playing field. These pin the VISIBLE half.
-  const glanceOf = (entry: PreviewEntryVM): string => {
+  // signature glance while a wave runs. Since #181 that glance is the strip's: the creep's
+  // icon and its count, plus — for a single-entry wave — its name and the deviating clause.
+  // These pin the VISIBLE half: the clause still names only what deviates from the baseline.
+  interface GlanceParts {
+    readonly count: string;
+    readonly name: string | null;
+    readonly clause: string | null;
+  }
+  const glanceOf = (entry: PreviewEntryVM): GlanceParts => {
     const { overlay, shell } = setup();
     overlay.update({
       hud: hud({ preview: { kind: 'upcoming', waveNumber: 1, waveCount: 2, entries: [entry] } }),
@@ -329,7 +351,12 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       ui: uiState(),
       refund: 0,
     });
-    return shell.preview.list.querySelector('.wy-preview-glance')!.textContent!;
+    const glance = shell.preview.list.querySelector('.wy-preview-glance')!;
+    return {
+      count: glance.querySelector('.wy-preview-count')!.textContent!,
+      name: glance.querySelector('.wy-preview-name')?.textContent ?? null,
+      clause: glance.querySelector('.wy-preview-clause')?.textContent ?? null,
+    };
   };
   const baseline: PreviewEntryVM = {
     creepId: 'normal',
@@ -341,20 +368,24 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     boss: false,
   };
 
-  it('omits every baseline-valued clause — an all-default creep glances as count × name alone', () => {
-    expect(glanceOf(baseline)).toBe('10 × Creep');
+  it('omits every baseline-valued clause — an all-default creep glances as count and name alone', () => {
+    expect(glanceOf(baseline)).toEqual({ count: '×10', name: 'Creep', clause: null });
   });
 
   it.each([
-    ['air domain', { domain: 'air' as const }, '10 × Creep — air'],
-    ['armor', { armor: 6 }, '10 × Creep — armor −6 direct'],
-    ['leak cost', { leakCost: 3 }, '10 × Creep — leak cost 3'],
-    ['immunities', { immunities: ['slow'] as const }, '10 × Creep — immune to slow'],
-    ['boss role', { boss: true }, '10 × Creep — boss'],
+    ['air domain', { domain: 'air' as const }, 'air'],
+    ['armor', { armor: 6 }, 'armor −6 direct'],
+    ['leak cost', { leakCost: 3 }, 'leak cost 3'],
+    ['immunities', { immunities: ['slow'] as const }, 'immune to slow'],
+    ['boss role', { boss: true }, 'boss'],
   ])(
     'surfaces %s when it deviates — and that clause ALONE, so the deviation is what is read',
     (_axis, over, expected) => {
-      expect(glanceOf({ ...baseline, ...over })).toBe(expected);
+      expect(glanceOf({ ...baseline, ...over })).toEqual({
+        count: '×10',
+        name: 'Creep',
+        clause: expected,
+      });
     },
   );
 
@@ -369,7 +400,11 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
         immunities: ['slow', 'stun'],
         boss: true,
       }),
-    ).toBe('1 × Boss — boss · air · armor −8 direct · leak cost 3 · immune to slow, stun');
+    ).toEqual({
+      count: '×1',
+      name: 'Boss',
+      clause: 'boss · air · armor −8 direct · leak cost 3 · immune to slow, stun',
+    });
   });
 
   // The parity contract, asserted rather than assumed: assistive tech must read the FULL
@@ -393,15 +428,21 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const row = shell.preview.list.querySelector('li')!;
     const full = row.querySelector('.wy-preview-full')!;
-    const glance = row.querySelector('.wy-preview-glance')!;
+    const glance = row.querySelector<HTMLElement>('.wy-preview-glance')!;
     expect(glance.getAttribute('aria-hidden')).toBe('true');
     expect(full.getAttribute('aria-hidden')).toBeNull();
     // The full form keeps every slot the glance drops — the guarantee that makes the diet
     // a presentation change rather than an information loss.
-    expect(full.textContent).toBe(
-      '10 × Creep — air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
-    );
-    expect(glance.textContent).toBe('10 × Creep — air · armor −4 direct');
+    const sentence =
+      '10 × Creep — air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities';
+    expect(full.textContent).toBe(sentence);
+    expect(glance.textContent).toBe('×10Creepair · armor −4 direct'); // icon, count, name, clause
+    // #181: the same sentence is the visible row's tooltip — on the aria-hidden glance, never
+    // the row, where a `title` would become an accessible name or description and have
+    // assistive tech read the sentence a second time.
+    expect(glance.title).toBe(sentence);
+    expect(row.hasAttribute('title')).toBe(false);
+    expect(full.hasAttribute('title')).toBe(false);
   });
 
   // M2-S6 P7: verify (add nothing) that `resolute`'s slow immunity actually renders
@@ -736,7 +777,7 @@ describe('overlay — player-started runs (PLAN.md P4)', () => {
     expect(shell.hud.wave.full.textContent).toBe('Wave in 25s');
     expect(shell.hud.wave.root.hidden).toBe(false);
     const visible = [...shell.hudBox.children].filter((el) => !(el as HTMLElement).hidden);
-    expect(visible).toHaveLength(5); // lives, bounty, score, wave, stars (preview is separate)
+    expect(visible).toHaveLength(5); // lives, bounty, stars, score, wave (no preview to show)
   });
 
   it('once started: Pause is visible, and the primary Dock button MORPHS to Call wave rather than hiding (M2-S2, PLAN.md P3 step 17)', () => {
@@ -3223,5 +3264,263 @@ describe('Panel auto-reveal latch (#69)', () => {
     // unrevealed.
     overlay.update(frameFor({ selection: SELECTION, inspectSeq: 0 }));
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #181 (L1): the wave strip — the preview's one home. The sentence-level contract (what each
+// row SAYS) is pinned in the wave preview block above; these pin what the strip adds: the
+// creep icons, their palette, and the in-place overflow form.
+describe('overlay — the wave strip (#181 L1)', () => {
+  const entry = (over: Partial<PreviewEntryVM> = {}): PreviewEntryVM => ({
+    creepId: 'normal',
+    count: 10,
+    domain: 'ground',
+    armor: 0,
+    leakCost: 1,
+    immunities: [],
+    boss: false,
+    ...over,
+  });
+  const show = (
+    overlay: ReturnType<typeof setup>['overlay'],
+    entries: readonly PreviewEntryVM[],
+    waveNumber = 1,
+  ): void => {
+    overlay.update({
+      hud: hud({ preview: { kind: 'upcoming', waveNumber, waveCount: 9, entries } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+  };
+
+  it('a multi-entry wave shows each creep as icon and count alone — no name, no clause', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [
+      entry({ creepId: 'normal', count: 8 }),
+      entry({ creepId: 'fast', count: 6, armor: 2 }),
+    ]);
+    const glances = [...shell.preview.list.querySelectorAll('.wy-preview-glance')];
+    expect(glances).toHaveLength(2);
+    for (const glance of glances) {
+      expect([...glance.children].map((c) => c.getAttribute('class'))).toEqual([
+        'wy-creep-icon',
+        'wy-preview-count',
+      ]);
+    }
+    expect(glances.map((g) => g.textContent)).toEqual(['×8', '×6']);
+    // The deviation is still in each row's full sentence — the strip drops nothing for AT.
+    expect(shell.preview.list.querySelectorAll('.wy-preview-full')[1]!.textContent).toContain(
+      'armor 2',
+    );
+  });
+
+  it("every icon executes the render package's own silhouette for its creep, with the airborne chevron only on air", () => {
+    const { overlay, shell } = setup();
+    const ids = Object.keys(ruleset.creepById);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const creepId of ids) {
+      for (const domain of ['ground', 'air'] as const) {
+        show(overlay, [entry({ creepId, domain })]);
+        const icon = shell.preview.list.querySelector<SVGSVGElement>('.wy-creep-icon')!;
+        expect(icon.dataset.wyShape, creepId).toBe(creepShapeFor(creepId));
+        expect(icon.getAttribute('aria-hidden')).toBe('true');
+        expect(icon.querySelector('.wy-creep-chevron') !== null, `${creepId}/${domain}`).toBe(
+          domain === 'air',
+        );
+      }
+    }
+  });
+
+  it('inks the icons from the ACTIVE palette, and a colour-mode change re-inks them in place', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry({ creepId: 'normal', domain: 'air' })]);
+    const row = shell.preview.list.firstElementChild!;
+    const body = (): string | null =>
+      shell.preview.list.querySelector('.wy-creep-body')!.getAttribute('fill');
+    const chevron = (): string | null =>
+      shell.preview.list.querySelector('.wy-creep-chevron')!.getAttribute('stroke');
+    expect(body()).toBe(hexColour(resolvePalette('default').creep));
+    expect(chevron()).toBe(hexColour(resolvePalette('default').airborne));
+
+    const other = COLOUR_MODES.find(
+      (m) => resolvePalette(m).creep !== resolvePalette('default').creep,
+    );
+    expect(other, 'a colour mode that inks creeps differently').toBeDefined();
+    overlay.setColourMode(other!);
+    expect(body()).toBe(hexColour(resolvePalette(other!).creep));
+    expect(chevron()).toBe(hexColour(resolvePalette(other!).airborne));
+    // Repainted, not rebuilt: a reader parked on the row keeps its node.
+    expect(shell.preview.list.firstElementChild).toBe(row);
+
+    // And a wave built AFTER the change is born in the new palette.
+    show(overlay, [entry({ creepId: 'fast' })], 2);
+    expect(body()).toBe(hexColour(resolvePalette(other!).creep));
+  });
+
+  describe('the overflow scroll form', () => {
+    /** jsdom lays nothing out, so the strip's two widths are stubbed per test. */
+    function widths(el: HTMLElement, scroll: number, client: number): void {
+      Object.defineProperty(el, 'scrollWidth', { configurable: true, get: () => scroll });
+      Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => client });
+    }
+    const isScrollForm = (el: HTMLElement): boolean => {
+      const on = el.classList.contains('wy-wave-preview--scroll');
+      // The four move together: the class, the tab stop, the role and the label.
+      expect(el.getAttribute('tabindex')).toBe(on ? '0' : null);
+      expect(el.getAttribute('role')).toBe(on ? 'group' : null);
+      expect(el.getAttribute('aria-label')).toBe(on ? 'Wave preview' : null);
+      return on;
+    };
+
+    it('takes the scroll form, with a labelled tab stop, exactly while the line is longer than the box', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 300, 300);
+      show(overlay, [entry()]);
+      expect(isScrollForm(strip)).toBe(false);
+      widths(strip, 420, 300);
+      show(overlay, [entry(), entry({ creepId: 'fast' })], 2);
+      expect(isScrollForm(strip)).toBe(true);
+      widths(strip, 301, 300); // within the 1px sub-pixel slack: it fits
+      show(overlay, [entry({ creepId: 'swarm' })], 3);
+      expect(isScrollForm(strip)).toBe(false);
+    });
+
+    it('keeps the tab stop under a focused reader, and releases it when focus leaves', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.focus();
+      expect(document.activeElement).toBe(strip);
+      widths(strip, 300, 300);
+      show(overlay, [entry({ creepId: 'swarm' })], 2);
+      // Fits now, but revoking the stop under focus would drop the reader to <body>.
+      expect(isScrollForm(strip)).toBe(true);
+      // Focus leaving settles it — even while `activeElement` still reports the outgoing
+      // strip, as it can during `focusout` (the Rail's hazard, `syncRailAffordances`).
+      strip.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      expect(document.activeElement).toBe(strip);
+      expect(isScrollForm(strip)).toBe(false);
+    });
+
+    it('re-decides on a resize of the strip or its list, and stops observing on destroy', () => {
+      const observed: Element[] = [];
+      let callback: (() => void) | null = null;
+      let disconnected = false;
+      class FakeResizeObserver {
+        constructor(cb: () => void) {
+          // The Rail's observer is created first; the strip's is the one that watches it.
+          callback = cb;
+        }
+        observe(el: Element): void {
+          observed.push(el);
+        }
+        disconnect(): void {
+          disconnected = true;
+        }
+      }
+      const original = window.ResizeObserver;
+      window.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+      try {
+        const { overlay, shell } = setup();
+        const strip = shell.preview.root;
+        expect(observed).toContain(strip);
+        expect(observed).toContain(shell.preview.list);
+        widths(strip, 300, 300);
+        show(overlay, [entry()]);
+        expect(isScrollForm(strip)).toBe(false);
+        widths(strip, 420, 300); // a window resize narrows the row; the wave did not change
+        callback!();
+        expect(isScrollForm(strip)).toBe(true);
+        overlay.destroy();
+        expect(disconnected).toBe(true);
+      } finally {
+        window.ResizeObserver = original;
+      }
+    });
+  });
+});
+
+// #181 (H1): the countdown ring beside the Dock's primary action. Decoration only — the wave
+// chip stays the accessible countdown — so what is pinned is that it shows the SAME seconds,
+// a truthful arc and hint, and that it never churns the DOM on a steady refresh.
+describe('overlay — the countdown ring (#181 H1)', () => {
+  const view = (over: Partial<HudVM> = {}): HudView => ({
+    hud: hud(over),
+    paused: false,
+    speed: 1,
+    ui: uiState(),
+    refund: 0,
+  });
+  /** A wave's full countdown in whole seconds, from the ruleset — rounded up like
+   *  `HudVM.countdownSeconds`, so a fresh countdown reads as a full ring. */
+  const totalSeconds = (cursor: number): number =>
+    Math.ceil((ruleset.waves[cursor]!.countdownTicks * MS_PER_TICK) / 1000);
+
+  it("shows the wave chip's seconds, with an arc for the share of THIS wave's countdown left", () => {
+    const { overlay, shell } = setup();
+    const ring = shell.dock.ring;
+    const first = totalSeconds(0);
+    overlay.update(view({ countdownSeconds: first }));
+    expect(ring.root.hidden).toBe(false);
+    expect(ring.ring.text.textContent).toBe(`${first}s`);
+    expect(ring.ring.text.textContent).toBe(shell.hud.wave.value.textContent);
+    expect(ring.ring.progress.getAttribute('stroke-dasharray')).toBe(ringDash(1));
+    overlay.update(view({ countdownSeconds: 4 }));
+    expect(ring.ring.progress.getAttribute('stroke-dasharray')).toBe(ringDash(4 / first));
+    // Each wave is measured against its own countdown, not the first one's.
+    const second = totalSeconds(1);
+    overlay.update(view({ countdownSeconds: second, waveCursor: 1 }));
+    expect(ring.ring.progress.getAttribute('stroke-dasharray')).toBe(ringDash(1));
+  });
+
+  it('claims the early-call bounty only where the sim pays one — never for the opening wave', () => {
+    const { overlay, shell } = setup();
+    expect(ruleset.balance.earlyCallBountyDivisor).toBeGreaterThan(0);
+    overlay.update(view({ waveCursor: 0 }));
+    expect(shell.dock.ring.hint.textContent).toBe('until wave 1');
+    overlay.update(view({ waveCursor: 1, countdownSeconds: 12 }));
+    expect(shell.dock.ring.hint.textContent).toBe('until wave 2 · calling early pays a bounty');
+  });
+
+  it('is down whenever there is no countdown to draw: none left, a launching call, or a resolved run', () => {
+    const { overlay, shell } = setup();
+    const ring = shell.dock.ring.root;
+    overlay.update(view());
+    expect(ring.hidden).toBe(false);
+    overlay.update(view({ launchPending: true, callable: false }));
+    expect(ring.hidden).toBe(true);
+    overlay.update(view());
+    expect(ring.hidden).toBe(false);
+    overlay.update(view({ countdownSeconds: null, waveCursor: 9, callable: false }));
+    expect(ring.hidden).toBe(true);
+    overlay.update(view({ phase: 'won', won: true, countdownSeconds: null }));
+    expect(ring.hidden).toBe(true);
+    expect(ring.getAttribute('aria-hidden')).toBe('true'); // decoration in every state
+  });
+
+  it('a steady refresh writes nothing to the ring — no text node, no attribute (#98)', () => {
+    const { overlay, shell } = setup();
+    overlay.update(view({ countdownSeconds: 7, waveCursor: 1 }));
+    const observer = new MutationObserver(() => {});
+    observer.observe(shell.dock.ring.root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+    // Positive calibration: the observer sees an attribute write on the arc.
+    const arc = shell.dock.ring.ring.progress;
+    arc.setAttribute('stroke-dasharray', arc.getAttribute('stroke-dasharray')!);
+    expect(observer.takeRecords().length).toBeGreaterThan(0);
+    overlay.update(structuredClone(view({ countdownSeconds: 7, waveCursor: 1 })));
+    expect(observer.takeRecords()).toEqual([]);
+    // …while a real tick does write.
+    overlay.update(view({ countdownSeconds: 6, waveCursor: 1 }));
+    expect(observer.takeRecords().length).toBeGreaterThan(0);
+    observer.disconnect();
   });
 });

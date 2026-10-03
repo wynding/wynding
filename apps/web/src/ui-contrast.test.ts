@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { COLOUR_MODES, resolvePalette } from '@wynding/render';
 
 // `new URL('./ui.css', import.meta.url)` would normally suffice, but under the jsdom test
 // environment the global `URL` is jsdom's DOM implementation, not Node's — resolve via
@@ -66,6 +67,15 @@ const REQUIRED_TOKENS = [
   // M2-S12a P3: the pinned Panel's top edge. Deleting it would silently fall back to
   // `.wy-panel`'s ordinary 1.63:1 border against the Cards it now floats over.
   'panel-edge',
+  // #181 (H1): the HUD's icon inks, the lives pill, and the countdown ring's arc. Each is
+  // paired below against the surface it is drawn on.
+  'fg-dim',
+  'lives',
+  'lives-pill',
+  'bounty',
+  'stars',
+  'icon-ink',
+  'countdown',
 ];
 
 describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥ 3:1)', () => {
@@ -86,6 +96,17 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // backdrop, which is near-black and darker than `bg`, so `bg` is the conservative
       // stand-in (the rule itself is gated below).
       ['accent', 'bg'],
+      // #181 (H1/L1). The status row has no fill of its own, so its text sits on `bg`: the
+      // score's dim "Score" label and the stars' "/ 3". The lives value is read on its pill.
+      ['fg-dim', 'bg'],
+      ['fg', 'lives-pill'],
+      // The wave strip is a `surface` box: its title and counts (`fg`, gated above) and a
+      // single-entry wave's dim name and clause.
+      ['fg-dim', 'surface'],
+      // The countdown ring and its hint are painted on the Stage's board backdrop beside the
+      // Dock: the seconds in `fg`, the hint in `fg-dim`.
+      ['fg', 'board-bg'],
+      ['fg-dim', 'board-bg'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
@@ -113,10 +134,45 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // #158: the survey textarea's edge, over the results dialog's backdrop. The backdrop
       // is near-black and darker than `bg`, so `bg` is the conservative stand-in.
       ['panel-edge', 'bg'],
+      // #181 (H1): the chip icons on the status row (`bg`). Decorative — each chip's full
+      // message is its text alternative — so this gates legibility, not information. The
+      // heart also sits on the lives pill, whose border is the same ink.
+      ['lives', 'bg'],
+      ['lives', 'lives-pill'],
+      ['bounty', 'bg'],
+      ['stars', 'bg'],
+      // The gem's and star's outline and facets, against the fills they outline.
+      ['icon-ink', 'bounty'],
+      ['icon-ink', 'stars'],
+      // The countdown ring: its arc against the backdrop AND against its own track, and the
+      // track against the backdrop, so the remaining share reads at a glance.
+      ['countdown', 'board-bg'],
+      ['countdown', 'panel-edge'],
+      ['panel-edge', 'board-bg'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
       expect(ratio, `${fg} on ${bg} = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(3.0);
+    }
+  });
+
+  // #181 (L1): the wave strip's creep icons are inked from the ACTIVE colour-vision palette
+  // (`hud-icons.ts`), not from a token here, and drawn on the strip's `surface`. Every mode's
+  // body ink and airborne chevron must clear the non-text bar on that surface, or a mode switch
+  // could leave a shape the player reads the wave by unreadable.
+  it("every colour mode inks the strip's creep icons at 3:1 or better on its surface", () => {
+    expect(COLOUR_MODES.length).toBeGreaterThan(1);
+    for (const mode of COLOUR_MODES) {
+      const pal = resolvePalette(mode);
+      for (const [name, ink] of [
+        ['creep', pal.creep],
+        ['airborne', pal.airborne],
+      ] as const) {
+        const ratio = contrast(ink, tokens['surface']!);
+        expect(ratio, `${mode} ${name} on surface = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(
+          3.0,
+        );
+      }
     }
   });
 

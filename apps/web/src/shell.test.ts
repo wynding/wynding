@@ -165,17 +165,17 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.board.getAttribute('aria-label')).toBeNull();
   });
 
-  it('the HUD group holds Lives/Bounty/Score/wave/preview/Stars/board-summary, in that order (M2-S2: the wave preview surface sits near the countdown; #79 appends the pollable summary last)', () => {
+  it("the HUD group holds Lives/Bounty/Stars/Score/wave/preview/board-summary, in that order (#181: the style frame's order, the strip right after the countdown it previews and LAST among the laid-out items; #79 appends the pollable summary last)", () => {
     const shell = createShell(document, TWO_CARDS);
     expect(shell.hudBox.className).toBe('wy-hud');
     expect(shell.hudBox.getAttribute('role')).toBe('group');
     expect([...shell.hudBox.children]).toEqual([
       shell.hud.lives.root,
       shell.hud.bounty.root,
+      shell.hud.stars.root,
       shell.hud.score.root,
       shell.hud.wave.root,
       shell.preview.root,
-      shell.hud.stars.root,
       shell.statusSummary,
     ]);
   });
@@ -197,6 +197,15 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.preview.root.hidden).toBe(true);
     expect(shell.preview.title.textContent).toBe('');
     expect(shell.preview.list.children).toHaveLength(0);
+  });
+
+  // #181 (L1): the preview has ONE home. It is built inside the chips list and nothing ever
+  // moves it — the Stage never hosts it (the floating placement chain is gone).
+  it('the wave preview lives in the chips list, never in the Stage', () => {
+    const shell = createShell(document, TWO_CARDS);
+    expect(shell.preview.root.parentElement).toBe(shell.hudBox);
+    expect(shell.stage.contains(shell.preview.root)).toBe(false);
+    expect('placePreview' in shell).toBe(false);
   });
 
   // Contract §1: the chips list is the bounded scrollport now that the Dock shares the
@@ -221,6 +230,34 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     }
   });
 
+  // #181 (H1): the glance is [icon][value], led by an inline-SVG icon that is decoration
+  // twice over (inside the aria-hidden glance AND aria-hidden itself). Two chips carry a
+  // static, localized companion the style frame draws: the score's dim label before its value,
+  // the stars' "/ 3" after it. The value is its own leaf, so a refresh rewrites only it (#98).
+  it('every chip glance leads with its own aria-hidden SVG icon, then the value leaf', () => {
+    const shell = createShell(document, TWO_CARDS);
+    const shape = (slot: string): string[] =>
+      [...shell.hud[slot as keyof typeof shell.hud].glance.children].map((c) =>
+        c.tagName.toLowerCase() === 'svg' ? 'svg' : c.className,
+      );
+    expect(shape('lives')).toEqual(['svg', 'wy-chip-value']);
+    expect(shape('bounty')).toEqual(['svg', 'wy-chip-value']);
+    expect(shape('wave')).toEqual(['svg', 'wy-chip-value']);
+    expect(shape('score')).toEqual(['svg', 'wy-chip-label', 'wy-chip-value']);
+    expect(shape('stars')).toEqual(['svg', 'wy-chip-value', 'wy-chip-suffix']);
+    for (const [slot, chip] of Object.entries(shell.hud)) {
+      const icon = chip.glance.firstElementChild!;
+      expect(icon.getAttribute('aria-hidden')).toBe('true');
+      expect(icon.getAttribute('focusable')).toBe('false');
+      expect(icon.classList.contains(`wy-icon--${slot}`)).toBe(true);
+      expect(chip.value.parentElement).toBe(chip.glance);
+      expect(chip.value.textContent).toBe('');
+    }
+    // The companions are written once, from the catalog (ADR 0004), never per frame.
+    expect(shell.hud.score.glance.querySelector('.wy-chip-label')!.textContent).toBe('Score');
+    expect(shell.hud.stars.glance.querySelector('.wy-chip-suffix')!.textContent).toBe('/ 3');
+  });
+
   it('the Dock holds Pause/Speed/Settings + a hidden empty primary slot (no global Sell — PLAN.md P2 moves Sell into the Panel; no separate Call-wave button — PLAN.md P4 wires the primary slot as Start)', () => {
     const shell = createShell(document, TWO_CARDS);
     expect([...shell.dock.root.children]).toEqual([
@@ -228,8 +265,28 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
       shell.dock.speed,
       shell.dock.settings,
       shell.dock.primary,
+      shell.dock.ring.root, // #181 (H1): the countdown ring's slot, last — after the primary it sits beside
     ]);
     expect(shell.dock.primary.hidden).toBe(true); // shown by overlay.ts's first render (P4)
+  });
+
+  // #181 (H1): the countdown ring is decoration (the wave chip stays the accessible
+  // countdown), so its whole slot is aria-hidden and it is never a `.wy-btn` — that class is
+  // what the Dock's controls, the input chrome selector and the Dock footprint measure key on.
+  it('the countdown ring slot is aria-hidden decoration, hidden at boot, and not a Dock button', () => {
+    const shell = createShell(document, TWO_CARDS);
+    const { root, visual, ring, hint } = shell.dock.ring;
+    expect(root.className).toBe('wy-dock-ring');
+    expect(root.getAttribute('aria-hidden')).toBe('true');
+    expect(root.hidden).toBe(true); // overlay.ts shows it once there is a countdown to draw
+    expect(root.tagName).not.toBe('BUTTON');
+    expect(root.classList.contains('wy-btn')).toBe(false);
+    expect(root.querySelector('button, a, [tabindex]')).toBeNull(); // nothing focusable inside
+    expect([...root.children]).toEqual([visual]);
+    expect([...visual.children]).toEqual([ring.svg, hint]);
+    expect(hint.className).toBe('wy-dock-ring-hint');
+    expect(hint.textContent).toBe('');
+    expect(ring.svg.getAttribute('aria-hidden')).toBe('true');
   });
 
   // P1's Dock markup contract, both layouts: aria-hidden icon span + localized text span.
@@ -314,23 +371,8 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
   });
 });
 
-// The playtest round's Shell additions: the preview's two homes and the Card's glyph tile.
-describe('placePreview + Card swatches (playtest round)', () => {
-  it('re-homes the ONE preview node between its Stage and hud homes, restoring the exact slot', () => {
-    const shell = createShell(document, [{ towerId: 'basic' }]);
-    const original = [...shell.hudBox.children];
-    expect(original).toContain(shell.preview.root); // the hud slot is the boot default
-
-    shell.placePreview('stage');
-    expect(shell.preview.root.parentElement).toBe(shell.stage);
-    // MOVED, never cloned: the same node object left the chips column (one AT surface).
-    expect([...shell.hudBox.children]).not.toContain(shell.preview.root);
-
-    shell.placePreview('hud');
-    expect([...shell.hudBox.children]).toEqual(original); // byte-exact original order
-    shell.destroy();
-  });
-
+// The playtest round's Card glyph tile. (Its preview re-homing half went with #181's one home.)
+describe('Card swatches (playtest round)', () => {
   it('every Card leads with an aria-hidden canvas swatch — presentation only, no AT surface', () => {
     const shell = createShell(document, [{ towerId: 'basic' }, { towerId: 'slow' }]);
     for (const card of shell.cards) {
@@ -338,25 +380,6 @@ describe('placePreview + Card swatches (playtest round)', () => {
       expect(card.swatch.getAttribute('aria-hidden')).toBe('true');
       expect(card.root.firstElementChild).toBe(card.swatch);
     }
-    shell.destroy();
-  });
-});
-
-// The conditional reparent (playtest round 4): an unconditional re-append on an
-// already-homed preview would zero a reader's scrollTop on every ResizeObserver tick.
-describe('placePreview — no-op when already home', () => {
-  it('does not move an already-stage-homed preview (a sentinel keeps its position)', () => {
-    const shell = createShell(document, [{ towerId: 'basic' }]);
-    shell.placePreview('stage');
-    const sentinel = document.createElement('div');
-    shell.stage.append(sentinel); // now: [...board..., preview, sentinel]
-    shell.placePreview('stage'); // must NOT re-append (which would put preview last again)
-    expect(shell.stage.lastElementChild).toBe(sentinel);
-    shell.placePreview('hud');
-    shell.placePreview('hud'); // same on the hud side: the slot insert happens once
-    const idx = [...shell.hudBox.children].indexOf(shell.preview.root);
-    shell.placePreview('hud');
-    expect([...shell.hudBox.children].indexOf(shell.preview.root)).toBe(idx);
     shell.destroy();
   });
 });

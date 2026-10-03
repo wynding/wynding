@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { RenderHandle } from '@wynding/render';
+import { COLOUR_MODES, resolvePalette, type RenderHandle } from '@wynding/render';
 import type { InputHandle } from './input';
 import { createKeymap } from './keymap';
 import { MS_PER_TICK, isTerminalPhase, type SimPhase } from '@wynding/sim';
@@ -38,9 +38,9 @@ vi.mock('./swatch', () => ({ paintSwatch: vi.fn() }));
 
 import { mount as mountMock } from '@wynding/render/scene';
 import { paintSwatch } from './swatch';
+import { hexColour } from './hud-icons';
 import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
-import { COMPACT_QUERY } from './layout';
 import { createController, type Controller } from './controller';
 import { MAX_RECENT_AGE_MS } from './playtrace';
 import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
@@ -1436,388 +1436,9 @@ describe('main — boot()', () => {
   });
 });
 
-describe('main — the wave preview home + swatch wiring (playtest round)', () => {
-  // The REAL trigger token, never a restated literal: a drifted copy would leave the
-  // fake matching nothing and every test here passing while asserting nothing.
-  const COMPACT = COMPACT_QUERY;
-  /** A matchMedia fake whose Compact MQL is settable and whose listener registry is
-   *  inspectable — every other query gets the inert stub `main.ts` itself falls back to. */
-  function compactMq(initial: boolean) {
-    const listeners: (() => void)[] = [];
-    let matching = initial;
-    return {
-      matchMedia: (q: string) =>
-        q === COMPACT
-          ? {
-              get matches() {
-                return matching;
-              },
-              addEventListener: (_t: 'change', l: () => void) => void listeners.push(l),
-              removeEventListener: (_t: 'change', l: () => void) => {
-                const i = listeners.indexOf(l);
-                if (i >= 0) listeners.splice(i, 1);
-              },
-            }
-          : { matches: false, addEventListener: () => {}, removeEventListener: () => {} },
-      set(v: boolean) {
-        matching = v;
-        for (const l of [...listeners]) l();
-      },
-      listeners,
-    };
-  }
-
-  it('boots the preview into the Stage on Standard, the hud on Compact, and follows the media change', () => {
-    const mq = compactMq(false);
-    const h = homeApp({ matchMedia: mq.matchMedia });
-    const preview = h.root.querySelector('.wy-wave-preview')!;
-    expect(preview.parentElement?.className).toBe('wy-stage');
-
-    mq.set(true); // the viewport shrinks under the Compact trigger
-    expect(preview.parentElement?.className).toBe('wy-hud');
-    mq.set(false);
-    expect(preview.parentElement?.className).toBe('wy-stage');
-    h.app.destroy();
-  });
-
-  it('destroy() removes the compact listener — no re-homing after teardown', () => {
-    const mq = compactMq(false);
-    const h = homeApp({ matchMedia: mq.matchMedia });
-    expect(mq.listeners.length).toBe(1);
-    h.app.destroy();
-    expect(mq.listeners).toHaveLength(0);
-  });
-
-  it('heavy root font does NOT re-home the float — zoom is served in place (Codex #96 P1)', () => {
-    // The earlier ≥150% zoom bucket parked the preview in the content-sized status row,
-    // where wave changes re-projected the board for zoomed Standard users — deleted. The
-    // RO stub also pins the observer lifecycle: both boxes observed, disconnected on
-    // destroy.
-    // PER-INSTANCE, not a shared array: the app legitimately runs more than one observer
-    // (M2-S12a's Rail affordance watches the Rail's children), and a single shared list
-    // conflates them — it turns "main.ts observes exactly the preview and the stage" into a
-    // total that any unrelated observer perturbs, and lets ONE disconnect satisfy a
-    // teardown assertion meant for all of them. Identity + every-instance teardown is the
-    // stricter claim, and it is the one this test was always making.
-    const instances: { observed: Element[]; disconnected: boolean }[] = [];
-    (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      readonly observed: Element[] = [];
-      disconnected = false;
-      constructor() {
-        instances.push(this);
-      }
-      observe(el: Element): void {
-        this.observed.push(el);
-      }
-      disconnect(): void {
-        this.disconnected = true;
-        this.observed.length = 0;
-      }
-    };
-    try {
-      document.documentElement.style.fontSize = '32px'; // 200%
-      const h = homeApp();
-      const preview = h.root.querySelector('.wy-wave-preview')!;
-      const stage = h.root.querySelector('.wy-stage')!;
-      expect(preview.parentElement?.className).toBe('wy-stage'); // zoom never re-homes
-      // The preview's own observer watches exactly two boxes: the preview AND the stage
-      // (the width bucket's input).
-      const previewObserver = instances.find((i) => i.observed.includes(preview));
-      expect(previewObserver, 'the preview must be observed').toBeDefined();
-      expect(new Set(previewObserver!.observed)).toEqual(new Set([preview, stage]));
-      // Length BESIDE the set, because `new Set` discards multiplicity: a regression that
-      // re-observes the preview on every recompute leaves `[preview, stage, preview, ...]`,
-      // which the set comparison still accepts. That is the very leak class this test claims
-      // to be strengthening, and the `length === 2` this replaced used to catch it.
-      expect(previewObserver!.observed).toHaveLength(2);
-      h.app.destroy();
-      // EVERY observer the app created, not just the preview's — a leaked one keeps writing
-      // to a detached tree for the lifetime of the page.
-      expect(instances.length).toBeGreaterThan(0);
-      for (const i of instances) expect(i.disconnected).toBe(true);
-    } finally {
-      document.documentElement.style.fontSize = '';
-      delete (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
-    }
-  });
-
-  it('a stage with no compliant dead band is a hud home (#101 — portrait phones are Standard)', () => {
-    // jsdom lays nothing out (rect width 0 = "no signal", which the placement ignores), so
-    // the narrow stage is driven at the prototype seam for this test only: `.wy-stage` and
-    // the `.wy-board` filling it both report the 360×640-portrait geometry, everything else
-    // passes through. At 259×596 the 28×24 grid projects to 9px cells and a 3px letterbox
-    // margin — 5px of dead band even after borrowing the blocked border ring, far under the
-    // 64px floor — so the float has nowhere compliant to sit and the hud takes it. This
-    // REPLACED a hand-picked sub-400px width bucket: the same viewports still land here,
-    // now by measuring the space rather than by guessing a threshold.
-    const original = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      if (this.classList.contains('wy-stage') || this.classList.contains('wy-board')) {
-        return {
-          width: 259,
-          height: 596,
-          top: 0,
-          left: 0,
-          right: 259,
-          bottom: 596,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        } as DOMRect;
-      }
-      return original.call(this);
-    };
-    try {
-      const h = homeApp();
-      const preview = h.root.querySelector('.wy-wave-preview')!;
-      expect(preview.parentElement?.className).toBe('wy-hud');
-      // The scroll form's grants are cleared in the hud home — no stray tab stop.
-      expect(preview.getAttribute('tabindex')).toBeNull();
-      expect(preview.getAttribute('role')).toBeNull();
-      // ...and so are the BAND grants (#101): a stale width cap from a band that no longer
-      // exists would pin the in-flow form, which sizes to its column, not to dead space.
-      expect((preview as HTMLElement).style.getPropertyValue('--wy-preview-max-w')).toBe('');
-      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(false);
-      h.app.destroy();
-    } finally {
-      Element.prototype.getBoundingClientRect = original;
-    }
-  });
-
-  /** Boot with `.wy-stage`/`.wy-board` reporting `geometry`, and with a ResizeObserver stub
-   *  whose callbacks the caller can fire by hand — the seam every re-decide in this block
-   *  needs, since jsdom has neither layout nor a real observer. */
-  function stagedApp(geometry: { width: number; height: number }) {
-    const fire: (() => void)[] = [];
-    const originalRO = (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
-    (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      constructor(cb: () => void) {
-        fire.push(cb);
-      }
-      observe(): void {}
-      disconnect(): void {}
-    };
-    const originalRect = Element.prototype.getBoundingClientRect;
-    let stubbed = true;
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      if (stubbed && (this.classList.contains('wy-stage') || this.classList.contains('wy-board'))) {
-        return {
-          width: geometry.width,
-          height: geometry.height,
-          top: 0,
-          left: 0,
-          right: geometry.width,
-          bottom: geometry.height,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        } as DOMRect;
-      }
-      return originalRect.call(this);
-    };
-    const h = homeApp();
-    return {
-      root: h.root,
-      app: h.app,
-      /** Drop the layout stub, so every box reads jsdom's zeroes — the "no signal" state. */
-      blind(): void {
-        stubbed = false;
-      },
-      /** Move the placement key (text zoom is one of its four inputs) and re-run the
-       *  observer, i.e. exactly what a real zoom change does. */
-      turnKeyOver(): void {
-        document.documentElement.style.fontSize = '20px';
-        for (const cb of [...fire]) cb();
-      },
-      restore(): void {
-        document.documentElement.style.fontSize = '';
-        Element.prototype.getBoundingClientRect = originalRect;
-        if (originalRO === undefined) {
-          delete (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
-        } else {
-          (window as unknown as { ResizeObserver: unknown }).ResizeObserver = originalRO;
-        }
-      },
-    };
-  }
-
-  it('a parked card is never re-homed just to MEASURE — a key turnover that changes nothing touches no DOM (#101)', () => {
-    // The defect this forbids: an exploratory hud→stage→hud round trip flushes layout with
-    // the row reservation lifted, and a browser CLAMPS a scroll container's scrollTop the
-    // moment its content shrinks. A reader scrolled down the chips column would be yanked
-    // to the top by nothing more than a window resize. `main.ts` avoids it by measuring
-    // where it stands: from the hud home the Stage is shorter, so the letterbox reads WIDER
-    // than the float home would offer, which makes "no compliant band" an upper bound —
-    // and therefore a proof — rather than a guess needing a physical trial.
-    const h = stagedApp({ width: 259, height: 596 }); // the portrait-phone geometry: no band
-    try {
-      const hud = h.root.querySelector('.wy-hud')!;
-      const preview = h.root.querySelector('.wy-wave-preview')!;
-      expect(preview.parentElement).toBe(hud);
-
-      const observer = new MutationObserver(() => {});
-      observer.observe(hud, { childList: true });
-      // Positive calibration: the observer must be able to see a child move at all, or a
-      // "no records" result below would prove nothing about the code under test.
-      const probe = document.createElement('span');
-      hud.append(probe);
-      probe.remove();
-      expect(observer.takeRecords().length).toBeGreaterThan(0);
-
-      h.turnKeyOver();
-
-      expect(preview.parentElement, 'the card must still be parked').toBe(hud);
-      expect(observer.takeRecords(), 'the chips scrollport must not have been disturbed').toEqual(
-        [],
-      );
-      observer.disconnect();
-      h.app.destroy();
-    } finally {
-      h.restore();
-    }
-  });
-
-  it('NO SIGNAL while FLOATING keeps the band — it must not snap back to the occluding default (#101)', () => {
-    // The grants' fallbacks in `ui.css` are the PRE-#101 placement (`left: 0.5rem`,
-    // `max-width: min(256px, 45%)`) — the card on the board's top-left corner, over exactly
-    // the cells this issue is about. So clearing them on a transient degenerate box does not
-    // merely lose the band, it re-creates the defect for a tick.
-    const h = stagedApp({ width: 1144, height: 810 }); // the 1512×854 Stage: a real band
-    try {
-      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
-      expect(preview.parentElement?.className).toBe('wy-stage');
-      const band = preview.style.getPropertyValue('--wy-preview-max-w');
-      expect(band).not.toBe('');
-
-      h.blind(); // every box now reads jsdom's zeroes, mid-resize style
-      h.turnKeyOver();
-
-      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe(band);
-      expect(preview.style.getPropertyValue('--wy-preview-left')).toBe('8px');
-      h.app.destroy();
-    } finally {
-      h.restore();
-    }
-  });
-
-  it('NO SIGNAL after a Compact→Standard hand-off leaves the card parked, never on the occluding default (#101, CodeRabbit)', () => {
-    // The seam a pre-move `parked` flag left open: crossing back out of Compact clears the
-    // latch, so a first Standard tick with a degenerate box used to fall through to
-    // `setFloatBand`, clear the grants, and drop the card on the stylesheet default — which
-    // is the pre-#101 placement over the buildable corner. "No signal moves nothing" is now
-    // unconditional, so the card stays where the Compact branch left it until a real
-    // measurement arrives.
-    const mq = compactMq(true); // boot INSIDE Compact
-    const h = homeApp({ matchMedia: mq.matchMedia });
-    try {
-      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
-      expect(preview.parentElement?.className).toBe('wy-hud');
-      // Cross back to Standard. jsdom lays nothing out, so this tick has no measurement —
-      // exactly the mid-resize case. The fork crossing itself is a legitimate re-home, so
-      // the card returns to the Standard starting placement; what must NOT happen is a band
-      // grant being written from a measurement that never existed.
-      mq.set(false);
-      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('');
-      expect(preview.style.getPropertyValue('--wy-preview-left')).toBe('');
-      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(false);
-      h.app.destroy();
-    } finally {
-      /* no stubs to restore */
-    }
-  });
-
-  it('NO SIGNAL while parked changes nothing — a degenerate box is not evidence of room (#101)', () => {
-    // `unmeasured` means "nothing was laid out", which is not the same claim as "there is
-    // room". Re-homing a deliberately parked card on it would be a move with nothing behind
-    // it, and it would spend the scrollport for free.
-    const h = stagedApp({ width: 259, height: 596 });
-    try {
-      const hud = h.root.querySelector('.wy-hud')!;
-      const preview = h.root.querySelector('.wy-wave-preview')!;
-      expect(preview.parentElement).toBe(hud);
-
-      h.blind(); // every box now reads jsdom's zeroes
-      h.turnKeyOver();
-
-      expect(preview.parentElement).toBe(hud);
-      h.app.destroy();
-    } finally {
-      h.restore();
-    }
-  });
-
-  it('a stage with a letterbox margin keeps the float, pinned to the band and capped to it (#101)', () => {
-    // The 1512×854 geometry, measured on the shipped build: a 1144×810 stage, a 28×24 grid
-    // at 33px cells (924×792), leaving a 110px letterbox margin on each side. The card is
-    // pinned into it and capped to it — 102px, the band less its 8px gap — so it covers no
-    // grid cell at all, buildable or otherwise, and needs no reduced-weight companion form.
-    const original = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      if (this.classList.contains('wy-stage') || this.classList.contains('wy-board')) {
-        return {
-          width: 1144,
-          height: 810,
-          top: 0,
-          left: 0,
-          right: 1144,
-          bottom: 810,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        } as DOMRect;
-      }
-      return original.call(this);
-    };
-    try {
-      const h = homeApp();
-      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
-      expect(preview.parentElement?.className).toBe('wy-stage');
-      expect(preview.style.getPropertyValue('--wy-preview-left')).toBe('8px');
-      expect(preview.style.getPropertyValue('--wy-preview-right')).toBe('auto');
-      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('102px');
-      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(false);
-      h.app.destroy();
-      // The band grants are this module's to clear, like the scroll form's beside them.
-      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('');
-    } finally {
-      Element.prototype.getBoundingClientRect = original;
-    }
-  });
-
-  it('a stage whose letterbox is too narrow borrows the blocked border ring, and says so (#101)', () => {
-    // The 1440×900 geometry, measured: a 1072×856 stage, 35px cells, a 46px letterbox
-    // margin — 38px of usable band, under the 64px floor. Borrowing the one-cell blocked
-    // ring lifts it to 81px (73px usable), which clears the floor, so the card sits over
-    // board terrain no tower can ever occupy and takes the reduced-weight companion form.
-    const original = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      if (this.classList.contains('wy-stage') || this.classList.contains('wy-board')) {
-        return {
-          width: 1072,
-          height: 856,
-          top: 0,
-          left: 0,
-          right: 1072,
-          bottom: 856,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        } as DOMRect;
-      }
-      return original.call(this);
-    };
-    try {
-      const h = homeApp();
-      const preview = h.root.querySelector('.wy-wave-preview') as HTMLElement;
-      expect(preview.parentElement?.className).toBe('wy-stage');
-      expect(preview.style.getPropertyValue('--wy-preview-max-w')).toBe('73px');
-      expect(preview.classList.contains('wy-wave-preview--over-board')).toBe(true);
-      h.app.destroy();
-    } finally {
-      Element.prototype.getBoundingClientRect = original;
-    }
-  });
-
+// The colour-mode repaint wiring. The playtest round's other half here — the wave preview's
+// two homes and #101's placement chain — went with #181, which gave the preview one home.
+describe('main — the colour-mode repaint wiring (playtest round, #181)', () => {
   it('paints every swatch at boot and repaints ONLY on a real colour-mode change', () => {
     vi.mocked(paintSwatch).mockClear();
     const h = homeApp();
@@ -1839,6 +1460,30 @@ describe('main — the wave preview home + swatch wiring (playtest round)', () =
     protan.dispatchEvent(new Event('change'));
     expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount * 2);
     expect(vi.mocked(paintSwatch).mock.calls.at(-1)?.[2]).toBe('protan');
+    h.app.destroy();
+  });
+
+  // #181 (L1): the wave strip's creep icons ride the same subscription. Its colours come from
+  // the palette, so the expectation is derived, never restated.
+  it("re-inks the wave strip's creep icons on the same colour-mode change, in place", () => {
+    const h = homeApp();
+    h.frame(); // the first HUD render — pre-start, the strip already previews wave 1
+    const body = (): Element => h.root.querySelector('.wy-wave-preview .wy-creep-body')!;
+    expect(body(), 'the boot strip shows a creep icon').not.toBeNull();
+    const before = body();
+    expect(before.getAttribute('fill')).toBe(hexColour(resolvePalette('default').creep));
+    // A mode that really inks creeps differently (some share the default's creep colour).
+    const other = COLOUR_MODES.find(
+      (m) => resolvePalette(m).creep !== resolvePalette('default').creep,
+    );
+    expect(other, 'a colour mode that inks creeps differently').toBeDefined();
+    const radio = h.root.querySelector<HTMLInputElement>(
+      `.wy-settings input[name="wy-colour-mode"][value="${other!}"]`,
+    )!;
+    radio.checked = true;
+    radio.dispatchEvent(new Event('change'));
+    expect(body()).toBe(before); // repainted, never rebuilt
+    expect(body().getAttribute('fill')).toBe(hexColour(resolvePalette(other!).creep));
     h.app.destroy();
   });
 });
@@ -2788,7 +2433,13 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       const probe = h.root.querySelector('.wy-inset-probe');
       expect(probe, 'the inset probe must be mounted').not.toBeNull();
       expect(probe!.getAttribute('aria-hidden')).toBe('true');
-      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage, ...dock.children, probe!]));
+      // ...and the countdown ring's painted box (#181 H1): its slot is zero-width, so a hint
+      // that changes length resizes only the visual.
+      const ringVisual = dock.querySelector('.wy-dock-ring-visual');
+      expect(ringVisual, 'the ring visual must be mounted').not.toBeNull();
+      expect(new Set(observer!.observed)).toEqual(
+        new Set([dock, stage, ...dock.children, ringVisual!, probe!]),
+      );
       expect(dock.children.length).toBeGreaterThan(1);
 
       // The scroll cue follows the scrollport: a scroll re-points it, no frame needed.
@@ -2800,6 +2451,8 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
 
       // A burst of notifications is ONE pass, one frame later — never inside the callback.
       stageHeight = 500;
+      const ring = dock.querySelector<HTMLElement>('.wy-dock-ring')!;
+      ring.classList.add('wy-dock-ring--off'); // a verdict from an older layout
       const before = frames.length;
       observer!.cb();
       observer!.cb();
@@ -2807,6 +2460,9 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       expect(prop('--wy-dock-reserve')).toBe('400px');
       frames[frames.length - 1]!(0);
       expect(prop('--wy-dock-reserve')).toBe('500px');
+      // The ring's fit rides the same pass (#181 H1). jsdom renders no ring, so the pass can
+      // only clear — which is the point: no verdict outlives the layout it was measured in.
+      expect(ring.classList.contains('wy-dock-ring--off')).toBe(false);
       // ...and the frame slot is released, so the next resize schedules again.
       observer!.cb();
       expect(frames.length - before).toBe(2);

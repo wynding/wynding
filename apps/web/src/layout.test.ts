@@ -18,7 +18,6 @@ import {
   EXEMPT_FROM_DECLARATION,
   WALKED_CONTAINERS,
 } from './layout';
-import { PREVIEW_FLOAT_CAP_PX } from './preview-place';
 
 // `new URL('./ui.css', import.meta.url)` would normally suffice, but under the jsdom test
 // environment the global `URL` is jsdom's DOM implementation, not Node's — resolve via
@@ -226,33 +225,62 @@ describe('layout — the home link box model and visibility contract', () => {
   });
 });
 
-// The wave preview's band grants (#101): three custom properties `main.ts` writes and
-// `ui.css` reads. The DEFAULTS are what a pre-measurement pass (jsdom, a stage mid-resize)
-// renders with, and one of them carries a number `preview-place.ts` mirrors — so, exactly
-// like COMPACT_QUERY above, the duplication is made safe by asserting it rather than by
-// trusting it.
-describe('layout — the wave preview’s band grants (#101)', () => {
-  const preview = ruleBody(css, '.wy-wave-preview');
+// The wave preview's ONE home (#181 L1). Its stage-stability holds by CONSTRUCTION — the strip
+// is sized by the status row, never by the wave it shows — and these are the declarations that
+// construct it. `stage-stability.spec.ts` measures the result in a real browser; these fail
+// first, with the reason attached, when a mechanism is edited away.
+describe('layout — the wave strip’s one home (#181)', () => {
+  const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const standard = uncommented.slice(uncommented.indexOf(`@media not all and ${COMPACT_QUERY}`));
 
-  it('reads all three band properties, each with its pre-measurement default', () => {
-    expect(preview).toContain('left: var(--wy-preview-left, 0.5rem)');
-    expect(preview).toContain('right: var(--wy-preview-right, auto)');
-    expect(preview).toContain('max-width: var(--wy-preview-max-w, min(256px, 45%))');
+  /** Every leaf rule whose SUBJECT is the strip itself — its modifiers included, its parts
+   *  (`-title`, `-list`) not. */
+  function stripRules(): { selector: string; body: string }[] {
+    const out: { selector: string; body: string }[] = [];
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(uncommented)) !== null) {
+      for (const selector of (m[1] as string).split(',').map((x) => x.trim())) {
+        const subject = selector.split(/\s*[>+~]\s*|\s+/).pop() ?? '';
+        if (/\.wy-wave-preview(?:--[\w-]+)?(?![\w-])/.test(subject)) {
+          out.push({ selector, body: (m[2] as string).replace(/\s+/g, ' ').trim() });
+        }
+      }
+    }
+    return out;
+  }
+
+  it('never floats: no rule takes the strip out of flow, and #101’s band grants are gone', () => {
+    const rules = stripRules();
+    expect(rules.length, 'the strip has rules to check').toBeGreaterThan(2);
+    for (const r of rules)
+      expect(r.body, r.selector).not.toMatch(/position\s*:\s*(absolute|fixed)/);
+    expect(uncommented).not.toMatch(/--wy-preview-(?:left|right|max-w)\b/);
+    expect(uncommented).not.toContain('.wy-wave-preview--over-board');
   });
 
-  it('the stylesheet’s own width cap is the one preview-place.ts mirrors', () => {
-    // `preview-place.ts` clamps a band wider than the cap back to it, so the card can never
-    // be stretched past the box this stylesheet declares. A silent edit to either number
-    // would let a wide band grow the card beyond its declared cap with nothing failing.
-    expect(preview).toContain(`min(${PREVIEW_FLOAT_CAP_PX}px,`);
+  it('Standard: the strip takes the row’s LEFTOVER width and one fixed line of height', () => {
+    const strip = ruleBody(standard, '.wy-shell .wy-wave-preview');
+    // A zero basis plus inline-size containment keep the strip's content out of every
+    // intrinsic measure, so the row's line breaks never depend on what a wave contains.
+    expect(strip).toContain('flex: 1 1 0;');
+    expect(strip).toContain('container: wy-strip / inline-size;');
+    // A fixed height, not a content height: a long wave scrolls in place (the scroll form)
+    // or clips, and never grows the row.
+    expect(strip).toMatch(/(?:^|; )height: 2\.25rem;/);
+    expect(strip).toContain('overflow: hidden;');
+    expect(strip).toContain('white-space: nowrap;');
   });
 
-  it('the reduced-weight companion form exists and is scoped to its own class', () => {
-    // Candidate 5 (#101) applies ONLY while the card borrows the board's blocked border
-    // ring; `main.ts` toggles the class. An unconditional edit into the base rule above
-    // would paint it over the letterbox band too, where there is no board underneath.
-    expect(ruleBody(css, '.wy-wave-preview--over-board')).toContain('border-style: dashed');
-    expect(preview).not.toContain('border-style: dashed');
+  it('Standard: a hidden strip or chip keeps its box, so the run resolving never reflows the row', () => {
+    for (const selector of [
+      '.wy-shell .wy-wave-preview[hidden]',
+      '.wy-shell .wy-hud > .wy-chip[hidden]',
+    ]) {
+      const body = ruleBody(standard, selector);
+      expect(body, selector).toContain('visibility: hidden;');
+      expect(body, selector).not.toContain('display: none');
+    }
   });
 });
 
@@ -362,8 +390,11 @@ describe('layout — the safe-area seam (#136)', () => {
   });
 
   it('the three guards together account for every token read', () => {
-    // 16 axis-named + 3 vertical bounds + 2 track tokens + the inset probe = the 22 call sites
-    // (the probe joined in #152's review round: an out-of-flow `height` that exists only to
+    // 16 axis-named + 2 vertical bounds + 2 track tokens + the inset probe = the 21 call sites.
+    // #181 removed one: the wave preview's reserved hud row (`.wy-hud:has(> .wy-wave-preview)`,
+    // a `height` bound) went with the preview's floating placement chain, since the strip that
+    // replaced both is one fixed line tall and needs no viewport-relative budget. Before that,
+    // 22 (the probe joined in #152's review round: an out-of-flow `height` that exists only to
     // make the bottom inset observable, pinned by its own test below). Before it, 21 (20 before #153
     // too, by a different route: #153 added the Compact Rail's two top-inset reads, making
     // 22, and its third round routed the Rail's two scroll reserves through the named
@@ -372,17 +403,17 @@ describe('layout — the safe-area seam (#136)', () => {
     // partition means a NEW read cannot land in the gap between the guards: it either matches
     // one of them or fails this. Each guard's own count pins its share; this pins the whole.
     const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
-    expect(reads).toHaveLength(22);
+    expect(reads).toHaveLength(21);
   });
 
   it('vertical bounds read a VERTICAL axis token', () => {
-    // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which three
-    // of the twenty-two call sites are not: two `max-height` bounds and one `height`, all
-    // subtracting `--wy-safe-top`. Two of those sit behind `:has()` selectors that are not
-    // exercised at page load (`.wy-shell:has(.wy-banner:not([hidden]))` and
-    // `.wy-hud:has(> .wy-wave-preview)`), so a top→left slip there would shrink the HUD by the
-    // wrong inset with the entire suite green — the exact failure the guard exists to catch,
-    // in the one place it could not see.
+    // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which two
+    // of the twenty-one call sites are not: the two `max-height` bounds, both subtracting
+    // `--wy-safe-top`. One of them sits behind a `:has()` selector that is not exercised at
+    // page load (`.wy-shell:has(.wy-banner:not([hidden]))`), so a top→left slip there would
+    // shrink the HUD by the wrong inset with the entire suite green — the exact failure the
+    // guard exists to catch, in the one place it could not see. (A third, the wave preview's
+    // reserved hud row `height`, went with #181's one-line strip.)
     // The inset PROBE is not a bound: it reads the BOTTOM inset on purpose and is pinned by
     // its own test below, so its one rule is set aside here — by selector, so any other
     // `height` reading an inset still lands in this guard.
@@ -395,15 +426,15 @@ describe('layout — the safe-area seam (#136)', () => {
       const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(m[1] as string);
       if (token === null) continue;
       seen += 1;
-      // TOP specifically, not "any vertical axis" (Codex P2 on c9b1cfa). All three of these
+      // TOP specifically, not "any vertical axis" (Codex P2 on c9b1cfa). Both of these
       // are `calc(NNdvh - 3.5rem - var(--wy-safe-top))` — a budget measured DOWN from the top
       // edge, so `top` is the only correct axis. Accepting `bottom` as well let a slip pass
-      // this guard AND keep the 20-read partition intact, while the rendered spec probes only
-      // the base `.wy-hud` rule and never the two `:has()`-gated ones — so those bounds would
+      // this guard AND keep the read partition intact, while the rendered spec probes only
+      // the base `.wy-hud` rule and never the `:has()`-gated one — so that bound would
       // react to the wrong physical inset with the whole suite green.
       if (token[1] !== 'top') wrong.push(m[0].trim());
     }
-    expect(seen, 'expected the three vertical bounds that read an inset').toBe(3);
+    expect(seen, 'expected the two vertical bounds that read an inset').toBe(2);
     expect(wrong).toEqual([]);
   });
 
