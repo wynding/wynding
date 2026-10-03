@@ -83,7 +83,8 @@ export interface BakeLog {
 export interface BakeHost<C> {
   /** A blank `width × height` canvas and its 2D context, or null when the browser refuses. */
   createCanvas(width: number, height: number): HostCanvas<C> | null;
-  /** Give a canvas's memory back now. Only ever called on a canvas no texture uses. */
+  /** Give a canvas's memory back now. Called once the texture made from it is removed — or
+   *  once removing that texture has failed, since cleanup goes on regardless. */
   releaseCanvas(canvas: C): void;
   /** Register `canvas` as texture `key`, with `frames` as its named sub-rectangles. */
   addTexture(key: string, canvas: C, frames: readonly TextureFrameRect[]): void;
@@ -145,8 +146,16 @@ type Failure =
 const describeInputs = (i: BakeInputs): string =>
   `cellPx ${i.cellPx}, dpr ${i.dpr}, colour mode ${i.mode}`;
 
-const describeError = (error: unknown): string =>
-  error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+/** A thrown value as text, for telling failures apart — total, since reporting a failure
+ *  must not throw: a null-prototype object, a throwing `toString` or a revoked Proxy has no
+ *  text to give, and is told apart by its type alone. */
+const describeError = (error: unknown): string => {
+  try {
+    return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  } catch {
+    return `an unprintable ${typeof error}`;
+  }
+};
 
 const countAttempts = (n: number): string => `${n} failed attempt${n === 1 ? '' : 's'}`;
 
@@ -196,7 +205,12 @@ export function createBakeRunner<C>(geometry: BoardCellsGeometry, host: BakeHost
   ): void => {
     const { canvas, act } = STEPS[failure.stage];
     const size = canvas === null ? `board ${sizes.board}, atlas ${sizes.atlas}` : sizes[canvas];
-    const key = `${failure.stage}|${failure.refused ? 'refused' : describeError(failure.error)}|${size}`;
+    const key = [
+      failure.stage,
+      failure.refused ? 'refused' : describeError(failure.error),
+      size,
+      describeInputs(inputs), // the message names them: a new colour mode is a new report
+    ].join('|');
     if (reported.has(key)) return;
     reported.add(key);
     const what = failure.refused
@@ -213,6 +227,10 @@ export function createBakeRunner<C>(geometry: BoardCellsGeometry, host: BakeHost
   const undo = (failure: Failure, canvases: readonly C[], added: readonly string[]): void => {
     const previous = live;
     if (failure.stage === 'show' && previous !== null) {
+      // Should this throw too, the attempt's textures are still removed below. That assumes a
+      // show fails the same way on both passes, so no sprite reached them — true of Phaser 3.90,
+      // whose show throws only on a destroyed object, at the same sprite each time. A host that
+      // can fail differently should keep the textures instead.
       step('pointing the board and its sprites back at the previous art', () =>
         host.show(previous.art),
       );

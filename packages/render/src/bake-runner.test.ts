@@ -104,15 +104,16 @@ function fakeHost() {
   const textures = new Map<string, readonly TextureFrameRect[]>();
   const logs: LogLine[] = [];
   const state = {
-    canvases: [] as ('ok' | 'refuse' | 'throw')[],
+    canvases: [] as ('ok' | 'refuse' | 'throw' | 'create-throws')[],
     shows: [] as ('ok' | 'throw')[],
+    createError: new Error('no canvas'),
     paintError: new Error('paint failed'),
     showError: new Error('repoint failed'),
     /** What `addTexture`, `removeTexture` or `releaseCanvas` throws for a key or canvas id —
      *  null to succeed. A host may throw anything, not only an `Error`. */
     addThrows: (_key: string): unknown => null,
-    removeThrows: (_key: string): Error | null => null,
-    releaseThrows: (_id: number): Error | null => null,
+    removeThrows: (_key: string): unknown => null,
+    releaseThrows: (_id: number): unknown => null,
     logThrows: false,
   };
   const log =
@@ -128,6 +129,10 @@ function fakeHost() {
       if (step === 'refuse') {
         events.push(`refuse ${width}×${height}`);
         return null;
+      }
+      if (step === 'create-throws') {
+        events.push(`create-throw ${width}×${height}`);
+        throw state.createError;
       }
       const canvas: FakeCanvas = {
         id: canvases.length + 1,
@@ -302,6 +307,19 @@ describe('createBakeRunner — a failed attempt is reported first, then undone',
     ]);
   });
 
+  it('making a canvas that throws: reported, naming the canvas being made, then the one already made is freed', () => {
+    const { h, runner } = setup();
+    h.state.canvases = ['ok', 'create-throws']; // the atlas canvas's creation throws
+    expect(ensureSafely(runner, at(10))).toBeNull();
+    const atlas = layoutAtlas(10, 1, MAX_TEX);
+    expect(h.events).toEqual(['canvas#1', `create-throw ${size(atlas)}`, 'log:error', 'release#1']);
+    expect(h.errors().map((e) => e.message)).toEqual([
+      `board art: making the atlas canvas (${size(atlas)}) failed while baking for ` +
+        `${named(at(10))}; ${BLANK}. ${RETRYING}`,
+    ]);
+    expect(h.errors()[0]!.error).toBe(h.state.createError);
+  });
+
   it('a paint that throws: its error passed on, then both canvases freed — and nothing uploaded, as both paint before either uploads', () => {
     const { h, runner } = setup();
     const first = runner.ensure(at(10), MAX_TEX);
@@ -358,7 +376,7 @@ describe('createBakeRunner — a failed attempt is reported first, then undone',
     expect(h.textures.size).toBe(0);
   });
 
-  it('a thrown value that is not an Error is reported as its text, and passed on as thrown', () => {
+  it('a thrown value that is not an Error is keyed by its text, and passed on as thrown', () => {
     const { h, runner } = setup();
     const thrown = { code: 'CONTEXT_LOST' };
     h.state.addThrows = (key) => (key.startsWith('wy-board') ? thrown : null);
@@ -369,10 +387,39 @@ describe('createBakeRunner — a failed attempt is reported first, then undone',
         `for ${named(at(10))}; ${BLANK}. ${RETRYING}`,
     ]);
     expect(h.errors()[0]!.error).toBe(thrown);
+    expect(h.events).toContain('remove wy-board-1'); // the key it threw partway through adding
     // Keyed by its text: the same value thrown again, after the backoff, is not reported twice.
     for (let i = 0; i < BAKE_RETRY_FRAMES; i++) runner.ensure(at(10), MAX_TEX);
     expect(h.events.filter((e) => e === 'add wy-board-2')).toEqual(['add wy-board-2']);
     expect(h.errors()).toHaveLength(1);
+  });
+
+  it('a thrown value with no text to give — no prototype, a throwing toString, a revoked Proxy — is still reported and undone', () => {
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const unprintable: readonly unknown[] = [
+      Object.create(null),
+      {
+        toString() {
+          throw new Error('no text');
+        },
+      },
+      revoked.proxy,
+    ];
+    for (const thrown of unprintable) {
+      const { h, runner } = setup();
+      h.state.addThrows = (key) => (key.startsWith('wy-atlas') ? thrown : null);
+      expect(ensureSafely(runner, at(10))).toBeNull();
+      expect(h.errors()).toHaveLength(1);
+      expect(h.errors()[0]!.error).toBe(thrown);
+      expect(h.events.slice(-5)).toEqual([
+        'log:error',
+        'remove wy-board-1',
+        'remove wy-atlas-1',
+        'release#1',
+        'release#2',
+      ]);
+    }
   });
 
   it('a show that throws is undone: pointed back at the previous art, its textures removed, its canvases freed, nothing recorded or kept', () => {
@@ -549,10 +596,12 @@ describe('createBakeRunner — cleanup can neither hide a failure nor throw', ()
     h.state.canvases = ['refuse'];
     expect(ensureSafely(runner, at(12))).toBe(first); // its warning throws
     h.state.canvases = ['ok', 'throw'];
-    expect(ensureSafely(runner, at(14))).toBe(first); // its error throws
+    h.state.releaseThrows = (id) => (id === 3 ? new Error('release failed') : null);
+    expect(ensureSafely(runner, at(14))).toBe(first); // its error throws, and so does a cleanup step's
     expect(ensureSafely(runner, at(16))).toMatchObject({ boardKey: 'wy-board-4' }); // its recovery line throws
     expect(h.events.filter((e) => e.startsWith('log:'))).toEqual([
       'log:warn',
+      'log:error',
       'log:error',
       'log:info',
     ]);
@@ -560,6 +609,10 @@ describe('createBakeRunner — cleanup can neither hide a failure nor throw', ()
 });
 
 describe('createBakeRunner — a retry waits out the backoff, unless the inputs change', () => {
+  it('waits 60 frames — about a second at 60 Hz', () => {
+    expect(BAKE_RETRY_FRAMES).toBe(60);
+  });
+
   it(`tries the same inputs again only ${BAKE_RETRY_FRAMES} frames later, and does not report the same failure twice`, () => {
     const { h, runner } = setup();
     const first = runner.ensure(at(10), MAX_TEX);
@@ -668,7 +721,7 @@ describe('createBakeRunner — a failing streak closes once, and the next starts
   });
 });
 
-describe('createBakeRunner — a failure is distinct by its stage, its error and its canvas size', () => {
+describe('createBakeRunner — a failure is distinct by its stage, its error, its canvas size and its inputs', () => {
   it('a different error at the same step and size is reported too', () => {
     const { h, runner } = setup();
     runner.ensure(at(10), MAX_TEX);
@@ -682,21 +735,50 @@ describe('createBakeRunner — a failure is distinct by its stage, its error and
     expect(h.errors().map((e) => e.error)).toEqual([first, second]);
   });
 
-  it('the same error at a different canvas size is reported too', () => {
+  it('the same error at a different canvas size, for the same inputs, is reported too', () => {
+    // A smaller texture limit packs the same atlas into a different shape.
+    const sizes = [MAX_TEX, 512].map((max) => size(layoutAtlas(12, 1, max)));
+    expect(sizes[0]).not.toBe(sizes[1]);
     const { h, runner } = setup();
     runner.ensure(at(10), MAX_TEX);
     h.state.canvases = ['ok', 'throw', 'ok', 'throw'];
     runner.ensure(at(12), MAX_TEX);
-    runner.ensure(at(14), MAX_TEX); // new inputs, tried at once: a bigger atlas, the same throw
-    const sizes = [12, 14].map((cell) => size(layoutAtlas(cell, 1, MAX_TEX)));
-    expect(sizes[0]).not.toBe(sizes[1]);
+    for (let i = 0; i < BAKE_RETRY_FRAMES; i++) runner.ensure(at(12), 512);
     expect(h.errors().map((e) => e.message)).toEqual(
       sizes.map(
-        (s, i) =>
+        (s) =>
           `board art: painting the atlas canvas (${s}) failed while baking for ` +
-          `${named(at(i === 0 ? 12 : 14))}; ${showing(at(10))}. ${RETRYING}`,
+          `${named(at(12))}; ${showing(at(10))}. ${RETRYING}`,
       ),
     );
+  });
+
+  it('the same error at a different step, for the same inputs and size, is reported too', () => {
+    const { h, runner } = setup();
+    runner.ensure(at(10), MAX_TEX);
+    h.state.canvases = ['throw', 'ok']; // the board's paint throws…
+    runner.ensure(at(12), MAX_TEX);
+    // … then, once the backoff is out, the board's upload throws the very same error.
+    h.state.addThrows = (key) => (key.startsWith('wy-board') ? h.state.paintError : null);
+    for (let i = 0; i < BAKE_RETRY_FRAMES; i++) runner.ensure(at(12), MAX_TEX);
+    expect(h.errors().map((e) => e.error)).toEqual([h.state.paintError, h.state.paintError]);
+    expect(h.errors()[0]!.message).toContain('painting the board canvas');
+    expect(h.errors()[1]!.message).toContain('uploading the board canvas as a texture');
+  });
+
+  it('the same failure for different inputs is reported for each: a colour mode tried at the canvas cap is named', () => {
+    // iOS at its canvas cap refuses every canvas; the player tries one colour mode after another.
+    const { h, runner } = setup();
+    runner.ensure(at(10), MAX_TEX);
+    h.state.canvases = ['refuse', 'refuse', 'refuse'];
+    for (const mode of ['protan', 'deutan', 'tritan'] as const)
+      runner.ensure(at(10, 1, mode), MAX_TEX);
+    expect(h.warns()).toHaveLength(3);
+    expect(h.warns().map((w) => /colour mode (\w+);/.exec(w)?.[1])).toEqual([
+      'protan',
+      'deutan',
+      'tritan',
+    ]);
   });
 });
 
@@ -716,9 +798,21 @@ describe('createBakeRunner — destroy', () => {
     expect(h.events).toEqual([]);
   });
 
-  it('before any bake, frees nothing', () => {
+  it('before any bake, frees nothing — and bakes nothing afterwards', () => {
     const { h, runner } = setup();
     runner.destroy();
     expect(h.events).toEqual([]);
+    expect(runner.ensure(at(10), MAX_TEX)).toBeNull();
+    expect(h.events).toEqual([]);
+  });
+
+  it('a canvas release that throws does not escape destroy, and the other is still released', () => {
+    const { h, runner } = setup();
+    runner.ensure(at(10), MAX_TEX);
+    h.state.releaseThrows = (id) => (id === 1 ? new Error('release failed') : null);
+    h.events.length = 0;
+    expect(() => runner.destroy()).not.toThrow();
+    expect(h.events).toEqual(['release#1', 'log:error', 'release#2']);
+    expect(h.canvases[1]!.released).toBe(true);
   });
 });

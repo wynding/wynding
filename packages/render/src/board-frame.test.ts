@@ -318,6 +318,26 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
   });
 });
 
+describe('drawBoardFrame — the board image goes to the NEAREST device pixel', () => {
+  it('rounds its corner — not down, not up — at dpr 1.25, where the corner is a quarter pixel off on both axes', () => {
+    // 1074×802 CSS px at dpr 1.25: 33px cells, the corner at (75, 5) CSS px — device (93.75, 6.25).
+    // Nearest is device (94, 6): flooring would give 93 across, ceiling 7 down.
+    const projection = createProjection({
+      cols: 28,
+      rows: 24,
+      cssWidth: 1074,
+      cssHeight: 802,
+      dpr: 1.25,
+    });
+    expect([projection.originX * 1.25, projection.originY * 1.25]).toEqual([93.75, 6.25]);
+    const { t, board } = targets();
+    drawBoardFrame(t, busyFrame(projection));
+    const [x, y] = board.positions[0]!;
+    expect(x).toBeCloseTo(94 / 1.25, 9);
+    expect(y).toBeCloseTo(6 / 1.25, 9);
+  });
+});
+
 describe('drawBoardFrame — the ghost, the sparks and reduced motion (drawn in `cues`)', () => {
   const cuesOf = (overlay: Partial<RenderOverlay>, sparks: LiveSpark[] = []): Call[] => {
     const { t } = targets();
