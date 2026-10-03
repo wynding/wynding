@@ -1110,11 +1110,12 @@ three `Graphics` objects at fixed depths (`packages/render/src/layers.ts`): the 
 under the towers; the selection cue and tracers between the pending builds and the creeps;
 health pips, status cues, the build ghost and sparks over everything. ADR 0003's cue
 vocabulary — the choice the S10 Finding said the frame budget may be paying for — is split
-between the two by what it marks, not by kind. The cues that belong to a tower's own art are
-baked with it: the footprint marks, and two STATE cues, the buffed recipient's ✦ and the
-pending-build outline, each an atlas variant of its tower's frame. Everything else stays
-stroked `Graphics`, drawn per frame: the status rings and pips, the airborne chevron, the aura
-shells, the selection cue, the ghost and the sparks.
+between the two by what it marks, not by kind. The cues that belong to a piece's own art are
+baked with it: a tower's footprint mark and two tower STATE cues, the buffed recipient's ✦ and
+the pending-build outline; and two creep cues, the low-health tint and the boss size — each an
+atlas variant of its tower's or creep's frame. Everything else stays stroked `Graphics`, drawn
+per frame: the status rings and pips, the airborne chevron, the aura shells, the selection
+cue, the ghost and the sparks.
 
 **Measured before/after.** The record-only browser perf suite (`playwright.perf.config.ts`: the
 `catalog` and `stress` scenes on the `mid-range` and `low-end` emulation profiles), run twice
