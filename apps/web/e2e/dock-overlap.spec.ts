@@ -349,11 +349,15 @@ test.describe('the bounded Dock at the worst case: 640×560, banner up, 200% zoo
 // Dock that became a scrollport at 100% zoom, and controls left partly visible at rest.
 //
 // THE STARTED SCROLLPORT MOVED WITH #181. The QC sweep found it at 540×556, where #101's
-// reserved hud row had already taken the status row to ~200px; the one-line strip gave that
-// height back to the Stage, so at 540 wide the started Dock now scrolls only below ~525px tall
-// (it did up to ~581px). The tests below that need it scrolling — and say so first — measure
-// at 540×509, inside that band with room on both sides; 540×556 stays in the case table, where
-// it now checks the same Dock un-scrolled.
+// reserved hud row had already taken the status row to ~200px. The strip gave that height back
+// to the Stage: at 540 wide the strip shares the wrapped chips' second line (a 95px status
+// row) and the started Dock no longer scrolls at 100% at any Standard height, while at 500
+// wide the strip takes a line of its own (136px) and the Dock scrolls from the Standard floor
+// (501px) to ~525px tall. The tests below that need it scrolling — and say so first — measure
+// at 500×509, inside that band, where the floor holds by 33px; that layout measures identically
+// on macOS's font stack and CI's (DejaVu Sans). The bottom-inset test stays at 540×509, where
+// the inset itself is what puts the Dock in its scroll form; 540×556 stays in the case table,
+// where it checks the same Dock un-scrolled.
 
 interface DockCase {
   readonly width: number;
@@ -838,14 +842,14 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     await assertTabWalkShowsEachControl(page, 'with a bottom inset');
   });
 
-  test('540×509 at 100%, a bottom inset that ARRIVES after the Dock scrolls: the reserve follows it', async ({
+  test('500×509 at 100%, a bottom inset that ARRIVES after the Dock scrolls: the reserve follows it', async ({
     page,
   }) => {
     // Codex P2 on #169: in scroll form the inset lifts the Dock by `bottom`, which MOVES it
     // without resizing any observed box — so an inset written after the scroll form engaged
     // (a native write of `--safe-area-inset-bottom`, or `env()` changing) must still re-sync
     // the reserve, or the lifted Dock covers buildable cells by the inset delta.
-    await gotoCase(page, { width: 540, height: 509, zoom: 100 });
+    await gotoCase(page, { width: 500, height: 509, zoom: 100 });
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await settle(page);
     await expect(page.locator('.wy-dock'), 'the started Dock must scroll here').toHaveClass(
@@ -869,7 +873,7 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
       await assertNoPartialControl(page, `after a ${inset}px inset arrived`);
       await assertFloorOrException(
         page,
-        { width: 540, height: 509, zoom: 100 },
+        { width: 500, height: 509, zoom: 100 },
         `after a ${inset}px inset arrived`,
       );
     }
@@ -885,11 +889,11 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     );
   });
 
-  test('540×509 at 100%, forced colors: the scroll cue survives, inked in the system CanvasText', async ({
+  test('500×509 at 100%, forced colors: the scroll cue survives, inked in the system CanvasText', async ({
     page,
   }) => {
     await page.emulateMedia({ forcedColors: 'active' });
-    await gotoCase(page, { width: 540, height: 509, zoom: 100 });
+    await gotoCase(page, { width: 500, height: 509, zoom: 100 });
     expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await settle(page);
@@ -959,10 +963,10 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     await assertNoPartialControl(page, 'forced colors');
   });
 
-  test('540×509 at 100%: no point of the started Dock reaches a control that is not wholly in view', async ({
+  test('500×509 at 100%: no point of the started Dock reaches a control that is not wholly in view', async ({
     page,
   }) => {
-    await gotoCase(page, { width: 540, height: 509, zoom: 100 });
+    await gotoCase(page, { width: 500, height: 509, zoom: 100 });
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await settle(page);
     // The premise, asserted like its siblings': an unscrolled Dock has no control to leak.
