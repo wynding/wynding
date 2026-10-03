@@ -1,14 +1,16 @@
 // placement.ts — which atlas frame each sprite shows, and where (V2, #181). Pure,
-// Phaser-free, unit-tested: `scene.ts` only copies these lists onto pooled sprites, so every
-// decision a frame's picture depends on — which towers are hidden, which are pending, which
-// wear the buffed ✦, which silhouette and size a creep gets, when it turns low-health — is
-// made here, where a test can see it.
+// Phaser-free, unit-tested: `board-frame.ts` hands these lists to the sprite pools
+// (`sprite-pool.ts`), which only copy them onto sprites, so every decision a frame's picture
+// depends on — which towers are hidden, which are pending, which wear the buffed ✦, which
+// silhouette and size a creep gets, when it turns low-health — is made here, where a test
+// can see it.
 //
 // POSITIONS are world CSS px (the space every projection call returns) and are SNAPPED TO
 // WHOLE DEVICE PIXELS: a sprite's top-left lands where `x × dpr` is an integer. The atlas
-// bakes at the effective dpr with every frame anchor on a whole texel, so a snapped sprite
-// puts each texel on exactly one device pixel — crisp, never resampled between two. Creeps
-// carry their snapped centre too, for the cues drawn around them (`drawCreepCues`).
+// bakes at the effective dpr with every frame anchor on a whole texel, and the canvas's CSS
+// box is whole device pixels too (`scene.ts`), so a snapped sprite puts each texel on exactly
+// one device pixel — crisp, never resampled between two. Creeps carry their snapped centre
+// too, for the cues drawn around them (`drawCreepCues`) and the tracers converging on them.
 
 import {
   creepFillColour,

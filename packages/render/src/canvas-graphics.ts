@@ -17,6 +17,12 @@
 //  - Rounded rects trace Phaser's own paths: the fill as one continuous outline with the 20px
 //    default radius; the stroke clamped to half the shorter side and built from separate
 //    edge and corner sub-paths (Phaser's `strokeRoundedRect` moves between them).
+//  - A radius is never negative. Phaser draws whatever a negative radius describes; Canvas2D's
+//    `arc()` THROWS (`IndexSizeError`). The board reaches one for real: under ~56×48 CSS px
+//    (a hidden board measures 0×0) the projection falls back to 1px cells, and a 2×2
+//    footprint's `size - 4` inset goes negative, which the stroke's half-the-shorter-side
+//    clamp turns into a negative radius. Every arc here takes `nonNegative(radius)`, so a
+//    degenerate size draws a degenerate shape instead of throwing out of the bake.
 //
 // One deliberate departure, made so the bake LOOKS like the WebGL draw rather than merely
 // calling the same functions: consecutive OPAQUE `fillRect`s of one colour fill as ONE path.
@@ -76,6 +82,11 @@ const HALF_PI = Math.PI / 2;
 /** Phaser's `fillRoundedRect` / `strokeRoundedRect` default radius. */
 const PHASER_DEFAULT_RADIUS = 20;
 
+/** `radius` as Canvas2D's `arc()` will accept it: a negative one (or NaN) becomes 0. */
+function nonNegative(radius: number): number {
+  return radius > 0 ? radius : 0;
+}
+
 export function canvasGraphics(ctx: Canvas2DLike): BakeGraphics {
   // Phaser strokes are quads per segment — square-ended, no cap.
   ctx.lineCap = 'butt';
@@ -132,8 +143,9 @@ export function canvasGraphics(ctx: Canvas2DLike): BakeGraphics {
     },
     fillRoundedRect(x, y, width, height, radius = PHASER_DEFAULT_RADIUS) {
       flush();
-      // Phaser's path, corner by corner; no clamp on the fill (Phaser applies none).
-      const r = Math.abs(radius);
+      // Phaser's path, corner by corner, at the radius's magnitude — never clamped to the
+      // rect's size, as Phaser's fill never is.
+      const r = nonNegative(Math.abs(radius));
       ctx.beginPath();
       ctx.moveTo(x + r, y);
       ctx.lineTo(x + width - r, y);
@@ -151,7 +163,7 @@ export function canvasGraphics(ctx: Canvas2DLike): BakeGraphics {
       flush();
       // Phaser clamps the stroke's radius to half the shorter side, and moves between the
       // straight edges and the corner arcs — separate sub-paths, butt-ended where they meet.
-      const r = Math.min(Math.abs(radius), Math.min(width, height) / 2);
+      const r = nonNegative(Math.min(Math.abs(radius), Math.min(width, height) / 2));
       ctx.beginPath();
       ctx.moveTo(x + r, y);
       ctx.lineTo(x + width - r, y);
@@ -182,14 +194,14 @@ export function canvasGraphics(ctx: Canvas2DLike): BakeGraphics {
     fillCircle(x, y, radius) {
       flush();
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.arc(x, y, nonNegative(radius), 0, Math.PI * 2);
       fillPath();
       return g;
     },
     strokeCircle(x, y, radius) {
       flush();
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.arc(x, y, nonNegative(radius), 0, Math.PI * 2);
       strokePath();
       return g;
     },

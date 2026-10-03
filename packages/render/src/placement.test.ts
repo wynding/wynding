@@ -289,8 +289,15 @@ describe('placeCreeps', () => {
         expect(Math.abs(snapped * dpr - Math.round(snapped * dpr))).toBeLessThan(1e-9);
         expect(Math.abs(snapped - real)).toBeLessThanOrEqual(0.5 / dpr + 1e-9);
       }
-      // The sprite's own corner is on a whole device pixel too (the anchor is whole texels).
+      // The sprite's own corner is on a whole device pixel too, on BOTH axes (the anchor is
+      // whole texels)…
       expect(Math.abs(p!.x * dpr - Math.round(p!.x * dpr))).toBeLessThan(1e-9);
+      expect(Math.abs(p!.y * dpr - Math.round(p!.y * dpr))).toBeLessThan(1e-9);
+      // … and its corner plus its frame's anchor IS the centre the cues are drawn around, so
+      // a creep's body and its pip and rings cannot come apart by the snap.
+      const anchor = fr.get(p!.frame)!;
+      expect(p!.x + anchor.anchorX).toBeCloseTo(p!.cx, 9);
+      expect(p!.y + anchor.anchorY).toBeCloseTo(p!.cy, 9);
     }
   });
 });

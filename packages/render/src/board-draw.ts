@@ -18,7 +18,8 @@
 //    baked art matches what the board used to draw by construction.
 //  - PER-FRAME EXECUTORS (`drawAuraShells`, `drawSelection`, `drawCreepCues`) still draw into
 //    a Phaser `Graphics` every frame: what moves, or comes and goes, stays live. Which layer
-//    each one draws into is `layers.ts`'s business, not call order's.
+//    each one draws into is decided by `board-frame.ts` (and pinned by its test), and where
+//    that layer sits is `layers.ts`'s business — neither is call order's.
 
 import {
   slowTelegraphPaintOps,

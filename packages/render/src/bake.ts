@@ -7,8 +7,9 @@
 // are repainted only when what they depend on changes — the cell size, the effective dpr or
 // the colour mode (`createBakeTracker`) — never per frame.
 //
-// Everything here is Phaser-free and unit-tested: `scene.ts` creates the textures and hands
-// their 2D contexts in; these functions decide sizes and paint through `canvas-graphics.ts`.
+// Everything here is Phaser-free and unit-tested: these functions decide sizes and paint
+// through `canvas-graphics.ts`, and `bake-runner.ts` runs an attempt with them — canvases,
+// textures, and what happens when one fails.
 //
 // SCALE. Art is drawn in CSS px under `ctx.setTransform(scale, …)`, `scale` being the
 // effective dpr — so one texel is one device pixel when the sprite is shown at 1/scale under
@@ -154,17 +155,17 @@ export interface BakeInputs {
 }
 
 export interface BakeTracker {
-  /** True when the art must be (re)baked for `inputs`: on the first call, and whenever the
-   *  cell size, the effective dpr or the colour mode differs from the last bake's. Each
-   *  `true` advances `version`, so a rebake can create its textures under fresh keys,
-   *  repoint the sprites, and only then destroy the old ones. */
+  /** True when the art must be (re)baked for `inputs`: until a bake has succeeded, and
+   *  whenever the cell size, the effective dpr or the colour mode differs from the last
+   *  SUCCESSFUL bake's. Asking records nothing — so a bake that fails is simply asked for
+   *  again on the next frame, with no state to undo. */
   needsBake(inputs: BakeInputs): boolean;
-  /** Forget the last bake, so the next `needsBake` calls for another whatever its inputs. For
-   *  a bake that could not complete — no canvas to paint into — which must be retried rather
-   *  than leave the board on missing or stale art until the next resize. */
-  invalidate(): void;
-  /** How many bakes `needsBake` has called for so far. */
-  readonly version: number;
+  /** Record that a bake for `inputs` succeeded. */
+  recordBaked(inputs: BakeInputs): void;
+  /** A fresh version for one bake attempt's texture keys (1, 2, 3, …). Every attempt gets
+   *  its own, failed or not, so a rebake always creates its textures under new keys,
+   *  repoints the sprites, and only then destroys the old ones. */
+  nextVersion(): number;
 }
 
 export function createBakeTracker(): BakeTracker {
@@ -172,22 +173,18 @@ export function createBakeTracker(): BakeTracker {
   let version = 0;
   return {
     needsBake(inputs) {
-      if (
-        last !== null &&
-        last.cellPx === inputs.cellPx &&
-        last.dpr === inputs.dpr &&
-        last.mode === inputs.mode
-      ) {
-        return false;
-      }
+      return (
+        last === null ||
+        last.cellPx !== inputs.cellPx ||
+        last.dpr !== inputs.dpr ||
+        last.mode !== inputs.mode
+      );
+    },
+    recordBaked(inputs) {
       last = { cellPx: inputs.cellPx, dpr: inputs.dpr, mode: inputs.mode };
+    },
+    nextVersion() {
       version += 1;
-      return true;
-    },
-    invalidate() {
-      last = null;
-    },
-    get version() {
       return version;
     },
   };
