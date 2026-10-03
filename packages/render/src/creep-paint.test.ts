@@ -571,6 +571,16 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     expect(down.leftX).toBe(up.leftX); // horizontal span untouched
   });
 
+  it('flips at the boundary the outline’s shift sets, not the bare apex’s', () => {
+    // Half a pixel more than the bare apex needs (r × 3.4 above the centre) is still too
+    // little once the chevron has moved out `AIRBORNE_OUTLINE_SHIFT_PX` for its outline: the
+    // apex would sit at −0.75px. It flips, and the apex and both tips stay on the canvas.
+    const y = R * 3.4 + 0.5;
+    const [op] = airborneCuePaintOps({ x: 100, y, airborne: true }, R, AIRBORNE, 0);
+    expect(op!.apexY).toBeGreaterThan(y);
+    for (const v of [op!.apexY, op!.leftY, op!.rightY]) expect(v).toBeGreaterThanOrEqual(0);
+  });
+
   it('does NOT flip when there is room above — the default stays upward', () => {
     const [op] = airborneCuePaintOps({ x: 100, y: 500, airborne: true }, R, AIRBORNE, 0);
     expect(op!.apexY).toBeLessThan(500);

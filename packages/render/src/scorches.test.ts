@@ -229,6 +229,20 @@ describe('createScorchTracker — detection', () => {
     t.update(frame({ tracers: [detonation(m, 41)], renderTick: 41.3 }));
     expect(t.live(41.3)).toHaveLength(2);
   });
+
+  it('settles a landing once it has arrived — so the next mine on that spot is scorched from its landing alone', () => {
+    // The first detonation is scorched from its tracer and its landing settles it. The mine
+    // is rebuilt, and its next detonation's whole flight falls between two frames: only the
+    // landing shows. Had the first landing stayed owed, this one would be taken for it.
+    const m = mine(4, 6);
+    const t = createScorchTracker();
+    t.update(frame({ towers: [m], renderTick: 9 }));
+    t.update(frame({ tracers: [detonation(m, 10)], renderTick: 10.2 }));
+    t.update(frame({ sparks: [landing(m)], renderTick: 11.1 }));
+    t.update(frame({ towers: [m], renderTick: 40 }));
+    t.update(frame({ sparks: [landing(m)], renderTick: 42.5 }));
+    expect(t.live(42.5)).toHaveLength(2);
+  });
 });
 
 describe('createScorchTracker — lifetime', () => {

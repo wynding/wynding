@@ -172,7 +172,10 @@ function scaledDiamond(kx: number, ky: number): ArtShape {
 
 describe('silhouettes — T1: an outline per tower', () => {
   const marks = TOWER_FOOTPRINT_MARKS;
+  // Built while the suite is collected, not inside a test: rasterising nine outlines twice
+  // takes seconds under coverage, which no test's timeout should have to absorb.
   const outlines = new Map(marks.map((m) => [m, outline(HEAD_ART[m].shapes)]));
+  const coarse = new Map(marks.map((m) => [m, outline(HEAD_ART[m].shapes, 48, 1 / 3)]));
   const roleOf = (m: TowerFootprintMark): string => TOWER_LOOKS.find((l) => l.mark === m)!.role;
   const pairs: { a: TowerFootprintMark; b: TowerFootprintMark; overlap: number }[] = [];
   for (let i = 0; i < marks.length; i++) {
@@ -184,7 +187,6 @@ describe('silhouettes — T1: an outline per tower', () => {
   }
 
   it('measures the outline, not the pixel grid: a coarser grid at a third-cell offset reads every pair the same', () => {
-    const coarse = new Map(marks.map((m) => [m, outline(HEAD_ART[m].shapes, 48, 1 / 3)]));
     for (const p of pairs) {
       const again = overlap(coarse.get(p.a)!, coarse.get(p.b)!);
       expect(Math.abs(again - p.overlap), `${p.a} vs ${p.b}`).toBeLessThan(0.01);
@@ -494,9 +496,9 @@ describe('the plate, the boost glow and the pending rim', () => {
   });
 
   it('the mine’s pad is the plate’s own rectangle, opaque in the floor colour — no rim, shadow or bevel', () => {
+    // No alpha in it, so it is opaque: whatever lies under it — an aura shell — is hidden,
+    // as a plate hides it.
     expect(PAD_ART).toEqual([{ kind: 'rect', ...PLATE_RECT, fill: 'floor' }]);
-    // Opaque, so whatever lies under it — an aura shell — is hidden, as a plate hides it.
-    expect(PAD_ART[0]!.alpha ?? 1).toBe(1);
   });
 
   it('a pending build fades to a part-opacity picture — its plate further than its head — and draws a DASHED rim on top', () => {
