@@ -96,7 +96,8 @@ export interface ShellDock {
   /** The countdown dial inside the primary action (#181 H1, Standard only): decoration,
    *  `aria-hidden`, absolutely positioned in the button's own inline-start padding (`ui.css`),
    *  so it contributes nothing to the button's size or the Dock's — it can never move the Dock
-   *  or the board, shown or hidden. The wave chip's glance is the readable countdown. */
+   *  or the board, shown or hidden. Drawn only where the Dock pass measured room for it beside
+   *  the label (`dock-reserve.ts`). The wave chip's glance is the readable countdown. */
   readonly dial: CountdownDialParts;
 }
 
