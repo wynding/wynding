@@ -542,10 +542,14 @@ a.wy-home:focus-visible {
      ceiling — and on a 1080×810 tablet it is one line, where #101's reserved hud row was
      ~284px. */
 
-  /* The hud fills the row after the home link, so the strip — its one flexible item — can
-     take the space the chips leave. */
+  /* The hud takes the row's LEFTOVER after the home link (`flex: 1 1 0`), so the strip — its
+     one flexible item — can take the space the chips leave. A zero basis keeps the hud BESIDE
+     the link at every width and zoom: where the row cannot hold chips and strip on one line,
+     the strip wraps onto a line of its own inside the hud, under the chips, instead of the
+     whole hud dropping below the link and spending a line on the link alone. #101's hud home
+     used the same basis for the same reason; at 640×560 it is worth two to four board cells. */
   .wy-shell .wy-hud {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     align-items: center;
   }
 
@@ -612,25 +616,39 @@ a.wy-home:focus-visible {
     visibility: hidden;
   }
 
-  /* The strip. Its width is the row's LEFTOVER (`flex: 1 1 0`) between a floor that holds a
-     title and four entries and a cap that keeps it the frame's compact box; `contain:
-     inline-size` keeps its content out of every intrinsic measure, so the row's line breaks
-     never depend on what a wave contains. One fixed line tall. Together those make the
-     stage-stability invariant hold by construction: no wave can resize the row or move the
-     board. Where the floor exceeds the row (a narrow portrait window), the strip takes a line
-     of its own — decided by the viewport, never by the wave. It is a named size container
-     (`wy-strip`) so its narrow form below keys on the strip's own width. */
+  /* The strip. Its width is the row's LEFTOVER (`flex: 1 1 0`) between a floor and a cap
+     that keeps it the frame's compact box; `contain: inline-size` keeps its content out of
+     every intrinsic measure, so the row's line breaks never depend on what a wave contains.
+     One fixed line tall. Together those make the stage-stability invariant hold by
+     construction: no wave can resize the row or move the board.
+
+     THE FLOOR IS THE STRIP'S SMALLEST USEFUL FORM — the title and one entry whole — because
+     the floor's only job is to decide when the strip takes a line of its own, and a line is
+     paid for in board height. Measured in the narrow form below: a single entry fits in
+     ~11rem (its name and clause give way first), a two-entry wave needs 13.8–14.3rem on
+     macOS's font stack and 15.2–15.9rem on CI's Linux one, and wave 9's four entries
+     21.1–23rem — so no floor short of the cap spares the densest wave the scroll form, and a
+     strip squeezed under a wave's line scrolls (below, with a cue at the clipped edge) instead
+     of costing the board a line. A 20rem floor, measured against this one: 1280×720 at 150%
+     text kept a 141px status row where this keeps 78px, and at 800×501 at 150% the strip
+     sat on a third line, scrolled wholly out of the capped hud at rest. Where even the floor
+     exceeds the row (a narrow portrait window), the strip takes a line of its own — decided by
+     the viewport, never by the wave. It is a named size container (`wy-strip`) so its narrow
+     form below keys on the strip's own width. */
   .wy-shell .wy-wave-preview {
+    --wy-strip-gap: 0.75rem;
+    --wy-strip-pad: 0.75rem;
+    --wy-strip-fade-w: 1.5rem;
     flex: 1 1 0;
-    min-width: min(100%, 20rem);
+    min-width: min(100%, 12rem);
     max-width: 30rem;
     container: wy-strip / inline-size;
     box-sizing: border-box;
     height: 2.25rem;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0 0.75rem;
+    gap: var(--wy-strip-gap);
+    padding: 0 var(--wy-strip-pad);
     overflow: hidden;
     font-size: 0.9rem;
     white-space: nowrap;
@@ -649,16 +667,21 @@ a.wy-home:focus-visible {
     flex: none;
   }
 
+  /* The list's box IS its line (`flex: none`): a multi-entry line longer than the strip
+     overflows it and the strip scrolls (below), and because the box tracks its content, the
+     strip's observer (`overlay.ts`) sees every change in the line's length — a reflow, a font
+     swap — not only the ones that also resize the strip. */
   .wy-shell .wy-wave-preview-list {
     display: flex;
     align-items: center;
     gap: 0.9rem;
-    flex: 0 1 auto;
-    min-width: 0;
+    flex: none;
   }
 
-  /* A NARROW strip (its own line on a portrait phone) tightens its spacing so a four-entry
-     wave still fits one line at 360px wide; past that, the scroll form below takes over. */
+  /* A NARROW strip (squeezed beside the chips, or its own line in a portrait window's hud)
+     tightens its spacing, so a multi-entry wave needs the scroll form below as rarely as the
+     width allows. At 360×640 the hud sits beside the home link and gives the strip 203px:
+     two entries overflow by ~23px and wave 9's four by ~133px, and both scroll. */
   @container wy-strip (max-width: 22rem) {
     .wy-wave-preview-title {
       margin-inline-end: -0.35rem;
@@ -674,9 +697,14 @@ a.wy-home:focus-visible {
     }
   }
 
-  /* Only a single entry may shrink — its name and clause wrap away first. Entries of a
-     multi-entry wave keep their icon and count whole; a line too long for the strip scrolls
-     (below), it never squeezes or clips an entry. */
+  /* Only a single entry may shrink — its name and clause wrap away first — so only its list
+     shrinks with it. Entries of a multi-entry wave keep their icon and count whole; a line too
+     long for the strip scrolls (below), it never squeezes or clips an entry. */
+  .wy-shell .wy-wave-preview-list:has(> .wy-preview-entry:only-child) {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
   .wy-shell .wy-preview-entry:only-child,
   .wy-shell .wy-preview-entry:only-child .wy-preview-glance {
     min-width: 0;
@@ -699,6 +727,57 @@ a.wy-home:focus-visible {
   .wy-shell .wy-wave-preview--scroll:focus-visible {
     outline: 3px solid var(--wy-focus);
     outline-offset: -3px;
+  }
+
+  /* THE SCROLL FORM'S CUE. With its scrollbar hidden, a strip whose next entry happened to
+     end exactly at the clipped edge would read as a wave with fewer creep types — so each
+     edge with entries past it fades into the strip's surface (`wy-wave-preview--more-after`
+     / `--more-before`, set by `overlay.ts`'s `syncStripCue` from the scroll position, the
+     Rail's `wy-rail-has-more` pattern turned on its side). Sticky, so the fade rides the
+     visible edge while the line scrolls under it; positioned, so it paints over the entries;
+     and its negative margin cancels its own box AND the strip's gap beside it, so the cue
+     leaves `scrollWidth` — the quantity the cue is computed from — unchanged and can never be
+     the reason it shows. Decorative only: every entry's full sentence is in the accessible
+     text whether or not it is scrolled into view. */
+  .wy-shell .wy-wave-preview::before,
+  .wy-shell .wy-wave-preview::after {
+    content: '';
+    position: sticky;
+    z-index: 1;
+    flex: 0 0 var(--wy-strip-fade-w);
+    align-self: stretch;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  /* A sticky inset counts from the scroll container's padding edge inward, so each fade is
+     pulled out by the strip's padding to sit flush with the visible edge. */
+  .wy-shell .wy-wave-preview::before {
+    left: calc(-1 * var(--wy-strip-pad));
+    margin-right: calc(-1 * (var(--wy-strip-fade-w) + var(--wy-strip-gap)));
+    background: linear-gradient(to right, var(--wy-strip-fade-ink, var(--wy-surface)), transparent);
+  }
+
+  .wy-shell .wy-wave-preview::after {
+    right: calc(-1 * var(--wy-strip-pad));
+    margin-left: calc(-1 * (var(--wy-strip-fade-w) + var(--wy-strip-gap)));
+    background: linear-gradient(to left, var(--wy-strip-fade-ink, var(--wy-surface)), transparent);
+  }
+
+  .wy-shell .wy-wave-preview--more-before::before,
+  .wy-shell .wy-wave-preview--more-after::after {
+    opacity: 1;
+  }
+
+  /* Forced colors drop authored background images, so the fade would vanish; kept on the two
+     pseudo-elements alone (the Dock cue's remedy) and inked in `Canvas`, the colour the strip's
+     own surface takes under the user's theme. */
+  @media (forced-colors: active) {
+    .wy-shell .wy-wave-preview::before,
+    .wy-shell .wy-wave-preview::after {
+      --wy-strip-fade-ink: Canvas;
+      forced-color-adjust: none;
+    }
   }
 
   /* --- THE DOCK'S FOOTPRINT IS RESERVED, NOT OVERLAID (#152, owner ruling) ---

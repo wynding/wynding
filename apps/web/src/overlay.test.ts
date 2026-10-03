@@ -3360,8 +3360,11 @@ describe('overlay — the wave strip (#181 L1)', () => {
   });
 
   describe('the overflow scroll form', () => {
-    /** jsdom lays nothing out, so the strip's two widths are stubbed per test. */
+    /** jsdom lays nothing out and loads no stylesheet, so the strip's two widths are stubbed
+     *  per test, and the box is made to CLIP as Standard's one-line form does (`ui.css`'s
+     *  `overflow: hidden`) — the only form that has a line to make reachable. */
     function widths(el: HTMLElement, scroll: number, client: number): void {
+      el.style.overflowX = 'hidden';
       Object.defineProperty(el, 'scrollWidth', { configurable: true, get: () => scroll });
       Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => client });
     }
@@ -3374,6 +3377,23 @@ describe('overlay — the wave strip (#181 L1)', () => {
       return on;
     };
 
+    /** The cue reads the scroll position too; jsdom scrolls nothing, so it is a plain value
+     *  here — writable, because a rebuilt wave resets it. */
+    function scrollAt(el: HTMLElement, at: number): void {
+      let left = at;
+      Object.defineProperty(el, 'scrollLeft', {
+        configurable: true,
+        get: () => left,
+        set: (v: number) => {
+          left = v;
+        },
+      });
+    }
+    const cue = (el: HTMLElement): { before: boolean; after: boolean } => ({
+      before: el.classList.contains('wy-wave-preview--more-before'),
+      after: el.classList.contains('wy-wave-preview--more-after'),
+    });
+
     it('takes the scroll form, with a labelled tab stop, exactly while the line is longer than the box', () => {
       const { overlay, shell } = setup();
       const strip = shell.preview.root;
@@ -3385,6 +3405,24 @@ describe('overlay — the wave strip (#181 L1)', () => {
       expect(isScrollForm(strip)).toBe(true);
       widths(strip, 301, 300); // within the 1px sub-pixel slack: it fits
       show(overlay, [entry({ creepId: 'swarm' })], 3);
+      expect(isScrollForm(strip)).toBe(false);
+    });
+
+    it('never takes it where the strip clips nothing — the Compact column, whose chips list scrolls instead', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      strip.style.overflowX = 'visible'; // the Compact block: no clipping, so no line to reach
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(false);
+      expect(cue(strip)).toEqual({ before: false, after: false }); // nothing hidden past an edge
+      // …and a strip that took the form on Standard gives it up when it stops clipping.
+      strip.style.overflowX = 'hidden';
+      show(overlay, [entry(), entry({ creepId: 'swarm' })], 2);
+      expect(isScrollForm(strip)).toBe(true);
+      strip.style.overflowX = 'visible';
+      show(overlay, [entry(), entry({ creepId: 'armored' })], 3);
       expect(isScrollForm(strip)).toBe(false);
     });
 
@@ -3404,6 +3442,81 @@ describe('overlay — the wave strip (#181 L1)', () => {
       strip.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       expect(document.activeElement).toBe(strip);
       expect(isScrollForm(strip)).toBe(false);
+    });
+
+    it('fades each edge with entries past it, and follows the scroll position', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(true);
+      // At rest the line runs on past the trailing edge only.
+      expect(cue(strip)).toEqual({ before: false, after: true });
+      strip.scrollLeft = 60;
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: true });
+      strip.scrollLeft = 120; // the end: 420 − 300
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: false });
+      strip.scrollLeft = 119.5; // within the 1px sub-pixel slack of the end
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: false });
+      // A wave whose line fits clears both, with the form.
+      widths(strip, 300, 300);
+      show(overlay, [entry({ creepId: 'swarm' })], 2);
+      expect(isScrollForm(strip)).toBe(false);
+      expect(cue(strip)).toEqual({ before: false, after: false });
+    });
+
+    it('opens a new wave at its title, whatever the last one was scrolled to', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.scrollLeft = 120;
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: false });
+      show(overlay, [entry({ creepId: 'swarm' }), entry({ creepId: 'armored' })], 2);
+      expect(strip.scrollLeft).toBe(0);
+      expect(cue(strip)).toEqual({ before: false, after: true });
+    });
+
+    it('drops the cue with the line even while a focused reader keeps the tab stop', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.focus();
+      widths(strip, 300, 300);
+      show(overlay, [entry({ creepId: 'swarm' })], 2);
+      expect(isScrollForm(strip)).toBe(true); // retained under focus
+      expect(cue(strip)).toEqual({ before: false, after: false }); // but nothing lies past an edge
+    });
+
+    it('writes nothing on a scroll that moves no edge, and stops listening on destroy', async () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.scrollLeft = 60;
+      strip.dispatchEvent(new Event('scroll'));
+      const records: MutationRecord[] = [];
+      const watch = new MutationObserver((r) => records.push(...r));
+      watch.observe(strip, { attributes: true });
+      strip.scrollLeft = 70; // mid-line still: both edges keep their state
+      strip.dispatchEvent(new Event('scroll'));
+      strip.dispatchEvent(new Event('scroll'));
+      await Promise.resolve();
+      expect(records).toEqual([]);
+      watch.disconnect();
+      overlay.destroy();
+      strip.scrollLeft = 120;
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: true }); // no listener left to clear it
     });
 
     it('re-decides on a resize of the strip or its list, and stops observing on destroy', () => {

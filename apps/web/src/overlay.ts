@@ -1995,6 +1995,21 @@ export function createOverlay(
     return single ? count + creepName(entry.creepId) + previewEntryNotes(entry).join(' · ') : count;
   }
 
+  /** The scroll form's cue (`ui.css`): each edge with entries past it fades, because the
+   *  form hides its scrollbar and an entry ending exactly at the clipped edge would otherwise
+   *  leave a wave reading as fewer creep types than it holds. Read from the scroll position on
+   *  every trigger the form has plus the strip's own `scroll` event — the Rail's
+   *  `wy-rail-has-more` discipline, with the same 1px slack for fractional zoom. Class toggles
+   *  that do not change a class write nothing, so an idle strip costs no mutation. */
+  const STRIP_MORE_BEFORE_CLASS = 'wy-wave-preview--more-before';
+  const STRIP_MORE_AFTER_CLASS = 'wy-wave-preview--more-after';
+  function syncStripCue(scrollable: boolean): void {
+    const strip = previewEl.root;
+    const past = strip.scrollWidth - strip.clientWidth - strip.scrollLeft;
+    strip.classList.toggle(STRIP_MORE_BEFORE_CLASS, scrollable && strip.scrollLeft > 1);
+    strip.classList.toggle(STRIP_MORE_AFTER_CLASS, scrollable && past > 1);
+  }
+
   /** The strip's overflow remedy, IN PLACE (#181 L1) — the rule every surface in this row
    *  keeps: content never resizes the status row (that would re-project the board mid-run), so
    *  a strip whose line is longer than its box (a narrow portrait window, heavy text zoom, a
@@ -2010,7 +2025,16 @@ export function createOverlay(
   const STRIP_SCROLL_CLASS = 'wy-wave-preview--scroll';
   function syncStripScroll(focusLeaving = false): void {
     const strip = previewEl.root;
-    const scrollable = !strip.hidden && strip.scrollWidth > strip.clientWidth + 1;
+    // Only a CLIPPING strip has a line to make reachable: Standard's one-line form, which
+    // `ui.css` clips (`overflow: hidden` at rest, `auto` in this form). The Compact column's
+    // strip is an in-flow block that clips nothing — its overflow is the chips list's to
+    // scroll — so a tab stop there would scroll nothing at all. An unknown value (no computed
+    // style to read) counts as not clipping: a tab stop is only ever granted on evidence.
+    const overflowX = doc.defaultView?.getComputedStyle(strip).overflowX ?? '';
+    const clips = overflowX !== '' && overflowX !== 'visible';
+    const scrollable = clips && !strip.hidden && strip.scrollWidth > strip.clientWidth + 1;
+    // The cue follows the line itself, whatever the tab-stop retention below decides.
+    syncStripCue(scrollable);
     if (!scrollable && !focusLeaving && doc.activeElement === strip) return;
     if (strip.classList.contains(STRIP_SCROLL_CLASS) === scrollable) return;
     strip.classList.toggle(STRIP_SCROLL_CLASS, scrollable);
@@ -2082,6 +2106,9 @@ export function createOverlay(
       return;
     }
     lastPreviewKey = key;
+    // A new wave reads from its title: a strip the player scrolled through the last wave's
+    // entries would otherwise open this one part-way along its line.
+    previewEl.root.scrollLeft = 0;
     if (preview.kind === 'lastWave') {
       previewEl.title.textContent = t('hud.preview.lastWave');
       clearChildren(previewEl.list);
@@ -2275,6 +2302,14 @@ export function createOverlay(
   previewEl.root.addEventListener('focusout', () => syncStripScroll(true), {
     signal: railAffordanceAbort.signal,
   });
+  // A scroll moves the line under the strip's edges without resizing anything, so no
+  // observer sees it: the cue re-reads the position here, and only the cue (the form and its
+  // tab stop depend on the line's length, which a scroll never changes).
+  previewEl.root.addEventListener(
+    'scroll',
+    () => syncStripCue(previewEl.root.classList.contains(STRIP_SCROLL_CLASS)),
+    { signal: railAffordanceAbort.signal, passive: true },
+  );
 
   return {
     resultsEl: results,
