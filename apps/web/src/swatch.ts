@@ -58,7 +58,11 @@ export function paintSwatch(
   g.fillStyle(pal.floor, 1);
   g.fillRect(0, 0, SWATCH_SIZE_PX, SWATCH_SIZE_PX);
   const fit = towerArtFit(SWATCH_SIZE_PX);
-  // On this canvas's own pixel grid, so the plate's rim is crisp, as on the board.
-  paintTowerArt(g, pal, towerLookFor(towerId), fit.x, fit.y, fit.footprintPx, dpr);
+  // On this canvas's own pixel grid, so the plate's rim is crisp, as on the board — and kept
+  // on the canvas, which the fitted footprint reaches past at its top and left.
+  paintTowerArt(g, pal, towerLookFor(towerId), fit.x, fit.y, fit.footprintPx, dpr, {
+    width: SWATCH_SIZE_PX,
+    height: SWATCH_SIZE_PX,
+  });
   g.flush();
 }

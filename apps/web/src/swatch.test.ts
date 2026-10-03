@@ -201,6 +201,58 @@ describe('paintSwatch', () => {
     expect(Math.abs(start - Math.round(start))).toBeLessThan(1e-9);
   });
 
+  /** The plate rim as the tile strokes it, design units: its centre line's left, top, right
+   *  and bottom (from the rounded rect's path, clockwise from the top edge), and its width. */
+  const rimOf = (ops: readonly string[]): { edges: number[]; width: number } => {
+    const stroke = ops.indexOf(`strokeStyle=${rgba(resolvePalette('default').tower)}`);
+    const path = ops.slice(ops.lastIndexOf('beginPath()', stroke), stroke);
+    const nums = (o: string): number[] =>
+      o
+        .slice(o.indexOf('(') + 1, -1)
+        .split(',')
+        .map(Number);
+    const top = nums(path.find((o) => o.startsWith('moveTo('))!)[1]!;
+    const lines = path.filter((o) => o.startsWith('lineTo(')).map(nums);
+    const width = Number(
+      ops
+        .slice(stroke)
+        .find((o) => o.startsWith('lineWidth='))!
+        .slice(10),
+    );
+    return { edges: [lines[3]![0]!, top, lines[1]![0]!, lines[2]![1]!], width };
+  };
+
+  for (const dpr of [1.25, 1.1]) {
+    it(`keeps the plate’s rim whole on the tile at dpr ${dpr} — though the fitted footprint starts above and left of the canvas`, () => {
+      const { ctx, ops } = recordingCtx();
+      const canvas = {
+        getContext: () => ctx,
+        width: 0,
+        height: 0,
+        ownerDocument: { defaultView: { devicePixelRatio: dpr } },
+      } as unknown as HTMLCanvasElement;
+      paintSwatch(canvas, 'basic', 'default', recordingPaths().makePath);
+      const fit = towerArtFit(SWATCH_SIZE_PX);
+      expect(fit.x).toBeLessThan(0);
+      expect(fit.y).toBeLessThan(0);
+      const unit = fit.footprintPx / 64;
+      const {
+        edges: [left, top, right, bottom],
+        width,
+      } = rimOf(ops);
+      const w = width * unit * dpr; // device px
+      expect(w).toBeCloseTo(2, 9); // its one-CSS-px floor, rounded up
+      const px = (corner: number, v: number): number => (corner + v * unit) * dpr;
+      // All of its width is on the canvas: from pixel 0 at the top and left ...
+      expect(px(fit.x, left!) - w / 2).toBeGreaterThanOrEqual(-1e-9);
+      expect(px(fit.y, top!) - w / 2).toBeGreaterThanOrEqual(-1e-9);
+      // ... to the tile's last whole pixel at the right and bottom.
+      const last = Math.floor(SWATCH_SIZE_PX * dpr);
+      expect(px(fit.x, right!) + w / 2).toBeLessThanOrEqual(last + 1e-9);
+      expect(px(fit.y, bottom!) + w / 2).toBeLessThanOrEqual(last + 1e-9);
+    });
+  }
+
   it("a mode change changes the paint — protan's role colours replace the default ones", () => {
     const { ctx, ops } = recordingCtx();
     paintSwatch(fakeCanvas(ctx), 'basic', 'protan', recordingPaths().makePath);

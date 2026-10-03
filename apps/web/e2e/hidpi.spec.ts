@@ -9,7 +9,8 @@ import { GRID } from './layout-probe';
 // default `chromium` project explicitly ignores this file (`testIgnore`).
 //
 // Three gates, each catching a distinct failure mode a size check alone can't:
-//   (a) backing store  — the canvas' actual pixel buffer sizes to CSS-rect × clamped dpr.
+//   (a) backing store  — the canvas' actual pixel buffer sizes to the device pixels its
+//       CSS rect snaps to at the clamped dpr, and its CSS size stays the rect.
 //   (b) rendered alignment — a real screenshot, decoded with pngjs (the existing DOM
 //       "rendered-contrast" spot checks in smoke.spec.ts read computed CSS on DOM
 //       elements and cannot sample the canvas), pins that a known floor cell and a known
@@ -45,7 +46,7 @@ function sampleCssPoint(
 }
 
 test.describe('HiDPI backing store + alignment (#28/P5)', () => {
-  test('backing store sizes to CSS-rect × clamped dpr; CSS size stays pinned to the rect', async ({
+  test('backing store sizes to the device pixels the CSS rect snaps to at the clamped dpr; CSS size stays pinned to the rect', async ({
     page,
   }, testInfo) => {
     await page.goto('/');
@@ -67,11 +68,26 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
 
     const canvas = await canvasLocator.evaluate((el: HTMLCanvasElement) => {
       const rect = el.getBoundingClientRect();
-      return { width: el.width, height: el.height, cssWidth: rect.width, cssHeight: rect.height };
+      return {
+        width: el.width,
+        height: el.height,
+        left: rect.left,
+        top: rect.top,
+        cssWidth: rect.width,
+        cssHeight: rect.height,
+      };
     });
 
-    expect(canvas.width).toBe(Math.round((box as { width: number }).width * effectiveDpr));
-    expect(canvas.height).toBe(Math.round((box as { height: number }).height * effectiveDpr));
+    // The backing store is the device pixels the browser draws the canvas's box into, so it
+    // is shown pixel for pixel: the box snapped to whole device pixels, from the one nearest
+    // its left edge to the one nearest its right (and likewise down). That can be a pixel
+    // off round(width × dpr), which is what the store was once sized to — and a store scaled
+    // into its box smears every one-pixel line (`plate-rim.spec.ts`). Positions are read to
+    // the layout engine's 1/64 px before rounding.
+    const edge = (v: number): number => Math.round(Math.round(v * effectiveDpr * 64) / 64);
+    const span = (start: number, size: number): number => edge(start + size) - edge(start);
+    expect(canvas.width).toBe(span(canvas.left, canvas.cssWidth));
+    expect(canvas.height).toBe(span(canvas.top, canvas.cssHeight));
     // CSS size stays pinned to the container rect regardless of dpr/clamp.
     expect(Math.round(canvas.cssWidth)).toBe(Math.round((box as { width: number }).width));
     expect(Math.round(canvas.cssHeight)).toBe(Math.round((box as { height: number }).height));

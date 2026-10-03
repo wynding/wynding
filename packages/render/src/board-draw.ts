@@ -184,19 +184,20 @@ export function drawSelection(
     // lies the floor, where `range` clears 4.61:1 composited. Inward it meets the rim,
     // which sits 3/64 of the footprint in (`PLATE_RECT`, `tower-art.ts`), drawn on whole
     // device pixels, and which `range` measures only 1.32:1 against (1.75 tritan). The
-    // stroke is drawn OVER the rim (the effects layer sits above the tower sprites). At
-    // cells up to 16 px it covers the whole rim, so its inner edge lies on the plate,
-    // where `range` clears 3.70:1 composited (4.83 tritan; gated, `palette.test.ts`); from
-    // 32 px the floor margin outside the rim is wider than the stroke, so it lies wholly on
-    // the floor. Between the two its inner edge ends on the rim, and its floor-side edge is
-    // what carries the cue. (Those are the dpr 1 thresholds: at a fractional dpr the rim's
-    // whole pixels can move either one by a few cell sizes. At the smallest cells a side of
-    // the rim lands on the footprint's outermost pixel, which the stroke covers: at dpr 1
-    // only at 10px cells; at a fractional dpr, where the rim's one-CSS-px floor rounds up and
-    // widens it outward, at some sizes up to 19px (dpr 1.25). Where a neighbouring tower's
-    // rim does the same, the floor beyond the stroke gives way to that rim.) It stays clear
-    // of a neighbour: the next footprint starts beyond this one's edge. These relations hold
-    // only because `c` is snapped exactly as the tower sprite's corner is.
+    // stroke is drawn OVER the rim (the effects layer sits above the tower sprites). At dpr
+    // 1 it covers the whole rim at cells up to 21 px, so its inner edge lies on the plate,
+    // where `range` clears 3.70:1 composited (4.83 tritan; gated, `palette.test.ts`); at 22
+    // to 24 px, and from 28 px, the floor margin outside the rim is at least the stroke's
+    // width, so it lies wholly on the floor; at 25 to 27 px, where the rim's own width
+    // rounds up to two pixels and widens outward, its inner edge ends on the rim, and its
+    // floor-side edge is what carries the cue. (A fractional dpr moves those bands, the rim
+    // being on whole device pixels. At the smallest cells a side of the rim lands on the
+    // footprint's outermost pixel, which the stroke covers: at dpr 1 only at 10px cells; at
+    // a fractional dpr, where the rim's one-CSS-px floor rounds up and widens it outward, at
+    // some sizes up to 19px (dpr 1.25). Where a neighbouring tower's rim does the same, the
+    // floor beyond the stroke gives way to that rim.) It stays clear of a neighbour: the
+    // next footprint starts beyond this one's edge. These relations hold only because `c` is
+    // snapped exactly as the tower sprite's corner is.
     g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);
   } else {
     g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));

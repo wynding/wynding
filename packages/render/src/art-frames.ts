@@ -23,7 +23,7 @@ import { creepFillColour, creepRadius, paintCreepSilhouette, isLowHp } from './b
 import { CREEP_SHAPE_VALUES, creepShapeFor, type CreepShape } from './creep-paint';
 import { artBounds } from './art-geometry';
 import type { ArtColourResolver, ArtGraphics } from './art-paint';
-import { alignArtToTexels, type ArtShape } from './art-ir';
+import { alignArtToTexels, type ArtBox, type ArtShape } from './art-ir';
 import {
   ART_BOX,
   ART_FOOTPRINT,
@@ -187,7 +187,11 @@ function artFrame(
  *  footprint `footprintPx` CSS px across. The same art, through the same painter, as the
  *  board's frames, so a Card always matches the board. With `pixelScale` — the surface's
  *  device px per CSS px, its CSS (0, 0) on a whole device pixel — the plate's crisp rim is
- *  drawn on that surface's pixel grid, as the board's frames draw it on the atlas's. */
+ *  drawn on that surface's pixel grid, as the board's frames draw it on the atlas's, inside
+ *  the footprint; and, given `surfacePx` (the surface's CSS size from its (0, 0)), inside the
+ *  surface too. A fitted picture's footprint can reach past the surface's edge — the plate's
+ *  offset shadow pushes it up and left (`towerArtFit`) — and a rim widened outward to its
+ *  floor there would lose a pixel of its width to that edge. */
 export function paintTowerArt(
   g: ArtGraphics,
   pal: Palette,
@@ -196,20 +200,25 @@ export function paintTowerArt(
   y: number,
   footprintPx: number,
   pixelScale?: number,
+  surfacePx?: { readonly width: number; readonly height: number },
 ): void {
   const unit = footprintPx / ART_BOX;
   const c = colours(pal, look.role);
   const head = HEAD_ART[look.mark];
+  /** The footprint, cut to the surface when there is one — design units. */
+  const within: ArtBox =
+    surfacePx === undefined
+      ? ART_FOOTPRINT
+      : [
+          Math.max(0, -x / unit),
+          Math.max(0, -y / unit),
+          Math.min(ART_BOX, (surfacePx.width - x) / unit),
+          Math.min(ART_BOX, (surfacePx.height - y) / unit),
+        ];
   const plate =
     pixelScale === undefined
       ? PLATE_ART
-      : alignArtToTexels(
-          PLATE_ART,
-          unit,
-          pixelScale,
-          [x * pixelScale, y * pixelScale],
-          ART_FOOTPRINT,
-        );
+      : alignArtToTexels(PLATE_ART, unit, pixelScale, [x * pixelScale, y * pixelScale], within);
   if (head.plate) g.art(plate, c, x, y, unit);
   g.art(head.shapes, c, x, y, unit);
 }

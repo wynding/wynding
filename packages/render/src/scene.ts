@@ -31,6 +31,7 @@ import {
   resetBoardFrame,
   type BoardTargets,
 } from './board-frame';
+import { snappedSpan } from './device-px';
 import { layerDepth } from './layers';
 import type { RenderVM, RenderOverlay, RenderHandle } from './types';
 
@@ -60,10 +61,11 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // frame in draw(), NOT only on a Phaser RESIZE event. An element that reaches its final
   // size purely by initial layout (no resize ever fires) would otherwise keep the stale
   // 0×0 → 1px-cell fallback captured at mount and render off-canvas. A ResizeObserver
-  // syncs it on actual size changes (incl. the initial layout), so draw() does NOT read
-  // the rect every frame — a per-frame getBoundingClientRect would force a synchronous
-  // layout flush ~60×/s. Only when ResizeObserver is unavailable does draw() fall back to
-  // a per-frame sync.
+  // syncs it on actual size changes (incl. the initial layout), and a window resize syncs it
+  // too — that can move the board without resizing it, which changes the backing store
+  // (`applyBackingStoreSize`) — so draw() does NOT read the rect every frame: a per-frame
+  // getBoundingClientRect would force a synchronous layout flush ~60×/s. Only when
+  // ResizeObserver is unavailable does draw() fall back to a per-frame sync.
   let projW = -1;
   let projH = -1;
   let projDpr = -1;
@@ -76,38 +78,61 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     dpr: 1,
   });
 
-  // HiDPI backing store (#28/P5): size the game's actual pixel buffer to CSS-rect ×
-  // effective-dpr while keeping every draw coordinate in CSS px. The camera zooms by dpr
-  // about its TOP-LEFT origin with no scroll, so CSS-px world (x, y) lands at device pixel
-  // (x × dpr, y × dpr) EXACTLY. (Until V2 it zoomed about the viewport centre and
-  // re-centred with `centerOn`, which lands world (0, 0) on device (0, 0) only when the
-  // backing store's width and height are even: Phaser rounds the centre to a whole pixel,
-  // so an odd one shifted the whole board by half a device pixel. Sprites snapped to whole
-  // device pixels need the exact mapping, or every texel would straddle two pixels.)
+  // HiDPI backing store (#28/P5): size the game's actual pixel buffer to the device pixels
+  // the element's CSS rect covers at the effective dpr (below), while keeping every draw
+  // coordinate in CSS px. The camera zooms by dpr about its TOP-LEFT origin with no scroll,
+  // so CSS-px world (x, y) lands at device pixel (x × dpr, y × dpr) of the canvas EXACTLY.
+  // (Until V2 it zoomed about the viewport centre and re-centred with `centerOn`, which
+  // lands world (0, 0) on device (0, 0) only when the backing store's width and height are
+  // even: Phaser rounds the centre to a whole pixel, so an odd one shifted the whole board
+  // by half a device pixel. Sprites snapped to whole device pixels need the exact mapping,
+  // or every texel would straddle two pixels.)
   // Effective dpr is clamped to ≤2 (ADR 0005: fill cost scales dpr²).
   //
-  // The canvas's CSS box stays the element's rect, as hidpi.spec.ts pins it. A rect whose
-  // width × dpr (and height × dpr) is whole maps the backing store 1:1. Otherwise (759.33 px at
-  // dpr 2, say) the compositor fits round(rect × dpr) backing pixels into rect × dpr device
-  // pixels, blending some vertical edges by part of a pixel. Sizing the box to backing ÷ dpr
-  // instead was measured in #181: it still blended them (by an eighth of a pixel), and it
-  // rounds the box away from the rect.
+  // The canvas's CSS box stays the element's rect, as hidpi.spec.ts pins it, and its backing
+  // store is exactly the device pixels the browser draws that box into. The browser snaps the
+  // box to whole device pixels, and how many it covers depends on where the box sits, not
+  // only on its size (`snappedSpan`): at 525×320 the board sits at x = 52.5 with w = 328.5,
+  // so it covers 328 device pixels, where round(328.5 × dpr) is 329. A backing store of any
+  // other size is scaled into the box, which smears every one-pixel line of the baked art
+  // across two at about half its contrast: sized by round(rect × dpr), the plate rim measured
+  // as low as 1.88:1 against its colour's 4.08:1 (#181). Matched, the canvas is shown pixel
+  // for pixel at any dpr up to the clamp; past it (a raw dpr over 2) it is scaled up by
+  // design. World (0, 0) lands on the device pixel the box's left edge snaps to, under half a
+  // pixel from its CSS position, as it did when the store was scaled into the box.
+  //
+  // Because that count depends on the box's position, it is re-read on every sync, and a
+  // window resize — which can move the board without resizing it — syncs too. The canvas is
+  // reallocated only when the count, the CSS size or the dpr changes.
+  let applied = { width: 0, height: 0, cssWidth: -1, cssHeight: -1, dpr: -1 };
   const applyBackingStoreSize = (cssWidth: number, cssHeight: number, dpr: number): void => {
     const scene = game.scene.scenes[0];
     if (scene === undefined) return;
-    const backingWidth = Math.max(1, Math.round(cssWidth * dpr));
-    const backingHeight = Math.max(1, Math.round(cssHeight * dpr));
-    game.scale.resize(backingWidth, backingHeight);
-    // Take the canvas out of normal flow: `el` (.wy-board) sizes itself from
-    // `aspect-ratio`, which is only a PREFERRED size — a normal-flow canvas whose CSS
-    // height we set can still make the container grow to fit it (any rounding
-    // difference compounds every resize into a runaway feedback loop). Absolute +
-    // inset:0 makes the container's own box authoritative; the canvas fills it exactly
-    // without ever contributing to its size.
-    game.canvas.style.position = 'absolute';
-    game.canvas.style.inset = '0';
-    game.canvas.style.width = `${cssWidth}px`;
-    game.canvas.style.height = `${cssHeight}px`;
+    // Take the canvas out of normal flow: a normal-flow canvas whose CSS size we set can make
+    // its container grow to fit it (any rounding difference compounding every resize into a
+    // runaway feedback loop). Absolute + inset:0 makes the container's own box
+    // authoritative; the canvas fills it exactly without ever contributing to its size.
+    // (Phaser's `resize` leaves this CSS size alone: in Scale.NONE it writes the canvas's
+    // style only after a Scale Manager zoom change, which this renderer never makes.)
+    const canvas = game.canvas;
+    canvas.style.position = 'absolute';
+    canvas.style.inset = '0';
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    const box = canvas.getBoundingClientRect(); // where the canvas sits now
+    const width = Math.max(1, snappedSpan(box.left, box.width, dpr));
+    const height = Math.max(1, snappedSpan(box.top, box.height, dpr));
+    if (
+      width === applied.width &&
+      height === applied.height &&
+      cssWidth === applied.cssWidth &&
+      cssHeight === applied.cssHeight &&
+      dpr === applied.dpr
+    ) {
+      return;
+    }
+    applied = { width, height, cssWidth, cssHeight, dpr };
+    game.scale.resize(width, height);
     const cam = scene.cameras.main;
     cam.setOrigin(0, 0);
     cam.setZoom(dpr);
@@ -131,19 +156,26 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     const dpr = clampDpr(rawDpr);
     dprTracker?.rearm(rawDpr); // always re-arm to the CURRENT raw value, even if unchanged
-    if (rect.width === projW && rect.height === projH && dpr === projDpr) return;
-    projW = rect.width;
-    projH = rect.height;
-    projDpr = dpr;
-    projection = createProjection({
-      cols: geometry.cols,
-      rows: geometry.rows,
-      cssWidth: rect.width,
-      cssHeight: rect.height,
-      dpr,
-    });
+    if (rect.width !== projW || rect.height !== projH || dpr !== projDpr) {
+      projW = rect.width;
+      projH = rect.height;
+      projDpr = dpr;
+      projection = createProjection({
+        cols: geometry.cols,
+        rows: geometry.rows,
+        cssWidth: rect.width,
+        cssHeight: rect.height,
+        dpr,
+      });
+    }
+    // On every sync, not only when the CSS size changes: the device pixels the box covers
+    // depend on where it sits too (`applyBackingStoreSize`, which does nothing if they and
+    // the size are unchanged).
     if (targets !== null) applyBackingStoreSize(rect.width, rect.height, dpr);
   };
+  // A window resize can move the board without resizing it, which the ResizeObserver does
+  // not report but which can change the device pixels its box covers.
+  const onWindowResize = (): void => syncProjection();
 
   // Scale.NONE (not RESIZE, #28/P5): RESIZE auto-stretches the canvas' CSS AND backing
   //-store size to the parent on its own internal ResizeObserver, which would fight
@@ -253,6 +285,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       resizeObserver = new ResizeObserver(() => syncProjection());
       resizeObserver.observe(el); // rebuild only on actual size changes — no per-frame reflow
     }
+    if (typeof window !== 'undefined') window.addEventListener('resize', onWindowResize);
   });
 
   const draw = (
@@ -296,6 +329,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     destroy(): void {
       sparks.clear();
       resizeObserver?.disconnect();
+      if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
       dprTracker?.destroy();
       // Free the bake's canvases once Phaser has torn down, not before: its destroy runs at
       // its next step, and a Canvas-renderer fallback draws straight from them until then.

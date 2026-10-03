@@ -764,9 +764,9 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     expect(rim.x).not.toBe(PLATE_RECT.x); // (and at this size it did move)
   });
 
-  it('the attackless outline’s outer edge is never inside the rim, at any cell size or dpr — covering the rim at small cells, clear of it from 32 px', () => {
+  it('the attackless outline’s outer edge is never inside the rim, at any cell size or dpr — at dpr 1 covering the rim up to 21 px, clear of it at 22–24 px and from 28 px', () => {
     for (const dpr of [1, 1.25, 1.5, 1.75, 2, 3]) {
-      for (const cellPx of [10, 11, 12, 13, 16, 20, 24, 31, 32, 40, 60]) {
+      for (const cellPx of [10, 11, 12, 13, 16, 20, 21, 22, 24, 25, 27, 28, 31, 32, 40, 60]) {
         const at = `cellPx ${cellPx} at dpr ${dpr}`;
         const projection = createProjection({
           cols: 10,
@@ -805,13 +805,19 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
         // rim's — no pixel of the rim lies outside the outline.
         expect(edge - half, at).toBeGreaterThanOrEqual(-1e-9);
         expect(edge - half, at).toBeLessThanOrEqual(rimOuter + 1e-9);
-        // At dpr 1 — small cells: it covers the whole rim, so its inner edge meets the plate.
-        // Large cells: the floor margin holds all of it. (Between, its inner edge ends on the
-        // rim — the residual docs/accessibility-checklist.md records. At a fractional dpr each
-        // threshold can move a few cell sizes, the rim being on whole device pixels.)
-        if (dpr === 1 && cellPx <= 16)
-          expect(edge + half, at).toBeGreaterThanOrEqual(rimInner - 1e-9);
-        if (dpr === 1 && cellPx >= 32) expect(edge + half, at).toBeLessThanOrEqual(rimOuter + 1e-9);
+        // At dpr 1 — up to 21 px: it covers the whole rim, so its inner edge meets the plate.
+        // At 22–24 px and from 28 px: the floor margin holds all of it. Between, at 25–27 px,
+        // where the rim's own width rounds up to two pixels and widens outward, its inner edge
+        // ends on the rim, and its floor-side edge carries the cue. (A fractional dpr moves
+        // these bands, the rim being on whole device pixels.)
+        if (dpr !== 1) continue;
+        if (cellPx <= 21) expect(edge + half, at).toBeGreaterThanOrEqual(rimInner - 1e-9);
+        else if (cellPx <= 24 || cellPx >= 28) {
+          expect(edge + half, at).toBeLessThanOrEqual(rimOuter + 1e-9);
+        } else {
+          expect(edge + half, at).toBeGreaterThan(rimOuter + 1e-9);
+          expect(edge + half, at).toBeLessThan(rimInner - 1e-9);
+        }
       }
     }
   });

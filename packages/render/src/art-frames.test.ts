@@ -24,7 +24,7 @@ import {
   SCORCH_FRAME_KEY,
   type FrameSpec,
 } from './art-frames';
-import { artBounds } from './art-geometry';
+import { artBounds, flattenPath } from './art-geometry';
 import { artGraphics, type ArtColourResolver } from './art-paint';
 import { cssColour } from './canvas-graphics';
 import { fakeContext, fakePath, type CtxOp } from './test-support/fake-context';
@@ -244,6 +244,29 @@ describe('atlasFrameSpecs — the whole catalogue', () => {
   });
 });
 
+/** `spec`, at `scale` texels per CSS px, holds everything it paints — art by its bounds as
+ *  painted, strokes grown — with the pad on every side, and no more than the pad and a
+ *  texel's rounding beyond the art and its anchor. */
+function expectSizedToArt(spec: FrameSpec, scale: number): void {
+  const box = paintedExtent(spec);
+  const pad = FRAME_PAD_TEXELS / scale;
+  const at = `${spec.key} at scale ${scale}`;
+  // At least the pad on every side...
+  expect(box.minX, at).toBeGreaterThanOrEqual(pad - 1e-9);
+  expect(box.minY, at).toBeGreaterThanOrEqual(pad - 1e-9);
+  expect(spec.width / scale - box.maxX, at).toBeGreaterThanOrEqual(pad - 1e-9);
+  expect(spec.height / scale - box.maxY, at).toBeGreaterThanOrEqual(pad - 1e-9);
+  // ...and no more than the pad and a texel's rounding beyond the art and the anchor.
+  const left = Math.min(box.minX, spec.anchorX);
+  const top = Math.min(box.minY, spec.anchorY);
+  expect(left, at).toBeLessThan(pad + 1 / scale + 1e-9);
+  expect(top, at).toBeLessThan(pad + 1 / scale + 1e-9);
+  const right = Math.max(box.maxX, spec.anchorX);
+  const bottom = Math.max(box.maxY, spec.anchorY);
+  expect(spec.width / scale - right, at).toBeLessThan(pad + 1 / scale + 1e-9);
+  expect(spec.height / scale - bottom, at).toBeLessThan(pad + 1 / scale + 1e-9);
+}
+
 const SIZES = [
   [10, 1], // the narrow compact floor
   [13, 2], // a phone's cell at dpr 2
@@ -290,22 +313,7 @@ describe('frame sizes and anchors sit on whole texels', () => {
   it('sizes every art frame to its art — shadow, glow and strokes included — plus the pad, and no more', () => {
     for (const [cellPx, scale] of SIZES) {
       for (const spec of [...towerFrameSpecs(cellPx, scale), scorchFrameSpec(cellPx, scale)]) {
-        const box = paintedExtent(spec);
-        const pad = FRAME_PAD_TEXELS / scale;
-        // At least the pad on every side...
-        expect(box.minX, spec.key).toBeGreaterThanOrEqual(pad - 1e-9);
-        expect(box.minY, spec.key).toBeGreaterThanOrEqual(pad - 1e-9);
-        expect(spec.width / scale - box.maxX, spec.key).toBeGreaterThanOrEqual(pad - 1e-9);
-        expect(spec.height / scale - box.maxY, spec.key).toBeGreaterThanOrEqual(pad - 1e-9);
-        // ...and no more than the pad and a texel's rounding beyond the art and the anchor.
-        const left = Math.min(box.minX, spec.anchorX);
-        const top = Math.min(box.minY, spec.anchorY);
-        expect(left, spec.key).toBeLessThan(pad + 1 / scale + 1e-9);
-        expect(top, spec.key).toBeLessThan(pad + 1 / scale + 1e-9);
-        const right = Math.max(box.maxX, spec.anchorX);
-        const bottom = Math.max(box.maxY, spec.anchorY);
-        expect(spec.width / scale - right, spec.key).toBeLessThan(pad + 1 / scale + 1e-9);
-        expect(spec.height / scale - bottom, spec.key).toBeLessThan(pad + 1 / scale + 1e-9);
+        expectSizedToArt(spec, scale);
       }
     }
   });
@@ -561,6 +569,79 @@ describe('paintTowerArt — the Card swatch’s picture, through the same art an
     expect((y + rim.y * unit) * scale - half).toBeCloseTo(1, 9);
     expect((y + (rim.y + rim.h) * unit) * scale + half).toBeCloseTo(27, 9);
   });
+
+  it('measures the footprint’s far end from where its corner sits on the surface’s pixels', () => {
+    // The same footprint with its corner 0.7 device px into a pixel ends at 28.2, so the 2px
+    // rim, which placed freely ends on pixel 28, fits there: it runs from pixel 1 to 28. (A
+    // bound measured from pixel 0 instead would end at 27.5, and push the rim in to 27.)
+    const [x, y, footprintPx, scale] = [0.56, 0.56, 22, 1.25];
+    const g = recorder();
+    paintTowerArt(g, PAL, { mark: 'ringed', role: 'control' }, x, y, footprintPx, scale);
+    const [plate] = artCalls(g.calls);
+    const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
+    if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+    const unit = footprintPx / ART_BOX;
+    const half = (strokeWidthAt(rim, unit) * unit * scale) / 2;
+    expect(2 * half).toBeCloseTo(2, 9);
+    for (const [start, edge, end] of [
+      [x, rim.x, rim.x + rim.w],
+      [y, rim.y, rim.y + rim.h],
+    ] as const) {
+      expect((start + edge * unit) * scale - half).toBeCloseTo(1, 9);
+      expect((start + end * unit) * scale + half).toBeCloseTo(28, 9);
+    }
+  });
+
+  it('keeps a fitted rim on its surface, whole, at every dpr — the fitted footprint starts above and left of it', () => {
+    const size = 36;
+    const fit = towerArtFit(size);
+    expect(fit.x).toBeLessThan(0);
+    expect(fit.y).toBeLessThan(0);
+    const unit = fit.footprintPx / ART_BOX;
+    const design = PLATE_ART.find((s) => s.stroke === 'rim')!;
+    if (design.kind !== 'rect') throw new Error('the rim is a rect');
+    for (const scale of [1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+      const g = recorder();
+      paintTowerArt(
+        g,
+        PAL,
+        { mark: 'ringed', role: 'control' },
+        fit.x,
+        fit.y,
+        fit.footprintPx,
+        scale,
+        {
+          width: size,
+          height: size,
+        },
+      );
+      const [plate] = artCalls(g.calls);
+      const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
+      if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+      const half = (strokeWidthAt(rim, unit) * unit * scale) / 2;
+      const px = (corner: number, v: number): number => (corner + v * unit) * scale;
+      const at = `dpr ${scale}`;
+      expect(2 * half, at).toBeGreaterThanOrEqual(scale - 1e-9); // its floor, in full
+      // On the surface, from its first pixel to its last whole one ...
+      expect(px(fit.x, rim.x) - half, at).toBeGreaterThanOrEqual(-1e-9);
+      expect(px(fit.y, rim.y) - half, at).toBeGreaterThanOrEqual(-1e-9);
+      expect(px(fit.x, rim.x + rim.w) + half, at).toBeLessThanOrEqual(
+        Math.floor(size * scale) + 1e-9,
+      );
+      expect(px(fit.y, rim.y + rim.h) + half, at).toBeLessThanOrEqual(
+        Math.floor(size * scale) + 1e-9,
+      );
+      // ... and over the plate fill's edge, which stays where the design puts it.
+      for (const [drawn, edge] of [
+        [rim.x, design.x],
+        [rim.y, design.y],
+        [rim.x + rim.w, design.x + design.w],
+        [rim.y + rim.h, design.y + design.h],
+      ] as const) {
+        expect(Math.abs(drawn - edge) * unit * scale, at).toBeLessThanOrEqual(half + 1e-9);
+      }
+    }
+  });
 });
 
 describe('towerArtFit — a whole tower, shadow included, centred in a square', () => {
@@ -640,10 +721,19 @@ function dashOn(s: number, dash: readonly number[]): boolean {
 
 const SS = 8; // samples per texel side
 
+/** A box in texels: [left, top, right, bottom]. */
+type TexelBox = readonly [number, number, number, number];
+
 /** The most any one texel along `run` is covered by a butt-capped stroke `width` texels
- *  wide, dashed by `dash` (texels): 1 when some texel lies wholly inside the stroke and
- *  inside a dash. */
-function runPeak(run: Run, width: number, dash: readonly number[]): number {
+ *  wide, dashed by `dash` (texels), among texels no box in `over` touches: 1 when some
+ *  texel lies wholly inside the stroke and inside a dash, and nothing drawn later reaches
+ *  it. */
+function runPeak(
+  run: Run,
+  width: number,
+  dash: readonly number[],
+  over: readonly TexelBox[],
+): number {
   const [x0, y0] = run.from;
   const [x1, y1] = run.to;
   const horizontal = Math.abs(y1 - y0) < 1e-9;
@@ -656,6 +746,11 @@ function runPeak(run: Run, width: number, dash: readonly number[]): number {
   let peak = 0;
   for (let i = Math.floor(lo); i < Math.ceil(hi); i++) {
     for (let j = Math.floor(v - half); j < Math.ceil(v + half); j++) {
+      const [tx, ty] = horizontal ? [i, j] : [j, i];
+      const touched = over.some(
+        ([l, t, r, b]) => l < tx + 1 - 1e-9 && r > tx + 1e-9 && t < ty + 1 - 1e-9 && b > ty + 1e-9,
+      );
+      if (touched) continue;
       let hits = 0;
       for (let a = 0; a < SS; a++) {
         const u = i + (a + 0.5) / SS;
@@ -670,11 +765,19 @@ function runPeak(run: Run, width: number, dash: readonly number[]): number {
   return peak;
 }
 
-/** Each straight edge of every stroke `ops` drew in `strokeStyle`, as its peak texel
- *  coverage — replaying the recorded transform, path, width and dash as Canvas2D would. */
+/**
+ * Each straight edge of every stroke `ops` drew in `strokeStyle`, as the most any one texel
+ * along it ends up wholly in that colour: covered by the stroke — its recorded transform,
+ * path, width and dash replayed as Canvas2D would — under the plain `source-over`
+ * composite, and touched by nothing drawn after it. What a later draw touches is bounded by
+ * its geometry's box, a stroke's grown by five line widths (the furthest a miter join
+ * reaches at Canvas2D's default limit of 10); anti-aliasing paints no texel the geometry
+ * does not reach.
+ */
 function strokeEdgePeaks(ops: readonly CtxOp[], strokeStyle: string): number[] {
   let m: Mat = [1, 0, 0, 1, 0, 0];
-  const stack: Mat[] = [];
+  let composite = 'source-over';
+  const stack: { m: Mat; composite: string }[] = [];
   let runs: Run[] = [];
   let cur: [number, number] | null = null;
   let start: [number, number] | null = null;
@@ -682,7 +785,20 @@ function strokeEdgePeaks(ops: readonly CtxOp[], strokeStyle: string): number[] {
   let style = '';
   let lineWidth = 1;
   let dash: number[] = [];
-  const peaks: number[] = [];
+  /** The current path's box, texels. */
+  let box: [number, number, number, number] | null = null;
+  const include = (b: [number, number, number, number] | null, p: [number, number]) =>
+    b === null
+      ? ([p[0], p[1], p[0], p[1]] as [number, number, number, number])
+      : ([
+          Math.min(b[0], p[0]),
+          Math.min(b[1], p[1]),
+          Math.max(b[2], p[0]),
+          Math.max(b[3], p[1]),
+        ] as [number, number, number, number]);
+  /** Every rim edge stroked, and how many later draws there were when it was. */
+  const rims: { run: Run; width: number; dash: number[]; shown: boolean; after: number }[] = [];
+  const later: TexelBox[] = [];
   const lineTo = (p: [number, number]): void => {
     const len = Math.hypot(p[0] - cur![0], p[1] - cur![1]);
     if (len > 1e-6) runs.push({ from: cur!, to: p, s0: s });
@@ -691,45 +807,73 @@ function strokeEdgePeaks(ops: readonly CtxOp[], strokeStyle: string): number[] {
   };
   for (const { op, args } of ops) {
     const n = args as number[];
-    if (op === 'save') stack.push(m);
-    else if (op === 'restore') m = stack.pop()!;
+    if (op === 'save') stack.push({ m, composite });
+    else if (op === 'restore') ({ m, composite } = stack.pop()!);
     else if (op === 'setTransform') m = n as unknown as Mat;
     else if (op === 'transform') m = compose(m, n as unknown as Mat);
     else if (op === 'set:strokeStyle') style = String(args[0]);
     else if (op === 'set:lineWidth') lineWidth = n[0]!;
+    else if (op === 'set:globalCompositeOperation') composite = String(args[0]);
     else if (op === 'setLineDash') dash = [...(args[0] as number[])];
     else if (op === 'beginPath') {
       runs = [];
       cur = start = null;
+      box = null;
     } else if (op === 'moveTo') {
       cur = start = apply(m, [n[0]!, n[1]!]);
       s = 0; // the dash pattern restarts with every subpath
-    } else if (op === 'lineTo') lineTo(apply(m, [n[0]!, n[1]!]));
-    else if (op === 'arc') {
+      box = include(box, cur);
+    } else if (op === 'lineTo') {
+      const p = apply(m, [n[0]!, n[1]!]);
+      lineTo(p);
+      box = include(box, p);
+    } else if (op === 'arc') {
       const [cx, cy, r, a0, a1] = n as [number, number, number, number, number];
       if (cur !== null) lineTo(apply(m, [cx + r * Math.cos(a0), cy + r * Math.sin(a0)]));
       s += r * Math.abs(a1 - a0) * m[0];
       cur = apply(m, [cx + r * Math.cos(a1), cy + r * Math.sin(a1)]);
+      box = include(include(box, apply(m, [cx - r, cy - r])), apply(m, [cx + r, cy + r]));
+    } else if (op === 'ellipse') {
+      const [cx, cy, rx, ry] = n as [number, number, number, number];
+      box = include(include(box, apply(m, [cx - rx, cy - ry])), apply(m, [cx + rx, cy + ry]));
+    } else if (op === 'rect') {
+      const [x, y, w, h] = n as [number, number, number, number];
+      box = include(include(box, apply(m, [x, y])), apply(m, [x + w, y + h]));
     } else if (op === 'closePath') {
       if (cur !== null && start !== null) lineTo(start);
-    } else if (op === 'stroke' && style === strokeStyle) {
+    } else if (op === 'stroke' && args.length === 0 && style === strokeStyle) {
       expect([m[1], m[2]], 'no rotation or skew').toEqual([0, 0]);
       expect(m[0]).toBeCloseTo(m[3], 12);
       for (const run of runs) {
-        peaks.push(
-          runPeak(
-            run,
-            lineWidth * m[0],
-            dash.map((d) => d * m[0]),
-          ),
-        );
+        rims.push({
+          run,
+          width: lineWidth * m[0],
+          dash: dash.map((d) => d * m[0]),
+          shown: composite === 'source-over',
+          after: later.length,
+        });
+      }
+    } else if (op === 'fill' || op === 'stroke' || op === 'fillRect') {
+      let drawn: [number, number, number, number] | null = box;
+      if (op === 'fillRect') {
+        const [x, y, w, h] = n as [number, number, number, number];
+        drawn = include(include(null, apply(m, [x, y])), apply(m, [x + w, y + h]));
+      } else if (args[0] !== undefined) {
+        drawn = null; // a Path2D: its own path, not the current one
+        for (const line of flattenPath((args[0] as { d: string }).d)) {
+          for (const p of line.points) drawn = include(drawn, apply(m, p));
+        }
+      }
+      if (drawn !== null) {
+        const g = op === 'stroke' ? 5 * lineWidth * m[0] : 0;
+        later.push([drawn[0] - g, drawn[1] - g, drawn[2] + g, drawn[3] + g]);
       }
     }
   }
-  return peaks;
+  return rims.map((r) => (r.shown ? runPeak(r.run, r.width, r.dash, later.slice(r.after)) : 0));
 }
 
-describe('the rim reaches its full colour — a whole texel on every straight edge (QC round 2)', () => {
+describe('the rim ends in its full colour — a whole texel on every straight edge, nothing drawn over it (QC rounds 2–3)', () => {
   const RIM = cssColour(PAL.tower, 1);
   /** What frame `spec` paints at `scale` texels per CSS px, as recorded context ops. */
   const painted = (spec: FrameSpec, scale: number): CtxOp[] => {
@@ -747,8 +891,11 @@ describe('the rim reaches its full colour — a whole texel on every straight ed
       for (let cellPx = 10; cellPx <= 24; cellPx++) {
         const specs = new Map(towerFrameSpecs(cellPx, scale).map((f) => [f.key, f]));
         for (const key of [PLATE_FRAME_KEY, pendingFrameKey('basic'), pendingFrameKey('mine')]) {
+          // Each frame is sized to the art it paints — the rim as moved onto the texel grid.
+          expectSizedToArt(specs.get(key)!, scale);
           const peaks = strokeEdgePeaks(painted(specs.get(key)!, scale), RIM);
-          // Four straight edges, and each has a texel the rim colour fills.
+          // Four straight edges, and each has a texel the rim colour fills, which nothing
+          // drawn afterwards — the plate's bevel included — reaches.
           expect(peaks, `${key} at ${cellPx}px`).toHaveLength(4);
           const worst = Math.min(...peaks);
           if (worst < 1 - 1e-9) misses.push(`${key} ${cellPx}px: ${worst.toFixed(3)}`);
@@ -778,6 +925,37 @@ describe('the rim reaches its full colour — a whole texel on every straight ed
     // A dash pattern shorter than a texel never covers one whole along the edge.
     ops.splice(2, 0, { op: 'setLineDash', args: [[0.5, 0.5]] });
     expect(strokeEdgePeaks(ops, RIM)[0]).toBeLessThan(1);
+  });
+
+  it('can fail: a whole texel of the rim that something is drawn over afterwards is not in its colour', () => {
+    // A 1px rim on a half texel covers row 2 whole ...
+    const rim: CtxOp[] = [
+      { op: 'set:strokeStyle', args: [RIM] },
+      { op: 'set:lineWidth', args: [1] },
+      { op: 'beginPath', args: [] },
+      { op: 'moveTo', args: [0, 2.5] },
+      { op: 'lineTo', args: [10, 2.5] },
+      { op: 'stroke', args: [] },
+    ];
+    const then = (...after: CtxOp[]): number => strokeEdgePeaks([...rim, ...after], RIM)[0]!;
+    expect(then()).toBe(1);
+    // ... until a later fill or stroke reaches it, as the plate's bevel once did, stroked
+    // after the rim along its top edge — a path string here, as the bevel is.
+    expect(then({ op: 'fillRect', args: [0, 2.4, 10, 0.2] })).toBe(0);
+    expect(then({ op: 'stroke', args: [fakePath('M0 4.5H10')] })).toBe(0);
+    // A later draw that reaches no rim texel leaves it be (a fill's box is its own; a
+    // stroke's is grown by five line widths) ...
+    expect(then({ op: 'fillRect', args: [0, 3, 10, 2] })).toBe(1);
+    expect(then({ op: 'stroke', args: [fakePath('M0 9H10')] })).toBe(1);
+    // ... and draws before it lie under it.
+    expect(strokeEdgePeaks([{ op: 'fillRect', args: [0, 0, 10, 10] }, ...rim], RIM)[0]).toBe(1);
+    // A rim stroked under another composite than source-over does not show its own colour.
+    expect(
+      strokeEdgePeaks(
+        [{ op: 'set:globalCompositeOperation', args: ['destination-in'] }, ...rim],
+        RIM,
+      )[0],
+    ).toBe(0);
   });
 });
 
@@ -838,12 +1016,22 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
         const half = strokeWidthAt(rim, unit) / 2;
         const k = unit * scale;
         const at = `${cellPx}px at dpr ${scale}`;
-        // Never thinner than its one-CSS-px floor — so two texels at a fractional dpr, where a
-        // canvas shown a fraction of a pixel off the grid would smear a one-texel line ...
+        // Never thinner than its one-CSS-px floor (so two texels at dpr 1.25 or 1.5) ...
         expect(2 * half * k, at).toBeGreaterThanOrEqual(scale - 1e-9);
-        // ... and inside the footprint, so two abutting plates never overlap.
+        // ... inside the footprint, so two abutting plates never overlap ...
         expect((rim.x - half) * k, at).toBeGreaterThanOrEqual(-1e-9);
         expect((rim.x + rim.w + half) * k, at).toBeLessThanOrEqual(ART_BOX * k + 1e-9);
+        // ... and over the plate fill's edge, which stays on the design's centre line: no
+        // sliver of plate shows past the rim, and none of the floor inside it.
+        if (designRim.kind !== 'rect') throw new Error('the rim is a rect');
+        for (const [drawn, design] of [
+          [rim.x, designRim.x],
+          [rim.y, designRim.y],
+          [rim.x + rim.w, designRim.x + designRim.w],
+          [rim.y + rim.h, designRim.y + designRim.h],
+        ] as const) {
+          expect(Math.abs(drawn - design) * k, at).toBeLessThanOrEqual(half * k + 1e-9);
+        }
         for (const ring of BOOST_ART) {
           if (ring.kind !== 'circle') throw new Error('the glow is rings');
           const outer = ring.r + strokeWidthAt(ring, unit) / 2;
