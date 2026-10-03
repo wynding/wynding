@@ -3,8 +3,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
-import type { RenderVM, TracerVM } from './types';
-import { resolvePalette } from './palette';
+import type { ColourMode, RenderVM, TracerVM } from './types';
+import { COLOUR_MODES, resolvePalette } from './palette';
 
 function vm(tick: number): RenderVM {
   return { tick, phase: 'running', creeps: [], towers: [] };
@@ -133,7 +133,7 @@ describe('positionTracers', () => {
 describe('tracerPaintOps', () => {
   const pal = resolvePalette('default');
 
-  it('emits one op per positioned tracer, in the tower cue colour', () => {
+  it('emits one op per positioned tracer, in the tracer colour', () => {
     const ops = tracerPaintOps(
       [
         { x: 1, y: 2 },
@@ -143,9 +143,25 @@ describe('tracerPaintOps', () => {
       pal,
     );
     expect(ops).toEqual([
-      { x: 1, y: 2, colour: pal.tower },
-      { x: 3, y: 4, colour: pal.tower },
+      { x: 1, y: 2, colour: pal.tracer },
+      { x: 3, y: 4, colour: pal.tracer },
     ]);
+  });
+
+  it('keeps the colour tracers drew in before the visual pass, in every mode (#181)', () => {
+    // The dot drew in `pal.tower` — the tower body's green, blue in protan/deutan — until
+    // the visual pass gave `tower` to the plate rim. Shots are not this pass's to restyle,
+    // so the dot keeps exactly that colour: pinned per mode, not merely "some colour".
+    const before: Record<ColourMode, number> = {
+      default: 0x009e73,
+      protan: 0x0072b2,
+      deutan: 0x0072b2,
+      tritan: 0x009e73,
+    };
+    for (const mode of COLOUR_MODES) {
+      const [op] = tracerPaintOps([{ x: 0, y: 0 }], false, resolvePalette(mode));
+      expect(op?.colour).toBe(before[mode]);
+    }
   });
 
   it('reduced motion omits tracers entirely — an empty plan', () => {

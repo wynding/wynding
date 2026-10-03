@@ -19,6 +19,7 @@ import { packShelves } from './atlas-pack';
 import { atlasFrameSpecs, type FrameSpec } from './art-frames';
 import { drawBoard, type BoardPaintOp } from './board-cells';
 import { canvasGraphics, type Canvas2DLike } from './canvas-graphics';
+import { artGraphics, type ArtCanvas2DLike, type PathFactory } from './art-paint';
 import type { Palette } from './palette';
 import type { ColourMode } from './types';
 
@@ -90,8 +91,15 @@ export function layoutAtlas(cellPx: number, dpr: number, maxTextureSize: number)
 
 /** Paint every frame of `layout` into `ctx` (a fresh, transparent canvas of the layout's
  *  size). Each frame is clipped to its own rectangle so nothing it draws can land in a
- *  neighbour, and drawn in frame-local CSS px scaled to texels. */
-export function paintAtlas(ctx: Canvas2DLike, layout: AtlasLayout, pal: Palette): void {
+ *  neighbour — which is also what scopes a frame's group fade (`ArtGraphics.fade`) to that
+ *  frame — and drawn in frame-local CSS px scaled to texels. `makePath` turns the art's SVG
+ *  path strings into `Path2D`s (`(d) => new Path2D(d)` in a browser). */
+export function paintAtlas(
+  ctx: ArtCanvas2DLike,
+  layout: AtlasLayout,
+  pal: Palette,
+  makePath: PathFactory,
+): void {
   for (const frame of layout.frames.values()) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -99,7 +107,7 @@ export function paintAtlas(ctx: Canvas2DLike, layout: AtlasLayout, pal: Palette)
     ctx.rect(frame.x, frame.y, frame.width, frame.height);
     ctx.clip();
     ctx.setTransform(layout.scale, 0, 0, layout.scale, frame.x, frame.y);
-    const g = canvasGraphics(ctx);
+    const g = artGraphics(ctx, makePath);
     frame.paint(g, pal);
     g.flush();
     ctx.restore();

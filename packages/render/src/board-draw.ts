@@ -4,18 +4,18 @@
 // per `CanvasFeatures.js`), so nothing in it can be unit-tested. Nothing here needs Phaser —
 // every function draws through `GraphicsLike` below, a structural slice of
 // `Phaser.GameObjects.Graphics` that a real Graphics satisfies for free and that
-// `scene.test.ts` satisfies with a recording fake. That is what keeps the hexagon, droplet
-// and poisoned-pip branches witnessed: `scene.ts` is coverage-excluded and Playwright + axe
+// `scene.test.ts` satisfies with a recording fake. That is what keeps the hexagon and
+// poisoned-pip branches witnessed: `scene.ts` is coverage-excluded and Playwright + axe
 // cannot see canvas cues.
 //
 // Two kinds of function live here since the visual pass's V2 (#181), which bakes static art
 // into textures instead of re-recording it every frame:
 //
-//  - STATIC-ART PAINTERS (`paintCommittedTower`, `paintPendingTower`, `paintCreepSilhouette`)
-//    run at BAKE time only, into a Canvas2D-backed `GraphicsLike` (`canvas-graphics.ts`),
-//    once per atlas frame (`art-frames.ts`). Their geometry is the per-frame draw's,
-//    unchanged — the footprint/centre they are handed is simply frame-local now — so the
-//    baked art matches what the board used to draw by construction.
+//  - A STATIC-ART PAINTER (`paintCreepSilhouette`) runs at BAKE time only, into a
+//    Canvas2D-backed `GraphicsLike` (`canvas-graphics.ts`), once per atlas frame
+//    (`art-frames.ts`). Its geometry is the per-frame draw's, unchanged — the centre it is
+//    handed is simply frame-local now. Towers are no longer drawn here: since the visual
+//    pass they are vector art (`tower-art.ts`), painted by the art kit (`art-paint.ts`).
 //  - PER-FRAME EXECUTORS (`drawAuraShells`, `drawSelection`, `drawCreepCues`) still draw into
 //    a Phaser `Graphics` every frame: what moves, or comes and goes, stays live. Which layer
 //    each one draws into is `layers.ts`'s business, not call order's.
@@ -28,13 +28,12 @@ import {
   airborneCuePaintOps,
   type CreepSilhouettePaintOp,
 } from './creep-paint';
-import type { TowerFootprintMark } from './tower-paint';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
 import type { RenderVM, RenderOverlay, TowerVM } from './types';
 
 /** The exact `Phaser.GameObjects.Graphics` surface this module's functions (and their
- *  `drawCrosshair`/`drawDroplet` helpers) call — nothing more. A structural interface,
+ *  `drawCrosshair` helper) call — nothing more. A structural interface,
  *  never imported from `phaser`, so this module (and anything testing it) never triggers
  *  Phaser's import-time device detection. `canvas-graphics.ts` implements it over a 2D
  *  context for the bake. */
@@ -52,11 +51,10 @@ export interface GraphicsLike {
 }
 
 /** Four short spokes radiating from `(cx,cy)` out to `spoke`, with a gap at the centre
- *  (never touching it) — the `'crosshair'` footprint mark AND the ghost's blast-radius
- *  preview share this exact motif (drawn at different scales: the footprint mark at
- *  `size * 0.22`, the ghost preview at the full blast radius) so "area effect" reads as
- *  one consistent shape language, always distinct from the closed `'ringed'` circle and
- *  the smooth range ring (never colour alone — ADR 0003). */
+ *  (never touching it) — the ghost's and the selection's blast-radius cue, the same motif
+ *  the area-effect towers' heads carry in their glyph (`splash`'s spokes, `tower-art.ts`), so
+ *  "area effect" reads as one consistent shape language, always distinct from the smooth
+ *  range ring (never colour alone — ADR 0003). */
 export function drawCrosshair(g: GraphicsLike, cx: number, cy: number, spoke: number): void {
   const gap = spoke * 0.4;
   g.lineBetween(cx, cy - spoke, cx, cy - gap);
@@ -65,193 +63,17 @@ export function drawCrosshair(g: GraphicsLike, cx: number, cy: number, spoke: nu
   g.lineBetween(cx + gap, cy, cx + spoke, cy);
 }
 
-/** A closed circle at `(cx,cy,halfSize)` — the `'ringed'` footprint mark's own radius —
- *  plus four short spokes radiating OUTWARD from that ring to `halfSize * 1.5`, one per
- *  cardinal direction — the `'ringed-crosshair'` footprint mark (M2-S10, `frost-splash`),
- *  composing `'ringed'` (the ring, unchanged radius) and `'crosshair'` (the radiating-
- *  spoke motif) into one shape that reads as its two parents (m2.md:299) while staying
- *  distinct from both: unlike `'crosshair'` above, the spokes start at the ring's edge
- *  and point away from it, not from the centre outward with a gap. `halfSize` is the
- *  ring's radius, mirroring `drawCrosshair`'s own half-size parameter. */
-export function drawRingedCrosshair(
-  g: GraphicsLike,
-  cx: number,
-  cy: number,
-  halfSize: number,
-): void {
-  g.strokeCircle(cx, cy, halfSize);
-  const spokeOuter = halfSize * 1.5;
-  g.lineBetween(cx, cy - halfSize, cx, cy - spokeOuter);
-  g.lineBetween(cx, cy + halfSize, cx, cy + spokeOuter);
-  g.lineBetween(cx - halfSize, cy, cx - spokeOuter, cy);
-  g.lineBetween(cx + halfSize, cy, cx + spokeOuter, cy);
-}
-
-/** A small teardrop outline at `(cx,cy)`: a circular bulb offset downward, plus two
- *  lines converging to a point above it — the `'droplet'` footprint mark (M2-S5a,
- *  `venom`), evoking "applies a lingering effect". Distinct in SHAPE from both the
- *  closed `'ringed'` circle and the radiating `'crosshair'` spokes (never colour alone
- *  — ADR 0003); `spoke` plays the same role as `drawCrosshair`'s (the mark's half-size). */
-function drawDroplet(g: GraphicsLike, cx: number, cy: number, spoke: number): void {
-  const bulbR = spoke * 0.55;
-  const bulbCy = cy + spoke * 0.25;
-  g.strokeCircle(cx, bulbCy, bulbR);
-  g.lineBetween(cx - bulbR * 0.7, bulbCy - bulbR * 0.6, cx, cy - spoke);
-  g.lineBetween(cx + bulbR * 0.7, bulbCy - bulbR * 0.6, cx, cy - spoke);
-}
-
-/** A three-segment zigzag polyline through `(cx,cy)`, evoking a lightning bolt — the
- *  `'bolt'` footprint mark (M2-S6, `stun`). `halfSize` is the footprint's HALF-SIZE
- *  (unlike `drawCrosshair`/`drawDroplet`'s `spoke`, which is `size * 0.22`): the
- *  vertices are pinned in the plan as fractions of the footprint half-size, so this
- *  reads at roughly cell scale rather than the other marks' smaller motif. Distinct
- *  from `'crosshair'`'s spokes by not being radial — never colour alone (ADR 0003). */
-function drawBolt(g: GraphicsLike, cx: number, cy: number, halfSize: number): void {
-  const verts: readonly (readonly [number, number])[] = [
-    [-0.35, -0.5],
-    [0.15, -0.1],
-    [-0.15, 0.1],
-    [0.35, 0.5],
-  ];
-  for (let i = 0; i < verts.length - 1; i++) {
-    const [x0, y0] = verts[i]!;
-    const [x1, y1] = verts[i + 1]!;
-    g.lineBetween(cx + x0 * halfSize, cy + y0 * halfSize, cx + x1 * halfSize, cy + y1 * halfSize);
-  }
-}
-
-/** An upward arrow at `(cx,cy)` — a vertical shaft with two barbs at its tip — the
- *  `'arrow'` footprint mark (M2-S7, `antiair`), evoking "shoots skyward". `halfSize`
- *  plays the same role as `'crosshair'`/`'droplet'`'s — both call sites pass
- *  `size * 0.22`, NOT `drawBolt`'s `size * 0.5`, which an earlier version of this line
- *  named and which would produce a mark twice the size of every other footprint mark.
- *  Distinct in shape from `'crosshair'`'s four radiating spokes (this is a single
- *  unbroken shaft through the centre plus two barbs, not four strokes around a centre
- *  gap), `'bolt'`'s zigzag (straight, not staggered), `'ringed'`'s closed circle, and
- *  `'droplet'`'s teardrop — never colour alone (ADR 0003).
- *
- *  The shaft and the barbs' downward fan are BOTH load-bearing, which is why this is not
- *  the bare "^" it started as: `airborneCuePaintOps` (`creep-paint.ts`) draws the
- *  airborne creep cue as exactly that apex-plus-two-strokes glyph, and its r×3.4 offset
- *  puts it ≈1.19 cells ABOVE the creep — so a flyer on the shipped board's row-11 lane
- *  paints its cue over a row-10 footprint, ~0.19 of a cell past this mark's own centre
- *  (figures from the residual block beside `AIRBORNE_APEX_R_MUL`; #126 moved the apex out
- *  from r×2.9, which makes this argument stronger, not weaker). An `antiair` tower
- *  plus a flying wave is the normal case, not a corner one, so two upward chevrons would
- *  have left `pal.floor` vs `pal.airborne` as the only channel telling tower from creep. */
-function drawArrow(g: GraphicsLike, cx: number, cy: number, halfSize: number): void {
-  g.lineBetween(cx, cy + halfSize, cx, cy - halfSize); // shaft, tip up
-  g.lineBetween(cx - halfSize * 0.55, cy - halfSize * 0.35, cx, cy - halfSize);
-  g.lineBetween(cx + halfSize * 0.55, cy - halfSize * 0.35, cx, cy - halfSize);
-}
-
-/** An upright post through `(cx,cy)` with a short crossbar near its top and a wider bar
- *  at its base — the `'pylon'` footprint mark (M2-S8, `beacon`), evoking a broadcasting
- *  mast. `halfSize` plays the same role as `drawArrow`'s. Distinct from `'arrow'` (no
- *  convergent tip; the bars are horizontal and the base one is the WIDEST feature, where
- *  an arrow's widest point is at its tip) and from `'bolt'` (a straight post, not a
- *  three-segment stagger) — never colour alone (ADR 0003). */
-function drawPylon(g: GraphicsLike, cx: number, cy: number, halfSize: number): void {
-  g.lineBetween(cx, cy - halfSize, cx, cy + halfSize); // mast
-  g.lineBetween(
-    cx - halfSize * 0.45,
-    cy - halfSize * 0.55,
-    cx + halfSize * 0.45,
-    cy - halfSize * 0.55,
-  ); // crossbar
-  g.lineBetween(cx - halfSize * 0.8, cy + halfSize, cx + halfSize * 0.8, cy + halfSize); // base
-}
-
-/** A four-pointed star (✦) at `(cx,cy)`: two axial strokes crossed by two shorter
- *  diagonals — the BUFFED-RECIPIENT mark (M2-S8), drawn in the footprint's top-left
- *  QUADRANT so it never overlaps the tower's own centred `TowerFootprintMark`. Its own
- *  shape carries the state; the colour channel is redundant (ADR 0003). */
-function drawSparkle(g: GraphicsLike, cx: number, cy: number, r: number): void {
-  g.lineBetween(cx, cy - r, cx, cy + r);
-  g.lineBetween(cx - r, cy, cx + r, cy);
-  const d = r * 0.45;
-  g.lineBetween(cx - d, cy - d, cx + d, cy + d);
-  g.lineBetween(cx + d, cy - d, cx - d, cy + d);
-}
-
 /** The alpha the support-aura shell strokes at — pinned here rather than inlined
  *  because `palette.test.ts` gates `aura` COMPOSITED at exactly this value, and a
  *  change at this one draw site must move the gate with it (the same discipline
  *  `RANGE_GHOST_PREVIEW_ALPHA` already carries for `range`). */
-/** THE footprint-mark dispatch (#89): the committed-body chain (`2, pal.floor, 1`), the
- *  pending-outline chain (`1, pal.tower, 0.6`), and the Card swatch (`apps/web/src/
- *  swatch.ts`) all draw the nine-mark vocabulary through this one table, so a new mark
- *  lands everywhere at once or nowhere. Per-mark scale stays internal: every mark draws at
- *  `size * 0.22` except `'bolt'`, whose zigzag deliberately spans the whole footprint
- *  (`size * 0.5` — its comment in `drawBolt` carries the reasoning). `'charge'` is the
- *  vocabulary's ONE fill (that is its whole distinctness argument at the narrow floor), so
- *  it consumes the (width, colour, alpha) triple as a fill — width unused — and every
- *  other mark as a stroke. `'plain'` draws nothing: total over the union, and the reason
- *  callers need no pre-check. */
-export function drawFootprintMark(
-  g: GraphicsLike,
-  mark: TowerFootprintMark,
-  cx: number,
-  cy: number,
-  size: number,
-  lineWidth: number,
-  color: number,
-  alpha: number,
-): void {
-  if (mark === 'plain') return;
-  if (mark === 'charge') {
-    g.fillStyle(color, alpha);
-    g.fillCircle(cx, cy, size * 0.22);
-    return;
-  }
-  g.lineStyle(lineWidth, color, alpha);
-  if (mark === 'ringed') g.strokeCircle(cx, cy, size * 0.22);
-  else if (mark === 'crosshair') drawCrosshair(g, cx, cy, size * 0.22);
-  else if (mark === 'droplet') drawDroplet(g, cx, cy, size * 0.22);
-  else if (mark === 'bolt') drawBolt(g, cx, cy, size * 0.5);
-  else if (mark === 'arrow') drawArrow(g, cx, cy, size * 0.22);
-  else if (mark === 'pylon') drawPylon(g, cx, cy, size * 0.22);
-  else if (mark === 'ringed-crosshair') drawRingedCrosshair(g, cx, cy, size * 0.22);
-  else {
-    // Exhaustiveness — the header's "everywhere at once or nowhere" made compile-time: a
-    // tenth mark must fail HERE, never silently borrow the last glyph in the chain.
-    const unreachable: never = mark;
-    void unreachable;
-  }
-}
-
 export const AURA_SHELL_ALPHA = 0.9;
 
-/** The buffed-recipient ✦'s centre and radius, both as fractions of ONE cell — pinned
- *  here because they are a CONTAINMENT constraint, not a taste choice, and the test that
- *  proves it reads these same two numbers.
- *
- *  The mark strokes `pal.floor` against the solid `pal.tower` fill, so any part of it
- *  that lands outside the body is floor-on-floor and simply vanishes. The body is
- *  `fillRoundedRect(p+2, size-4, radius 6)`, and at the smallest supported cell
- *  (`CELL_PX_MIN_NARROW` = 10, the 568×320 compact floor) that rect is only 16px across
- *  with a 6px corner radius — so the corner arc, not the straight edge, is what binds.
- *  The first version of this mark sat at 0.42 with r = 0.26, which put its top and left
- *  tips 1.6px from the anchor against a body starting at 2px: most of the ✦ rendered
- *  invisibly and what survived read as an asymmetric half-mark. These values keep all
- *  four tips inside the rounded body at that floor, with margin, and — being fractions
- *  of the cell — keep the same relationship at every larger size.
- *
- *  THE STROKE WIDTH IS PART OF THE CONSTRAINT, not a detail: the mark is drawn with a 2px
- *  line, so every tip carries 1px of half-width beyond its centreline, and it is the OUTER
- *  EDGE that has to clear the arc. A prior pair (0.5 / 0.15) satisfied a centreline-only
- *  test and still clipped — the axial tips sat 5.41 from the corner arc centre against a
- *  6px radius, leaving 0.59px for a 1px half-width. That is the same disappearing-mark
- *  failure these constants exist to prevent, reintroduced by a test measuring the wrong
- *  thing; `scene.test.ts` now measures the endpoints `drawSparkle` actually emits and
- *  subtracts {@link SPARKLE_STROKE_PX} / 2 before checking, so it pins the DRAWING rather
- *  than these two numbers — which is why they are module-private: the test no longer needs
- *  them, and an export with no consumer is surface without a reason. */
-const SPARKLE_CENTRE_FRAC = 0.55;
-const SPARKLE_RADIUS_FRAC = 0.13;
-/** The ✦'s stroke width, exported so the containment test reasons about the OUTER EDGE
- *  rather than the centreline, and cannot drift from the draw site. */
-export const SPARKLE_STROKE_PX = 2;
+/** The alpha the selection cue strokes at — its range ring, blast spokes and attackless
+ *  outline. Pinned for the same reason as `AURA_SHELL_ALPHA`: `palette.test.ts` gates
+ *  `range` composited at this value over the tower PLATE, the surface the outline's inner
+ *  edge and the spokes lie on. */
+export const SELECTION_ALPHA = 0.9;
 
 /** The committed towers a frame presents: every one EXCEPT a tower whose sell is pending
  *  (paused planning, #37+#27) — hidden immediately, presented as already gone, not merely
@@ -278,8 +100,9 @@ export function visibleTowers(
  *  cells, because the four DIAGONAL corners are excluded (corner-only touch never buffs),
  *  while a rounded rect encloses all twelve cells of the surrounding block. A corner-only
  *  neighbour therefore sits partly inside a boundary that does not reach it. The
- *  authoritative signal is the recipient ✦ (`paintCommittedTower`) — derived from the sim's
- *  own rule and drawn only on towers genuinely being buffed; the shell is the coarser
+ *  authoritative signal is the boost glow on each recipient's head (`BOOST_ART`,
+ *  `tower-art.ts`) — derived from the sim's own rule (`TowerVM.buffed`) and drawn only on
+ *  towers genuinely being buffed; the shell is the coarser
  *  "roughly here" cue. Drawing the true plus outline instead would change the aura's
  *  approved visual shape, so it is a product decision rather than a refactor
  *  (docs/accessibility-checklist.md carries it as a recorded residual).
@@ -292,8 +115,9 @@ export function visibleTowers(
  *  the tower. Same board, two renderings. M2-S8 hoisted every shell into its own earlier
  *  pass; since V2 (#181) the guarantee is STRUCTURAL — this draws into the shells layer,
  *  which `layers.ts` puts below the tower sprites, so no call order can put a shell over a
- *  body. The result is order-independent and the shell never crosses a tower body — which
- *  also keeps `pal.aura` off `pal.tower`, a pairing it does not clear 3:1 against and which
+ *  body. The result is order-independent and the shell never crosses a tower — its plate,
+ *  rim or head — which keeps `pal.aura` off the plate rim (`pal.tower`, 2.23:1) and the
+ *  light role-coloured heads, pairings it does not clear 3:1 against and which
  *  `palette.test.ts` therefore does not gate. */
 export function drawAuraShells(
   g: GraphicsLike,
@@ -315,89 +139,6 @@ export function drawAuraShells(
       6,
     );
   }
-}
-
-/** A committed tower — its body, its footprint mark, and (when `buffed`) the recipient ✦ —
- *  with its 2×2 footprint's top-left corner at `(x, y)`. A STATIC-ART painter: it runs at
- *  bake time, into an atlas frame (`art-frames.ts`), with `(x, y)` frame-local. The geometry
- *  is the per-frame draw's, unchanged. */
-export function paintCommittedTower(
-  g: GraphicsLike,
-  pal: Palette,
-  mark: TowerFootprintMark,
-  x: number,
-  y: number,
-  cellPx: number,
-  buffed: boolean,
-): void {
-  const size = cellPx * 2; // 2×2 footprint
-  g.fillStyle(pal.tower, 1);
-  g.fillRoundedRect(x + 2, y + 2, size - 4, size - 4, 6);
-  // `slow`/`splash`/`venom`/`stun`/`antiair`/`beacon`/`mine` vs `basic` footprint mark
-  // (M2-S3, extended M2-S4a, M2-S5a, M2-S6, M2-S7, M2-S8, M2-S9): all bodies share
-  // `pal.tower` — a palette decision (S3 mints no second tower colour), with the
-  // per-tower distinction carried by SHAPE — an inner concentric ring for `'ringed'`
-  // (slow), four short radiating spokes for `'crosshair'` (splash — the same "area
-  // effect" motif the ghost's blast-radius preview draws at cell scale, per ADR
-  // 0003's redundant-encoding rule), a small teardrop for `'droplet'` (venom), a
-  // three-segment zigzag for `'bolt'` (stun), an upward arrow for `'arrow'`
-  // (antiair), an upright mast for `'pylon'` (beacon), a FILLED disc for `'charge'`
-  // (mine — M2-S9, the only filled mark in the vocabulary, so it survives at the
-  // narrow floor where every other mark's fine detail has collapsed), nothing extra
-  // for `'plain'` (basic). The committed marks stroke (or, for `'charge'` alone,
-  // FILL) `pal.floor` so they read against the solid `pal.tower` fill; the pending
-  // painter below uses `pal.tower` instead — its body is an unfilled outline, so
-  // there is no fill to contrast against and the mark keeps the pending cue's own
-  // colour + alpha (CodeRabbit #73: the two painters differ on purpose).
-  drawFootprintMark(g, mark, x + cellPx, y + cellPx, size, 2, pal.floor, 1);
-  // The recipient ✦ sits in the footprint's top-left CELL, while every
-  // `TowerFootprintMark` is anchored at the footprint CENTRE — separated by position,
-  // which is what keeps both readable in one 2×2 body.
-  //
-  // Separation is positional, NOT a guarantee that the two never touch, and the
-  // difference is worth stating because an earlier version of this comment claimed the
-  // stronger thing: a `size * 0.22` mark reaches 0.56 × cell from the anchor while the ✦
-  // reaches 0.68, so they overlap slightly before stroke width is even counted, and
-  // `'bolt'` is drawn at `size * 0.5` — deliberately spanning the WHOLE footprint, so it
-  // crosses this cell by design and no placement inside the body could avoid it. What is
-  // actually guaranteed, and tested, is that the ✦ stays inside the body and inside the
-  // top-left cell; legibility where the two marks abut at the narrow floor is a recorded
-  // residual (docs/accessibility-checklist.md), not a solved problem.
-  //
-  // It strokes `pal.floor` for the same reason every footprint mark above does: it is
-  // drawn over the solid `pal.tower` fill — which is also exactly why its containment
-  // inside that fill is a correctness constraint rather than polish (see
-  // `SPARKLE_CENTRE_FRAC`).
-  if (buffed) {
-    g.lineStyle(SPARKLE_STROKE_PX, pal.floor, 1);
-    drawSparkle(
-      g,
-      x + cellPx * SPARKLE_CENTRE_FRAC,
-      y + cellPx * SPARKLE_CENTRE_FRAC,
-      cellPx * SPARKLE_RADIUS_FRAC,
-    );
-  }
-}
-
-/** A queued-but-not-yet-committed build, footprint top-left at `(x, y)`: a translucent
- *  OUTLINE (never a filled solid), the dual shape+alpha cue distinguishing "pending" from a
- *  committed tower — and it carries its own footprint mark too, so a slow tower queued while
- *  paused keeps its shape-distinct identity (Codex R1-7). A STATIC-ART painter like
- *  `paintCommittedTower`. Each primitive keeps its own 0.6 alpha in the bake, so where the
- *  outline and a mark (or two strokes of one mark) overlap they compound exactly as they did
- *  when drawn straight onto the board, rather than the whole frame being faded as one. */
-export function paintPendingTower(
-  g: GraphicsLike,
-  pal: Palette,
-  mark: TowerFootprintMark,
-  x: number,
-  y: number,
-  cellPx: number,
-): void {
-  const size = cellPx * 2;
-  g.lineStyle(3, pal.tower, 0.6);
-  g.strokeRoundedRect(x + 2, y + 2, size - 4, size - 4, 6);
-  drawFootprintMark(g, mark, x + cellPx, y + cellPx, size, 1, pal.tower, 0.6);
 }
 
 /** The selected tower's board-side cue: its range ring, its blast spokes, or — for an
@@ -423,16 +164,20 @@ export function drawSelection(
   // the body's own inset so it traces the tower rather than floating around it, and
   // never at radius 0 — a dot at the footprint centre would be a cue the player has to
   // decode, and it would collide with the tower's own centred mark.
-  g.lineStyle(2, pal.range, 0.9);
+  g.lineStyle(2, pal.range, SELECTION_ALPHA);
   if (o.selection.rangeFp === null) {
     const size = projection.cellPx * 2;
-    // Inset 1, NOT 2. A canvas stroke is centred on its path, so tracing the body's own
-    // `fillRoundedRect(p + 2, size - 4)` geometry would put the inner half of a 2px
-    // stroke on the solid `pal.tower` fill — where `range` measures 1.06:1 (default;
-    // 1.55 protan/deutan, 1.42 tritan) and is simply not there — leaving 1px of cue at
-    // the narrow floor. At inset 1 the whole 2px stroke sits in the 2px margin between
-    // the body edge and the cell boundary, i.e. entirely on `floor`, where `range`
-    // clears 4.61:1. Neighbouring footprints are 4px apart, so it cannot reach one.
+    // Inset 1: the 2px stroke (centred on its path) covers the footprint's outermost 2px,
+    // so its OUTER edge is always on the floor, where `range` clears 4.61:1 composited.
+    // Inward it meets the plate's rim, which sits 3/64 of the footprint in (`PLATE_RECT`,
+    // `tower-art.ts`) and which `range` measures only 1.32:1 against (1.75 tritan). The
+    // stroke is drawn OVER the rim (the effects layer sits above the tower sprites). At
+    // cells up to 16 px it covers the whole rim, so its inner edge lies on the plate,
+    // where `range` clears 3.70:1 composited (4.83 tritan; gated, `palette.test.ts`); from
+    // 32 px the floor margin outside the rim is wider than the stroke, so it lies wholly on
+    // the floor. Between the two its inner edge ends on the rim, and its floor-side edge is
+    // what carries the cue. It stays clear of a neighbour: the next footprint starts
+    // beyond this one's edge.
     g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);
   } else {
     g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));
@@ -442,10 +187,17 @@ export function drawSelection(
     //
     // The CONDITION is identical; the painted result is not quite, and the difference is
     // worth stating rather than implying parity the pixels do not have (ship-review).
-    // `drawCrosshair` leaves a centre gap of `spoke * 0.4`, and the committed body is a FILLED rounded rect whose edge sits ~`cellPx` from the footprint centre. For the mine (blast 2.5 tiles) the gap lands at `1.0 * cellPx` — exactly the body edge — so its spokes are wholly on `floor`. For `splash`/`frost-splash` (blast 1.5 tiles) the gap is `0.6 * cellPx`, so each spoke's inner ~22-44% is painted over `pal.tower`, where `pal.range` measures 1.06:1 (the same surface the attackless-selection branch above rejects an inset-2 stroke over). The ghost has no such band because its body is an OUTLINE, not a fill.
-    // The spoke TIP — which is what marks the radius — is always on `floor` in both
-    // surfaces, so the cue reads either way; a small-blast tower simply shows a shorter
-    // visible spoke when committed than when previewed. The mine is what forced the question: it is the only tower whose blast
+    // `drawCrosshair` leaves a centre gap of `spoke * 0.4`. For the mine (blast 2.5 tiles)
+    // the gap lands at `1.0 * cellPx` — the footprint's edge, and the mine has no plate —
+    // so its spokes are wholly on `floor`. For `splash`/`frost-splash` (blast 1.5 tiles) the
+    // gap is `0.6 * cellPx`: just clear of both heads along the axes the spokes take
+    // (`splash`'s octagon reaches 0.55 of a cell there, `frost-splash`'s arms 0.59, outlines
+    // included — `tower-art.ts`). Each spoke is painted over the plate, where `pal.range`
+    // clears 3.70:1 composited at `SELECTION_ALPHA` (4.83 tritan; gated), then over the
+    // rim, and out onto the floor.
+    // The spoke TIP — which is what marks the radius — is always on `floor`, so the cue
+    // reads at its end on every tower; the ghost differs only in having no plate under its
+    // spokes. The mine is what forced the question: it is the only tower whose blast
     // (2.5 tiles) reaches PAST its own ring (2.25), so a selected mine drawing the
     // ring alone would actively understate it.
     //

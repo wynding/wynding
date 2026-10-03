@@ -71,11 +71,12 @@ export function positionTracers(
 }
 
 /**
- * Turn positioned tracers into an ordered draw plan: a small bright dot in the firing
- * tower's cue colour (`pal.tower`) — decorative only, per docs/CONTEXT.md's "Tracer"
- * entry, never the carrier of a hit/miss outcome (the impact spark + HP pips are).
- * Reduced motion (WCAG 2.3.3 / GAG §2) omits tracers entirely — an EMPTY plan, the
- * same posture already ratified for the impact spark.
+ * Turn positioned tracers into an ordered draw plan: a small bright dot in `pal.tracer`
+ * (the colour tower bodies had before the visual pass gave `pal.tower` to the plate rim —
+ * kept, so shots look as they did until they get their own look) — decorative only, per
+ * docs/CONTEXT.md's "Tracer" entry, never the carrier of a hit/miss outcome (the impact
+ * spark + HP pips are). Reduced motion (WCAG 2.3.3 / GAG §2) omits tracers entirely — an
+ * EMPTY plan, the same posture already ratified for the impact spark.
  */
 export function tracerPaintOps(
   positioned: readonly PositionedTracer[],
@@ -83,5 +84,5 @@ export function tracerPaintOps(
   palette: Palette,
 ): readonly TracerPaintOp[] {
   if (reducedMotion) return [];
-  return positioned.map((p) => ({ x: p.x, y: p.y, colour: palette.tower }));
+  return positioned.map((p) => ({ x: p.x, y: p.y, colour: palette.tracer }));
 }

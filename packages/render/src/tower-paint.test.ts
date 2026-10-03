@@ -1,9 +1,18 @@
-// tower-paint.test.ts — the tower footprint-mark paint-plan (M2-S3): `basic`/`slow`
-// share `palette.tower`'s colour; shape carries the distinction.
+// tower-paint.test.ts — what a tower looks like, keyed on its id: the footprint mark (M2-S3;
+// since the visual pass, which head silhouette and glyph it draws) and the role (T2, #181:
+// which colour that head wears). Shape carries the distinction; the role colour is the
+// second channel.
 
 import { describe, it, expect } from 'vitest';
 import { getBundledRuleset } from '@wynding/content';
-import { towerFootprintMarkFor } from './tower-paint';
+import {
+  TOWER_LOOKS,
+  TOWER_ROLES,
+  towerFootprintMarkFor,
+  towerLookFor,
+  towerLookKey,
+  towerRoleFor,
+} from './tower-paint';
 
 describe('towerFootprintMarkFor — id-keyed footprint mark (total over any string)', () => {
   it('draws basic plain (no extra mark)', () => {
@@ -49,5 +58,80 @@ describe('towerFootprintMarkFor — id-keyed footprint mark (total over any stri
   it('falls back to plain for an unknown id — never throws', () => {
     expect(towerFootprintMarkFor('__proto__')).toBe('plain');
     expect(towerFootprintMarkFor('')).toBe('plain');
+  });
+});
+
+describe('towerRoleFor — id-keyed role (total over any string, T2 #181)', () => {
+  it('pins every shipped tower to its role', () => {
+    expect(
+      Object.fromEntries(
+        [
+          'basic',
+          'slow',
+          'splash',
+          'venom',
+          'stun',
+          'antiair',
+          'beacon',
+          'mine',
+          'frost-splash',
+        ].map((id) => [id, towerRoleFor(id)]),
+      ),
+    ).toEqual({
+      basic: 'damage',
+      slow: 'control',
+      splash: 'damage',
+      venom: 'poison',
+      stun: 'control',
+      antiair: 'air',
+      beacon: 'support',
+      mine: 'burst',
+      'frost-splash': 'control',
+    });
+  });
+
+  it('covers every catalog tower, and every role is some tower’s', () => {
+    // Read off the bundled catalog, so a new tower without a role falls back loudly here
+    // rather than silently wearing `basic`'s colour.
+    const ids = getBundledRuleset().towerCatalog.map((t) => t.id);
+    const known = new Set([
+      'basic',
+      'slow',
+      'splash',
+      'venom',
+      'stun',
+      'antiair',
+      'beacon',
+      'mine',
+      'frost-splash',
+    ]);
+    for (const id of ids) expect(known.has(id), id).toBe(true);
+    expect(new Set(ids.map(towerRoleFor))).toEqual(new Set(TOWER_ROLES));
+  });
+
+  it('falls back like the mark does — an unknown id is `basic` on both axes', () => {
+    for (const id of ['__proto__', 'constructor', '', 'no-such-tower']) {
+      expect(towerRoleFor(id)).toBe(towerRoleFor('basic'));
+      expect(towerLookFor(id)).toEqual(towerLookFor('basic'));
+    }
+  });
+});
+
+describe('TOWER_LOOKS — every look placement can ask for', () => {
+  it('is one look per shipped tower, each distinct, and nothing else', () => {
+    const ids = getBundledRuleset().towerCatalog.map((t) => t.id);
+    expect(TOWER_LOOKS).toHaveLength(ids.length);
+    expect(new Set(TOWER_LOOKS.map(towerLookKey)).size).toBe(ids.length);
+  });
+
+  it('contains the look of any id at all — known, unknown or hostile', () => {
+    const keys = new Set(TOWER_LOOKS.map(towerLookKey));
+    const ids = [...getBundledRuleset().towerCatalog.map((t) => t.id), '', '__proto__', 'x-9'];
+    for (const id of ids) expect(keys.has(towerLookKey(towerLookFor(id))), id).toBe(true);
+  });
+
+  it('names a look by its mark and role', () => {
+    expect(towerLookKey(towerLookFor('frost-splash'))).toBe('ringed-crosshair:control');
+    expect(towerLookKey(towerLookFor('mine'))).toBe('charge:burst');
   });
 });

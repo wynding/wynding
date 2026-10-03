@@ -17,9 +17,13 @@ export { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
 export type { PositionedTracer, TracerPaintOp } from './tracers';
 export { creepShapeFor, creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
 export type { CreepShape, CreepSilhouettePaintOp, SlowTelegraphPaintOp } from './creep-paint';
-export { towerFootprintMarkFor } from './tower-paint';
-export type { TowerFootprintMark } from './tower-paint';
-export { drawFootprintMark } from './board-draw';
+export { towerFootprintMarkFor, towerRoleFor, towerLookFor } from './tower-paint';
+export type { TowerFootprintMark, TowerRole, TowerLook } from './tower-paint';
+// The tower art kit, for the Card swatches (`apps/web/src/swatch.ts`): the same art through
+// the same painter as the board's atlas, so a Card always matches the board.
+export { artGraphics } from './art-paint';
+export type { ArtGraphics, ArtCanvas2DLike, PathFactory } from './art-paint';
+export { paintTowerArt, towerArtFit } from './art-frames';
 export type { GraphicsLike } from './board-draw';
 export type {
   CreepVM,

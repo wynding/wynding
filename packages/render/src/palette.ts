@@ -1,14 +1,16 @@
 // palette.ts — the drawing colours the Phaser scene uses, one set per colourblind
 // mode (GAG §2 / ADR 0003). Pure data + a resolver, so it is unit-tested and the scene
 // stays a dumb consumer. Every semantic role also has a distinct SHAPE cue in the scene
-// (creep = polygon, tower = rounded square, valid ghost = solid outline, invalid = dashed
-// cross); colour is a redundant channel, never the sole carrier of meaning. Palettes are
+// (creep = polygon, tower = a plate with a head of its own silhouette, valid ghost = solid
+// outline, invalid = dashed cross); colour is a redundant channel, never the sole carrier of
+// meaning. Palettes are
 // drawn from Okabe–Ito and Paul Tol colourblind-safe sets and hold the WCAG 1.4.11
 // non-text bar (≥ 3:1) against the dark board floor for every opaque-drawn cue, most
 // pairs well above; enforced permanently by `palette.test.ts`. `border` is a deliberate
 // quiet structural fill excluded from the gate (identity carried by geometry); `spark` is
 // exempt (transient fading FX, non-essential — see `palette.test.ts`).
 
+import type { TowerRole } from './tower-paint';
 import type { ColourMode } from './types';
 
 /** The concrete colours (0xRRGGBB) the scene draws with for one colour mode. */
@@ -22,8 +24,33 @@ export interface Palette {
   /** Creep silhouette + its health pip. */
   readonly creep: number;
   readonly creepLowHp: number;
-  /** Tower footprint fill and its range ring stroke. */
+  /** The tower plate's RIM (visual pass, #181) — the outline that carries a tower's 2×2
+   *  footprint edge. The plate itself (`plate`) is only ~1.28:1 against the floor, so the rim
+   *  is what the floor gate guards: `tower` is in `palette.test.ts`'s opaque set, ≥ 3:1
+   *  against the floor in every mode, and a pending build's dashed rim draws in it too. Until
+   *  the visual pass this key was the whole tower body's fill; it kept the name so the gate
+   *  that held the footprint edge keeps holding it. */
   readonly tower: number;
+  /** The tower plate's fill — the slate every tower but the mine stands on. Deliberately
+   *  quiet against the floor (the rim carries the edge); what the gate holds is every ROLE
+   *  colour ≥ 3:1 against it, since a head and its glyph-free role strokes are drawn on it. */
+  readonly plate: number;
+  /** The six tower ROLE colours (T2, `TowerRole` in `tower-paint.ts`) — the colour of a
+   *  tower's head, the second channel beside its silhouette. Gated in every mode against the
+   *  floor and the plate (≥ 3:1) and for DISTINCTNESS under each mode's own simulated
+   *  colour-vision deficiency (`palette.test.ts`), so each mode re-tunes them. Read them
+   *  through `roleColour`. */
+  readonly roleDamage: number;
+  readonly roleControl: number;
+  readonly rolePoison: number;
+  readonly roleAir: number;
+  readonly roleSupport: number;
+  readonly roleBurst: number;
+  /** The in-flight shot dot (`tracerPaintOps`). It drew in the tower body's colour until the
+   *  visual pass gave `tower` to the plate rim; it keeps that colour here, unchanged, until
+   *  shots get their own look. */
+  readonly tracer: number;
+  /** The range ring stroke. */
   readonly range: number;
   /** Build-ghost valid / invalid cues (paired with distinct shapes in the scene). */
   readonly ghostValid: number;
@@ -71,13 +98,12 @@ export interface Palette {
    *  `range`'s ghost-preview stroke rather than dropped into the opaque set
    *  (`palette.test.ts`).
    *
-   *  It is deliberately NOT the colour of the buffed-recipient ✦. That mark is drawn
-   *  ON a tower body, and near-white is the only band clearing 3:1 against `tower` in
-   *  the default table (measured — pale lavender is 1.89:1 there) — a luminance
-   *  sandwich of exactly the kind `stunned`'s comment documents. So the ✦ follows the
-   *  footprint-mark precedent instead and strokes `floor` against the solid `tower`
-   *  fill, the way `'ringed'`/`'crosshair'`/`'droplet'` already do; shape and position
-   *  carry the distinction, per ADR 0003's primary channel. */
+   *  Since the visual pass it is also the colour of the BOOST GLOW — the two rings around
+   *  the head of a tower a beacon boosts (`BOOST_ART`, `tower-art.ts`), which replaced the
+   *  buffed-recipient ✦. The glow is drawn on the plate, where `aura` clears 3:1 with room
+   *  to spare (gated composited at `BOOST_RING_ALPHA`, `palette.test.ts`) — the reason the
+   *  ✦ could not wear this colour (it was drawn on the old green body, where pale lavender
+   *  measured 1.89:1) no longer applies. */
   readonly aura: number;
 }
 
@@ -90,7 +116,19 @@ const DEFAULT: Palette = {
   exit: 0xe69f00, // orange
   creep: 0xf0e442, // yellow
   creepLowHp: 0xd55e00, // vermillion (low-HP tint; pip length also shrinks)
-  tower: 0x009e73, // bluish green
+  // The plate rim: a light slate, neutral on every colour-vision axis, so one value serves
+  // every mode — 4.08:1 against the floor (and 3.19:1 against the plate it outlines).
+  tower: 0x707f9c,
+  plate: 0x283245, // the style frame's slate
+  // The style frame's role colours. Every mode below re-tunes them for its own deficiency;
+  // these are the ones normal colour vision sees.
+  roleDamage: 0xf4a940, // amber
+  roleControl: 0x8fd3ff, // ice blue
+  rolePoison: 0xd58bd6, // orchid
+  roleAir: 0x3ccfa6, // sea green
+  roleSupport: 0xe8eef7, // near-white
+  roleBurst: 0xff6a3d, // red-orange
+  tracer: 0x009e73, // bluish green — the tower body's colour before the visual pass
   range: 0xcc79a7, // reddish purple
   ghostValid: 0x009e73,
   ghostInvalid: 0xd55e00,
@@ -116,15 +154,22 @@ const DEFAULT: Palette = {
   // Warm gold (M2-S6) — reads as "protected". Gated against the floor and by pairwise
   // distinctness (`palette.test.ts`), not by contrast against the creep fill: the ward
   // ring draws OUTSIDE the silhouette at r×2.2 and so is never over the creep body.
-  // It IS drawn over `tower` at 2.37:1 when a warded creep paths across a footprint (the
-  // ring spans ~1.54 cells). That is the same posture every sibling cue already has —
-  // `poisoned`'s pips at r×1.8 overlap footprints too, and are gated against `tower` by
+  // It IS drawn over a tower when a warded creep paths across a footprint (the ring spans
+  // ~1.54 cells). Since the visual pass that surface is mostly the plate (8.91:1); the thin
+  // rim (`tower`) measures 2.79:1 and the light role-coloured heads as little as 1.12:1
+  // (default control). That is the same posture every sibling cue already has — `poisoned`'s
+  // pips at r×1.8 overlap footprints too, and are gated against the tower's surfaces by
   // byte-DISTINCTNESS, not contrast — so it is consistent rather than a new hole, but the
   // cue-radius layout as a whole is owed a pass.
   warded: 0xffd23f,
   // Pale ice-blue (M2-S7) — distinct from every other cue in this table, and gated on
-  // contrast against BOTH surfaces it is actually drawn over: the floor (14.82:1) and
-  // `tower` (3.08:1 default, 4.67:1 protan/deutan) — see `palette.test.ts`.
+  // contrast against the surfaces it is actually drawn over: the floor (14.82:1) and, since
+  // the visual pass drew towers as a plate with a head, the plate (11.59:1) and its rim
+  // `tower` (3.63:1) — see `palette.test.ts`. The light role-coloured HEADS it can also
+  // cross are not gated and cannot be: the wingspan clears none of the light ones (1.05:1
+  // over the default support white), and no single colour clears both them and the dark
+  // plate — a residual recorded in docs/accessibility-checklist.md, carried by shape, with
+  // the cue's own redraw (C4) to come.
   //
   // WHY IT IS NOT THE ELECTRIC CYAN THIS SHIPPED AS FIRST (0x33ccff): that measured
   // 1.83:1 against `tower` 0x009e73 and 2.77:1 against 0x0072b2, both under this repo's
@@ -141,9 +186,9 @@ const DEFAULT: Palette = {
   // `stunned` is 0xfffff5, so airborne-vs-stunned is ~1.10:1 — perceptually one
   // near-white. There is no override that fixes it: clearing the ENFORCED ≥3:1 gate
   // against `tower` needs a very light colour, and every candidate that separates from
-  // `stunned` falls under it (measured: 0x9ad0ff → 2.09 vs tower, 0xb0d8ff → 2.30,
-  // 0x8fb8f0 → 1.68). Choosing separation here would trade an enforced gate for an
-  // unenforced one. Shape carries the distinction instead, decisively and per ADR 0003's
+  // `stunned` falls under it (measured against the old green body: 0x9ad0ff → 2.09,
+  // 0xb0d8ff → 2.30, 0x8fb8f0 → 1.68; against today's plate rim: 2.47, 2.71, 1.98).
+  // Choosing separation here would trade an enforced gate for an unenforced one. Shape carries the distinction instead, decisively and per ADR 0003's
   // primary channel: a stun jolt is a RING at r×1.15; the airborne cue is two line
   // strokes whose NEAREST point is r×3.23 (the wingtips), over a cell out from the creep
   // centre — a separation no near-white pair can erase. Restated from the `airborne` key
@@ -172,7 +217,18 @@ const DEFAULT: Palette = {
 const PROTAN_DEUTAN: Palette = {
   ...DEFAULT,
   creepLowHp: 0xe69f00,
-  tower: 0x0072b2, // blue (avoids the red–green axis)
+  // The role colours, re-tuned so the six stay apart under BOTH simulated protanopia and
+  // deuteranopia (min ΔE76 31.79 / 31.38; the default six fall to 20.40 / 11.23 there,
+  // amber and red-orange collapsing first). Same families, separated by LIGHTNESS, the axis
+  // these deficiencies keep: a bright amber against a darker red-orange, a darker plum
+  // against the light ice blue, and the support white at full brightness.
+  roleDamage: 0xffb618,
+  roleControl: 0x82cdff,
+  rolePoison: 0xb8649c,
+  roleAir: 0x58cb93,
+  roleSupport: 0xfcffff,
+  roleBurst: 0xe75933,
+  tracer: 0x0072b2, // blue — the tower body's colour in this mode before the visual pass
   ghostValid: 0x0072b2,
   ghostInvalid: 0xe69f00,
 };
@@ -181,6 +237,14 @@ const PROTAN_DEUTAN: Palette = {
 // Only the keys that actually differ from DEFAULT are overridden.
 const TRITAN: Palette = {
   ...DEFAULT,
+  // The role colours re-tuned for simulated tritanopia (min ΔE76 33.01; the default six fall
+  // to 14.47 there, ice blue and sea green collapsing first): the blue-side roles move to a
+  // periwinkle, a violet and a mint, and support warms to a pale blush. Amber and red-orange
+  // already sit on the axis this deficiency keeps, and stay.
+  roleControl: 0xa9bbff,
+  rolePoison: 0xb278db,
+  roleAir: 0x4ce0ae,
+  roleSupport: 0xffe3e2,
   entrance: 0x009e73,
   exit: 0xd55e00,
   creep: 0xcc79a7, // magenta
@@ -188,9 +252,10 @@ const TRITAN: Palette = {
   // Yellow here, not DEFAULT's reddish purple: this mode gives `creep` the magenta
   // 0xcc79a7, and a telegraph byte-identical to a creep body would be no cue at all.
   // What this buys, stated precisely (QC round 2 measured it): yellow separates well
-  // from the BACKGROUNDS a pip is actually drawn over — this mode's bluish-green
-  // `tower` and the dark `floor` — which is the collision that made the first draft
-  // unusable. It does NOT separate strongly from this mode's magenta `creep` under
+  // from the BACKGROUNDS a pip is actually drawn over — the dark `floor`, and what was
+  // then this mode's bluish-green tower body (today a tower is the slate `plate`, 9.73:1,
+  // its rim, 3.05:1, and its role-coloured head) — which is the collision that made the
+  // first draft unusable. It does NOT separate strongly from this mode's magenta `creep` under
   // simulated tritanopia; the pips sit outside the silhouette at r*1.8 so they are not
   // drawn ON it, and the always-on SHAPE cue carries the state regardless, colour being
   // the redundant channel per the Telegraph glossary. The gate below is byte-equality,
@@ -229,4 +294,22 @@ export const COLOUR_MODES = Object.keys(PALETTES) as ColourMode[];
 /** The palette for a colour mode (falls back to the base palette for an unknown mode). */
 export function resolvePalette(mode: ColourMode): Palette {
   return PALETTES[mode] ?? DEFAULT;
+}
+
+/** The colour of a tower of `role` in `pal` — the one place a role becomes a palette key. */
+export function roleColour(pal: Palette, role: TowerRole): number {
+  switch (role) {
+    case 'damage':
+      return pal.roleDamage;
+    case 'control':
+      return pal.roleControl;
+    case 'poison':
+      return pal.rolePoison;
+    case 'air':
+      return pal.roleAir;
+    case 'support':
+      return pal.roleSupport;
+    case 'burst':
+      return pal.roleBurst;
+  }
 }

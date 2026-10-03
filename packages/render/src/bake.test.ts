@@ -15,19 +15,29 @@ import {
   ATLAS_MAX_WIDTH,
   MIN_BAKE_SCALE,
 } from './bake';
-import { atlasFrameSpecs } from './art-frames';
+import { atlasFrameSpecs, PLATE_FRAME_KEY } from './art-frames';
+import type { ArtCanvas2DLike } from './art-paint';
 import { boardPaintOps } from './board-cells';
-import type { Canvas2DLike } from './canvas-graphics';
 import { resolvePalette } from './palette';
 
-type Op = { op: string; args: unknown[] };
+type Op = { op: string; args: unknown[]; composite?: GlobalCompositeOperation };
 
-function fakeContext(): Canvas2DLike & { ops: Op[] } {
+/** A recording 2D context — the slice the art painter draws through, which includes the
+ *  board bake's. Every fill and stroke records the composite operation it ran under, and
+ *  `save`/`restore` stack that operation as a real context does. */
+function fakeContext(): ArtCanvas2DLike & { ops: Op[] } {
   const ops: Op[] = [];
+  let composite: GlobalCompositeOperation = 'source-over';
+  const saved: GlobalCompositeOperation[] = [];
   const call =
     (op: string) =>
     (...args: unknown[]): void => {
       ops.push({ op, args });
+    };
+  const draw =
+    (op: string) =>
+    (...args: unknown[]): void => {
+      ops.push({ op, args, composite });
     };
   const ctx = {
     ops,
@@ -36,21 +46,62 @@ function fakeContext(): Canvas2DLike & { ops: Op[] } {
     lineWidth: 1,
     lineCap: 'butt' as CanvasLineCap,
     lineJoin: 'miter' as CanvasLineJoin,
+    get globalCompositeOperation(): GlobalCompositeOperation {
+      return composite;
+    },
+    set globalCompositeOperation(v: GlobalCompositeOperation) {
+      composite = v;
+    },
     beginPath: call('beginPath'),
     closePath: call('closePath'),
     moveTo: call('moveTo'),
     lineTo: call('lineTo'),
     arc: call('arc'),
+    ellipse: call('ellipse'),
     rect: call('rect'),
-    fill: call('fill'),
-    stroke: call('stroke'),
-    fillRect: call('fillRect'),
-    save: call('save'),
-    restore: call('restore'),
+    fill: draw('fill'),
+    stroke: draw('stroke'),
+    fillRect: draw('fillRect'),
+    setLineDash: call('setLineDash'),
+    transform: call('transform'),
+    save: (...args: unknown[]): void => {
+      saved.push(composite);
+      ops.push({ op: 'save', args });
+    },
+    restore: (...args: unknown[]): void => {
+      composite = saved.pop() ?? composite;
+      ops.push({ op: 'restore', args });
+    },
     setTransform: call('setTransform'),
     clip: call('clip'),
   };
   return ctx;
+}
+
+/** A stand-in `Path2D` factory: the "path" carries the string it was made from. */
+const makePath = (d: string): Path2D => ({ d }) as unknown as Path2D;
+
+/** Each frame's ops, split where the context's save/restore nesting returns to the top —
+ *  the bake opens one save per frame and every art call nests its own inside it. */
+function frameSegments(ops: readonly Op[]): Op[][] {
+  const segments: Op[][] = [];
+  let depth = 0;
+  let current: Op[] = [];
+  for (const o of ops) {
+    current.push(o);
+    if (o.op === 'save') depth++;
+    if (o.op === 'restore') {
+      depth--;
+      expect(depth).toBeGreaterThanOrEqual(0);
+      if (depth === 0) {
+        segments.push(current);
+        current = [];
+      }
+    }
+  }
+  expect(depth).toBe(0);
+  expect(current).toEqual([]);
+  return segments;
 }
 
 const PAL = resolvePalette('default');
@@ -128,9 +179,10 @@ describe('layoutAtlas', () => {
     expect(cramped.scale).toBeLessThan(2);
     expect(cramped.width).toBeLessThanOrEqual(512);
     expect(cramped.height).toBeLessThanOrEqual(512);
-    // The frames are sized for the scale actually used.
+    // The frames are sized for the scale actually used: the plate frame spans its footprint
+    // (its offset shadow reaches the footprint's right edge, no further) plus the pad.
     expect(cramped.frames.size).toBe(roomy.frames.size);
-    const frame = cramped.frames.get('tower:plain:committed')!;
+    const frame = cramped.frames.get(PLATE_FRAME_KEY)!;
     expect(frame.width).toBe(Math.ceil(60 * 2 * cramped.scale) + 4);
   });
 });
@@ -139,42 +191,83 @@ describe('paintAtlas', () => {
   it('paints each frame clipped to its own rectangle, in frame-local CSS px scaled to texels', () => {
     const layout = layoutAtlas(10, 2, 4096);
     const ctx = fakeContext();
-    paintAtlas(ctx, layout, PAL);
-    const clipRects = ctx.ops
-      .map((o, i) => ({ o, i }))
-      .filter(({ o }) => o.op === 'clip')
-      .map(({ i }) => ctx.ops[i - 1]!);
-    expect(clipRects).toHaveLength(layout.frames.size);
+    paintAtlas(ctx, layout, PAL, makePath);
     const frames = [...layout.frames.values()];
-    clipRects.forEach((rect, i) => {
+    // One top-level save/restore per frame, every nested save inside it restored too — so
+    // no frame's clip, transform or composite operation leaks into the next.
+    const segments = frameSegments(ctx.ops);
+    expect(segments).toHaveLength(frames.length);
+    segments.forEach((ops, i) => {
       const f = frames[i]!;
-      expect(rect).toEqual({ op: 'rect', args: [f.x, f.y, f.width, f.height] });
+      const clip = ops.findIndex((o) => o.op === 'clip');
+      expect(ops[clip - 1]).toEqual({ op: 'rect', args: [f.x, f.y, f.width, f.height] });
+      // The clip is set in texels; then the transform scales CSS px to texels at the
+      // frame's corner.
+      const transforms = ops.filter((o) => o.op === 'setTransform').map((o) => o.args);
+      expect(transforms.slice(0, 2)).toEqual([
+        [1, 0, 0, 1, 0, 0],
+        [2, 0, 0, 2, f.x, f.y],
+      ]);
+      expect(ops.findIndex((o) => o.op === 'setTransform')).toBeLessThan(clip);
     });
-    // After each clip, the transform scales CSS px to texels at the frame's corner.
-    const transforms = ctx.ops.filter((o) => o.op === 'setTransform').map((o) => o.args);
-    frames.forEach((f, i) => {
-      expect(transforms[i * 2]).toEqual([1, 0, 0, 1, 0, 0]); // the clip is set in texels
-      expect(transforms[i * 2 + 1]).toEqual([2, 0, 0, 2, f.x, f.y]);
-    });
-    // Every save is restored, so no frame's clip or transform leaks into the next.
-    expect(ctx.ops.filter((o) => o.op === 'save')).toHaveLength(frames.length);
-    expect(ctx.ops.filter((o) => o.op === 'restore')).toHaveLength(frames.length);
   });
 
   it('paints every frame’s art — a batched rect included — before its clip is restored', () => {
     const layout = layoutAtlas(10, 1, 4096);
     const ctx = fakeContext();
-    paintAtlas(ctx, layout, PAL);
+    paintAtlas(ctx, layout, PAL, makePath);
     // The square silhouette is a single opaque fillRect, held in the adapter's batch: it
     // must be flushed inside its own frame, before that frame's restore.
     const keys = [...layout.frames.keys()];
-    const squareIndex = keys.indexOf('creep:square:normal:standard');
-    const restores = ctx.ops.map((o, i) => (o.op === 'restore' ? i : -1)).filter((i) => i >= 0);
-    const end = restores[squareIndex]!;
-    const start = squareIndex === 0 ? 0 : restores[squareIndex - 1]!;
-    const inFrame = ctx.ops.slice(start, end).map((o) => o.op);
+    const inFrame = frameSegments(ctx.ops)[keys.indexOf('creep:square:normal:standard')]!.map(
+      (o) => o.op,
+    );
     expect(inFrame).toContain('rect');
     expect(inFrame.lastIndexOf('fill')).toBeGreaterThan(inFrame.lastIndexOf('rect'));
+  });
+
+  it('hands every art path string to the Path2D factory, and draws the path it gets back', () => {
+    const layout = layoutAtlas(10, 1, 4096);
+    const ctx = fakeContext();
+    const made: string[] = [];
+    paintAtlas(ctx, layout, PAL, (d) => {
+      made.push(d);
+      return makePath(d);
+    });
+    expect(made.length).toBeGreaterThan(0);
+    const drawn = ctx.ops
+      .filter((o) => (o.op === 'fill' || o.op === 'stroke') && o.args.length > 0)
+      .map((o) => (o.args[0] as { d: string }).d);
+    expect(new Set(drawn)).toEqual(new Set(made));
+  });
+
+  it('fades a pending build inside its own frame, and draws its dashed rim after at full strength', () => {
+    const layout = layoutAtlas(10, 1, 4096);
+    const ctx = fakeContext();
+    paintAtlas(ctx, layout, PAL, makePath);
+    const keys = [...layout.frames.keys()];
+    const segments = frameSegments(ctx.ops);
+    keys.forEach((key, i) => {
+      const ops = segments[i]!;
+      const drawn = ops.filter((o) => o.composite !== undefined);
+      const fades = drawn.filter((o) => o.composite === 'destination-in');
+      // Only a pending build fades: ONE fillRect, after its frame's clip is set...
+      if (!key.startsWith('tower:pending:')) {
+        expect(fades, key).toEqual([]);
+        return;
+      }
+      expect(fades, key).toHaveLength(1);
+      expect(fades[0]!.op).toBe('fillRect');
+      expect(ops.indexOf(fades[0]!)).toBeGreaterThan(ops.findIndex((o) => o.op === 'clip'));
+      // ...and everything drawn after it — the dashed rim — composites normally again, so
+      // the rim is painted over the faded picture rather than cutting into it.
+      const after = drawn.slice(drawn.indexOf(fades[0]!) + 1);
+      expect(
+        after.some((o) => o.op === 'stroke'),
+        key,
+      ).toBe(true);
+      for (const o of after) expect(o.composite, key).toBe('source-over');
+    });
   });
 });
 

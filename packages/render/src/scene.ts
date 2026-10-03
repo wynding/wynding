@@ -32,7 +32,14 @@ import {
   paintBoard,
   type AtlasLayout,
 } from './bake';
-import { placeCreeps, placeTowers, snapToDevicePx, type SpritePlacement } from './placement';
+import {
+  placeCreeps,
+  placeScorches,
+  placeTowers,
+  snapToDevicePx,
+  type SpritePlacement,
+} from './placement';
+import { createScorchTracker } from './scorches';
 import { layerDepth } from './layers';
 import type { RenderVM, RenderOverlay, RenderHandle, ColourMode, SparkPoint } from './types';
 
@@ -215,10 +222,14 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   };
   // A bake that cannot get a canvas warns once per failing streak, not once per frame.
   let bakeFailing = false;
-  const towerPool: SpritePool = { depth: layerDepth('towers'), images: [], frames: [] };
+  const scorchPool: SpritePool = { depth: layerDepth('scorches'), images: [], frames: [] };
+  const platePool: SpritePool = { depth: layerDepth('plates'), images: [], frames: [] };
+  const headPool: SpritePool = { depth: layerDepth('heads'), images: [], frames: [] };
   const pendingPool: SpritePool = { depth: layerDepth('pending'), images: [], frames: [] };
   const creepPool: SpritePool = { depth: layerDepth('creeps'), images: [], frames: [] };
-  const pools = [towerPool, pendingPool, creepPool];
+  const pools = [scorchPool, platePool, headPool, pendingPool, creepPool];
+  // Where mines went off, fading (`scorches.ts`) — fed every frame, reset with the run.
+  const scorchTracker = createScorchTracker();
 
   const maxTextureSize = (): number => {
     const renderer = game.renderer;
@@ -283,7 +294,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     }
     bakeFailing = false;
     paintBoard(boardCanvas.ctx, boardPaintOps(geometry, pal), geometry, cellPx, board);
-    paintAtlas(atlasCanvas.ctx, layout, pal);
+    paintAtlas(atlasCanvas.ctx, layout, pal, (d) => new Path2D(d));
 
     // `addImage` accepts any canvas-image source at runtime (Phaser's TextureSource detects
     // a canvas and uploads it as one); its type names only HTMLImageElement. It returns null
@@ -321,8 +332,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     atlas = layout;
   };
 
-  /** Show `placements` on `pool`'s sprites — sprite `i` gets placement `i` — creating
-   *  sprites as the count grows and hiding the ones beyond it. */
+  /** Show `placements` on `pool`'s sprites — sprite `i` gets placement `i`, at its alpha —
+   *  creating sprites as the count grows and hiding the ones beyond it. */
   const syncPool = (
     scene: Phaser.Scene,
     pool: SpritePool,
@@ -338,7 +349,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
             .image(p.x, p.y, key, p.frame)
             .setOrigin(0, 0)
             .setScale(1 / scale)
-            .setDepth(pool.depth),
+            .setDepth(pool.depth)
+            .setAlpha(p.alpha ?? 1),
         );
         pool.frames.push(p.frame);
         return;
@@ -347,6 +359,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
         image.setFrame(p.frame);
         pool.frames[i] = p.frame;
       }
+      const alpha = p.alpha ?? 1;
+      if (image.alpha !== alpha) image.setAlpha(alpha);
       image.setPosition(p.x, p.y);
       if (!image.visible) image.setVisible(true);
     });
@@ -507,18 +521,32 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     shells.clear();
     effects.clear();
     cues.clear();
-    // shells — under every tower body.
+    // ONE render-time derivation per frame, shared by tracers, scorches and the telegraph
+    // pulse (CodeRabbit #73) — the "one clock" invariant is structural, not calls that
+    // happen to agree.
+    const renderTimeTicks = renderTimeOf(prevVm, curVm, alpha);
+    // scorches — on the floor, under everything a tower draws.
+    scorchTracker.update({
+      tracers: overlay.tracers,
+      sparks: overlay.sparks,
+      towers: curVm.towers,
+      renderTick: renderTimeTicks,
+    });
+    const scorchSprites = placeScorches(
+      scorchTracker.live(renderTimeTicks),
+      projection,
+      atlas.frames,
+    );
+    syncPool(scene, scorchPool, scorchSprites, atlasKey, atlas.scale);
+    // shells — under every tower.
     drawAuraShells(shells, pal, curVm, overlay, projection);
-    // towers, pending — atlas sprites.
+    // plates, heads, pending — atlas sprites.
     const towers = placeTowers(curVm, overlay, projection, atlas.frames);
-    syncPool(scene, towerPool, towers.committed, atlasKey, atlas.scale);
+    syncPool(scene, platePool, towers.plates, atlasKey, atlas.scale);
+    syncPool(scene, headPool, towers.heads, atlasKey, atlas.scale);
     syncPool(scene, pendingPool, towers.pending, atlasKey, atlas.scale);
     // effects — the selection cue, then tracers.
     drawSelection(effects, pal, overlay, projection);
-    // ONE render-time derivation per frame, shared by tracers and the telegraph pulse
-    // (CodeRabbit #73) — the "one clock" invariant is structural, not two calls that
-    // happen to agree.
-    const renderTimeTicks = renderTimeOf(prevVm, curVm, alpha);
     drawTracers(effects, pal, overlay, renderTimeTicks, interpolatedById);
     // creeps — atlas sprites, in creep order.
     const creeps = placeCreeps(interpolated, pal, projection, atlas.frames);
@@ -538,6 +566,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     reset(): void {
       sparks.length = 0;
       preReady.length = 0;
+      scorchTracker.reset();
       shells?.clear();
       effects?.clear();
       cues?.clear();
