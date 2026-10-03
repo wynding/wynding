@@ -1197,5 +1197,9 @@ describe('render barrel', () => {
     expect(barrel.towerLookFor).toBeTypeOf('function');
     expect(barrel.artGraphics).toBeTypeOf('function');
     expect(barrel.paintTowerArt).toBeTypeOf('function');
+    // What the e2e pixel specs sample the art through (`hidpi`, `touch`, `arming`).
+    expect(barrel.roleColour).toBeTypeOf('function');
+    expect(barrel.towerRoleFor).toBeTypeOf('function');
+    expect(barrel.towerArtFit).toBeTypeOf('function');
   });
 });

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { createProjection, resolvePalette } from '@wynding/render';
+import { createProjection, resolvePalette, roleColour, towerRoleFor } from '@wynding/render';
 import { GRID } from './layout-probe';
 
 // HiDPI backing-store gates (#28/P5). Runs ONLY under the chromium-dpr1/2/3 projects
@@ -224,9 +224,9 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       }, 'first frame painted: neighbour cell reads as pal.floor')
       .toBe(true);
 
-    // Press Start first (PLAN.md P4): a build on a held run is Pending (rendered as an
-    // outline, not the filled `pal.tower` this test samples) — the run must actually be
-    // stepping for the build to commit and paint solid.
+    // Press Start first (PLAN.md P4): a build on a held run is Pending (drawn translucent,
+    // not the solid art this test samples) — the run must actually be stepping for the
+    // build to commit and paint solid.
     await page.getByRole('button', { name: 'Start' }).click();
 
     // Desktop input is armed-click-to-place (PLAN.md P2): arm the Card first, then a
@@ -234,22 +234,31 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     await page.getByRole('button', { name: /Basic Tower/ }).click();
     await page.mouse.click(box.x + targetPx.x + cellPx / 2, box.y + targetPx.y + cellPx / 2);
 
-    // The build paints on a later animation frame — poll the tower centre until it
-    // reads as pal.tower, keeping the last decoded screenshot for the assertions below.
+    // Two points the basic tower's art guarantees (`tower-art.ts`, a 64-unit box over the
+    // 2×2 footprint, so one design unit is cellPx / 32 CSS px):
+    //  - its HEAD: a role-coloured ring around an ink core, 3.6 to 11.5 units from the
+    //    footprint centre — sampled 7.5 units straight below the centre (the barrel points
+    //    up), in basic's role colour;
+    //  - its PLATE: the slate inside the rim, at (12, 50) — 8 units in from the rim's inner
+    //    edge, 13 from the head.
+    const unit = cellPx / 32;
+    const ringPoint = { x: targetPx.x + 32 * unit, y: targetPx.y + 39.5 * unit };
+    const platePoint = { x: targetPx.x + 12 * unit, y: targetPx.y + 50 * unit };
+    const roleRgb = toRgb(roleColour(pal, towerRoleFor('basic')));
+
+    // The build paints on a later animation frame — poll the head's ring until it reads
+    // as basic's role colour, keeping the last decoded screenshot for the assertions below.
     let png!: PNG;
     await expect
       .poll(async () => {
         const buf = await page.screenshot({ clip, scale: 'css' });
         png = PNG.sync.read(buf);
-        return closeTo(
-          sampleCssPoint(png, clipX, clipY, targetPx.x + cellPx, targetPx.y + cellPx),
-          toRgb(pal.tower),
-        );
-      }, 'build painted: tower centre reads as pal.tower')
+        return closeTo(sampleCssPoint(png, clipX, clipY, ringPoint.x, ringPoint.y), roleRgb);
+      }, 'build painted: the head’s ring reads as basic’s role colour')
       .toBe(true);
 
-    // Centre of the built tower's 2×2 footprint (the shared corner of the four cells).
-    const towerCentre = sampleCssPoint(png, clipX, clipY, targetPx.x + cellPx, targetPx.y + cellPx);
+    const ringSample = sampleCssPoint(png, clipX, clipY, ringPoint.x, ringPoint.y);
+    const plateSample = sampleCssPoint(png, clipX, clipY, platePoint.x, platePoint.y);
     // Same offset applied to the untouched neighbour cell — must still read as floor.
     const neighbourSample = sampleCssPoint(
       png,
@@ -259,9 +268,17 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       neighbourPx.y + cellPx / 2,
     );
 
-    expect(closeTo(towerCentre, toRgb(pal.tower)), `tower sample ${towerCentre.join(',')}`).toBe(
+    expect(closeTo(ringSample, roleRgb), `head sample ${ringSample.join(',')}`).toBe(true);
+    // The plate is deliberately quiet against the floor (its rim carries the edge), so the
+    // plate sample must match the plate AND not pass for the floor — at the ±24 tolerance
+    // the two are told apart by the blue channel alone (69 against 42).
+    expect(closeTo(plateSample, toRgb(pal.plate)), `plate sample ${plateSample.join(',')}`).toBe(
       true,
     );
+    expect(
+      closeTo(plateSample, toRgb(pal.floor)),
+      `plate sample ${plateSample.join(',')} must not read as floor`,
+    ).toBe(false);
     expect(
       closeTo(neighbourSample, toRgb(pal.floor)),
       `neighbour sample ${neighbourSample.join(',')} should still be floor`,

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createProjection } from '@wynding/render';
+import { createProjection, resolvePalette, towerArtFit } from '@wynding/render';
 import { FOCUS_RGB, GRID, edgeColours, type Rect } from './layout-probe';
 
 // arming.spec.ts — the ARMED state's chrome, measured in a real browser (#69). Pressing a
@@ -156,45 +156,86 @@ test.describe('arming via hotkey — Standard layout', () => {
     expect(fit.scrollTop, 'arming must not scroll the Rail').toBe(0);
 
     // The swatches actually PAINTED — their unit seam is deliberately null-context inert
-    // (vitest.setup.ts), so this is the one gate that proves the real canvas path runs.
-    // Sampled on the SLOW card (index 1), whose 'ringed' mark strokes the ground colour
-    // back INSIDE the body — witnessing that the shared dispatch ran, which the mark-less
-    // basic tile could never do (its ground + body survive a dispatch deletion).
-    const swatch = await page.evaluate(() => {
-      const canvas = document.querySelectorAll('.wy-card-swatch')[1] as HTMLCanvasElement;
-      const ctx = canvas.getContext('2d');
-      if (ctx === null) return null;
-      const { width: w, height: h } = canvas;
-      const data = ctx.getImageData(0, 0, w, h).data;
-      const px = (x: number, y: number): string => {
-        const i = (y * w + x) * 4;
-        return `${data[i]},${data[i + 1]},${data[i + 2]}`;
-      };
-      const colours = new Set<string>();
-      for (let i = 0; i < data.length; i += 4)
-        colours.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
-      const ground = px(1, 1);
-      // The ring crosses the centre row at cx ± 0.22·size — scan the middle band for a
-      // ground-coloured pixel INSIDE the body (the stroke's core beats antialiasing).
-      let markPixel = false;
-      const cy = Math.floor(h / 2);
-      for (let x = Math.floor(w * 0.25); x < Math.floor(w * 0.75); x++) {
-        if (px(x, cy) === ground) {
-          markPixel = true;
-          break;
-        }
-      }
-      return { colours: colours.size, markPixel };
-    });
-    expect(swatch, 'a real browser must hand the swatch a 2D context').not.toBeNull();
-    expect(
-      swatch!.colours,
-      'the glyph swatch must be painted (ground + body at minimum)',
-    ).toBeGreaterThanOrEqual(2);
-    expect(
-      swatch!.markPixel,
-      "slow's ring must stroke the ground colour inside the body — the dispatch ran",
-    ).toBe(true);
+    // (vitest.setup.ts), so this is the one gate that proves the real canvas path runs. Each
+    // tile is the tower's own art (`paintTowerArt`): its head in its ROLE colour, its glyph
+    // in ink. Read on the BASIC card (index 0, damage) and the SLOW card (index 1, control):
+    // each wears its own role colour and not the other's — witnessing that the per-tower
+    // look dispatch ran, not one shared picture — and slow's head shows its ringed glyph:
+    // within 4.5 CSS px of the head's centre (the ring's 3.4 px radius, well inside the
+    // star's notches at ~6 px) a dark ring pixel sits between control-coloured head on
+    // opposite sides of it.
+    const pal = resolvePalette('default');
+    const rgb = (hex: number): [number, number, number] => [
+      (hex >> 16) & 0xff,
+      (hex >> 8) & 0xff,
+      hex & 0xff,
+    ];
+    const tileFit = towerArtFit(36); // the tile's fit (`swatch.ts`, SWATCH_SIZE_PX)
+    const headCentre = {
+      x: tileFit.x + tileFit.footprintPx / 2,
+      y: tileFit.y + tileFit.footprintPx / 2,
+    };
+    const read = (index: number) =>
+      page.evaluate(
+        ({ index, damage, control, centre }) => {
+          const canvas = document.querySelectorAll('.wy-card-swatch')[index] as HTMLCanvasElement;
+          const ctx = canvas.getContext('2d');
+          if (ctx === null) return null;
+          const { width: w, height: h } = canvas;
+          const data = ctx.getImageData(0, 0, w, h).data;
+          const at = (x: number, y: number): number => (y * w + x) * 4;
+          const near = (i: number, c: readonly number[]): boolean =>
+            [0, 1, 2].every((k) => Math.abs((data[i + k] as number) - (c[k] as number)) <= 24);
+          const colours = new Set<string>();
+          let damagePx = 0;
+          let controlPx = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            colours.add(`${data[i]},${data[i + 1]},${data[i + 2]}`);
+            if (near(i, damage)) damagePx++;
+            if (near(i, control)) controlPx++;
+          }
+          const s = w / 36; // device px per CSS px
+          const cx = centre.x * s;
+          const cy = centre.y * s;
+          const radius = 4.5 * s;
+          const reach = Math.ceil(3 * s);
+          const head = (x: number, y: number): boolean =>
+            x >= 0 && y >= 0 && x < w && y < h && near(at(x, y), control);
+          const run = (x: number, y: number, dx: number, dy: number): boolean => {
+            for (let k = 1; k <= reach; k++) if (head(x + dx * k, y + dy * k)) return true;
+            return false;
+          };
+          let ringDip = false;
+          for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y++) {
+            for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x++) {
+              if (x < 0 || y < 0 || x >= w || y >= h) continue;
+              if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > radius) continue;
+              // At least 80 darker in green than the control colour: the ring's ink.
+              if ((data[at(x, y) + 1] as number) > (control[1] as number) - 80) continue;
+              if ((run(x, y, -1, 0) && run(x, y, 1, 0)) || (run(x, y, 0, -1) && run(x, y, 0, 1))) {
+                ringDip = true;
+              }
+            }
+          }
+          return { colours: colours.size, damagePx, controlPx, ringDip };
+        },
+        {
+          index,
+          damage: rgb(pal.roleDamage),
+          control: rgb(pal.roleControl),
+          centre: headCentre,
+        },
+      );
+    const basicTile = await read(0);
+    const slowTile = await read(1);
+    expect(basicTile, 'a real browser must hand the swatch a 2D context').not.toBeNull();
+    expect(slowTile, 'a real browser must hand the swatch a 2D context').not.toBeNull();
+    expect(slowTile!.colours, 'the swatch must be painted').toBeGreaterThanOrEqual(4);
+    expect(basicTile!.damagePx, "basic's head in the damage colour").toBeGreaterThanOrEqual(20);
+    expect(basicTile!.controlPx, 'and none of the control colour').toBe(0);
+    expect(slowTile!.controlPx, "slow's head in the control colour").toBeGreaterThanOrEqual(20);
+    expect(slowTile!.damagePx, 'and none of the damage colour').toBe(0);
+    expect(slowTile!.ringDip, "slow's ring glyph darkens its head — the art ran").toBe(true);
   });
 
   test('1000×720: an ARM and a pointer inspect reveal the Panel — placement and cursor-steps never scroll', async ({
