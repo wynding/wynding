@@ -758,3 +758,97 @@ describe('drawCreepCues — every telegraph draws at the PROJECTED centre, not f
     }
   });
 });
+
+// A fractional dpr that puts footprint corners BETWEEN device pixels: 33px cells at dpr 1.25.
+// The tower sprite's corner snaps to the nearest device pixel (`placement.ts`); the cues drawn
+// around the tower must snap the same way or they drift off it. Two footprints tell rounding
+// from both of its neighbours: (3,5) lands on device (217.5, 212.5), a half-pixel tie where
+// round and ceil agree but floor does not; (2,4) lands on (176.25, 171.25), where round and
+// floor agree but ceil does not.
+describe('selection and aura shells at a fractional dpr — they follow the snapped sprite corner', () => {
+  const FRAC = createProjection({
+    cols: 28,
+    rows: 24,
+    cssWidth: 1074,
+    cssHeight: 802,
+    dpr: 1.25,
+  });
+  const FRAC_FRAMES = new Map(atlasFrameSpecs(FRAC.cellPx, FRAC.dpr).map((f) => [f.key, f]));
+
+  /** Where `placeTowers` puts the tower's 2×2 footprint corner: its sprite's top-left plus
+   *  the frame anchor. */
+  function spriteCorner(t: TowerVM): { sx: number; sy: number } {
+    const placed = placeTowers(vmWith([t]), EMPTY_OVERLAY, FRAC, FRAC_FRAMES).committed[0]!;
+    const a = FRAC_FRAMES.get(placed.frame)!;
+    return { sx: placed.x + a.anchorX, sy: placed.y + a.anchorY };
+  }
+
+  for (const at of [
+    { col: 3, row: 5 },
+    { col: 2, row: 4 },
+  ]) {
+    describe(`footprint (${at.col}, ${at.row})`, () => {
+      it('is genuinely off the device grid (the fixture can tell snapping from not)', () => {
+        const raw = FRAC.cellToPixel(at.col, at.row);
+        expect(raw.x * 1.25).not.toBeCloseTo(Math.round(raw.x * 1.25), 3);
+        expect(raw.y * 1.25).not.toBeCloseTo(Math.round(raw.y * 1.25), 3);
+      });
+
+      it('an attackless selection outline stays at inset 1 from the sprite corner', () => {
+        const { sx, sy } = spriteCorner(tower('beacon', at));
+        const g = fakeGraphics();
+        drawSelection(
+          g,
+          PAL,
+          {
+            ...EMPTY_OVERLAY,
+            selection: { ...at, rangeFp: null, blastRadiusFp: null, towerId: 'beacon' },
+          },
+          FRAC,
+        );
+        const outline = g.calls.find((c) => c.method === 'strokeRoundedRect')!;
+        const size = FRAC.cellPx * 2;
+        expect(outline.args.slice(0, 4)).toEqual([sx + 1, sy + 1, size - 2, size - 2]);
+      });
+
+      it('a range ring and its blast spokes are centred on the sprite footprint centre', () => {
+        const { sx, sy } = spriteCorner(tower('splash', at));
+        const g = fakeGraphics();
+        drawSelection(
+          g,
+          PAL,
+          {
+            ...EMPTY_OVERLAY,
+            selection: { ...at, rangeFp: 512, blastRadiusFp: 384, towerId: 'splash' },
+          },
+          FRAC,
+        );
+        const cx = sx + FRAC.cellPx;
+        const cy = sy + FRAC.cellPx;
+        const ring = g.calls.find((c) => c.method === 'strokeCircle')!;
+        expect(ring.args.slice(0, 2)).toEqual([cx, cy]);
+        // `drawCrosshair`: two vertical spokes on the centre's x, then two horizontal ones on
+        // its y.
+        const spokes = g.calls.filter((c) => c.method === 'lineBetween');
+        expect(spokes).toHaveLength(4);
+        for (const v of spokes.slice(0, 2)) expect([v.args[0], v.args[2]]).toEqual([cx, cx]);
+        for (const h of spokes.slice(2)) expect([h.args[1], h.args[3]]).toEqual([cy, cy]);
+      });
+
+      it('an aura shell stays one cell out from the sprite footprint', () => {
+        const beacon = tower('beacon', at);
+        const { sx, sy } = spriteCorner(beacon);
+        const g = fakeGraphics();
+        drawAuraShells(g, PAL, vmWith([beacon]), EMPTY_OVERLAY, FRAC);
+        const shell = g.calls.find((c) => c.method === 'strokeRoundedRect')!;
+        const cell = FRAC.cellPx;
+        expect(shell.args.slice(0, 4)).toEqual([
+          sx - cell + 2,
+          sy - cell + 2,
+          cell * 4 - 4,
+          cell * 4 - 4,
+        ]);
+      });
+    });
+  }
+});

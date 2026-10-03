@@ -16,15 +16,10 @@ import {
   drawSelection,
   type GraphicsLike,
 } from './board-draw';
+import { snapToDevicePx } from './device-px';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
-import {
-  placeCreeps,
-  placeTowers,
-  snapToDevicePx,
-  type FrameAnchor,
-  type SpritePlacement,
-} from './placement';
+import { placeCreeps, placeTowers, type FrameAnchor, type SpritePlacement } from './placement';
 import type { Projection } from './projection';
 import type { LiveSpark } from './sparks';
 import { positionTracers, renderTimeOf, tracerPaintOps } from './tracers';

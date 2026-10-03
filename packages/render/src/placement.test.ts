@@ -3,7 +3,8 @@
 // size), and positions snapped to whole device pixels with the frame's anchor honoured.
 
 import { describe, it, expect } from 'vitest';
-import { placeCreeps, placeTowers, snapToDevicePx, type FrameAnchor } from './placement';
+import { placeCreeps, placeTowers, type FrameAnchor } from './placement';
+import { snapToDevicePx } from './device-px';
 import { atlasFrameSpecs } from './art-frames';
 import { creepRadius } from './board-draw';
 import { createProjection, type Projection } from './projection';
