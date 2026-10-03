@@ -187,7 +187,7 @@ test('wave 1 and the real wave 9, at 1280×720, 1440×900, 1920×1080 and 1080×
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
-test('a strip whose line runs past its edge fades that edge, follows the scroll, costs no width, and keeps the fade under forced colors', async ({
+test('a strip whose line runs past its edge fades that edge, follows the scroll and costs no width', async ({
   page,
 }) => {
   // 360×640 (portrait Standard) gives the strip 203px beside the home link, and wave 5 is the
@@ -241,18 +241,77 @@ test('a strip whose line runs past its edge fades that edge, follows the scroll,
   await strip.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
   await expect.poll(async () => [(await read()).before, (await read()).after]).toEqual(['1', '0']);
 
-  await page.emulateMedia({ forcedColors: 'active' });
-  expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
-  const forced = await strip.evaluate((el) => ({
-    image: getComputedStyle(el, '::before').backgroundImage,
-    adjust: getComputedStyle(el, '::before').getPropertyValue('forced-color-adjust'),
-    opacity: getComputedStyle(el, '::before').opacity,
-  }));
-  expect(forced.image, 'forced colors must not strip the fade').not.toBe('none');
-  expect(forced.adjust).toBe('none');
-  expect(forced.opacity).toBe('1');
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+});
+
+test('forced colors: every HUD icon, the strip’s creep icon and the ring take the user’s system colours, and the strip’s fade survives', async ({
+  page,
+}) => {
+  // Chromium does not force SVG `fill` or `stroke`, so without `ui.css`'s forced-colors block
+  // the ring's seconds — the only visible countdown on Standard while the ring shows — stay
+  // near-white on the user's Canvas. Emulated BEFORE the page loads, as the Dock's
+  // forced-colors test does. No axe audit in this state: under emulated forced colors axe-core
+  // reports the authored text colour (it reads `-webkit-text-fill-color`, which Chromium leaves
+  // unforced while it paints the forced one — 26 such findings on the commit before #181), so
+  // the inks are checked against the system colours themselves, resolved by the browser.
+  await page.emulateMedia({ forcedColors: 'active' });
+  await gotoAt(page, STANDARD);
+  expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+  // The painted ring, not its slot: the slot is zero-width by design (`ui.css`).
+  await expect(page.locator('.wy-dock-ring .wy-ring')).toBeVisible();
+  await expect(page.locator('.wy-wave-preview .wy-creep-icon')).toHaveCount(1);
+  const inks = await page.evaluate(() => {
+    const system = (value: string): string => {
+      const probe = document.createElement('span');
+      probe.style.color = value;
+      document.body.append(probe);
+      const out = getComputedStyle(probe).color;
+      probe.remove();
+      return out;
+    };
+    const paint = (sel: string, prop: 'fill' | 'stroke'): string[] =>
+      [...document.querySelectorAll(sel)].map((el) => getComputedStyle(el)[prop]);
+    return {
+      canvasText: system('CanvasText'),
+      canvas: system('Canvas'),
+      bodies: paint('.wy-hud .wy-icon .wy-icon-body', 'fill'),
+      lines: paint('.wy-hud .wy-icon .wy-icon-line', 'stroke'),
+      facets: paint('.wy-hud .wy-icon .wy-icon-facets', 'stroke'),
+      creep: paint('.wy-wave-preview .wy-creep-body', 'fill'),
+      ringText: paint('.wy-ring-text', 'fill'),
+      ringArc: paint('.wy-ring-progress', 'stroke'),
+      ringTrack: paint('.wy-ring-track', 'stroke'),
+      fade: getComputedStyle(document.querySelector('.wy-wave-preview')!, '::after')
+        .backgroundImage,
+      fadeAdjust: getComputedStyle(
+        document.querySelector('.wy-wave-preview')!,
+        '::after',
+      ).getPropertyValue('forced-color-adjust'),
+    };
+  });
+  expect(inks.canvasText).not.toBe(inks.canvas);
+  // lives, bounty, stars and score bodies; the countdown clock's lines.
+  expect(inks.bodies).toHaveLength(4);
+  for (const ink of [
+    ...inks.bodies,
+    ...inks.lines,
+    ...inks.creep,
+    ...inks.ringText,
+    ...inks.ringArc,
+  ]) {
+    expect(ink).toBe(inks.canvasText);
+  }
+  expect(inks.lines.length).toBeGreaterThan(0);
+  expect(inks.creep).toHaveLength(1);
+  expect(inks.facets).toEqual([inks.canvas]); // drawn on the gem's body, in the colour around it
+  expect(inks.ringTrack).toHaveLength(1);
+  expect(inks.ringTrack[0], 'the ring’s track must stay apart from its arc').not.toBe(
+    inks.canvasText,
+  );
+  // The fade is a background image, which forced colors would otherwise drop.
+  expect(inks.fade, 'forced colors must not strip the strip’s fade').not.toBe('none');
+  expect(inks.fadeAdjust).toBe('none');
 });
 
 for (const [layout, size] of [

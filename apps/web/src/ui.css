@@ -438,7 +438,8 @@ a.wy-home:focus-visible {
 }
 
 /* The chip icons (`hud-icons.ts`): the style frame's shapes, inked here so every colour is a
-   gated token and forced colors can repaint them like any other ink. */
+   gated token — and re-inked in system colours under forced colors (after the ring's rules,
+   below), because Chromium does not force SVG `fill` or `stroke` on its own. */
 .wy-icon {
   flex: none;
   width: 1.1em;
@@ -1829,6 +1830,40 @@ a.wy-home:focus-visible {
    scroll range. The ring stands down there; the wave chip still carries the countdown. */
 .wy-dock--scroll > .wy-dock-ring {
   display: none;
+}
+
+/* FORCED COLORS (#181). Chromium leaves SVG `fill` and `stroke` unforced, so the icons and the
+   ring would keep their authored inks on the user's Canvas — the ring's seconds, the countdown's
+   only visible form on Standard while the ring shows, near-white on white. Every SVG ink takes a
+   system colour instead. The shapes carry the meaning (heart, gem, star; a creep's silhouette
+   and its airborne chevron), so they read in the one colour the user's theme draws text in;
+   the ring keeps its track and arc apart with `GrayText`. The creep icons' palette inks are
+   presentation attributes, which any rule here outranks. */
+@media (forced-colors: active) {
+  .wy-icon .wy-icon-body,
+  .wy-creep-icon .wy-creep-body {
+    fill: CanvasText;
+    stroke: CanvasText;
+  }
+
+  .wy-icon .wy-icon-line,
+  .wy-creep-icon .wy-creep-chevron,
+  .wy-ring .wy-ring-progress {
+    stroke: CanvasText;
+  }
+
+  /* The gem's facets are drawn ON its body, so they take the colour around it. */
+  .wy-icon .wy-icon-facets {
+    stroke: Canvas;
+  }
+
+  .wy-ring .wy-ring-track {
+    stroke: GrayText;
+  }
+
+  .wy-ring .wy-ring-text {
+    fill: CanvasText;
+  }
 }
 
 .wy-btn-icon {
