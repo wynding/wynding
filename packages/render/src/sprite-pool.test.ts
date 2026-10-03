@@ -95,13 +95,19 @@ describe('createSpritePool', () => {
     ]);
   });
 
-  it('after hideAll (a Play-again reset) the next sync shows exactly what it places', () => {
+  it('after hideAll (a Play-again reset) the next sync shows exactly what it places — new frames and places included', () => {
     const { pool, made } = fakePool();
     pool.sync([at('a', 1), at('b', 2), at('c', 3)]);
     pool.hideAll();
     expect(made.every((s) => !s.visible)).toBe(true);
-    pool.sync([at('a', 1), at('b', 2)]);
-    expect(made.map((s) => s.visible)).toEqual([true, true, false]);
+    // The hidden sprites are reused for DIFFERENT frames at new places: each is re-framed,
+    // moved and shown; the one left over stays hidden, as it was.
+    pool.sync([at('x', 7), at('y', 8)]);
+    expect(made.map((s) => [s.visible, s.frame, s.x])).toEqual([
+      [true, 'x', 7],
+      [true, 'y', 8],
+      [false, 'c', 3],
+    ]);
   });
 
   it('lists every sprite with the frame it shows, for a rebake to repoint', () => {

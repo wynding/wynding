@@ -7,6 +7,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  createLiveLayers,
+  createSpriteLayers,
   drawBoardFrame,
   resetBoardFrame,
   type BoardFrameInput,
@@ -15,6 +17,7 @@ import {
 } from './board-frame';
 import { atlasFrameSpecs } from './art-frames';
 import { AURA_SHELL_ALPHA } from './board-draw';
+import { layerDepth } from './layers';
 import { resolvePalette } from './palette';
 import { createProjection, type Projection } from './projection';
 import type { CreepPlacement, FrameAnchor, SpritePlacement } from './placement';
@@ -251,10 +254,11 @@ describe('drawBoardFrame — which live layer each thing is drawn into', () => {
       overlay: OVERLAY,
       sparks: [],
     });
-    expect([t.layers.shells, t.layers.effects, t.layers.cues].map((l) => drawn(l))).toEqual([
-      [],
-      [],
-      [],
+    // Each layer was cleared — and given nothing else.
+    expect([t.layers.shells, t.layers.effects, t.layers.cues].map((l) => l.calls)).toEqual([
+      [{ method: 'clear', args: [] }],
+      [{ method: 'clear', args: [] }],
+      [{ method: 'clear', args: [] }],
     ]);
   });
 });
@@ -277,6 +281,26 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
     drawBoardFrame(t, busyFrame());
     expect(board.positions).toEqual([[74, 6]]);
     expect(board.visible).toEqual([true]);
+  });
+
+  it('snaps the board image to a whole device pixel at a fractional dpr, where its corner falls between two', () => {
+    // 1074×806 CSS px at dpr 1.5: 33px cells, the corner at (75, 7) CSS px — device (112.5, 10.5).
+    const projection = createProjection({
+      cols: 28,
+      rows: 24,
+      cssWidth: 1074,
+      cssHeight: 806,
+      dpr: 1.5,
+    });
+    expect([projection.originX * 1.5, projection.originY * 1.5]).toEqual([112.5, 10.5]);
+    const { t, board } = targets();
+    drawBoardFrame(t, busyFrame(projection));
+    const [x, y] = board.positions[0]!;
+    expect(x * 1.5).toBeCloseTo(Math.round(x * 1.5), 9);
+    expect(y * 1.5).toBeCloseTo(Math.round(y * 1.5), 9);
+    // … and the nearest such pixel: within half a device pixel of the true corner.
+    expect(Math.abs(x - projection.originX)).toBeLessThanOrEqual(0.5 / 1.5);
+    expect(Math.abs(y - projection.originY)).toBeLessThanOrEqual(0.5 / 1.5);
   });
 
   it('a reset clears every layer and hides the board and every sprite layer; the next frame shows them', () => {
@@ -352,6 +376,35 @@ describe('drawBoardFrame — the ghost, the sparks and reduced motion (drawn in 
     ]);
   });
 
+  it('never draws a tracer dot, a spark or a blast ring under 2px — on a board of 10px cells, too', () => {
+    // 280×240 CSS px: 10px cells, where a tracer's 0.15-cell dot would be 1.5px, a k = 0.25
+    // spark's 0.3-cell × k dot 0.75px, and a blast ring at its birth (grown 0) nothing at all.
+    const projection = createProjection({
+      cols: 28,
+      rows: 24,
+      cssWidth: 280,
+      cssHeight: 240,
+      dpr: 1,
+    });
+    expect(projection.cellPx).toBe(10);
+    const frame = busyFrame(projection);
+    const { t } = targets();
+    drawBoardFrame(t, {
+      ...frame,
+      curVm: vm([], [creep()]), // the tracer's target, wearing no status cue
+      overlay: { ...frame.overlay, ghost: null, selection: null, pendingAdds: [] },
+      sparks: [
+        { x: 3 * 256, y: 3 * 256, radiusFp: 0, k: 0.25 },
+        { x: 3 * 256, y: 3 * 256, radiusFp: 512, k: 1 },
+      ],
+    });
+    const radii = (layer: { calls: Call[] }, method: string): number[] =>
+      layer.calls.filter((c) => c.method === method).map((c) => c.args[2] as number);
+    expect(radii(t.layers.effects, 'fillCircle')).toEqual([2]); // the tracer's dot
+    expect(radii(t.layers.cues, 'fillCircle')).toEqual([2]); // the spark
+    expect(radii(t.layers.cues, 'strokeCircle')).toEqual([2]); // the blast ring
+  });
+
   it('under reduced motion a spark is half as bright, a blast ring holds its full radius, and tracers are omitted', () => {
     const ring = cuesOf({ reducedMotion: true }, [{ x: 0, y: 0, radiusFp: 512, k: 0.5 }]);
     expect(ring[0]).toEqual({ method: 'lineStyle', args: [2, PAL.spark, 0.25] });
@@ -386,5 +439,42 @@ describe('drawBoardFrame — a tracer converges on where its creep is DRAWN', ()
       const raw = projection.fpToPixel(c.x, c.y);
       expect([raw.x, raw.y]).not.toEqual([placed.cx, placed.cy]);
     }
+  });
+});
+
+describe('createLiveLayers / createSpriteLayers — each layer made under its own name', () => {
+  it('makes each live layer under its own name', () => {
+    const layers = createLiveLayers((name) => Object.assign(recordingLayer(), { name }));
+    expect([layers.shells.name, layers.effects.name, layers.cues.name]).toEqual([
+      'shells',
+      'effects',
+      'cues',
+    ]);
+  });
+
+  it('makes each sprite layer under its own name', () => {
+    const layers = createSpriteLayers((name) => ({ name }));
+    expect([layers.towers.name, layers.pending.name, layers.creeps.name]).toEqual([
+      'towers',
+      'pending',
+      'creeps',
+    ]);
+  });
+
+  it('so depths read from those names keep every shell under every tower body (M2-S8), and the rest in order', () => {
+    // How `scene.ts` makes them: each object's depth is `layerDepth` of the name it was made under.
+    const live = createLiveLayers((name) =>
+      Object.assign(recordingLayer(), { depth: layerDepth(name) }),
+    );
+    const sprites = createSpriteLayers((name) => layerDepth(name));
+    expect([
+      layerDepth('board'),
+      live.shells.depth,
+      sprites.towers,
+      sprites.pending,
+      live.effects.depth,
+      sprites.creeps,
+      live.cues.depth,
+    ]).toEqual([0, 1, 2, 3, 4, 5, 6]);
   });
 });

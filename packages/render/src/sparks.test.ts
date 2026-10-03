@@ -29,6 +29,7 @@ describe('createSparkStore', () => {
   it('expires faster under reduced motion', () => {
     const s = createSparkStore();
     s.intake([hit(1)], 0, true);
+    expect(s.live(36, true)[0]!.k).toBeCloseTo(0.5, 9); // halfway through its 72ms
     expect(s.live(72, true)).toHaveLength(1);
     expect(s.live(73, true)).toEqual([]);
   });
