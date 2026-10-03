@@ -219,10 +219,11 @@ const PROTAN_DEUTAN: Palette = {
   ...DEFAULT,
   creepLowHp: 0xe69f00,
   // The role colours, re-tuned so the six stay apart under BOTH simulated protanopia and
-  // deuteranopia (min ΔE76 31.79 / 31.38; the default six fall to 20.40 / 11.23 there,
-  // amber and red-orange collapsing first). Same families, separated by LIGHTNESS, the axis
-  // these deficiencies keep: a bright amber against a darker red-orange, a darker plum
-  // against the light ice blue, and the support white at full brightness.
+  // deuteranopia (min ΔE76 31.79 / 31.38; the default six fall to 20.40 under protanopia,
+  // ice blue and orchid closest, and to 11.23 under deuteranopia, amber and red-orange
+  // closest). Same families, separated by LIGHTNESS, the axis these deficiencies keep: a
+  // bright amber against a darker red-orange, a darker plum against the light ice blue, and
+  // the support white at full brightness.
   roleDamage: 0xffb618,
   roleControl: 0x82cdff,
   rolePoison: 0xb8649c,

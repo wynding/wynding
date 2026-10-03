@@ -11,9 +11,11 @@
 //  - Styles LATCH. `fillStyle`/`lineStyle` apply to every later shape until restated, and
 //    their alpha defaults to 1, as Phaser's do.
 //  - Every primitive composites ON ITS OWN. Two strokes at alpha 0.6 that cross read 0.84
-//    where they overlap, exactly as two Phaser primitives blended one after the other do —
-//    the pending-build variant is baked primitive by primitive at its own alphas for that
-//    reason, never flattened and then faded as a whole.
+//    where they overlap, exactly as two Phaser primitives blended one after the other do.
+//    (Where a picture should fade as ONE — a pending build, whose head must cover its
+//    plate as a built tower's does rather than show it through — the art kit says so
+//    explicitly: `artGraphics`' `fade()`, which `art-frames.ts` calls on the finished
+//    picture. Nothing here flattens on its own.)
 //  - Rounded rects trace Phaser's own paths: the fill as one continuous outline with the 20px
 //    default radius; the stroke clamped to half the shorter side and built from separate
 //    edge and corner sub-paths (Phaser's `strokeRoundedRect` moves between them).

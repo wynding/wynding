@@ -1482,7 +1482,7 @@ export function createController(
                 // where a queued build is part of the answer. This row answers a
                 // question about the SIM ("what damage does this tower deal"), and a
                 // queued beacon deals nothing yet: the sim still fires 10, and
-                // `deriveViewModel` draws neither its shell nor the recipient's ✦ from
+                // `deriveViewModel` draws neither its shell nor the recipient's boost glow from
                 // committed state. Projecting it here made the Panel the only surface of
                 // three claiming otherwise — for as long as the command sat in the
                 // buffer, which before Start is unbounded.

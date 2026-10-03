@@ -415,9 +415,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       // Gated on "has a blast at all" — the SAME condition the committed selection uses
       // (`board-draw.ts`), so arming a tower and selecting that same tower both show the
       // blast. The ghost's body is an OUTLINE rather than a fill, so its spokes sit
-      // wholly on `floor`; a committed small-blast tower's inner spoke crosses its own
-      // filled body and reads shorter. Same condition, same motif, slightly different
-      // painted result — `board-draw.ts` carries the geometry. They briefly diverged during M2-S9 (selection additionally required the
+      // wholly on `floor`; a committed small-blast tower's spokes start just clear of its
+      // head and cross its plate (3.70:1, gated) and rim before they reach the floor. Same
+      // condition, same motif, slightly different painted result — `board-draw.ts` carries
+      // the geometry. They briefly diverged during M2-S9 (selection additionally required the
       // blast to overreach the range ring, which only the mine does); Rob ruled for
       // consistency, 2026-08-07. Change both sites together or neither.
       if (o.ghost.blastRadiusFp !== null) {

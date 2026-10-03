@@ -246,8 +246,8 @@ export interface SelectionVM {
    *  stops there. Drawn whenever it is non-null — the SAME condition
    *  `GhostVM.blastRadiusFp` uses for the preview, so arming a tower and selecting that
    *  same tower both answer "where does my blast land". (Same condition and same motif;
-   *  the painted spoke is slightly shorter on a committed small-blast tower, whose filled
-   *  body the inner segment crosses — `board-draw.ts` carries that geometry.) M2-S9 first shipped a
+   *  on a committed small-blast tower the spokes start just clear of its head and cross its
+   *  plate before the floor — `board-draw.ts` carries that geometry.) M2-S9 first shipped a
    *  narrower gate here (`blastRadiusFp > rangeFp`, which only the mine satisfies) to
    *  leave `splash` untouched; that made arming a `splash` show spokes and selecting it
    *  show none, and Rob ruled for consistency instead (2026-08-07). `splash` and
