@@ -64,9 +64,9 @@ export interface Palette {
    *  collisions from here would have reconstructed the exact bug that was fixed.) */
   readonly airborne: number;
   /** Support-aura cue (M2-S8) — the colour channel behind the adjacency SHELL
-   *  `drawTowers` strokes one cell out from a `beacon`'s footprint. Drawn on the board
+   *  `drawAuraShells` strokes one cell out from a `beacon`'s footprint. Drawn on the board
    *  FLOOR (the shell bounds, and slightly over-approximates, the cells a recipient must
-   *  occupy — see `board-draw.ts` PASS 1 for the corner-cell caveat), at
+   *  occupy — see `drawAuraShells` in `board-draw.ts` for the corner-cell caveat), at
    *  `AURA_SHELL_ALPHA`, so it is gated COMPOSITED against the floor exactly like
    *  `range`'s ghost-preview stroke rather than dropped into the opaque set
    *  (`palette.test.ts`).
