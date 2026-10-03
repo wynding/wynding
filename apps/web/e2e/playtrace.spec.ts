@@ -69,6 +69,15 @@ async function playToResults(page: import('@playwright/test').Page): Promise<voi
   await expect(page.locator('.wy-results')).toBeVisible({ timeout: 60_000 });
 }
 
+/** Copy and Save sit behind the results panel's Run data disclosure (#181 H2): collapsed when
+ *  the dialog opens, so a player — and this spec — opens it first. */
+async function openRunData(page: import('@playwright/test').Page): Promise<void> {
+  const toggle = page.locator('.wy-results').getByRole('button', { name: 'Run data', exact: true });
+  await expect(page.getByRole('button', { name: 'Copy run data' })).toBeHidden();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
+
 test.describe('playtrace export (#133, ADR 0011)', () => {
   test.setTimeout(150_000);
 
@@ -81,6 +90,7 @@ test.describe('playtrace export (#133, ADR 0011)', () => {
     await expect(page.locator('.wy-board')).toBeVisible();
     await playToResults(page);
 
+    await openRunData(page);
     await page.getByRole('button', { name: 'Copy run data' }).click();
     // The announcement is the app's own proof the write resolved — reading the clipboard
     // before it lands is the flake this avoids.
@@ -128,6 +138,7 @@ test.describe('playtrace export (#133, ADR 0011)', () => {
     await page.getByRole('button', { name: 'Close' }).click();
 
     await playToResults(page);
+    await openRunData(page);
     await page.getByRole('button', { name: 'Copy run data' }).click();
     await expect(page.locator('.wy-results .wy-verify')).toHaveText(
       'Run data copied to the clipboard.',

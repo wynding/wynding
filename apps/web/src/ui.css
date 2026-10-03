@@ -163,6 +163,22 @@
      literal ring is no wider than the Card's. */
   --wy-card-ring-w: 3px;
   --wy-card-ring-offset: 2px;
+  /* The results panel (#181 H2), in the style frame's colours. The panel and its tiles are the
+     surfaces its text is read on, gated as such (text ≥ 4.5:1). Their own edges are decoration:
+     the panel is not a control, and neither is a tile. */
+  --wy-results-panel: #12233a;
+  --wy-results-edge: #2b4466;
+  --wy-results-tile: #0f1d31;
+  --wy-results-tile-edge: #22395a;
+  /* A loss's outcome band (a win's is `--wy-stars`). Decorative — the heading carries the
+     outcome — and gated ≥ 3:1 against the panel and the dialog's backdrop all the same. */
+  --wy-loss: #ff5a64;
+  /* A loss's Leaks number: text, gated on its tile. */
+  --wy-danger: #ff8a8a;
+  /* The Run data toggle's quieter label: text, gated on the panel. */
+  --wy-fg-quiet: #c3cfdc;
+  /* An unearned star's fill. Its outline, which carries the shape, is `--wy-panel-edge`. */
+  --wy-star-empty: #1b2a40;
 }
 
 html,
@@ -1968,7 +1984,15 @@ a.wy-home:focus-visible {
   border-color: var(--wy-focus);
 }
 
-/* --- Results dialog --- */
+/* --- Results dialog: the results panel (#181 H2) ---
+   The dialog is the full-screen scrim it always was; its one child is the style frame's
+   panel, centred on it (`results-panel.ts` builds it). The panel is capped to the scrim
+   (`max-height: 100%`), and when its content is taller — the expanded survey, the Run data
+   group on a short screen, heavy text zoom — its BODY scrolls inside it, with the band and the
+   panel's edge staying put around it. So the heading and Play again are always at the top of
+   the body's scroll range, and placement can never push them out of reach: the panel is never
+   taller than the dialog that places it. (That retires the auto-margin workaround the survey
+   needed for older WebKit, which drops `justify-content: safe center`.) */
 
 .wy-results {
   position: fixed;
@@ -1977,10 +2001,11 @@ a.wy-home:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 2rem;
-  text-align: center;
+  box-sizing: border-box;
+  padding: 1.5rem 1rem;
+  /* A net, not the mechanism: nothing should overflow the scrim (the panel is capped to it),
+     but anything that ever did stays reachable rather than clipped. */
+  overflow: auto;
   background: rgba(6, 12, 22, 0.94);
 }
 
@@ -1988,34 +2013,260 @@ a.wy-home:focus-visible {
   display: none;
 }
 
-.wy-verify {
-  max-width: 30rem;
-  font-size: 1rem;
+/* The panel's RESTING place: a spacer above it, sized by `results-panel.ts` (`settle`) to
+   centre the panel as it stands with nothing open below its action row. Opening the Run data
+   group or the survey form then grows the panel DOWNWARD from there — a centred panel would
+   slide up by half its growth and move the control the pointer just pressed. Only the spacer
+   ever shrinks, so it gives way when the open panel needs the room; the panel itself is capped
+   by `max-height` alone and never squeezed (its body scrolls instead). */
+.wy-results::before {
+  content: '';
+  flex: 0 1 var(--wy-results-rest, 0px);
 }
 
-/* ADR 0014's survey, expanded in place inside the results dialog. The expanded form is
-   taller than a compact landscape viewport, so the dialog scrolls — and it must centre only
-   while it fits, or its top (title, Play again) is clipped out of reach. Auto margins on the
-   first and last child do that in every engine; `justify-content: safe center` would too,
-   but older WebKit (the Capacitor WebView) drops it and falls back to the unsafe `center`. */
-.wy-results {
+.wy-results-panel {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(100%, 32.5rem);
+  max-height: 100%;
+  border: 1.5px solid var(--wy-results-edge);
+  border-radius: 14px;
+  background: var(--wy-results-panel);
+  color: var(--wy-fg);
+}
+
+/* The outcome band: the frame's 5px line along the panel's top edge, inset by the corner
+   radius and round-capped — gold for a win, red for a loss. Decoration: the heading carries
+   the outcome. Offsets are from the padding box, inside the 1.5px border. */
+.wy-results-panel::before {
+  content: '';
+  position: absolute;
+  top: -3.25px;
+  right: 12.5px;
+  left: 12.5px;
+  height: 5px;
+  border-radius: 2.5px;
+  background: var(--wy-results-band, var(--wy-stars));
+  pointer-events: none;
+}
+
+.wy-results-panel[data-outcome='lost'] {
+  --wy-results-band: var(--wy-loss);
+}
+
+/* The scroller. Its inline size is the panel's, never its content's, so it can be the
+   container the tiles' Compact row queries. */
+.wy-results-body {
+  flex: 0 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  justify-content: flex-start;
+  container: wy-results / inline-size;
+  padding: 1.75rem clamp(1rem, 6vw, 2.75rem) 1.25rem;
+  /* The panel's radius inside its border, so a scrollbar keeps to the rounded corners. */
+  border-radius: 12.5px;
+  text-align: center;
 }
 
-.wy-results > :first-child {
-  margin-top: auto;
+.wy-results-title {
+  margin: 0;
+  font-size: 1.625rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
-.wy-results > :last-child {
-  margin-bottom: auto;
+.wy-results-subtitle {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--wy-fg-dim);
 }
 
-.wy-survey {
+.wy-results-grade {
+  margin-top: 1.25rem;
+}
+
+.wy-results-stars {
+  display: flex;
+  justify-content: center;
+  gap: 0.625rem;
+}
+
+/* The HUD's star (`hud-icons.ts`) at the frame's results size. An unearned star keeps the
+   shape — outlined, unfilled — so the grade reads by shape and not by colour alone (ADR 0003);
+   its outline is the gated `--wy-panel-edge`, not the frame's 2.2:1 slate. */
+.wy-results-stars .wy-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.wy-results-star[data-earned='false'] .wy-icon-body {
+  fill: var(--wy-star-empty);
+  stroke: var(--wy-panel-edge);
+}
+
+.wy-results-score {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: min(100%, 30rem);
+  margin-top: 0.875rem;
+}
+
+.wy-results-score-label {
+  font-size: 0.8125rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--wy-fg-dim);
+}
+
+.wy-results-score-value {
+  font-size: 2.125rem;
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The run's numbers: four labelled tiles, two by two. */
+.wy-results-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  margin: 1.25rem 0 0;
+}
+
+.wy-results-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  box-sizing: border-box;
+  min-height: 3rem;
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--wy-results-tile-edge);
+  border-radius: 8px;
+  background: var(--wy-results-tile);
+  text-align: left;
+}
+
+.wy-results-stat dt {
+  font-size: 0.8125rem;
+  color: var(--wy-fg-dim);
+}
+
+.wy-results-stat dd {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A loss's leaks read in the danger ink — emphasis only: the label says what the number is. */
+.wy-results-panel[data-outcome='lost'] .wy-results-stat[data-stat='leaks'] dd {
+  color: var(--wy-danger);
+}
+
+/* One row of actions, as the frame draws it: Play again leads and takes the room; Give
+   feedback (where the survey renders) and Run data keep the frame's smaller type and their own
+   width, Run data always at the row's end, over the group it opens. Under pressure (a narrow
+   window, heavy zoom) the row wraps. */
+.wy-results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin-top: 1.25rem;
+}
+
+.wy-results-actions .wy-btn {
+  min-height: 3rem;
+}
+
+.wy-results-actions .wy-primary {
+  flex: 1 1 9rem;
+  font-weight: 800;
+}
+
+/* The survey's Give feedback slot is a row member, not a box: its button is the item. */
+.wy-survey-opener {
+  display: contents;
+}
+
+.wy-survey-opener[hidden] {
+  display: none;
+}
+
+.wy-survey-opener > .wy-btn {
+  padding-inline: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+/* The Run data toggle: the frame's quieter secondary button, with a chevron that turns over
+   while the group is open — instantly, so there is no motion for reduced motion to stop. */
+.wy-results-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  margin-left: auto;
+  padding-inline: 0.625rem;
+  border-color: var(--wy-panel-edge);
+  color: var(--wy-fg-quiet);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.wy-results-chevron {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wy-results-more[aria-expanded='true'] .wy-results-chevron {
+  transform: rotate(180deg);
+}
+
+/* The disclosed group: under the toggle at the row's end, in the frame's menu box. */
+.wy-results-run-data {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: fit-content;
+  min-width: min(100%, 11rem);
+  max-width: 100%;
+  margin: 0.625rem 0 0 auto;
+  padding: 0.25rem;
+  border: 1px solid var(--wy-panel-edge);
+  border-radius: 8px;
+  background: var(--wy-results-tile);
+}
+
+.wy-results-run-data[hidden] {
+  display: none;
+}
+
+/* Its actions are the menu box's items: the box is their boundary, so each drops its own
+   border (its label identifies it, WCAG 1.4.11) and keeps the 44px target and focus ring. */
+.wy-results-item {
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.wy-results-item:hover {
+  background: var(--wy-results-panel);
+}
+
+/* ADR 0014's survey form, expanded in place below the action row. */
+.wy-survey {
+  width: 100%;
 }
 
 .wy-survey[hidden],
@@ -2028,7 +2279,42 @@ a.wy-home:focus-visible {
   flex-direction: column;
   gap: 0.75rem;
   width: 100%;
+  margin-top: 1rem;
   text-align: left;
+}
+
+/* The shared status region closes the panel. Never hidden, not even empty: a live region has
+   to be in the accessibility tree BEFORE its text arrives, or the arrival goes unannounced. */
+.wy-verify {
+  max-width: 30rem;
+  margin: 0.75rem auto 0;
+  font-size: 1rem;
+}
+
+/* A narrow panel (a narrow window, heavy text zoom) stacks the tiles, so a label and its
+   number never have to share less than a whole row. */
+@container wy-results (max-width: 16rem) {
+  .wy-results-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* FORCED COLORS for the panel (the HUD icons' block above sets the star's base inks). An earned
+   star takes `CanvasText` from that block; an UNEARNED one drops its fill and keeps its
+   outline, so the grade still reads by shape when every ink is the user's one text colour. The
+   outcome band is painted as a background, which forced colors would reset to the Canvas it
+   sits on, so it opts out and takes the text colour. The chevron needs nothing: it strokes in
+   its button's own colour, which forced colors already set. */
+@media (forced-colors: active) {
+  .wy-results-star[data-earned='false'] .wy-icon-body {
+    fill: Canvas;
+    stroke: CanvasText;
+  }
+
+  .wy-results-panel::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
 }
 
 .wy-survey-scale {
@@ -2519,6 +2805,90 @@ a.wy-home:focus-visible {
      where it teaches — on the board itself. */
   .wy-card-swatch {
     display: none;
+  }
+
+  /* --- The results panel, Compact (#181 H2) ---
+     The frame's panel restacked for a short screen, so it fits whole at 658×320 and 740×360
+     with Run data closed: the stars and the score share a line, the four tiles share one where
+     the panel is wide enough (two by two where it is not, and at heavy zoom), and the type
+     steps down. Anything taller — the survey, or the open Run data group where there is no
+     room for it — scrolls in the panel's body, as on Standard. */
+  .wy-results {
+    padding: 0.5rem;
+  }
+
+  .wy-results-panel {
+    width: min(100%, 40rem);
+  }
+
+  .wy-results-body {
+    padding: 0.75rem 1.25rem;
+  }
+
+  .wy-results-title {
+    font-size: 1.25rem;
+  }
+
+  .wy-results-subtitle {
+    margin-top: 0.25rem;
+    font-size: 0.8125rem;
+  }
+
+  .wy-results-grade {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .wy-results-stars .wy-icon {
+    width: 1.875rem;
+    height: 1.875rem;
+  }
+
+  .wy-results-score {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0;
+  }
+
+  .wy-results-score-value {
+    font-size: 1.625rem;
+  }
+
+  .wy-results-stats {
+    gap: 0.5rem;
+    margin-top: 0.625rem;
+  }
+
+  @container wy-results (min-width: 34rem) {
+    .wy-results-stats {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .wy-results-stat {
+    min-height: 2.5rem;
+    padding: 0.125rem 0.625rem;
+  }
+
+  .wy-results-actions {
+    gap: 0.5rem;
+    margin-top: 0.625rem;
+  }
+
+  .wy-results-actions .wy-btn {
+    min-height: 44px;
+  }
+
+  /* The group's three actions lie in a row here: a column would cost the short screen two
+     more rows of height. */
+  .wy-results-run-data {
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
   }
 }
 

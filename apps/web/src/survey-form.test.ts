@@ -51,9 +51,12 @@ function setup(options: { offered?: boolean } = {}) {
   const doc = document;
   const dialog = doc.createElement('div');
   const playAgain = doc.createElement('button');
+  // The results dialog's two survey slots (#181 H2): Give feedback in the action row beside
+  // Play again, the form below it.
+  const opener = doc.createElement('div');
   const slot = doc.createElement('div');
   const elsewhere = doc.createElement('button');
-  dialog.append(playAgain, elsewhere, slot);
+  dialog.append(playAgain, opener, elsewhere, slot);
   doc.body.append(dialog);
   mounted.push(dialog);
 
@@ -99,13 +102,16 @@ function setup(options: { offered?: boolean } = {}) {
     setRegionHeld: (h) => void held.push(h),
     focusPlayAgain: () => playAgain.focus(),
   };
-  const form = createSurveyForm(doc, slot, host);
+  const form = createSurveyForm(doc, { opener, form: slot }, host);
   const q = <T extends Element>(selector: string): T => {
     const el = slot.querySelector<T>(selector);
     if (el === null) throw new Error(`no ${selector}`);
     return el;
   };
-  const buttons = (): HTMLButtonElement[] => [...slot.querySelectorAll('button')];
+  const buttons = (): HTMLButtonElement[] => [
+    ...opener.querySelectorAll('button'),
+    ...slot.querySelectorAll('button'),
+  ];
   const button = (label: string): HTMLButtonElement => {
     const b = buttons().find((x) => x.textContent === label);
     if (b === undefined) throw new Error(`no button ${label}`);
@@ -132,6 +138,7 @@ function setup(options: { offered?: boolean } = {}) {
   return {
     doc,
     slot,
+    opener,
     playAgain,
     elsewhere,
     form,
@@ -171,16 +178,31 @@ describe('survey form — presence (ADR 0014 §1, §3)', () => {
   it('shows nothing until the dialog’s ask refresh settles, then Give feedback', async () => {
     const h = setup();
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
     let release = (): void => {};
     h.setRefreshGate(new Promise<void>((r) => (release = r)));
     h.form.dialogOpened();
     await flush();
     expect(h.slot.hidden, 'presence is decided after the refresh, not before').toBe(true);
+    expect(h.opener.hidden, 'Give feedback waits for the same decision').toBe(true);
     release();
     await vi.waitFor(() => expect(h.slot.hidden).toBe(false));
+    expect(h.opener.hidden).toBe(false);
     expect(h.button('Give feedback').hidden).toBe(false);
     expect(h.formEl().hidden).toBe(true);
     expect(h.ask.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts Give feedback in the action row’s slot and the form in the slot below it (#181 H2)', async () => {
+    const h = setup();
+    await h.expand();
+    expect(h.opener.contains(h.button('Give feedback'))).toBe(true);
+    expect(h.slot.contains(h.formEl())).toBe(true);
+    expect(h.opener.contains(h.formEl())).toBe(false);
+    // Expanded, the button gives way to the form it opened; the row's slot stays present.
+    expect(h.button('Give feedback').hidden).toBe(true);
+    expect(h.formEl().hidden).toBe(false);
+    expect(h.opener.hidden).toBe(false);
   });
 
   it('is absent when the ask is consumed', async () => {
@@ -190,6 +212,7 @@ describe('survey form — presence (ADR 0014 §1, §3)', () => {
     await flush();
     expect(h.survey.state().phase).toBe('absent');
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
   });
 
   it('a refresh that settles after the dialog closed begins nothing', async () => {
@@ -204,6 +227,7 @@ describe('survey form — presence (ADR 0014 §1, §3)', () => {
     expect(h.survey.state().phase).toBe('absent');
     expect(h.slot.hasAttribute('data-ready'), 'never decided').toBe(false);
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
   });
 
   it('two forms in one document never share a radio group', () => {
@@ -476,6 +500,7 @@ describe('survey form — a send in flight (§6)', () => {
     expect(h.held).toEqual([true, false]);
     expect(h.status()).toBe(`Thanks for the feedback. Reference: ${REFERENCE}.`);
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden, 'Give feedback is retired from the row too').toBe(true);
     expect(h.doc.activeElement).toBe(h.playAgain);
     expect(h.last().payload.answers).toEqual({ rating: 3, somethingBroke: false, text: 'hello' });
   });
@@ -520,6 +545,7 @@ describe('survey form — a send in flight (§6)', () => {
     expect(h.last().signal.aborted).toBe(true);
     expect(h.held).toEqual([true, false]);
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
     h.last().resolve('accepted'); // a late response to the aborted request
     await flush();
     expect(h.status(), 'nothing lands after the cancel').toBe('Sending your feedback…');
@@ -534,9 +560,12 @@ describe('survey form — a send in flight (§6)', () => {
     expect(h.held.at(-1)).toBe(false);
   });
 
-  it('destroy empties the slot', () => {
+  it('destroy empties both slots', () => {
     const h = setup();
+    expect(h.opener.childElementCount).toBe(1);
+    expect(h.slot.childElementCount).toBe(1);
     h.form.destroy();
     expect(h.slot.childElementCount).toBe(0);
+    expect(h.opener.childElementCount).toBe(0);
   });
 });

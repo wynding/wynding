@@ -340,7 +340,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     const ask = deps.surveyAsk;
     const gameVersion = deps.gameVersion ?? import.meta.env.WYNDING_GAME_VERSION;
     const survey = createSurvey({ ask, transport: deps.surveyTransport, mintKey: mintSurveyId });
-    surveyForm = createSurveyForm(doc, overlay.resultsSurveySlot, {
+    surveyForm = createSurveyForm(doc, overlay.resultsSurveySlots, {
       survey,
       refreshAsk: () => ask.refresh(),
       compose(idempotencyKey) {
@@ -553,7 +553,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // there being one re-open path; enforcing it where the dialog actually opens means a
       // second path cannot silently inherit a stale announcement.
       abandonResultsStatus();
-      overlay.showResults(hud);
+      // The panel's run numbers (#181 H2) are read here, on the same terminal edge as the
+      // capture above: the controller is frozen, so they describe the run the dialog is about.
+      overlay.showResults(hud, controller.runStats());
       surveyForm?.dialogOpened();
       resultsShown = true;
     }

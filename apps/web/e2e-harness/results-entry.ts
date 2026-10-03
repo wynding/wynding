@@ -1,0 +1,69 @@
+// results-entry.ts — the e2e results harness's entry (#181 H2). NOT part of the shipped app:
+// `e2e-harness/results.html` is this module's only consumer, built by `vite.e2e.config.ts`
+// into `dist-e2e`, a directory nothing that ships reads.
+//
+// Why a harness: the results panel's WIN treatment needs a won run, and no e2e spec can play
+// one through the page — a win takes a ten-wave maze and a boss. So this page plays a proven
+// build script through the REAL controller before the app mounts (`scripted-run.ts`, the
+// content package's greedy rule): `?run=win` plays the content suite's winning showcase build
+// (WINNER_A, won on 10 lives), `?run=loss` its 12-tower prefix (lost on wave 9 of 10). The
+// app then boots on that finished run as `boot()` would — the real scene, the real overlay,
+// and `main.ts`'s requestAnimationFrame loop (restated below, as it is private there) — and
+// opens its results dialog on the first frame, with the run's own numbers. Nothing is forced:
+// the outcome, score, stars and stats are the run's.
+//
+// `&survey=1` adds an always-offered survey with a transport that accepts every send, so the
+// panel's Give feedback can be checked (and seen) beside Play again and Run data.
+
+import { createApp } from '../src/main';
+import { createController } from '../src/controller';
+import { playScript } from '../src/scripted-run';
+import type { SurveyAsk, SurveyTransport } from '../src/survey';
+import { mount } from '@wynding/render/scene';
+// Reached by relative path, as `apps/server`'s replay-parity test does: the content
+// package's `exports` map has no subpath for its test support, and this harness never ships.
+import { WINNER_A } from '../../../packages/content/src/showcase-builds';
+
+/** The seed WINNER_A is tuned against (`packages/content/src/m2-golden.test.ts`). */
+const SCENARIO_SEED = 0x5eed;
+
+/** `main.ts`'s requestAnimationFrame scheduler, restated: it is private there, and this page
+ *  boots `createApp` the way `boot()` does. */
+function rafScheduler(onFrame: (nowMs: number) => void): () => void {
+  let id = 0;
+  const loop = (now: number): void => {
+    onFrame(now);
+    id = requestAnimationFrame(loop);
+  };
+  id = requestAnimationFrame(loop);
+  return () => cancelAnimationFrame(id);
+}
+
+const params = new URLSearchParams(window.location.search);
+const plan = params.get('run') === 'loss' ? WINNER_A.slice(0, 12) : WINNER_A;
+
+let offered = true;
+const surveyAsk: SurveyAsk = {
+  offered: () => offered,
+  refresh: async () => {},
+  commit: async () => {
+    offered = false;
+  },
+};
+const surveyTransport: SurveyTransport = { send: async () => 'accepted' };
+
+const root = document.getElementById('app');
+if (root === null) throw new Error('missing #app root element');
+createApp(document, root, {
+  sceneFactory: mount,
+  schedule: rafScheduler,
+  now: () => performance.now(),
+  seed: SCENARIO_SEED,
+  controllerFactory: (seed) => {
+    const controller = createController(seed);
+    playScript(controller, plan);
+    if (!controller.isTerminal()) throw new Error('results harness: the scripted run did not end');
+    return controller;
+  },
+  ...(params.get('survey') === '1' ? { surveyTransport, surveyAsk } : {}),
+});

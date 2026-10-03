@@ -1,5 +1,6 @@
 // survey-form.ts — the end-of-run survey's DOM (ADR 0014 §1, §2, §6), rendered into the
-// results dialog's survey slot (`overlay.ts`).
+// results dialog's two survey slots (`results-panel.ts`): Give feedback in the dialog's action
+// row, and the form, expanded in place, below it.
 //
 // Every RULE lives in `survey.ts`'s model: what may be edited when, what a Send consumes,
 // when the idempotency key rotates, what a run start cancels. This module is the other
@@ -44,6 +45,14 @@ export interface SurveyFormHost {
   focusPlayAgain(): void;
 }
 
+/** Where the survey renders (#181 H2). Give feedback is one of the results dialog's actions,
+ *  so it sits in their row; the form it expands is too tall for a row, so it opens below. Both
+ *  slots are hidden while the survey is absent — so a build with no survey shows neither. */
+export interface SurveySlots {
+  readonly opener: HTMLElement;
+  readonly form: HTMLElement;
+}
+
 export interface SurveyForm {
   /** A results dialog opened: refresh the ask, then decide presence. */
   dialogOpened(): void;
@@ -70,7 +79,7 @@ interface ScaleGroup {
 
 export function createSurveyForm(
   doc: Document,
-  slot: HTMLElement,
+  slots: SurveySlots,
   host: SurveyFormHost,
 ): SurveyForm {
   const { survey } = host;
@@ -176,7 +185,8 @@ export function createSurveyForm(
     privacyEl,
     actions,
   );
-  slot.append(openBtn, form);
+  slots.opener.append(openBtn);
+  slots.form.append(form);
 
   /** False from a dialog opening until its ask refresh settles: nothing shows until the
    *  model has decided presence against current storage. */
@@ -207,10 +217,11 @@ export function createSurveyForm(
     const state = survey.state();
     const { phase } = state;
     const shown = ready && phase !== 'absent' && phase !== 'retired';
-    slot.hidden = !shown;
+    slots.opener.hidden = !shown;
+    slots.form.hidden = !shown;
     // Presence is DECIDED once the ask refresh settles — shown or not. Exposed so a test can
     // tell "absent" from "not decided yet", which `hidden` alone cannot.
-    slot.toggleAttribute('data-ready', ready);
+    slots.form.toggleAttribute('data-ready', ready);
     const expanded = phase === 'open' || phase === 'sending';
     openBtn.hidden = expanded;
     form.hidden = !expanded;
@@ -349,7 +360,8 @@ export function createSurveyForm(
       host.setRegionHeld(false);
       ownMessage = OUTCOME[result]();
       announce(ownMessage);
-      const focusWasHere = slot.contains(doc.activeElement);
+      const focusWasHere =
+        slots.form.contains(doc.activeElement) || slots.opener.contains(doc.activeElement);
       render();
       // An accepted Send retires the control the player was on, so focus goes to Play
       // again (§1) — but only if it was in the survey: a player who had already moved on
@@ -386,7 +398,8 @@ export function createSurveyForm(
     destroy(): void {
       dialogSeq++;
       survey.endDialog();
-      slot.replaceChildren();
+      slots.opener.replaceChildren();
+      slots.form.replaceChildren();
     },
   };
 }

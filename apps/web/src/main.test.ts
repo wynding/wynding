@@ -223,9 +223,18 @@ describe('main — createApp wiring & frame loop', () => {
     const shellEl = root.querySelector<HTMLElement>('.wy-shell')!;
     expect(shellEl.hasAttribute('inert')).toBe(true);
 
+    // #181 H2: Play again is still the dialog's first control; Verify moved behind the Run
+    // data disclosure, so it is found by name and must be DISCLOSED before it is pressed —
+    // jsdom would click a hidden button, a player cannot.
     const resBtns = [...results.querySelectorAll<HTMLButtonElement>('.wy-btn')];
+    const named = (label: string): HTMLButtonElement =>
+      resBtns.find((b) => b.textContent === label)!;
     const playAgain = resBtns[0]!;
-    const verify = resBtns[1]!;
+    expect(playAgain.textContent).toBe('Play again');
+    const verify = named('Verify this run');
+    expect(verify.closest('[hidden]'), 'Verify waits behind Run data').not.toBeNull();
+    named('Run data').click();
+    expect(verify.closest('[hidden]')).toBeNull();
     verify.click();
     expect(root.querySelector('.wy-verify')!.textContent).toContain('Verified');
 
@@ -241,6 +250,49 @@ describe('main — createApp wiring & frame loop', () => {
     expect(primaryBtn.hidden).toBe(false);
     expect(dockText(primaryBtn)).toBe('Start');
     app.destroy();
+  });
+});
+
+describe('main — the results panel reads the finished run (#181 H2)', () => {
+  it('fills the tiles and subtitle from the controller’s own run stats at the terminal edge', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    let controller: Controller | null = null;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 7,
+      controllerFactory: (seed) => (controller = createController(seed)),
+    });
+    openApps.push(app);
+    sched.frame((clock += 16));
+    dockButton(root, 'Start').click();
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    expect(results.hidden).toBe(false);
+
+    const stats = controller!.runStats();
+    // An undefended run: nothing can stop a creep and nothing was built — known without
+    // reading the stats back — and it lost, so creeps leaked.
+    expect(stats.creepsStopped).toBe(0);
+    expect(stats.towersBuilt).toBe(0);
+    expect(stats.leaks).toBeGreaterThan(0);
+    const tiles = [...results.querySelectorAll('.wy-results-stat')].map(
+      (tile) => tile.querySelector('dd')!.textContent,
+    );
+    expect(tiles).toEqual([
+      `${String(stats.wavesCleared)} / ${String(stats.waveCount)}`,
+      '0',
+      String(stats.leaks),
+      '0',
+    ]);
+    expect(results.querySelector('.wy-results-subtitle')!.textContent).toBe(
+      `Lost on wave ${String(stats.wavesLaunched)} of ${String(stats.waveCount)}`,
+    );
+    expect(results.querySelector('.wy-results-panel')!.getAttribute('data-outcome')).toBe('lost');
   });
 });
 
@@ -2137,6 +2189,9 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
         (b) => b.textContent === label,
       );
       if (btn === undefined) throw new Error(`no results button named ${label}`);
+      // #181 H2: Copy, Save and Verify sit behind the Run data disclosure. jsdom clicks a
+      // hidden button as readily as a shown one, so this refuses any a player could not reach.
+      if (btn.closest('[hidden]') !== null) throw new Error(`results button ${label} is hidden`);
       return btn;
     };
     return {
@@ -2156,12 +2211,14 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       /** Jump the frame clock without driving frames — `deps.now` is what the playtrace
        *  ring measures its six-hour bound against. */
       advance: (ms: number): void => void (clock += ms),
-      /** Drive the run to its terminal state so the results dialog opens. */
+      /** Drive the run to its terminal state so the results dialog opens, then disclose its
+       *  Run data group, where the export actions live (#181 H2). */
       resolve(): void {
         this.frame();
         dockButton(root, 'Start').click();
         for (let i = 0; i < 4000 && results.hidden; i++) this.frame();
         expect(results.hidden, 'the run must actually have resolved').toBe(false);
+        resultsButton('Run data').click();
       },
     };
   }
@@ -2537,6 +2594,18 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
         (b) => b.textContent === label,
       );
       if (btn === undefined) throw new Error(`no results button named ${label}`);
+      // The same reachability rule as the playtrace harness above (#181 H2): a button behind
+      // a collapsed Run data disclosure, or in a hidden survey slot, is not pressable.
+      if (btn.closest('[hidden]') !== null) throw new Error(`results button ${label} is hidden`);
+      return btn;
+    };
+    /** A results control for READING its state, wherever it is — the one escape from
+     *  `button`'s reachability rule, for asserting on a control the player cannot see. */
+    const buttonState = (label: string): HTMLButtonElement => {
+      const btn = [...results.querySelectorAll<HTMLButtonElement>('button')].find(
+        (b) => b.textContent === label,
+      );
+      if (btn === undefined) throw new Error(`no results button named ${label}`);
       return btn;
     };
     return {
@@ -2545,6 +2614,7 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       sent,
       commits,
       button,
+      buttonState,
       status: (): string => results.querySelector('.wy-verify')!.textContent ?? '',
       slot: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey')!,
       frame: (): void => sched.frame((clock += 16)),
@@ -2591,6 +2661,9 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
     expect(payload.answers.rating).toBe(4);
 
     expect(h.status()).toBe('Sending your feedback…');
+    // #181 H2: the region's other writers sit behind Run data; disclosing them mid-send must
+    // not release the lock (the overlay suite pins the lock both open and closed).
+    h.button('Run data').click();
     for (const label of ['Verify this run', 'Copy run data', 'Save run data']) {
       expect(h.button(label).getAttribute('aria-disabled'), label).toBe('true');
     }
@@ -2645,7 +2718,8 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
 
     expect(h.sent[0]!.signal.aborted).toBe(true);
     expect(h.status()).toBe('');
-    expect(h.button('Verify this run').getAttribute('aria-disabled')).toBe('false');
+    // The dialog is gone, so this reads the control's STATE rather than pressing it.
+    expect(h.buttonState('Verify this run').getAttribute('aria-disabled')).toBe('false');
     h.sent[0]!.resolve('accepted'); // a late answer to the aborted request
     await settle();
     expect(h.status(), 'no result from the last run lands on this one').toBe('');
