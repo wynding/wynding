@@ -85,16 +85,19 @@ describe('alignRectToTexels — a crisp stroke on whole texels', () => {
   const texelWidth = (r: ArtRect, unit: number, scale: number): number =>
     strokeWidthAt(r, unit) * unit * scale;
 
-  it('makes the width whole texels — the nearest to its floored width, the thinner at a tie, never under one', () => {
-    // 10px cells: 0.3125 px per unit, so the 1px floor rules (3.2 units).
+  it('makes the width whole texels — never under its CSS-px floor, rounded up; else the nearest to its own, the thinner at a tie; never under one', () => {
+    // 10px cells: 0.3125 px per unit, so the 1px floor rules (3.2 units), rounded UP to whole
+    // texels — two at every fractional dpr, never thinner than the floor.
     const unit = 0.3125;
     expect(texelWidth(alignRectToTexels(RIM, unit, 1), unit, 1)).toBeCloseTo(1, 9);
-    expect(texelWidth(alignRectToTexels(RIM, unit, 1.25), unit, 1.25)).toBeCloseTo(1, 9);
-    expect(texelWidth(alignRectToTexels(RIM, unit, 1.5), unit, 1.5)).toBeCloseTo(1, 9); // a tie
+    expect(texelWidth(alignRectToTexels(RIM, unit, 1.25), unit, 1.25)).toBeCloseTo(2, 9);
+    expect(texelWidth(alignRectToTexels(RIM, unit, 1.5), unit, 1.5)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 1.75), unit, 1.75)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 3), unit, 3)).toBeCloseTo(3, 9);
     // 40px cells: 1.25 px per unit, so its own 2 units (2.5px) rule — a tie, so 2.
     expect(texelWidth(alignRectToTexels(RIM, 1.25, 1), 1.25, 1)).toBeCloseTo(2, 9);
+    // 27px cells: its own 1.6875px is nearer 2 than 1.
+    expect(texelWidth(alignRectToTexels(RIM, 27 / 32, 1), 27 / 32, 1)).toBeCloseTo(2, 9);
     // A hairline is never thinner than one texel.
     const hair: ArtRect = { ...RIM, width: 0.1, minWidthPx: undefined };
     expect(texelWidth(alignRectToTexels(hair, 1, 1), 1, 1)).toBeCloseTo(1, 9);
@@ -102,31 +105,68 @@ describe('alignRectToTexels — a crisp stroke on whole texels', () => {
     expect(alignRectToTexels(RIM, unit, 1).minWidthPx).toBeUndefined();
   });
 
-  it('moves each edge’s centre line under half a texel, to where the stroke covers whole texels', () => {
+  it('puts each edge on whole texels: a widened stroke keeps its inner side, a narrowed one its centre line, within half a texel', () => {
     // 10px cells at dpr 1: a 1-texel rim whose design centre lines sit at 0.9375 and 19.0625
     // texels moves to 0.5 and 19.5 — each now covers exactly one texel.
     const a = alignRectToTexels(RIM, 0.3125, 1);
     expect([a.x, a.y, a.x + a.w, a.y + a.h].map((v) => v * 0.3125)).toEqual([0.5, 0.5, 19.5, 19.5]);
-    // Everywhere: every edge, at every scale, lands where (centre − half its width) is a
-    // whole texel, and within half a texel of the design.
+    // 10px cells at dpr 1.5: the floor widens the rim from 1.5 texels to 2, and the extra half
+    // texel goes OUTWARD: its inner side stays at the design's 2.16 texels, to the nearest.
+    const b = alignRectToTexels(RIM, 0.3125, 1.5);
+    expect((b.x - strokeWidthAt(b, 0.3125) / 2) * 0.46875).toBeCloseTo(0, 9); // texels 0–2
+    // Everywhere: each edge starts on a whole texel, and its INNER side (towards the rect's
+    // middle) — for a stroke rounded thinner, its centre line — is within half a texel of
+    // the design's.
+    let widened = 0;
+    let narrowed = 0;
     for (const scale of [1, 1.25, 1.5, 1.75, 2, 3]) {
       for (let cellPx = 10; cellPx <= 40; cellPx += 3) {
         const unit = (2 * cellPx) / 64;
         const k = unit * scale;
         const r = alignRectToTexels(RIM, unit, scale);
         const half = texelWidth(r, unit, scale) / 2;
-        const edges: [number, number][] = [
-          [r.x, RIM.x],
-          [r.y, RIM.y],
-          [r.x + r.w, RIM.x + RIM.w],
-          [r.y + r.h, RIM.y + RIM.h],
+        const designHalf = (strokeWidthAt(RIM, unit) * k) / 2;
+        const wider = half >= designHalf - 1e-9;
+        if (wider) widened++;
+        else narrowed++;
+        // [drawn centre, design centre, which way is inward]
+        const edges: [number, number, 1 | -1][] = [
+          [r.x, RIM.x, 1],
+          [r.y, RIM.y, 1],
+          [r.x + r.w, RIM.x + RIM.w, -1],
+          [r.y + r.h, RIM.y + RIM.h, -1],
         ];
-        for (const [drawn, design] of edges) {
+        for (const [drawn, design, inward] of edges) {
           const at = `${cellPx}px at dpr ${scale}`;
-          const outer = drawn * k - half;
-          expect(Math.abs(outer - Math.round(outer)), at).toBeLessThan(1e-9);
-          expect(Math.abs(drawn - design) * k, at).toBeLessThanOrEqual(0.5 + 1e-9);
+          const start = drawn * k - half;
+          expect(Math.abs(start - Math.round(start)), at).toBeLessThan(1e-9);
+          const miss = wider
+            ? drawn * k + inward * half - (design * k + inward * designHalf)
+            : (drawn - design) * k;
+          expect(Math.abs(miss), at).toBeLessThanOrEqual(0.5 + 1e-9);
         }
+      }
+    }
+    expect([widened > 0, narrowed > 0]).toEqual([true, true]); // both cases were met
+  });
+
+  it('keeps the stroke inside `within` — the footprint — moving an edge inward where it would spill', () => {
+    // 11px cells at dpr 1.25: the footprint ends at 27.5 texels, and the 2-texel rim's far
+    // edge, placed freely, would end at 28 — half a texel into the next footprint.
+    const unit = 22 / 64;
+    const k = unit * 1.25;
+    const farEnd = (r: ArtRect): number => (r.x + r.w) * k + texelWidth(r, unit, 1.25) / 2;
+    expect(farEnd(alignRectToTexels(RIM, unit, 1.25))).toBeCloseTo(28, 9);
+    const kept = alignRectToTexels(RIM, unit, 1.25, [0, 0], [0, 0, 64, 64]);
+    expect(farEnd(kept)).toBeCloseTo(27, 9); // the last whole texel inside 27.5
+    expect(kept.x).toBe(alignRectToTexels(RIM, unit, 1.25).x); // the near edge had room
+    for (const scale of [1, 1.25, 1.5, 1.75, 2, 3]) {
+      for (let cellPx = 10; cellPx <= 40; cellPx++) {
+        const u = (2 * cellPx) / 64;
+        const r = alignRectToTexels(RIM, u, scale, [0, 0], [0, 0, 64, 64]);
+        const h = texelWidth(r, u, scale) / 2;
+        expect(r.x * u * scale - h, `${cellPx}px at dpr ${scale}`).toBeGreaterThanOrEqual(-1e-9);
+        expect((r.x + r.w) * u * scale + h).toBeLessThanOrEqual(64 * u * scale + 1e-9);
       }
     }
   });

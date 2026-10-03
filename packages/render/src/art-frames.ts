@@ -26,6 +26,7 @@ import type { ArtColourResolver, ArtGraphics } from './art-paint';
 import { alignArtToTexels, type ArtShape } from './art-ir';
 import {
   ART_BOX,
+  ART_FOOTPRINT,
   BOOST_ART,
   HEAD_ART,
   PAD_ART,
@@ -141,7 +142,7 @@ type ArtPainter = (draw: ArtDraw, g: ArtGraphics, pal: Palette) => void;
  *
  * Every frame is packed on whole atlas texels (`atlas-pack.ts`), so the frame's texel grid
  * is the atlas's: what the frame draws — and sizes itself for — is the art with its `crisp`
- * strokes moved onto that grid (`alignArtToTexels`).
+ * strokes moved onto that grid (`alignArtToTexels`), kept inside the footprint.
  */
 function artFrame(
   key: string,
@@ -157,7 +158,7 @@ function artFrame(
   // whole texel: that offset is all the texel grid's alignment needs to know.
   const origin = [-ax * unit * scale, -ay * unit * scale] as const;
   const onGrid = (s: readonly ArtShape[]): readonly ArtShape[] =>
-    alignArtToTexels(s, unit, scale, origin);
+    alignArtToTexels(s, unit, scale, origin, ART_FOOTPRINT);
   const b = artBounds(onGrid(shapes), unit);
   /** Whole texels to hold `d` design units: rounded up, but never for floating-point dust —
    *  a rim moved onto the texel grid can end exactly on the anchor, which the bounds then
@@ -202,7 +203,13 @@ export function paintTowerArt(
   const plate =
     pixelScale === undefined
       ? PLATE_ART
-      : alignArtToTexels(PLATE_ART, unit, pixelScale, [x * pixelScale, y * pixelScale]);
+      : alignArtToTexels(
+          PLATE_ART,
+          unit,
+          pixelScale,
+          [x * pixelScale, y * pixelScale],
+          ART_FOOTPRINT,
+        );
   if (head.plate) g.art(plate, c, x, y, unit);
   g.art(head.shapes, c, x, y, unit);
 }

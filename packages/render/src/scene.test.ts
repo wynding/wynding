@@ -808,7 +808,7 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
         // At dpr 1 — small cells: it covers the whole rim, so its inner edge meets the plate.
         // Large cells: the floor margin holds all of it. (Between, its inner edge ends on the
         // rim — the residual docs/accessibility-checklist.md records. At a fractional dpr each
-        // threshold can move a cell size or two, the rim being on whole device pixels.)
+        // threshold can move a few cell sizes, the rim being on whole device pixels.)
         if (dpr === 1 && cellPx <= 16)
           expect(edge + half, at).toBeGreaterThanOrEqual(rimInner - 1e-9);
         if (dpr === 1 && cellPx >= 32) expect(edge + half, at).toBeLessThanOrEqual(rimOuter + 1e-9);

@@ -408,19 +408,21 @@ describe('the plate, the boost glow and the pending rim', () => {
       const unit = (2 * cellPx) / ART_BOX;
       expect(strokeWidthAt(rim, unit) * unit).toBeGreaterThanOrEqual(1 - 1e-9);
     }
-    // ... and, baked crisp, a whole number of device pixels and never fewer than one.
+    // ... and, baked crisp, a whole number of device pixels, never thinner than that one CSS
+    // px: two at dpr 1.25 and 1.5, where one would be under it. (At 30px cells its own
+    // 1.875px rules: 5.625 device px at dpr 3, so 6.)
     if (rim.kind !== 'rect') throw new Error('the rim is a rect');
-    for (const [cellPx, scale] of [
-      [10, 1],
-      [10, 1.25],
-      [13, 1.5],
-      [13, 2],
-      [30, 3],
+    for (const [cellPx, scale, pixels] of [
+      [10, 1, 1],
+      [10, 1.25, 2],
+      [13, 1.5, 2],
+      [13, 2, 2],
+      [30, 3, 6],
     ] as const) {
       const unit = (2 * cellPx) / ART_BOX;
       const baked = strokeWidthAt(alignRectToTexels(rim, unit, scale), unit) * unit * scale;
-      expect(baked, `${cellPx}px at dpr ${scale}`).toBeCloseTo(Math.round(baked), 9);
-      expect(baked, `${cellPx}px at dpr ${scale}`).toBeGreaterThanOrEqual(1 - 1e-9);
+      expect(baked, `${cellPx}px at dpr ${scale}`).toBeCloseTo(pixels, 9);
+      expect(baked, `${cellPx}px at dpr ${scale}`).toBeGreaterThanOrEqual(scale - 1e-9);
     }
   });
 

@@ -33,6 +33,7 @@ import { creepRadius } from './board-draw';
 import { CREEP_SHAPE_VALUES } from './creep-paint';
 import {
   ART_BOX,
+  ART_FOOTPRINT,
   BOOST_ART,
   HEAD_ART,
   PAD_ART,
@@ -395,7 +396,7 @@ describe('painters draw the art they own, in the palette they are handed', () =>
     expect(call.shapes).toHaveLength(PLATE_ART.length);
     PLATE_ART.forEach((s, i) => {
       if (s.kind === 'rect' && s.crisp === true) {
-        expect(call.shapes[i]).toEqual(alignRectToTexels(s, artUnit(20), 1));
+        expect(call.shapes[i]).toEqual(alignRectToTexels(s, artUnit(20), 1, [0, 0], ART_FOOTPRINT));
         // At 20px cells the design rim's edges are off the grid, so it really moved.
         expect(call.shapes[i]).not.toEqual(s);
       } else {
@@ -445,7 +446,7 @@ describe('painters draw the art they own, in the palette they are handed', () =>
   it('paints a pending build as its plate faded further than its head, then the dashed rim at full opacity', () => {
     // The dashed rim is crisp, so it is painted on the frame's texel grid — which at 20px
     // cells moves it off its design position (the raster test at the end measures it).
-    const rimOnGrid = alignArtToTexels(PENDING_RIM_ART, artUnit(20), 1);
+    const rimOnGrid = alignArtToTexels(PENDING_RIM_ART, artUnit(20), 1, [0, 0], ART_FOOTPRINT);
     expect(rimOnGrid).not.toEqual(PENDING_RIM_ART);
     for (const l of TOWER_LOOKS) {
       const key = `tower:pending:${towerLookKey(l)}`;
@@ -520,7 +521,9 @@ describe('paintTowerArt — the Card swatch’s picture, through the same art an
     paintTowerArt(g, PAL, { mark: 'ringed', role: 'control' }, x, y, footprintPx, scale);
     const [plate, head] = artCalls(g.calls);
     const unit = footprintPx / ART_BOX;
-    expect(plate!.shapes).toEqual(alignArtToTexels(PLATE_ART, unit, scale, [x * scale, y * scale]));
+    expect(plate!.shapes).toEqual(
+      alignArtToTexels(PLATE_ART, unit, scale, [x * scale, y * scale], ART_FOOTPRINT),
+    );
     expect(head!.shapes).toBe(HEAD_ART.ringed.shapes);
     const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
     if (rim.kind !== 'rect') throw new Error('the rim is a rect');
@@ -769,7 +772,9 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
       const [plate] = artCalls(paint(specs.get(PLATE_FRAME_KEY)!));
       const [head] = artCalls(paint(specs.get(headFrameKey('basic', true))!));
       const at = `${cellPx}px at dpr ${scale}`;
-      expect(plate!.shapes, at).toEqual(alignArtToTexels(PLATE_ART, artUnit(cellPx), scale));
+      expect(plate!.shapes, at).toEqual(
+        alignArtToTexels(PLATE_ART, artUnit(cellPx), scale, [0, 0], ART_FOOTPRINT),
+      );
       expect(head!.shapes.slice(0, BOOST_ART.length), at).toEqual(BOOST_ART);
       expect([head!.x, head!.y, head!.unit], at).toEqual([plate!.x, plate!.y, plate!.unit]);
       expect(plate!.x * scale, at).toBeCloseTo(Math.round(plate!.x * scale), 9);
@@ -777,7 +782,7 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
     }
   });
 
-  it('at every cell size from 10 to 64px and dpr from 1 to 3, each glow ring is inside the rim on all four sides', () => {
+  it('at every cell size from 10 to 64px and dpr from 1 to 3: the rim no thinner than its floor and inside the footprint, each glow ring inside the rim', () => {
     // The glow is `pal.aura`, gated against the PLATE (palette.test.ts) and not against the
     // rim, so it must stay inside the rim. Drawing the rim on whole device pixels moves it up
     // to half a pixel, a different way at each cell size and dpr — so this measures the rim
@@ -788,9 +793,19 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
     for (const scale of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
       for (let cellPx = 10; cellPx <= 64; cellPx++) {
         const unit = artUnit(cellPx);
-        const rim = alignArtToTexels(PLATE_ART, unit, scale).find((s) => s.stroke === 'rim')!;
+        const rim = alignArtToTexels(PLATE_ART, unit, scale, [0, 0], ART_FOOTPRINT).find(
+          (s) => s.stroke === 'rim',
+        )!;
         if (rim.kind !== 'rect') throw new Error('the rim is a rect');
         const half = strokeWidthAt(rim, unit) / 2;
+        const k = unit * scale;
+        const at = `${cellPx}px at dpr ${scale}`;
+        // Never thinner than its one-CSS-px floor — so two texels at a fractional dpr, where a
+        // canvas shown a fraction of a pixel off the grid would smear a one-texel line ...
+        expect(2 * half * k, at).toBeGreaterThanOrEqual(scale - 1e-9);
+        // ... and inside the footprint, so two abutting plates never overlap.
+        expect((rim.x - half) * k, at).toBeGreaterThanOrEqual(-1e-9);
+        expect((rim.x + rim.w + half) * k, at).toBeLessThanOrEqual(ART_BOX * k + 1e-9);
         for (const ring of BOOST_ART) {
           if (ring.kind !== 'circle') throw new Error('the glow is rings');
           const outer = ring.r + strokeWidthAt(ring, unit) / 2;

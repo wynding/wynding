@@ -17,11 +17,14 @@
 // fixed art inks, decorative or always drawn against colours the gate does cover.
 
 import { roleColour, type Palette } from './palette';
-import type { ArtColour, ArtRect, ArtShape } from './art-ir';
+import type { ArtBox, ArtColour, ArtRect, ArtShape } from './art-ir';
 import type { TowerFootprintMark, TowerRole } from './tower-paint';
 
 /** Design units across one 2×2 footprint. */
 export const ART_BOX = 64;
+/** The footprint itself, in design units: what a crisp stroke is kept inside when it is
+ *  moved onto the pixel grid (`alignArtToTexels`), so it never spills into a neighbour's. */
+export const ART_FOOTPRINT: ArtBox = [0, 0, ART_BOX, ART_BOX];
 /** The footprint's centre, design units — where every head, glow and scorch is centred. */
 const C = ART_BOX / 2;
 
@@ -79,11 +82,15 @@ export const PLATE_RECT = { x: 3, y: 3, w: 58, h: 58, rx: 9 } as const;
  *  only ~1.28:1 against the floor, so on its own the footprint's edge would vanish; the rim
  *  is what carries it, in `palette.tower`, which the palette gate holds ≥ 3:1 against the
  *  floor in every mode. That contrast is only shown if the rim's pixels are wholly rim, so
- *  the rim is drawn CRISP (`ArtRect.crisp`): baked on whole device pixels, its width the
- *  whole number of them nearest one CSS px or its design width, whichever is wider (never
- *  fewer than one), and its edges moved under half a pixel onto the pixel grid. Without it, a
- *  one-pixel rim whose centre fell inside a pixel was smeared across two half-lit ones —
- *  2.19:1 at 10px cells on a dpr 1 screen (QC round 2, A4). */
+ *  the rim is drawn CRISP (`ArtRect.crisp`, `alignRectToTexels`): baked on whole device
+ *  pixels, never thinner than its one CSS px rounded UP (two pixels at dpr 1.25 or 1.5),
+ *  else the whole number nearest its design width; moved under half a pixel onto the pixel
+ *  grid, any width the rounding added going outward (so its plate side keeps its place), and
+ *  never past the footprint. Without it, a one-pixel rim whose centre fell inside a pixel was
+ *  smeared across two half-lit ones — 2.19:1 at 10px cells on a dpr 1 screen (QC round 2,
+ *  A4). Two pixels at a fractional dpr also keep one wholly lit where the compositor blends
+ *  the board's canvas by part of a pixel, as it does when the board's CSS size × dpr is not
+ *  whole (`scene.ts`): a one-pixel rim measured as low as 2.37:1 there (10px cells, dpr 1.5). */
 export const PLATE_RIM_WIDTH = 2;
 export const PLATE_RIM_MIN_PX = 1;
 
