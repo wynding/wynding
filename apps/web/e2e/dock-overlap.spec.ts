@@ -100,17 +100,22 @@ async function settle(page: Page): Promise<void> {
 /** The countdown dial (#181 H1, QC) may never move the Dock, and the countdown it decorates must
  *  be readable. The dial is drawn INSIDE the primary control, out of its layout (`ui.css`,
  *  `.wy-dial`): never a Dock item, so never a wrap, a taller row or a wider control. Proven as an
- *  A/B in the real layout: the Dock's box, every control's box, the reserve the Dock pass
- *  publishes and the board it leaves are identical with the dial REMOVED from the document —
+ *  A/B in the real layout: the Dock's box, every control's box — EXACTLY, so not even the 1/64px
+ *  a rem shift once cost at fractional root sizes (#181 QC round 2) — the reserve the Dock pass
+ *  publishes and the board it leaves are identical with the dial REMOVED from the document,
  *  which also drops the padding redistribution it is drawn in, so the control's own unshifted
- *  box is the reference. While it shows it sits inside the control and clear of its label.
+ *  box is the reference.
+ *
+ *  Whether it shows is MEASURED (#181 QC round 2, `dock-reserve.ts`): drawn exactly where the
+ *  Dock pass found room, and then inside the control, its label's ink a real gap (>= 2px) clear
+ *  of it and inside the padding box; withheld everywhere else, and its padding shift with it.
  *
  *  And THE COUNTDOWN IS READABLE (#181 QC): the wave chip's glance — the clock and the seconds,
  *  the one readable countdown at every text size — is painted, wholly inside the capped hud and
  *  the viewport at rest, in every Dock form, at every case this runs at. */
 async function assertDialMovesNothing(page: Page, phase: string): Promise<void> {
   const dial = page.locator('.wy-dock .wy-primary > .wy-dial');
-  await expect(dial, `${phase}: the dial is drawn inside the primary control`).toHaveCount(1);
+  await expect(dial, `${phase}: the dial lives inside the primary control`).toHaveCount(1);
   await expect(dial).toHaveAttribute('aria-hidden', 'true');
   expect(
     await page.evaluate(() =>
@@ -162,29 +167,27 @@ async function assertDialMovesNothing(page: Page, phase: string): Promise<void> 
   ).toBe(true);
   expect(glance!.inViewport, `${phase}: …and inside the viewport`).toBe(true);
 
-  const drawn = await page.evaluate(() => {
-    const a = document.querySelector<HTMLElement>('.wy-dock .wy-primary > .wy-dial')!;
-    const p = document.querySelector<HTMLElement>('.wy-dock .wy-primary')!;
-    if (a.hidden || p.hidden || a.getClientRects().length === 0) return null;
-    const ar = a.getBoundingClientRect();
-    const pr = p.getBoundingClientRect();
-    const range = document.createRange();
-    range.selectNodeContents(p.querySelector('.wy-btn-text')!);
-    const ink = [...range.getClientRects()];
-    return {
-      width: ar.width,
-      inside:
-        ar.left >= pr.left && ar.right <= pr.right && ar.top >= pr.top && ar.bottom <= pr.bottom,
-      clearOfLabel: ink.every(
-        (r) => r.right <= ar.left || r.left >= ar.right || r.bottom <= ar.top || r.top >= ar.bottom,
-      ),
-    };
-  });
-  // Standard draws the dial whenever a countdown runs and no call is launching — both phases.
-  expect(drawn, `${phase}: the dial is drawn`).not.toBeNull();
-  expect(drawn!.width, `${phase}: …with a size`).toBeGreaterThan(0);
-  expect(drawn!.inside, `${phase}: …inside the primary control's box`).toBe(true);
-  expect(drawn!.clearOfLabel, `${phase}: …clear of the label's ink`).toBe(true);
+  const drawn = await dialState(page);
+  // Both phases this runs in have a countdown and no call launching, so whether the dial shows
+  // is the measured room alone.
+  expect(drawn.countdown, `${phase}: a countdown runs`).toBe(true);
+  expect(drawn.shown, `${phase}: the dial shows exactly where the Dock pass measured room`).toBe(
+    drawn.room,
+  );
+  if (drawn.shown) {
+    expect(drawn.width, `${phase}: …with a size`).toBeGreaterThan(0);
+    expect(drawn.inside, `${phase}: …inside the primary control's box`).toBe(true);
+    expect(
+      drawn.gap,
+      `${phase}: the label's ink clears the dial by a real gap (${drawn.gap}px)`,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      drawn.inkEnd,
+      `${phase}: …and ends inside the control's padding box, clear of its border (${drawn.inkEnd}px)`,
+    ).toBeGreaterThanOrEqual(2);
+  } else {
+    expect(drawn.pads[0], `${phase}: withheld, the dial's room goes with it`).toBe(drawn.pads[1]);
+  }
 
   const snapshot = (): Promise<unknown> =>
     page.evaluate(() => {
@@ -193,9 +196,15 @@ async function assertDialMovesNothing(page: Page, phase: string): Promise<void> 
         return [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 100) / 100).join(',');
       };
       const dock = document.querySelector('.wy-dock')!;
+      // Unrounded, beside the rounded boxes: the redistribution must cost no fraction at all.
+      const exact = (el: Element): number[] => {
+        const b = el.getBoundingClientRect();
+        return [b.x, b.y, b.width, b.height];
+      };
       return {
         dock: box(dock),
         controls: [...dock.querySelectorAll('.wy-btn')].map(box),
+        controlsExact: [...dock.querySelectorAll('.wy-btn')].map(exact),
         reserve: getComputedStyle(document.querySelector('.wy-shell')!).getPropertyValue(
           '--wy-dock-reserve',
         ),
@@ -218,6 +227,47 @@ async function assertDialMovesNothing(page: Page, phase: string): Promise<void> 
   });
   await settle(page);
   expect(present, `${phase}: the countdown dial moved the Dock or the board`).toEqual(absent);
+}
+
+/** The primary control's countdown dial, measured: whether a countdown runs (the dial's own
+ *  `hidden`), whether the Dock pass found room (`wy-primary--dial`), whether it is DRAWN, and —
+ *  drawn — its box against the control's and the horizontal gap from it to the label's ink (the
+ *  dial sits at the inline start); and the ink's clearance from the padding box's end, and the
+ *  control's two inline paddings. */
+async function dialState(page: Page): Promise<{
+  countdown: boolean;
+  room: boolean;
+  shown: boolean;
+  width: number;
+  inside: boolean;
+  gap: number | null;
+  inkEnd: number;
+  pads: [string, string];
+}> {
+  return page.evaluate(() => {
+    const p = document.querySelector<HTMLElement>('.wy-dock .wy-primary')!;
+    const a = p.querySelector<HTMLElement>(':scope > .wy-dial')!;
+    const cs = getComputedStyle(p);
+    const pr = p.getBoundingClientRect();
+    const padRight = pr.right - parseFloat(cs.borderRightWidth);
+    const range = document.createRange();
+    range.selectNodeContents(p.querySelector('.wy-btn-text')!);
+    const ink = [...range.getClientRects()].filter((r) => r.width > 0);
+    const shown = !p.hidden && !a.hidden && getComputedStyle(a).display !== 'none';
+    const ar = a.getBoundingClientRect();
+    const round = (v: number): number => Math.round(v * 100) / 100;
+    return {
+      countdown: !a.hidden,
+      room: p.classList.contains('wy-primary--dial'),
+      shown,
+      width: ar.width,
+      inside:
+        ar.left >= pr.left && ar.right <= pr.right && ar.top >= pr.top && ar.bottom <= pr.bottom,
+      gap: shown ? round(Math.min(...ink.map((r) => r.left - ar.right))) : null,
+      inkEnd: round(padRight - Math.max(...ink.map((r) => r.right))),
+      pads: [cs.paddingLeft, cs.paddingRight] as [string, string],
+    };
+  });
 }
 
 /** The page-coordinate centre of board cell (col, row). */
@@ -343,6 +393,66 @@ test.describe('the Standard sweep: no buildable cell under the Dock (#152)', () 
       await assertDialMovesNothing(page, 'started');
     });
   }
+});
+
+test.describe('the countdown dial’s room is MEASURED, on any font stack (#181 QC round 2)', () => {
+  // CI's DejaVu Sans ran "Start" 3.1px into the dial at 320×900 and 300% text, where a font
+  // assumption had put it; the Dock pass now measures. Each case holds on macOS's stack and
+  // DejaVu Sans alike (measured on both), in both phases.
+  const cases = [
+    // Drawn: room to spare at 300% on a wide window — a 43px dial, a 12px gap.
+    { width: 1440, height: 900, zoom: 300, drawn: true },
+    // Withheld: the collision CI found, and the narrowest phone width, where the label is wider
+    // than its control and spills over its own padding.
+    { width: 320, height: 900, zoom: 300, drawn: false },
+    { width: 280, height: 640, zoom: 300, drawn: false },
+  ] as const;
+  for (const c of cases) {
+    test(`${c.width}×${c.height} at ${c.zoom}%: ${c.drawn ? 'drawn, a real gap clear of the label' : 'withheld, and the label exactly where it would be with no dial'} — before and after Start`, async ({
+      page,
+    }) => {
+      await gotoStandard(page, { width: c.width, height: c.height });
+      await page.addStyleTag({ content: `:root { font-size: ${c.zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        const state = await dialState(page);
+        expect(state.shown, `${phase}: the dial is ${c.drawn ? 'drawn' : 'withheld'}`).toBe(
+          c.drawn,
+        );
+        await assertDialMovesNothing(page, phase);
+      }
+    });
+  }
+
+  test('fractional root sizes — 110, 115 and 130% — redistribute without moving the control by any fraction', async ({
+    page,
+  }) => {
+    // A rem shift rounded each padding to the layout unit separately, so the control's width
+    // moved by 1/64px while the dial showed (360×720 at 110%: 75.78125 against 75.765625). The
+    // shift is a whole px now; `assertDialMovesNothing` compares the controls' boxes exactly.
+    for (const zoom of [110, 115, 130]) {
+      await gotoStandard(page, { width: 360, height: 720 });
+      await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        expect(
+          (await dialState(page)).shown,
+          `${zoom}% ${phase}: the premise — the dial shows, so its room is in force`,
+        ).toBe(true);
+        await assertDialMovesNothing(page, `${zoom}% ${phase}`);
+      }
+    }
+  });
 });
 
 test.describe('the bounded Dock at the worst case: 640×560, banner up, 200% zoom (#152)', () => {

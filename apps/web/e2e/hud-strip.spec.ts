@@ -300,10 +300,12 @@ test('forced colors: every HUD icon and the strip’s creep icon take the user�
       facets: paint('.wy-hud .wy-icon .wy-icon-facets', 'stroke'),
       creep: paint('.wy-wave-preview .wy-creep-body', 'fill'),
       control: getComputedStyle(primary).color,
-      dial: style('.wy-dial-progress').stroke,
-      dialOpacity: style('.wy-dial-progress').strokeOpacity,
-      track: style('.wy-dial-track').stroke,
-      trackOpacity: style('.wy-dial-track').strokeOpacity,
+      grayText: system('GrayText'),
+      wedge: style('.wy-dial-wedge').stroke,
+      ring: style('.wy-dial-ring').stroke,
+      crown: style('.wy-dial-crown').stroke,
+      face: style('.wy-dial-track').fill,
+      faceOpacity: style('.wy-dial-track').fillOpacity,
       labelFill: style('.wy-btn-text').backgroundColor,
       fade: getComputedStyle(document.querySelector('.wy-wave-preview')!, '::after')
         .backgroundImage,
@@ -322,17 +324,22 @@ test('forced colors: every HUD icon and the strip’s creep icon take the user�
   expect(inks.lines.length).toBeGreaterThan(0);
   expect(inks.creep).toHaveLength(1);
   expect(inks.facets).toEqual([inks.canvas]); // drawn on the gem's body, in the colour around it
-  // The dial is the control's own ink, which the UA forces to a system colour; its track the
-  // same ink, kept apart by opacity alone.
+  // The dial (#181 QC round 2, a stopwatch face): the remaining-time wedge, the ring and the
+  // crown in the control's own system ink, ButtonText; the spent face in GrayText at full
+  // strength — a second system colour, where the dimmed first the default theme uses would not
+  // stay apart in a forced palette.
   expect([inks.buttonText, inks.canvasText]).toContain(inks.control);
-  expect(inks.dial).toBe(inks.control);
-  expect(inks.track).toBe(inks.control);
-  expect(inks.dialOpacity).toBe('1');
-  expect(Number(inks.trackOpacity)).toBeLessThan(1);
-  // The label's mask stands down, so no Canvas box shows on the forced ButtonFace: nothing is
-  // painted. Only the ALPHA is compared — the UA forces a colour's channels to a system colour
-  // and keeps the authored alpha, so a transparent fill computes as Canvas at alpha 0.
-  expect(inks.labelFill, 'the label’s mask paints nothing under forced colors').toMatch(
+  for (const part of [inks.wedge, inks.ring, inks.crown]) expect(part).toBe(inks.buttonText);
+  expect(inks.face).toBe(inks.grayText);
+  expect(inks.faceOpacity).toBe('1');
+  expect(inks.grayText, 'the spent face stays apart from the remaining wedge').not.toBe(
+    inks.buttonText,
+  );
+  // The label paints no box of its own (#181 QC round 2: a mask that once covered the dial
+  // painted accent boxes outside the control). Only the ALPHA is compared — the UA forces a
+  // colour's channels to a system colour and keeps the authored alpha, so a transparent fill
+  // computes as Canvas at alpha 0.
+  expect(inks.labelFill, 'the label paints no box under forced colors').toMatch(
     /^rgba\(\d+, \d+, \d+, 0\)$/,
   );
   // The fade is a background image, which forced colors would otherwise drop.
@@ -396,6 +403,8 @@ test('Standard: the dial is aria-hidden decoration inside the primary control, t
   const primary = page.locator('.wy-dock .wy-primary');
   const dial = primary.locator(':scope > .wy-dial');
   await expect(dial).toHaveAttribute('aria-hidden', 'true');
+  // Drawn where the Dock pass measured room for it (#181 QC round 2) — as it has here.
+  await expect(primary).toHaveClass(/(^|\s)wy-primary--dial(\s|$)/);
   await expect(dial).toBeVisible();
   // One read, so the chip's two forms are compared at the same instant.
   const read = (): Promise<{ full: string; value: string; visibility: string; dash: number }> =>
@@ -407,7 +416,7 @@ test('Standard: the dial is aria-hidden decoration inside the primary control, t
         value: glance.querySelector('.wy-chip-value')!.textContent ?? '',
         visibility: getComputedStyle(glance).visibility,
         dash: parseFloat(
-          document.querySelector('.wy-dial-progress')!.getAttribute('stroke-dasharray') ?? 'NaN',
+          document.querySelector('.wy-dial-wedge')!.getAttribute('stroke-dasharray') ?? 'NaN',
         ),
       };
     });
@@ -427,7 +436,7 @@ test('Standard: the dial is aria-hidden decoration inside the primary control, t
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 
-  // Running: the chip counts the next wave down, the dial's progress shortens with it, and a call
+  // Running: the chip counts the next wave down, the dial's wedge shrinks with it, and a call
   // now would pay — said as the control's description (and tooltip), never as part of its name.
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(primary).toHaveAccessibleName('Call wave');
@@ -440,7 +449,7 @@ test('Standard: the dial is aria-hidden decoration inside the primary control, t
     .not.toBe(first.value);
   const later = await read();
   agree(later);
-  expect(later.dash, 'the dial’s progress shortens as the countdown runs').toBeLessThan(first.dash);
+  expect(later.dash, 'the dial’s wedge shrinks as the countdown runs').toBeLessThan(first.dash);
   const running = await new AxeBuilder({ page }).include('#app').analyze();
   expect(running.violations, JSON.stringify(running.violations, null, 2)).toEqual([]);
 });
@@ -463,6 +472,163 @@ test('Compact: no dial — the primary control keeps its own padding, and the ch
   const seconds = /^Wave in (\d+)s$/.exec(full ?? '')?.[1];
   expect(seconds).toBeDefined();
   await expect(glance.locator('.wy-chip-value')).toHaveText(`${seconds}s`);
+});
+
+test('the hud’s floor holds one whole chip: forced to it, every glance sits inside, 100–300% text (#181 QC round 2)', async ({
+  page,
+}) => {
+  // The floor (`ui.css`: the hud never narrower than 5rem beside the home link) was pinned only
+  // against a sliver. A 3rem floor passed every other test and still clipped the countdown's
+  // glance at 412–420×915 and 200% text, by 4.5–12.5px. Forced to the floor here — no basis, no
+  // growth — the hud must still hold each chip a line shows whole.
+  await gotoAt(page, { width: 360, height: 640 });
+  for (const zoom of [100, 150, 200, 250, 300]) {
+    await page.addStyleTag({
+      content: `:root { font-size: ${zoom}% } .wy-shell .wy-hud { flex: 0 0 0 !important; }`,
+    });
+    await settle(page);
+    const glances = await page.evaluate(() => {
+      const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+      const left = hud.getBoundingClientRect().left + hud.clientLeft;
+      const right = left + hud.clientWidth;
+      return ['wave', 'lives', 'bounty', 'stars'].map((slot) => {
+        const g = document
+          .querySelector(`.wy-chip[data-wy-chip="${slot}"] .wy-chip-glance`)!
+          .getBoundingClientRect();
+        return {
+          slot,
+          start: g.left - left,
+          end: right - g.right,
+          width: g.width,
+          floor: hud.clientWidth,
+        };
+      });
+    });
+    for (const g of glances) {
+      const what = `${zoom}%: ${g.slot} (${g.width.toFixed(1)}px) inside the ${g.floor}px floor`;
+      expect(g.start, `${what} — its start`).toBeGreaterThanOrEqual(-0.5);
+      expect(g.end, `${what} — its end`).toBeGreaterThanOrEqual(-0.5);
+    }
+  }
+});
+
+/** Compact's chips column, measured at rest: its visible box, every item's box in it (the chips,
+ *  and the wave strip's title and lines), the cut the pass wrote, and — for the A/B — every box
+ *  that must not move for the cut: the Dock, its controls, the chips and the home mark. */
+async function compactColumn(page: Page): Promise<{
+  cut: string;
+  straddling: string[];
+  shownWhole: number;
+  boxes: string;
+}> {
+  return page.evaluate(() => {
+    const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+    hud.scrollTop = 0; // at rest
+    const h = hud.getBoundingClientRect();
+    const top = h.top + hud.clientTop;
+    const bottom = top + hud.clientHeight;
+    const items = [
+      ...hud.querySelectorAll<HTMLElement>(
+        ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, :scope > .wy-wave-preview .wy-preview-entry',
+      ),
+    ]
+      .map((el) => ({ el, r: el.getBoundingClientRect() }))
+      .filter(({ r }) => r.height > 0);
+    const name = (el: HTMLElement): string =>
+      el.dataset.wyChip ?? (el.textContent ?? '').trim().slice(0, 16);
+    const box = (el: Element): string => {
+      const b = el.getBoundingClientRect();
+      return [b.x, b.y, b.width, b.height].map((v) => v.toFixed(3)).join(',');
+    };
+    return {
+      cut: hud.style.getPropertyValue('--wy-hud-cut'),
+      // An item the visible box's bottom edge runs through: part shown, part not.
+      straddling: items
+        .filter(({ r }) => r.top < bottom - 0.5 && r.bottom > bottom + 0.5)
+        .map(
+          ({ el, r }) =>
+            `${name(el)} ${r.top.toFixed(1)}→${r.bottom.toFixed(1)} vs ${bottom.toFixed(1)}`,
+        ),
+      shownWhole: items.filter(({ r }) => r.top >= top - 0.5 && r.bottom <= bottom + 0.5).length,
+      boxes: [
+        ...document.querySelectorAll('.wy-dock, .wy-dock .wy-btn, .wy-hud > .wy-chip, .wy-home'),
+      ]
+        .map(box)
+        .join(' | '),
+    };
+  });
+}
+
+test('Compact: the chips column rests on WHOLE items — nothing else moves for it, and every chip stays reachable (#181 QC round 2)', async ({
+  page,
+}) => {
+  // At 658×320 before the run the column cut the score chip through its icon and value, just
+  // above the Dock. `hud-cut.ts` stops it at the last whole item; the room it gives up stays
+  // empty above the Dock.
+  let cutSomewhere = false;
+  for (const size of [PHONE, { width: 568, height: 320 }, { width: 900, height: 480 }]) {
+    for (const zoom of [100, 200]) {
+      await gotoAt(page, size);
+      expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+      if (zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        const what = `${size.width}×${size.height} at ${zoom}%, ${phase}`;
+        const rest = await compactColumn(page);
+        if (rest.shownWhole === 0) {
+          // NOT EVEN THE COUNTDOWN FITS WHOLE: after Start at 200% text on a 320px-tall phone the
+          // column has 31px of room for a 44px chip. A cut to nothing would hide the countdown
+          // outright, so the column keeps its room, the countdown — and only it — runs past the
+          // edge, and the list scrolls to the rest (the checklist's Compact residual).
+          expect(rest.cut, `${what}: no cut where nothing fits whole`).toBe('');
+          expect(rest.straddling, `${what}: only the countdown runs past the edge`).toHaveLength(1);
+          expect(rest.straddling[0]).toMatch(/^wave /);
+        } else {
+          expect(rest.straddling, `${what}: no item cut by the column's edge at rest`).toEqual([]);
+        }
+        if (rest.cut !== '') cutSomewhere = true;
+        // A/B: lift the cut, and nothing but the column's own height may change.
+        await page.evaluate(() =>
+          document.querySelector<HTMLElement>('.wy-hud')!.style.removeProperty('--wy-hud-cut'),
+        );
+        await settle(page);
+        const lifted = await compactColumn(page);
+        expect(rest.boxes, `${what}: the cut moved the Dock, a control, a chip or the mark`).toBe(
+          lifted.boxes,
+        );
+        // Every chip stays reachable: the column still scrolls to its last item, whole.
+        const reach = await page.evaluate(() => {
+          const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+          hud.scrollTop = hud.scrollHeight;
+          const bottom = hud.getBoundingClientRect().top + hud.clientTop + hud.clientHeight;
+          const chips = [...hud.querySelectorAll<HTMLElement>(':scope > .wy-chip')].filter(
+            (c) => c.getBoundingClientRect().height > 0,
+          );
+          const last = chips[chips.length - 1]!.getBoundingClientRect();
+          hud.scrollTop = 0;
+          return { lastBottom: last.bottom, bottom, chips: chips.length };
+        });
+        expect(reach.chips, `${what}: all five chips are in the column`).toBe(5);
+        expect(
+          reach.lastBottom,
+          `${what}: scrolled to its end, the last chip is whole`,
+        ).toBeLessThanOrEqual(reach.bottom + 0.5);
+        // Put the cut back exactly as the pass left it, for the next phase.
+        await page.evaluate((cut) => {
+          if (cut !== '')
+            document.querySelector<HTMLElement>('.wy-hud')!.style.setProperty('--wy-hud-cut', cut);
+        }, rest.cut);
+      }
+    }
+  }
+  // The premise, so the A/B is not vacuous: the cut was in force somewhere — at the very least
+  // the case that found the defect.
+  expect(cutSomewhere, 'some case needed a cut').toBe(true);
 });
 
 /** The page's own scroll range on both axes. `body` is `overflow: hidden`, so any range here is
