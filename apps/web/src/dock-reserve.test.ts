@@ -626,31 +626,59 @@ describe('syncDockDial (#181 QC round 2)', () => {
   });
 
   it('reads the same verdict from the SHIFTED layout as from the unshifted one — it can never flip back and forth', () => {
-    for (const ink of [[[28, 68]], [[8, 88]], [[22, 86]]] as [number, number][][]) {
+    // The shift is in force exactly while the control carries the class (`ui.css`), so a pass
+    // after a room verdict reads a SHIFTED layout and must read it back to the unshifted one.
+    // Counted twice, the shift would spend the end clearance of a label that fits — [28, 80],
+    // 8px clear — and drop the dial it just drew, then draw it again: a flip every pass. And a
+    // class left by a wider label must come off a label that meets the dial — [8, 60], which a
+    // second shift would carry clear of it.
+    const cases: [[number, number][], boolean][] = [
+      [[[28, 68]], true],
+      [[[8, 88]], false],
+      [[[22, 86]], false],
+      [[[28, 80]], true],
+      [[[8, 60]], false],
+    ];
+    for (const [ink, fits] of cases) {
       document.body.replaceChildren();
       vi.restoreAllMocks();
       const plain = primaryRig({ ink }).primary;
       syncDockDial(plain);
-      const verdict = room(plain);
+      expect(room(plain), `unshifted ${JSON.stringify(ink)}`).toBe(fits);
       vi.restoreAllMocks();
       const shifted = primaryRig({ ink, applied: 8 }).primary;
-      shifted.classList.toggle(DIAL_ROOM_CLASS, verdict);
+      shifted.classList.add(DIAL_ROOM_CLASS); // the shift is in force only under the class
       syncDockDial(shifted);
-      expect(room(shifted), JSON.stringify(ink)).toBe(verdict);
+      expect(room(shifted), `shifted ${JSON.stringify(ink)}`).toBe(fits);
       expect(prop(shifted, DIAL_PROPS.shift)).toBe('8px');
     }
   });
 
   it('measures from the inline START edge in a right-to-left control', () => {
-    const fits = primaryRig({ ink: [[28, 68]], rtl: true }).primary;
-    syncDockDial(fits);
-    expect(room(fits)).toBe(true);
-    vi.restoreAllMocks();
-    document.body.replaceChildren();
-    const meets = primaryRig({ ink: [[8, 88]], rtl: true }).primary;
-    meets.classList.add(DIAL_ROOM_CLASS);
-    syncDockDial(meets);
-    expect(room(meets)).toBe(false);
+    // Each ink is [start, end] from the inline-START edge, and right to left that edge is the
+    // control's RIGHT one: the verdict must be the left-to-right verdict for the same ink. A
+    // centred label reads the same from either edge, so the lopsided ones carry this — and a
+    // label is lopsided exactly where the dial is in question, since one too wide for its
+    // control is start-aligned and overflows at its end (CSS Text). [20, 83] fits, 5px short of
+    // the end; [13, 60] starts 3px from the dial. Read from the wrong edge, each flips.
+    const cases: [[number, number][], boolean][] = [
+      [[[28, 68]], true],
+      [[[8, 88]], false],
+      [[[20, 83]], true],
+      [[[13, 60]], false],
+    ];
+    for (const [ink, fits] of cases) {
+      for (const rtl of [false, true]) {
+        vi.restoreAllMocks();
+        document.body.replaceChildren();
+        // From the other verdict, as the page holds it: a first, unshifted pass for a label that
+        // fits; a class left by a wider label — its shift still in force — for one that does not.
+        const { primary } = primaryRig({ ink, rtl, applied: fits ? 0 : 8 });
+        primary.classList.toggle(DIAL_ROOM_CLASS, !fits);
+        syncDockDial(primary);
+        expect(room(primary), `${JSON.stringify(ink)} ${rtl ? 'rtl' : 'ltr'}`).toBe(fits);
+      }
+    }
   });
 
   it('every line of a wrapped label counts', () => {
