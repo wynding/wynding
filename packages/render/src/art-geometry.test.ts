@@ -128,8 +128,9 @@ describe('parsePath', () => {
     for (const space of [' ', '﻿', '\u000b', '　']) {
       expect(() => parsePath(`M10${space}10L50 50`), JSON.stringify(space)).toThrow(/unreadable/);
     }
-    // An arc flag is the one character 0 or 1: never 2, 1.0, -1 or 1e5 ...
-    for (const flags of ['2 1', '1.0 1', '-1 1', '0 2', '1e5 1']) {
+    // An arc flag is the one character 0 or 1: never 2, 1.0, -1 or 1e5 — and a packed flag
+    // leaves only a number to read next (`'0 1e5'` would leave `'e5'` as the x coordinate) ...
+    for (const flags of ['2 1', '1.0 1', '-1 1', '0 2', '1e5 1', '0 1e5']) {
       expect(() => parsePath(`M10 50A40 40 0 ${flags} 90 50`), flags).toThrow(/arc flag/);
     }
     // ... and may be packed against what follows it, as the grammar allows.
