@@ -132,8 +132,8 @@ export interface TowerVM {
   readonly id: number;
   readonly col: number;
   readonly row: number;
-  /** Catalog id (M2-S3) — keys the footprint mark distinguishing `slow` from `basic`
-   *  (`tower-paint.ts`); both share `palette.tower` (shape carries the distinction). */
+  /** Catalog id (M2-S3) — keys the tower's look (`towerLookFor`, `tower-paint.ts`): its
+   *  head's silhouette and glyph, and the role colour it is tinted. */
   readonly towerId: string;
   /** This tower is a SUPPORT tower (M2-S8, `beacon`) — it does not attack, and the
    *  scene draws its adjacency shell one cell out from the footprint. A catalog join,

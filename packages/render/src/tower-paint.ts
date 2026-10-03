@@ -4,7 +4,10 @@
 // ROLE — which colour that head is tinted. Shape is the primary channel (ADR 0003); the
 // role colour is the second one, never the only one.
 
-/** The footprint marks the scene can draw over a tower's 2×2 fill. `'plain'` is the
+/** The footprint marks — since the visual pass (#181), which HEAD a tower wears: its
+ *  silhouette and the ink glyph inside it (`HEAD_ART`, `tower-art.ts`), each keeping the idea
+ *  of the mark described here. The descriptions are the marks as the M2 stories drew them
+ *  over the old 2×2 fill — kept as the record of what each glyph means. `'plain'` is the
  *  pre-M2-S3 look (no extra mark — `basic`); `'ringed'` adds a concentric inner ring
  *  (`slow`'s distinct mark). `'crosshair'` is `splash`'s (M2-S4a) — four short spokes
  *  radiating from the footprint centre, evoking "area effect" — a SHAPE distinct from
@@ -17,7 +20,7 @@
  *  `'crosshair'`'s spokes by not being radial. `'arrow'` is `antiair`'s (M2-S7) — an
  *  upward arrow (a shaft through the footprint centre plus two barbs at its tip,
  *  drawn at the same `size * 0.22` half-size as `'crosshair'`/`'droplet'` — NOT
- *  full-height; `drawArrow`'s own comment carries the derivation) evoking "shoots skyward" — distinct from `'crosshair'`'s four spokes (a shaft
+ *  full-height) evoking "shoots skyward" — distinct from `'crosshair'`'s four spokes (a shaft
  *  and two barbs, not four radial strokes with a centre gap) and `'bolt'`'s zigzag (a
  *  straight shaft, not a three-segment stagger), so `antiair` is never visually
  *  conflated with `basic`'s plain body. It is deliberately NOT a bare "^": the airborne
@@ -65,7 +68,7 @@ export type TowerFootprintMark =
  *  state (`art-frames.ts`), so it needs the union enumerated rather than merely typed. A
  *  `Record` keyed on the union, so a tenth mark that is not listed here fails to compile
  *  instead of silently baking no frame (the same "everywhere at once or nowhere" rule
- *  `drawFootprintMark`'s exhaustiveness check enforces). */
+ *  `HEAD_ART`'s `Record` over the union enforces in `tower-art.ts`). */
 const ALL_MARKS: Readonly<Record<TowerFootprintMark, true>> = {
   plain: true,
   ringed: true,

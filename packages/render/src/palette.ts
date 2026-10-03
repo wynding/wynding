@@ -135,9 +135,10 @@ const DEFAULT: Palette = {
   spark: 0xffffff,
   slowed: 0x56b4e9, // sky blue — the slow telegraph's redundant colour channel
   // Reddish purple (Okabe-Ito) — the DoT telegraph's redundant colour channel. NOT
-  // bluish green, which the first draft used (QC round 1): that is byte-identical to
-  // `tower`/`ghostValid`, and since creeps path straight along tower footprints the
-  // pips sat on a body of exactly their own colour and vanished. The pairwise gate in
+  // bluish green, which the first draft used (QC round 1): that was byte-identical to
+  // the tower body of the time (`tower`, now the plate rim) and is to `ghostValid`, and since
+  // creeps path straight along tower footprints the pips sat on a body of exactly their own
+  // colour and vanished. The pairwise gate in
   // `palette.test.ts` now pins this against every cue a pip can be drawn over. Sharing
   // a value with `range` is deliberate and safe — that is a thin selection ring drawn
   // only while a tower is selected, never a filled body under a creep.

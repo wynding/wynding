@@ -528,9 +528,10 @@ export interface AirborneCuePaintOp {
 //     not colour: the cell it lands in is usually a tower footprint, so no footprint mark
 //     may be this glyph — `antiair` (the tower that co-occurs with flyers by definition)
 //     therefore draws the `'arrow'` mark, a shafted arrow, rather than the bare "^" it
-//     first shipped as (see `drawArrow` in `board-draw.ts`). The airborne colour is
-//     additionally contrast-gated against `tower` as well as the floor
-//     (`palette.test.ts`) so the two remain separable once overlaid.
+//     first shipped as (since the visual pass, #181, the arrow is antiair's head, `HEAD_ART` in
+//     `tower-art.ts`). The airborne colour is additionally contrast-gated against the
+//     tower's rim (`tower`) and plate as well as the floor (`palette.test.ts`) so the two
+//     remain separable once overlaid.
 //     The same offset puts the chevron OFF-BOARD for a flyer on row 0, on a board whose
 //     opening sits on the top border — legal in principle, unreachable on the shipped
 //     board (every creep walks the row-11 lane), and called out here because an earlier
