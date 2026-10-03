@@ -494,7 +494,12 @@ test.describe('the bounded Dock at the worst case: 640×560, banner up, 200% zoo
     const controls = dockEl.locator('.wy-btn:visible');
     const count = await controls.count();
     expect(count).toBeGreaterThan(1);
-    await page.locator('.wy-hud').focus();
+    // From the last tab stop BEFORE the Dock, as the hardened walk does: the chips list — or,
+    // while the wave strip is in its scroll form (#181), the strip, a labelled tab stop of its
+    // own inside it. Which one is a font metric here: set in DejaVu Sans, CI's font, the strip's
+    // line runs past its box at this size; set in macOS's stack, it does not.
+    const scrollingStrip = page.locator('.wy-hud .wy-wave-preview--scroll');
+    await ((await scrollingStrip.count()) > 0 ? scrollingStrip : page.locator('.wy-hud')).focus();
     for (let i = 0; i < count; i++) {
       await page.keyboard.press('Tab');
       const control = controls.nth(i);

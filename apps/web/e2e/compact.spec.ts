@@ -210,10 +210,18 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // The computed value, and then the consequence — a pinned declaration that stopped
     // producing its effect would pass the first alone.
     expect(await hud.evaluate((el) => getComputedStyle(el).flexGrow)).toBe('1');
+    // Since #181 QC round 2 the column stops the scrollport at its last WHOLE item
+    // (`--wy-hud-cut`, `hud-cut.ts`) and leaves the rest of its room empty above the Dock on
+    // purpose — 15px of it here on CI's font metrics. What this guards is the ROOM the column
+    // gives the scrollport, so that is read with the cut lifted, and the cut is put straight
+    // back in the same task (nothing renders in between).
     const boxes = await page.evaluate(() => {
       const r = (s: string): DOMRect =>
         document.querySelector(s)!.getBoundingClientRect() as DOMRect;
-      return {
+      const hudEl = document.querySelector<HTMLElement>('.wy-hud')!;
+      const cut = hudEl.style.getPropertyValue('--wy-hud-cut');
+      hudEl.style.removeProperty('--wy-hud-cut');
+      const lifted = {
         hud: r('.wy-hud'),
         dock: r('.wy-dock'),
         status: r('.wy-status'),
@@ -222,9 +230,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
         // fail on a gap change that is not a regression at all.
         gap: parseFloat(getComputedStyle(document.querySelector('.wy-status')!).rowGap) || 0,
       };
+      if (cut !== '') hudEl.style.setProperty('--wy-hud-cut', cut);
+      return lifted;
     });
-    // The hud fills the space between its own top and the Dock below it: content-sized, it
-    // would stop short by the height of everything it is not rendering.
+    // The hud's room fills the space between its own top and the Dock below it: content-sized,
+    // it would stop short by the height of everything it is not rendering.
     expect(
       boxes.dock.top - (boxes.hud.top + boxes.hud.height),
       'the chips scrollport must still fill the column down to the Dock',
