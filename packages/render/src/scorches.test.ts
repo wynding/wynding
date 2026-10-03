@@ -84,6 +84,65 @@ describe('createScorchTracker — detection', () => {
     expect(t.live(10.2)).toEqual([{ ...centreOf(m), alpha: 1 }]);
   });
 
+  it('scorches nothing for any other shot — a targeted tracer, or a splash blast that leads its target', () => {
+    // Every shot is a tracer; only a detonation (origin === destination) may scorch, or
+    // every shot would leave an 80-tick scorch under the tower that fired it.
+    const basic: TowerVM = { ...mine(4, 6, 2), towerId: 'basic' };
+    const splash: TowerVM = { ...mine(8, 6, 3), towerId: 'splash' };
+    const from = centreOf(basic);
+    const at = centreOf(splash);
+    const t = createScorchTracker();
+    t.update(frame({ towers: [basic, splash], renderTick: 9 }));
+    t.update(
+      frame({
+        towers: [basic, splash],
+        tracers: [
+          {
+            kind: 'targeted',
+            originX: from.x,
+            originY: from.y,
+            targetId: 7,
+            launchTick: 10,
+            impactTick: 12,
+          },
+          {
+            kind: 'blast',
+            originX: at.x,
+            originY: at.y,
+            destX: at.x + 3 * FP_ONE,
+            destY: at.y,
+            launchTick: 10,
+            impactTick: 13,
+          },
+        ],
+        renderTick: 10.5,
+      }),
+    );
+    // ... and their landings, a targeted spark and a blast ring, with both towers standing.
+    t.update(
+      frame({
+        towers: [basic, splash],
+        sparks: [
+          { x: from.x + FP_ONE, y: from.y, radiusFp: 0 },
+          { x: at.x + 3 * FP_ONE, y: at.y, radiusFp: 1.5 * FP_ONE },
+        ],
+        renderTick: 13,
+      }),
+    );
+    expect(t.live(13)).toEqual([]);
+  });
+
+  it('scorches a detonation ONCE when its tracer and its landing arrive in the frame the mine vanishes in', () => {
+    // Both detection paths see this detonation at once — the tracer, and a blast landing on
+    // the centre of a burst tower the last frame drew — and only the first may scorch: the
+    // landing is the tracer's own, consumed rather than read as a second detonation.
+    const m = mine(4, 6);
+    const t = createScorchTracker();
+    t.update(frame({ towers: [m], renderTick: 9 }));
+    t.update(frame({ tracers: [detonation(m, 10)], sparks: [landing(m)], renderTick: 11 }));
+    expect(t.live(11)).toHaveLength(1);
+  });
+
   it('scorches each detonation ONCE — not again while its tracer stays listed, nor when it lands', () => {
     const m = mine(4, 6);
     const t = createScorchTracker();

@@ -403,10 +403,24 @@ export function drawCreepCues(
     // `renderTimeMs` and has no reduced-motion branch.
     // The `0` is the canvas top: the cue mirrors below the creep rather than drawing
     // off-screen, for a flyer on a board whose openings sit on row 0 (Codex P2, PR #87).
+    // Ink outline first, then the light strokes over it (QC round 1, #181): the cue lands
+    // on tower heads, and over a light role colour only the ink edge reads.
     for (const tel of airborneCuePaintOps({ ...p, airborne: c.airborne }, r, pal.airborne, 0)) {
-      g.lineStyle(2, tel.colour, tel.alpha);
-      g.lineBetween(tel.apexX, tel.apexY, tel.leftX, tel.leftY);
-      g.lineBetween(tel.apexX, tel.apexY, tel.rightX, tel.rightY);
+      const wings = [
+        [tel.leftX, tel.leftY],
+        [tel.rightX, tel.rightY],
+      ] as const;
+      g.lineStyle(tel.strokePx + 2 * tel.outlinePx, tel.outlineColour, tel.alpha);
+      for (const [tx, ty] of wings) {
+        // A line quad ends square at its points, so the outline runs `outlinePx` past both
+        // ends to ring the tips and the apex too.
+        const len = Math.hypot(tx - tel.apexX, ty - tel.apexY);
+        const ux = ((tx - tel.apexX) / len) * tel.outlinePx;
+        const uy = ((ty - tel.apexY) / len) * tel.outlinePx;
+        g.lineBetween(tel.apexX - ux, tel.apexY - uy, tx + ux, ty + uy);
+      }
+      g.lineStyle(tel.strokePx, tel.colour, tel.alpha);
+      for (const [tx, ty] of wings) g.lineBetween(tel.apexX, tel.apexY, tx, ty);
     }
   }
 }

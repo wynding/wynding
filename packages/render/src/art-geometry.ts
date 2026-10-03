@@ -49,16 +49,47 @@ export type PathCommand =
 const COMMAND_LETTERS = 'MmLlHhVvCcSsQqTtAaZz';
 const TOKEN = /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
 
+/** Whether `token` is a number rather than a command letter. */
+const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
+
 /**
  * Parse an SVG path string into absolute M/L/C/Q/A/Z commands: relative forms are made
  * absolute, H/V become L, S/T become C/Q with their reflected control point. Throws on
  * anything it cannot read — art is code, so a malformed path is a bug to surface at once,
  * never a shape to skip.
+ *
+ * NEVER MORE LENIENT THAN `Path2D`, which is what paints the art: a browser drops path data
+ * from its first error on, so data it would draw as nothing must not measure as a shape
+ * here. So the path must open with a moveto (`'L50 50'` and `'h40'` paint nothing), and a
+ * comma may only separate two numbers, once (`'M10,,10L50 50'` and `',M10 10L50 50'` paint
+ * nothing either) — the SVG grammar's `comma-wsp`.
  */
 export function parsePath(d: string): PathCommand[] {
-  const tokens = d.match(TOKEN) ?? [];
-  if (tokens.join('').length !== d.replace(/[\s,]/g, '').length) {
-    throw new Error(`unreadable path data: '${d}'`);
+  /** What may stand between the token `before` and the token `after` (either missing at the
+   *  ends of the string): whitespace, and one comma only between two numbers. */
+  const checkGap = (gap: string, before: string | undefined, after: string | undefined): void => {
+    if (!/^[\s,]*$/.test(gap)) throw new Error(`unreadable path data: '${d}'`);
+    if (!gap.includes(',')) return;
+    if (
+      gap.indexOf(',') !== gap.lastIndexOf(',') ||
+      before === undefined ||
+      after === undefined ||
+      !isNumber(before) ||
+      !isNumber(after)
+    ) {
+      throw new Error(`a comma must separate two numbers, once: '${d}'`);
+    }
+  };
+  const tokens: string[] = [];
+  let gapStart = 0;
+  for (const m of d.matchAll(TOKEN)) {
+    checkGap(d.slice(gapStart, m.index), tokens[tokens.length - 1], m[0]);
+    tokens.push(m[0]);
+    gapStart = m.index + m[0].length;
+  }
+  checkGap(d.slice(gapStart), tokens[tokens.length - 1], undefined);
+  if (tokens[0] !== 'M' && tokens[0] !== 'm') {
+    throw new Error(`path data must open with a moveto (M or m): '${d}'`);
   }
   const out: PathCommand[] = [];
   let i = 0;

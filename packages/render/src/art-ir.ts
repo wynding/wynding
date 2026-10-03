@@ -20,6 +20,8 @@ export type ArtColour =
   | 'role'
   /** The tower plate's fill (`palette.plate`). */
   | 'plate'
+  /** The board floor (`palette.floor`) — the pad a plateless tower stands on. */
+  | 'floor'
   /** The plate's rim — `palette.tower`, gated ≥ 3:1 against the floor. */
   | 'rim'
   /** `palette.aura` — the glow on a tower a beacon boosts. */

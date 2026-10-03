@@ -1,8 +1,9 @@
 // placement.ts — which atlas frame each sprite shows, and where (V2, #181). Pure,
 // Phaser-free, unit-tested: `scene.ts` only copies these lists onto pooled sprites, so every
 // decision a frame's picture depends on — which towers are hidden, which are pending, which
-// stand on a plate, which heads wear the boost glow, how faded a scorch is, which silhouette
-// and size a creep gets, when it turns low-health — is made here, where a test can see it.
+// stand on a plate and which on a pad, which heads wear the boost glow, how faded a scorch
+// is, which silhouette and size a creep gets, when it turns low-health — is made here, where
+// a test can see it.
 //
 // POSITIONS are world CSS px (the space every projection call returns) and are SNAPPED TO
 // WHOLE DEVICE PIXELS: a sprite's top-left lands where `x × dpr` is an integer. The atlas
@@ -19,11 +20,10 @@ import {
 } from './board-draw';
 import {
   creepFrameKey,
+  groundFrameKey,
   headFrameKey,
   pendingFrameKey,
-  PLATE_FRAME_KEY,
   SCORCH_FRAME_KEY,
-  towerHasPlate,
 } from './art-frames';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
@@ -51,8 +51,8 @@ export function snapToDevicePx(v: number, dpr: number): number {
 
 function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {
   const frame = frames.get(key);
-  // Every key placement can produce — the plate, `headFrameKey`, `pendingFrameKey`, the
-  // scorch, `creepFrameKey` — is baked (`art-frames.ts`), for any id at all: a miss is a
+  // Every key placement can produce — `groundFrameKey`, `headFrameKey`, `pendingFrameKey`,
+  // the scorch, `creepFrameKey` — is baked (`art-frames.ts`), for any id at all: a miss is a
   // broken atlas, and drawing nothing would hide it.
   if (frame === undefined) throw new Error(`board atlas has no frame '${key}'`);
   return frame;
@@ -75,8 +75,9 @@ function placeAt(
 }
 
 export interface TowerPlacements {
-  /** Committed towers' plates — the plates layer. A tower whose look has no plate (the
-   *  mine) has none, so this can be shorter than `heads`. */
+  /** What committed towers stand on — the plates layer: each one's plate, or for a
+   *  plateless look (the mine) its floor-coloured pad, which keeps a neighbouring beacon's
+   *  aura shell off its footprint as a plate does. One per head. */
   readonly plates: readonly SpritePlacement[];
   /** Committed towers' heads — the heads layer, over the plates. */
   readonly heads: readonly SpritePlacement[];
@@ -87,7 +88,7 @@ export interface TowerPlacements {
 /**
  * Every tower sprite this frame. A committed tower whose sell is pending is HIDDEN —
  * presented as already gone (`visibleTowers`) — plate and head alike. A committed tower
- * shows its plate (if its look has one) and its head, the boosted head when a beacon
+ * shows its plate (or, plateless, its pad) and its head, the boosted head when a beacon
  * boosts it; a pending build (`overlay.pendingAdds`) shows the pending picture of ITS OWN
  * look, so a slow tower queued while paused keeps its shape-distinct identity (Codex R1-7).
  * Every sprite is anchored at its 2×2 footprint's top-left cell, so a tower's plate and
@@ -104,7 +105,7 @@ export function placeTowers(
   const heads: SpritePlacement[] = [];
   for (const t of visibleTowers(vm.towers, o.pendingSells)) {
     const p = projection.cellToPixel(t.col, t.row);
-    if (towerHasPlate(t.towerId)) plates.push(placeAt(frames, PLATE_FRAME_KEY, p.x, p.y, dpr));
+    plates.push(placeAt(frames, groundFrameKey(t.towerId), p.x, p.y, dpr));
     heads.push(placeAt(frames, headFrameKey(t.towerId, t.buffed), p.x, p.y, dpr));
   }
   const pending = o.pendingAdds.map((t) => {

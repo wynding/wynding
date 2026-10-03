@@ -12,7 +12,7 @@ import {
   snapToDevicePx,
   type FrameAnchor,
 } from './placement';
-import { atlasFrameSpecs, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
+import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
 import { creepRadius } from './board-draw';
 import { createProjection, type Projection } from './projection';
 import { resolvePalette } from './palette';
@@ -110,7 +110,7 @@ describe('placeTowers', () => {
     expect(placed.plates.map((p) => p.frame)).toEqual([PLATE_FRAME_KEY, PLATE_FRAME_KEY]);
   });
 
-  it('stands every committed tower on a plate but the mine', () => {
+  it('stands every committed tower on a plate but the mine, which stands on its floor-coloured pad', () => {
     const placed = placeTowers(
       vmWith([tower('mine', 2, 2), tower('beacon', 5, 2), tower('no-such-tower', 2, 5)]),
       NO_OVERLAY,
@@ -122,13 +122,24 @@ describe('placeTowers', () => {
       'tower:head:pylon:support:committed',
       'tower:head:plain:damage:committed', // an unknown id looks like basic
     ]);
-    const plateCorners = placed.plates.map((p) => [p.x, p.y]);
-    const at = (col: number, row: number): number[] => {
+    // One ground sprite per head, in the same order, each at its own footprint corner: the
+    // mine's is the pad, so nothing — a neighbouring beacon's shell above all — shows
+    // through a footprint its studded head leaves bare.
+    expect(placed.plates.map((p) => p.frame)).toEqual([
+      PAD_FRAME_KEY,
+      PLATE_FRAME_KEY,
+      PLATE_FRAME_KEY,
+    ]);
+    const at = (key: string, col: number, row: number): number[] => {
       const c = projection.cellToPixel(col, row);
-      const a = frames.get(PLATE_FRAME_KEY)!;
+      const a = frames.get(key)!;
       return [c.x - a.anchorX, c.y - a.anchorY];
     };
-    expect(plateCorners).toEqual([at(5, 2), at(2, 5)]);
+    expect(placed.plates.map((p) => [p.x, p.y])).toEqual([
+      at(PAD_FRAME_KEY, 2, 2),
+      at(PLATE_FRAME_KEY, 5, 2),
+      at(PLATE_FRAME_KEY, 2, 5),
+    ]);
   });
 
   it('hides a committed tower whose sell is pending — plate and head alike — and only that one', () => {

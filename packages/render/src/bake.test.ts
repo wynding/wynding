@@ -19,6 +19,8 @@ import { atlasFrameSpecs, PLATE_FRAME_KEY } from './art-frames';
 import type { ArtCanvas2DLike } from './art-paint';
 import { boardPaintOps } from './board-cells';
 import { resolvePalette } from './palette';
+import { HEAD_ART } from './tower-art';
+import type { TowerFootprintMark } from './tower-paint';
 
 type Op = { op: string; args: unknown[]; composite?: GlobalCompositeOperation };
 
@@ -251,17 +253,32 @@ describe('paintAtlas', () => {
       const ops = segments[i]!;
       const drawn = ops.filter((o) => o.composite !== undefined);
       const fades = drawn.filter((o) => o.composite === 'destination-in');
-      // Only a pending build fades: ONE fillRect, after its frame's clip is set...
+      // Only a pending build fades: its plate on its own first (every look but the
+      // plateless mine), then plate and head together — each fade ONE fillRect, after its
+      // frame's clip is set...
       if (!key.startsWith('tower:pending:')) {
         expect(fades, key).toEqual([]);
         return;
       }
-      expect(fades, key).toHaveLength(1);
-      expect(fades[0]!.op).toBe('fillRect');
-      expect(ops.indexOf(fades[0]!)).toBeGreaterThan(ops.findIndex((o) => o.op === 'clip'));
-      // ...and everything drawn after it — the dashed rim — composites normally again, so
-      // the rim is painted over the faded picture rather than cutting into it.
-      const after = drawn.slice(drawn.indexOf(fades[0]!) + 1);
+      const mark = key.split(':')[2] as TowerFootprintMark;
+      expect(fades, key).toHaveLength(HEAD_ART[mark].plate ? 2 : 1);
+      const clip = ops.findIndex((o) => o.op === 'clip');
+      for (const fade of fades) {
+        expect(fade.op).toBe('fillRect');
+        expect(ops.indexOf(fade)).toBeGreaterThan(clip);
+      }
+      // ...the head is painted BETWEEN the two fades, over the faded plate...
+      if (fades.length === 2) {
+        const between = drawn.slice(drawn.indexOf(fades[0]!) + 1, drawn.indexOf(fades[1]!));
+        expect(
+          between.some((o) => o.op === 'fill'),
+          key,
+        ).toBe(true);
+        for (const o of between) expect(o.composite, key).toBe('source-over');
+      }
+      // ...and everything drawn after the last — the dashed rim — composites normally again,
+      // so the rim is painted over the faded picture rather than cutting into it.
+      const after = drawn.slice(drawn.indexOf(fades[fades.length - 1]!) + 1);
       expect(
         after.some((o) => o.op === 'stroke'),
         key,

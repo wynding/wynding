@@ -49,6 +49,8 @@ export function artColour(token: ArtColour, pal: Palette, role: TowerRole): numb
       return roleColour(pal, role);
     case 'plate':
       return pal.plate;
+    case 'floor':
+      return pal.floor;
     case 'rim':
       return pal.tower;
     case 'aura':
@@ -112,6 +114,14 @@ export const PLATE_ART: readonly ArtShape[] = [
   },
   PLATE_BEVEL,
 ];
+
+/** The PAD a plateless tower (the mine) stands on in the plates layer: the plate's own
+ *  rectangle, filled opaque in the floor colour — no rim, no shadow, no bevel — so it is
+ *  invisible against the floor. It exists for the layer order's sake: a beacon's aura shell
+ *  sits under every tower (M2-S8: a shell never stripes a tower), which a plated tower's
+ *  plate makes true over its footprint; a mine's studded head covers too little of its
+ *  footprint to, and without the pad a neighbouring beacon's shell ran straight through it. */
+export const PAD_ART: readonly ArtShape[] = [{ kind: 'rect', ...PLATE_RECT, fill: 'floor' }];
 
 /** The plate a PENDING build shows under its translucent art: the same plate without its
  *  solid rim, because the pending build's rim is the dashed one (`PENDING_RIM_ART`) and a
@@ -293,15 +303,17 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   },
   // frost-splash — its own outline, a plus whose arms carry the ringed-crosshair glyph's
   // spokes out from the ring. The frame drew it as `splash`'s octagon; a tower needs an
-  // outline of its own (T1), and the plus reads apart from every other head at a phone's
-  // cell size, the other two control heads (the star and the diamond) included
-  // (`tower-art.test.ts` measures it).
+  // outline of its own (T1). The arms are slim (12 units across, reaching 18 — the most the
+  // blast spokes' 0.6-cell start allows) so the plus's deep notches set it apart from
+  // splash's octagon, whose flat sides a broad plus would all but fill; the ring is sized to
+  // clear the notches' inner corners. `tower-art.test.ts` measures the outline against every
+  // other head, splash's and the other two control heads' (the star and the diamond) included.
   'ringed-crosshair': {
     plate: true,
     shapes: [
-      { kind: 'polygon', points: plus(7.5, 18), ...BODY },
-      { kind: 'circle', cx: C, cy: C, r: 6.5, stroke: 'ink', width: 2.2 },
-      { kind: 'path', d: spokes(6.5, 13), stroke: 'ink', width: 2.2, cap: 'round' },
+      { kind: 'polygon', points: plus(6, 18), ...BODY },
+      { kind: 'circle', cx: C, cy: C, r: 5.25, stroke: 'ink', width: 2.2 },
+      { kind: 'path', d: spokes(5.25, 13), stroke: 'ink', width: 2.2, cap: 'round' },
     ],
   },
 };
@@ -332,9 +344,16 @@ export const BOOST_ART: readonly ArtShape[] = [
   { kind: 'circle', cx: C, cy: C, r: 25.5, stroke: 'aura', width: 1.2, alpha: 0.45 },
 ];
 
-/** How opaque a pending build's art is: the whole tower — plate and head together — at this
- *  opacity, faded as one picture rather than shape by shape. */
-export const PENDING_ALPHA = 0.5;
+/** How opaque a pending build's HEAD is. The plate under it fades further
+ *  (`PENDING_PLATE_ALPHA`), so the tower reads as planned — a faint plate inside a dashed
+ *  rim — while its head, the identity a player plans with, stays legible: the head's role
+ *  colour at this opacity clears 3:1 against the faded plate in every mode
+ *  (`palette.test.ts`). Each part fades as a whole picture, never shape by shape, so the
+ *  head still covers the plate under it exactly as a built tower's does. */
+export const PENDING_ALPHA = 0.85;
+
+/** How opaque a pending build's plate is — well under the head's `PENDING_ALPHA`. */
+export const PENDING_PLATE_ALPHA = 0.25;
 
 /** A pending build's rim (T4): the plate's outline, DASHED, at full opacity over the faded
  *  art — so "planned, not built" reads by shape (the dashes) as well as by alpha. In

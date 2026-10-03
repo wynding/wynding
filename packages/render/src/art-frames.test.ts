@@ -10,6 +10,7 @@ import {
   artUnit,
   creepFrameKey,
   creepFrameSpecs,
+  groundFrameKey,
   headFrameKey,
   paintTowerArt,
   pendingFrameKey,
@@ -18,6 +19,7 @@ import {
   towerFrameSpecs,
   towerHasPlate,
   FRAME_PAD_TEXELS,
+  PAD_FRAME_KEY,
   PLATE_FRAME_KEY,
   SCORCH_FRAME_KEY,
   type FrameSpec,
@@ -31,7 +33,9 @@ import {
   ART_BOX,
   BOOST_ART,
   HEAD_ART,
+  PAD_ART,
   PENDING_ALPHA,
+  PENDING_PLATE_ALPHA,
   PENDING_PLATE_ART,
   PENDING_RIM_ART,
   PLATE_ART,
@@ -174,9 +178,13 @@ describe('frame keys follow the look, not the catalog id', () => {
     expect(pendingFrameKey('__proto__')).toBe(pendingFrameKey('basic'));
   });
 
-  it('stands every tower on the one shared plate but the mine, an unknown id included', () => {
-    for (const id of CATALOG_IDS) expect(towerHasPlate(id), id).toBe(id !== 'mine');
+  it('stands every tower on the one shared plate but the mine, which stands on its pad — an unknown id included', () => {
+    for (const id of CATALOG_IDS) {
+      expect(towerHasPlate(id), id).toBe(id !== 'mine');
+      expect(groundFrameKey(id), id).toBe(id === 'mine' ? PAD_FRAME_KEY : PLATE_FRAME_KEY);
+    }
     expect(towerHasPlate('no-such-tower')).toBe(true);
+    expect(groundFrameKey('no-such-tower')).toBe(PLATE_FRAME_KEY);
   });
 
   it('keys a creep frame by its shape, its low-health tint and its boss size', () => {
@@ -197,14 +205,20 @@ describe('atlasFrameSpecs — the whole catalogue', () => {
   const specs = atlasFrameSpecs(20, 1);
   const keys = new Set(specs.map((s) => s.key));
 
-  it('bakes every key placement can produce: the plate, each look × state, the scorch, each creep', () => {
+  it('bakes every key placement can produce: the plate, the pad, each look × state, the scorch, each creep', () => {
     expect(specs).toHaveLength(keys.size); // no duplicate keys
-    expect(specs).toHaveLength(1 + TOWER_LOOKS.length * 3 + 1 + CREEP_SHAPE_VALUES.length * 4);
+    expect(specs).toHaveLength(2 + TOWER_LOOKS.length * 3 + 1 + CREEP_SHAPE_VALUES.length * 4);
     expect(keys.has(PLATE_FRAME_KEY)).toBe(true);
+    expect(keys.has(PAD_FRAME_KEY)).toBe(true);
     expect(keys.has(SCORCH_FRAME_KEY)).toBe(true);
     // Every catalog id, and ids the catalog has never heard of, resolve to baked frames.
     for (const id of [...CATALOG_IDS, 'no-such-tower', '__proto__', '']) {
-      for (const key of [headFrameKey(id, false), headFrameKey(id, true), pendingFrameKey(id)]) {
+      for (const key of [
+        groundFrameKey(id),
+        headFrameKey(id, false),
+        headFrameKey(id, true),
+        pendingFrameKey(id),
+      ]) {
         expect(keys.has(key), `${id}: ${key}`).toBe(true);
       }
     }
@@ -440,19 +454,37 @@ describe('painters draw the art they own, in the palette they are handed', () =>
     }
   });
 
-  it('paints a pending build as plate and head, faded as ONE picture, then the dashed rim at full opacity', () => {
+  it('paints a pending build as its plate faded further than its head, then the dashed rim at full opacity', () => {
     for (const l of TOWER_LOOKS) {
       const key = `tower:pending:${towerLookKey(l)}`;
       const ops = artOps(paint(frame(key)));
-      const under = HEAD_ART[l.mark].plate ? PENDING_PLATE_ART : [];
+      // The plate, faded so the head's fade takes it the rest of the way to
+      // `PENDING_PLATE_ALPHA`; the head over it, opaque; both faded as ONE picture to the
+      // head's `PENDING_ALPHA` — so the head covers the plate as a built tower's does — and
+      // the dashed rim on top at full opacity. The plateless mine skips the first step.
+      const plate = HEAD_ART[l.mark].plate
+        ? [
+            { op: 'art', shapes: PENDING_PLATE_ART },
+            { op: 'fade', alpha: PENDING_PLATE_ALPHA / PENDING_ALPHA },
+          ]
+        : [];
       expect(
         ops.map((o) => (o.op === 'art' ? { op: 'art', shapes: o.shapes } : o)),
         key,
       ).toEqual([
-        { op: 'art', shapes: [...under, ...HEAD_ART[l.mark].shapes] },
+        ...plate,
+        { op: 'art', shapes: HEAD_ART[l.mark].shapes },
         { op: 'fade', alpha: PENDING_ALPHA },
         { op: 'art', shapes: PENDING_RIM_ART },
       ]);
+    }
+  });
+
+  it('paints the pad as the pad art, in the floor colour of the mode it is handed', () => {
+    for (const mode of ['default', 'tritan'] as const) {
+      const calls = artCalls(paint(frame(PAD_FRAME_KEY), mode));
+      expect(calls.map((c) => c.shapes)).toEqual([PAD_ART]);
+      expect(calls[0]!.colour('floor')).toBe(resolvePalette(mode).floor);
     }
   });
 });

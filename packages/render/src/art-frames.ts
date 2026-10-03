@@ -5,10 +5,11 @@
 //
 // Towers (visual pass T1/T2/T4/B3) are drawn from their vector art (`tower-art.ts`) through
 // the art painter (`art-paint.ts`), as SEPARATE frames: the plate every tower but the mine
-// sits on, the head (committed, or boosted with its glow), a pending build's whole
-// translucent picture, and the scorch a spent mine leaves. Every tower frame is sized from
-// its own art's bounds — shadow, glow and strokes included — so nothing is clipped at any
-// cell size. Creeps are still the board's own geometry (`board-draw.ts`), unchanged.
+// sits on (the mine stands on a floor-coloured pad instead), the head (committed, or
+// boosted with its glow), a pending build's whole translucent picture, and the scorch a
+// spent mine leaves. Every tower frame is sized from its own art's bounds — shadow, glow and
+// strokes included — so nothing is clipped at any cell size. Creeps are still the board's
+// own geometry (`board-draw.ts`), unchanged.
 //
 // "Paint frame X into a graphics surface" is the seam later art goes through: the packing,
 // baking, placement and sprite pools never learn what is inside a frame.
@@ -27,7 +28,9 @@ import {
   ART_BOX,
   BOOST_ART,
   HEAD_ART,
+  PAD_ART,
   PENDING_ALPHA,
+  PENDING_PLATE_ALPHA,
   PENDING_PLATE_ART,
   PENDING_RIM_ART,
   PLATE_ART,
@@ -73,6 +76,15 @@ export function towerHasPlate(towerId: string): boolean {
 
 /** The one plate frame every plated tower shows. */
 export const PLATE_FRAME_KEY = 'tower:plate';
+
+/** The pad a plateless tower (the mine) shows in the plates layer instead (`PAD_ART`). */
+export const PAD_FRAME_KEY = 'tower:pad';
+
+/** What a committed tower of `towerId` stands on in the plates layer: its plate, or — for a
+ *  plateless look — the floor-coloured pad that keeps aura shells off its footprint too. */
+export function groundFrameKey(towerId: string): string {
+  return towerHasPlate(towerId) ? PLATE_FRAME_KEY : PAD_FRAME_KEY;
+}
 
 /** The frame a spent mine's scorch shows. */
 export const SCORCH_FRAME_KEY = 'scorch';
@@ -203,6 +215,9 @@ export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
     artFrame(PLATE_FRAME_KEY, PLATE_ART, cellPx, scale, corner, (g, pal, x0, y0, unit) =>
       g.art(PLATE_ART, colours(pal, 'damage'), x0, y0, unit),
     ),
+    artFrame(PAD_FRAME_KEY, PAD_ART, cellPx, scale, corner, (g, pal, x0, y0, unit) =>
+      g.art(PAD_ART, colours(pal, 'burst'), x0, y0, unit),
+    ),
   ];
   for (const look of TOWER_LOOKS) {
     const head = HEAD_ART[look.mark];
@@ -225,9 +240,15 @@ export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
         corner,
         (g, pal, x0, y0, unit) => {
           const c = colours(pal, look.role);
-          // The whole tower, then faded as ONE picture — so the head covers the plate under
-          // it exactly as a built tower's does — then the dashed rim at full opacity.
-          g.art([...under, ...head.shapes], c, x0, y0, unit);
+          // The plate first, faded so that the head's fade below takes it the rest of the way
+          // to `PENDING_PLATE_ALPHA`; then the head over it, opaque, so it covers the plate
+          // exactly as a built tower's does; then both faded as ONE picture to the head's
+          // `PENDING_ALPHA`; then the dashed rim at full opacity.
+          if (under.length > 0) {
+            g.art(under, c, x0, y0, unit);
+            g.fade(PENDING_PLATE_ALPHA / PENDING_ALPHA);
+          }
+          g.art(head.shapes, c, x0, y0, unit);
           g.fade(PENDING_ALPHA);
           g.art(PENDING_RIM_ART, c, x0, y0, unit);
         },

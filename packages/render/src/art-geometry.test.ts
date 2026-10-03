@@ -94,10 +94,31 @@ describe('parsePath', () => {
 
   it('throws on anything it cannot read — a malformed path is a bug, never a shape to skip', () => {
     expect(() => parsePath('M0 0 X 3')).toThrow(/unreadable/);
-    expect(() => parsePath('3 4')).toThrow(/without a command/);
+    // Numbers with no command at all fail the opening-moveto rule below first.
+    expect(() => parsePath('3 4')).toThrow(/moveto/);
     expect(() => parsePath('M0 0Z 4 4')).toThrow(/without a command/);
     expect(() => parsePath('M0')).toThrow(/ends early/);
     expect(() => parsePath('M0 0L4')).toThrow(/ends early/);
+  });
+
+  it('is never more lenient than Path2D: path data a browser paints as NOTHING throws', () => {
+    // Chromium and WebKit drop path data from its first error on, so each of these paints
+    // no pixel at all — measuring them as shapes would let frame sizes and the tests reason
+    // about art the board never shows.
+    expect(() => parsePath('L50 50')).toThrow(/moveto/);
+    expect(() => parsePath('h40')).toThrow(/moveto/);
+    expect(() => parsePath('')).toThrow(/moveto/);
+    expect(() => parsePath('M10,,10L50 50')).toThrow(/comma/);
+    expect(() => parsePath(',M10 10L50 50')).toThrow(/comma/);
+    // A comma separates two NUMBERS: never after a command letter, before one, or at the end.
+    expect(() => parsePath('M,10 10L50 50')).toThrow(/comma/);
+    expect(() => parsePath('M10 10,L50 50')).toThrow(/comma/);
+    expect(() => parsePath('M10 10L50 50,')).toThrow(/comma/);
+    // ... while every separator the grammar allows still reads.
+    expect(parsePath(' m10,10 L 50 , 50\n')).toEqual([
+      { c: 'M', x: 10, y: 10 },
+      { c: 'L', x: 50, y: 50 },
+    ]);
   });
 });
 

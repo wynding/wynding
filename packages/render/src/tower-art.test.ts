@@ -1,8 +1,8 @@
 // tower-art.test.ts — the towers' vector art, tested as DATA (visual pass T1/T2/T4/B3, #181):
 // a head for every mark, the role colour as the head's fill, every colour token resolvable in
 // every mode, the paint combinations the painter is exact for, heads inside their footprint
-// and the aiming ones pointing up, the boost glow on the plate, the pending rim dashed — and
-// the T1 promise itself: at a phone's cell size no two heads read alike.
+// and the aiming ones pointing up, the boost glow on the plate, the pending rim dashed, the
+// mine's pad — and the T1 promise itself: no two heads share an outline.
 
 import { describe, it, expect } from 'vitest';
 import { artBounds, shapeOutline, type Point, type Polyline } from './art-geometry';
@@ -11,8 +11,11 @@ import {
   ART_BOX,
   ART_INK,
   BOOST_ART,
+  BOOST_RING_ALPHA,
   HEAD_ART,
+  PAD_ART,
   PENDING_ALPHA,
+  PENDING_PLATE_ALPHA,
   PENDING_PLATE_ART,
   PENDING_RIM_ART,
   PLATE_ART,
@@ -31,6 +34,7 @@ import {
 
 const ALL_ART: readonly (readonly [string, readonly ArtShape[]])[] = [
   ['plate', PLATE_ART],
+  ['pad', PAD_ART],
   ['pending plate', PENDING_PLATE_ART],
   ['pending rim', PENDING_RIM_ART],
   ['boost', BOOST_ART],
@@ -41,7 +45,7 @@ const ALL_ART: readonly (readonly [string, readonly ArtShape[]])[] = [
   ]),
 ];
 
-// ---- A small rasterizer: what a head COVERS, sampled on a pixel grid ----
+// ---- A small rasterizer: what a head COVERS, sampled on a grid ----
 
 /** Even-odd point-in-polygon over a set of rings. */
 function insideRings(x: number, y: number, rings: readonly (readonly Point[])[]): boolean {
@@ -75,103 +79,130 @@ function nearStroke(x: number, y: number, lines: readonly Polyline[], half: numb
   return false;
 }
 
-/** The pixels a head covers when drawn into a footprint `footprintPx` CSS px across: each
- *  pixel supersampled 4×4 over every visible shape — fills, and strokes at their width at
- *  that scale (floors applied) — and kept where at least half its samples land. Shadows are
- *  not part of a silhouette (dark on the dark floor). */
-function silhouette(shapes: readonly ArtShape[], footprintPx: number): Set<number> {
-  const unit = footprintPx / ART_BOX;
-  const prepared = shapes
-    .filter((s) => s.fill !== 'shadow')
-    .map((s) => ({
-      fills: s.fill !== undefined,
-      strokeHalf: s.stroke === undefined ? -1 : strokeWidthAt(s, unit) / 2,
-      lines: shapeOutline(s),
-    }));
-  const covered = new Set<number>();
+/** A head's OUTLINE as fractional coverage of an `n`×`n` grid laid over its own bounding
+ *  box: scaled uniformly (aspect kept) so the box's longer side spans the grid, centred, and
+ *  shifted by `offset` of a grid cell. Each cell is supersampled 4×4 over every visible shape
+ *  — fills, and strokes at their design width — so a cell an edge crosses counts the share
+ *  of it covered. Shadows are not part of a silhouette (dark on the dark floor).
+ *
+ *  Normalising to the box makes this measure SHAPE — not size, which a copy at 90% of the
+ *  size only changes (a footprint-sized raster scored such a copy as a different outline),
+ *  and not where edges fall on the pixel grid (a footprint-sized raster at a phone's 26px
+ *  swung splash against frost-splash from 0.82 to 0.91 between 20px and 33px). The measure
+ *  itself is pinned grid-independent below. */
+function outline(shapes: readonly ArtShape[], n = 64, offset = 0): Float64Array {
+  const visible = shapes.filter((s) => s.fill !== 'shadow');
+  const b = artBounds(visible, Infinity); // Infinity: strokes at their design width
+  const side = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+  const x0 = (b.minX + b.maxX) / 2 - side / 2 - (offset * side) / n;
+  const y0 = (b.minY + b.maxY) / 2 - side / 2 - (offset * side) / n;
+  const prepared = visible.map((s) => {
+    const lines = shapeOutline(s);
+    return {
+      rings: s.fill === undefined ? null : lines.map((l) => l.points),
+      half: s.stroke === undefined ? -1 : strokeWidthAt(s, Infinity) / 2,
+      lines,
+    };
+  });
   const SS = 4;
-  for (let py = 0; py < footprintPx; py++) {
-    for (let px = 0; px < footprintPx; px++) {
+  const out = new Float64Array(n * n);
+  for (let py = 0; py < n; py++) {
+    for (let px = 0; px < n; px++) {
       let hits = 0;
       for (let sy = 0; sy < SS; sy++) {
         for (let sx = 0; sx < SS; sx++) {
-          const x = (px + (sx + 0.5) / SS) / unit;
-          const y = (py + (sy + 0.5) / SS) / unit;
-          const hit = prepared.some(
-            (p) =>
-              (p.fills &&
-                insideRings(
-                  x,
-                  y,
-                  p.lines.map((l) => l.points),
-                )) ||
-              (p.strokeHalf >= 0 && nearStroke(x, y, p.lines, p.strokeHalf)),
-          );
-          if (hit) hits++;
+          const x = x0 + ((px + (sx + 0.5) / SS) * side) / n;
+          const y = y0 + ((py + (sy + 0.5) / SS) * side) / n;
+          if (
+            prepared.some(
+              (p) =>
+                (p.rings !== null && insideRings(x, y, p.rings)) ||
+                (p.half >= 0 && nearStroke(x, y, p.lines, p.half)),
+            )
+          ) {
+            hits++;
+          }
         }
       }
-      if (hits * 2 >= SS * SS) covered.add(py * footprintPx + px);
+      out[py * n + px] = hits / (SS * SS);
     }
   }
-  return covered;
+  return out;
 }
 
-function iou(a: ReadonlySet<number>, b: ReadonlySet<number>): number {
-  let both = 0;
-  for (const p of a) if (b.has(p)) both++;
-  return both / (a.size + b.size - both);
+/** How much two outlines overlap: soft intersection over union of their coverage, Σmin/Σmax
+ *  — 1 for one outline twice, falling as they differ. */
+function overlap(a: Float64Array, b: Float64Array): number {
+  let lo = 0;
+  let hi = 0;
+  for (let i = 0; i < a.length; i++) {
+    lo += Math.min(a[i]!, b[i]!);
+    hi += Math.max(a[i]!, b[i]!);
+  }
+  return lo / hi;
 }
 
-/** A phone's cell (the style frame's phone mock: 13 px cells) — a 26 px footprint. */
-const PHONE_FOOTPRINT_PX = 26;
+/** The most any two heads' outlines may overlap. Measured, closest first: basic's ring with
+ *  its barrel against venom's droplet, 0.85 (each a round body with a point straight up —
+ *  and each its own colour and glyph); then splash's octagon against frost-splash's plus,
+ *  0.72 (0.83 with the plus's first, broader arms, which this bar would still have passed but
+ *  not clearly — so the arms were slimmed). Controls that must FAIL it, below: stun's
+ *  diamond at 90% of its size (0.99 — scale is not shape), the style frame's own
+ *  frost-splash against splash (1.00 — splash's octagon with another glyph inside), and
+ *  stun's diamond squashed to 90% of its height (0.90 — a near-copy of an outline). */
+const MAX_OUTLINE_OVERLAP = 0.88;
 
-/** The most any two heads may overlap at a phone's cell, intersection over union: two heads
- *  sharing an outline score 1, and stun's own diamond drawn at 90% of its size scores 0.90
- *  against it. The style frame's closest pair of heads, venom's droplet and stun's diamond,
- *  scores 0.84 — a pair whose role colours differ as well. */
-const MAX_HEAD_IOU = 0.87;
+/** The most two heads of ONE role may overlap — they share a colour, so outline and glyph are
+ *  all that tell them apart at a glance. The closest such pair is slow's star and stun's
+ *  diamond, 0.71 (their glyphs differ too — a ring, a zigzag); stun's diamond squashed to 85%
+ *  of its height scores 0.86 against the original. */
+const MAX_SAME_ROLE_OVERLAP = 0.75;
 
-/** The most two heads of ONE role may overlap: they share a colour, so their outlines are all
- *  that tells them apart at a glance. The closest such pair is slow's star and stun's diamond,
- *  0.71 (their glyphs differ too — a ring, a zigzag); stun's diamond at 85% of its size scores
- *  0.80 against the original. */
-const MAX_SAME_ROLE_IOU = 0.75;
-
-/** Stun's diamond — the outline of the head the near-copy cases below copy — scaled by `k`
- *  about the footprint centre. */
-function scaledDiamond(k: number): ArtShape {
+/** Stun's diamond — the outline of the head the near-copy controls copy — scaled by `kx`
+ *  across and `ky` down, about the footprint centre. */
+function scaledDiamond(kx: number, ky: number): ArtShape {
   const diamond = HEAD_ART.bolt.shapes[0]!;
   if (diamond.kind !== 'polygon') throw new Error('stun’s outline is a polygon');
   const C = ART_BOX / 2;
   return {
     ...diamond,
-    points: diamond.points.map(([x, y]) => [C + (x - C) * k, C + (y - C) * k] as const),
+    points: diamond.points.map(([x, y]) => [C + (x - C) * kx, C + (y - C) * ky] as const),
   };
 }
 
-describe('silhouettes — T1: an outline per tower, apart at a phone’s cell size', () => {
+describe('silhouettes — T1: an outline per tower', () => {
   const marks = TOWER_FOOTPRINT_MARKS;
-  const masks = new Map(marks.map((m) => [m, silhouette(HEAD_ART[m].shapes, PHONE_FOOTPRINT_PX)]));
+  const outlines = new Map(marks.map((m) => [m, outline(HEAD_ART[m].shapes)]));
   const roleOf = (m: TowerFootprintMark): string => TOWER_LOOKS.find((l) => l.mark === m)!.role;
-  const pairs: { a: TowerFootprintMark; b: TowerFootprintMark; iou: number }[] = [];
+  const pairs: { a: TowerFootprintMark; b: TowerFootprintMark; overlap: number }[] = [];
   for (let i = 0; i < marks.length; i++) {
     for (let j = i + 1; j < marks.length; j++) {
       const a = marks[i]!;
       const b = marks[j]!;
-      pairs.push({ a, b, iou: iou(masks.get(a)!, masks.get(b)!) });
+      pairs.push({ a, b, overlap: overlap(outlines.get(a)!, outlines.get(b)!) });
     }
   }
 
-  it(`no two heads share an outline — every pair overlaps less than ${MAX_HEAD_IOU}`, () => {
-    const table = [...pairs]
-      .sort((x, y) => y.iou - x.iou)
-      .map((p) => `${p.a}/${p.b}=${p.iou.toFixed(2)}`)
-      .join(' ');
-    console.info(`[tower-art.test] head IoU at a 26 px footprint, highest first: ${table}`);
-    for (const p of pairs) expect(p.iou, `${p.a} vs ${p.b}`).toBeLessThan(MAX_HEAD_IOU);
+  it('measures the outline, not the pixel grid: a coarser grid at a third-cell offset reads every pair the same', () => {
+    const coarse = new Map(marks.map((m) => [m, outline(HEAD_ART[m].shapes, 48, 1 / 3)]));
+    for (const p of pairs) {
+      const again = overlap(coarse.get(p.a)!, coarse.get(p.b)!);
+      expect(Math.abs(again - p.overlap), `${p.a} vs ${p.b}`).toBeLessThan(0.01);
+    }
   });
 
-  it(`heads of one role — the three control heads among them — overlap at most ${MAX_SAME_ROLE_IOU}`, () => {
+  it(`no two heads share an outline — every pair overlaps less than ${MAX_OUTLINE_OVERLAP}`, () => {
+    const table = [...pairs]
+      .sort((x, y) => y.overlap - x.overlap)
+      .map((p) => `${p.a}/${p.b}=${p.overlap.toFixed(3)}`)
+      .join(' ');
+    console.info(`[tower-art.test] head outline overlap, highest first: ${table}`);
+    for (const p of pairs) {
+      expect(p.overlap, `${p.a} vs ${p.b}`).toBeLessThan(MAX_OUTLINE_OVERLAP);
+    }
+  });
+
+  it(`heads of one role — the three control heads among them — overlap at most ${MAX_SAME_ROLE_OVERLAP}`, () => {
     const same = pairs.filter((p) => roleOf(p.a) === roleOf(p.b));
     // The pairs this bar is about, pinned so it cannot pass by matching nothing: slow, stun
     // and frost-splash share the control colour, basic and splash the damage one.
@@ -181,7 +212,9 @@ describe('silhouettes — T1: an outline per tower, apart at a phone’s cell si
       'ringed/ringed-crosshair',
       'bolt/ringed-crosshair',
     ]);
-    for (const p of same) expect(p.iou, `${p.a} vs ${p.b}`).toBeLessThanOrEqual(MAX_SAME_ROLE_IOU);
+    for (const p of same) {
+      expect(p.overlap, `${p.a} vs ${p.b}`).toBeLessThanOrEqual(MAX_SAME_ROLE_OVERLAP);
+    }
   });
 
   it('can fail: the style frame’s own frost-splash — splash’s octagon — shares splash’s outline', () => {
@@ -191,16 +224,21 @@ describe('silhouettes — T1: an outline per tower, apart at a phone’s cell si
       HEAD_ART.crosshair.shapes[0]!,
       ...HEAD_ART['ringed-crosshair'].shapes.slice(1),
     ];
-    const v = iou(silhouette(frameFrost, PHONE_FOOTPRINT_PX), masks.get('crosshair')!);
-    expect(v).toBeGreaterThanOrEqual(MAX_HEAD_IOU);
+    expect(overlap(outline(frameFrost), outlines.get('crosshair')!)).toBeGreaterThanOrEqual(
+      MAX_OUTLINE_OVERLAP,
+    );
   });
 
-  it('can fail: near-copies of a head — stun’s diamond at 90% and at 85% of its size', () => {
-    const at = (k: number): number =>
-      iou(silhouette([scaledDiamond(k)], PHONE_FOOTPRINT_PX), masks.get('bolt')!);
-    // At 90% it fails the bar every pair is held to; at 85%, the bar a same-role pair is.
-    expect(at(0.9)).toBeGreaterThanOrEqual(MAX_HEAD_IOU);
-    expect(at(0.85)).toBeGreaterThan(MAX_SAME_ROLE_IOU);
+  it('can fail: near-copies of a head — stun’s diamond at 90% of its size, and squashed to 90% and 85% of its height', () => {
+    const diamond = outline([scaledDiamond(1, 1)]);
+    const against = (kx: number, ky: number): number =>
+      overlap(outline([scaledDiamond(kx, ky)]), diamond);
+    // A smaller copy is the same outline — the measure is blind to size, by design.
+    expect(against(0.9, 0.9)).toBeGreaterThanOrEqual(MAX_OUTLINE_OVERLAP);
+    // A 10% change of proportion is still too close to pass for a different outline...
+    expect(against(1, 0.9)).toBeGreaterThanOrEqual(MAX_OUTLINE_OVERLAP);
+    // ... and 15% is too close for two heads that share a colour.
+    expect(against(1, 0.85)).toBeGreaterThan(MAX_SAME_ROLE_OVERLAP);
   });
 });
 
@@ -294,9 +332,10 @@ describe('colours — tokens every mode can resolve', () => {
     expect(artColour('rim', pal, 'damage')).toBe(pal.tower);
     expect(artColour('aura', pal, 'damage')).toBe(pal.aura);
     expect(artColour('ink', pal, 'damage')).toBe(ART_INK);
+    expect(artColour('floor', pal, 'burst')).toBe(pal.floor);
   });
 
-  it('only a head asks for the role colour — plate, glow, rim and scorch never do', () => {
+  it('only a head asks for the role colour — plate, pad, glow, rim and scorch never do', () => {
     for (const [name, shapes] of ALL_ART) {
       if (name.startsWith('head')) continue;
       for (const s of shapes) expect([s.fill, s.stroke], name).not.toContain('role');
@@ -430,11 +469,21 @@ describe('the plate, the boost glow and the pending rim', () => {
     expect(inner.fill).toBeUndefined();
     expect(inner.minWidthPx).toBe(1);
     expect(inner.alpha).toBeGreaterThan(outer.alpha ?? 1);
+    // The opacity the palette gate composites the cue at is the one actually painted.
+    expect(inner.alpha).toBe(BOOST_RING_ALPHA);
   });
 
-  it('a pending build fades to a part-opacity picture and draws a DASHED rim on top', () => {
+  it('the mine’s pad is the plate’s own rectangle, opaque in the floor colour — no rim, shadow or bevel', () => {
+    expect(PAD_ART).toEqual([{ kind: 'rect', ...PLATE_RECT, fill: 'floor' }]);
+    // Opaque, so whatever lies under it — an aura shell — is hidden, as a plate hides it.
+    expect(PAD_ART[0]!.alpha ?? 1).toBe(1);
+  });
+
+  it('a pending build fades to a part-opacity picture — its plate further than its head — and draws a DASHED rim on top', () => {
     expect(PENDING_ALPHA).toBeGreaterThan(0);
     expect(PENDING_ALPHA).toBeLessThan(1);
+    expect(PENDING_PLATE_ALPHA).toBeGreaterThan(0);
+    expect(PENDING_PLATE_ALPHA).toBeLessThan(PENDING_ALPHA);
     expect(PENDING_RIM_ART).toHaveLength(1);
     const rim = PENDING_RIM_ART[0]!;
     expect(rim).toMatchObject({ kind: 'rect', ...PLATE_RECT, stroke: 'rim' });
@@ -450,7 +499,10 @@ describe('the plate, the boost glow and the pending rim', () => {
   it('the scorch is centred on the footprint and stays inside it', () => {
     const b = artBounds(SCORCH_ART, 1);
     expect((b.minX + b.maxX) / 2).toBeCloseTo(ART_BOX / 2, 1);
+    expect((b.minY + b.maxY) / 2).toBeCloseTo(ART_BOX / 2, 1);
     expect(b.minX).toBeGreaterThanOrEqual(0);
+    expect(b.minY).toBeGreaterThanOrEqual(0);
+    expect(b.maxX).toBeLessThanOrEqual(ART_BOX);
     expect(b.maxY).toBeLessThanOrEqual(ART_BOX);
   });
 });

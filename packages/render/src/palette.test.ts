@@ -27,7 +27,7 @@
 import { describe, it, expect } from 'vitest';
 import { COLOUR_MODES, resolvePalette, roleColour } from './palette';
 import { AURA_SHELL_ALPHA, SELECTION_ALPHA } from './board-draw';
-import { ART_INK, BOOST_RING_ALPHA } from './tower-art';
+import { ART_INK, BOOST_RING_ALPHA, PENDING_ALPHA, PENDING_PLATE_ALPHA } from './tower-art';
 import { TOWER_ROLES, type TowerRole } from './tower-paint';
 import type { Palette } from './palette';
 import type { ColourMode } from './types';
@@ -216,11 +216,12 @@ const POISONED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
 // stays as belt-and-braces for the `flicker`, which is still inside but is the non-essential
 // motion cue. `warded`'s ring can be drawn over a tower: since the visual pass that is mostly
 // the plate (8.91:1), but the thin rim measures 2.79:1 and the light role-coloured heads as
-// little as 1.12:1, in every mode — gated by byte-distinctness instead (the tower surfaces
-// below), the same posture `poisoned`'s pips carry. (Against the green tower body before the
-// visual pass it was 2.37:1 in the default and tritan tables.) The ward ring is opaque and
-// drawn well outside the silhouette at r×2.2, but a tower footprint under it is the same kind
-// of "cue drawn over a body this gate doesn't reach" as this one.
+// little as 1.12:1 (default; protan/deutan 1.20, tritan 1.16) — gated by byte-distinctness
+// instead (the tower surfaces below), the same posture `poisoned`'s pips carry. (Against the
+// green tower body before the visual pass it was 2.37:1 in the default and tritan tables.)
+// The ward ring is opaque and drawn well outside the silhouette at r×2.2, but a tower
+// footprint under it is the same kind of "cue drawn over a body this gate doesn't reach" as
+// this one.
 const STUNNED_MUST_CONTRAST: ReadonlyArray<keyof Palette> = ['creep'];
 
 describe('stunned — the jolt ring vs the creep fill it is drawn over (M2-S6)', () => {
@@ -556,9 +557,40 @@ describe('tower role colours — distinguishable under each mode’s own simulat
   });
 });
 
+describe('airborne — readable on every tower surface it lands on (QC round 1, #181)', () => {
+  // The flyer cue sits ~1.2 cells above its creep, so a flyer one row under a tower puts it
+  // on that tower as the ordinary case — and since the visual pass a tower's top is a LIGHT
+  // role-coloured head, over which the light stroke alone measures as little as 1.05:1. So
+  // the cue carries an ink outline (`airborneCuePaintOps`' `outlineColour`): the light core
+  // reads on the dark surfaces, the ink edge on the light ones. Both halves gated here.
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": the light stroke clears ${MIN_CUE_CONTRAST}:1 on the floor, plate and rim; its ink outline on every role colour and the rim`, () => {
+      const pal = resolvePalette(mode);
+      for (const surface of ['floor', 'plate', 'tower'] as const) {
+        expect(contrast(pal.airborne, pal[surface]), surface).toBeGreaterThanOrEqual(
+          MIN_CUE_CONTRAST,
+        );
+      }
+      let inkMin = Infinity;
+      for (const role of TOWER_ROLES) {
+        const c = contrast(ART_INK, roleColour(pal, role));
+        inkMin = Math.min(inkMin, c);
+        expect(c, role).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      }
+      expect(contrast(ART_INK, pal.tower)).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      // ... and the two halves of the cue read apart from each other.
+      expect(contrast(ART_INK, pal.airborne)).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      console.info(
+        `[palette.test] mode=${mode} airborne ink outline vs heads min=${inkMin.toFixed(2)} ` +
+          `vs rim=${contrast(ART_INK, pal.tower).toFixed(2)}`,
+      );
+    });
+  }
+});
+
 describe('what a tower’s states draw on it — composited over the plate they lie on (T4)', () => {
   for (const mode of COLOUR_MODES) {
-    it(`mode "${mode}": the boost glow and the selection cue clear ${MIN_CUE_CONTRAST}:1 over the plate`, () => {
+    it(`mode "${mode}": the boost glow and the selection cue clear ${MIN_CUE_CONTRAST}:1 over the plate, and a pending head over its faded plate`, () => {
       const pal = resolvePalette(mode);
       // The boost glow's inner ring — the cue — lies wholly on the plate (`tower-art.test.ts`
       // holds it inside the rim), at `BOOST_RING_ALPHA`; on the plateless mine, on the floor.
@@ -570,6 +602,21 @@ describe('what a tower’s states draw on it — composited over the plate they 
       // plate, at `SELECTION_ALPHA`.
       const selection = contrast(compositeOver(pal.range, pal.plate, SELECTION_ALPHA), pal.plate);
       expect(selection).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      // A PENDING build's identity — its head's role colour — against its own faded plate,
+      // both composited over the floor at the opacities its frame bakes them at
+      // (`PENDING_ALPHA`, `PENDING_PLATE_ALPHA`; QC round 1). The plate fades further than
+      // the head precisely so this holds for the darkest role colours too.
+      const fadedPlate = compositeOver(pal.plate, pal.floor, PENDING_PLATE_ALPHA);
+      let pendingMin = Infinity;
+      for (const role of TOWER_ROLES) {
+        const head = compositeOver(roleColour(pal, role), pal.floor, PENDING_ALPHA);
+        const c = contrast(head, fadedPlate);
+        pendingMin = Math.min(pendingMin, c);
+        expect(c, role).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      }
+      console.info(
+        `[palette.test] mode=${mode} pending head vs faded plate min=${pendingMin.toFixed(2)}`,
+      );
       console.info(
         `[palette.test] mode=${mode} aura@${BOOST_RING_ALPHA}@plate=${glow.toFixed(2)} ` +
           `aura@${BOOST_RING_ALPHA}@floor=${glowOnFloor.toFixed(2)} ` +

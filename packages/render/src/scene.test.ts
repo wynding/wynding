@@ -26,11 +26,24 @@
 
 import { describe, it, expect } from 'vitest';
 import { drawAuraShells, drawCreepCues, drawSelection, type GraphicsLike } from './board-draw';
-import { atlasFrameSpecs, artUnit, PLATE_FRAME_KEY, type FrameSpec } from './art-frames';
+import {
+  atlasFrameSpecs,
+  artUnit,
+  PAD_FRAME_KEY,
+  PLATE_FRAME_KEY,
+  type FrameSpec,
+} from './art-frames';
 import { flattenPath, parsePath } from './art-geometry';
 import type { ArtGraphics } from './art-paint';
 import { strokeWidthAt, type ArtShape } from './art-ir';
-import { ART_BOX, PENDING_ALPHA, PLATE_RECT } from './tower-art';
+import {
+  ART_BOX,
+  ART_INK,
+  PAD_ART,
+  PENDING_ALPHA,
+  PENDING_PLATE_ALPHA,
+  PLATE_RECT,
+} from './tower-art';
 import { placeCreeps, placeTowers } from './placement';
 import { layerDepth } from './layers';
 import { createProjection } from './projection';
@@ -504,17 +517,21 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     ]) {
       const calls = drawnPending(towerId);
       const committed = headShapes(towerId);
-      const [picture, rim] = artCallsOf(calls);
-      // The pending picture holds the committed head's shapes, every one of them, in order.
-      const shapes = picture!.shapes;
-      const at = shapes.indexOf(committed[0]!);
-      expect(at, towerId).toBeGreaterThanOrEqual(0);
-      expect(shapes.slice(at, at + committed.length), towerId).toEqual(committed);
-      expect(glyphOf(shapes), towerId).toEqual(glyphOf(committed));
-      // Faded as one picture, then ONE dashed rim at full opacity on top.
-      expect(calls.filter((c) => c.method === 'fade').map((c) => c.args[0])).toEqual([
-        PENDING_ALPHA,
-      ]);
+      const parts = artCallsOf(calls);
+      const rim = parts[parts.length - 1];
+      // The pending picture's head is the committed head's shapes, every one, in order.
+      const head = parts[parts.length - 2]!;
+      expect(head.shapes, towerId).toEqual(committed);
+      expect(glyphOf(head.shapes), towerId).toEqual(glyphOf(committed));
+      // The plate (every tower but the mine) fades on its own first, further than the head;
+      // then plate and head fade as ONE picture to `PENDING_ALPHA`; then ONE dashed rim at
+      // full opacity on top.
+      const plated = towerId !== 'mine';
+      expect(parts, towerId).toHaveLength(plated ? 3 : 2);
+      expect(
+        calls.filter((c) => c.method === 'fade').map((c) => c.args[0]),
+        towerId,
+      ).toEqual(plated ? [PENDING_PLATE_ALPHA / PENDING_ALPHA, PENDING_ALPHA] : [PENDING_ALPHA]);
       expect(rim!.shapes).toHaveLength(1);
       expect(rim!.shapes[0]!.dash?.length, towerId).toBeGreaterThanOrEqual(2);
       expect(rim!.shapes[0]!.alpha ?? 1, towerId).toBe(1);
@@ -642,6 +659,82 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     }
   });
 
+  it('a mine beside a beacon keeps the shell off its footprint as a plated tower does — its pad covers the crossing (QC round 1)', () => {
+    // The shell runs one cell out from its beacon — down the middle of an edge-adjacent
+    // neighbour's footprint. A plate hides that segment; the mine has no plate and its
+    // studded head covers too little, so before the pad a lavender line ran through most of
+    // a mine's footprint and across its own boost rings. Beacon at (4,12), mine at (6,12),
+    // 32px cells.
+    const P32 = createProjection({ cols: 16, rows: 16, cssWidth: 512, cssHeight: 512, dpr: 1 });
+    expect(P32.cellPx).toBe(32);
+    const frames32: ReadonlyMap<string, FrameSpec> = new Map(
+      atlasFrameSpecs(32, 1).map((f) => [f.key, f]),
+    );
+    const beacon = tower('beacon', { id: 1, col: 4, row: 12 });
+    const mine = tower('mine', { id: 2, col: 6, row: 12, buffed: true });
+
+    // The shell's right edge, in board px, crosses the mine's footprint top to bottom.
+    const g = fakeGraphics();
+    drawAuraShells(g, PAL, vmWith([beacon, mine]), EMPTY_OVERLAY, P32);
+    const half = (g.calls.find((c) => c.method === 'lineStyle')!.args[0] as number) / 2;
+    const [sx, sy, sw, sh] = g.calls.find((c) => c.method === 'strokeRoundedRect')!
+      .args as number[];
+    const edgeX = sx! + sw!;
+    const foot = P32.cellToPixel(6, 12);
+    const side = 2 * P32.cellPx;
+    expect(edgeX - half).toBeGreaterThan(foot.x);
+    expect(edgeX + half).toBeLessThan(foot.x + side);
+    expect(sy!).toBeLessThan(foot.y);
+    expect(sy! + sh!).toBeGreaterThan(foot.y + side);
+
+    /** The opaque rect a plates-layer sprite paints, in board px. */
+    const groundRect = (placement: {
+      frame: string;
+      x: number;
+      y: number;
+    }): [number, number, number, number] => {
+      const rg = fakeArtGraphics();
+      frames32.get(placement.frame)!.paint(rg, PAL);
+      const [call] = artCallsOf(rg.calls);
+      const fill = call!.shapes.find(
+        (s) => s.kind === 'rect' && (s.alpha ?? 1) === 1 && s.fill !== 'shadow',
+      )!;
+      if (fill.kind !== 'rect') throw new Error('a ground is a rect');
+      const left = placement.x + call!.x + fill.x * call!.unit;
+      const top = placement.y + call!.y + fill.y * call!.unit;
+      return [left, top, left + fill.w * call!.unit, top + fill.h * call!.unit];
+    };
+
+    for (const order of [
+      [beacon, mine],
+      [mine, beacon],
+    ]) {
+      const placed = placeTowers(vmWith(order), EMPTY_OVERLAY, P32, frames32);
+      const pad = placed.plates.find((p) => p.frame === PAD_FRAME_KEY)!;
+      expect(pad).toBeDefined();
+      const [left, top, right, bottom] = groundRect(pad);
+      // The pad spans the shell's whole band across the footprint...
+      expect(left).toBeLessThan(edgeX - half);
+      expect(right).toBeGreaterThan(edgeX + half);
+      // ... over all of the footprint but its 3/64 margins, top and bottom — exactly the
+      // rect a plated tower stands on at the same anchor.
+      expect(top - foot.y).toBeCloseTo((PLATE_RECT.y / ART_BOX) * side, 9);
+      expect(foot.y + side - bottom).toBeCloseTo((PLATE_RECT.y / ART_BOX) * side, 9);
+      // (The frames differ — a plate's is sized for its shadow — but the rects coincide.)
+      const plated = placeTowers(
+        vmWith([beacon, { ...mine, towerId: 'basic' }]),
+        EMPTY_OVERLAY,
+        P32,
+        frames32,
+      ).plates[1]!;
+      expect(plated.frame).toBe(PLATE_FRAME_KEY);
+      const plateRect = groundRect(plated);
+      [left, top, right, bottom].forEach((v, i) => expect(plateRect[i]).toBeCloseTo(v!, 9));
+    }
+    // And the plates layer composites over the shells layer, so the pad hides what it covers.
+    expect(layerDepth('plates')).toBeGreaterThan(layerDepth('shells'));
+  });
+
   it('a pending-sold tower is hidden from BOTH passes — no plate, no head and no shell (M2-S8)', () => {
     // The two passes have to honour the pending-sell skip each on their own; drawing the
     // shells live while the towers became sprites is exactly the kind of change that
@@ -763,7 +856,10 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
 
   it('a mine tower’s head is the charge — a filled disc ringed by six studs, an ink core — lying on the floor with NO plate, and no other tower is', () => {
     const drawn = drawnTowers([tower('mine')]);
-    expect(drawn.plates).toHaveLength(0);
+    // No plate and no rim: what it stands on in the plates layer is the floor-coloured pad
+    // that keeps aura shells off its footprint, invisible against the floor.
+    expect(drawn.plates).toHaveLength(1);
+    expect(shapesOf(drawn.plates[0]!)).toEqual(PAD_ART);
     const shapes = shapesOf(drawn.heads[0]!);
     // The charge's filled disc, its ink core and no glyph strokes.
     expect(glyphOf(shapes)).toEqual({ rings: 0, discs: 1, segments: 0, vertical: 0 });
@@ -777,6 +873,10 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     for (const towerId of ['basic', 'slow', 'splash', 'venom', 'stun', 'antiair', 'beacon']) {
       const other = drawnTowers([tower(towerId)]);
       expect(other.plates, towerId).toHaveLength(1);
+      expect(
+        shapesOf(other.plates[0]!).some((s) => s.fill === 'plate' && s.stroke === 'rim'),
+        towerId,
+      ).toBe(true); // a real plate, rimmed — not the pad
       const os = shapesOf(other.heads[0]!);
       expect(
         os.filter((s) => s.kind === 'circle' && s.fill === 'role' && s.r < 5),
@@ -897,14 +997,43 @@ describe('creep silhouettes and cues — the remaining shapes + slowed telegraph
     const fillPointsCalls = air.all.filter((c) => c.method === 'fillPoints');
     expect(fillPointsCalls).toHaveLength(1); // the hexagon silhouette — still drawn
     expect((fillPointsCalls[0]!.args[0] as unknown[]).length).toBe(6);
-    // The wingspan is 2 `lineBetween` calls (apex→left, apex→right) — ADDITIONAL to
-    // the silhouette, never a replacement for it.
-    expect(count(air.all, 'lineBetween')).toBe(2);
+    // The wingspan is 2 light strokes (apex→left, apex→right) over 2 ink strokes under them
+    // (QC round 1, #181) — ADDITIONAL to the silhouette, never a replacement for it.
+    expect(count(air.all, 'lineBetween')).toBe(4);
+    const strokes = air.cues.flatMap((c, i) =>
+      c.method === 'lineBetween'
+        ? [
+            {
+              style: air.cues
+                .slice(0, i)
+                .filter((s) => s.method === 'lineStyle')
+                .pop()!,
+              c,
+            },
+          ]
+        : [],
+    );
+    const [inkL, inkR, lightL, lightR] = strokes;
+    // The ink first, in the art kit's ink, 1px wider on each side than the light stroke...
+    for (const ink of [inkL!, inkR!]) expect(ink.style.args).toEqual([4, ART_INK, 1]);
+    for (const light of [lightL!, lightR!]) expect(light.style.args).toEqual([2, PAL.airborne, 1]);
+    // ... and run 1px past both ends of the light stroke it outlines: the same line, longer.
+    for (const [ink, light] of [
+      [inkL!, lightL!],
+      [inkR!, lightR!],
+    ] as const) {
+      const [lx0, ly0, lx1, ly1] = light.c.args as number[];
+      const [ix0, iy0, ix1, iy1] = ink.c.args as number[];
+      const lightLen = Math.hypot(lx1! - lx0!, ly1! - ly0!);
+      expect(Math.hypot(ix1! - ix0!, iy1! - iy0!)).toBeCloseTo(lightLen + 2, 9);
+      expect(Math.hypot(ix0! - lx0!, iy0! - ly0!)).toBeCloseTo(1, 9); // past the apex
+      expect(Math.hypot(ix1! - lx1!, iy1! - ly1!)).toBeCloseTo(1, 9); // past the tip
+    }
 
     // Reduced motion changes nothing — the airborne cue carries no motion component.
     expect(
       count(drawnCreep(creep({ creepId: 'armored', domain: 'air' }), true).all, 'lineBetween'),
-    ).toBe(2);
+    ).toBe(4);
 
     // A ground creep of the same id draws the hexagon with no wingspan at all.
     const ground = drawnCreep(creep({ creepId: 'armored', domain: 'ground' }));
