@@ -20,8 +20,9 @@ export interface SpritePool<S extends PoolSprite> {
   /**
    * Show `placements`: sprite `i` takes placement `i` — its frame and its alpha (each set
    * only when it changed; a placement without an alpha is opaque), its position, and
-   * visibility. Sprites are created as the count grows and every one past it is hidden. Creating them in index order, at one depth, is what keeps a layer drawing in
-   * list order under Phaser's stable depth sort — a later creep still covers an earlier one.
+   * visibility. Sprites are created as the count grows and every one past it is hidden.
+   * Creating them in index order, at one depth, is what keeps a layer drawing in list order
+   * under Phaser's stable depth sort — a later creep still covers an earlier one.
    */
   sync(placements: readonly SpritePlacement[]): void;
   /** Hide every sprite; the next `sync` shows exactly what it places. */
@@ -33,7 +34,8 @@ export interface SpritePool<S extends PoolSprite> {
 }
 
 /** A pool whose new sprites come from `create`, which returns one already showing the
- *  placement it is given (its frame, at its position and alpha, visible). */
+ *  placement it is given (its frame, at its position, visible); the pool gives it the
+ *  placement's alpha, as it does a reused sprite. */
 export function createSpritePool<S extends PoolSprite>(
   create: (placement: SpritePlacement) => S,
 ): SpritePool<S> {
@@ -42,9 +44,12 @@ export function createSpritePool<S extends PoolSprite>(
   return {
     sync(placements) {
       placements.forEach((p, i) => {
+        const alpha = p.alpha ?? 1;
         const sprite = sprites[i];
         if (sprite === undefined) {
-          sprites.push(create(p));
+          const made = create(p);
+          if (made.alpha !== alpha) made.setAlpha(alpha);
+          sprites.push(made);
           frames.push(p.frame);
           return;
         }
@@ -52,7 +57,6 @@ export function createSpritePool<S extends PoolSprite>(
           sprite.setFrame(p.frame);
           frames[i] = p.frame;
         }
-        const alpha = p.alpha ?? 1;
         if (sprite.alpha !== alpha) sprite.setAlpha(alpha);
         sprite.setPosition(p.x, p.y);
         if (!sprite.visible) sprite.setVisible(true);

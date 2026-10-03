@@ -71,14 +71,11 @@ export interface SpriteLayer {
 /** A sprite layer's name — the one it is made under, and its depth is read from. */
 export type SpriteLayerName = 'scorches' | 'plates' | 'heads' | 'pending' | 'creeps';
 
+/** One `S` per sprite layer. */
+export type SpriteLayers<S> = { readonly [L in SpriteLayerName]: S };
+
 /** The five sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
-export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): {
-  readonly scorches: S;
-  readonly plates: S;
-  readonly heads: S;
-  readonly pending: S;
-  readonly creeps: S;
-} {
+export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): SpriteLayers<S> {
   return {
     scorches: make('scorches'),
     plates: make('plates'),
@@ -86,6 +83,20 @@ export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): {
     pending: make('pending'),
     creeps: make('creeps'),
   };
+}
+
+/**
+ * `fn` for every sprite in every layer of `layers`, with the frame it shows — what a rebake
+ * repoints at the new atlas. EVERY layer, read off the layers themselves rather than listed
+ * by hand: a sprite a rebake missed would stay on the atlas the bake runner removes right
+ * after, and the first one drawn would throw inside Phaser's WebGL batcher and end the frame
+ * loop.
+ */
+export function forEachLayerSprite<S>(
+  layers: SpriteLayers<{ forEach(fn: (sprite: S, frame: string) => void): void }>,
+  fn: (sprite: S, frame: string) => void,
+): void {
+  for (const layer of Object.values(layers)) layer.forEach(fn);
 }
 
 /** The baked board texture's image. */
@@ -178,9 +189,13 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   drawSparks(cues, pal, input.sparks, overlay.reducedMotion, projection);
 }
 
-/** Hide and clear everything a frame drew (Play again): the next `drawBoardFrame` shows
- *  exactly what it draws. */
-export function resetBoardFrame(t: BoardTargets): void {
+/** Hide and clear everything a frame drew (Play again), and forget the scorches the run
+ *  left: the next `drawBoardFrame` shows exactly what it draws, on a clean floor. */
+export function resetBoardFrame(
+  t: BoardTargets,
+  state: { readonly scorches: Pick<ScorchTracker, 'reset'> },
+): void {
+  state.scorches.reset();
   t.layers.shells.clear();
   t.layers.effects.clear();
   t.layers.cues.clear();

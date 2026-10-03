@@ -27,6 +27,7 @@ import {
   createLiveLayers,
   createSpriteLayers,
   drawBoardFrame,
+  forEachLayerSprite,
   resetBoardFrame,
   type BoardTargets,
 } from './board-frame';
@@ -174,8 +175,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
         .add.image(p.x, p.y, current.atlasKey, p.frame)
         .setOrigin(0, 0)
         .setScale(1 / current.atlas.scale)
-        .setDepth(layerDepth(layer))
-        .setAlpha(p.alpha ?? 1);
+        .setDepth(layerDepth(layer)); // the pool gives it its placement's alpha
     }),
   );
   // The board image, made at READY: hidden, on Phaser's blank default texture, until a bake
@@ -226,11 +226,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     },
     show(next) {
       boardImage?.setTexture(next.boardKey).setScale(1 / next.board.scale);
-      for (const pool of Object.values(pools)) {
-        pool.forEach((sprite, frame) =>
-          sprite.setTexture(next.atlasKey, frame).setScale(1 / next.atlas.scale),
-        );
-      }
+      forEachLayerSprite(pools, (sprite, frame) =>
+        sprite.setTexture(next.atlasKey, frame).setScale(1 / next.atlas.scale),
+      );
     },
     makePath: (d) => new Path2D(d),
     log: console,
@@ -292,8 +290,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     draw,
     reset(): void {
       sparks.clear();
-      scorches.reset();
-      if (targets !== null) resetBoardFrame(targets);
+      // (Before READY no frame has fed the scorch tracker, so there is nothing to forget.)
+      if (targets !== null) resetBoardFrame(targets, { scorches });
     },
     destroy(): void {
       sparks.clear();

@@ -25,7 +25,7 @@ function fakePool() {
       x: p.x,
       y: p.y,
       visible: true,
-      alpha: p.alpha ?? 1,
+      alpha: 1, // opaque, as Phaser makes an image: the pool gives it its placement's alpha
       calls: [],
       setPosition(x, y) {
         this.calls.push(`setPosition ${x},${y}`);
@@ -80,19 +80,25 @@ describe('createSpritePool', () => {
     expect(pool.size).toBe(1);
   });
 
-  it('gives a reused sprite its placement’s alpha — re-set ONLY when it changed, opaque when the placement has none', () => {
+  it('gives a sprite its placement’s alpha — new or reused, re-set ONLY when it changed, opaque when the placement has none', () => {
     // A scorch fades frame by frame (`placeScorches`); every other layer is opaque.
     const { pool, made } = fakePool();
     pool.sync([{ ...at('scorch', 1), alpha: 0.5 }]);
-    expect(made[0]!.alpha).toBe(0.5); // made at its alpha, by `create`
+    // `create` makes it opaque; the pool gives it its alpha before anything else.
+    expect(made[0]!.calls[0]).toBe('setAlpha 0.5');
+    expect(made[0]!.alpha).toBe(0.5);
     pool.sync([{ ...at('scorch', 1), alpha: 0.25 }]);
     pool.sync([{ ...at('scorch', 1), alpha: 0.25 }]);
     pool.sync([at('scorch', 1)]); // the slot reused by an opaque placement
     expect(made[0]!.calls.filter((c) => c.startsWith('setAlpha'))).toEqual([
+      'setAlpha 0.5',
       'setAlpha 0.25',
       'setAlpha 1',
     ]);
     expect(made[0]!.alpha).toBe(1);
+    // An opaque placement makes an opaque sprite: no alpha call at all.
+    pool.sync([at('scorch', 1), at('plate', 2)]);
+    expect(made[1]!.calls.filter((c) => c.startsWith('setAlpha'))).toEqual([]);
   });
 
   it('hides every sprite past this frame’s count, and only once', () => {
