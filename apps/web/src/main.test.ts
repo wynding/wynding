@@ -297,15 +297,17 @@ describe('main — the results panel reads the finished run (#181 H2)', () => {
 });
 
 describe('main — the terminal edge captures each run once, even when it throws (#181 H2)', () => {
-  /** An undefended run whose terminal edge throws ONCE: reading the run stats, or — after the
-   *  capture — the survey's ask refresh, which the edge reaches once the dialog is showing. */
-  function brokenEdgeApp(step: 'runStats' | 'afterCapture') {
+  /** An undefended run whose terminal edge throws ONCE: reading the run stats, the playtrace
+   *  capture itself, or — after the capture — the survey's ask refresh, which the edge reaches
+   *  once the dialog is showing. */
+  function brokenEdgeApp(step: 'runStats' | 'capture' | 'afterCapture') {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const sched = manualSchedule();
     let clock = 0;
     const copied: string[] = [];
     let armed = true;
+    let captures = 0;
     const fail = (): never => {
       armed = false;
       throw new Error('the terminal edge broke');
@@ -322,9 +324,16 @@ describe('main — the terminal edge captures each run once, even when it throws
       seed: 1,
       controllerFactory: (seed) => {
         const controller = createController(seed);
-        if (step !== 'runStats') return controller;
         const read = controller.runStats;
-        return Object.assign(controller, { runStats: () => (armed ? fail() : read()) });
+        // The terminal edge's capture is the controller's only `capture()` call (`main.ts`).
+        const capture = controller.capture;
+        return Object.assign(controller, {
+          runStats: () => (step === 'runStats' && armed ? fail() : read()),
+          capture: () => {
+            captures++;
+            return step === 'capture' && armed ? fail() : capture();
+          },
+        });
       },
       playtraceDelivery: { copy: async (text: string) => void copied.push(text), save: () => {} },
       ...(step === 'afterCapture'
@@ -362,24 +371,39 @@ describe('main — the terminal edge captures each run once, even when it throws
       await vi.waitFor(() => expect(copied).toHaveLength(1));
       return (JSON.parse(copied[0]!) as { runs: unknown[] }).runs.length;
     };
-    return { root, results, runToBrokenEdge, capturedRuns };
+    return { root, results, runToBrokenEdge, capturedRuns, captures: (): number => captures };
   }
 
   it('a throw reading the run stats opens nothing; the next refresh opens the dialog with the run captured once', async () => {
     const h = brokenEdgeApp('runStats');
     h.runToBrokenEdge();
     expect(h.results.hidden, 'the broken edge opened nothing').toBe(true);
-    // The frame loop's HUD key has not moved, so only an input handler refreshes the HUD now.
+    // The frame loop's HUD key has not moved, so only an input handler refreshes the HUD now:
+    // the Dock's Pause, which a player can still press, since no dialog opened.
     dockButton(h.root, 'Pause').click();
     expect(h.results.hidden).toBe(false);
+    expect(h.captures(), 'one capture attempt, made by the walk that opened the dialog').toBe(1);
     expect(await h.capturedRuns()).toBe(1);
+  });
+
+  it('a capture that THROWS is not retried: the next refresh opens the dialog without it', () => {
+    const h = brokenEdgeApp('capture');
+    h.runToBrokenEdge();
+    expect(h.results.hidden, 'the broken edge opened nothing').toBe(true);
+    dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
+    expect(h.results.hidden, 'the dialog still opens').toBe(false);
+    expect(h.captures(), 'the failed capture was attempted once and never again').toBe(1);
   });
 
   it('a throw AFTER the capture (the survey’s ask refresh) still leaves the run captured once', async () => {
     const h = brokenEdgeApp('afterCapture');
     h.runToBrokenEdge();
-    dockButton(h.root, 'Pause').click(); // walks the edge again: the dialog's open is retried
+    // Any later `refreshHud` walks the edge again and retries the dialog's open. The Dock's
+    // Pause handler is invoked directly as one such caller: with the dialog shown the Shell is
+    // inert, so no player could press it, but the frame loop's next HUD change would do the same.
+    dockButton(h.root, 'Pause').click();
     expect(h.results.hidden).toBe(false);
+    expect(h.captures(), 'the retried walk did not capture again').toBe(1);
     expect(await h.capturedRuns()).toBe(1);
   });
 });

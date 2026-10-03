@@ -42,7 +42,11 @@ export interface SurveyFormHost {
   /** The region is held (a send in flight) or released (its outcome announced): the
    *  dialog's other writers are locked exactly while it is held (§6). */
   setRegionHeld(held: boolean): void;
-  focusPlayAgain(): void;
+  /** Move focus to Play again, where an accepted Send sends it (§1). `preventScroll` after a
+   *  POINTER press: the retired form's collapse has already moved the panel under the pointer
+   *  (the results panel's press guard covers that), and scrolling Play again into view would
+   *  move it again. After a keyboard press, focus brings Play again into view. */
+  focusPlayAgain(preventScroll: boolean): void;
 }
 
 /** Where the survey renders (#181 H2). Give feedback is one of the results dialog's actions,
@@ -75,6 +79,26 @@ const CHOICE_KEYS = new Set([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRig
 interface ScaleGroup {
   readonly fieldset: HTMLFieldSetElement;
   readonly inputs: readonly HTMLInputElement[];
+}
+
+/** Focus `el` right after a render, without scrolling where `preventScroll`. Layout is read
+ *  first: WebKit, asked to focus without scrolling while layout is dirty (as a render that
+ *  shows or hides part of the form leaves it), scrolls the element into view anyway at its next
+ *  rendering update (#181 H2). */
+function focusAfterRender(el: HTMLElement | undefined, preventScroll: boolean): void {
+  if (el === undefined) return;
+  void el.offsetHeight;
+  el.focus(preventScroll ? { preventScroll: true } : undefined);
+}
+
+/** The nearest ancestor of `el` that scrolls: the results panel's body. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  const view = el.ownerDocument.defaultView;
+  for (let up = el.parentElement; up !== null; up = up.parentElement) {
+    const overflow = view?.getComputedStyle(up).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return up;
+  }
+  return null;
 }
 
 export function createSurveyForm(
@@ -306,6 +330,23 @@ export function createSurveyForm(
     render();
   });
 
+  /** Bring the first question into view where it opened below the fold of the panel's scroller
+   *  (#181 H2): the whole question, legend and options, where it fits, else its legend at the
+   *  top. A press that opened the form must show it. After a POINTER press, only where the
+   *  first option is wholly or mostly below the fold: a question that mostly shows needs no
+   *  scroll moving the row under the pointer. After a keyboard press, wherever that option,
+   *  which has focus, is not wholly in view, as the browser's own focus scroll would do. */
+  const revealFirstQuestion = (byPointer: boolean): void => {
+    const option = rating.inputs[0]?.closest('label') ?? null;
+    const port = scrollerOf(form);
+    if (option === null || port === null) return;
+    const box = option.getBoundingClientRect();
+    const top = port.getBoundingClientRect().top;
+    const shown = Math.min(box.bottom, top + port.clientHeight) - Math.max(box.top, top);
+    if (shown >= (byPointer ? box.height / 2 : box.height - 0.5)) return;
+    rating.fieldset.scrollIntoView({ block: 'nearest' });
+  };
+
   openBtn.addEventListener('click', (event) => {
     if (!survey.open()) return;
     // Opening CLEARS the region without claiming it (§6): a Verify result still showing has
@@ -313,15 +354,16 @@ export function createSurveyForm(
     // so its result lands after this. Only Send takes the region.
     say('');
     render();
-    // Focus moves to the first question (§1). A POINTER press (`detail` counts its clicks)
-    // moves it without scrolling: the form opens below the action row, and scrolling the
-    // dialog here would carry the row away from under the pointer, so a double-click's second
-    // press would land on an answer (#181 H2). A keyboard press (`detail` 0) lets the browser
-    // bring the question into view, as it always has.
-    rating.inputs[0]?.focus(event.detail > 0 ? { preventScroll: true } : undefined);
+    // Focus moves to the first question (§1), by keyboard and pointer alike, and never by the
+    // browser's own scroll, which differs between engines. Then the question is brought into
+    // view (`revealFirstQuestion`). That scroll moves the action row under a resting pointer,
+    // so the results panel's press guard keeps a double-click's second press off whatever
+    // arrives there. (`detail` counts a pointer press's clicks; a keyboard press has none.)
+    focusAfterRender(rating.inputs[0], true);
+    revealFirstQuestion(event.detail > 0);
   });
 
-  notNowBtn.addEventListener('click', () => {
+  notNowBtn.addEventListener('click', (event) => {
     if (notNowBtn.getAttribute('aria-disabled') === 'true') return;
     // The model's commit never rejects, but an injected ask is not ours to trust: a rejection
     // must not surface as an unhandled one. The accepted-Send path guards the same way.
@@ -330,8 +372,11 @@ export function createSurveyForm(
     // or a failure notice is about a submission that is no longer pending.
     if (ownMessage !== null && ownMessage !== '' && host.statusText() === ownMessage) say('');
     render();
-    // Give feedback stays present and live on this dialog (§3), so it is a real target.
-    openBtn.focus();
+    // Give feedback stays present and live on this dialog (§3), so it is a real target. After a
+    // POINTER press (`detail` counts its clicks) focus moves without scrolling: the form's
+    // collapse has already moved the panel under the pointer, and the press guard covers that.
+    // After a keyboard press, focus brings Give feedback into view.
+    focusAfterRender(openBtn, event.detail > 0);
   });
 
   const OUTCOME: Record<SurveySendResult, () => string> = {
@@ -340,9 +385,12 @@ export function createSurveyForm(
     offline: () => t('survey.offline'),
   };
 
-  sendBtn.addEventListener('click', () => {
+  sendBtn.addEventListener('click', (event) => {
     // In flight, Send is one of the controls the region's owner has locked: silent.
     if (locked()) return;
+    // Whether this Send was a POINTER press (`detail` counts its clicks), for where focus goes
+    // once it is accepted (`focusPlayAgain`).
+    const byPointer = event.detail > 0;
     const attempt = survey.send((key) => host.compose(key));
     if (attempt.kind === 'needsRating') {
       // §2's deliberate divergence from the Dock: an explicit submit attempt gets an answer.
@@ -371,7 +419,7 @@ export function createSurveyForm(
       // An accepted Send retires the control the player was on, so focus goes to Play
       // again (§1) — but only if it was in the survey: a player who had already moved on
       // is not pulled back.
-      if (result === 'accepted' && focusWasHere) host.focusPlayAgain();
+      if (result === 'accepted' && focusWasHere) host.focusPlayAgain(byPointer);
     });
   });
 

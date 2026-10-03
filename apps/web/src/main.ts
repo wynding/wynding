@@ -296,11 +296,13 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // `ensurePaused` returns early; that is an accident of controller state, not an ordering
   // guarantee, and it should not be what keeps a phone held in portrait from failing to boot.
   let resultsShown = false;
-  /** Whether the finished run is already in the playtrace ring — set at the terminal edge's
-   *  capture, cleared by Play again. Declared HERE, beside `resultsShown`, for the same
-   *  temporal-dead-zone reason. Separate from `resultsShown` because that one is set only once
-   *  the dialog is open: a throw between the capture and the open leaves it false, and the next
-   *  `refreshHud` walks the edge again — which must not fold the same run into the ring twice. */
+  /** Whether the finished run's playtrace capture has been ATTEMPTED — set just before the
+   *  terminal edge's capture, cleared by Play again. Declared HERE, beside `resultsShown`, for
+   *  the same temporal-dead-zone reason. Separate from `resultsShown` because that one is set
+   *  only once the dialog is open: a throw between the capture and the open leaves it false, and
+   *  the next `refreshHud` walks the edge again, which must not fold the same run into the ring
+   *  twice. Set before the capture rather than after it, so a capture that throws is not retried
+   *  either: the dialog still opens on the next refresh, without that run in the ring. */
   let runCaptured = false;
   /** The results dialog's live-region claim counter (#133 review round). Declared HERE,
    *  beside `resultsShown`, for the reason the comment above gives: `refreshHud` can be
@@ -381,7 +383,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       writeStatus: (message) => overlay.setResultsStatus(message),
       statusText: () => overlay.resultsStatusText(),
       setRegionHeld: (held) => overlay.setResultsWritersLocked(held),
-      focusPlayAgain: () => overlay.focusPlayAgain(),
+      focusPlayAgain: (preventScroll) => overlay.focusPlayAgain(preventScroll),
     });
   }
   const rotate = doc.createElement('div');
@@ -554,10 +556,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // happened yet if reading them fails.
       const stats = controller.runStats();
       // Capture BEFORE the dialog opens (#133). The controller is frozen at the terminal
-      // transition, so nothing can move between here and the export. Exactly ONE capture per
-      // run, whatever follows: if a step below throws, `resultsShown` stays false and the next
-      // `refreshHud` (an input handler's) walks this edge again, so the capture keeps its own
-      // guard rather than riding the dialog's.
+      // transition, so nothing can move between here and the export. At most ONE capture
+      // attempt per run, whatever follows: if a step below throws, `resultsShown` stays false
+      // and the next `refreshHud` (an input handler's) walks this edge again, so the capture
+      // keeps its own guard rather than riding the dialog's. A capture that itself throws is
+      // not retried; the next walk opens the dialog without it.
       if (!runCaptured) {
         runCaptured = true;
         capturePlaytrace(hud);

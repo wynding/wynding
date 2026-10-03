@@ -116,8 +116,9 @@ export interface Overlay {
    *  each writer claims the region, silence the outcome entirely. */
   setResultsWritersLocked(locked: boolean): void;
   /** Focus Play again — where an accepted Send sends focus, since it retires the control
-   *  the player was on (ADR 0014 §1). */
-  focusPlayAgain(): void;
+   *  the player was on (ADR 0014 §1). Without scrolling after a pointer-pressed Send
+   *  (`SurveyFormHost.focusPlayAgain`, #181 H2). */
+  focusPlayAgain(preventScroll: boolean): void;
   destroy(): void;
 }
 
@@ -731,10 +732,11 @@ export function createOverlay(
   results.setAttribute('aria-modal', 'true');
   results.hidden = true;
   // Its content is the results PANEL (#181 H2, `results-panel.ts`): the outcome, the stars and
-  // score, the run's numbers, and the actions. Play again keeps its primary styling and its
-  // initial focus; Verify, Copy and Save (#133's local export) sit behind the panel's Run data
-  // disclosure, the same buttons with the same handlers below. The dialog's description is the
-  // panel's one sentence carrying the score and the stars.
+  // score, the run's numbers, and the actions. Play again keeps its primary styling, and the
+  // initial focus wherever it is wholly in view as the panel opens (else the heading takes it,
+  // `resultsOverlay.show` below). Verify, Copy and Save (#133's local export) sit behind the
+  // panel's Run data disclosure, the same buttons with the same handlers below. The dialog's
+  // description is the panel's one sentence carrying the score and the stars.
   const resultsPanel = createResultsPanel(doc, results);
   results.setAttribute('aria-describedby', resultsPanel.description.id);
   const {
@@ -2444,8 +2446,11 @@ export function createOverlay(
     setResultsWritersLocked(locked: boolean): void {
       for (const btn of regionWriters) btn.setAttribute('aria-disabled', String(locked));
     },
-    focusPlayAgain(): void {
-      playAgainBtn.focus();
+    focusPlayAgain(preventScroll: boolean): void {
+      // Layout first: the survey has just rendered, and WebKit defers a `preventScroll` focus
+      // made over dirty layout to its next rendering update, then scrolls anyway (#181 H2).
+      void playAgainBtn.offsetHeight;
+      playAgainBtn.focus(preventScroll ? { preventScroll: true } : undefined);
     },
     setColourMode(mode: ColourMode): void {
       palette = resolvePalette(mode);

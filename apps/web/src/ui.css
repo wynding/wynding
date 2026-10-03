@@ -1986,13 +1986,14 @@ a.wy-home:focus-visible {
 
 /* --- Results dialog: the results panel (#181 H2) ---
    The dialog is the full-screen scrim it always was; its one child is the style frame's
-   panel, centred on it (`results-panel.ts` builds it). The panel is capped to the scrim
-   (`max-height: 100%`), and when its content is taller — the expanded survey, the Run data
-   group on a short screen, heavy text zoom — its BODY scrolls inside it, with the band and the
-   panel's edge staying put around it. So the heading and Play again are always at the top of
-   the body's scroll range, and placement can never push them out of reach: the panel is never
-   taller than the dialog that places it. (That retires the auto-margin workaround the survey
-   needed for older WebKit, which drops `justify-content: safe center`.) */
+   panel, centred on it (`results-panel.ts` builds it). The panel is capped to the room below
+   its resting place (`max-height: calc(100% - rest)`, below), and when its content is taller —
+   the expanded survey, the Run data group on a short screen, heavy text zoom — its BODY
+   scrolls inside it, with the band and the panel's edge staying put around it. So the heading
+   and Play again are always at the top of the body's scroll range, and placement can never
+   push them out of reach: the panel is never taller than the dialog that places it. (That
+   retires the auto-margin workaround the survey needed for older WebKit, which drops
+   `justify-content: safe center`.) */
 
 .wy-results {
   position: fixed;
@@ -2017,9 +2018,11 @@ a.wy-home:focus-visible {
    centre the panel as it stands with nothing open below its action row, and FIXED: it never
    gives way. The panel is capped to the room left below it, so whatever opens — the Run data
    group, the survey form, a status message — grows the panel downward into that room and then
-   scrolls inside its body. Nothing moves under a control the player has just pressed: a panel
-   that moved instead (re-centred, or pushed up to fit) would put another control under the
-   pointer for a double-click's second press. */
+   scrolls inside its body. Opening something never moves the panel itself: a panel that moved
+   instead (re-centred, or pushed up to fit) would put another control under the pointer on
+   every open. What can still move content under a pointer (a scrolled body clamping as
+   something closes, the survey bringing its first question into view) is the press guard's
+   to catch (`press-guard.ts`). */
 .wy-results::before {
   content: '';
   flex: none;
@@ -2034,6 +2037,8 @@ a.wy-home:focus-visible {
   box-sizing: border-box;
   width: min(100%, 32.5rem);
   max-height: calc(100% - var(--wy-results-rest, 0px));
+  /* A size container, so its body's scrollbar gutter can follow the panel's width (below). */
+  container: wy-results-panel / inline-size;
   border: 1.5px solid var(--wy-results-edge);
   border-radius: 14px;
   background: var(--wy-results-panel);
@@ -2063,11 +2068,17 @@ a.wy-home:focus-visible {
    container the tiles' Compact row and the stars query. Its scrollbar's gutter is always
    reserved: where scrollbars take room, something opening below the row would otherwise narrow
    the body the moment it overflows, and reflow the row out from under the pointer. Reserved on
-   both edges, so the centred heading, stars and score stay centred on the panel and its band. */
+   both edges, so the centred heading, stars and score stay centred on the panel and its band,
+   except on a narrow panel (below). */
 .wy-results-body {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* No scroll anchoring. Chromium would pick the status region as the anchor and, as the survey
+     form above it collapses, scroll the body up to hold the region still, which brings Play
+     again down under the pointer that pressed Send. Without it the body only clamps to the end
+     of its shorter range, as WebKit (which has no anchoring) already does. */
+  overflow-anchor: none;
   scrollbar-gutter: stable both-edges;
   container: wy-results / inline-size;
   padding: 1.75rem clamp(1rem, 6vw, 2.75rem) 1.25rem;
@@ -2222,9 +2233,9 @@ a.wy-home:focus-visible {
 
 /* While its form is open the survey hides Give feedback (ADR 0014 §1), and here the button
    keeps its box, invisibly. An emptied slot would let Play again widen under the pointer that
-   just pressed Give feedback, and a double-click's second press would start a new run. It is
-   hidden from sight, focus and assistive tech alike, and a press on its place lands on
-   nothing. */
+   just pressed Give feedback: the press guard (`press-guard.ts`) would swallow a second press
+   there, but the row would still jump. It is hidden from sight, focus and assistive tech
+   alike, and a press on its place lands on nothing. */
 .wy-survey-opener > .wy-btn[hidden] {
   display: inline-block;
   visibility: hidden;
@@ -2312,8 +2323,11 @@ a.wy-home:focus-visible {
 }
 
 /* The shared status region closes the panel. Never hidden, not even empty: a live region has
-   to be in the accessibility tree BEFORE its text arrives, or the arrival goes unannounced. */
+   to be in the accessibility tree BEFORE its text arrives, or the arrival goes unannounced.
+   Within one dialog it never shrinks (`results-panel.ts` holds its tallest message's height as
+   a `min-height`, measured as a border box). */
 .wy-verify {
+  box-sizing: border-box;
   max-width: 30rem;
   margin: 0.75rem auto 0;
   font-size: 1rem;
@@ -2321,14 +2335,34 @@ a.wy-home:focus-visible {
 
 /* A narrow panel (a narrow window, heavy text zoom) stacks the tiles, so a label and its
    number never have to share less than a whole row — and where even a whole row is too narrow,
-   the number wraps at its spaces ("8 / 10") rather than overflowing the body. */
+   the number wraps at its spaces ("8 / 10") rather than overflowing the body. A stacked tile
+   also takes tighter padding: its number cannot wrap ("117"), and at 200% text on a 320px window
+   the default padding left it no room beside its label. */
 @container wy-results (max-width: 16rem) {
   .wy-results-stats {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .wy-results-stat {
+    gap: 0.375rem;
+    padding-inline: 0.5rem;
+  }
+
   .wy-results-stat dd {
     white-space: normal;
+  }
+}
+
+/* On a narrow panel (18rem: the width at which its tiles stack, with the body's padding), the
+   body reserves its scrollbar's gutter on that edge only, and takes tighter side padding.
+   Where a scrollbar takes room (a classic 15–17px one), a gutter on both edges and the full
+   padding would cost more width than a 320px window at 200% text has: the stacked tiles'
+   "117" and the loss heading's "through." would scroll the body sideways. The centred content
+   then sits half a scrollbar off the band's centre, on a narrow panel only. */
+@container wy-results-panel (max-width: 18rem) {
+  .wy-results-body {
+    scrollbar-gutter: stable;
+    padding-inline: 0.75rem;
   }
 }
 

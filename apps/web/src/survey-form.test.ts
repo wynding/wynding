@@ -85,6 +85,8 @@ function setup(options: { offered?: boolean } = {}) {
   let status = '';
   let seq = 0;
   const held: boolean[] = [];
+  /** Each `focusPlayAgain` call's `preventScroll`. */
+  const focusPlayAgainCalls: boolean[] = [];
   const host: SurveyFormHost = {
     survey,
     refreshAsk: () => ask.refresh(),
@@ -100,7 +102,10 @@ function setup(options: { offered?: boolean } = {}) {
     writeStatus: (message) => void (status = message),
     statusText: () => status,
     setRegionHeld: (h) => void held.push(h),
-    focusPlayAgain: () => playAgain.focus(),
+    focusPlayAgain: (preventScroll) => {
+      focusPlayAgainCalls.push(preventScroll);
+      playAgain.focus();
+    },
   };
   const form = createSurveyForm(doc, { opener, form: slot }, host);
   const q = <T extends Element>(selector: string): T => {
@@ -137,9 +142,11 @@ function setup(options: { offered?: boolean } = {}) {
   }
   return {
     doc,
+    dialog,
     slot,
     opener,
     playAgain,
+    focusPlayAgainCalls,
     elsewhere,
     form,
     survey,
@@ -252,26 +259,102 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     expect(h.textarea().maxLength).toBe(SURVEY_TEXT_MAX);
   });
 
-  it('a POINTER press focuses the first question without scrolling; a keyboard press may scroll (#181 H2)', async () => {
-    // The form opens below the results dialog's action row. Scrolling the dialog to the first
-    // question on a pointer press would carry the row out from under the pointer, and a
-    // double-click's second press would land on an answer — so only a keyboard press (whose
-    // synthesized click has `detail` 0) leaves the browser free to scroll.
-    const pointer = setup();
-    await pointer.open();
-    const pointerFocus = vi.spyOn(pointer.radios(0)[0]!, 'focus');
-    pointer
-      .button('Give feedback')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
-    expect(pointerFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+  /** Press `el` as the browser delivers it: `detail` 1 for a pointer, 0 for a keyboard. */
+  const pressWith = (el: Element, detail: number): void =>
+    void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail }));
 
-    const keyboard = setup();
-    await keyboard.open();
-    const keyboardFocus = vi.spyOn(keyboard.radios(0)[0]!, 'focus');
-    keyboard
-      .button('Give feedback')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
-    expect(keyboardFocus).toHaveBeenCalledExactlyOnceWith(undefined);
+  /** Watch `el` for a layout read and a focus, in order, and answer the focus's options. */
+  function watchFocus(el: HTMLElement) {
+    const order: string[] = [];
+    Object.defineProperty(el, 'offsetHeight', {
+      configurable: true,
+      get: () => {
+        order.push('layout');
+        return 0;
+      },
+    });
+    const focus = vi.spyOn(el, 'focus').mockImplementation(() => void order.push('focus'));
+    return { order, focus };
+  }
+
+  /** Lay out what jsdom cannot: the form scrolls in its dialog, a 300px scrollport from y=100,
+   *  and the first option's 44px label stands at `optionTop`. Returns the question's reveal. */
+  function inScroller(h: ReturnType<typeof setup>, optionTop: number) {
+    h.dialog.style.overflowY = 'auto';
+    Object.defineProperty(h.dialog, 'clientHeight', { configurable: true, value: 300 });
+    h.dialog.getBoundingClientRect = () => new DOMRect(0, 100, 400, 300);
+    h.radios(0)[0]!.closest('label')!.getBoundingClientRect = () =>
+      new DOMRect(0, optionTop, 60, 44);
+    const reveal = vi.fn();
+    h.slot.querySelector('fieldset')!.scrollIntoView = reveal;
+    return reveal;
+  }
+
+  it('opening focuses the first question without the browser’s scroll, by pointer and keyboard alike (#181 H2)', async () => {
+    // The form brings the question into view itself (below). A focus that scrolled would do it
+    // differently in each engine, and WebKit scrolls even a `preventScroll` focus made while the
+    // layout the render has just dirtied is pending, so layout is read first.
+    for (const detail of [1, 0]) {
+      const h = setup();
+      await h.open();
+      const first = watchFocus(h.radios(0)[0]!);
+      pressWith(h.button('Give feedback'), detail);
+      expect(first.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+      expect(first.order, 'layout is read before the focus').toEqual(['layout', 'focus']);
+    }
+  });
+
+  it('brings the first question into view: after a pointer press where it opened mostly below the fold, after a keyboard press wherever it is not wholly in view (#181 H2)', async () => {
+    const reveals = async (optionTop: number, detail: number): Promise<boolean> => {
+      const h = setup();
+      await h.open();
+      const reveal = inScroller(h, optionTop);
+      pressWith(h.button('Give feedback'), detail);
+      if (reveal.mock.calls.length > 0)
+        expect(reveal).toHaveBeenCalledExactlyOnceWith({
+          block: 'nearest',
+        });
+      return reveal.mock.calls.length > 0;
+    };
+    // The scrollport ends at y=400; the first option's label is 44px tall.
+    expect(await reveals(380, 1), 'pointer, 20px shown: mostly below the fold').toBe(true);
+    expect(await reveals(380, 0), 'keyboard, 20px shown').toBe(true);
+    expect(await reveals(376, 1), 'pointer, 24px shown: mostly in view, nothing moves').toBe(false);
+    expect(await reveals(376, 0), 'keyboard, 24px shown: not wholly in view').toBe(true);
+    expect(await reveals(300, 1), 'pointer, wholly in view').toBe(false);
+    expect(await reveals(300, 0), 'keyboard, wholly in view').toBe(false);
+    expect(await reveals(356, 0), 'keyboard, its last pixel on the fold: wholly in view').toBe(
+      false,
+    );
+  });
+
+  it('Not now returns focus to Give feedback without scrolling after a POINTER press only (#181 H2)', async () => {
+    for (const [detail, options] of [
+      [1, { preventScroll: true }],
+      [0, undefined],
+    ] as const) {
+      const h = setup();
+      await h.expand();
+      const opener = watchFocus(h.opener.querySelector('button')!);
+      pressWith(h.button('Not now'), detail);
+      expect(opener.focus).toHaveBeenCalledExactlyOnceWith(options);
+      expect(opener.order, 'layout is read before the focus').toEqual(['layout', 'focus']);
+    }
+  });
+
+  it('an accepted Send moves focus to Play again without scrolling after a POINTER press only (#181 H2)', async () => {
+    for (const [detail, preventScroll] of [
+      [1, true],
+      [0, false],
+    ] as const) {
+      const h = setup();
+      await h.expand();
+      h.radios(0)[2]!.click();
+      pressWith(h.button('Send'), detail);
+      h.last().resolve('accepted');
+      await flush();
+      expect(h.focusPlayAgainCalls).toEqual([preventScroll]);
+    }
   });
 
   it('Send is aria-disabled with no rating, and pressing it announces what is missing', async () => {

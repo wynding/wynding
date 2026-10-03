@@ -17,6 +17,12 @@
 // sets the e2e suite's text zoom (`compact.spec.ts`'s `:root { font-size: 200% }`) BEFORE the
 // app mounts: the dialog opens on the first frame, so a zoom applied after load would come too
 // late for where the panel opens and what takes focus.
+//
+// The survey's ask refresh takes a Web Lock, as production's storage read does (`persist.ts`'s
+// `browserLockFn`), so Give feedback arrives a task AFTER the dialog opens and the panel first
+// settles, never in the same task. A refresh that settled in a microtask would hide the panel's
+// re-settle on a late arrival, the case production always hits (#181 H2). `&askLock=0` gives the
+// instant refresh, and `&askLock=1` names the default explicitly.
 
 import { createApp } from '../src/main';
 import { createController } from '../src/controller';
@@ -53,7 +59,9 @@ const plan = params.get('run') === 'loss' ? WINNER_A.slice(0, 12) : WINNER_A;
 let offered = true;
 const surveyAsk: SurveyAsk = {
   offered: () => offered,
-  refresh: async () => {},
+  refresh: async () => {
+    if (params.get('askLock') !== '0') await navigator.locks.request('wy-harness-ask', () => {});
+  },
   commit: async () => {
     offered = false;
   },

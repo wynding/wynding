@@ -2600,6 +2600,19 @@ describe('overlay — accessibility semantics', () => {
     expect(document.activeElement).toBe(playAgain);
   });
 
+  it('a Play again STRADDLING the fold is not wholly in view: the heading takes focus (#181 H2)', () => {
+    const { overlay } = setup();
+    const body = overlay.resultsEl.querySelector<HTMLElement>('.wy-results-body')!;
+    const heading = overlay.resultsEl.querySelector<HTMLElement>('h2')!;
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-btn')!;
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 300 });
+    body.getBoundingClientRect = () => new DOMRect(0, 100, 400, 300);
+    // Its top inside the 100–400 scrollport, its bottom 28px past the fold.
+    playAgain.getBoundingClientRect = () => new DOMRect(0, 380, 200, 48);
+    overlay.showResults(hud({ won: true }), runStats());
+    expect(document.activeElement).toBe(heading);
+  });
+
   it('restores focus to the pre-modal element when the results dialog closes', () => {
     const { overlay, settingsBtn } = setup();
     settingsBtn.focus();
@@ -3390,6 +3403,92 @@ describe('overlay — the results panel (#181 H2)', () => {
     expect(order.indexOf(form)).toBe(order.indexOf(groupOf(overlay)) + 1);
     expect(order.indexOf(status)).toBe(order.length - 1);
     expect(order.indexOf(form)).toBeLessThan(order.indexOf(status));
+  });
+
+  it('guards its presses: a second pointer press at the same spot cannot reach Play again (#181 H2)', () => {
+    // The wiring of `press-guard.ts` (whose own suite pins its rules): Run data's group closing
+    // under a scrolled body moves Play again under the pointer before a double-click's second
+    // press lands.
+    const { overlay, actions } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    const press = (el: Element, at: number, detail = 1): void => {
+      const event = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        detail,
+        clientX: 300,
+        clientY: 400,
+      });
+      Object.defineProperty(event, 'timeStamp', { value: at });
+      el.dispatchEvent(event);
+    };
+    press(toggleOf(overlay), 1000);
+    expect(toggleOf(overlay).getAttribute('aria-expanded')).toBe('true');
+    press(playAgain, 1120);
+    expect(actions, 'the second press of the double-click is swallowed').toEqual([]);
+    press(playAgain, 1130, 0);
+    expect(
+      actions.map((a) => a.type),
+      'a keyboard activation passes',
+    ).toEqual(['playAgain']);
+    press(playAgain, 1499);
+    expect(actions, 'still inside the window').toHaveLength(1);
+    press(playAgain, 1500);
+    expect(actions, 'the window has closed').toHaveLength(2);
+  });
+
+  it('the status region never shrinks within one dialog, and the next dialog starts with no floor (#181 H2)', async () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const status = overlay.resultsEl.querySelector<HTMLElement>('.wy-verify')!;
+    // jsdom has no layout: the region's height is stubbed as each message would measure.
+    let height = 0;
+    status.getBoundingClientRect = () => new DOMRect(0, 0, 400, height);
+    const write = async (message: string, measured: number): Promise<void> => {
+      height = measured;
+      overlay.setResultsStatus(message);
+      await Promise.resolve(); // the observer's microtask
+      await Promise.resolve();
+    };
+    await write('Saved the run data, as a file with a long name.', 46);
+    expect(status.style.minHeight).toBe('46px');
+    await write('Verified.', 23);
+    expect(status.style.minHeight, 'a shorter message keeps the taller one’s height').toBe('46px');
+    await write('', 0);
+    expect(status.style.minHeight, 'so does a cleared region').toBe('46px');
+    await write('A message three lines tall.', 69);
+    expect(status.style.minHeight, 'a taller message raises the floor').toBe('69px');
+    overlay.hideResults();
+    height = 0;
+    overlay.showResults(hud({ won: false }), runStats());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(status.style.minHeight, 'the next dialog starts from none').toBe('');
+  });
+
+  it('focusPlayAgain reads layout, then focuses Play again with or without scrolling (#181 H2)', () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    const order: string[] = [];
+    Object.defineProperty(playAgain, 'offsetHeight', {
+      configurable: true,
+      get: () => {
+        order.push('layout');
+        return 0;
+      },
+    });
+    const focus = vi.spyOn(playAgain, 'focus').mockImplementation(() => void order.push('focus'));
+    overlay.focusPlayAgain(true);
+    overlay.focusPlayAgain(false);
+    expect(focus.mock.calls).toEqual([[{ preventScroll: true }], [undefined]]);
+    expect(order, 'WebKit scrolls a preventScroll focus made over dirty layout').toEqual([
+      'layout',
+      'focus',
+      'layout',
+      'focus',
+    ]);
   });
 });
 

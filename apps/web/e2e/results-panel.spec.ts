@@ -20,11 +20,12 @@ import {
 // so Give feedback takes its place in the action row; `&text=200` opens it at 200% text.
 //
 // What only a browser can prove, and the unit suites cannot: the disclosure's keyboard
-// behaviour and tab order, the treatments as painted, axe over every state, the panel's fit at
-// the campaign's sizes and at 200% text, and that nothing moves or appears under a control the
-// player has just pressed — driven with the real pointer (`page.mouse`), which, unlike a
-// locator's click, never scrolls anything into view first. The same, where a scrollbar takes
-// room, is `results-panel-scrollbar.spec.ts`'s: it needs a browser started with scrollbars.
+// behaviour and tab order, the treatments as painted, axe over every state, the panel's fit and
+// resting place at the campaign's sizes and at 200% text, and that opening Run data never moves
+// its toggle, pressed with the real pointer (`page.mouse`), which, unlike a locator's click,
+// never scrolls anything into view first. That a press never activates a control it was not
+// aimed at is `results-pointer.spec.ts`'s, in Chromium and WebKit. The panel where a scrollbar
+// takes room is `results-panel-scrollbar.spec.ts`'s: it needs a browser started with scrollbars.
 
 type Size = { readonly width: number; readonly height: number };
 
@@ -72,18 +73,6 @@ const FIT_SIZES: readonly Size[] = [
   { width: 1280, height: 720 },
   { width: 740, height: 360 },
   { width: 658, height: 320 }, // Galaxy S9+ landscape — Compact
-];
-
-/** Where QC round 1 caught the panel moving under the pointer: the open Run data group or
- *  survey form did not fit below the panel's resting place (1280×720, 1366×657, 1536×730,
- *  658×320), or did and still lifted the row (1440×900, 1920×960). */
-const POINTER_SIZES: readonly Size[] = [
-  { width: 1280, height: 720 },
-  { width: 1366, height: 657 },
-  { width: 1536, height: 730 },
-  DESKTOP,
-  { width: 1920, height: 960 },
-  { width: 658, height: 320 },
 ];
 
 const ITEMS = ['Verify this run', 'Copy run data', 'Save run data'] as const;
@@ -321,10 +310,20 @@ for (const size of [
   }) => {
     await page.setViewportSize(size);
     const dialog = await openResults(page, 'win');
+    // Give feedback's place in the row, measured from Play again: opening the form may scroll
+    // the body to show its first question, which moves the whole row, not a place in it.
+    const place = (): Promise<Box> =>
+      page.evaluate(() => {
+        const play = document.querySelector('.wy-results .wy-primary')!.getBoundingClientRect();
+        const own = document.querySelector('.wy-survey-opener > .wy-btn')!.getBoundingClientRect();
+        return { x: own.x - play.x, y: own.y - play.y, width: own.width, height: own.height };
+      });
+    const before = await place();
     await dialog.getByRole('button', { name: 'Give feedback' }).click();
     await expect(dialog.getByRole('button', { name: 'Send' })).toBeAttached();
     // Kept as a box for the row's sake, but out of sight, the tab order and the tree.
     await expect(dialog.getByRole('button', { name: 'Give feedback' })).toBeHidden();
+    expectSameBox(await place(), before, 'Give feedback, its form open');
     await axeClean(page, 'with the survey form open');
     await toggleOf(dialog).click();
     await axeClean(page, 'with the survey form and Run data open');
@@ -408,77 +407,21 @@ for (const text of [100, 200] as const) {
   }
 }
 
-for (const size of POINTER_SIZES) {
-  test(`at ${String(size.width)}×${String(size.height)} nothing moves or activates under a pressed control: Run data and Give feedback, clicked and double-clicked`, async ({
+// The campaign's pointer sizes (`results-pointer.spec.ts` presses them with the real pointer).
+for (const size of [
+  { width: 1280, height: 720 },
+  { width: 1366, height: 657 },
+  { width: 1536, height: 730 },
+  DESKTOP,
+  { width: 1920, height: 960 },
+  { width: 658, height: 320 },
+] as const) {
+  test(`at ${String(size.width)}×${String(size.height)} the open survey form is reachable by scrolling, and by Tab from its first question`, async ({
     page,
   }) => {
     await page.setViewportSize(size);
-    let downloads = 0;
-    page.on('download', () => void downloads++);
     const dialog = await openResults(page, 'win');
-    const toggle = toggleOf(dialog);
-    const feedback = dialog.getByRole('button', { name: 'Give feedback' });
-    const status = dialog.getByRole('status');
-    const answered = (): Promise<number> => dialog.locator('.wy-survey-form input:checked').count();
-    const toggleBox = await boxOf(page, '.wy-results-more');
-    const feedbackBox = await boxOf(page, '.wy-survey-opener > .wy-btn');
-    const centreX = (b: Box): number => b.x + b.width / 2;
-    const at = (b: Box, f: number): number => b.y + b.height * f;
-    const nothingElse = async (what: string): Promise<void> => {
-      await expect(dialog, `${what}: no new run`).toBeVisible();
-      await expect(status, `${what}: no Verify, no export`).toHaveText('');
-      expect(await answered(), `${what}: no survey answer`).toBe(0);
-      expect(downloads, `${what}: no download`).toBe(0);
-    };
-
-    // One click each: the pressed control keeps its box, to within half a pixel.
-    await page.mouse.click(centreX(toggleBox), at(toggleBox, 0.5));
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expectSameBox(await boxOf(page, '.wy-results-more'), toggleBox, 'Run data, opened');
-    await page.mouse.click(centreX(toggleBox), at(toggleBox, 0.5));
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expectSameBox(await boxOf(page, '.wy-results-more'), toggleBox, 'Run data, closed');
-
-    await page.mouse.click(centreX(feedbackBox), at(feedbackBox, 0.5));
-    await expect(dialog.getByRole('radio', { name: '1' }).first()).toBeFocused();
-    expectSameBox(
-      await boxOf(page, '.wy-survey-opener > .wy-btn'),
-      feedbackBox,
-      'Give feedback, opened',
-    );
-    expect(
-      await dialog.locator('.wy-results-body').evaluate((b) => b.scrollTop),
-      'opening the form scrolled nothing',
-    ).toBe(0);
-    await dialog.getByRole('button', { name: 'Not now' }).click();
-    await expect(feedback).toBeFocused();
-    expectSameBox(
-      await boxOf(page, '.wy-survey-opener > .wy-btn'),
-      feedbackBox,
-      'Give feedback, closed',
-    );
-
-    // Double-clicks, high and low on each control: the second press lands where the first did.
-    for (const f of [0.1, 0.5, 0.75, 0.9]) {
-      await page.mouse.dblclick(centreX(toggleBox), at(toggleBox, f));
-      await expect(toggle, `Run data double-clicked at ${String(f)}`).toHaveAttribute(
-        'aria-expanded',
-        'false',
-      );
-      await nothingElse(`Run data double-clicked at ${String(f)}`);
-      expectSameBox(await boxOf(page, '.wy-results-more'), toggleBox, 'Run data');
-    }
-    for (const f of [0.1, 0.5, 0.75, 0.9]) {
-      await page.mouse.dblclick(centreX(feedbackBox), at(feedbackBox, f));
-      await expect(feedback, `Give feedback double-clicked at ${String(f)}`).toBeHidden();
-      await nothingElse(`Give feedback double-clicked at ${String(f)}`);
-      await dialog.getByRole('button', { name: 'Not now' }).click();
-      await expect(feedback).toBeVisible();
-      expectSameBox(await boxOf(page, '.wy-survey-opener > .wy-btn'), feedbackBox, 'Give feedback');
-    }
-
-    // The open form is reachable by scrolling, and by Tab from the question focus landed on.
-    await page.mouse.click(centreX(feedbackBox), at(feedbackBox, 0.5));
+    await dialog.getByRole('button', { name: 'Give feedback' }).click();
     const send = dialog.getByRole('button', { name: 'Send' });
     await send.scrollIntoViewIfNeeded();
     await expect(send).toBeInViewport();
@@ -491,7 +434,7 @@ for (const size of POINTER_SIZES) {
   });
 }
 
-test('at 200% text on a phone-width window the panel never scrolls sideways, and every star stays inside it', async ({
+test('at 200% text on a phone-width window neither the panel nor the dialog scrolls sideways, and every star stays inside both', async ({
   page,
 }) => {
   // The narrow sizes QC round 1 measured overflowing (a fixed-size star row; a value that would
@@ -508,35 +451,149 @@ test('at 200% text on a phone-width window the panel never scrolls sideways, and
     for (const run of ['win', 'loss'] as const) {
       await openResults(page, run, 200);
       const fit = await page.evaluate(() => {
+        const dialogEl = document.querySelector('.wy-results')!;
         const body = document.querySelector('.wy-results-body')!;
         const port = body.getBoundingClientRect();
+        const panel = document.querySelector('.wy-results-panel')!.getBoundingClientRect();
         const stars = [...document.querySelectorAll('.wy-results-star')].map((s) =>
           s.getBoundingClientRect(),
         );
         return {
           sideways: body.scrollWidth - body.clientWidth,
+          dialogSideways: dialogEl.scrollWidth - dialogEl.clientWidth,
+          panelOnScreen: panel.left >= 0 && panel.right <= innerWidth,
           starsInside: stars.every((s) => s.left >= port.left && s.right <= port.right),
+          starsOnScreen: stars.every((s) => s.left >= 0 && s.right <= innerWidth),
         };
       });
       const at = `${String(size.width)}×${String(size.height)} ${run}`;
       expect(fit.sideways, `${at}: no sideways scroll`).toBeLessThanOrEqual(0);
+      expect(fit.dialogSideways, `${at}: the dialog never scrolls sideways`).toBeLessThanOrEqual(0);
+      expect(fit.panelOnScreen, `${at}: the panel inside the window`).toBe(true);
       expect(fit.starsInside, `${at}: every star inside the body`).toBe(true);
+      expect(fit.starsOnScreen, `${at}: every star inside the window`).toBe(true);
     }
   }
 });
 
-test('the panel re-settles when the window resizes: opened at 1280×720, centred again at 1440×900', async ({
+/** The closed panel is centred: the gap above it less the gap below, which a centred panel on
+ *  a floored pixel spacer reads in (-2, 0.5]. */
+async function expectCentred(page: Page, what: string): Promise<void> {
+  const g = await geometry(page);
+  const off = g.panel.top - g.restTop - (g.restBottom - g.panel.bottom);
+  expect(off, `${what}: centred`).toBeLessThanOrEqual(0.5);
+  expect(off, `${what}: centred`).toBeGreaterThan(-2);
+}
+
+test('the panel re-settles when the window grows: opened at 1280×720, centred again at 1440×900', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await openResults(page, 'win');
   await page.setViewportSize(DESKTOP);
   await twoFrames(page);
-  const g = await geometry(page);
-  const above = g.panel.top - g.restTop;
-  const below = g.restBottom - g.panel.bottom;
-  expect(above - below, 'centred on the new window').toBeLessThanOrEqual(0.5);
-  expect(above - below, 'centred on the new window').toBeGreaterThan(-2);
+  await expectCentred(page, 'grown to 1440×900');
+});
+
+test('the panel re-settles when the window shrinks: opened at 1440×900, centred again at 1280×720', async ({
+  page,
+}) => {
+  await page.setViewportSize(DESKTOP);
+  await openResults(page, 'win');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await twoFrames(page);
+  await expectCentred(page, 'shrunk to 1280×720');
+});
+
+test('a resize with Run data and the survey form open re-settles on the CLOSED panel', async ({
+  page,
+}) => {
+  // The resting place is the closed panel's: what stands open below the row is left out of it.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const dialog = await openResults(page, 'win');
+  const toggle = toggleOf(dialog);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await dialog.getByRole('button', { name: 'Give feedback' }).click();
+  await expect(dialog.getByRole('button', { name: 'Send' })).toBeAttached();
+  await page.setViewportSize(DESKTOP);
+  await twoFrames(page);
+  // Close both (neither close re-settles anything): the panel must already rest where a closed
+  // panel is centred on the new window.
+  const body = dialog.locator('.wy-results-body');
+  await body.evaluate((b) => (b.scrollTop = 0));
+  await dialog.getByRole('button', { name: 'Not now' }).click();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await body.evaluate((b) => (b.scrollTop = 0));
+  await twoFrames(page);
+  await expectCentred(page, 'closed again after the resize');
+});
+
+test('Give feedback arriving after the panel first settles, and wrapping the row, re-settles it', async ({
+  page,
+}) => {
+  // The harness's ask refresh takes a Web Lock, as production's does, so Give feedback arrives
+  // a task after the dialog opens. At 400×760 it wraps the action row onto a second line.
+  await page.setViewportSize({ width: 400, height: 760 });
+  await openResults(page, 'win');
+  const rowHeight = await page.evaluate(
+    () => document.querySelector('.wy-results-actions')!.getBoundingClientRect().height,
+  );
+  expect(rowHeight, 'the row wrapped').toBeGreaterThan(80);
+  await expectCentred(page, 'after Give feedback arrived');
+});
+
+test('at 200% text on a narrow COMPACT window nothing scrolls sideways, and the grade stays inside the body', async ({
+  page,
+}) => {
+  for (const size of [
+    { width: 400, height: 480 },
+    { width: 480, height: 400 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const run of ['win', 'loss'] as const) {
+      await openResults(page, run, 200);
+      const fit = await page.evaluate(() => {
+        const body = document.querySelector('.wy-results-body')!;
+        const port = body.getBoundingClientRect();
+        const grade = [...document.querySelectorAll('.wy-results-grade > *')].map((el) =>
+          el.getBoundingClientRect(),
+        );
+        return {
+          compact: matchMedia('(max-height: 500px)').matches,
+          sideways: body.scrollWidth - body.clientWidth,
+          gradeInside: grade.every((g) => g.left >= port.left && g.right <= port.right),
+        };
+      });
+      const at = `${String(size.width)}×${String(size.height)} ${run}`;
+      expect(fit.compact, `${at}: Compact applies`).toBe(true);
+      expect(fit.sideways, `${at}: no sideways scroll`).toBeLessThanOrEqual(0);
+      expect(fit.gradeInside, `${at}: the stars and the score inside the body`).toBe(true);
+    }
+  }
+});
+
+test('the heading that takes first focus at 200% text wears the app’s focus ring', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const dialog = await openResults(page, 'win', 200);
+  await expect(dialog.getByRole('heading', { level: 2 })).toBeFocused();
+  const ring = await page.evaluate(() => {
+    const h = document.querySelector('.wy-results-title')!;
+    const style = getComputedStyle(h);
+    return {
+      visible: h.matches(':focus-visible'),
+      style: style.outlineStyle,
+      width: style.outlineWidth,
+      colour: style.outlineColor,
+    };
+  });
+  expect(ring.visible, 'focus on open is visible').toBe(true);
+  expect(ring.style).toBe('solid');
+  expect(ring.width).toBe('3px');
+  expect(ring.colour).toBe(await resolveColour(page, 'var(--wy-focus)'));
 });
 
 test('at 1440×900 Verify’s report grows the panel downward: the button stays where it was pressed', async ({

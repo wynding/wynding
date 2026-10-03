@@ -12,10 +12,14 @@
 //
 // Where the panel stands: centred on the dialog by its height with nothing open below the
 // action row, and FIXED there. The Run data group, the survey form and a status message grow it
-// downward into the room below, then scroll inside its body, so nothing ever moves under a
-// control the player has just pressed (`settle` below; `ui.css`'s `.wy-results::before`). It
-// opens with Play again focused, unless Play again is not wholly in view at the top of the
-// panel (a short window at heavy text zoom): then the heading takes focus (`focusOnOpen`).
+// downward into the room below, then scroll inside its body (`settle` below; `ui.css`'s
+// `.wy-results::before`). Content can still move under a resting pointer: something closing
+// while the body is scrolled makes the browser clamp the scroll position, and opening the survey
+// can bring its first question into view. So every press is guarded instead: a press never
+// activates a control it was not aimed at (`press-guard.ts`). And the status region never
+// shrinks within one dialog, so a shorter message is not one of the things that move. The panel
+// opens with Play again focused, unless Play again is not wholly in view at the top of the panel
+// (a short window at heavy text zoom): then the heading takes focus (`focusOnOpen`).
 //
 // One sentence carries the score and the stars to assistive tech (`results.summary`, today's
 // string): it is the dialog's description, and the visual stars and score are `aria-hidden`
@@ -23,6 +27,7 @@
 
 import { t } from './i18n/t';
 import { chipIcon } from './hud-icons';
+import { guardPresses } from './press-guard';
 import type { RunStats } from './controller';
 import type { SurveySlots } from './survey-form';
 
@@ -71,8 +76,9 @@ function statValue(stat: ResultsStat, stats: RunStats): string {
 export interface ResultsPanel {
   /** The panel: the dialog's one child. */
   readonly root: HTMLElement;
-  /** The part that scrolls when the panel is taller than the dialog (a short viewport, an
-   *  expanded survey, heavy text zoom). The band and the panel's edge stay put around it. */
+  /** The part that scrolls when the panel is taller than the room below its resting place (a
+   *  short viewport, the open survey or Run data group, heavy text zoom). The band and the
+   *  panel's edge stay put around it. */
   readonly body: HTMLElement;
   readonly title: HTMLHeadingElement;
   /** The one accessible sentence carrying score and stars — the dialog's description. */
@@ -95,7 +101,8 @@ export interface ResultsPanel {
   focusOnOpen(): void;
   /** Show or hide the Run data group, keeping `aria-expanded` in step. */
   setRunDataExpanded(expanded: boolean): void;
-  /** Stop following the dialog's size (the overlay's teardown). */
+  /** Stop following the dialog's size and the status region's height, and drop the press guard
+   *  (the overlay's teardown). */
   destroy(): void;
 }
 
@@ -188,8 +195,9 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
     statValues.set(stat, value);
   }
 
-  // One row of actions. Play again leads (primary, initial focus); Give feedback joins it
-  // where a survey renders; Run data closes it and discloses the three secondary actions.
+  // One row of actions. Play again leads (primary, and the first focus wherever it is wholly in
+  // view as the panel opens); Give feedback joins it where a survey renders; Run data closes it
+  // and discloses the three secondary actions.
   const actions = doc.createElement('div');
   actions.className = 'wy-results-actions';
   const playAgain = button(doc, 'wy-btn wy-primary', t('controls.playAgain'));
@@ -244,9 +252,8 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
   // below (`max-height`). The spacer never gives way: whatever opens below the row — the Run
   // data group, the survey form, a status message — grows the panel downward into that room and
   // then scrolls inside its body. A panel that moved instead (centred by its current height, or
-  // pushed up to fit) would carry the control the pointer just pressed away from under it, and
-  // a double-click's second press would land on whatever moved there: Verify, a download, a
-  // survey answer.
+  // pushed up to fit) would carry the control the pointer just pressed away from under it on
+  // every open. The press guard below catches a second press wherever something still moves.
   const view = doc.defaultView;
   function settle(): void {
     if (view === null || dialog.hidden) return;
@@ -280,6 +287,25 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
   for (const box of [dialog, title, subtitle, grade, statList, actions]) {
     restObserver?.observe(box);
   }
+
+  // A press never activates a control it was not aimed at (`press-guard.ts`).
+  const unguardPresses = guardPresses(root);
+
+  // The status region never shrinks within one dialog. A shorter message after a longer one
+  // would shrink the body, and the scroll clamp of a scrolled body would then pull the panel
+  // down under the pointer. Each taller message raises the floor, and the next dialog starts
+  // from none (`render`). Measured as each message lands, before the next rendering update, so
+  // the region is never painted shorter. jsdom has no layout, so the floor never rises there.
+  let statusFloor = 0;
+  const holdStatusHeight = (): void => {
+    const height = status.getBoundingClientRect().height;
+    if (height <= statusFloor) return;
+    statusFloor = height;
+    status.style.minHeight = `${String(height)}px`;
+  };
+  const MO = view?.MutationObserver;
+  const statusObserver = typeof MO === 'function' ? new MO(holdStatusHeight) : null;
+  statusObserver?.observe(status, { childList: true, characterData: true, subtree: true });
 
   /** Whether `el` stands wholly inside the body's scrollport as the body is scrolled now. */
   function wholeInView(el: HTMLElement): boolean {
@@ -328,6 +354,9 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
       // A new dialog starts collapsed: the run data belongs to the run it was opened for.
       setRunDataExpanded(false);
       body.scrollTop = 0;
+      // ...and with no status floor: the last dialog's messages are not this one's.
+      statusFloor = 0;
+      status.style.minHeight = '';
     },
     focusOnOpen(): void {
       // Placed now rather than at the observer's next pass: where Play again stands decides
@@ -346,6 +375,8 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
     setRunDataExpanded,
     destroy(): void {
       restObserver?.disconnect();
+      statusObserver?.disconnect();
+      unguardPresses();
     },
   };
 }
