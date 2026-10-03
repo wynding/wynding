@@ -765,7 +765,7 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
   });
 
   it('the attackless outline’s outer edge is never inside the rim, at any cell size or dpr — at dpr 1 covering the rim up to 21 px, clear of it at 22–24 px and from 28 px', () => {
-    for (const dpr of [1, 1.25, 1.5, 1.75, 2, 3]) {
+    for (const dpr of [0.8, 0.9, 1, 1.25, 1.5, 1.75, 2, 3]) {
       for (const cellPx of [10, 11, 12, 13, 16, 20, 21, 22, 24, 25, 27, 28, 31, 32, 40, 60]) {
         const at = `cellPx ${cellPx} at dpr ${dpr}`;
         const projection = createProjection({

@@ -87,13 +87,19 @@ describe('alignRectToTexels — a crisp stroke on whole texels', () => {
 
   it('makes the width whole texels — never under its CSS-px floor, rounded up; else the nearest to its own, the thinner at a tie; never under one', () => {
     // 10px cells: 0.3125 px per unit, so the 1px floor rules (3.2 units), rounded UP to whole
-    // texels — two at every fractional dpr, never thinner than the floor.
+    // texels — two at dpr 1.25, 1.5 and 1.75, never thinner than the floor.
     const unit = 0.3125;
     expect(texelWidth(alignRectToTexels(RIM, unit, 1), unit, 1)).toBeCloseTo(1, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 1.25), unit, 1.25)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 1.5), unit, 1.5)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 1.75), unit, 1.75)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 3), unit, 3)).toBeCloseTo(3, 9);
+    // Below dpr 1 the floor is under a texel, so it is one: never fewer (0.9 as a browser
+    // reports it, too).
+    for (const scale of [0.9, 0.8, 0.8999999761581421]) {
+      const width = texelWidth(alignRectToTexels(RIM, unit, scale), unit, scale);
+      expect(width, `${scale}`).toBeCloseTo(1, 9);
+    }
     // 40px cells: 1.25 px per unit, so its own 2 units (2.5px) rule — a tie, so 2.
     expect(texelWidth(alignRectToTexels(RIM, 1.25, 1), 1.25, 1)).toBeCloseTo(2, 9);
     // 27px cells: its own 1.6875px is nearer 2 than 1.

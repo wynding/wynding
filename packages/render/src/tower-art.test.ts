@@ -413,6 +413,8 @@ describe('the plate, the boost glow and the pending rim', () => {
     // 1.875px rules: 5.625 device px at dpr 3, so 6.)
     if (rim.kind !== 'rect') throw new Error('the rim is a rect');
     for (const [cellPx, scale, pixels] of [
+      [10, 0.9, 1], // below dpr 1 one CSS px is under a pixel: one, never none
+      [26, 0.8, 1],
       [10, 1, 1],
       [10, 1.25, 2],
       [13, 1.5, 2],
