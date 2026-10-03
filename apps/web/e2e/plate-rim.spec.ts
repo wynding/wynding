@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
 import { GRID } from './layout-probe';
@@ -10,19 +10,22 @@ import { GRID } from './layout-probe';
 // box SNAPS to, and that count depends on where the box sits, not only on its size: at
 // 525×320 the board sits at x = 52.5 with w = 328.5, so it covers device pixels 53 to 381 —
 // 328 of them, where round(328.5) is 329. A 329-pixel backing store scaled into 328 smears a
-// one-pixel rim across two at about half strength (measured as low as 1.88:1). So the
-// backing store is sized to that snapped box (`scene.ts`), and these checks place a tower
-// and require each of its plate's four edges to show the rim's own colour at sizes where
-// sizing by round(width × dpr) did not match it.
+// one-pixel rim across two at about half strength (measured as low as 1.88:1). So the store
+// is sized to the snapped box (`scene.ts`), and these checks place towers and require each
+// plate's four edges to show the rim's own colour where sizing by round(width × dpr) did not
+// match it — at dpr 1, and at a real device scale below 1.
 
 const PAL = resolvePalette('default');
 const RIM = rgb(PAL.tower);
 /** Per channel. A rim pixel spread across two at half strength is ~40 levels off. */
 const TOL = 6;
-/** Two committed builds (solid rims) — a Basic Tower, whose barrel points at its plate's top
- *  edge, and a Slow Tower — and a Pending one (a dashed rim), clear of the lane on row 11 and
- *  of each other. */
-const BASIC = { col: 14, row: 5 };
+/** Two committed builds (solid rims) and a Pending one (a dashed rim), clear of the lane on
+ *  row 11 and of each other. The solid ones are a Splash and a Slow Tower, whose heads keep
+ *  clear of their rims. (A Basic Tower's barrel, a head drawn over its plate, ends a 16th of
+ *  a pixel short of its rim at 11px cells and dpr 1, and its anti-aliasing darkens the rim's
+ *  one pixel along part of the top edge, to 3.65:1 — docs/accessibility-checklist.md. This
+ *  spec is about how the rim's own pixels reach the screen.) */
+const SPLASH = { col: 14, row: 5 };
 const SLOW = { col: 18, row: 5 };
 const DASHED = { col: 22, row: 5 };
 
@@ -61,7 +64,13 @@ async function rimMiss(
   page: Page,
   cell: { col: number; row: number },
   mode: 'every' | 'some',
-): Promise<{ miss: number; sides: Record<string, number>; cellPx: number; board: Board }> {
+): Promise<{
+  miss: number;
+  sides: Record<string, number>;
+  worst: Record<string, string>;
+  cellPx: number;
+  board: Board;
+}> {
   const board = await boardRect(page);
   const vw = await page.evaluate(() => window.innerWidth);
   const proj = createProjection({
@@ -84,10 +93,15 @@ async function rimMiss(
     return Math.max(...RIM.map((v, k) => Math.abs((png.data[i + k] as number) - v)));
   };
   const sides: Record<string, number> = {};
+  /** For a failure's message: on each side, where the worst position is, and the column of
+   *  pixels across the band there. */
+  const worst: Record<string, string> = {};
   for (const side of ['top', 'bottom', 'left', 'right'] as const) {
     const per: number[] = [];
+    const bands: string[] = [];
     for (let t = Math.ceil(size / 4); t <= Math.floor((3 * size) / 4); t++) {
       let best = 255;
+      const band: string[] = [];
       for (let d = -2; d <= depth; d++) {
         const [x, y] =
           side === 'top'
@@ -98,18 +112,23 @@ async function rimMiss(
                 ? [x0 + d, y0 + t]
                 : [x0 + size - 1 - d, y0 + t];
         best = Math.min(best, off(x, y));
+        const i = (y * png.width + x) << 2;
+        band.push(`${png.data[i]},${png.data[i + 1]},${png.data[i + 2]}`);
       }
       per.push(best);
+      bands.push(band.join(' '));
     }
     sides[side] = mode === 'every' ? Math.max(...per) : Math.min(...per);
+    const at = per.indexOf(sides[side]!);
+    worst[side] = `at ${Math.ceil(size / 4) + at} of ${size}: ${bands[at]}`;
   }
-  return { miss: Math.max(...Object.values(sides)), sides, cellPx: proj.cellPx, board };
+  return { miss: Math.max(...Object.values(sides)), sides, worst, cellPx: proj.cellPx, board };
 }
 
 /** Polls until every rim is in its own colour, or fails with the last measurement. */
 async function expectRimsInFullColour(page: Page, label: string): Promise<void> {
   for (const [cell, mode] of [
-    [BASIC, 'every'],
+    [SPLASH, 'every'],
     [SLOW, 'every'],
     [DASHED, 'some'],
   ] as const) {
@@ -151,25 +170,49 @@ async function stage(page: Page): Promise<void> {
     Number(/(\d+)/.exec((await bountyChip.textContent()) ?? '')?.[1] ?? NaN);
   const before = await bounty();
   await page.getByRole('button', { name: 'Start' }).click(); // a build on a running game commits
-  await place(/^Basic Tower/, BASIC);
+  await place(/^Splash Tower/, SPLASH);
   await place(/^Slow Tower/, SLOW);
   // Both built — paid for at a tick of the running game — before it pauses.
-  await expect.poll(bounty).toBeLessThanOrEqual(before - 13); // 5 + 8
+  await expect.poll(bounty).toBeLessThanOrEqual(before - 20); // 12 + 8
   await page.getByRole('button', { name: 'Pause' }).click(); // … and on a paused one is Pending
   await place(/^Basic Tower/, DASHED);
 }
 
-for (const [width, height, dsf] of [
-  [525, 320, 1],
-  [1280, 720, 0.9],
-  [1280, 720, 0.8],
-] as const) {
-  test.describe(`the plate rim at ${width}×${height}, device scale ${dsf}`, () => {
-    test.use({ viewport: { width, height }, deviceScaleFactor: dsf });
-    test('every edge of a solid and a dashed rim shows the rim’s own colour', async ({ page }) => {
-      await stage(page);
-      await expectRimsInFullColour(page, `${width}×${height} @${dsf}`);
+test.describe('the plate rim at 525×320, device scale 1', () => {
+  test.use({ viewport: { width: 525, height: 320 }, deviceScaleFactor: 1 });
+  test('every edge of a solid and a dashed rim shows the rim’s own colour', async ({ page }) => {
+    await stage(page);
+    await expectRimsInFullColour(page, '525×320 @1');
+  });
+});
+
+// A device scale below 1 — a screen, or browser zoom, at 0.9 or 0.8 — needs a browser that
+// really runs at that scale: Playwright's `deviceScaleFactor` only EMULATES one, laying the
+// page out in CSS px and scaling its picture, which resamples the canvas whatever its
+// backing size. `--force-device-scale-factor` gives the real thing, where layout is in
+// device pixels and the canvas is drawn into the pixels its box snaps to.
+for (const dsf of [0.9, 0.8] as const) {
+  test(`the plate rim at 1280×720, a real device scale of ${dsf}: every edge of a solid and a dashed rim shows the rim’s own colour`, async ({
+    baseURL,
+  }) => {
+    const browser = await chromium.launch({
+      args: [`--force-device-scale-factor=${dsf}`, '--window-size=1280,720'],
     });
+    try {
+      // `deviceScaleFactor: undefined` keeps Playwright Test from filling in the project's
+      // emulated scale, which a context without a viewport refuses.
+      const page = await (
+        await browser.newContext({ viewport: null, deviceScaleFactor: undefined, baseURL })
+      ).newPage();
+      await stage(page);
+      // A 1280×720 page at that scale, not an emulated one.
+      expect(
+        await page.evaluate(() => [innerWidth, innerHeight, Math.round(devicePixelRatio * 100)]),
+      ).toEqual([1280, 720, Math.round(dsf * 100)]);
+      await expectRimsInFullColour(page, `1280×720 @${dsf}`);
+    } finally {
+      await browser.close();
+    }
   });
 }
 
@@ -184,48 +227,43 @@ test.describe('the plate rim across window widths, 320 tall', () => {
     // of a pixel, exact in a double, so these spans are the browser's own.)
     const span = (start: number, size: number): number =>
       Math.round(start + size) - Math.round(start);
-    const boards = new Map<number, Board>();
+    const mismatched: number[] = [];
+    let moved = 0; // widths where the board moved without resizing
+    let last: Board | undefined;
     for (let w = 482; w <= 635; w++) {
       await page.setViewportSize({ width: w, height: 320 });
-      boards.set(w, await boardRect(page));
+      const b = await boardRect(page);
+      // Where sizing by round(width × dpr) scaled the canvas into its box: the box's snapped
+      // span differs from its rounded CSS size on either axis.
+      if (
+        span(b.x, b.width) !== Math.round(b.width) ||
+        span(b.y, b.height) !== Math.round(b.height)
+      )
+        mismatched.push(w);
+      const resized = last === undefined || b.width !== last.width || b.height !== last.height;
+      if (!resized && (b.x !== last!.x || b.y !== last!.y)) moved++;
+      last = b;
     }
-    const at = (w: number): Board => boards.get(w)!;
-    // Where sizing by round(width × dpr) scaled the canvas into its box: the box's snapped
-    // span differs from its rounded CSS size on either axis.
-    const mismatched = [...boards.keys()].filter(
-      (w) =>
-        w > 482 &&
-        (span(at(w).x, at(w).width) !== Math.round(at(w).width) ||
-          span(at(w).y, at(w).height) !== Math.round(at(w).height)),
-    );
-    // Of those, the ones a window one pixel narrower MOVES the board into without resizing
-    // it, changing its span: no ResizeObserver fires there, so only a window resize can
-    // re-size the backing store (`scene.ts`).
-    const moves = mismatched.filter(
-      (w) =>
-        at(w).width === at(w - 1).width &&
-        at(w).height === at(w - 1).height &&
-        (span(at(w).x, at(w).width) !== span(at(w - 1).x, at(w - 1).width) ||
-          span(at(w).y, at(w).height) !== span(at(w - 1).y, at(w - 1).height)),
-    );
     console.log(
-      `[plate-rim] at 320 tall, mismatched: ${mismatched.join(', ')}; moves: ${moves.join(', ')}`,
+      `[plate-rim] at 320 tall, mismatched: ${mismatched.join(', ')}; moved alone: ${moved}`,
     );
     expect(mismatched.length).toBeGreaterThanOrEqual(5);
-    expect(moves.length).toBeGreaterThanOrEqual(1);
-    const spread = (ws: readonly number[], n: number): number[] => [
+    // The board fills its Stage: a width that moves it also resizes it, so the ResizeObserver
+    // re-sizes the backing store wherever it moves (`scene.ts`).
+    expect(moved).toBe(0);
+    // Five of them, spread across the range, each reached from a pixel narrower.
+    const picks = [
       ...new Set(
-        Array.from({ length: n }, (_, i) => ws[Math.round((i * (ws.length - 1)) / (n - 1))]!),
+        [0, 1, 2, 3, 4].map((i) => mismatched[Math.round((i * (mismatched.length - 1)) / 4)]!),
       ),
     ];
-    // Each checked arriving from one pixel narrower, so a move arrives as a move.
-    for (const w of [...new Set([...spread(moves, 3), ...spread(mismatched, 4)])]) {
+    for (const w of picks) {
       await page.setViewportSize({ width: w - 1, height: 320 });
       await page.evaluate(
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
       await page.setViewportSize({ width: w, height: 320 });
-      await expectRimsInFullColour(page, `${w}×320 @1, from ${w - 1}`);
+      await expectRimsInFullColour(page, `${w}×320 @1`);
     }
   });
 });

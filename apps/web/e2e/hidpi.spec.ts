@@ -78,12 +78,12 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       };
     });
 
-    // The backing store is the device pixels the browser draws the canvas's box into, so it
-    // is shown pixel for pixel: the box snapped to whole device pixels, from the one nearest
-    // its left edge to the one nearest its right (and likewise down). That can be a pixel
-    // off round(width × dpr), which is what the store was once sized to — and a store scaled
-    // into its box smears every one-pixel line (`plate-rim.spec.ts`). Positions are read to
-    // the layout engine's 1/64 px before rounding.
+    // The backing store is the device pixels the canvas's box snaps to at the clamped dpr,
+    // from the one nearest its left edge to the one nearest its right (and likewise down):
+    // what a browser that lays the page out in device pixels draws it into, pixel for pixel.
+    // That can be a pixel off round(width × dpr), which is what the store was once sized to —
+    // and a store scaled into its box smears every one-pixel line (`plate-rim.spec.ts`).
+    // Positions are read to the layout engine's 1/64 px before rounding.
     const edge = (v: number): number => Math.round(Math.round(v * effectiveDpr * 64) / 64);
     const span = (start: number, size: number): number => edge(start + size) - edge(start);
     expect(canvas.width).toBe(span(canvas.left, canvas.cssWidth));
