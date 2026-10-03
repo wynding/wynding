@@ -61,11 +61,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // frame in draw(), NOT only on a Phaser RESIZE event. An element that reaches its final
   // size purely by initial layout (no resize ever fires) would otherwise keep the stale
   // 0×0 → 1px-cell fallback captured at mount and render off-canvas. A ResizeObserver
-  // syncs it on actual size changes (incl. the initial layout), and a window resize syncs it
-  // too — that can move the board without resizing it, which changes the backing store
-  // (`applyBackingStoreSize`) — so draw() does NOT read the rect every frame: a per-frame
-  // getBoundingClientRect would force a synchronous layout flush ~60×/s. Only when
-  // ResizeObserver is unavailable does draw() fall back to a per-frame sync.
+  // syncs it on actual size changes (incl. the initial layout), so draw() does NOT read
+  // the rect every frame — a per-frame getBoundingClientRect would force a synchronous
+  // layout flush ~60×/s. Only when ResizeObserver is unavailable does draw() fall back to
+  // a per-frame sync.
   let projW = -1;
   let projH = -1;
   let projDpr = -1;
@@ -97,13 +96,19 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // other size is scaled into the box, which smears every one-pixel line of the baked art
   // across two at about half its contrast: sized by round(rect × dpr), the plate rim measured
   // as low as 1.88:1 against its colour's 4.08:1 (#181). Matched, the canvas is shown pixel
-  // for pixel at any dpr up to the clamp; past it (a raw dpr over 2) it is scaled up by
-  // design. World (0, 0) lands on the device pixel the box's left edge snaps to, under half a
-  // pixel from its CSS position, as it did when the store was scaled into the box.
+  // for pixel wherever the browser lays the page out in device pixels — measured on screen at
+  // dpr 1 and at a real device scale of 0.9 and 0.8 (plate-rim.spec.ts); past the clamp (a
+  // raw dpr over 2) it is scaled up by design. (Chromium's device-scale EMULATION,
+  // Playwright's `deviceScaleFactor`, lays the page out in CSS px and scales its picture
+  // instead, so at a fractional dpr it resamples the canvas whatever its size.) World (0, 0)
+  // lands on the device pixel the box's left edge snaps to, under half a pixel from its CSS
+  // position, as it did when the store was scaled into the box.
   //
-  // Because that count depends on the box's position, it is re-read on every sync, and a
-  // window resize — which can move the board without resizing it — syncs too. The canvas is
-  // reallocated only when the count, the CSS size or the dpr changes.
+  // Because that count depends on the box's position, it is re-read on every sync, and the
+  // canvas is reallocated only when it, the CSS size or the dpr changes. The board fills its
+  // Stage, so a window resize that moves it also resizes it (from 482 to 635 px wide at 320
+  // tall, none moved it alone — plate-rim.spec.ts), and the ResizeObserver's sync re-reads
+  // where it sits; a move with no resize would keep the last count until the next sync.
   let applied = { width: 0, height: 0, cssWidth: -1, cssHeight: -1, dpr: -1 };
   const applyBackingStoreSize = (cssWidth: number, cssHeight: number, dpr: number): void => {
     const scene = game.scene.scenes[0];
@@ -173,9 +178,6 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     // the size are unchanged).
     if (targets !== null) applyBackingStoreSize(rect.width, rect.height, dpr);
   };
-  // A window resize can move the board without resizing it, which the ResizeObserver does
-  // not report but which can change the device pixels its box covers.
-  const onWindowResize = (): void => syncProjection();
 
   // Scale.NONE (not RESIZE, #28/P5): RESIZE auto-stretches the canvas' CSS AND backing
   //-store size to the parent on its own internal ResizeObserver, which would fight
@@ -285,7 +287,6 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       resizeObserver = new ResizeObserver(() => syncProjection());
       resizeObserver.observe(el); // rebuild only on actual size changes — no per-frame reflow
     }
-    if (typeof window !== 'undefined') window.addEventListener('resize', onWindowResize);
   });
 
   const draw = (
@@ -329,7 +330,6 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     destroy(): void {
       sparks.clear();
       resizeObserver?.disconnect();
-      if (typeof window !== 'undefined') window.removeEventListener('resize', onWindowResize);
       dprTracker?.destroy();
       // Free the bake's canvases once Phaser has torn down, not before: its destroy runs at
       // its next step, and a Canvas-renderer fallback draws straight from them until then.
