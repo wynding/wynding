@@ -191,13 +191,13 @@ export function drawSelection(
     // width, so it lies wholly on the floor; at 25 to 27 px, where the rim's own width
     // rounds up to two pixels and widens outward, its inner edge ends on the rim, and its
     // floor-side edge is what carries the cue. (A fractional dpr moves those bands, the rim
-    // being on whole device pixels. At the smallest cells a side of the rim lands on the
-    // footprint's outermost pixel, which the stroke covers: at dpr 1 only at 10px cells; at
-    // a fractional dpr, where the rim's one-CSS-px floor rounds up and widens it outward, at
-    // some sizes up to 19px (dpr 1.25). Where a neighbouring tower's rim does the same, the
-    // floor beyond the stroke gives way to that rim.) It stays clear of a neighbour: the
-    // next footprint starts beyond this one's edge. These relations hold only because `c` is
-    // snapped exactly as the tower sprite's corner is.
+    // being on whole device pixels. At small cells a side of the rim can land on the
+    // footprint's outermost pixel, which the stroke covers: at dpr 1 only at 10px cells, but
+    // at a fractional dpr, where the rim is widened outward to two pixels or more, at many
+    // sizes — docs/accessibility-checklist.md lists them. Where a neighbouring tower's rim
+    // does the same, the floor beyond the stroke gives way to that rim.) It stays clear of a
+    // neighbour: the next footprint starts beyond this one's edge. These relations hold only
+    // because `c` is snapped exactly as the tower sprite's corner is.
     g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);
   } else {
     g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));

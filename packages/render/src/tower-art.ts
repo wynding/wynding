@@ -86,12 +86,12 @@ export const PLATE_RECT = { x: 3, y: 3, w: 58, h: 58, rx: 9 } as const;
  *  pixels, never thinner than its one CSS px rounded UP (two pixels at dpr 1.25 or 1.5),
  *  else the whole number nearest its design width. Any width that rounding adds goes
  *  outward, so its plate side keeps its place; each edge then moves to the nearest place on
- *  the pixel grid, under half a pixel away — or, where that would cross the footprint's edge,
- *  inward to the first place inside it (at most 0.59 of a pixel from the design). Without
- *  it, a one-pixel rim whose centre fell inside a pixel was smeared across two half-lit ones
- *  — 2.19:1 at 10px cells on a dpr 1 screen (QC round 2, A4). And it needs the board's
- *  canvas shown pixel for pixel, which `scene.ts` sizes it to be: a canvas scaled into its
- *  box smears a one-pixel line the same way (as low as 1.88:1, QC round 3). */
+ *  the pixel grid, under half a pixel away — or, where that would cross the footprint's
+ *  edge, inward to the first place inside it. Without it, a one-pixel rim whose centre fell
+ *  inside a pixel was smeared across two half-lit ones — 2.19:1 at 10px cells on a dpr 1
+ *  screen (QC round 2, A4). And it needs the board's canvas shown pixel for pixel, which
+ *  `scene.ts` sizes it to be: a canvas scaled into its box smears a one-pixel line the same
+ *  way (as low as 1.88:1 at dpr 1, QC round 3). */
 export const PLATE_RIM_WIDTH = 2;
 export const PLATE_RIM_MIN_PX = 1;
 
@@ -117,9 +117,11 @@ const PLATE_BEVEL: ArtShape = {
 const PLATE_FILL: ArtShape = { kind: 'rect', ...PLATE_RECT, fill: 'plate' };
 
 /** The plate's rim: a rect of its own, so that drawing it crisp moves only the stroke. The
- *  fill's edge, on the rim's design centre line, always lies under the moved stroke (swept
- *  over every cell size and dpr in `art-frames.test.ts`), so no sliver of plate shows past
- *  the rim and none of the floor inside it. */
+ *  fill's edge, on the rim's design centre line, lies under the moved stroke at every cell
+ *  size from dpr 1 up, so no sliver of plate shows past the rim and none of the floor inside
+ *  it; below dpr 1, where one CSS px is under a pixel, it can lie up to a tenth of a pixel
+ *  inside the rim at 0.8 and 0.9, too faint a blend to see (both swept in
+ *  `art-frames.test.ts`). */
 const PLATE_RIM: ArtRect = {
   kind: 'rect',
   ...PLATE_RECT,

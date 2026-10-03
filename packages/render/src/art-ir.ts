@@ -150,9 +150,9 @@ export type ArtBox = readonly [number, number, number, number];
  * centred inside a texel shows about half its colour's contrast). With `within`, the
  * stroke's outer edges stay inside that box (a tower's footprint, cut to the surface it is
  * drawn on), an edge that would cross it moving inward to the first place inside it — which
- * can take it a little over half a texel from the design's. (Whole texels reach the screen
- * as whole device pixels only where the surface is shown pixel for pixel, as `scene.ts`
- * sizes the board's canvas to be.)
+ * can take it further than half a texel from the design's. (Whole texels reach the screen as
+ * whole device pixels only where the surface is shown pixel for pixel, as `scene.ts` sizes
+ * the board's canvas to be.)
  *
  * The corner radius is kept, and the result is a plain stroke at its final width, with no
  * CSS-px floor left to apply. A rect with no stroke is returned as it is.
