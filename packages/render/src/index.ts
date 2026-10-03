@@ -25,8 +25,13 @@ export { artGraphics } from './art-paint';
 export type { ArtGraphics, ArtCanvas2DLike, PathFactory } from './art-paint';
 export { paintTowerArt, towerArtFit } from './art-frames';
 // How often a tower's shot flashes (visual pass T3) — what `apps/web`'s fire-rate test holds
-// every shipped tower to at the game's fastest speed (ADR 0003, WCAG 2.3.1).
-export { flashesPerSecond, FIRE_FEEDBACK_TICKS, MAX_FLASHES_PER_SECOND } from './tower-fire';
+// every shipped tower to at every game speed (ADR 0003, WCAG 2.3.1).
+export {
+  flashesPerSecond,
+  shortestFourFlashMs,
+  FIRE_FEEDBACK_TICKS,
+  MAX_FLASHES_PER_SECOND,
+} from './tower-fire';
 export type { GraphicsLike } from './board-draw';
 export type {
   CreepVM,

@@ -82,12 +82,20 @@ export function towerHasPlate(towerId: string): boolean {
   return HEAD_ART[towerLookFor(towerId).mark].plate;
 }
 
+/** `towerAims`' answer for each tower id it has been asked about. */
+const AIMS_BY_ID = new Map<string, boolean>();
+
 /** Whether a tower of `towerId` AIMS — turns its head to face its target (T3) — as its head
  *  is drawn to (`HeadArt.aims`): basic, venom, stun and antiair, and an id the catalog has
- *  never heard of, which looks like basic. Read per tower per frame, so it looks the mark up
- *  directly rather than building the tower's whole look. */
+ *  never heard of, which looks like basic. Read two or three times per tower per frame, so
+ *  each id's answer is kept: a tower id's look never changes, and a ruleset has a handful. */
 export function towerAims(towerId: string): boolean {
-  return HEAD_ART[towerFootprintMarkFor(towerId)].aims;
+  let aims = AIMS_BY_ID.get(towerId);
+  if (aims === undefined) {
+    aims = HEAD_ART[towerFootprintMarkFor(towerId)].aims;
+    AIMS_BY_ID.set(towerId, aims);
+  }
+  return aims;
 }
 
 /** The one plate frame every plated tower shows. */

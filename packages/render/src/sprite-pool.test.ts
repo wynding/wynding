@@ -3,6 +3,7 @@
 // place, and showing again what a later frame does — after a Play-again reset hid every one.
 
 import { describe, it, expect } from 'vitest';
+import { atlasFrameSpecs, type FrameSpec } from './art-frames';
 import { createSpritePool, type PoolSprite } from './sprite-pool';
 import type { SpritePlacement } from './placement';
 
@@ -214,5 +215,33 @@ describe('createSpritePool', () => {
       [0, 'c'],
       [1, 'b'],
     ]);
+  });
+});
+
+describe('createSpritePool — origin change detection, each axis on its own', () => {
+  it('re-sets a reused sprite’s origin when only ONE axis changes — venom’s and stun’s heads share a pivotX at 33px cells', () => {
+    const { pool, made } = fakePool();
+    const frames = new Map(atlasFrameSpecs(33, 1).map((f) => [f.key, f]));
+    const venom = frames.get('tower:head:droplet:poison:committed')!;
+    const stun = frames.get('tower:head:bolt:control:committed')!;
+    expect(venom.pivotX).toBe(stun.pivotX);
+    expect(venom.pivotY).not.toBe(stun.pivotY);
+    const turned = (f: FrameSpec, originX = f.pivotX): SpritePlacement => ({
+      ...at(f.key, 40, 40),
+      originX,
+      originY: f.pivotY,
+      rotation: 1,
+    });
+    pool.sync([turned(venom)]);
+    pool.sync([turned(stun)]);
+    expect([made[0]!.originX, made[0]!.originY]).toEqual([stun.pivotX, stun.pivotY]);
+    pool.sync([turned(stun, 0.25)]);
+    expect([made[0]!.originX, made[0]!.originY]).toEqual([0.25, stun.pivotY]);
+  });
+
+  it('gives a NEW sprite its origin when only one axis is off the top-left', () => {
+    const { pool, made } = fakePool();
+    pool.sync([{ ...at('a', 0), originX: 0, originY: 0.5 }]);
+    expect([made[0]!.originX, made[0]!.originY]).toEqual([0, 0.5]);
   });
 });

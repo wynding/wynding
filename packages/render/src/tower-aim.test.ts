@@ -2,7 +2,8 @@
 // (clockwise from straight up, wrapped), the shorter-arc step at a bounded rate, and the
 // tracker — new heads point up, aiming heads sweep toward where their target is drawn and
 // track it, idle heads hold, the rest never turn, render time drives it (a pause freezes it),
-// Reduce motion holds every head at 0, and gone towers are forgotten.
+// Reduce motion holds every head at 0, and gone towers are forgotten — and a shot first seen
+// turns its head onto the shot's bearing at once.
 
 import { describe, it, expect } from 'vitest';
 import { FP_ONE } from '@wynding/engine';
@@ -14,7 +15,7 @@ import {
   wrapAngle,
   type AimFrame,
 } from './tower-aim';
-import type { TowerVM } from './types';
+import type { TowerVM, TracerVM } from './types';
 
 const PI = Math.PI;
 
@@ -274,5 +275,115 @@ describe('createAimTracker', () => {
     // After a reset the first frame has no time behind it, whatever the clock reads.
     aim.update(frame({ towers: [t], creeps, renderTick: 900 }));
     expect(aim.angleOf(1)).toBe(0);
+  });
+});
+
+describe('createAimTracker — a shot turns its head onto the shot’s bearing at once', () => {
+  /** A shot from the (4, 4) tower's centre at creep `targetId`. */
+  const targeted = (targetId: number): TracerVM => ({
+    kind: 'targeted',
+    originX: CX,
+    originY: CY,
+    targetId,
+    launchTick: 11,
+    impactTick: 13,
+  });
+  /** A blast from the (4, 4) tower's centre, landing at `dest`. */
+  const blast = (dest: { x: number; y: number }): TracerVM => ({
+    kind: 'blast',
+    originX: CX,
+    originY: CY,
+    destX: dest.x,
+    destY: dest.y,
+    launchTick: 11,
+    impactTick: 19,
+  });
+
+  it('turns a head facing up straight onto a creep to its left — not the one bounded step tracking gives — then tracks on at the bounded rate', () => {
+    const aim = createAimTracker();
+    const left = new Map([[9, at(-1, 0)]]);
+    aim.update(frame({ towers: [tower(1, 'basic')], creeps: left, renderTick: 10 })); // no lock: up
+    const t = tower(1, 'basic', { targetId: 9 });
+    aim.update(
+      frame({
+        towers: [t],
+        creeps: left,
+        renderTick: 11,
+        shots: [{ tower: t, tracer: targeted(9) }],
+      }),
+    );
+    expect(aim.angleOf(1)).toBeCloseTo(-PI / 2, 12);
+    const below = new Map([[9, at(0, 1)]]);
+    aim.update(frame({ towers: [t], creeps: below, renderTick: 12 }));
+    expect(aim.angleOf(1)).toBeCloseTo(-PI / 2 - AIM_TURN_PER_TICK, 12);
+  });
+
+  it('faces the shot’s own target, though the lock has moved on, then turns toward the lock', () => {
+    const aim = createAimTracker();
+    const t = tower(1, 'venom', { targetId: 9 }); // locked on 9, to the right ...
+    const creeps = new Map([
+      [8, at(-1, 0)],
+      [9, at(1, 0)],
+    ]);
+    aim.update(frame({ towers: [t], creeps, renderTick: 10 }));
+    // ... but the shot this frame went to 8, on the left: the barrel follows the shot.
+    aim.update(
+      frame({ towers: [t], creeps, renderTick: 11, shots: [{ tower: t, tracer: targeted(8) }] }),
+    );
+    expect(aim.angleOf(1)).toBeCloseTo(-PI / 2, 12);
+    aim.update(frame({ towers: [t], creeps, renderTick: 12 }));
+    // Dead opposite: the shorter arc is either way, and a step goes clockwise.
+    expect(aim.angleOf(1)).toBeCloseTo(-PI / 2 + AIM_TURN_PER_TICK, 12);
+  });
+
+  it('turns a head toward where a blast will land, wherever its creep is drawn', () => {
+    const aim = createAimTracker();
+    // A tower the catalog has never heard of aims, as basic does: the perf scene's blasts.
+    const t = tower(1, 'stress-blast', { targetId: 9 });
+    const creeps = new Map([[9, at(1, 0)]]);
+    aim.update(
+      frame({
+        towers: [t],
+        creeps,
+        renderTick: 11,
+        shots: [{ tower: t, tracer: blast(at(0, 1)) }],
+      }),
+    );
+    expect(aim.angleOf(1)).toBeCloseTo(PI, 12);
+  });
+
+  it('turns nothing for a shot whose target is no longer drawn, for a head that does not aim, or under Reduce motion', () => {
+    const aim = createAimTracker();
+    const t = tower(1, 'basic', { targetId: 9 });
+    const slow = tower(2, 'slow', { targetId: 9 });
+    const creeps = new Map([[9, at(1, 0)]]);
+    aim.update(frame({ towers: [t, slow], creeps, renderTick: 10 }));
+    aim.update(frame({ towers: [t, slow], creeps, renderTick: 11 }));
+    const tracked = aim.angleOf(1);
+    expect(tracked).toBeCloseTo(AIM_TURN_PER_TICK, 12);
+    // Its target died with the shot in the air: the head keeps the angle it was tracking at.
+    aim.update(
+      frame({
+        towers: [t, slow],
+        creeps,
+        renderTick: 11,
+        shots: [
+          { tower: t, tracer: targeted(77) },
+          { tower: slow, tracer: targeted(9) },
+        ],
+      }),
+    );
+    expect(aim.angleOf(1)).toBe(tracked);
+    expect(aim.angleOf(2)).toBe(0); // slow never turns, shot or no shot
+    aim.update(
+      frame({
+        towers: [t],
+        creeps,
+        renderTick: 12,
+        reducedMotion: true,
+        shots: [{ tower: t, tracer: targeted(9) }],
+      }),
+    );
+    expect(aim.angleOf(1)).toBe(0); // static, as drawn
   });
 });

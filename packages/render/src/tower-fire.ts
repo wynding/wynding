@@ -9,25 +9,36 @@
 // fire step: `originX/Y` is `(col + 1, row + 1)` cells), so a tracer seen for the first time,
 // launched from a tower's footprint centre, is that tower firing. A mine going off is the one
 // shot left out: `isDetonation` (`scorches.ts`) is the rule that recognises it, and its scorch
-// is how the board shows it. Each shot counts once — keyed by its launch tick and origin while
-// its tracer stays listed — and one first seen after its feedback would already be over shows
-// nothing. A shot whose whole flight falls between two frames (a two-tick flight, at 2× speed,
-// on a frame slower than 50 ms) is never listed, and shows nothing: this is decoration, and the
-// impact spark still lands.
+// is how the board shows it. Each shot counts once, and one first seen after its feedback would
+// already be over shows nothing. "Seen already" needs no record of each shot: the controller
+// lists every shot a sim tick fires together, from the first frame after that tick until each
+// lands (`apps/web/src/controller.ts`), so a shot launched no later than the latest launch tick
+// taken in has been taken in already — or was never listed and never will be. A shot whose
+// whole flight falls between two frames (a two-tick flight, at 2× speed, on a frame slower
+// than 50 ms) is never listed, and shows nothing: this is decoration, and the impact spark
+// still lands.
 //
 // FEEDBACK, per the style frame's firing state: an aiming head (`towerAims`) is knocked back
 // along its facing and flashes at its muzzle; a head that does not aim (slow, splash,
 // frost-splash) pulses a pair of rings in its role colour. Each lasts a few ticks of RENDER time
 // — a paused game freezes it part-way, 2× speed plays it twice as fast — and a tower's next
-// shot restarts it.
+// shot restarts it. The shots first seen in a frame are handed back (`FireTracker.update`), so
+// the aim tracker can turn each one's head onto its bearing (`tower-aim.ts`).
 //
 // PHOTOSENSITIVITY (ADR 0003, WCAG 2.3.1): a shot is one flash or one pulse, a single rise and
-// fade, so a tower flashes exactly as often as it fires — `flashesPerSecond`. The fastest
-// shipped tower, antiair, fires every 15 ticks: 1⅓ times a second at 1×, 2⅔ at 2×, under the
-// bound of three. `apps/web/src/fire-rate.test.ts` pins that for every shipped tower at the
-// game's fastest speed, so a faster tower fails it.
+// fade, shown when its tracer is first seen: from its launch tick to just under
+// `FIRE_FEEDBACK_TICKS` after it. A tower fires at most once per cadence, so four of its
+// flashes take no less than three cadences less `FIRE_FEEDBACK_TICKS` of game time —
+// `shortestFourFlashMs`. `apps/web/src/fire-rate.test.ts` requires that to be at least a
+// second for every shipped tower at every game speed, so no second holds four flashes of one
+// tower: the closest is antiair, every 15 ticks, at 2×, 1025 ms. A faster tower or a faster
+// speed fails it.
 //
 // REDUCE MOTION draws none of it: no recoil, no flash and no pulse.
+//
+// COST: this runs every frame, over every tracer in flight. In steady state a frame allocates
+// nothing: a tracer already taken in is passed over on its launch tick alone, only a new
+// shot's tower is looked for, and the towers that just fired are kept and pruned in place.
 
 import { MS_PER_TICK } from '@wynding/sim';
 import { FP_ONE } from '@wynding/engine';
@@ -59,6 +70,15 @@ export const MAX_FLASHES_PER_SECOND = 3;
  *  fast as the wall clock. */
 export function flashesPerSecond(cadenceTicks: number, gameSpeed: number): number {
   return (gameSpeed * 1000) / (cadenceTicks * MS_PER_TICK);
+}
+
+/** The least wall-clock time, in ms, that four flashes of a tower firing every `cadenceTicks`
+ *  can take with the game running at `gameSpeed`×. A shot shows when its tracer is first
+ *  seen, from its launch tick to just under `FIRE_FEEDBACK_TICKS` after it: the first of four
+ *  as late as that, the fourth the moment it launches, three cadences after the first. ADR
+ *  0003's bound holds while this is at least a second — no second then holds four. */
+export function shortestFourFlashMs(cadenceTicks: number, gameSpeed: number): number {
+  return ((3 * cadenceTicks - FIRE_FEEDBACK_TICKS) * MS_PER_TICK) / gameSpeed;
 }
 
 /** The flash's smallest radius, CSS px — the floor the tracer dot and the spark keep too. */
@@ -99,10 +119,17 @@ export interface FireFrame {
   readonly renderTick: number;
 }
 
+/** A shot first seen this frame: the tower that fired it, and its tracer. */
+export interface ShotSeen {
+  readonly tower: TowerVM;
+  readonly tracer: TracerVM;
+}
+
 export interface FireTracker {
   /** Take in one frame: note every tower whose shot appears for the first time, and forget
-   *  shots whose feedback is over and towers that are gone. */
-  update(frame: FireFrame): void;
+   *  shots whose feedback is over and towers that are gone. Returns the shots first seen
+   *  this frame, in tracer order — valid until the next update, which reuses the list. */
+  update(frame: FireFrame): readonly ShotSeen[];
   /** Ticks of render time since tower `id` last fired, as of the last update — or null when
    *  it has not fired within `FIRE_FEEDBACK_TICKS`. */
   sinceFired(id: number): number | null;
@@ -110,58 +137,76 @@ export interface FireTracker {
   reset(): void;
 }
 
-const pointKey = (x: number, y: number): string => `${x},${y}`;
-
-/** Every tower's id by its footprint centre, fixed-point sim units — where its shots start. */
-function towersByCentre(towers: readonly TowerVM[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const t of towers) out.set(pointKey((t.col + 1) * FP_ONE, (t.row + 1) * FP_ONE), t.id);
-  return out;
+/** The tower whose footprint centre is `(x, y)`, fixed-point sim units — where its shots
+ *  start. Looked for only for a shot first seen, a few a frame at most. */
+function towerAt(towers: readonly TowerVM[], x: number, y: number): TowerVM | undefined {
+  for (const t of towers) {
+    if ((t.col + 1) * FP_ONE === x && (t.row + 1) * FP_ONE === y) return t;
+  }
+  return undefined;
 }
 
 export function createFireTracker(): FireTracker {
   /** Each tower that fired recently, by entity id: the render tick its shot was first seen. */
-  let fired = new Map<number, number>();
-  /** Shots already taken in, while their tracers are still listed. */
-  let seen = new Set<string>();
-  let now = 0;
+  const fired = new Map<number, number>();
+  /** The latest launch tick taken in: a shot launched no later has been (DETECTION, above). */
+  let takenThrough = -Infinity;
+  let now = -Infinity;
+  /** The shots first seen by the latest update — one list, refilled each frame. */
+  const shots: ShotSeen[] = [];
   return {
     update({ tracers, towers, renderTick }) {
+      // Render time never runs backwards within a run: a frame earlier than the last is a run
+      // gone by, and nothing it noted stands.
+      if (renderTick < now) {
+        fired.clear();
+        takenThrough = -Infinity;
+      }
       now = renderTick;
-      const stillListed = new Set<string>();
-      let byCentre: Map<string, number> | null = null; // built for the first new shot only
+      shots.length = 0;
+      let latest = takenThrough;
       for (const t of tracers) {
-        if (isDetonation(t)) continue; // a mine going off: its scorch shows it
-        const key = `${t.launchTick}@${pointKey(t.originX, t.originY)}`;
-        stillListed.add(key);
-        if (seen.has(key) || renderTick - t.launchTick >= FIRE_FEEDBACK_TICKS) continue;
-        byCentre ??= towersByCentre(towers);
-        const id = byCentre.get(pointKey(t.originX, t.originY));
-        if (id !== undefined) fired.set(id, renderTick);
+        // Taken in already — or a mine going off, which its scorch shows.
+        if (t.launchTick <= takenThrough || isDetonation(t)) continue;
+        if (t.launchTick > latest) latest = t.launchTick;
+        if (renderTick - t.launchTick >= FIRE_FEEDBACK_TICKS) continue; // over before it showed
+        const tower = towerAt(towers, t.originX, t.originY);
+        if (tower === undefined) continue; // no tower's shot — or one already sold
+        fired.set(tower.id, renderTick);
+        shots.push({ tower, tracer: t });
       }
-      seen = stillListed;
-      if (fired.size === 0) return;
-      // Keep only the towers still standing whose feedback is still playing — render time
-      // never runs backwards within a run, so a shot "seen" after now is from a run gone by.
-      const next = new Map<number, number>();
-      for (const t of towers) {
-        const at = fired.get(t.id);
-        if (at !== undefined && renderTick >= at && renderTick - at < FIRE_FEEDBACK_TICKS) {
-          next.set(t.id, at);
-        }
-      }
-      fired = next;
+      takenThrough = latest;
+      if (fired.size > 0) forgetSettled(fired, towers, renderTick);
+      return shots;
     },
     sinceFired(id) {
       const at = fired.get(id);
       return at === undefined ? null : now - at;
     },
     reset() {
-      fired = new Map();
-      seen = new Set();
-      now = 0;
+      fired.clear();
+      takenThrough = -Infinity;
+      now = -Infinity;
+      shots.length = 0;
     },
   };
+}
+
+/** Forget, in place, the shots whose feedback is over and the towers that are gone. A tower
+ *  sold within its feedback is rare, so the standing ones are only counted, and the gone one
+ *  found only when the count falls short. */
+function forgetSettled(
+  fired: Map<number, number>,
+  towers: readonly TowerVM[],
+  renderTick: number,
+): void {
+  for (const [id, at] of fired) if (renderTick - at >= FIRE_FEEDBACK_TICKS) fired.delete(id);
+  if (fired.size === 0) return;
+  let standing = 0;
+  for (const t of towers) if (fired.has(t.id)) standing += 1;
+  if (standing === fired.size) return;
+  const ids = new Set(towers.map((t) => t.id));
+  for (const id of fired.keys()) if (!ids.has(id)) fired.delete(id);
 }
 
 /** Tower `t`'s head pose this frame: turned to its aim angle (`tower-aim.ts`) and knocked back

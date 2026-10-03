@@ -44,7 +44,7 @@ import {
   type FireTracker,
 } from './tower-fire';
 import { positionTracers, renderTimeOf, tracerPaintOps } from './tracers';
-import type { RenderOverlay, RenderVM, TowerVM } from './types';
+import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
 
 /** A live layer: a `Graphics` that is cleared and re-recorded every frame. Wider than
  *  `GraphicsLike` by what only per-frame drawing uses — kept off `GraphicsLike` itself, which
@@ -149,10 +149,12 @@ export interface BoardFrameInput {
    *  scorches still fading. */
   readonly scorches: ScorchTracker;
   /** Where each tower's head points (`tower-aim.ts`), kept and reset the same way. Each frame
-   *  feeds it its towers and where every creep is drawn, then turns the heads to it. */
+   *  feeds it its towers, where every creep is drawn and the shots first seen, then turns the
+   *  heads to it. */
   readonly aim: AimTracker;
   /** Which towers just fired (`tower-fire.ts`), kept and reset the same way. Each frame feeds
-   *  it its tracers and towers, then knocks back and flashes or pulses the ones that did. */
+   *  it its tracers and towers — the shots it first sees go on to the aim tracker — then
+   *  knocks back and flashes or pulses the towers that fired. */
   readonly fire: FireTracker;
 }
 
@@ -193,21 +195,24 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   // shells — under every tower.
   drawAuraShells(shells, pal, curVm, overlay, projection);
   // Interpolated ONCE and shared: the creep placement below, the tracers' lerp targets and
-  // the points the heads turn toward are the same points (#32/P6).
+  // the points the heads turn toward are the same points (#32/P6). The map holds the
+  // interpolated creeps themselves, by id — no object per creep per frame.
   const interpolated = interpolateCreeps(prevVm, curVm, alpha);
-  const drawnAt = new Map(interpolated.map((c) => [c.id, { x: c.x, y: c.y }]));
-  // The heads turn toward where their targets are drawn, and the towers whose shots just
-  // appeared are noted — both before a head is placed.
+  const drawnAt = new Map<number, CreepVM>();
+  for (const c of interpolated) drawnAt.set(c.id, c);
+  // The towers whose shots just appeared are noted, then the heads turn toward where their
+  // targets are drawn, each that just fired onto its shot's bearing — before a head is placed.
+  const shots = input.fire.update({
+    tracers: overlay.tracers,
+    towers: curVm.towers,
+    renderTick: renderTimeTicks,
+  });
   input.aim.update({
     towers: curVm.towers,
     creeps: drawnAt,
     renderTick: renderTimeTicks,
     reducedMotion: overlay.reducedMotion,
-  });
-  input.fire.update({
-    tracers: overlay.tracers,
-    towers: curVm.towers,
-    renderTick: renderTimeTicks,
+    shots,
   });
   const poseOf = (tw: TowerVM) =>
     headPose(tw, input.aim, input.fire, overlay.reducedMotion, projection.cellPx);

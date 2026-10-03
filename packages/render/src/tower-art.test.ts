@@ -360,6 +360,20 @@ describe('firing — the muzzle flash and the ring pulse (T3)', () => {
   });
 });
 
+describe('the muzzle flash sits where the style frame draws it', () => {
+  it('is centred just past the tip of every head that aims', () => {
+    const C = ART_BOX / 2;
+    for (const mark of TOWER_FOOTPRINT_MARKS.filter((m) => HEAD_ART[m].aims)) {
+      const tip = Math.max(
+        ...HEAD_ART[mark].shapes.flatMap((s) =>
+          shapeOutline(s).flatMap((l) => l.points.map((p) => Math.hypot(p[0] - C, p[1] - C))),
+        ),
+      );
+      expect(MUZZLE_FLASH.reach, mark).toBeGreaterThan(tip);
+    }
+  });
+});
+
 describe('colours — tokens every mode can resolve', () => {
   it('every token in every piece of art resolves to a colour, in every mode, for every role', () => {
     for (const mode of COLOUR_MODES) {

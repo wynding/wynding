@@ -1,9 +1,10 @@
 // tower-fire.test.ts — a tower's shots, as the board shows them (visual pass T3, #181): which
 // tower fired (a tracer launched from its footprint centre, each shot once, a mine's
-// detonation left to its scorch), the recoil, flash and pulse curves on render time, a head's
-// pose (and Reduce motion's gate on it), the paint plan — the muzzle flash at the tip of an
-// aiming head, the ring pulse of one that does not aim, nothing under Reduce motion — and
-// the flash rate a cadence gives at a game speed.
+// detonation left to its scorch) and the shots handed back for their heads to turn, the
+// recoil, flash and pulse curves on render time and the durations the checklist documents, a
+// head's pose (and Reduce motion's gate on it), the paint plan — the muzzle flash at the tip
+// of an aiming head, the ring pulse of one that does not aim, nothing under Reduce motion —
+// and the flash rate a cadence gives at a game speed, with the least time four flashes take.
 
 import { describe, it, expect } from 'vitest';
 import { FP_ONE } from '@wynding/engine';
@@ -27,6 +28,7 @@ import {
   headPose,
   pulseAt,
   recoilAt,
+  shortestFourFlashMs,
   type FireFrame,
   type FireTracker,
 } from './tower-fire';
@@ -139,6 +141,24 @@ describe('the feedback curves — on render time, each a single rise and fade', 
     expect(flashesPerSecond(20, 1)).toBe(1);
     expect(MAX_FLASHES_PER_SECOND).toBe(3); // ADR 0003 / WCAG 2.3.1
   });
+
+  it('shortestFourFlashMs: three cadences less the latest a shot still shows, sped up with the game', () => {
+    // Antiair, every 15 ticks, at 2×: (45 − 4) ticks of 25 ms, 1025 ms. A tower firing every
+    // 14 ticks averages under three flashes a second at 2× (2.86), and still fits four in 950 ms.
+    expect(FIRE_FEEDBACK_TICKS).toBe(4);
+    expect(shortestFourFlashMs(15, 2)).toBe(1025);
+    expect(shortestFourFlashMs(15, 1)).toBe(2050);
+    expect(shortestFourFlashMs(14, 2)).toBe(950);
+    expect(flashesPerSecond(14, 2)).toBeLessThan(MAX_FLASHES_PER_SECOND);
+  });
+});
+
+describe('the feedback lasts what docs/accessibility-checklist.md documents', () => {
+  it('recoil eases home over 150 ms, a muzzle flash fades over 100 ms, a ring pulse over 200 ms', () => {
+    expect(RECOIL_TICKS * MS_PER_TICK).toBe(150);
+    expect(FLASH_TICKS * MS_PER_TICK).toBe(100);
+    expect(PULSE_TICKS * MS_PER_TICK).toBe(200);
+  });
 });
 
 describe('createFireTracker — which tower fired', () => {
@@ -154,6 +174,37 @@ describe('createFireTracker — which tower fired', () => {
     expect(fire.sinceFired(2)).toBeNull(); // the other tower did not fire
     fire.update(frame({ towers: [basic, slow], tracers: [shot(basic, 10)], renderTick: 11.75 }));
     expect(fire.sinceFired(1)).toBe(1.5);
+  });
+
+  it('hands back the shots first seen this frame, each with its tower and tracer, for the aim tracker to turn their heads', () => {
+    const fire = createFireTracker();
+    const mine = tower(3, 'mine', 10);
+    const a = shot(basic, 10);
+    const b = lob(slow, 10);
+    expect(
+      fire.update(
+        frame({
+          towers: [basic, slow, mine],
+          tracers: [a, detonation(mine, 10), b],
+          renderTick: 10.5,
+        }),
+      ),
+    ).toEqual([
+      { tower: basic, tracer: a },
+      { tower: slow, tracer: b },
+    ]);
+    // Taken in already: none again, however long the tracers stay listed.
+    expect(fire.update(frame({ towers: [basic, slow], tracers: [a, b], renderTick: 11 }))).toEqual(
+      [],
+    );
+    // A shot from no tower's centre, or first seen too late to show, is handed back by no one.
+    const offCentre: TracerVM = { ...shot(basic, 12), originX: centreOf(basic).x + 1 };
+    expect(
+      fire.update(frame({ towers: [basic, slow], tracers: [offCentre], renderTick: 12 })),
+    ).toEqual([]);
+    expect(
+      fire.update(frame({ towers: [basic, slow], tracers: [shot(basic, 13)], renderTick: 17 })),
+    ).toEqual([]);
   });
 
   it('takes each shot once, however many frames its tracer stays listed', () => {
@@ -207,6 +258,35 @@ describe('createFireTracker — which tower fired', () => {
     // ... while one first seen a moment late — a frame that covered two ticks — still shows.
     fire.update(frame({ towers: [slow], tracers: [lob(slow, 30)], renderTick: 31.5 }));
     expect(fire.sinceFired(2)).toBe(0);
+  });
+
+  it('four of a tower’s flashes take no less than shortestFourFlashMs: the first seen as late as a shot still shows, the fourth the moment it launches', () => {
+    const fire = createFireTracker();
+    const cadence = 15;
+    const late = FIRE_FEEDBACK_TICKS - 1 / 64; // the last moment a shot still shows
+    const onsets: number[] = [];
+    // How long after its launch each of four shots is first seen: frames that late are hitches.
+    [late, 1, 2, 0].forEach((after, k) => {
+      const launch = 100 + k * cadence;
+      fire.update(
+        frame({ towers: [basic], tracers: [shot(basic, launch)], renderTick: launch + after }),
+      );
+      if (fire.sinceFired(1) === 0) onsets.push(launch + after);
+    });
+    expect(onsets).toHaveLength(4);
+    const spanMs = (onsets[3]! - onsets[0]!) * MS_PER_TICK;
+    expect(spanMs).toBeGreaterThan(shortestFourFlashMs(cadence, 1));
+    expect(spanMs - shortestFourFlashMs(cadence, 1)).toBeCloseTo(MS_PER_TICK / 64, 9);
+    // Seen any later, the first would not show at all.
+    const hitch = createFireTracker();
+    hitch.update(
+      frame({
+        towers: [basic],
+        tracers: [shot(basic, 100)],
+        renderTick: 100 + FIRE_FEEDBACK_TICKS,
+      }),
+    );
+    expect(hitch.sinceFired(1)).toBeNull();
   });
 
   it('forgets a tower that is gone, and a shot "seen" after the time being drawn', () => {

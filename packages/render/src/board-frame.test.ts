@@ -4,13 +4,16 @@
 // order — the selection and tracers into `effects`, every creep cue, the ghost and the sparks
 // into `cues`, in that order), what each sprite layer is shown — a spent mine's scorch on the
 // frame's own clock among them — where the board image sits, that a reset hides everything,
-// and that an arrived tracer lands exactly on its creep.
+// that an arrived tracer lands exactly on its creep, and how the heads aim and each shot shows
+// (T3): turned toward where the target is drawn, onto a shot's bearing the moment it is seen,
+// knocked back, flashed or pulsed, on render time, and still under Reduce motion.
 
 import { describe, it, expect } from 'vitest';
 import {
   createLiveLayers,
   createSpriteLayers,
   drawBoardFrame,
+  drawFireFeedback,
   forEachLayerSprite,
   resetBoardFrame,
   type BoardFrameInput,
@@ -35,7 +38,7 @@ import { createScorchTracker } from './scorches';
 import type { LiveSpark } from './sparks';
 import { ART_FLASH, MUZZLE_FLASH, RECOIL_DEPTH } from './tower-art';
 import { AIM_TURN_PER_TICK, aimAngle, createAimTracker } from './tower-aim';
-import { createFireTracker } from './tower-fire';
+import { createFireTracker, flashAt } from './tower-fire';
 import { recordingLayer, type Call } from './test-support/recording-graphics';
 import type { CreepVM, RenderOverlay, RenderVM, TowerVM, TracerVM } from './types';
 
@@ -797,6 +800,90 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     }
     expect(t.heads.syncs.at(-1)![0]).toEqual(before.head);
     expect(lastFrame(t.layers.effects).calls).toEqual(before.effects);
+  });
+
+  it('a shot turns its head onto the shot’s bearing on the frame it is seen: barrel, flash, recoil and tracer agree', () => {
+    const { t, draw } = run();
+    const left = [creep({ x: CX - 600, y: CY })]; // straight left of the footprint centre
+    // No lock yet: the head faces up, as drawn.
+    draw(10, 0, [tower(2, 'basic', 4)], { prev: left, cur: left });
+    expect(t.heads.syncs[0]![0]).toEqual(atRest(tower(2, 'basic', 4)));
+    // The sim fires on the tick a tower locks on. The head is turned onto the shot's
+    // bearing at once — not the one bounded step tracking alone would give it.
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    draw(11, 0, [basic], { prev: left, cur: left }, { tracers: [shotFrom(basic, 11)] });
+    const bearing = aimAngle(CX, CY, CX - 600, CY)!;
+    expect(bearing).toBeCloseTo(-Math.PI / 2, 12);
+    expect(Math.abs(bearing)).toBeGreaterThan(AIM_TURN_PER_TICK); // a step falls short of it
+    const head = t.heads.syncs[1]![0]!;
+    expect(head.rotation).toBeCloseTo(bearing, 12);
+    // The flash sits along it, `reach` straight left of the footprint centre ...
+    const flash = lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillCircle')!;
+    expect(flash.args[0]).toBeCloseTo(corner.x + PROJECTION.cellPx - MUZZLE_FLASH.reach * unit, 9);
+    expect(flash.args[1]).toBeCloseTo(corner.y + PROJECTION.cellPx, 9);
+    // ... and the head is knocked back along it, to the right.
+    const back = snapToDevicePx(RECOIL_DEPTH * unit, PROJECTION.dpr);
+    expect(head.x).toBeCloseTo(corner.x + PROJECTION.cellPx + back, 9);
+    expect(head.y).toBeCloseTo(corner.y + PROJECTION.cellPx, 9);
+    // Then tracking resumes at the bounded rate: its target is below now, and the head turns
+    // one tick's step toward it, the shorter way.
+    const below = [creep({ x: CX, y: CY + 600 })];
+    draw(12, 0, [basic], { prev: below, cur: below }, { tracers: [shotFrom(basic, 11)] });
+    expect(t.heads.syncs[2]![0]!.rotation).toBeCloseTo(bearing - AIM_TURN_PER_TICK, 12);
+  });
+
+  it('draws each planned op as planned: a flash at its alpha and radius, a ring at its width, alpha and radius', () => {
+    const g = recordingLayer();
+    drawFireFeedback(g, [
+      { kind: 'flash', x: 10, y: 20, r: 4.5, colour: ART_FLASH, alpha: 0.5 },
+      { kind: 'ring', x: 30, y: 40, r: 24, width: 2.6, colour: PAL.roleControl, alpha: 0.25 },
+    ]);
+    expect(g.calls).toEqual([
+      { method: 'fillStyle', args: [ART_FLASH, 0.5] },
+      { method: 'fillCircle', args: [10, 20, 4.5] },
+      { method: 'lineStyle', args: [2.6, PAL.roleControl, 0.25] },
+      { method: 'strokeCircle', args: [30, 40, 24] },
+    ]);
+  });
+
+  it('a head released from Reduce motion sweeps from facing up — the frame hands the aim tracker Reduce motion', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const right = [creep({ x: CX + 600, y: CY })];
+    for (let tick = 10; tick <= 30; tick++) {
+      draw(tick, 0, [basic], { prev: right, cur: right }, { reducedMotion: true });
+    }
+    for (const heads of t.heads.syncs) expect(heads[0]).toEqual(atRest(basic));
+    draw(31, 0, [basic], { prev: right, cur: right });
+    expect(t.heads.syncs.at(-1)![0]!.rotation).toBeCloseTo(AIM_TURN_PER_TICK, 12);
+  });
+
+  it('turns a head on render time within a tick: half a tick on, half a tick’s turn', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const below = [creep({ x: CX, y: CY + 512 })];
+    draw(10, 0, [basic], { prev: below, cur: below });
+    draw(10, 0.5, [basic], { prev: below, cur: below });
+    expect(t.heads.syncs[1]![0]!.rotation).toBeCloseTo(AIM_TURN_PER_TICK / 2, 12);
+  });
+
+  it('plays a shot on render time within a tick: half a tick on, its flash has faded and shrunk', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const above = [creep({ x: CX, y: CY - 600 })];
+    const shot = { tracers: [shotFrom(basic, 11)] };
+    draw(11, 0, [basic], { prev: above, cur: above }, shot);
+    draw(11, 0.5, [basic], { prev: above, cur: above }, shot);
+    const calls = lastFrame(t.layers.effects).calls;
+    const k = flashAt(0.5);
+    expect(calls.find((c) => c.method === 'fillStyle')!.args).toEqual([
+      ART_FLASH,
+      MUZZLE_FLASH.alpha * k,
+    ]);
+    expect(calls.find((c) => c.method === 'fillCircle')!.args[2]).toBeCloseTo(
+      (MUZZLE_FLASH.fadeR + (MUZZLE_FLASH.r - MUZZLE_FLASH.fadeR) * k) * unit,
+      9,
+    );
   });
 });
 
