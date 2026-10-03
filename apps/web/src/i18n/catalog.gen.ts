@@ -24,7 +24,7 @@ export const EN = {
   "app.title": "Wynding",
   "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
   "controls.callWave": "Call wave",
-  "controls.callWave.bounty": "Calling now pays an early-call bounty",
+  "controls.callWave.earlyBonus": "Calling now pays an early-call bonus",
   "controls.callWave.pending": "Launching…",
   "controls.copyRun": "Copy run data",
   "controls.pause": "Pause",
@@ -215,7 +215,7 @@ export interface MessageParams {
   "app.title": Record<never, never>;
   "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
   "controls.callWave": Record<never, never>;
-  "controls.callWave.bounty": Record<never, never>;
+  "controls.callWave.earlyBonus": Record<never, never>;
   "controls.callWave.pending": Record<never, never>;
   "controls.copyRun": Record<never, never>;
   "controls.pause": Record<never, never>;

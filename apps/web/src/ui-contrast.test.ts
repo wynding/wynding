@@ -167,24 +167,29 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
     }
   });
 
-  // #181 (QC): the countdown dial is drawn INSIDE the primary Dock control in that control's
-  // own text ink (`currentColor`), with a faint track of the same ink. Neither is a token, so
-  // the rendered colours are derived here from the rules that paint them: the progress stroke
-  // must clear 3:1 against the control's fill AND against its own track — the remaining share
-  // is the whole message — and the track's opacity is read from the stylesheet, so a fainter
-  // or bolder track re-gates itself.
-  it('the countdown dial reads on the primary control: progress against the fill and against its track', () => {
+  // #181 (QC): the countdown dial — a stopwatch face — is drawn INSIDE the primary Dock control
+  // in that control's own text ink (`currentColor`): the ring, the crown and the remaining-time
+  // wedge at full strength, the spent part of the face as the same ink, dimmed. Neither is a
+  // token, so the rendered colours are derived here from the rules that paint them: the wedge
+  // must clear 3:1 against the control's fill AND against the dimmed face it is drawn over — the
+  // remaining share is the whole message — and the face's opacity is read from the stylesheet,
+  // so a fainter or bolder face re-gates itself.
+  it('the countdown dial reads on the primary control: the wedge against the fill and against the spent face', () => {
     const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
     const primary = /\n\.wy-primary\s*\{([^}]*)\}/.exec(uncommented)?.[1];
     expect(primary, 'missing the .wy-primary rule').toBeDefined();
     expect(primary!).toMatch(/background:\s*var\(--wy-accent\)/);
     expect(primary!).toMatch(/(^|[^-])color:\s*var\(--wy-on-accent\)/);
-    const strokes = /\.wy-dial-track,\s*\.wy-dial-progress\s*\{([^}]*)\}/.exec(uncommented)?.[1];
-    expect(strokes, 'missing the dial strokes rule').toBeDefined();
+    const strokes = /\n\.wy-dial-ring,\s*\.wy-dial-crown,\s*\.wy-dial-wedge\s*\{([^}]*)\}/.exec(
+      uncommented,
+    )?.[1];
+    expect(strokes, 'missing the dial inks rule').toBeDefined();
     expect(strokes!).toMatch(/stroke:\s*currentColor/);
-    const track = /\.wy-dial-track\s*\{([^}]*)\}/.exec(uncommented)?.[1];
-    const alpha = Number(/stroke-opacity:\s*([0-9.]+)/.exec(track ?? '')?.[1]);
-    expect(alpha, 'the track carries an explicit stroke-opacity').toBeGreaterThan(0);
+    const track = /\n\.wy-dial-track\s*\{([^}]*)\}/.exec(uncommented)?.[1];
+    expect(track, 'missing the dial face rule').toBeDefined();
+    expect(track!).toMatch(/fill:\s*currentColor/);
+    const alpha = Number(/fill-opacity:\s*([0-9.]+)/.exec(track ?? '')?.[1]);
+    expect(alpha, 'the face carries an explicit fill-opacity').toBeGreaterThan(0);
     expect(alpha).toBeLessThan(1);
 
     const ink = tokens['on-accent']!;

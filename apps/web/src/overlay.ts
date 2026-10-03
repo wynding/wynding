@@ -2014,6 +2014,9 @@ export function createOverlay(
   const WHEEL_LINE_PX = 16;
   function onStripWheel(event: WheelEvent): void {
     const strip = previewEl.root;
+    // An event the browser will not let us cancel is already its scroll to perform (#181 QC
+    // round 2): moving the line too would spend one turn twice.
+    if (!event.cancelable) return;
     if (!strip.classList.contains(STRIP_SCROLL_CLASS) || event.ctrlKey) return;
     if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
     const unit =
@@ -2184,16 +2187,16 @@ export function createOverlay(
     }
   }
 
-  /** Whether calling the counting-down wave NOW pays an early-call bounty — the claim the
+  /** Whether calling the counting-down wave NOW pays an early-call bonus — the claim the
    *  primary control's description makes, so it is made only where it is TRUE. The sim pays
-   *  `floor(rem / earlyCallBountyDivisor)` from the ticks still remaining (its launch branch,
-   *  which a buffered call reaches on the next step without that step's decrement), pays
+   *  `floor(rem / earlyCallBountyDivisor)` Bounty from the ticks still remaining (its launch
+   *  branch, which a buffered call reaches on the next step without that step's decrement), pays
    *  nothing for the OPENING launch (sv15, #70 — wave index 0), and nothing at all with a
    *  zero divisor. The HUD sees only `countdownSeconds = ceil(rem × MS_PER_TICK / 1000)`, so
    *  the gate uses the smallest `rem` those seconds allow — `(seconds − 1) × 1000 /
-   *  MS_PER_TICK + 1` — and stays silent through the second in which the bounty runs out,
+   *  MS_PER_TICK + 1` — and stays silent through the second in which the bonus runs out,
    *  rather than promise one the sim will not pay. */
-  function callPaysEarlyBounty(hud: HudVM): boolean {
+  function callPaysEarlyBonus(hud: HudVM): boolean {
     const seconds = hud.countdownSeconds;
     const divisor = ruleset.balance.earlyCallBountyDivisor;
     if (seconds === null || hud.waveCursor <= 0 || !(divisor > 0)) return false;
@@ -2245,11 +2248,11 @@ export function createOverlay(
     const label = hud.launchPending ? t('controls.callWave.pending') : t('controls.callWave');
     setLabel(primaryParts.text, label);
     setPrimaryAttr('aria-disabled', String(!ui.callWaveReady));
-    // The early-call bounty, said where it is true and nowhere else (#181): only while a press
+    // The early-call bonus, said where it is true and nowhere else (#181): only while a press
     // would actually call the wave, and only while the call would actually pay.
     setPrimaryNote(
-      !hud.launchPending && ui.callWaveReady && callPaysEarlyBounty(hud)
-        ? t('controls.callWave.bounty')
+      !hud.launchPending && ui.callWaveReady && callPaysEarlyBonus(hud)
+        ? t('controls.callWave.earlyBonus')
         : null,
     );
   }
@@ -2368,7 +2371,10 @@ export function createOverlay(
   // line can still move that way: at either end the event is left alone, so the wheel goes on
   // to whatever scrolls beyond the strip (the capped hud) rather than being trapped. A
   // horizontal-dominant delta (a trackpad, a tilt wheel) is already the browser's to handle,
-  // and a ctrl+wheel is a pinch or a page zoom, never a scroll.
+  // and a ctrl+wheel is a pinch or a page zoom, never a scroll. Nor is an event that cannot be
+  // cancelled ours: once a wheel sequence has passed through to the hud, the browser latches it
+  // there and stops letting its events be cancelled — moving the line as well would scroll
+  // twice per turn.
   previewEl.root.addEventListener('wheel', (event) => onStripWheel(event), {
     signal: railAffordanceAbort.signal,
     passive: false,

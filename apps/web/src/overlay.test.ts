@@ -3581,13 +3581,39 @@ describe('overlay — the wave strip (#181 L1)', () => {
       strip.scrollLeft = 120;
       expect(wheel({ deltaY: -40 })).toBe(true);
       expect(strip.scrollLeft).toBe(80);
-      // A horizontal-dominant delta is the browser's own, and ctrl+wheel is a zoom.
+      // A horizontal-dominant delta is the browser's own — a TIE too, since only a turn that is
+      // mostly vertical needs turning sideways — and ctrl+wheel is a zoom.
       expect(wheel({ deltaX: 30, deltaY: 10 })).toBe(false);
+      expect(wheel({ deltaX: 30, deltaY: 30 })).toBe(false);
       expect(wheel({ deltaY: 40, ctrlKey: true })).toBe(false);
+      expect(strip.scrollLeft).toBe(80);
+      // An event the browser will not let us cancel is ITS scroll (#181 QC round 2): once a
+      // wheel sequence has passed through to the hud, its later events cannot be cancelled, and
+      // moving the line as well would spend one turn twice.
+      const latched = new WheelEvent('wheel', { bubbles: true, cancelable: false, deltaY: -40 });
+      strip.dispatchEvent(latched);
       expect(strip.scrollLeft).toBe(80);
       overlay.destroy();
       expect(wheel({ deltaY: -40 })).toBe(false); // no listener left
       expect(strip.scrollLeft).toBe(80);
+    });
+
+    it('takes no wheel turn where the line overflows but the strip does not clip it (Compact)', () => {
+      // #181 QC round 2: Compact's strip lets a long line run past its edge (`overflow-x:
+      // visible`) inside the scrolling chips column, so it has a scroll RANGE and no scroll
+      // FORM. A down-wheel over it belongs to the column — taking it would leave the chips
+      // unscrollable from where the pointer rests.
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      strip.style.overflowX = 'visible';
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(false);
+      const e = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 });
+      strip.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+      expect(strip.scrollLeft).toBe(0);
     });
 
     it('takes no wheel turn while the line fits', () => {
@@ -3707,7 +3733,7 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
    *  `HudVM.countdownSeconds`, so a fresh countdown draws a full dial. */
   const totalSeconds = (cursor: number): number =>
     Math.ceil((ruleset.waves[cursor]!.countdownTicks * MS_PER_TICK) / 1000);
-  const NOTE = 'Calling now pays an early-call bounty';
+  const NOTE = 'Calling now pays an early-call bonus';
 
   it("draws the share of THIS wave's countdown left — and the seconds stay the chip's alone", () => {
     const { overlay, shell } = setup();
@@ -3746,7 +3772,7 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
     expect(dial.getAttribute('aria-hidden')).toBe('true'); // decoration in every state
   });
 
-  it('notes the early-call bounty exactly where the lower bound of the ticks left pays one', () => {
+  it('notes the early-call bonus exactly where the lower bound of the ticks left pays one', () => {
     const { overlay, shell } = setup();
     const primary = shell.dock.primary;
     const divisor = ruleset.balance.earlyCallBountyDivisor;
@@ -3770,28 +3796,59 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
     if (divisor === 50 && MS_PER_TICK === 50) expect(firstPaying).toBe(4);
   });
 
-  it('never notes a bounty the press would not earn: the opening wave, Start, a launching or a refused call, a resolved run', () => {
-    const { overlay, shell } = setup();
-    const primary = shell.dock.primary;
-    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }));
-    expect(primary.getAttribute('title')).toBe(NOTE); // calibration
-    overlay.update(view({ countdownSeconds: 25, waveCursor: 0 })); // the opening launch (sv15)
-    expect(primary.getAttribute('title')).toBeNull();
-    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }, { started: false })); // Start
-    expect(primary.getAttribute('title')).toBeNull();
-    overlay.update(
-      view({ countdownSeconds: 25, waveCursor: 1, launchPending: true, callable: false }),
-    );
-    expect(primary.getAttribute('title')).toBeNull();
-    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }, { callWaveReady: false }));
-    expect(primary.getAttribute('title')).toBeNull();
-    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }));
-    expect(primary.getAttribute('title')).toBe(NOTE);
-    overlay.update(view({ phase: 'won', won: true, countdownSeconds: null }));
-    expect(primary.getAttribute('title')).toBeNull();
+  it('notes the bonus iff EVERY tick count the shown second can hold would pay one — enumerated, across divisors', () => {
+    // An oracle independent of the gate's algebra (#181 QC round 2): for each second the HUD
+    // can show, list every count of remaining ticks that rounds UP to it, and pay each the sim's
+    // way — floor(rem / divisor). The note is a promise, so it shows only where EVERY one of
+    // them pays. Divisors either side of each second's bounds (20/21/22, 41, 61) and between
+    // them (45, 49), where an off-by-one in the bound over- or under-claims.
+    for (const divisor of [1, 20, 21, 22, 41, 45, 49, 61]) {
+      const tuned = {
+        ...ruleset,
+        balance: { ...ruleset.balance, earlyCallBountyDivisor: divisor },
+      };
+      const { overlay, shell } = setup(undefined, undefined, { ruleset: tuned });
+      for (let s = 1; s <= 6; s++) {
+        const rems: number[] = [];
+        for (let rem = 1; rem <= 1000; rem++) {
+          if (Math.ceil((rem * MS_PER_TICK) / 1000) === s) rems.push(rem);
+        }
+        expect(rems.length, `${s}s holds some tick counts`).toBeGreaterThan(0);
+        const pays = rems.every((rem) => Math.floor(rem / divisor) >= 1);
+        overlay.update(view({ countdownSeconds: s, waveCursor: 1 }));
+        expect(shell.dock.primary.getAttribute('title'), `divisor ${divisor}, ${s}s`).toBe(
+          pays ? NOTE : null,
+        );
+      }
+      overlay.destroy();
+    }
   });
 
-  it('never notes a bounty under a ruleset whose divisor pays none', () => {
+  it('never notes a bonus the press would not earn: the opening wave, Start, a launching or a refused call, a resolved run', () => {
+    const { overlay, shell } = setup();
+    const primary = shell.dock.primary;
+    const paying = view({ countdownSeconds: 25, waveCursor: 1 });
+    // Each case starts from a SHOWN note, so each proves the note is taken down — not merely
+    // never put up.
+    const cases: [string, HudView][] = [
+      ['the opening launch (sv15)', view({ countdownSeconds: 25, waveCursor: 0 })],
+      ['Start', view({ countdownSeconds: 25, waveCursor: 1 }, { started: false })],
+      [
+        'a launching call',
+        view({ countdownSeconds: 25, waveCursor: 1, launchPending: true, callable: false }),
+      ],
+      ['a refused call', view({ countdownSeconds: 25, waveCursor: 1 }, { callWaveReady: false })],
+      ['a resolved run', view({ phase: 'won', won: true, countdownSeconds: null })],
+    ];
+    for (const [name, quiet] of cases) {
+      overlay.update(paying);
+      expect(primary.getAttribute('title'), `calibration before ${name}`).toBe(NOTE);
+      overlay.update(quiet);
+      expect(primary.getAttribute('title'), name).toBeNull();
+    }
+  });
+
+  it('never notes a bonus under a ruleset whose divisor pays none', () => {
     const noBounty = { ...ruleset, balance: { ...ruleset.balance, earlyCallBountyDivisor: 0 } };
     const { overlay, shell } = setup(undefined, undefined, { ruleset: noBounty });
     for (const s of [1, 4, 12, totalSeconds(1)]) {
@@ -3823,5 +3880,42 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
     overlay.update(view({ countdownSeconds: 6, waveCursor: 1 }));
     expect(observer.takeRecords().length).toBeGreaterThan(0);
     observer.disconnect();
+  });
+
+  /** A steady refresh of `v` writes nothing under the primary control: calibrated first with a
+   *  same-value write, which the observer DOES record, so a quiet result means the overlay
+   *  wrote nothing — not that the observer saw nothing. */
+  function expectQuietRefresh(
+    v: HudView,
+    calibrate: (shell: ReturnType<typeof setup>['shell']) => void,
+  ): void {
+    const { overlay, shell } = setup();
+    overlay.update(v);
+    const observer = new MutationObserver(() => {});
+    observer.observe(shell.dock.primary, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+    calibrate(shell);
+    expect(observer.takeRecords().length, 'the calibration write is seen').toBeGreaterThan(0);
+    overlay.update(structuredClone(v));
+    expect(observer.takeRecords()).toEqual([]);
+    observer.disconnect();
+  }
+
+  it('a steady refresh BEFORE Start writes nothing either — not even an equal aria-disabled (#98)', () => {
+    expectQuietRefresh(view({ countdownSeconds: 25, waveCursor: 0 }, { started: false }), (sh) => {
+      expect(sh.dock.primary.getAttribute('aria-disabled')).toBe('false');
+      sh.dock.primary.setAttribute('aria-disabled', 'false');
+    });
+  });
+
+  it('a steady refresh with the dial DOWN writes nothing to it — not even an equal hidden (#98)', () => {
+    expectQuietRefresh(view({ countdownSeconds: null, waveCursor: 9, callable: false }), (sh) => {
+      expect(sh.dock.dial.root.hidden).toBe(true);
+      sh.dock.dial.root.hidden = true;
+    });
   });
 });

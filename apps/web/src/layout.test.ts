@@ -291,39 +291,88 @@ describe('layout — the wave strip’s one home (#181)', () => {
 describe('layout — the countdown dial, the hud floor, and hidden text’s containing blocks (#181 QC)', () => {
   const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const standard = uncommented.slice(uncommented.indexOf(`@media not all and ${COMPACT_QUERY}`));
-  const rem = (v: string): number => {
-    const m = /^([0-9.]+)rem$/.exec(v.trim());
-    if (m === null) throw new Error(`not a rem length: ${v}`);
-    return Number(m[1]);
-  };
 
-  it('the dial is out of every layout measure and leaves the UA’s [hidden] rule in charge', () => {
+  /** The one rule that draws the dial: Standard's, keyed on the room the Dock pass MEASURED
+   *  (`wy-primary--dial`, #181 QC round 2) and on a running countdown. */
+  const DRAW = '.wy-shell .wy-dock .wy-primary.wy-primary--dial > .wy-dial:not([hidden])';
+  const ROOM = '.wy-shell .wy-dock .wy-primary.wy-primary--dial:has(> .wy-dial:not([hidden]))';
+
+  it('the dial is out of every layout measure, and drawn only where the Dock pass measured room for it', () => {
     const dial = ruleBody(uncommented, '.wy-dial');
     expect(dial).toContain('position: absolute;');
     expect(dial).toContain('pointer-events: none;');
-    // An author `display` would out-rank `[hidden] { display: none }` and paint a stale dial.
-    expect(dial).not.toMatch(/(^|; )display:/);
+    // Drawn nowhere by default: no measured room, no dial — so a page the pass has not reached
+    // yet, or cannot measure, never paints a dial over its label.
+    expect(dial).toContain('display: none;');
+    // Exactly ONE rule draws it, Standard's. It names the measured room AND `:not([hidden])`:
+    // without the latter an author `display` would out-rank the UA's `[hidden] { display: none }`
+    // and paint a stale dial while no countdown runs.
+    const drawing = [...uncommented.matchAll(/\.wy-dial(?![-\w])[^{]*\{([^}]*)\}/g)].filter(
+      ([, body]) => {
+        const display = /display:\s*([\w-]+)/.exec(body!)?.[1];
+        return display !== undefined && display !== 'none';
+      },
+    );
+    expect(drawing).toHaveLength(1);
+    expect(ruleBody(standard, DRAW)).toBe('display: block;');
+    // Measured in whole px by the Dock pass and sized from the control's own font.
+    expect(dial).toContain('width: var(--wy-dial-size, 0.9em);');
+    expect(dial).toContain('height: var(--wy-dial-size, 0.9em);');
+    expect(dial).toContain('inset-inline-start: var(--wy-dial-inset, 0.25em);');
     // The control is the dial's containing block, so the dial is drawn inside it.
     expect(ruleBody(uncommented, '.wy-dock .wy-primary')).toContain('position: relative;');
   });
 
-  it('Standard makes the dial’s room by REDISTRIBUTING the control’s inline padding, never adding to it', () => {
+  it('Standard makes the dial’s room by REDISTRIBUTING the control’s inline padding by one whole-px shift, never adding to it', () => {
     const base = /padding:\s*([0-9.]+rem)\s+([0-9.]+rem);/.exec(ruleBody(uncommented, '.wy-btn'));
     expect(base, 'the base .wy-btn padding shorthand').not.toBeNull();
-    const shifted = /padding-inline:\s*([0-9.]+rem)\s+([0-9.]+rem);/.exec(
-      ruleBody(standard, '.wy-shell .wy-dock .wy-primary:has(> .wy-dial:not([hidden]))'),
-    );
+    const shifted =
+      /^padding-inline: calc\(([0-9.]+rem) \+ var\((--[\w-]+), 0px\)\) calc\(([0-9.]+rem) - var\((--[\w-]+), 0px\)\);$/.exec(
+        ruleBody(standard, ROOM),
+      );
     expect(shifted, 'the Standard padding redistribution').not.toBeNull();
-    const total = (a: string, b: string): number => Math.round((rem(a) + rem(b)) * 1000);
-    // Same total, so the control's box — and every Dock row — is the same with or without it.
-    expect(total(shifted![1]!, shifted![2]!)).toBe(total(base![2]!, base![2]!));
-    // …and the start side is the larger, where the dial is drawn.
-    expect(rem(shifted![1]!)).toBeGreaterThan(rem(shifted![2]!));
+    // Both sides start from the base padding and move by the SAME shift — added where the dial
+    // is drawn, taken from the end — so the control's box, and every Dock row, is the same with
+    // or without the dial. The shift is the Dock pass's whole-px value (`dock-reserve.ts`), so
+    // neither side gains a fraction of a layout unit the other loses.
+    expect(shifted![1]).toBe(base![2]);
+    expect(shifted![3]).toBe(base![2]);
+    expect(shifted![2]).toBe('--wy-dial-shift');
+    expect(shifted![4]).toBe('--wy-dial-shift');
+  });
+
+  it('the dial’s geometry is the SVG’s own: no rule sets a radius, a centre, a stroke width or a path', () => {
+    // `hud-icons.test.ts` reads the dial's geometry back from its attributes, which any rule
+    // here would out-rank — so none may set it.
+    const parts = [
+      ...uncommented.matchAll(/([^{}]*\.wy-dial-(?:ring|crown|track|wedge|svg)[^{}]*)\{([^}]*)\}/g),
+    ];
+    expect(parts.length).toBeGreaterThan(0);
+    for (const [, selector, body] of parts) {
+      expect(body, selector!.trim()).not.toMatch(
+        /(^|[;\s])(stroke-width|r|cx|cy|d|transform|stroke-dasharray)\s*:/,
+      );
+    }
+  });
+
+  it('the primary control’s label paints no background of its own', () => {
+    // #181 QC round 2: a label "mask" (`background-color: inherit`) once covered the dial where
+    // a word spilled over it, and painted accent boxes OUTSIDE the rounded control where the word
+    // ran past its border. The measured room withholds the dial instead.
+    expect(uncommented).not.toMatch(/\.wy-primary\s*>\s*\.wy-btn-text\s*\{[^}]*background/);
   });
 
   it('Compact keeps its button as it is: no dial in the column', () => {
     const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
     expect(ruleBody(compact, '.wy-dial')).toContain('display: none;');
+  });
+
+  it('Compact’s chips column stops at the cut `hud-cut.ts` measures, and the Dock keeps its place under it', () => {
+    // #181 QC round 2: whole chips at rest. Unset, the column takes all its room as before.
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(ruleBody(compact, '.wy-hud')).toContain('max-height: var(--wy-hud-cut, none);');
+    // The room a cut gives up opens ABOVE the Dock, so the Dock never moves with it.
+    expect(ruleBody(compact, '.wy-dock')).toContain('margin-top: auto;');
   });
 
   it('the hud never shrinks below one whole chip beside the link (no sliver)', () => {

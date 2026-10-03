@@ -389,7 +389,7 @@ for (const [layout, size] of [
   });
 }
 
-test('Standard: the dial is aria-hidden decoration inside the primary control, the chip reads the seconds, and the control notes the early-call bounty only once a call would pay', async ({
+test('Standard: the dial is aria-hidden decoration inside the primary control, the chip reads the seconds, and the control notes the early-call bonus only once a call would pay', async ({
   page,
 }) => {
   await gotoAt(page, STANDARD);
@@ -431,8 +431,8 @@ test('Standard: the dial is aria-hidden decoration inside the primary control, t
   // now would pay — said as the control's description (and tooltip), never as part of its name.
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(primary).toHaveAccessibleName('Call wave');
-  await expect(primary).toHaveAccessibleDescription('Calling now pays an early-call bounty');
-  await expect(primary).toHaveAttribute('title', 'Calling now pays an early-call bounty');
+  await expect(primary).toHaveAccessibleDescription('Calling now pays an early-call bonus');
+  await expect(primary).toHaveAttribute('title', 'Calling now pays an early-call bonus');
   const first = await read();
   agree(first);
   await expect

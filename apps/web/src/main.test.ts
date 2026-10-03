@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { COLOUR_MODES, resolvePalette, type RenderHandle } from '@wynding/render';
 import type { InputHandle } from './input';
 import { createKeymap } from './keymap';
+import { COMPACT_QUERY } from './layout';
 import { MS_PER_TICK, isTerminalPhase, type SimPhase } from '@wynding/sim';
 
 // The Phaser scene is WebGL — mock the subpath so it never loads under jsdom. This is the
@@ -2403,6 +2404,20 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
     let stageHeight = 400;
     const originalRect = Element.prototype.getBoundingClientRect;
     Element.prototype.getBoundingClientRect = function (this: Element) {
+      // The primary control, laid out (#181 QC round 2): the pass sizes its countdown dial.
+      if (this.classList.contains('wy-primary') && this.closest('.wy-dock')) {
+        return {
+          x: 50,
+          y: 0,
+          top: 0,
+          left: 50,
+          width: 100,
+          height: 44,
+          right: 150,
+          bottom: 44,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
       if (this.classList.contains('wy-stage')) {
         return {
           x: 0,
@@ -2433,17 +2448,23 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       const probe = h.root.querySelector('.wy-inset-probe');
       expect(probe, 'the inset probe must be mounted').not.toBeNull();
       expect(probe!.getAttribute('aria-hidden')).toBe('true');
-      // EXACTLY those: the Dock, the Stage, every control, and the probe — the countdown dial
-      // (#181) is drawn inside the primary control, out of its layout, so it is no box of its
-      // own to watch.
-      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage, ...dock.children, probe!]));
+      // EXACTLY those: the Dock, the Stage, every control, the primary control's LABEL (#181 QC
+      // round 2 — the dial's room is decided from its words, which can change inside a control
+      // its row holds at one width), and the probe. The countdown dial is drawn inside the
+      // primary control, out of its layout, so it is no box of its own to watch.
+      const primary = dock.querySelector<HTMLElement>('.wy-primary')!;
+      const label = primary.querySelector('.wy-btn-text')!;
+      expect(label, 'the primary control has a label').not.toBeNull();
+      expect(new Set(observer!.observed)).toEqual(
+        new Set([dock, stage, ...dock.children, label, probe!]),
+      );
       // Length BESIDE the set, because `new Set` discards multiplicity: a regression that
       // re-observed a box on every pass would still satisfy the set comparison.
-      expect(observer!.observed).toHaveLength(2 + dock.children.length + 1);
+      expect(observer!.observed).toHaveLength(2 + dock.children.length + 1 + 1);
       expect(dock.children.length).toBeGreaterThan(1);
       const dial = dock.querySelector<HTMLElement>('.wy-dial');
       expect(dial, 'the dial lives inside the primary control').not.toBeNull();
-      expect(dial!.parentElement!.classList.contains('wy-primary')).toBe(true);
+      expect(dial!.parentElement).toBe(primary);
 
       // The scroll cue follows the scrollport: a scroll re-points it, no frame needed.
       dock.classList.add('wy-dock--scroll');
@@ -2453,15 +2474,33 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       expect(dock.classList.contains('wy-dock--more-below')).toBe(true);
 
       // A burst of notifications is ONE pass, one frame later — never inside the callback.
+      // The primary control is laid out for it (above, and here: the base `.wy-btn` padding at
+      // 100% text, and a 40px label centred in it), so the pass has a dial to size.
+      primary.hidden = false;
+      primary.style.fontSize = '16px';
+      primary.style.border = '2px solid';
+      primary.style.paddingLeft = '14.4px';
+      primary.style.paddingRight = '14.4px';
+      const ink = [{ left: 80, right: 120, width: 40, top: 16, height: 12 }];
+      vi.spyOn(document, 'createRange').mockReturnValue({
+        selectNodeContents: () => undefined,
+        getClientRects: () => ink,
+      } as unknown as Range);
       stageHeight = 500;
       const before = frames.length;
       observer!.cb();
       observer!.cb();
       expect(frames.length - before).toBe(1);
       expect(prop('--wy-dock-reserve')).toBe('400px');
+      expect(primary.classList.contains('wy-primary--dial')).toBe(false);
       frames[frames.length - 1]!(0);
       expect(prop('--wy-dock-reserve')).toBe('500px');
-      // The pass measures the Dock and never touches the dial (#181): no fit verdict, no style.
+      // The same pass sized the countdown dial and found it room (#181 QC round 2) — on the
+      // PRIMARY control, whose padding the stylesheet redistributes; the dial element itself
+      // carries no verdict and no style.
+      expect(primary.classList.contains('wy-primary--dial')).toBe(true);
+      expect(primary.style.getPropertyValue('--wy-dial-shift')).toBe('8px');
+      expect(primary.style.getPropertyValue('--wy-dial-size')).toBe('14px');
       expect(dial!.className).toBe('wy-dial');
       expect(dial!.getAttribute('style')).toBeNull();
       // ...and the frame slot is released, so the next resize schedules again.
@@ -2481,12 +2520,18 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       for (const p of ['--wy-dock-reserve', '--wy-dock-max-h', '--wy-dock-row-h']) {
         expect(prop(p), p).toBe('');
       }
+      // ...the dial's room with it.
+      expect(primary.classList.contains('wy-primary--dial')).toBe(false);
+      for (const p of ['--wy-dial-size', '--wy-dial-inset', '--wy-dial-shift']) {
+        expect(primary.style.getPropertyValue(p), p).toBe('');
+      }
       expect(dock.classList.contains('wy-dock--more-below')).toBe(false);
       // ...and the scroll listener is gone with it.
       dock.classList.add('wy-dock--scroll');
       dock.dispatchEvent(new Event('scroll'));
       expect(dock.classList.contains('wy-dock--more-below')).toBe(false);
     } finally {
+      vi.restoreAllMocks();
       Element.prototype.getBoundingClientRect = originalRect;
       window.requestAnimationFrame = originalRaf;
       window.cancelAnimationFrame = originalCaf;
@@ -2665,5 +2710,101 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       h.results.querySelectorAll<HTMLInputElement>('input:checked'),
       'nothing of the last draft carries over',
     ).toHaveLength(0);
+  });
+});
+
+describe('main — Compact’s chips cut wiring (#181 QC round 2)', () => {
+  // `hud-cut.test.ts` owns the measurement; this pins the WIRING main.ts adds around it: what
+  // the observer watches — everything that decides where the column's room ends or where an
+  // item does, and NEVER the scrollport whose size the cut sets — the one-frame coalescing, and
+  // a teardown that leaves no cut behind.
+  it('observes the column, the Dock, each chip and the strip, cuts one frame later, and clears the cut on destroy', () => {
+    const instances: { cb: () => void; observed: Element[]; disconnected: boolean }[] = [];
+    const originalRO = (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+    (window as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      readonly observed: Element[] = [];
+      disconnected = false;
+      constructor(readonly cb: () => void) {
+        instances.push(this);
+      }
+      observe(el: Element): void {
+        this.observed.push(el);
+      }
+      disconnect(): void {
+        this.disconnected = true;
+      }
+    };
+    const frames: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = (cb: FrameRequestCallback): number => frames.push(cb);
+    const cancelled: number[] = [];
+    window.cancelAnimationFrame = (id: number): void => void cancelled.push(id);
+    try {
+      const h = homeApp({
+        matchMedia: (query) => ({
+          matches: query === COMPACT_QUERY,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        }),
+      });
+      const status = h.root.querySelector<HTMLElement>('.wy-status')!;
+      const hud = h.root.querySelector<HTMLElement>('.wy-hud')!;
+      const dock = h.root.querySelector<HTMLElement>('.wy-dock')!;
+      const chips = [...hud.querySelectorAll<HTMLElement>(':scope > .wy-chip')];
+      const strip = hud.querySelector<HTMLElement>(':scope > .wy-wave-preview')!;
+      expect(chips).toHaveLength(5);
+      const observer = instances.find((i) => i.observed.includes(status));
+      expect(observer, 'the column must be observed').toBeDefined();
+      // EXACTLY those, once each (length beside the set: `new Set` hides a doubled observe).
+      expect(new Set(observer!.observed)).toEqual(new Set([status, dock, ...chips, strip]));
+      expect(observer!.observed).toHaveLength(2 + chips.length + 1);
+      expect(observer!.observed).not.toContain(hud);
+
+      // Lay the column out: 100px of room at y = 40, the chips ending 20, 45, 70, 95, 120px in.
+      const rect = (top: number, height: number): DOMRect =>
+        ({
+          x: 0,
+          y: top,
+          left: 0,
+          top,
+          width: 60,
+          height,
+          right: 60,
+          bottom: top + height,
+        }) as DOMRect;
+      hud.getBoundingClientRect = () => {
+        const cut = parseFloat(hud.style.getPropertyValue('--wy-hud-cut'));
+        return rect(40, Number.isFinite(cut) ? cut : 100);
+      };
+      chips.forEach((chip, i) => {
+        chip.getBoundingClientRect = () => rect(40 + 25 * i, 20);
+      });
+      // A burst of notifications is ONE pass, one frame later — never inside the callback.
+      const before = frames.length;
+      observer!.cb();
+      observer!.cb();
+      expect(frames.length - before).toBe(1);
+      expect(hud.style.getPropertyValue('--wy-hud-cut')).toBe('');
+      frames[frames.length - 1]!(0);
+      expect(hud.style.getPropertyValue('--wy-hud-cut')).toBe('95px');
+      // ...and the frame slot is released, so the next resize schedules again.
+      observer!.cb();
+      expect(frames.length - before).toBe(2);
+
+      // Teardown with a pass still pending: cancelled, disconnected, and the cut cleared.
+      h.app.destroy();
+      expect(cancelled).toContain(frames.length);
+      expect(observer!.disconnected).toBe(true);
+      expect(hud.style.getPropertyValue('--wy-hud-cut')).toBe('');
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCaf;
+      if (originalRO === undefined) {
+        delete (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+      } else {
+        (window as unknown as { ResizeObserver: unknown }).ResizeObserver = originalRO;
+      }
+    }
   });
 });
