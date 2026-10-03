@@ -167,6 +167,40 @@ describe('paintSwatch', () => {
     expect(drawn.length).toBeGreaterThan(0);
   });
 
+  it('draws the plate’s rim on the canvas’s own device pixels — crisp at a fractional dpr, as on the board', () => {
+    const { ctx, ops } = recordingCtx();
+    const canvas = {
+      getContext: () => ctx,
+      width: 0,
+      height: 0,
+      ownerDocument: { defaultView: { devicePixelRatio: 1.5 } },
+    } as unknown as HTMLCanvasElement;
+    paintSwatch(canvas, 'basic', 'default', recordingPaths().makePath);
+    expect(ops[0]).toBe('setTransform(1.5,0,0,1.5,0,0)');
+    const fit = towerArtFit(SWATCH_SIZE_PX);
+    const unit = fit.footprintPx / 64;
+    // The rim's path is the one stroked in the rim colour: its first point is on the top
+    // edge (design units, under the art's transform), and its width follows the colour.
+    const stroke = ops.indexOf(`strokeStyle=${rgba(resolvePalette('default').tower)}`);
+    expect(stroke).toBeGreaterThan(0);
+    const moveTo = ops
+      .slice(0, stroke)
+      .reverse()
+      .find((o) => o.startsWith('moveTo('))!;
+    const top = Number(/^moveTo\([^,]+,([^)]+)\)$/.exec(moveTo)![1]);
+    const width = Number(
+      ops
+        .slice(stroke)
+        .find((o) => o.startsWith('lineWidth='))!
+        .slice(10),
+    );
+    // Device px: the stroke is whole pixels wide, and starts on a whole pixel.
+    const w = width * unit * 1.5;
+    const start = (fit.y + top * unit) * 1.5 - w / 2;
+    expect(Math.abs(w - Math.round(w))).toBeLessThan(1e-9);
+    expect(Math.abs(start - Math.round(start))).toBeLessThan(1e-9);
+  });
+
   it("a mode change changes the paint — protan's role colours replace the default ones", () => {
     const { ctx, ops } = recordingCtx();
     paintSwatch(fakeCanvas(ctx), 'basic', 'protan', recordingPaths().makePath);

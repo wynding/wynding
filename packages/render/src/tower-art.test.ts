@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { artBounds, shapeOutline, type Point, type Polyline } from './art-geometry';
-import { strokeWidthAt, type ArtShape } from './art-ir';
+import { alignRectToTexels, strokeWidthAt, type ArtShape } from './art-ir';
 import {
   ART_BOX,
   ART_INK,
@@ -392,13 +392,33 @@ describe('the plate, the boost glow and the pending rim', () => {
 
   it('the plate is inset 3/64 of the footprint and rimmed — the rim is what the floor gate guards', () => {
     expect(PLATE_RECT).toEqual({ x: 3, y: 3, w: 58, h: 58, rx: 9 });
+    // The slate plate and its rim are the same rectangle, as two shapes — so that drawing
+    // the rim crisp moves the rim alone — and the rim is drawn over the plate's edge.
     const plate = PLATE_ART.find((s) => s.fill === 'plate')!;
-    expect(plate.stroke).toBe('rim');
-    // Never thinner than one CSS px, at any cell size.
+    const rim = PLATE_ART.find((s) => s.stroke === 'rim')!;
+    expect(plate).toMatchObject({ kind: 'rect', ...PLATE_RECT });
+    expect(plate.stroke).toBeUndefined();
+    expect(rim).toMatchObject({ kind: 'rect', ...PLATE_RECT, crisp: true });
+    expect(rim.fill).toBeUndefined();
+    expect(PLATE_ART.indexOf(rim)).toBeGreaterThan(PLATE_ART.indexOf(plate));
+    // Never thinner than one CSS px in the design, at any cell size ...
     for (const cellPx of [1, 10, 13, 30]) {
-      expect(
-        strokeWidthAt(plate, (2 * cellPx) / ART_BOX) * ((2 * cellPx) / ART_BOX),
-      ).toBeGreaterThanOrEqual(1 - 1e-9);
+      const unit = (2 * cellPx) / ART_BOX;
+      expect(strokeWidthAt(rim, unit) * unit).toBeGreaterThanOrEqual(1 - 1e-9);
+    }
+    // ... and, baked crisp, a whole number of device pixels and never fewer than one.
+    if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+    for (const [cellPx, scale] of [
+      [10, 1],
+      [10, 1.25],
+      [13, 1.5],
+      [13, 2],
+      [30, 3],
+    ] as const) {
+      const unit = (2 * cellPx) / ART_BOX;
+      const baked = strokeWidthAt(alignRectToTexels(rim, unit, scale), unit) * unit * scale;
+      expect(baked, `${cellPx}px at dpr ${scale}`).toBeCloseTo(Math.round(baked), 9);
+      expect(baked, `${cellPx}px at dpr ${scale}`).toBeGreaterThanOrEqual(1 - 1e-9);
     }
   });
 

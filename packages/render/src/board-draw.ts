@@ -180,17 +180,22 @@ export function drawSelection(
   if (o.selection.rangeFp === null) {
     const size = projection.cellPx * 2;
     // Inset 1: the 2px stroke (centred on its path) covers the footprint's outermost 2px,
-    // so its OUTER edge is always on the floor, where `range` clears 4.61:1 composited.
-    // Inward it meets the plate's rim, which sits 3/64 of the footprint in (`PLATE_RECT`,
-    // `tower-art.ts`) and which `range` measures only 1.32:1 against (1.75 tritan). The
+    // so its OUTER edge is the footprint's edge, never inside the plate's rim: beyond it
+    // lies the floor, where `range` clears 4.61:1 composited. Inward it meets the rim,
+    // which sits 3/64 of the footprint in (`PLATE_RECT`, `tower-art.ts`), drawn on whole
+    // device pixels, and which `range` measures only 1.32:1 against (1.75 tritan). The
     // stroke is drawn OVER the rim (the effects layer sits above the tower sprites). At
     // cells up to 16 px it covers the whole rim, so its inner edge lies on the plate,
     // where `range` clears 3.70:1 composited (4.83 tritan; gated, `palette.test.ts`); from
     // 32 px the floor margin outside the rim is wider than the stroke, so it lies wholly on
     // the floor. Between the two its inner edge ends on the rim, and its floor-side edge is
-    // what carries the cue. It stays clear of a neighbour: the next footprint starts
-    // beyond this one's edge. These relations hold only because `c` is snapped exactly as
-    // the tower sprite's corner is.
+    // what carries the cue. (Those are the dpr 1 thresholds: at a fractional dpr the rim's
+    // whole pixels can move either one by a cell size or two. At 10px cells and dpr 1 the
+    // rim lands on the footprint's outermost pixel, which the stroke covers — and where a
+    // neighbouring tower's rim does the same, the floor beyond the stroke gives way to
+    // that rim.) It stays clear of a neighbour: the next footprint starts beyond this one's
+    // edge. These relations hold only because `c` is snapped exactly as the tower sprite's
+    // corner is.
     g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);
   } else {
     g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));

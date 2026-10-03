@@ -46,6 +46,7 @@ import {
 import { placeCreeps, placeTowers, type CreepPlacementInput as CreepIn } from './placement';
 import { layerDepth } from './layers';
 import { createProjection } from './projection';
+import { snapToDevicePx } from './device-px';
 import { resolvePalette } from './palette';
 import type { RenderVM, RenderOverlay, TowerVM } from './types';
 // A recording `GraphicsLike` (`fakeGraphics`) records every call instead of drawing; the
@@ -558,22 +559,32 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     expect(rim.kind).toBe('rect');
     if (rim.kind !== 'rect') return;
     const u = plate!.unit;
-    // The nearest the rim's INNER edge comes to the footprint centre — the middle of a
-    // side — in CSS px.
-    const rimInner = (rim.w / 2 - strokeWidthAt(rim, u) / 2) * u;
-    const centreX = plate!.x + (rim.x + rim.w / 2) * u;
-    const centreY = plate!.y + (rim.y + rim.h / 2) * u;
+    // The rim's INNER edge on each side, CSS px — the rim as the plate frame draws it, on
+    // whole device pixels, so each side may have moved its own way.
+    const half = strokeWidthAt(rim, u) / 2;
+    const inner = {
+      left: plate!.x + (rim.x + half) * u,
+      right: plate!.x + (rim.x + rim.w - half) * u,
+      top: plate!.y + (rim.y + half) * u,
+      bottom: plate!.y + (rim.y + rim.h - half) * u,
+    };
 
     const rings = head!.shapes.filter((s) => s.stroke === 'aura');
     expect(rings).toHaveLength(2); // the glow drew at all — guards a vacuous pass below
     for (const ring of rings) {
       if (ring.kind !== 'circle') throw new Error('the glow is rings');
       // Centred on the footprint...
-      expect(head!.x + ring.cx * head!.unit).toBeCloseTo(centreX, 9);
-      expect(head!.y + ring.cy * head!.unit).toBeCloseTo(centreY, 9);
-      // ... and its OUTER edge — the stroke is centred on its radius — inside the rim.
+      const cx = head!.x + ring.cx * head!.unit;
+      const cy = head!.y + ring.cy * head!.unit;
+      expect(cx).toBeCloseTo(plate!.x + (ART_BOX / 2) * u, 9);
+      expect(cy).toBeCloseTo(plate!.y + (ART_BOX / 2) * u, 9);
+      // ... and its OUTER edge — the stroke is centred on its radius — inside the rim on
+      // every side.
       const outer = (ring.r + strokeWidthAt(ring, head!.unit) / 2) * head!.unit;
-      expect(outer).toBeLessThan(rimInner);
+      expect(cx - outer).toBeGreaterThan(inner.left);
+      expect(cx + outer).toBeLessThan(inner.right);
+      expect(cy - outer).toBeGreaterThan(inner.top);
+      expect(cy + outer).toBeLessThan(inner.bottom);
     }
   });
 
@@ -719,12 +730,14 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     expect(count(g.calls, 'strokeCircle')).toBe(0);
     const outlines = g.calls.filter((c) => c.method === 'strokeRoundedRect');
     expect(outlines).toHaveLength(1);
-    // ... and its OUTER edge must sit on the floor, outside the plate's rim, where `range`
-    // clears 4.61:1 — `range` against the rim itself is 1.32:1. The rim is the plate's
-    // stroke, read from the plate frame at this cell size (its one-CSS-px floor applied).
-    // At the narrowest cell the 2px outline also covers the whole rim, so its inner edge
-    // lies on the plate, where `range` clears 3.70:1 composited (gated, palette.test.ts).
-    // The next test walks the other cell sizes.
+    // ... and its OUTER edge must never sit inside the plate's rim: `range` against the rim
+    // is 1.32:1, against the floor outside the footprint 4.61:1. The rim is the plate's
+    // stroke as the plate frame draws it at this cell size: its one-CSS-px floor applied and
+    // moved onto whole device pixels — which at this narrowest cell, at dpr 1, is the
+    // footprint's outermost pixel (the design puts its outer edge only 0.44px in). The 2px
+    // outline covers the whole of it, so its inner edge lies on the plate, where `range`
+    // clears 3.70:1 composited (gated, palette.test.ts). The next test walks the other cell
+    // sizes and dprs.
     const lineStyle = g.calls.find((c) => c.method === 'lineStyle')!;
     const half = (lineStyle.args[0] as number) / 2;
     const origin = PROJECTION.cellToPixel(2, 2);
@@ -736,60 +749,70 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     // The rim's two edges, CSS px in from the footprint corner (widths are design units).
     const rimOuter = (rim.x - strokeWidthAt(rim, u) / 2) * u;
     const rimInner = (rim.x + strokeWidthAt(rim, u) / 2) * u;
-    expect(rimOuter).toBeGreaterThan(0); // the plate is inset: floor shows outside its rim
+    expect(rimOuter).toBeGreaterThanOrEqual(0); // the rim stays inside the footprint
     for (const edge of [x! - origin.x, y! - origin.y]) {
       expect(edge - half).toBeGreaterThanOrEqual(0); // inside the footprint...
-      expect(edge - half).toBeLessThan(rimOuter); // ... its outer edge on the floor
+      // ... its outer edge at or outside the rim's, so no pixel of the rim lies outside it ...
+      expect(edge - half).toBeLessThanOrEqual(rimOuter + 1e-9);
       expect(edge + half).toBeGreaterThanOrEqual(rimInner); // ... covering the whole rim
     }
     for (const span of [w!, h!]) {
       expect(span + 2 * half).toBeLessThanOrEqual(PROJECTION.cellPx * 2); // never past it
     }
-    expect(PLATE_RECT.x).toBe(rim.x); // the rim read here IS the plate's
+    // The rim read here IS the plate's, moved under half a pixel onto the pixel grid.
+    expect(Math.abs(rim.x - PLATE_RECT.x) * u).toBeLessThanOrEqual(0.5 + 1e-9);
+    expect(rim.x).not.toBe(PLATE_RECT.x); // (and at this size it did move)
   });
 
-  it('the attackless outline’s outer edge is on the floor at every cell size — covering the rim at small cells, clear of it from 32 px', () => {
-    for (const cellPx of [10, 12, 13, 16, 20, 24, 31, 32, 40, 60]) {
-      const projection = createProjection({
-        cols: 10,
-        rows: 10,
-        cssWidth: cellPx * 10,
-        cssHeight: cellPx * 10,
-        dpr: 1,
-      });
-      expect(projection.cellPx).toBe(cellPx);
-      const g = fakeGraphics();
-      drawSelection(
-        g,
-        PAL,
-        {
-          ...EMPTY_OVERLAY,
-          selection: { col: 2, row: 2, rangeFp: null, blastRadiusFp: null, towerId: 'beacon' },
-        },
-        projection,
-      );
-      const half = (g.calls.find((c) => c.method === 'lineStyle')!.args[0] as number) / 2;
-      const [x] = g.calls.find((c) => c.method === 'strokeRoundedRect')!.args as number[];
-      const edge = x! - projection.cellToPixel(2, 2).x;
-      const plateSpec = atlasFrameSpecs(cellPx, 1).find((s) => s.key === PLATE_FRAME_KEY)!;
-      const pg = fakeArtGraphics();
-      plateSpec.paint(pg, PAL);
-      const [plate] = artCallsOf(pg.calls);
-      const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
-      if (rim.kind !== 'rect') throw new Error('the rim is the plate rect’s stroke');
-      const u = plate!.unit;
-      const rimOuter = (rim.x - strokeWidthAt(rim, u) / 2) * u;
-      const rimInner = (rim.x + strokeWidthAt(rim, u) / 2) * u;
-      // Always: the outline's outer edge on the floor, inside the footprint.
-      expect(edge - half, `cellPx ${cellPx}`).toBeGreaterThanOrEqual(0);
-      expect(edge - half, `cellPx ${cellPx}`).toBeLessThan(rimOuter);
-      // Small cells: it covers the whole rim, so its inner edge meets the plate. Large
-      // cells: the floor margin holds all of it. (Between, its inner edge ends on the rim —
-      // the residual docs/accessibility-checklist.md records.)
-      if (cellPx <= 16)
-        expect(edge + half, `cellPx ${cellPx}`).toBeGreaterThanOrEqual(rimInner - 1e-9);
-      if (cellPx >= 32)
-        expect(edge + half, `cellPx ${cellPx}`).toBeLessThanOrEqual(rimOuter + 1e-9);
+  it('the attackless outline’s outer edge is never inside the rim, at any cell size or dpr — covering the rim at small cells, clear of it from 32 px', () => {
+    for (const dpr of [1, 1.25, 1.5, 1.75, 2, 3]) {
+      for (const cellPx of [10, 11, 12, 13, 16, 20, 24, 31, 32, 40, 60]) {
+        const at = `cellPx ${cellPx} at dpr ${dpr}`;
+        const projection = createProjection({
+          cols: 10,
+          rows: 10,
+          cssWidth: cellPx * 10,
+          cssHeight: cellPx * 10,
+          dpr,
+        });
+        expect(projection.cellPx).toBe(cellPx);
+        const g = fakeGraphics();
+        drawSelection(
+          g,
+          PAL,
+          {
+            ...EMPTY_OVERLAY,
+            selection: { col: 2, row: 2, rangeFp: null, blastRadiusFp: null, towerId: 'beacon' },
+          },
+          projection,
+        );
+        const half = (g.calls.find((c) => c.method === 'lineStyle')!.args[0] as number) / 2;
+        const [x] = g.calls.find((c) => c.method === 'strokeRoundedRect')!.args as number[];
+        // From the corner the outline is drawn at — the sprite's, snapped to a device pixel.
+        const edge = x! - snapToDevicePx(projection.cellToPixel(2, 2).x, dpr);
+        // The rim as the plate frame draws it at this cell size and dpr: on whole device
+        // pixels.
+        const plateSpec = atlasFrameSpecs(cellPx, dpr).find((s) => s.key === PLATE_FRAME_KEY)!;
+        const pg = fakeArtGraphics();
+        plateSpec.paint(pg, PAL);
+        const [plate] = artCallsOf(pg.calls);
+        const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
+        if (rim.kind !== 'rect') throw new Error('the rim is the plate rect’s stroke');
+        const u = plate!.unit;
+        const rimOuter = (rim.x - strokeWidthAt(rim, u) / 2) * u;
+        const rimInner = (rim.x + strokeWidthAt(rim, u) / 2) * u;
+        // Always: the outline's outer edge inside the footprint, and at or outside the
+        // rim's — no pixel of the rim lies outside the outline.
+        expect(edge - half, at).toBeGreaterThanOrEqual(-1e-9);
+        expect(edge - half, at).toBeLessThanOrEqual(rimOuter + 1e-9);
+        // At dpr 1 — small cells: it covers the whole rim, so its inner edge meets the plate.
+        // Large cells: the floor margin holds all of it. (Between, its inner edge ends on the
+        // rim — the residual docs/accessibility-checklist.md records. At a fractional dpr each
+        // threshold can move a cell size or two, the rim being on whole device pixels.)
+        if (dpr === 1 && cellPx <= 16)
+          expect(edge + half, at).toBeGreaterThanOrEqual(rimInner - 1e-9);
+        if (dpr === 1 && cellPx >= 32) expect(edge + half, at).toBeLessThanOrEqual(rimOuter + 1e-9);
+      }
     }
   });
 
@@ -828,8 +851,9 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     for (const towerId of ['basic', 'slow', 'splash', 'venom', 'stun', 'antiair', 'beacon']) {
       const other = drawnTowers([tower(towerId)]);
       expect(other.plates, towerId).toHaveLength(1);
+      const ground = shapesOf(other.plates[0]!);
       expect(
-        shapesOf(other.plates[0]!).some((s) => s.fill === 'plate' && s.stroke === 'rim'),
+        ground.some((s) => s.fill === 'plate') && ground.some((s) => s.stroke === 'rim'),
         towerId,
       ).toBe(true); // a real plate, rimmed — not the pad
       const os = shapesOf(other.heads[0]!);

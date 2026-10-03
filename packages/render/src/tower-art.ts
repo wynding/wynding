@@ -17,7 +17,7 @@
 // fixed art inks, decorative or always drawn against colours the gate does cover.
 
 import { roleColour, type Palette } from './palette';
-import type { ArtColour, ArtShape } from './art-ir';
+import type { ArtColour, ArtRect, ArtShape } from './art-ir';
 import type { TowerFootprintMark, TowerRole } from './tower-paint';
 
 /** Design units across one 2×2 footprint. */
@@ -78,7 +78,12 @@ export const PLATE_RECT = { x: 3, y: 3, w: 58, h: 58, rx: 9 } as const;
 /** The plate rim's width, design units, and its floor in CSS px. The frame's slate plate is
  *  only ~1.28:1 against the floor, so on its own the footprint's edge would vanish; the rim
  *  is what carries it, in `palette.tower`, which the palette gate holds ≥ 3:1 against the
- *  floor in every mode. One CSS px at the least, so it never thins to a faint seam. */
+ *  floor in every mode. That contrast is only shown if the rim's pixels are wholly rim, so
+ *  the rim is drawn CRISP (`ArtRect.crisp`): baked on whole device pixels, its width the
+ *  whole number of them nearest one CSS px or its design width, whichever is wider (never
+ *  fewer than one), and its edges moved under half a pixel onto the pixel grid. Without it, a
+ *  one-pixel rim whose centre fell inside a pixel was smeared across two half-lit ones —
+ *  2.19:1 at 10px cells on a dpr 1 screen (QC round 2, A4). */
 export const PLATE_RIM_WIDTH = 2;
 export const PLATE_RIM_MIN_PX = 1;
 
@@ -100,20 +105,25 @@ const PLATE_BEVEL: ArtShape = {
   cap: 'round',
 };
 
-/** A committed tower's plate: its soft offset shadow, the slate plate with its rim, and the
+/** The slate plate itself. */
+const PLATE_FILL: ArtShape = { kind: 'rect', ...PLATE_RECT, fill: 'plate' };
+
+/** The plate's rim: a rect of its own, so that drawing it crisp moves only the stroke. The
+ *  fill's edge, on the rim's design centre line, always lies under the moved stroke (it is
+ *  at least one pixel wide and moves under half of one), so no sliver of plate shows past
+ *  the rim and none of the floor inside it. */
+const PLATE_RIM: ArtRect = {
+  kind: 'rect',
+  ...PLATE_RECT,
+  stroke: 'rim',
+  width: PLATE_RIM_WIDTH,
+  minWidthPx: PLATE_RIM_MIN_PX,
+  crisp: true,
+};
+
+/** A committed tower's plate: its soft offset shadow, the slate plate, its rim, and the
  *  bevel along its top edge. Shared by every tower that has a plate. */
-export const PLATE_ART: readonly ArtShape[] = [
-  PLATE_SHADOW,
-  {
-    kind: 'rect',
-    ...PLATE_RECT,
-    fill: 'plate',
-    stroke: 'rim',
-    width: PLATE_RIM_WIDTH,
-    minWidthPx: PLATE_RIM_MIN_PX,
-  },
-  PLATE_BEVEL,
-];
+export const PLATE_ART: readonly ArtShape[] = [PLATE_SHADOW, PLATE_FILL, PLATE_RIM, PLATE_BEVEL];
 
 /** The PAD a plateless tower (the mine) stands on in the plates layer: the plate's own
  *  rectangle, filled opaque in the floor colour — no rim, no shadow, no bevel — so it is
@@ -126,11 +136,7 @@ export const PAD_ART: readonly ArtShape[] = [{ kind: 'rect', ...PLATE_RECT, fill
 /** The plate a PENDING build shows under its translucent art: the same plate without its
  *  solid rim, because the pending build's rim is the dashed one (`PENDING_RIM_ART`) and a
  *  faded solid rim showing through its gaps would blur the dashes into a line. */
-export const PENDING_PLATE_ART: readonly ArtShape[] = [
-  PLATE_SHADOW,
-  { kind: 'rect', ...PLATE_RECT, fill: 'plate' },
-  PLATE_BEVEL,
-];
+export const PENDING_PLATE_ART: readonly ArtShape[] = [PLATE_SHADOW, PLATE_FILL, PLATE_BEVEL];
 
 // ---- The heads ----
 
@@ -355,22 +361,13 @@ export const PENDING_ALPHA = 0.85;
 /** How opaque a pending build's plate is — well under the head's `PENDING_ALPHA`. */
 export const PENDING_PLATE_ALPHA = 0.25;
 
-/** A pending build's rim (T4): the plate's outline, DASHED, at full opacity over the faded
- *  art — so "planned, not built" reads by shape (the dashes) as well as by alpha. In
- *  `palette.tower`, gated ≥ 3:1 against the floor; the pattern is scaled up until its
- *  shortest dash or gap is 2 CSS px, so it stays dashed at a phone's cell size. Drawn for
- *  the mine too, which has no plate of its own: it marks the footprint the build will take. */
-export const PENDING_RIM_ART: readonly ArtShape[] = [
-  {
-    kind: 'rect',
-    ...PLATE_RECT,
-    stroke: 'rim',
-    width: PLATE_RIM_WIDTH,
-    minWidthPx: PLATE_RIM_MIN_PX,
-    dash: [5, 4],
-    dashMinPx: 2,
-  },
-];
+/** A pending build's rim (T4): the plate's rim, DASHED, at full opacity over the faded art
+ *  — so "planned, not built" reads by shape (the dashes) as well as by alpha. In
+ *  `palette.tower`, gated ≥ 3:1 against the floor, and crisp like the solid rim, so its
+ *  dashes show that contrast in full; the pattern is scaled up until its shortest dash or gap
+ *  is 2 CSS px, so it stays dashed at a phone's cell size. Drawn for the mine too, which has
+ *  no plate of its own: it marks the footprint the build will take. */
+export const PENDING_RIM_ART: readonly ArtShape[] = [{ ...PLATE_RIM, dash: [5, 4], dashMinPx: 2 }];
 
 /** The scorch's radius, design units — the frame's, 0.73 of a cell. */
 export const SCORCH_RADIUS = 23.5;

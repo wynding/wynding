@@ -92,6 +92,12 @@ export interface ArtRect extends ArtPaint {
   readonly w: number;
   readonly h: number;
   readonly rx: number;
+  /** Stroke on WHOLE TEXELS wherever the art is baked onto a texel grid
+   *  (`alignArtToTexels`): a thin stroke whose centre line falls inside a texel is
+   *  anti-aliased across two, each partly covered, and reads at a fraction of its colour's
+   *  contrast. The fill, if any, moves with it — so the art gives a crisp stroke a rect of
+   *  its own. */
+  readonly crisp?: boolean;
 }
 
 /** A closed polygon through `points`. */
@@ -121,6 +127,59 @@ export function dashAt(shape: ArtPaint, unit: number): number[] {
   const floor = shape.dashMinPx === undefined || unit <= 0 ? 0 : shape.dashMinPx / unit;
   const k = shortest > 0 && floor > shortest ? floor / shortest : 1;
   return dash.map((d) => d * k);
+}
+
+/**
+ * `rect`'s stroke moved onto whole texels, for art drawn at `unit` CSS px per design unit
+ * and `scale` texels per CSS px, with design-unit (0, 0) at texel `origin` (only its
+ * fractional part matters: a whole-texel offset moves nothing).
+ *
+ * The width becomes the whole number of texels nearest its own — its CSS-px floor applied
+ * first — and never fewer than one; at a tie, the thinner (1.5 texels, one CSS px at dpr
+ * 1.5, becomes 1), which keeps a plate's rim off its footprint's edge more often. Each
+ * straight edge's centre line then moves to the nearest place where that stroke covers whole
+ * texels — a half texel for an odd width, a texel boundary for an even one — at most half a
+ * texel from where the design puts it. So the edges are drawn in the stroke's full colour,
+ * rather than anti-aliased across two partly covered texels: a one-texel line centred inside
+ * a texel shows only about half its colour's contrast.
+ *
+ * The corner radius is kept, and the result is a plain stroke at its final width, with no
+ * CSS-px floor left to apply. A rect with no stroke is returned as it is.
+ */
+export function alignRectToTexels(
+  rect: ArtRect,
+  unit: number,
+  scale: number,
+  origin: readonly [number, number] = [0, 0],
+): ArtRect {
+  const k = unit * scale; // texels per design unit
+  if (!(k > 0) || rect.stroke === undefined) return rect;
+  // Nearest, the thinner at a tie — and a tie by a hair of floating-point noise is a tie.
+  const widthTexels = Math.max(1, Math.ceil(strokeWidthAt(rect, unit) * k - 0.5 - 1e-9));
+  /** The centre line nearest `edge` (design units) at which the stroke covers whole texels,
+   *  for an origin at texel `at`. */
+  const snap = (edge: number, at: number): number =>
+    (Math.round(at + edge * k - widthTexels / 2) + widthTexels / 2 - at) / k;
+  const [ox, oy] = origin;
+  const x = snap(rect.x, ox);
+  const y = snap(rect.y, oy);
+  const right = Math.max(x, snap(rect.x + rect.w, ox));
+  const bottom = Math.max(y, snap(rect.y + rect.h, oy));
+  const { minWidthPx: _floorApplied, ...rest } = rect;
+  return { ...rest, x, y, w: right - x, h: bottom - y, width: widthTexels / k };
+}
+
+/** `shapes` with every `crisp` rect aligned by `alignRectToTexels` — the SAME array when
+ *  none is, so a list with nothing to align keeps its identity. */
+export function alignArtToTexels(
+  shapes: readonly ArtShape[],
+  unit: number,
+  scale: number,
+  origin: readonly [number, number] = [0, 0],
+): readonly ArtShape[] {
+  const crisp = (s: ArtShape): s is ArtRect => s.kind === 'rect' && s.crisp === true;
+  if (!shapes.some(crisp)) return shapes;
+  return shapes.map((s) => (crisp(s) ? alignRectToTexels(s, unit, scale, origin) : s));
 }
 
 /** SVG's rect corner radius rule: `rx` clamped to half of each side. */

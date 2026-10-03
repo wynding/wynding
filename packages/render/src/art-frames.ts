@@ -23,7 +23,7 @@ import { creepFillColour, creepRadius, paintCreepSilhouette, isLowHp } from './b
 import { CREEP_SHAPE_VALUES, creepShapeFor, type CreepShape } from './creep-paint';
 import { artBounds } from './art-geometry';
 import type { ArtColourResolver, ArtGraphics } from './art-paint';
-import type { ArtShape } from './art-ir';
+import { alignArtToTexels, type ArtShape } from './art-ir';
 import {
   ART_BOX,
   BOOST_ART,
@@ -126,15 +126,22 @@ export function artUnit(cellPx: number): number {
   return (2 * cellPx) / ART_BOX;
 }
 
-/** Paints art with its design origin at `(x0, y0)` frame-local CSS px, `unit` CSS px per
- *  design unit. */
-type ArtPainter = (g: ArtGraphics, pal: Palette, x0: number, y0: number, unit: number) => void;
+/** Draws design-unit `shapes` into the frame, in the colours `colour` resolves. */
+type ArtDraw = (shapes: readonly ArtShape[], colour: ArtColourResolver) => void;
+
+/** Paints a frame's art through `draw`, which places it; `g` is there for the bake's other
+ *  operations (`fade`). */
+type ArtPainter = (draw: ArtDraw, g: ArtGraphics, pal: Palette) => void;
 
 /**
  * A frame sized to hold `shapes` drawn at `cellPx`, anchored at the design point `anchor`
  * (a tower's footprint corner is (0, 0); its centre is (32, 32)). The anchor sits on a whole
  * texel at least `FRAME_PAD_TEXELS` in from every edge, and the frame reaches past the art's
  * bounds — strokes grown by their half-width at this scale — by that same pad.
+ *
+ * Every frame is packed on whole atlas texels (`atlas-pack.ts`), so the frame's texel grid
+ * is the atlas's: what the frame draws — and sizes itself for — is the art with its `crisp`
+ * strokes moved onto that grid (`alignArtToTexels`).
  */
 function artFrame(
   key: string,
@@ -145,23 +152,41 @@ function artFrame(
   paint: ArtPainter,
 ): FrameSpec {
   const unit = artUnit(cellPx);
-  const b = artBounds(shapes, unit);
   const [ax, ay] = anchor;
-  const leftTexels = FRAME_PAD_TEXELS + Math.ceil(Math.max(0, ax - b.minX) * unit * scale);
-  const topTexels = FRAME_PAD_TEXELS + Math.ceil(Math.max(0, ay - b.minY) * unit * scale);
-  const width = leftTexels + Math.ceil(Math.max(0, b.maxX - ax) * unit * scale) + FRAME_PAD_TEXELS;
-  const height = topTexels + Math.ceil(Math.max(0, b.maxY - ay) * unit * scale) + FRAME_PAD_TEXELS;
+  // Design-unit (0, 0) lies `anchor` design units up and left of the anchor, which is on a
+  // whole texel: that offset is all the texel grid's alignment needs to know.
+  const origin = [-ax * unit * scale, -ay * unit * scale] as const;
+  const onGrid = (s: readonly ArtShape[]): readonly ArtShape[] =>
+    alignArtToTexels(s, unit, scale, origin);
+  const b = artBounds(onGrid(shapes), unit);
+  /** Whole texels to hold `d` design units: rounded up, but never for floating-point dust —
+   *  a rim moved onto the texel grid can end exactly on the anchor, which the bounds then
+   *  report a few 1e-16 units past it. */
+  const texels = (d: number): number => Math.ceil(Math.max(0, d) * unit * scale - 1e-9);
+  const leftTexels = FRAME_PAD_TEXELS + texels(ax - b.minX);
+  const topTexels = FRAME_PAD_TEXELS + texels(ay - b.minY);
+  const width = leftTexels + texels(b.maxX - ax) + FRAME_PAD_TEXELS;
+  const height = topTexels + texels(b.maxY - ay) + FRAME_PAD_TEXELS;
   const anchorX = leftTexels / scale;
   const anchorY = topTexels / scale;
   const x0 = anchorX - ax * unit;
   const y0 = anchorY - ay * unit;
-  return { key, width, height, anchorX, anchorY, paint: (g, pal) => paint(g, pal, x0, y0, unit) };
+  return {
+    key,
+    width,
+    height,
+    anchorX,
+    anchorY,
+    paint: (g, pal) => paint((s, colour) => g.art(onGrid(s), colour, x0, y0, unit), g, pal),
+  };
 }
 
 /** A tower's whole picture as a Card swatch shows it — its plate (if its look has one), then
  *  its committed head — with design-unit (0, 0), the footprint corner, at `(x, y)` and the
  *  footprint `footprintPx` CSS px across. The same art, through the same painter, as the
- *  board's frames, so a Card always matches the board. */
+ *  board's frames, so a Card always matches the board. With `pixelScale` — the surface's
+ *  device px per CSS px, its CSS (0, 0) on a whole device pixel — the plate's crisp rim is
+ *  drawn on that surface's pixel grid, as the board's frames draw it on the atlas's. */
 export function paintTowerArt(
   g: ArtGraphics,
   pal: Palette,
@@ -169,11 +194,16 @@ export function paintTowerArt(
   x: number,
   y: number,
   footprintPx: number,
+  pixelScale?: number,
 ): void {
   const unit = footprintPx / ART_BOX;
   const c = colours(pal, look.role);
   const head = HEAD_ART[look.mark];
-  if (head.plate) g.art(PLATE_ART, c, x, y, unit);
+  const plate =
+    pixelScale === undefined
+      ? PLATE_ART
+      : alignArtToTexels(PLATE_ART, unit, pixelScale, [x * pixelScale, y * pixelScale]);
+  if (head.plate) g.art(plate, c, x, y, unit);
   g.art(head.shapes, c, x, y, unit);
 }
 
@@ -212,11 +242,11 @@ export function towerArtFit(sizePx: number): { x: number; y: number; footprintPx
 export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
   const corner = [0, 0] as const;
   const specs: FrameSpec[] = [
-    artFrame(PLATE_FRAME_KEY, PLATE_ART, cellPx, scale, corner, (g, pal, x0, y0, unit) =>
-      g.art(PLATE_ART, colours(pal, 'damage'), x0, y0, unit),
+    artFrame(PLATE_FRAME_KEY, PLATE_ART, cellPx, scale, corner, (draw, _g, pal) =>
+      draw(PLATE_ART, colours(pal, 'damage')),
     ),
-    artFrame(PAD_FRAME_KEY, PAD_ART, cellPx, scale, corner, (g, pal, x0, y0, unit) =>
-      g.art(PAD_ART, colours(pal, 'burst'), x0, y0, unit),
+    artFrame(PAD_FRAME_KEY, PAD_ART, cellPx, scale, corner, (draw, _g, pal) =>
+      draw(PAD_ART, colours(pal, 'burst')),
     ),
   ];
   for (const look of TOWER_LOOKS) {
@@ -224,9 +254,9 @@ export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
     for (const buffed of [false, true]) {
       const shapes = buffed ? [...BOOST_ART, ...head.shapes] : head.shapes;
       specs.push(
-        artFrame(headLookKey(look, buffed), shapes, cellPx, scale, corner, (g, pal, x0, y0, unit) =>
+        artFrame(headLookKey(look, buffed), shapes, cellPx, scale, corner, (draw, _g, pal) =>
           // The glow first, so the head draws over it, as in the frame.
-          g.art(shapes, colours(pal, look.role), x0, y0, unit),
+          draw(shapes, colours(pal, look.role)),
         ),
       );
     }
@@ -238,19 +268,19 @@ export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
         cellPx,
         scale,
         corner,
-        (g, pal, x0, y0, unit) => {
+        (draw, g, pal) => {
           const c = colours(pal, look.role);
           // The plate first, faded so that the head's fade below takes it the rest of the way
           // to `PENDING_PLATE_ALPHA`; then the head over it, opaque, so it covers the plate
           // exactly as a built tower's does; then both faded as ONE picture to the head's
           // `PENDING_ALPHA`; then the dashed rim at full opacity.
           if (under.length > 0) {
-            g.art(under, c, x0, y0, unit);
+            draw(under, c);
             g.fade(PENDING_PLATE_ALPHA / PENDING_ALPHA);
           }
-          g.art(head.shapes, c, x0, y0, unit);
+          draw(head.shapes, c);
           g.fade(PENDING_ALPHA);
-          g.art(PENDING_RIM_ART, c, x0, y0, unit);
+          draw(PENDING_RIM_ART, c);
         },
       ),
     );
@@ -262,8 +292,8 @@ export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
  *  centre, where its blast went off. */
 export function scorchFrameSpec(cellPx: number, scale: number): FrameSpec {
   const centre = [ART_BOX / 2, ART_BOX / 2] as const;
-  return artFrame(SCORCH_FRAME_KEY, SCORCH_ART, cellPx, scale, centre, (g, pal, x0, y0, unit) =>
-    g.art(SCORCH_ART, colours(pal, 'burst'), x0, y0, unit),
+  return artFrame(SCORCH_FRAME_KEY, SCORCH_ART, cellPx, scale, centre, (draw, _g, pal) =>
+    draw(SCORCH_ART, colours(pal, 'burst')),
   );
 }
 
