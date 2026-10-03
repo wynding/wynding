@@ -1,19 +1,27 @@
-// fire-rate.test.ts — no tower flashes more than three times a second (ADR 0003's
-// photosensitivity bound, WCAG 2.3.1), held against every shipped tower at the game's fastest
-// speed (visual pass T3, #181).
+// fire-rate.test.ts — no tower flashes more than three times in any one second (ADR 0003's
+// photosensitivity bound, WCAG 2.3.1), held against every shipped tower at every game speed
+// (visual pass T3, #181).
 //
 // A tower that fires shows the shot once — its head's muzzle flash, or its ring pulse
-// (`packages/render/src/tower-fire.ts`) — so it flashes exactly as often as it fires: at most
-// once per `cadenceTicks`, and render time runs as many times faster than the wall clock as
-// the game's speed. The worst case is therefore the shortest cadence in any shipped ruleset at
-// the fastest speed the game offers. Both are READ here — the cadences from the bundled
-// rulesets, the speeds from the real controller's speed toggle — so a faster tower, or a
-// faster game speed, fails this test instead of quietly strobing. (The game's own fixed tick
-// rate comes from the sim.)
+// (`packages/render/src/tower-fire.ts`) — when the shot's tracer is first seen: from its
+// launch tick to just under `FIRE_FEEDBACK_TICKS` after it. A tower fires at most once per
+// `cadenceTicks`, so four of its flashes take no less than three cadences less
+// `FIRE_FEEDBACK_TICKS` of game time (`shortestFourFlashMs`; the first seen as late as a shot
+// still shows, the fourth the moment it launches), and render time runs as many times faster
+// than the wall clock as the game's speed. The bound holds while that is at least a second
+// for every tower at every speed: no second then holds four flashes of one tower. The
+// cadences and the speeds are READ here — from the bundled rulesets and from the real
+// controller's speed toggle — so a faster tower, or a faster game speed, fails this test
+// instead of quietly strobing.
 
 import { describe, it, expect } from 'vitest';
 import { bundledRulesetIds, getBundledRuleset } from '@wynding/content';
-import { FIRE_FEEDBACK_TICKS, MAX_FLASHES_PER_SECOND, flashesPerSecond } from '@wynding/render';
+import {
+  FIRE_FEEDBACK_TICKS,
+  MAX_FLASHES_PER_SECOND,
+  flashesPerSecond,
+  shortestFourFlashMs,
+} from '@wynding/render';
 import { createController } from './controller';
 
 /** Every speed the game runs at: the controller's speed toggle, cycled until it repeats. */
@@ -44,26 +52,32 @@ describe('fire feedback flash rate (ADR 0003, WCAG 2.3.1)', () => {
     expect(gameSpeeds()).toEqual([1, 2]);
   });
 
-  it('no shipped tower flashes more than three times a second, even at the fastest speed', () => {
-    const fastest = Math.max(...gameSpeeds());
+  it('no shipped tower fits four flashes into one second, at any game speed', () => {
     const towers = cadencedTowers();
     expect(towers.length).toBeGreaterThan(0);
-    for (const t of towers) {
-      expect(flashesPerSecond(t.cadenceTicks, fastest), t.id).toBeLessThanOrEqual(
-        MAX_FLASHES_PER_SECOND,
-      );
+    for (const speed of gameSpeeds()) {
+      for (const t of towers) {
+        expect(
+          shortestFourFlashMs(t.cadenceTicks, speed),
+          `${t.id} at ${speed}×`,
+        ).toBeGreaterThanOrEqual(1000);
+      }
     }
   });
 
-  it('the worst case is the one docs/accessibility-checklist.md cites: antiair, 2⅔ a second at 2×', () => {
+  it('the closest is the one docs/accessibility-checklist.md cites: antiair at 2×, four flashes in no less than 1025 ms', () => {
     const fastest = Math.max(...gameSpeeds());
-    const rates = cadencedTowers().map((t) => ({
+    const windows = cadencedTowers().map((t) => ({
       id: t.id,
+      ms: shortestFourFlashMs(t.cadenceTicks, fastest),
       perSecond: flashesPerSecond(t.cadenceTicks, fastest),
     }));
-    const worst = rates.reduce((a, b) => (b.perSecond > a.perSecond ? b : a));
-    expect(worst.id).toBe('wynding-core/antiair'); // every 15 ticks
-    expect(worst.perSecond).toBeCloseTo(8 / 3, 9);
+    const closest = windows.reduce((a, b) => (b.ms < a.ms ? b : a));
+    expect(closest.id).toBe('wynding-core/antiair'); // every 15 ticks
+    expect(closest.ms).toBe(1025);
+    // ... 2⅔ flashes a second on average, under the three the bound allows.
+    expect(closest.perSecond).toBeCloseTo(8 / 3, 9);
+    expect(closest.perSecond).toBeLessThan(MAX_FLASHES_PER_SECOND);
   });
 
   it('each shot’s flash is over before the tower’s next shot, so no two run together', () => {
