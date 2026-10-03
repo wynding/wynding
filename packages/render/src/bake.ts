@@ -154,14 +154,22 @@ export interface BakeInputs {
   readonly mode: ColourMode;
 }
 
+/** Whether two sets of bake inputs would bake the same art. */
+export function sameInputs(a: BakeInputs, b: BakeInputs): boolean {
+  return a.cellPx === b.cellPx && a.dpr === b.dpr && a.mode === b.mode;
+}
+
 export interface BakeTracker {
   /** True when the art must be (re)baked for `inputs`: until a bake has succeeded, and
    *  whenever the cell size, the effective dpr or the colour mode differs from the last
-   *  SUCCESSFUL bake's. Asking records nothing — so a bake that fails is simply asked for
-   *  again on the next frame, with no state to undo. */
+   *  SUCCESSFUL bake's. Asking records nothing, so a bake that fails leaves the tracker as it
+   *  was; when it is tried again is the runner's decision (`bake-runner.ts`). */
   needsBake(inputs: BakeInputs): boolean;
   /** Record that a bake for `inputs` succeeded. */
   recordBaked(inputs: BakeInputs): void;
+  /** The inputs of the last successful bake — what the art on screen was baked for — or null
+   *  before one has succeeded. */
+  baked(): BakeInputs | null;
   /** A fresh version for one bake attempt's texture keys (1, 2, 3, …). Every attempt gets
    *  its own, failed or not, so a rebake always creates its textures under new keys,
    *  repoints the sprites, and only then destroys the old ones. */
@@ -173,15 +181,13 @@ export function createBakeTracker(): BakeTracker {
   let version = 0;
   return {
     needsBake(inputs) {
-      return (
-        last === null ||
-        last.cellPx !== inputs.cellPx ||
-        last.dpr !== inputs.dpr ||
-        last.mode !== inputs.mode
-      );
+      return last === null || !sameInputs(last, inputs);
     },
     recordBaked(inputs) {
       last = { cellPx: inputs.cellPx, dpr: inputs.dpr, mode: inputs.mode };
+    },
+    baked() {
+      return last;
     },
     nextVersion() {
       version += 1;

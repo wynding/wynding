@@ -7,6 +7,7 @@ import {
   bakedTextureKey,
   createBakeTracker,
   fitScale,
+  sameInputs,
   layoutAtlas,
   layoutBoard,
   paintAtlas,
@@ -303,7 +304,7 @@ describe('createBakeTracker — rebake only when the art’s inputs change', () 
     for (let i = 0; i < 5; i++) expect(t.needsBake(at(30))).toBe(false);
   });
 
-  it('records nothing by being asked: a bake that never succeeded is asked for again, every frame', () => {
+  it('records nothing by being asked: until a bake succeeds, every ask says one is due', () => {
     // The ordering that made a failed bake permanent: asking used to RECORD the inputs, so a
     // bake that then failed was not retried until the next resize.
     const t = createBakeTracker();
@@ -343,6 +344,24 @@ describe('createBakeTracker — rebake only when the art’s inputs change', () 
     t.recordBaked(at(30));
     t.recordBaked(at(31));
     expect(t.needsBake(at(30))).toBe(true);
+  });
+
+  it('knows what the art on screen was baked for: nothing until a bake succeeds, then the last success', () => {
+    const t = createBakeTracker();
+    expect(t.baked()).toBeNull();
+    t.needsBake(at(30)); // asking records nothing
+    expect(t.baked()).toBeNull();
+    t.recordBaked(at(30, 2, 'protan'));
+    expect(t.baked()).toEqual(at(30, 2, 'protan'));
+    t.recordBaked(at(24, 1.5));
+    expect(t.baked()).toEqual(at(24, 1.5));
+  });
+
+  it('counts two sets of inputs the same only when the cell size, dpr and colour mode all match', () => {
+    expect(sameInputs(at(30, 2, 'default'), at(30, 2, 'default'))).toBe(true);
+    expect(sameInputs(at(30, 2, 'default'), at(31, 2, 'default'))).toBe(false);
+    expect(sameInputs(at(30, 2, 'default'), at(30, 1.5, 'default'))).toBe(false);
+    expect(sameInputs(at(30, 2, 'default'), at(30, 2, 'tritan'))).toBe(false);
   });
 
   it('gives every attempt its own version, failed or not, so no two attempts share a texture key', () => {

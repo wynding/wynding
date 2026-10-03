@@ -22,8 +22,14 @@ import { createDprTracker, clampDpr } from './dpr-tracker';
 import { createBakeRunner, type BakedArt } from './bake-runner';
 import { createSpritePool } from './sprite-pool';
 import { createSparkStore } from './sparks';
-import { drawBoardFrame, resetBoardFrame, type BoardTargets, type LiveLayers } from './board-frame';
-import { layerDepth, type BoardLayer } from './layers';
+import {
+  createLiveLayers,
+  createSpriteLayers,
+  drawBoardFrame,
+  resetBoardFrame,
+  type BoardTargets,
+} from './board-frame';
+import { layerDepth } from './layers';
 import type { RenderVM, RenderOverlay, RenderHandle } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -78,11 +84,12 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // device pixels need the exact mapping, or every texel would straddle two pixels.)
   // Effective dpr is clamped to ≤2 (ADR 0005: fill cost scales dpr²).
   //
-  // The canvas's CSS box stays the element's rect, as hidpi.spec.ts pins it. A whole-pixel
-  // rect maps the backing store 1:1. A fractional one (759.33 px, say) has the compositor fit
-  // round(rect × dpr) backing pixels into rect × dpr device pixels, blending some vertical edges
-  // by part of a pixel. Sizing the box to backing ÷ dpr instead was measured in #181: it still
-  // blended them (by an eighth of a pixel), and it rounds the box away from the rect.
+  // The canvas's CSS box stays the element's rect, as hidpi.spec.ts pins it. A rect whose
+  // width × dpr (and height × dpr) is whole maps the backing store 1:1. Otherwise (759.33 px at
+  // dpr 2, say) the compositor fits round(rect × dpr) backing pixels into rect × dpr device
+  // pixels, blending some vertical edges by part of a pixel. Sizing the box to backing ÷ dpr
+  // instead was measured in #181: it still blended them (by an eighth of a pixel), and it
+  // rounds the box away from the rect.
   const applyBackingStoreSize = (cssWidth: number, cssHeight: number, dpr: number): void => {
     const scene = game.scene.scenes[0];
     if (scene === undefined) return;
@@ -156,7 +163,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
 
   // The art the sprites are showing this frame — what a sprite created mid-frame is given.
   let art: BakedArt | null = null;
-  const spritePool = (layer: BoardLayer) =>
+  // Each pool's sprites take their depth from the name the pool was made under.
+  const pools = createSpriteLayers((layer) =>
     createSpritePool<Phaser.GameObjects.Image>((p) => {
       const current = art as BakedArt; // pools are synced only once a bake has succeeded
       return sceneOf()
@@ -164,12 +172,12 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
         .setOrigin(0, 0)
         .setScale(1 / current.atlas.scale)
         .setDepth(layerDepth(layer));
-    });
-  const pools = {
-    towers: spritePool('towers'),
-    pending: spritePool('pending'),
-    creeps: spritePool('creeps'),
-  };
+    }),
+  );
+  // The board image, made at READY: hidden, on Phaser's blank default texture, until a bake
+  // succeeds — `show` only ever repoints it. Made up front rather than by the first `show`, so
+  // a show that fails partway (the runner then removes that attempt's textures) can never
+  // leave a VISIBLE image on a removed texture: nothing shows it before a bake has succeeded.
   let boardImage: Phaser.GameObjects.Image | null = null;
 
   const maxTextureSize = (): number => {
@@ -213,15 +221,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       if (game.textures.exists(key)) game.textures.remove(key);
     },
     show(next) {
-      if (boardImage === null) {
-        boardImage = sceneOf()
-          .add.image(0, 0, next.boardKey)
-          .setOrigin(0, 0)
-          .setDepth(layerDepth('board'));
-      } else {
-        boardImage.setTexture(next.boardKey);
-      }
-      boardImage.setScale(1 / next.board.scale);
+      boardImage?.setTexture(next.boardKey).setScale(1 / next.board.scale);
       for (const pool of [pools.towers, pools.pending, pools.creeps]) {
         pool.forEach((sprite, frame) =>
           sprite.setTexture(next.atlasKey, frame).setScale(1 / next.atlas.scale),
@@ -231,21 +231,19 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     log: console,
   });
 
-  // The live layers (`layers.ts`), created at READY.
+  // What a frame draws into — the board image, the live layers and the sprite pools, each at
+  // its depth in `layers.ts` — complete at READY.
   let targets: BoardTargets | null = null;
   game.events.once(Phaser.Core.Events.READY, () => {
     const scene = sceneOf();
-    const layers: LiveLayers = {
-      shells: scene.add.graphics().setDepth(layerDepth('shells')),
-      effects: scene.add.graphics().setDepth(layerDepth('effects')),
-      cues: scene.add.graphics().setDepth(layerDepth('cues')),
-    };
-    // The board image is made by the first successful bake (`show`); until then nothing is
-    // drawn, so this stand-in is never touched.
-    const board = {
-      setPosition: (x: number, y: number) => boardImage?.setPosition(x, y),
-      setVisible: (visible: boolean) => boardImage?.setVisible(visible),
-    };
+    // Each live layer's depth comes from the name it was made under.
+    const layers = createLiveLayers((layer) => scene.add.graphics().setDepth(layerDepth(layer)));
+    const board = scene.add
+      .image(0, 0, '__DEFAULT')
+      .setOrigin(0, 0)
+      .setDepth(layerDepth('board'))
+      .setVisible(false);
+    boardImage = board;
     targets = { board, layers, ...pools };
     syncProjection(); // seed the projection from the current (post-layout) size
     if (typeof ResizeObserver !== 'undefined') {
@@ -272,7 +270,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       { cellPx: projection.cellPx, dpr: projection.dpr, mode: overlay.colourMode },
       maxTextureSize(),
     );
-    if (art === null) return; // no bake has succeeded yet — `ensure` retries next frame
+    if (art === null) return; // no bake has succeeded yet — `ensure` keeps trying (bake-runner.ts)
     drawBoardFrame(targets, {
       prevVm,
       curVm,

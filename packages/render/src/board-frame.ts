@@ -48,10 +48,33 @@ export interface LiveLayers {
   readonly cues: LayerGraphics;
 }
 
+/** A live layer's name — the one it is made under, and its depth is read from. */
+export type LiveLayerName = keyof LiveLayers;
+
+/** The three live layers, each made by `make` under its own name: whatever depth `make` gives
+ *  a layer comes from that layer's own entry in `layers.ts`, never a neighbour's. */
+export function createLiveLayers<G extends LayerGraphics>(
+  make: (layer: LiveLayerName) => G,
+): { readonly shells: G; readonly effects: G; readonly cues: G } {
+  return { shells: make('shells'), effects: make('effects'), cues: make('cues') };
+}
+
 /** A sprite layer: shows a placement list (`sprite-pool.ts`). */
 export interface SpriteLayer {
   sync(placements: readonly SpritePlacement[]): void;
   hideAll(): void;
+}
+
+/** A sprite layer's name — the one it is made under, and its depth is read from. */
+export type SpriteLayerName = 'towers' | 'pending' | 'creeps';
+
+/** The three sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
+export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): {
+  readonly towers: S;
+  readonly pending: S;
+  readonly creeps: S;
+} {
+  return { towers: make('towers'), pending: make('pending'), creeps: make('creeps') };
 }
 
 /** The baked board texture's image. */
