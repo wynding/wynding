@@ -1,8 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
-import { getBundledRuleset } from '@wynding/content';
-import type { SimInput } from '@wynding/sim';
-import { createController, enqueueVerdict, outcomesMatch, type Controller } from './controller';
+import { getBundledRuleset, defaultBoardId } from '@wynding/content';
+import { compileRuleset, type SimInput } from '@wynding/sim';
+import {
+  createController,
+  enqueueVerdict,
+  outcomesMatch,
+  type Controller,
+  type RunStats,
+} from './controller';
+import { playScript, type ScriptedPlacement } from './scripted-run';
+// The content package's showcase build and its shared greedy runner, reached by relative path
+// as `apps/server/src/replay-parity.test.ts` does (its header says why: the package's
+// `exports` map has no subpath for test support). Imported, never copied, so these tests
+// cannot drift onto a different build than the one the content suite proves wins.
+import { WINNER_A } from '../../../packages/content/src/showcase-builds';
+import { runBuildScript } from '../../../packages/content/src/script-runner';
 
 const TICK = 50; // MS_PER_TICK
 
@@ -1771,5 +1784,236 @@ describe('controller — call-wave readiness (UiState.callWaveReady, PLAN.md P3 
     runToTerminal(c);
     expect(c.isTerminal()).toBe(true);
     expect(c.uiState().callWaveReady).toBe(false);
+  });
+});
+
+describe('controller — run stats for the results panel (#181 H2)', () => {
+  /** The seed WINNER_A is tuned against (`packages/content/src/m2-golden.test.ts`'s
+   *  `SCENARIO_SEED`, restated by `apps/server`'s replay-parity test for the same reason). */
+  const SCENARIO_SEED = 0x5eed;
+
+  interface Tally {
+    readonly phase: string;
+    readonly finalTick: number;
+    readonly stats: RunStats;
+  }
+
+  /** An INDEPENDENT account of a scripted run: the PURE sim, through the content package's
+   *  own runner — never the controller, and never the counters `runStats` reads
+   *  (`waveSpawnCursor`, `leakedCount`, `waveResolved`, `waveCursor`). Creeps are followed
+   *  by entity id from tick to tick: an id seen on the board entered it; on a tick that cost
+   *  lives, the lives lost are the creeps that leaked (asserted to be one-life creeps, so a
+   *  costlier leak fails here rather than miscounting); every other id that vanished died. A
+   *  wave is cleared once all its scheduled creeps have entered and none is left; launched
+   *  once its launch tick is stamped. Towers built are the placements the runner saw
+   *  accepted — the showcase build never sells, and none of its towers is a mine. */
+  function tally(plan: readonly ScriptedPlacement[]): Tally {
+    const bundle = getBundledRuleset();
+    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const waveOf = new Map<number, number>();
+    let prevIds: number[] = [];
+    let prevKinds: string[] = [];
+    let prevLives = 0;
+    let leaks = 0;
+    let stopped = 0;
+    const { state, placedCount } = runBuildScript(ruleset, SCENARIO_SEED, plan, {
+      beforeStep: (s) => {
+        prevIds = [...s.creeps.id];
+        prevKinds = [...s.creeps.creepId];
+        prevLives = s.lives;
+      },
+      afterStep: (s) => {
+        s.creeps.id.forEach((id, i) => waveOf.set(id, s.creeps.wave[i]!));
+        const now = new Set(s.creeps.id);
+        const vanished = prevIds.flatMap((id, i) => (now.has(id) ? [] : [prevKinds[i]!]));
+        const livesLost = prevLives - s.lives;
+        if (livesLost > 0) {
+          for (const kind of vanished) expect(ruleset.creepById[kind]!.leakCost).toBe(1);
+        }
+        leaks += livesLost;
+        stopped += vanished.length - livesLost;
+      },
+    });
+    const entered = new Map<number, number>();
+    for (const wave of waveOf.values()) entered.set(wave, (entered.get(wave) ?? 0) + 1);
+    const stillOnBoard = new Set(state.creeps.wave);
+    expect(state.towers.id, 'the build stands whole: no sell, no detonation').toHaveLength(
+      placedCount,
+    );
+    return {
+      phase: state.phase,
+      finalTick: state.tick,
+      stats: {
+        waveCount: ruleset.waves.length,
+        wavesLaunched: state.waveLaunchTick.filter((t) => t !== null).length,
+        wavesCleared: ruleset.waves.filter(
+          (w, k) => entered.get(k) === w.spawns.length && !stillOnBoard.has(k),
+        ).length,
+        creepsStopped: stopped,
+        leaks,
+        towersBuilt: placedCount,
+      },
+    };
+  }
+
+  it(
+    'a scripted WIN — the showcase build — reads ten of ten waves cleared, all 117 creeps stopped, no leak, 40 towers',
+    { timeout: 60_000 },
+    () => {
+      const expected = tally(WINNER_A);
+      // Pinned, so the scenario is concrete and a content retune names itself here. The
+      // content suite pins the same run from its side: won at tick 4070 on 10 lives, 117
+      // kills = every scheduled creep (`story-showcase.test.ts`).
+      expect(expected).toEqual({
+        phase: 'won',
+        finalTick: 4070,
+        stats: {
+          waveCount: 10,
+          wavesLaunched: 10,
+          wavesCleared: 10,
+          creepsStopped: 117,
+          leaks: 0,
+          towersBuilt: 40,
+        },
+      });
+
+      const c = createController(SCENARIO_SEED);
+      expect(playScript(c, WINNER_A)).toBe(40);
+      // The controller replayed the content runner's run tick for tick — the same outcome on
+      // the same tick — so the account above is an account of THIS run.
+      expect(c.hud().won).toBe(true);
+      expect(c.frame().curVm.tick).toBe(expected.finalTick);
+      expect(c.runStats()).toEqual(expected.stats);
+    },
+  );
+
+  it(
+    'a scripted LOSS — the showcase build cut to 12 towers — reads wave 9 of 10, 8 cleared, 93 stopped, 10 leaks, 12 towers',
+    { timeout: 60_000 },
+    () => {
+      // `apps/server`'s replay-parity loss fixture: enough defense to bank kills across the
+      // early arc, far too little to survive it.
+      const plan = WINNER_A.slice(0, 12);
+      const expected = tally(plan);
+      expect(expected).toEqual({
+        phase: 'lost',
+        finalTick: 3187,
+        stats: {
+          waveCount: 10,
+          wavesLaunched: 9,
+          wavesCleared: 8,
+          creepsStopped: 93,
+          leaks: 10,
+          towersBuilt: 12,
+        },
+      });
+
+      const c = createController(SCENARIO_SEED);
+      expect(playScript(c, plan)).toBe(12);
+      expect(c.hud().phase).toBe('lost');
+      expect(c.frame().curVm.tick).toBe(expected.finalTick);
+      expect(c.runStats()).toEqual(expected.stats);
+      // A loss leaves creeps on the board, so "stopped" is not merely "entered − leaked":
+      // the five still walking are neither.
+      expect(c.frame().curVm.creeps).toHaveLength(5);
+    },
+  );
+
+  it('towers built keeps a sold tower and a detonated mine', () => {
+    const c = createController(1);
+    c.start();
+    c.armTower('basic');
+    c.clickAt(3, 3);
+    // Off the lane but inside the mine's trigger ring of it (the mine test above uses the
+    // same cell), so a wave-0 creep walking past sets it off.
+    c.armTower('mine');
+    c.clickAt(10, 9);
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(2);
+    expect(c.runStats().towersBuilt).toBe(2);
+
+    c.aimAt(3, 3); // select the basic tower
+    expect(c.sellSelected()).toBe(true);
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+    expect(c.runStats().towersBuilt, 'a sold tower was still built').toBe(2);
+
+    let n = 0;
+    while (c.frame().curVm.towers.length > 0 && n < 600) {
+      tick(c);
+      n++;
+    }
+    expect(c.frame().curVm.towers, 'the mine detonated').toHaveLength(0);
+    expect(c.runStats().towersBuilt, 'a detonated mine was still built').toBe(2);
+  });
+
+  it('towers built counts a mine set off on the very tick it was placed', () => {
+    // Placement runs before combat inside one `step()`, and a mine has no warm-up, so a mine
+    // dropped beside a creep is placed and consumed in the same tick: its row never stands at a
+    // boundary. A probe run finds that tick — the mine at (10, 9) as above, off the lane, so it
+    // does not change the creeps' path — then the same run, without it, places it there.
+    const probe = createController(1);
+    probe.start();
+    probe.armTower('mine');
+    probe.clickAt(10, 9);
+    let steps = 0;
+    do {
+      tick(probe);
+      steps++;
+    } while (probe.frame().curVm.towers.length > 0 && steps < 600);
+    expect(probe.frame().curVm.towers, 'the probe mine detonated').toHaveLength(0);
+    expect(steps, 'it stood for a while first, so the probe saw it').toBeGreaterThan(1);
+
+    const c = createController(1);
+    c.start();
+    for (let i = 1; i < steps; i++) tick(c);
+    c.armTower('mine');
+    c.clickAt(10, 9);
+    expect(c.uiState().lastOutcome?.kind).toBe('placed');
+    tick(c);
+    expect(c.frame().curVm.towers, 'placed and set off inside one step').toHaveLength(0);
+    expect(c.runStats().towersBuilt).toBe(1);
+  });
+
+  it('towers built counts committed towers only — a pending build is not one, and one sold inside its own buffer never stood', () => {
+    const c = createController(1);
+    c.start();
+    c.pause();
+    c.armTower('basic');
+    c.clickAt(3, 3); // pending: queued, not committed
+    expect(c.frame().pendingAdds).toHaveLength(1);
+    expect(c.runStats().towersBuilt).toBe(0);
+    c.aimAt(3, 3);
+    expect(c.sellSelected()).toBe(true); // sold back inside the same buffer
+    c.armTower('basic');
+    c.clickAt(9, 3); // ...and a second build that does commit
+    c.resume();
+    tick(c);
+    expect(c.frame().curVm.towers).toHaveLength(1);
+    expect(c.runStats().towersBuilt).toBe(1);
+  });
+
+  it('starts at zero and resets with the run (Play again)', () => {
+    const c = createController(1);
+    const zero = {
+      waveCount: c.ruleset.waves.length,
+      wavesLaunched: 0,
+      wavesCleared: 0,
+      creepsStopped: 0,
+      leaks: 0,
+      towersBuilt: 0,
+    };
+    expect(c.runStats()).toEqual(zero);
+    c.start();
+    c.armTower('basic');
+    c.clickAt(3, 3);
+    runToTerminal(c); // a one-tower loss: waves launched, creeps leaked
+    const lost = c.runStats();
+    expect(lost.towersBuilt).toBe(1);
+    expect(lost.leaks).toBeGreaterThan(0);
+    expect(lost.wavesLaunched).toBeGreaterThan(0);
+
+    c.startRun(2);
+    expect(c.runStats()).toEqual(zero);
   });
 });
