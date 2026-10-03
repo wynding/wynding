@@ -270,6 +270,15 @@ describe('createBakeTracker — rebake only when the art’s inputs change', () 
     expect(t.version).toBe(3);
   });
 
+  it('calls for a fresh bake after a failed one is invalidated, under a new version', () => {
+    const t = createBakeTracker();
+    t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' });
+    t.invalidate();
+    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' })).toBe(true);
+    expect(t.version).toBe(2);
+    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' })).toBe(false);
+  });
+
   it('names each bake’s textures with its version, so the old ones can outlive the new ones’ creation', () => {
     expect(bakedTextureKey('wy-atlas', 3)).toBe('wy-atlas-3');
     expect(bakedTextureKey('wy-board', 1)).not.toBe(bakedTextureKey('wy-board', 2));

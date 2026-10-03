@@ -56,6 +56,12 @@ interface Spark extends SparkPoint {
   readonly bornAt: number;
 }
 
+/** A baked texture's key and the canvas it was uploaded from. */
+interface BakedTexture {
+  readonly key: string;
+  readonly canvas: HTMLCanvasElement;
+}
+
 /** Pooled atlas sprites for one layer. Images are never destroyed, only re-pointed and
  *  hidden, and sprite `i` is always the list's `i`th entry — created in index order at one
  *  depth, so Phaser's stable depth sort draws them in list order. */
@@ -201,9 +207,14 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // ---- The baked layers: the board image and the atlas sprite pools ----
   const bakeTracker = createBakeTracker();
   let boardImage: Phaser.GameObjects.Image | null = null;
-  let boardKey: string | null = null;
   let atlas: AtlasLayout | null = null;
-  let atlasKey: string | null = null;
+  /** The textures the current bake made, and the canvases they were uploaded from. */
+  const baked: { board: BakedTexture | null; atlas: BakedTexture | null } = {
+    board: null,
+    atlas: null,
+  };
+  // A bake that cannot get a canvas warns once per failing streak, not once per frame.
+  let bakeFailing = false;
   const towerPool: SpritePool = { depth: layerDepth('towers'), images: [], frames: [] };
   const pendingPool: SpritePool = { depth: layerDepth('pending'), images: [], frames: [] };
   const creepPool: SpritePool = { depth: layerDepth('creeps'), images: [], frames: [] };
@@ -216,58 +227,74 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     return Number.isFinite(max) && max > 0 ? max : FALLBACK_MAX_TEXTURE_SIZE;
   };
 
-  /** A fresh canvas of `width × height`, painted by `paint`, registered as texture `key`. A
-   *  plain `Texture` over the canvas, not a `CanvasTexture`: that class reads the whole
-   *  canvas back into a retained `ImageData` on construction, a full-board-sized copy kept
-   *  on the JS heap for nothing — this canvas is uploaded once and never read. */
-  const addPaintedTexture = (
-    scene: Phaser.Scene,
-    key: string,
+  /** Give a canvas's backing store back NOW rather than whenever it is collected: iOS Safari
+   *  counts a dropped canvas against its page-wide canvas-memory cap until GC, and a window
+   *  being resized rebakes on every cell-size step. Only ever applied to a canvas no texture
+   *  uses any more — a live one is what Phaser re-uploads from after a lost WebGL context. */
+  const releaseCanvas = (canvas: HTMLCanvasElement): void => {
+    canvas.width = 0;
+    canvas.height = 0;
+  };
+
+  /** A blank canvas of `width × height` and its 2D context — or null when the browser will
+   *  not give one. iOS Safari refuses a 2D context once that canvas-memory cap is reached, so
+   *  this is a real path on a phone, not a typing formality. */
+  const newCanvas = (
     width: number,
     height: number,
-    paint: (ctx: CanvasRenderingContext2D) => void,
-  ): Phaser.Textures.Texture | null => {
+  ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    if (ctx === null) return null;
-    paint(ctx);
-    // `addImage` accepts any canvas-image source at runtime (Phaser's TextureSource detects
-    // a canvas and uploads it as one); its type names only HTMLImageElement.
-    return scene.textures.addImage(key, canvas as unknown as HTMLImageElement);
+    if (ctx === null) {
+      releaseCanvas(canvas);
+      return null;
+    }
+    return { canvas, ctx };
   };
 
   /** Paint the board and the atlas for the current projection and `mode`, under fresh
    *  versioned keys; repoint the board image and every pooled sprite; THEN destroy the
-   *  previous textures — nothing is ever pointed at a texture that is gone. */
+   *  previous textures — nothing is ever pointed at a texture that is gone. The textures are
+   *  plain `Texture`s over the canvases, not `CanvasTexture`s: that class reads the whole
+   *  canvas back into a retained `ImageData` on construction, a board-sized copy kept on the
+   *  JS heap for nothing — these canvases are uploaded once and never read. */
   const rebake = (scene: Phaser.Scene, mode: ColourMode): void => {
     const pal = resolvePalette(mode);
     const maxTex = maxTextureSize();
     const version = bakeTracker.version;
     const cellPx = projection.cellPx;
-
     const board = layoutBoard(geometry, cellPx, projection.dpr, maxTex);
-    const nextBoardKey = bakedTextureKey('wy-board', version);
-    const boardTexture = addPaintedTexture(scene, nextBoardKey, board.width, board.height, (ctx) =>
-      paintBoard(ctx, boardPaintOps(geometry, pal), geometry, cellPx, board),
-    );
-
     const layout = layoutAtlas(cellPx, projection.dpr, maxTex);
-    const nextAtlasKey = bakedTextureKey('wy-atlas', version);
-    const atlasTexture = addPaintedTexture(
-      scene,
-      nextAtlasKey,
-      layout.width,
-      layout.height,
-      (ctx) => paintAtlas(ctx, layout, pal),
-    );
-    if (boardTexture === null || atlasTexture === null) {
-      // No 2D context: keep whatever art is already showing, and leak nothing half-made.
-      if (boardTexture !== null) scene.textures.remove(nextBoardKey);
-      if (atlasTexture !== null) scene.textures.remove(nextAtlasKey);
+
+    // Both canvases before any painting or upload, so a refusal wastes no work.
+    const boardCanvas = newCanvas(board.width, board.height);
+    const atlasCanvas = boardCanvas === null ? null : newCanvas(layout.width, layout.height);
+    if (boardCanvas === null || atlasCanvas === null) {
+      // Keep whatever art is showing and try again next frame: a canvas-memory refusal
+      // clears once dropped canvases are collected, and waiting for the next resize could
+      // leave a first bake's board blank for good.
+      if (boardCanvas !== null) releaseCanvas(boardCanvas.canvas);
+      bakeTracker.invalidate();
+      if (!bakeFailing) console.warn('board art could not be baked (no 2D canvas); retrying');
+      bakeFailing = true;
       return;
     }
+    bakeFailing = false;
+    paintBoard(boardCanvas.ctx, boardPaintOps(geometry, pal), geometry, cellPx, board);
+    paintAtlas(atlasCanvas.ctx, layout, pal);
+
+    // `addImage` accepts any canvas-image source at runtime (Phaser's TextureSource detects
+    // a canvas and uploads it as one); its type names only HTMLImageElement. It returns null
+    // only for a key already in use, which a fresh version never is.
+    const nextBoardKey = bakedTextureKey('wy-board', version);
+    const nextAtlasKey = bakedTextureKey('wy-atlas', version);
+    scene.textures.addImage(nextBoardKey, boardCanvas.canvas as unknown as HTMLImageElement);
+    const atlasTexture = scene.textures.addImage(
+      nextAtlasKey,
+      atlasCanvas.canvas as unknown as HTMLImageElement,
+    ) as Phaser.Textures.Texture;
     for (const f of layout.frames.values()) atlasTexture.add(f.key, 0, f.x, f.y, f.width, f.height);
 
     if (boardImage === null) {
@@ -284,10 +311,13 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
         image.setTexture(nextAtlasKey, pool.frames[i]).setScale(1 / layout.scale),
       );
     }
-    if (boardKey !== null) scene.textures.remove(boardKey);
-    if (atlasKey !== null) scene.textures.remove(atlasKey);
-    boardKey = nextBoardKey;
-    atlasKey = nextAtlasKey;
+    for (const old of [baked.board, baked.atlas]) {
+      if (old === null) continue;
+      scene.textures.remove(old.key);
+      releaseCanvas(old.canvas);
+    }
+    baked.board = { key: nextBoardKey, canvas: boardCanvas.canvas };
+    baked.atlas = { key: nextAtlasKey, canvas: atlasCanvas.canvas };
     atlas = layout;
   };
 
@@ -457,7 +487,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     ) {
       rebake(scene, overlay.colourMode);
     }
-    if (atlas === null || atlasKey === null || boardImage === null) return; // first bake failed
+    const atlasKey = baked.atlas?.key;
+    // No bake has succeeded yet (`rebake` retries every frame until one does).
+    if (atlas === null || atlasKey === undefined || boardImage === null) return;
     const pal = resolvePalette(overlay.colourMode); // resolve once per frame, pass down
     // Computed ONCE and shared: the creep pass places these points; the tracer pass
     // reuses the SAME interpolated points as its lerp targets (#32/P6) so a tracer

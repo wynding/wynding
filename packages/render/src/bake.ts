@@ -159,6 +159,10 @@ export interface BakeTracker {
    *  `true` advances `version`, so a rebake can create its textures under fresh keys,
    *  repoint the sprites, and only then destroy the old ones. */
   needsBake(inputs: BakeInputs): boolean;
+  /** Forget the last bake, so the next `needsBake` calls for another whatever its inputs. For
+   *  a bake that could not complete — no canvas to paint into — which must be retried rather
+   *  than leave the board on missing or stale art until the next resize. */
+  invalidate(): void;
   /** How many bakes `needsBake` has called for so far. */
   readonly version: number;
 }
@@ -179,6 +183,9 @@ export function createBakeTracker(): BakeTracker {
       last = { cellPx: inputs.cellPx, dpr: inputs.dpr, mode: inputs.mode };
       version += 1;
       return true;
+    },
+    invalidate() {
+      last = null;
     },
     get version() {
       return version;
