@@ -253,9 +253,11 @@ type CreepIn = Pick<
   | 'boss'
 >;
 
+// Off the diagonal (x ≠ y) on purpose: a cue or pip drawn with its coordinates swapped must
+// land somewhere else, or the centre tests below could not see it.
 const creep = (opts: Partial<CreepIn> = {}): CreepIn => ({
   x: 5 * 256,
-  y: 5 * 256,
+  y: 3 * 256,
   hpFrac: 1,
   creepId: 'normal',
   domain: 'ground',

@@ -10,12 +10,16 @@ type Op = { op: string; args: unknown[] };
 
 /** A recording `Canvas2DLike`: every method call AND every style write, in order. Style
  *  writes are recorded as `set:<prop>` so a test can see which style a fill or stroke ran
- *  under. */
+ *  under. Its `arc` rejects a negative radius the way a real 2D context does (the HTML
+ *  spec's `IndexSizeError`), so a path that would throw in a browser throws here too. */
 function fakeContext(): Canvas2DLike & { ops: Op[] } {
   const ops: Op[] = [];
   const call =
     (op: string) =>
     (...args: unknown[]): void => {
+      if (op === 'arc' && (args[2] as number) < 0) {
+        throw new RangeError(`IndexSizeError: arc radius ${String(args[2])} is negative`);
+      }
       ops.push({ op, args });
     };
   const state: Record<string, unknown> = {
@@ -83,6 +87,20 @@ describe('canvasGraphics — Phaser Graphics semantics over a 2D context', () =>
     const styleWrites = ctx.ops.filter((o) => o.op === 'set:strokeStyle').map((o) => o.args[0]);
     expect(styleWrites).toEqual(['rgba(0, 158, 115, 1)', 'rgba(0, 158, 115, 1)']);
     expect(ctx.ops.filter((o) => o.op === 'set:lineWidth').map((o) => o.args[0])).toEqual([3, 3]);
+  });
+
+  it('LATCHES fills too: a fillStyle with no alpha fills opaque, and holds until restated', () => {
+    const ctx = fakeContext();
+    const g = canvasGraphics(ctx);
+    g.fillStyle(0xf0e442);
+    g.fillCircle(0, 0, 4);
+    g.fillTriangle(0, 0, 4, 0, 0, 4);
+    const fills = ctx.ops.filter((o) => o.op === 'set:fillStyle').map((o) => o.args[0]);
+    expect(fills).toEqual(['rgba(240, 228, 66, 1)', 'rgba(240, 228, 66, 1)']);
+    // ... and an opaque fill is what a rect batches under: no alpha means alpha 1.
+    g.fillRect(0, 0, 2, 2);
+    g.flush();
+    expect(ctx.ops.filter((o) => o.op === 'rect')).toHaveLength(1);
   });
 
   it('composites every primitive ON ITS OWN — two translucent strokes are two stroke() calls', () => {
@@ -206,6 +224,27 @@ describe('canvasGraphics — Phaser Graphics semantics over a 2D context', () =>
       { op: 'arc', args: [2, 2, 2, -Math.PI, -HALF_PI] },
       { op: 'stroke', args: [] },
     ]);
+  });
+
+  it('never hands arc() a negative radius — a rect smaller than its 2px inset strokes at radius 0', () => {
+    // The 1px-cell fallback (a board under ~56×48 CSS px, or hidden): a 2×2 footprint is
+    // 2px, so the pending outline's `strokeRoundedRect(x + 2, y + 2, size - 4, size - 4, 6)`
+    // is −2 × −2, and half its shorter side is −1. A real context throws on that.
+    const ctx = fakeContext();
+    expect(() => canvasGraphics(ctx).strokeRoundedRect(3, 3, -2, -2, 6)).not.toThrow();
+    const radii = ctx.ops.filter((o) => o.op === 'arc').map((o) => o.args[2]);
+    expect(radii).toEqual([0, 0, 0, 0]);
+  });
+
+  it('fills a rounded rect at its radius’s magnitude, as Phaser does, and clamps a circle’s at 0', () => {
+    const fill = fakeContext();
+    canvasGraphics(fill).fillRoundedRect(0, 0, 40, 40, -6);
+    expect(fill.ops.filter((o) => o.op === 'arc').map((o) => o.args[2])).toEqual([6, 6, 6, 6]);
+    const circles = fakeContext();
+    const g = canvasGraphics(circles);
+    expect(() => g.fillCircle(5, 5, -1)).not.toThrow();
+    expect(() => g.strokeCircle(5, 5, -3)).not.toThrow();
+    expect(circles.ops.filter((o) => o.op === 'arc').map((o) => o.args[2])).toEqual([0, 0]);
   });
 
   it("a rounded rect with no radius takes Phaser's 20px default", () => {

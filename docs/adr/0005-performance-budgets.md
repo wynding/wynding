@@ -1109,30 +1109,31 @@ scale instead of failing.
 three `Graphics` objects at fixed depths (`packages/render/src/layers.ts`): the aura shells
 under the towers; the selection cue and tracers between the pending builds and the creeps;
 health pips, status cues, the build ghost and sparks over everything. ADR 0003's cue
-vocabulary — the choice the S10 Finding said the frame budget may be paying for — is otherwise
-untouched: the cue rings, chevrons and pips are still stroked `Graphics`; what moved into
-textures is the static art underneath them.
+vocabulary — the choice the S10 Finding said the frame budget may be paying for — is split
+between the two by what it marks, not by kind. The cues that belong to a piece's own art are
+baked with it: a tower's footprint mark and two tower STATE cues, the buffed recipient's ✦ and
+the pending-build outline; and two creep cues, the low-health tint and the boss size — each an
+atlas variant of its tower's or creep's frame. Everything else stays stroked `Graphics`, drawn
+per frame: the status rings and pips, the airborne chevron, the aura shells, the selection
+cue, the ghost and the sparks.
 
 **Measured before/after.** The record-only browser perf suite (`playwright.perf.config.ts`: the
 `catalog` and `stress` scenes on the `mid-range` and `low-end` emulation profiles), run twice
-at the base commit (`9c3b524`) before any change and twice at the branch head, back to back on
-one machine: Chrome 149.0.7827.55, `ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro,
+at the base commit (`9c3b524`) before any change and twice at `710bc8f`, all on one machine
+within three hours: Chrome 149.0.7827.55, `ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro,
 Unspecified Version)`. Frame time in milliseconds; each cell gives run 1 / run 2.
 
 | scene   | profile   | p50 before    | p50 after   | p95 before    | p95 after   | p99 before    | p99 after   |
 | ------- | --------- | ------------- | ----------- | ------------- | ----------- | ------------- | ----------- |
-| catalog | mid-range | 26.4 / 26.3   | 8.3 / 8.3   | 34.6 / 34.7   | 10.2 / 10.2 | 35.2 / 35.1   | 10.3 / 10.3 |
-| stress  | mid-range | 33.4 / 33.4   | 16.5 / 16.7 | 41.6 / 41.7   | 18.5 / 25.2 | 43.1 / 43.2   | 24.9 / 26.5 |
-| catalog | low-end   | 93.3 / 92.8   | 23.9 / 23.4 | 101.7 / 101.1 | 32.5 / 31.8 | 109.7 / 108.2 | 34.4 / 33.7 |
-| stress  | low-end   | 110.3 / 108.7 | 50.5 / 51.5 | 118.2 / 118.1 | 59.6 / 59.8 | 141.0 / 125.0 | 66.7 / 74.5 |
+| catalog | mid-range | 26.4 / 26.3   | 8.3 / 8.3   | 34.6 / 34.7   | 10.2 / 10.2 | 35.2 / 35.1   | 10.4 / 10.3 |
+| stress  | mid-range | 33.4 / 33.4   | 16.6 / 16.6 | 41.6 / 41.7   | 18.6 / 18.5 | 43.1 / 43.2   | 25.3 / 24.7 |
+| catalog | low-end   | 93.3 / 92.8   | 23.8 / 23.8 | 101.7 / 101.1 | 31.8 / 33.3 | 109.7 / 108.2 | 33.8 / 35.1 |
+| stress  | low-end   | 110.3 / 108.7 | 50.8 / 50.3 | 118.2 / 118.1 | 60.1 / 59.9 | 141.0 / 125.0 | 67.1 / 68.0 |
 
-Frames sampled in the 10 s window rose accordingly (catalog mid-range 354 / 351 → 1201 / 1200;
-stress mid-range 295 / 295 → 641 / 598; catalog low-end 105 / 106 → 452 / 464; stress low-end
-89 / 90 → 190 / 187). The medians agree within about 2% run to run on both sides, so the change
-is far outside run-to-run noise; the stress scene's tails are noisier (its mid-range p95 after
-reads 18.5 and 25.2). The catalog scene on mid-range now sits at 8.3 ms, one refresh of the
-120 Hz display, so that figure is the display's floor rather than the remaining cost. Both
-perf scenes were screenshotted at the head build to confirm every tower and creep is still
+The medians agree within about 2% run to run on both sides, so the change is far outside
+run-to-run noise; the tails are noisier. The catalog scene on mid-range now sits at 8.3 ms, one
+refresh of the 120 Hz display, so that figure is the display's floor rather than the remaining
+cost. Both perf scenes were screenshotted at `710bc8f` to confirm every tower and creep is still
 drawn — a bake that silently drew nothing would also make frames cheap.
 
 **Missed-refresh proportion: not available from these runs.** The suite evaluates it only for
@@ -1140,7 +1141,7 @@ the stress scene on mid-range, and the display cadence calibrated at 8.3 ms (a 1
 outside the calibration band, so all four runs report it NOT EVALUATED (low-end: not
 applicable by design; catalog: not computed) — the same condition the S10 Finding recorded.
 The stress scene's p95-breach signal still fires on both profiles after the change (mid-range
-p95 18.5 / 25.2 ms against the 16.7 ms budget; low-end 59.6 / 59.8 ms against 33.3 ms).
+p95 18.6 / 18.5 ms against the 16.7 ms budget; low-end 60.1 / 59.9 ms against 33.3 ms).
 
 **What this evidence is.** Emulation on one development machine — the same class of evidence
 as the S10 Finding, with the 6× / 2× CPU throttles slowing JavaScript but not the GPU. It does

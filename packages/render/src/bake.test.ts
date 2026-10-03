@@ -7,6 +7,7 @@ import {
   bakedTextureKey,
   createBakeTracker,
   fitScale,
+  sameInputs,
   layoutAtlas,
   layoutBoard,
   paintAtlas,
@@ -14,7 +15,9 @@ import {
   ATLAS_GUTTER_TEXELS,
   ATLAS_MAX_WIDTH,
   MIN_BAKE_SCALE,
+  type BakeInputs,
 } from './bake';
+import type { ColourMode } from './types';
 import { atlasFrameSpecs, PLATE_FRAME_KEY } from './art-frames';
 import type { ArtCanvas2DLike } from './art-paint';
 import { boardPaintOps } from './board-cells';
@@ -26,7 +29,9 @@ type Op = { op: string; args: unknown[]; composite?: GlobalCompositeOperation };
 
 /** A recording 2D context — the slice the art painter draws through, which includes the
  *  board bake's. Every fill and stroke records the composite operation it ran under, and
- *  `save`/`restore` stack that operation as a real context does. */
+ *  `save`/`restore` stack that operation as a real context does. Its `arc` and `ellipse`
+ *  reject a negative radius as a real 2D context does (the HTML spec's `IndexSizeError`) —
+ *  so a bake that would throw in a browser throws here too. */
 function fakeContext(): ArtCanvas2DLike & { ops: Op[] } {
   const ops: Op[] = [];
   let composite: GlobalCompositeOperation = 'source-over';
@@ -34,6 +39,10 @@ function fakeContext(): ArtCanvas2DLike & { ops: Op[] } {
   const call =
     (op: string) =>
     (...args: unknown[]): void => {
+      const radii = op === 'arc' ? args.slice(2, 3) : op === 'ellipse' ? args.slice(2, 4) : [];
+      if (radii.some((r) => (r as number) < 0)) {
+        throw new RangeError(`IndexSizeError: ${op} radius ${radii.join(', ')} is negative`);
+      }
       ops.push({ op, args });
     };
   const draw =
@@ -113,6 +122,9 @@ describe('fitScale — degrade, never fail', () => {
   it('keeps the dpr when it fits', () => {
     expect(fitScale(2, () => true)).toBe(2);
     expect(fitScale(1.5, () => true)).toBe(1.5);
+    // A dpr below 1 (a zoomed-out browser) comes through `clampDpr` unchanged: kept as is,
+    // never rounded up to 1.
+    expect(fitScale(0.9, () => true)).toBe(0.9);
   });
 
   it('steps down until the art fits', () => {
@@ -221,11 +233,15 @@ describe('paintAtlas', () => {
     // The square silhouette is a single opaque fillRect, held in the adapter's batch: it
     // must be flushed inside its own frame, before that frame's restore.
     const keys = [...layout.frames.keys()];
-    const inFrame = frameSegments(ctx.ops)[keys.indexOf('creep:square:normal:standard')]!.map(
-      (o) => o.op,
+    const inFrame = frameSegments(ctx.ops)[keys.indexOf('creep:square:normal:standard')]!;
+    // The square's OWN rect — not the clip's, which is also a `rect` in this slice: at 10px
+    // cells r = 3.5, so the frame is 2 × (⌈3.5⌉ + 2) = 12 texels with its centre at 6, and the
+    // square spans 6 ± 3.5 in frame-local px.
+    const square = inFrame.findIndex(
+      (o) => o.op === 'rect' && JSON.stringify(o.args) === JSON.stringify([2.5, 2.5, 7, 7]),
     );
-    expect(inFrame).toContain('rect');
-    expect(inFrame.lastIndexOf('fill')).toBeGreaterThan(inFrame.lastIndexOf('rect'));
+    expect(square).toBeGreaterThanOrEqual(0);
+    expect(inFrame.slice(square + 1).some((o) => o.op === 'fill')).toBe(true);
   });
 
   it('hands every art path string to the Path2D factory, and draws the path it gets back', () => {
@@ -288,6 +304,32 @@ describe('paintAtlas', () => {
   });
 });
 
+describe('paintAtlas at the 1px-cell fallback (a hidden or tiny board)', () => {
+  it('bakes every frame at 1px and 2px cells without a throw — the pending builds included', () => {
+    // At 1px cells a 2×2 footprint is 2px, and a unit of the tower art's 64-unit box is a
+    // few hundredths of a pixel, so a radius worked out by taking an inset or a stroke off a
+    // size can come out negative: a real context's arc() and ellipse() reject that (so do
+    // this fake's). One once threw out of the renderer's draw() and froze the whole game.
+    for (const [cellPx, dpr] of [
+      [1, 1],
+      [1, 2],
+      [2, 1],
+      [2, 2],
+    ] as const) {
+      const layout = layoutAtlas(cellPx, dpr, 4096);
+      const ctx = fakeContext();
+      expect(
+        () => paintAtlas(ctx, layout, PAL, makePath),
+        `cellPx ${cellPx}, dpr ${dpr}`,
+      ).not.toThrow();
+      expect(ctx.ops.filter((o) => o.op === 'clip')).toHaveLength(layout.frames.size);
+      const pending = [...layout.frames.keys()].filter((k) => k.startsWith('tower:pending:'));
+      expect(pending.length).toBeGreaterThan(0);
+      expect(ctx.ops.filter((o) => o.op === 'stroke').length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('layoutBoard / paintBoard', () => {
   it('sizes the board texture to the board in device pixels', () => {
     expect(layoutBoard(GEOMETRY, 32, 1, 8192)).toEqual({
@@ -300,12 +342,10 @@ describe('layoutBoard / paintBoard', () => {
       width: 28 * 64,
       height: 24 * 64,
     });
-    // A fractional dpr rounds the texture UP, so the board's last texels are never cut.
-    expect(layoutBoard(GEOMETRY, 13, 1.5, 8192)).toEqual({
-      scale: 1.5,
-      width: Math.ceil(28 * 13 * 1.5),
-      height: Math.ceil(24 * 13 * 1.5),
-    });
+    // A fractional dpr rounds the texture UP, so the board's last texels are never cut:
+    // 28 × 13 × 1.1 = 400.4 texels needs 401 (rounding or flooring would give 400), and
+    // 24 × 13 × 1.1 = 343.2 needs 344.
+    expect(layoutBoard(GEOMETRY, 13, 1.1, 8192)).toEqual({ scale: 1.1, width: 401, height: 344 });
   });
 
   it('lowers the scale rather than exceed the maximum texture size', () => {
@@ -313,6 +353,27 @@ describe('layoutBoard / paintBoard', () => {
     expect(bake.scale).toBeLessThan(2);
     expect(bake.width).toBeLessThanOrEqual(4096);
     expect(bake.height).toBeLessThanOrEqual(4096);
+    // ... and a board too TALL for the limit, though narrow enough, is lowered just the same:
+    // 100 rows × 30 × 2 = 6000 texels high, only 600 wide.
+    const tall = layoutBoard({ cols: 10, rows: 100 }, 30, 2, 4096);
+    expect(tall.scale).toBeLessThan(2);
+    expect(tall.height).toBeLessThanOrEqual(4096);
+  });
+
+  it('paints the board at the 1px-cell fallback and at 2px cells without a throw (a hidden or tiny board)', () => {
+    // A board under ~56×48 CSS px — hidden boards measure 0×0 — projects 1px cells. Its plan
+    // is only rects and a triangle, but it must bake there all the same.
+    for (const [cellPx, dpr] of [
+      [1, 1],
+      [2, 2],
+    ] as const) {
+      const ctx = fakeContext();
+      const bake = layoutBoard(GEOMETRY, cellPx, dpr, 8192);
+      expect(() =>
+        paintBoard(ctx, boardPaintOps(GEOMETRY, PAL), GEOMETRY, cellPx, bake),
+      ).not.toThrow();
+      expect(ctx.ops.filter((o) => o.op === 'fill').length).toBeGreaterThan(0);
+    }
   });
 
   it('never sizes a texture below one texel', () => {
@@ -341,52 +402,84 @@ describe('layoutBoard / paintBoard', () => {
 });
 
 describe('createBakeTracker — rebake only when the art’s inputs change', () => {
-  it('bakes on the first frame, then not again for the same inputs', () => {
+  const at = (cellPx: number, dpr = 2, mode: ColourMode = 'default'): BakeInputs => ({
+    cellPx,
+    dpr,
+    mode,
+  });
+
+  it('bakes on the first frame, then not again for the same inputs once that bake succeeded', () => {
     const t = createBakeTracker();
-    expect(t.version).toBe(0);
-    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' })).toBe(true);
-    expect(t.version).toBe(1);
-    for (let i = 0; i < 5; i++)
-      expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' })).toBe(false);
-    expect(t.version).toBe(1);
+    expect(t.needsBake(at(30))).toBe(true);
+    t.recordBaked(at(30));
+    for (let i = 0; i < 5; i++) expect(t.needsBake(at(30))).toBe(false);
+  });
+
+  it('records nothing by being asked: until a bake succeeds, every ask says one is due', () => {
+    // The ordering that made a failed bake permanent: asking used to RECORD the inputs, so a
+    // bake that then failed was not retried until the next resize.
+    const t = createBakeTracker();
+    for (let i = 0; i < 3; i++) expect(t.needsBake(at(30))).toBe(true);
+    t.recordBaked(at(30));
+    expect(t.needsBake(at(30))).toBe(false);
+    // A rebake that fails leaves the LAST SUCCESS standing: the new inputs are still due…
+    expect(t.needsBake(at(24))).toBe(true);
+    expect(t.needsBake(at(24))).toBe(true);
+    // … and going back to the baked ones needs nothing.
+    expect(t.needsBake(at(30))).toBe(false);
   });
 
   it('rebakes when the cell size changes (a resize)', () => {
     const t = createBakeTracker();
-    t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' });
-    expect(t.needsBake({ cellPx: 24, dpr: 2, mode: 'default' })).toBe(true);
-    expect(t.version).toBe(2);
+    t.recordBaked(at(30));
+    expect(t.needsBake(at(24))).toBe(true);
   });
 
   it('rebakes when the effective dpr changes (a monitor move or a zoom)', () => {
     const t = createBakeTracker();
-    t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' });
-    expect(t.needsBake({ cellPx: 30, dpr: 1.5, mode: 'default' })).toBe(true);
+    t.recordBaked(at(30, 2));
+    expect(t.needsBake(at(30, 1.5))).toBe(true);
   });
 
   it('rebakes when the colour mode changes', () => {
     const t = createBakeTracker();
-    t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' });
-    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'tritan' })).toBe(true);
-    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'tritan' })).toBe(false);
-    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'protan' })).toBe(true);
+    t.recordBaked(at(30, 2, 'default'));
+    expect(t.needsBake(at(30, 2, 'tritan'))).toBe(true);
+    t.recordBaked(at(30, 2, 'tritan'));
+    expect(t.needsBake(at(30, 2, 'tritan'))).toBe(false);
+    expect(t.needsBake(at(30, 2, 'protan'))).toBe(true);
   });
 
   it('a change back is still a change', () => {
     const t = createBakeTracker();
-    t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' });
-    t.needsBake({ cellPx: 31, dpr: 2, mode: 'default' });
-    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' })).toBe(true);
-    expect(t.version).toBe(3);
+    t.recordBaked(at(30));
+    t.recordBaked(at(31));
+    expect(t.needsBake(at(30))).toBe(true);
   });
 
-  it('calls for a fresh bake after a failed one is invalidated, under a new version', () => {
+  it('knows what the art on screen was baked for: nothing until a bake succeeds, then the last success', () => {
     const t = createBakeTracker();
-    t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' });
-    t.invalidate();
-    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' })).toBe(true);
-    expect(t.version).toBe(2);
-    expect(t.needsBake({ cellPx: 30, dpr: 2, mode: 'default' })).toBe(false);
+    expect(t.baked()).toBeNull();
+    t.needsBake(at(30)); // asking records nothing
+    expect(t.baked()).toBeNull();
+    t.recordBaked(at(30, 2, 'protan'));
+    expect(t.baked()).toEqual(at(30, 2, 'protan'));
+    t.recordBaked(at(24, 1.5));
+    expect(t.baked()).toEqual(at(24, 1.5));
+  });
+
+  it('counts two sets of inputs the same only when the cell size, dpr and colour mode all match', () => {
+    expect(sameInputs(at(30, 2, 'default'), at(30, 2, 'default'))).toBe(true);
+    expect(sameInputs(at(30, 2, 'default'), at(31, 2, 'default'))).toBe(false);
+    expect(sameInputs(at(30, 2, 'default'), at(30, 1.5, 'default'))).toBe(false);
+    expect(sameInputs(at(30, 2, 'default'), at(30, 2, 'tritan'))).toBe(false);
+  });
+
+  it('gives every attempt its own version, failed or not, so no two attempts share a texture key', () => {
+    const t = createBakeTracker();
+    expect([t.nextVersion(), t.nextVersion(), t.nextVersion()]).toEqual([1, 2, 3]);
+    t.recordBaked(at(30));
+    expect(t.nextVersion()).toBe(4);
   });
 
   it('names each bake’s textures with its version, so the old ones can outlive the new ones’ creation', () => {

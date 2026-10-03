@@ -1,0 +1,75 @@
+// sprite-pool.ts — the pooled sprites of one board layer (V2, #181). Phaser-free: a sprite is
+// anything with the calls below — a Phaser `Image` satisfies them structurally, the unit tests
+// use a recorder. Sprites are created as a layer's count grows and never destroyed: one past
+// this frame's count is hidden, and shown again when a later frame places it — after a
+// Play-again `reset()` has hidden every one, say.
+
+import type { SpritePlacement } from './placement';
+
+/** The sprite surface a pool drives. */
+export interface PoolSprite {
+  readonly visible: boolean;
+  readonly alpha: number;
+  setPosition(x: number, y: number): unknown;
+  setFrame(frame: string): unknown;
+  setVisible(visible: boolean): unknown;
+  setAlpha(alpha: number): unknown;
+}
+
+export interface SpritePool<S extends PoolSprite> {
+  /**
+   * Show `placements`: sprite `i` takes placement `i` — its frame and its alpha (each set
+   * only when it changed; a placement without an alpha is opaque), its position, and
+   * visibility. Sprites are created as the count grows and every one past it is hidden. Creating them in index order, at one depth, is what keeps a layer drawing in
+   * list order under Phaser's stable depth sort — a later creep still covers an earlier one.
+   */
+  sync(placements: readonly SpritePlacement[]): void;
+  /** Hide every sprite; the next `sync` shows exactly what it places. */
+  hideAll(): void;
+  /** Each sprite with the frame it shows — what a rebake repoints at the new atlas. */
+  forEach(fn: (sprite: S, frame: string) => void): void;
+  /** How many sprites exist, shown or hidden. */
+  readonly size: number;
+}
+
+/** A pool whose new sprites come from `create`, which returns one already showing the
+ *  placement it is given (its frame, at its position and alpha, visible). */
+export function createSpritePool<S extends PoolSprite>(
+  create: (placement: SpritePlacement) => S,
+): SpritePool<S> {
+  const sprites: S[] = [];
+  const frames: string[] = [];
+  return {
+    sync(placements) {
+      placements.forEach((p, i) => {
+        const sprite = sprites[i];
+        if (sprite === undefined) {
+          sprites.push(create(p));
+          frames.push(p.frame);
+          return;
+        }
+        if (frames[i] !== p.frame) {
+          sprite.setFrame(p.frame);
+          frames[i] = p.frame;
+        }
+        const alpha = p.alpha ?? 1;
+        if (sprite.alpha !== alpha) sprite.setAlpha(alpha);
+        sprite.setPosition(p.x, p.y);
+        if (!sprite.visible) sprite.setVisible(true);
+      });
+      for (let i = placements.length; i < sprites.length; i++) {
+        const sprite = sprites[i] as S;
+        if (sprite.visible) sprite.setVisible(false);
+      }
+    },
+    hideAll() {
+      for (const sprite of sprites) if (sprite.visible) sprite.setVisible(false);
+    },
+    forEach(fn) {
+      sprites.forEach((sprite, i) => fn(sprite, frames[i] as string));
+    },
+    get size() {
+      return sprites.length;
+    },
+  };
+}
