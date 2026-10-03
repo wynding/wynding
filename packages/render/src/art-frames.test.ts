@@ -541,6 +541,26 @@ describe('paintTowerArt — the Card swatch’s picture, through the same art an
       expect(Math.abs(2 * half - Math.round(2 * half))).toBeLessThan(1e-9);
     }
   });
+
+  it('keeps the plate’s rim inside the footprint on the surface’s pixels, where its floor would spill it', () => {
+    // A 22px footprint (11px cells) on a dpr 1.25 canvas, its corner 0.3 device px into a
+    // pixel: the rim's one-CSS-px floor makes it 2px, and placed freely it would start on
+    // pixel 0, partly outside the footprint (which starts at 0.3), and end on pixel 28, past
+    // the footprint's end at 27.8. Kept inside, it runs from pixel 1 to pixel 27.
+    const [x, y, footprintPx, scale] = [0.24, 0.24, 22, 1.25];
+    const g = recorder();
+    paintTowerArt(g, PAL, { mark: 'ringed', role: 'control' }, x, y, footprintPx, scale);
+    const [plate] = artCalls(g.calls);
+    const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
+    if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+    const unit = footprintPx / ART_BOX;
+    const half = (strokeWidthAt(rim, unit) * unit * scale) / 2;
+    expect(2 * half).toBeCloseTo(2, 9);
+    expect((x + rim.x * unit) * scale - half).toBeCloseTo(1, 9);
+    expect((x + (rim.x + rim.w) * unit) * scale + half).toBeCloseTo(27, 9);
+    expect((y + rim.y * unit) * scale - half).toBeCloseTo(1, 9);
+    expect((y + (rim.y + rim.h) * unit) * scale + half).toBeCloseTo(27, 9);
+  });
 });
 
 describe('towerArtFit — a whole tower, shadow included, centred in a square', () => {
@@ -780,6 +800,24 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
       expect(plate!.x * scale, at).toBeCloseTo(Math.round(plate!.x * scale), 9);
       expect(plate!.y * scale, at).toBeCloseTo(Math.round(plate!.y * scale), 9);
     }
+  });
+
+  it('keeps the plate frame’s rim inside the footprint where its floor would spill it — 11px cells at dpr 1.25', () => {
+    // There the rim's one-CSS-px floor makes it 2 texels, grown outward: placed freely, its
+    // far side would end on texel 28, half a texel past the footprint's end at 27.5 — in the
+    // next tower's footprint. The frame draws it ending on texel 27.
+    const [cellPx, scale] = [11, 1.25];
+    const unit = artUnit(cellPx);
+    const k = unit * scale;
+    const specs = new Map(towerFrameSpecs(cellPx, scale).map((f) => [f.key, f]));
+    const [plate] = artCalls(paint(specs.get(PLATE_FRAME_KEY)!));
+    const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
+    if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+    const half = (strokeWidthAt(rim, unit) * k) / 2;
+    expect(ART_BOX * k).toBeCloseTo(27.5, 9);
+    expect(2 * half).toBeCloseTo(2, 9);
+    expect(rim.x * k - half).toBeCloseTo(0, 9); // the footprint's first texel
+    expect((rim.x + rim.w) * k + half).toBeCloseTo(27, 9); // its last whole one
   });
 
   it('at every cell size from 10 to 64px and dpr from 1 to 3: the rim no thinner than its floor and inside the footprint, each glow ring inside the rim', () => {

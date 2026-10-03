@@ -160,13 +160,28 @@ describe('alignRectToTexels — a crisp stroke on whole texels', () => {
     const kept = alignRectToTexels(RIM, unit, 1.25, [0, 0], [0, 0, 64, 64]);
     expect(farEnd(kept)).toBeCloseTo(27, 9); // the last whole texel inside 27.5
     expect(kept.x).toBe(alignRectToTexels(RIM, unit, 1.25).x); // the near edge had room
+    // The near side too: with the footprint's corner 0.3 texels into a texel, the rim placed
+    // freely starts on texel 0, partly outside the footprint; kept, it starts on texel 1,
+    // the first whole one inside.
+    const o = [0.3, 0.3] as const;
+    const nearStart = (r: ArtRect): number => o[0] + r.x * k - texelWidth(r, unit, 1.25) / 2;
+    expect(nearStart(alignRectToTexels(RIM, unit, 1.25, o))).toBeCloseTo(0, 9);
+    expect(nearStart(alignRectToTexels(RIM, unit, 1.25, o, [0, 0, 64, 64]))).toBeCloseTo(1, 9);
+    // Everywhere, wherever the footprint's corner falls in a texel: inside it, on whole texels.
     for (const scale of [1, 1.25, 1.5, 1.75, 2, 3]) {
       for (let cellPx = 10; cellPx <= 40; cellPx++) {
-        const u = (2 * cellPx) / 64;
-        const r = alignRectToTexels(RIM, u, scale, [0, 0], [0, 0, 64, 64]);
-        const h = texelWidth(r, u, scale) / 2;
-        expect(r.x * u * scale - h, `${cellPx}px at dpr ${scale}`).toBeGreaterThanOrEqual(-1e-9);
-        expect((r.x + r.w) * u * scale + h).toBeLessThanOrEqual(64 * u * scale + 1e-9);
+        for (const f of [0, 0.3, 0.7]) {
+          const u = (2 * cellPx) / 64;
+          const r = alignRectToTexels(RIM, u, scale, [f, f], [0, 0, 64, 64]);
+          const h = texelWidth(r, u, scale) / 2;
+          const at = `${cellPx}px at dpr ${scale}, corner +${f}`;
+          const start = f + r.x * u * scale - h;
+          expect(start, at).toBeGreaterThanOrEqual(f - 1e-9);
+          expect(Math.abs(start - Math.round(start)), at).toBeLessThan(1e-9);
+          expect(f + (r.x + r.w) * u * scale + h, at).toBeLessThanOrEqual(
+            f + 64 * u * scale + 1e-9,
+          );
+        }
       }
     }
   });
