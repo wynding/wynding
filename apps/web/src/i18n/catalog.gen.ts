@@ -24,6 +24,7 @@ export const EN = {
   "app.title": "Wynding",
   "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
   "controls.callWave": "Call wave",
+  "controls.callWave.bounty": "Calling now pays an early-call bounty",
   "controls.callWave.pending": "Launching…",
   "controls.copyRun": "Copy run data",
   "controls.pause": "Pause",
@@ -63,8 +64,6 @@ export const EN = {
   "hud.preview.leakCost": "leak cost {leakCost}",
   "hud.preview.role.boss": "boss",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
-  "hud.ring.hint": "until wave {waveNumber} · calling early pays a bounty",
-  "hud.ring.hint.first": "until wave {waveNumber}",
   "hud.score": "Score: {count}",
   "hud.score.glance.label": "Score",
   "hud.stars": "Stars: {count} of 3",
@@ -216,6 +215,7 @@ export interface MessageParams {
   "app.title": Record<never, never>;
   "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
   "controls.callWave": Record<never, never>;
+  "controls.callWave.bounty": Record<never, never>;
   "controls.callWave.pending": Record<never, never>;
   "controls.copyRun": Record<never, never>;
   "controls.pause": Record<never, never>;
@@ -255,8 +255,6 @@ export interface MessageParams {
   "hud.preview.leakCost": { "leakCost": string | number };
   "hud.preview.role.boss": Record<never, never>;
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
-  "hud.ring.hint": { "waveNumber": string | number };
-  "hud.ring.hint.first": { "waveNumber": string | number };
   "hud.score": { "count": string | number };
   "hud.score.glance.label": Record<never, never>;
   "hud.stars": { "count": string | number };

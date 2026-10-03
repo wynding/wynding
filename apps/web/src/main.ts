@@ -55,7 +55,6 @@ import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './ro
 import { COMPACT_QUERY } from './layout';
 import { clearDockReserve, syncDockCue, syncDockReserve } from './dock-reserve';
 import { paintSwatch } from './swatch';
-import { syncDockRing } from './dock-ring';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
 import {
@@ -473,12 +472,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     dock: shell.dock.root,
     rows: grid.height,
   };
-  // The countdown ring (#181 H1) rides the same pass: it sits beside the Dock's primary control,
-  // so whether it fits before the Rail moves exactly when the Dock's rows do.
-  const syncDock = (): void => {
-    syncDockReserve(dockTargets, compactMq.matches);
-    syncDockRing(shell.dock.ring, shell.stage);
-  };
+  const syncDock = (): void => syncDockReserve(dockTargets, compactMq.matches);
   syncDock();
   // No `compactMq` listener of its own: crossing the fork re-lays out BOTH observed boxes (the
   // Dock goes from a floating row to an in-column block, the Stage loses the status row), so
@@ -506,9 +500,6 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // already held at its bound does not change size when that happens — its controls do
   // (a hidden control's box collapses to nothing), so they are what reports the change.
   for (const control of Array.from(shell.dock.root.children)) dockResizeObserver?.observe(control);
-  // ...and the ring's painted box (#181 H1). Its slot is zero-width and reports nothing when the
-  // hint's text changes (a new wave number, a translation), so the visual is observed itself.
-  dockResizeObserver?.observe(shell.dock.ring.visual);
   // ...and the bottom SAFE-AREA INSET. In scroll form the inset lifts the Dock by `bottom`,
   // which MOVES it without resizing any box above, so a runtime inset change (a native write
   // of `--safe-area-inset-bottom`, or `env()` changing) would leave the reserve stale and the

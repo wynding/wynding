@@ -165,16 +165,16 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.board.getAttribute('aria-label')).toBeNull();
   });
 
-  it("the HUD group holds Lives/Bounty/Stars/Score/wave/preview/board-summary, in that order (#181: the style frame's order, the strip right after the countdown it previews and LAST among the laid-out items; #79 appends the pollable summary last)", () => {
+  it('the HUD group holds wave/Lives/Bounty/Stars/Score/preview/board-summary, in that order (#181 QC: the countdown FIRST, so it always sits on the line the capped hud shows at rest; the strip LAST among the laid-out items; #79 appends the pollable summary last)', () => {
     const shell = createShell(document, TWO_CARDS);
     expect(shell.hudBox.className).toBe('wy-hud');
     expect(shell.hudBox.getAttribute('role')).toBe('group');
     expect([...shell.hudBox.children]).toEqual([
+      shell.hud.wave.root,
       shell.hud.lives.root,
       shell.hud.bounty.root,
       shell.hud.stars.root,
       shell.hud.score.root,
-      shell.hud.wave.root,
       shell.preview.root,
       shell.statusSummary,
     ]);
@@ -197,6 +197,14 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.preview.root.hidden).toBe(true);
     expect(shell.preview.title.textContent).toBe('');
     expect(shell.preview.list.children).toHaveLength(0);
+  });
+
+  // #181 QC: WebKit drops a list's semantics once it is styled `list-style: none` and laid out
+  // as a flex row — the strip's form — so the role is stated, not implied.
+  it('the wave preview list states its list role explicitly', () => {
+    const shell = createShell(document, TWO_CARDS);
+    expect(shell.preview.list.tagName).toBe('UL');
+    expect(shell.preview.list.getAttribute('role')).toBe('list');
   });
 
   // #181 (L1): the preview has ONE home. It is built inside the chips list and nothing ever
@@ -260,33 +268,39 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
 
   it('the Dock holds Pause/Speed/Settings + a hidden empty primary slot (no global Sell — PLAN.md P2 moves Sell into the Panel; no separate Call-wave button — PLAN.md P4 wires the primary slot as Start)', () => {
     const shell = createShell(document, TWO_CARDS);
+    // EXACTLY the four controls (#181 QC): the countdown dial is drawn inside the primary, never
+    // as a Dock item of its own that could wrap onto a row.
     expect([...shell.dock.root.children]).toEqual([
       shell.dock.pause,
       shell.dock.speed,
       shell.dock.settings,
       shell.dock.primary,
-      shell.dock.ring.root, // #181 (H1): the countdown ring's slot, last — after the primary it sits beside
     ]);
     expect(shell.dock.primary.hidden).toBe(true); // shown by overlay.ts's first render (P4)
   });
 
-  // #181 (H1): the countdown ring is decoration (the wave chip stays the accessible
-  // countdown), so its whole slot is aria-hidden and it is never a `.wy-btn` — that class is
-  // what the Dock's controls, the input chrome selector and the Dock footprint measure key on.
-  it('the countdown ring slot is aria-hidden decoration, hidden at boot, and not a Dock button', () => {
+  // #181 (H1, QC): the countdown dial is decoration inside the primary control — the wave chip
+  // is the readable AND the accessible countdown — so it is aria-hidden, carries no text and
+  // nothing focusable, and is never a `.wy-btn`, the class the Dock's controls, the input
+  // chrome selector and the Dock footprint measure key on.
+  it('the countdown dial is aria-hidden decoration inside the primary control, hidden at boot', () => {
     const shell = createShell(document, TWO_CARDS);
-    const { root, visual, ring, hint } = shell.dock.ring;
-    expect(root.className).toBe('wy-dock-ring');
+    const { root, progress } = shell.dock.dial;
+    expect(root.parentElement).toBe(shell.dock.primary);
+    expect(shell.dock.primary.lastElementChild).toBe(root); // after the contract's two spans
+    expect(root.className).toBe('wy-dial');
     expect(root.getAttribute('aria-hidden')).toBe('true');
     expect(root.hidden).toBe(true); // overlay.ts shows it once there is a countdown to draw
-    expect(root.tagName).not.toBe('BUTTON');
     expect(root.classList.contains('wy-btn')).toBe(false);
     expect(root.querySelector('button, a, [tabindex]')).toBeNull(); // nothing focusable inside
-    expect([...root.children]).toEqual([visual]);
-    expect([...visual.children]).toEqual([ring.svg, hint]);
-    expect(hint.className).toBe('wy-dock-ring-hint');
-    expect(hint.textContent).toBe('');
-    expect(ring.svg.getAttribute('aria-hidden')).toBe('true');
+    expect(root.contains(progress)).toBe(true);
+    expect(root.textContent).toBe('');
+    // The control's accessible name is still its label alone: the dial adds no text to it.
+    expect(dockButtonParts(shell.dock.primary).text.textContent).toBe('');
+    expect(shell.dock.primary.textContent).toBe('');
+    for (const btn of [shell.dock.pause, shell.dock.speed, shell.dock.settings]) {
+      expect(btn.querySelector('.wy-dial')).toBeNull();
+    }
   });
 
   // P1's Dock markup contract, both layouts: aria-hidden icon span + localized text span.
@@ -295,7 +309,10 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     const { pause, speed, settings, primary } = shell.dock;
     for (const btn of [pause, speed, settings, primary]) {
       const parts = dockButtonParts(btn);
-      expect([...btn.children]).toEqual([parts.icon, parts.text]);
+      // The primary also carries the countdown dial (#181), AFTER the contract's two spans.
+      expect([...btn.children]).toEqual(
+        btn === primary ? [parts.icon, parts.text, shell.dock.dial.root] : [parts.icon, parts.text],
+      );
       expect(parts.icon.getAttribute('aria-hidden')).toBe('true');
       expect(parts.text.className).toBe('wy-btn-text');
     }

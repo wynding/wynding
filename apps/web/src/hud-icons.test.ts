@@ -32,15 +32,17 @@ import {
   CHEVRON_HALF_SPAN,
   CREEP_ICON_BOSS_SCALE,
   CREEP_ICON_R,
+  DIAL_BOX,
+  DIAL_CIRCUMFERENCE,
+  DIAL_R,
   ICON_VIEWBOX,
-  RING_CIRCUMFERENCE,
+  dialDash,
   chevronPoints,
   chipIcon,
-  countdownRing,
+  countdownDial,
   creepIcon,
   hexColour,
   paintCreepIcon,
-  ringDash,
   silhouettePoints,
   type ChipIconKind,
 } from './hud-icons';
@@ -322,37 +324,50 @@ describe('hud-icons — the creep icons execute the board’s own art (#181 L1)'
   });
 });
 
-describe('hud-icons — the countdown ring (#181 H1)', () => {
-  const C = RING_CIRCUMFERENCE;
+describe('hud-icons — the countdown dial (#181 H1)', () => {
+  const C = DIAL_CIRCUMFERENCE;
   const dash = (len: number): string =>
     `${Math.round(len * 100) / 100} ${Math.round(C * 100) / 100}`;
 
-  it('is aria-hidden decoration: a track, an arc from twelve o’clock, and a centred value', () => {
-    const { svg, progress, text } = countdownRing(document);
-    expect(svg.getAttribute('class')).toBe('wy-ring');
+  it('is aria-hidden decoration with NO text: a wrapper, a track, and a progress stroke from twelve o’clock', () => {
+    const { root, progress } = countdownDial(document);
+    // An HTML wrapper, so the UA's `[hidden]` rule can take the dial out of the paint.
+    expect(root.tagName).toBe('SPAN');
+    expect(root.className).toBe('wy-dial');
+    expect(root.getAttribute('aria-hidden')).toBe('true');
+    const svg = root.querySelector('svg')!;
+    expect(root.children).toHaveLength(1);
+    expect(svg.getAttribute('class')).toBe('wy-dial-svg');
     expect(svg.getAttribute('aria-hidden')).toBe('true');
     expect(svg.getAttribute('focusable')).toBe('false');
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 ${DIAL_BOX} ${DIAL_BOX}`);
     expect([...svg.children].map((c) => c.getAttribute('class'))).toEqual([
-      'wy-ring-track',
-      'wy-ring-progress',
-      'wy-ring-text',
+      'wy-dial-track',
+      'wy-dial-progress',
     ]);
-    expect(svg.children[0]!.getAttribute('r')).toBe(progress.getAttribute('r'));
-    expect(progress.getAttribute('transform')).toBe('rotate(-90 22 22)');
-    expect(progress.getAttribute('stroke-dasharray')).toBe(ringDash(1)); // full until told
-    expect(text.getAttribute('text-anchor')).toBe('middle');
-    expect(text.textContent).toBe('');
-    expect(svg.querySelector('animate, animateTransform, set')).toBeNull(); // no animation
+    expect(svg.children[1]).toBe(progress);
+    expect(svg.children[0]!.getAttribute('r')).toBe(String(DIAL_R));
+    expect(progress.getAttribute('r')).toBe(String(DIAL_R));
+    const c = String(DIAL_BOX / 2);
+    expect(progress.getAttribute('cx')).toBe(c);
+    expect(progress.getAttribute('cy')).toBe(c);
+    expect(progress.getAttribute('transform')).toBe(`rotate(-90 ${c} ${c})`);
+    expect(progress.getAttribute('stroke-dasharray')).toBe(dialDash(1)); // full until told
+    // The seconds live in the wave chip, at every text size — the dial carries none (#181 QC:
+    // the ring's fixed 13px seconds did not scale with text).
+    expect(root.textContent).toBe('');
+    expect(root.querySelector('text, tspan, foreignObject')).toBeNull();
+    expect(root.querySelector('animate, animateTransform, set')).toBeNull(); // no animation
   });
 
-  it('ringDash draws the remaining share of the circumference, clamped to [0, 1]', () => {
-    expect(C).toBeCloseTo(2 * Math.PI * 18, 9);
-    expect(ringDash(1)).toBe(dash(C));
-    expect(ringDash(0.5)).toBe(dash(C / 2));
-    expect(ringDash(0)).toBe(dash(0));
-    expect(ringDash(2)).toBe(ringDash(1));
-    expect(ringDash(-1)).toBe(ringDash(0));
-    expect(ringDash(Number.NaN)).toBe(ringDash(0));
-    expect(ringDash(Number.POSITIVE_INFINITY)).toBe(ringDash(0));
+  it('dialDash draws the remaining share of the circumference, clamped to [0, 1]', () => {
+    expect(C).toBeCloseTo(2 * Math.PI * DIAL_R, 9);
+    expect(dialDash(1)).toBe(dash(C));
+    expect(dialDash(0.5)).toBe(dash(C / 2));
+    expect(dialDash(0)).toBe(dash(0));
+    expect(dialDash(2)).toBe(dialDash(1));
+    expect(dialDash(-1)).toBe(dialDash(0));
+    expect(dialDash(Number.NaN)).toBe(dialDash(0));
+    expect(dialDash(Number.POSITIVE_INFINITY)).toBe(dialDash(0));
   });
 });

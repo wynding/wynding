@@ -9,7 +9,8 @@
 //   │   │                           semantics at all (ADR 0012, #146 — see `createShell`)
 //   │   ├── div.wy-hud              (the five status chips + the wave strip; the labelled
 //   │   │                            scrollport)
-//   │   └── div.wy-dock             (Pause/Speed/Settings/Start + the countdown ring)
+//   │   └── div.wy-dock             (Pause/Speed/Settings/Start — the countdown dial drawn
+//   │                                inside Start/Call wave)
 //   ├── div.wy-banner  (the install suggestion — a RESERVED grid row, hidden by default)
 //   └── div.wy-main
 //       ├── div.wy-stage   (position: relative)
@@ -43,7 +44,7 @@
 
 import { t } from './i18n/t';
 import { REGION_ATTR } from './layout';
-import { chipIcon, countdownRing, type ChipIconKind, type CountdownRingParts } from './hud-icons';
+import { chipIcon, countdownDial, type ChipIconKind, type CountdownDialParts } from './hud-icons';
 
 /** One status readout in the Shell (contract §4 — dual-form chips, ADR 0004-safe).
  *
@@ -92,22 +93,11 @@ export interface ShellDock {
    *  hides for the rest of the run once pressed. `overlay.ts` owns its text/visibility;
    *  this is the empty slot P1 reserved. */
   readonly primary: HTMLButtonElement;
-  /** The countdown ring beside the primary action (#181 H1, Standard only). */
-  readonly ring: ShellRing;
-}
-
-/** The countdown ring's slot in the Dock (#181 H1): decoration, `aria-hidden` as a whole —
- *  the HUD's wave chip stays the accessible countdown. Deliberately NOT a `.wy-btn`, and laid
- *  out so it can never move the Dock: `root` is a ZERO-WIDTH in-flow item whose negative
- *  inline margin cancels the Dock's gap, so it always fits on the primary control's row and
- *  never wraps one, and it stretches to that row's height without setting it; the visible
- *  ring and hint (`visual`) are absolutely positioned against it, out of every layout
- *  measure (`ui.css`, `.wy-dock-ring`). `main.ts`'s Dock pass decides whether they fit. */
-export interface ShellRing {
-  readonly root: HTMLElement;
-  readonly visual: HTMLElement;
-  readonly ring: CountdownRingParts;
-  readonly hint: HTMLElement;
+  /** The countdown dial inside the primary action (#181 H1, Standard only): decoration,
+   *  `aria-hidden`, absolutely positioned in the button's own inline-start padding (`ui.css`),
+   *  so it contributes nothing to the button's size or the Dock's — it can never move the Dock
+   *  or the board, shown or hidden. The wave chip's glance is the readable countdown. */
+  readonly dial: CountdownDialParts;
 }
 
 /** One tower Card (PLAN.md P2, M2-S3: one per catalog tower) — a whole clickable/
@@ -451,6 +441,10 @@ export function createShell(
   previewTitle.className = 'wy-wave-preview-title';
   const previewList = doc.createElement('ul');
   previewList.className = 'wy-wave-preview-list';
+  // Explicit, not implied: WebKit drops a list's semantics once it is styled `list-style: none`
+  // and laid out as a flex row — exactly the strip's form — so VoiceOver would read the
+  // entries as loose text. The role restores "list, N items".
+  previewList.setAttribute('role', 'list');
   preview.append(previewTitle, previewList);
 
   // --- The pollable board summary (#79). A haircut taken on evidence rather than
@@ -478,9 +472,13 @@ export function createShell(
   statusSummary.setAttribute('aria-live', 'off');
   statusSummary.hidden = true; // empty board is the safe pre-first-render default
 
-  // The style frame's order (#181 H1): lives, bounty, stars, then the de-emphasised score, then
-  // the countdown beside the strip that previews the wave it counts down to.
-  hudBox.append(lives.root, bounty.root, stars.root, score.root, wave.root, preview, statusSummary);
+  // The countdown FIRST (#181): its glance is the one readable countdown, in both layouts, so
+  // it must sit on the hud's first line — the one line its height cap always shows at rest
+  // (`max(2.5rem, …)`, taller than any one line). Third was not enough: where text is heavy
+  // and the row narrow, a line holds one chip or two (360×640 at 200%, 320×560 at 300%, the
+  // Compact column), and the third chip sat wholly outside the cap. Then lives, bounty, stars,
+  // the de-emphasised score, and the strip — the row's one flexible item — last.
+  hudBox.append(wave.root, lives.root, bounty.root, stars.root, score.root, preview, statusSummary);
 
   // --- Dock: a status child in BOTH layouts (contract §1's topology amendment) ---
   const dock = doc.createElement('div');
@@ -496,23 +494,15 @@ export function createShell(
   // the run once pressed — the empty slot P1 reserved).
   const primaryBtn = dockButton(doc, 'wy-btn wy-primary');
   primaryBtn.hidden = true; // safe default before overlay.ts's first render
-  // The countdown ring (#181 H1) — see `ShellRing` for why its slot can never move the Dock.
-  // LAST, so it sits beside the primary action on that control's own row; hidden until
-  // `overlay.ts` has a countdown to show.
-  const ringRoot = doc.createElement('div');
-  ringRoot.className = 'wy-dock-ring';
-  ringRoot.setAttribute('aria-hidden', 'true');
-  ringRoot.hidden = true;
-  const ringVisual = doc.createElement('div');
-  ringVisual.className = 'wy-dock-ring-visual';
-  const ringParts = countdownRing(doc);
-  const ringHint = doc.createElement('span');
-  ringHint.className = 'wy-dock-ring-hint';
-  ringVisual.append(ringParts.svg, ringHint);
-  ringRoot.append(ringVisual);
+  // The countdown dial (#181 H1) — see `ShellDock.dial`: inside the button, out of its layout,
+  // hidden until `overlay.ts` has a countdown to show. Appended after the markup contract's two
+  // spans, which `dockButtonParts` finds by class, so the contract is unchanged.
+  const dial = countdownDial(doc);
+  dial.root.hidden = true;
+  primaryBtn.append(dial.root);
   // The global Sell button is removed (PLAN.md P2) — Sell lives in the Panel now; the `X`
   // hotkey still sells the current selection directly via the controller (input.ts).
-  dock.append(pauseBtn, speedBtn, settingsBtn, primaryBtn, ringRoot);
+  dock.append(pauseBtn, speedBtn, settingsBtn, primaryBtn);
 
   // FOCUS-ORDER TRADE-OFF (recorded, not silent — see docs/accessibility-checklist.md, the
   // Story 11 audit's "Dock focus order" row). `header.wy-status` precedes `.wy-main`, so the
@@ -645,7 +635,7 @@ export function createShell(
       speed: speedBtn,
       settings: settingsBtn,
       primary: primaryBtn,
-      ring: { root: ringRoot, visual: ringVisual, ring: ringParts, hint: ringHint },
+      dial,
     },
     cards,
     panel: { root: panel },

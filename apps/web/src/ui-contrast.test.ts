@@ -67,15 +67,15 @@ const REQUIRED_TOKENS = [
   // M2-S12a P3: the pinned Panel's top edge. Deleting it would silently fall back to
   // `.wy-panel`'s ordinary 1.63:1 border against the Cards it now floats over.
   'panel-edge',
-  // #181 (H1): the HUD's icon inks, the lives pill, and the countdown ring's arc. Each is
-  // paired below against the surface it is drawn on.
+  // #181 (H1): the HUD's icon inks and the lives pill. Each is paired below against the
+  // surface it is drawn on. (The countdown dial has no token: it is inked in the primary
+  // control's own colours, gated in its own test below.)
   'fg-dim',
   'lives',
   'lives-pill',
   'bounty',
   'stars',
   'icon-ink',
-  'countdown',
 ];
 
 describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥ 3:1)', () => {
@@ -103,10 +103,6 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // The wave strip is a `surface` box: its title and counts (`fg`, gated above) and a
       // single-entry wave's dim name and clause.
       ['fg-dim', 'surface'],
-      // The countdown ring and its hint are painted on the Stage's board backdrop beside the
-      // Dock: the seconds in `fg`, the hint in `fg-dim`.
-      ['fg', 'board-bg'],
-      ['fg-dim', 'board-bg'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
@@ -144,11 +140,6 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // The gem's and star's outline and facets, against the fills they outline.
       ['icon-ink', 'bounty'],
       ['icon-ink', 'stars'],
-      // The countdown ring: its arc against the backdrop AND against its own track, and the
-      // track against the backdrop, so the remaining share reads at a glance.
-      ['countdown', 'board-bg'],
-      ['countdown', 'panel-edge'],
-      ['panel-edge', 'board-bg'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
@@ -174,6 +165,39 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
         );
       }
     }
+  });
+
+  // #181 (QC): the countdown dial is drawn INSIDE the primary Dock control in that control's
+  // own text ink (`currentColor`), with a faint track of the same ink. Neither is a token, so
+  // the rendered colours are derived here from the rules that paint them: the progress stroke
+  // must clear 3:1 against the control's fill AND against its own track — the remaining share
+  // is the whole message — and the track's opacity is read from the stylesheet, so a fainter
+  // or bolder track re-gates itself.
+  it('the countdown dial reads on the primary control: progress against the fill and against its track', () => {
+    const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const primary = /\n\.wy-primary\s*\{([^}]*)\}/.exec(uncommented)?.[1];
+    expect(primary, 'missing the .wy-primary rule').toBeDefined();
+    expect(primary!).toMatch(/background:\s*var\(--wy-accent\)/);
+    expect(primary!).toMatch(/(^|[^-])color:\s*var\(--wy-on-accent\)/);
+    const strokes = /\.wy-dial-track,\s*\.wy-dial-progress\s*\{([^}]*)\}/.exec(uncommented)?.[1];
+    expect(strokes, 'missing the dial strokes rule').toBeDefined();
+    expect(strokes!).toMatch(/stroke:\s*currentColor/);
+    const track = /\.wy-dial-track\s*\{([^}]*)\}/.exec(uncommented)?.[1];
+    const alpha = Number(/stroke-opacity:\s*([0-9.]+)/.exec(track ?? '')?.[1]);
+    expect(alpha, 'the track carries an explicit stroke-opacity').toBeGreaterThan(0);
+    expect(alpha).toBeLessThan(1);
+
+    const ink = tokens['on-accent']!;
+    const fill = tokens['accent']!;
+    // Source-over in sRGB, which is how the browser composites the track onto the fill.
+    const [ir, ig, ib] = channels(ink);
+    const [fr, fg, fb] = channels(fill);
+    const mix = (a: number, b: number): number => Math.round(alpha * a + (1 - alpha) * b);
+    const trackInk = (mix(ir, fr) << 16) | (mix(ig, fg) << 8) | mix(ib, fb);
+    const onFill = contrast(ink, fill);
+    const onTrack = contrast(ink, trackInk);
+    expect(onFill, `dial on fill = ${onFill.toFixed(2)}`).toBeGreaterThanOrEqual(3.0);
+    expect(onTrack, `dial on its track = ${onTrack.toFixed(2)}`).toBeGreaterThanOrEqual(3.0);
   });
 
   it('styles the survey privacy link in the accent, visited too (#158)', () => {

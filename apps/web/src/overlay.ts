@@ -35,7 +35,7 @@ import type { SettingsStore } from './settings';
 import { ARM_TOWER_ACTIONS, GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
-import { creepIcon, paintCreepIcon, ringDash } from './hud-icons';
+import { dialDash, creepIcon, paintCreepIcon } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
@@ -2010,6 +2010,23 @@ export function createOverlay(
     strip.classList.toggle(STRIP_MORE_AFTER_CLASS, scrollable && past > 1);
   }
 
+  /** One wheel notch in LINE mode, in px — the line height browsers themselves scroll by. */
+  const WHEEL_LINE_PX = 16;
+  function onStripWheel(event: WheelEvent): void {
+    const strip = previewEl.root;
+    if (!strip.classList.contains(STRIP_SCROLL_CLASS) || event.ctrlKey) return;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    const unit =
+      event.deltaMode === 1 ? WHEEL_LINE_PX : event.deltaMode === 2 ? strip.clientWidth : 1;
+    const delta = event.deltaY * unit;
+    // The cue's 1px slack: at fractional zoom an end can sit a fraction of a pixel short.
+    const room =
+      delta > 0 ? strip.scrollWidth - strip.clientWidth - strip.scrollLeft : strip.scrollLeft;
+    if (!(room > 1)) return;
+    event.preventDefault();
+    strip.scrollLeft += delta;
+  }
+
   /** The strip's overflow remedy, IN PLACE (#181 L1) — the rule every surface in this row
    *  keeps: content never resizes the status row (that would re-project the board mid-run), so
    *  a strip whose line is longer than its box (a narrow portrait window, heavy text zoom, a
@@ -2139,42 +2156,67 @@ export function createOverlay(
     syncStripScroll();
   }
 
-  // --- The countdown ring beside the Dock's primary action (#181 H1, Standard only) ---
-  // Decoration: the wave chip stays the accessible countdown (and Compact's visible one), so
-  // the ring is `aria-hidden` and its writes are all change-gated — a value that did not move
-  // touches nothing (#98's discipline, applied to attributes as well as text).
-  const ring = dock.ring;
+  // --- The countdown dial inside the Dock's primary action (#181 H1, Standard only) ---
+  // Decoration: the wave chip is the accessible AND the readable countdown in both layouts, so
+  // the dial is `aria-hidden`, carries no text, and its writes are all change-gated — a value
+  // that did not move touches nothing (#98's discipline, applied to attributes as well as
+  // text). It lives out of the button's layout (`ui.css`), so showing or hiding it moves
+  // nothing.
+  const dial = dock.dial;
   /** The current countdown's full length in whole seconds, from the ruleset's per-wave
-   *  `countdownTicks` — rounded UP like `HudVM.countdownSeconds` itself, so a full ring reads
-   *  exactly the seconds the chip does. */
+   *  `countdownTicks` — rounded UP like `HudVM.countdownSeconds` itself, so a full dial is
+   *  exactly the seconds the chip shows. */
   function countdownTotalSeconds(cursor: number, fallback: number): number {
     const wave = Number.isSafeInteger(cursor) ? ruleset.waves[cursor] : undefined;
     return wave === undefined ? fallback : Math.ceil((wave.countdownTicks * MS_PER_TICK) / 1000);
   }
-  function renderRing(hud: HudVM): void {
+  function renderDial(hud: HudVM): void {
     const seconds = hud.countdownSeconds;
-    // Down while a call is already launching: the wave goes on the next tick, not when the
-    // ring empties, so the ring would be a wrong answer — and the primary control's wider
-    // "Launching…" label is the one row the ring's slot must never share at heavy zoom. The
-    // wave chip's glance takes over the visible countdown meanwhile (`ui.css`).
+    // Down while a call is already launching: the wave goes on the next tick, not when the dial
+    // empties, so the dial would be a wrong answer.
     const show = seconds !== null && !isTerminalPhase(hud.phase) && !hud.launchPending;
-    if (ring.root.hidden === show) ring.root.hidden = !show;
+    if (dial.root.hidden === show) dial.root.hidden = !show;
     if (seconds === null || !show) return;
     const total = countdownTotalSeconds(hud.waveCursor, seconds);
-    const dash = ringDash(total > 0 ? seconds / total : 0);
-    if (ring.ring.progress.getAttribute('stroke-dasharray') !== dash) {
-      ring.ring.progress.setAttribute('stroke-dasharray', dash);
+    const dash = dialDash(total > 0 ? seconds / total : 0);
+    if (dial.progress.getAttribute('stroke-dasharray') !== dash) {
+      dial.progress.setAttribute('stroke-dasharray', dash);
     }
-    setLabel(ring.ring.text, t('hud.wave.compact.countdown', { s: seconds }));
-    // The bounty clause is a claim about the sim, so it is only made where it is true: the
-    // OPENING launch pays nothing (sv15, #70 — Start claims wave 1), and a ruleset with no
-    // early-call bounty pays nothing at any wave.
-    const waveNumber = hud.waveCursor + 1;
-    const paysEarly = hud.waveCursor > 0 && ruleset.balance.earlyCallBountyDivisor > 0;
-    setLabel(
-      ring.hint,
-      paysEarly ? t('hud.ring.hint', { waveNumber }) : t('hud.ring.hint.first', { waveNumber }),
-    );
+  }
+
+  /** Whether calling the counting-down wave NOW pays an early-call bounty — the claim the
+   *  primary control's description makes, so it is made only where it is TRUE. The sim pays
+   *  `floor(rem / earlyCallBountyDivisor)` from the ticks still remaining (its launch branch,
+   *  which a buffered call reaches on the next step without that step's decrement), pays
+   *  nothing for the OPENING launch (sv15, #70 — wave index 0), and nothing at all with a
+   *  zero divisor. The HUD sees only `countdownSeconds = ceil(rem × MS_PER_TICK / 1000)`, so
+   *  the gate uses the smallest `rem` those seconds allow — `(seconds − 1) × 1000 /
+   *  MS_PER_TICK + 1` — and stays silent through the second in which the bounty runs out,
+   *  rather than promise one the sim will not pay. */
+  function callPaysEarlyBounty(hud: HudVM): boolean {
+    const seconds = hud.countdownSeconds;
+    const divisor = ruleset.balance.earlyCallBountyDivisor;
+    if (seconds === null || hud.waveCursor <= 0 || !(divisor > 0)) return false;
+    const minRemainingTicks = Math.floor(((seconds - 1) * 1000) / MS_PER_TICK) + 1;
+    return minRemainingTicks >= divisor;
+  }
+
+  /** One CHANGE-GATED attribute write on the primary control, which renders on every HUD
+   *  refresh (~20×/s through a countdown): a value that did not move touches nothing (#98's
+   *  discipline, applied to attributes as well as text). */
+  function setPrimaryAttr(name: string, value: string | null): void {
+    if (value === null) {
+      if (primaryBtn.hasAttribute(name)) primaryBtn.removeAttribute(name);
+    } else if (primaryBtn.getAttribute(name) !== value) {
+      primaryBtn.setAttribute(name, value);
+    }
+  }
+
+  /** The primary control's note is its `title`: the tooltip, and also its accessible
+   *  DESCRIPTION — the button's name comes from its label, so a `title` is never taken for the
+   *  name and is read once, as the description. */
+  function setPrimaryNote(note: string | null): void {
+    setPrimaryAttr('title', note);
   }
 
   /** The morphing primary control's text + `aria-disabled` state (PLAN.md P3 step 17):
@@ -2190,17 +2232,26 @@ export function createOverlay(
   function renderPrimary(hud: HudVM, ui: UiState): void {
     if (isTerminalPhase(hud.phase)) {
       primaryBtn.hidden = true;
+      setPrimaryNote(null);
       return;
     }
     primaryBtn.hidden = false;
     if (!ui.started) {
       setLabel(primaryParts.text, t('controls.start'));
-      primaryBtn.setAttribute('aria-disabled', 'false');
+      setPrimaryAttr('aria-disabled', 'false');
+      setPrimaryNote(null); // Start claims wave 1, which pays nothing (sv15)
       return;
     }
     const label = hud.launchPending ? t('controls.callWave.pending') : t('controls.callWave');
     setLabel(primaryParts.text, label);
-    primaryBtn.setAttribute('aria-disabled', String(!ui.callWaveReady));
+    setPrimaryAttr('aria-disabled', String(!ui.callWaveReady));
+    // The early-call bounty, said where it is true and nowhere else (#181): only while a press
+    // would actually call the wave, and only while the call would actually pay.
+    setPrimaryNote(
+      !hud.launchPending && ui.callWaveReady && callPaysEarlyBounty(hud)
+        ? t('controls.callWave.bounty')
+        : null,
+    );
   }
 
   function outcomeMessage(outcome: PlacementOutcome | null): string {
@@ -2310,6 +2361,18 @@ export function createOverlay(
     () => syncStripCue(previewEl.root.classList.contains(STRIP_SCROLL_CLASS)),
     { signal: railAffordanceAbort.signal, passive: true },
   );
+  // A plain mouse wheel scrolls the line too (#181 QC). The form hides its scrollbar, and a
+  // wheel reports VERTICAL movement, which a sideways scrollport ignores — so the line was
+  // reachable by touch, trackpad and keyboard but not by the commonest pointer. While the
+  // strip is in its scroll form, a vertical-dominant turn is spent sideways, but only while the
+  // line can still move that way: at either end the event is left alone, so the wheel goes on
+  // to whatever scrolls beyond the strip (the capped hud) rather than being trapped. A
+  // horizontal-dominant delta (a trackpad, a tilt wheel) is already the browser's to handle,
+  // and a ctrl+wheel is a pinch or a page zoom, never a scroll.
+  previewEl.root.addEventListener('wheel', (event) => onStripWheel(event), {
+    signal: railAffordanceAbort.signal,
+    passive: false,
+  });
 
   return {
     resultsEl: results,
@@ -2339,7 +2402,7 @@ export function createOverlay(
           : '',
       );
       renderPreview(hud.preview);
-      renderRing(hud);
+      renderDial(hud);
       // The pollable board summary (#79). CHANGE-GATED like every other per-tick leaf write
       // (`setLabel`): the counts move only when a status is applied or a creep leaves the
       // board, but this runs on every HUD refresh — 20-40× a second through a live wave.

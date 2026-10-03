@@ -1,5 +1,6 @@
 // hud-icons.ts — the HUD's inline-SVG icons (#181, H1 + L1): the chip icons (heart, gem,
-// star, plus the score sparkle and the countdown clock) and the wave strip's creep icons.
+// star, plus the score sparkle and the countdown clock), the wave strip's creep icons, and
+// the countdown dial inside the primary Dock button.
 //
 // Every icon is DECORATION. Each one sits inside an `aria-hidden` glance form next to a full
 // localized sentence that stays the accessible text (the chip's `.wy-chip-full`, the strip
@@ -243,54 +244,56 @@ export function paintCreepIcon(svg: SVGSVGElement, palette: Palette): void {
   svg.querySelector('.wy-creep-chevron')?.setAttribute('stroke', hexColour(palette.airborne));
 }
 
-// --- The countdown ring ----------------------------------------------------------------------
+// --- The countdown dial ------------------------------------------------------------------------
 
-/** The countdown ring's geometry, in its own 44-unit box (the style frame's r = 18 ring). */
-export const RING_BOX = 44;
-export const RING_R = 18;
-export const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
+/** The countdown dial's geometry, in its own 20-unit box: a ring of radius 7.5 whose stroke
+ *  (`ui.css`) stays inside the box. */
+export const DIAL_BOX = 20;
+export const DIAL_R = 7.5;
+export const DIAL_CIRCUMFERENCE = 2 * Math.PI * DIAL_R;
 
-/** The ring's parts, for `overlay.ts` to update in place. */
-export interface CountdownRingParts {
-  readonly svg: SVGSVGElement;
+/** The dial's parts, for `overlay.ts` to update in place. */
+export interface CountdownDialParts {
+  /** The positioned wrapper inside the primary Dock button — an HTML element, so the UA's
+   *  `[hidden]` rule takes the dial out of the paint when there is no countdown to show. */
+  readonly root: HTMLSpanElement;
   readonly progress: SVGCircleElement;
-  readonly text: SVGTextElement;
 }
 
-/** The countdown ring (#181 H1): a track, a progress arc that starts at twelve o'clock, and the
- *  seconds in its centre. Static geometry; `ringDash` gives the arc's value. No animation of
- *  any kind — the arc only takes a new value when the second changes. */
-export function countdownRing(doc: Document): CountdownRingParts {
+/** The countdown dial (#181 H1): a faint track and a progress stroke that starts at twelve
+ *  o'clock and shortens as the countdown runs out, drawn INSIDE the primary Dock button. It
+ *  carries no text — the wave chip's glance is the readable countdown, at every text size —
+ *  and no animation of any kind: the dial only takes a new value when the second changes. Both
+ *  strokes are `currentColor` (`ui.css`), so the dial is always the button's own text colour,
+ *  in every theme and under forced colors. */
+export function countdownDial(doc: Document): CountdownDialParts {
+  const root = doc.createElement('span');
+  root.className = 'wy-dial';
+  root.setAttribute('aria-hidden', 'true');
   const svg = el(doc, 'svg', {
-    class: 'wy-ring',
-    viewBox: `0 0 ${RING_BOX} ${RING_BOX}`,
+    class: 'wy-dial-svg',
+    viewBox: `0 0 ${DIAL_BOX} ${DIAL_BOX}`,
     'aria-hidden': 'true',
     focusable: 'false',
   });
-  const c = String(RING_BOX / 2);
-  const track = el(doc, 'circle', { class: 'wy-ring-track', cx: c, cy: c, r: String(RING_R) });
+  const c = String(DIAL_BOX / 2);
+  const track = el(doc, 'circle', { class: 'wy-dial-track', cx: c, cy: c, r: String(DIAL_R) });
   const progress = el(doc, 'circle', {
-    class: 'wy-ring-progress',
+    class: 'wy-dial-progress',
     cx: c,
     cy: c,
-    r: String(RING_R),
+    r: String(DIAL_R),
     transform: `rotate(-90 ${c} ${c})`,
-    'stroke-dasharray': ringDash(1),
+    'stroke-dasharray': dialDash(1),
   });
-  const text = el(doc, 'text', {
-    class: 'wy-ring-text',
-    x: c,
-    y: c,
-    'text-anchor': 'middle',
-    'dominant-baseline': 'central',
-  });
-  svg.append(track, progress, text);
-  return { svg, progress, text };
+  svg.append(track, progress);
+  root.append(svg);
+  return { root, progress };
 }
 
-/** The arc's dash for a remaining fraction, clamped to [0, 1]: the drawn length, then a gap of
+/** The dial's dash for a remaining fraction, clamped to [0, 1]: the drawn length, then a gap of
  *  the whole circumference so the dash pattern never repeats onto the track. */
-export function ringDash(fraction: number): string {
+export function dialDash(fraction: number): string {
   const f = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0;
-  return `${fmt(RING_CIRCUMFERENCE * f)} ${fmt(RING_CIRCUMFERENCE)}`;
+  return `${fmt(DIAL_CIRCUMFERENCE * f)} ${fmt(DIAL_CIRCUMFERENCE)}`;
 }

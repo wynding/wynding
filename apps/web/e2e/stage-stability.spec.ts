@@ -231,6 +231,52 @@ test('360×640 (portrait Standard): the strip on its own line is content-invaria
   expect(await statusHeight(page), 'hiding the preview resized the status row').toBe(statusBefore);
 });
 
+test('the countdown chip hiding once every wave has launched keeps its slot — the row, the strip and the board never move (#181 QC)', async ({
+  page,
+}) => {
+  // The hide overlay.ts makes when no wave is left to count down — the chip's `hidden`
+  // attribute — set in a real layout, at 200% text, where the countdown chip LEADS a hud of
+  // several lines (#181 QC). `ui.css` holds its slot by visibility.
+  let statusAtWidest = 0;
+  for (const size of [
+    { width: 1000, height: 720 },
+    { width: 1512, height: 854 },
+  ]) {
+    await gotoAt(page, size);
+    await page.addStyleTag({ content: ':root { font-size: 200% }' });
+    await page.waitForTimeout(200); // the zoom's own (legitimate) reflow
+    const at = `${size.width}×${size.height} at 200%`;
+    const gridBefore = await projectedGrid(page);
+    const statusBefore = await statusHeight(page);
+    const stripBefore = await stripBox(page);
+    await page.evaluate(() => {
+      (document.querySelector('.wy-chip[data-wy-chip="wave"]') as HTMLElement).hidden = true;
+    });
+    await page.waitForTimeout(100); // two frames for any re-projection to land
+    await expect(page.locator('.wy-chip[data-wy-chip="wave"] .wy-chip-glance')).toBeHidden();
+    expect(await projectedGrid(page), `${at}: hiding the countdown re-projected the board`).toEqual(
+      gridBefore,
+    );
+    expect(await statusHeight(page), `${at}: hiding the countdown resized the status row`).toBe(
+      statusBefore,
+    );
+    expect(await stripBox(page), `${at}: hiding the countdown moved the strip`).toEqual(
+      stripBefore,
+    );
+    statusAtWidest = statusBefore;
+  }
+  // POSITIVE CONTROL, at 1512×854 with the chip still hidden: were the slot given up, the row
+  // WOULD re-wrap here (187.5px → 104px, measured), so the pins above measure a live rule.
+  await page.addStyleTag({
+    content: '.wy-shell .wy-hud > .wy-chip[hidden] { display: none !important; }',
+  });
+  await page.waitForTimeout(100);
+  expect(
+    await statusHeight(page),
+    'the premise: without the held slot, the row re-wraps at this size',
+  ).toBeLessThan(statusAtWidest);
+});
+
 test('1280×720 at 140% zoom, overflowing strip: handled IN PLACE — the strip scrolls sideways, the board never moves', async ({
   page,
 }) => {
@@ -460,32 +506,86 @@ test('the strip keeps its ONE home across the layout fork — the same node, the
  *  values ARE the strip table in `docs/accessibility-checklist.md`; a change to either has to
  *  move the other.
  *
+ *  THE `visible` COLUMN is what of the strip is ON SCREEN at rest — `whole`, `partial`, or
+ *  `none` — because a line tells you where the strip sits, not whether anyone can see it: at
+ *  heavy text the capped hud (ADR 0003's overflow remedy) can leave a strip on its own line
+ *  wholly scrolled out of view at rest, still costing the board that line (#181 QC). These are
+ *  the strip table's residuals in `docs/accessibility-checklist.md`; and because the
+ *  occlusion half below can only check what is shown, a strip expected on screen that is not
+ *  FAILS here rather than skipping it.
+ *
  *  Every row is EXACT on both font stacks, measured on macOS and with CI's Linux metrics
  *  (DejaVu Sans): the nearest call, 1000×720 at 100%, leaves the strip ~360–380px against
  *  its 192px floor (`ui.css`'s 12rem). #101's table needed an `'either'` where the two
  *  stacks disagreed (1280×900 at 200%); this one has no row within a font stack of its
  *  floor, so it pins none. */
+type StripVisible = 'whole' | 'partial' | 'none';
 const PINNED_STANDARD = [
   // the viewport #101 was reported at
-  { width: 1512, height: 854, line: { 100: 'shared', 200: 'own' } },
-  { width: 1440, height: 900, line: { 100: 'shared', 200: 'own' } },
-  { width: 1366, height: 768, line: { 100: 'shared', 200: 'own' } },
+  {
+    width: 1512,
+    height: 854,
+    line: { 100: 'shared', 200: 'own' },
+    visible: { 100: 'whole', 200: 'whole' },
+  },
+  {
+    width: 1440,
+    height: 900,
+    line: { 100: 'shared', 200: 'own' },
+    visible: { 100: 'whole', 200: 'whole' },
+  },
+  {
+    width: 1366,
+    height: 768,
+    line: { 100: 'shared', 200: 'own' },
+    visible: { 100: 'whole', 200: 'whole' },
+  },
   // the hidpi projects' fixed viewport
-  { width: 1280, height: 900, line: { 100: 'shared', 200: 'own' } },
+  {
+    width: 1280,
+    height: 900,
+    line: { 100: 'shared', 200: 'own' },
+    visible: { 100: 'whole', 200: 'whole' },
+  },
   // Playwright's Desktop Chrome default
-  { width: 1280, height: 720, line: { 100: 'shared', 200: 'own' } },
+  {
+    width: 1280,
+    height: 720,
+    line: { 100: 'shared', 200: 'own' },
+    visible: { 100: 'whole', 200: 'whole' },
+  },
   // the narrowest row in this table the strip shares, with the widest margin to spare
-  { width: 1000, height: 720, line: { 100: 'shared', 200: 'own' } },
-  // coarse-pointer landscape tablet — Standard
-  { width: 640, height: 560, line: { 100: 'own', 200: 'own' } },
-  // portrait phone — Standard by height
-  { width: 360, height: 640, line: { 100: 'own', 200: 'own' } },
+  {
+    width: 1000,
+    height: 720,
+    line: { 100: 'shared', 200: 'own' },
+    visible: { 100: 'whole', 200: 'whole' },
+  },
+  // coarse-pointer landscape tablet — Standard. At 200% the strip's line is past the capped
+  // hud at rest (the hud scrolls to it).
+  {
+    width: 640,
+    height: 560,
+    line: { 100: 'own', 200: 'own' },
+    visible: { 100: 'whole', 200: 'none' },
+  },
+  // portrait phone — Standard by height. At 200% likewise.
+  {
+    width: 360,
+    height: 640,
+    line: { 100: 'own', 200: 'own' },
+    visible: { 100: 'whole', 200: 'none' },
+  },
 ] as const satisfies readonly {
   readonly width: number;
   readonly height: number;
   readonly line: {
     readonly 100: 'shared' | 'own';
     readonly 200: 'shared' | 'own';
+  };
+  readonly visible: {
+    readonly 100: StripVisible;
+    readonly 200: StripVisible;
   };
 }[];
 
@@ -540,12 +640,32 @@ for (const size of PINNED_STANDARD) {
         Math.ceil(size.height * 0.4) + 1,
       );
 
-      // OCCLUSION: what of the strip is on screen covers no cell of the board — the whole
-      // projected grid, a stricter claim than #101's buildable-cells rule.
-      const grid = await projectedGrid(page);
+      // VISIBILITY at rest, against the measured table: a strip the table expects on screen
+      // that is not (scrolled out of the capped hud) fails here.
+      const strip = await stripBox(page);
       const shown = await visibleStrip(page);
-      if (shown !== null) {
-        expect(intersect(shown, grid), 'the strip covers part of the board').toBeNull();
+      const visible: StripVisible =
+        shown === null || shown.width <= 0 || shown.height <= 0
+          ? 'none'
+          : shown.height >= strip.height - 1
+            ? 'whole'
+            : 'partial';
+      expect(
+        visible,
+        `what of the strip is on screen at rest (${shown === null ? 0 : shown.height.toFixed(1)} of ` +
+          `${strip.height.toFixed(1)}px) — if that is now correct, re-measure and move the strip ` +
+          'table with it',
+      ).toBe(size.visible[zoom]);
+
+      // OCCLUSION: what of the strip is on screen covers no cell of the board — the whole
+      // projected grid, a stricter claim than #101's buildable-cells rule. Never skipped: a
+      // strip expected on screen has been asserted on screen above, and one expected scrolled
+      // out has nothing on screen to cover anything.
+      const grid = await projectedGrid(page);
+      if (visible === 'none') {
+        expect(shown, 'nothing of the strip is on screen').toBeNull();
+      } else {
+        expect(intersect(shown!, grid), 'the strip covers part of the board').toBeNull();
       }
     });
   }

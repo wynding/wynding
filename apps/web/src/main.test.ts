@@ -2433,14 +2433,17 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       const probe = h.root.querySelector('.wy-inset-probe');
       expect(probe, 'the inset probe must be mounted').not.toBeNull();
       expect(probe!.getAttribute('aria-hidden')).toBe('true');
-      // ...and the countdown ring's painted box (#181 H1): its slot is zero-width, so a hint
-      // that changes length resizes only the visual.
-      const ringVisual = dock.querySelector('.wy-dock-ring-visual');
-      expect(ringVisual, 'the ring visual must be mounted').not.toBeNull();
-      expect(new Set(observer!.observed)).toEqual(
-        new Set([dock, stage, ...dock.children, ringVisual!, probe!]),
-      );
+      // EXACTLY those: the Dock, the Stage, every control, and the probe — the countdown dial
+      // (#181) is drawn inside the primary control, out of its layout, so it is no box of its
+      // own to watch.
+      expect(new Set(observer!.observed)).toEqual(new Set([dock, stage, ...dock.children, probe!]));
+      // Length BESIDE the set, because `new Set` discards multiplicity: a regression that
+      // re-observed a box on every pass would still satisfy the set comparison.
+      expect(observer!.observed).toHaveLength(2 + dock.children.length + 1);
       expect(dock.children.length).toBeGreaterThan(1);
+      const dial = dock.querySelector<HTMLElement>('.wy-dial');
+      expect(dial, 'the dial lives inside the primary control').not.toBeNull();
+      expect(dial!.parentElement!.classList.contains('wy-primary')).toBe(true);
 
       // The scroll cue follows the scrollport: a scroll re-points it, no frame needed.
       dock.classList.add('wy-dock--scroll');
@@ -2451,8 +2454,6 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
 
       // A burst of notifications is ONE pass, one frame later — never inside the callback.
       stageHeight = 500;
-      const ring = dock.querySelector<HTMLElement>('.wy-dock-ring')!;
-      ring.classList.add('wy-dock-ring--off'); // a verdict from an older layout
       const before = frames.length;
       observer!.cb();
       observer!.cb();
@@ -2460,9 +2461,9 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       expect(prop('--wy-dock-reserve')).toBe('400px');
       frames[frames.length - 1]!(0);
       expect(prop('--wy-dock-reserve')).toBe('500px');
-      // The ring's fit rides the same pass (#181 H1). jsdom renders no ring, so the pass can
-      // only clear — which is the point: no verdict outlives the layout it was measured in.
-      expect(ring.classList.contains('wy-dock-ring--off')).toBe(false);
+      // The pass measures the Dock and never touches the dial (#181): no fit verdict, no style.
+      expect(dial!.className).toBe('wy-dial');
+      expect(dial!.getAttribute('style')).toBeNull();
       // ...and the frame slot is released, so the next resize schedules again.
       observer!.cb();
       expect(frames.length - before).toBe(2);
@@ -2471,6 +2472,11 @@ describe('main — the Standard Dock footprint wiring (#152)', () => {
       h.app.destroy();
       expect(cancelled).toContain(frames.length);
       expect(observer!.disconnected).toBe(true);
+      // EVERY observer the app created, not just the Dock's (the Rail's, the strip's): a leaked
+      // one keeps writing to a detached tree for the lifetime of the page. Per instance, so one
+      // disconnect can never stand in for another's.
+      expect(instances.length).toBeGreaterThan(1);
+      for (const i of instances) expect(i.disconnected).toBe(true);
       expect(h.root.querySelector('.wy-inset-probe'), 'the probe is removed').toBeNull();
       for (const p of ['--wy-dock-reserve', '--wy-dock-max-h', '--wy-dock-row-h']) {
         expect(prop(p), p).toBe('');

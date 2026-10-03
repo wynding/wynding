@@ -11,7 +11,7 @@ import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { createOverlay, type UiAction, type HudView } from './overlay';
 import type { ModalOverlay } from './modal';
 import { createShell, dockButtonParts } from './shell';
-import { hexColour, ringDash } from './hud-icons';
+import { dialDash, hexColour } from './hud-icons';
 import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
 import { createController, type UiState } from './controller';
@@ -93,6 +93,8 @@ const fakeEnsurePaused = (): ReturnType<typeof vi.fn> => vi.fn();
 
 interface SetupOptions {
   readonly install?: InstallHandle;
+  /** A ruleset other than the shipped one — e.g. a clone with a balance value changed. */
+  readonly ruleset?: ReturnType<typeof compileRuleset>;
 }
 
 function setup(
@@ -113,7 +115,7 @@ function setup(
     settings,
     keymap,
     shell,
-    ruleset,
+    options.ruleset ?? ruleset,
     abortGesture,
     install,
   );
@@ -777,7 +779,7 @@ describe('overlay — player-started runs (PLAN.md P4)', () => {
     expect(shell.hud.wave.full.textContent).toBe('Wave in 25s');
     expect(shell.hud.wave.root.hidden).toBe(false);
     const visible = [...shell.hudBox.children].filter((el) => !(el as HTMLElement).hidden);
-    expect(visible).toHaveLength(5); // lives, bounty, stars, score, wave (no preview to show)
+    expect(visible).toHaveLength(5); // wave, lives, bounty, stars, score (no preview to show)
   });
 
   it('once started: Pause is visible, and the primary Dock button MORPHS to Call wave rather than hiding (M2-S2, PLAN.md P3 step 17)', () => {
@@ -2178,6 +2180,46 @@ describe('overlay — a steady-state refresh performs zero child-node replacemen
     });
   });
 
+  it('(e) a MULTI-ENTRY wave preview in view — rows whose glance is icon and count alone (#181)', () => {
+    // A multi-entry row renders less than a single entry's (no name, no clause), so the row
+    // comparison that decides a rebuild has its own branch for it; a wrong expectation there
+    // would rebuild the list on every refresh — the #98 class, and a scrolled strip snapping
+    // back to its start 20 times a second.
+    expectSteadyStateIsQuiet({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 5,
+          waveCount: 9,
+          entries: [
+            {
+              creepId: 'normal',
+              count: 8,
+              domain: 'ground',
+              armor: 0,
+              leakCost: 1,
+              immunities: [],
+              boss: false,
+            },
+            {
+              creepId: 'fast',
+              count: 6,
+              domain: 'air',
+              armor: 2,
+              leakCost: 1,
+              immunities: [],
+              boss: false,
+            },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+  });
+
   it('(d) a POPULATED board summary in view (#79) — the counts hold still through a wave', () => {
     // The `hud()` default is an empty board, where the summary is hidden and never
     // written at all — which would leave this whole class untested for the one HUD node
@@ -3469,6 +3511,25 @@ describe('overlay — the wave strip (#181 L1)', () => {
       expect(cue(strip)).toEqual({ before: false, after: false });
     });
 
+    it('keeps the line where the reader scrolled it through a same-wave refresh', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      const entries = [entry(), entry({ creepId: 'fast', domain: 'air' })];
+      show(overlay, entries);
+      expect(isScrollForm(strip)).toBe(true);
+      const rows = [...shell.preview.list.children];
+      strip.scrollLeft = 23;
+      strip.dispatchEvent(new Event('scroll'));
+      // Fresh, deep-equal entries — a refresh mid-countdown, not a new wave.
+      show(overlay, structuredClone(entries));
+      show(overlay, structuredClone(entries));
+      expect(strip.scrollLeft).toBe(23);
+      expect([...shell.preview.list.children]).toEqual(rows); // not rebuilt
+      expect(cue(strip)).toEqual({ before: true, after: true });
+    });
+
     it('opens a new wave at its title, whatever the last one was scrolled to', () => {
       const { overlay, shell } = setup();
       const strip = shell.preview.root;
@@ -3481,6 +3542,65 @@ describe('overlay — the wave strip (#181 L1)', () => {
       show(overlay, [entry({ creepId: 'swarm' }), entry({ creepId: 'armored' })], 2);
       expect(strip.scrollLeft).toBe(0);
       expect(cue(strip)).toEqual({ before: false, after: true });
+    });
+
+    it('spends a vertical wheel turn sideways while the line can move that way, and leaves it alone at either end', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300); // a 120px range
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(true);
+      const wheel = (init: WheelEventInit): boolean => {
+        const e = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
+        strip.dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      expect(wheel({ deltaY: 40 })).toBe(true);
+      expect(strip.scrollLeft).toBe(40);
+      expect(wheel({ deltaY: -10 })).toBe(true);
+      expect(strip.scrollLeft).toBe(30);
+      // LINE and PAGE modes are converted to px: a line is 16px, a page the strip's width.
+      strip.scrollLeft = 0;
+      expect(wheel({ deltaY: 3, deltaMode: 1 })).toBe(true);
+      expect(strip.scrollLeft).toBe(48);
+      strip.scrollLeft = 0;
+      expect(wheel({ deltaY: 1, deltaMode: 2 })).toBe(true);
+      expect(strip.scrollLeft).toBe(300);
+      // At either end the turn is NOT taken: it goes on to whatever scrolls beyond the strip.
+      strip.scrollLeft = 120;
+      expect(wheel({ deltaY: 40 })).toBe(false);
+      expect(strip.scrollLeft).toBe(120);
+      strip.scrollLeft = 119.5; // within the 1px sub-pixel slack of the end
+      expect(wheel({ deltaY: 40 })).toBe(false);
+      expect(strip.scrollLeft).toBe(119.5);
+      strip.scrollLeft = 0;
+      expect(wheel({ deltaY: -40 })).toBe(false);
+      expect(strip.scrollLeft).toBe(0);
+      // …but turning back from an end is taken again.
+      strip.scrollLeft = 120;
+      expect(wheel({ deltaY: -40 })).toBe(true);
+      expect(strip.scrollLeft).toBe(80);
+      // A horizontal-dominant delta is the browser's own, and ctrl+wheel is a zoom.
+      expect(wheel({ deltaX: 30, deltaY: 10 })).toBe(false);
+      expect(wheel({ deltaY: 40, ctrlKey: true })).toBe(false);
+      expect(strip.scrollLeft).toBe(80);
+      overlay.destroy();
+      expect(wheel({ deltaY: -40 })).toBe(false); // no listener left
+      expect(strip.scrollLeft).toBe(80);
+    });
+
+    it('takes no wheel turn while the line fits', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 300, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry()]);
+      expect(isScrollForm(strip)).toBe(false);
+      const e = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 });
+      strip.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+      expect(strip.scrollLeft).toBe(0);
     });
 
     it('drops the cue with the line even while a focused reader keeps the tab stop', () => {
@@ -3520,19 +3640,25 @@ describe('overlay — the wave strip (#181 L1)', () => {
     });
 
     it('re-decides on a resize of the strip or its list, and stops observing on destroy', () => {
-      const observed: Element[] = [];
-      let callback: (() => void) | null = null;
-      let disconnected = false;
+      // One record PER INSTANCE (#181 QC): the Rail has an observer too, so a flag shared by
+      // every instance would pass on the Rail's teardown even if the strip's were missing.
+      interface FakeRecord {
+        readonly observed: Element[];
+        disconnected: boolean;
+        readonly callback: () => void;
+      }
+      const instances: FakeRecord[] = [];
       class FakeResizeObserver {
+        private readonly record: FakeRecord;
         constructor(cb: () => void) {
-          // The Rail's observer is created first; the strip's is the one that watches it.
-          callback = cb;
+          this.record = { observed: [], disconnected: false, callback: cb };
+          instances.push(this.record);
         }
         observe(el: Element): void {
-          observed.push(el);
+          this.record.observed.push(el);
         }
         disconnect(): void {
-          disconnected = true;
+          this.record.disconnected = true;
         }
       }
       const original = window.ResizeObserver;
@@ -3540,16 +3666,23 @@ describe('overlay — the wave strip (#181 L1)', () => {
       try {
         const { overlay, shell } = setup();
         const strip = shell.preview.root;
-        expect(observed).toContain(strip);
-        expect(observed).toContain(shell.preview.list);
+        const stripObservers = instances.filter((r) => r.observed.includes(strip));
+        expect(stripObservers).toHaveLength(1);
+        const own = stripObservers[0]!;
+        // EXACTLY the strip and its list: nothing else rides this observer's callback.
+        expect(own.observed).toEqual([strip, shell.preview.list]);
         widths(strip, 300, 300);
         show(overlay, [entry()]);
         expect(isScrollForm(strip)).toBe(false);
         widths(strip, 420, 300); // a window resize narrows the row; the wave did not change
-        callback!();
+        own.callback();
         expect(isScrollForm(strip)).toBe(true);
+        expect(own.disconnected).toBe(false);
         overlay.destroy();
-        expect(disconnected).toBe(true);
+        expect(own.disconnected).toBe(true);
+        // …and every other observer this overlay made is torn down with it.
+        expect(instances.length).toBeGreaterThan(1);
+        for (const r of instances) expect(r.disconnected).toBe(true);
       } finally {
         window.ResizeObserver = original;
       }
@@ -3557,77 +3690,132 @@ describe('overlay — the wave strip (#181 L1)', () => {
   });
 });
 
-// #181 (H1): the countdown ring beside the Dock's primary action. Decoration only — the wave
-// chip stays the accessible countdown — so what is pinned is that it shows the SAME seconds,
-// a truthful arc and hint, and that it never churns the DOM on a steady refresh.
-describe('overlay — the countdown ring (#181 H1)', () => {
-  const view = (over: Partial<HudVM> = {}): HudView => ({
+// #181 (H1, QC): the countdown dial inside the Dock's primary action, and the early-call
+// note the primary carries. The dial is decoration — the wave chip is the readable and the
+// accessible countdown — so what is pinned is a truthful dial with no text of its own, that it
+// never churns the DOM on a steady refresh, and that the note claims a bounty ONLY where the
+// sim would pay one.
+describe('overlay — the countdown dial and the early-call note (#181 H1)', () => {
+  const view = (over: Partial<HudVM> = {}, ui: Partial<UiState> = {}): HudView => ({
     hud: hud(over),
     paused: false,
     speed: 1,
-    ui: uiState(),
+    ui: uiState(ui),
     refund: 0,
   });
   /** A wave's full countdown in whole seconds, from the ruleset — rounded up like
-   *  `HudVM.countdownSeconds`, so a fresh countdown reads as a full ring. */
+   *  `HudVM.countdownSeconds`, so a fresh countdown draws a full dial. */
   const totalSeconds = (cursor: number): number =>
     Math.ceil((ruleset.waves[cursor]!.countdownTicks * MS_PER_TICK) / 1000);
+  const NOTE = 'Calling now pays an early-call bounty';
 
-  it("shows the wave chip's seconds, with an arc for the share of THIS wave's countdown left", () => {
+  it("draws the share of THIS wave's countdown left — and the seconds stay the chip's alone", () => {
     const { overlay, shell } = setup();
-    const ring = shell.dock.ring;
+    const dial = shell.dock.dial;
     const first = totalSeconds(0);
     overlay.update(view({ countdownSeconds: first }));
-    expect(ring.root.hidden).toBe(false);
-    expect(ring.ring.text.textContent).toBe(`${first}s`);
-    expect(ring.ring.text.textContent).toBe(shell.hud.wave.value.textContent);
-    expect(ring.ring.progress.getAttribute('stroke-dasharray')).toBe(ringDash(1));
+    expect(dial.root.hidden).toBe(false);
+    expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(1));
+    expect(shell.hud.wave.value.textContent).toBe(`${first}s`);
     overlay.update(view({ countdownSeconds: 4 }));
-    expect(ring.ring.progress.getAttribute('stroke-dasharray')).toBe(ringDash(4 / first));
+    expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(4 / first));
+    expect(shell.hud.wave.value.textContent).toBe('4s');
     // Each wave is measured against its own countdown, not the first one's.
     const second = totalSeconds(1);
     overlay.update(view({ countdownSeconds: second, waveCursor: 1 }));
-    expect(ring.ring.progress.getAttribute('stroke-dasharray')).toBe(ringDash(1));
-  });
-
-  it('claims the early-call bounty only where the sim pays one — never for the opening wave', () => {
-    const { overlay, shell } = setup();
-    expect(ruleset.balance.earlyCallBountyDivisor).toBeGreaterThan(0);
-    overlay.update(view({ waveCursor: 0 }));
-    expect(shell.dock.ring.hint.textContent).toBe('until wave 1');
-    overlay.update(view({ waveCursor: 1, countdownSeconds: 12 }));
-    expect(shell.dock.ring.hint.textContent).toBe('until wave 2 · calling early pays a bounty');
+    expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(1));
+    // No text of its own, ever: the control's name is its label.
+    expect(dial.root.textContent).toBe('');
+    expect(dockButtonParts(shell.dock.primary).text.textContent).toBe('Call wave');
+    expect(shell.dock.primary.textContent).toBe('Call wave');
   });
 
   it('is down whenever there is no countdown to draw: none left, a launching call, or a resolved run', () => {
     const { overlay, shell } = setup();
-    const ring = shell.dock.ring.root;
+    const dial = shell.dock.dial.root;
     overlay.update(view());
-    expect(ring.hidden).toBe(false);
+    expect(dial.hidden).toBe(false);
     overlay.update(view({ launchPending: true, callable: false }));
-    expect(ring.hidden).toBe(true);
+    expect(dial.hidden).toBe(true);
     overlay.update(view());
-    expect(ring.hidden).toBe(false);
+    expect(dial.hidden).toBe(false);
     overlay.update(view({ countdownSeconds: null, waveCursor: 9, callable: false }));
-    expect(ring.hidden).toBe(true);
+    expect(dial.hidden).toBe(true);
     overlay.update(view({ phase: 'won', won: true, countdownSeconds: null }));
-    expect(ring.hidden).toBe(true);
-    expect(ring.getAttribute('aria-hidden')).toBe('true'); // decoration in every state
+    expect(dial.hidden).toBe(true);
+    expect(dial.getAttribute('aria-hidden')).toBe('true'); // decoration in every state
   });
 
-  it('a steady refresh writes nothing to the ring — no text node, no attribute (#98)', () => {
+  it('notes the early-call bounty exactly where the lower bound of the ticks left pays one', () => {
+    const { overlay, shell } = setup();
+    const primary = shell.dock.primary;
+    const divisor = ruleset.balance.earlyCallBountyDivisor;
+    expect(divisor).toBeGreaterThan(0);
+    // The sim pays floor(rem / divisor) from the ticks still remaining, and the HUD sees only
+    // ceil(rem × MS_PER_TICK / 1000). The FEWEST ticks a given second can hold:
+    const minTicks = (s: number): number => ((s - 1) * 1000) / MS_PER_TICK + 1;
+    for (let s = 1; s <= totalSeconds(1); s++) {
+      overlay.update(view({ countdownSeconds: s, waveCursor: 1 }));
+      const pays = Math.floor(minTicks(s) / divisor) >= 1;
+      expect(primary.getAttribute('title'), `${s}s`).toBe(pays ? NOTE : null);
+    }
+    // The boundary, named: the first second whose fewest ticks still pay, and the one below
+    // it, where some of its ticks would pay nothing — so the note says nothing there.
+    const firstPaying = Math.ceil(((divisor - 1) * MS_PER_TICK) / 1000) + 1;
+    overlay.update(view({ countdownSeconds: firstPaying, waveCursor: 1 }));
+    expect(primary.getAttribute('title')).toBe(NOTE);
+    overlay.update(view({ countdownSeconds: firstPaying - 1, waveCursor: 1 }));
+    expect(primary.getAttribute('title')).toBeNull();
+    // Shipped content: 50 ticks — 4 seconds says it, 3 does not.
+    if (divisor === 50 && MS_PER_TICK === 50) expect(firstPaying).toBe(4);
+  });
+
+  it('never notes a bounty the press would not earn: the opening wave, Start, a launching or a refused call, a resolved run', () => {
+    const { overlay, shell } = setup();
+    const primary = shell.dock.primary;
+    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }));
+    expect(primary.getAttribute('title')).toBe(NOTE); // calibration
+    overlay.update(view({ countdownSeconds: 25, waveCursor: 0 })); // the opening launch (sv15)
+    expect(primary.getAttribute('title')).toBeNull();
+    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }, { started: false })); // Start
+    expect(primary.getAttribute('title')).toBeNull();
+    overlay.update(
+      view({ countdownSeconds: 25, waveCursor: 1, launchPending: true, callable: false }),
+    );
+    expect(primary.getAttribute('title')).toBeNull();
+    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }, { callWaveReady: false }));
+    expect(primary.getAttribute('title')).toBeNull();
+    overlay.update(view({ countdownSeconds: 25, waveCursor: 1 }));
+    expect(primary.getAttribute('title')).toBe(NOTE);
+    overlay.update(view({ phase: 'won', won: true, countdownSeconds: null }));
+    expect(primary.getAttribute('title')).toBeNull();
+  });
+
+  it('never notes a bounty under a ruleset whose divisor pays none', () => {
+    const noBounty = { ...ruleset, balance: { ...ruleset.balance, earlyCallBountyDivisor: 0 } };
+    const { overlay, shell } = setup(undefined, undefined, { ruleset: noBounty });
+    for (const s of [1, 4, 12, totalSeconds(1)]) {
+      overlay.update(view({ countdownSeconds: s, waveCursor: 1 }));
+      expect(shell.dock.primary.getAttribute('title'), `${s}s`).toBeNull();
+    }
+    // The dial itself does not depend on the bounty: it still draws the countdown.
+    expect(shell.dock.dial.root.hidden).toBe(false);
+  });
+
+  it('a steady refresh writes nothing to the dial or the note — no node, no attribute (#98)', () => {
     const { overlay, shell } = setup();
     overlay.update(view({ countdownSeconds: 7, waveCursor: 1 }));
+    expect(shell.dock.primary.getAttribute('title')).toBe(NOTE);
     const observer = new MutationObserver(() => {});
-    observer.observe(shell.dock.ring.root, {
+    observer.observe(shell.dock.primary, {
       childList: true,
       subtree: true,
       attributes: true,
       characterData: true,
     });
-    // Positive calibration: the observer sees an attribute write on the arc.
-    const arc = shell.dock.ring.ring.progress;
-    arc.setAttribute('stroke-dasharray', arc.getAttribute('stroke-dasharray')!);
+    // Positive calibration: the observer sees an attribute write on the dial.
+    const dial = shell.dock.dial.progress;
+    dial.setAttribute('stroke-dasharray', dial.getAttribute('stroke-dasharray')!);
     expect(observer.takeRecords().length).toBeGreaterThan(0);
     overlay.update(structuredClone(view({ countdownSeconds: 7, waveCursor: 1 })));
     expect(observer.takeRecords()).toEqual([]);

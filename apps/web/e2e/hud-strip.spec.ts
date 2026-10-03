@@ -16,11 +16,12 @@ import { COMPACT_QUERY } from '../src/layout';
 // hud-strip.spec.ts — the icon HUD and the wave strip, measured where they are drawn (#181).
 //
 // L1 put the wave preview in ONE home, a one-line strip in the status row; H1 gave the chips
-// the style frame's icons and put a countdown ring beside the Dock's primary action.
-// `stage-stability.spec.ts` pins that no wave can move the board; this file pins what the
-// change was FOR — the status row back to one line on the tablets #101's reserved row
-// inflated, the strip whole and unclipped inside it, the icons painted with the accessible
-// text untouched, and the ring as decoration that agrees with the countdown it decorates.
+// the style frame's icons, and a countdown dial inside the Dock's primary action (#181 QC: it
+// replaced a ring beside the Dock). `stage-stability.spec.ts` pins that no wave can move the
+// board; this file pins what the change was FOR — the status row back to one line on the
+// tablets #101's reserved row inflated, the strip whole and unclipped inside it, the icons
+// painted with the accessible text untouched, the countdown readable in the chip that leads
+// the hud, and the dial as decoration that adds nothing to the control it sits in.
 
 const STANDARD = { width: 1280, height: 720 };
 const PHONE = { width: 658, height: 320 }; // Galaxy S9+ landscape — Compact
@@ -72,32 +73,48 @@ test('1080×810: the status row is one line and the board keeps 28px cells — t
 test('1080×810 at 200% text: the strip shares the wrapped chips’ second line — two lines, the strip wholly on screen (its floor is its smallest useful form)', async ({
   page,
 }) => {
-  // At 200% the chips wrap after the stars, leaving the countdown chip ~615px of line where
-  // the strip's 12rem floor (384px here) fits beside it — on any font stack. A floor sized to
-  // a longer line sends the strip to a third line inside the hud's 40dvh cap, partly scrolled
-  // out of view, and takes ~57px from the board.
+  // At 200% the chips wrap after the stars — the countdown, lives, bounty and stars on the first
+  // line — and the score chip leaves ~500–540px of the second, where the strip's 12rem floor
+  // (384px here) fits beside it, on macOS's font stack and CI's (DejaVu Sans) alike. A floor
+  // sized to a longer line sends the strip to a third line inside the hud's 40dvh cap, partly
+  // scrolled out of view, and takes ~57px from the board. The lines are found from the chips
+  // themselves, so the check does not depend on which chip the row wraps before.
   await gotoAt(page, { width: 1080, height: 810 });
   await page.addStyleTag({ content: ':root { font-size: 200% }' });
   await settle(page);
   const m = await page.evaluate(() => {
-    const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-    const strip = box('.wy-wave-preview');
-    const hud = box('.wy-hud');
-    const lives = box('.wy-chip[data-wy-chip="lives"]');
-    const wave = box('.wy-chip[data-wy-chip="wave"]');
+    const box = (el: Element): DOMRect => el.getBoundingClientRect();
+    const strip = box(document.querySelector('.wy-wave-preview')!);
+    const hud = box(document.querySelector('.wy-hud')!);
+    const chips = [...document.querySelectorAll('.wy-hud > .wy-chip')].map(box);
+    // Chips that overlap vertically share a line (1px tolerance); the rest start a new one.
+    const lines: DOMRect[][] = [];
+    for (const chip of chips) {
+      const line = lines.find((l) =>
+        l.some((c) => chip.top < c.bottom - 1 && c.top < chip.bottom - 1),
+      );
+      if (line === undefined) lines.push([chip]);
+      else line.push(chip);
+    }
     const middle = strip.top + strip.height / 2;
+    const first = lines[0]!;
+    const second = lines[1] ?? [];
     return {
-      status: box('.wy-status').height,
-      belowLives: strip.top >= lives.bottom - 1,
-      besideWaveChip: middle > wave.top && middle < wave.bottom,
+      status: box(document.querySelector('.wy-status')!).height,
+      chipLines: lines.length,
+      belowFirstLine: strip.top >= Math.max(...first.map((c) => c.bottom)) - 1,
+      besideSecondLine: second.some((c) => middle > c.top && middle < c.bottom),
       inHudView: strip.top >= hud.top - 1 && strip.bottom <= hud.bottom + 1,
     };
   });
+  expect(m.chipLines, 'the premise: the chips wrapped onto exactly two lines').toBe(2);
   expect(
-    m.belowLives,
+    m.belowFirstLine,
     'the premise: the chips wrapped, so the strip is under their first line',
   ).toBe(true);
-  expect(m.besideWaveChip, 'the strip took a third line instead of sharing the second').toBe(true);
+  expect(m.besideSecondLine, 'the strip took a third line instead of sharing the second').toBe(
+    true,
+  );
   expect(m.inHudView, 'part of the strip sits in the hud’s scroll range at rest').toBe(true);
   expect(m.status, 'two lines of status row').toBeLessThanOrEqual(190);
 });
@@ -245,21 +262,20 @@ test('a strip whose line runs past its edge fades that edge, follows the scroll 
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
-test('forced colors: every HUD icon, the strip’s creep icon and the ring take the user’s system colours, and the strip’s fade survives', async ({
+test('forced colors: every HUD icon and the strip’s creep icon take the user’s system colours, the dial follows its control’s, and the strip’s fade survives', async ({
   page,
 }) => {
   // Chromium does not force SVG `fill` or `stroke`, so without `ui.css`'s forced-colors block
-  // the ring's seconds — the only visible countdown on Standard while the ring shows — stay
-  // near-white on the user's Canvas. Emulated BEFORE the page loads, as the Dock's
-  // forced-colors test does. No axe audit in this state: under emulated forced colors axe-core
-  // reports the authored text colour (it reads `-webkit-text-fill-color`, which Chromium leaves
-  // unforced while it paints the forced one — 26 such findings on the commit before #181), so
-  // the inks are checked against the system colours themselves, resolved by the browser.
+  // the countdown clock and the chips' icons stay near-white on the user's Canvas. Emulated
+  // BEFORE the page loads, as the Dock's forced-colors test does. No axe audit in this state:
+  // under emulated forced colors axe-core reports the authored text colour (it reads
+  // `-webkit-text-fill-color`, which Chromium leaves unforced while it paints the forced one —
+  // 26 such findings on the commit before #181), so the inks are checked against the system
+  // colours themselves, resolved by the browser.
   await page.emulateMedia({ forcedColors: 'active' });
   await gotoAt(page, STANDARD);
   expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
-  // The painted ring, not its slot: the slot is zero-width by design (`ui.css`).
-  await expect(page.locator('.wy-dock-ring .wy-ring')).toBeVisible();
+  await expect(page.locator('.wy-dock .wy-primary > .wy-dial')).toBeVisible();
   await expect(page.locator('.wy-wave-preview .wy-creep-icon')).toHaveCount(1);
   const inks = await page.evaluate(() => {
     const system = (value: string): string => {
@@ -272,16 +288,23 @@ test('forced colors: every HUD icon, the strip’s creep icon and the ring take 
     };
     const paint = (sel: string, prop: 'fill' | 'stroke'): string[] =>
       [...document.querySelectorAll(sel)].map((el) => getComputedStyle(el)[prop]);
+    const primary = document.querySelector<HTMLElement>('.wy-dock .wy-primary')!;
+    const style = (sel: string): CSSStyleDeclaration =>
+      getComputedStyle(primary.querySelector(sel)!);
     return {
       canvasText: system('CanvasText'),
       canvas: system('Canvas'),
+      buttonText: system('ButtonText'),
       bodies: paint('.wy-hud .wy-icon .wy-icon-body', 'fill'),
       lines: paint('.wy-hud .wy-icon .wy-icon-line', 'stroke'),
       facets: paint('.wy-hud .wy-icon .wy-icon-facets', 'stroke'),
       creep: paint('.wy-wave-preview .wy-creep-body', 'fill'),
-      ringText: paint('.wy-ring-text', 'fill'),
-      ringArc: paint('.wy-ring-progress', 'stroke'),
-      ringTrack: paint('.wy-ring-track', 'stroke'),
+      control: getComputedStyle(primary).color,
+      dial: style('.wy-dial-progress').stroke,
+      dialOpacity: style('.wy-dial-progress').strokeOpacity,
+      track: style('.wy-dial-track').stroke,
+      trackOpacity: style('.wy-dial-track').strokeOpacity,
+      labelFill: style('.wy-btn-text').backgroundColor,
       fade: getComputedStyle(document.querySelector('.wy-wave-preview')!, '::after')
         .backgroundImage,
       fadeAdjust: getComputedStyle(
@@ -293,21 +316,24 @@ test('forced colors: every HUD icon, the strip’s creep icon and the ring take 
   expect(inks.canvasText).not.toBe(inks.canvas);
   // lives, bounty, stars and score bodies; the countdown clock's lines.
   expect(inks.bodies).toHaveLength(4);
-  for (const ink of [
-    ...inks.bodies,
-    ...inks.lines,
-    ...inks.creep,
-    ...inks.ringText,
-    ...inks.ringArc,
-  ]) {
+  for (const ink of [...inks.bodies, ...inks.lines, ...inks.creep]) {
     expect(ink).toBe(inks.canvasText);
   }
   expect(inks.lines.length).toBeGreaterThan(0);
   expect(inks.creep).toHaveLength(1);
   expect(inks.facets).toEqual([inks.canvas]); // drawn on the gem's body, in the colour around it
-  expect(inks.ringTrack).toHaveLength(1);
-  expect(inks.ringTrack[0], 'the ring’s track must stay apart from its arc').not.toBe(
-    inks.canvasText,
+  // The dial is the control's own ink, which the UA forces to a system colour; its track the
+  // same ink, kept apart by opacity alone.
+  expect([inks.buttonText, inks.canvasText]).toContain(inks.control);
+  expect(inks.dial).toBe(inks.control);
+  expect(inks.track).toBe(inks.control);
+  expect(inks.dialOpacity).toBe('1');
+  expect(Number(inks.trackOpacity)).toBeLessThan(1);
+  // The label's mask stands down, so no Canvas box shows on the forced ButtonFace: nothing is
+  // painted. Only the ALPHA is compared — the UA forces a colour's channels to a system colour
+  // and keeps the authored alpha, so a transparent fill computes as Canvas at alpha 0.
+  expect(inks.labelFill, 'the label’s mask paints nothing under forced colors').toMatch(
+    /^rgba\(\d+, \d+, \d+, 0\)$/,
   );
   // The fade is a background image, which forced colors would otherwise drop.
   expect(inks.fade, 'forced colors must not strip the strip’s fade').not.toBe('none');
@@ -325,15 +351,15 @@ for (const [layout, size] of [
     expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(
       layout === 'Compact',
     );
-    // The full ICU messages, exactly as before #181 — still each chip's accessible text, in
-    // the style frame's order.
+    // The full ICU messages, exactly as before #181 — still each chip's accessible text — with
+    // the countdown first (#181 QC), then the style frame's order.
     await expect.poll(async () => (await visibleChipAccessibleText(page)).length).toBe(5);
     const text = await visibleChipAccessibleText(page);
-    expect(text[0]).toMatch(/^Lives: \d+$/);
-    expect(text[1]).toMatch(/^Bounty: \d+$/);
-    expect(text[2]).toMatch(/^Stars: \d+ of 3$/);
-    expect(text[3]).toMatch(/^Score: \d+$/);
-    expect(text[4]).toMatch(/^Wave in \d+s$/);
+    expect(text[0]).toMatch(/^Wave in \d+s$/);
+    expect(text[1]).toMatch(/^Lives: \d+$/);
+    expect(text[2]).toMatch(/^Bounty: \d+$/);
+    expect(text[3]).toMatch(/^Stars: \d+ of 3$/);
+    expect(text[4]).toMatch(/^Score: \d+$/);
     for (const slot of ['lives', 'bounty', 'stars', 'score', 'wave']) {
       const shape = await page
         .locator(`.wy-chip[data-wy-chip="${slot}"] .wy-chip-glance`)
@@ -350,74 +376,231 @@ for (const [layout, size] of [
         iconHidden: 'true',
       });
     }
-    // Painted: every icon but the countdown's is on screen in both layouts. The countdown
-    // chip's glance shows only where the ring cannot (Compact has no ring).
-    for (const slot of ['lives', 'bounty', 'stars', 'score']) {
+    // Painted: EVERY icon is on screen in both layouts — the countdown's included, whose glance
+    // is the one readable countdown (#181 QC: it no longer stands down for anything).
+    for (const slot of ['wave', 'lives', 'bounty', 'stars', 'score']) {
       await expect(
         page.locator(`.wy-chip[data-wy-chip="${slot}"] svg.wy-icon--${slot}`),
         slot,
       ).toBeVisible();
     }
-    const waveIcon = page.locator('.wy-chip[data-wy-chip="wave"] svg.wy-icon--wave');
-    if (layout === 'Compact') await expect(waveIcon).toBeVisible();
-    else await expect(waveIcon).toBeHidden();
     const audit = await new AxeBuilder({ page }).include('#app').analyze();
     expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
   });
 }
 
-test('Standard: the countdown ring is aria-hidden decoration showing the wave chip’s own seconds', async ({
+test('Standard: the dial is aria-hidden decoration inside the primary control, the chip reads the seconds, and the control notes the early-call bounty only once a call would pay', async ({
   page,
 }) => {
   await gotoAt(page, STANDARD);
-  const slot = page.locator('.wy-dock > .wy-dock-ring');
-  await expect(slot).toHaveAttribute('aria-hidden', 'true');
-  await expect(slot.locator('svg.wy-ring')).toBeVisible();
-  // One read, so the ring and the chip are compared at the same instant.
-  const read = (): Promise<{ ring: string; chip: string; glance: string }> =>
-    page.evaluate(() => ({
-      ring: document.querySelector('.wy-dock-ring .wy-ring-text')!.textContent ?? '',
-      chip:
-        document.querySelector('.wy-chip[data-wy-chip="wave"] .wy-chip-full')!.textContent ?? '',
-      glance: getComputedStyle(
-        document.querySelector('.wy-chip[data-wy-chip="wave"] .wy-chip-glance')!,
-      ).visibility,
-    }));
-  const agree = (r: { ring: string; chip: string }): void => {
-    const seconds = /^Wave in (\d+)s$/.exec(r.chip)?.[1];
-    expect(seconds, `the chip's full text "${r.chip}"`).toBeDefined();
-    expect(r.ring, 'the ring shows the chip’s seconds').toBe(`${seconds}s`);
+  const primary = page.locator('.wy-dock .wy-primary');
+  const dial = primary.locator(':scope > .wy-dial');
+  await expect(dial).toHaveAttribute('aria-hidden', 'true');
+  await expect(dial).toBeVisible();
+  // One read, so the chip's two forms are compared at the same instant.
+  const read = (): Promise<{ full: string; value: string; visibility: string; dash: number }> =>
+    page.evaluate(() => {
+      const chip = document.querySelector('.wy-chip[data-wy-chip="wave"]')!;
+      const glance = chip.querySelector('.wy-chip-glance')!;
+      return {
+        full: chip.querySelector('.wy-chip-full')!.textContent ?? '',
+        value: glance.querySelector('.wy-chip-value')!.textContent ?? '',
+        visibility: getComputedStyle(glance).visibility,
+        dash: parseFloat(
+          document.querySelector('.wy-dial-progress')!.getAttribute('stroke-dasharray') ?? 'NaN',
+        ),
+      };
+    });
+  const agree = (r: { full: string; value: string; visibility: string }): void => {
+    const seconds = /^Wave in (\d+)s$/.exec(r.full)?.[1];
+    expect(seconds, `the chip's full text "${r.full}"`).toBeDefined();
+    expect(r.value, 'the glance shows the full text’s seconds').toBe(`${seconds}s`);
+    expect(r.visibility, 'the glance is painted').toBe('visible');
   };
   const pre = await read();
   agree(pre);
-  // The seconds are shown ONCE: the chip's glance stands down while the ring shows them.
-  expect(pre.glance).toBe('hidden');
-  await expect(slot.locator('.wy-dock-ring-hint')).toHaveText('until wave 1');
+  // The dial adds no text: the control's name is its label, and Start notes nothing — the
+  // opening launch pays no bounty (sv15).
+  await expect(primary).toHaveAccessibleName('Start');
+  await expect(primary).toHaveAccessibleDescription('');
+  await expect(primary).not.toHaveAttribute('title');
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 
-  // Running: the ring counts the next wave down, still in step with the chip.
+  // Running: the chip counts the next wave down, the dial's progress shortens with it, and a call
+  // now would pay — said as the control's description (and tooltip), never as part of its name.
   await page.getByRole('button', { name: 'Start' }).click();
-  await expect(slot.locator('.wy-dock-ring-hint')).toHaveText(
-    'until wave 2 · calling early pays a bounty',
-  );
+  await expect(primary).toHaveAccessibleName('Call wave');
+  await expect(primary).toHaveAccessibleDescription('Calling now pays an early-call bounty');
+  await expect(primary).toHaveAttribute('title', 'Calling now pays an early-call bounty');
   const first = await read();
   agree(first);
   await expect
-    .poll(async () => (await read()).ring, { message: 'the ring counts down' })
-    .not.toBe(first.ring);
-  agree(await read());
+    .poll(async () => (await read()).value, { message: 'the chip counts down' })
+    .not.toBe(first.value);
+  const later = await read();
+  agree(later);
+  expect(later.dash, 'the dial’s progress shortens as the countdown runs').toBeLessThan(first.dash);
+  const running = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(running.violations, JSON.stringify(running.violations, null, 2)).toEqual([]);
 });
 
-test('Compact: no ring — the wave chip’s glance carries the seconds', async ({ page }) => {
+test('Compact: no dial — the primary control keeps its own padding, and the chip’s glance carries the seconds', async ({
+  page,
+}) => {
   await gotoAt(page, PHONE);
-  await expect(page.locator('.wy-dock-ring svg.wy-ring')).toBeHidden();
+  const primary = page.locator('.wy-dock .wy-primary');
+  await expect(primary.locator(':scope > .wy-dial')).toBeHidden();
+  // As it was: no room made for a dial that is not there.
+  const pad = await primary.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return [cs.paddingLeft, cs.paddingRight];
+  });
+  expect(pad[0], 'Compact keeps its button as it was').toBe(pad[1]);
   const glance = page.locator('.wy-chip[data-wy-chip="wave"] .wy-chip-glance');
   await expect(glance).toBeVisible();
   const full = await page.locator('.wy-chip[data-wy-chip="wave"] .wy-chip-full').textContent();
   const seconds = /^Wave in (\d+)s$/.exec(full ?? '')?.[1];
   expect(seconds).toBeDefined();
   await expect(glance.locator('.wy-chip-value')).toHaveText(`${seconds}s`);
+});
+
+/** The page's own scroll range on both axes. `body` is `overflow: hidden`, so any range here is
+ *  range no one can pan back — but a focus move or a screen reader can still scroll it. */
+async function pageScrollRange(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => {
+    const se = document.scrollingElement!;
+    return { x: se.scrollWidth - se.clientWidth, y: se.scrollHeight - se.clientHeight };
+  });
+}
+
+test('no hidden sentence or hidden chip becomes PAGE scroll range — the page never scrolls, before or after Start (#181 QC)', async ({
+  page,
+}) => {
+  // Measured on the commit before this fix: 131–134px of sideways range at 360×640 and 200%
+  // text, 82px at 412×915, and 70–317px of range downwards where hidden boxes sat past the
+  // viewport — the visually-hidden sentences resolving against `.wy-shell`, outside the hud's
+  // and the strip's clips. A CHIP's sentence does the same once its chip sits in a capped hud's
+  // scroll range past the viewport's bottom, unless the chip is its containing block: without
+  // that, 80–88px of range downwards in the Compact column at 300% text, and 2–6px at 400×560
+  // (measured on macOS's font stack and CI's DejaVu Sans; neither size has any range sideways).
+  for (const c of [
+    { width: 360, height: 640, zoom: 200 },
+    { width: 412, height: 915, zoom: 200 },
+    { width: 640, height: 560, zoom: 100 },
+    { width: 600, height: 1024, zoom: 200 },
+    { width: 400, height: 560, zoom: 300 },
+    { width: 658, height: 320, zoom: 300 },
+  ]) {
+    await gotoAt(page, { width: c.width, height: c.height });
+    if (c.zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${c.zoom}% }` });
+    await settle(page);
+    const at = `${c.width}×${c.height} at ${c.zoom}%`;
+    expect(await pageScrollRange(page), `${at}, before Start`).toEqual({ x: 0, y: 0 });
+    await page.getByRole('button', { name: 'Start' }).click();
+    await settle(page);
+    expect(await pageScrollRange(page), `${at}, after Start`).toEqual({ x: 0, y: 0 });
+  }
+});
+
+test('360×640, the real wave 9: no page scroll range, a reader’s move to a row scrolls the STRIP, and a plain wheel scrolls it until it can go no further', async ({
+  page,
+}) => {
+  test.setTimeout(120_000); // seven paced calls (the marathon specs' budget-coherence rule)
+  await gotoAt(page, { width: 360, height: 640 });
+  await settle(page);
+  expect(await pageScrollRange(page), 'wave 1, before Start').toEqual({ x: 0, y: 0 });
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.locator('.wy-wave-preview .wy-wave-preview-title')).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+  }
+  await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
+  await settle(page);
+  const strip = page.locator('.wy-wave-preview');
+  await expect(strip, 'the premise: four entries scroll in a phone’s strip').toHaveClass(
+    /wy-wave-preview--scroll/,
+  );
+  expect(await pageScrollRange(page), 'wave 9').toEqual({ x: 0, y: 0 });
+
+  // A screen reader moving to the last row's sentence brings it into view by scrolling the
+  // STRIP — its containing block is the row now — never the page, which nothing could pan back.
+  const moved = await page.evaluate(() => {
+    const el = document.querySelector('.wy-wave-preview') as HTMLElement;
+    el.scrollLeft = 0;
+    const rows = el.querySelectorAll('.wy-preview-full');
+    rows[rows.length - 1]!.scrollIntoView();
+    return {
+      strip: el.scrollLeft,
+      pageX: document.scrollingElement!.scrollLeft,
+      pageY: document.scrollingElement!.scrollTop,
+    };
+  });
+  expect(moved.strip, 'the strip scrolled to the row').toBeGreaterThan(0);
+  expect({ x: moved.pageX, y: moved.pageY }, 'the page did not move').toEqual({ x: 0, y: 0 });
+
+  // A plain mouse wheel (vertical deltas only) moves the line sideways…
+  await page.evaluate(() => {
+    (document.querySelector('.wy-wave-preview') as HTMLElement).scrollLeft = 0;
+    const w = window as unknown as { __wyWheel: boolean[] };
+    w.__wyWheel = [];
+    document.addEventListener('wheel', (e) => w.__wyWheel.push(e.defaultPrevented));
+  });
+  const box = (await strip.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const scrollLeft = (): Promise<number> => strip.evaluate((el) => (el as HTMLElement).scrollLeft);
+  const max = await strip.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(max, 'there is a line to scroll').toBeGreaterThan(1);
+  await page.mouse.wheel(0, 40);
+  await expect.poll(scrollLeft, { message: 'a wheel turn scrolls the strip' }).toBeGreaterThan(0);
+  // …and is TAKEN while the line can move, then LEFT ALONE at the end, for whatever scrolls
+  // beyond the strip.
+  for (let i = 0; i < 40 && (await scrollLeft()) < max - 1; i++) await page.mouse.wheel(0, 120);
+  expect(await scrollLeft()).toBeGreaterThanOrEqual(max - 1);
+  const seen = (): Promise<boolean[]> =>
+    page.evaluate(() => {
+      const w = window as unknown as { __wyWheel: boolean[] };
+      const out = w.__wyWheel;
+      w.__wyWheel = [];
+      return out;
+    });
+  await seen();
+  await page.mouse.wheel(0, 120);
+  let atEnd: boolean[] = [];
+  await expect.poll(async () => (atEnd = [...atEnd, ...(await seen())]).length > 0).toBe(true);
+  expect(atEnd, 'at the end every wheel event is left alone').not.toContain(true);
+  await page.mouse.wheel(0, -120); // back from the end: taken again
+  let back: boolean[] = [];
+  await expect.poll(async () => (back = [...back, ...(await seen())]).length > 0).toBe(true);
+  expect(back, 'turning back from the end is taken').not.toContain(false);
+  expect(await pageScrollRange(page), 'after the wheel').toEqual({ x: 0, y: 0 });
+});
+
+test('a NARROW strip’s tightened spacing applies, and a wide one keeps the frame’s (#181 QC)', async ({
+  page,
+}) => {
+  const spacing = (): Promise<{ strip: number; rem: number; titleEnd: string; gap: string }> =>
+    page.evaluate(() => ({
+      strip: document.querySelector('.wy-wave-preview')!.getBoundingClientRect().width,
+      rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+      titleEnd: getComputedStyle(document.querySelector('.wy-wave-preview-title')!).marginInlineEnd,
+      gap: getComputedStyle(document.querySelector('.wy-wave-preview-list')!).columnGap,
+    }));
+  // A phone's strip, well under the 22rem query: both tightenings win the cascade.
+  await gotoAt(page, { width: 360, height: 640 });
+  await settle(page);
+  const narrow = await spacing();
+  expect(narrow.strip / narrow.rem, 'the premise: a narrow strip').toBeLessThan(22);
+  expect(narrow.titleEnd).toBe(`${-0.35 * narrow.rem}px`);
+  expect(narrow.gap).toBe(`${0.55 * narrow.rem}px`);
+  // A desktop's strip, at its 30rem cap: the frame's spacing (the positive control).
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await settle(page);
+  const wide = await spacing();
+  expect(wide.strip / wide.rem, 'the premise: a wide strip').toBeGreaterThan(22);
+  expect(wide.titleEnd).toBe('0px');
+  expect(wide.gap).toBe(`${0.9 * wide.rem}px`);
 });
 
 test('a colour-vision mode re-inks the strip’s creep icons in place (tritan)', async ({ page }) => {

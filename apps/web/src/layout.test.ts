@@ -284,6 +284,73 @@ describe('layout — the wave strip’s one home (#181)', () => {
   });
 });
 
+// #181 QC. The countdown dial, the hud's floor, and the two containing blocks that keep
+// visually-hidden text inside the scrollport that clips it. The specs measure each result in a
+// real browser (`dock-overlap.spec.ts`, `hud-strip.spec.ts`); these fail first, with the
+// reason attached, when a mechanism is edited away.
+describe('layout — the countdown dial, the hud floor, and hidden text’s containing blocks (#181 QC)', () => {
+  const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const standard = uncommented.slice(uncommented.indexOf(`@media not all and ${COMPACT_QUERY}`));
+  const rem = (v: string): number => {
+    const m = /^([0-9.]+)rem$/.exec(v.trim());
+    if (m === null) throw new Error(`not a rem length: ${v}`);
+    return Number(m[1]);
+  };
+
+  it('the dial is out of every layout measure and leaves the UA’s [hidden] rule in charge', () => {
+    const dial = ruleBody(uncommented, '.wy-dial');
+    expect(dial).toContain('position: absolute;');
+    expect(dial).toContain('pointer-events: none;');
+    // An author `display` would out-rank `[hidden] { display: none }` and paint a stale dial.
+    expect(dial).not.toMatch(/(^|; )display:/);
+    // The control is the dial's containing block, so the dial is drawn inside it.
+    expect(ruleBody(uncommented, '.wy-dock .wy-primary')).toContain('position: relative;');
+  });
+
+  it('Standard makes the dial’s room by REDISTRIBUTING the control’s inline padding, never adding to it', () => {
+    const base = /padding:\s*([0-9.]+rem)\s+([0-9.]+rem);/.exec(ruleBody(uncommented, '.wy-btn'));
+    expect(base, 'the base .wy-btn padding shorthand').not.toBeNull();
+    const shifted = /padding-inline:\s*([0-9.]+rem)\s+([0-9.]+rem);/.exec(
+      ruleBody(standard, '.wy-shell .wy-dock .wy-primary:has(> .wy-dial:not([hidden]))'),
+    );
+    expect(shifted, 'the Standard padding redistribution').not.toBeNull();
+    const total = (a: string, b: string): number => Math.round((rem(a) + rem(b)) * 1000);
+    // Same total, so the control's box — and every Dock row — is the same with or without it.
+    expect(total(shifted![1]!, shifted![2]!)).toBe(total(base![2]!, base![2]!));
+    // …and the start side is the larger, where the dial is drawn.
+    expect(rem(shifted![1]!)).toBeGreaterThan(rem(shifted![2]!));
+  });
+
+  it('Compact keeps its button as it is: no dial in the column', () => {
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(ruleBody(compact, '.wy-dial')).toContain('display: none;');
+  });
+
+  it('the hud never shrinks below one whole chip beside the link (no sliver)', () => {
+    expect(ruleBody(standard, '.wy-shell .wy-hud')).toMatch(/min-width: min\(100%, [0-9.]+rem\);/);
+  });
+
+  it('a visually-hidden sentence resolves against its own chip or row, inside the scrollport', () => {
+    // Unpositioned, the absolute `.wy-chip-full` / `.wy-preview-full` resolved against
+    // `.wy-shell`, outside the hud and strip clips: page scroll range nobody could pan back.
+    expect(ruleBody(uncommented, '.wy-chip')).toContain('position: relative;');
+    expect(ruleBody(uncommented, '.wy-preview-entry')).toContain('position: relative;');
+    expect(ruleBody(uncommented, '.wy-chip-full')).toContain('position: absolute;');
+    expect(ruleBody(uncommented, '.wy-preview-full')).toContain('position: absolute;');
+  });
+
+  it('the narrow strip’s tightenings out-rank the rules they refine', () => {
+    const at = standard.indexOf('@container wy-strip (max-width: 22rem)');
+    expect(at, 'the narrow container query').toBeGreaterThan(-1);
+    const narrow = standard.slice(at);
+    // `.wy-shell` puts both at (0,2,0): above the title's base `margin: 0` (0,1,0, later in
+    // source) and level with the list's Standard gap (0,2,0, earlier in source).
+    expect(ruleBody(narrow, '.wy-shell .wy-wave-preview-title')).toContain('margin-inline-end:');
+    expect(ruleBody(narrow, '.wy-shell .wy-wave-preview-list')).toContain('gap:');
+    expect(standard.indexOf('.wy-shell .wy-wave-preview-list {')).toBeLessThan(at);
+  });
+});
+
 describe('layout — the safe-area seam (#136)', () => {
   // A Compact region that spends a safe-area inset as INTERNAL padding while its grid track is
   // a fixed width starves the content by the inset (≈44–59px on a notched iPhone in
