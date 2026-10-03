@@ -1,19 +1,39 @@
 // scene.ts — the Phaser 3 board renderer (WebGL). This is the ONLY file that touches
 // Phaser; it is deliberately a dumb consumer of the pure modules (projection,
-// interpolate, palette) so no real logic hides in the WebGL layer. It is excluded from
-// unit-coverage (not meaningfully testable under jsdom) and exercised by the Playwright
-// e2e smoke instead. Draws board-space visuals only — the HUD and all controls are a
-// DOM overlay owned by apps/web (ADR 0003 §3: canvas text isn't semantic/axe-visible).
+// interpolate, palette, bake, placement) so no real logic hides in the WebGL layer. It is
+// excluded from unit-coverage (not meaningfully testable under jsdom) and exercised by the
+// Playwright e2e smoke instead. Draws board-space visuals only — the HUD and all controls
+// are a DOM overlay owned by apps/web (ADR 0003 §3: canvas text isn't semantic/axe-visible).
+//
+// STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep
+// silhouette are painted once into textures (`bake.ts`) and shown by sprites: one board
+// image, and pooled images over one atlas, placed each frame from pure placement lists
+// (`placement.ts`). They are repainted only when the cell size, the effective dpr or the
+// colour mode changes. Only what moves or comes and goes is still drawn live, into three
+// `Graphics` — shells, effects, cues — and `layers.ts` fixes where each object sits in the
+// draw order. ADR 0005's S10 finding is the reason: re-tessellating static `Graphics`
+// geometry every frame was where the frame time went.
 
 import Phaser from 'phaser';
 import { MS_PER_TICK } from '@wynding/sim';
 import { createProjection, type Projection } from './projection';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
-import { boardPaintOps, type BoardPaintOp } from './board-cells';
+import { boardPaintOps } from './board-cells';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
-import { drawTowers, drawCreeps, drawCrosshair } from './board-draw';
+import { drawAuraShells, drawCreepCues, drawCrosshair, drawSelection } from './board-draw';
+import {
+  bakedTextureKey,
+  createBakeTracker,
+  layoutAtlas,
+  layoutBoard,
+  paintAtlas,
+  paintBoard,
+  type AtlasLayout,
+} from './bake';
+import { placeCreeps, placeTowers, snapToDevicePx, type SpritePlacement } from './placement';
+import { layerDepth } from './layers';
 import type { RenderVM, RenderOverlay, RenderHandle, ColourMode, SparkPoint } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -28,18 +48,29 @@ export interface BoardGeometry {
 /** How long (ms) an impact-spark stays lit; damped further under reduced motion. */
 const SPARK_MS = 180;
 
+/** The texture-size limit assumed when the renderer cannot report one (Phaser's Canvas
+ *  fallback): every browser canvas holds at least this. */
+const FALLBACK_MAX_TEXTURE_SIZE = 4096;
+
 interface Spark extends SparkPoint {
   readonly bornAt: number;
 }
 
-// `drawTowers`/`drawCreeps` (plus their `drawCrosshair`/`drawDroplet` helpers) now
-// live in `./board-draw` (M2-S5a QC round): they never actually needed Phaser's real
-// `Graphics` type (only a handful of drawing methods on it), and `scene.ts` importing
-// `Phaser` at module scope means it can NEVER be imported by a plain Vitest test —
-// Phaser's device/canvas-feature detection runs at import time and crashes even under
-// jsdom. Moving them to a Phaser-free module (a structural `GraphicsLike` interface
-// stands in for `Phaser.GameObjects.Graphics`, which satisfies it for free) is what
-// makes `scene.test.ts` possible at all. No drawing behaviour changed.
+/** Pooled atlas sprites for one layer. Images are never destroyed, only re-pointed and
+ *  hidden, and sprite `i` is always the list's `i`th entry — created in index order at one
+ *  depth, so Phaser's stable depth sort draws them in list order. */
+interface SpritePool {
+  readonly depth: number;
+  readonly images: Phaser.GameObjects.Image[];
+  /** The frame each image currently shows, so an unchanged frame is never re-set. */
+  readonly frames: string[];
+}
+
+// The draw functions live in Phaser-free modules (`board-draw.ts`, `board-cells.ts`,
+// `bake.ts`): `scene.ts` imports `Phaser` at module scope, so it can NEVER be imported by a
+// plain Vitest test — Phaser's device/canvas-feature detection runs at import time and
+// crashes even under jsdom. They draw through the structural `GraphicsLike`, which a real
+// `Phaser.GameObjects.Graphics` satisfies for free.
 
 /** Mount the Phaser board renderer into `el`. The returned handle is fed the last two
  *  render view-models + an alpha + the transient overlay each animation frame. */
@@ -66,11 +97,14 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
 
   // HiDPI backing store (#28/P5): size the game's actual pixel buffer to CSS-rect ×
   // effective-dpr, while pinning the canvas' CSS size to the rect and keeping every
-  // existing draw coordinate in CSS px. Phaser cameras zoom around the viewport
-  // CENTRE, so `setZoom(dpr)` alone would shift the world origin — `centerOn` after
-  // zoom re-centres the CSS-px world midpoint back onto the viewport midpoint,
-  // landing CSS-px world (0,0) back at device-pixel canvas (0,0). Effective dpr is
-  // clamped to ≤2 (ADR 0005: fill cost scales dpr²).
+  // existing draw coordinate in CSS px. The camera zooms by dpr about its TOP-LEFT origin
+  // with no scroll, so CSS-px world (x, y) lands at device pixel (x × dpr, y × dpr)
+  // EXACTLY. (Until V2 it zoomed about the viewport centre and re-centred with `centerOn`,
+  // which lands world (0, 0) on device (0, 0) only when the backing store's width and
+  // height are even: Phaser rounds the centre to a whole pixel, so an odd one shifted the
+  // whole board by half a device pixel. Sprites snapped to whole device pixels need the
+  // exact mapping, or every texel would straddle two pixels.) Effective dpr is clamped to
+  // ≤2 (ADR 0005: fill cost scales dpr²).
   const applyBackingStoreSize = (cssWidth: number, cssHeight: number, dpr: number): void => {
     const scene = game.scene.scenes[0];
     if (scene === undefined) return;
@@ -88,8 +122,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     game.canvas.style.width = `${cssWidth}px`;
     game.canvas.style.height = `${cssHeight}px`;
     const cam = scene.cameras.main;
+    cam.setOrigin(0, 0);
     cam.setZoom(dpr);
-    cam.centerOn(cssWidth / 2, cssHeight / 2);
+    cam.setScroll(0, 0);
   };
 
   // Live DPR-change tracking (monitor move / browser zoom, #28/P5): re-arms on every
@@ -120,19 +155,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       cssHeight: rect.height,
       dpr,
     });
-    if (gfx !== null) applyBackingStoreSize(rect.width, rect.height, dpr);
-  };
-  // The board paint plan (#38) depends only on geometry (static) and the palette (changes
-  // only on a colour-mode switch) — precompute once and rebuild ONLY when the mode
-  // changes, so the steady-state per-frame draw stays allocation-free (ADR 0005).
-  let paintPlan: readonly BoardPaintOp[] | null = null;
-  let paintPlanMode: ColourMode | null = null;
-  const boardPlanFor = (mode: ColourMode): readonly BoardPaintOp[] => {
-    if (paintPlan === null || paintPlanMode !== mode) {
-      paintPlan = boardPaintOps(geometry, resolvePalette(mode));
-      paintPlanMode = mode;
-    }
-    return paintPlan;
+    if (cues !== null) applyBackingStoreSize(rect.width, rect.height, dpr);
   };
 
   const sparks: Spark[] = [];
@@ -156,11 +179,16 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     scene: { create() {}, update() {} },
   });
 
-  let gfx: Phaser.GameObjects.Graphics | null = null;
+  // The live layers (`layers.ts`): what moves or comes and goes, re-recorded every frame.
+  let shells: Phaser.GameObjects.Graphics | null = null;
+  let effects: Phaser.GameObjects.Graphics | null = null;
+  let cues: Phaser.GameObjects.Graphics | null = null;
   game.events.once(Phaser.Core.Events.READY, () => {
     const scene = game.scene.scenes[0];
     if (scene === undefined) return;
-    gfx = scene.add.graphics();
+    shells = scene.add.graphics().setDepth(layerDepth('shells'));
+    effects = scene.add.graphics().setDepth(layerDepth('effects'));
+    cues = scene.add.graphics().setDepth(layerDepth('cues'));
     syncProjection(); // seed the projection from the current (post-layout) size
     if (typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => syncProjection());
@@ -170,63 +198,133 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
 
   const now = (): number => game.getTime();
 
-  // A thin executor of `boardPaintOps`' plan verbatim (#38) — the ordering/content gate
-  // lives in `board-cells.test.ts` against the plan itself, not here (this file is
-  // coverage-excluded). Do not reorder or special-case ops here; change the plan instead.
-  const drawBoard = (g: Phaser.GameObjects.Graphics, mode: ColourMode): void => {
-    for (const op of boardPlanFor(mode)) {
-      switch (op.kind) {
-        case 'floor': {
-          g.fillStyle(op.colour, 1);
-          const topLeft = projection.cellToPixel(0, 0);
-          g.fillRect(
-            topLeft.x,
-            topLeft.y,
-            geometry.cols * projection.cellPx,
-            geometry.rows * projection.cellPx,
-          );
-          break;
-        }
-        case 'border': {
-          g.fillStyle(op.colour, 1);
-          for (const cell of op.cells) {
-            const p = projection.cellToPixel(cell.col, cell.row);
-            g.fillRect(p.x, p.y, projection.cellPx, projection.cellPx);
-          }
-          break;
-        }
-        case 'entrance': {
-          g.fillStyle(op.colour, 1);
-          const p = projection.cellToPixel(op.cell.col, op.cell.row);
-          g.fillTriangle(
-            p.x,
-            p.y,
-            p.x + projection.cellPx,
-            p.y + projection.cellPx / 2,
-            p.x,
-            p.y + projection.cellPx,
-          );
-          break;
-        }
-        case 'exit': {
-          g.fillStyle(op.colour, 1);
-          const p = projection.cellToPixel(op.cell.col, op.cell.row);
-          g.fillRect(
-            p.x + projection.cellPx * 0.25,
-            p.y + projection.cellPx * 0.25,
-            projection.cellPx * 0.5,
-            projection.cellPx * 0.5,
-          );
-          break;
-        }
-      }
-    }
+  // ---- The baked layers: the board image and the atlas sprite pools ----
+  const bakeTracker = createBakeTracker();
+  let boardImage: Phaser.GameObjects.Image | null = null;
+  let boardKey: string | null = null;
+  let atlas: AtlasLayout | null = null;
+  let atlasKey: string | null = null;
+  const towerPool: SpritePool = { depth: layerDepth('towers'), images: [], frames: [] };
+  const pendingPool: SpritePool = { depth: layerDepth('pending'), images: [], frames: [] };
+  const creepPool: SpritePool = { depth: layerDepth('creeps'), images: [], frames: [] };
+  const pools = [towerPool, pendingPool, creepPool];
+
+  const maxTextureSize = (): number => {
+    const renderer = game.renderer;
+    const max =
+      renderer instanceof Phaser.Renderer.WebGL.WebGLRenderer ? renderer.getMaxTextureSize() : NaN;
+    return Number.isFinite(max) && max > 0 ? max : FALLBACK_MAX_TEXTURE_SIZE;
   };
 
-  // `drawCrosshair`/`drawDroplet`/`drawTowers`/`drawCreeps` are now MODULE-LEVEL
-  // functions (above `mount()`), taking `projection` as an explicit parameter instead
-  // of a captured closure — see the comment at their definition for why (M2-S5a QC
-  // round). The calls below pass this scope's `projection` local explicitly.
+  /** A fresh canvas of `width × height`, painted by `paint`, registered as texture `key`. A
+   *  plain `Texture` over the canvas, not a `CanvasTexture`: that class reads the whole
+   *  canvas back into a retained `ImageData` on construction, a full-board-sized copy kept
+   *  on the JS heap for nothing — this canvas is uploaded once and never read. */
+  const addPaintedTexture = (
+    scene: Phaser.Scene,
+    key: string,
+    width: number,
+    height: number,
+    paint: (ctx: CanvasRenderingContext2D) => void,
+  ): Phaser.Textures.Texture | null => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (ctx === null) return null;
+    paint(ctx);
+    // `addImage` accepts any canvas-image source at runtime (Phaser's TextureSource detects
+    // a canvas and uploads it as one); its type names only HTMLImageElement.
+    return scene.textures.addImage(key, canvas as unknown as HTMLImageElement);
+  };
+
+  /** Paint the board and the atlas for the current projection and `mode`, under fresh
+   *  versioned keys; repoint the board image and every pooled sprite; THEN destroy the
+   *  previous textures — nothing is ever pointed at a texture that is gone. */
+  const rebake = (scene: Phaser.Scene, mode: ColourMode): void => {
+    const pal = resolvePalette(mode);
+    const maxTex = maxTextureSize();
+    const version = bakeTracker.version;
+    const cellPx = projection.cellPx;
+
+    const board = layoutBoard(geometry, cellPx, projection.dpr, maxTex);
+    const nextBoardKey = bakedTextureKey('wy-board', version);
+    const boardTexture = addPaintedTexture(scene, nextBoardKey, board.width, board.height, (ctx) =>
+      paintBoard(ctx, boardPaintOps(geometry, pal), geometry, cellPx, board),
+    );
+
+    const layout = layoutAtlas(cellPx, projection.dpr, maxTex);
+    const nextAtlasKey = bakedTextureKey('wy-atlas', version);
+    const atlasTexture = addPaintedTexture(
+      scene,
+      nextAtlasKey,
+      layout.width,
+      layout.height,
+      (ctx) => paintAtlas(ctx, layout, pal),
+    );
+    if (boardTexture === null || atlasTexture === null) {
+      // No 2D context: keep whatever art is already showing, and leak nothing half-made.
+      if (boardTexture !== null) scene.textures.remove(nextBoardKey);
+      if (atlasTexture !== null) scene.textures.remove(nextAtlasKey);
+      return;
+    }
+    for (const f of layout.frames.values()) atlasTexture.add(f.key, 0, f.x, f.y, f.width, f.height);
+
+    if (boardImage === null) {
+      boardImage = scene.add
+        .image(0, 0, nextBoardKey)
+        .setOrigin(0, 0)
+        .setDepth(layerDepth('board'));
+    } else {
+      boardImage.setTexture(nextBoardKey);
+    }
+    boardImage.setScale(1 / board.scale);
+    for (const pool of pools) {
+      pool.images.forEach((image, i) =>
+        image.setTexture(nextAtlasKey, pool.frames[i]).setScale(1 / layout.scale),
+      );
+    }
+    if (boardKey !== null) scene.textures.remove(boardKey);
+    if (atlasKey !== null) scene.textures.remove(atlasKey);
+    boardKey = nextBoardKey;
+    atlasKey = nextAtlasKey;
+    atlas = layout;
+  };
+
+  /** Show `placements` on `pool`'s sprites — sprite `i` gets placement `i` — creating
+   *  sprites as the count grows and hiding the ones beyond it. */
+  const syncPool = (
+    scene: Phaser.Scene,
+    pool: SpritePool,
+    placements: readonly SpritePlacement[],
+    key: string,
+    scale: number,
+  ): void => {
+    placements.forEach((p, i) => {
+      const image = pool.images[i];
+      if (image === undefined) {
+        pool.images.push(
+          scene.add
+            .image(p.x, p.y, key, p.frame)
+            .setOrigin(0, 0)
+            .setScale(1 / scale)
+            .setDepth(pool.depth),
+        );
+        pool.frames.push(p.frame);
+        return;
+      }
+      if (pool.frames[i] !== p.frame) {
+        image.setFrame(p.frame);
+        pool.frames[i] = p.frame;
+      }
+      image.setPosition(p.x, p.y);
+      if (!image.visible) image.setVisible(true);
+    });
+    for (let i = placements.length; i < pool.images.length; i++) {
+      const image = pool.images[i] as Phaser.GameObjects.Image;
+      if (image.visible) image.setVisible(false);
+    }
+  };
 
   // A thin executor of `tracerPaintOps`' plan (#32/P6) — the ordering/content gate lives
   // in `tracers.test.ts` against the plan itself, not here.
@@ -337,7 +435,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   ): void => {
     // Consume drained spark points — the controller clears them on drain, so dropping them
     // here would lose those flashes permanently. Before READY, hold them unstamped.
-    if (gfx === null) {
+    const scene = game.scene.scenes[0];
+    if (shells === null || effects === null || cues === null || scene === undefined) {
       for (const pt of overlay.sparks) preReady.push({ x: pt.x, y: pt.y, radiusFp: pt.radiusFp });
       return; // Phaser not READY yet — nothing to draw into
     }
@@ -347,34 +446,59 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     preReady.length = 0;
     for (const pt of overlay.sparks)
       sparks.push({ x: pt.x, y: pt.y, radiusFp: pt.radiusFp, bornAt });
+    // Rebake only when what the art depends on changed — cell size, effective dpr, colour
+    // mode (`createBakeTracker`) — never per frame.
+    if (
+      bakeTracker.needsBake({
+        cellPx: projection.cellPx,
+        dpr: projection.dpr,
+        mode: overlay.colourMode,
+      })
+    ) {
+      rebake(scene, overlay.colourMode);
+    }
+    if (atlas === null || atlasKey === null || boardImage === null) return; // first bake failed
     const pal = resolvePalette(overlay.colourMode); // resolve once per frame, pass down
-    // Computed ONCE and shared: the creep pass draws these points; the tracer pass
+    // Computed ONCE and shared: the creep pass places these points; the tracer pass
     // reuses the SAME interpolated points as its lerp targets (#32/P6) so a tracer
     // visibly converges on exactly where its target creep is drawn this frame.
     const interpolated = interpolateCreeps(prevVm, curVm, alpha);
     const interpolatedById = new Map(interpolated.map((c) => [c.id, { x: c.x, y: c.y }]));
-    gfx.clear();
-    drawBoard(gfx, overlay.colourMode);
-    drawTowers(gfx, pal, curVm, overlay, projection);
+
+    // board — the baked texture, at the board's corner.
+    boardImage
+      .setPosition(
+        snapToDevicePx(projection.originX, projection.dpr),
+        snapToDevicePx(projection.originY, projection.dpr),
+      )
+      .setVisible(true);
+    shells.clear();
+    effects.clear();
+    cues.clear();
+    // shells — under every tower body.
+    drawAuraShells(shells, pal, curVm, overlay, projection);
+    // towers, pending — atlas sprites.
+    const towers = placeTowers(curVm, overlay, projection, atlas.frames);
+    syncPool(scene, towerPool, towers.committed, atlasKey, atlas.scale);
+    syncPool(scene, pendingPool, towers.pending, atlasKey, atlas.scale);
+    // effects — the selection cue, then tracers.
+    drawSelection(effects, pal, overlay, projection);
     // ONE render-time derivation per frame, shared by tracers and the telegraph pulse
     // (CodeRabbit #73) — the "one clock" invariant is structural, not two calls that
     // happen to agree.
     const renderTimeTicks = renderTimeOf(prevVm, curVm, alpha);
-    drawTracers(gfx, pal, overlay, renderTimeTicks, interpolatedById);
+    drawTracers(effects, pal, overlay, renderTimeTicks, interpolatedById);
+    // creeps — atlas sprites, in creep order.
+    const creeps = placeCreeps(interpolated, pal, projection, atlas.frames);
+    syncPool(scene, creepPool, creeps, atlasKey, atlas.scale);
+    // cues — every pip and status cue over every silhouette, then the ghost, then sparks.
     // CLOCK DOMAIN (QC round 2): `renderTimeOf` is in fractional TICKS (tracers.test.ts:
     // `renderTimeOf(vm(5), vm(6), 0.5) === 5.5`); the paint-plan's pulse period is
     // MILLISECONDS (`renderTimeMs`) — convert here, or the 900ms breath becomes a
     // 900-TICK (45s) one and the motion cue is imperceptible inside a 40-tick slow.
-    drawCreeps(
-      gfx,
-      pal,
-      interpolated,
-      overlay.reducedMotion,
-      renderTimeTicks * MS_PER_TICK,
-      projection,
-    );
-    drawGhost(gfx, pal, overlay);
-    drawSparks(gfx, pal, overlay);
+    drawCreepCues(cues, pal, creeps, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
+    drawGhost(cues, pal, overlay);
+    drawSparks(cues, pal, overlay);
   };
 
   return {
@@ -382,7 +506,11 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     reset(): void {
       sparks.length = 0;
       preReady.length = 0;
-      if (gfx !== null) gfx.clear();
+      shells?.clear();
+      effects?.clear();
+      cues?.clear();
+      boardImage?.setVisible(false);
+      for (const pool of pools) for (const image of pool.images) image.setVisible(false);
     },
     destroy(): void {
       sparks.length = 0;

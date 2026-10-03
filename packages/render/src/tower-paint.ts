@@ -59,6 +59,26 @@ export type TowerFootprintMark =
   | 'charge'
   | 'ringed-crosshair';
 
+/** Every `TowerFootprintMark`, as a value — the board atlas bakes one frame per mark per
+ *  state (`art-frames.ts`), so it needs the union enumerated rather than merely typed. A
+ *  `Record` keyed on the union, so a tenth mark that is not listed here fails to compile
+ *  instead of silently baking no frame (the same "everywhere at once or nowhere" rule
+ *  `drawFootprintMark`'s exhaustiveness check enforces). */
+const ALL_MARKS: Readonly<Record<TowerFootprintMark, true>> = {
+  plain: true,
+  ringed: true,
+  crosshair: true,
+  droplet: true,
+  bolt: true,
+  arrow: true,
+  pylon: true,
+  charge: true,
+  'ringed-crosshair': true,
+};
+export const TOWER_FOOTPRINT_MARKS: readonly TowerFootprintMark[] = Object.keys(
+  ALL_MARKS,
+) as TowerFootprintMark[];
+
 const TOWER_MARKS: Readonly<Partial<Record<string, TowerFootprintMark>>> = {
   basic: 'plain',
   slow: 'ringed',
