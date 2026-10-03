@@ -592,53 +592,61 @@ describe('paintTowerArt — the Card swatch’s picture, through the same art an
     }
   });
 
-  it('keeps a fitted rim on its surface, whole, at every dpr — the fitted footprint starts above and left of it', () => {
+  it('keeps a fitted rim on its surface, whole, at every dpr — wherever its footprint reaches past an edge', () => {
     const size = 36;
     const fit = towerArtFit(size);
+    // The fitted footprint starts above and left of the surface; mirrored across the
+    // surface's centre, it reaches as far past the right and bottom edges.
     expect(fit.x).toBeLessThan(0);
     expect(fit.y).toBeLessThan(0);
+    const corners = {
+      fitted: { x: fit.x, y: fit.y },
+      mirrored: { x: size - fit.footprintPx - fit.x, y: size - fit.footprintPx - fit.y },
+    };
     const unit = fit.footprintPx / ART_BOX;
     const design = PLATE_ART.find((s) => s.stroke === 'rim')!;
     if (design.kind !== 'rect') throw new Error('the rim is a rect');
-    for (const scale of [1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
-      const g = recorder();
-      paintTowerArt(
-        g,
-        PAL,
-        { mark: 'ringed', role: 'control' },
-        fit.x,
-        fit.y,
-        fit.footprintPx,
-        scale,
-        {
-          width: size,
-          height: size,
-        },
-      );
-      const [plate] = artCalls(g.calls);
-      const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
-      if (rim.kind !== 'rect') throw new Error('the rim is a rect');
-      const half = (strokeWidthAt(rim, unit) * unit * scale) / 2;
-      const px = (corner: number, v: number): number => (corner + v * unit) * scale;
-      const at = `dpr ${scale}`;
-      expect(2 * half, at).toBeGreaterThanOrEqual(scale - 1e-9); // its floor, in full
-      // On the surface, from its first pixel to its last whole one ...
-      expect(px(fit.x, rim.x) - half, at).toBeGreaterThanOrEqual(-1e-9);
-      expect(px(fit.y, rim.y) - half, at).toBeGreaterThanOrEqual(-1e-9);
-      expect(px(fit.x, rim.x + rim.w) + half, at).toBeLessThanOrEqual(
-        Math.floor(size * scale) + 1e-9,
-      );
-      expect(px(fit.y, rim.y + rim.h) + half, at).toBeLessThanOrEqual(
-        Math.floor(size * scale) + 1e-9,
-      );
-      // ... and over the plate fill's edge, which stays where the design puts it.
-      for (const [drawn, edge] of [
-        [rim.x, design.x],
-        [rim.y, design.y],
-        [rim.x + rim.w, design.x + design.w],
-        [rim.y + rim.h, design.y + design.h],
-      ] as const) {
-        expect(Math.abs(drawn - edge) * unit * scale, at).toBeLessThanOrEqual(half + 1e-9);
+    for (const [where, corner] of Object.entries(corners)) {
+      for (const scale of [1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+        const g = recorder();
+        paintTowerArt(
+          g,
+          PAL,
+          { mark: 'ringed', role: 'control' },
+          corner.x,
+          corner.y,
+          fit.footprintPx,
+          scale,
+          {
+            width: size,
+            height: size,
+          },
+        );
+        const [plate] = artCalls(g.calls);
+        const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
+        if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+        const half = (strokeWidthAt(rim, unit) * unit * scale) / 2;
+        const px = (origin: number, v: number): number => (origin + v * unit) * scale;
+        const at = `${where}, dpr ${scale}`;
+        expect(2 * half, at).toBeGreaterThanOrEqual(scale - 1e-9); // its floor, in full
+        // On the surface, from its first pixel to its last whole one ...
+        expect(px(corner.x, rim.x) - half, at).toBeGreaterThanOrEqual(-1e-9);
+        expect(px(corner.y, rim.y) - half, at).toBeGreaterThanOrEqual(-1e-9);
+        expect(px(corner.x, rim.x + rim.w) + half, at).toBeLessThanOrEqual(
+          Math.floor(size * scale) + 1e-9,
+        );
+        expect(px(corner.y, rim.y + rim.h) + half, at).toBeLessThanOrEqual(
+          Math.floor(size * scale) + 1e-9,
+        );
+        // ... and over the plate fill's edge, which stays where the design puts it.
+        for (const [drawn, edge] of [
+          [rim.x, design.x],
+          [rim.y, design.y],
+          [rim.x + rim.w, design.x + design.w],
+          [rim.y + rim.h, design.y + design.h],
+        ] as const) {
+          expect(Math.abs(drawn - edge) * unit * scale, at).toBeLessThanOrEqual(half + 1e-9);
+        }
       }
     }
   });

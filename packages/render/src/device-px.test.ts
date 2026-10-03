@@ -16,9 +16,12 @@ describe('snappedSpan — the device pixels a box is drawn into', () => {
   });
 
   it('rounds a half up, either side of zero, as layout does', () => {
-    expect(snappedSpan(-0.5, 10, 1)).toBe(10); // −0.5 → 0, 9.5 → 10
-    expect(snappedSpan(-1.5, 3, 1)).toBe(3); // −1.5 → −1, 1.5 → 2
-    expect(snappedSpan(0.5, 10, 1)).toBe(10); // 0.5 → 1, 10.5 → 11
+    // One edge on a half each time, so the way the half goes decides the count — with both
+    // on halves, rounding them either way moves both edges together and keeps it.
+    expect(snappedSpan(0.5, 10.25, 1)).toBe(10); // 0.5 → 1 (not 0), 10.75 → 11
+    expect(snappedSpan(0.25, 9.25, 1)).toBe(10); // 0.25 → 0, 9.5 → 10 (not 9)
+    expect(snappedSpan(-1.5, 3.25, 1)).toBe(3); // −1.5 → −1 (not −2), 1.75 → 2
+    expect(snappedSpan(-3.25, 1.75, 1)).toBe(2); // −3.25 → −3, −1.5 → −1 (not −2)
   });
 
   it('puts an edge read back with floating-point dust onto layout’s 1/64 grid before rounding', () => {
