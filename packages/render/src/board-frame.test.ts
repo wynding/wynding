@@ -17,16 +17,27 @@ import {
   type BoardTargets,
 } from './board-frame';
 import { createSpritePool } from './sprite-pool';
-import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
+import {
+  artUnit,
+  atlasFrameSpecs,
+  PAD_FRAME_KEY,
+  PLATE_FRAME_KEY,
+  SCORCH_FRAME_KEY,
+  type FrameSpec,
+} from './art-frames';
 import { AURA_SHELL_ALPHA } from './board-draw';
+import { snapToDevicePx } from './device-px';
 import { layerDepth } from './layers';
 import { resolvePalette } from './palette';
 import { createProjection, type Projection } from './projection';
-import type { CreepPlacement, FrameAnchor, SpritePlacement } from './placement';
+import { placeTowers, type CreepPlacement, type SpritePlacement } from './placement';
 import { createScorchTracker } from './scorches';
 import type { LiveSpark } from './sparks';
+import { ART_FLASH, MUZZLE_FLASH, RECOIL_DEPTH } from './tower-art';
+import { AIM_TURN_PER_TICK, aimAngle, createAimTracker } from './tower-aim';
+import { createFireTracker } from './tower-fire';
 import { recordingLayer, type Call } from './test-support/recording-graphics';
-import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
+import type { CreepVM, RenderOverlay, RenderVM, TowerVM, TracerVM } from './types';
 
 /** Each drawing call of a layer as `method colour` — the fill or line colour in force. */
 function drawn(layer: { calls: Call[] }): string[] {
@@ -81,7 +92,7 @@ function targets() {
 
 const PAL = resolvePalette('default');
 const hex = (n: number): string => n.toString(16);
-const framesFor = (p: Projection): ReadonlyMap<string, FrameAnchor> =>
+const framesFor = (p: Projection): ReadonlyMap<string, FrameSpec> =>
   new Map(atlasFrameSpecs(p.cellPx, p.dpr).map((f) => [f.key, f]));
 
 // A 1072×804 board at dpr 1: 33px cells, the board's corner at (74, 6).
@@ -94,6 +105,7 @@ const tower = (id: number, towerId: string, col: number, opts: Partial<TowerVM> 
   towerId,
   support: towerId === 'beacon',
   buffed: false,
+  targetId: 0,
   ...opts,
 });
 
@@ -161,6 +173,8 @@ function busyFrame(projection = PROJECTION): BoardFrameInput {
     frames: framesFor(projection),
     sparks,
     scorches: createScorchTracker(),
+    aim: createAimTracker(),
+    fire: createFireTracker(),
   };
 }
 
@@ -291,12 +305,16 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
     expect(Math.abs(y - projection.originY)).toBeLessThanOrEqual(0.5 / 1.5);
   });
 
-  it('a reset clears every layer and hides the board and every sprite layer; the next frame shows them', () => {
+  it('a reset forgets every tracker, clears every layer and hides the board and every sprite layer; the next frame shows them', () => {
     const { t, board } = targets();
     drawBoardFrame(t, busyFrame());
-    let scorchResets = 0;
-    resetBoardFrame(t, { scorches: { reset: () => (scorchResets += 1) } });
-    expect(scorchResets).toBe(1);
+    const resets: string[] = [];
+    resetBoardFrame(t, {
+      scorches: { reset: () => resets.push('scorches') },
+      aim: { reset: () => resets.push('aim') },
+      fire: { reset: () => resets.push('fire') },
+    });
+    expect(resets.sort()).toEqual(['aim', 'fire', 'scorches']); // each one, once
     for (const layer of [t.layers.shells, t.layers.effects, t.layers.cues]) {
       expect(layer.calls[layer.calls.length - 1]!.method).toBe('clear');
     }
@@ -462,6 +480,8 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
   it('shows a detonated mine’s scorch at its footprint centre, fading from the render tick it went off at', () => {
     const { t } = targets();
     const scorches = createScorchTracker();
+    const aim = createAimTracker();
+    const fire = createFireTracker();
     // A mine anchored at (6, 2): its footprint centre — where its blast is anchored — is the
     // corner of cells (7, 3).
     const mine = tower(3, 'mine', 6);
@@ -480,6 +500,8 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
       frames: framesFor(PROJECTION),
       sparks: [],
       scorches,
+      aim,
+      fire,
     });
     // The mine stands, on its pad in the plates layer, and nothing has gone off.
     drawBoardFrame(t, frame(20, 0, [mine], []));
@@ -520,6 +542,8 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
   it('feeds the tracker the frame’s impacts and towers: a mine seen standing, then gone with only its blast’s landing at its centre, leaves a scorch', () => {
     const { t } = targets();
     const scorches = createScorchTracker();
+    const aim = createAimTracker();
+    const fire = createFireTracker();
     const mine = tower(3, 'mine', 6); // footprint centre: the corner of cells (7, 3)
     const frame = (tick: number, towers: readonly TowerVM[], overlay: RenderOverlay) =>
       ({
@@ -531,6 +555,8 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         frames: framesFor(PROJECTION),
         sparks: [],
         scorches,
+        aim,
+        fire,
       }) satisfies BoardFrameInput;
     drawBoardFrame(t, frame(20, [mine], OVERLAY)); // the mine stands
     // Gone, with no tracer: only the blast's impact, at its footprint centre.
@@ -544,6 +570,8 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
   it('a reset forgets every scorch the run left: the next frame’s floor is clean', () => {
     const { t } = targets();
     const scorches = createScorchTracker();
+    const aim = createAimTracker();
+    const fire = createFireTracker();
     const centre = 7 * 256;
     const blast = {
       kind: 'blast' as const,
@@ -564,13 +592,211 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         frames: framesFor(PROJECTION),
         sparks: [],
         scorches,
+        aim,
+        fire,
       }) satisfies BoardFrameInput;
     drawBoardFrame(t, frame(21, [blast]));
     expect(t.scorches.syncs[0]).toHaveLength(1); // held
-    resetBoardFrame(t, { scorches });
+    resetBoardFrame(t, { scorches, aim, fire });
     drawBoardFrame(t, frame(22, []));
     expect(t.scorches.syncs[1]).toEqual([]);
     expect(scorches.live(22)).toEqual([]);
+  });
+});
+
+describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
+  // A tower anchored at (4, 2): its footprint centre is the corner of cells (5, 3).
+  const CX = 5 * 256;
+  const CY = 3 * 256;
+  const corner = PROJECTION.cellToPixel(4, 2);
+  const unit = artUnit(PROJECTION.cellPx);
+
+  /** Frames drawn on one set of trackers, as the scene draws them. */
+  function run() {
+    const { t } = targets();
+    const trackers = {
+      scorches: createScorchTracker(),
+      aim: createAimTracker(),
+      fire: createFireTracker(),
+    };
+    /** A frame drawn at render tick `prevTick + alpha`: each creep moves from `prev` to
+     *  `cur`, and the overlay carries `over`. */
+    const draw = (
+      prevTick: number,
+      alpha: number,
+      towers: readonly TowerVM[],
+      creeps: { prev: readonly CreepVM[]; cur: readonly CreepVM[] },
+      over: Partial<RenderOverlay> = {},
+    ): void =>
+      drawBoardFrame(t, {
+        prevVm: { ...vm(towers, creeps.prev), tick: prevTick },
+        curVm: { ...vm(towers, creeps.cur), tick: prevTick + 1 },
+        alpha,
+        overlay: { ...OVERLAY, ...over },
+        projection: PROJECTION,
+        frames: framesFor(PROJECTION),
+        sparks: [],
+        ...trackers,
+      });
+    return { t, draw, trackers };
+  }
+
+  /** The tracer of a shot `t` fired at `launchTick`, at creep 7. */
+  const shotFrom = (t: TowerVM, launchTick: number): TracerVM => ({
+    kind: 'targeted',
+    originX: (t.col + 1) * 256,
+    originY: (t.row + 1) * 256,
+    targetId: 7,
+    launchTick,
+    impactTick: launchTick + 4,
+  });
+
+  /** Where an unposed head of `t` is placed: the picture before towers aimed. */
+  const atRest = (t: TowerVM): SpritePlacement =>
+    placeTowers(vm([t], []), OVERLAY, PROJECTION, framesFor(PROJECTION)).heads[0]!;
+
+  /** The calls a layer recorded in its LAST frame — after its last clear. */
+  const lastFrame = (layer: { calls: Call[] }): { calls: Call[] } => ({
+    calls: layer.calls.slice(layer.calls.map((c) => c.method).lastIndexOf('clear')),
+  });
+
+  it('turns an aiming head toward where its target is DRAWN this frame — the interpolated point', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    // The creep moves from 2 cells right of the centre to 2 right and 2 down; at alpha 0.5
+    // it is drawn 2 right and 1 down — neither end of its step.
+    const creeps = {
+      prev: [creep({ x: CX + 512, y: CY })],
+      cur: [creep({ x: CX + 512, y: CY + 512 })],
+    };
+    for (let tick = 10; tick <= 30; tick++) draw(tick, 0.5, [basic], creeps);
+    const head = t.heads.syncs.at(-1)![0]!;
+    const drawnAt = aimAngle(CX, CY, CX + 512, CY + 256)!;
+    expect(head.rotation).toBeCloseTo(drawnAt, 9);
+    expect(drawnAt).not.toBeCloseTo(aimAngle(CX, CY, CX + 512, CY + 512)!, 2); // not cur's
+    expect(drawnAt).not.toBeCloseTo(aimAngle(CX, CY, CX + 512, CY)!, 2); // not prev's
+    // Turned about its footprint centre: on the snapped corner plus a cell, by its pivot.
+    const spec = framesFor(PROJECTION).get(head.frame)!;
+    expect([head.x, head.y]).toEqual([corner.x + PROJECTION.cellPx, corner.y + PROJECTION.cellPx]);
+    expect([head.originX, head.originY]).toEqual([spec.pivotX, spec.pivotY]);
+    // ... while the plate under it never moves.
+    expect(t.plates.syncs.at(-1)).toEqual(t.plates.syncs[0]);
+  });
+
+  it('sweeps rather than snaps: the first frames turn it a bounded step at a time', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const below = [creep({ x: CX, y: CY + 512 })]; // straight down: a half turn
+    draw(10, 0, [basic], { prev: below, cur: below });
+    expect(t.heads.syncs[0]![0]).toEqual(atRest(basic)); // a new tower points up
+    draw(11, 0, [basic], { prev: below, cur: below });
+    expect(t.heads.syncs[1]![0]!.rotation).toBeCloseTo(AIM_TURN_PER_TICK, 12);
+  });
+
+  it('a shot: the aiming head recoils and flashes at its muzzle — in effects after the selection, before the tracer', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const above = [creep({ x: CX, y: CY - 600 })]; // straight up: the head stays unturned
+    const selection = { col: 4, row: 2, rangeFp: 1024, blastRadiusFp: null, towerId: 'basic' };
+    draw(10, 0, [basic], { prev: above, cur: above }, { selection });
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([`strokeCircle ${hex(PAL.range)}`]);
+    draw(
+      11,
+      0,
+      [basic],
+      { prev: above, cur: above },
+      { selection, tracers: [shotFrom(basic, 11)] },
+    );
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([
+      `strokeCircle ${hex(PAL.range)}`, // the selection
+      `fillCircle ${hex(ART_FLASH)}`, // the muzzle flash
+      `fillCircle ${hex(PAL.tracer)}`, // the tracer
+    ]);
+    const flash = lastFrame(t.layers.effects).calls.filter((c) => c.method === 'fillCircle')[0]!;
+    expect(flash.args).toEqual([
+      corner.x + PROJECTION.cellPx,
+      corner.y + PROJECTION.cellPx - MUZZLE_FLASH.reach * unit,
+      MUZZLE_FLASH.r * unit,
+    ]);
+    // Knocked straight down — it faces up — by its whole recoil, still unturned and crisp.
+    const head = t.heads.syncs[1]![0]!;
+    const rest = atRest(basic);
+    expect(head.x).toBe(rest.x);
+    expect(head.y).toBeCloseTo(rest.y + snapToDevicePx(RECOIL_DEPTH * unit, 1), 9);
+    expect(head.rotation).toBeUndefined();
+    // It settles: once the recoil is over, the head is back where it was.
+    draw(15, 0, [basic], { prev: above, cur: above }, { tracers: [shotFrom(basic, 11)] });
+    expect(t.heads.syncs[2]![0]).toEqual(rest);
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([`fillCircle ${hex(PAL.tracer)}`]);
+  });
+
+  it('a tower that does not aim pulses two rings in its role colour, before the tracer — and its head never moves', () => {
+    const { t, draw } = run();
+    const slow = tower(2, 'slow', 4, { targetId: 7 });
+    const right = [creep({ x: CX + 600, y: CY })];
+    draw(10, 0, [slow], { prev: right, cur: right });
+    draw(11, 0, [slow], { prev: right, cur: right }, { tracers: [shotFrom(slow, 11)] });
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([
+      `strokeCircle ${hex(PAL.roleControl)}`,
+      `strokeCircle ${hex(PAL.roleControl)}`,
+      `fillCircle ${hex(PAL.tracer)}`,
+    ]);
+    expect(t.heads.syncs.map((s) => s[0])).toEqual([atRest(slow), atRest(slow)]);
+  });
+
+  it('under Reduce motion every head stays as drawn — no turn, no recoil — and no flash or pulse is drawn', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const slow = tower(3, 'slow', 8, { targetId: 7 });
+    const right = [creep({ x: CX + 600, y: CY })];
+    const tracers = [shotFrom(basic, 12), shotFrom(slow, 12)];
+    for (let tick = 10; tick <= 20; tick++) {
+      draw(
+        tick,
+        0.5,
+        [basic, slow],
+        { prev: right, cur: right },
+        {
+          reducedMotion: true,
+          tracers: tick >= 12 ? tracers : [],
+        },
+      );
+    }
+    for (const heads of t.heads.syncs) expect(heads).toEqual([atRest(basic), atRest(slow)]);
+    expect(t.layers.effects.calls.filter((c) => c.method !== 'clear')).toEqual([]);
+  });
+
+  it('shows no shot for a tower whose sell is pending — it is drawn as already gone', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const above = [creep({ x: CX, y: CY - 600 })];
+    draw(
+      11,
+      0,
+      [basic],
+      { prev: above, cur: above },
+      {
+        tracers: [shotFrom(basic, 11)],
+        pendingSells: [{ col: 4, row: 2 }],
+      },
+    );
+    expect(t.heads.syncs[0]).toEqual([]);
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([`fillCircle ${hex(PAL.tracer)}`]); // its tracer only
+  });
+
+  it('holds still while render time does: a paused frame draws the same head and the same flash', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const right = [creep({ x: CX + 600, y: CY })];
+    draw(10, 0, [basic], { prev: right, cur: right });
+    draw(11, 0.25, [basic], { prev: right, cur: right }, { tracers: [shotFrom(basic, 11)] });
+    const before = { head: t.heads.syncs[1]![0], effects: lastFrame(t.layers.effects).calls };
+    expect(drawn({ calls: before.effects })).toContain(`fillCircle ${hex(ART_FLASH)}`);
+    for (let i = 0; i < 5; i++) {
+      draw(11, 0.25, [basic], { prev: right, cur: right }, { tracers: [shotFrom(basic, 11)] });
+    }
+    expect(t.heads.syncs.at(-1)![0]).toEqual(before.head);
+    expect(lastFrame(t.layers.effects).calls).toEqual(before.effects);
   });
 });
 
@@ -598,6 +824,8 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
           this.visible = v;
         },
         setAlpha: () => undefined,
+        setOrigin: () => undefined,
+        setRotation: () => undefined,
       })),
     );
     const names = ['scorches', 'plates', 'heads', 'pending', 'creeps'] as const;

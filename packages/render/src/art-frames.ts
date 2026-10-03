@@ -40,6 +40,7 @@ import {
 } from './tower-art';
 import {
   TOWER_LOOKS,
+  towerFootprintMarkFor,
   towerLookFor,
   towerLookKey,
   type TowerLook,
@@ -62,6 +63,12 @@ export interface FrameSpec {
    *  too. */
   readonly anchorX: number;
   readonly anchorY: number;
+  /** Where the art's CENTRE sits — a tower frame's footprint centre, a creep's or a scorch's
+   *  own centre — as fractions of the frame's width and height: the point a sprite showing
+   *  the frame turns about (an aiming head, `placement.ts`). A tower frame's lies `cellPx`
+   *  CSS px right of and below its anchor, the footprint corner. */
+  readonly pivotX: number;
+  readonly pivotY: number;
   readonly paint: FramePainter;
 }
 
@@ -73,6 +80,14 @@ function colours(pal: Palette, role: TowerRole): ArtColourResolver {
 /** Whether a tower of `towerId` stands on a plate — every look but the mine's. */
 export function towerHasPlate(towerId: string): boolean {
   return HEAD_ART[towerLookFor(towerId).mark].plate;
+}
+
+/** Whether a tower of `towerId` AIMS — turns its head to face its target (T3) — as its head
+ *  is drawn to (`HeadArt.aims`): basic, venom, stun and antiair, and an id the catalog has
+ *  never heard of, which looks like basic. Read per tower per frame, so it looks the mark up
+ *  directly rather than building the tower's whole look. */
+export function towerAims(towerId: string): boolean {
+  return HEAD_ART[towerFootprintMarkFor(towerId)].aims;
 }
 
 /** The one plate frame every plated tower shows. */
@@ -172,12 +187,17 @@ function artFrame(
   const anchorY = topTexels / scale;
   const x0 = anchorX - ax * unit;
   const y0 = anchorY - ay * unit;
+  // The art's centre, design (32, 32), lies `32 - ax` design units right of the anchor (and
+  // `32 - ay` below it): in texels from the frame's corner, over the frame's size.
+  const centre = ART_BOX / 2;
   return {
     key,
     width,
     height,
     anchorX,
     anchorY,
+    pivotX: (leftTexels + (centre - ax) * unit * scale) / width,
+    pivotY: (topTexels + (centre - ay) * unit * scale) / height,
     paint: (g, pal) => paint((s, colour) => g.art(onGrid(s), colour, x0, y0, unit), g, pal),
   };
 }
@@ -322,6 +342,8 @@ export function creepFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
           height: half * 2,
           anchorX: at,
           anchorY: at,
+          pivotX: 0.5, // the anchor is the centre, `half` texels in on each side
+          pivotY: 0.5,
           paint: (g, pal) =>
             paintCreepSilhouette(g, {
               shape,

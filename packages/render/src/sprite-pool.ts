@@ -14,15 +14,21 @@ export interface PoolSprite {
   setFrame(frame: string): unknown;
   setVisible(visible: boolean): unknown;
   setAlpha(alpha: number): unknown;
+  /** Its origin, as fractions of its frame's width and height (Phaser keeps those fractions
+   *  across a `setFrame`, and re-measures them against the new frame). */
+  setOrigin(x: number, y: number): unknown;
+  /** Its turn about its origin, radians clockwise. */
+  setRotation(radians: number): unknown;
 }
 
 export interface SpritePool<S extends PoolSprite> {
   /**
-   * Show `placements`: sprite `i` takes placement `i` — its frame and its alpha (each set
-   * only when it changed; a placement without an alpha is opaque), its position, and
-   * visibility. Sprites are created as the count grows and every one past it is hidden.
-   * Creating them in index order, at one depth, is what keeps a layer drawing in list order
-   * under Phaser's stable depth sort — a later creep still covers an earlier one.
+   * Show `placements`: sprite `i` takes placement `i` — its frame, its alpha (a placement
+   * without one is opaque), its origin and its rotation (the top-left and none unless it
+   * says otherwise; each of these set only when it changed), its position, and visibility.
+   * Sprites are created as the count grows and every one past it is hidden. Creating them in
+   * index order, at one depth, is what keeps a layer drawing in list order under Phaser's
+   * stable depth sort — a later creep still covers an earlier one.
    */
   sync(placements: readonly SpritePlacement[]): void;
   /** Hide every sprite; the next `sync` shows exactly what it places. */
@@ -33,29 +39,57 @@ export interface SpritePool<S extends PoolSprite> {
   readonly size: number;
 }
 
+/** What the pool last set on a sprite, so it sets each only when it changes. Rotation is kept
+ *  here rather than read back: Phaser wraps the angle it is given, so its reading need not
+ *  equal the one placed. */
+interface Shown {
+  frame: string;
+  originX: number;
+  originY: number;
+  rotation: number;
+}
+
 /** A pool whose new sprites come from `create`, which returns one already showing the
- *  placement it is given (its frame, at its position, visible); the pool gives it the
- *  placement's alpha, as it does a reused sprite. */
+ *  placement it is given (its frame, at its position, visible) with its origin at its
+ *  top-left and no turn; the pool gives it the placement's alpha, origin and rotation, as it
+ *  does a reused sprite. */
 export function createSpritePool<S extends PoolSprite>(
   create: (placement: SpritePlacement) => S,
 ): SpritePool<S> {
   const sprites: S[] = [];
-  const frames: string[] = [];
+  const shown: Shown[] = [];
   return {
     sync(placements) {
       placements.forEach((p, i) => {
         const alpha = p.alpha ?? 1;
+        const originX = p.originX ?? 0;
+        const originY = p.originY ?? 0;
+        const rotation = p.rotation ?? 0;
         const sprite = sprites[i];
         if (sprite === undefined) {
           const made = create(p);
           if (made.alpha !== alpha) made.setAlpha(alpha);
+          if (originX !== 0 || originY !== 0) made.setOrigin(originX, originY);
+          if (rotation !== 0) made.setRotation(rotation);
           sprites.push(made);
-          frames.push(p.frame);
+          shown.push({ frame: p.frame, originX, originY, rotation });
           return;
         }
-        if (frames[i] !== p.frame) {
+        const was = shown[i] as Shown;
+        // The frame first: a new frame keeps the origin's fractions, re-measured against it,
+        // so an origin set after it is the one that stands.
+        if (was.frame !== p.frame) {
           sprite.setFrame(p.frame);
-          frames[i] = p.frame;
+          was.frame = p.frame;
+        }
+        if (was.originX !== originX || was.originY !== originY) {
+          sprite.setOrigin(originX, originY);
+          was.originX = originX;
+          was.originY = originY;
+        }
+        if (was.rotation !== rotation) {
+          sprite.setRotation(rotation);
+          was.rotation = rotation;
         }
         if (sprite.alpha !== alpha) sprite.setAlpha(alpha);
         sprite.setPosition(p.x, p.y);
@@ -70,7 +104,7 @@ export function createSpritePool<S extends PoolSprite>(
       for (const sprite of sprites) if (sprite.visible) sprite.setVisible(false);
     },
     forEach(fn) {
-      sprites.forEach((sprite, i) => fn(sprite, frames[i] as string));
+      sprites.forEach((sprite, i) => fn(sprite, (shown[i] as Shown).frame));
     },
     get size() {
       return sprites.length;

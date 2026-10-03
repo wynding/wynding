@@ -15,6 +15,7 @@ import {
   paintTowerArt,
   pendingFrameKey,
   scorchFrameSpec,
+  towerAims,
   towerArtFit,
   towerFrameSpecs,
   towerHasPlate,
@@ -164,6 +165,13 @@ describe('frame keys follow the look, not the catalog id', () => {
     expect(groundFrameKey('no-such-tower')).toBe(PLATE_FRAME_KEY);
   });
 
+  it('turns the heads of exactly the towers the style frame aims — basic, venom, stun, antiair — and an unknown id, which looks like basic (T3)', () => {
+    const aiming = new Set(['basic', 'venom', 'stun', 'antiair']);
+    for (const id of CATALOG_IDS) expect(towerAims(id), id).toBe(aiming.has(id));
+    expect(towerAims('no-such-tower')).toBe(true);
+    expect(towerAims('__proto__')).toBe(true);
+  });
+
   it('keys a creep frame by its shape, its low-health tint and its boss size', () => {
     expect(creepFrameKey('armored', 1, false)).toBe('creep:hexagon:normal:standard');
     expect(creepFrameKey('boss', 1, true)).toBe('creep:hexagon:normal:boss');
@@ -306,6 +314,31 @@ describe('frame sizes and anchors sit on whole texels', () => {
         const bottom = Math.max(box.maxY, spec.anchorY);
         expect(spec.width / scale - right, spec.key).toBeLessThan(pad + 1 / scale + 1e-9);
         expect(spec.height / scale - bottom, spec.key).toBeLessThan(pad + 1 / scale + 1e-9);
+      }
+    }
+  });
+
+  it('pivots every frame on its art’s centre: a tower frame’s footprint centre, a cell right of and below its anchor (T3)', () => {
+    for (const [cellPx, scale] of SIZES) {
+      // The pivot is a fraction of the frame; in CSS px from its corner it is that fraction of
+      // the frame's texels over the scale.
+      const at = (spec: FrameSpec) => ({
+        x: (spec.pivotX * spec.width) / scale,
+        y: (spec.pivotY * spec.height) / scale,
+      });
+      for (const spec of towerFrameSpecs(cellPx, scale)) {
+        expect(at(spec).x, spec.key).toBeCloseTo(spec.anchorX + cellPx, 9);
+        expect(at(spec).y, spec.key).toBeCloseTo(spec.anchorY + cellPx, 9);
+        // ... which is where the frame's art is painted centred: design (32, 32).
+        for (const call of artCalls(paint(spec))) {
+          expect(call.x + (ART_BOX / 2) * call.unit, spec.key).toBeCloseTo(at(spec).x, 9);
+          expect(call.y + (ART_BOX / 2) * call.unit, spec.key).toBeCloseTo(at(spec).y, 9);
+        }
+      }
+      // A scorch and a creep are anchored at their centres already.
+      for (const spec of [scorchFrameSpec(cellPx, scale), ...creepFrameSpecs(cellPx, scale)]) {
+        expect(at(spec).x, spec.key).toBeCloseTo(spec.anchorX, 9);
+        expect(at(spec).y, spec.key).toBeCloseTo(spec.anchorY, 9);
       }
     }
   });

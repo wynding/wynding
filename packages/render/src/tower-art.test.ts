@@ -12,7 +12,9 @@ import {
   ART_INK,
   BOOST_ART,
   BOOST_RING_ALPHA,
+  FIRE_PULSE_RINGS,
   HEAD_ART,
+  MUZZLE_FLASH,
   PAD_ART,
   PENDING_ALPHA,
   PENDING_PLATE_ALPHA,
@@ -20,6 +22,7 @@ import {
   PENDING_RIM_ART,
   PLATE_ART,
   PLATE_RECT,
+  RECOIL_DEPTH,
   SCORCH_ART,
   artColour,
 } from './tower-art';
@@ -285,27 +288,75 @@ describe('heads — one per look, role-coloured, outlined in ink', () => {
     }
   });
 
-  it('the heads that will aim point UP, symmetric about the footprint’s vertical centre line', () => {
-    // basic, venom, stun and antiair turn toward their target in a later pass, about the
-    // footprint centre; drawn at aim angle 0 their tip is straight up and nothing reaches
-    // further from the centre.
+  it('the heads that aim are the style frame’s four — basic, venom, stun, antiair — and no other', () => {
+    const aiming = TOWER_FOOTPRINT_MARKS.filter((m) => HEAD_ART[m].aims);
+    expect(aiming.sort()).toEqual(
+      ['basic', 'venom', 'stun', 'antiair'].map((id) => towerLookFor(id).mark).sort(),
+    );
+  });
+
+  it('the heads that aim point UP, symmetric about the footprint’s vertical centre line', () => {
+    // Each turns toward its target about the footprint centre (T3, `tower-aim.ts`); drawn at
+    // aim angle 0 its tip is straight up and nothing reaches further from the centre.
     const C = ART_BOX / 2;
-    for (const id of ['basic', 'venom', 'stun', 'antiair']) {
-      const { mark } = towerLookFor(id);
+    for (const mark of TOWER_FOOTPRINT_MARKS.filter((m) => HEAD_ART[m].aims)) {
       const body = HEAD_ART[mark].shapes.filter((s) => s.fill === 'role');
       const pts = body.flatMap((s) => shapeOutline(s).flatMap((l) => l.points));
       const top = pts.reduce((best, p) => (p[1] < best[1] ? p : best));
-      expect(Math.abs(top[0] - C), id).toBeLessThan(3.6); // basic's barrel is 7 wide
-      expect(top[1], id).toBeLessThan(C);
+      expect(Math.abs(top[0] - C), mark).toBeLessThan(3.6); // basic's barrel is 7 wide
+      expect(top[1], mark).toBeLessThan(C);
       const reach = (p: Point): number => Math.hypot(p[0] - C, p[1] - C);
       const tipReach = Math.max(
         ...pts.filter((p) => Math.abs(p[0] - C) < 3.6 && p[1] < C).map(reach),
       );
-      for (const p of pts) expect(reach(p), id).toBeLessThanOrEqual(tipReach + 1e-9);
+      for (const p of pts) expect(reach(p), mark).toBeLessThanOrEqual(tipReach + 1e-9);
       // Mirror-symmetric silhouette: the body's extents match on both sides of the line.
       const xs = pts.map(([x]) => x);
-      expect(Math.min(...xs) + Math.max(...xs), id).toBeCloseTo(2 * C, 6);
+      expect(Math.min(...xs) + Math.max(...xs), mark).toBeCloseTo(2 * C, 6);
     }
+  });
+});
+
+describe('firing — the muzzle flash and the ring pulse (T3)', () => {
+  const C = ART_BOX / 2;
+  /** How far a head's outline reaches from the footprint centre, its ink stroke included. */
+  const reachOf = (mark: TowerFootprintMark): number =>
+    Math.max(
+      ...HEAD_ART[mark].shapes.flatMap((s) =>
+        shapeOutline(s).flatMap((l) =>
+          l.points.map((p) => Math.hypot(p[0] - C, p[1] - C) + (s.width ?? 0) / 2),
+        ),
+      ),
+    );
+
+  it('the muzzle flash covers the tip of every head that aims, and stays inside the footprint', () => {
+    for (const mark of TOWER_FOOTPRINT_MARKS.filter((m) => HEAD_ART[m].aims)) {
+      // The tip is straight up, `reachOf` from the centre: the flash's disc spans it.
+      expect(MUZZLE_FLASH.reach - MUZZLE_FLASH.r, mark).toBeLessThan(reachOf(mark));
+      expect(MUZZLE_FLASH.reach + MUZZLE_FLASH.r, mark).toBeGreaterThan(reachOf(mark));
+    }
+    expect(MUZZLE_FLASH.reach + MUZZLE_FLASH.r).toBeLessThanOrEqual(C);
+  });
+
+  it('the ring pulse circles every head that pulses clear of it, on the plate inside its edge', () => {
+    // The heads that do not aim and fire: slow, splash, frost-splash. (The beacon never fires,
+    // and the mine's one shot is its detonation, which its scorch shows instead.)
+    const plateHalf = PLATE_RECT.w / 2; // the plate's edge, straight out from the centre
+    for (const id of ['slow', 'splash', 'frost-splash']) {
+      const { mark } = towerLookFor(id);
+      expect(HEAD_ART[mark].aims, id).toBe(false);
+      for (const ring of FIRE_PULSE_RINGS) {
+        expect(ring.r - ring.width / 2, id).toBeGreaterThan(reachOf(mark));
+      }
+    }
+    for (const ring of FIRE_PULSE_RINGS) {
+      expect(ring.r + ring.width / 2).toBeLessThanOrEqual(plateHalf);
+    }
+  });
+
+  it('the recoil is a small knock — under a fifth of a cell', () => {
+    expect(RECOIL_DEPTH).toBeGreaterThan(0);
+    expect(RECOIL_DEPTH).toBeLessThan(ART_BOX / 2 / 5);
   });
 });
 

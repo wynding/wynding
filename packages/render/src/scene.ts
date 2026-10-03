@@ -23,6 +23,8 @@ import { createBakeRunner, type BakedArt } from './bake-runner';
 import { createSpritePool } from './sprite-pool';
 import { createSparkStore } from './sparks';
 import { createScorchTracker } from './scorches';
+import { createAimTracker } from './tower-aim';
+import { createFireTracker } from './tower-fire';
 import {
   createLiveLayers,
   createSpriteLayers,
@@ -161,8 +163,11 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   const sceneOf = (): Phaser.Scene => game.scene.scenes[0] as Phaser.Scene;
 
   const sparks = createSparkStore();
-  // Where mines went off, fading (`scorches.ts`): fed by every frame, forgotten with the run.
+  // Where mines went off, fading (`scorches.ts`), where each head points (`tower-aim.ts`) and
+  // which towers just fired (`tower-fire.ts`): fed by every frame, forgotten with the run.
   const scorches = createScorchTracker();
+  const aim = createAimTracker();
+  const fire = createFireTracker();
   const now = (): number => game.getTime();
 
   // The art the sprites are showing this frame — what a sprite created mid-frame is given.
@@ -283,6 +288,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       frames: art.atlas.frames,
       sparks: sparks.live(now(), overlay.reducedMotion),
       scorches,
+      aim,
+      fire,
     });
   };
 
@@ -290,8 +297,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     draw,
     reset(): void {
       sparks.clear();
-      // (Before READY no frame has fed the scorch tracker, so there is nothing to forget.)
-      if (targets !== null) resetBoardFrame(targets, { scorches });
+      // (Before READY no frame has fed the trackers, so there is nothing to forget.)
+      if (targets !== null) resetBoardFrame(targets, { scorches, aim, fire });
     },
     destroy(): void {
       sparks.clear();

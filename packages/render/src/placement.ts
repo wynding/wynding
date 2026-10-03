@@ -2,8 +2,9 @@
 // Phaser-free, unit-tested: `board-frame.ts` hands these lists to the sprite pools
 // (`sprite-pool.ts`), which only copy them onto sprites, so every decision a frame's picture
 // depends on — which towers are hidden, which are pending, which stand on a plate and which
-// on a pad, which heads wear the boost glow, how faded a scorch is, which silhouette and size
-// a creep gets, when it turns low-health — is made here, where a test can see it.
+// on a pad, which heads wear the boost glow, how each head is turned and knocked back, how
+// faded a scorch is, which silhouette and size a creep gets, when it turns low-health — is
+// made here, where a test can see it.
 //
 // POSITIONS are world CSS px (the space every projection call returns) and are SNAPPED TO
 // WHOLE DEVICE PIXELS: a sprite's top-left lands where `x × dpr` is an integer. The atlas
@@ -11,7 +12,9 @@
 // puts each texel on exactly one pixel of the canvas's backing store — crisp, never resampled
 // between two (`scene.ts` says how that store reaches the screen). Creeps carry their snapped
 // centre too, for the cues drawn around them (`drawCreepCues`) and the tracers converging on
-// them.
+// them. The one sprite that leaves the grid is a tower's head while it is TURNED toward its
+// target (visual pass T3): it turns about its footprint centre, and a turned sprite's texels
+// fall between pixels whatever its position (`placeHead`).
 
 import {
   creepFillColour,
@@ -30,22 +33,45 @@ import {
 import { snapToDevicePx } from './device-px';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
-import type { CreepVM, RenderOverlay, RenderVM } from './types';
+import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
 
-/** One sprite: the atlas frame it shows, its top-left corner (world CSS px), and its
- *  opacity — 1 unless it says otherwise. */
+/** One sprite: the atlas frame it shows, where it goes (world CSS px), and its opacity — 1
+ *  unless it says otherwise. `x`/`y` place the sprite's ORIGIN: its top-left corner, unless
+ *  the placement moves the origin — only a turned head does (`placeTowers`), to turn about
+ *  its footprint centre. */
 export interface SpritePlacement {
   readonly frame: string;
   readonly x: number;
   readonly y: number;
   readonly alpha?: number;
+  /** The sprite's origin, as fractions of its frame's width and height — the point `x`/`y`
+   *  place and the one it turns about. 0 (the top-left) unless set. */
+  readonly originX?: number;
+  readonly originY?: number;
+  /** How far the sprite is turned about its origin, radians clockwise. 0 unless set. */
+  readonly rotation?: number;
 }
 
-/** What placement needs to know of a baked frame: where its anchor sits inside it. */
+/** What placement needs to know of a baked frame: where its anchor sits inside it, and its
+ *  pivot — where its art's centre sits, as fractions of its size (`FrameSpec`). */
 export interface FrameAnchor {
   readonly anchorX: number;
   readonly anchorY: number;
+  readonly pivotX: number;
+  readonly pivotY: number;
 }
+
+/** How a committed tower's head is posed this frame (visual pass T3): turned `angle` radians
+ *  clockwise from straight up about its footprint centre, and knocked `recoilPx` CSS px back
+ *  along the way it faces. `tower-fire.ts`'s `headPose` says how each head is posed. */
+export interface HeadPose {
+  readonly angle: number;
+  readonly recoilPx: number;
+}
+
+/** A head as it is drawn: pointing up, where it stands — every head before towers aimed, a
+ *  head that does not aim, and every head under Reduce motion. */
+export const HEAD_AT_REST: HeadPose = { angle: 0, recoilPx: 0 };
 
 function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {
   const frame = frames.get(key);
@@ -91,12 +117,15 @@ export interface TowerPlacements {
  * look, so a slow tower queued while paused keeps its shape-distinct identity (Codex R1-7).
  * Every sprite is anchored at its 2×2 footprint's top-left cell, so a tower's plate and
  * head land on the same snapped corner.
+ *
+ * Each head is posed as `poseOf` says (T3; at rest when it is not given — `placeHead`).
  */
 export function placeTowers(
   vm: RenderVM,
   o: Pick<RenderOverlay, 'pendingAdds' | 'pendingSells'>,
   projection: Projection,
   frames: ReadonlyMap<string, FrameAnchor>,
+  poseOf: (t: TowerVM) => HeadPose = () => HEAD_AT_REST,
 ): TowerPlacements {
   const dpr = projection.dpr;
   const plates: SpritePlacement[] = [];
@@ -104,13 +133,53 @@ export function placeTowers(
   for (const t of visibleTowers(vm.towers, o.pendingSells)) {
     const p = projection.cellToPixel(t.col, t.row);
     plates.push(placeAt(frames, groundFrameKey(t.towerId), p.x, p.y, dpr));
-    heads.push(placeAt(frames, headFrameKey(t.towerId, t.buffed), p.x, p.y, dpr));
+    heads.push(
+      placeHead(frames, headFrameKey(t.towerId, t.buffed), p.x, p.y, projection, poseOf(t)),
+    );
   }
   const pending = o.pendingAdds.map((t) => {
     const p = projection.cellToPixel(t.col, t.row);
     return placeAt(frames, pendingFrameKey(t.towerId), p.x, p.y, dpr);
   });
   return { plates, heads, pending };
+}
+
+/**
+ * A committed tower's head, posed (T3). Its recoil knocks it `pose.recoilPx` back along the
+ * way it faces, `(sin a, −cos a)` for a turn of `a` from straight up, the knock moved onto
+ * whole device pixels so a head that is not turned stays crisp as it recoils.
+ *
+ * A head NOT turned is placed exactly as the plate under it is — its frame's anchor on the
+ * snapped footprint corner, its origin the frame's top-left — so at rest it is the picture
+ * before towers aimed, to the bit. A TURNED head is placed by the point it turns about: its
+ * origin is the frame's pivot, the art's centre (`FrameSpec.pivotX/Y`), which lies a cell
+ * right of and below the frame's anchor, so it goes on the snapped corner plus a cell. Turning
+ * a sprite resamples its texels, so a turned head is drawn a little softer than one at rest.
+ */
+function placeHead(
+  frames: ReadonlyMap<string, FrameAnchor>,
+  key: string,
+  cornerX: number,
+  cornerY: number,
+  projection: Projection,
+  pose: HeadPose,
+): SpritePlacement {
+  const { dpr, cellPx } = projection;
+  const a = anchorOf(frames, key);
+  const x = snapToDevicePx(cornerX, dpr);
+  const y = snapToDevicePx(cornerY, dpr);
+  const back = pose.recoilPx;
+  const dx = back === 0 ? 0 : snapToDevicePx(-Math.sin(pose.angle) * back, dpr);
+  const dy = back === 0 ? 0 : snapToDevicePx(Math.cos(pose.angle) * back, dpr);
+  if (pose.angle === 0) return { frame: key, x: x - a.anchorX + dx, y: y - a.anchorY + dy };
+  return {
+    frame: key,
+    x: x + cellPx + dx,
+    y: y + cellPx + dy,
+    originX: a.pivotX,
+    originY: a.pivotY,
+    rotation: pose.angle,
+  };
 }
 
 /** A scorch to show: where it is, in fixed-point sim units, and how opaque it is now. */

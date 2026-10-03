@@ -5,9 +5,21 @@
 // honoured.
 
 import { describe, it, expect } from 'vitest';
-import { placeCreeps, placeScorches, placeTowers, type FrameAnchor } from './placement';
+import {
+  HEAD_AT_REST,
+  placeCreeps,
+  placeScorches,
+  placeTowers,
+  type FrameAnchor,
+} from './placement';
 import { snapToDevicePx } from './device-px';
-import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
+import {
+  atlasFrameSpecs,
+  PAD_FRAME_KEY,
+  PLATE_FRAME_KEY,
+  SCORCH_FRAME_KEY,
+  type FrameSpec,
+} from './art-frames';
 import { creepRadius } from './board-draw';
 import { createProjection, type Projection } from './projection';
 import { resolvePalette } from './palette';
@@ -45,6 +57,7 @@ const tower = (
   towerId,
   support: false,
   buffed: false,
+  targetId: 0,
   ...opts,
 });
 
@@ -217,9 +230,103 @@ describe('placeTowers', () => {
         vmWith([tower('basic', 2, 2)]),
         NO_OVERLAY,
         projection,
-        new Map([[PLATE_FRAME_KEY, { anchorX: 0, anchorY: 0 }]]),
+        new Map([[PLATE_FRAME_KEY, { anchorX: 0, anchorY: 0, pivotX: 0, pivotY: 0 }]]),
       ),
     ).toThrow(/no frame 'tower:head:plain:damage:committed'/);
+  });
+});
+
+describe('placeTowers — each head posed to aim and recoil (visual pass T3)', () => {
+  // dpr 1, and 1.25 and 1.5, where a footprint corner can fall between device pixels.
+  const LAYOUTS = [
+    projectionAt(1),
+    createProjection({ cols: 28, rows: 24, cssWidth: 1074, cssHeight: 802, dpr: 1.25 }),
+    projectionAt(1.5, 110, 110),
+  ];
+  const specsFor = (p: Projection): ReadonlyMap<string, FrameSpec> =>
+    new Map(atlasFrameSpecs(p.cellPx, p.dpr).map((f) => [f.key, f]));
+  const TOWERS = [tower('basic', 1, 1), tower('venom', 3, 5), tower('slow', 6, 2)];
+
+  it('places a head at rest exactly as an unposed head — the same numbers, to the bit', () => {
+    for (const p of LAYOUTS) {
+      const frames = specsFor(p);
+      const unposed = placeTowers(vmWith(TOWERS), NO_OVERLAY, p, frames);
+      for (const pose of [HEAD_AT_REST, { angle: 0, recoilPx: 0 }]) {
+        const posed = placeTowers(vmWith(TOWERS), NO_OVERLAY, p, frames, () => pose);
+        expect(posed).toEqual(unposed);
+        // No origin and no turn: the pool leaves the sprite at its top-left, unturned.
+        for (const h of posed.heads)
+          expect([h.originX, h.originY, h.rotation]).toEqual([undefined, undefined, undefined]);
+      }
+    }
+  });
+
+  it('places a TURNED head by its footprint centre: its origin the frame’s pivot, on the snapped corner plus a cell', () => {
+    for (const p of LAYOUTS) {
+      const frames = specsFor(p);
+      const t = tower('basic', 3, 5);
+      const placed = placeTowers(vmWith([t]), NO_OVERLAY, p, frames, () => ({
+        angle: 0.6,
+        recoilPx: 0,
+      }));
+      const head = placed.heads[0]!;
+      const spec = frames.get(head.frame)!;
+      const corner = p.cellToPixel(3, 5);
+      expect(head).toEqual({
+        frame: 'tower:head:plain:damage:committed',
+        x: snapToDevicePx(corner.x, p.dpr) + p.cellPx,
+        y: snapToDevicePx(corner.y, p.dpr) + p.cellPx,
+        originX: spec.pivotX,
+        originY: spec.pivotY,
+        rotation: 0.6,
+      });
+      // The frame's top-left, before the turn, is where the unturned head's would be: the
+      // pivot is the very point that head's footprint centre was drawn at. (A sprite's origin
+      // is its frame's size in CSS px — texels over the bake scale — times the fraction.)
+      const rest = placeTowers(vmWith([t]), NO_OVERLAY, p, frames).heads[0]!;
+      expect(head.x - head.originX! * (spec.width / p.dpr)).toBeCloseTo(rest.x, 9);
+      expect(head.y - head.originY! * (spec.height / p.dpr)).toBeCloseTo(rest.y, 9);
+      // ... and the plate under it does not move.
+      expect(placed.plates).toEqual(placeTowers(vmWith([t]), NO_OVERLAY, p, frames).plates);
+    }
+  });
+
+  it('turns each head by its own pose, the boosted one too', () => {
+    const p = LAYOUTS[0]!;
+    const frames = specsFor(p);
+    const towers = [tower('basic', 2, 2, { buffed: true }), tower('antiair', 6, 2)];
+    const placed = placeTowers(vmWith(towers), NO_OVERLAY, p, frames, (t) => ({
+      angle: t.towerId === 'basic' ? 1 : -2,
+      recoilPx: 0,
+    }));
+    expect(placed.heads.map((h) => [h.frame, h.rotation])).toEqual([
+      ['tower:head:plain:damage:buffed', 1],
+      ['tower:head:arrow:air:committed', -2],
+    ]);
+  });
+
+  it('knocks a head back along its facing by whole device pixels: down facing up, left facing right', () => {
+    for (const p of LAYOUTS) {
+      const frames = specsFor(p);
+      const t = tower('stun', 3, 5);
+      const rest = placeTowers(vmWith([t]), NO_OVERLAY, p, frames).heads[0]!;
+      // Facing up (unturned), a 2.3px knock moves it straight down, to a whole device pixel.
+      const up = placeTowers(vmWith([t]), NO_OVERLAY, p, frames, () => ({
+        angle: 0,
+        recoilPx: 2.3,
+      })).heads[0]!;
+      expect(up.x).toBe(rest.x);
+      expect(up.y).toBeCloseTo(rest.y + snapToDevicePx(2.3, p.dpr), 9);
+      expect(Math.abs(up.y * p.dpr - Math.round(up.y * p.dpr))).toBeLessThan(1e-9);
+      expect(up.rotation).toBeUndefined(); // still at its top-left: crisp as it recoils
+      // Facing right, it moves left of where the turned head stands.
+      const turned = (recoilPx: number) =>
+        placeTowers(vmWith([t]), NO_OVERLAY, p, frames, () => ({ angle: Math.PI / 2, recoilPx }))
+          .heads[0]!;
+      const knocked = turned(2.3);
+      expect(knocked.x).toBeCloseTo(turned(0).x - snapToDevicePx(2.3, p.dpr), 9);
+      expect(knocked.y).toBeCloseTo(turned(0).y, 9);
+    }
   });
 });
 

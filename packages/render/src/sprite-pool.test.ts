@@ -13,6 +13,9 @@ interface FakeSprite extends PoolSprite {
   y: number;
   visible: boolean;
   alpha: number;
+  originX: number;
+  originY: number;
+  rotation: number;
   calls: string[];
 }
 
@@ -26,6 +29,10 @@ function fakePool() {
       y: p.y,
       visible: true,
       alpha: 1, // opaque, as Phaser makes an image: the pool gives it its placement's alpha
+      // At its top-left and unturned, as the scene makes one: the pool gives it the rest.
+      originX: 0,
+      originY: 0,
+      rotation: 0,
       calls: [],
       setPosition(x, y) {
         this.calls.push(`setPosition ${x},${y}`);
@@ -43,6 +50,15 @@ function fakePool() {
       setAlpha(alpha) {
         this.calls.push(`setAlpha ${alpha}`);
         this.alpha = alpha;
+      },
+      setOrigin(x, y) {
+        this.calls.push(`setOrigin ${x},${y}`);
+        this.originX = x;
+        this.originY = y;
+      },
+      setRotation(radians) {
+        this.calls.push(`setRotation ${radians}`);
+        this.rotation = radians;
       },
     };
     made.push(sprite);
@@ -99,6 +115,57 @@ describe('createSpritePool', () => {
     // An opaque placement makes an opaque sprite: no alpha call at all.
     pool.sync([at('scorch', 1), at('plate', 2)]);
     expect(made[1]!.calls.filter((c) => c.startsWith('setAlpha'))).toEqual([]);
+  });
+
+  it('gives a sprite its placement’s origin and turn — new or reused, re-set ONLY when changed, top-left and unturned when the placement has none', () => {
+    // A turned head (`placeTowers`) is placed by its footprint centre; every other sprite by
+    // its top-left.
+    const { pool, made } = fakePool();
+    const turned = (rotation: number): SpritePlacement => ({
+      ...at('tower:head:plain:damage:committed', 40, 40),
+      originX: 0.5,
+      originY: 0.6,
+      rotation,
+    });
+    pool.sync([turned(0.3)]);
+    expect(made[0]!.calls).toEqual(['setOrigin 0.5,0.6', 'setRotation 0.3']);
+    pool.sync([turned(0.3)]);
+    pool.sync([turned(0.4)]); // still turning: only the turn changes
+    expect(made[0]!.calls.slice(2)).toEqual([
+      'setPosition 40,40',
+      'setRotation 0.4',
+      'setPosition 40,40',
+    ]);
+    // Back at rest: top-left and unturned again.
+    pool.sync([at('tower:head:plain:damage:committed', 30, 30)]);
+    expect(made[0]!.calls.slice(5)).toEqual([
+      'setOrigin 0,0',
+      'setRotation 0',
+      'setPosition 30,30',
+    ]);
+    expect([made[0]!.originX, made[0]!.originY, made[0]!.rotation]).toEqual([0, 0, 0]);
+    // A sprite made for a placement at rest gets neither call.
+    pool.sync([at('a', 1), at('b', 2)]);
+    expect(made[1]!.calls).toEqual([]);
+  });
+
+  it('re-frames a sprite BEFORE re-setting its origin, so the new origin is measured on the new frame', () => {
+    // Phaser keeps an origin's fractions across a new frame and re-measures them against
+    // it; the placement's own origin, set after, is the one that stands.
+    const { pool, made } = fakePool();
+    pool.sync([
+      { ...at('tower:head:plain:damage:committed', 0), originX: 0.5, originY: 0.5, rotation: 1 },
+    ]);
+    pool.sync([
+      { ...at('tower:head:arrow:air:committed', 0), originX: 0.4, originY: 0.45, rotation: 1 },
+    ]);
+    expect(made[0]!.calls).toEqual([
+      'setOrigin 0.5,0.5', // made: given its origin and turn
+      'setRotation 1',
+      'setFrame tower:head:arrow:air:committed', // reused: the frame, then the origin
+      'setOrigin 0.4,0.45',
+      'setPosition 0,0', // the turn did not change
+    ]);
   });
 
   it('hides every sprite past this frame’s count, and only once', () => {
