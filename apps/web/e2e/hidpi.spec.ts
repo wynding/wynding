@@ -83,21 +83,23 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     await page.goto('/');
     const board = page.locator('.wy-board');
     await expect(board).toBeVisible();
-    // The floating wave preview (playtest round) is DOM chrome over the stage's top-left —
-    // display-only and click-through, but opaque, and this tall 1280×900 viewport is
-    // width-limited (≈10px of letterbox margin), so the card sits exactly over the corner
-    // cells sampled below. Canvas backing-store alignment is this test's subject, not DOM
-    // chrome occlusion (`stage-stability.spec.ts` owns the preview), so it is hidden for
-    // the sampling.
-    await page.evaluate(() => {
-      (document.querySelector('.wy-wave-preview') as HTMLElement).hidden = true;
-    });
     const box = (await board.boundingBox()) as {
       x: number;
       y: number;
       width: number;
       height: number;
     };
+    // The wave preview used to float over the Stage's top-left (playtest round, #101) — exactly
+    // over the corner cells sampled below on this width-limited 1280×900 viewport — so this test
+    // hid it. Since #181 it is a strip in the status row, and nothing is hidden any more: the
+    // sampled cells must be clear of it as rendered. Asserted rather than assumed, so a strip
+    // that drifted back over the board fails HERE, by name, instead of corrupting the samples.
+    const strip = await page.locator('.wy-wave-preview').boundingBox();
+    expect(strip, 'the wave strip is laid out pre-start').not.toBeNull();
+    expect(
+      strip!.y + strip!.height,
+      'the wave strip must sit wholly above the board it previews',
+    ).toBeLessThanOrEqual(box.y + 0.5);
 
     // M1's "Open Field" board is 28×24 (entrance/exit on row 11) — the dims come from
     // `layout-probe.ts`'s shared `GRID`, the single mirror of content's boards.ts (e2e stays

@@ -23,20 +23,19 @@ const STANDARD = { width: 1280, height: 720 };
 const PHONE = { width: 658, height: 320 }; // Galaxy S9+ landscape — the smallest supported
 const NARROW = { width: 568, height: 320 }; // iPhone-SE-class narrow floor
 
-/** The Standard status row's expected height: the chips line alone, exactly the link's
- *  44px hit box absorbed into the row's own padding (ui.css derives this) — measured
- *  44.0px at 1280×720 since the playtest round FLOATED the wave preview over the Stage
- *  (`.wy-wave-preview`'s ui.css comment: a content-sized row re-projected the board on
- *  every preview change, so the preview left the row entirely). That resolves the
- *  recalibration saga that lived here through M2-S2 and M2-S10 and the S11/S12 flag that
- *  asked for "a real look rather than a third recalibration" — the real look was removing
- *  the variable content, and `stage-stability.spec.ts` now pins the board-never-moves
- *  invariant directly; git carries the essays.
+/** The Standard status row's expected height: ONE line — the home link's 44px hit box
+ *  absorbed into the row's own padding (ui.css derives this), the icon chips, and since #181
+ *  the wave strip — measured 52px at 1280×720. The strip is back in the row, but as a box the
+ *  ROW sizes (its leftover width, one fixed line tall), never its content: a content-sized
+ *  preview row re-projected the board on every wave change, which is why the playtest round
+ *  had floated it out of the row entirely. `stage-stability.spec.ts` pins the
+ *  board-never-moves invariant directly; git carries the recalibration essays.
  *
  *  The ceiling still earns its keep the original way: a naive `min-height: 44px` flex
  *  item stacking ON TOP of the row's own content — the regression class this guard has
- *  caught since M1 — adds ~19px and breaches; re-hosting any preview-like content row
- *  breaches by 60px+. */
+ *  caught since M1 — adds ~19px and breaches; a strip pushed onto a line of its own (the
+ *  row wrapping at this width), or any content-sized preview row, breaches by a line or
+ *  more. */
 const STANDARD_ROW_MAX_PX = 56;
 
 async function gotoAt(page: Page, size: { width: number; height: number }): Promise<void> {
