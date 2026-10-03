@@ -338,9 +338,9 @@ export const PENDING_ALPHA = 0.5;
 
 /** A pending build's rim (T4): the plate's outline, DASHED, at full opacity over the faded
  *  art — so "planned, not built" reads by shape (the dashes) as well as by alpha. In
- *  `palette.tower`, gated ≥ 3:1 against the floor; the dashes are scaled up until the
- *  shortest is 2 CSS px, so they stay dashes at a phone's cell size. Drawn for the mine too,
- *  which has no plate of its own: it marks the footprint the build will take. */
+ *  `palette.tower`, gated ≥ 3:1 against the floor; the pattern is scaled up until its
+ *  shortest dash or gap is 2 CSS px, so it stays dashed at a phone's cell size. Drawn for
+ *  the mine too, which has no plate of its own: it marks the footprint the build will take. */
 export const PENDING_RIM_ART: readonly ArtShape[] = [
   {
     kind: 'rect',
