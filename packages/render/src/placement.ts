@@ -27,6 +27,7 @@ import {
   pendingFrameKey,
   SCORCH_FRAME_KEY,
 } from './art-frames';
+import { snapToDevicePx } from './device-px';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
 import type { CreepVM, RenderOverlay, RenderVM } from './types';
@@ -44,11 +45,6 @@ export interface SpritePlacement {
 export interface FrameAnchor {
   readonly anchorX: number;
   readonly anchorY: number;
-}
-
-/** `v` (CSS px) moved to the nearest whole DEVICE pixel at `dpr`. */
-export function snapToDevicePx(v: number, dpr: number): number {
-  return Math.round(v * dpr) / dpr;
 }
 
 function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {

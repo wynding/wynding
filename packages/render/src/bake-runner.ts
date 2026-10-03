@@ -20,11 +20,11 @@
 //
 // RETRY. A failed attempt is not repeated for `BAKE_RETRY_FRAMES` frames, about a second,
 // unless the inputs change first — so a failure that recurs costs one attempt a second, not
-// one a frame. Each distinct failure (its stage, its error, its canvas size) is reported once,
-// saying what the board shows meanwhile: nothing, or the art baked for which cell size, dpr
-// and colour mode. The failing streak closes — its reports and its count of failed attempts
-// reset, and one line says so — when a bake succeeds, or when the inputs come back to those
-// the visible art was baked for.
+// one a frame. Each distinct failure (its stage, its error, its canvas size and its inputs) is
+// reported once, saying what the board shows meanwhile: nothing, or the art baked for which
+// cell size, dpr and colour mode. The failing streak closes — its reports and its count of
+// failed attempts reset, and one line says so — when a bake succeeds, or when the inputs come
+// back to those the visible art was baked for.
 
 import {
   bakedTextureKey,
@@ -85,7 +85,8 @@ export interface BakeHost<C> {
   /** A blank `width × height` canvas and its 2D context, or null when the browser refuses. */
   createCanvas(width: number, height: number): HostCanvas<C> | null;
   /** Give a canvas's memory back now. Called once the texture made from it is removed — or
-   *  once removing that texture has failed, since cleanup goes on regardless. */
+   *  once removing that texture has failed, since cleanup goes on regardless — or, on
+   *  `destroy`, once the caller has torn its textures down. */
   releaseCanvas(canvas: C): void;
   /** Register `canvas` as texture `key`, with `frames` as its named sub-rectangles. */
   addTexture(key: string, canvas: C, frames: readonly TextureFrameRect[]): void;
@@ -171,7 +172,7 @@ export function createBakeRunner<C>(geometry: BoardCellsGeometry, host: BakeHost
   /** The inputs whose attempt last failed, and the first frame they may be tried again on. */
   let retry: { readonly inputs: BakeInputs; readonly fromFrame: number } | null = null;
   let failedAttempts = 0;
-  /** The failures this streak has reported, by stage, error and canvas size. */
+  /** The failures this streak has reported, by stage, error, canvas size and inputs. */
   const reported = new Set<string>();
 
   /** Log — and survive a log that throws, since there is nowhere left to report that. */
@@ -230,10 +231,11 @@ export function createBakeRunner<C>(geometry: BoardCellsGeometry, host: BakeHost
   const undo = (failure: Failure, canvases: readonly C[], added: readonly string[]): void => {
     const previous = live;
     if (failure.stage === 'show' && previous !== null) {
-      // Should this throw too, the attempt's textures are still removed below. That assumes a
-      // show fails the same way on both passes, so no sprite reached them — true of Phaser 3.90,
-      // whose show throws only on a destroyed object, at the same sprite each time. A host that
-      // can fail differently should keep the textures instead.
+      // Should this throw too, the attempt's textures are still removed below. That assumes the
+      // re-show fails at the same sprite the first show did, so every sprite the first pass
+      // reached has been pointed back before it throws — true of Phaser 3.90, whose show throws
+      // only on a destroyed object, before assigning anything, at the same sprite each time.
+      // Should a host's show fail differently, `undo` must keep the textures instead.
       step('pointing the board and its sprites back at the previous art', () =>
         host.show(previous.art),
       );

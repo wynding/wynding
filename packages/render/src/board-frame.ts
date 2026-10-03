@@ -17,13 +17,13 @@ import {
   drawSelection,
   type GraphicsLike,
 } from './board-draw';
+import { snapToDevicePx } from './device-px';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
 import {
   placeCreeps,
   placeScorches,
   placeTowers,
-  snapToDevicePx,
   type FrameAnchor,
   type SpritePlacement,
 } from './placement';

@@ -102,7 +102,8 @@ interface LogLine {
 
 /**
  * A recording host. Each `createCanvas` takes the next entry of `state.canvases` (default 'ok'):
- * 'refuse' returns null, 'throw' hands back a context whose painting throws `paintError`. Each
+ * 'refuse' returns null, 'throw' hands back a context whose painting throws `paintError`, and
+ * 'create-throws' makes `createCanvas` itself throw `createError`. Each
  * `show` takes the next entry of `state.shows` ('throw' throws `showError`). Host calls and log
  * lines go into one `events` stream, so a report's place against its cleanup is visible.
  */
@@ -402,20 +403,39 @@ describe('createBakeRunner — a failed attempt is reported first, then undone',
 
   it('a thrown value that is not an Error is keyed by its text, and passed on as thrown', () => {
     const { h, runner } = setup();
-    const thrown = { code: 'CONTEXT_LOST' };
-    h.state.addThrows = (key) => (key.startsWith('wy-board') ? thrown : null);
+    // A fresh value on every attempt, as a real failure throws one: keyed by its text, never
+    // by its identity or merely its type.
+    const thrown: unknown[] = [];
+    let next: () => unknown = () => ({ code: 'CONTEXT_LOST' });
+    h.state.addThrows = (key) => {
+      if (!key.startsWith('wy-board')) return null;
+      const value = next();
+      thrown.push(value);
+      return value;
+    };
     expect(ensureSafely(runner, at(10))).toBeNull();
     const board = layoutBoard(GEOMETRY, 10, 1, MAX_TEX);
     expect(h.errors().map((e) => e.message)).toEqual([
       `board art: uploading the board canvas as a texture (${size(board)}) failed while baking ` +
         `for ${named(at(10))}; ${BLANK}. ${RETRYING}`,
     ]);
-    expect(h.errors()[0]!.error).toBe(thrown);
+    expect(h.errors()[0]!.error).toBe(thrown[0]);
     expect(h.events).toContain('remove wy-board-1'); // the key it threw partway through adding
-    // Keyed by its text: the same value thrown again, after the backoff, is not reported twice.
-    for (let i = 0; i < BAKE_RETRY_FRAMES; i++) runner.ensure(at(10), MAX_TEX);
-    expect(h.events.filter((e) => e === 'add wy-board-2')).toEqual(['add wy-board-2']);
+    const afterTheBackoff = (): void => {
+      for (let i = 0; i < BAKE_RETRY_FRAMES; i++) runner.ensure(at(10), MAX_TEX);
+    };
+    // A second, distinct object with the same text: the same failure, not reported again.
+    afterTheBackoff();
+    expect(thrown).toHaveLength(2);
+    expect(thrown[1]).not.toBe(thrown[0]);
     expect(h.errors()).toHaveLength(1);
+    // Two values of one type with different text are two failures, and each is reported.
+    next = () => 'context lost';
+    afterTheBackoff();
+    next = () => 'device lost';
+    afterTheBackoff();
+    expect(thrown.slice(2)).toEqual(['context lost', 'device lost']);
+    expect(h.errors().map((e) => e.error)).toEqual([thrown[0], 'context lost', 'device lost']);
   });
 
   it('a thrown value with no text to give — no prototype, a throwing toString, a revoked Proxy — is still reported and undone', () => {

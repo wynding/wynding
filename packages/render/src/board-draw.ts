@@ -29,6 +29,7 @@ import {
   airborneCuePaintOps,
   type CreepSilhouettePaintOp,
 } from './creep-paint';
+import { snapToDevicePx } from './device-px';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
 import type { RenderVM, RenderOverlay, TowerVM } from './types';
@@ -119,7 +120,10 @@ export function visibleTowers(
  *  body. The result is order-independent and the shell never crosses a tower — its plate,
  *  rim or head — which keeps `pal.aura` off the plate rim (`pal.tower`, 2.23:1) and the
  *  light role-coloured heads, pairings it does not clear 3:1 against and which
- *  `palette.test.ts` therefore does not gate. */
+ *  `palette.test.ts` therefore does not gate.
+ *
+ *  The footprint corner is snapped to a whole device pixel exactly as the tower sprite's is
+ *  (`placement.ts`), so the shell stays concentric with its beacon at any dpr. */
 export function drawAuraShells(
   g: GraphicsLike,
   pal: Palette,
@@ -129,7 +133,11 @@ export function drawAuraShells(
 ): void {
   for (const t of visibleTowers(vm.towers, o.pendingSells)) {
     if (!t.support) continue;
-    const p = projection.cellToPixel(t.col, t.row);
+    const raw = projection.cellToPixel(t.col, t.row);
+    const p = {
+      x: snapToDevicePx(raw.x, projection.dpr),
+      y: snapToDevicePx(raw.y, projection.dpr),
+    };
     const size = projection.cellPx * 2; // 2×2 footprint
     g.lineStyle(2, pal.aura, AURA_SHELL_ALPHA);
     g.strokeRoundedRect(
@@ -151,7 +159,10 @@ export function drawSelection(
   projection: Projection,
 ): void {
   if (o.selection === null) return;
-  const c = projection.cellToPixel(o.selection.col, o.selection.row);
+  const raw = projection.cellToPixel(o.selection.col, o.selection.row);
+  // Snapped exactly as the tower sprite's corner is (`placement.ts`), so the geometry
+  // relations below hold at any dpr.
+  const c = { x: snapToDevicePx(raw.x, projection.dpr), y: snapToDevicePx(raw.y, projection.dpr) };
   const cx = c.x + projection.cellPx; // centre of the 2×2
   const cy = c.y + projection.cellPx;
   // M2-S8: a support tower (`beacon`) does not attack, so it has no range and there is
@@ -178,7 +189,8 @@ export function drawSelection(
     // 32 px the floor margin outside the rim is wider than the stroke, so it lies wholly on
     // the floor. Between the two its inner edge ends on the rim, and its floor-side edge is
     // what carries the cue. It stays clear of a neighbour: the next footprint starts
-    // beyond this one's edge.
+    // beyond this one's edge. These relations hold only because `c` is snapped exactly as
+    // the tower sprite's corner is.
     g.strokeRoundedRect(c.x + 1, c.y + 1, size - 2, size - 2, 6);
   } else {
     g.strokeCircle(cx, cy, projection.fpLenToPixel(o.selection.rangeFp));

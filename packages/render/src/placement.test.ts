@@ -5,13 +5,8 @@
 // honoured.
 
 import { describe, it, expect } from 'vitest';
-import {
-  placeCreeps,
-  placeScorches,
-  placeTowers,
-  snapToDevicePx,
-  type FrameAnchor,
-} from './placement';
+import { placeCreeps, placeScorches, placeTowers, type FrameAnchor } from './placement';
+import { snapToDevicePx } from './device-px';
 import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
 import { creepRadius } from './board-draw';
 import { createProjection, type Projection } from './projection';
