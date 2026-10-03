@@ -50,13 +50,12 @@ export const EN = {
   "hud.preview.armor": "armor {armor}",
   "hud.preview.armor.armored": "armor {armor} (subtracted from each direct hit; damage over time ignores it)",
   "hud.preview.armor.glance": "armor −{armor} direct",
+  "hud.preview.count": "×{count}",
   "hud.preview.domain.air": "air",
   "hud.preview.domain.ground": "ground",
   "hud.preview.entry": "{count} × {name} — {domain}, {armor}, {leakCost}, {immunities}",
   "hud.preview.entry.boss": "{count} × {name} — boss, {domain}, {armor}, {leakCost}, {immunities}",
-  "hud.preview.glance": "{count} × {name}",
   "hud.preview.glance.immune": "immune to {immunities}",
-  "hud.preview.glance.noted": "{count} × {name} — {notes}",
   "hud.preview.immunities.none": "no immunities",
   "hud.preview.immunity.slow": "slow",
   "hud.preview.immunity.stun": "stun",
@@ -64,8 +63,12 @@ export const EN = {
   "hud.preview.leakCost": "leak cost {leakCost}",
   "hud.preview.role.boss": "boss",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
+  "hud.ring.hint": "until wave {waveNumber} · calling early pays a bounty",
+  "hud.ring.hint.first": "until wave {waveNumber}",
   "hud.score": "Score: {count}",
+  "hud.score.glance.label": "Score",
   "hud.stars": "Stars: {count} of 3",
+  "hud.stars.glance.max": "/ 3",
   "hud.statuses": "On the board: {statuses}",
   "hud.statuses.airborne": "{count} airborne",
   "hud.statuses.armored": "{count} armored",
@@ -239,13 +242,12 @@ export interface MessageParams {
   "hud.preview.armor": { "armor": string | number };
   "hud.preview.armor.armored": { "armor": string | number };
   "hud.preview.armor.glance": { "armor": string | number };
+  "hud.preview.count": { "count": string | number };
   "hud.preview.domain.air": Record<never, never>;
   "hud.preview.domain.ground": Record<never, never>;
   "hud.preview.entry": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
   "hud.preview.entry.boss": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
-  "hud.preview.glance": { "count": string | number; "name": string | number };
   "hud.preview.glance.immune": { "immunities": string | number };
-  "hud.preview.glance.noted": { "count": string | number; "name": string | number; "notes": string | number };
   "hud.preview.immunities.none": Record<never, never>;
   "hud.preview.immunity.slow": Record<never, never>;
   "hud.preview.immunity.stun": Record<never, never>;
@@ -253,8 +255,12 @@ export interface MessageParams {
   "hud.preview.leakCost": { "leakCost": string | number };
   "hud.preview.role.boss": Record<never, never>;
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
+  "hud.ring.hint": { "waveNumber": string | number };
+  "hud.ring.hint.first": { "waveNumber": string | number };
   "hud.score": { "count": string | number };
+  "hud.score.glance.label": Record<never, never>;
   "hud.stars": { "count": string | number };
+  "hud.stars.glance.max": Record<never, never>;
   "hud.statuses": { "statuses": string | number };
   "hud.statuses.airborne": { "count": string | number };
   "hud.statuses.armored": { "count": string | number };

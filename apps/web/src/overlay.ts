@@ -14,11 +14,13 @@
 import { FP_ONE } from '@wynding/engine';
 import {
   COLOUR_MODES,
+  resolvePalette,
   type HudVM,
   type HudPreview,
   type PreviewEntryVM,
   type ColourMode,
   type CreepStatusCounts,
+  type Palette,
 } from '@wynding/render';
 import {
   MS_PER_TICK,
@@ -33,6 +35,7 @@ import type { SettingsStore } from './settings';
 import { ARM_TOWER_ACTIONS, GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
+import { creepIcon, paintCreepIcon, ringDash } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
@@ -80,6 +83,10 @@ export interface Overlay {
    *  second, disconnected one. */
   readonly modal: ModalOwner;
   update(view: HudView): void;
+  /** Re-ink the wave strip's creep icons for a colour-vision mode change (#181 L1) — the
+   *  same hook `main.ts` repaints the Card swatches from. Repaints in place; never rebuilds
+   *  the strip's rows. */
+  setColourMode(mode: ColourMode): void;
   /** Open the leave-this-run confirm dialog. PRESENTATION ONLY — the decision to open it
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
    *  the guard; this just shows the dialog and calls `onConfirm` if the player commits. */
@@ -218,7 +225,7 @@ function towerName(towerId: string): string {
   return t('tower.unknown.name', { id: towerId });
 }
 
-/** Glance-form glyphs for the Compact chips and Dock buttons (Story 11 P1).
+/** Glance-form glyphs for the Dock buttons (Story 11 P1) and the Panel's cost row.
  *
  *  These are PRESENTATION, not copy: every node they are written into is `aria-hidden`, and
  *  the full localized message sits alongside it as the element's actual accessible text. A
@@ -226,12 +233,13 @@ function towerName(towerId: string): string {
  *  translatable entry with nothing to translate — the same exemption the codebase already
  *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The one
  *  genuinely WORDED compact form (the wave slot's countdown) goes through the catalog, as
- *  `hud.wave.compact.countdown`. */
+ *  `hud.wave.compact.countdown`.
+ *
+ *  The HUD chips no longer draw from here: since #181 (H1) their glances lead with inline-SVG
+ *  icons (`hud-icons.ts`, built once by `shell.ts`). `bounty` stays for the Panel's cost row,
+ *  which the rail's own redesign owns. */
 const ICONS = {
-  lives: '♥',
   bounty: '◈',
-  score: '✦',
-  stars: '★',
   settings: '⚙',
   pause: '⏸',
   resume: '⏵',
@@ -245,10 +253,11 @@ const ICONS = {
  *  same call, so the visible glance and the accessible full message can never disagree, and
  *  no caller can sentence-split a label away from its value. An empty full form means the
  *  slot has nothing to say and the whole chip hides (the wave slot pre-start and terminal)
- *  — the node itself is retained either way. */
-function setChip(chip: ShellChip, full: string, glance: string): void {
+ *  — the node itself is retained either way. The glance's VALUE leaf is what is written: its
+ *  icon sibling is static structure (`shell.ts`) and is never replaced. */
+function setChip(chip: ShellChip, full: string, value: string): void {
   setLabel(chip.full, full);
-  setLabel(chip.glance, glance);
+  setLabel(chip.value, value);
   chip.root.hidden = full === '';
 }
 
@@ -1462,6 +1471,9 @@ export function createOverlay(
    *  does both in one place. */
   const railAffordanceAbort = new AbortController();
   let railAffordanceObserver: ResizeObserver | null = null;
+  /** The wave strip's overflow observer (#181 L1) — created beside the Rail's, torn down with
+   *  it. */
+  let stripObserver: ResizeObserver | null = null;
 
   /** Recompute the Rail's scroll affordance, the focus reserve and the rows block's tab
    *  stop (M2-S12a P3/P4). Idempotent and cheap — three class/attribute toggles guarded on
@@ -1879,12 +1891,13 @@ export function createOverlay(
     return entry.boss ? t('hud.preview.entry.boss', params) : t('hud.preview.entry', params);
   }
 
-  /** THE VISIBLE FORM — the same row with every BASELINE-VALUED clause omitted, so what is
-   *  printed is exactly what deviates. M2-S10 ruling 3 was narrowed to the full form above
+  /** THE VISIBLE FORM'S CLAUSE — the row's stats with every BASELINE-VALUED clause omitted,
+   *  so what is printed is exactly what deviates. M2-S10 ruling 3 was narrowed to the full form above
    *  by the owner on 2026-08-16 (#101) on measured evidence: the preview is read to answer
    *  two questions — "is air next?" and "is a boss next?" — while a live wave runs, i.e. as
-   *  a threat-signature glance, not a stat-table read. Rendering four clauses a row to
-   *  answer that tripled the card's height, and the card floats over the playing field.
+   *  a threat-signature glance, not a stat-table read. Since #181 (L1) the strip answers the
+   *  first question with SHAPE — every entry's icon carries the board's airborne chevron —
+   *  and prints this clause only beside a single-entry wave, where there is room for it.
    *
    *  OMITTED BY SEMANTIC BASELINE, NOT BY FREQUENCY. Each omission means "nothing to say
    *  here": `ground` is the absence of the air threat, `armor 0` the absence of mitigation,
@@ -1893,7 +1906,7 @@ export function createOverlay(
    *  this correct for a MODDED bundle — a ruleset shipping nothing but armored creeps still
    *  reads correctly, where a rule tuned to "what today's catalog happens to make rare"
    *  would invert and print the common case while hiding the exception. */
-  function previewEntryGlance(entry: PreviewEntryVM): string {
+  function previewEntryNotes(entry: PreviewEntryVM): string[] {
     const notes: string[] = [];
     // Role leads — it is the heaviest thing about a row and the second of the two questions
     // the surface is read to answer. It is NOT part of the omit-at-baseline set below: a
@@ -1928,13 +1941,85 @@ export function createOverlay(
         }),
       );
     }
-    const count = entry.count;
-    const name = creepName(entry.creepId);
-    // The join separator is punctuation between already-translated fragments, not copy — the
-    // same posture the immunities list above has always taken with its `', '`.
-    return notes.length === 0
-      ? t('hud.preview.glance', { count, name })
-      : t('hud.preview.glance.noted', { count, name, notes: notes.join(' · ') });
+    return notes;
+  }
+
+  // The strip's creep icons are inked from the ACTIVE palette (#181 L1) so they follow the
+  // colour-vision mode like the board does. Read once here (this module never subscribes —
+  // `main.ts` owns the settings subscription and calls `setColourMode` on a change).
+  let palette: Palette = resolvePalette(settings.get().colourMode);
+
+  /** One strip entry's visible glance (#181 L1): the creep's icon — the board's own
+   *  silhouette, with the board's airborne chevron on an air entry (`hud-icons.ts`) — and
+   *  "×count". Only when the wave has a SINGLE entry does it add the creep's name and its
+   *  deviating clause, which `ui.css` drops whenever the strip has no room for them; a
+   *  multi-entry wave is read by shape and count alone. `aria-hidden`: the row's full sentence
+   *  is its accessible text. The same sentence is the glance's `title` tooltip — set HERE, on
+   *  the aria-hidden node, rather than on the row, because a `title` on the row would become
+   *  its accessible name or description and have assistive tech read the sentence twice (the
+   *  reason the Shell's home link carries none). */
+  function buildEntryGlance(entry: PreviewEntryVM, single: boolean, full: string): HTMLElement {
+    const glance = doc.createElement('span');
+    glance.className = 'wy-preview-glance';
+    glance.setAttribute('aria-hidden', 'true');
+    glance.title = full;
+    const count = doc.createElement('span');
+    count.className = 'wy-preview-count';
+    count.textContent = t('hud.preview.count', { count: entry.count });
+    glance.append(creepIcon(doc, entry, palette), count);
+    if (single) {
+      const detail = doc.createElement('span');
+      detail.className = 'wy-preview-detail';
+      const name = doc.createElement('span');
+      name.className = 'wy-preview-name';
+      name.textContent = creepName(entry.creepId);
+      detail.append(name);
+      const notes = previewEntryNotes(entry);
+      if (notes.length > 0) {
+        const clause = doc.createElement('span');
+        clause.className = 'wy-preview-clause';
+        // The join separator is punctuation between already-translated fragments, not copy —
+        // the same posture the immunities list has always taken with its `', '`.
+        clause.textContent = notes.join(' · ');
+        detail.append(clause);
+      }
+      glance.append(detail);
+    }
+    return glance;
+  }
+
+  /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
+   *  row comparison (the icon carries no text). */
+  function previewEntryGlanceText(entry: PreviewEntryVM, single: boolean): string {
+    const count = t('hud.preview.count', { count: entry.count });
+    return single ? count + creepName(entry.creepId) + previewEntryNotes(entry).join(' · ') : count;
+  }
+
+  /** The strip's overflow remedy, IN PLACE (#181 L1) — the rule every surface in this row
+   *  keeps: content never resizes the status row (that would re-project the board mid-run), so
+   *  a strip whose line is longer than its box (a narrow portrait window, heavy text zoom, a
+   *  modded wave with many entries) SCROLLS sideways instead. While it does, it is a labelled,
+   *  focusable region — the `.wy-hud` scrollport's own discipline, since a scrollable region
+   *  must be operable without a pointer — and it drops all three the moment the line fits.
+   *  Kept while the strip itself holds focus, so a resize can never pull the tab stop out from
+   *  under a keyboard user; the `focusout` listener settles it once focus moves on. Changes no
+   *  geometry, so it cannot feed the observer that drives it. */
+  const STRIP_SCROLL_CLASS = 'wy-wave-preview--scroll';
+  function syncStripScroll(): void {
+    const strip = previewEl.root;
+    const scrollable = !strip.hidden && strip.scrollWidth > strip.clientWidth + 1;
+    if (!scrollable && doc.activeElement === strip) return;
+    if (strip.classList.contains(STRIP_SCROLL_CLASS) === scrollable) return;
+    strip.classList.toggle(STRIP_SCROLL_CLASS, scrollable);
+    if (scrollable) {
+      strip.tabIndex = 0;
+      strip.setAttribute('role', 'group');
+      strip.setAttribute('aria-label', t('preview.label'));
+    } else {
+      strip.removeAttribute('tabindex');
+      strip.removeAttribute('role');
+      strip.removeAttribute('aria-label');
+    }
   }
 
   // The preview's content only changes when `waveCursor` moves — a handful of times per
@@ -1975,15 +2060,16 @@ export function createOverlay(
         ? t('hud.preview.lastWave')
         : t('hud.preview.title', { waveNumber: preview.waveNumber, waveCount: preview.waveCount });
     const firstEntry = preview.kind === 'upcoming' ? preview.entries[0] : undefined;
+    const single = preview.kind === 'upcoming' && preview.entries.length === 1;
     // `textContent` on a row concatenates BOTH forms in document order (full, then glance
     // — the append order below), so this sentinel covers every catalog key either form
     // reads. Comparing one side alone would let a locale swap self-heal that form while
-    // the other stayed stale: the two read DISJOINT key sets (`hud.preview.glance*` vs
-    // `hud.preview.entry`/`domain.ground`/`immunities.none`).
+    // the other stayed stale: the two read DISJOINT key sets (`hud.preview.count` and the
+    // clause notes vs `hud.preview.entry`/`domain.ground`/`immunities.none`).
     const expectedFirstRow =
       firstEntry === undefined
         ? null
-        : previewEntryFull(firstEntry) + previewEntryGlance(firstEntry);
+        : previewEntryFull(firstEntry) + previewEntryGlanceText(firstEntry, single);
     const firstRowCurrent = previewEl.list.firstElementChild?.textContent ?? null;
     if (
       key === lastPreviewKey &&
@@ -1996,6 +2082,7 @@ export function createOverlay(
     if (preview.kind === 'lastWave') {
       previewEl.title.textContent = t('hud.preview.lastWave');
       clearChildren(previewEl.list);
+      syncStripScroll();
       return;
     }
     previewEl.title.textContent = t('hud.preview.title', {
@@ -2006,21 +2093,58 @@ export function createOverlay(
     warnUnmappedCreeps(preview.entries); // dev diagnostic — rebuild path only
     for (const entry of preview.entries) {
       const li = doc.createElement('li');
+      li.className = 'wy-preview-entry';
       // Dual-form row, mirroring `shell.ts`'s `chip()` exactly: both nodes always exist,
       // the glance carries `aria-hidden` so assistive tech reads the full sentence and ONLY
       // the full sentence (never both, which is what an unhidden glance would produce), and
       // `ui.css` owns which one takes the visible slot. Append order is load-bearing for
       // the locale sentinel above.
+      const sentence = previewEntryFull(entry);
       const full = doc.createElement('span');
       full.className = 'wy-preview-full';
-      full.textContent = previewEntryFull(entry);
-      const glance = doc.createElement('span');
-      glance.className = 'wy-preview-glance';
-      glance.setAttribute('aria-hidden', 'true');
-      glance.textContent = previewEntryGlance(entry);
-      li.append(full, glance);
+      full.textContent = sentence;
+      li.append(full, buildEntryGlance(entry, single, sentence));
       previewEl.list.appendChild(li);
     }
+    syncStripScroll();
+  }
+
+  // --- The countdown ring beside the Dock's primary action (#181 H1, Standard only) ---
+  // Decoration: the wave chip stays the accessible countdown (and Compact's visible one), so
+  // the ring is `aria-hidden` and its writes are all change-gated — a value that did not move
+  // touches nothing (#98's discipline, applied to attributes as well as text).
+  const ring = dock.ring;
+  /** The current countdown's full length in whole seconds, from the ruleset's per-wave
+   *  `countdownTicks` — rounded UP like `HudVM.countdownSeconds` itself, so a full ring reads
+   *  exactly the seconds the chip does. */
+  function countdownTotalSeconds(cursor: number, fallback: number): number {
+    const wave = Number.isSafeInteger(cursor) ? ruleset.waves[cursor] : undefined;
+    return wave === undefined ? fallback : Math.ceil((wave.countdownTicks * MS_PER_TICK) / 1000);
+  }
+  function renderRing(hud: HudVM): void {
+    const seconds = hud.countdownSeconds;
+    // Down while a call is already launching: the wave goes on the next tick, not when the
+    // ring empties, so the ring would be a wrong answer — and the primary control's wider
+    // "Launching…" label is the one row the ring's slot must never share at heavy zoom. The
+    // wave chip's glance takes over the visible countdown meanwhile (`ui.css`).
+    const show = seconds !== null && !isTerminalPhase(hud.phase) && !hud.launchPending;
+    if (ring.root.hidden === show) ring.root.hidden = !show;
+    if (seconds === null || !show) return;
+    const total = countdownTotalSeconds(hud.waveCursor, seconds);
+    const dash = ringDash(total > 0 ? seconds / total : 0);
+    if (ring.ring.progress.getAttribute('stroke-dasharray') !== dash) {
+      ring.ring.progress.setAttribute('stroke-dasharray', dash);
+    }
+    setLabel(ring.ring.text, t('hud.wave.compact.countdown', { s: seconds }));
+    // The bounty clause is a claim about the sim, so it is only made where it is true: the
+    // OPENING launch pays nothing (sv15, #70 — Start claims wave 1), and a ruleset with no
+    // early-call bounty pays nothing at any wave.
+    const waveNumber = hud.waveCursor + 1;
+    const paysEarly = hud.waveCursor > 0 && ruleset.balance.earlyCallBountyDivisor > 0;
+    setLabel(
+      ring.hint,
+      paysEarly ? t('hud.ring.hint', { waveNumber }) : t('hud.ring.hint.first', { waveNumber }),
+    );
   }
 
   /** The morphing primary control's text + `aria-disabled` state (PLAN.md P3 step 17):
@@ -2134,8 +2258,19 @@ export function createOverlay(
     // scroll listener that would clear it.
     railAffordanceObserver.observe(shell.rail);
     for (const child of shell.rail.children) railAffordanceObserver.observe(child);
+    // The wave strip's overflow form (#181 L1) re-decides on BOTH boxes: the strip itself (its
+    // width is the status row's leftover, so a window resize or a chip growing moves it) and
+    // its entry list (sized to its content, so a rebuilt wave or a text-zoom reflow moves it
+    // while the strip's own box stays put).
+    stripObserver = new view.ResizeObserver(() => syncStripScroll());
+    stripObserver.observe(previewEl.root);
+    stripObserver.observe(previewEl.list);
   }
   syncRailAffordances();
+  // Focus leaving the strip settles a tab stop the retention rule in `syncStripScroll` kept.
+  previewEl.root.addEventListener('focusout', () => syncStripScroll(), {
+    signal: railAffordanceAbort.signal,
+  });
 
   return {
     resultsEl: results,
@@ -2145,14 +2280,12 @@ export function createOverlay(
     modal,
     update(view: HudView): void {
       const { hud } = view;
-      setChip(hudEls.lives, t('hud.lives', { count: hud.lives }), `${ICONS.lives} ${hud.lives}`);
-      setChip(
-        hudEls.bounty,
-        t('hud.bounty', { count: hud.bounty }),
-        `${ICONS.bounty} ${hud.bounty}`,
-      );
-      setChip(hudEls.score, t('hud.score', { count: hud.score }), `${ICONS.score} ${hud.score}`);
-      setChip(hudEls.stars, t('hud.stars', { count: hud.stars }), `${ICONS.stars} ${hud.stars}`);
+      // Raw digits in every glance value (no grouping separators): the value is the number the
+      // full message states, and the glance must never read differently from it.
+      setChip(hudEls.lives, t('hud.lives', { count: hud.lives }), String(hud.lives));
+      setChip(hudEls.bounty, t('hud.bounty', { count: hud.bounty }), String(hud.bounty));
+      setChip(hudEls.stars, t('hud.stars', { count: hud.stars }), String(hud.stars));
+      setChip(hudEls.score, t('hud.score', { count: hud.score }), String(hud.score));
       // Wave chip: COUNTDOWN-ONLY (M2-S2, PLAN.md P3 step 17 — the composition text moved
       // to its own preview surface below, so the chip no longer carries an "in progress"
       // fallback). VISIBLE PRE-START now too (`HudVM.countdownSeconds` reads the sim's real
@@ -2167,6 +2300,7 @@ export function createOverlay(
           : '',
       );
       renderPreview(hud.preview);
+      renderRing(hud);
       // The pollable board summary (#79). CHANGE-GATED like every other per-tick leaf write
       // (`setLabel`): the counts move only when a status is applied or a creep leaves the
       // board, but this runs on every HUD refresh — 20-40× a second through a live wave.
@@ -2288,6 +2422,12 @@ export function createOverlay(
     focusPlayAgain(): void {
       playAgainBtn.focus();
     },
+    setColourMode(mode: ColourMode): void {
+      palette = resolvePalette(mode);
+      for (const icon of previewEl.list.querySelectorAll<SVGSVGElement>('.wy-creep-icon')) {
+        paintCreepIcon(icon, palette);
+      }
+    },
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI
       doc.removeEventListener('keydown', onGameKeydown);
@@ -2298,6 +2438,8 @@ export function createOverlay(
       railAffordanceAbort.abort();
       railAffordanceObserver?.disconnect();
       railAffordanceObserver = null;
+      stripObserver?.disconnect();
+      stripObserver = null;
       modal.destroy();
       results.remove();
       settingsDialog.remove();
