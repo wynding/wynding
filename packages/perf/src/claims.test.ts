@@ -1297,7 +1297,7 @@ const ROWED_CENSUS: readonly {
     value: '25',
     census: [
       [G.fixture, 1],
-      [G.adr, 6],
+      [G.adr, 9],
       [G.spike, 2],
       [G.m2, 9],
       [O.layout, 2],
