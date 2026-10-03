@@ -1109,9 +1109,12 @@ scale instead of failing.
 three `Graphics` objects at fixed depths (`packages/render/src/layers.ts`): the aura shells
 under the towers; the selection cue and tracers between the pending builds and the creeps;
 health pips, status cues, the build ghost and sparks over everything. ADR 0003's cue
-vocabulary — the choice the S10 Finding said the frame budget may be paying for — is otherwise
-untouched: the cue rings, chevrons and pips are still stroked `Graphics`; what moved into
-textures is the static art underneath them.
+vocabulary — the choice the S10 Finding said the frame budget may be paying for — is split
+between the two by what it marks, not by kind. The cues that belong to a tower's own art are
+baked with it: the footprint marks, and two STATE cues, the buffed recipient's ✦ and the
+pending-build outline, each an atlas variant of its tower's frame. Everything else stays
+stroked `Graphics`, drawn per frame: the status rings and pips, the airborne chevron, the aura
+shells, the selection cue, the ghost and the sparks.
 
 **Measured before/after.** The record-only browser perf suite (`playwright.perf.config.ts`: the
 `catalog` and `stress` scenes on the `mid-range` and `low-end` emulation profiles), run twice
