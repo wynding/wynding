@@ -7,10 +7,11 @@
 //
 // POSITIONS are world CSS px (the space every projection call returns) and are SNAPPED TO
 // WHOLE DEVICE PIXELS: a sprite's top-left lands where `x × dpr` is an integer. The atlas
-// bakes at the effective dpr with every frame anchor on a whole texel, and the canvas's CSS
-// box is whole device pixels too (`scene.ts`), so a snapped sprite puts each texel on exactly
-// one device pixel — crisp, never resampled between two. Creeps carry their snapped centre
-// too, for the cues drawn around them (`drawCreepCues`) and the tracers converging on them.
+// bakes at the effective dpr with every frame anchor on a whole texel, so a snapped sprite
+// puts each texel on exactly one pixel of the canvas's backing store — crisp, never resampled
+// between two (`scene.ts` says how that store reaches the screen). Creeps carry their snapped
+// centre too, for the cues drawn around them (`drawCreepCues`) and the tracers converging on
+// them.
 
 import {
   creepFillColour,

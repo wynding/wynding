@@ -78,12 +78,11 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // device pixels need the exact mapping, or every texel would straddle two pixels.)
   // Effective dpr is clamped to ≤2 (ADR 0005: fill cost scales dpr²).
   //
-  // The canvas's CSS box is the backing store ÷ dpr — whole device pixels — not the
-  // element's rect. A fractional rect (934.40625 px, say) would have the compositor rescale
-  // the whole canvas by rect × dpr ÷ round(rect × dpr) every frame, resampling every texel
-  // the bake put on a device pixel. The two differ by under half a device pixel and share
-  // their top-left corner (inset 0), so no board coordinate moves — nor the pointer mapping,
-  // which projects the element's rect, exactly as this file's projection does.
+  // The canvas's CSS box stays the element's rect, as hidpi.spec.ts pins it. A whole-pixel
+  // rect maps the backing store 1:1. A fractional one (759.33 px, say) has the compositor fit
+  // round(rect × dpr) backing pixels into rect × dpr device pixels, blending some vertical edges
+  // by part of a pixel. Sizing the box to backing ÷ dpr instead was measured in #181: it still
+  // blended them (by an eighth of a pixel), and it rounds the box away from the rect.
   const applyBackingStoreSize = (cssWidth: number, cssHeight: number, dpr: number): void => {
     const scene = game.scene.scenes[0];
     if (scene === undefined) return;
@@ -94,12 +93,12 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     // `aspect-ratio`, which is only a PREFERRED size — a normal-flow canvas whose CSS
     // height we set can still make the container grow to fit it (any rounding
     // difference compounds every resize into a runaway feedback loop). Absolute +
-    // inset:0 makes the container's own box authoritative; the canvas sits at its
-    // top-left without ever contributing to its size.
+    // inset:0 makes the container's own box authoritative; the canvas fills it exactly
+    // without ever contributing to its size.
     game.canvas.style.position = 'absolute';
     game.canvas.style.inset = '0';
-    game.canvas.style.width = `${backingWidth / dpr}px`;
-    game.canvas.style.height = `${backingHeight / dpr}px`;
+    game.canvas.style.width = `${cssWidth}px`;
+    game.canvas.style.height = `${cssHeight}px`;
     const cam = scene.cameras.main;
     cam.setOrigin(0, 0);
     cam.setZoom(dpr);
