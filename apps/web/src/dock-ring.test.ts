@@ -120,6 +120,26 @@ describe('dock-ring — syncDockRing (the DOM glue)', () => {
     expect(unrendered.root.className).toBe('');
   });
 
+  it('writes nothing on a pass that changes no verdict — measured or sitting out', async () => {
+    const records: MutationRecord[] = [];
+    const watch = new MutationObserver((r) => records.push(...r));
+    // A slot that carries a class of its own, as the shipped one does: an attribute with a
+    // value is what a needless rewrite would touch.
+    const out = fixture({ ringRight: 900, hintRight: 900, stageRight: 800, rendered: false });
+    out.root.className = 'wy-dock-ring';
+    const fits = fixture({ ringRight: 300, hintRight: 600, stageRight: 800 });
+    fits.root.className = 'wy-dock-ring';
+    watch.observe(out.root, { attributes: true });
+    watch.observe(fits.root, { attributes: true });
+    for (let pass = 0; pass < 3; pass++) {
+      syncDockRing(out.targets, out.stage);
+      syncDockRing(fits.targets, fits.stage);
+    }
+    await Promise.resolve();
+    expect(records).toEqual([]);
+    watch.disconnect();
+  });
+
   it('a stage with no layout box is no evidence: nothing changes', () => {
     const f = fixture({ ringRight: 300, hintRight: 900, stageRight: 0, stageWidth: 0 });
     f.root.classList.add(RING_OFF_CLASS);

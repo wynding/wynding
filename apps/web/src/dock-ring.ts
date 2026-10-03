@@ -57,7 +57,10 @@ export interface RingTargets {
 export function syncDockRing(t: RingTargets, stage: HTMLElement): void {
   const root = t.root;
   if (root.hidden || root.getClientRects().length === 0) {
-    root.classList.remove(RING_OFF_CLASS, RING_NO_HINT_CLASS);
+    // `toggle(…, false)`, never `remove`: `remove` rewrites the class attribute even when
+    // neither class is present, and this runs on every Dock pass the ring sits out.
+    root.classList.toggle(RING_OFF_CLASS, false);
+    root.classList.toggle(RING_NO_HINT_CLASS, false);
     return;
   }
   const stageBox = stage.getBoundingClientRect();
