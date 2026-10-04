@@ -3,8 +3,9 @@
 //
 // Wynding ships exactly TWO layouts out of one DOM and one stylesheet fork:
 //
-//   Standard — viewports taller than the Compact trigger. Status bar across the top, the
-//              Dock floating over the Stage's bottom-left.
+//   Standard — viewports taller than the Compact trigger. Status bar across the top (the
+//              chips, then the one-line wave strip), the Dock floating over the Stage's
+//              bottom-left.
 //   Compact  — short viewports (phones in landscape, and any window under the trigger).
 //              The status header becomes a full-height left COLUMN holding the status
 //              chips above its own in-column Dock; the board takes the rest.
@@ -30,10 +31,9 @@ export const REGION_ATTR = 'data-wy-region';
  *  `banner` is the install suggestion's reserved row (Story 11 P3); it is declared here
  *  unconditionally even though the element is usually `hidden`, because the registry
  *  describes the layout's VOCABULARY, not what happens to be on screen. `preview` is the
- *  wave-preview surface (playtest round): floating over the Stage on Standard — the
- *  second Stage overlay after the Dock, budgeted by the same relations gate — and in-flow
- *  inside `.wy-hud` on Compact or under heavy text zoom, where `regionRect` still finds
- *  it but the relations rule demands grid-disjointness instead of a budget. */
+ *  wave-preview surface: since #181 it lives inside `.wy-hud` in both layouts (the
+ *  Standard status row's one-line strip, the Compact column's block), and the relations
+ *  gate holds it inside the status region and disjoint from the projected grid. */
 export const LAYOUT_REGIONS = ['status', 'stage', 'dock', 'rail', 'banner', 'preview'] as const;
 
 export type LayoutRegion = (typeof LAYOUT_REGIONS)[number];
@@ -64,9 +64,10 @@ export const EXEMPT_FROM_DECLARATION = `${EXEMPT_CONTAINER_SELECTOR}, ${EXEMPT_C
  *  is walked alongside `.wy-shell`/`.wy-main`: Story 11's topology amendment reparented the
  *  Dock into it, so `.wy-dock` — and anything a future packet adds beside it — is a Shell
  *  layout child in all but nesting, and would otherwise escape the gate entirely.
- *  `.wy-stage` joined at the playtest round for the same reason: the floating wave preview
- *  made the Stage a host of overlay surfaces, and an undeclared overlay is exactly how the
- *  preview's 200%-zoom growth escaped every budget until it covered the whole grid. */
+ *  `.wy-stage` joined at the playtest round for the same reason, when the wave preview floated
+ *  over it — an undeclared overlay is exactly how that preview's 200%-zoom growth escaped
+ *  every budget until it covered the whole grid. The float is gone (#181), and the walk stays:
+ *  the Stage is still a place a future overlay could land undeclared. */
 export const WALKED_CONTAINERS = [
   '.wy-shell',
   EXEMPT_CONTAINER_SELECTOR,

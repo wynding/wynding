@@ -75,19 +75,16 @@ const TOWER_FOOTPRINT = 2;
  *  under the threshold the gesture is a tap (PLAN.md P3). */
 const DRAG_THRESHOLD_PX = 8;
 
-/** Shell chrome the release hit-test checks against (Dock/Status bar/Rail/install banner/
- *  wave preview) — a release geometrically over any of these never commits a placement,
- *  even if it lands on a cell the Dock happens to overlap (PLAN.md P1's Dock overlaps the
- *  board's bottom-left). The install banner (Story 11 P3) joins the list: it is a reserved
- *  chrome ROW with its own controls, so releasing a drag over it must cancel exactly like
- *  releasing over the Dock. The wave preview (Codex #96 P2) is chrome in exactly the states
- *  the hit-test can SEE it: its hud home already sits inside `.wy-status`, and the Stage
- *  float is pointer-inert at rest (`pointer-events: none` excludes it from
- *  `elementFromPoint` entirely, so listing it here cannot break resting click-through) — the
- *  entry bites only in the float's overflow scroll form, where the card takes the pointer
- *  for scrolling and a captured board/Card release over it must cancel, not place a tower
- *  on the cell behind it. */
-const CHROME_SELECTOR = '.wy-dock, .wy-status, .wy-rail, .wy-banner, .wy-wave-preview';
+/** Shell chrome the release hit-test checks against (Dock/Status bar/Rail/install banner)
+ *  — a release geometrically over any of these never commits a placement, even if it lands
+ *  on a cell the Dock happens to overlap (PLAN.md P1's Dock overlaps the board's
+ *  bottom-left). The install banner (Story 11 P3) joins the list: it is a reserved chrome ROW
+ *  with its own controls, so releasing a drag over it must cancel exactly like releasing over
+ *  the Dock. The wave preview needs no entry of its own since #181: it has ONE home, inside
+ *  `.wy-status` in both layouts, so a release over it — its overflow scroll form included —
+ *  is a release over the status chrome and cancels on that entry. (It had one while it could
+ *  float over the Stage, Codex #96 P2.) */
+const CHROME_SELECTOR = '.wy-dock, .wy-status, .wy-rail, .wy-banner';
 
 const isTouchLike = (pointerType: string): boolean =>
   pointerType === 'touch' || pointerType === 'pen';

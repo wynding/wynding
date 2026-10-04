@@ -36,6 +36,28 @@ function tap(x: number, y: number, pointerType = 'mouse', button = 0, pointerId 
   board.dispatchEvent(ptr('pointerup', x, y, pointerType, button, pointerId));
 }
 
+/** A strip entry in the wave preview's ONE home (#181): `header.wy-status > .wy-hud >
+ *  .wy-wave-preview > ul > li`, the Shell's real topology. Returned as the DEEPEST element,
+ *  the way a real hit-test reports it, so the chrome rule must find `.wy-status` by walking
+ *  up from inside the strip (its overflow scroll form included — the form that takes the
+ *  pointer for scrolling). */
+function stripEntryInStatus(): HTMLElement {
+  const status = document.createElement('header');
+  status.className = 'wy-status';
+  const hud = document.createElement('div');
+  hud.className = 'wy-hud';
+  const preview = document.createElement('div');
+  preview.className = 'wy-wave-preview wy-wave-preview--scroll';
+  const list = document.createElement('ul');
+  const entry = document.createElement('li');
+  list.append(entry);
+  preview.append(list);
+  hud.append(preview);
+  status.append(hud);
+  document.body.append(status);
+  return entry;
+}
+
 beforeEach(() => {
   document.body.innerHTML = '';
   board = document.createElement('div');
@@ -212,25 +234,22 @@ describe('input — mouse (P2 hover/click, unchanged by P3)', () => {
     expect(c.frame().curVm.towers).toHaveLength(0); // no placement on the cell underneath the Dock
   });
 
-  // Codex #96 P2: the wave preview's overflow scroll form takes the pointer
-  // (`pointer-events: auto`, for wheel/drag scrolling), so a captured release over it must
-  // cancel exactly like the Dock. Faking `elementFromPoint` to return the preview models
-  // its pointer-active states — the scroll form (the state this selector entry changes)
-  // and the hud home (already chrome via `.wy-status`) — and ONLY those: at rest the float
-  // is pointer-inert (`pointer-events: none`), so the real hit-test can never return it
-  // (stage-stability.spec.ts pins that half in a real browser).
+  // Codex #96 P2, kept through #181: the wave preview's overflow scroll form takes the
+  // pointer (for wheel/drag scrolling), so a captured release over it must cancel exactly
+  // like the Dock. Since #181 the preview has one home, inside the status row, so it is
+  // chrome by ancestry (`.wy-status`) and needs no selector entry of its own — this pins
+  // that a release landing deep inside the strip still finds it.
   it('a mouse release over the scroll-form wave preview never places through it — stays armed', () => {
-    const preview = document.createElement('div');
-    preview.className = 'wy-wave-preview wy-wave-preview--scroll';
+    const entry = stripEntryInStatus();
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     attachInput(document, board, [], c, createKeymap(), {
       getRect: () => RECT,
-      elementFromPoint: () => preview,
+      elementFromPoint: () => entry,
     });
     c.armTower('basic');
     board.dispatchEvent(ptr('pointerdown', 35, 35, 'mouse')); // armed press on the board
-    board.dispatchEvent(ptr('pointerup', 35, 35, 'mouse')); // released over the scrollable card
+    board.dispatchEvent(ptr('pointerup', 35, 35, 'mouse')); // released over a strip entry
     expect(c.uiState().armed).not.toBeNull(); // stays armed — the chrome-release contract
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(0); // no tower on the cell behind the preview
@@ -370,17 +389,16 @@ describe.each([['touch'], ['pen']])(
     // Codex #96 P2, the board-touch half: with this, all three release paths that consult
     // `isOverChrome` (board-mouse, this tap-flow, Card-drag) carry a preview-specific pin.
     it('a release over the scroll-form wave preview never commits — stays armed (tap-flow)', () => {
-      const preview = document.createElement('div');
-      preview.className = 'wy-wave-preview wy-wave-preview--scroll';
+      const entry = stripEntryInStatus();
       const c = createController(1);
       c.start(); // PLAN.md P4: advance() no-ops while held
       attachInput(document, board, [], c, createKeymap(), {
         getRect: () => RECT,
-        elementFromPoint: () => preview,
+        elementFromPoint: () => entry,
       });
       c.armTower('basic');
       board.dispatchEvent(ptr('pointerdown', 35, 105, pointerType)); // anchor (3,8), valid
-      board.dispatchEvent(ptr('pointerup', 35, 105, pointerType)); // released over the scrollable card
+      board.dispatchEvent(ptr('pointerup', 35, 105, pointerType)); // released over a strip entry
       expect(c.uiState().armed).not.toBeNull(); // stays armed — the tap-flow chrome rule
       c.advance(50);
       expect(c.frame().curVm.towers).toHaveLength(0);
@@ -629,17 +647,16 @@ describe('input — Card gestures: tap vs drag (touch/pen only, PLAN.md P3)', ()
   // scroll-form preview (35,105 → (3,8), the same anchor the plain drag-release test above
   // PLACES at) — the chrome rule must win over the valid cell.
   it('a release over the scroll-form wave preview cancels a Card drag AND disarms — never places behind it', () => {
-    const preview = document.createElement('div');
-    preview.className = 'wy-wave-preview wy-wave-preview--scroll';
+    const entry = stripEntryInStatus();
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
     attachInput(document, board, [{ el: card, towerId: 'basic' }], c, createKeymap(), {
       getRect: () => RECT,
-      elementFromPoint: () => preview,
+      elementFromPoint: () => entry,
     });
     card.dispatchEvent(ptr('pointerdown', 10, 10, 'touch'));
     card.dispatchEvent(ptr('pointermove', 35, 105, 'touch')); // crosses threshold, armed
-    card.dispatchEvent(ptr('pointerup', 35, 105, 'touch')); // released over the scrollable card
+    card.dispatchEvent(ptr('pointerup', 35, 105, 'touch')); // released over a strip entry
     expect(c.uiState().armed).toBeNull(); // cancelled AND disarmed — the drag-flow chrome rule
     c.advance(50);
     expect(c.frame().curVm.towers).toHaveLength(0);

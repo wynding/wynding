@@ -165,17 +165,17 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.board.getAttribute('aria-label')).toBeNull();
   });
 
-  it('the HUD group holds Lives/Bounty/Score/wave/preview/Stars/board-summary, in that order (M2-S2: the wave preview surface sits near the countdown; #79 appends the pollable summary last)', () => {
+  it('the HUD group holds wave/Lives/Bounty/Stars/Score/preview/board-summary, in that order (#181 QC: the countdown FIRST, so it always sits on the line the capped hud shows at rest; the strip LAST among the laid-out items; #79 appends the pollable summary last)', () => {
     const shell = createShell(document, TWO_CARDS);
     expect(shell.hudBox.className).toBe('wy-hud');
     expect(shell.hudBox.getAttribute('role')).toBe('group');
     expect([...shell.hudBox.children]).toEqual([
+      shell.hud.wave.root,
       shell.hud.lives.root,
       shell.hud.bounty.root,
-      shell.hud.score.root,
-      shell.hud.wave.root,
-      shell.preview.root,
       shell.hud.stars.root,
+      shell.hud.score.root,
+      shell.preview.root,
       shell.statusSummary,
     ]);
   });
@@ -197,6 +197,23 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.preview.root.hidden).toBe(true);
     expect(shell.preview.title.textContent).toBe('');
     expect(shell.preview.list.children).toHaveLength(0);
+  });
+
+  // #181 QC: WebKit drops a list's semantics once it is styled `list-style: none` and laid out
+  // as a flex row — the strip's form — so the role is stated, not implied.
+  it('the wave preview list states its list role explicitly', () => {
+    const shell = createShell(document, TWO_CARDS);
+    expect(shell.preview.list.tagName).toBe('UL');
+    expect(shell.preview.list.getAttribute('role')).toBe('list');
+  });
+
+  // #181 (L1): the preview has ONE home. It is built inside the chips list and nothing ever
+  // moves it — the Stage never hosts it (the floating placement chain is gone).
+  it('the wave preview lives in the chips list, never in the Stage', () => {
+    const shell = createShell(document, TWO_CARDS);
+    expect(shell.preview.root.parentElement).toBe(shell.hudBox);
+    expect(shell.stage.contains(shell.preview.root)).toBe(false);
+    expect('placePreview' in shell).toBe(false);
   });
 
   // Contract §1: the chips list is the bounded scrollport now that the Dock shares the
@@ -221,8 +238,61 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     }
   });
 
+  // #181 (H1): the glance is [icon][value], led by an inline-SVG icon that is decoration
+  // twice over (inside the aria-hidden glance AND aria-hidden itself). Two chips carry a
+  // static, localized companion the style frame draws: the score's dim label before its value,
+  // the stars' "/ 3" after it. The value is its own leaf, so a refresh rewrites only it (#98).
+  it('every chip glance leads with its own aria-hidden SVG icon, then the value leaf', () => {
+    const shell = createShell(document, TWO_CARDS);
+    const shape = (slot: string): string[] =>
+      [...shell.hud[slot as keyof typeof shell.hud].glance.children].map((c) =>
+        c.tagName.toLowerCase() === 'svg' ? 'svg' : c.className,
+      );
+    expect(shape('lives')).toEqual(['svg', 'wy-chip-value']);
+    expect(shape('bounty')).toEqual(['svg', 'wy-chip-value']);
+    expect(shape('wave')).toEqual(['svg', 'wy-chip-value']);
+    expect(shape('score')).toEqual(['svg', 'wy-chip-label', 'wy-chip-value']);
+    expect(shape('stars')).toEqual(['svg', 'wy-chip-value', 'wy-chip-suffix']);
+    for (const [slot, chip] of Object.entries(shell.hud)) {
+      const icon = chip.glance.firstElementChild!;
+      expect(icon.getAttribute('aria-hidden')).toBe('true');
+      expect(icon.getAttribute('focusable')).toBe('false');
+      expect(icon.classList.contains(`wy-icon--${slot}`)).toBe(true);
+      // The rewritten leaf is the glance's own value — or, for the countdown, the number in it.
+      const valueBox = chip.glance.querySelector('.wy-chip-value')!;
+      expect(valueBox.parentElement).toBe(chip.glance);
+      expect(chip.value).toBe(slot === 'wave' ? valueBox.firstElementChild : valueBox);
+      expect(chip.value.textContent).toBe('');
+    }
+    // The companions are written once, from the catalog (ADR 0004), never per frame.
+    expect(shell.hud.score.glance.querySelector('.wy-chip-label')!.textContent).toBe('Score');
+    expect(shell.hud.stars.glance.querySelector('.wy-chip-suffix')!.textContent).toBe('/ 3');
+  });
+
+  // #181 QC round 2: Compact's column is narrower than the countdown's value at 568×320 and
+  // 175–200% text. Its unit is part of the value as read ("25s", one word in both layouts) but
+  // static, after a `<wbr>` — the one place the value may wrap, so a digit never does.
+  it('the countdown’s value is [number][<wbr>][unit]: the number is the rewritten leaf, the unit static from the catalog', () => {
+    const shell = createShell(document, TWO_CARDS);
+    const valueBox = shell.hud.wave.glance.querySelector('.wy-chip-value')!;
+    expect(
+      [...valueBox.childNodes].map((n) =>
+        n.nodeName.toLowerCase() === 'wbr' ? 'wbr' : (n as Element).className,
+      ),
+    ).toEqual(['wy-chip-number', 'wbr', 'wy-chip-unit']);
+    expect(shell.hud.wave.value).toBe(valueBox.firstElementChild);
+    expect(valueBox.querySelector('.wy-chip-unit')!.textContent).toBe('s');
+    // No other chip has a unit, or anywhere to wrap: its value box is its leaf.
+    for (const slot of ['lives', 'bounty', 'stars', 'score'] as const) {
+      expect(shell.hud[slot].glance.querySelector('.wy-chip-value')).toBe(shell.hud[slot].value);
+      expect(shell.hud[slot].glance.querySelector('wbr, .wy-chip-unit')).toBeNull();
+    }
+  });
+
   it('the Dock holds Pause/Speed/Settings + a hidden empty primary slot (no global Sell — PLAN.md P2 moves Sell into the Panel; no separate Call-wave button — PLAN.md P4 wires the primary slot as Start)', () => {
     const shell = createShell(document, TWO_CARDS);
+    // EXACTLY the four controls (#181 QC): the countdown dial is drawn inside the primary, never
+    // as a Dock item of its own that could wrap onto a row.
     expect([...shell.dock.root.children]).toEqual([
       shell.dock.pause,
       shell.dock.speed,
@@ -232,13 +302,40 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
     expect(shell.dock.primary.hidden).toBe(true); // shown by overlay.ts's first render (P4)
   });
 
+  // #181 (H1, QC): the countdown dial is decoration inside the primary control — the wave chip
+  // is the readable AND the accessible countdown — so it is aria-hidden, carries no text and
+  // nothing focusable, and is never a `.wy-btn`, the class the Dock's controls, the input
+  // chrome selector and the Dock footprint measure key on.
+  it('the countdown dial is aria-hidden decoration inside the primary control, hidden at boot', () => {
+    const shell = createShell(document, TWO_CARDS);
+    const { root, progress } = shell.dock.dial;
+    expect(root.parentElement).toBe(shell.dock.primary);
+    expect(shell.dock.primary.lastElementChild).toBe(root); // after the contract's two spans
+    expect(root.className).toBe('wy-dial');
+    expect(root.getAttribute('aria-hidden')).toBe('true');
+    expect(root.hidden).toBe(true); // overlay.ts shows it once there is a countdown to draw
+    expect(root.classList.contains('wy-btn')).toBe(false);
+    expect(root.querySelector('button, a, [tabindex]')).toBeNull(); // nothing focusable inside
+    expect(root.contains(progress)).toBe(true);
+    expect(root.textContent).toBe('');
+    // The control's accessible name is still its label alone: the dial adds no text to it.
+    expect(dockButtonParts(shell.dock.primary).text.textContent).toBe('');
+    expect(shell.dock.primary.textContent).toBe('');
+    for (const btn of [shell.dock.pause, shell.dock.speed, shell.dock.settings]) {
+      expect(btn.querySelector('.wy-dial')).toBeNull();
+    }
+  });
+
   // P1's Dock markup contract, both layouts: aria-hidden icon span + localized text span.
   it('every Dock button carries an aria-hidden icon span then its text span', () => {
     const shell = createShell(document, TWO_CARDS);
     const { pause, speed, settings, primary } = shell.dock;
     for (const btn of [pause, speed, settings, primary]) {
       const parts = dockButtonParts(btn);
-      expect([...btn.children]).toEqual([parts.icon, parts.text]);
+      // The primary also carries the countdown dial (#181), AFTER the contract's two spans.
+      expect([...btn.children]).toEqual(
+        btn === primary ? [parts.icon, parts.text, shell.dock.dial.root] : [parts.icon, parts.text],
+      );
       expect(parts.icon.getAttribute('aria-hidden')).toBe('true');
       expect(parts.text.className).toBe('wy-btn-text');
     }
@@ -314,23 +411,8 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
   });
 });
 
-// The playtest round's Shell additions: the preview's two homes and the Card's glyph tile.
-describe('placePreview + Card swatches (playtest round)', () => {
-  it('re-homes the ONE preview node between its Stage and hud homes, restoring the exact slot', () => {
-    const shell = createShell(document, [{ towerId: 'basic' }]);
-    const original = [...shell.hudBox.children];
-    expect(original).toContain(shell.preview.root); // the hud slot is the boot default
-
-    shell.placePreview('stage');
-    expect(shell.preview.root.parentElement).toBe(shell.stage);
-    // MOVED, never cloned: the same node object left the chips column (one AT surface).
-    expect([...shell.hudBox.children]).not.toContain(shell.preview.root);
-
-    shell.placePreview('hud');
-    expect([...shell.hudBox.children]).toEqual(original); // byte-exact original order
-    shell.destroy();
-  });
-
+// The playtest round's Card glyph tile. (Its preview re-homing half went with #181's one home.)
+describe('Card swatches (playtest round)', () => {
   it('every Card leads with an aria-hidden canvas swatch — presentation only, no AT surface', () => {
     const shell = createShell(document, [{ towerId: 'basic' }, { towerId: 'slow' }]);
     for (const card of shell.cards) {
@@ -338,25 +420,6 @@ describe('placePreview + Card swatches (playtest round)', () => {
       expect(card.swatch.getAttribute('aria-hidden')).toBe('true');
       expect(card.root.firstElementChild).toBe(card.swatch);
     }
-    shell.destroy();
-  });
-});
-
-// The conditional reparent (playtest round 4): an unconditional re-append on an
-// already-homed preview would zero a reader's scrollTop on every ResizeObserver tick.
-describe('placePreview — no-op when already home', () => {
-  it('does not move an already-stage-homed preview (a sentinel keeps its position)', () => {
-    const shell = createShell(document, [{ towerId: 'basic' }]);
-    shell.placePreview('stage');
-    const sentinel = document.createElement('div');
-    shell.stage.append(sentinel); // now: [...board..., preview, sentinel]
-    shell.placePreview('stage'); // must NOT re-append (which would put preview last again)
-    expect(shell.stage.lastElementChild).toBe(sentinel);
-    shell.placePreview('hud');
-    shell.placePreview('hud'); // same on the hud side: the slot insert happens once
-    const idx = [...shell.hudBox.children].indexOf(shell.preview.root);
-    shell.placePreview('hud');
-    expect([...shell.hudBox.children].indexOf(shell.preview.root)).toBe(idx);
     shell.destroy();
   });
 });

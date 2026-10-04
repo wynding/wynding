@@ -184,56 +184,42 @@ export async function assertRegionRelations(
     ).toBeNull();
   }
 
-  // The wave preview (playtest round) — the SECOND Stage overlay, and since #101 the one
-  // held to a STRICTER rule than the Dock beside it: the Dock may still clip the grid's
-  // bottom-left corner by design, while the preview may not touch a buildable cell at all.
-  // Gated ONLY in its floating home (a `.wy-stage` parent): in the hud home (Compact, or a
-  // Stage with no compliant dead band — `main.ts`'s ratified fallback) the node lives
-  // inside an `overflow-y: auto` scrollport, where
-  // `boundingBox()` is a LAYOUT rect — a scrolled-out preview reports coordinates
-  // anywhere, including a negative y over the grid, while occluding nothing. What governs
-  // it there is `.wy-hud`'s own bounded-scroll contract (`smoke.spec.ts`'s zoom gates)
-  // plus the `status` disjointness asserted above, so comparing the un-clipped rect to
-  // the grid would be meaningless in both directions. Absent / hidden (`regionRect`
-  // null) is legal: the preview hides once every wave has launched.
-  // `classList.contains`, never className equality: an extra class on `.wy-stage` must
-  // not route a genuinely floating preview into the exempt branch (a gate whose failure
-  // mode is "silently skip" is no gate).
-  const previewFloating = await page.evaluate(
-    () =>
-      document
-        .querySelector('[data-wy-region="preview"]')
-        ?.parentElement?.classList.contains('wy-stage') ?? false,
+  // The wave preview — ONE home since #181 (L1). It used to float over the Stage (#101's
+  // letterbox → border ring → reserved row chain), where this gate held it to zero buildable
+  // cells. Now the strip is built in the status region's chips list in BOTH layouts and never
+  // moves, so its relation is the status region's, and it is gated harder than before:
+  //  - WHERE it lives is a DOM fact, asserted unconditionally — so a regression that re-homed it
+  //    onto the Stage fails here instead of slipping past a geometry check that only runs in one
+  //    home (the old gate's blind spot: it skipped every non-floating state);
+  //  - what of it is VISIBLE — its rect clipped to the chips list's scrollport, because inside a
+  //    scrollport a scrolled-out entry reports layout coordinates anywhere — must sit inside the
+  //    status region and stay disjoint from the projected grid.
+  // Hidden (`regionRect` null) is legal: the strip keeps its box but hides once the run resolves.
+  const previewHome = await page.evaluate(() => {
+    const el = document.querySelector('[data-wy-region="preview"]');
+    if (el === null) return 'absent';
+    return el.parentElement?.matches('.wy-status > .wy-hud') === true ? 'chips' : 'elsewhere';
+  });
+  expect(previewHome, "the wave preview's one home is the status region's chips list").toBe(
+    'chips',
   );
   const preview = await regionRect(page, 'preview');
-  if (preview !== null && previewFloating) {
-    const stageR = stage as Rect;
-    expect(contains(stageR, preview), 'the floating preview must sit inside the Stage').toBe(true);
-    // THE RATIFIED RULE (#101, owner 2026-08-17), replacing the ≤40%-of-grid-AREA allowance
-    // this gate carried before it. That allowance was retired for cause rather than
-    // tightened: it PASSED while the playtest failed, and still passed at 3.5% coverage,
-    // because bounding an overlap by AREA says nothing about WHICH cells are covered — a
-    // card can sit well inside its budget and still cover the exact corner a player wanted
-    // to build on. The quantity that matters is buildable territory removed, so that is
-    // what is measured: ZERO intersection, no budget to sit inside.
-    //
-    // The card may still overlap the blocked border ring and the two openings; those are
-    // board terrain no tower can ever occupy, and `preview-place.ts` reaches for them only
-    // after the letterbox margins come up short.
-    const buildable = buildableRect(grid);
-    const clipped = intersect(preview, buildable);
-    expect(
-      clipped,
-      clipped === null
-        ? ''
-        : `the floating preview covers ${Math.round(clipped.width)}×${Math.round(
-            clipped.height,
-          )}px of STRUCTURALLY BUILDABLE board (${(clipped.width / grid.cellPx).toFixed(1)}×${(
-            clipped.height / grid.cellPx
-          ).toFixed(1)} cells) at [${Math.round(preview.x)},${Math.round(preview.y)} ${Math.round(
-            preview.width,
-          )}×${Math.round(preview.height)}]`,
-    ).toBeNull();
+  if (preview !== null) {
+    const hud = (await page.locator('.wy-status > .wy-hud').boundingBox()) as Rect | null;
+    expect(hud, 'the chips list must have a box while the strip does').not.toBeNull();
+    const visible = intersect(preview, hud as Rect);
+    if (visible !== null) {
+      const status = await regionRect(page, 'status');
+      expect(status, 'the status region must be present').not.toBeNull();
+      expect(
+        contains(status as Rect, visible),
+        'the visible strip must sit inside the status region',
+      ).toBe(true);
+      expect(
+        intersect(visible, grid),
+        'the visible strip must be disjoint from the projected grid',
+      ).toBeNull();
+    }
   }
 
   const dock = await regionRect(page, 'dock');
@@ -270,7 +256,8 @@ export async function assertRegionRelations(
  *  tap is ever swallowed"; zero intersection can.
  *
  *  Measured against `buildableRect` (the grid inset by one cell) for the same reason the
- *  floating preview is: the outer ring is blocked terrain no tower can ever occupy. The fix
+ *  floating preview was (#101; the preview has had one home, in the status row, since #181):
+ *  the outer ring is blocked terrain no tower can ever occupy. The fix
  *  (`--wy-dock-reserve`) keeps the whole grid clear of the Dock anyway, so this is the
  *  weaker of the two claims it satisfies — and the one the defect is about.
  *
@@ -330,13 +317,16 @@ export async function assertDeclaredRegions(page: Page): Promise<void> {
 
 /** The visible status chips, as the text assistive tech actually reads: every text node NOT
  *  inside an `aria-hidden` subtree. Proves the dual-form contract end to end — the glance
- *  form is invisible to AT, and the full ICU message is never sentence-split. */
+ *  form is invisible to AT, and the full ICU message is never sentence-split. A hidden chip
+ *  is skipped in either of its forms: no box (Compact, the UA's `[hidden]`), or a box held
+ *  with `visibility: hidden` (Standard keeps the countdown chip's slot, #181). */
 export async function visibleChipAccessibleText(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
     for (const chip of Array.from(document.querySelectorAll<HTMLElement>('.wy-hud > .wy-chip'))) {
       const r = chip.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) continue;
+      if (getComputedStyle(chip).visibility === 'hidden') continue;
       const walker = document.createTreeWalker(chip, NodeFilter.SHOW_TEXT);
       let text = '';
       let node = walker.nextNode();

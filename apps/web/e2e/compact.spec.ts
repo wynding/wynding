@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { PNG } from 'pngjs';
-import { createProjection } from '@wynding/render';
+import { createProjection, creepShapeFor } from '@wynding/render';
 import {
   GRID,
   assertDeclaredRegions,
@@ -142,16 +142,28 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // decouple): the wave chip is countdown-only and the sim's real `countdownRemaining`
     // is meaningful before Start is ever pressed, not just after. Each chip reads to
     // assistive tech as its COMPLETE localized ICU message — the aria-hidden glance form
-    // ("♥ 10") is invisible to AT.
+    // (an SVG icon and the value, #181) is invisible to AT. The countdown LEADS (#181 QC: the
+    // first chip is the one the capped column always shows), then the style frame's order:
+    // lives, bounty, stars, score.
     await expect.poll(async () => (await visibleChipAccessibleText(page)).length).toBe(5);
     const chips = await visibleChipAccessibleText(page);
-    expect(chips[0]).toMatch(/^Lives: \d+$/);
-    expect(chips[1]).toMatch(/^Bounty: \d+$/);
-    expect(chips[2]).toMatch(/^Score: \d+$/);
-    expect(chips[3]).toMatch(/^Wave in \d+s$/);
-    expect(chips[4]).toMatch(/^Stars: \d+ of 3$/);
-    // ...and the glance forms ARE what is painted on screen.
-    await expect(page.locator('.wy-chip[data-wy-chip="lives"] .wy-chip-glance')).toHaveText(/^♥/);
+    expect(chips[0]).toMatch(/^Wave in \d+s$/);
+    expect(chips[1]).toMatch(/^Lives: \d+$/);
+    expect(chips[2]).toMatch(/^Bounty: \d+$/);
+    expect(chips[3]).toMatch(/^Stars: \d+ of 3$/);
+    expect(chips[4]).toMatch(/^Score: \d+$/);
+    // ...and the glance forms ARE what is painted on screen: each chip's own icon beside its
+    // bare value (Compact's narrow column drops the score's word and the stars' "/ 3").
+    for (const slot of ['lives', 'bounty', 'stars', 'score', 'wave']) {
+      const glance = page.locator(`.wy-chip[data-wy-chip="${slot}"] .wy-chip-glance`);
+      await expect(glance.locator(`svg.wy-icon--${slot}`), slot).toBeVisible();
+      await expect(glance.locator('.wy-chip-value'), slot).toHaveText(/^\d+s?$/);
+    }
+    // EVERY companion is dropped, not just the first (#181 QC): the score's word and the stars'
+    // "/ 3" — count pinned first, so an empty match can never pass the loop vacuously.
+    const companions = page.locator('.wy-chip-label, .wy-chip-suffix');
+    await expect(companions).toHaveCount(2);
+    for (const companion of await companions.all()) await expect(companion).toBeHidden();
 
     // Board floor, banner absent.
     const grid = await projectedGrid(page);
@@ -173,16 +185,17 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   // KEYBOARD-reachable, not a mouse-only overflow container. It is hosted inside the same
   // `.wy-hud` scrollport the chips already use (contract §1), so it inherits that
   // scrollport's keyboard reachability by construction; this test proves that end to end.
-  test('658×320: hosting the preview does not cost the chips scrollport its column (#101 regression guard)', async ({
+  test('658×320: hosting the strip does not cost the chips scrollport its column (#101 / #181 regression guard)', async ({
     page,
   }) => {
-    // `.wy-hud:has(> .wy-wave-preview)` exists for the STANDARD row reservation, but it is
-    // unscoped, and on Compact the preview always lives in the hud — so that fork always
-    // wins here, at a higher specificity than `.wy-hud`'s own Compact rule. #101 added
-    // `flex: 1 1 0` to it (a row measure) and the Compact reset for it was briefly written
-    // as the `0 1 auto` INITIAL, which drops `flex-grow` to 0 and leaves the scrollport
-    // content-sized instead of filling the column it owns (CodeRabbit, PR #164). Nothing
-    // else in the suite would have noticed: the chips still render, still scroll, still
+    // The strip lives in the hud in BOTH layouts (#181), and the Standard form sizes the hud
+    // as a ROW item (`flex: 1 1 auto` in the row, the strip `flex: 1 1 0` inside it). A
+    // Standard row measure leaking into this column is the regression class this guards:
+    // #101's `.wy-hud:has(> .wy-wave-preview)` fork did exactly that — unscoped, it won here
+    // at a higher specificity than `.wy-hud`'s own Compact rule, and its Compact reset was
+    // briefly written as the `0 1 auto` INITIAL, which drops `flex-grow` to 0 and leaves the
+    // scrollport content-sized instead of filling the column it owns (CodeRabbit, PR #164).
+    // Nothing else in the suite would notice: the chips still render, still scroll, still
     // stay disjoint from the Dock — the column simply stops being filled.
     await gotoAt(page, PHONE);
     const hud = page.locator('.wy-hud');
@@ -191,16 +204,24 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       await page.evaluate(
         () => document.querySelector('.wy-wave-preview')!.parentElement?.className,
       ),
-      'the premise: on Compact the preview lives in the hud, so the :has() fork applies',
+      'the premise: the strip lives in the hud, the item any leaked row measure would size',
     ).toContain('wy-hud');
 
     // The computed value, and then the consequence — a pinned declaration that stopped
     // producing its effect would pass the first alone.
     expect(await hud.evaluate((el) => getComputedStyle(el).flexGrow)).toBe('1');
+    // Since #181 QC round 2 the column stops the scrollport at its last WHOLE item
+    // (`--wy-hud-cut`, `hud-cut.ts`) and leaves the rest of its room empty above the Dock on
+    // purpose — 15px of it here on CI's font metrics. What this guards is the ROOM the column
+    // gives the scrollport, so that is read with the cut lifted, and the cut is put straight
+    // back in the same task (nothing renders in between).
     const boxes = await page.evaluate(() => {
       const r = (s: string): DOMRect =>
         document.querySelector(s)!.getBoundingClientRect() as DOMRect;
-      return {
+      const hudEl = document.querySelector<HTMLElement>('.wy-hud')!;
+      const cut = hudEl.style.getPropertyValue('--wy-hud-cut');
+      hudEl.style.removeProperty('--wy-hud-cut');
+      const lifted = {
         hud: r('.wy-hud'),
         dock: r('.wy-dock'),
         status: r('.wy-status'),
@@ -209,9 +230,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
         // fail on a gap change that is not a regression at all.
         gap: parseFloat(getComputedStyle(document.querySelector('.wy-status')!).rowGap) || 0,
       };
+      if (cut !== '') hudEl.style.setProperty('--wy-hud-cut', cut);
+      return lifted;
     });
-    // The hud fills the space between its own top and the Dock below it: content-sized, it
-    // would stop short by the height of everything it is not rendering.
+    // The hud's room fills the space between its own top and the Dock below it: content-sized,
+    // it would stop short by the height of everything it is not rendering.
     expect(
       boxes.dock.top - (boxes.hud.top + boxes.hud.height),
       'the chips scrollport must still fill the column down to the Dock',
@@ -236,13 +259,22 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // Rows carry BOTH forms since #101, so a bare `li` locator reads the accessible
     // sentence and the visible glance concatenated. Address each explicitly: the full form
     // is unchanged (which is the parity guarantee — the diet cost no information), and the
-    // glance is the text a sighted player actually reads.
+    // glance is what a sighted player actually reads: since #181 the creep's own board
+    // silhouette and its count (the column is too narrow for the name, which the sentence
+    // still carries).
     const entries = preview.locator('li');
     await expect(entries).toHaveCount(1); // the shipped bundle's single creep kind
     await expect(preview.locator('.wy-preview-full').first()).toHaveText(
       '10 × Creep — ground, armor 0, leak cost 1, no immunities',
     );
-    await expect(preview.locator('.wy-preview-glance').first()).toHaveText('10 × Creep');
+    const glance = preview.locator('.wy-preview-glance').first();
+    await expect(glance.locator('svg.wy-creep-icon')).toBeVisible();
+    await expect(glance.locator('svg.wy-creep-icon')).toHaveAttribute(
+      'data-wy-shape',
+      creepShapeFor('normal'),
+    );
+    await expect(glance.locator('.wy-preview-count')).toHaveText('×10');
+    await expect(glance.locator('.wy-preview-detail')).toBeHidden();
 
     // Force the SAME overflow smoke.spec's 200%-zoom gate proves for the chips, and confirm
     // the preview is still present and KEYBOARD-OPERABLE inside that same scrollport — never
@@ -332,15 +364,22 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       '4 × Armored Creep — ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
     ]);
-    // The arc's densest wave, in the form a player actually reads it (#101): three of the
-    // four rows collapse to bare count-and-name, and `air` is the only annotation standing
-    // — which is precisely the "is air next?" question the surface is scanned for.
-    await expect(preview.locator('.wy-preview-glance')).toHaveText([
-      '10 × Swarm Creep',
-      '6 × Fast Creep',
-      '4 × Armored Creep — armor −6 direct',
-      '4 × Flying Creep — air',
-    ]);
+    // The arc's densest wave, in the form a player actually reads it (#181): each row is the
+    // creep's own board silhouette and its count — the shapes tell the four kinds apart (the
+    // armored hexagon among them), and the board's airborne chevron rides on the flyer
+    // alone, which is precisely the "is air next?" question the surface is scanned for.
+    await expect(preview.locator('.wy-preview-count')).toHaveText(['×10', '×6', '×4', '×4']);
+    const icons = preview.locator('svg.wy-creep-icon');
+    await expect(icons).toHaveCount(4);
+    expect(
+      await icons.evaluateAll((els) => els.map((el) => el.getAttribute('data-wy-shape'))),
+    ).toEqual(['swarm', 'fast', 'armored', 'flying'].map((id) => creepShapeFor(id)));
+    expect(
+      await icons.evaluateAll((els) =>
+        els.map((el) => el.querySelector('.wy-creep-chevron') !== null),
+      ),
+    ).toEqual([false, false, false, true]);
+    for (const icon of await icons.all()) await expect(icon).toBeVisible();
 
     // axe audit with all 4 rows showing — the standard bar every other HUD content is
     // held to (PLAN.md P3 step 19).
@@ -611,10 +650,23 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     for (const badge of await page.locator('.wy-card-hotkey').all())
       await expect(badge).toBeVisible();
 
-    // The full-form chips are what's painted; the glance forms never render on Standard.
+    // Since #181 the GLANCE is what Standard paints too — the style frame's icon beside the
+    // value — while the full ICU message stays the accessible text, visually hidden in both
+    // layouts. (Before #181 Standard painted the full form and never rendered the glance.)
     const chips = await visibleChipAccessibleText(page);
-    expect(chips[0]).toMatch(/^Lives: \d+$/);
-    await expect(page.locator('.wy-chip[data-wy-chip="lives"] .wy-chip-glance')).toBeHidden();
+    expect(chips[0]).toMatch(/^Wave in \d+s$/); // the countdown leads (#181 QC)
+    expect(chips[1]).toMatch(/^Lives: \d+$/);
+    const livesGlance = page.locator('.wy-chip[data-wy-chip="lives"] .wy-chip-glance');
+    await expect(livesGlance).toBeVisible();
+    await expect(livesGlance.locator('svg.wy-icon--lives')).toBeVisible();
+    await expect(livesGlance.locator('.wy-chip-value')).toHaveText(/^\d+$/);
+    const livesFull = (await page
+      .locator('.wy-chip[data-wy-chip="lives"] .wy-chip-full')
+      .boundingBox()) as Rect;
+    expect(
+      livesFull.width <= 1 && livesFull.height <= 1,
+      'the full message is visually hidden (a 1px clip), never painted beside the glance',
+    ).toBe(true);
 
     // The Dock reparented into `header.wy-status` (contract §1's topology amendment) but
     // still RENDERS exactly as before: absolutely positioned against `.wy-shell`, floating
