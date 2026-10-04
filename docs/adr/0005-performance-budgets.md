@@ -1224,7 +1224,8 @@ small part of it. Garbage collection was 1.3–1.6% of the replay either way.
   has been seen already. Only a new shot is matched to its tower, by a scan of the towers, and the
   towers that just fired are pruned in place.
 - The aim tracker keeps each head and updates it in place, and on a frame whose render time has not
-  moved — a paused game — it turns and computes nothing.
+  moved — a paused game — it turns nothing: it still walks every tower to keep it marked as seen,
+  and skips only the angle maths.
 - The map of where each creep is drawn holds the interpolated creeps themselves, not a copy of each
   creep's point.
 - `wrapAngle` skips its floating-point remainder for an angle already in range, which every angle
@@ -1263,6 +1264,73 @@ Where the rest goes is not established. The S10 Finding's traced method (`WY_TRA
 show it: if the `wy:draw` span — the app's own draw, which holds the trackers, the placement and the
 sprite pools — grows by the gap, the cost is in that JavaScript under the browser's conditions; if
 it does not, it is in Phaser's loop or in garbage collection.
+
+**Traced (QC round 2, at `7b943ba`).** The S10 Finding's method (`WY_TRACE=1`, then
+`apps/web/scripts/analyze-trace.mjs`, which reads a catalog trace from this round on) on the catalog
+scene at low-end: one run with T3 on and one with T3 off (variant C above), each built from its own
+scratch copy of the lane head. Per frame, averaged over the sampling window, in µs:
+
+| span                                | T3 off | T3 on  | on − off |
+| ----------------------------------- | ------ | ------ | -------- |
+| the main thread's work              | 24,407 | 25,256 | +849     |
+| Phaser's own frame, its render loop | 17,606 | 18,237 | +630     |
+| the app's draw (`wy:draw`)          | 2,559  | 2,809  | +251     |
+
+The sim step, the view model and garbage collection each moved by less than a twentieth of a
+millisecond. So about three quarters of what T3 costs the browser is Phaser's, and the rest the
+app's own draw. Phaser's part, placed by the call stack each profiler sample was taken in and counted
+inclusively, in µs a frame:
+
+| where in Phaser                                       | T3 off | T3 on  |
+| ----------------------------------------------------- | ------ | ------ |
+| drawing the live layers (its `Graphics` renderer)     | 15,399 | 15,528 |
+| drawing sprites (`ImageWebGLRenderer`, `batchSprite`) | 403    | 619    |
+| its per-object render loop                            | 398    | 522    |
+
+The live layers grew by the flash and the pulse they now draw. The other two grew because heads
+turn, and so did a third, smaller loop: the camera's visibility filter took nearly three times as
+long.
+
+**Why a turned head made every sprite dearer: hidden classes.** Phaser keeps a game object's
+defaults, its rotation, alpha and visibility among them, on the prototype its components are mixed
+into, and an object owns a field only once one is set on it. A head's first `setRotation` gave it a
+`_rotation` of its own, and with it a V8 hidden class of its own. Each of Phaser's loops over its
+objects then met turned and unturned sprites as two shapes where it had met one, and slowed down
+for every sprite, not only the turned heads. A probe that gave every pooled sprite its rotation at birth, and changed nothing else,
+took about 0.29 ms a frame off sprite drawing, the render loop and the visibility filter together,
+about two thirds of what T3 had added to them. Its traced frame as a whole did not show the saving:
+one traced run moves by up to half a millisecond in parts no change touches, and in the probe's run
+the sim step alone, which the probe does not touch, took 0.13 ms a frame more. These runs locate the
+cost; untraced runs are what size it.
+
+**What changed (QC round 2).**
+
+- Every pooled sprite has one shape from birth (`533fbf7`). The pool gives each new sprite its
+  alpha, origin, rotation and visibility at once, in one order, even at their defaults, so every
+  sprite owns the same fields and Phaser's loops meet one shape again. A reused sprite is still
+  given each only when it changed. This rests on where Phaser keeps those defaults, so a Phaser
+  upgrade could change it; `sprite-pool.ts` says so beside the code.
+- The muzzle flash and the pulse rings are polygons (`7bd3183`,
+  `packages/render/src/circle-polygon.ts`). Phaser draws every circle as a hundred and one points
+  whatever its radius (`GraphicsWebGLRenderer` steps round it a hundredth of a turn at a time):
+  earcut triangulates a filled one over all of them, and a stroked one becomes a hundred line quads.
+  A regular polygon with enough sides that none is longer than three CSS pixels, from twelve for the
+  smallest circles up to twenty-four, costs a fraction of that. Below twenty-four sides it is within
+  a fifth of a CSS pixel of its circle, and at twenty-four within 1% of its radius: under a quarter
+  of a pixel for a pulse ring at desktop cell size, where a flash has thirteen sides.
+
+**Not yet sized.** The untraced runs that would size this round's saving, the record-only suite at
+`3d83684` with T3 off beside it, have not run yet. Until they do, the traced probe above is the
+evidence for the change to the pool, and what T3 still costs the browser after both changes is not
+established.
+
+**The largest lever left: the live layers' circles.** In the traced frame with T3 on, Phaser's
+`Graphics` renderer took 15.53 of the 25.26 ms, about three fifths of it, drawing the live layers,
+which are cleared and redrawn every frame: tracers, impact sparks, HP pips, range rings and the
+rest. Every circle among them is a hundred and one points whatever its size, so a tracer's dot a few
+pixels across costs Phaser what a range ring does. Drawing those circles as `circle-polygon.ts`
+polygons, as T3's flash and rings now are, is the largest saving left in reach. Visual pass items C1
+and C2 (combat feedback and shots) take it up for tracers, sparks and pips.
 
 **Outside T3: the frame keys.** The single largest cost in the board frame's JavaScript, in every
 scene and with T3 on or off, is `anchorOf` in `placement.ts`, at about a fifth of it: every frame
