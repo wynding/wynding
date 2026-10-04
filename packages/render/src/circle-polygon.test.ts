@@ -1,7 +1,7 @@
 // circle-polygon.test.ts — a small circle drawn as a regular polygon: how many sides a radius
-// gets (12 at the smallest, up to 24, no side longer than 3 CSS px below the cap), where the
-// corners sit (on the circle, evenly spaced, the first straight up, going clockwise) and the
-// calls that fill one and stroke one closed.
+// gets (12 at the smallest, NaN included, up to 24, no side longer than 3 CSS px below the cap),
+// where the corners sit (on the circle, evenly spaced, the first straight up, going clockwise)
+// and the calls that fill one and stroke one closed.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -24,6 +24,11 @@ describe('circleSides — enough sides that it reads as a circle, at every size'
     for (const r of [0, 0.5, 2, 5]) expect(circleSides(r)).toBe(12);
     for (const r of [12, 24, 75, 1000]) expect(circleSides(r)).toBe(24);
     expect(circleSides(-1)).toBe(12); // no radius at all is the smallest circle
+  });
+
+  it('gives a radius that is not a number the smallest circle’s 12 sides, never none — an empty list throws out of Phaser', () => {
+    expect(circleSides(NaN)).toBe(12);
+    expect(circlePoints(0, 0, NaN)).toHaveLength(12);
   });
 
   it('adds sides as the radius grows, never removing one, so no side passes 3 CSS px below the cap', () => {

@@ -31,9 +31,12 @@ export interface PolygonGraphics {
 }
 
 /** How many sides the polygon for a circle of radius `r` CSS px has: enough that no side is
- *  longer than `MAX_CIRCLE_SIDE_PX`, within `MIN_CIRCLE_SIDES`..`MAX_CIRCLE_SIDES`. */
+ *  longer than `MAX_CIRCLE_SIDE_PX`, within `MIN_CIRCLE_SIDES`..`MAX_CIRCLE_SIDES`. A radius
+ *  that is not a positive number, NaN included, is the smallest circle: `Math.max(0, NaN)` is
+ *  NaN, which would give no sides at all, and an empty point list throws out of Phaser's
+ *  `fillPoints` and `strokePoints` (they read the first point), stopping the frame. */
 export function circleSides(r: number): number {
-  const n = Math.ceil((TAU * Math.max(0, r)) / MAX_CIRCLE_SIDE_PX);
+  const n = Math.ceil((TAU * (r > 0 ? r : 0)) / MAX_CIRCLE_SIDE_PX);
   return Math.min(MAX_CIRCLE_SIDES, Math.max(MIN_CIRCLE_SIDES, n));
 }
 

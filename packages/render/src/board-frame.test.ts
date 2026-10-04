@@ -917,6 +917,25 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect([ring.x, ring.y, ring.r].map((v) => +v.toFixed(9))).toEqual([30, 40, 24]);
   });
 
+  it('draws a flash or a ring whose radius is not a number without throwing — never an empty polygon, which Phaser cannot draw', () => {
+    // Phaser 3.90's `fillPoints` and `strokePoints` begin at the first point: a stand-in that
+    // does the same throws on an empty list, as a live layer would, out of the frame.
+    const sides: number[] = [];
+    const phaserLike = {
+      fillStyle: () => undefined,
+      lineStyle: () => undefined,
+      fillPoints: (pts: readonly { x: number; y: number }[]) => sides.push(pts.length, pts[0]!.x),
+      strokePoints: (pts: readonly { x: number; y: number }[]) => sides.push(pts.length, pts[0]!.x),
+    };
+    expect(() =>
+      drawFireFeedback(phaserLike, [
+        { kind: 'flash', x: 10, y: 20, r: NaN, colour: ART_FLASH, alpha: 0.5 },
+        { kind: 'ring', x: 30, y: 40, r: NaN, width: 2.6, colour: PAL.roleControl, alpha: 0.25 },
+      ]),
+    ).not.toThrow();
+    expect(sides).toEqual([12, NaN, 12, NaN]); // the smallest polygon, each, though placed nowhere
+  });
+
   it('a head released from Reduce motion sweeps from facing up — the frame hands the aim tracker Reduce motion', () => {
     const { t, draw } = run();
     const basic = tower(2, 'basic', 4, { targetId: 7 });
