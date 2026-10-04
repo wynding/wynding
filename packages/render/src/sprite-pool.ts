@@ -3,6 +3,17 @@
 // use a recorder. Sprites are created as a layer's count grows and never destroyed: one past
 // this frame's count is hidden, and shown again when a later frame places it — after a
 // Play-again `reset()` has hidden every one, say.
+//
+// ONE SHAPE FOR EVERY SPRITE (visual pass T3, QC round 2). A new sprite is given its alpha,
+// origin, turn and visibility at once, in that order, even where they are the defaults, so
+// every pooled sprite owns the same fields from birth. Phaser keeps those defaults on the
+// prototype (its Alpha, Origin, Transform and Visible components), so a field set on only
+// some sprites — a turned head's `_rotation`, a fading scorch's `_alpha`, a hidden sprite's
+// `_visible` — would give those sprites a different hidden class from the rest, and every
+// per-object loop in Phaser's render would slow down for all of them. A trace measured it when
+// heads began to turn (ADR 0005, the T3 entry): Phaser's visibility filter took about three
+// times as long, and drawing its images half as long again. Flip is never set, on any sprite.
+// This rests on where Phaser keeps those defaults, so a Phaser upgrade could change it.
 
 import type { SpritePlacement } from './placement';
 
@@ -25,7 +36,8 @@ export interface SpritePool<S extends PoolSprite> {
   /**
    * Show `placements`: sprite `i` takes placement `i` — its frame, its alpha (a placement
    * without one is opaque), its origin and its rotation (the top-left and none unless it
-   * says otherwise; each of these set only when it changed), its position, and visibility.
+   * says otherwise; on a reused sprite each of these is set only when it changed, and a new
+   * sprite is given all of them), its position, and visibility.
    * Sprites are created as the count grows and every one past it is hidden. Creating them in
    * index order, at one depth, is what keeps a layer drawing in list order under Phaser's
    * stable depth sort — a later creep still covers an earlier one.
@@ -51,8 +63,9 @@ interface Shown {
 
 /** A pool whose new sprites come from `create`, which returns one already showing the
  *  placement it is given (its frame, at its position, visible) with its origin at its
- *  top-left and no turn; the pool gives it the placement's alpha, origin and rotation, as it
- *  does a reused sprite. */
+ *  top-left and no turn. The pool then gives every new sprite its placement's alpha, origin
+ *  and turn and makes it visible, each set even when it is the default (ONE SHAPE, above);
+ *  a reused sprite is given each only when it changed. */
 export function createSpritePool<S extends PoolSprite>(
   create: (placement: SpritePlacement) => S,
 ): SpritePool<S> {
@@ -68,9 +81,11 @@ export function createSpritePool<S extends PoolSprite>(
         const sprite = sprites[i];
         if (sprite === undefined) {
           const made = create(p);
-          if (made.alpha !== alpha) made.setAlpha(alpha);
-          if (originX !== 0 || originY !== 0) made.setOrigin(originX, originY);
-          if (rotation !== 0) made.setRotation(rotation);
+          // Every field, every time, in one order: one shape for every pooled sprite.
+          made.setAlpha(alpha);
+          made.setOrigin(originX, originY);
+          made.setRotation(rotation);
+          made.setVisible(true);
           sprites.push(made);
           shown.push({ frame: p.frame, originX, originY, rotation });
           return;
