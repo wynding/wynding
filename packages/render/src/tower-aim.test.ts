@@ -283,16 +283,16 @@ describe('createAimTracker', () => {
     const slow = tower(3, 'slow', { col: 7, targetId: 9 }); // does not aim
     const west = tower(2, 'venom', { col: 10, targetId: 8 }); // centre (11, 5)
     const creeps = new Map([
-      [9, { x: 7 * FP_ONE, y: 5 * FP_ONE }], // right of east
-      [8, { x: 9 * FP_ONE, y: 5 * FP_ONE }], // left of west
+      [9, { x: 7 * FP_ONE, y: 5 * FP_ONE }], // right of east (and left of west)
+      [8, { x: 11 * FP_ONE, y: 8 * FP_ONE }], // straight below west (and below-right of east)
     ]);
     aim.update(frame({ towers: [east, slow, west], creeps, renderTick: 0 }));
     aim.update(frame({ towers: [east, slow, west], creeps, renderTick: 50 }));
     expect(aim.angleOf(1)).toBeCloseTo(PI / 2, 12);
-    expect(aim.angleOf(2)).toBeCloseTo(-PI / 2, 12);
+    expect(aim.angleOf(2)).toBeCloseTo(PI, 12);
     aim.update(frame({ towers: [slow, west], creeps, renderTick: 51 })); // east sold
     expect(aim.angleOf(1)).toBe(0);
-    expect(aim.angleOf(2)).toBeCloseTo(-PI / 2, 12);
+    expect(aim.angleOf(2)).toBeCloseTo(PI, 12);
   });
 
   it('Reduce motion switched on and off while paused holds a head at 0, and releases it to sweep from 0', () => {

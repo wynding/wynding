@@ -328,6 +328,21 @@ describe('createFireTracker — which tower fired', () => {
     expect(fire.sinceFired(1)).toBeNull();
   });
 
+  it('under Reduce motion takes in every shot a frame first sees, the later launched too: none shows on release', () => {
+    const fire = createFireTracker();
+    const flight = [shot(basic, 10), shot(slow, 11)]; // first seen together, by a frame that caught up on two ticks
+    expect(
+      fire.update(
+        frame({ towers: [basic, slow], tracers: flight, renderTick: 11, reducedMotion: true }),
+      ),
+    ).toEqual([]);
+    expect(
+      fire.update(frame({ towers: [basic, slow], tracers: flight, renderTick: 11.5 })),
+    ).toEqual([]); // released inside both shots' feedback
+    expect(fire.sinceFired(1)).toBeNull();
+    expect(fire.sinceFired(2)).toBeNull();
+  });
+
   it('Reduce motion switched on part-way through a shot forgets it: nothing stale shows on release', () => {
     const fire = createFireTracker();
     const flight = [shot(basic, 10)];
@@ -368,6 +383,17 @@ describe('createFireTracker — which tower fired', () => {
         frame({ towers: [basic, slow], tracers: [blast], creeps: NONE_DRAWN, renderTick: 13 }),
       ),
     ).toEqual([{ tower: basic, tracer: blast }]);
+  });
+
+  it('an aiming head’s shot at its own creep, no longer drawn, shows nothing though other creeps still are', () => {
+    const fire = createFireTracker();
+    const othersOnly = new Map([[98, { x: 0, y: 0 }]]); // creep 99 gone; creep 98 still drawn
+    expect(
+      fire.update(
+        frame({ towers: [basic], tracers: [shot(basic, 10)], creeps: othersOnly, renderTick: 10 }),
+      ),
+    ).toEqual([]);
+    expect(fire.sinceFired(1)).toBeNull();
   });
 
   it('a pause that catches a shot part-way holds it there: a repeated render time neither restarts it nor hands it back', () => {

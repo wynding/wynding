@@ -1,9 +1,10 @@
 // sprite-pool.test.ts — the pooled sprites of a board layer, against recording sprites: growth,
 // one shape for every sprite (a new one is given its alpha, origin, turn and visibility, even
-// at their defaults), reuse (a frame or an alpha is re-set only when it changed), hiding what a
-// frame does not place, and showing again what a later frame does — after a Play-again reset
-// hid every one.
+// at their defaults, which rests on Phaser 3.90 — pinned here), reuse (a frame or an alpha is
+// re-set only when it changed), hiding what a frame does not place, and showing again what a
+// later frame does — after a Play-again reset hid every one.
 
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { atlasFrameSpecs, type FrameSpec } from './art-frames';
 import { createSpritePool, type PoolSprite } from './sprite-pool';
@@ -103,6 +104,19 @@ describe('createSpritePool — one shape for every sprite', () => {
     pool.sync([]);
     pool.sync([at('a', 1), at('b', 2)]);
     expect(made[1]!.calls).toEqual(born());
+  });
+
+  it('rests on Phaser 3.90, where its defaults live on the prototype: a Phaser bump must re-check it', () => {
+    // Read by path from the copy this package resolves (its own node_modules link). Resolving it
+    // with `createRequire` reaches Node's module loader where the layering zones cannot check the
+    // specifier, which eslint-rules/no-aliased-require.mjs rejects (#171).
+    const pkg = JSON.parse(
+      readFileSync(new URL('../node_modules/phaser/package.json', import.meta.url), 'utf8'),
+    ) as { version: string };
+    expect(
+      pkg.version,
+      're-check sprite-pool.ts ONE SHAPE and bake-runner.ts show() before bumping Phaser',
+    ).toMatch(/^3\.90\./);
   });
 });
 

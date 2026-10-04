@@ -866,6 +866,24 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect([head.x, head.y]).toEqual([corner.x + PROJECTION.cellPx, corner.y + PROJECTION.cellPx]);
   });
 
+  it('an aiming head’s shot at a creep no longer drawn shows nothing, though another creep still is — the frame hands the fire tracker where creeps are drawn', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const target = creep({ x: CX - 600, y: CY }); // creep 7, the shot's
+    const other = creep({ id: 8, x: CX + 600, y: CY }); // still drawn
+    draw(10, 0, [basic], { prev: [target, other], cur: [target, other] });
+    // Creep 7 is gone by the frame its shot is first seen (one that caught up on two ticks).
+    draw(
+      11,
+      0,
+      [basic],
+      { prev: [target, other], cur: [other] },
+      { tracers: [shotFrom(basic, 10)] },
+    );
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([]); // no flash, and no tracer to draw
+    expect(t.heads.syncs.at(-1)![0]).toEqual(atRest(basic)); // no recoil, no turn
+  });
+
   it('a shot turns its head onto the shot’s bearing on the frame it is seen: barrel, flash, recoil and tracer agree', () => {
     const { t, draw } = run();
     const left = [creep({ x: CX - 600, y: CY })]; // straight left of the footprint centre

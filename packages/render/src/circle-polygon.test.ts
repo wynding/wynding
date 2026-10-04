@@ -82,9 +82,12 @@ describe('circlePoints — the polygon’s corners', () => {
 
   it('hands back a list of its own each time, so a caller may keep or change it', () => {
     const a = circlePoints(0, 0, 4);
-    const b = circlePoints(0, 0, 4);
-    expect(b).toEqual(a);
+    const kept = a.map((p) => ({ ...p }));
+    const b = circlePoints(5, 5, 4); // another circle with as many sides
+    expect(b).not.toBe(a);
+    expect(a).toEqual(kept); // the second call left the first list as it was
     a[0]!.x = 99;
+    expect(b[0]!.x).toBeCloseTo(5, 12); // and changing the first leaves the second alone
     expect(circlePoints(0, 0, 4)[0]!.x).toBeCloseTo(0, 12);
   });
 });
