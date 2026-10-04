@@ -8,6 +8,7 @@ import { getBundledRuleset } from '@wynding/content';
 import {
   atlasFrameSpecs,
   artUnit,
+  boostArtAt,
   creepFrameKey,
   creepFrameSpecs,
   groundFrameKey,
@@ -442,6 +443,8 @@ describe('painters draw the art they own, in the palette they are handed', () =>
   });
 
   it('paints a boosted head as the glow first, then the head over it', () => {
+    // (At 20px the design's glow fits inside the drawn rim: `boostArtAt` hands it back.)
+    expect(boostArtAt(artUnit(20), 1)).toBe(BOOST_ART);
     for (const l of TOWER_LOOKS) {
       const key = `tower:head:${towerLookKey(l)}:buffed`;
       const ops = artOps(paint(frame(key)));
@@ -649,6 +652,55 @@ describe('paintTowerArt — the Card swatch’s picture, through the same art an
         }
       }
     }
+  });
+
+  it('keeps the rim inside the footprint and the surface both, for footprints inside, across and past a 36px surface, at dpr 0.8 to 2', () => {
+    // QC round 4's kill test (U1-U3: the clamp's near sides, far sides, or axes dropped or
+    // swapped): over a grid of corners that put the footprint wholly on the surface, across
+    // its edges, and past them on either side, the stroke never leaves where both overlap.
+    const W = 36;
+    const bad: string[] = [];
+    for (const s of [0.8, 1, 1.25, 2]) {
+      for (const fp of [20, 26.5, 35.925]) {
+        for (let x = -3; x <= 6; x += 0.29) {
+          for (const dy of [-0.61, 0.61]) {
+            const y = x + dy;
+            const g = recorder();
+            paintTowerArt(g, PAL, { mark: 'ringed', role: 'control' }, x, y, fp, s, {
+              width: W,
+              height: W,
+            });
+            const [plate] = artCalls(g.calls);
+            const rim = plate!.shapes.find((sh) => sh.stroke === 'rim')!;
+            if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+            const unit = fp / ART_BOX;
+            const half = (strokeWidthAt(rim, unit) * unit * s) / 2;
+            const px = (o: number, v: number): number => (o + v * unit) * s;
+            const box = [
+              Math.max(x, 0) * s,
+              Math.max(y, 0) * s,
+              Math.min(x + fp, W) * s,
+              Math.min(y + fp, W) * s,
+            ];
+            const e = [
+              px(x, rim.x) - half,
+              px(y, rim.y) - half,
+              px(x, rim.x + rim.w) + half,
+              px(y, rim.y + rim.h) + half,
+            ];
+            if (
+              e[0]! < box[0]! - 1e-9 ||
+              e[1]! < box[1]! - 1e-9 ||
+              e[2]! > box[2]! + 1e-9 ||
+              e[3]! > box[3]! + 1e-9
+            ) {
+              bad.push(`s ${s} fp ${fp} x ${x.toFixed(2)} y ${y.toFixed(2)}`);
+            }
+          }
+        }
+      }
+    }
+    expect(bad, bad.slice(0, 3).join('; ')).toEqual([]);
   });
 });
 
@@ -972,7 +1024,8 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
     // What the sweep below measures, pinned against the frames themselves at every size the
     // frame tests use: the plate frame draws `alignArtToTexels(PLATE_ART)` with design-unit
     // (0, 0) — the footprint corner — on a whole texel, and the boosted head draws the glow
-    // unmoved, from that same corner at the same scale.
+    // as `boostArtAt` fits it inside that rim (the design's own at every size here), from
+    // that same corner at the same scale.
     for (const [cellPx, scale] of SIZES) {
       const specs = new Map(towerFrameSpecs(cellPx, scale).map((f) => [f.key, f]));
       const [plate] = artCalls(paint(specs.get(PLATE_FRAME_KEY)!));
@@ -981,7 +1034,8 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
       expect(plate!.shapes, at).toEqual(
         alignArtToTexels(PLATE_ART, artUnit(cellPx), scale, [0, 0], ART_FOOTPRINT),
       );
-      expect(head!.shapes.slice(0, BOOST_ART.length), at).toEqual(BOOST_ART);
+      const glow = boostArtAt(artUnit(cellPx), scale);
+      expect(head!.shapes.slice(0, glow.length), at).toEqual(glow);
       expect([head!.x, head!.y, head!.unit], at).toEqual([plate!.x, plate!.y, plate!.unit]);
       expect(plate!.x * scale, at).toBeCloseTo(Math.round(plate!.x * scale), 9);
       expect(plate!.y * scale, at).toBeCloseTo(Math.round(plate!.y * scale), 9);
@@ -1006,19 +1060,23 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
     expect((rim.x + rim.w) * k + half).toBeCloseTo(27, 9); // its last whole one
   });
 
-  it('at every cell size from 10 to 64px and dpr from 0.8 to 3: the rim no thinner than its floor and inside the footprint, each glow ring inside the rim', () => {
+  it('at every cell size from 9 to 64px and every dpr from 0.8 to 3: the rim no thinner than its floor and inside the footprint, each glow ring inside it, and the plate fill’s edge under it but by a fraction of a pixel at the smallest cells', () => {
     // The glow is `pal.aura`, gated against the PLATE (palette.test.ts) and not against the
     // rim, so it must stay inside the rim. Drawing the rim on whole device pixels moves it —
     // up to half a pixel, and further inward where the footprint's edge stops it — a
     // different way at each cell size and dpr, so this measures the rim as the plate frame
-    // draws it (pinned above), everywhere, not the design's.
+    // draws it (pinned above), not the design's — at every 0.005 of dpr, as a few sampled
+    // scales hide what the ones between them do (QC round 4: the design's glow reaches the
+    // drawn rim at 9 to 15 px cells at dprs between ten sampled ones; `boostArtAt` fits it).
     const designRim = PLATE_ART.find((s) => s.stroke === 'rim')!;
-    expect(BOOST_ART.filter((s) => s.stroke === 'aura')).toHaveLength(2);
-    let worst = { margin: Infinity, at: '' };
-    /** Below dpr 1: the most the fill's edge lies beyond the drawn rim's inner side, px. */
-    let past = { by: 0, at: '' };
-    for (const scale of [0.8, 0.9, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
-      for (let cellPx = 10; cellPx <= 64; cellPx++) {
+    if (designRim.kind !== 'rect') throw new Error('the rim is a rect');
+    const bad: string[] = [];
+    let fitted = 0;
+    /** The most the fill's edge lies past the drawn rim, px: from dpr 1 up, and below. */
+    const past = { fromOne: { by: 0, at: '' }, belowOne: { by: 0, at: '' } };
+    for (let step = 0; step <= 440; step++) {
+      const scale = Math.round((0.8 + step * 0.005) * 1000) / 1000;
+      for (let cellPx = 9; cellPx <= 64; cellPx++) {
         const unit = artUnit(cellPx);
         const rim = alignArtToTexels(PLATE_ART, unit, scale, [0, 0], ART_FOOTPRINT).find(
           (s) => s.stroke === 'rim',
@@ -1028,52 +1086,82 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
         const k = unit * scale;
         const at = `${cellPx}px at dpr ${scale}`;
         // Never thinner than its one-CSS-px floor (so two texels at dpr 1.25 or 1.5) ...
-        expect(2 * half * k, at).toBeGreaterThanOrEqual(scale - 1e-9);
+        if (2 * half * k < scale - 1e-9) bad.push(`${at}: thinner than its floor`);
         // ... inside the footprint, so two abutting plates never overlap ...
-        expect((rim.x - half) * k, at).toBeGreaterThanOrEqual(-1e-9);
-        expect((rim.x + rim.w + half) * k, at).toBeLessThanOrEqual(ART_BOX * k + 1e-9);
-        // ... and over the plate fill's edge, which stays on the design's centre line: no
-        // sliver of plate shows past the rim, and none of the floor inside it. (Below dpr 1
-        // one CSS px is under a pixel, and the rim widened to one can leave the fill's edge
-        // up to that widening's half beyond its inner side: measured, and held, below.)
-        if (designRim.kind !== 'rect') throw new Error('the rim is a rect');
-        const widened = Math.max(0, half - strokeWidthAt(designRim, unit) / 2);
-        for (const [drawn, design] of [
-          [rim.x, designRim.x],
-          [rim.y, designRim.y],
-          [rim.x + rim.w, designRim.x + designRim.w],
-          [rim.y + rim.h, designRim.y + designRim.h],
-        ] as const) {
-          const off = Math.abs(drawn - design);
-          if (scale >= 1) expect(off * k, at).toBeLessThanOrEqual(half * k + 1e-9);
-          else {
-            expect(off * k, at).toBeLessThanOrEqual((half + widened) * k + 1e-9);
-            if ((off - half) * k > past.by) past = { by: (off - half) * k, at };
-          }
+        if ((rim.x - half) * k < -1e-9 || (rim.x + rim.w + half) * k > ART_BOX * k + 1e-9) {
+          bad.push(`${at}: outside the footprint`);
         }
-        for (const ring of BOOST_ART) {
+        // ... each ring of the glow, as the boosted head's frame draws it, inside it: meeting
+        // its inner edge at most, a texel's, never crossing it ...
+        const glow = boostArtAt(unit, scale);
+        if (glow !== BOOST_ART) fitted++;
+        for (const ring of glow) {
           if (ring.kind !== 'circle') throw new Error('the glow is rings');
           const outer = ring.r + strokeWidthAt(ring, unit) / 2;
-          // The narrowest gap, texels, between the ring's outer edge and the rim's inner edge.
           const margin =
             Math.min(
               ring.cx - outer - (rim.x + half),
               rim.x + rim.w - half - (ring.cx + outer),
               ring.cy - outer - (rim.y + half),
               rim.y + rim.h - half - (ring.cy + outer),
-            ) *
-            unit *
-            scale;
-          if (margin < worst.margin) worst = { margin, at: `${cellPx}px at dpr ${scale}` };
+            ) * k;
+          if (margin < -1e-9) bad.push(`${at}: a glow ring ${-margin}px into the rim`);
         }
-        // (The rim measured is the aligned one: at 10px cells and dpr 1 it moved.)
-        if (cellPx === 10 && scale === 1) expect(rim).not.toEqual(designRim);
+        // ... and over the plate fill's edge, which stays on the design's centre line: no
+        // sliver of plate shows past the rim, and none of the floor inside it — from dpr 1
+        // up, at every cell size from 10 px.
+        for (const [drawn, design] of [
+          [rim.x, designRim.x],
+          [rim.y, designRim.y],
+          [rim.x + rim.w, designRim.x + designRim.w],
+          [rim.y + rim.h, designRim.y + designRim.h],
+        ] as const) {
+          const by = (Math.abs(drawn - design) - half) * k;
+          const most = scale >= 1 ? past.fromOne : past.belowOne;
+          if (by > most.by) Object.assign(most, { by, at });
+          if (scale >= 1 && cellPx >= 10 && by > 1e-9)
+            bad.push(`${at}: the fill ${by}px past the rim`);
+        }
       }
     }
-    expect(worst.margin, worst.at).toBeGreaterThan(0);
-    // At 0.8 and 0.9 the fill's edge lies at most a tenth of a pixel inside the rim's inner
-    // side: a blend of floor into the plate's first pixel too faint to see.
-    expect(past.by, past.at).toBeGreaterThan(0); // (it does happen: 0.075px at 17px, dpr 0.8)
-    expect(past.by, past.at).toBeLessThan(0.1);
+    expect(bad.slice(0, 5), `${bad.length} failures`).toEqual([]);
+    expect(fitted, 'the fit is in play').toBeGreaterThan(0);
+    // Where the footprint ends inside a pixel, the rim's far side stops on the whole pixel
+    // before it, short of its place, and the fill's edge can lie past it: a blend of plate
+    // into the footprint's last pixel, from dpr 1 up only at 9 px cells (0.10 px at dpr
+    // 1.055), and below dpr 1 at 9 to 12 px (0.24 px at 9 px and dpr 0.83; 0.11 at 10 px).
+    expect(past.fromOne.by, past.fromOne.at).toBeLessThan(0.11);
+    expect(past.belowOne.by, past.belowOne.at).toBeGreaterThan(0);
+    expect(past.belowOne.by, past.belowOne.at).toBeLessThan(0.25);
+  });
+
+  it('fits the glow inside the rim only where the drawn rim comes in past it — 9px cells at dpr 1.055, at its worst', () => {
+    // There the footprint ends at 18.99 texels, so the rim's far side, two texels wide,
+    // stops at 18: its inner edge 1.24px inside where the design's halo reaches, and 0.55px
+    // inside the cue's.
+    const unit = artUnit(9);
+    const [cue, halo] = BOOST_ART;
+    if (cue?.kind !== 'circle' || halo?.kind !== 'circle') throw new Error('the glow is rings');
+    const glow = boostArtAt(unit, 1.055);
+    // The halo cannot stay clear of the cue inside it, so it is left out; the cue shrinks
+    // about the head's centre — to 0.92 of its radius, the least any frame needs.
+    expect(glow).toHaveLength(1);
+    const [fit] = glow;
+    if (fit?.kind !== 'circle') throw new Error('the glow is rings');
+    expect([fit.cx, fit.cy, fit.width, fit.minWidthPx, fit.alpha]).toEqual([
+      cue.cx,
+      cue.cy,
+      cue.width,
+      cue.minWidthPx,
+      cue.alpha,
+    ]);
+    expect(fit.r / cue.r).toBeCloseTo(0.9157, 3);
+    // From 16px up it is the design's own glow, at every dpr.
+    for (let step = 0; step <= 440; step++) {
+      const scale = Math.round((0.8 + step * 0.005) * 1000) / 1000;
+      for (const cellPx of [16, 20, 32, 64]) {
+        expect(boostArtAt(artUnit(cellPx), scale), `${cellPx}px at dpr ${scale}`).toBe(BOOST_ART);
+      }
+    }
   });
 });

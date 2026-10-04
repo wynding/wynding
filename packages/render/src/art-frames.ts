@@ -23,7 +23,7 @@ import { creepFillColour, creepRadius, paintCreepSilhouette, isLowHp } from './b
 import { CREEP_SHAPE_VALUES, creepShapeFor, type CreepShape } from './creep-paint';
 import { artBounds } from './art-geometry';
 import type { ArtColourResolver, ArtGraphics } from './art-paint';
-import { alignArtToTexels, type ArtBox, type ArtShape } from './art-ir';
+import { alignArtToTexels, strokeWidthAt, type ArtBox, type ArtShape } from './art-ir';
 import {
   ART_BOX,
   ART_FOOTPRINT,
@@ -252,6 +252,45 @@ export function towerArtFit(sizePx: number): { x: number; y: number; footprintPx
   };
 }
 
+/**
+ * The boost glow as a boosted head's frame draws it, at `unit` CSS px per design unit and
+ * `scale` texels per CSS px: each ring inside the plate's rim AS THE PLATE FRAME DRAWS IT —
+ * on whole texels and inside the footprint, which at small cells brings the rim's far sides
+ * in past the design's place, where the footprint ends inside a pixel. The glow's colour is
+ * gated against the plate, never the rim, and a ring reaching into the rim's texels would
+ * blend the footprint's edge itself. So the cue ring is drawn as designed wherever it fits
+ * and otherwise shrinks about its centre just enough (only at 9 and 10 px cells, to 0.92 of
+ * its radius at the least, where every head still leaves 0.9 of it showing); the fainter
+ * halo shrinks too while it stays clear of the cue, and is left out where it cannot be (at
+ * 9 to 12 px cells, at some dprs). Each ring may meet the rim's inner edge — a texel's —
+ * never cross it.
+ */
+export function boostArtAt(unit: number, scale: number): readonly ArtShape[] {
+  const rim = alignArtToTexels(PLATE_ART, unit, scale, [0, 0], ART_FOOTPRINT).find(
+    (s) => s.stroke === 'rim',
+  );
+  const [cue, halo] = BOOST_ART;
+  if (rim?.kind !== 'rect' || cue?.kind !== 'circle' || halo?.kind !== 'circle') {
+    throw new Error('the glow is two rings inside a rect rim');
+  }
+  const half = strokeWidthAt(rim, unit) / 2;
+  // The room inside the drawn rim, from the glow's centre to its nearest inner edge.
+  const room = Math.min(
+    cue.cx - (rim.x + half),
+    rim.x + rim.w - half - cue.cx,
+    cue.cy - (rim.y + half),
+    rim.y + rim.h - half - cue.cy,
+  );
+  const cueHalf = strokeWidthAt(cue, unit) / 2;
+  const haloHalf = strokeWidthAt(halo, unit) / 2;
+  const cueR = Math.min(cue.r, room - cueHalf);
+  const haloR = Math.min(halo.r, room - haloHalf);
+  if (cueR === cue.r && haloR === halo.r) return BOOST_ART;
+  const fitted: ArtShape[] = [{ ...cue, r: cueR }];
+  if (haloR - haloHalf >= cueR + cueHalf) fitted.push({ ...halo, r: haloR });
+  return fitted;
+}
+
 /** Every tower frame at `cellPx` and `scale` texels per CSS px: the shared plate, and for
  *  every look its head (committed and boosted) and its pending build. Tower frames are
  *  anchored at the footprint's top-left corner. */
@@ -265,10 +304,11 @@ export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
       draw(PAD_ART, colours(pal, 'burst')),
     ),
   ];
+  const glow = boostArtAt(artUnit(cellPx), scale);
   for (const look of TOWER_LOOKS) {
     const head = HEAD_ART[look.mark];
     for (const buffed of [false, true]) {
-      const shapes = buffed ? [...BOOST_ART, ...head.shapes] : head.shapes;
+      const shapes = buffed ? [...glow, ...head.shapes] : head.shapes;
       specs.push(
         artFrame(headLookKey(look, buffed), shapes, cellPx, scale, corner, (draw, _g, pal) =>
           // The glow first, so the head draws over it, as in the frame.

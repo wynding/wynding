@@ -117,11 +117,14 @@ const PLATE_BEVEL: ArtShape = {
 const PLATE_FILL: ArtShape = { kind: 'rect', ...PLATE_RECT, fill: 'plate' };
 
 /** The plate's rim: a rect of its own, so that drawing it crisp moves only the stroke. The
- *  fill's edge, on the rim's design centre line, lies under the moved stroke at every cell
- *  size from dpr 1 up, so no sliver of plate shows past the rim and none of the floor inside
- *  it; below dpr 1, where one CSS px is under a pixel, it can lie up to a tenth of a pixel
- *  inside the rim at 0.8 and 0.9, too faint a blend to see (both swept in
- *  `art-frames.test.ts`). */
+ *  fill's edge, on the rim's design centre line, lies under the moved stroke — so no sliver
+ *  of plate shows past the rim and none of the floor inside it — at every cell size from 10
+ *  px, from dpr 1 up. Where the footprint ends inside a pixel, which stops the rim's far side
+ *  on the whole pixel before it, the edge can lie a fraction of a pixel past the rim, a faint
+ *  blend of plate into the footprint's last pixel: at 9 px cells from dpr 1 up (0.1 px at
+ *  most), and below dpr 1 at 9 to 12 px (0.24 px at 9 px and dpr 0.83; 0.11 at 10 px). Below
+ *  dpr 1 the floor can also show inside the rim's near side at 11 and 12 px, by under 0.04 px
+ *  (all swept at every 0.005 of dpr, `art-frames.test.ts`). */
 const PLATE_RIM: ArtRect = {
   kind: 'rect',
   ...PLATE_RECT,
@@ -133,9 +136,10 @@ const PLATE_RIM: ArtRect = {
 
 /** A committed tower's plate: its soft offset shadow, the slate plate, the bevel along its
  *  top edge, and its rim last, over all three. The rim must be on top: on whole pixels it
- *  can land on the bevel's row (at dpr 1 at cells of 11 to 13 px, and at a few cell sizes up
- *  to 13 px at other dprs), and its colour is the footprint's edge. Shared by every tower
- *  that has a plate. */
+ *  can share pixels with the bevel's top edge at cells of 16 px and under — at dpr 1 at 11
+ *  to 13 px, at 0.9 at 13 and 14, at 0.8 at 15 and 16; never from 17 px, at any dpr from
+ *  0.8 to 3 (`tower-art.test.ts`) — and its colour is the footprint's edge. Shared by every
+ *  tower that has a plate. */
 export const PLATE_ART: readonly ArtShape[] = [PLATE_SHADOW, PLATE_FILL, PLATE_BEVEL, PLATE_RIM];
 
 /** The PAD a plateless tower (the mine) stands on in the plates layer: the plate's own
