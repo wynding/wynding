@@ -1855,15 +1855,19 @@ a.wy-home:focus-visible {
   }
 
   /* "need N" has no line to itself on a tile this small: it rides over the faded art, on a
-     chip of the page colour it is gated against. */
+     chip of the page colour it is gated against. One line wherever it fits, and wrapped
+     inside the tile where heavy text makes it wider than the tile (`max-content`, capped):
+     never past the tile's edge, where it would give the Rail a sideways scroll. */
   .wy-card-need {
     position: absolute;
     top: 14px;
     left: 50%;
+    width: max-content;
+    max-width: calc(100% - 4px);
     padding: 1px 4px;
     font-size: 0.6875rem;
     line-height: 1.2;
-    white-space: nowrap;
+    text-align: center;
     background: var(--wy-bg);
     border-radius: 6px;
     transform: translateX(-50%);
@@ -2881,10 +2885,12 @@ a.wy-home:focus-visible {
     position: absolute;
     top: 14px;
     left: 50%;
+    width: max-content;
+    max-width: calc(100% - 4px);
     padding: 1px 4px;
     font-size: 0.6875rem;
     line-height: 1.2;
-    white-space: nowrap;
+    text-align: center;
     background: var(--wy-bg);
     border-radius: 6px;
     transform: translateX(-50%);
