@@ -36,7 +36,8 @@ import { createProjection, type Projection } from './projection';
 import { placeTowers, type CreepPlacement, type SpritePlacement } from './placement';
 import { createScorchTracker } from './scorches';
 import type { LiveSpark } from './sparks';
-import { ART_FLASH, MUZZLE_FLASH, RECOIL_DEPTH } from './tower-art';
+import { ART_FLASH, FIRE_PULSE_RINGS, MUZZLE_FLASH, RECOIL_DEPTH } from './tower-art';
+import { circlePoints } from './circle-polygon';
 import { AIM_TURN_PER_TICK, aimAngle, createAimTracker } from './tower-aim';
 import { createFireTracker, flashAt } from './tower-fire';
 import { recordingLayer, type Call } from './test-support/recording-graphics';
@@ -663,6 +664,17 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     calls: layer.calls.slice(layer.calls.map((c) => c.method).lastIndexOf('clear')),
   });
 
+  /** The circle a flash's or a ring's polygon (`circle-polygon.ts`) was drawn for: the centre
+   *  its corners balance on, and their distance from it — the same for every corner. */
+  const circleOf = (call: Call): { x: number; y: number; r: number } => {
+    const pts = call.args[0] as { x: number; y: number }[];
+    const x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const r = Math.hypot(pts[0]!.x - x, pts[0]!.y - y);
+    for (const p of pts) expect(Math.hypot(p.x - x, p.y - y)).toBeCloseTo(r, 9);
+    return { x, y, r };
+  };
+
   it('turns an aiming head toward where its target is DRAWN this frame — the interpolated point', () => {
     const { t, draw } = run();
     const basic = tower(2, 'basic', 4, { targetId: 7 });
@@ -712,14 +724,18 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     );
     expect(drawn(lastFrame(t.layers.effects))).toEqual([
       `strokeCircle ${hex(PAL.range)}`, // the selection
-      `fillCircle ${hex(ART_FLASH)}`, // the muzzle flash
+      `fillPoints ${hex(ART_FLASH)}`, // the muzzle flash, a polygon
       `fillCircle ${hex(PAL.tracer)}`, // the tracer
     ]);
-    const flash = lastFrame(t.layers.effects).calls.filter((c) => c.method === 'fillCircle')[0]!;
-    expect(flash.args).toEqual([
-      corner.x + PROJECTION.cellPx,
-      corner.y + PROJECTION.cellPx - MUZZLE_FLASH.reach * unit,
-      MUZZLE_FLASH.r * unit,
+    const flash = circleOf(
+      lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillPoints')!,
+    );
+    expect(flash.x).toBeCloseTo(corner.x + PROJECTION.cellPx, 9);
+    expect(flash.y).toBeCloseTo(corner.y + PROJECTION.cellPx - MUZZLE_FLASH.reach * unit, 9);
+    expect(flash.r).toBeCloseTo(MUZZLE_FLASH.r * unit, 9);
+    expect(lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillStyle')!.args).toEqual([
+      ART_FLASH,
+      MUZZLE_FLASH.alpha,
     ]);
     // Knocked straight down — it faces up — by its whole recoil, still unturned and crisp.
     const head = t.heads.syncs[1]![0]!;
@@ -740,10 +756,28 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     draw(10, 0, [slow], { prev: right, cur: right });
     draw(11, 0, [slow], { prev: right, cur: right }, { tracers: [shotFrom(slow, 11)] });
     expect(drawn(lastFrame(t.layers.effects))).toEqual([
-      `strokeCircle ${hex(PAL.roleControl)}`,
-      `strokeCircle ${hex(PAL.roleControl)}`,
+      `strokePoints ${hex(PAL.roleControl)}`, // the two rings, polygons
+      `strokePoints ${hex(PAL.roleControl)}`,
       `fillCircle ${hex(PAL.tracer)}`,
     ]);
+    // Both about the footprint centre — the snapped corner plus a cell — at their radii.
+    const rings = lastFrame(t.layers.effects)
+      .calls.filter((c) => c.method === 'strokePoints')
+      .map(circleOf);
+    for (const ring of rings) {
+      expect(ring.x).toBeCloseTo(corner.x + PROJECTION.cellPx, 9);
+      expect(ring.y).toBeCloseTo(corner.y + PROJECTION.cellPx, 9);
+    }
+    expect(rings.map((ring) => ring.r)).toEqual(
+      FIRE_PULSE_RINGS.map((ring) => expect.closeTo(ring.r * unit, 9)),
+    );
+    expect(
+      lastFrame(t.layers.effects)
+        .calls.filter((c) => c.method === 'lineStyle')
+        .map((c) => c.args),
+    ).toEqual(
+      FIRE_PULSE_RINGS.map((ring) => [Math.max(1, ring.width * unit), PAL.roleControl, ring.alpha]),
+    );
     expect(t.heads.syncs.map((s) => s[0])).toEqual([atRest(slow), atRest(slow)]);
   });
 
@@ -794,7 +828,7 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     draw(10, 0, [basic], { prev: right, cur: right });
     draw(11, 0.25, [basic], { prev: right, cur: right }, { tracers: [shotFrom(basic, 11)] });
     const before = { head: t.heads.syncs[1]![0], effects: lastFrame(t.layers.effects).calls };
-    expect(drawn({ calls: before.effects })).toContain(`fillCircle ${hex(ART_FLASH)}`);
+    expect(drawn({ calls: before.effects })).toContain(`fillPoints ${hex(ART_FLASH)}`);
     for (let i = 0; i < 5; i++) {
       draw(11, 0.25, [basic], { prev: right, cur: right }, { tracers: [shotFrom(basic, 11)] });
     }
@@ -818,9 +852,11 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     const head = t.heads.syncs[1]![0]!;
     expect(head.rotation).toBeCloseTo(bearing, 12);
     // The flash sits along it, `reach` straight left of the footprint centre ...
-    const flash = lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillCircle')!;
-    expect(flash.args[0]).toBeCloseTo(corner.x + PROJECTION.cellPx - MUZZLE_FLASH.reach * unit, 9);
-    expect(flash.args[1]).toBeCloseTo(corner.y + PROJECTION.cellPx, 9);
+    const flash = circleOf(
+      lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillPoints')!,
+    );
+    expect(flash.x).toBeCloseTo(corner.x + PROJECTION.cellPx - MUZZLE_FLASH.reach * unit, 9);
+    expect(flash.y).toBeCloseTo(corner.y + PROJECTION.cellPx, 9);
     // ... and the head is knocked back along it, to the right.
     const back = snapToDevicePx(RECOIL_DEPTH * unit, PROJECTION.dpr);
     expect(head.x).toBeCloseTo(corner.x + PROJECTION.cellPx + back, 9);
@@ -832,7 +868,7 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(t.heads.syncs[2]![0]!.rotation).toBeCloseTo(bearing - AIM_TURN_PER_TICK, 12);
   });
 
-  it('draws each planned op as planned: a flash at its alpha and radius, a ring at its width, alpha and radius', () => {
+  it('draws each planned op as planned: a flash at its alpha and radius, a ring at its width, alpha and radius — each a polygon', () => {
     const g = recordingLayer();
     drawFireFeedback(g, [
       { kind: 'flash', x: 10, y: 20, r: 4.5, colour: ART_FLASH, alpha: 0.5 },
@@ -840,10 +876,15 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     ]);
     expect(g.calls).toEqual([
       { method: 'fillStyle', args: [ART_FLASH, 0.5] },
-      { method: 'fillCircle', args: [10, 20, 4.5] },
+      { method: 'fillPoints', args: [circlePoints(10, 20, 4.5), true] },
       { method: 'lineStyle', args: [2.6, PAL.roleControl, 0.25] },
-      { method: 'strokeCircle', args: [30, 40, 24] },
+      { method: 'strokePoints', args: [circlePoints(30, 40, 24), false, true] },
     ]);
+    // The polygons are the ops' circles: centred where planned, at the radius planned.
+    const flash = circleOf(g.calls[1]!);
+    const ring = circleOf(g.calls[3]!);
+    expect([flash.x, flash.y, flash.r].map((v) => +v.toFixed(9))).toEqual([10, 20, 4.5]);
+    expect([ring.x, ring.y, ring.r].map((v) => +v.toFixed(9))).toEqual([30, 40, 24]);
   });
 
   it('a head released from Reduce motion sweeps from facing up — the frame hands the aim tracker Reduce motion', () => {
@@ -880,7 +921,7 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
       ART_FLASH,
       MUZZLE_FLASH.alpha * k,
     ]);
-    expect(calls.find((c) => c.method === 'fillCircle')!.args[2]).toBeCloseTo(
+    expect(circleOf(calls.find((c) => c.method === 'fillPoints')!).r).toBeCloseTo(
       (MUZZLE_FLASH.fadeR + (MUZZLE_FLASH.r - MUZZLE_FLASH.fadeR) * k) * unit,
       9,
     );

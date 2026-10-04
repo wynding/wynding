@@ -23,6 +23,7 @@ import {
   visibleTowers,
   type GraphicsLike,
 } from './board-draw';
+import { fillCircleAsPolygon, strokeCircleAsPolygon, type PolygonGraphics } from './circle-polygon';
 import { snapToDevicePx } from './device-px';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
@@ -47,9 +48,10 @@ import { positionTracers, renderTimeOf, tracerPaintOps } from './tracers';
 import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
 
 /** A live layer: a `Graphics` that is cleared and re-recorded every frame. Wider than
- *  `GraphicsLike` by what only per-frame drawing uses — kept off `GraphicsLike` itself, which
- *  the bake's Canvas2D adapter and the web app's swatch implement. */
-export interface LayerGraphics extends GraphicsLike {
+ *  `GraphicsLike` by what only per-frame drawing uses — clearing, the outline rectangle and the
+ *  closed polygon a small circle is stroked as (`circle-polygon.ts`) — kept off `GraphicsLike`
+ *  itself, which the bake's Canvas2D adapter and the web app's swatch implement. */
+export interface LayerGraphics extends GraphicsLike, PolygonGraphics {
   clear(): unknown;
   strokeRect(x: number, y: number, width: number, height: number): unknown;
 }
@@ -270,15 +272,19 @@ export function resetBoardFrame(t: BoardTargets, state: BoardFrameTrackers): voi
 
 /** A tower's shot, shown (T3): a thin executor of `fireFeedbackPaintOps`' plan, whose content
  *  and reduced-motion gate are tested against the plan itself (`tower-fire.test.ts`) — a
- *  muzzle flash is a filled disc, a pulse ring a stroked circle. */
-export function drawFireFeedback(g: GraphicsLike, ops: readonly FireFeedbackOp[]): void {
+ *  muzzle flash is a filled disc, a pulse ring a stroked circle, each drawn as a polygon
+ *  (`circle-polygon.ts`: Phaser would draw either as a 101-point arc). */
+export function drawFireFeedback(
+  g: Pick<LayerGraphics, 'fillStyle' | 'lineStyle' | 'fillPoints' | 'strokePoints'>,
+  ops: readonly FireFeedbackOp[],
+): void {
   for (const op of ops) {
     if (op.kind === 'flash') {
       g.fillStyle(op.colour, op.alpha);
-      g.fillCircle(op.x, op.y, op.r);
+      fillCircleAsPolygon(g, op.x, op.y, op.r);
     } else {
       g.lineStyle(op.width, op.colour, op.alpha);
-      g.strokeCircle(op.x, op.y, op.r);
+      strokeCircleAsPolygon(g, op.x, op.y, op.r);
     }
   }
 }
