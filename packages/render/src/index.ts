@@ -24,6 +24,9 @@ export type { TowerFootprintMark, TowerRole, TowerLook } from './tower-paint';
 export { artGraphics } from './art-paint';
 export type { ArtGraphics, ArtCanvas2DLike, PathFactory } from './art-paint';
 export { paintTowerArt, towerArtFit } from './art-frames';
+// The backing store a canvas needs to be shown pixel for pixel — a Card swatch's as the board's.
+export { backingStoreSize, devicePixelReport, observesDevicePixels } from './device-px';
+export type { DevicePixelReport } from './device-px';
 export type { GraphicsLike } from './board-draw';
 export type {
   CreepVM,

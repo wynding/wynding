@@ -31,7 +31,12 @@ import {
   resetBoardFrame,
   type BoardTargets,
 } from './board-frame';
-import { snappedSpan } from './device-px';
+import {
+  backingStoreSize,
+  devicePixelReport,
+  observesDevicePixels,
+  type DevicePixelReport,
+} from './device-px';
 import { layerDepth } from './layers';
 import type { RenderVM, RenderOverlay, RenderHandle } from './types';
 
@@ -91,26 +96,35 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // The canvas's CSS box stays the element's rect, as hidpi.spec.ts pins it, and its backing
   // store is exactly the device pixels the browser draws that box into. The browser snaps the
   // box to whole device pixels, and how many it covers depends on where the box sits, not
-  // only on its size (`snappedSpan`): at 525×320 the board sits at x = 52.5 with w = 328.5,
-  // so it covers 328 device pixels, where round(328.5 × dpr) is 329. A backing store of any
-  // other size is scaled into the box, which smears every one-pixel line of the baked art
-  // across two at about half its contrast: sized by round(rect × dpr), the plate rim measured
-  // as low as 1.88:1 against its colour's 4.08:1 (#181). Matched, the canvas is shown pixel
-  // for pixel wherever the browser lays the page out in device pixels — measured on screen at
-  // dpr 1 and at a real device scale of 0.9 and 0.8 (plate-rim.spec.ts); past the clamp (a
-  // raw dpr over 2) it is scaled up by design. (Chromium's device-scale EMULATION,
-  // Playwright's `deviceScaleFactor`, lays the page out in CSS px and scales its picture
-  // instead, so at a fractional dpr it resamples the canvas whatever its size.) World (0, 0)
-  // lands on the device pixel the box's left edge snaps to, at most half a pixel from its CSS
-  // position, as it did when the store was scaled into the box.
+  // only on its size: at 525×320 the board sits at x = 52.5 with w = 328.5, so it covers 328
+  // device pixels, where round(328.5 × dpr) is 329. A backing store of any other size is
+  // scaled into the box, which smears every one-pixel line of the baked art across two at
+  // about half its contrast: sized by round(rect × dpr), the plate rim measured as low as
+  // 1.88:1 against its colour's 4.08:1 (#181). Matched, the canvas is shown pixel for pixel
+  // wherever the browser lays the page out in device pixels — at a real device scale or a
+  // browser zoom (plate-rim.spec.ts measures the first on screen); past the clamp (a raw dpr
+  // over 2) it is scaled up by design. (Chromium's device-scale EMULATION, Playwright's
+  // `deviceScaleFactor`, lays the page out in CSS px and scales its picture instead, so at
+  // any scale but 1 — a whole one too — it resamples the canvas, whatever its size, wherever
+  // the box is not on whole CSS px.) World (0, 0) lands on the device pixel the box's left
+  // edge snaps to, at most half a pixel from its CSS position, as it did when the store was
+  // scaled into the box.
   //
-  // Because that count depends on the box's position, it is re-read on every sync, and the
-  // canvas is reallocated only when it, the CSS size or the dpr changes. The board fills its
-  // Stage, so a window resize that moves it also resizes it (from 482 to 635 px wide at 320
-  // tall, none moved it alone — plate-rim.spec.ts), and the ResizeObserver's sync re-reads
-  // where it sits; a move with no resize would keep the last count until the next sync.
+  // The count is the browser's own where it gives one: a `device-pixel-content-box` observer
+  // on the canvas (Chromium, Firefox) reports it, and again whenever it changes — after a
+  // move that changes it, too, which no size observer sees. Elsewhere (WebKit), and past the
+  // clamp, it is worked out from where the box sits (`backingStoreSize`), re-read on every
+  // sync; there a move with no resize keeps the last count until the next sync. The canvas is
+  // reallocated only when the count, the CSS size or the dpr changes.
+  let devicePixels: DevicePixelReport | null = null;
+  let devicePixelObserver: ResizeObserver | null = null;
   let applied = { width: 0, height: 0, cssWidth: -1, cssHeight: -1, dpr: -1 };
-  const applyBackingStoreSize = (cssWidth: number, cssHeight: number, dpr: number): void => {
+  const applyBackingStoreSize = (
+    cssWidth: number,
+    cssHeight: number,
+    dpr: number,
+    rawDpr: number,
+  ): void => {
     const scene = game.scene.scenes[0];
     if (scene === undefined) return;
     // Take the canvas out of normal flow: a normal-flow canvas whose CSS size we set can make
@@ -125,8 +139,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     canvas.style.width = `${cssWidth}px`;
     canvas.style.height = `${cssHeight}px`;
     const box = canvas.getBoundingClientRect(); // where the canvas sits now
-    const width = Math.max(1, snappedSpan(box.left, box.width, dpr));
-    const height = Math.max(1, snappedSpan(box.top, box.height, dpr));
+    const { width, height } = backingStoreSize(box, dpr, rawDpr, devicePixels);
     if (
       width === applied.width &&
       height === applied.height &&
@@ -176,7 +189,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     // On every sync, not only when the CSS size changes: the device pixels the box covers
     // depend on where it sits too (`applyBackingStoreSize`, which does nothing if they and
     // the size are unchanged).
-    if (targets !== null) applyBackingStoreSize(rect.width, rect.height, dpr);
+    if (targets !== null) applyBackingStoreSize(rect.width, rect.height, dpr, rawDpr);
   };
 
   // Scale.NONE (not RESIZE, #28/P5): RESIZE auto-stretches the canvas' CSS AND backing
@@ -286,6 +299,17 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     if (typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => syncProjection());
       resizeObserver.observe(el); // rebuild only on actual size changes — no per-frame reflow
+      if (observesDevicePixels(window)) {
+        // The browser's own count of the device pixels the canvas is drawn into, reported
+        // again whenever it changes (`applyBackingStoreSize`).
+        devicePixelObserver = new ResizeObserver((entries) => {
+          const entry = entries[entries.length - 1];
+          if (entry === undefined) return;
+          devicePixels = devicePixelReport(entry, window.devicePixelRatio || 1);
+          syncProjection();
+        });
+        devicePixelObserver.observe(game.canvas, { box: 'device-pixel-content-box' });
+      }
     }
   });
 
@@ -330,6 +354,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     destroy(): void {
       sparks.clear();
       resizeObserver?.disconnect();
+      devicePixelObserver?.disconnect();
       dprTracker?.destroy();
       // Free the bake's canvases once Phaser has torn down, not before: its destroy runs at
       // its next step, and a Canvas-renderer fallback draws straight from them until then.
