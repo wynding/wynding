@@ -13,7 +13,8 @@
 // per-object loop in Phaser's render would slow down for all of them. A trace measured it when
 // heads began to turn (ADR 0005, the T3 entry): Phaser's visibility filter took about three
 // times as long, and drawing its images half as long again. Flip is never set, on any sprite.
-// This rests on where Phaser keeps those defaults, so a Phaser upgrade could change it.
+// This rests on where Phaser 3.90 keeps those defaults, so a Phaser upgrade could change it:
+// `sprite-pool.test.ts` fails on any other Phaser release until this is re-checked.
 
 import type { SpritePlacement } from './placement';
 

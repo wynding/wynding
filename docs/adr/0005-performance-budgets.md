@@ -1308,16 +1308,19 @@ cost; untraced runs are what size it.
 - Every pooled sprite has one shape from birth (`533fbf7`). The pool gives each new sprite its
   alpha, origin, rotation and visibility at once, in one order, even at their defaults, so every
   sprite owns the same fields and Phaser's loops meet one shape again. A reused sprite is still
-  given each only when it changed. This rests on where Phaser keeps those defaults, so a Phaser
-  upgrade could change it; `sprite-pool.ts` says so beside the code.
+  given each only when it changed. This rests on where Phaser v3.90 keeps those defaults, so a
+  Phaser upgrade could change it: `sprite-pool.ts` says so beside the code, and a render test fails
+  on any other Phaser release until this is re-checked.
 - The muzzle flash and the pulse rings are polygons (`7bd3183`,
   `packages/render/src/circle-polygon.ts`). Phaser draws every circle as a hundred and one points
   whatever its radius (`GraphicsWebGLRenderer` steps round it a hundredth of a turn at a time):
   earcut triangulates a filled one over all of them, and a stroked one becomes a hundred line quads.
   A regular polygon with enough sides that none is longer than three CSS pixels, from twelve for the
   smallest circles up to twenty-four, costs a fraction of that. Below twenty-four sides it is within
-  a fifth of a CSS pixel of its circle, and at twenty-four within 1% of its radius: under a quarter
-  of a pixel for a pulse ring at desktop cell size, where a flash has thirteen sides.
+  a fifth of a CSS pixel of its circle, and at twenty-four within 1% of its radius. For a pulse
+  ring, that 1% is under a quarter of a pixel at the cell size a 1440×900 window plays at,
+  thirty-three pixels, and at any smaller cell; at larger cells it grows with the ring, to just
+  under half a pixel at sixty-pixel cells. A flash at thirty-three-pixel cells has thirteen sides.
 
 **After (QC round 2, the code of `3d83684`).** Four runs of the record-only suite, gated, one
 worker, on AC power with the gate's fast policy throughout, alternating the head and T3 off
