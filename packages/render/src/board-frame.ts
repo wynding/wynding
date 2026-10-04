@@ -205,7 +205,9 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   const shots = input.fire.update({
     tracers: overlay.tracers,
     towers: curVm.towers,
+    creeps: drawnAt,
     renderTick: renderTimeTicks,
+    reducedMotion: overlay.reducedMotion,
   });
   input.aim.update({
     towers: curVm.towers,

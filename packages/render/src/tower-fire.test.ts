@@ -83,10 +83,16 @@ const detonation = (t: TowerVM, launchTick: number): TracerVM => ({
   impactTick: launchTick + 1,
 });
 
+/** Where creep 99, every `shot`'s target, is drawn: a frame draws it unless it says not. */
+const DRAWN = new Map([[99, { x: 0, y: 0 }]]);
+const NONE_DRAWN = new Map<number, { x: number; y: number }>();
+
 const frame = (over: Partial<FireFrame>): FireFrame => ({
   tracers: [],
   towers: [],
+  creeps: DRAWN,
   renderTick: 0,
+  reducedMotion: false,
   ...over,
 });
 
@@ -308,6 +314,128 @@ describe('createFireTracker — which tower fired', () => {
     expect(fire.sinceFired(1)).toBeNull();
     fire.update(frame({ towers: [basic], tracers: flight, renderTick: 11 }));
     expect(fire.sinceFired(1)).toBe(0);
+  });
+
+  it('under Reduce motion takes a shot in without showing it: released inside its feedback, it still shows nothing', () => {
+    const fire = createFireTracker();
+    const flight = [shot(basic, 10)];
+    expect(
+      fire.update(frame({ towers: [basic], tracers: flight, renderTick: 10, reducedMotion: true })),
+    ).toEqual([]);
+    expect(fire.sinceFired(1)).toBeNull();
+    // Released half a tick later, while the shot's recoil and flash would still be playing.
+    expect(fire.update(frame({ towers: [basic], tracers: flight, renderTick: 10.5 }))).toEqual([]);
+    expect(fire.sinceFired(1)).toBeNull();
+  });
+
+  it('Reduce motion switched on part-way through a shot forgets it: nothing stale shows on release', () => {
+    const fire = createFireTracker();
+    const flight = [shot(basic, 10)];
+    fire.update(frame({ towers: [basic], tracers: flight, renderTick: 10 }));
+    expect(fire.sinceFired(1)).toBe(0);
+    fire.update(frame({ towers: [basic], tracers: flight, renderTick: 10.5, reducedMotion: true }));
+    expect(fire.sinceFired(1)).toBeNull();
+    // Released inside the shot's feedback: no recoil or flash along a head just reset to 0.
+    fire.update(frame({ towers: [basic], tracers: flight, renderTick: 11 }));
+    expect(fire.sinceFired(1)).toBeNull();
+  });
+
+  it('an aiming head’s shot at a creep no longer drawn shows nothing — no tracer, no flash, no recoil — while a pulse and a blast still show', () => {
+    const fire = createFireTracker();
+    const lost = shot(basic, 10); // at creep 99, not drawn when the shot is first seen
+    expect(
+      fire.update(
+        frame({ towers: [basic, slow], tracers: [lost], creeps: NONE_DRAWN, renderTick: 10 }),
+      ),
+    ).toEqual([]);
+    expect(fire.sinceFired(1)).toBeNull();
+    // Taken in all the same: drawn again a frame later, the creep brings no late flash.
+    expect(
+      fire.update(frame({ towers: [basic, slow], tracers: [lost], renderTick: 10.5 })),
+    ).toEqual([]);
+    expect(fire.sinceFired(1)).toBeNull();
+    // A head that does not aim pulses about its centre, whatever its shot was at.
+    const pulse = shot(slow, 12);
+    expect(
+      fire.update(
+        frame({ towers: [basic, slow], tracers: [pulse], creeps: NONE_DRAWN, renderTick: 12 }),
+      ),
+    ).toEqual([{ tower: slow, tracer: pulse }]);
+    // And an aiming head's blast faces where it will land: no creep needs to be drawn.
+    const blast = lob(basic, 13);
+    expect(
+      fire.update(
+        frame({ towers: [basic, slow], tracers: [blast], creeps: NONE_DRAWN, renderTick: 13 }),
+      ),
+    ).toEqual([{ tower: basic, tracer: blast }]);
+  });
+
+  it('a pause that catches a shot part-way holds it there: a repeated render time neither restarts it nor hands it back', () => {
+    const fire = createFireTracker();
+    const flight = [shot(basic, 10, 6)];
+    expect(fire.update(frame({ towers: [basic], tracers: flight, renderTick: 10 }))).toHaveLength(
+      1,
+    );
+    fire.update(frame({ towers: [basic], tracers: flight, renderTick: 11 }));
+    for (let i = 0; i < 3; i++) {
+      expect(fire.update(frame({ towers: [basic], tracers: flight, renderTick: 11 }))).toEqual([]);
+      expect(fire.sinceFired(1)).toBe(1);
+    }
+  });
+
+  it('render time running backwards starts over: the next run’s shots show, though launched no later than the last run’s', () => {
+    const fire = createFireTracker();
+    fire.update(frame({ towers: [basic], tracers: [shot(basic, 40)], renderTick: 40 }));
+    const again = shot(basic, 7);
+    expect(fire.update(frame({ towers: [basic], tracers: [again], renderTick: 7.5 }))).toEqual([
+      { tower: basic, tracer: again },
+    ]);
+    expect(fire.sinceFired(1)).toBe(0);
+  });
+
+  it('tells apart two towers in one column: a shot is its own tower’s, matched on both axes', () => {
+    const fire = createFireTracker();
+    const upper = tower(1, 'basic', 2, 2);
+    const lower = tower(2, 'basic', 2, 6);
+    const s = shot(lower, 10);
+    expect(fire.update(frame({ towers: [upper, lower], tracers: [s], renderTick: 10 }))).toEqual([
+      { tower: lower, tracer: s },
+    ]);
+    expect(fire.sinceFired(1)).toBeNull();
+    expect(fire.sinceFired(2)).toBe(0);
+  });
+
+  it('a shot first listed with no tower at its origin is still taken in: a tower built there while it flies did not fire it', () => {
+    const fire = createFireTracker();
+    const flight = [shot(basic, 10, 8)];
+    expect(fire.update(frame({ towers: [], tracers: flight, renderTick: 10.5 }))).toEqual([]);
+    const rebuilt = { ...basic, id: 5 };
+    expect(fire.update(frame({ towers: [rebuilt], tracers: flight, renderTick: 11 }))).toEqual([]);
+    expect(fire.sinceFired(5)).toBeNull();
+  });
+
+  it('forgets a tower sold inside its feedback, and keeps the one still standing', () => {
+    const fire = createFireTracker();
+    fire.update(
+      frame({
+        towers: [basic, slow],
+        tracers: [shot(basic, 10), shot(slow, 10)],
+        renderTick: 10,
+      }),
+    );
+    fire.update(frame({ towers: [slow], renderTick: 10.5 }));
+    expect(fire.sinceFired(1)).toBeNull();
+    expect(fire.sinceFired(2)).toBe(0.5);
+  });
+
+  it('takes in the latest launch tick of a frame’s shots, whatever order they are listed in', () => {
+    const fire = createFireTracker();
+    const listed = [shot(basic, 12), shot(slow, 11, 6)];
+    fire.update(frame({ towers: [basic, slow], tracers: listed, renderTick: 12.25 }));
+    expect(fire.update(frame({ towers: [basic, slow], tracers: listed, renderTick: 13 }))).toEqual(
+      [],
+    );
+    expect(fire.sinceFired(1)).toBe(0.75);
   });
 });
 

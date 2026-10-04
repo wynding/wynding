@@ -12,11 +12,14 @@
 // is how the board shows it. Each shot counts once, and one first seen after its feedback would
 // already be over shows nothing. "Seen already" needs no record of each shot: the controller
 // lists every shot a sim tick fires together, from the first frame after that tick until each
-// lands (`apps/web/src/controller.ts`), so a shot launched no later than the latest launch tick
-// taken in has been taken in already — or was never listed and never will be. A shot whose
-// whole flight falls between two frames (a two-tick flight, at 2× speed, on a frame slower
-// than 50 ms) is never listed, and shows nothing: this is decoration, and the impact spark
-// still lands.
+// lands (`apps/web/src/controller.ts`; `controller.test.ts`'s "lists every shot a tick fires
+// together" pins it), so a shot launched no later than the latest launch tick taken in has
+// been taken in already — or was never listed and never will be. A shot whose whole flight
+// falls between two frames (a two-tick flight, at 2× speed, on a frame slower than 50 ms) is
+// never listed, and shows nothing: this is decoration, and the impact spark still lands. Nor
+// does an aiming head's shot at a creep no longer drawn when the shot is first seen (a frame
+// that caught up on several ticks): it has no tracer to draw and no bearing to turn onto, so it
+// is taken in and shows no flash and no recoil.
 //
 // FEEDBACK, per the style frame's firing state: an aiming head (`towerAims`) is knocked back
 // along its facing and flashes at its muzzle; a head that does not aim (slow, splash,
@@ -34,7 +37,9 @@
 // tower: the closest is antiair, every 15 ticks, at 2×, 1025 ms. A faster tower or a faster
 // speed fails it.
 //
-// REDUCE MOTION draws none of it: no recoil, no flash and no pulse.
+// REDUCE MOTION draws none of it: no recoil, no flash and no pulse. A shot first seen under it
+// is taken in and never shown, and one still playing when it is switched on is forgotten, so
+// switching it off shows nothing stale: no recoil or flash along a head just reset to face up.
 //
 // COST: this runs every frame, over every tracer in flight. In steady state a frame allocates
 // nothing: a tracer already taken in is passed over on its launch tick alone, only a new
@@ -115,8 +120,12 @@ export interface FireFrame {
   readonly tracers: readonly TracerVM[];
   /** The towers the sim holds this frame (`curVm.towers`). */
   readonly towers: readonly TowerVM[];
+  /** Where each creep is drawn this frame, by entity id — the map the tracers converge on and
+   *  the heads turn toward (`AimFrame.creeps`). Only whether a shot's creep is in it is read. */
+  readonly creeps: ReadonlyMap<number, { readonly x: number; readonly y: number }>;
   /** Render time, in fractional ticks (`renderTimeOf`). */
   readonly renderTick: number;
+  readonly reducedMotion: boolean;
 }
 
 /** A shot first seen this frame: the tower that fired it, and its tracer. */
@@ -155,7 +164,7 @@ export function createFireTracker(): FireTracker {
   /** The shots first seen by the latest update — one list, refilled each frame. */
   const shots: ShotSeen[] = [];
   return {
-    update({ tracers, towers, renderTick }) {
+    update({ tracers, towers, creeps, renderTick, reducedMotion }) {
       // Render time never runs backwards within a run: a frame earlier than the last is a run
       // gone by, and nothing it noted stands.
       if (renderTick < now) {
@@ -164,14 +173,20 @@ export function createFireTracker(): FireTracker {
       }
       now = renderTick;
       shots.length = 0;
+      // Under Reduce motion nothing shows now, so nothing is kept to show stale on release.
+      if (reducedMotion) fired.clear();
       let latest = takenThrough;
       for (const t of tracers) {
         // Taken in already — or a mine going off, which its scorch shows.
         if (t.launchTick <= takenThrough || isDetonation(t)) continue;
         if (t.launchTick > latest) latest = t.launchTick;
         if (renderTick - t.launchTick >= FIRE_FEEDBACK_TICKS) continue; // over before it showed
+        if (reducedMotion) continue; // taken in, and never shown
         const tower = towerAt(towers, t.originX, t.originY);
         if (tower === undefined) continue; // no tower's shot — or one already sold
+        // An aiming head's shot at a creep no longer drawn has no tracer and no bearing to turn
+        // onto: it shows nothing, rather than a flash along wherever the head happens to face.
+        if (t.kind === 'targeted' && !creeps.has(t.targetId) && towerAims(tower.towerId)) continue;
         fired.set(tower.id, renderTick);
         shots.push({ tower, tracer: t });
       }

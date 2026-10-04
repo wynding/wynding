@@ -276,6 +276,39 @@ describe('createAimTracker', () => {
     aim.update(frame({ towers: [t], creeps, renderTick: 900 }));
     expect(aim.angleOf(1)).toBe(0);
   });
+
+  it('keeps each aiming head on its own target, and selling one leaves the others where they point', () => {
+    const aim = createAimTracker();
+    const east = tower(1, 'basic', { targetId: 9 }); // centre (5, 5)
+    const slow = tower(3, 'slow', { col: 7, targetId: 9 }); // does not aim
+    const west = tower(2, 'venom', { col: 10, targetId: 8 }); // centre (11, 5)
+    const creeps = new Map([
+      [9, { x: 7 * FP_ONE, y: 5 * FP_ONE }], // right of east
+      [8, { x: 9 * FP_ONE, y: 5 * FP_ONE }], // left of west
+    ]);
+    aim.update(frame({ towers: [east, slow, west], creeps, renderTick: 0 }));
+    aim.update(frame({ towers: [east, slow, west], creeps, renderTick: 50 }));
+    expect(aim.angleOf(1)).toBeCloseTo(PI / 2, 12);
+    expect(aim.angleOf(2)).toBeCloseTo(-PI / 2, 12);
+    aim.update(frame({ towers: [slow, west], creeps, renderTick: 51 })); // east sold
+    expect(aim.angleOf(1)).toBe(0);
+    expect(aim.angleOf(2)).toBeCloseTo(-PI / 2, 12);
+  });
+
+  it('Reduce motion switched on and off while paused holds a head at 0, and releases it to sweep from 0', () => {
+    const aim = createAimTracker();
+    const t = tower(1, 'basic', { targetId: 9 });
+    const creeps = new Map([[9, at(1, 0)]]);
+    aim.update(frame({ towers: [t], creeps, renderTick: 0 }));
+    aim.update(frame({ towers: [t], creeps, renderTick: 50 }));
+    expect(aim.angleOf(1)).toBeCloseTo(PI / 2, 12);
+    aim.update(frame({ towers: [t], creeps, renderTick: 50, reducedMotion: true }));
+    expect(aim.angleOf(1)).toBe(0);
+    aim.update(frame({ towers: [t], creeps, renderTick: 50 })); // released, still paused
+    expect(aim.angleOf(1)).toBe(0);
+    aim.update(frame({ towers: [t], creeps, renderTick: 51 }));
+    expect(aim.angleOf(1)).toBeCloseTo(AIM_TURN_PER_TICK, 12);
+  });
 });
 
 describe('createAimTracker — a shot turns its head onto the shot’s bearing at once', () => {

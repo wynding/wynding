@@ -31,7 +31,8 @@
 //
 // COST: this runs every frame for every tower, so each head's state is kept and updated in
 // place — a frame allocates nothing for the heads it already knows — and a frame whose render
-// time has not moved (a paused game) turns nothing and computes nothing.
+// time has not moved (a paused game) turns nothing: it still walks every tower to keep it
+// marked as seen, and skips only the angle maths.
 
 import { FP_ONE } from '@wynding/engine';
 import { towerAims } from './art-frames';
