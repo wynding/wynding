@@ -442,8 +442,11 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
   // It is now exactly what the Panel covers (ui.css `.wy-rail-panel-pinned`).
   //
   // With no tower armed the guarantee also holds at DOUBLED text zoom. Armed at doubled zoom
-  // nothing is claimed: Cards are ~189px tall against ~121px of room above the Panel — the
-  // pre-existing S12a geometry.
+  // it holds too since #181 (L2) with no inset, where it was the S12a geometry nothing could
+  // be claimed for — a ~189px Card against ~121px of room above the Panel: the phone rail's
+  // Card is 68px there. With a 24px inset nothing is claimed: the room between the bar and
+  // the Panel's fade band is then a little under a Card (measured: a parked Card's bottom at
+  // 98.0px against the band's top at 97.6px).
   //
   // The unarmed walk at default text size and NO inset moved to doubled zoom with #181 (L2):
   // its premise is a Rail that scrolls, and at 658×320 the phone rail no longer does — all nine
@@ -455,6 +458,7 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
     { armed: false, zoom: 100, insets: [TOP] },
     { armed: true, zoom: 100, insets: [0, TOP] },
     { armed: false, zoom: 200, insets: [0, TOP] },
+    { armed: true, zoom: 200, insets: [0] },
   ];
   for (const { armed, zoom, insets } of WALKS) {
     for (const inset of insets) {
@@ -479,7 +483,9 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   //
   // Walked at the issue's 640x560 and at 360x640 (Standard by height, with the narrow Rail
   // that PINS an armed Panel), at 1000x720 (a wide Rail, whose armed Panel stays in flow) and
-  // at 1440x900 (the two-column Rail, which overflows only at doubled text zoom).
+  // on the two-column Rail, which overflows only at doubled text zoom — and since #181's
+  // shorter Cards only low in its band (doubled text fits at 1440x900), so it is walked at
+  // 1440x560.
   //
   // Standard's Rail pays NO top inset of its own: it sits below `.wy-status`, which already
   // does. Two checks hold that. The 24px walks bound each ring from below by the larger of
@@ -487,10 +493,12 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   // through the walk's parked-Card bound, which a reserve paying the inset again fails. The
   // at-rest test below catches the same inset leaking into the Rail's padding instead.
   //
-  // Armed at doubled text zoom with the Panel pinned nothing is claimed, as in Compact: at
-  // 640x560 Cards are 189-226px tall against ~160px of room above the Panel.
+  // Armed at doubled text zoom with the Panel pinned it holds too since #181 (L2), at both
+  // insets (the status row pays the inset here, so the Rail keeps its height): at 640x560 the
+  // narrow Rail's icon-form Cards are 68px there, where they were 189-226px against ~160px
+  // of room above the Panel and nothing could be claimed.
   const STANDARD_TALL = { width: 360, height: 640 }; // portrait phone, Standard by height
-  const TWO_COLUMN = { width: 1440, height: 900 };
+  const TWO_COLUMN = { width: 1440, height: 560 };
   // The unarmed 100% walk needs a Rail that SCROLLS far enough for a Shift+Tab stop to park a
   // Card at its top bound — or the top-reserve assertion checks only Infinity. At 1000×720 it
   // did while #101's reserved hud row held the status row at 248px; since #181's one-line
@@ -509,13 +517,17 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
     // 640x560 unarmed at default text size is no longer walked (#181 L2): its 144px Rail now
     // carries the icon-form Cards two to a row, which fit with room to spare, so there is no
     // scroll for a walk to exercise — compact.spec.ts's at-rest test asserts all nine on
-    // screen there instead. Its two walks moved where a Rail of the same width still scrolls
-    // unarmed: doubled zoom here, and the 24px inset to the narrow portrait Rail as well.
+    // screen there instead. Its two walks moved where the Rail still scrolls unarmed: the
+    // same Rail at doubled zoom, and the wide Rail at 1000x524 for the 24px inset at default
+    // size. Not the narrow portrait Rail: with that inset it scrolls 120px at 360x640, and no
+    // Shift+Tab stop there parks a Card at its top bound (the closest scrolled stop measured
+    // 7px below it), so the walk's parked-Card bound cannot be met whatever the reserve.
     { view: TABLET, armed: true, pinned: true, zoom: 100, insets: [0, TOP] },
+    { view: TABLET, armed: true, pinned: true, zoom: 200, insets: [0, TOP] },
     { view: TABLET, armed: false, pinned: false, zoom: 200, insets: [0, TOP] },
-    { view: STANDARD_TALL, armed: false, pinned: false, zoom: 100, insets: [0, TOP] },
+    { view: STANDARD_TALL, armed: false, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD_TALL, armed: true, pinned: true, zoom: 100, insets: [0] },
-    { view: STANDARD_SHORT, armed: false, pinned: false, zoom: 100, insets: [0] },
+    { view: STANDARD_SHORT, armed: false, pinned: false, zoom: 100, insets: [0, TOP] },
     { view: STANDARD, armed: true, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD, armed: false, pinned: false, zoom: 200, insets: [0] },
     { view: TWO_COLUMN, armed: false, pinned: false, zoom: 200, insets: [0] },

@@ -257,6 +257,72 @@ test.describe('#181 H3: the Panel docked below the Cards', () => {
   });
 });
 
+test.describe('#181 L2: a narrow Rail never scrolls sideways', () => {
+  // Before #181 the Rail scrolled SIDEWAYS on every portrait phone — 15-34px of range at
+  // default text and 101-120px at 200% (320×568, 360×640, 390×844), measured. The icon-form
+  // Cards fixed default text; at 200% their bare 3.5rem tile minimum (112px) was still wider
+  // than those Rails (58-77px of content) and left 19-38px, until the minimum was capped at
+  // the Rail's own content box (`ui.css`). Read at rest, Panel closed, at both text sizes.
+  const sideways = (page: Page) =>
+    page.evaluate(() => {
+      const rail = document.querySelector('.wy-rail') as HTMLElement;
+      const cs = getComputedStyle(rail);
+      const left = rail.getBoundingClientRect().left + rail.clientLeft;
+      const contentLeft = left + parseFloat(cs.paddingLeft);
+      const contentRight = left + rail.clientWidth - parseFloat(cs.paddingRight);
+      const cards = [...document.querySelectorAll('.wy-card')].map((c) =>
+        c.getBoundingClientRect(),
+      );
+      const chips = [...document.querySelectorAll('.wy-card--short')].map((card) => {
+        const cb = card.getBoundingClientRect();
+        const nb = (card.querySelector('.wy-card-need') as HTMLElement).getBoundingClientRect();
+        return nb.left >= cb.left - 0.5 && nb.right <= cb.right + 0.5;
+      });
+      return {
+        range: rail.scrollWidth - rail.clientWidth,
+        cardsOutside: cards.filter(
+          (b) => b.left < contentLeft - 0.5 || b.right > contentRight + 0.5,
+        ).length,
+        narrowest: Math.min(...cards.map((b) => b.width)),
+        chipsShown: chips.length,
+        chipsInside: chips.every(Boolean),
+      };
+    });
+
+  for (const [w, h] of [
+    [320, 568],
+    [360, 640],
+    [390, 844],
+    [568, 320],
+    [658, 320],
+  ] as const) {
+    for (const zoom of [100, 200] as const) {
+      test(`${w}×${h} at ${zoom}% text: no sideways range, every Card inside the Rail and still a 44px target`, async ({
+        page,
+      }) => {
+        await gotoAt(page, { width: w, height: h });
+        if (zoom === 200) await page.addStyleTag({ content: ':root { font-size: 200% }' });
+        const m = await sideways(page);
+        expect(m.range, 'the Rail must not scroll sideways').toBe(0);
+        expect(m.cardsOutside, 'every Card inside the Rail’s content box').toBe(0);
+        expect(m.narrowest, 'every Card still a 44px target').toBeGreaterThanOrEqual(TARGET_MIN_PX);
+      });
+    }
+  }
+
+  test('360×640 at 200% text with Cards short: each "need N" stays inside its tile, and nothing scrolls sideways', async ({
+    page,
+  }) => {
+    await gotoAt(page, { width: 360, height: 640 });
+    await spendTo11(page);
+    await page.addStyleTag({ content: ':root { font-size: 200% }' });
+    const m = await sideways(page);
+    expect(m.chipsShown, 'three Cards short, so three chips to check').toBe(3);
+    expect(m.chipsInside, 'each "need N" wraps inside its tile').toBe(true);
+    expect(m.range, 'the Rail must not scroll sideways').toBe(0);
+  });
+});
+
 test.describe('#181 H3/L2: axe in every state the Rail redesign adds', () => {
   for (const [label, size] of [
     ['1440×900', WIDE],

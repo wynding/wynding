@@ -1354,9 +1354,10 @@ a.wy-home:focus-visible {
      Rail's top edge on every Shift+Tab stop that scrolled.
      Standard reserves the ring band alone: its Rail sits below `.wy-status`, whose own
      `padding-top` already pays the top inset. The Compact fork adds the inset to this same
-     token (#153). The trailing 1px is rounding: Cards are fractional-pixel tall (58.4 / 76.4px)
-     while the browser parks `scrollTop` on a whole pixel, and the exact band alone left rings
-     0.2-0.4px short (measured in the Compact fork, where the reserve first shipped). */
+     token (#153). The trailing 1px is rounding: Cards were fractional-pixel tall when it was
+     measured (58.4 / 76.4px, before #181) while the browser parks `scrollTop` on a whole
+     pixel, and the exact band alone left rings 0.2-0.4px short (measured in the Compact
+     fork, where the reserve first shipped). */
   --wy-rail-ring-reserve: calc(var(--wy-card-ring-w) + var(--wy-card-ring-offset) + 1px);
   scroll-padding-top: var(--wy-rail-ring-reserve);
   /* The Rail's two VERTICAL paddings are named, because the pinned Panel's focus reserve
@@ -1818,11 +1819,13 @@ a.wy-home:focus-visible {
      a 3.5rem tile allows: two in a 128px Rail, which is what lets all nine Cards fit a
      658×320 Rail at rest (five rows of 56px and four 6px gaps fill its 304px content box
      exactly), and one in the 85px Rail of a 360px-wide portrait window, where two would fall
-     under the 44px tap floor. The name is already visually hidden in every form; the hotkey
+     under the 44px tap floor. A tile never asks for more than the Rail has (`min(…, 100%)`):
+     at 200% text that portrait Rail is narrower than 3.5rem, and the bare minimum gave it a
+     sideways scroll range. The name is already visually hidden in every form; the hotkey
      stays in its corner here, where there is room for it beside the art (the Compact arm
      hides it, per L2). Repeated in the Compact fork for the reason the pin's body is. */
   .wy-cards {
-    grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(3.5rem, 100%), 1fr));
     gap: 6px;
   }
 
@@ -1881,9 +1884,12 @@ a.wy-home:focus-visible {
 }
 
 /* --- The Rail's scroll affordance (M2-S12a P4) ---------------------------------------
-   Five of nine Cards sit below the fold at 658x320 with a 0px scrollbar gutter, and
-   nothing on screen says so. A fade at the scrollport's bottom edge, shown only while
-   content actually remains below — `overlay.ts` owns the boolean and toggles the class.
+   Wherever the Rail's content outruns it, Cards sit below the fold with a 0px scrollbar
+   gutter, and nothing on screen says so. At 658x320 that was five of nine Cards at rest;
+   since the phone rail (#181 L2) it is the Cards under an armed, pinned Panel, a phone at
+   200% text or under a top inset, and a 360px-wide portrait window. A fade at the
+   scrollport's bottom edge, shown only while content actually remains below — `overlay.ts`
+   owns the boolean and toggles the class.
 
    DECORATIVE ONLY, and the a11y audit says so rather than claiming it as a fix: the
    hidden Cards are native buttons already in the tab order, and focusing one scrolls it
@@ -1937,10 +1943,10 @@ a.wy-home:focus-visible {
 
    The trailing `1px` is the same whole-pixel rounding allowance the Rail's
    `scroll-padding-top` carries (inside `--wy-rail-ring-reserve`), and measured the same way:
-   Cards are 58.4 / 76.4px tall, the browser parks `scrollTop` on the NEAREST whole pixel,
-   and an exact reserve left the second Card 0.2px inside the fade band at 658×320 (it
-   needed 27.2px of scroll and got 27). The old over-cover had silently absorbed that; an
-   exact one cannot.
+   the Cards were then 58.4 / 76.4px tall, the browser parks `scrollTop` on the NEAREST
+   whole pixel, and an exact reserve left the second Card 0.2px inside the fade band at
+   658×320 (it needed 27.2px of scroll and got 27). The old over-cover had silently
+   absorbed that; an exact one cannot.
 
    `var(--wy-safe-bottom)` reaches this through `--wy-rail-padding-bottom`, because it is part
    of the padding that term mirrors (see `.wy-rail` above). */
@@ -2767,8 +2773,10 @@ a.wy-home:focus-visible {
 
      `--wy-rail-padding-top` (spent by the base rule's `padding-top`, and read by the pinned
      focus reserve) places the Cards AT REST: byte-identical to the base 0.5rem at zero
-     inset. Measured cost at 658×320: the at-rest fully-visible Cards drop 4 → 3 once the
-     inset reaches ~19px, and the scroll extent grows by exactly the inset (358 → 382px at 24).
+     inset. Measured cost at 658×320, where the phone rail's nine Cards fill the Rail exactly
+     (#181 L2): a 24px inset puts the last one below the fold (9 → 8 fully visible) and grows
+     the scroll extent by exactly the inset (0 → 24px). At 640×360 the same inset costs
+     nothing.
 
      `scroll-padding-top` places a Card that FOCUS scrolls to. Padding does not do that: focus
      scrolling aligns to the scroll snapport, which is the padding box inset by
@@ -2778,17 +2786,20 @@ a.wy-home:focus-visible {
      text size, and unarmed at 200%. Armed, that depends on the pinned Panel's focus reserve
      (`.wy-rail-panel-pinned`) leaving a snapport taller than a Card plus this band: it
      reserves exactly what the Panel covers, which at 658×320 and a 24px inset leaves 89px
-     for a 76.4px Card. (It once reserved 24px more than that, leaving 66px; the browser then
-     centred the Card and its ring sat under the bar.) Armed at 200% is the pre-existing S12a
-     geometry — a ~189px Card against ~121px of room — and nothing is claimed there.
+     for a 56px Card (76.4px before #181). (It once reserved 24px more than that, leaving
+     66px; the browser then centred the Card and its ring sat under the bar.) Armed at 200%
+     it holds too with no inset, since the phone rail's Card is 68px there (#181 L2; it was
+     ~189px against ~121px of room, the S12a geometry nothing could be claimed for). With a
+     24px inset at 200% a parked Card ends 0.4px inside the Panel's fade band, and nothing is
+     claimed there.
      THE ONE ZERO-INSET CHANGE, accepted by the owner: the reserve is then the ring band
      alone, which ends today's ~0.4px clip of the ring's top leg on a Card parked flush with
      the Rail's top edge. That band is `--wy-rail-ring-reserve`, which the base rule now
      spends on its own for Standard (#172); this fork adds the inset to it.
-     The trailing `1px` (inside that token) is rounding, and measured: the Cards' edges fall
-     on fractional pixels (they are 58.4 / 76.4px tall) while the browser parks `scrollTop` on
-     a whole pixel, so the exact band alone left rings 0.2–0.4px short (ring tops at −0.4 /
-     23.8px).
+     The trailing `1px` (inside that token) is rounding, and measured: the Cards' edges fell
+     on fractional pixels (they were 58.4 / 76.4px tall before #181) while the browser parks
+     `scrollTop` on a whole pixel, so the exact band alone left rings 0.2–0.4px short (ring
+     tops at −0.4 / 23.8px).
      The bottom edge needs no mirror: the fade reserve (`scroll-padding-bottom`, above) already
      clears the ring there — measured, not assumed (`insets.spec.ts`). */
   .wy-rail {
@@ -2849,7 +2860,7 @@ a.wy-home:focus-visible {
      this arm at every text size, so a phone keeps the phone rail at 200% too, scrolling where
      the bigger cost line no longer fits. */
   .wy-cards {
-    grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(3.5rem, 100%), 1fr));
     gap: 6px;
   }
 

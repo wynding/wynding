@@ -1146,6 +1146,19 @@ cancel") names the one way to back out that a keyboard has; a touch player backs
 Card or Close panel. Escape is a fixed key, not a rebindable one, so the hint cannot go stale.
 The hint is not painted on a narrow Rail.
 
+**What this changes in earlier sections.** Story 12a's audit records the phone Rail as it was,
+and stays as the record of that story. At 658×320 all nine Cards are now on screen at rest,
+where four were; four show above a pinned Panel, where two did. The fade no longer marks five
+resting Cards below the fold there; it marks the Cards below a pinned Panel, at 200% text,
+under a top inset, or in a 360px-wide portrait window. Its 200% bound on focus clearance (a
+Card 225.8px tall) is lifted where the walks now show it: at 200% a phone-rail Card is 68px,
+and every focused Card and its ring clear the pinned Panel at 658×320 with no inset and at
+640×560 with or without one (`insets.spec.ts`). With a 24px top inset at 658×320 and 200%
+text nothing is claimed: a parked Card ends 0.4px inside the Panel's fade band. A narrow Rail
+also no longer scrolls sideways: before #181 every portrait phone's Rail did (15-34px at
+default text, 101-120px at 200%), and `rail-cards.spec.ts` now asserts none at 320×568,
+360×640, 390×844, 568×320 and 658×320 at both text sizes.
+
 **Residual — the single-column Rail scrolls a little further when armed.** At 1080×810 the docked
 Panel is taller than before (its head and hint), so arming there scrolls the Rail 268px where it
 scrolled 237px; the reveal still brings the Panel's name into view.

@@ -1801,11 +1801,14 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     );
   });
 
-  // The two-column Rail (>=1280w, aspect >= 16/10) is a GRID, where the fade needs its own
-  // construction. It genuinely never overflows at 100% — but it does at 200% text zoom,
-  // which this project commits to supporting, and an earlier draft switched the fade off
-  // here on the false premise that it never overflows at all.
-  test('1440x900 two-column: the fade is absent at 100% and present at 200% zoom', async ({
+  // The two-column Rail (>=1280w, aspect >= 16/10, >=501px tall) was once a GRID, where the
+  // fade needed its own construction; since #181 the grid is the Cards' own box and the Rail
+  // stays a flex column. It genuinely never overflows at 100% — but it does at 200% text
+  // zoom, which this project commits to supporting, and an earlier draft switched the fade
+  // off here on the false premise that it never overflows at all. Since #181's shorter Cards,
+  // doubled text still fits at 1440x900 and overflows lower in the band (163px at 1440x560),
+  // so the 200% half runs there.
+  test('1440-wide two-column: the fade is absent at 100% and present at 200% zoom (1440x560)', async ({
     page,
   }) => {
     await gotoAt(page, { width: 1440, height: 900 });
@@ -1848,9 +1851,11 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     expect(at100.hasMore, 'no cue where there is nothing below').toBe(false);
     expect(at100.opacity).toBe('0');
 
+    await page.setViewportSize({ width: 1440, height: 560 });
     await page.addStyleTag({ content: ':root { font-size: 200% }' });
     await expect(rail).toHaveClass(/wy-rail-has-more/);
     const at200 = await state();
+    expect(at200.columns, '1440x560 at 200% must still be two-column').toBe(2);
     expect(at200.overflow, 'the two-column Rail DOES overflow at 200%').toBeGreaterThan(0);
     // The box must be GENERATED, not merely opaque — `display: none` here was the defect.
     expect(at200.display, 'the fade must exist as a box in the Rail').not.toBe('none');
