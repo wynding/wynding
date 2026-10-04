@@ -172,8 +172,17 @@ async function stage(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Start' }).click(); // a build on a running game commits
   await place(/^Splash Tower/, SPLASH);
   await place(/^Slow Tower/, SLOW);
-  // Both built — paid for at a tick of the running game — before it pauses.
-  await expect.poll(bounty).toBeLessThanOrEqual(before - 20); // 12 + 8
+  // Both paid for (12 + 8) — but the chips present the PENDING world while builds are
+  // queued (`controller.ts`), so that alone can pass before a tick commits them, and a Pause
+  // landing first leaves the Slow Tower queued: a Pending plate (QC round 4, 2 runs in 13
+  // under load). The countdown is the committed tick's (the projection is memoised on
+  // `state.tick`), so its text changing after both placements means a tick of the running
+  // game ran, and committed them.
+  await expect.poll(bounty).toBeLessThanOrEqual(before - 20);
+  const waveChip = page.locator('.wy-chip[data-wy-chip="wave"] .wy-chip-full');
+  const countdown = await waveChip.textContent();
+  expect(countdown, 'a countdown to watch for a committed tick').toMatch(/\d/);
+  await expect.poll(() => waveChip.textContent()).not.toBe(countdown);
   await page.getByRole('button', { name: 'Pause' }).click(); // … and on a paused one is Pending
   await place(/^Basic Tower/, DASHED);
 }
@@ -188,9 +197,10 @@ test.describe('the plate rim at 525×320, device scale 1', () => {
 
 // A device scale below 1 — a screen, or browser zoom, at 0.9 or 0.8 — needs a browser that
 // really runs at that scale: Playwright's `deviceScaleFactor` only EMULATES one, laying the
-// page out in CSS px and scaling its picture, which resamples the canvas whatever its
-// backing size. `--force-device-scale-factor` gives the real thing, where layout is in
-// device pixels and the canvas is drawn into the pixels its box snaps to.
+// page out in CSS px and scaling its picture, which at any scale but 1 (a whole one too)
+// resamples the canvas wherever its box is not on whole CSS px, whatever its backing size.
+// `--force-device-scale-factor` gives the real thing, where layout is in device pixels and
+// the canvas is drawn into the pixels its box snaps to.
 for (const dsf of [0.9, 0.8] as const) {
   test(`the plate rim at 1280×720, a real device scale of ${dsf}: every edge of a solid and a dashed rim shows the rim’s own colour`, async ({
     baseURL,
