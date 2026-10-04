@@ -836,6 +836,36 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(lastFrame(t.layers.effects).calls).toEqual(before.effects);
   });
 
+  it('a pause that catches a shot part-way holds its flash and recoil there', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const right = [creep({ x: CX + 600, y: CY })];
+    const shot = { tracers: [shotFrom(basic, 11)] };
+    draw(10, 0, [basic], { prev: right, cur: right });
+    draw(11, 0, [basic], { prev: right, cur: right }, shot); // first seen
+    draw(11, 0.25, [basic], { prev: right, cur: right }, shot); // a quarter tick on
+    const before = { head: t.heads.syncs.at(-1)![0], effects: lastFrame(t.layers.effects).calls };
+    expect(drawn({ calls: before.effects })).toContain(`fillPoints ${hex(ART_FLASH)}`);
+    for (let i = 0; i < 5; i++) draw(11, 0.25, [basic], { prev: right, cur: right }, shot); // paused
+    expect(t.heads.syncs.at(-1)![0]).toEqual(before.head);
+    expect(lastFrame(t.layers.effects).calls).toEqual(before.effects);
+  });
+
+  it('a shot taken in under Reduce motion shows nothing when it is released: no stale flash or recoil', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const right = [creep({ x: CX + 600, y: CY })];
+    const shot = { tracers: [shotFrom(basic, 11)] };
+    draw(10, 0, [basic], { prev: right, cur: right });
+    draw(11, 0, [basic], { prev: right, cur: right }, { ...shot, reducedMotion: true });
+    draw(11, 0.5, [basic], { prev: right, cur: right }, shot); // released inside the feedback
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([`fillCircle ${hex(PAL.tracer)}`]);
+    // The head sweeps from facing up, half a tick's turn, with no knock-back.
+    const head = t.heads.syncs.at(-1)![0]!;
+    expect(head.rotation).toBeCloseTo(AIM_TURN_PER_TICK / 2, 12);
+    expect([head.x, head.y]).toEqual([corner.x + PROJECTION.cellPx, corner.y + PROJECTION.cellPx]);
+  });
+
   it('a shot turns its head onto the shot’s bearing on the frame it is seen: barrel, flash, recoil and tracer agree', () => {
     const { t, draw } = run();
     const left = [creep({ x: CX - 600, y: CY })]; // straight left of the footprint centre
