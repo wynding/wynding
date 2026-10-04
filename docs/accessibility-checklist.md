@@ -1027,6 +1027,19 @@ the wave launches, the primary control reads "Launching…", which at 275% text 
 windows runs 39–49px past the control's end on both font stacks. The dial is withheld then, and
 main lays the word out the same way.
 
+**Residual — the primary control's label in Compact, at heavy text and while launching (as on
+main).** Compact's primary control is as wide as the column, whose track is capped by the
+viewport's width, so the control stops growing with the text while its label does not. The label wraps only between
+words and is centred: a word wider than the control runs past both of its edges, and its ends
+are cut off there. "Start" and "Call wave" do so from 125% text in DejaVu Sans and 150% on macOS
+on 568×320, later on the wider phones (on 900×480 only at 200%, in DejaVu Sans), and at 200% by
+up to 14px a side on macOS and 21px in DejaVu Sans. "Launching…", shown from Start, or a call,
+until the wave launches — for as long as the run stays paused after a call — does so on every
+Compact size from 100% text: 14–23px a side at 100%, 48–75px at 200%. The control's box, its hit
+area and its accessible name, the full label, are unaffected. Main lays the label out
+identically: the same control, ink and overflow, within 0.05px, in all 120 cases measured — four
+Compact sizes, 100–200% text, before Start, after it and while launching, on both font stacks.
+
 **P3 — the strip's right edge.** On Standard the strip's box ends where the status row's
 leftover width ends, which lines up with neither the board's right edge nor the Rail's. A
 visual detail for the owner's UAT pass; nothing reads or moves differently for it.
