@@ -23,10 +23,17 @@
 // settles, never in the same task. A refresh that settled in a microtask would hide the panel's
 // re-settle on a late arrival, the case production always hits (#181 H2). `&askLock=0` gives the
 // instant refresh, and `&askLock=1` names the default explicitly.
+//
+// `&sendDelay=<ms>` holds each survey send that long, as a slow network does: room for the player
+// to switch to the keyboard while a Send is in flight. `&endOnPress=1` stops the run one tick
+// short of its end and plays that tick on the page's first press, so the dialog opens on the next
+// frame under a pointer that was pressing the board: what the press guard's arming is for.
 
 import { createApp } from '../src/main';
 import { createController } from '../src/controller';
 import { playScript } from '../src/scripted-run';
+import type { Controller } from '../src/controller';
+import { MS_PER_TICK } from '@wynding/sim';
 import type { SurveyAsk, SurveyTransport } from '../src/survey';
 import { mount } from '@wynding/render/scene';
 // Reached by relative path, as `apps/server`'s replay-parity test does: the content
@@ -66,7 +73,51 @@ const surveyAsk: SurveyAsk = {
     offered = false;
   },
 };
-const surveyTransport: SurveyTransport = { send: async () => 'accepted' };
+const sendDelay = Number(params.get('sendDelay') ?? '0');
+const surveyTransport: SurveyTransport = {
+  send: async () => {
+    if (sendDelay > 0) await new Promise((resolve) => setTimeout(resolve, sendDelay));
+    return 'accepted';
+  },
+};
+
+/** The run, played one tick short of its end; its last tick plays on the page's first press. */
+function endingOnPress(seed: number): Controller {
+  // How many ticks the whole run takes, counted on a throwaway controller.
+  const probe = createController(seed);
+  let ticks = 0;
+  playScript(
+    {
+      ...probe,
+      advance: (ms: number) => {
+        ticks++;
+        probe.advance(ms);
+      },
+    },
+    plan,
+  );
+  const controller = createController(seed);
+  playScript(controller, plan, ticks - 1);
+  if (controller.isTerminal()) throw new Error('results harness: the run ended a tick early');
+  // Until the press, time stands still: the app's frame loop advances nothing.
+  let pressed = false;
+  window.addEventListener(
+    'pointerdown',
+    () => {
+      pressed = true;
+      // Bounded: a run that will not end must fail the test, not freeze the page.
+      for (let i = 0; i < 100 && !controller.isTerminal(); i++) controller.advance(MS_PER_TICK);
+      if (!controller.isTerminal()) throw new Error('results harness: the run did not end');
+    },
+    { capture: true, once: true },
+  );
+  return {
+    ...controller,
+    advance: (ms: number) => {
+      if (pressed) controller.advance(ms);
+    },
+  };
+}
 
 const root = document.getElementById('app');
 if (root === null) throw new Error('missing #app root element');
@@ -76,6 +127,7 @@ createApp(document, root, {
   now: () => performance.now(),
   seed: SCENARIO_SEED,
   controllerFactory: (seed) => {
+    if (params.get('endOnPress') === '1') return endingOnPress(seed);
     const controller = createController(seed);
     playScript(controller, plan);
     if (!controller.isTerminal()) throw new Error('results harness: the scripted run did not end');

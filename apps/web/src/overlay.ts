@@ -117,7 +117,8 @@ export interface Overlay {
   setResultsWritersLocked(locked: boolean): void;
   /** Focus Play again — where an accepted Send sends focus, since it retires the control
    *  the player was on (ADR 0014 §1). Without scrolling after a pointer-pressed Send
-   *  (`SurveyFormHost.focusPlayAgain`, #181 H2). */
+   *  (`SurveyFormHost.focusPlayAgain`, #181 H2), and taking no Enter or Space for a moment
+   *  (`ResultsPanel.focusPlayAgain`). */
   focusPlayAgain(preventScroll: boolean): void;
   destroy(): void;
 }
@@ -775,10 +776,12 @@ export function createOverlay(
   const resultsOverlay: ModalOverlay = {
     show(): void {
       results.hidden = false;
-      // Play again keeps initial focus (ADR 0014 §1) wherever it is wholly in view as the panel
-      // opens. Where it is not — a short window at heavy text zoom — focusing it would scroll
-      // the outcome out of view, so the heading takes focus instead (#181 H2, `results-panel.ts`).
-      resultsPanel.focusOnOpen();
+      // The panel's press guard counts the dialog's arrival as the layout moving under any press
+      // made before it. Play again keeps initial focus (ADR 0014 §1) wherever it is wholly in
+      // view as the panel opens. Where it is not — a short window at heavy text zoom — focusing
+      // it would scroll the outcome out of view, so the heading takes focus instead (#181 H2,
+      // `results-panel.ts`).
+      resultsPanel.open();
     },
     hide(): void {
       results.hidden = true;
@@ -2447,10 +2450,7 @@ export function createOverlay(
       for (const btn of regionWriters) btn.setAttribute('aria-disabled', String(locked));
     },
     focusPlayAgain(preventScroll: boolean): void {
-      // Layout first: the survey has just rendered, and WebKit defers a `preventScroll` focus
-      // made over dirty layout to its next rendering update, then scrolls anyway (#181 H2).
-      void playAgainBtn.offsetHeight;
-      playAgainBtn.focus(preventScroll ? { preventScroll: true } : undefined);
+      resultsPanel.focusPlayAgain(preventScroll);
     },
     setColourMode(mode: ColourMode): void {
       palette = resolvePalette(mode);

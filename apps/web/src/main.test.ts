@@ -2854,4 +2854,28 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       'nothing of the last draft carries over',
     ).toHaveLength(0);
   });
+
+  it('an accepted Send moves focus to Play again: scrolled into view after a keyboard press, held still after a pointer press (#181 H2)', async () => {
+    // The glue from the survey's Send to the overlay: what kind of press it was travels with the
+    // accepted result. A keyboard press is `detail` 0; a pointer press counts its clicks.
+    for (const [detail, options] of [
+      [0, undefined],
+      [1, { preventScroll: true }],
+    ] as const) {
+      const h = surveyApp();
+      h.resolve();
+      await vi.waitFor(() => expect(h.slot().hidden).toBe(false));
+      h.button('Give feedback').click();
+      h.results.querySelector<HTMLInputElement>('fieldset input[value="4"]')!.click();
+      const send = h.button('Send');
+      send.focus();
+      const focus = vi.spyOn(h.button('Play again'), 'focus');
+      send.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+      h.sent[0]!.resolve('accepted');
+      await settle();
+      expect(focus, `Send pressed with detail ${String(detail)}`).toHaveBeenCalledExactlyOnceWith(
+        options,
+      );
+    }
+  });
 });

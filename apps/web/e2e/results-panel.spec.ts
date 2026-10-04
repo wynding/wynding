@@ -534,9 +534,10 @@ test('Give feedback arriving after the panel first settles, and wrapping the row
   page,
 }) => {
   // The harness's ask refresh takes a Web Lock, as production's does, so Give feedback arrives
-  // a task after the dialog opens. At 400×760 it wraps the action row onto a second line.
+  // a task after the dialog opens: asked for by name (`&askLock=1`), so this never rests on the
+  // harness's default. At 400×760 Give feedback wraps the action row onto a second line.
   await page.setViewportSize({ width: 400, height: 760 });
-  await openResults(page, 'win');
+  await openResults(page, 'win', 100, '&askLock=1');
   const rowHeight = await page.evaluate(
     () => document.querySelector('.wy-results-actions')!.getBoundingClientRect().height,
   );

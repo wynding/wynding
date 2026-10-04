@@ -14,12 +14,13 @@
 // action row, and FIXED there. The Run data group, the survey form and a status message grow it
 // downward into the room below, then scroll inside its body (`settle` below; `ui.css`'s
 // `.wy-results::before`). Content can still move under a resting pointer: something closing
-// while the body is scrolled makes the browser clamp the scroll position, and opening the survey
-// can bring its first question into view. So every press is guarded instead: a press never
-// activates a control it was not aimed at (`press-guard.ts`). And the status region never
-// shrinks within one dialog, so a shorter message is not one of the things that move. The panel
-// opens with Play again focused, unless Play again is not wholly in view at the top of the panel
-// (a short window at heavy text zoom): then the heading takes focus (`focusOnOpen`).
+// while the body is scrolled makes the browser clamp the scroll position, opening the survey can
+// bring its first question into view, and the dialog itself can arrive under a pointer that was
+// pressing the board. So every press is guarded instead: a press never activates a control it
+// was not aimed at (`press-guard.ts`). And the status region never shrinks within one dialog, so
+// a shorter message is not one of the things that move. The panel opens with Play again focused,
+// unless Play again is not wholly in view at the top of the panel (a short window at heavy text
+// zoom): then the heading takes focus (`open`).
 //
 // One sentence carries the score and the stars to assistive tech (`results.summary`, today's
 // string): it is the dialog's description, and the visual stars and score are `aria-hidden`
@@ -27,6 +28,7 @@
 
 import { t } from './i18n/t';
 import { chipIcon } from './hud-icons';
+import { focusAfterRender } from './focus-in-place';
 import { guardPresses } from './press-guard';
 import type { RunStats } from './controller';
 import type { SurveySlots } from './survey-form';
@@ -96,13 +98,19 @@ export interface ResultsPanel {
   readonly status: HTMLElement;
   /** Fill the panel for one finished run, with the disclosure collapsed. */
   render(outcome: ResultsOutcome): void;
-  /** The dialog has just been shown: place the panel, then give it its first focus — Play
-   *  again (ADR 0014 §1), or the heading where Play again is not wholly in view at the top. */
-  focusOnOpen(): void;
+  /** The dialog has just been shown, or shown again: its arrival counts as the layout moving
+   *  under any press made before it (`press-guard.ts`). Place the panel, then give it its first
+   *  focus — Play again (ADR 0014 §1), or the heading where Play again is not wholly in view at
+   *  the top. */
+  open(): void;
+  /** Move focus to Play again, where an accepted Send sends it (ADR 0014 §1): without the
+   *  browser's scroll after a POINTER press (`focusAfterRender`), and taking no Enter or Space
+   *  for a moment, so a second key press meant for Send does not start a new run. */
+  focusPlayAgain(preventScroll: boolean): void;
   /** Show or hide the Run data group, keeping `aria-expanded` in step. */
   setRunDataExpanded(expanded: boolean): void;
-  /** Stop following the dialog's size and the status region's height, and drop the press guard
-   *  (the overlay's teardown). */
+  /** Stop following the dialog's size and the status region's height and text, and drop the
+   *  press guard (the overlay's teardown). */
   destroy(): void;
 }
 
@@ -148,7 +156,7 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
   const title = doc.createElement('h2');
   title.className = 'wy-results-title';
   // Focusable by script only, never by Tab: the ARIA dialog pattern's first focus where the
-  // first control would scroll the start of the content out of view (`focusOnOpen`).
+  // first control would scroll the start of the content out of view (`open`).
   title.tabIndex = -1;
   const subtitle = doc.createElement('p');
   subtitle.className = 'wy-results-subtitle';
@@ -289,13 +297,15 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
   }
 
   // A press never activates a control it was not aimed at (`press-guard.ts`).
-  const unguardPresses = guardPresses(root);
+  const guard = guardPresses(root);
 
   // The status region never shrinks within one dialog. A shorter message after a longer one
   // would shrink the body, and the scroll clamp of a scrolled body would then pull the panel
   // down under the pointer. Each taller message raises the floor, and the next dialog starts
   // from none (`render`). Measured as each message lands, before the next rendering update, so
-  // the region is never painted shorter. jsdom has no layout, so the floor never rises there.
+  // the region is never painted shorter; and whenever the region grows, so a message the window
+  // has since re-wrapped taller (a rotation) holds that height too. jsdom has no layout, so the
+  // floor never rises there.
   let statusFloor = 0;
   const holdStatusHeight = (): void => {
     const height = status.getBoundingClientRect().height;
@@ -306,6 +316,8 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
   const MO = view?.MutationObserver;
   const statusObserver = typeof MO === 'function' ? new MO(holdStatusHeight) : null;
   statusObserver?.observe(status, { childList: true, characterData: true, subtree: true });
+  const statusSizeObserver = typeof RO === 'function' ? new RO(holdStatusHeight) : null;
+  statusSizeObserver?.observe(status);
 
   /** Whether `el` stands wholly inside the body's scrollport as the body is scrolled now. */
   function wholeInView(el: HTMLElement): boolean {
@@ -358,7 +370,8 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
       statusFloor = 0;
       status.style.minHeight = '';
     },
-    focusOnOpen(): void {
+    open(): void {
+      guard.arm();
       // Placed now rather than at the observer's next pass: where Play again stands decides
       // which element takes focus.
       settle();
@@ -372,11 +385,16 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
         title.focus({ preventScroll: true });
       }
     },
+    focusPlayAgain(preventScroll: boolean): void {
+      focusAfterRender(playAgain, preventScroll);
+      guard.holdKeys(playAgain);
+    },
     setRunDataExpanded,
     destroy(): void {
       restObserver?.disconnect();
       statusObserver?.disconnect();
-      unguardPresses();
+      statusSizeObserver?.disconnect();
+      guard.remove();
     },
   };
 }

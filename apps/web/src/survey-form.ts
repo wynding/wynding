@@ -12,6 +12,7 @@
 import { t } from './i18n/t';
 import { SURVEY_TEXT_MAX, type SurveyPayload, type SurveyScale } from '@wynding/feedback';
 import { type Survey, type SurveySendResult } from './survey';
+import { focusAfterRender } from './focus-in-place';
 
 /** The privacy notice the survey is sent under (wynding-site ADR 0001 §5). */
 export const PRIVACY_HREF = '/privacy';
@@ -79,16 +80,6 @@ const CHOICE_KEYS = new Set([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRig
 interface ScaleGroup {
   readonly fieldset: HTMLFieldSetElement;
   readonly inputs: readonly HTMLInputElement[];
-}
-
-/** Focus `el` right after a render, without scrolling where `preventScroll`. Layout is read
- *  first: WebKit, asked to focus without scrolling while layout is dirty (as a render that
- *  shows or hides part of the form leaves it), scrolls the element into view anyway at its next
- *  rendering update (#181 H2). */
-function focusAfterRender(el: HTMLElement | undefined, preventScroll: boolean): void {
-  if (el === undefined) return;
-  void el.offsetHeight;
-  el.focus(preventScroll ? { preventScroll: true } : undefined);
 }
 
 /** The nearest ancestor of `el` that scrolls: the results panel's body. */

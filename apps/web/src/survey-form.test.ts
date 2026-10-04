@@ -328,6 +328,15 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     );
   });
 
+  it('a keyboard open brings the first question into view when it opened ABOVE the scrollport too (#181 H2)', async () => {
+    const h = setup();
+    await h.open();
+    // The scrollport starts at y=100: the first option's label, at 60, stands above it.
+    const reveal = inScroller(h, 60);
+    pressWith(h.button('Give feedback'), 0);
+    expect(reveal).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' });
+  });
+
   it('Not now returns focus to Give feedback without scrolling after a POINTER press only (#181 H2)', async () => {
     for (const [detail, options] of [
       [1, { preventScroll: true }],

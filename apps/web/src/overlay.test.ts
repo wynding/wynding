@@ -3405,26 +3405,31 @@ describe('overlay — the results panel (#181 H2)', () => {
     expect(order.indexOf(form)).toBeLessThan(order.indexOf(status));
   });
 
-  it('guards its presses: a second pointer press at the same spot cannot reach Play again (#181 H2)', () => {
+  /** A pointer click at one spot and time, with no `mousedown` of its own: the press guard
+   *  judges it at the click. */
+  const clickAt = (el: Element, at: number, detail = 1): void => {
+    const event = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      detail,
+      clientX: 300,
+      clientY: 400,
+    });
+    Object.defineProperty(event, 'timeStamp', { value: at });
+    el.dispatchEvent(event);
+  };
+
+  it('guards its presses: a second pointer press at the same spot cannot reach Play again once the layout moved under it (#181 H2)', () => {
     // The wiring of `press-guard.ts` (whose own suite pins its rules): Run data's group closing
-    // under a scrolled body moves Play again under the pointer before a double-click's second
-    // press lands.
+    // under a scrolled body carries Play again down under the pointer before a double-click's
+    // second press lands. jsdom has no layout: the toggle's move is stubbed.
     const { overlay, actions } = setup();
     overlay.showResults(hud({ won: true }), runStats());
     const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
-    const press = (el: Element, at: number, detail = 1): void => {
-      const event = new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        detail,
-        clientX: 300,
-        clientY: 400,
-      });
-      Object.defineProperty(event, 'timeStamp', { value: at });
-      el.dispatchEvent(event);
-    };
+    const press = clickAt;
     press(toggleOf(overlay), 1000);
     expect(toggleOf(overlay).getAttribute('aria-expanded')).toBe('true');
+    toggleOf(overlay).getBoundingClientRect = () => new DOMRect(0, 160, 200, 44);
     press(playAgain, 1120);
     expect(actions, 'the second press of the double-click is swallowed').toEqual([]);
     press(playAgain, 1130, 0);
@@ -3489,6 +3494,112 @@ describe('overlay — the results panel (#181 H2)', () => {
       'layout',
       'focus',
     ]);
+  });
+
+  it('counts the dialog’s arrival as the layout moving: a press on the board just before it opened holds a quick second press off its controls (#181 H2)', () => {
+    const { overlay, actions } = setup();
+    const board = document.createElement('div');
+    document.body.append(board);
+    try {
+      // The run's last press, on the board: the dialog opens under the pointer.
+      clickAt(board, 1000);
+      overlay.showResults(hud({ won: true }), runStats());
+      const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+      clickAt(playAgain, 1120, 2);
+      expect(actions, 'the double-click’s second press is swallowed').toEqual([]);
+      clickAt(playAgain, 1700);
+      expect(
+        actions.map((a) => a.type),
+        'a later press is the player’s',
+      ).toEqual(['playAgain']);
+    } finally {
+      board.remove();
+    }
+  });
+
+  it('focusPlayAgain holds Play again’s Enter and Space for a moment: a second key press meant for Send starts no run (#181 H2)', () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    const now = vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(5000);
+    overlay.focusPlayAgain(false);
+    expect(document.activeElement).toBe(playAgain);
+    const enter = (): KeyboardEvent => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      playAgain.dispatchEvent(event);
+      return event;
+    };
+    now.mockReturnValue(5499);
+    expect(enter().defaultPrevented, 'Enter, 499 ms after focus moved').toBe(true);
+    now.mockReturnValue(5500);
+    expect(enter().defaultPrevented, 'at 500 ms Play again takes its key').toBe(false);
+  });
+
+  it('the floor holds again in the next dialog, from that dialog’s own messages (#181 H2)', async () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const status = overlay.resultsEl.querySelector<HTMLElement>('.wy-verify')!;
+    let height = 0;
+    status.getBoundingClientRect = () => new DOMRect(0, 0, 400, height);
+    const write = async (message: string, measured: number): Promise<void> => {
+      height = measured;
+      overlay.setResultsStatus(message);
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    await write('A message three lines tall.', 69);
+    overlay.hideResults();
+    height = 0;
+    overlay.showResults(hud({ won: false }), runStats());
+    await Promise.resolve();
+    await Promise.resolve();
+    await write('Saved the run data, as a file with a long name.', 46);
+    expect(status.style.minHeight, 'the next dialog’s first message sets its own floor').toBe(
+      '46px',
+    );
+    await write('Verified.', 23);
+    expect(status.style.minHeight, 'and a shorter one keeps it').toBe('46px');
+  });
+
+  it('the floor rises when the status region re-wraps taller with no new message, as after a rotation, and never falls (#181 H2)', () => {
+    // jsdom has no ResizeObserver: a fake stands in, and the region's height is stubbed.
+    const observers: { callback: () => void; observed: Element[]; disconnected: boolean }[] = [];
+    class FakeResizeObserver {
+      private readonly record: (typeof observers)[number];
+      constructor(callback: () => void) {
+        this.record = { callback, observed: [], disconnected: false };
+        observers.push(this.record);
+      }
+      observe(el: Element): void {
+        this.record.observed.push(el);
+      }
+      disconnect(): void {
+        this.record.disconnected = true;
+      }
+    }
+    const original = window.ResizeObserver;
+    window.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+    try {
+      const { overlay } = setup();
+      overlay.showResults(hud({ won: true }), runStats());
+      const status = overlay.resultsEl.querySelector<HTMLElement>('.wy-verify')!;
+      const resized = observers.find((o) => o.observed.includes(status));
+      expect(resized, 'the region’s size is followed').toBeDefined();
+      let height = 46;
+      status.getBoundingClientRect = () => new DOMRect(0, 0, 400, height);
+      resized!.callback();
+      expect(status.style.minHeight).toBe('46px');
+      height = 69; // the window narrowed: the same message wraps to three lines
+      resized!.callback();
+      expect(status.style.minHeight, 'a taller wrap raises the floor').toBe('69px');
+      height = 46; // and widened again
+      resized!.callback();
+      expect(status.style.minHeight, 'it never comes down within the dialog').toBe('69px');
+      overlay.destroy();
+      expect(resized!.disconnected, 'and it stops following on teardown').toBe(true);
+    } finally {
+      window.ResizeObserver = original;
+    }
   });
 });
 

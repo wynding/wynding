@@ -10,9 +10,15 @@ export type Run = 'win' | 'loss';
 /** Open the harness on a finished run, with the survey offered so Give feedback takes its place
  *  in the action row, and wait for the panel's resting place to settle. Give feedback arrives a
  *  task after the dialog opens (the harness's ask refresh takes a Web Lock, as production's
- *  does), so the panel has re-settled for it by the time this returns. */
-export async function openResults(page: Page, run: Run, text: 100 | 200 = 100): Promise<Locator> {
-  await page.goto(`${HARNESS}?run=${run}&survey=1${text === 200 ? '&text=200' : ''}`);
+ *  does), so the panel has re-settled for it by the time this returns. `query` adds the
+ *  harness's other knobs (`&askLock=1`, `&sendDelay=<ms>`; `results-entry.ts`). */
+export async function openResults(
+  page: Page,
+  run: Run,
+  text: 100 | 200 = 100,
+  query = '',
+): Promise<Locator> {
+  await page.goto(`${HARNESS}?run=${run}&survey=1${text === 200 ? '&text=200' : ''}${query}`);
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible({ timeout: 30_000 });
   // The fixture took: a test "at 200% text" that ran at 100% would prove nothing about zoom.

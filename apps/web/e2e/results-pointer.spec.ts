@@ -2,110 +2,235 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import {
   boxOf,
   expectSameBox,
+  HARNESS,
   openResults,
   toggleOf,
   twoFrames,
   type Box,
 } from './results-harness';
-import { PRESS_GUARD_WINDOW_MS } from '../src/press-guard';
+import {
+  PRESS_GUARD_KEY_HOLD_MS,
+  PRESS_GUARD_REPEAT_MS,
+  PRESS_GUARD_SLOP_PX,
+  PRESS_GUARD_TOUCH_SLOP_PX,
+  PRESS_GUARD_WINDOW_MS,
+} from '../src/press-guard';
 
 // results-pointer.spec.ts — the results panel under a real pointer (#181 H2), in Chromium AND
 // WebKit (`playwright.config.ts` runs this spec in both projects).
 //
 // The invariant: a press never activates a control it was not aimed at. Content can still move
 // under a resting pointer: a scrolled body clamps as the survey form or the Run data group
-// closes, or as a status message shrinks, and opening the survey brings its first question into
-// view. So the panel guards its presses (`press-guard.ts`): a second press at the same spot
-// inside the double-click window may land only on the control the first was aimed at.
+// closes, or as a status message shrinks; opening the survey brings its first question into
+// view; and the dialog itself opens under a pointer that was pressing the board. So the panel
+// guards its presses (`press-guard.ts`): a press in the same gesture as the last one (inside the
+// double-click window, or a repeat the system counts, however slow the player has set their
+// double-click), at the same spot, on a different control, is held where the layout moved under
+// it. Where nothing moved, a quick press on a neighbour is the player's.
 //
 // Every reproduction below starts with the body scrolled where a collapse does the most harm (the
 // end of its range, or for Run data's group the place where its closing carries the control above
 // the toggle exactly under the pointer), and presses twice at ONE spot, the ways a player does
-// it: a double-click (`page.mouse.dblclick`), two clicks 120 ms apart, and two taps. The real
-// pointer (`page.mouse`, `page.touchscreen`) never scrolls anything into view first, as a
-// locator's click does. What each asserts afterwards: no new run, no survey answer, and no change
-// to the status region or the Run data disclosure beyond what the aimed control does.
+// it: a double-click (`page.mouse.dblclick`), two clicks 120 ms apart, a double-click slowed to
+// 750 ms, and two taps, the second drifting as a finger's does. The real pointer (`page.mouse`,
+// `page.touchscreen`) never scrolls anything into view first, as a locator's click does. What
+// each asserts afterwards: no new run, no survey answer, and no change to the status region or
+// the Run data disclosure beyond what the aimed control does.
 
 type Size = { readonly width: number; readonly height: number };
-type Pair = 'double-click' | 'two clicks 120 ms apart' | 'two taps';
+/** A double-click slowed to 750 ms, as a player who has slowed their system's double-click speed
+ *  makes one: the system still counts the second press as a double-click's (`detail` 2). */
+const SLOWED = 'a slowed double-click, 750 ms apart';
+type Pair = 'double-click' | 'two clicks 120 ms apart' | typeof SLOWED | 'two taps';
 const MOUSE_PAIRS: readonly Pair[] = ['double-click', 'two clicks 120 ms apart'];
+type Point = { readonly x: number; readonly y: number };
+/** How far the second press of a pair lands from the first. */
+type Drift = { readonly dx: number; readonly dy: number };
+const NO_DRIFT: Drift = { dx: 0, dy: 0 };
 
 const centreX = (b: Box): number => b.x + b.width / 2;
 const at = (b: Box, f: number): number => b.y + b.height * f;
+const isChromium = (page: Page): boolean =>
+  page.context().browser()?.browserType().name() === 'chromium';
 
-/** Start recording the pointer clicks the page receives: their `timeStamp`s, read in the capture
- *  phase at the window, before the panel's guard can swallow one. */
+type Click = { readonly t: number; readonly detail: number };
+
+/** Start recording the pointer clicks the page receives: their `timeStamp`s and `detail`s (the
+ *  system's click count), read in the capture phase at the window, before the panel's guard can
+ *  swallow one. The click a label forwards to its radio (Chromium's carries its press's own
+ *  time and `detail`) is that press's and is not counted again. A double-click's two clicks can
+ *  share one time too, so only a forward is dropped: at the same time, on the control of the
+ *  label the last click landed in. */
 async function recordClicks(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const w = window as unknown as { __clicks?: number[] };
+    const w = window as unknown as {
+      __clicks?: { t: number; detail: number }[];
+      __lastClick?: { t: number; target: Element } | null;
+    };
+    w.__lastClick = null;
     if (w.__clicks !== undefined) {
       w.__clicks.length = 0;
       return;
     }
-    const clicks: number[] = [];
+    const clicks: { t: number; detail: number }[] = [];
     w.__clicks = clicks;
-    window.addEventListener('click', (e) => void (e.detail > 0 && clicks.push(e.timeStamp)), true);
+    window.addEventListener(
+      'click',
+      (e) => {
+        if (e.detail === 0) return;
+        const target = e.target as Element;
+        const last = w.__lastClick;
+        const forwarded =
+          last != null &&
+          last.t === e.timeStamp &&
+          last.target !== target &&
+          last.target.closest('label')?.control === target;
+        w.__lastClick = { t: e.timeStamp, target };
+        if (!forwarded) clicks.push({ t: e.timeStamp, detail: e.detail });
+      },
+      true,
+    );
   });
 }
 
-/** Two presses at one spot. The pair must have reached the page as two pointer clicks inside the
- *  guard's window, or it stands for no quick double press at all: a harness slow to deliver the
- *  second would pass a test the guard never had to hold. */
-async function pressTwice(page: Page, pair: Pair, x: number, y: number): Promise<void> {
+const recordedClicks = (page: Page): Promise<Click[]> =>
+  page.evaluate(() => (window as unknown as { __clicks: Click[] }).__clicks);
+
+/** Two presses, the second `drift` off the first. The pair must have reached the page as two
+ *  pointer clicks in one gesture (inside the guard's window, or for the slowed double-click past
+ *  it but counted by the system as a repeat), or it stands for no double press at all: a harness
+ *  slow to deliver the second would pass a test the guard never had to hold. */
+async function pressTwice(
+  page: Page,
+  pair: Pair,
+  x: number,
+  y: number,
+  drift: Drift = NO_DRIFT,
+): Promise<void> {
+  const second = { x: x + drift.dx, y: y + drift.dy };
   await recordClicks(page);
   if (pair === 'double-click') {
+    expect(drift, 'a double-click has no drift').toEqual(NO_DRIFT);
     await page.mouse.dblclick(x, y);
-  } else if (page.context().browser()?.browserType().name() === 'chromium') {
-    await stampedPair(page, pair === 'two taps' ? 'touch' : 'mouse', x, y);
-  } else if (pair === 'two clicks 120 ms apart') {
-    await page.mouse.click(x, y);
+  } else if (isChromium(page)) {
+    await stampedPair(page, pair, { x, y }, second);
+  } else if (pair === 'two taps') {
+    await page.touchscreen.tap(x, y);
     await page.waitForTimeout(120);
-    await page.mouse.click(x, y);
+    await page.touchscreen.tap(second.x, second.y);
   } else {
-    await page.touchscreen.tap(x, y);
-    await page.waitForTimeout(120);
-    await page.touchscreen.tap(x, y);
+    const count = pair === SLOWED ? 2 : 1;
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(pair === SLOWED ? 750 : 120);
+    await page.mouse.move(second.x, second.y);
+    await page.mouse.down({ clickCount: count });
+    await page.mouse.up({ clickCount: count });
   }
   await twoFrames(page);
-  const stamps = await page.evaluate(() => (window as unknown as { __clicks: number[] }).__clicks);
-  expect(stamps, `${pair}: two pointer clicks reached the page`).toHaveLength(2);
-  expect(
-    stamps[1]! - stamps[0]!,
-    `${pair}: the second inside the ${String(PRESS_GUARD_WINDOW_MS)} ms window`,
-  ).toBeLessThan(PRESS_GUARD_WINDOW_MS);
+  const clicks = await recordedClicks(page);
+  expect(clicks, `${pair}: two pointer clicks reached the page`).toHaveLength(2);
+  const gap = clicks[1]!.t - clicks[0]!.t;
+  if (pair === SLOWED) {
+    expect(clicks[1]!.detail, `${pair}: the system counts the second as a repeat`).toBe(2);
+    expect(gap, `${pair}: past the double-click window`).toBeGreaterThanOrEqual(
+      PRESS_GUARD_WINDOW_MS,
+    );
+    expect(gap, `${pair}: inside a repeat's span`).toBeLessThan(PRESS_GUARD_REPEAT_MS);
+  } else {
+    expect(
+      gap,
+      `${pair}: the second inside the ${String(PRESS_GUARD_WINDOW_MS)} ms window`,
+    ).toBeLessThan(PRESS_GUARD_WINDOW_MS);
+  }
 }
 
-/** Two presses 120 ms apart at one spot, in Chromium. Its emulated input reaches a page this
- *  busy (the board renders behind the dialog) late, so a pause between two presses is not the
- *  pause the page sees: emulated taps arrive a second or more apart, and under load even clicks
- *  drift past the window. Dispatched with their own timestamps, as a device stamps them, they
- *  arrive 120 ms apart; the second click counts as a double-click's, as a system counts it. */
-async function stampedPair(page: Page, kind: 'mouse' | 'touch', x: number, y: number) {
+/** Two presses in Chromium, each at its own spot, stamped as a device stamps them: 120 ms apart,
+ *  or 750 ms for the slowed double-click. Its emulated input reaches a page this busy (the board
+ *  renders behind the dialog) late, so a pause between two presses is not the pause the page
+ *  sees: emulated taps arrive a second or more apart, and under load even clicks drift past the
+ *  window. Dispatched with their own timestamps, they arrive as stamped; the second click counts
+ *  as a double-click's, as a system counts it. */
+async function stampedPair(
+  page: Page,
+  pair: Exclude<Pair, 'double-click'>,
+  first: Point,
+  second: Point,
+): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   const start = Date.now() / 1000;
-  for (const [i, at] of [start, start + 0.12].entries()) {
-    if (kind === 'touch') {
+  const presses = [
+    { ...first, stamp: start },
+    { ...second, stamp: start + (pair === SLOWED ? 0.75 : 0.12) },
+  ];
+  for (const [i, { x, y, stamp }] of presses.entries()) {
+    if (pair === 'two taps') {
       await cdp.send('Input.dispatchTouchEvent', {
         type: 'touchStart',
         touchPoints: [{ x, y }],
-        timestamp: at,
+        timestamp: stamp,
       });
       await cdp.send('Input.dispatchTouchEvent', {
         type: 'touchEnd',
         touchPoints: [],
-        timestamp: at + 0.01,
+        timestamp: stamp + 0.01,
       });
     } else {
       const press = { x, y, button: 'left', clickCount: i + 1 } as const;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...press, timestamp: at });
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        ...press,
+        timestamp: stamp,
+      });
       await cdp.send('Input.dispatchMouseEvent', {
         type: 'mouseReleased',
         ...press,
-        timestamp: at + 0.01,
+        timestamp: stamp + 0.01,
       });
     }
   }
   await cdp.detach();
+}
+
+/** Two single presses, each its own click (`detail` 1) at its own spot, `gap` ms apart: stamped
+ *  in Chromium, as `stampedPair` explains. They must reach the page inside the guard's window, or
+ *  the guard never had to judge the second. */
+async function pressApart(page: Page, first: Point, second: Point, gap: number): Promise<void> {
+  await recordClicks(page);
+  if (isChromium(page)) {
+    const cdp = await page.context().newCDPSession(page);
+    const start = Date.now() / 1000;
+    for (const { x, y, stamp } of [
+      { ...first, stamp: start },
+      { ...second, stamp: start + gap / 1000 },
+    ]) {
+      const press = { x, y, button: 'left', clickCount: 1 } as const;
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        ...press,
+        timestamp: stamp,
+      });
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        ...press,
+        timestamp: stamp + 0.01,
+      });
+    }
+    await cdp.detach();
+  } else {
+    await page.mouse.click(first.x, first.y);
+    await page.waitForTimeout(gap);
+    await page.mouse.click(second.x, second.y);
+  }
+  await twoFrames(page);
+  const clicks = await recordedClicks(page);
+  expect(clicks, 'two pointer clicks reached the page').toHaveLength(2);
+  expect(
+    clicks.map((c) => c.detail),
+    'each its own click',
+  ).toEqual([1, 1]);
+  expect(clicks[1]!.t - clicks[0]!.t, 'the second inside the window').toBeLessThan(
+    PRESS_GUARD_WINDOW_MS,
+  );
 }
 
 /** One press with the real pointer on `selector`, brought into view first: a setup step. */
@@ -302,7 +427,8 @@ for (const size of POINTER_SIZES) {
     await openAndClose(async () => {
       await page.mouse.click(centreX(feedbackBox), at(feedbackBox, 0.5));
       // Focus moves to the first question (§1). After a double-click it may not end there: the
-      // second press's mousedown lands where Give feedback was and moves focus as any press
+      // second press lands where Give feedback was. On a control the opening brought there, the
+      // guard holds it, focus and all; on no control, its mousedown moves focus as such a press
       // does, though its click activates nothing.
       await expect(firstOption, 'one click: focus on the first question').toBeFocused();
     }, 'one click');
@@ -328,6 +454,17 @@ for (const r of REPRO.a) {
   }
 }
 
+// A player who has slowed their system's double-click speed (for motor access) presses a second
+// time well past the guard's window; the system still counts it as a double-click's (#181 H2).
+for (const r of REPRO.a.filter((size) => size.width >= 1280)) {
+  test(`(a) at ${sizeLabel(r)}, Not now pressed twice as ${SLOWED}: the system counts the second as a repeat, and the collapse never hands it to Play again`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(r);
+    await notNowCase(page, await openResults(page, 'win', r.text), SLOWED);
+  });
+}
+
 for (const r of REPRO.b) {
   for (const pair of MOUSE_PAIRS) {
     test(`(b) at ${sizeLabel(r)}, Send pressed twice (${pair}) after the rating prompt: the accepted send's collapse never hands the second press to Play again`, async ({
@@ -348,6 +485,53 @@ for (const r of REPRO.c) {
       await runDataCase(page, await openResults(page, 'win', r.text), pair);
     });
   }
+}
+
+// Run data opened by a press on its TEXT, then double-clicked on the toggle's own edge: a press
+// on a control's own content is that control's press (QC round 3).
+for (const r of [
+  { width: 658, height: 320, text: 200 },
+  { width: 480, height: 640, text: 200 },
+] as const) {
+  test(`(c) at ${sizeLabel(r)}, Run data opened by a press on its text, then double-clicked high on its edge where its closing brings a control under the pointer: the second press reaches nothing else`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(r);
+    const dialog = await openResults(page, 'win', r.text);
+    const toggle = toggleOf(dialog);
+    const body = dialog.locator('.wy-results-body');
+    // The body's range with the group closed, measured before it opens.
+    const closedHeight = await body.evaluate((b) => b.scrollHeight);
+    await page.locator('.wy-results-more').scrollIntoViewIfNeeded();
+    const text = await boxOf(page, '.wy-results-more > span');
+    const [tx, ty] = [centreX(text), at(text, 0.5)];
+    expect(
+      await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [tx, ty] as const),
+      'the opening press lands on the toggle’s text',
+    ).toBe('SPAN');
+    await page.mouse.click(tx, ty);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.waitForTimeout(PRESS_GUARD_WINDOW_MS + 100);
+    const worst = await worstPlace(body, closedHeight);
+    expect(worst, 'a control above the toggle is within reach of the clamp').not.toBeNull();
+    await body.evaluate((b, top) => (b.scrollTop = top), worst!.scroll);
+    await twoFrames(page);
+    expect(
+      await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y) === document.querySelector('.wy-results-more'),
+        [worst!.x, worst!.y] as const,
+      ),
+      'the pair lands on the toggle itself, not its text',
+    ).toBe(true);
+    const before = await strayState(page);
+    await pressTwice(page, 'double-click', worst!.x, worst!.y);
+    await expectNoNewRun(page, dialog, 'Run data double-clicked');
+    const after = await strayState(page);
+    expect({ ...after, runData: null }, 'nothing but the toggle').toEqual({
+      ...before,
+      runData: null,
+    });
+  });
 }
 
 for (const r of REPRO.d) {
@@ -373,6 +557,24 @@ test.describe('on a touch screen', () => {
     const dialog = await openResults(page, 'win', 200);
     await notNowCase(page, dialog, 'two taps');
   });
+
+  // A finger's second tap drifts further than a resting mouse: past the mouse's slop, inside a
+  // finger's (#181 H2). These two drifts are where the second tap lands on Play again.
+  for (const drift of [
+    { dx: 30, dy: 0 },
+    { dx: 0, dy: -30 },
+  ] as const) {
+    test(`(a) at 658×320, 200% text, Not now tapped twice, the second tap 30px ${drift.dx === 0 ? 'higher' : 'to the right'}: inside a finger's slop, it never reaches Play again`, async ({
+      page,
+    }) => {
+      const off = Math.hypot(drift.dx, drift.dy);
+      expect(off, 'past a mouse’s slop').toBeGreaterThan(PRESS_GUARD_SLOP_PX);
+      expect(off, 'inside a finger’s').toBeLessThanOrEqual(PRESS_GUARD_TOUCH_SLOP_PX);
+      await page.setViewportSize({ width: 658, height: 320 });
+      const dialog = await openResults(page, 'win', 200);
+      await notNowCase(page, dialog, 'two taps', drift);
+    });
+  }
 
   test('(b) at 658×320, 100% text, Send tapped twice after the rating prompt: the second tap never reaches Play again', async ({
     page,
@@ -401,7 +603,12 @@ test.describe('on a touch screen', () => {
 
 /** (a) Open the form, scroll to its end, press Not now twice. The first press closes the form;
  *  the body clamps and Play again comes down under the pointer. */
-async function notNowCase(page: Page, dialog: Locator, pair: Pair): Promise<void> {
+async function notNowCase(
+  page: Page,
+  dialog: Locator,
+  pair: Pair,
+  drift: Drift = NO_DRIFT,
+): Promise<void> {
   await pressOnce(page, '.wy-survey-opener > .wy-btn', pair);
   await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
   await page.waitForTimeout(500); // let the guard's window from the opening press close
@@ -410,7 +617,7 @@ async function notNowCase(page: Page, dialog: Locator, pair: Pair): Promise<void
   expect(await wholeInView(page, notNow), 'Not now is on screen').toBe(true);
   const box = await boxOf(page, notNow);
   const before = await strayState(page);
-  await pressTwice(page, pair, centreX(box), at(box, 0.5));
+  await pressTwice(page, pair, centreX(box), at(box, 0.5), drift);
   await expect(dialog.getByRole('button', { name: 'Give feedback' })).toBeVisible();
   await expectNoNewRun(page, dialog, 'Not now pressed twice');
   expect(await strayState(page), 'only the form closed').toEqual({ ...before, survey: false });
@@ -466,7 +673,31 @@ async function runDataCase(page: Page, dialog: Locator, pair: Pair): Promise<voi
   await toggle.press('Enter');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.waitForTimeout(500); // let the guard's window from the opening press close
-  const worst = await body.evaluate((b, closed) => {
+  const worst = await worstPlace(body, closedHeight);
+  expect(worst, 'a control above the toggle is within reach of the clamp here').not.toBeNull();
+  await body.evaluate((b, top) => (b.scrollTop = top), worst!.scroll);
+  await twoFrames(page);
+  expect(await pressableAt(page, '.wy-results-more', worst!.x, worst!.y), 'the toggle').toBe(true);
+  const before = await strayState(page);
+  await pressTwice(page, pair, worst!.x, worst!.y);
+  await expectNoNewRun(page, dialog, 'Run data pressed twice');
+  const after = await strayState(page);
+  // The second press, swallowed, left the group closed: nothing but the toggle changed.
+  expect({ ...after, runData: null }, 'nothing but the toggle').toEqual({
+    ...before,
+    runData: null,
+  });
+}
+
+/** Where to scroll the body, and where to press high on Run data's toggle, so that the group's
+ *  closing (the body clamps to `closedHeight`) carries the nearest control above the toggle
+ *  (Play again, or Give feedback where the row wraps) down to exactly the point pressed; or null
+ *  where none is within reach. */
+const worstPlace = (
+  body: Locator,
+  closedHeight: number,
+): Promise<{ scroll: number; x: number; y: number } | null> =>
+  body.evaluate((b, closed) => {
     const port = b.getBoundingClientRect();
     const inContent = (y: number): number => y - port.top + b.scrollTop;
     const t = document.querySelector('.wy-results-more')!.getBoundingClientRect();
@@ -487,20 +718,6 @@ async function runDataCase(page: Page, dialog: Locator, pair: Pair): Promise<voi
     const onScreen = press - scroll >= 0 && press - scroll <= b.clientHeight;
     return reachable && onScreen ? { scroll, x, y: port.top + (press - scroll) } : null;
   }, closedHeight);
-  test.skip(worst === null, 'no control stands above the toggle within reach of the clamp here');
-  await body.evaluate((b, top) => (b.scrollTop = top), worst!.scroll);
-  await twoFrames(page);
-  expect(await pressableAt(page, '.wy-results-more', worst!.x, worst!.y), 'the toggle').toBe(true);
-  const before = await strayState(page);
-  await pressTwice(page, pair, worst!.x, worst!.y);
-  await expectNoNewRun(page, dialog, 'Run data pressed twice');
-  const after = await strayState(page);
-  // The second press, swallowed, left the group closed: nothing but the toggle changed.
-  expect({ ...after, runData: null }, 'nothing but the toggle').toEqual({
-    ...before,
-    runData: null,
-  });
-}
 
 /** (d) Open Run data, press Save (a two-line message), scroll to the end, press Verify twice
  *  HIGH on it. Verify's one-line message is shorter than Save's: were the region to shrink, the
@@ -589,4 +806,343 @@ for (const r of [
       }
     });
   }
+}
+
+// --- Opening the survey where its first option straddles the fold --------------------------------
+
+type Straddle = { readonly rel: number; readonly lo: number; readonly hi: number };
+
+/** Where the survey's first option stands against the fold at scrollTop 0, in the body's content
+ *  coordinates (so however far an open scrolled): how far the fold is below the top of its label
+ *  (`rel`), and the band where at least half the label shows while its radio is cut by the fold
+ *  (`lo`..`hi`). */
+const firstOption = (page: Page): Promise<Straddle> =>
+  page.evaluate(() => {
+    const b = document.querySelector('.wy-results-body')!;
+    const port = b.getBoundingClientRect();
+    const label = document.querySelector('.wy-survey-scale label')!.getBoundingClientRect();
+    const radio = document.querySelector('.wy-survey-scale input')!.getBoundingClientRect();
+    const c = (y: number): number => y - port.top + b.scrollTop;
+    return {
+      rel: b.clientHeight - c(label.top),
+      lo: label.height / 2 + 1,
+      hi: c(radio.bottom) - c(label.top) - 1,
+    };
+  });
+
+const straddles = (m: Straddle): boolean => m.rel >= m.lo && m.rel <= m.hi;
+
+/** `firstOption` at a size, read after opening the survey from the keyboard. */
+async function firstOptionAt(page: Page, width: number, height: number) {
+  await page.setViewportSize({ width, height });
+  const dialog = await openResults(page, 'win');
+  await dialog.getByRole('button', { name: 'Give feedback' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
+  return { h: height, ...(await firstOption(page)) };
+}
+
+/** The first window above Compact, by width, where the first option opens straddling the fold:
+ *  found by bisecting on the height. */
+async function findStraddle(page: Page): Promise<Size | null> {
+  for (const width of [1280, 1024, 900, 800]) {
+    let a = await firstOptionAt(page, width, 520);
+    if (a.hi <= a.lo) continue;
+    if (straddles(a)) return { width, height: a.h };
+    let b = await firstOptionAt(page, width, 760);
+    for (let i = 0; i < 6; i++) {
+      if (straddles(b)) return { width, height: b.h };
+      if (!(a.rel < a.lo && b.rel > b.hi)) break;
+      const target = (a.lo + a.hi) / 2;
+      const h = Math.round(a.h + ((target - a.rel) * (b.h - a.h)) / (b.rel - a.rel));
+      if (h <= a.h || h >= b.h) break;
+      const m = await firstOptionAt(page, width, h);
+      if (straddles(m)) return { width, height: h };
+      if (m.rel < m.lo) a = m;
+      else b = m;
+    }
+  }
+  return null;
+}
+
+test('opening the survey by pointer where its first option opens mostly, not wholly, in view moves nothing', async ({
+  page,
+}) => {
+  // The question's reveal runs only where the option opened mostly below the fold, so here only
+  // the layout read before the focus keeps the body still: WebKit scrolls a `preventScroll` focus
+  // made over the layout a render has just dirtied into view at its next rendering update
+  // (`focus-in-place.ts`).
+  test.setTimeout(180_000);
+  const found = await findStraddle(page);
+  expect(
+    found,
+    'a window above Compact where the first option opens straddling the fold',
+  ).not.toBeNull();
+  await page.setViewportSize(found!);
+  const dialog = await openResults(page, 'win');
+  const body = dialog.locator('.wy-results-body');
+  expect(await body.evaluate((b) => b.scrollTop), 'the closed panel fits: nothing scrolled').toBe(
+    0,
+  );
+  const box = await boxOf(page, '.wy-survey-opener > .wy-btn');
+  await page.mouse.click(centreX(box), at(box, 0.5));
+  await expect(dialog.getByRole('radio', { name: '1' }).first()).toBeFocused();
+  await page.waitForTimeout(300);
+  await twoFrames(page);
+  expect(
+    straddles(await firstOption(page)),
+    'the first option opened mostly, not wholly, in view',
+  ).toBe(true);
+  expect(await body.evaluate((b) => b.scrollTop), 'nothing moved').toBe(0);
+});
+
+// --- What the guard lets through, what the dialog's arrival holds, and the keyboard -------------
+
+for (const size of [
+  { width: 1280, height: 720 },
+  { width: 390, height: 844 },
+] as const) {
+  for (const gap of [150, 300]) {
+    test(`at ${String(size.width)}×${String(size.height)}, a quick correction from rating 3 to rating 4, ${String(gap)} ms later and near their facing edges, is the player’s: nothing moved under the pointer`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      const dialog = await openResults(page, 'win');
+      // Opened from the keyboard: no pointer press comes before the two below.
+      await dialog.getByRole('button', { name: 'Give feedback' }).focus();
+      await page.keyboard.press('Enter');
+      await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
+      const three = '.wy-survey-scale label:nth-of-type(3)';
+      await page.locator(three).first().scrollIntoViewIfNeeded();
+      await twoFrames(page);
+      const b3 = await boxOf(page, three);
+      const b4 = await boxOf(page, '.wy-survey-scale label:nth-of-type(4)');
+      // Just inside rating 3's facing edge, then on rating 4's radio.
+      const p3 = { x: b3.x + b3.width - 4, y: at(b3, 0.5) };
+      const p4 = { x: b4.x + 7, y: at(b4, 0.5) };
+      expect(
+        Math.hypot(p4.x - p3.x, p4.y - p3.y),
+        'the two presses are at one spot, to the guard',
+      ).toBeLessThanOrEqual(PRESS_GUARD_SLOP_PX);
+      await pressApart(page, p3, p4, gap);
+      await expect(dialog.getByRole('radio', { name: '4' }).first()).toBeChecked();
+    });
+  }
+}
+
+for (const key of ['Enter', 'Space'] as const) {
+  test(`(a) at 1440×900, 200% text, Not now double-clicked, then ${key}: the held second press moved no focus, so ${key} acts on Give feedback, where Not now left it`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const dialog = await openResults(page, 'win', 200);
+    await notNowCase(page, dialog, 'double-click');
+    const feedback = dialog.getByRole('button', { name: 'Give feedback' });
+    await expect(feedback, 'focus where Not now put it').toBeFocused();
+    await page.keyboard.press(key);
+    await expect(
+      dialog.getByRole('button', { name: 'Send' }),
+      `${key} opened the survey again`,
+    ).toBeVisible();
+    await expectNoNewRun(page, dialog, `${key} after the double-click`);
+  });
+}
+
+test('a double-click on the board as the run ends: its second press lands on Play again in the dialog that just opened, and is held', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // Where Play again stands in the open dialog, measured on the same run already over.
+  await openResults(page, 'win');
+  const play = await boxOf(page, '.wy-results .wy-primary');
+  const [x, y] = [centreX(play), at(play, 0.5)];
+  // The same run one tick short of its end: the first press anywhere plays that tick, and the
+  // dialog opens on the next frame (`results-entry.ts`, `&endOnPress=1`).
+  await page.goto(`${HARNESS}?run=win&survey=1&endOnPress=1`);
+  const dialog = page.getByRole('dialog');
+  const board = page.locator('.wy-board');
+  await expect(board).toHaveAttribute('data-sim-phase', /\w/, { timeout: 30_000 });
+  expect(await board.getAttribute('data-sim-phase'), 'the run is not over yet').not.toBe('won');
+  await expect(dialog).toBeHidden();
+  const hit = ([px, py]: readonly [number, number]) =>
+    page.evaluate(
+      ([hx, hy]) => {
+        const el = document.elementFromPoint(hx, hy);
+        return {
+          control: el?.closest('button, a[href], input, select, textarea, label') != null,
+          playAgain: el !== null && document.querySelector('.wy-results .wy-primary')!.contains(el),
+        };
+      },
+      [px, py] as const,
+    );
+  expect((await hit([x, y])).control, 'the first press lands on the board, on no control').toBe(
+    false,
+  );
+  await recordClicks(page);
+  if (isChromium(page)) {
+    const cdp = await page.context().newCDPSession(page);
+    const send = (type: 'mousePressed' | 'mouseReleased', clickCount: number) =>
+      cdp.send('Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        button: 'left',
+        clickCount,
+        timestamp: Date.now() / 1000,
+      });
+    await send('mousePressed', 1);
+    await send('mouseReleased', 1);
+    await expect(dialog).toBeVisible();
+    expect((await hit([x, y])).playAgain, 'Play again is under the pointer').toBe(true);
+    await send('mousePressed', 2);
+    await send('mouseReleased', 2);
+    await cdp.detach();
+  } else {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(dialog).toBeVisible();
+    expect((await hit([x, y])).playAgain, 'Play again is under the pointer').toBe(true);
+    await page.mouse.down({ clickCount: 2 });
+    await page.mouse.up({ clickCount: 2 });
+  }
+  await twoFrames(page);
+  const clicks = await recordedClicks(page);
+  expect(
+    clicks.map((c) => c.detail),
+    'a double-click reached the page',
+  ).toEqual([1, 2]);
+  expect(clicks[1]!.t - clicks[0]!.t, 'in one gesture').toBeLessThan(PRESS_GUARD_REPEAT_MS);
+  await expectNoNewRun(page, dialog, 'the board double-click');
+});
+
+test('Enter on Send pressed twice in a row, or held down, starts no new run: Play again takes no key for a moment after focus moves to it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  for (const way of ['twice', 'held'] as const) {
+    const dialog = await openResults(page, 'win');
+    await dialog.getByRole('button', { name: 'Give feedback' }).focus();
+    await page.keyboard.press('Enter');
+    const four = dialog.getByRole('radio', { name: '4' }).first();
+    await four.focus();
+    await page.keyboard.press('Space');
+    await expect(four).toBeChecked();
+    await dialog.getByRole('button', { name: 'Send' }).focus();
+    if (way === 'twice') {
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(150);
+      await page.keyboard.press('Enter');
+    } else {
+      // Held down: the system repeats the key after a delay (`repeat` set).
+      await page.keyboard.down('Enter');
+      await page.waitForTimeout(550);
+      for (let i = 0; i < 4; i++) {
+        await page.keyboard.down('Enter');
+        await page.waitForTimeout(35);
+      }
+      await page.keyboard.up('Enter');
+    }
+    await expect(dialog.getByRole('status')).toContainText('Thanks for the feedback');
+    await expect(dialog.getByRole('button', { name: 'Play again' }), `Enter ${way}`).toBeFocused();
+    await twoFrames(page);
+    await expectNoNewRun(page, dialog, `Enter ${way} on Send`);
+  }
+  // A moment on, Play again takes its key.
+  await page.waitForTimeout(PRESS_GUARD_KEY_HOLD_MS);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog'), 'Play again started a new run').toBeHidden();
+});
+
+for (const r of [
+  { width: 658, height: 320, text: 200 },
+  { width: 1024, height: 600, text: 200 },
+] as const) {
+  test(`at ${sizeLabel(r)}, Run data open, a pointer Send and a Tab while it is in flight: Play again takes focus with its ring in view`, async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(
+      browserName === 'webkit',
+      'WebKit focuses no button on a press, and its Tab reaches no button by default: focus never enters the form, so the accepted Send leaves focus where it is',
+    );
+    await page.setViewportSize(r);
+    const dialog = await openResults(page, 'win', r.text, '&sendDelay=1500');
+    await pressOnce(page, '.wy-results-more');
+    await expect(toggleOf(dialog)).toHaveAttribute('aria-expanded', 'true');
+    await page.waitForTimeout(PRESS_GUARD_WINDOW_MS);
+    await pressOnce(page, '.wy-survey-opener > .wy-btn');
+    await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
+    await page.waitForTimeout(PRESS_GUARD_WINDOW_MS);
+    await pressOnce(page, '.wy-survey-scale label:nth-of-type(4)');
+    await expect(dialog.getByRole('radio', { name: '4' }).first()).toBeChecked();
+    await page.waitForTimeout(PRESS_GUARD_WINDOW_MS);
+    await scrollToEnd(page);
+    await pressOnce(page, '.wy-survey-actions .wy-btn:nth-child(1)');
+    await expect(dialog.getByRole('status')).toContainText('Sending your feedback');
+    // The player switches to the keyboard while the send is in flight.
+    await page.keyboard.press('Tab');
+    expect(
+      await page.evaluate(() => document.activeElement?.matches(':focus-visible')),
+      'a Tab rings focus',
+    ).toBe(true);
+    await expect(dialog.getByRole('status')).toContainText('Thanks for the feedback', {
+      timeout: 10_000,
+    });
+    await expect(dialog.getByRole('button', { name: 'Play again' })).toBeFocused();
+    await twoFrames(page);
+    const ring = await page.evaluate(() => {
+      const body = document.querySelector('.wy-results-body')!;
+      const port = body.getBoundingClientRect();
+      const el = document.querySelector('.wy-results .wy-primary')!;
+      const box = el.getBoundingClientRect();
+      return {
+        ringed: el.matches(':focus-visible'),
+        inView: box.top >= port.top - 0.5 && box.bottom <= port.top + body.clientHeight + 0.5,
+      };
+    });
+    expect(ring.ringed, 'Play again shows its focus ring').toBe(true);
+    expect(ring.inView, 'and the ring is in view').toBe(true);
+  });
+}
+
+for (const r of [
+  { width: 844, height: 390, text: 200 },
+  { width: 1024, height: 600, text: 200 },
+] as const) {
+  test(`at ${sizeLabel(r)}, Run data open, a keyboard Send from the end of the form brings Play again into view as it takes focus`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(r);
+    const dialog = await openResults(page, 'win', r.text);
+    const toggle = toggleOf(dialog);
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await dialog.getByRole('button', { name: 'Give feedback' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
+    const four = dialog.getByRole('radio', { name: '4' }).first();
+    await four.focus();
+    await page.keyboard.press('Space');
+    await expect(four).toBeChecked();
+    await dialog.getByRole('button', { name: 'Send' }).focus();
+    await scrollToEnd(page);
+    await page.keyboard.press('Enter');
+    await expect(dialog.getByRole('status')).toContainText('Thanks for the feedback');
+    await expect(dialog.getByRole('button', { name: 'Play again' })).toBeFocused();
+    await twoFrames(page);
+    const after = await page.locator('.wy-results-body').evaluate((b) => {
+      const port = b.getBoundingClientRect();
+      const box = document.querySelector('.wy-results .wy-primary')!.getBoundingClientRect();
+      return {
+        top: b.scrollTop,
+        end: b.scrollHeight - b.clientHeight,
+        inView: box.top >= port.top - 0.5 && box.bottom <= port.top + b.clientHeight + 0.5,
+      };
+    });
+    expect(after.inView, 'focus on Play again is in view').toBe(true);
+    // The collapse's clamp alone leaves the body at its end; only the focus scroll moves it off.
+    expect(after.top, 'the focus scrolled Play again into view').toBeLessThan(after.end - 1);
+  });
 }
