@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, chromium, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette, roleColour, towerRoleFor } from '@wynding/render';
 import { GRID } from './layout-probe';
@@ -9,8 +9,10 @@ import { GRID } from './layout-probe';
 // default `chromium` project explicitly ignores this file (`testIgnore`).
 //
 // Three gates, each catching a distinct failure mode a size check alone can't:
-//   (a) backing store  — the canvas' actual pixel buffer sizes to the device pixels its
-//       CSS rect snaps to at the clamped dpr, and its CSS size stays the rect.
+//   (a) backing store  — the canvas' actual pixel buffer is the device pixels the browser
+//       draws its CSS rect into, by the browser's OWN count (a `device-pixel-content-box`
+//       observer the test makes itself, never the renderer's arithmetic), and its CSS size
+//       stays the rect. Under emulation here, and at real device scales below.
 //   (b) rendered alignment — a real screenshot, decoded with pngjs (the existing DOM
 //       "rendered-contrast" spot checks in smoke.spec.ts read computed CSS on DOM
 //       elements and cannot sample the canvas), pins that a known floor cell and a known
@@ -45,6 +47,175 @@ function sampleCssPoint(
   return [png.data[idx] as number, png.data[idx + 1] as number, png.data[idx + 2] as number];
 }
 
+/** The board canvas's backing store, and the device pixels the browser draws its box into
+ *  by its own count: a `device-pixel-content-box` observer made here, independent of the
+ *  renderer's. (Through the getter `hideDevicePixels` keeps, where it has hidden it.) */
+async function storeAndBrowserCount(
+  page: Page,
+): Promise<{ store: [number, number]; browser: [number, number]; css: [number, number] }> {
+  return page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const canvas = document.querySelector<HTMLCanvasElement>('.wy-board canvas')!;
+        const kept = (
+          window as unknown as {
+            __wyDevicePixels?: (e: ResizeObserverEntry) => readonly ResizeObserverSize[];
+          }
+        ).__wyDevicePixels;
+        const observer = new ResizeObserver((entries) => {
+          const entry = entries[entries.length - 1]!;
+          const device = (kept ? kept(entry) : entry.devicePixelContentBoxSize)[0]!;
+          const rect = canvas.getBoundingClientRect();
+          observer.disconnect();
+          resolve({
+            store: [canvas.width, canvas.height],
+            browser: [device.inlineSize, device.blockSize],
+            css: [rect.width, rect.height],
+          });
+        });
+        observer.observe(canvas, { box: 'device-pixel-content-box' });
+      }),
+  );
+}
+
+/** Polls until the store is the browser's own count, or fails with the last reading. */
+async function expectStoreIsBrowserCount(page: Page, label: string): Promise<void> {
+  let last = '';
+  await expect
+    .poll(
+      async () => {
+        const r = await storeAndBrowserCount(page);
+        last = JSON.stringify(r);
+        return r.store[0] === r.browser[0] && r.store[1] === r.browser[1];
+      },
+      { message: `${label}: the backing store is the browser's count`, timeout: 5_000 },
+    )
+    .toBe(true)
+    .finally(() => console.log(`[hidpi] ${label}: ${last}`));
+}
+
+/** Init script: keep the browser's `devicePixelContentBoxSize` getter for the test's own
+ *  observer, and with `hide`, take it away from the page — as a browser without it (WebKit),
+ *  so the renderer works its store out from where the box sits. */
+function hideDevicePixels({ hide }: { hide: boolean }): void {
+  const proto = ResizeObserverEntry.prototype;
+  const getter = Object.getOwnPropertyDescriptor(proto, 'devicePixelContentBoxSize')?.get;
+  if (getter === undefined) return;
+  (
+    window as unknown as {
+      __wyDevicePixels: (e: ResizeObserverEntry) => readonly ResizeObserverSize[];
+    }
+  ).__wyDevicePixels = (e) => getter.call(e) as readonly ResizeObserverSize[];
+  if (hide)
+    delete (proto as unknown as { devicePixelContentBoxSize?: unknown }).devicePixelContentBoxSize;
+}
+
+/** Runs `body` on the app in a browser really running at device scale `dsf`, its window
+ *  `width`×`height`: `--force-device-scale-factor` lays the page out in device pixels and
+ *  draws the canvas into the pixels its box snaps to — which Playwright's `deviceScaleFactor`
+ *  does not: it lays the page out in CSS px and scales its picture. With `fallback`, the app
+ *  sees no `device-pixel-content-box` (`hideDevicePixels`). */
+async function atRealScale(
+  {
+    dsf,
+    width,
+    height,
+    fallback,
+  }: { dsf: number; width: number; height: number; fallback: boolean },
+  baseURL: string | undefined,
+  body: (page: Page) => Promise<void>,
+): Promise<void> {
+  const browser = await chromium.launch({
+    args: [`--force-device-scale-factor=${dsf}`, `--window-size=${width},${height}`],
+  });
+  try {
+    // `deviceScaleFactor: undefined` keeps Playwright Test from filling in the project's
+    // emulated scale, which a context without a viewport refuses.
+    const context = await browser.newContext({
+      viewport: null,
+      deviceScaleFactor: undefined,
+      baseURL,
+    });
+    await context.addInitScript(hideDevicePixels, { hide: fallback });
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect
+      .poll(() => page.locator('.wy-board canvas').evaluate((c: HTMLCanvasElement) => c.width))
+      .toBeGreaterThan(1);
+    expect(
+      await page.evaluate(() => [innerWidth, innerHeight, Math.round(devicePixelRatio * 100)]),
+    ).toEqual([width, height, Math.round(dsf * 100)]);
+    expect(
+      await page.evaluate(() => 'devicePixelContentBoxSize' in ResizeObserverEntry.prototype),
+      'the app sees the device-pixel box exactly when it should',
+    ).toBe(!fallback);
+    await body(page);
+  } finally {
+    await browser.close();
+  }
+}
+
+test.describe('the backing store against the browser’s own count, at a real device scale', () => {
+  // Worked out from where the box sits (as in WebKit): at each scale, at two window sizes —
+  // 525×320 puts the board at x = 52.5 — and again after the board is resized by a fraction.
+  for (const dsf of [0.8, 0.9, 1, 1.1, 1.25, 1.5, 2]) {
+    test(`worked out from where the box sits, at ${dsf}: the browser's count, before and after a fractional resize`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(90_000);
+      for (const [width, height] of [
+        [525, 320],
+        [1280, 720],
+      ] as const) {
+        await atRealScale({ dsf, width, height, fallback: true }, baseURL, async (page) => {
+          const at = `${width}×${height} @${dsf}, worked out`;
+          await expectStoreIsBrowserCount(page, at);
+          // Narrower and shorter by fractions of a pixel: the ResizeObserver's sync.
+          await page.evaluate(() => {
+            const board = document.querySelector<HTMLElement>('.wy-board')!;
+            board.style.right = '0.3px';
+            board.style.top = '0.45px';
+          });
+          await expectStoreIsBrowserCount(page, `${at}, resized`);
+        });
+      }
+    });
+  }
+
+  // The browser's own count (Chromium, Firefox), which it reports again when it changes —
+  // after a move that changes it, too, which no size observer sees.
+  for (const dsf of [0.8, 1, 1.25, 1.75]) {
+    test(`the browser's own count at ${dsf}, followed through a move that does not resize the board`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(60_000);
+      await atRealScale(
+        { dsf, width: 525, height: 320, fallback: false },
+        baseURL,
+        async (page) => {
+          const at = `525×320 @${dsf}`;
+          await expectStoreIsBrowserCount(page, at);
+          const counts = new Set<string>();
+          // The Stage nudged by fractions of a CSS px: the board keeps its size and moves.
+          for (const nudge of [0.2, 0.4, 0.6, 0.8]) {
+            await page.evaluate((n) => {
+              document.querySelector<HTMLElement>('.wy-stage')!.style.left = `${n}px`;
+            }, nudge);
+            await expectStoreIsBrowserCount(page, `${at}, moved ${nudge}px`);
+            counts.add(JSON.stringify((await storeAndBrowserCount(page)).browser));
+          }
+          // ... at least one of which changed the count, or this tested nothing.
+          expect(counts.size, 'a move that changes the device-pixel count').toBeGreaterThan(1);
+        },
+      );
+    });
+  }
+});
+
 test.describe('HiDPI backing store + alignment (#28/P5)', () => {
   test('backing store sizes to the device pixels the CSS rect snaps to at the clamped dpr; CSS size stays pinned to the rect', async ({
     page,
@@ -68,26 +239,25 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
 
     const canvas = await canvasLocator.evaluate((el: HTMLCanvasElement) => {
       const rect = el.getBoundingClientRect();
-      return {
-        width: el.width,
-        height: el.height,
-        left: rect.left,
-        top: rect.top,
-        cssWidth: rect.width,
-        cssHeight: rect.height,
-      };
+      return { cssWidth: rect.width, cssHeight: rect.height };
     });
 
-    // The backing store is the device pixels the canvas's box snaps to at the clamped dpr,
-    // from the one nearest its left edge to the one nearest its right (and likewise down):
-    // what a browser that lays the page out in device pixels draws it into, pixel for pixel.
-    // That can be a pixel off round(width × dpr), which is what the store was once sized to —
-    // and a store scaled into its box smears every one-pixel line (`plate-rim.spec.ts`).
-    // Positions are read to the layout engine's 1/64 px before rounding.
-    const edge = (v: number): number => Math.round(Math.round(v * effectiveDpr * 64) / 64);
-    const span = (start: number, size: number): number => edge(start + size) - edge(start);
-    expect(canvas.width).toBe(span(canvas.left, canvas.cssWidth));
-    expect(canvas.height).toBe(span(canvas.top, canvas.cssHeight));
+    // The backing store is the device pixels the browser draws the canvas's box into, by its
+    // own count — that can be a pixel off round(width × dpr), which is what the store was
+    // once sized to, and a store scaled into its box smears every one-pixel line
+    // (`plate-rim.spec.ts`). Past the clamp (a 3× screen) the store is drawn at 2,
+    // deliberately fewer pixels than the box: two thirds of the browser's count, to within
+    // the pixel an edge's snap can move.
+    if (rawDpr <= 2) {
+      await expectStoreIsBrowserCount(page, `dpr ${rawDpr}`);
+    } else {
+      const { store, browser } = await storeAndBrowserCount(page);
+      for (const axis of [0, 1] as const) {
+        expect(Math.abs(store[axis] - (browser[axis] * effectiveDpr) / rawDpr)).toBeLessThanOrEqual(
+          1,
+        );
+      }
+    }
     // CSS size stays pinned to the container rect regardless of dpr/clamp.
     expect(Math.round(canvas.cssWidth)).toBe(Math.round((box as { width: number }).width));
     expect(Math.round(canvas.cssHeight)).toBe(Math.round((box as { height: number }).height));
