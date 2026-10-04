@@ -80,6 +80,15 @@ describe('backingStoreSize — as many pixels as the device pixels the box is dr
       width: 657, // pixels 105 to 762
       height: 400,
     });
+    // A count of pixels at another scale than the page's: Chromium's device-scale emulation
+    // counts the screen's own (here 1×) for a page at 2 — taken as the store, it halved the
+    // board's resolution there (QC round 4). A count of where the box snaps to is within one
+    // pixel of its size × dpr; one further off is not that count.
+    expect(
+      backingStoreSize(box, 2, 2, report({ dpr: 2, width: 328, height: 200 })),
+      'emulated',
+    ).toEqual({ width: 657, height: 400 });
+    expect(backingStoreSize(box, 1, 1, report({ height: 202 })), 'two off').toEqual(worked);
   });
 
   it('is never under one pixel', () => {
