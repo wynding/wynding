@@ -930,6 +930,14 @@ const CONTRACT_EXCLUSIONS: readonly {
     ],
     why: "Collision, and revealed only when the file-path mask stopped eating compact ratios: oracle.ts's 30 is the DoT record window in `floor((240-1)/30)+1`, ADR 0005's is the ≥ 30 fps low-end floor, the spike's are a 30% slow and a 30% ambient-load swing, and m2.md's are tower range columns. Five unrelated quantities wearing one numeral; a row keyed on it would bind every one of those sites to the others.",
   },
+  {
+    value: '33',
+    surfaces: [
+      [G.fixture, 1],
+      [G.adr, 1],
+    ],
+    why: "Collision: gate-fixture.test.ts's ~33% is the gap between the p95 and the gating median that the sensitivity grid's points alone would suggest (the swept gap is ~24%), while ADR 0005's only 33.0 is a measured frame time, a 33.0 ms p95 in the T3 entry's QC round 2 table (#181). A percentage of a statistic's sensitivity and a frame time; no shared quantity.",
+  },
   // THE FIVE COLLISIONS #163 FOUND INSIDE `KNOWN_UNROWED`. That table was the scene oracle's
   // family, held as a block when PR #161 sized it; rowing the family meant reading every copy,
   // and these five turned out to be no shared claim at all — every surface states a DIFFERENT
@@ -1297,7 +1305,7 @@ const ROWED_CENSUS: readonly {
     value: '25',
     census: [
       [G.fixture, 1],
-      [G.adr, 9],
+      [G.adr, 11],
       [G.spike, 2],
       [G.m2, 9],
       [O.layout, 2],

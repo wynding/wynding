@@ -1319,10 +1319,41 @@ cost; untraced runs are what size it.
   a fifth of a CSS pixel of its circle, and at twenty-four within 1% of its radius: under a quarter
   of a pixel for a pulse ring at desktop cell size, where a flash has thirteen sides.
 
-**Not yet sized.** The untraced runs that would size this round's saving, the record-only suite at
-`3d83684` with T3 off beside it, have not run yet. Until they do, the traced probe above is the
-evidence for the change to the pool, and what T3 still costs the browser after both changes is not
-established.
+**After (QC round 2, the code of `3d83684`).** Four runs of the record-only suite, gated, one
+worker, on AC power with the gate's fast policy throughout, alternating the head and T3 off
+(variant C, built from a scratch copy of `3d83684`). Each run's bundle was checked for its
+variant: the polygon helper in both, the control only in T3 off. Frame time in ms, p50 / p95 / p99:
+
+| scene   | profile   | head, first run    | head, second run   | T3 off, first run  | T3 off, second run |
+| ------- | --------- | ------------------ | ------------------ | ------------------ | ------------------ |
+| catalog | mid-range | 8.3 / 10.2 / 10.3  | 8.3 / 10.2 / 10.4  | 8.3 / 10.2 / 10.4  | 8.3 / 10.2 / 10.3  |
+| stress  | mid-range | 16.6 / 18.5 / 25.0 | 16.6 / 18.6 / 25.1 | 16.6 / 18.6 / 25.0 | 16.6 / 18.6 / 24.9 |
+| catalog | low-end   | 24.6 / 33.6 / 35.1 | 24.7 / 33.3 / 35.0 | 24.2 / 32.3 / 33.7 | 23.7 / 33.0 / 34.7 |
+| stress  | low-end   | 58.0 / 66.1 / 74.8 | 58.0 / 65.8 / 66.8 | 58.2 / 64.9 / 67.4 | 52.0 / 60.2 / 75.0 |
+
+Mean frame time in ms, and what T3 adds to it (the head's mean less T3 off's):
+
+| scene   | profile   | head          | T3 off        | T3 adds   |
+| ------- | --------- | ------------- | ------------- | --------- |
+| catalog | mid-range | 8.37 / 8.33   | 8.35 / 8.33   | nothing   |
+| stress  | mid-range | 16.05 / 15.72 | 15.60 / 15.53 | 0.32      |
+| catalog | low-end   | 23.64 / 23.31 | 22.32 / 22.37 | 1.13      |
+| stress  | low-end   | 56.82 / 56.50 | 56.50 / 54.35 | about 1.2 |
+
+**What remains.** At catalog low-end T3 now adds about 1.13 ms a frame, against about 1.4 before
+this round. The head's mean fell to 23.31–23.64 ms, from 23.70–23.92 across QC round 1's four head
+runs, while T3 off held where it was (22.32–22.37 ms, against 22.22–22.62). That is close to what
+the traced probe recovered, so the one sprite shape and the polygons together bought about a fifth
+of T3's cost there. The stress scene's low-end means spread by more than two milliseconds from run
+to run (54.35 to 56.50 ms with T3 off), too widely to size a change this small, and its mid-range
+adds about a third of a millisecond, much as before. The catalog scene at mid-range sits on one
+refresh either way. At catalog low-end T3 still holds the p95 on the 33.3 ms budget line, at 33.6
+and 33.3 ms, where with T3 off it fell just below it. How the millisecond that remains divides was
+not measured after the change. Before it, the trace above put about a quarter of a millisecond
+(traced) in the app's own draw, the trackers and the placement of turned heads, and the rest in
+Phaser, in its per-object loops and in drawing the flash and the rings: the two parts this round
+worked on. None of it moves a budget, a trigger, `R0`, `TOLERANCE` or the CI ratio gate, and the
+stress scene's p95-breach signal fired on both profiles in all four runs, as it did before T3.
 
 **The largest lever left: the live layers' circles.** In the traced frame with T3 on, Phaser's
 `Graphics` renderer took 15.53 of the 25.26 ms, about three fifths of it, drawing the live layers,
