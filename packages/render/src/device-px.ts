@@ -43,11 +43,14 @@ const SAME_LAYOUT = 1e-3;
  * The backing store a canvas needs to be shown pixel for pixel: as many pixels as the device
  * pixels the browser draws its box into. That is the browser's own answer when it has given
  * one (`reported`, from a `device-pixel-content-box` observer — Chromium and Firefox) for
- * the box as it is now — the same CSS size, at the same dpr — and the store is drawn at the
- * device's own ratio (`dpr === rawDpr`). Otherwise it is worked out from where the box sits
- * (`snappedSpan`): WebKit gives no such answer, the observer has not yet answered for a box
- * just resized, and a store at a dpr clamped below the device's is deliberately fewer pixels
- * than the box, scaled up into it. `box` is the canvas's CSS box from its page position, as
+ * the box as it is now — the same CSS size, at the same dpr — counting pixels at that dpr
+ * (within one of the box's size × dpr, as any count of where the box snaps to is), and the
+ * store is drawn at the device's own ratio (`dpr === rawDpr`). Otherwise it is worked out
+ * from where the box sits (`snappedSpan`): WebKit gives no such answer, the observer has not
+ * yet answered for a box just resized, Chromium's device-scale emulation counts the screen's
+ * own pixels rather than the emulated ones (a box 1072 CSS px wide read 1072 at an emulated
+ * 2), and a store at a dpr clamped below the device's is deliberately fewer pixels than the
+ * box, scaled up into it. `box` is the canvas's CSS box from its page position, as
  * `getBoundingClientRect` reads it. Never under one pixel.
  */
 export function backingStoreSize(
@@ -66,7 +69,9 @@ export function backingStoreSize(
     dpr === rawDpr &&
     reported.dpr === rawDpr &&
     Math.abs(reported.cssWidth - box.width) < SAME_LAYOUT &&
-    Math.abs(reported.cssHeight - box.height) < SAME_LAYOUT
+    Math.abs(reported.cssHeight - box.height) < SAME_LAYOUT &&
+    Math.abs(reported.width - box.width * dpr) <= 1 &&
+    Math.abs(reported.height - box.height * dpr) <= 1
       ? reported
       : null;
   return {

@@ -112,10 +112,12 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   //
   // The count is the browser's own where it gives one: a `device-pixel-content-box` observer
   // on the canvas (Chromium, Firefox) reports it, and again whenever it changes — after a
-  // move that changes it, too, which no size observer sees. Elsewhere (WebKit), and past the
-  // clamp, it is worked out from where the box sits (`backingStoreSize`), re-read on every
-  // sync; there a move with no resize keeps the last count until the next sync. The canvas is
-  // reallocated only when the count, the CSS size or the dpr changes.
+  // move that changes it, too, which no size observer sees. Elsewhere (WebKit), past the
+  // clamp, and under device-scale emulation (whose count is the screen's own pixels, not the
+  // emulated ones: `backingStoreSize` sets it aside), it is worked out from where the box
+  // sits, re-read on every sync; there a move with no resize keeps the last count until the
+  // next sync. The canvas is reallocated only when the count, the CSS size or the dpr
+  // changes.
   let devicePixels: DevicePixelReport | null = null;
   let devicePixelObserver: ResizeObserver | null = null;
   let applied = { width: 0, height: 0, cssWidth: -1, cssHeight: -1, dpr: -1 };
