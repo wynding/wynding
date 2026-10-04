@@ -187,13 +187,14 @@ export function drawSelection(
     // stroke is drawn OVER the rim (the effects layer sits above the tower sprites). At dpr
     // 1 it covers the whole rim at cells up to 21 px, so its inner edge lies on the plate,
     // where `range` clears 3.70:1 composited (4.83 tritan; gated, `palette.test.ts`); at 22
-    // to 24 px, and from 28 px, the floor margin outside the rim is at least the stroke's
-    // width, so it lies wholly on the floor; at 25 to 27 px, where the rim's own width
-    // rounds up to two pixels and widens outward, its inner edge ends on the rim, and its
-    // floor-side edge is what carries the cue. (A fractional dpr moves those bands, the rim
-    // being on whole device pixels. At small cells a side of the rim can land on the
-    // footprint's outermost pixel, which the stroke covers: at dpr 1 only at 10px cells, but
-    // at other dprs at more sizes, on the near side or the far —
+    // to 24 px, and from 29 px (its near sides from 28), the floor margin outside the rim is
+    // at least the stroke's width, so it lies wholly on the floor; at 25 to 27 px, where the
+    // rim's own width rounds up to two pixels and widens outward — and on the far sides at 28
+    // px, where the widened rim's place is an exact tie that rounds outward there — its inner
+    // edge ends on the rim, and its floor-side edge carries the cue. (A fractional dpr moves
+    // those bands, the rim being on whole device pixels. At small cells a side of the rim can
+    // land on the footprint's outermost pixel, which the stroke covers: at dpr 1 only at 10px
+    // cells, but at other dprs at more sizes, on the near side or the far —
     // docs/accessibility-checklist.md lists them. Where a neighbouring tower's rim does the
     // same, the floor beyond the stroke gives way to that rim.) It stays clear of a
     // neighbour: the next footprint starts beyond this one's edge. These relations hold only
