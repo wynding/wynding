@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
 import { getBundledRuleset } from '@wynding/content';
+import type { TracerVM } from '@wynding/render';
 import type { SimInput } from '@wynding/sim';
 import { createController, enqueueVerdict, outcomesMatch, type Controller } from './controller';
 
@@ -957,6 +958,40 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
     // the real code) catches both.
     expect(t.destX).toBe(362);
     expect(t.destY).toBe(2944);
+  });
+
+  it('lists every shot a tick fires together, from the first frame after it: a newly listed shot always launched after every shot listed before', () => {
+    // `packages/render/src/tower-fire.ts` takes each shot in once by its launch tick alone,
+    // keeping no record of each, and relies on this. Eight basic towers either side of the
+    // lane fire together on many ticks; frames come at 60 Hz, with a 130 ms catch-up every 97.
+    const c = createController(1);
+    startAndCall(c);
+    for (const row of [8, 12]) {
+      for (const col of [2, 4, 6, 8]) {
+        if (c.uiState().armed !== 'basic') c.armTower('basic');
+        c.aimAt(col, row);
+        expect(c.confirm(), `basic at (${col}, ${row})`).toBe(true);
+      }
+    }
+    const listed = new Set<TracerVM>();
+    const shotsPerTick = new Map<number, number>();
+    let latest = -Infinity;
+    for (let i = 0; i < 3000; i++) {
+      c.advance(i % 97 === 0 ? 130 : 1000 / 60);
+      let frameLatest = latest;
+      for (const t of c.frame().tracers) {
+        if (listed.has(t)) continue;
+        listed.add(t);
+        shotsPerTick.set(t.launchTick, (shotsPerTick.get(t.launchTick) ?? 0) + 1);
+        expect(t.launchTick).toBeGreaterThan(latest);
+        frameLatest = Math.max(frameLatest, t.launchTick);
+      }
+      latest = frameLatest;
+    }
+    // Not vacuous: shots were listed, and many ticks fired more than one at once — the case
+    // a shot listed a tick late would break.
+    expect(listed.size).toBeGreaterThan(100);
+    expect([...shotsPerTick.values()].filter((n) => n >= 2).length).toBeGreaterThan(10);
   });
 });
 
