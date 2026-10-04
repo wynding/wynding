@@ -2346,8 +2346,10 @@ a.wy-home:focus-visible {
      the mark and the Dock put it — at 658×320 it cut the fifth chip through its icon and value.
      `hud-cut.ts` measures where the last whole chip (or wave-strip line) ends and writes it as
      `--wy-hud-cut`: the scrollport stops there, and the room below it stays empty above the
-     Dock (whose `margin-top: auto` keeps it where it was). Unset — every item fits, none does,
-     or the pass has not run — the scrollport takes all the room, as before. */
+     Dock (whose `margin-top: auto` keeps it where it was). Where no item fits whole — a wrapped
+     countdown after Start at 150–200% text — it stops at that item's last whole line. Unset —
+     every item fits, not one line does, or the pass has not run — the scrollport takes all the
+     room, as before. */
   .wy-hud {
     flex: 1 1 auto;
     flex-direction: column;
@@ -2363,6 +2365,34 @@ a.wy-home:focus-visible {
   .wy-chip-label,
   .wy-chip-suffix {
     display: none;
+  }
+
+  /* THE GLANCE WRAPS, ICON ABOVE VALUE (#181 QC round 2). The column's track is vw-capped and
+     does not grow with the text, so from 125–175% text (by width) an icon and its value no
+     longer fit side by side: the one-line glance ran its value past the column's edge, where
+     the scrollport clipped it — at 568×320 and 150% the countdown read "1" for 14s. Wrapped,
+     the icon keeps the line above its value, as main's glances do, so no value loses its icon.
+     Where even the value is wider than the column (the countdown at 568×320 and 175–200%, and
+     658×320 at 200%), its unit wraps under the digits at its `<wbr>` (`shell.ts`), never a
+     digit. Taller chips change no rule of the cut: `hud-cut.ts` measures the real boxes. */
+  .wy-chip-glance {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .wy-chip-value {
+    white-space: normal;
+  }
+
+  /* …except the countdown, whose seconds wrap ABOVE its clock. After Start at 150–200% text on a
+     320px-tall phone the Dock leaves the chips room for one line, and the column rests on the
+     first item's last whole line (`hud-cut.ts`): that line should be the seconds — a number
+     counting down explains itself, a clock alone tells the player nothing. `wrap-reverse`
+     reverses the order of the lines and nothing else: the DOM, the reading order and the
+     accessible text are unchanged, and on one line the clock still leads. Lives, bounty, stars
+     and score keep their icon above the value, so each stays labelled. */
+  .wy-chip[data-wy-chip='wave'] .wy-chip-glance {
+    flex-wrap: wrap-reverse;
   }
 
   /* The wave strip's Compact form (#181 L1): an in-flow block in the column — the title, then

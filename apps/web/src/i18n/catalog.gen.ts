@@ -74,7 +74,7 @@ export const EN = {
   "hud.statuses.poisoned": "{count} poisoned",
   "hud.statuses.slowed": "{count} slowed",
   "hud.statuses.stunned": "{count} stunned",
-  "hud.wave.compact.countdown": "{s}s",
+  "hud.wave.glance.unit": "s",
   "install.banner.dismiss": "Dismiss install suggestion",
   "install.banner.how": "Show me how",
   "install.banner.install": "Install",
@@ -265,7 +265,7 @@ export interface MessageParams {
   "hud.statuses.poisoned": { "count": string | number };
   "hud.statuses.slowed": { "count": string | number };
   "hud.statuses.stunned": { "count": string | number };
-  "hud.wave.compact.countdown": { "s": string | number };
+  "hud.wave.glance.unit": Record<never, never>;
   "install.banner.dismiss": Record<never, never>;
   "install.banner.how": Record<never, never>;
   "install.banner.install": Record<never, never>;

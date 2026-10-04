@@ -3742,10 +3742,13 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
     overlay.update(view({ countdownSeconds: first }));
     expect(dial.root.hidden).toBe(false);
     expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(1));
-    expect(shell.hud.wave.value.textContent).toBe(`${first}s`);
+    // The chip reads the seconds: its number leaf, then the static unit.
+    expect(shell.hud.wave.glance.textContent).toBe(`${first}s`);
+    expect(shell.hud.wave.value.textContent).toBe(String(first));
     overlay.update(view({ countdownSeconds: 4 }));
     expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(4 / first));
-    expect(shell.hud.wave.value.textContent).toBe('4s');
+    expect(shell.hud.wave.glance.textContent).toBe('4s');
+    expect(shell.hud.wave.value.textContent).toBe('4');
     // Each wave is measured against its own countdown, not the first one's.
     const second = totalSeconds(1);
     overlay.update(view({ countdownSeconds: second, waveCursor: 1 }));

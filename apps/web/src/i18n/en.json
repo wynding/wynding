@@ -71,7 +71,7 @@
   "hud.statuses.poisoned": "{count} poisoned",
   "hud.statuses.slowed": "{count} slowed",
   "hud.statuses.stunned": "{count} stunned",
-  "hud.wave.compact.countdown": "{s}s",
+  "hud.wave.glance.unit": "s",
   "install.banner.dismiss": "Dismiss install suggestion",
   "install.banner.how": "Show me how",
   "install.banner.install": "Install",

@@ -53,7 +53,9 @@ import { chipIcon, countdownDial, type ChipIconKind, type CountdownDialParts } f
  *  sentence-split. `glance` is the visible presentation in both layouts since #181 (H1): an
  *  inline-SVG icon and the value, `aria-hidden` so assistive tech reads the full message
  *  exactly once. `value` is the glance's one rewritten leaf — the icon beside it is static, so
- *  a refresh never replaces it (#98: only a leaf's own text is ever rewritten). */
+ *  a refresh never replaces it (#98: only a leaf's own text is ever rewritten). For the
+ *  countdown that leaf is the NUMBER inside `.wy-chip-value`, which also holds the static unit
+ *  after a `<wbr>`: Compact's narrow column may wrap the unit under the digits, never a digit. */
 export interface ShellChip {
   readonly root: HTMLSpanElement;
   readonly full: HTMLSpanElement;
@@ -317,11 +319,18 @@ function homeAnchor(doc: Document): HTMLAnchorElement {
  *  renders per layout. The glance is [icon][value] (#181 H1), with two static, localized
  *  companions where the style frame draws one: the score's dim "Score" label BEFORE its value
  *  (Standard shows it, Compact's narrow column drops it) and the stars' "/ 3" AFTER it. Both
- *  are written once here, like the wordmark — they carry no live value. */
+ *  are written once here, like the wordmark — they carry no live value.
+ *
+ *  A `unit` (the countdown's "s") is a third kind: part of the value as read — "25s", in the
+ *  value's own weight and colour, both layouts — yet static. It sits INSIDE `.wy-chip-value`,
+ *  after the rewritten number and a `<wbr>`, so the value reads as one word wherever it fits,
+ *  and where Compact's column is narrower than even the value (568×320 at 175–200% text, 658×320
+ *  at 200%) the unit wraps under the digits rather than running past the column's edge (#181 QC
+ *  round 2). */
 function chip(
   doc: Document,
   slot: ChipIconKind,
-  extras: { readonly label?: string; readonly suffix?: string } = {},
+  extras: { readonly label?: string; readonly suffix?: string; readonly unit?: string } = {},
 ): ShellChip {
   const root = doc.createElement('span');
   root.className = 'wy-chip';
@@ -333,6 +342,16 @@ function chip(
   glance.setAttribute('aria-hidden', 'true');
   const value = doc.createElement('span');
   value.className = 'wy-chip-value';
+  // The leaf `setChip` rewrites: the value itself, or — with a unit — the number inside it.
+  let leaf = value;
+  if (extras.unit !== undefined) {
+    leaf = doc.createElement('span');
+    leaf.className = 'wy-chip-number';
+    const unit = doc.createElement('span');
+    unit.className = 'wy-chip-unit';
+    unit.textContent = extras.unit;
+    value.append(leaf, doc.createElement('wbr'), unit);
+  }
   glance.append(chipIcon(doc, slot));
   if (extras.label !== undefined) {
     const label = doc.createElement('span');
@@ -348,7 +367,7 @@ function chip(
     glance.append(suffix);
   }
   root.append(full, glance);
-  return { root, full, glance, value };
+  return { root, full, glance, value: leaf };
 }
 
 /** What the Shell needs told rather than discovered. One field today; a named type so the
@@ -425,7 +444,7 @@ export function createShell(
   const bounty = chip(doc, 'bounty');
   const stars = chip(doc, 'stars', { suffix: t('hud.stars.glance.max') });
   const score = chip(doc, 'score', { label: t('hud.score.glance.label') });
-  const wave = chip(doc, 'wave');
+  const wave = chip(doc, 'wave', { unit: t('hud.wave.glance.unit') });
 
   // --- Wave preview (M2-S2; one home since #181 — see the `ShellPreview` doc comment). The
   // LAST layout item in `.wy-hud`, after the countdown chip it previews: on Standard it is the

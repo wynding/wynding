@@ -232,8 +232,8 @@ function towerName(towerId: string): string {
  *  glyph has no language, so routing it through the `t()` catalog would create a
  *  translatable entry with nothing to translate — the same exemption the codebase already
  *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The one
- *  genuinely WORDED compact form (the wave slot's countdown) goes through the catalog, as
- *  `hud.wave.compact.countdown`.
+ *  genuinely WORDED glance part, the countdown's unit, goes through the catalog, as
+ *  `hud.wave.glance.unit` — a static companion `shell.ts` writes once, like the stars' "/ 3".
  *
  *  The HUD chips no longer draw from here: since #181 (H1) their glances lead with inline-SVG
  *  icons (`hud-icons.ts`, built once by `shell.ts`). `bounty` stays for the Panel's cost row,
@@ -2400,12 +2400,11 @@ export function createOverlay(
       // `countdownRemaining`, which is meaningful before `start()` — the Start decouple —
       // not just after); hidden once every wave has launched (its preview surface shows the
       // last-wave marker instead) or the run is terminal.
+      // The glance's number only: its unit is static structure (`shell.ts`), after a `<wbr>`.
       setChip(
         hudEls.wave,
         hud.countdownSeconds !== null ? t('hud.countdown', { seconds: hud.countdownSeconds }) : '',
-        hud.countdownSeconds !== null
-          ? t('hud.wave.compact.countdown', { s: hud.countdownSeconds })
-          : '',
+        hud.countdownSeconds !== null ? String(hud.countdownSeconds) : '',
       );
       renderPreview(hud.preview);
       renderDial(hud);

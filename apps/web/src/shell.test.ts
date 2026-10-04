@@ -258,12 +258,35 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
       expect(icon.getAttribute('aria-hidden')).toBe('true');
       expect(icon.getAttribute('focusable')).toBe('false');
       expect(icon.classList.contains(`wy-icon--${slot}`)).toBe(true);
-      expect(chip.value.parentElement).toBe(chip.glance);
+      // The rewritten leaf is the glance's own value — or, for the countdown, the number in it.
+      const valueBox = chip.glance.querySelector('.wy-chip-value')!;
+      expect(valueBox.parentElement).toBe(chip.glance);
+      expect(chip.value).toBe(slot === 'wave' ? valueBox.firstElementChild : valueBox);
       expect(chip.value.textContent).toBe('');
     }
     // The companions are written once, from the catalog (ADR 0004), never per frame.
     expect(shell.hud.score.glance.querySelector('.wy-chip-label')!.textContent).toBe('Score');
     expect(shell.hud.stars.glance.querySelector('.wy-chip-suffix')!.textContent).toBe('/ 3');
+  });
+
+  // #181 QC round 2: Compact's column is narrower than the countdown's value at 568×320 and
+  // 175–200% text. Its unit is part of the value as read ("25s", one word in both layouts) but
+  // static, after a `<wbr>` — the one place the value may wrap, so a digit never does.
+  it('the countdown’s value is [number][<wbr>][unit]: the number is the rewritten leaf, the unit static from the catalog', () => {
+    const shell = createShell(document, TWO_CARDS);
+    const valueBox = shell.hud.wave.glance.querySelector('.wy-chip-value')!;
+    expect(
+      [...valueBox.childNodes].map((n) =>
+        n.nodeName.toLowerCase() === 'wbr' ? 'wbr' : (n as Element).className,
+      ),
+    ).toEqual(['wy-chip-number', 'wbr', 'wy-chip-unit']);
+    expect(shell.hud.wave.value).toBe(valueBox.firstElementChild);
+    expect(valueBox.querySelector('.wy-chip-unit')!.textContent).toBe('s');
+    // No other chip has a unit, or anywhere to wrap: its value box is its leaf.
+    for (const slot of ['lives', 'bounty', 'stars', 'score'] as const) {
+      expect(shell.hud[slot].glance.querySelector('.wy-chip-value')).toBe(shell.hud[slot].value);
+      expect(shell.hud[slot].glance.querySelector('wbr, .wy-chip-unit')).toBeNull();
+    }
   });
 
   it('the Dock holds Pause/Speed/Settings + a hidden empty primary slot (no global Sell — PLAN.md P2 moves Sell into the Panel; no separate Call-wave button — PLAN.md P4 wires the primary slot as Start)', () => {

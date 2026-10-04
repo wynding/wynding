@@ -1,8 +1,24 @@
 // hud-cut.test.ts — Compact's chips column rests on whole items (#181 QC round 2). jsdom lays
 // nothing out, so every box is driven at the element seam; the rendered outcome (whole items at
 // rest, the Dock and the chips unmoved, every chip reachable) is `compact.spec.ts`'s.
-import { afterEach, describe, it, expect } from 'vitest';
-import { chooseHudCut, clearHudCut, HUD_CUT_PROP, syncHudCut } from './hud-cut';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import {
+  chooseHudCut,
+  clearHudCut,
+  HUD_CUT_PROP,
+  lastWholeLine,
+  syncHudCut,
+  type PaintedPart,
+} from './hud-cut';
+
+// The countdown wrapped: its number, its unit under it, its clock under both (#181 QC round 2) —
+// taller than the room the Dock leaves the chips after Start at 150–200% text on a 320px-tall
+// phone.
+const COUNTDOWN: readonly PaintedPart[] = [
+  { top: 0, bottom: 31 }, // the number
+  { top: 33, bottom: 64 }, // the unit, wrapped under it
+  { top: 66, bottom: 97 }, // the clock
+];
 
 describe('chooseHudCut (#181 QC round 2)', () => {
   it('cuts at the bottom of the last item that fits whole', () => {
@@ -10,10 +26,11 @@ describe('chooseHudCut (#181 QC round 2)', () => {
     expect(chooseHudCut(94, [20, 45, 70, 95, 120])).toBe(70);
   });
 
-  it('no cut where every item fits — nothing to hide — or none does — nothing whole to show', () => {
+  it('no cut where every item fits — nothing to hide — or none does and the first offers no whole line', () => {
     expect(chooseHudCut(200, [20, 45, 70])).toBeNull();
     expect(chooseHudCut(70, [20, 45, 70])).toBeNull();
     expect(chooseHudCut(10, [20, 45])).toBeNull();
+    expect(chooseHudCut(10, [20, 45], [{ top: 0, bottom: 18 }])).toBeNull();
     expect(chooseHudCut(100, [])).toBeNull();
   });
 
@@ -25,6 +42,36 @@ describe('chooseHudCut (#181 QC round 2)', () => {
 
   it('reads the bottoms in any order', () => {
     expect(chooseHudCut(100, [95, 120, 20, 70])).toBe(95);
+  });
+
+  it('where no item fits whole, rests on the first item’s last whole LINE — never half a number', () => {
+    expect(chooseHudCut(70, [100, 170], COUNTDOWN)).toBe(64);
+    expect(chooseHudCut(40, [100, 170], COUNTDOWN)).toBe(31);
+    expect(chooseHudCut(31.005, [100, 170], COUNTDOWN)).toBe(31);
+    expect(chooseHudCut(30.98, [100, 170], COUNTDOWN)).toBeNull();
+  });
+
+  it('reads the lines only where no item fits whole', () => {
+    expect(chooseHudCut(120, [100, 170], COUNTDOWN)).toBe(100);
+    expect(chooseHudCut(200, [100, 170], COUNTDOWN)).toBeNull();
+  });
+});
+
+describe('lastWholeLine (#181 QC round 2)', () => {
+  it('never cuts through a part beside the one that ends there', () => {
+    // An icon and a taller number side by side on one line: the icon's edge runs through the
+    // number, so the line is whole only at the number's edge.
+    const line = [
+      { top: 0, bottom: 31 },
+      { top: 2, bottom: 34 },
+    ];
+    expect(lastWholeLine(33, line)).toBeNull();
+    expect(lastWholeLine(34, line)).toBe(34);
+  });
+
+  it('takes the deepest whole edge within the room, in any order, and nothing from no parts', () => {
+    expect(lastWholeLine(70, [...COUNTDOWN].reverse())).toBe(64);
+    expect(lastWholeLine(70, [])).toBeNull();
   });
 });
 
@@ -183,6 +230,53 @@ describe('syncHudCut (#181 QC round 2)', () => {
     hud.style.setProperty(HUD_CUT_PROP, '45px');
     syncHudCut(hud, true);
     expect(cut(hud)).toBe('45px');
+  });
+
+  it('where no item fits whole, cuts at the countdown’s last whole line — read from its glance, not its hidden message', () => {
+    vi.restoreAllMocks();
+    const hud = column({ room: 70, bottoms: [100, 170] });
+    const chip = hud.querySelector<HTMLElement>('.wy-chip')!;
+    // The countdown, 100px tall from the column's top: its number, its unit, then its clock —
+    // the clock first in the DOM, last on screen (`wrap-reverse`).
+    chip.getBoundingClientRect = () => rect(TOP, 100);
+    const full = document.createElement('span');
+    full.className = 'wy-chip-full';
+    full.textContent = 'Wave in 14s';
+    const glance = document.createElement('span');
+    glance.className = 'wy-chip-glance';
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.getBoundingClientRect = () => rect(TOP + 66, 31);
+    const number = document.createElement('span');
+    number.textContent = '14';
+    const unit = document.createElement('span');
+    unit.textContent = 's';
+    glance.append(icon, number, unit);
+    chip.append(full, glance);
+    // jsdom's Range has no geometry: each text's line boxes come from a stand-in range. The
+    // hidden message's 1px box would run through every line if it were read.
+    const lines = new Map<string, DOMRect[]>([
+      ['14', [rect(TOP, 31)]],
+      ['s', [rect(TOP + 33, 31)]],
+      ['Wave in 14s', [rect(TOP, 200)]],
+    ]);
+    vi.spyOn(document, 'createRange').mockImplementation(() => {
+      let node: Node | null = null;
+      return {
+        selectNodeContents: (n: Node) => void (node = n),
+        getClientRects: () => lines.get(node?.textContent ?? '') ?? [],
+      } as unknown as Range;
+    });
+    syncHudCut(hud, true);
+    expect(cut(hud)).toBe('64px');
+    // Room for one line: the seconds, the rest one scroll away.
+    const short = column({ room: 40, bottoms: [100, 170] });
+    const chip2 = short.querySelector<HTMLElement>('.wy-chip')!;
+    chip2.getBoundingClientRect = () => rect(TOP, 100);
+    chip2.append(glance.cloneNode(true));
+    chip2.querySelector('svg')!.getBoundingClientRect = () => rect(TOP + 66, 31);
+    syncHudCut(short, true);
+    expect(cut(short)).toBe('31px');
+    vi.restoreAllMocks();
   });
 
   it('Standard owns none of it, and clearHudCut is the same clear, for teardown', () => {

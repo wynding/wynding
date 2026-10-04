@@ -375,6 +375,21 @@ describe('layout — the countdown dial, the hud floor, and hidden text’s cont
     expect(ruleBody(compact, '.wy-dock')).toContain('margin-top: auto;');
   });
 
+  it('Compact’s glances wrap — icon above value, the countdown’s seconds above its clock — and only a value’s `<wbr>` lets it wrap inside', () => {
+    // #181 QC round 2: the column's track does not grow with the text, so a one-line glance ran
+    // its value past the column's edge from 125–175% text. Standard's glance stays one line.
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(ruleBody(compact, '.wy-chip-glance')).toContain('flex-wrap: wrap;');
+    expect(ruleBody(compact, '.wy-chip-value')).toContain('white-space: normal;');
+    expect(ruleBody(compact, ".wy-chip[data-wy-chip='wave'] .wy-chip-glance")).toContain(
+      'flex-wrap: wrap-reverse;',
+    );
+    // Outside Compact's block — the base rule and Standard's — no glance ever wraps.
+    expect(ruleBody(uncommented, '.wy-chip-glance')).toContain('white-space: nowrap;');
+    const outside = uncommented.slice(0, uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(outside).not.toMatch(/\.wy-chip-glance\s*\{[^}]*flex-wrap/);
+  });
+
   it('the hud never shrinks below one whole chip beside the link (no sliver)', () => {
     expect(ruleBody(standard, '.wy-shell .wy-hud')).toMatch(/min-width: min\(100%, [0-9.]+rem\);/);
   });

@@ -14,6 +14,13 @@
 // column moves. Every chip stays reachable as before: the scrollport scrolls through all of
 // them by touch, wheel and keyboard, and while it moves it may show part of an item.
 //
+// WHERE NO ITEM FITS WHOLE. Compact's glances wrap once the column is narrower than an icon and
+// its value together (#181 QC round 2), so a chip at heavy text is two lines tall — and after
+// Start, on a 320px-tall phone at 150–200% text, the Dock leaves the chips less room than that.
+// The column then rests on the last whole LINE of its first item: the countdown's seconds,
+// which wrap above its clock (`ui.css`), the clock one scroll away — never the top half of a
+// number. Only where not even one line fits does it keep the room it has.
+//
 // The cut is written as `--wy-hud-cut` on the scrollport, which the Compact stylesheet spends as
 // its `max-height`. Standard owns none of it — its chips are a row with its own cap — so the
 // property is cleared there.
@@ -26,14 +33,64 @@ const ITEMS =
   ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, ' +
   ':scope > .wy-wave-preview .wy-preview-entry';
 
+/** One painted part of an item — an icon's box, or one line of its text — in px below the
+ *  scrollport's padding-box top, in its content. */
+export interface PaintedPart {
+  readonly top: number;
+  readonly bottom: number;
+}
+
 /** The visible height for a column whose items end at `bottoms` — px below the scrollport's
  *  padding-box top, in its content — when `room` px of it can show: the bottom edge of the last
- *  item that fits whole. `null`, no cut, where every item fits (there is nothing to hide) or none
- *  does (there is nothing whole to show, so the column keeps the room it has). */
-export function chooseHudCut(room: number, bottoms: readonly number[]): number | null {
+ *  item that fits whole. `null`, no cut, where every item fits (there is nothing to hide). Where
+ *  none fits, the last whole line of the first item, whose painted parts are `firstParts` (see
+ *  the header); `null` where not even that fits, and the column keeps the room it has. */
+export function chooseHudCut(
+  room: number,
+  bottoms: readonly number[],
+  firstParts: readonly PaintedPart[] = [],
+): number | null {
   const fit = bottoms.filter((b) => b <= room + 0.01);
-  if (fit.length === 0 || fit.length === bottoms.length) return null;
-  return Math.max(...fit);
+  if (fit.length === bottoms.length) return null;
+  if (fit.length > 0) return Math.max(...fit);
+  return lastWholeLine(room, firstParts);
+}
+
+/** The deepest bottom edge within `room` of a painted part that no other part runs through: a
+ *  cut there shows every part above it whole and none of the rest. `null` where there is none. */
+export function lastWholeLine(room: number, parts: readonly PaintedPart[]): number | null {
+  let best: number | null = null;
+  for (const { bottom } of parts) {
+    if (bottom > room + 0.01) continue;
+    if (parts.some((p) => p.top < bottom - 0.01 && p.bottom > bottom + 0.01)) continue;
+    if (best === null || bottom > best) best = bottom;
+  }
+  return best;
+}
+
+/** The painted parts of `item`, `toContent` mapping a viewport y to the scrollport's content:
+ *  every SVG's box and every line of text in its visible form — a chip's or a strip line's
+ *  glance, never its visually hidden sentence, or else the item itself (the strip's title). Text
+ *  in a `display: none` companion has no line boxes, so it adds nothing. */
+function paintedParts(item: HTMLElement, toContent: (y: number) => number): PaintedPart[] {
+  const shown = item.querySelector<HTMLElement>('.wy-chip-glance, .wy-preview-glance') ?? item;
+  const parts: PaintedPart[] = [];
+  const add = (r: DOMRect): void => {
+    if (r.width > 0 && r.height > 0)
+      parts.push({ top: toContent(r.top), bottom: toContent(r.bottom) });
+  };
+  for (const svg of shown.querySelectorAll('svg')) add(svg.getBoundingClientRect());
+  const doc = item.ownerDocument;
+  const walker = doc.createTreeWalker(shown, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!n.textContent?.trim()) continue;
+    const range = doc.createRange();
+    range.selectNodeContents(n);
+    // A page with no range geometry (jsdom) has no text lines to offer.
+    if (typeof range.getClientRects !== 'function') continue;
+    for (const r of range.getClientRects()) add(r);
+  }
+  return parts;
 }
 
 /** Rounds UP to the 1/64px layout unit, so the last whole item is never clipped by a fraction. */
@@ -69,11 +126,15 @@ export function syncHudCut(hud: HTMLElement, compact: boolean): void {
   const room = box.bottom - px(cs.borderBottomWidth) - top;
   let next = before;
   if (room > 0) {
-    const bottoms = Array.from(hud.querySelectorAll<HTMLElement>(ITEMS))
-      .map((el) => el.getBoundingClientRect())
-      .filter((r) => r.height > 0)
-      .map((r) => r.bottom - top + hud.scrollTop);
-    const cut = chooseHudCut(room, bottoms);
+    const toContent = (y: number): number => y - top + hud.scrollTop;
+    const items = Array.from(hud.querySelectorAll<HTMLElement>(ITEMS))
+      .map((el) => ({ el, r: el.getBoundingClientRect() }))
+      .filter(({ r }) => r.height > 0);
+    const bottoms = items.map(({ r }) => toContent(r.bottom));
+    // The first item's lines are read only where no item fits whole, which is rare.
+    const first = items[0];
+    const none = first !== undefined && bottoms.every((b) => b > room + 0.01);
+    const cut = chooseHudCut(room, bottoms, none ? paintedParts(first.el, toContent) : []);
     // The cut is the PADDING box's height; `max-height` sizes whichever box `box-sizing` names.
     const frame =
       cs.boxSizing === 'border-box'
