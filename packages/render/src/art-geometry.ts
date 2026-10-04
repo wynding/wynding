@@ -75,8 +75,9 @@ const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
  * checks part by part: integer digits within a float's range, an exponent field of at most
  * 38 whatever comes before it, and a value within range (`'L1e39 50'`, `'L0e39 50'` and a
  * 40-digit `'L1000…0e-38 50'` paint nothing, though the last two are 0 and 10; a negative
- * exponent may be any size, as it only underflows); and an arc flag is the one character `0` or `1`, which may be packed against
- * what follows it (`'A40 40 0 0190 50'` is flags 0 and 1, then 90 50).
+ * exponent may be any size, as it only underflows); and an arc flag is the one character
+ * `0` or `1`, which may be packed against what follows it (`'A40 40 0 0190 50'` is flags 0
+ * and 1, then 90 50).
  */
 export function parsePath(d: string): PathCommand[] {
   /** What may stand between the token `before` and the token `after` (either missing at the

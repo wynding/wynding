@@ -118,13 +118,14 @@ const PLATE_FILL: ArtShape = { kind: 'rect', ...PLATE_RECT, fill: 'plate' };
 
 /** The plate's rim: a rect of its own, so that drawing it crisp moves only the stroke. The
  *  fill's edge, on the rim's design centre line, lies under the moved stroke — so no sliver
- *  of plate shows past the rim and none of the floor inside it — at every cell size from 10
+ *  of plate shows past the rim and none of the floor inside it — at every cell size from 11
  *  px, from dpr 1 up. Where the footprint ends inside a pixel, which stops the rim's far side
  *  on the whole pixel before it, the edge can lie a fraction of a pixel past the rim, a faint
- *  blend of plate into the footprint's last pixel: at 9 px cells from dpr 1 up (0.1 px at
- *  most), and below dpr 1 at 9 to 12 px (0.24 px at 9 px and dpr 0.83; 0.11 at 10 px). Below
- *  dpr 1 the floor can also show inside the rim's near side at 11 and 12 px, by under 0.04 px
- *  (all swept at every 0.005 of dpr, `art-frames.test.ts`). */
+ *  blend of plate into the footprint's last pixel: from dpr 1 up at 9 and 10 px cells (0.11
+ *  px at most), and below dpr 1 at 9 to 13 px (0.30 px at most, at 9 px). Below dpr 1 the
+ *  floor can also show inside the rim, at 11 to 19 px, by 0.10 px at most. (Each the worst
+ *  case at any dpr from 0.8 to 3, measured on both sides of every scale where the rim's
+ *  pixels change: `art-frames.test.ts`.) */
 const PLATE_RIM: ArtRect = {
   kind: 'rect',
   ...PLATE_RECT,
