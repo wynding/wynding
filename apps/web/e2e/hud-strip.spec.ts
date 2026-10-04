@@ -604,7 +604,7 @@ async function compactColumn(page: Page): Promise<{
 test('Compact: the chips column rests on WHOLE items — or, where none fits, on whole lines — nothing else moves for it, and every chip stays reachable (#181 QC round 2)', async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(480_000); // sixteen page loads, each started; generous for slow cores
   // At 658×320 before the run the column cut the score chip through its icon and value, just
   // above the Dock. `hud-cut.ts` stops it at the last whole item; the room it gives up stays
   // empty above the Dock. The glances wrap at heavy text, so the chips are taller there (from
@@ -697,24 +697,25 @@ test('Compact: the chips column rests on WHOLE items — or, where none fits, on
   for (const what of keptRoom) expect(what).toContain(' at 200%');
 });
 
-test('Compact: every chip keeps its icon, and its icon and value stay inside the column — wrapping, the countdown’s seconds above its clock — 100–200% text, before and after Start (#181 QC round 2)', async ({
-  page,
-}) => {
-  test.setTimeout(240_000);
-  // The column's track is vw-capped: it does not grow with the text. A one-line glance ran its
-  // value past the column's edge from 125–175% text, where the scrollport clipped it — at
-  // 568×320 and 150% the countdown read "1" for 14s. The glances wrap instead: icon above value,
-  // so lives, bounty, stars and score stay labelled; the countdown's seconds above its clock, so
-  // the one line a crowded column can show is the seconds; and the countdown's unit under its
-  // digits where even the value is wider than the column — never a digit.
-  const wrapped = new Set<string>();
-  let unitWrapped = false;
-  for (const size of [
-    PHONE,
-    { width: 568, height: 320 },
-    { width: 740, height: 360 },
-    { width: 900, height: 480 },
-  ]) {
+// The column's track is vw-capped: it does not grow with the text. A one-line glance ran its
+// value past the column's edge from 125–175% text, where the scrollport clipped it — at 568×320
+// and 150% the countdown read "1" for 14s. The glances wrap instead: icon above value, so lives,
+// bounty, stars and score stay labelled; the countdown's seconds above its clock, so the one line
+// a crowded column can show is the seconds; and the countdown's unit under its digits where even
+// the value is wider than the column — never a digit. One test per phone, so they run side by
+// side; the unit wraps only on the 320px-tall ones (568×320 at 175–200%, 658×320 at 200%).
+for (const size of [
+  PHONE,
+  { width: 568, height: 320 },
+  { width: 740, height: 360 },
+  { width: 900, height: 480 },
+]) {
+  test(`Compact ${size.width}×${size.height}: every chip keeps its icon, and its icon and value stay inside the column — wrapping, the countdown’s seconds above its clock — 100–200% text, before and after Start (#181 QC round 2)`, async ({
+    page,
+  }) => {
+    test.setTimeout(240_000); // five page loads, each started; generous for slow cores
+    const wrapped = new Set<string>();
+    let unitWrapped = false;
     for (const zoom of [100, 125, 150, 175, 200]) {
       await gotoAt(page, size);
       expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
@@ -809,14 +810,17 @@ test('Compact: every chip keeps its icon, and its icon and value stay inside the
         }
       }
     }
-  }
-  // The premises: both orders were exercised, and the unit wrapped under its digits somewhere.
-  expect([...wrapped].sort(), 'the countdown and a labelled chip each wrapped').toEqual([
-    'countdown',
-    'labelled',
-  ]);
-  expect(unitWrapped, 'the countdown’s unit wrapped under its digits somewhere').toBe(true);
-});
+    // The premises: both orders were exercised on this phone, and — on the 320px-tall ones —
+    // the unit wrapped under its digits.
+    expect([...wrapped].sort(), 'the countdown and a labelled chip each wrapped').toEqual([
+      'countdown',
+      'labelled',
+    ]);
+    if (size.height === 320) {
+      expect(unitWrapped, 'the countdown’s unit wrapped under its digits').toBe(true);
+    }
+  });
+}
 
 /** The page's own scroll range on both axes. `body` is `overflow: hidden`, so any range here is
  *  range no one can pan back — but a focus move or a screen reader can still scroll it. */
