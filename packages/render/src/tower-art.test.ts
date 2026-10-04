@@ -6,10 +6,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { artBounds, shapeOutline, type Point, type Polyline } from './art-geometry';
-import { alignArtToTexels, alignRectToTexels, strokeWidthAt, type ArtShape } from './art-ir';
+import { alignRectToTexels, strokeWidthAt, type ArtShape } from './art-ir';
 import {
   ART_BOX,
-  ART_FOOTPRINT,
   ART_INK,
   BOOST_ART,
   BOOST_RING_ALPHA,
@@ -26,6 +25,7 @@ import {
 } from './tower-art';
 import { COLOUR_MODES, resolvePalette, roleColour } from './palette';
 import { artUnit, boostArtAt } from './art-frames';
+import { drawnRim, rimScales } from './test-support/rim-scales';
 import {
   TOWER_FOOTPRINT_MARKS,
   TOWER_LOOKS,
@@ -437,14 +437,12 @@ describe('the plate, the boost glow and the pending rim', () => {
     const bevelTop = artBounds([bevel], Infinity).minY; // its design width: 5.6 - 0.8
     expect(PLATE_ART.at(-1)?.stroke).toBe('rim');
     const meets = new Map<number, number[]>();
-    for (let step = 0; step <= 440; step++) {
-      const scale = Math.round((0.8 + step * 0.005) * 1000) / 1000;
-      for (let cellPx = 9; cellPx <= 64; cellPx++) {
-        const unit = (2 * cellPx) / ART_BOX;
-        const rim = alignArtToTexels(PLATE_ART, unit, scale, [0, 0], ART_FOOTPRINT).find(
-          (s) => s.stroke === 'rim',
-        )!;
-        if (rim.kind !== 'rect') throw new Error('the rim is a rect');
+    for (let cellPx = 9; cellPx <= 64; cellPx++) {
+      const unit = artUnit(cellPx);
+      // At every 0.005 of dpr, and both sides of each change of the rim's texels: between
+      // two, the bevel's edge moves one way past the rim's pixels (`rimScales`).
+      for (const scale of rimScales(cellPx)) {
+        const rim = drawnRim(cellPx, scale);
         const k = unit * scale;
         if ((rim.y + strokeWidthAt(rim, unit) / 2) * k - bevelTop * k > 1e-9) {
           meets.set(scale, [...(meets.get(scale) ?? []), cellPx]);
@@ -481,11 +479,11 @@ describe('the plate, the boost glow and the pending rim', () => {
     const inner = BOOST_ART[0]!;
     if (inner.kind !== 'circle') throw new Error('the glow is rings');
     // As designed, and as the smallest frames fit it inside their drawn rim (`boostArtAt`, at
-    // 9 and 10 px cells): a smaller ring, which a head covers more of.
+    // 9 and 10 px cells): a smaller ring, which a head covers more of — at its smallest, which
+    // lies just short of a change of the rim's texels (`rimScales`).
     let fitted = inner.r;
-    for (let step = 0; step <= 440; step++) {
-      const scale = Math.round((0.8 + step * 0.005) * 1000) / 1000;
-      for (const cellPx of [9, 10]) {
+    for (const cellPx of [9, 10]) {
+      for (const scale of rimScales(cellPx)) {
         const [cue] = boostArtAt(artUnit(cellPx), scale);
         if (cue?.kind === 'circle') fitted = Math.min(fitted, cue.r);
       }
