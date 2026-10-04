@@ -147,15 +147,37 @@ describe('parsePath', () => {
     for (const bad of ['M10 10L90. 50', 'M10 10L1.e1 50', 'M10 50A40 40 0 0 190. 50']) {
       expect(() => parsePath(bad), bad).toThrow(/unreadable/);
     }
-    // ... and a number fits the 32-bit float a browser reads it into.
-    for (const bad of ['M10 10L1e39 50', 'M10 10L50 -3.5e38']) {
-      expect(() => parsePath(bad), bad).toThrow(/too large/);
+    // ... and a number is one a browser can read into the 32-bit float it parses path data
+    // into, part by part: integer digits within a float's range, an exponent field of at most
+    // 38 whatever precedes it, and a value within range. Each verdict below is Chromium's and
+    // WebKit's, measured (QC round 4): the 0e39, the 0.0…01e39 and the 40-digit 1000…0e-38
+    // paint nothing, though they are 0, 10 and 10.
+    for (const bad of [
+      'M10 10L1e39 50',
+      'M10 10L50 -3.5e38',
+      'M10 10L0e39 50',
+      `M10 10L0.${'0'.repeat(37)}1e39 50`,
+      `M10 10L1${'0'.repeat(39)}e-38 50`,
+      'M10 10L9e0039 50',
+      'M10 10L9e0038 50',
+    ]) {
+      expect(() => parsePath(bad), bad).toThrow(/32-bit float/);
     }
-    // Numbers it can hold read however they are written.
+    // Numbers it can hold read however they are written: an exponent of 38 on any digits, 39
+    // integer digits, and a negative exponent of any size.
     expect(parsePath('M.5 1e1L1e38-.25')).toEqual([
       { c: 'M', x: 0.5, y: 10 },
       { c: 'L', x: 1e38, y: -0.25 },
     ]);
+    for (const [good, x] of [
+      ['0e38', 0],
+      [`0.${'0'.repeat(36)}1e38`, 10],
+      [`1${'0'.repeat(38)}e-37`, 10],
+      ['1e-39', 1e-39],
+      ['1e-999', 0],
+    ] as const) {
+      expect(parsePath(`M10 10L${good} 50`)[1], good).toEqual({ c: 'L', x, y: 50 });
+    }
   });
 });
 

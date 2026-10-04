@@ -50,6 +50,10 @@ const COMMAND_LETTERS = 'MmLlHhVvCcSsQqTtAaZz';
 const TOKEN = /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?/g;
 /** A whole token that is a number without a sign — what may follow a packed arc flag. */
 const UNSIGNED_NUMBER = /^(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+/** A number token's integer digits and exponent field, which a browser checks one by one. */
+const NUMBER_PARTS = /^[-+]?(\d*)(?:\.\d+)?(?:[eE]([-+]?\d+))?$/;
+/** The largest finite 32-bit float. */
+const FLOAT32_MAX = 3.4028234663852886e38;
 
 /** Whether `token` is a number rather than a command letter. */
 const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
@@ -66,9 +70,12 @@ const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
  * may only separate two numbers, once (`'M10,,10L50 50'` and `',M10 10L50 50'` paint nothing
  * either) — the SVG grammar's `comma-wsp`; whitespace is SVG's own (space, tab, line feed,
  * form feed, carriage return — not the no-break or ideographic spaces JS's `\s` admits); a
- * decimal point is followed by a digit (`'L90. 50'` and `'L1.e1 50'` paint nothing), and a
- * number fits a 32-bit float, which is what the browser reads it into (`'L1e39 50'` paints
- * nothing); and an arc flag is the one character `0` or `1`, which may be packed against
+ * decimal point is followed by a digit (`'L90. 50'` and `'L1.e1 50'` paint nothing); a number
+ * is one the browser can read into the 32-bit float it parses path data into, which it
+ * checks part by part: integer digits within a float's range, an exponent field of at most
+ * 38 whatever comes before it, and a value within range (`'L1e39 50'`, `'L0e39 50'` and a
+ * 40-digit `'L1000…0e-38 50'` paint nothing, though the last two are 0 and 10; a negative
+ * exponent may be any size, as it only underflows); and an arc flag is the one character `0` or `1`, which may be packed against
  * what follows it (`'A40 40 0 0190 50'` is flags 0 and 1, then 90 50).
  */
 export function parsePath(d: string): PathCommand[] {
@@ -116,9 +123,16 @@ export function parsePath(d: string): PathCommand[] {
       throw new Error(`path data ends early: '${d}'`);
     }
     const v = Number(t);
-    // A browser reads path data into 32-bit floats, and a number that overflows one ends it.
-    if (!Number.isFinite(Math.fround(v))) {
-      throw new Error(`a number too large for path data: '${d}'`);
+    // A browser reads path data into 32-bit floats, and a number it cannot hold ends it:
+    // integer digits past a float's range, an exponent field over 38 (`0e39`, though it is
+    // 0), or a value past the range. (Measured in Chromium and WebKit, which agree.)
+    const [, whole, exponent] = NUMBER_PARTS.exec(t) ?? [];
+    if (
+      Number(whole || '0') > FLOAT32_MAX ||
+      (exponent !== undefined && Number(exponent) > 38) ||
+      !Number.isFinite(Math.fround(v))
+    ) {
+      throw new Error(`a number past a 32-bit float, which a browser reads it into: '${d}'`);
     }
     return v;
   };
