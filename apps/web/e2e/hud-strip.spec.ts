@@ -347,16 +347,22 @@ test('forced colors: every HUD icon and the strip’s creep icon take the user�
   expect(inks.fadeAdjust).toBe('none');
 });
 
-for (const [layout, size] of [
-  ['Standard', STANDARD],
-  ['Compact', PHONE],
+// The third case is Compact at 200% text, where the glances wrap and the countdown's seconds sit
+// ABOVE its clock (#181 QC round 2): `wrap-reverse` reorders the lines on screen only, so the DOM
+// still leads with the icon and the accessible text is the same, in the same order.
+for (const [layout, size, zoom] of [
+  ['Standard', STANDARD, 100],
+  ['Compact', PHONE, 100],
+  ['Compact at 200% text', PHONE, 200],
 ] as const) {
   test(`${layout}: every chip glance leads with its SVG icon, and the accessible text is unchanged`, async ({
     page,
   }) => {
     await gotoAt(page, size);
+    if (zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+    await settle(page);
     expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(
-      layout === 'Compact',
+      layout !== 'Standard',
     );
     // The full ICU messages, exactly as before #181 — still each chip's accessible text — with
     // the countdown first (#181 QC), then the style frame's order.
@@ -382,6 +388,16 @@ for (const [layout, size] of [
         iconClass: `wy-icon wy-icon--${slot}`,
         iconHidden: 'true',
       });
+    }
+    if (zoom !== 100) {
+      // On screen the countdown's seconds lead — above its clock — while its DOM leads with it.
+      const order = await page
+        .locator('.wy-chip[data-wy-chip="wave"] .wy-chip-glance')
+        .evaluate((g) => ({
+          icon: g.querySelector('svg')!.getBoundingClientRect().top,
+          value: g.querySelector('.wy-chip-value')!.getBoundingClientRect().bottom,
+        }));
+      expect(order.value, 'the seconds sit above the clock').toBeLessThanOrEqual(order.icon + 0.5);
     }
     // Painted: EVERY icon is on screen in both layouts — the countdown's included, whose glance
     // is the one readable countdown (#181 QC: it no longer stands down for anything).
@@ -513,11 +529,14 @@ test('the hud’s floor holds one whole chip: forced to it, every glance sits in
 });
 
 /** Compact's chips column, measured at rest: its visible box, every item's box in it (the chips,
- *  and the wave strip's title and lines), the cut the pass wrote, and — for the A/B — every box
- *  that must not move for the cut: the Dock, its controls, the chips and the home mark. */
+ *  and the wave strip's title and lines), every painted LINE of those items — an icon's box, a
+ *  line of visible text — the cut the pass wrote, and — for the A/B — every box that must not
+ *  move for the cut: the Dock, its controls, the chips and the home mark. */
 async function compactColumn(page: Page): Promise<{
   cut: string;
   straddling: string[];
+  straddlingLines: string[];
+  firstLinesInRoom: number;
   shownWhole: number;
   boxes: string;
 }> {
@@ -540,15 +559,38 @@ async function compactColumn(page: Page): Promise<{
       const b = el.getBoundingClientRect();
       return [b.x, b.y, b.width, b.height].map((v) => v.toFixed(3)).join(',');
     };
+    // Each item's painted lines, from its visible form: a chip's glance, a strip line's glance, the
+    // title itself — never a visually hidden sentence, whose 1px box is not painted.
+    const lines = (el: HTMLElement): DOMRect[] => {
+      const shown = el.querySelector<HTMLElement>('.wy-chip-glance, .wy-preview-glance') ?? el;
+      const out = [...shown.querySelectorAll('svg')].map((svg) => svg.getBoundingClientRect());
+      const walker = document.createTreeWalker(shown, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (!n.textContent?.trim() || n.parentElement?.closest('.wy-preview-full')) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        out.push(...range.getClientRects());
+      }
+      return out.filter((r) => r.width > 0 && r.height > 0);
+    };
+    const runsThrough = (r: DOMRect): boolean => r.top < bottom - 0.5 && r.bottom > bottom + 0.5;
     return {
       cut: hud.style.getPropertyValue('--wy-hud-cut'),
       // An item the visible box's bottom edge runs through: part shown, part not.
       straddling: items
-        .filter(({ r }) => r.top < bottom - 0.5 && r.bottom > bottom + 0.5)
+        .filter(({ r }) => runsThrough(r))
         .map(
           ({ el, r }) =>
             `${name(el)} ${r.top.toFixed(1)}→${r.bottom.toFixed(1)} vs ${bottom.toFixed(1)}`,
         ),
+      // A painted line — an icon, a line of digits — the edge runs through: half a glyph shown.
+      straddlingLines: items.flatMap(({ el }) =>
+        lines(el)
+          .filter(runsThrough)
+          .map((r) => `${name(el)} ${r.top.toFixed(1)}→${r.bottom.toFixed(1)}`),
+      ),
+      firstLinesInRoom:
+        items.length > 0 ? lines(items[0]!.el).filter((r) => r.bottom <= bottom + 0.5).length : 0,
       shownWhole: items.filter(({ r }) => r.top >= top - 0.5 && r.bottom <= bottom + 0.5).length,
       boxes: [
         ...document.querySelectorAll('.wy-dock, .wy-dock .wy-btn, .wy-hud > .wy-chip, .wy-home'),
@@ -559,15 +601,24 @@ async function compactColumn(page: Page): Promise<{
   });
 }
 
-test('Compact: the chips column rests on WHOLE items — nothing else moves for it, and every chip stays reachable (#181 QC round 2)', async ({
+test('Compact: the chips column rests on WHOLE items — or, where none fits, on whole lines — nothing else moves for it, and every chip stays reachable (#181 QC round 2)', async ({
   page,
 }) => {
+  test.setTimeout(240_000);
   // At 658×320 before the run the column cut the score chip through its icon and value, just
   // above the Dock. `hud-cut.ts` stops it at the last whole item; the room it gives up stays
-  // empty above the Dock.
+  // empty above the Dock. The glances wrap at heavy text, so the chips are taller there (from
+  // 150% the countdown is two lines, its seconds above its clock).
   let cutSomewhere = false;
-  for (const size of [PHONE, { width: 568, height: 320 }, { width: 900, height: 480 }]) {
-    for (const zoom of [100, 200]) {
+  let onAWholeLine = false;
+  const keptRoom: string[] = [];
+  for (const size of [
+    PHONE,
+    { width: 568, height: 320 },
+    { width: 740, height: 360 },
+    { width: 900, height: 480 },
+  ]) {
+    for (const zoom of [100, 150, 175, 200]) {
       await gotoAt(page, size);
       expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
       if (zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
@@ -580,16 +631,28 @@ test('Compact: the chips column rests on WHOLE items — nothing else moves for 
         }
         const what = `${size.width}×${size.height} at ${zoom}%, ${phase}`;
         const rest = await compactColumn(page);
-        if (rest.shownWhole === 0) {
-          // NOT EVEN THE COUNTDOWN FITS WHOLE: after Start at 200% text on a 320px-tall phone the
-          // column has 31px of room for a 44px chip. A cut to nothing would hide the countdown
-          // outright, so the column keeps its room, the countdown — and only it — runs past the
-          // edge, and the list scrolls to the rest (the checklist's Compact residual).
-          expect(rest.cut, `${what}: no cut where nothing fits whole`).toBe('');
+        if (rest.shownWhole > 0) {
+          expect(rest.straddling, `${what}: no item cut by the column's edge at rest`).toEqual([]);
+        } else {
+          // NO ITEM FITS WHOLE: after Start at 150–200% text on a 320px-tall phone the Dock leaves
+          // the chips room for one line, and the countdown is two. The column rests on its last
+          // whole line — its seconds — and only the countdown runs past the edge, its clock one
+          // scroll away.
           expect(rest.straddling, `${what}: only the countdown runs past the edge`).toHaveLength(1);
           expect(rest.straddling[0]).toMatch(/^wave /);
+          if (rest.cut !== '') onAWholeLine = true;
+        }
+        if (rest.cut === '' && rest.shownWhole === 0) {
+          // …unless not even one line of it fits: 31px of room for a 33px line of digits at
+          // 200%. The column keeps its room (the checklist's Compact residual).
+          expect(rest.firstLinesInRoom, `${what}: the room is kept only where no line fits`).toBe(
+            0,
+          );
+          keptRoom.push(what);
         } else {
-          expect(rest.straddling, `${what}: no item cut by the column's edge at rest`).toEqual([]);
+          expect(rest.straddlingLines, `${what}: no line cut by the column's edge at rest`).toEqual(
+            [],
+          );
         }
         if (rest.cut !== '') cutSomewhere = true;
         // A/B: lift the cut, and nothing but the column's own height may change.
@@ -626,9 +689,133 @@ test('Compact: the chips column rests on WHOLE items — nothing else moves for 
       }
     }
   }
-  // The premise, so the A/B is not vacuous: the cut was in force somewhere — at the very least
-  // the case that found the defect.
+  // The premises, so neither rule is vacuous: the cut was in force somewhere — at the very least
+  // the case that found the defect — and somewhere it rested on a whole line of the countdown.
   expect(cutSomewhere, 'some case needed a cut').toBe(true);
+  expect(onAWholeLine, 'some case rested on a whole line').toBe(true);
+  // The residual is 200% text's alone.
+  for (const what of keptRoom) expect(what).toContain(' at 200%');
+});
+
+test('Compact: every chip keeps its icon, and its icon and value stay inside the column — wrapping, the countdown’s seconds above its clock — 100–200% text, before and after Start (#181 QC round 2)', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  // The column's track is vw-capped: it does not grow with the text. A one-line glance ran its
+  // value past the column's edge from 125–175% text, where the scrollport clipped it — at
+  // 568×320 and 150% the countdown read "1" for 14s. The glances wrap instead: icon above value,
+  // so lives, bounty, stars and score stay labelled; the countdown's seconds above its clock, so
+  // the one line a crowded column can show is the seconds; and the countdown's unit under its
+  // digits where even the value is wider than the column — never a digit.
+  const wrapped = new Set<string>();
+  let unitWrapped = false;
+  for (const size of [
+    PHONE,
+    { width: 568, height: 320 },
+    { width: 740, height: 360 },
+    { width: 900, height: 480 },
+  ]) {
+    for (const zoom of [100, 125, 150, 175, 200]) {
+      await gotoAt(page, size);
+      expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+      if (zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        const what = `${size.width}×${size.height} at ${zoom}%, ${phase}`;
+        const m = await page.evaluate(() => {
+          const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+          const h = hud.getBoundingClientRect();
+          const left = h.left + hud.clientLeft;
+          const right = left + hud.clientWidth;
+          const span = (rs: DOMRect[]): { top: number; bottom: number } => ({
+            top: Math.min(...rs.map((r) => r.top)),
+            bottom: Math.max(...rs.map((r) => r.bottom)),
+          });
+          const textRects = (el: Element): DOMRect[] => {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            return [...range.getClientRects()].filter((r) => r.width > 0);
+          };
+          const chips = [...hud.querySelectorAll<HTMLElement>(':scope > .wy-chip')]
+            .filter((c) => !c.hidden && getComputedStyle(c).display !== 'none')
+            .map((chip) => {
+              const glance = chip.querySelector<HTMLElement>('.wy-chip-glance')!;
+              const svg = glance.querySelector('svg')!;
+              const icon = svg.getBoundingClientRect();
+              const shown = getComputedStyle(svg);
+              const value = textRects(glance.querySelector('.wy-chip-value')!);
+              const number = chip.querySelector('.wy-chip-number');
+              const unit = chip.querySelector('.wy-chip-unit');
+              return {
+                slot: chip.dataset.wyChip!,
+                painted:
+                  icon.width > 0 &&
+                  icon.height > 0 &&
+                  shown.display !== 'none' &&
+                  shown.visibility === 'visible',
+                parts: [
+                  { what: 'icon', left: icon.left, right: icon.right },
+                  ...value.map((r) => ({ what: 'value', left: r.left, right: r.right })),
+                ],
+                icon: { top: icon.top, bottom: icon.bottom },
+                value: span(value),
+                unitBelow:
+                  number !== null && unit !== null
+                    ? span(textRects(unit)).top >= span(textRects(number)).bottom - 0.5
+                    : false,
+              };
+            });
+          return { left, right, chips };
+        });
+        expect(
+          m.chips.map((c) => c.slot),
+          `${what}: every chip is in the column`,
+        ).toEqual(['wave', 'lives', 'bounty', 'stars', 'score']);
+        for (const c of m.chips) {
+          expect(c.painted, `${what}: ${c.slot} keeps its icon`).toBe(true);
+          for (const p of c.parts) {
+            expect(
+              p.left,
+              `${what}: ${c.slot}’s ${p.what} starts inside the column`,
+            ).toBeGreaterThanOrEqual(m.left - 0.5);
+            expect(
+              p.right,
+              `${what}: ${c.slot}’s ${p.what} ends inside the column`,
+            ).toBeLessThanOrEqual(m.right + 0.5);
+          }
+          if (c.unitBelow) unitWrapped = true;
+          // Wrapped — the icon and the value each on lines of their own — the order is the
+          // decision's: the countdown's seconds above its clock, every other icon above its value.
+          const apart = c.icon.bottom <= c.value.top + 0.5 || c.value.bottom <= c.icon.top + 0.5;
+          if (!apart) continue;
+          if (c.slot === 'wave') {
+            wrapped.add('countdown');
+            expect(
+              c.value.bottom,
+              `${what}: the countdown’s seconds sit above its clock`,
+            ).toBeLessThanOrEqual(c.icon.top + 0.5);
+          } else {
+            wrapped.add('labelled');
+            expect(
+              c.icon.bottom,
+              `${what}: ${c.slot}’s icon sits above its value`,
+            ).toBeLessThanOrEqual(c.value.top + 0.5);
+          }
+        }
+      }
+    }
+  }
+  // The premises: both orders were exercised, and the unit wrapped under its digits somewhere.
+  expect([...wrapped].sort(), 'the countdown and a labelled chip each wrapped').toEqual([
+    'countdown',
+    'labelled',
+  ]);
+  expect(unitWrapped, 'the countdown’s unit wrapped under its digits somewhere').toBe(true);
 });
 
 /** The page's own scroll range on both axes. `body` is `overflow: hidden`, so any range here is
