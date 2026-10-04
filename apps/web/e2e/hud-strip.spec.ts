@@ -399,8 +399,10 @@ for (const [layout, size, zoom] of [
         }));
       expect(order.value, 'the seconds sit above the clock').toBeLessThanOrEqual(order.icon + 0.5);
     }
-    // Painted: EVERY icon is on screen in both layouts — the countdown's included, whose glance
-    // is the one readable countdown (#181 QC: it no longer stands down for anything).
+    // Painted: EVERY icon renders — a box, never hidden — in both layouts, the countdown's
+    // included, whose glance is the one readable countdown (#181 QC: it no longer stands down for
+    // anything). In view is another matter: Compact's column shows what fits whole at rest, the
+    // rest one scroll away (`hud-cut.ts`), and at 200% that is the countdown's seconds alone.
     for (const slot of ['wave', 'lives', 'bounty', 'stars', 'score']) {
       await expect(
         page.locator(`.wy-chip[data-wy-chip="${slot}"] svg.wy-icon--${slot}`),

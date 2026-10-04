@@ -395,11 +395,22 @@ test.describe('home affordance — Compact layout (the playfield is sacred)', ()
     await gotoAt(page, PHONE);
     await page.addStyleTag({ content: ':root { font-size: 200% }' });
 
+    // Since #181 QC round 2 the column stops the scrollport at its last whole item or line
+    // (`--wy-hud-cut`, `hud-cut.ts`) and leaves the rest of its room empty above the Dock on
+    // purpose: here, a frame after the zoom, the countdown's seconds alone, 36px of 71. What this
+    // guards is the ROOM the column gives the scrollport, so that is read with the cut lifted and
+    // put straight back in the same task (nothing renders in between), as compact.spec's #101
+    // guard reads it — before or after the pass has run, the same 71px.
     const box = await page.evaluate(() => {
       const el = (s: string) => document.querySelector(s) as HTMLElement;
+      const hud = el('.wy-hud');
+      const cut = hud.style.getPropertyValue('--wy-hud-cut');
+      hud.style.removeProperty('--wy-hud-cut');
+      const room = hud.clientHeight;
+      if (cut !== '') hud.style.setProperty('--wy-hud-cut', cut);
       return {
         home: el('.wy-home').getBoundingClientRect().height,
-        hud: el('.wy-hud').clientHeight,
+        hud: room,
       };
     });
     // The link takes the 44px floor it is entitled to, and not a pixel more.
@@ -408,10 +419,10 @@ test.describe('home affordance — Compact layout (the playfield is sacred)', ()
       `home link ${box.home}px — the mark ballooned past the 44px floor`,
     ).toBeLessThanOrEqual(TARGET_MIN_PX + 1);
     expect(box.home).toBeGreaterThanOrEqual(TARGET_MIN_PX);
-    // …leaving the chips a scrollport worth scrolling: at least one full 200%-zoom chip line.
+    // …leaving the chips scrollport its room: 71px here, where a ballooned mark leaves ~49px.
     expect(
       box.hud,
-      `chips scrollport collapsed to ${box.hud}px at 200% zoom`,
+      `the chips scrollport's room collapsed to ${box.hud}px at 200% zoom`,
     ).toBeGreaterThanOrEqual(64);
   });
 
