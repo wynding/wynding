@@ -376,11 +376,11 @@ describe('shell — pinned DOM topology (PLAN.md P1)', () => {
   it('the Rail holds one Card per catalog tower then the (hidden) Panel, in that order (PLAN.md P2, M2-S3)', () => {
     const shell = createShell(document, TWO_CARDS);
     expect(shell.cards).toHaveLength(2);
-    expect([...shell.rail.children]).toEqual([
-      shell.cards[0]!.root,
-      shell.cards[1]!.root,
-      shell.panel.root,
-    ]);
+    // Since #181 the Cards sit in their own grid box, the Rail's first child, so the Rail
+    // itself stays the flex column its scroll fade and docked Panel are written against.
+    expect([...shell.rail.children]).toEqual([shell.cardsBox, shell.panel.root]);
+    expect(shell.cardsBox.className).toBe('wy-cards');
+    expect([...shell.cardsBox.children]).toEqual([shell.cards[0]!.root, shell.cards[1]!.root]);
     for (const card of shell.cards) {
       expect(card.root.tagName).toBe('BUTTON');
       expect(card.root.getAttribute('aria-pressed')).toBe('false');
@@ -420,6 +420,69 @@ describe('Card swatches (playtest round)', () => {
       expect(card.swatch.getAttribute('aria-hidden')).toBe('true');
       expect(card.root.firstElementChild).toBe(card.swatch);
     }
+    shell.destroy();
+  });
+});
+
+// #181 (H3/L2): the Card's dual form. What assistive tech reads (the full name, the full cost
+// message, the hotkey) and what the Card paints (the short label, the gem and the number,
+// "need N") are separate parts, and the painted ones are hidden from AT, so each fact is
+// heard once. `ui.css` decides which painted parts show; these pin the DOM contract.
+describe('Card parts (#181 H3/L2)', () => {
+  it('the accessible parts are exposed, the painted parts are aria-hidden, in reading order', () => {
+    const shell = createShell(document, TWO_CARDS);
+    for (const card of shell.cards) {
+      // Exposed: the head of the accessible name and its cost message, then the hotkey.
+      for (const part of [card.name, card.cost, card.hotkey]) {
+        expect(part.closest('[aria-hidden="true"]'), part.className).toBeNull();
+      }
+      // Painted only.
+      expect(card.label.getAttribute('aria-hidden')).toBe('true');
+      expect(card.costValue.closest('[aria-hidden="true"]')).not.toBeNull();
+      expect(card.need.closest('[aria-hidden="true"]')).not.toBeNull();
+      // The cost glance leads with the HUD's own gem, then the number, then "need N".
+      const glance = card.costValue.parentElement!;
+      expect(glance.firstElementChild!.getAttribute('class')).toContain('wy-icon--bounty');
+      expect([...glance.children].slice(1)).toEqual([card.costValue, card.need]);
+      // Reading order inside the button: name, cost, hotkey — the order the name has
+      // always been read in ("Basic Tower Cost: 5 1").
+      const order = [card.name, card.cost, card.hotkey].map((el) =>
+        [...card.root.querySelectorAll('*')].indexOf(el),
+      );
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    }
+    shell.destroy();
+  });
+
+  it('the can’t-afford texts are persistent Text nodes, and the description starts hidden with an id of its own', () => {
+    const shell = createShell(document, TWO_CARDS);
+    for (const card of shell.cards) {
+      // The nodes `overlay.ts` rewrites in place (#98): the only child of each part.
+      expect(card.need.firstChild).toBe(card.needText);
+      expect(card.desc.firstChild).toBe(card.descText);
+      expect(card.needText.data).toBe('');
+      expect(card.descText.data).toBe('');
+      // Hidden from every reading until a Card points `aria-describedby` at it.
+      expect(card.desc.hidden).toBe(true);
+      expect(card.root.hasAttribute('aria-describedby')).toBe(false);
+      expect(card.desc.id).not.toBe('');
+      expect(card.root.contains(card.desc)).toBe(true);
+    }
+    expect(new Set(shell.cards.map((c) => c.desc.id)).size).toBe(shell.cards.length);
+    // A second Shell in the same document never reuses the first one's ids.
+    const second = createShell(document, TWO_CARDS);
+    const ids = new Set(shell.cards.map((c) => c.desc.id));
+    for (const card of second.cards) expect(ids.has(card.desc.id)).toBe(false);
+    second.destroy();
+    shell.destroy();
+  });
+
+  it('the Panel owns one aria-hidden art canvas, built once with the Shell', () => {
+    const shell = createShell(document, TWO_CARDS);
+    expect(shell.panel.art.tagName).toBe('CANVAS');
+    expect(shell.panel.art.getAttribute('aria-hidden')).toBe('true');
+    // Not yet in the Panel: `overlay.ts` homes it in each Panel it builds.
+    expect(shell.panel.root.contains(shell.panel.art)).toBe(false);
     shell.destroy();
   });
 });

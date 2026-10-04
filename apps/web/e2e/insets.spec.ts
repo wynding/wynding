@@ -389,7 +389,7 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
     expect(await firstCardTop()).toBeGreaterThanOrEqual(TOP);
   });
 
-  test('the restated S12a commitment at rest: 4 of 9 Cards at zero inset, every Card scroll-reachable at a nonzero one', async ({
+  test('the restated S12a commitment at rest: all 9 Cards at zero inset (#181 L2), every Card scroll-reachable at a nonzero one', async ({
     page,
   }) => {
     await gotoAt(page, PHONE);
@@ -406,7 +406,11 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
             .length,
         };
       });
-    expect((await atRest()).fullyVisible, 'zero inset: the at-rest count is unchanged').toBe(4);
+    // Was 4 of 9 before the phone rail (#181 L2): the icon-form Cards, two to a row, fill
+    // the Rail's 304px content box exactly, so every one is on screen with no scrolling.
+    expect((await atRest()).fullyVisible, 'zero inset: every Card is on screen at rest').toBe(
+      CARD_COUNT,
+    );
 
     await inject(page, { top: `${TOP}px` });
     const n = (await atRest()).total;
@@ -440,10 +444,17 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
   // With no tower armed the guarantee also holds at DOUBLED text zoom. Armed at doubled zoom
   // nothing is claimed: Cards are ~189px tall against ~121px of room above the Panel — the
   // pre-existing S12a geometry.
+  //
+  // The unarmed walk at default text size and NO inset moved to doubled zoom with #181 (L2):
+  // its premise is a Rail that scrolls, and at 658×320 the phone rail no longer does — all nine
+  // Cards sit on screen at rest, which the #153 at-rest test above asserts outright. A walk there
+  // could only fail its own guards (no fade ever painted, no scrolled stop), so it is walked
+  // where the Rail still scrolls with the Panel closed. At a 24px inset the Rail scrolls by the
+  // inset at default size, so that walk stays where it was.
   const WALKS: { armed: boolean; zoom: 100 | 200; insets: readonly number[] }[] = [
-    { armed: false, zoom: 100, insets: [0, TOP] },
+    { armed: false, zoom: 100, insets: [TOP] },
     { armed: true, zoom: 100, insets: [0, TOP] },
-    { armed: false, zoom: 200, insets: [TOP] },
+    { armed: false, zoom: 200, insets: [0, TOP] },
   ];
   for (const { armed, zoom, insets } of WALKS) {
     for (const inset of insets) {
@@ -495,10 +506,14 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
     zoom: 100 | 200;
     insets: readonly number[];
   }[] = [
-    { view: TABLET, armed: false, pinned: false, zoom: 100, insets: [0, TOP] },
+    // 640x560 unarmed at default text size is no longer walked (#181 L2): its 144px Rail now
+    // carries the icon-form Cards two to a row, which fit with room to spare, so there is no
+    // scroll for a walk to exercise — compact.spec.ts's at-rest test asserts all nine on
+    // screen there instead. Its two walks moved where a Rail of the same width still scrolls
+    // unarmed: doubled zoom here, and the 24px inset to the narrow portrait Rail as well.
     { view: TABLET, armed: true, pinned: true, zoom: 100, insets: [0, TOP] },
-    { view: TABLET, armed: false, pinned: false, zoom: 200, insets: [0] },
-    { view: STANDARD_TALL, armed: false, pinned: false, zoom: 100, insets: [0] },
+    { view: TABLET, armed: false, pinned: false, zoom: 200, insets: [0, TOP] },
+    { view: STANDARD_TALL, armed: false, pinned: false, zoom: 100, insets: [0, TOP] },
     { view: STANDARD_TALL, armed: true, pinned: true, zoom: 100, insets: [0] },
     { view: STANDARD_SHORT, armed: false, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD, armed: true, pinned: false, zoom: 100, insets: [0] },

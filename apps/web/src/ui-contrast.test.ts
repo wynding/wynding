@@ -51,10 +51,9 @@ function contrast(a: number, b: number): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-// `armed` has no contrast PAIRING (the armed border is a redundant cue over the Card's
-// gated accent-fill + on-accent flip — see its ui.css comment) but its EXISTENCE is gated
-// here: deleting the token would make `border-color: var(--wy-armed)` fall back to
-// `currentColor` (`--wy-on-accent` on the armed fill — near-invisible) with CI green.
+// `armed` carries the armed Card's state since #181 (H3) — the style frame's gold frame over a
+// lifted fill, where the Card used to flip to the accent fill — so it is PAIRED below (non-text)
+// as well as required here.
 const REQUIRED_TOKENS = [
   'bg',
   'surface',
@@ -76,6 +75,11 @@ const REQUIRED_TOKENS = [
   'bounty',
   'stars',
   'icon-ink',
+  // #181 (H3/L2): the Cards' fills, their edge, and the can't-afford ink — each paired below.
+  'card',
+  'card-armed',
+  'card-edge',
+  'need',
 ];
 
 describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥ 3:1)', () => {
@@ -103,6 +107,18 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // The wave strip is a `surface` box: its title and counts (`fg`, gated above) and a
       // single-entry wave's dim name and clause.
       ['fg-dim', 'surface'],
+      // #181 (H3/L2): every text a Card draws, on both its fills — the name and cost (`fg`),
+      // the hotkey and a can't-afford name (`fg-dim`), the need ink on the cost and "need N".
+      ['fg', 'card'],
+      ['fg', 'card-armed'],
+      ['fg-dim', 'card'],
+      ['fg-dim', 'card-armed'],
+      ['need', 'card'],
+      ['need', 'card-armed'],
+      // The icon form's "need N" rides on a chip of the page colour.
+      ['need', 'bg'],
+      // The docked Panel is a `bg` well: its name and values (`fg on bg`, gated above), and its
+      // role line, stat labels and build hint in the dim ink (`fg-dim on bg`, likewise).
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
@@ -140,6 +156,17 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // The gem's and star's outline and facets, against the fills they outline.
       ['icon-ink', 'bounty'],
       ['icon-ink', 'stars'],
+      // #181 (H3/L2). A Card's edge is a component boundary (ADR 0003): against the Rail it
+      // sits in, and against its own fill.
+      ['card-edge', 'surface'],
+      ['card-edge', 'card'],
+      // The armed frame carries the armed state: against the Rail, and against the fill it
+      // frames.
+      ['armed', 'surface'],
+      ['armed', 'card-armed'],
+      // The gem a Card's cost leads with, on both fills.
+      ['bounty', 'card'],
+      ['bounty', 'card-armed'],
     ];
     for (const [fg, bg] of pairs) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
