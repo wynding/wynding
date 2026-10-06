@@ -82,7 +82,7 @@ import type { RenderOverlay, RenderVM } from './types';
 const GEOMETRY = { cols: 10, rows: 10, entrance: { col: 0, row: 5 }, exit: { col: 9, row: 5 } };
 const board = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 280, height: 240 }) };
 
-const vm = (tick: number): RenderVM => ({ tick, phase: 'building', creeps: [], towers: [] });
+const vm = (tick: number): RenderVM => ({ tick, phase: 'running', creeps: [], towers: [] });
 const overlay = (sparks: RenderOverlay['sparks']): RenderOverlay => ({
   ghost: null,
   selection: null,
