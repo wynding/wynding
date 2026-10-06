@@ -116,18 +116,78 @@ function hideDevicePixels({ hide }: { hide: boolean }): void {
     delete (proto as unknown as { devicePixelContentBoxSize?: unknown }).devicePixelContentBoxSize;
 }
 
+/** Init script: make the board canvas's `devicePixelContentBoxSize` read the box's OTHER whole
+ *  pixel width — one off the browser's own count, still within the pixel the renderer's scale
+ *  guard allows — keeping the real getter for the test's own observer (`hideDevicePixels`,
+ *  which runs first, keeps it). A store that is the fake count is the app taking the
+ *  browser's report; one that is the real count means it set the report aside (QC round 5:
+ *  a CSS-size comparison did, at most fractional scales). */
+function fakeBoardCount(): void {
+  const getter = Object.getOwnPropertyDescriptor(
+    ResizeObserverEntry.prototype,
+    'devicePixelContentBoxSize',
+  )?.get;
+  if (getter === undefined) return;
+  Object.defineProperty(ResizeObserverEntry.prototype, 'devicePixelContentBoxSize', {
+    configurable: true,
+    get(this: ResizeObserverEntry) {
+      const real = getter.call(this) as readonly ResizeObserverSize[];
+      if (!(this.target as Element).closest?.('.wy-board')) return real;
+      const v = this.target.getBoundingClientRect().width * devicePixelRatio;
+      return [
+        {
+          inlineSize: real[0]!.inlineSize >= v ? Math.floor(v) : Math.ceil(v),
+          blockSize: real[0]!.blockSize,
+        },
+      ];
+    },
+  });
+}
+
+/** The board canvas's backing store, the browser's own count (through the real getter), and
+ *  the fake width `fakeBoardCount` makes the app see, from the box's width × dpr. */
+async function storeAndFakeCount(
+  page: Page,
+): Promise<{ store: [number, number]; real: [number, number]; fakeWidth: number; v: number }> {
+  return page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const canvas = document.querySelector<HTMLCanvasElement>('.wy-board canvas')!;
+        const kept = (
+          window as unknown as {
+            __wyDevicePixels: (e: ResizeObserverEntry) => readonly ResizeObserverSize[];
+          }
+        ).__wyDevicePixels;
+        const observer = new ResizeObserver((entries) => {
+          const device = kept(entries[entries.length - 1]!)[0]!;
+          const v = canvas.getBoundingClientRect().width * devicePixelRatio;
+          observer.disconnect();
+          resolve({
+            store: [canvas.width, canvas.height],
+            real: [device.inlineSize, device.blockSize],
+            fakeWidth: device.inlineSize >= v ? Math.floor(v) : Math.ceil(v),
+            v,
+          });
+        });
+        observer.observe(canvas, { box: 'device-pixel-content-box' });
+      }),
+  );
+}
+
 /** Runs `body` on the app in a browser really running at device scale `dsf`, its window
  *  `width`×`height`: `--force-device-scale-factor` lays the page out in device pixels and
  *  draws the canvas into the pixels its box snaps to — which Playwright's `deviceScaleFactor`
  *  does not: it lays the page out in CSS px and scales its picture. With `fallback`, the app
- *  sees no `device-pixel-content-box` (`hideDevicePixels`). */
+ *  sees no `device-pixel-content-box` (`hideDevicePixels`); with `fakeCount`, the count it sees
+ *  is one pixel off (`fakeBoardCount`). */
 async function atRealScale(
   {
     dsf,
     width,
     height,
     fallback,
-  }: { dsf: number; width: number; height: number; fallback: boolean },
+    fakeCount = false,
+  }: { dsf: number; width: number; height: number; fallback: boolean; fakeCount?: boolean },
   baseURL: string | undefined,
   body: (page: Page) => Promise<void>,
 ): Promise<void> {
@@ -143,6 +203,7 @@ async function atRealScale(
       baseURL,
     });
     await context.addInitScript(hideDevicePixels, { hide: fallback });
+    if (fakeCount) await context.addInitScript(fakeBoardCount);
     const page = await context.newPage();
     await page.goto('/');
     await expect
@@ -197,6 +258,51 @@ test.describe('the backing store against the browser’s own count, at a real de
     });
   }
 
+  // The worked-out count's tie rule: layout puts an edge on a half device pixel at some
+  // positions, and rounds it up. The sizes above never put an edge of the box on one, so this
+  // walks the board across every 1/64 CSS px over two device pixels, at scales whose products
+  // are inexact in a float, and holds the store to the browser's count at each — ties included.
+  for (const dsf of [0.9, 0.8, 1.1]) {
+    test(`worked out at ${dsf}: the browser's count at every 1/64 px position, half-pixel ties included`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(240_000);
+      await atRealScale({ dsf, width: 525, height: 320, fallback: true }, baseURL, async (page) => {
+        let ties = 0;
+        const steps = Math.ceil(128 / dsf) + 2; // two device pixels of travel
+        for (let n = 1; n <= steps; n++) {
+          // Move the Stage n/64 CSS px; then resize the board by a whole CSS px and back,
+          // two frames each, so the size observer has synced at the FINAL position (1/64 of
+          // a CSS px of `right` need not resize the board at all at a fractional scale, so
+          // no sync happens, and a move alone is not followed here).
+          await page.evaluate(async (k) => {
+            const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+            const board = document.querySelector<HTMLElement>('.wy-board')!;
+            document.querySelector<HTMLElement>('.wy-stage')!.style.left = `${k / 64}px`;
+            board.style.right = '1px';
+            await frame();
+            await frame();
+            board.style.right = '0px';
+            await frame();
+            await frame();
+          }, n);
+          await expectStoreIsBrowserCount(page, `${dsf} step ${n}`, false);
+          const fractions = await page.evaluate(() => {
+            const r = document.querySelector('.wy-board canvas')!.getBoundingClientRect();
+            return [r.left, r.right, r.top, r.bottom].map(
+              (v) => (((Math.round(v * devicePixelRatio * 64) / 64) % 1) + 1) % 1,
+            );
+          });
+          if (fractions.some((f) => Math.abs(f - 0.5) < 1e-9)) ties++;
+        }
+        console.log(`[hidpi] ${dsf}: ${steps} steps, ${ties} with an edge on a half device pixel`);
+        expect(ties, 'the sweep reached a half-pixel tie').toBeGreaterThan(0);
+      });
+    });
+  }
+
   // The browser's own count (Chromium, Firefox), which it reports again when it changes —
   // after a move that changes it, too, which no size observer sees.
   for (const dsf of [0.8, 1, 1.25, 1.75]) {
@@ -232,6 +338,51 @@ test.describe('the backing store against the browser’s own count, at a real de
           expect(counts.size, 'a move that changes the device-pixel count').toBeGreaterThan(1);
         },
       );
+    });
+  }
+
+  // The browser's count is taken as it reports it: its width made one pixel off the real one
+  // (still within the scale guard's pixel), the store is that, not the arithmetic's or the
+  // real count — at every fractional scale, where a comparison of the CSS size the report was
+  // taken at set it aside (QC round 5). A layout whose width × dpr is whole has no other
+  // whole pixel: there the fake is the real count, and it is skipped.
+  for (const dsf of [0.9, 1, 1.1, 1.25, 1.5, 1.75]) {
+    test(`the browser's report is taken, not set aside, at ${dsf}`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(60_000);
+      let tested = 0;
+      for (const [width, height] of [
+        [525, 320],
+        [1280, 720],
+      ] as const) {
+        await atRealScale(
+          { dsf, width, height, fallback: false, fakeCount: true },
+          baseURL,
+          async (page) => {
+            let last = '';
+            await expect
+              .poll(
+                async () => {
+                  const r = await storeAndFakeCount(page);
+                  last = JSON.stringify(r);
+                  // Whole: the fake is the real count, which proves nothing.
+                  if (Math.abs(r.v - Math.round(r.v)) < 1e-6) return true;
+                  tested++;
+                  return r.store[0] === r.fakeWidth && r.store[1] === r.real[1];
+                },
+                { message: `${width}×${height} @${dsf}: the store is the report`, timeout: 5_000 },
+              )
+              .toBe(true)
+              .finally(() =>
+                console.log(`[hidpi] ${width}×${height} @${dsf}, fake count: ${last}`),
+              );
+          },
+        );
+      }
+      expect(tested, 'a layout with a fake count to take').toBeGreaterThan(0);
     });
   }
 });
