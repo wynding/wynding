@@ -23,20 +23,19 @@ const STANDARD = { width: 1280, height: 720 };
 const PHONE = { width: 658, height: 320 }; // Galaxy S9+ landscape — the smallest supported
 const NARROW = { width: 568, height: 320 }; // iPhone-SE-class narrow floor
 
-/** The Standard status row's expected height: the chips line alone, exactly the link's
- *  44px hit box absorbed into the row's own padding (ui.css derives this) — measured
- *  44.0px at 1280×720 since the playtest round FLOATED the wave preview over the Stage
- *  (`.wy-wave-preview`'s ui.css comment: a content-sized row re-projected the board on
- *  every preview change, so the preview left the row entirely). That resolves the
- *  recalibration saga that lived here through M2-S2 and M2-S10 and the S11/S12 flag that
- *  asked for "a real look rather than a third recalibration" — the real look was removing
- *  the variable content, and `stage-stability.spec.ts` now pins the board-never-moves
- *  invariant directly; git carries the essays.
+/** The Standard status row's expected height: ONE line — the home link's 44px hit box
+ *  absorbed into the row's own padding (ui.css derives this), the icon chips, and since #181
+ *  the wave strip — measured 52px at 1280×720. The strip is back in the row, but as a box the
+ *  ROW sizes (its leftover width, one fixed line tall), never its content: a content-sized
+ *  preview row re-projected the board on every wave change, which is why the playtest round
+ *  had floated it out of the row entirely. `stage-stability.spec.ts` pins the
+ *  board-never-moves invariant directly; git carries the recalibration essays.
  *
  *  The ceiling still earns its keep the original way: a naive `min-height: 44px` flex
  *  item stacking ON TOP of the row's own content — the regression class this guard has
- *  caught since M1 — adds ~19px and breaches; re-hosting any preview-like content row
- *  breaches by 60px+. */
+ *  caught since M1 — adds ~19px and breaches; a strip pushed onto a line of its own (the
+ *  row wrapping at this width), or any content-sized preview row, breaches by a line or
+ *  more. */
 const STANDARD_ROW_MAX_PX = 56;
 
 async function gotoAt(page: Page, size: { width: number; height: number }): Promise<void> {
@@ -396,11 +395,22 @@ test.describe('home affordance — Compact layout (the playfield is sacred)', ()
     await gotoAt(page, PHONE);
     await page.addStyleTag({ content: ':root { font-size: 200% }' });
 
+    // Since #181 QC round 2 the column stops the scrollport at its last whole item or line
+    // (`--wy-hud-cut`, `hud-cut.ts`) and leaves the rest of its room empty above the Dock on
+    // purpose: here, a frame after the zoom, the countdown's seconds alone, 36px of 71. What this
+    // guards is the ROOM the column gives the scrollport, so that is read with the cut lifted and
+    // put straight back in the same task (nothing renders in between), as compact.spec's #101
+    // guard reads it — before or after the pass has run, the same 71px.
     const box = await page.evaluate(() => {
       const el = (s: string) => document.querySelector(s) as HTMLElement;
+      const hud = el('.wy-hud');
+      const cut = hud.style.getPropertyValue('--wy-hud-cut');
+      hud.style.removeProperty('--wy-hud-cut');
+      const room = hud.clientHeight;
+      if (cut !== '') hud.style.setProperty('--wy-hud-cut', cut);
       return {
         home: el('.wy-home').getBoundingClientRect().height,
-        hud: el('.wy-hud').clientHeight,
+        hud: room,
       };
     });
     // The link takes the 44px floor it is entitled to, and not a pixel more.
@@ -409,10 +419,10 @@ test.describe('home affordance — Compact layout (the playfield is sacred)', ()
       `home link ${box.home}px — the mark ballooned past the 44px floor`,
     ).toBeLessThanOrEqual(TARGET_MIN_PX + 1);
     expect(box.home).toBeGreaterThanOrEqual(TARGET_MIN_PX);
-    // …leaving the chips a scrollport worth scrolling: at least one full 200%-zoom chip line.
+    // …leaving the chips scrollport its room: 71px here, where a ballooned mark leaves ~49px.
     expect(
       box.hud,
-      `chips scrollport collapsed to ${box.hud}px at 200% zoom`,
+      `the chips scrollport's room collapsed to ${box.hud}px at 200% zoom`,
     ).toBeGreaterThanOrEqual(64);
   });
 
