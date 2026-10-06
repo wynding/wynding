@@ -97,17 +97,98 @@ async function settle(page: Page): Promise<void> {
     .toBe(true);
 }
 
-/** The countdown ring beside the primary action (#181 H1) may never move the Dock: its slot is
- *  zero-width and row-stretched by construction (`ui.css`, `.wy-dock-ring`) — never a
- *  `.wy-btn`, never a wrap, never a taller row. Proven as an A/B in the real layout: the Dock's
- *  box, every control's box, the reserve the Dock pass publishes and the board it leaves are
- *  identical with the ring's slot taken out of layout entirely. And while the ring shows, its
- *  slot sits on the primary control's row — the one place it is drawn beside. */
-async function assertRingMovesNothing(page: Page, phase: string): Promise<void> {
-  const ring = page.locator('.wy-dock > .wy-dock-ring');
-  await expect(ring, `${phase}: the ring's slot is in the Dock`).toHaveCount(1);
-  await expect(ring).toHaveAttribute('aria-hidden', 'true');
-  expect(await ring.evaluate((el) => el.classList.contains('wy-btn'))).toBe(false);
+/** The countdown dial (#181 H1, QC) may never move the Dock, and the countdown it decorates must
+ *  be readable. The dial is drawn INSIDE the primary control, out of its layout (`ui.css`,
+ *  `.wy-dial`): never a Dock item, so never a wrap, a taller row or a wider control. Proven as an
+ *  A/B in the real layout: the Dock's box, every control's box — EXACTLY, so not even the 1/64px
+ *  a rem shift once cost at fractional root sizes (#181 QC round 2) — the reserve the Dock pass
+ *  publishes and the board it leaves are identical with the dial REMOVED from the document,
+ *  which also drops the padding redistribution it is drawn in, so the control's own unshifted
+ *  box is the reference.
+ *
+ *  Whether it shows is MEASURED (#181 QC round 2, `dock-reserve.ts`): drawn exactly where the
+ *  Dock pass found room, and then inside the control, its label's ink a real gap (>= 2px) clear
+ *  of it and inside the padding box; withheld everywhere else, and its padding shift with it.
+ *
+ *  And THE COUNTDOWN IS READABLE (#181 QC): the wave chip's glance — the clock and the seconds,
+ *  the one readable countdown at every text size — is painted, wholly inside the capped hud and
+ *  the viewport at rest, in every Dock form, at every case this runs at. */
+async function assertDialMovesNothing(page: Page, phase: string): Promise<void> {
+  const dial = page.locator('.wy-dock .wy-primary > .wy-dial');
+  await expect(dial, `${phase}: the dial lives inside the primary control`).toHaveCount(1);
+  await expect(dial).toHaveAttribute('aria-hidden', 'true');
+  expect(
+    await page.evaluate(() =>
+      [...document.querySelector('.wy-dock')!.children].map((c) => c.classList.contains('wy-btn')),
+    ),
+    `${phase}: the Dock holds its controls and nothing else`,
+  ).not.toContain(false);
+
+  const glance = await page.evaluate(() => {
+    const chip = document.querySelector<HTMLElement>('.wy-hud > .wy-chip[data-wy-chip="wave"]');
+    if (chip === null || chip.hidden) return null;
+    const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+    const h = hud.getBoundingClientRect();
+    const port = {
+      left: h.left + hud.clientLeft,
+      top: h.top + hud.clientTop,
+      right: h.left + hud.clientLeft + hud.clientWidth,
+      bottom: h.top + hud.clientTop + hud.clientHeight,
+    };
+    const g = chip.querySelector<HTMLElement>('.wy-chip-glance')!;
+    const r = g.getBoundingClientRect();
+    const near = (a: number, b: number): boolean => a >= b - 0.5;
+    return {
+      visibility: getComputedStyle(g).visibility,
+      text: g.textContent ?? '',
+      area: r.width * r.height,
+      rect: `[${r.left.toFixed(1)},${r.top.toFixed(1)} ${r.width.toFixed(1)}×${r.height.toFixed(1)}]`,
+      port: `[${port.left.toFixed(1)},${port.top.toFixed(1)} → ${port.right.toFixed(1)},${port.bottom.toFixed(1)}]`,
+      inHud:
+        near(r.left, port.left) &&
+        near(r.top, port.top) &&
+        near(port.right, r.right) &&
+        near(port.bottom, r.bottom),
+      inViewport:
+        near(r.left, 0) &&
+        near(r.top, 0) &&
+        near(innerWidth, r.right) &&
+        near(innerHeight, r.bottom),
+    };
+  });
+  // Every phase this runs in has a countdown (before Start, and a run under way).
+  expect(glance, `${phase}: the countdown chip is shown`).not.toBeNull();
+  expect(glance!.visibility, `${phase}: the countdown's glance is painted`).toBe('visible');
+  expect(glance!.text, `${phase}: …and reads the seconds`).toMatch(/\d+s/);
+  expect(glance!.area, `${phase}: …in a box with area`).toBeGreaterThan(0);
+  expect(
+    glance!.inHud,
+    `${phase}: the countdown's glance ${glance!.rect} must sit wholly inside the capped hud ${glance!.port} at rest`,
+  ).toBe(true);
+  expect(glance!.inViewport, `${phase}: …and inside the viewport`).toBe(true);
+
+  const drawn = await dialState(page);
+  // Both phases this runs in have a countdown and no call launching, so whether the dial shows
+  // is the measured room alone.
+  expect(drawn.countdown, `${phase}: a countdown runs`).toBe(true);
+  expect(drawn.shown, `${phase}: the dial shows exactly where the Dock pass measured room`).toBe(
+    drawn.room,
+  );
+  if (drawn.shown) {
+    expect(drawn.width, `${phase}: …with a size`).toBeGreaterThan(0);
+    expect(drawn.inside, `${phase}: …inside the primary control's box`).toBe(true);
+    expect(
+      drawn.gap,
+      `${phase}: the label's ink clears the dial by a real gap (${drawn.gap}px)`,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      drawn.inkEnd,
+      `${phase}: …and ends inside the control's padding box, clear of its border (${drawn.inkEnd}px)`,
+    ).toBeGreaterThanOrEqual(2);
+  } else {
+    expect(drawn.pads[0], `${phase}: withheld, the dial's room goes with it`).toBe(drawn.pads[1]);
+  }
+
   const snapshot = (): Promise<unknown> =>
     page.evaluate(() => {
       const box = (el: Element): string => {
@@ -115,9 +196,15 @@ async function assertRingMovesNothing(page: Page, phase: string): Promise<void> 
         return [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 100) / 100).join(',');
       };
       const dock = document.querySelector('.wy-dock')!;
+      // Unrounded, beside the rounded boxes: the redistribution must cost no fraction at all.
+      const exact = (el: Element): number[] => {
+        const b = el.getBoundingClientRect();
+        return [b.x, b.y, b.width, b.height];
+      };
       return {
         dock: box(dock),
         controls: [...dock.querySelectorAll('.wy-btn')].map(box),
+        controlsExact: [...dock.querySelectorAll('.wy-btn')].map(exact),
         reserve: getComputedStyle(document.querySelector('.wy-shell')!).getPropertyValue(
           '--wy-dock-reserve',
         ),
@@ -125,32 +212,62 @@ async function assertRingMovesNothing(page: Page, phase: string): Promise<void> 
         scrollForm: dock.classList.contains('wy-dock--scroll'),
       };
     });
-  const placement = await page.evaluate(() => {
-    const slot = document.querySelector<HTMLElement>('.wy-dock > .wy-dock-ring')!;
-    const primary = document.querySelector<HTMLElement>('.wy-dock .wy-primary')!;
-    if (slot.getClientRects().length === 0 || primary.hidden) return null; // nothing drawn
-    const s = slot.getBoundingClientRect();
-    const p = primary.getBoundingClientRect();
-    return { slotTop: s.top, slotWidth: s.width, primaryTop: p.top, primaryBottom: p.bottom };
-  });
-  if (placement !== null) {
-    expect(placement.slotWidth, `${phase}: the ring's slot is zero-width`).toBe(0);
-    expect(
-      placement.slotTop >= placement.primaryTop - 1 && placement.slotTop < placement.primaryBottom,
-      `${phase}: the ring's slot rides the primary control's row`,
-    ).toBe(true);
-  }
-  const withRing = await snapshot();
-  await ring.evaluate((el) => {
-    (el as HTMLElement).style.display = 'none';
+  const present = await snapshot();
+  await page.evaluate(() => {
+    const a = document.querySelector('.wy-dock .wy-primary > .wy-dial')!;
+    (window as unknown as { __wyDial: Element }).__wyDial = a;
+    a.remove();
   });
   await settle(page);
-  const without = await snapshot();
-  await ring.evaluate((el) => {
-    (el as HTMLElement).style.removeProperty('display');
+  const absent = await snapshot();
+  await page.evaluate(() => {
+    const w = window as unknown as { __wyDial?: Element };
+    document.querySelector('.wy-dock .wy-primary')!.append(w.__wyDial!);
+    delete w.__wyDial;
   });
   await settle(page);
-  expect(withRing, `${phase}: the countdown ring moved the Dock or the board`).toEqual(without);
+  expect(present, `${phase}: the countdown dial moved the Dock or the board`).toEqual(absent);
+}
+
+/** The primary control's countdown dial, measured: whether a countdown runs (the dial's own
+ *  `hidden`), whether the Dock pass found room (`wy-primary--dial`), whether it is DRAWN, and —
+ *  drawn — its box against the control's and the horizontal gap from it to the label's ink (the
+ *  dial sits at the inline start); and the ink's clearance from the padding box's end, and the
+ *  control's two inline paddings. */
+async function dialState(page: Page): Promise<{
+  countdown: boolean;
+  room: boolean;
+  shown: boolean;
+  width: number;
+  inside: boolean;
+  gap: number | null;
+  inkEnd: number;
+  pads: [string, string];
+}> {
+  return page.evaluate(() => {
+    const p = document.querySelector<HTMLElement>('.wy-dock .wy-primary')!;
+    const a = p.querySelector<HTMLElement>(':scope > .wy-dial')!;
+    const cs = getComputedStyle(p);
+    const pr = p.getBoundingClientRect();
+    const padRight = pr.right - parseFloat(cs.borderRightWidth);
+    const range = document.createRange();
+    range.selectNodeContents(p.querySelector('.wy-btn-text')!);
+    const ink = [...range.getClientRects()].filter((r) => r.width > 0);
+    const shown = !p.hidden && !a.hidden && getComputedStyle(a).display !== 'none';
+    const ar = a.getBoundingClientRect();
+    const round = (v: number): number => Math.round(v * 100) / 100;
+    return {
+      countdown: !a.hidden,
+      room: p.classList.contains('wy-primary--dial'),
+      shown,
+      width: ar.width,
+      inside:
+        ar.left >= pr.left && ar.right <= pr.right && ar.top >= pr.top && ar.bottom <= pr.bottom,
+      gap: shown ? round(Math.min(...ink.map((r) => r.left - ar.right))) : null,
+      inkEnd: round(padRight - Math.max(...ink.map((r) => r.right))),
+      pads: [cs.paddingLeft, cs.paddingRight] as [string, string],
+    };
+  });
 }
 
 /** The page-coordinate centre of board cell (col, row). */
@@ -260,22 +377,82 @@ test.describe('the tablet repro (1280×800, coarse pointer): no cell under the D
 
 test.describe('the Standard sweep: no buildable cell under the Dock (#152)', () => {
   for (const size of SWEEP) {
-    test(`${size.width}×${size.height}: no buildable cell renders under the Dock, every edge cell hit-tests to the board, and the countdown ring moves nothing`, async ({
+    test(`${size.width}×${size.height}: no buildable cell renders under the Dock, every edge cell hit-tests to the board, and the countdown dial moves nothing while the countdown reads`, async ({
       page,
     }) => {
       await gotoStandard(page, size);
       await settle(page);
       await assertNoBuildableCellUnderDock(page);
       await assertEdgeCellsHitTheBoard(page);
-      await assertRingMovesNothing(page, 'pre-start');
-      // …and with a run under way, when the primary control reads "Call wave" and the ring
-      // counts down to the next wave beside it.
+      await assertDialMovesNothing(page, 'pre-start');
+      // …and with a run under way, when the primary control reads "Call wave" and the dial
+      // inside it counts down to the next wave.
       await page.getByRole('button', { name: 'Start', exact: true }).click();
       await expect(page.locator('.wy-board')).toHaveAttribute('data-started', 'true');
       await settle(page);
-      await assertRingMovesNothing(page, 'started');
+      await assertDialMovesNothing(page, 'started');
     });
   }
+});
+
+test.describe('the countdown dial’s room is MEASURED, on any font stack (#181 QC round 2)', () => {
+  // CI's DejaVu Sans ran "Start" 3.1px into the dial at 320×900 and 300% text, where a font
+  // assumption had put it; the Dock pass now measures. Each case holds on macOS's stack and
+  // DejaVu Sans alike (measured on both), in both phases.
+  const cases = [
+    // Drawn: room to spare at 300% on a wide window — a 43px dial, a 12px gap.
+    { width: 1440, height: 900, zoom: 300, drawn: true },
+    // Withheld: the collision CI found, and the narrowest phone width, where the label is wider
+    // than its control and spills over its own padding.
+    { width: 320, height: 900, zoom: 300, drawn: false },
+    { width: 280, height: 640, zoom: 300, drawn: false },
+  ] as const;
+  for (const c of cases) {
+    test(`${c.width}×${c.height} at ${c.zoom}%: ${c.drawn ? 'drawn, a real gap clear of the label' : 'withheld, and the label exactly where it would be with no dial'} — before and after Start`, async ({
+      page,
+    }) => {
+      await gotoStandard(page, { width: c.width, height: c.height });
+      await page.addStyleTag({ content: `:root { font-size: ${c.zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        const state = await dialState(page);
+        expect(state.shown, `${phase}: the dial is ${c.drawn ? 'drawn' : 'withheld'}`).toBe(
+          c.drawn,
+        );
+        await assertDialMovesNothing(page, phase);
+      }
+    });
+  }
+
+  test('fractional root sizes — 110, 115 and 130% — redistribute without moving the control by any fraction', async ({
+    page,
+  }) => {
+    // A rem shift rounded each padding to the layout unit separately, so the control's width
+    // moved by 1/64px while the dial showed (360×720 at 110%: 75.78125 against 75.765625). The
+    // shift is a whole px now; `assertDialMovesNothing` compares the controls' boxes exactly.
+    for (const zoom of [110, 115, 130]) {
+      await gotoStandard(page, { width: 360, height: 720 });
+      await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        expect(
+          (await dialState(page)).shown,
+          `${zoom}% ${phase}: the premise — the dial shows, so its room is in force`,
+        ).toBe(true);
+        await assertDialMovesNothing(page, `${zoom}% ${phase}`);
+      }
+    }
+  });
 });
 
 test.describe('the bounded Dock at the worst case: 640×560, banner up, 200% zoom (#152)', () => {
@@ -317,7 +494,12 @@ test.describe('the bounded Dock at the worst case: 640×560, banner up, 200% zoo
     const controls = dockEl.locator('.wy-btn:visible');
     const count = await controls.count();
     expect(count).toBeGreaterThan(1);
-    await page.locator('.wy-hud').focus();
+    // From the last tab stop BEFORE the Dock, as the hardened walk does: the chips list — or,
+    // while the wave strip is in its scroll form (#181), the strip, a labelled tab stop of its
+    // own inside it. Which one is a font metric here: set in DejaVu Sans, CI's font, the strip's
+    // line runs past its box at this size; set in macOS's stack, it does not.
+    const scrollingStrip = page.locator('.wy-hud .wy-wave-preview--scroll');
+    await ((await scrollingStrip.count()) > 0 ? scrollingStrip : page.locator('.wy-hud')).focus();
     for (let i = 0; i < count; i++) {
       await page.keyboard.press('Tab');
       const control = controls.nth(i);
@@ -351,13 +533,15 @@ test.describe('the bounded Dock at the worst case: 640×560, banner up, 200% zoo
 // THE STARTED SCROLLPORT MOVED WITH #181. The QC sweep found it at 540×556, where #101's
 // reserved hud row had already taken the status row to ~200px. The strip gave that height back
 // to the Stage: at 540 wide the strip shares the wrapped chips' second line (a 95px status
-// row) and the started Dock no longer scrolls at 100% at any Standard height, while at 500
-// wide the strip takes a line of its own (136px) and the Dock scrolls from the Standard floor
-// (501px) to ~525px tall. The tests below that need it scrolling — and say so first — measure
-// at 500×509, inside that band, where the floor holds by 33px; that layout measures identically
-// on macOS's font stack and CI's (DejaVu Sans). The bottom-inset test stays at 540×509, where
-// the inset itself is what puts the Dock in its scroll form; 540×556 stays in the case table,
-// where it checks the same Dock un-scrolled.
+// row) and the started Dock no longer scrolls at 100% at any Standard height. With the
+// countdown leading the hud (#181 QC) the same holds at 500 wide; at 480 the strip takes a line
+// of its own (a 134px row) and the started Dock scrolls at 480×509 and 480×520 (not 480×540).
+// The tests below that need it scrolling — and say so first — measure at 480×509, where the
+// floor holds by 34.8px on macOS's font stack and CI's (DejaVu Sans) alike, and the table
+// carries the same case, so every hardened check runs on a scrolling Dock at 100% too. Every
+// case DECLARES its started Dock's form (`startedScrolls`), so the table can never again lose
+// that state without failing. The bottom-inset test stays at 540×509, where the inset itself is
+// what puts the Dock in its scroll form; 540×556 stays in the table, un-scrolled.
 
 interface DockCase {
   readonly width: number;
@@ -371,51 +555,80 @@ interface DockCase {
    *  the board's floor both, so the row wins. Every other case must NOT meet the exception's
    *  condition — the test proves the condition, not just the outcome. */
   readonly exception?: boolean;
+  /** Whether the STARTED Dock is in its scroll form here — declared by every case and asserted
+   *  (#181 QC), so a layout change that moves a case across that line fails loudly instead of
+   *  silently emptying the table of scrolling (or whole) cases. Each value is measured on
+   *  macOS's font stack and CI's (DejaVu Sans) alike, at a size where the form is the ONLY one
+   *  the controls allow: not where both are (see the 560×560 case). */
+  readonly startedScrolls: boolean;
 }
 
 const HARDENED: readonly DockCase[] = [
-  { width: 540, height: 556, zoom: 100 },
-  { width: 540, height: 578, zoom: 100 },
-  { width: 800, height: 501, zoom: 150 },
-  { width: 1080, height: 600, zoom: 200 },
-  { width: 640, height: 560, zoom: 200, banner: true, coarse: true },
-  { width: 640, height: 560, zoom: 200 },
-  { width: 360, height: 640, zoom: 200 },
-  { width: 1280, height: 800, zoom: 100, coarse: true },
+  { width: 540, height: 556, zoom: 100, startedScrolls: false },
+  { width: 540, height: 578, zoom: 100, startedScrolls: false },
+  // The 100% SCROLLING case (#181 QC): see THE STARTED SCROLLPORT MOVED above.
+  { width: 480, height: 509, zoom: 100, startedScrolls: true },
+  { width: 800, height: 501, zoom: 150, startedScrolls: true },
+  { width: 1080, height: 600, zoom: 200, startedScrolls: false },
+  // The owner's worst case. Start takes the banner down, so its started phase is plain
+  // 640×560 at 200%, where the four controls take two whole rows on both stacks — macOS's
+  // fonts measured locally, CI's DejaVu Sans measured on CI (a macOS-hosted DejaVu emulation
+  // predicted three rows; CI's own rendering is the arbiter) — so the started Dock is whole.
+  {
+    width: 640,
+    height: 560,
+    zoom: 200,
+    banner: true,
+    coarse: true,
+    startedScrolls: false,
+  },
+  // The worst case's size without the banner, at 560 rather than 640 wide (#181 QC), where the
+  // started Dock scrolls on both stacks — and MUST: its controls need three rows even with the
+  // scroll cue's gutter given back (four on CI), and two fit. Not 600: there, on macOS, the
+  // controls take two rows in the whole Dock and three in the scroll form's narrower box, so
+  // both forms hold and the one shown depends on the Dock's history (#152's pass measures rows
+  // in the form it is in) — a fresh page scrolls, a page that has been through this test's
+  // pre-start checks does not.
+  { width: 560, height: 560, zoom: 200, startedScrolls: true },
+  { width: 360, height: 640, zoom: 200, startedScrolls: true },
+  { width: 1280, height: 800, zoom: 100, coarse: true, startedScrolls: false },
   // Ruling 2's exception was found at 175% here, where — on CI's font stack — the status row
   // spent a line on the home link alone and set the hud (at its 40dvh cap) below it: Stage
-  // 333.6px against ~341px. Since #181 the hud sits BESIDE the link at every width (`flex: 1
-  // 1 0`), and at 175% this Stage holds the floor and a whole Dock row on both font stacks
-  // (370.6px against 340–341px, measured on macOS and with CI's DejaVu Sans metrics), so it
-  // proves the floor. The exception is proven where its condition holds on both by ~30px:
-  // 300%, where the capped hud and a taller Dock row leave 333px against 363–364px.
-  { width: 900, height: 501, zoom: 175 },
-  { width: 900, height: 501, zoom: 300, exception: true },
+  // 333.6px against ~341px. Since #181 the hud sits BESIDE the link wherever it can show a
+  // whole chip there (`flex: 1 1 0` above a 5rem floor), and at 175% this Stage holds the floor
+  // and a whole Dock row on both font stacks (by 30.6px on macOS, 29.6px with CI's DejaVu Sans
+  // metrics), so it proves the floor. The exception is proven where its condition holds on
+  // both by ~30px: 300%, where the capped hud and a taller Dock row leave 333px against
+  // 363–364px.
+  { width: 900, height: 501, zoom: 175, startedScrolls: true },
+  { width: 900, height: 501, zoom: 300, exception: true, startedScrolls: true },
   // Fractional RESERVES, not just fractional Stages: under 100% text the float offset is
   // 0.5rem = 7.2px, so the Dock's band is never a whole px. A reserve rounded up to a whole px
   // leaves these boards 287.6px tall — 11px cells — with no exception to excuse it.
-  { width: 540, height: 506, zoom: 90 },
-  { width: 360, height: 591, zoom: 90 },
+  { width: 540, height: 506, zoom: 90, startedScrolls: false },
+  { width: 360, height: 591, zoom: 90, startedScrolls: false },
   // UNEQUAL LABELS (round-2 QC). At phone widths under heavy text zoom a Dock label wraps
   // ("Call wave", "Speed: 1x" take two lines) while its neighbours do not, so a row can be
   // nearly twice as tall as the one above it. 320×640 at 200% is in scope twice over: WCAG
   // 1.4.10 reflow at 320px, and ADR 0003's 200% text commitment.
-  { width: 320, height: 640, zoom: 200 },
-  { width: 320, height: 640, zoom: 250 },
-  { width: 360, height: 640, zoom: 250 },
-  { width: 320, height: 900, zoom: 300 },
+  { width: 320, height: 640, zoom: 200, startedScrolls: true },
+  { width: 320, height: 640, zoom: 250, startedScrolls: true },
+  { width: 360, height: 640, zoom: 250, startedScrolls: true },
+  { width: 320, height: 900, zoom: 300, startedScrolls: true },
   // THE EXCEPTION ON AN ORDINARY PHONE (owner ruling, 2026-09-24: "one full Dock row" is the
   // TALLEST control's row). At 320px and 200% text a wrapped two-line label sets every row's
   // height (86px, measured 2026-09-24, before and after Start), one such row no longer fits
   // beside the 12px floor, and the row wins: the board drops to 11px rows. Accepted, not a
   // defect — and the exception's condition, not just its outcome, is asserted in both phases.
-  // FONT-SENSITIVE, and unchanged by #181 (identical before and after it on both stacks): its
-  // condition holds by ~9px on CI's Linux font stack and FAILS by 34px on macOS's, where this
-  // case reports the floor held — a local macOS run of the base commit fails it too.
-  { width: 320, height: 560, zoom: 200, exception: true },
+  // It WAS font-sensitive: on CI's stack the hud sat under the home link and the condition held
+  // by ~9px, while on macOS's the hud was a 14px sliver BESIDE the link and the case reported
+  // the floor held (a local macOS run of the base commit fails it). The hud's floor (`ui.css`,
+  // #181 QC) sets it under the link on both stacks now, and the condition holds on both: by
+  // 7.3px on macOS's and 9.3px on CI's.
+  { width: 320, height: 560, zoom: 200, exception: true, startedScrolls: true },
   // The same phone at 250%, where the condition holds by ~30px on both font stacks, so the
   // exception's code path stays checkable on any machine (#181).
-  { width: 320, height: 560, zoom: 250, exception: true },
+  { width: 320, height: 560, zoom: 250, exception: true, startedScrolls: true },
 ];
 
 interface Reach {
@@ -711,7 +924,7 @@ async function gotoCase(page: Page, c: DockCase): Promise<void> {
 
 async function assertPhase(page: Page, c: DockCase, phase: string): Promise<void> {
   await assertNoBuildableCellUnderDock(page);
-  await assertRingMovesNothing(page, phase);
+  await assertDialMovesNothing(page, phase);
   await assertRowHeightIsTallestControl(page, phase);
   await assertFloorOrException(page, c, phase);
   await assertNoPartialControl(page, phase);
@@ -734,6 +947,12 @@ async function assertPhase(page: Page, c: DockCase, phase: string): Promise<void
   }
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+  // The hud is a scrollport too, and the Tab walk scrolls it: in its scroll form the strip is a
+  // tab stop, and focusing it scrolls the capped hud down to its line. A user's scroll is not
+  // rest, and the next phase's at-rest checks (the countdown's glance among them) measure from
+  // rest — so the hud goes back there, as the Dock does above.
+  await page.locator('.wy-hud').evaluate((el) => el.scrollTo({ top: 0 }));
+  await settle(page);
 }
 
 for (const c of HARDENED) {
@@ -754,6 +973,11 @@ for (const c of HARDENED) {
       await page.getByRole('button', { name: 'Start', exact: true }).click();
       await expect(page.locator('.wy-board')).toHaveAttribute('data-started', 'true');
       await settle(page);
+      const startedScrolls = c.startedScrolls;
+      expect(
+        await page.locator('.wy-dock').evaluate((el) => el.classList.contains('wy-dock--scroll')),
+        `started: the case declares the started Dock ${startedScrolls ? 'scrolls' : 'is whole'}`,
+      ).toBe(startedScrolls);
       await assertPhase(page, c, 'started');
     });
   });
@@ -763,7 +987,7 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
   test('360×640 at 200%: a wheel nudge part-way into a row settles on a row edge, and the cue follows the range', async ({
     page,
   }) => {
-    await gotoCase(page, { width: 360, height: 640, zoom: 200 });
+    await gotoCase(page, { width: 360, height: 640, zoom: 200, startedScrolls: true });
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await settle(page);
     const dock = page.locator('.wy-dock');
@@ -810,7 +1034,7 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     page,
   }) => {
     const INSET = 24;
-    await gotoCase(page, { width: 540, height: 509, zoom: 100 });
+    await gotoCase(page, { width: 540, height: 509, zoom: 100, startedScrolls: true });
     // The Capacitor-owned property the `--wy-safe-*` seam reads (`insets.spec.ts`'s route).
     await page.evaluate(
       (v) => document.documentElement.style.setProperty('--safe-area-inset-bottom', `${v}px`),
@@ -837,19 +1061,23 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     expect(lowest, 'a visible Dock control reaches into the bottom inset').toBeLessThanOrEqual(
       509 - INSET + 0.5,
     );
-    await assertFloorOrException(page, { width: 540, height: 509, zoom: 100 }, 'with an inset');
+    await assertFloorOrException(
+      page,
+      { width: 540, height: 509, zoom: 100, startedScrolls: true },
+      'with an inset',
+    );
     await assertNoBuildableCellUnderDock(page);
     await assertTabWalkShowsEachControl(page, 'with a bottom inset');
   });
 
-  test('500×509 at 100%, a bottom inset that ARRIVES after the Dock scrolls: the reserve follows it', async ({
+  test('480×509 at 100%, a bottom inset that ARRIVES after the Dock scrolls: the reserve follows it', async ({
     page,
   }) => {
     // Codex P2 on #169: in scroll form the inset lifts the Dock by `bottom`, which MOVES it
     // without resizing any observed box — so an inset written after the scroll form engaged
     // (a native write of `--safe-area-inset-bottom`, or `env()` changing) must still re-sync
     // the reserve, or the lifted Dock covers buildable cells by the inset delta.
-    await gotoCase(page, { width: 500, height: 509, zoom: 100 });
+    await gotoCase(page, { width: 480, height: 509, zoom: 100, startedScrolls: true });
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await settle(page);
     await expect(page.locator('.wy-dock'), 'the started Dock must scroll here').toHaveClass(
@@ -873,7 +1101,7 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
       await assertNoPartialControl(page, `after a ${inset}px inset arrived`);
       await assertFloorOrException(
         page,
-        { width: 500, height: 509, zoom: 100 },
+        { width: 480, height: 509, zoom: 100, startedScrolls: true },
         `after a ${inset}px inset arrived`,
       );
     }
@@ -889,11 +1117,11 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     );
   });
 
-  test('500×509 at 100%, forced colors: the scroll cue survives, inked in the system CanvasText', async ({
+  test('480×509 at 100%, forced colors: the scroll cue survives, inked in the system CanvasText', async ({
     page,
   }) => {
     await page.emulateMedia({ forcedColors: 'active' });
-    await gotoCase(page, { width: 500, height: 509, zoom: 100 });
+    await gotoCase(page, { width: 480, height: 509, zoom: 100, startedScrolls: true });
     expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await settle(page);
@@ -963,10 +1191,10 @@ test.describe('the started Dock scrollport rests on whole rows (#152)', () => {
     await assertNoPartialControl(page, 'forced colors');
   });
 
-  test('500×509 at 100%: no point of the started Dock reaches a control that is not wholly in view', async ({
+  test('480×509 at 100%: no point of the started Dock reaches a control that is not wholly in view', async ({
     page,
   }) => {
-    await gotoCase(page, { width: 500, height: 509, zoom: 100 });
+    await gotoCase(page, { width: 480, height: 509, zoom: 100, startedScrolls: true });
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await settle(page);
     // The premise, asserted like its siblings': an unscrolled Dock has no control to leak.

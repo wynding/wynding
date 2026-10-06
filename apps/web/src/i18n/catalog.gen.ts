@@ -24,6 +24,7 @@ export const EN = {
   "app.title": "Wynding",
   "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
   "controls.callWave": "Call wave",
+  "controls.callWave.earlyBonus": "Calling now pays an early-call bonus",
   "controls.callWave.pending": "Launching…",
   "controls.copyRun": "Copy run data",
   "controls.pause": "Pause",
@@ -64,8 +65,6 @@ export const EN = {
   "hud.preview.leakCost": "leak cost {leakCost}",
   "hud.preview.role.boss": "boss",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
-  "hud.ring.hint": "until wave {waveNumber} · calling early pays a bounty",
-  "hud.ring.hint.first": "until wave {waveNumber}",
   "hud.score": "Score: {count}",
   "hud.score.glance.label": "Score",
   "hud.stars": "Stars: {count} of 3",
@@ -76,7 +75,7 @@ export const EN = {
   "hud.statuses.poisoned": "{count} poisoned",
   "hud.statuses.slowed": "{count} slowed",
   "hud.statuses.stunned": "{count} stunned",
-  "hud.wave.compact.countdown": "{s}s",
+  "hud.wave.glance.unit": "s",
   "install.banner.dismiss": "Dismiss install suggestion",
   "install.banner.how": "Show me how",
   "install.banner.install": "Install",
@@ -225,6 +224,7 @@ export interface MessageParams {
   "app.title": Record<never, never>;
   "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
   "controls.callWave": Record<never, never>;
+  "controls.callWave.earlyBonus": Record<never, never>;
   "controls.callWave.pending": Record<never, never>;
   "controls.copyRun": Record<never, never>;
   "controls.pause": Record<never, never>;
@@ -265,8 +265,6 @@ export interface MessageParams {
   "hud.preview.leakCost": { "leakCost": string | number };
   "hud.preview.role.boss": Record<never, never>;
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
-  "hud.ring.hint": { "waveNumber": string | number };
-  "hud.ring.hint.first": { "waveNumber": string | number };
   "hud.score": { "count": string | number };
   "hud.score.glance.label": Record<never, never>;
   "hud.stars": { "count": string | number };
@@ -277,7 +275,7 @@ export interface MessageParams {
   "hud.statuses.poisoned": { "count": string | number };
   "hud.statuses.slowed": { "count": string | number };
   "hud.statuses.stunned": { "count": string | number };
-  "hud.wave.compact.countdown": { "s": string | number };
+  "hud.wave.glance.unit": Record<never, never>;
   "install.banner.dismiss": Record<never, never>;
   "install.banner.how": Record<never, never>;
   "install.banner.install": Record<never, never>;

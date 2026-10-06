@@ -122,9 +122,6 @@
   /* The gem's and star's outline and the gem's facets — ink ON the icon, gated against the
      fills it outlines. */
   --wy-icon-ink: #0b0e14;
-  /* The countdown ring's progress arc (#181 H1), drawn on the Stage's board backdrop beside the
-     Dock; its track is `--wy-panel-edge`, and the arc is gated against both. */
-  --wy-countdown: #ffd166;
   /* Compact status-column width (contract §2). vw-capped so 200% text zoom cannot starve
      the board: at 200% `4rem` would be 128px, but `10vw` holds it to ~66px on a 658px-wide
      phone. Content that no longer fits scrolls inside `.wy-hud` (the ADR 0003 doctrine)
@@ -421,7 +418,17 @@ a.wy-home:focus-visible {
    layouts, rendered visually hidden (`.wy-sr-only`'s rules, restated for the reason
    `.wy-preview-full` gives); the aria-hidden glance — an inline-SVG icon and the value — is
    what both layouts paint since #181 (H1). Before it, Standard painted the full message as
-   plain text ("Lives: 10 Bounty: 80") and only Compact the glance. */
+   plain text ("Lives: 10 Bounty: 80") and only Compact the glance.
+
+   The chip is the hidden text's CONTAINING BLOCK (#181 QC). Unpositioned, the absolute
+   `.wy-chip-full` resolved against `.wy-shell` instead, outside `.wy-hud`'s scrollport, so the
+   hud's clip did not apply to it: a chip scrolled out of a capped hud left its 1px box at its
+   static position as scroll range on the PAGE, and a screen reader moving to it scrolled the
+   page rather than the hud. `.wy-preview-entry` does the same for the strip's rows. */
+.wy-chip {
+  position: relative;
+}
+
 .wy-chip-full {
   position: absolute;
   width: 1px;
@@ -454,8 +461,8 @@ a.wy-home:focus-visible {
 }
 
 /* The chip icons (`hud-icons.ts`): the style frame's shapes, inked here so every colour is a
-   gated token — and re-inked in system colours under forced colors (after the ring's rules,
-   below), because Chromium does not force SVG `fill` or `stroke` on its own. */
+   gated token — and re-inked in system colours under forced colors (after the countdown
+   dial's rules, below), because Chromium does not force SVG `fill` or `stroke` on its own. */
 .wy-icon {
   flex: none;
   width: 1.1em;
@@ -552,8 +559,9 @@ a.wy-home:focus-visible {
   }
 
   /* --- THE ICON HUD AND THE WAVE STRIP, STANDARD FORM (#181 H1 + L1) ---
-     One line, as the style frame draws it: the home link, then lives in its pill, bounty and
-     stars large, the score small, and the wave strip taking what is left. Selectors carry
+     One line, as the style frame draws it: the home link, then the countdown (first since #181
+     QC, so the readable countdown is the chip a capped hud always shows), lives in its pill,
+     bounty and stars large, the score small, and the wave strip taking what is left. Selectors carry
      `.wy-shell` for the `.wy-main .wy-board` reason above: this block sits ABOVE the base
      rules it refines. Measured at 100% zoom the row is 52px — under `home.spec.ts`'s 56px
      ceiling — and on a 1080×810 tablet it is one line, where #101's reserved hud row was
@@ -561,12 +569,23 @@ a.wy-home:focus-visible {
 
   /* The hud takes the row's LEFTOVER after the home link (`flex: 1 1 0`), so the strip — its
      one flexible item — can take the space the chips leave. A zero basis keeps the hud BESIDE
-     the link at every width and zoom: where the row cannot hold chips and strip on one line,
-     the strip wraps onto a line of its own inside the hud, under the chips, instead of the
-     whole hud dropping below the link and spending a line on the link alone. #101's hud home
-     used the same basis for the same reason; at 640×560 it is worth two to four board cells. */
+     the link: where the row cannot hold chips and strip on one line, the strip wraps onto a
+     line of its own inside the hud, under the chips, instead of the whole hud dropping below
+     the link and spending a line on the link alone. #101's hud home used the same basis for
+     the same reason; at 640×560 it is worth two to four board cells.
+
+     But never below a FLOOR of one whole chip (#181 QC). Beside a link that heavy text has
+     made wide, the leftover fell to a sliver — 14px at 320×640 and 200%, 54px at 360×640 (on
+     main as well) — where no chip could be read, the countdown included. 5rem holds every chip
+     but the score whole (measured at 100–300%: lives 4.6–4.75rem, bounty 4.2, the countdown
+     3.7–3.8); a row that cannot spare it sets the hud on a line of its own under the link,
+     where it takes the row. Across 168 portrait phones at 150–250% text that made the
+     countdown readable in 66 more, cost no board cell anywhere, and put the pre-start Dock in
+     its scroll form — the Dock's own remedy, with its cue — in 28 more, all but two of them
+     640–667px tall. */
   .wy-shell .wy-hud {
     flex: 1 1 0;
+    min-width: min(100%, 5rem);
     align-items: center;
   }
 
@@ -615,21 +634,14 @@ a.wy-home:focus-visible {
     min-width: 4ch;
   }
 
-  /* THE COUNTDOWN CHIP KEEPS ITS SLOT. Its full message is the accessible countdown in every
-     state; its GLANCE is what a sighted player reads only while the ring beside the Dock's
-     primary action cannot show the seconds — no countdown ring at all (a call already
-     launching), the Dock's scroll form, or a ring that would reach the Rail (`dock-ring.ts`).
-     So the glance is hidden by VISIBILITY while the ring is up, and the slot is held even
-     once every wave has launched: whichever of the two shows the seconds, nothing reflows
-     and the board never moves. */
+  /* THE COUNTDOWN CHIP KEEPS ITS SLOT. Its glance is the one readable countdown — always
+     shown while there is a countdown, at every size and in every Dock form — and its full
+     message the accessible one. Once every wave has launched there is none, and the chip
+     hides by VISIBILITY, keeping its box: collapsing it would re-wrap the row at heavy text
+     the moment the last wave launches (1512×854 at 200%: the status row would fall from 187.5px
+     to 104px and the board's cells grow from 25px to 28px — a re-projection mid-run). */
   .wy-shell .wy-hud > .wy-chip[hidden] {
     display: block;
-    visibility: hidden;
-  }
-
-  .wy-shell:has(.wy-dock:not(.wy-dock--scroll) > .wy-dock-ring:not([hidden], .wy-dock-ring--off))
-    .wy-chip[data-wy-chip='wave']
-    .wy-chip-glance {
     visibility: hidden;
   }
 
@@ -697,14 +709,15 @@ a.wy-home:focus-visible {
 
   /* A NARROW strip (squeezed beside the chips, or its own line in a portrait window's hud)
      tightens its spacing, so a multi-entry wave needs the scroll form below as rarely as the
-     width allows. At 360×640 the hud sits beside the home link and gives the strip 203px:
-     two entries overflow by ~23px and wave 9's four by ~133px, and both scroll. */
+     width allows. Each selector carries `.wy-shell` because the rules it refines out-rank a
+     bare class: the list's gap above is `(0,2,0)`, and the title's base `margin: 0` sits BELOW
+     this block in source, so a bare `.wy-wave-preview-title` here lost both (#181 QC). */
   @container wy-strip (max-width: 22rem) {
-    .wy-wave-preview-title {
+    .wy-shell .wy-wave-preview-title {
       margin-inline-end: -0.35rem;
     }
 
-    .wy-wave-preview-list {
+    .wy-shell .wy-wave-preview-list {
       gap: 0.55rem;
     }
 
@@ -891,11 +904,9 @@ a.wy-home:focus-visible {
     /* The scroll cue's gutter (below): a chevron's width plus its margins, fixed px because
        zoom does not grow a glyph's job. */
     --wy-dock-cue-w: 16px;
-    /* Named because the countdown ring's slot cancels exactly this gap (#181, `.wy-dock-ring`). */
-    --wy-dock-gap: min(0.5rem, 8px);
     box-sizing: border-box;
     bottom: var(--wy-dock-offset);
-    gap: var(--wy-dock-gap);
+    gap: min(0.5rem, 8px);
     max-height: var(--wy-dock-max-h, none);
   }
 
@@ -1016,6 +1027,32 @@ a.wy-home:focus-visible {
      changes. `.wy-shell` for specificity: the base `.wy-btn` 44px floor sits below this block. */
   .wy-shell .wy-dock .wy-btn {
     min-height: max(44px, var(--wy-dock-row-h, 0px));
+  }
+
+  /* THE COUNTDOWN DIAL'S ROOM (#181, QC round 2). The dial (`.wy-dial`, below) is drawn in the
+     primary control's inline-start padding, so while it shows the control moves
+     `--wy-dial-shift` of its END padding to its START — the base `.wy-btn` rule's 0.9rem +
+     0.9rem, redistributed, never added to. Same total, so the control's box, every Dock row,
+     and the reserve `dock-reserve.ts` measures from them are exactly what they are without the
+     dial: showing or hiding it can never move the Dock or the board. The shift is a whole px,
+     written by that pass, so each side keeps the base padding's own fraction of a layout unit
+     and the two always sum to the same width (a rem shift rounded each side separately, and
+     moved the control by 1/64px at 110–130% text).
+
+     Both the dial and its room are keyed on `wy-primary--dial`, which the pass sets only where
+     it MEASURED room: the label, moved by the shift, clears the dial by a real gap and stays
+     inside the control. A font assumption gated the dial before, and CI's font metrics broke it
+     — "Start" ran into the dial at 320×900 and 300% text, and narrower windows pushed the label
+     past the border. Where a word is that wide, the dial and the shift are both withheld and the
+     label sits exactly where it would with no dial. `:not([hidden])` leaves the UA's `[hidden]`
+     rule in charge of the countdown's own absence (no countdown, or a call already launching). */
+  .wy-shell .wy-dock .wy-primary.wy-primary--dial:has(> .wy-dial:not([hidden])) {
+    padding-inline: calc(0.9rem + var(--wy-dial-shift, 0px))
+      calc(0.9rem - var(--wy-dial-shift, 0px));
+  }
+
+  .wy-shell .wy-dock .wy-primary.wy-primary--dial > .wy-dial:not([hidden]) {
+    display: block;
   }
 }
 
@@ -1150,6 +1187,10 @@ a.wy-home:focus-visible {
 }
 
 .wy-preview-entry {
+  /* The row's hidden sentence resolves against the row, inside the strip's clip — see
+     `.wy-chip`. Unpositioned, a row past the strip's visible end was horizontal scroll range
+     on the page (131px at 360×640, 200% text) that no one could pan back. */
+  position: relative;
   display: flex;
   align-items: center;
 }
@@ -1771,90 +1812,65 @@ a.wy-home:focus-visible {
   display: none;
 }
 
-/* --- The countdown ring beside the primary action (#181 H1; Standard — Compact hides it) ---
-   Its slot can NEVER move the Dock, which `dock-reserve.ts` measures row by row:
-   - ZERO WIDTH, with a negative start margin that cancels exactly the Dock's gap, so its
-     outer size is nil: it always fits on the primary control's row (it is the last item) and
-     can never wrap the Dock or widen it, at any viewport, zoom or label length.
-   - It stretches to its row's height (the flex default) and contributes none of its own — the
-     painted ring and hint are absolutely positioned — so it never raises a row, and the Dock
-     pass reads it as part of the primary's row.
-   - It sets no `display`, so the UA's `[hidden]` rule still hides it (no countdown, or a call
-     already launching).
-   The visual is painted to the slot's right, inside the Stage band the Dock reserve already
-   keeps clear of the board, and is pointer-inert decoration. Whether it fits before the Rail is
-   measured (`dock-ring.ts`): the hint goes first, the ring only if even it would reach the
-   Rail. No animation of any kind — the arc only takes a new value each second — so reduced
-   motion needs nothing here. */
-.wy-dock-ring {
+/* --- The countdown dial inside the primary action (#181 H1; Standard — Compact hides it) ---
+   A small STOPWATCH face (`hud-icons.ts`, #181 QC round 2): a ring with a crown on top, the
+   remaining time a wedge that shrinks back to twelve o'clock over a dim face. The crown makes a
+   silhouette no letter has — the closed ring it replaced read as an "O" beside the label
+   ("O Start"). Decoration: the wave chip's glance is the readable countdown and its full message
+   the accessible one, so the dial is `aria-hidden`, carries no text and takes no pointer events.
+   It is OUT OF EVERY LAYOUT MEASURE — absolutely positioned against the control, in the
+   inline-start padding Standard's rule above makes room in without resizing the control — so
+   showing or hiding it can never move the Dock or the board. Its size and inset are whole px
+   the Dock pass derives from the control's font size (`dock-reserve.ts`), so it grows with text
+   like the label beside it, at every size. Drawn by Standard's `wy-primary--dial` rule above
+   and nowhere else: `display: none` here, so no room measured means no dial. No animation of
+   any kind — the wedge only takes a new value each second — so reduced motion needs nothing. */
+.wy-dock .wy-primary {
   position: relative;
-  flex: 0 0 0px;
-  width: 0;
-  margin-inline-start: calc(-1 * var(--wy-dock-gap, 0px));
+}
+
+.wy-dial {
+  display: none;
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: var(--wy-dial-inset, 0.25em);
+  width: var(--wy-dial-size, 0.9em);
+  height: var(--wy-dial-size, 0.9em);
+  margin-block: auto;
   pointer-events: none;
 }
 
-.wy-dock-ring-visual {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: var(--wy-dock-gap, 0px);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  white-space: nowrap;
+.wy-dial-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-/* PX-CAPPED, like the Dock's own chrome: the ring must never be taller than the row it sits
-   beside, at any text zoom. */
-.wy-ring {
-  flex: none;
-  width: min(2.5rem, 40px);
-  height: min(2.5rem, 40px);
+/* The face's INKS. Its geometry — radii, centres, stroke widths, the crown's path — is the SVG's
+   own (`hud-icons.ts`, whose tests read it back), so no rule here sets any. The ring, the crown
+   and the wedge are the control's own text ink, `currentColor`, in every state and theme; the
+   spent part of the face is that ink, dimmed (both pairings gated in `ui-contrast.test.ts`). */
+.wy-dial-ring,
+.wy-dial-crown,
+.wy-dial-wedge {
+  stroke: currentColor;
 }
 
-.wy-ring-track {
-  fill: none;
-  stroke: var(--wy-panel-edge);
-  stroke-width: 4;
+.wy-dial-track {
+  fill: currentColor;
+  fill-opacity: 0.3;
 }
 
-.wy-ring-progress {
-  fill: none;
-  stroke: var(--wy-countdown);
-  stroke-width: 4;
-  stroke-linecap: round;
-}
-
-.wy-ring-text {
-  fill: var(--wy-fg);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.wy-dock-ring-hint {
-  font-size: 0.8125rem;
-  color: var(--wy-fg-dim);
-}
-
-.wy-dock-ring--no-hint .wy-dock-ring-hint,
-.wy-dock-ring--off .wy-dock-ring-visual {
-  visibility: hidden;
-}
-
-/* The Dock's scroll form is a scrollport: a visual painted beside it would become horizontal
-   scroll range. The ring stands down there; the wave chip still carries the countdown. */
-.wy-dock--scroll > .wy-dock-ring {
-  display: none;
-}
-
-/* FORCED COLORS (#181). Chromium leaves SVG `fill` and `stroke` unforced, so the icons and the
-   ring would keep their authored inks on the user's Canvas — the ring's seconds, the countdown's
-   only visible form on Standard while the ring shows, near-white on white. Every SVG ink takes a
-   system colour instead. The shapes carry the meaning (heart, gem, star; a creep's silhouette
-   and its airborne chevron), so they read in the one colour the user's theme draws text in;
-   the ring keeps its track and arc apart with `GrayText`. The creep icons' palette inks are
-   presentation attributes, which any rule here outranks. */
+/* FORCED COLORS (#181). Chromium leaves SVG `fill` and `stroke` unforced, so the icons would
+   keep their authored inks on the user's Canvas — the countdown clock and the chips' icons
+   near-white on white. Every SVG ink takes a system colour instead. The shapes carry the
+   meaning (heart, gem, star; a creep's silhouette and its airborne chevron), so they read in
+   the one colour the user's theme draws text in. The creep icons' palette inks are
+   presentation attributes, which any rule here outranks. The countdown dial is in the
+   control's own system ink, `ButtonText`, over its face in `ButtonFace` — the control's own
+   system ground, so the remaining wedge reads at the full contrast of the control's text
+   (`GrayText` under it measured 1.5:1 in the contrast themes), and the ring and crown still
+   outline the face. */
 @media (forced-colors: active) {
   .wy-icon .wy-icon-body,
   .wy-creep-icon .wy-creep-body {
@@ -1863,8 +1879,7 @@ a.wy-home:focus-visible {
   }
 
   .wy-icon .wy-icon-line,
-  .wy-creep-icon .wy-creep-chevron,
-  .wy-ring .wy-ring-progress {
+  .wy-creep-icon .wy-creep-chevron {
     stroke: CanvasText;
   }
 
@@ -1873,12 +1888,15 @@ a.wy-home:focus-visible {
     stroke: Canvas;
   }
 
-  .wy-ring .wy-ring-track {
-    stroke: GrayText;
+  .wy-dial-ring,
+  .wy-dial-crown,
+  .wy-dial-wedge {
+    stroke: ButtonText;
   }
 
-  .wy-ring .wy-ring-text {
-    fill: CanvasText;
+  .wy-dial-track {
+    fill: ButtonFace;
+    fill-opacity: 1;
   }
 }
 
@@ -2676,14 +2694,23 @@ a.wy-home:focus-visible {
   }
 
   /* Chips: the `flex: 1` scrollport. The Dock is a separately bounded block BELOW it, so
-     chips can never scroll behind the controls (chip–Dock disjointness is asserted). */
+     chips can never scroll behind the controls (chip–Dock disjointness is asserted).
+
+     WHOLE ITEMS AT REST (#181 QC round 2). The room the column leaves the chips ends wherever
+     the mark and the Dock put it — at 658×320 it cut the fifth chip through its icon and value.
+     `hud-cut.ts` measures where the last whole chip (or wave-strip line) ends and writes it as
+     `--wy-hud-cut`: the scrollport stops there, and the room below it stays empty above the
+     Dock (whose `margin-top: auto` keeps it where it was). Where no item fits whole — a wrapped
+     countdown after Start at 150–200% text — it stops at that item's last whole line. Unset —
+     every item fits, not one line does, or the pass has not run — the scrollport takes all the
+     room, as before. */
   .wy-hud {
     flex: 1 1 auto;
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
     gap: 0.35rem;
-    max-height: none;
+    max-height: var(--wy-hud-cut, none);
     font-size: 0.875rem;
   }
 
@@ -2692,6 +2719,37 @@ a.wy-home:focus-visible {
   .wy-chip-label,
   .wy-chip-suffix {
     display: none;
+  }
+
+  /* THE GLANCE WRAPS, ICON ABOVE VALUE (#181 QC round 2). The column's track is vw-capped and
+     does not grow with the text, so from 125–175% text (by width) an icon and its value no
+     longer fit side by side: the one-line glance ran its value past the column's edge, where
+     the scrollport clipped it — at 568×320 and 150% the countdown read "1" for 14s. Wrapped,
+     the icon keeps the line above its value, as main's glances do, so no value loses its icon.
+     Where even the value is wider than the column (the countdown at 568×320 and 175–200%, and
+     658×320 at 200%), its unit wraps under the digits at its `<wbr>` (`shell.ts`), never a
+     digit. The value's `white-space: normal` is what lets WebKit break there: it honours the
+     glance's `nowrap` at a `<wbr>`, while Chromium breaks at one regardless, so no e2e test can
+     see this line go and only `layout.test.ts` pins it. Taller chips change no rule of the cut:
+     `hud-cut.ts` measures the real boxes. */
+  .wy-chip-glance {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .wy-chip-value {
+    white-space: normal;
+  }
+
+  /* …except the countdown, whose seconds wrap ABOVE its clock. After Start at 150–200% text on a
+     320px-tall phone the Dock leaves the chips room for one line, and the column rests on the
+     first item's last whole line (`hud-cut.ts`): that line should be the seconds — a number
+     counting down explains itself, a clock alone tells the player nothing. `wrap-reverse`
+     reverses the order of the lines and nothing else: the DOM, the reading order and the
+     accessible text are unchanged, and on one line the clock still leads. Lives, bounty, stars
+     and score keep their icon above the value, so each stays labelled. */
+  .wy-chip[data-wy-chip='wave'] .wy-chip-glance {
+    flex-wrap: wrap-reverse;
   }
 
   /* The wave strip's Compact form (#181 L1): an in-flow block in the column — the title, then
@@ -2708,15 +2766,19 @@ a.wy-home:focus-visible {
     display: none;
   }
 
-  /* No ring in the column — the countdown chip's glance shows the seconds instead. */
-  .wy-dock-ring {
+  /* No dial in the column: Start keeps its button exactly as it was — its padding is
+     Compact's own, with no room made — and the countdown chip's glance shows the seconds. */
+  .wy-dial {
     display: none;
   }
 
-  /* Dock: a static, separately bounded block at the bottom of the column. */
+  /* Dock: a static, separately bounded block at the bottom of the column — pinned there by
+     `margin-top: auto`, so the room a chips cut gives up (above) opens over it, never under it:
+     the Dock does not move when the chips stop at a whole item. */
   .wy-dock {
     position: static;
     flex: 0 0 auto;
+    margin-top: auto;
     flex-direction: column;
     flex-wrap: nowrap;
     gap: 0.25rem;

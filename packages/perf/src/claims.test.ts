@@ -558,6 +558,7 @@ const OFF_SURFACE: readonly {
     holds: [
       ['115', 1],
       ['120', 3],
+      ['125.0', 1],
       ['140', 1],
       ['144', 3],
       ['149.0', 1],
@@ -1349,7 +1350,7 @@ const ROWED_CENSUS: readonly {
     value: '68',
     census: [
       [G.gate, 1],
-      [G.adr, 1],
+      [G.adr, 2],
     ],
   },
   {

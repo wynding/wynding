@@ -41,6 +41,18 @@
  *  and one said "sixth"; the S7 accessibility audit copied the wrong one — #126.) */
 export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
 
+/** Every `CreepShape`, as a value — the board atlas bakes one silhouette frame per shape
+ *  (`art-frames.ts`). Keyed on the union, so a sixth shape that is not listed here fails to
+ *  compile rather than baking no frame. */
+const ALL_SHAPES: Readonly<Record<CreepShape, true>> = {
+  triangle: true,
+  diamond: true,
+  square: true,
+  hexagon: true,
+  pentagon: true,
+};
+export const CREEP_SHAPE_VALUES: readonly CreepShape[] = Object.keys(ALL_SHAPES) as CreepShape[];
+
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
   normal: 'triangle',
   fast: 'diamond',

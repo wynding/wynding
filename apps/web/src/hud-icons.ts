@@ -1,5 +1,6 @@
 // hud-icons.ts — the HUD's inline-SVG icons (#181, H1 + L1): the chip icons (heart, gem,
-// star, plus the score sparkle and the countdown clock) and the wave strip's creep icons.
+// star, plus the score sparkle and the countdown clock), the wave strip's creep icons, and
+// the countdown dial inside the primary Dock button.
 //
 // Every icon is DECORATION. Each one sits inside an `aria-hidden` glance form next to a full
 // localized sentence that stays the accessible text (the chip's `.wy-chip-full`, the strip
@@ -7,14 +8,15 @@
 // themselves too and never take a name. They are built with `createElementNS` — no markup
 // strings — in the injected document, like the Shell's own board-mark.
 //
-// THE CREEP ICONS EXECUTE THE BOARD'S OWN PAINT PLAN. Which silhouette a creep draws is the
-// render package's decision (`creepSilhouettePaintOp` / `creepShapeFor`), never a second table
-// here: the icon asks for the plan and only translates its shape into SVG, exactly as the
-// board's executor (`drawCreeps`) translates it into Phaser calls. The vertex arithmetic per
-// shape is therefore the one thing restated, because `@wynding/render` exports the plan but not
-// its executor — so `hud-icons.test.ts` runs the board's real executor through a recording
-// `GraphicsLike` and pins every shape's vertices, the airborne chevron's proportions and the
-// boss size step against it. If the board's art changes, that test fails and points here.
+// THE CREEP ICONS DRAW THE BOARD'S SILHOUETTES. Which silhouette a creep draws is the render
+// package's decision (`creepSilhouettePaintOp` / `creepShapeFor`), never a second table here:
+// the icon asks for the plan and only translates its shape into SVG, as the board's silhouette
+// painter (`board-draw.ts`'s `paintCreepSilhouette`, baked into its atlas since #182) translates
+// it into Phaser calls. The vertex arithmetic per shape is therefore the one thing restated,
+// because `@wynding/render` exports the plan but not its painter. `hud-icons.test.ts` pins every
+// shape's vertices, the airborne chevron's proportions and the boss size step to the board's
+// geometry, recorded from its painters at #182 — fixed numbers, not a reach into the package's
+// source. If the board's creep art is redrawn, that table (and this file) must follow it.
 //
 // Two deliberate departures from the board, both icon-scale concerns:
 //  - The airborne chevron keeps the board's glyph SHAPE (half-span 0.9r, tips 0.3r below the
@@ -39,7 +41,7 @@ export const CREEP_ICON_R = 6;
 
 /** The boss's size step — the board's own boss cue (`board-draw.ts`'s `BOSS_SCALE`, size being
  *  the ONLY thing that tells a boss from an armored creep there). Restated because the board
- *  does not export it; `hud-icons.test.ts` measures the board's ratio and pins this to it. */
+ *  does not export it; `hud-icons.test.ts` pins it to the board's step recorded at #182. */
 export const CREEP_ICON_BOSS_SCALE = 1.5;
 
 /** The airborne chevron's glyph, as fractions of r — the board's shape (see the header). */
@@ -153,7 +155,7 @@ export function chipIcon(doc: Document, kind: ChipIconKind): SVGSVGElement {
 // --- The creep icons ------------------------------------------------------------------------
 
 /** The silhouette's vertices for a paint op, centred on the op's point — the SVG twin of the
- *  board executor's per-shape branch (`drawCreeps`), pinned to it by `hud-icons.test.ts`. */
+ *  board's per-shape silhouette painter, pinned to its recorded geometry by `hud-icons.test.ts`. */
 export function silhouettePoints(op: CreepSilhouettePaintOp): Point[] {
   const { x, y, r } = op;
   const ring = (n: number): Point[] =>
@@ -180,8 +182,8 @@ export function silhouettePoints(op: CreepSilhouettePaintOp): Point[] {
       return ring(6);
     case 'pentagon':
       return ring(5);
-    // The board executor's `else` branch: `'triangle'`, and the shape any id the catalog does
-    // not know draws (`creepShapeFor` is total).
+    // The board painter's fallback: `'triangle'`, and the shape any id the catalog does not
+    // know draws (`creepShapeFor` is total).
     default:
       return [
         [x, y - r],
@@ -243,54 +245,91 @@ export function paintCreepIcon(svg: SVGSVGElement, palette: Palette): void {
   svg.querySelector('.wy-creep-chevron')?.setAttribute('stroke', hexColour(palette.airborne));
 }
 
-// --- The countdown ring ----------------------------------------------------------------------
+// --- The countdown dial ------------------------------------------------------------------------
+//
+// A STOPWATCH FACE (#181 QC round 2): a ring with a crown on top, the remaining time a filled
+// WEDGE that starts at twelve o'clock and shrinks back to it, over a dim disc — the track —
+// for the time already spent. Its silhouette is the chip's clock with a crown, so at no value
+// can it read as a glyph of the label beside it (the closed thin ring it replaced read as an
+// "O": "O Start"). Geometry lives here as presentation attributes; inks are `ui.css`'s.
 
-/** The countdown ring's geometry, in its own 44-unit box (the style frame's r = 18 ring). */
-export const RING_BOX = 44;
-export const RING_R = 18;
-export const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
+/** The dial draws in the icons' shared box. */
+export const DIAL_VIEWBOX = ICON_VIEWBOX;
+/** The face's centre sits below the box's centre, leaving the top band for the crown. */
+export const DIAL_CY = 1.4;
+/** The ring: radius and stroke width (its outer edge stays inside the box). */
+export const DIAL_RING_R = 7.2;
+export const DIAL_RING_STROKE = 1.8;
+/** The crown: a short stem from the ring up to a cap bar. */
+export const DIAL_CROWN_D = 'M-2.2 -9H2.2M0 -9V-6.7';
+export const DIAL_CROWN_STROKE = 1.8;
+/** The face inside the ring — the track disc and the wedge share its radius, clear of the
+ *  ring's inner edge. */
+export const DIAL_FACE_R = 5;
+/** The wedge is a circle of half the face radius stroked the face radius wide: its dash then
+ *  paints a pie sector of the face (`dialDash`). */
+export const DIAL_WEDGE_R = DIAL_FACE_R / 2;
+export const DIAL_WEDGE_CIRCUMFERENCE = 2 * Math.PI * DIAL_WEDGE_R;
 
-/** The ring's parts, for `overlay.ts` to update in place. */
-export interface CountdownRingParts {
-  readonly svg: SVGSVGElement;
+/** The dial's parts, for `overlay.ts` to update in place. */
+export interface CountdownDialParts {
+  /** The positioned wrapper inside the primary Dock button — an HTML element, so the UA's
+   *  `[hidden]` rule takes the dial out of the paint when there is no countdown to show. */
+  readonly root: HTMLSpanElement;
+  /** The remaining-time wedge, whose dash `overlay.ts` writes. */
   readonly progress: SVGCircleElement;
-  readonly text: SVGTextElement;
 }
 
-/** The countdown ring (#181 H1): a track, a progress arc that starts at twelve o'clock, and the
- *  seconds in its centre. Static geometry; `ringDash` gives the arc's value. No animation of
- *  any kind — the arc only takes a new value when the second changes. */
-export function countdownRing(doc: Document): CountdownRingParts {
+/** The countdown dial (#181 H1): the stopwatch face above, drawn INSIDE the primary Dock
+ *  button. It carries no text — the wave chip's glance is the readable countdown, at every
+ *  text size — and no animation of any kind: the wedge only takes a new value when the second
+ *  changes. Its size, inset and room come from the Dock pass (`dock-reserve.ts`), which also
+ *  withholds it wherever the label would not clear it. */
+export function countdownDial(doc: Document): CountdownDialParts {
+  const root = doc.createElement('span');
+  root.className = 'wy-dial';
+  root.setAttribute('aria-hidden', 'true');
   const svg = el(doc, 'svg', {
-    class: 'wy-ring',
-    viewBox: `0 0 ${RING_BOX} ${RING_BOX}`,
+    class: 'wy-dial-svg',
+    viewBox: DIAL_VIEWBOX,
     'aria-hidden': 'true',
     focusable: 'false',
   });
-  const c = String(RING_BOX / 2);
-  const track = el(doc, 'circle', { class: 'wy-ring-track', cx: c, cy: c, r: String(RING_R) });
+  const cy = String(DIAL_CY);
+  const crown = el(doc, 'path', {
+    class: 'wy-dial-crown',
+    d: DIAL_CROWN_D,
+    fill: 'none',
+    'stroke-width': String(DIAL_CROWN_STROKE),
+    'stroke-linecap': 'round',
+  });
+  const ring = el(doc, 'circle', {
+    class: 'wy-dial-ring',
+    cx: '0',
+    cy,
+    r: String(DIAL_RING_R),
+    fill: 'none',
+    'stroke-width': String(DIAL_RING_STROKE),
+  });
+  const track = el(doc, 'circle', { class: 'wy-dial-track', cx: '0', cy, r: String(DIAL_FACE_R) });
   const progress = el(doc, 'circle', {
-    class: 'wy-ring-progress',
-    cx: c,
-    cy: c,
-    r: String(RING_R),
-    transform: `rotate(-90 ${c} ${c})`,
-    'stroke-dasharray': ringDash(1),
+    class: 'wy-dial-wedge',
+    cx: '0',
+    cy,
+    r: String(DIAL_WEDGE_R),
+    fill: 'none',
+    'stroke-width': String(DIAL_FACE_R),
+    transform: `rotate(-90 0 ${cy})`,
+    'stroke-dasharray': dialDash(1),
   });
-  const text = el(doc, 'text', {
-    class: 'wy-ring-text',
-    x: c,
-    y: c,
-    'text-anchor': 'middle',
-    'dominant-baseline': 'central',
-  });
-  svg.append(track, progress, text);
-  return { svg, progress, text };
+  svg.append(crown, ring, track, progress);
+  root.append(svg);
+  return { root, progress };
 }
 
-/** The arc's dash for a remaining fraction, clamped to [0, 1]: the drawn length, then a gap of
- *  the whole circumference so the dash pattern never repeats onto the track. */
-export function ringDash(fraction: number): string {
+/** The wedge's dash for a remaining fraction, clamped to [0, 1]: the drawn length, then a gap
+ *  of the whole circumference so the dash pattern never repeats onto the track. */
+export function dialDash(fraction: number): string {
   const f = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0;
-  return `${fmt(RING_CIRCUMFERENCE * f)} ${fmt(RING_CIRCUMFERENCE)}`;
+  return `${fmt(DIAL_WEDGE_CIRCUMFERENCE * f)} ${fmt(DIAL_WEDGE_CIRCUMFERENCE)}`;
 }

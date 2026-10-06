@@ -1,10 +1,11 @@
-// board-cells.test.ts — the blocked-border ring geometry and the board's ordered paint
-// plan (#38). Pure, no Phaser — `scene.ts`'s `drawBoard` is a thin executor of exactly
-// this plan (the integration seam this test proves, since scene.ts itself is coverage-
-// excluded, exercised by the Playwright e2e smoke instead).
+// board-cells.test.ts — the blocked-border ring geometry, the board's ordered paint plan
+// (#38), and `drawBoard`, the executor that paints the plan into the board texture (V2,
+// #181). Pure, no Phaser — the executor used to live in the coverage-excluded `scene.ts`,
+// so this is the first test that watches the plan actually being drawn.
 
 import { describe, it, expect } from 'vitest';
-import { borderCells, boardPaintOps } from './board-cells';
+import { borderCells, boardPaintOps, drawBoard } from './board-cells';
+import type { GraphicsLike } from './board-draw';
 import { resolvePalette } from './palette';
 
 const GEOMETRY = {
@@ -79,5 +80,87 @@ describe('boardPaintOps', () => {
     const exit = ops.find((o) => o.kind === 'exit');
     expect(entrance).toMatchObject({ colour: pal.entrance, cell: GEOMETRY.entrance });
     expect(exit).toMatchObject({ colour: pal.exit, cell: GEOMETRY.exit });
+  });
+});
+
+describe('drawBoard — the plan, executed board-locally', () => {
+  type Call = { method: string; args: unknown[] };
+  const recorder = (): GraphicsLike & { calls: Call[] } => {
+    const calls: Call[] = [];
+    const record =
+      (method: string) =>
+      (...args: unknown[]): void => {
+        calls.push({ method, args });
+      };
+    return {
+      calls,
+      fillStyle: record('fillStyle'),
+      lineStyle: record('lineStyle'),
+      fillRect: record('fillRect'),
+      fillRoundedRect: record('fillRoundedRect'),
+      strokeRoundedRect: record('strokeRoundedRect'),
+      fillTriangle: record('fillTriangle'),
+      fillCircle: record('fillCircle'),
+      strokeCircle: record('strokeCircle'),
+      fillPoints: record('fillPoints'),
+      lineBetween: record('lineBetween'),
+    };
+  };
+  const pal = resolvePalette('default');
+  const CELL = 10;
+  const draw = (): Call[] => {
+    const g = recorder();
+    drawBoard(g, boardPaintOps(GEOMETRY, pal), GEOMETRY, CELL);
+    return g.calls;
+  };
+
+  it('fills the whole board in pal.floor from its own corner (0,0)', () => {
+    const calls = draw();
+    expect(calls[0]).toEqual({ method: 'fillStyle', args: [pal.floor, 1] });
+    expect(calls[1]).toEqual({ method: 'fillRect', args: [0, 0, 28 * CELL, 24 * CELL] });
+  });
+
+  it('fills each border cell, one cell square, in pal.border', () => {
+    const calls = draw();
+    const borderStyle = calls.findIndex(
+      (c) => c.method === 'fillStyle' && c.args[0] === pal.border,
+    );
+    expect(borderStyle).toBe(2);
+    const cells = borderCells(GEOMETRY);
+    const rects = calls.slice(borderStyle + 1, borderStyle + 1 + cells.length);
+    expect(rects).toEqual(
+      cells.map((c) => ({ method: 'fillRect', args: [c.col * CELL, c.row * CELL, CELL, CELL] })),
+    );
+  });
+
+  it('draws the entrance as a triangle pointing into the board, in pal.entrance', () => {
+    const calls = draw();
+    const i = calls.findIndex((c) => c.method === 'fillTriangle');
+    expect(calls[i - 1]).toEqual({ method: 'fillStyle', args: [pal.entrance, 1] });
+    const x = GEOMETRY.entrance.col * CELL;
+    const y = GEOMETRY.entrance.row * CELL;
+    expect(calls[i]!.args).toEqual([x, y, x + CELL, y + CELL / 2, x, y + CELL]);
+  });
+
+  it('draws the exit as a centred half-cell square, in pal.exit, last', () => {
+    const calls = draw();
+    const last = calls[calls.length - 1]!;
+    expect(calls[calls.length - 2]).toEqual({ method: 'fillStyle', args: [pal.exit, 1] });
+    const x = GEOMETRY.exit.col * CELL;
+    const y = GEOMETRY.exit.row * CELL;
+    expect(last).toEqual({
+      method: 'fillRect',
+      args: [x + CELL * 0.25, y + CELL * 0.25, CELL * 0.5, CELL * 0.5],
+    });
+  });
+
+  it('draws the plan in its own order — floor, border, entrance, exit — and nothing else', () => {
+    const styles = draw()
+      .filter((c) => c.method === 'fillStyle')
+      .map((c) => c.args[0]);
+    expect(styles).toEqual([pal.floor, pal.border, pal.entrance, pal.exit]);
+    expect(draw().every((c) => ['fillStyle', 'fillRect', 'fillTriangle'].includes(c.method))).toBe(
+      true,
+    );
   });
 });

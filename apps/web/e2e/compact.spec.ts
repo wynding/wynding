@@ -142,15 +142,16 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // decouple): the wave chip is countdown-only and the sim's real `countdownRemaining`
     // is meaningful before Start is ever pressed, not just after. Each chip reads to
     // assistive tech as its COMPLETE localized ICU message — the aria-hidden glance form
-    // (an SVG icon and the value, #181) is invisible to AT. The order is the style frame's
-    // (#181): lives, bounty, stars, score, then the countdown beside the strip it previews.
+    // (an SVG icon and the value, #181) is invisible to AT. The countdown LEADS (#181 QC: the
+    // first chip is the one the capped column always shows), then the style frame's order:
+    // lives, bounty, stars, score.
     await expect.poll(async () => (await visibleChipAccessibleText(page)).length).toBe(5);
     const chips = await visibleChipAccessibleText(page);
-    expect(chips[0]).toMatch(/^Lives: \d+$/);
-    expect(chips[1]).toMatch(/^Bounty: \d+$/);
-    expect(chips[2]).toMatch(/^Stars: \d+ of 3$/);
-    expect(chips[3]).toMatch(/^Score: \d+$/);
-    expect(chips[4]).toMatch(/^Wave in \d+s$/);
+    expect(chips[0]).toMatch(/^Wave in \d+s$/);
+    expect(chips[1]).toMatch(/^Lives: \d+$/);
+    expect(chips[2]).toMatch(/^Bounty: \d+$/);
+    expect(chips[3]).toMatch(/^Stars: \d+ of 3$/);
+    expect(chips[4]).toMatch(/^Score: \d+$/);
     // ...and the glance forms ARE what is painted on screen: each chip's own icon beside its
     // bare value (Compact's narrow column drops the score's word and the stars' "/ 3").
     for (const slot of ['lives', 'bounty', 'stars', 'score', 'wave']) {
@@ -158,7 +159,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       await expect(glance.locator(`svg.wy-icon--${slot}`), slot).toBeVisible();
       await expect(glance.locator('.wy-chip-value'), slot).toHaveText(/^\d+s?$/);
     }
-    await expect(page.locator('.wy-chip-label, .wy-chip-suffix').first()).toBeHidden();
+    // EVERY companion is dropped, not just the first (#181 QC): the score's word and the stars'
+    // "/ 3" — count pinned first, so an empty match can never pass the loop vacuously.
+    const companions = page.locator('.wy-chip-label, .wy-chip-suffix');
+    await expect(companions).toHaveCount(2);
+    for (const companion of await companions.all()) await expect(companion).toBeHidden();
 
     // Board floor, banner absent.
     const grid = await projectedGrid(page);
@@ -205,10 +210,18 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // The computed value, and then the consequence — a pinned declaration that stopped
     // producing its effect would pass the first alone.
     expect(await hud.evaluate((el) => getComputedStyle(el).flexGrow)).toBe('1');
+    // Since #181 QC round 2 the column stops the scrollport at its last WHOLE item
+    // (`--wy-hud-cut`, `hud-cut.ts`) and leaves the rest of its room empty above the Dock on
+    // purpose — 15px of it here on CI's font metrics. What this guards is the ROOM the column
+    // gives the scrollport, so that is read with the cut lifted, and the cut is put straight
+    // back in the same task (nothing renders in between).
     const boxes = await page.evaluate(() => {
       const r = (s: string): DOMRect =>
         document.querySelector(s)!.getBoundingClientRect() as DOMRect;
-      return {
+      const hudEl = document.querySelector<HTMLElement>('.wy-hud')!;
+      const cut = hudEl.style.getPropertyValue('--wy-hud-cut');
+      hudEl.style.removeProperty('--wy-hud-cut');
+      const lifted = {
         hud: r('.wy-hud'),
         dock: r('.wy-dock'),
         status: r('.wy-status'),
@@ -217,9 +230,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
         // fail on a gap change that is not a regression at all.
         gap: parseFloat(getComputedStyle(document.querySelector('.wy-status')!).rowGap) || 0,
       };
+      if (cut !== '') hudEl.style.setProperty('--wy-hud-cut', cut);
+      return lifted;
     });
-    // The hud fills the space between its own top and the Dock below it: content-sized, it
-    // would stop short by the height of everything it is not rendering.
+    // The hud's room fills the space between its own top and the Dock below it: content-sized,
+    // it would stop short by the height of everything it is not rendering.
     expect(
       boxes.dock.top - (boxes.hud.top + boxes.hud.height),
       'the chips scrollport must still fill the column down to the Dock',
@@ -639,7 +654,8 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // value — while the full ICU message stays the accessible text, visually hidden in both
     // layouts. (Before #181 Standard painted the full form and never rendered the glance.)
     const chips = await visibleChipAccessibleText(page);
-    expect(chips[0]).toMatch(/^Lives: \d+$/);
+    expect(chips[0]).toMatch(/^Wave in \d+s$/); // the countdown leads (#181 QC)
+    expect(chips[1]).toMatch(/^Lives: \d+$/);
     const livesGlance = page.locator('.wy-chip[data-wy-chip="lives"] .wy-chip-glance');
     await expect(livesGlance).toBeVisible();
     await expect(livesGlance.locator('svg.wy-icon--lives')).toBeVisible();

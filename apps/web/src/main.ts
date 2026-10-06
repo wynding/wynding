@@ -54,8 +54,8 @@ import type { Replay } from '@wynding/replay';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
 import { clearDockReserve, syncDockCue, syncDockReserve } from './dock-reserve';
+import { clearHudCut, syncHudCut } from './hud-cut';
 import { paintSwatch } from './swatch';
-import { syncDockRing } from './dock-ring';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
 import {
@@ -474,19 +474,17 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
 
   // THE STANDARD DOCK'S FOOTPRINT (#152) — `dock-reserve.ts` owns the measurement and the
   // whole-row bound, `ui.css` spends them. The board's row count is the one geometry input no
-  // stylesheet can hold (the cell floor is a stylesheet token; the rows are board data).
+  // stylesheet can hold (the cell floor is a stylesheet token; the rows are board data). The
+  // same pass sizes the countdown dial inside the primary control and decides, from its
+  // label's measured ink, whether there is room for it (#181 QC round 2).
   const dockTargets = {
     shell: shell.root,
     stage: shell.stage,
     dock: shell.dock.root,
     rows: grid.height,
+    primary: shell.dock.primary,
   };
-  // The countdown ring (#181 H1) rides the same pass: it sits beside the Dock's primary control,
-  // so whether it fits before the Rail moves exactly when the Dock's rows do.
-  const syncDock = (): void => {
-    syncDockReserve(dockTargets, compactMq.matches);
-    syncDockRing(shell.dock.ring, shell.stage);
-  };
+  const syncDock = (): void => syncDockReserve(dockTargets, compactMq.matches);
   syncDock();
   // No `compactMq` listener of its own: crossing the fork re-lays out BOTH observed boxes (the
   // Dock goes from a floating row to an in-column block, the Stage loses the status row), so
@@ -514,9 +512,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // already held at its bound does not change size when that happens — its controls do
   // (a hidden control's box collapses to nothing), so they are what reports the change.
   for (const control of Array.from(shell.dock.root.children)) dockResizeObserver?.observe(control);
-  // ...and the ring's painted box (#181 H1). Its slot is zero-width and reports nothing when the
-  // hint's text changes (a new wave number, a translation), so the visual is observed itself.
-  dockResizeObserver?.observe(shell.dock.ring.visual);
+  // ...and the primary control's LABEL (#181 QC round 2): the dial's room is decided from the
+  // words in it, and "Start" giving way to "Call wave" can change them inside a control its
+  // row holds at one width — the label's own box is what reports that.
+  const primaryLabel = shell.dock.primary.querySelector('.wy-btn-text');
+  if (primaryLabel) dockResizeObserver?.observe(primaryLabel);
   // ...and the bottom SAFE-AREA INSET. In scroll form the inset lifts the Dock by `bottom`,
   // which MOVES it without resizing any box above, so a runtime inset change (a native write
   // of `--safe-area-inset-bottom`, or `env()` changing) would leave the reserve stale and the
@@ -533,6 +533,37 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     passive: true,
     signal: dockScroll.signal,
   });
+
+  // COMPACT'S CHIPS COLUMN RESTS ON WHOLE ITEMS (#181 QC round 2) — `hud-cut.ts` owns the cut,
+  // `ui.css` spends it. Re-measured, one coalesced frame later (the Dock pass's reason), when
+  // anything that decides where the column's room ends, or where an item does, changes size:
+  // the column itself, the Dock under the chips (Start giving way to Pause + Call wave), each
+  // chip, and the wave strip. Never the chips scrollport: the cut is ITS size.
+  const syncCut = (): void => syncHudCut(shell.hudBox, compactMq.matches);
+  syncCut();
+  let cutFrame = 0;
+  const cutObserver =
+    RO && view
+      ? new RO(() => {
+          if (cutFrame !== 0) return;
+          cutFrame = view.requestAnimationFrame(() => {
+            cutFrame = 0;
+            syncCut();
+          });
+        })
+      : null;
+  for (const target of [
+    shell.status,
+    shell.dock.root,
+    shell.hud.wave.root,
+    shell.hud.lives.root,
+    shell.hud.bounty.root,
+    shell.hud.stars.root,
+    shell.hud.score.root,
+    shell.preview.root,
+  ]) {
+    cutObserver?.observe(target);
+  }
 
   const unsubscribeInstall = install.onChange(() => {
     installRev++;
@@ -1103,6 +1134,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       if (dockFrame !== 0) view?.cancelAnimationFrame(dockFrame);
       clearDockReserve(dockTargets);
       insetProbe.remove();
+      // The chips cut (#181 QC round 2): observer, pending frame, and the property it wrote.
+      cutObserver?.disconnect();
+      if (cutFrame !== 0) view?.cancelAnimationFrame(cutFrame);
+      clearHudCut(shell.hudBox);
       guardListener.abort(); // the home-link exit guard
       lifecycle.abort(); // the backgrounding listeners (#139)
       backHandler.destroy(); // the native Back + lifecycle listeners (#138)

@@ -9,7 +9,7 @@
 // is exempt (transient fading FX, alpha → 0 by design, non-essential — the kill outcome
 // is carried by the creep/HP-pip state, and it is reduced-motion governed). `border` is
 // excluded (a quiet structural fill — now an actually-drawn blocked-border ring with a
-// real consumer, `board-cells.ts`'s `boardPaintOps`/`scene.ts`'s `drawBoard` — whose
+// real consumer, `board-cells.ts`'s `boardPaintOps` and its `drawBoard` executor — whose
 // identity is carried by geometry, not colour). Gate scope: contrast is certified AGAINST
 // THE UNOBSCURED BOARD FLOOR, the defined baseline; where cues overlap other visuals in
 // play, the dual SHAPE encoding (ADR 0003) is the fallback channel.
@@ -202,10 +202,11 @@ describe('stunned — the jolt ring vs the creep fill it is drawn over (M2-S6)',
 // the floor itself, the `range` ring (a selected neighbour's ring crosses the shell), the
 // `ghostValid`/`ghostInvalid` outlines (a ghost aimed at a shell cell sits on top of it),
 // and the status/ward/airborne cues a creep pathing through a shell cell carries. NOT
-// `tower`: pass 1 of `drawTowers` guarantees no body is ever painted under a shell, which
-// is why that pairing needs no gate here (it would not clear 3:1 if it did — see
-// `palette.ts`'s own note). Scoped deliberately, on `POISONED_MUST_DIFFER_FROM`'s
-// precedent ("do not widen this gate"), rather than blanket.
+// `tower`: the board's layer order (`layers.ts` — every shell under every tower sprite)
+// guarantees no body is ever painted under a shell, which is why that pairing needs no
+// gate here (it would not clear 3:1 if it did — see `palette.ts`'s own note). Scoped
+// deliberately, on `POISONED_MUST_DIFFER_FROM`'s precedent ("do not widen this gate"),
+// rather than blanket.
 //
 // This exists because `palette.ts`'s comment on `aura` CLAIMS byte-distinctness from every
 // other cue in all three tables. An unasserted claim in a comment is how a future palette

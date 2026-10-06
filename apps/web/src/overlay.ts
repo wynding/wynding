@@ -35,7 +35,7 @@ import type { SettingsStore } from './settings';
 import { ARM_TOWER_ACTIONS, GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
-import { creepIcon, paintCreepIcon, ringDash } from './hud-icons';
+import { dialDash, creepIcon, paintCreepIcon } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
 import { createResultsPanel } from './results-panel';
 import type { InstallHandle, InstallState } from './install';
@@ -239,8 +239,8 @@ function towerName(towerId: string): string {
  *  glyph has no language, so routing it through the `t()` catalog would create a
  *  translatable entry with nothing to translate — the same exemption the codebase already
  *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The one
- *  genuinely WORDED compact form (the wave slot's countdown) goes through the catalog, as
- *  `hud.wave.compact.countdown`.
+ *  genuinely WORDED glance part, the countdown's unit, goes through the catalog, as
+ *  `hud.wave.glance.unit` — a static companion `shell.ts` writes once, like the stars' "/ 3".
  *
  *  The HUD chips no longer draw from here: since #181 (H1) their glances lead with inline-SVG
  *  icons (`hud-icons.ts`, built once by `shell.ts`). `bounty` stays for the Panel's cost row,
@@ -1276,14 +1276,14 @@ export function createOverlay(
    *  every variant reports as dead. */
   function glanceStatRows(stats: TowerStats): readonly string[] {
     const rows: string[] = [];
-    // Cost leads, in the `◈` vocabulary the Compact bounty chip already teaches — never a
-    // `g` suffix, which reintroduces exactly the gold/coin metaphor `docs/CONTEXT.md`'s
-    // Bounty entry avoids.
+    // Cost leads, with the `◈` glyph and never a `g` suffix, which reintroduces exactly the
+    // gold/coin metaphor `docs/CONTEXT.md`'s Bounty entry avoids.
     // The glyph comes from `ICONS`, which this file documents as owning it — never baked
     // into the catalog string. A glyph has no language, so a copy in `en.json` is not a
-    // translation, it is a SECOND source of truth: change `ICONS.bounty` and the Compact
-    // bounty chip renders the new mark while the Panel's cost line keeps the old one, on the
-    // same screen, with nothing to detect the drift.
+    // translation, it is a SECOND source of truth. The HUD's bounty chip no longer follows
+    // `ICONS.bounty`: it draws `hud-icons.ts`'s SVG gem. The Panel's cost row keeps `◈` because
+    // the rail-cards change (#181, D3) owns that row, so changing `ICONS.bounty` moves the
+    // Panel's glyph alone, not the chip.
     if (stats.damage === null) {
       rows.push(t('panel.glance.cost', { bounty: ICONS.bounty, cost: stats.cost }));
     } else if (stats.buffed) {
@@ -1952,28 +1952,26 @@ export function createOverlay(
    *  its accessible name or description and have assistive tech read the sentence twice (the
    *  reason the Shell's home link carries none). */
   function buildEntryGlance(entry: PreviewEntryVM, single: boolean, full: string): HTMLElement {
+    const parts = glanceParts(entry, single);
     const glance = doc.createElement('span');
     glance.className = 'wy-preview-glance';
     glance.setAttribute('aria-hidden', 'true');
     glance.title = full;
     const count = doc.createElement('span');
     count.className = 'wy-preview-count';
-    count.textContent = t('hud.preview.count', { count: entry.count });
+    count.textContent = parts.count;
     glance.append(creepIcon(doc, entry, palette), count);
     if (single) {
       const detail = doc.createElement('span');
       detail.className = 'wy-preview-detail';
       const name = doc.createElement('span');
       name.className = 'wy-preview-name';
-      name.textContent = creepName(entry.creepId);
+      name.textContent = parts.name;
       detail.append(name);
-      const notes = previewEntryNotes(entry);
-      if (notes.length > 0) {
+      if (parts.clause !== '') {
         const clause = doc.createElement('span');
         clause.className = 'wy-preview-clause';
-        // The join separator is punctuation between already-translated fragments, not copy —
-        // the same posture the immunities list has always taken with its `', '`.
-        clause.textContent = notes.join(' · ');
+        clause.textContent = parts.clause;
         detail.append(clause);
       }
       glance.append(detail);
@@ -1981,11 +1979,28 @@ export function createOverlay(
     return glance;
   }
 
+  /** The strings one glance is written from — the single source for `buildEntryGlance` and the
+   *  locale sentinel's `previewEntryGlanceText`, so the two cannot drift (a drift makes every
+   *  HUD refresh rebuild the list and reset a scrolled strip). `name` and `clause` are empty
+   *  unless the wave has a single entry; `clause` is also empty when the entry deviates in
+   *  nothing. The join separator is punctuation between already-translated fragments, not
+   *  copy — the same posture the immunities list has always taken with its `', '`. */
+  function glanceParts(
+    entry: PreviewEntryVM,
+    single: boolean,
+  ): { readonly count: string; readonly name: string; readonly clause: string } {
+    return {
+      count: t('hud.preview.count', { count: entry.count }),
+      name: single ? creepName(entry.creepId) : '',
+      clause: single ? previewEntryNotes(entry).join(' · ') : '',
+    };
+  }
+
   /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
    *  row comparison (the icon carries no text). */
   function previewEntryGlanceText(entry: PreviewEntryVM, single: boolean): string {
-    const count = t('hud.preview.count', { count: entry.count });
-    return single ? count + creepName(entry.creepId) + previewEntryNotes(entry).join(' · ') : count;
+    const { count, name, clause } = glanceParts(entry, single);
+    return count + name + clause;
   }
 
   /** The scroll form's cue (`ui.css`): each edge with entries past it fades, because the
@@ -2001,6 +2016,26 @@ export function createOverlay(
     const past = strip.scrollWidth - strip.clientWidth - strip.scrollLeft;
     strip.classList.toggle(STRIP_MORE_BEFORE_CLASS, scrollable && strip.scrollLeft > 1);
     strip.classList.toggle(STRIP_MORE_AFTER_CLASS, scrollable && past > 1);
+  }
+
+  /** One wheel notch in LINE mode, in px — the line height browsers themselves scroll by. */
+  const WHEEL_LINE_PX = 16;
+  function onStripWheel(event: WheelEvent): void {
+    const strip = previewEl.root;
+    // An event the browser will not let us cancel is already its scroll to perform (#181 QC
+    // round 2): moving the line too would spend one turn twice.
+    if (!event.cancelable) return;
+    if (!strip.classList.contains(STRIP_SCROLL_CLASS) || event.ctrlKey) return;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    const unit =
+      event.deltaMode === 1 ? WHEEL_LINE_PX : event.deltaMode === 2 ? strip.clientWidth : 1;
+    const delta = event.deltaY * unit;
+    // The cue's 1px slack: at fractional zoom an end can sit a fraction of a pixel short.
+    const room =
+      delta > 0 ? strip.scrollWidth - strip.clientWidth - strip.scrollLeft : strip.scrollLeft;
+    if (!(room > 1)) return;
+    event.preventDefault();
+    strip.scrollLeft += delta;
   }
 
   /** The strip's overflow remedy, IN PLACE (#181 L1) — the rule every surface in this row
@@ -2132,42 +2167,67 @@ export function createOverlay(
     syncStripScroll();
   }
 
-  // --- The countdown ring beside the Dock's primary action (#181 H1, Standard only) ---
-  // Decoration: the wave chip stays the accessible countdown (and Compact's visible one), so
-  // the ring is `aria-hidden` and its writes are all change-gated — a value that did not move
-  // touches nothing (#98's discipline, applied to attributes as well as text).
-  const ring = dock.ring;
+  // --- The countdown dial inside the Dock's primary action (#181 H1, Standard only) ---
+  // Decoration: the wave chip is the accessible AND the readable countdown in both layouts, so
+  // the dial is `aria-hidden`, carries no text, and its writes are all change-gated — a value
+  // that did not move touches nothing (#98's discipline, applied to attributes as well as
+  // text). It lives out of the button's layout (`ui.css`), so showing or hiding it moves
+  // nothing.
+  const dial = dock.dial;
   /** The current countdown's full length in whole seconds, from the ruleset's per-wave
-   *  `countdownTicks` — rounded UP like `HudVM.countdownSeconds` itself, so a full ring reads
-   *  exactly the seconds the chip does. */
+   *  `countdownTicks` — rounded UP like `HudVM.countdownSeconds` itself, so a full dial is
+   *  exactly the seconds the chip shows. */
   function countdownTotalSeconds(cursor: number, fallback: number): number {
     const wave = Number.isSafeInteger(cursor) ? ruleset.waves[cursor] : undefined;
     return wave === undefined ? fallback : Math.ceil((wave.countdownTicks * MS_PER_TICK) / 1000);
   }
-  function renderRing(hud: HudVM): void {
+  function renderDial(hud: HudVM): void {
     const seconds = hud.countdownSeconds;
-    // Down while a call is already launching: the wave goes on the next tick, not when the
-    // ring empties, so the ring would be a wrong answer — and the primary control's wider
-    // "Launching…" label is the one row the ring's slot must never share at heavy zoom. The
-    // wave chip's glance takes over the visible countdown meanwhile (`ui.css`).
+    // Down while a call is already launching: the wave goes on the next tick, not when the dial
+    // empties, so the dial would be a wrong answer.
     const show = seconds !== null && !isTerminalPhase(hud.phase) && !hud.launchPending;
-    if (ring.root.hidden === show) ring.root.hidden = !show;
+    if (dial.root.hidden === show) dial.root.hidden = !show;
     if (seconds === null || !show) return;
     const total = countdownTotalSeconds(hud.waveCursor, seconds);
-    const dash = ringDash(total > 0 ? seconds / total : 0);
-    if (ring.ring.progress.getAttribute('stroke-dasharray') !== dash) {
-      ring.ring.progress.setAttribute('stroke-dasharray', dash);
+    const dash = dialDash(total > 0 ? seconds / total : 0);
+    if (dial.progress.getAttribute('stroke-dasharray') !== dash) {
+      dial.progress.setAttribute('stroke-dasharray', dash);
     }
-    setLabel(ring.ring.text, t('hud.wave.compact.countdown', { s: seconds }));
-    // The bounty clause is a claim about the sim, so it is only made where it is true: the
-    // OPENING launch pays nothing (sv15, #70 — Start claims wave 1), and a ruleset with no
-    // early-call bounty pays nothing at any wave.
-    const waveNumber = hud.waveCursor + 1;
-    const paysEarly = hud.waveCursor > 0 && ruleset.balance.earlyCallBountyDivisor > 0;
-    setLabel(
-      ring.hint,
-      paysEarly ? t('hud.ring.hint', { waveNumber }) : t('hud.ring.hint.first', { waveNumber }),
-    );
+  }
+
+  /** Whether calling the counting-down wave NOW pays an early-call bonus — the claim the
+   *  primary control's description makes, so it is made only where it is TRUE. The sim pays
+   *  `floor(rem / earlyCallBountyDivisor)` Bounty from the ticks still remaining (its launch
+   *  branch, which a buffered call reaches on the next step without that step's decrement), pays
+   *  nothing for the OPENING launch (sv15, #70 — wave index 0), and nothing at all with a
+   *  zero divisor. The HUD sees only `countdownSeconds = ceil(rem × MS_PER_TICK / 1000)`, so
+   *  the gate uses the smallest `rem` those seconds allow — `(seconds − 1) × 1000 /
+   *  MS_PER_TICK + 1` — and stays silent through the second in which the bonus runs out,
+   *  rather than promise one the sim will not pay. */
+  function callPaysEarlyBonus(hud: HudVM): boolean {
+    const seconds = hud.countdownSeconds;
+    const divisor = ruleset.balance.earlyCallBountyDivisor;
+    if (seconds === null || hud.waveCursor <= 0 || !(divisor > 0)) return false;
+    const minRemainingTicks = Math.floor(((seconds - 1) * 1000) / MS_PER_TICK) + 1;
+    return minRemainingTicks >= divisor;
+  }
+
+  /** One CHANGE-GATED attribute write on the primary control, which renders on every HUD
+   *  refresh (~20×/s through a countdown): a value that did not move touches nothing (#98's
+   *  discipline, applied to attributes as well as text). */
+  function setPrimaryAttr(name: string, value: string | null): void {
+    if (value === null) {
+      if (primaryBtn.hasAttribute(name)) primaryBtn.removeAttribute(name);
+    } else if (primaryBtn.getAttribute(name) !== value) {
+      primaryBtn.setAttribute(name, value);
+    }
+  }
+
+  /** The primary control's note is its `title`: the tooltip, and also its accessible
+   *  DESCRIPTION — the button's name comes from its label, so a `title` is never taken for the
+   *  name and is read once, as the description. */
+  function setPrimaryNote(note: string | null): void {
+    setPrimaryAttr('title', note);
   }
 
   /** The morphing primary control's text + `aria-disabled` state (PLAN.md P3 step 17):
@@ -2183,17 +2243,26 @@ export function createOverlay(
   function renderPrimary(hud: HudVM, ui: UiState): void {
     if (isTerminalPhase(hud.phase)) {
       primaryBtn.hidden = true;
+      setPrimaryNote(null);
       return;
     }
     primaryBtn.hidden = false;
     if (!ui.started) {
       setLabel(primaryParts.text, t('controls.start'));
-      primaryBtn.setAttribute('aria-disabled', 'false');
+      setPrimaryAttr('aria-disabled', 'false');
+      setPrimaryNote(null); // Start claims wave 1, which pays nothing (sv15)
       return;
     }
     const label = hud.launchPending ? t('controls.callWave.pending') : t('controls.callWave');
     setLabel(primaryParts.text, label);
-    primaryBtn.setAttribute('aria-disabled', String(!ui.callWaveReady));
+    setPrimaryAttr('aria-disabled', String(!ui.callWaveReady));
+    // The early-call bonus, said where it is true and nowhere else (#181): only while a press
+    // would actually call the wave, and only while the call would actually pay.
+    setPrimaryNote(
+      !hud.launchPending && ui.callWaveReady && callPaysEarlyBonus(hud)
+        ? t('controls.callWave.earlyBonus')
+        : null,
+    );
   }
 
   function outcomeMessage(outcome: PlacementOutcome | null): string {
@@ -2303,6 +2372,21 @@ export function createOverlay(
     () => syncStripCue(previewEl.root.classList.contains(STRIP_SCROLL_CLASS)),
     { signal: railAffordanceAbort.signal, passive: true },
   );
+  // A plain mouse wheel scrolls the line too (#181 QC). The form hides its scrollbar, and a
+  // wheel reports VERTICAL movement, which a sideways scrollport ignores — so the line was
+  // reachable by touch, trackpad and keyboard but not by the commonest pointer. While the
+  // strip is in its scroll form, a vertical-dominant turn is spent sideways, but only while the
+  // line can still move that way: at either end the event is left alone, so the wheel goes on
+  // to whatever scrolls beyond the strip (the capped hud) rather than being trapped. A
+  // horizontal-dominant delta (a trackpad, a tilt wheel) is already the browser's to handle,
+  // and a ctrl+wheel is a pinch or a page zoom, never a scroll. Nor is an event that cannot be
+  // cancelled ours: once a wheel sequence has passed through to the hud, the browser latches it
+  // there and stops letting its events be cancelled — moving the line as well would scroll
+  // twice per turn.
+  previewEl.root.addEventListener('wheel', (event) => onStripWheel(event), {
+    signal: railAffordanceAbort.signal,
+    passive: false,
+  });
 
   return {
     resultsEl: results,
@@ -2324,15 +2408,14 @@ export function createOverlay(
       // `countdownRemaining`, which is meaningful before `start()` — the Start decouple —
       // not just after); hidden once every wave has launched (its preview surface shows the
       // last-wave marker instead) or the run is terminal.
+      // The glance's number only: its unit is static structure (`shell.ts`), after a `<wbr>`.
       setChip(
         hudEls.wave,
         hud.countdownSeconds !== null ? t('hud.countdown', { seconds: hud.countdownSeconds }) : '',
-        hud.countdownSeconds !== null
-          ? t('hud.wave.compact.countdown', { s: hud.countdownSeconds })
-          : '',
+        hud.countdownSeconds !== null ? String(hud.countdownSeconds) : '',
       );
       renderPreview(hud.preview);
-      renderRing(hud);
+      renderDial(hud);
       // The pollable board summary (#79). CHANGE-GATED like every other per-tick leaf write
       // (`setLabel`): the counts move only when a status is applied or a creep leaves the
       // board, but this runs on every HUD refresh — 20-40× a second through a live wave.
