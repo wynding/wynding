@@ -25,6 +25,7 @@ import {
   atlasFrameSpecs,
   PAD_FRAME_KEY,
   PLATE_FRAME_KEY,
+  RIM_RUNS_FRAME_KEY,
   SCORCH_FRAME_KEY,
   type FrameSpec,
 } from './art-frames';
@@ -89,6 +90,7 @@ function targets() {
     scorches: recordingSprites(),
     plates: recordingSprites(),
     heads: recordingSprites(),
+    rims: recordingSprites(),
     pending: recordingSprites(),
     creeps: recordingSprites(),
   };
@@ -274,6 +276,7 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
     expect(t.heads.syncs.map((s) => s.map((p) => p.frame))).toEqual([
       ['tower:head:pylon:support:committed', 'tower:head:plain:damage:buffed'],
     ]);
+    expect(t.rims.syncs).toEqual([[]]); // no head posed: no rim painted again over one
     expect(t.scorches.syncs).toEqual([[]]);
     expect(t.pending.syncs.map((s) => s.map((p) => p.frame))).toEqual([
       ['tower:pending:ringed:control'],
@@ -328,9 +331,10 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
       t.scorches.hidden,
       t.plates.hidden,
       t.heads.hidden,
+      t.rims.hidden,
       t.pending.hidden,
       t.creeps.hidden,
-    ]).toEqual([1, 1, 1, 1, 1]);
+    ]).toEqual([1, 1, 1, 1, 1, 1]);
     drawBoardFrame(t, busyFrame());
     expect(board.visible).toEqual([true, false, true]);
     expect(t.creeps.syncs).toHaveLength(2);
@@ -724,6 +728,31 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(t.heads.syncs[1]![0]!.rotation).toBeCloseTo(AIM_TURN_PER_TICK, 12);
   });
 
+  it('paints the plate rim again over a head it turns or knocks back — never over one at rest, or one that does not aim', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const slow = tower(3, 'slow', 10, { targetId: 7 });
+    const below = [creep({ x: CX, y: CY + 512 })];
+    const above = [creep({ x: CX, y: CY - 600 })];
+    // A new tower points up: nothing painted over it.
+    draw(10, 0, [basic, slow], { prev: below, cur: below });
+    expect(t.rims.syncs[0]).toEqual([]);
+    // Turning toward the creep below: the rim's runs over the basic's head, on its plate's
+    // corner — and still none over the slow tower's, which never turns.
+    draw(11, 0, [basic, slow], { prev: below, cur: below });
+    const plate = t.plates.syncs[1]![0]!;
+    expect(t.rims.syncs[1]).toEqual([{ frame: RIM_RUNS_FRAME_KEY, x: plate.x, y: plate.y }]);
+    // Knocked back while unturned, a shot at a creep straight up: painted again too.
+    const { t: t2, draw: draw2 } = run();
+    draw2(10, 0, [basic], { prev: above, cur: above });
+    draw2(11, 0, [basic], { prev: above, cur: above }, { tracers: [shotFrom(basic, 11)] });
+    expect(t2.heads.syncs[1]![0]!.rotation).toBeUndefined();
+    expect(t2.rims.syncs.map((s) => s.length)).toEqual([0, 1]);
+    // Under Reduce motion every head is at rest: nothing painted over any.
+    draw(12, 0, [basic, slow], { prev: below, cur: below }, { reducedMotion: true });
+    expect(t.rims.syncs[2]).toEqual([]);
+  });
+
   it('a shot: the aiming head recoils and flashes at its muzzle — in effects after the selection, before the tracer', () => {
     const { t, draw } = run();
     const basic = tower(2, 'basic', 4, { targetId: 7 });
@@ -1039,7 +1068,7 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
         setRotation: () => undefined,
       })),
     );
-    const names = ['scorches', 'plates', 'heads', 'pending', 'creeps'] as const;
+    const names = ['scorches', 'plates', 'heads', 'rims', 'pending', 'creeps'] as const;
     for (const name of names) {
       layers[name].sync([0, 1].map((i) => ({ frame: `${name}:${i}`, x: 0, y: 0 })));
     }
@@ -1055,9 +1084,10 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       layers.scorches.name,
       layers.plates.name,
       layers.heads.name,
+      layers.rims.name,
       layers.pending.name,
       layers.creeps.name,
-    ]).toEqual(['scorches', 'plates', 'heads', 'pending', 'creeps']);
+    ]).toEqual(['scorches', 'plates', 'heads', 'rims', 'pending', 'creeps']);
   });
 
   it('so depths read from those names keep every shell under every plate and head (M2-S8), every scorch under every shell, and the rest in order', () => {
@@ -1072,10 +1102,11 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       live.shells.depth,
       sprites.plates,
       sprites.heads,
+      sprites.rims,
       sprites.pending,
       live.effects.depth,
       sprites.creeps,
       live.cues.depth,
-    ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 });

@@ -23,7 +23,14 @@ import { creepFillColour, creepRadius, paintCreepSilhouette, isLowHp } from './b
 import { CREEP_SHAPE_VALUES, creepShapeFor, type CreepShape } from './creep-paint';
 import { artBounds } from './art-geometry';
 import type { ArtColourResolver, ArtGraphics } from './art-paint';
-import { alignArtToTexels, strokeWidthAt, type ArtBox, type ArtShape } from './art-ir';
+import {
+  alignArtToTexels,
+  rectRadius,
+  strokeWidthAt,
+  type ArtBox,
+  type ArtRect,
+  type ArtShape,
+} from './art-ir';
 import {
   ART_BOX,
   ART_FOOTPRINT,
@@ -100,6 +107,10 @@ export function towerAims(towerId: string): boolean {
 
 /** The one plate frame every plated tower shows. */
 export const PLATE_FRAME_KEY = 'tower:plate';
+
+/** The plate rim's four straight runs, painted again over an aiming head while it is posed —
+ *  turned or knocked back (T3, `placement.ts`; `rimRunsAt`). */
+export const RIM_RUNS_FRAME_KEY = 'tower:rim-runs';
 
 /** The pad a plateless tower (the mine) shows in the plates layer instead (`PAD_ART`). */
 export const PAD_FRAME_KEY = 'tower:pad';
@@ -296,11 +307,9 @@ export function towerArtFit(sizePx: number): { x: number; y: number; footprintPx
  * never cross it.
  */
 export function boostArtAt(unit: number, scale: number): readonly ArtShape[] {
-  const rim = alignArtToTexels(PLATE_ART, unit, scale, [0, 0], ART_FOOTPRINT).find(
-    (s) => s.stroke === 'rim',
-  );
+  const rim = drawnPlateRim(unit, scale);
   const [cue, halo] = BOOST_ART;
-  if (rim?.kind !== 'rect' || cue?.kind !== 'circle' || halo?.kind !== 'circle') {
+  if (cue?.kind !== 'circle' || halo?.kind !== 'circle') {
     throw new Error('the glow is two rings inside a rect rim');
   }
   const half = strokeWidthAt(rim, unit) / 2;
@@ -321,6 +330,59 @@ export function boostArtAt(unit: number, scale: number): readonly ArtShape[] {
   return fitted;
 }
 
+/** The plate's rim as the plate frame draws it at `unit` CSS px per design unit and `scale`
+ *  texels per CSS px: on whole texels, inside the footprint. */
+function drawnPlateRim(unit: number, scale: number): ArtRect {
+  const rim = alignArtToTexels(PLATE_ART, unit, scale, [0, 0], ART_FOOTPRINT).find(
+    (s) => s.stroke === 'rim',
+  );
+  if (rim?.kind !== 'rect') throw new Error('the plate rim is a rect');
+  return rim;
+}
+
+/**
+ * The plate rim's four straight runs as the plate frame draws them at `unit` CSS px per design
+ * unit and `scale` texels per CSS px: four filled rects in the rim's colour, each over exactly
+ * the texels the rim wholly covers between its rounded corners — its band of whole texels
+ * (`alignRectToTexels`), cut back to the whole texels between the corners' tangent points. So,
+ * painted over the plate, they change no pixel the rim has not already made its own; painted
+ * over a head, they give back whatever of it the head darkened (T3: a turned head is resampled,
+ * and where a side of the drawn rim comes within a texel of it — at small cells, and at dprs
+ * between the whole ones, where the footprint ends inside a pixel and the texel grid brings the
+ * rim's far sides in by up to a pixel — the Basic Tower's barrel took the rim's inner pixel to
+ * 1.34:1 on screen). A head never reaches a corner: its farthest point is 26 design units out,
+ * a corner's inner edge 36. A run with no whole texel between its corners — at a few px cells —
+ * is left out.
+ */
+export function rimRunsAt(unit: number, scale: number): readonly ArtShape[] {
+  const rim = drawnPlateRim(unit, scale);
+  const k = unit * scale; // texels per design unit
+  const half = strokeWidthAt(rim, unit) / 2;
+  const r = rectRadius(rim);
+  /** The rim's band of whole texels about centre line `c`. */
+  const band = (c: number): [number, number] => [
+    Math.round((c - half) * k),
+    Math.round((c + half) * k),
+  ];
+  /** The whole texels between two tangent points, `from` and `to` design units. */
+  const between = (from: number, to: number): [number, number] => [
+    Math.ceil(from * k - 1e-9),
+    Math.floor(to * k + 1e-9),
+  ];
+  const [x0, x1] = between(rim.x + r, rim.x + rim.w - r);
+  const [y0, y1] = between(rim.y + r, rim.y + rim.h - r);
+  const run = ([l, rt]: [number, number], [t, b]: [number, number]): ArtShape[] =>
+    rt > l && b > t
+      ? [{ kind: 'rect', x: l / k, y: t / k, w: (rt - l) / k, h: (b - t) / k, rx: 0, fill: 'rim' }]
+      : [];
+  return [
+    ...run([x0, x1], band(rim.y)),
+    ...run([x0, x1], band(rim.y + rim.h)),
+    ...run(band(rim.x), [y0, y1]),
+    ...run(band(rim.x + rim.w), [y0, y1]),
+  ];
+}
+
 /** Every tower frame at `cellPx` and `scale` texels per CSS px: the shared plate, and for
  *  every look its head (committed and boosted) and its pending build. Tower frames are
  *  anchored at the footprint's top-left corner. */
@@ -334,6 +396,12 @@ export function towerFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
       draw(PAD_ART, colours(pal, 'burst')),
     ),
   ];
+  const runs = rimRunsAt(artUnit(cellPx), scale);
+  specs.push(
+    artFrame(RIM_RUNS_FRAME_KEY, runs, cellPx, scale, corner, (draw, _g, pal) =>
+      draw(runs, colours(pal, 'damage')),
+    ),
+  );
   const glow = boostArtAt(artUnit(cellPx), scale);
   for (const look of TOWER_LOOKS) {
     const head = HEAD_ART[look.mark];

@@ -5,7 +5,7 @@
 // this fills them, so the routing that keeps every aura shell under every tower body (M2-S8)
 // is a unit-tested fact rather than a property of call order in a coverage-excluded file.
 //
-// The layers composite in `layers.ts`'s order: board, scorches, shells, plates, heads,
+// The layers composite in `layers.ts`'s order: board, scorches, shells, plates, heads, rims,
 // pending, effects (selection, fire feedback, tracers), creeps, cues (pips and status cues,
 // then the ghost, then sparks).
 //
@@ -86,7 +86,7 @@ export interface SpriteLayer {
 }
 
 /** A sprite layer's name — the one it is made under, and its depth is read from. */
-export type SpriteLayerName = 'scorches' | 'plates' | 'heads' | 'pending' | 'creeps';
+export type SpriteLayerName = 'scorches' | 'plates' | 'heads' | 'rims' | 'pending' | 'creeps';
 
 /** One `S` per sprite layer. */
 export type SpriteLayers<S> = { readonly [L in SpriteLayerName]: S };
@@ -97,6 +97,7 @@ export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): Spri
     scorches: make('scorches'),
     plates: make('plates'),
     heads: make('heads'),
+    rims: make('rims'),
     pending: make('pending'),
     creeps: make('creeps'),
   };
@@ -132,6 +133,8 @@ export interface BoardTargets {
   readonly plates: SpriteLayer;
   /** Committed towers' heads — boosted ones with their glow — over the plates. */
   readonly heads: SpriteLayer;
+  /** The plate rim's straight runs, again, over each posed head (`TowerPlacements.rims`). */
+  readonly rims: SpriteLayer;
   readonly pending: SpriteLayer;
   readonly creeps: SpriteLayer;
 }
@@ -215,10 +218,12 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   });
   const poseOf = (tw: TowerVM) =>
     headPose(tw, input.aim, input.fire, overlay.reducedMotion, projection.cellPx);
-  // plates, heads, pending — atlas sprites; each head turned and knocked back as posed.
+  // plates, heads, rims, pending — atlas sprites; each head turned and knocked back as posed,
+  // and the rim painted again over each one that is.
   const towers = placeTowers(curVm, overlay, projection, frames, poseOf);
   t.plates.sync(towers.plates);
   t.heads.sync(towers.heads);
+  t.rims.sync(towers.rims);
   t.pending.sync(towers.pending);
   // effects — the selection cue, then the shots' flashes and pulses, then tracers.
   drawSelection(effects, pal, overlay, projection);
@@ -261,6 +266,7 @@ export function resetBoardFrame(t: BoardTargets, state: BoardFrameTrackers): voi
   t.scorches.hideAll();
   t.plates.hideAll();
   t.heads.hideAll();
+  t.rims.hideAll();
   t.pending.hideAll();
   t.creeps.hideAll();
 }

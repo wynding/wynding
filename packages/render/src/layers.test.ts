@@ -9,13 +9,14 @@ import { describe, it, expect } from 'vitest';
 import { BOARD_LAYERS, layerDepth } from './layers';
 
 describe('BOARD_LAYERS — the board draw order', () => {
-  it('is exactly: board, scorches, shells, plates, heads, pending, effects, creeps, cues', () => {
+  it('is exactly: board, scorches, shells, plates, heads, rims, pending, effects, creeps, cues', () => {
     expect(BOARD_LAYERS).toEqual([
       'board',
       'scorches',
       'shells',
       'plates',
       'heads',
+      'rims',
       'pending',
       'effects',
       'creeps',
@@ -43,6 +44,13 @@ describe('BOARD_LAYERS — the board draw order', () => {
 
   it('draws every head over every plate, so no neighbour’s plate covers a head', () => {
     expect(layerDepth('plates')).toBeLessThan(layerDepth('heads'));
+  });
+
+  it('paints a posed head’s plate rim over every head — and under a shot’s flash and pulse (T3)', () => {
+    // A turned head is resampled, and nothing it draws may darken the footprint's edge; the
+    // shot's muzzle flash and ring pulse, lighter than the rim, still show over it.
+    expect(layerDepth('heads')).toBeLessThan(layerDepth('rims'));
+    expect(layerDepth('rims')).toBeLessThan(layerDepth('effects'));
   });
 
   it('draws a creep cue over EVERY creep body, so a neighbour can never hide it (the V2 reorder)', () => {

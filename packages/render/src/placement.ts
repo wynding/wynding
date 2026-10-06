@@ -28,7 +28,9 @@ import {
   groundFrameKey,
   headFrameKey,
   pendingFrameKey,
+  RIM_RUNS_FRAME_KEY,
   SCORCH_FRAME_KEY,
+  towerHasPlate,
 } from './art-frames';
 import { snapToDevicePx } from './device-px';
 import type { Projection } from './projection';
@@ -105,6 +107,12 @@ export interface TowerPlacements {
   readonly plates: readonly SpritePlacement[];
   /** Committed towers' heads — the heads layer, over the plates. */
   readonly heads: readonly SpritePlacement[];
+  /** The plate rim's straight runs over each POSED head — one an aiming tower has turned or
+   *  knocked back (T3) — the rims layer, over every head. A posed head is resampled, or moved
+   *  off the grid it was baked on, so its outline can spread into the rim's pixels, and the
+   *  rim is the footprint's edge: it is painted again over it (`RIM_RUNS_FRAME_KEY`). A head
+   *  at rest needs none — it is the picture R2 measured — so a head that never aims has none. */
+  readonly rims: readonly SpritePlacement[];
   /** Pending builds — the pending layer, above the towers: one translucent picture each. */
   readonly pending: readonly SpritePlacement[];
 }
@@ -118,7 +126,8 @@ export interface TowerPlacements {
  * Every sprite is anchored at its 2×2 footprint's top-left cell, so a tower's plate and
  * head land on the same snapped corner.
  *
- * Each head is posed as `poseOf` says (T3; at rest when it is not given — `placeHead`).
+ * Each head is posed as `poseOf` says (T3; at rest when it is not given — `placeHead`), and a
+ * posed one's plate rim is painted again over it (`TowerPlacements.rims`).
  */
 export function placeTowers(
   vm: RenderVM,
@@ -130,18 +139,21 @@ export function placeTowers(
   const dpr = projection.dpr;
   const plates: SpritePlacement[] = [];
   const heads: SpritePlacement[] = [];
+  const rims: SpritePlacement[] = [];
   for (const t of visibleTowers(vm.towers, o.pendingSells)) {
     const p = projection.cellToPixel(t.col, t.row);
     plates.push(placeAt(frames, groundFrameKey(t.towerId), p.x, p.y, dpr));
-    heads.push(
-      placeHead(frames, headFrameKey(t.towerId, t.buffed), p.x, p.y, projection, poseOf(t)),
-    );
+    const pose = poseOf(t);
+    heads.push(placeHead(frames, headFrameKey(t.towerId, t.buffed), p.x, p.y, projection, pose));
+    if ((pose.angle !== 0 || pose.recoilPx !== 0) && towerHasPlate(t.towerId)) {
+      rims.push(placeAt(frames, RIM_RUNS_FRAME_KEY, p.x, p.y, dpr));
+    }
   }
   const pending = o.pendingAdds.map((t) => {
     const p = projection.cellToPixel(t.col, t.row);
     return placeAt(frames, pendingFrameKey(t.towerId), p.x, p.y, dpr);
   });
-  return { plates, heads, pending };
+  return { plates, heads, rims, pending };
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   atlasFrameSpecs,
   PAD_FRAME_KEY,
   PLATE_FRAME_KEY,
+  RIM_RUNS_FRAME_KEY,
   SCORCH_FRAME_KEY,
   type FrameSpec,
 } from './art-frames';
@@ -303,6 +304,44 @@ describe('placeTowers — each head posed to aim and recoil (visual pass T3)', (
       ['tower:head:plain:damage:buffed', 1],
       ['tower:head:arrow:air:committed', -2],
     ]);
+  });
+
+  it('paints the plate rim again over each POSED head, on its plate’s corner — over none at rest, and none that never aims', () => {
+    for (const p of LAYOUTS) {
+      const frames = specsFor(p);
+      const runs = frames.get(RIM_RUNS_FRAME_KEY)!;
+      const at = (t: TowerVM) => {
+        const corner = p.cellToPixel(t.col, t.row);
+        return {
+          frame: RIM_RUNS_FRAME_KEY,
+          x: snapToDevicePx(corner.x, p.dpr) - runs.anchorX,
+          y: snapToDevicePx(corner.y, p.dpr) - runs.anchorY,
+        };
+      };
+      const [basic, venom, slow] = TOWERS as [TowerVM, TowerVM, TowerVM];
+      expect(placeTowers(vmWith(TOWERS), NO_OVERLAY, p, frames).rims).toEqual([]);
+      // Turned, or knocked back unturned: posed. A head that does not aim is never posed
+      // (`headPose`), so the slow tower stands at rest here.
+      for (const pose of [
+        { angle: 0.6, recoilPx: 0 },
+        { angle: 0, recoilPx: 1.5 },
+      ]) {
+        const placed = placeTowers(vmWith(TOWERS), NO_OVERLAY, p, frames, (t) =>
+          t === slow ? HEAD_AT_REST : pose,
+        );
+        expect(placed.rims).toEqual([at(basic), at(venom)]);
+      }
+      // A tower whose sell is pending is presented as gone: no rim over its head either. (Each
+      // head here is handed a turn, the slow tower's too.)
+      const selling = placeTowers(
+        vmWith(TOWERS),
+        { pendingAdds: [], pendingSells: [{ col: basic.col, row: basic.row }] },
+        p,
+        frames,
+        () => ({ angle: 0.6, recoilPx: 0 }),
+      );
+      expect(selling.rims).toEqual([at(venom), at(slow)]);
+    }
   });
 
   it('knocks a head back along its facing by whole device pixels: down facing up, left facing right', () => {
