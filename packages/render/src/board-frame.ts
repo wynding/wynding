@@ -11,8 +11,9 @@
 //
 // State that lives across frames — where mines went off, where each head points, which towers
 // just fired — is kept in Phaser-free trackers the scene owns (`scorches.ts`, `tower-aim.ts`,
-// `tower-fire.ts`). Each frame feeds every one of them once, on the render clock, before
-// anything they shape is placed or drawn; `resetBoardFrame` requires all three.
+// `tower-fire.ts`), each fed once a frame on the render clock, before anything it shapes is
+// placed or drawn: the scorch tracker by the scene's `draw()`, before any early return, and the
+// other two here. `resetBoardFrame` requires all three.
 
 import { MS_PER_TICK } from '@wynding/sim';
 import {
