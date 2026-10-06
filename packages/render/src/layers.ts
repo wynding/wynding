@@ -15,9 +15,14 @@
 //             the plateless mine, its floor-coloured pad, which keeps shells off its
 //             footprint as a plate does
 //   heads     sprites: committed towers' heads — boosted ones with their glow — over the
-//             plates, a layer of their own so a head can turn without touching its plate
+//             plates, a layer of their own so a head turns to aim without touching its plate
+//   rims      sprites: the plate rim's straight runs, painted again over each head an aiming
+//             tower has turned or knocked back (visual pass T3): a posed head is resampled
+//             or moved off the pixel grid, and nothing it draws may darken the footprint's
+//             edge (`placement.ts`)
 //   pending   sprites: pending builds — each one translucent picture with its dashed rim
-//   effects   live: the selection ring/outline/blast spokes, then in-flight tracers
+//   effects   live: the selection ring/outline/blast spokes, then each shot's muzzle flash
+//             or ring pulse (visual pass T3), then in-flight tracers
 //   creeps    sprites: every creep silhouette
 //   cues      live: every health pip and status cue, then the build ghost, then sparks
 //
@@ -32,6 +37,7 @@ export const BOARD_LAYERS = [
   'shells',
   'plates',
   'heads',
+  'rims',
   'pending',
   'effects',
   'creeps',

@@ -515,6 +515,42 @@ describe('view-model + hud derivation', () => {
     expect(poisonedById.get(ids[4]!)).toBe(false);
   });
 
+  // Visual pass T3: an aiming head turns toward the creep the SIM's own target lock names —
+  // read off its `towers.targetId` column, never re-derived here.
+  it('carries each tower’s target lock from the sim’s own column: 0 for none, else a creep it draws', () => {
+    let s = createInitialState(1, ruleset);
+    // A basic tower beside the row-11 lane every creep walks, then wave 1.
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 6, row: 12 }, towerId: 'basic' }]);
+    expect(deriveViewModel(s, ruleset).towers[0]!.targetId).toBe(0); // nothing in range yet
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    let n = 0;
+    while (s.towers.targetId[0] === 0 && n < 2000) {
+      s = step(s, ruleset, []);
+      n++;
+    }
+    const vm = deriveViewModel(s, ruleset);
+    const locked = vm.towers[0]!.targetId;
+    expect(locked).not.toBe(0);
+    expect(locked).toBe(s.towers.targetId[0]);
+    expect(vm.creeps.some((c) => c.id === locked)).toBe(true);
+    // ... and it follows the column tick to tick: whatever the sim names next, the VM names.
+    for (let i = 0; i < 40; i++) {
+      s = step(s, ruleset, []);
+      expect(deriveViewModel(s, ruleset).towers[0]?.targetId).toBe(s.towers.targetId[0]);
+    }
+  });
+
+  it('reads a forged or ragged target-lock entry as no lock, as the sim’s fire step does', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' }]);
+    for (const forged of [Number.NaN, 1.5, Number.MAX_SAFE_INTEGER + 2, undefined]) {
+      s.towers.targetId[0] = forged as unknown as number;
+      expect(deriveViewModel(s, ruleset).towers[0]!.targetId, String(forged)).toBe(0);
+    }
+    s.towers.targetId[0] = 42; // a lock on a creep that is not on the board stays as read
+    expect(deriveViewModel(s, ruleset).towers[0]!.targetId).toBe(42);
+  });
+
   it('does not draw a sim-invalid tower row (Codex R3-2: forged towerId is never drawn)', () => {
     let s = createInitialState(1, ruleset);
     const build: SimInput = { kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' };
@@ -1201,5 +1237,9 @@ describe('render barrel', () => {
     expect(barrel.roleColour).toBeTypeOf('function');
     expect(barrel.towerRoleFor).toBeTypeOf('function');
     expect(barrel.towerArtFit).toBeTypeOf('function');
+    // What the web app's fire-rate test holds every shipped tower to (visual pass T3).
+    expect(barrel.flashesPerSecond).toBeTypeOf('function');
+    expect(barrel.FIRE_FEEDBACK_TICKS).toBeTypeOf('number');
+    expect(barrel.MAX_FLASHES_PER_SECOND).toBe(3);
   });
 });
