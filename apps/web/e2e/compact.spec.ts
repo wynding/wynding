@@ -1249,6 +1249,68 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     ).toBeLessThanOrEqual(180);
   });
 
+  // The condensed Panel is the name and the glance: the wide Rail's head art, role line and
+  // build hint are what it sheds (#181 H3), and its cost row LEADS with the HUD's gem.
+  test('658×320: the condensed Panel sheds the head art, role line and build hint, and its cost row leads with the gem', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    await armByHotkey(page, '9');
+    const m = await page.evaluate(() => {
+      const painted = (sel: string): boolean =>
+        getComputedStyle(document.querySelector(sel) as HTMLElement).display !== 'none';
+      const costRow = document.querySelector('.wy-stats-glance p') as HTMLElement;
+      return {
+        art: painted('.wy-panel-art'),
+        role: painted('.wy-panel-role'),
+        hint: painted('.wy-panel-hint'),
+        gemLeads: costRow.firstChild === costRow.querySelector('svg'),
+      };
+    });
+    expect(m, 'a 144px Rail paints the name and the glance alone').toEqual({
+      art: false,
+      role: false,
+      hint: false,
+      gemLeads: true,
+    });
+  });
+
+  // Compact PINS the Panel at every text size (ui.css's Compact fork), but the condensed form
+  // follows the Rail's width — and from 150% text the Compact Rail's content box is wider than
+  // 160px. A pinned Panel must still show the armed tower's whole name, never scrolling it
+  // sideways out of a box too narrow for the wide form's head art beside it.
+  for (const [label, size, zoom] of [
+    ['658×320', PHONE, 150],
+    ['740×360', { width: 740, height: 360 }, 200],
+  ] as const) {
+    test(`${label} at ${zoom}% text: the pinned Panel shows the armed tower's whole name and never scrolls sideways`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await armByHotkey(page, '3'); // Splash Tower
+      const m = await page.evaluate(() => {
+        const panel = document.querySelector('.wy-panel') as HTMLElement;
+        const scroll = panel.querySelector('.wy-panel-scroll') as HTMLElement;
+        const range = document.createRange();
+        range.selectNodeContents(panel.querySelector('.wy-panel-name') as HTMLElement);
+        const sr = scroll.getBoundingClientRect();
+        return {
+          position: getComputedStyle(panel).position,
+          nameRight: Math.max(...[...range.getClientRects()].map((r) => r.right)),
+          clipRight: sr.left + scroll.clientLeft + scroll.clientWidth,
+          sideways: scroll.scrollWidth - scroll.clientWidth,
+        };
+      });
+      expect(m.position, 'the premise: Compact pins the Panel').toBe('sticky');
+      expect(
+        m.nameRight,
+        "the armed tower's name must not run under the Panel's edge",
+      ).toBeLessThanOrEqual(m.clipRight + 0.5);
+      expect(m.sideways, 'the pinned Panel must not scroll sideways').toBe(0);
+    });
+  }
+
   test('1000×720: a wide Rail paints the label-value rows and drops the glance entirely; the sentences stay the accessible text', async ({
     page,
   }) => {
@@ -1808,7 +1870,7 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
   // off here on the false premise that it never overflows at all. Since #181's shorter Cards,
   // doubled text still fits at 1440x900 and overflows lower in the band (163px at 1440x560),
   // so the 200% half runs there.
-  test('1440-wide two-column: the fade is absent at 100% and present at 200% zoom (1440x560)', async ({
+  test('1440-wide two-column: the fade is absent at 100% and present at 200% zoom, one column by then (1440x560)', async ({
     page,
   }) => {
     await gotoAt(page, { width: 1440, height: 900 });
@@ -1855,7 +1917,10 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     await page.addStyleTag({ content: ':root { font-size: 200% }' });
     await expect(rail).toHaveClass(/wy-rail-has-more/);
     const at200 = await state();
-    expect(at200.columns, '1440x560 at 200% must still be two-column').toBe(2);
+    // One column: at heavy text the two-column grid falls back to one (ui.css, the container
+    // query in the two-column block), because a Card's name no longer fits beside the corner
+    // hotkey. The Rail still overflows, and the fade is what marks it.
+    expect(at200.columns, '1440x560 at 200% falls back to one column').toBe(1);
     expect(at200.overflow, 'the two-column Rail DOES overflow at 200%').toBeGreaterThan(0);
     // The box must be GENERATED, not merely opaque — `display: none` here was the defect.
     expect(at200.display, 'the fade must exist as a box in the Rail').not.toBe('none');

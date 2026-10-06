@@ -353,7 +353,7 @@ test.describe('#181 H3/L2: axe in every state the Rail redesign adds', () => {
 });
 
 test.describe('#181 H3: the armed Card under forced colours', () => {
-  test('the armed Card keeps a mark of its own when the system repaints every Card', async ({
+  test('the armed Card keeps a mark of its own when the system repaints every Card — focused or not', async ({
     page,
   }) => {
     await page.emulateMedia({ forcedColors: 'active' });
@@ -362,8 +362,8 @@ test.describe('#181 H3: the armed Card under forced colours', () => {
     await page.keyboard.press('1');
     const armed = page.locator('.wy-card').nth(0);
     await expect(armed).toHaveAttribute('aria-pressed', 'true');
-    // Off the armed Card, so its focus ring cannot stand in for the armed mark.
-    await page.locator('.wy-board').focus();
+    // The armed mark is the border itself (3px double, in the selection colour), because the
+    // focus ring is an outline: it replaces any outline mark, but not a border.
     const look = (n: number) =>
       page
         .locator('.wy-card')
@@ -371,15 +371,203 @@ test.describe('#181 H3: the armed Card under forced colours', () => {
         .evaluate((card) => {
           const cs = getComputedStyle(card);
           return {
-            border: cs.borderTopColor,
-            outline: cs.outlineStyle,
-            outlineColor: cs.outlineColor,
+            width: cs.borderTopWidth,
+            style: cs.borderTopStyle,
+            color: cs.borderTopColor,
+            focused: card === document.activeElement,
+            ring: cs.outlineStyle,
           };
         });
+    // Off the armed Card first, then ON it: the same mark must show with its focus ring up.
+    await page.locator('.wy-board').focus();
     const a = await look(0);
     const b = await look(1);
-    expect(a.border, 'the armed border is not the resting one').not.toBe(b.border);
-    expect(a.outline, 'and the armed Card carries the inner ring').toBe('solid');
-    expect(b.outline).toBe('none');
+    expect(a.focused, 'the armed Card is not focused').toBe(false);
+    expect({ width: a.width, style: a.style }, 'the armed Card has the 3px double border').toEqual({
+      width: '3px',
+      style: 'double',
+    });
+    expect({ width: b.width, style: b.style }, 'a resting Card keeps 1px solid').toEqual({
+      width: '1px',
+      style: 'solid',
+    });
+    expect(a.color, 'the armed border is not the resting one').not.toBe(b.color);
+
+    await armed.focus();
+    await expect(armed).toBeFocused();
+    const f = await look(0);
+    expect(f.focused).toBe(true);
+    expect(f.ring, 'the focus ring is up').toBe('solid');
+    expect(
+      { width: f.width, style: f.style },
+      'and the armed mark still shows with focus ON the armed Card',
+    ).toEqual({ width: '3px', style: 'double' });
+    // A focused resting Card has the same ring and none of the mark: the two now differ.
+    await page.locator('.wy-card').nth(1).focus();
+    const g = await look(1);
+    expect(g.focused).toBe(true);
+    expect({ width: g.width, style: g.style }, 'a focused resting Card is 1px solid').toEqual({
+      width: '1px',
+      style: 'solid',
+    });
+  });
+});
+
+/** The frame's armed gold and the two inks a Card's name is drawn in (`--wy-armed`,
+ *  `--wy-fg`, `--wy-fg-dim` in ui.css). */
+const ARMED_RGB = 'rgb(255, 209, 102)';
+const FG_RGB = 'rgb(244, 247, 251)';
+const FG_DIM_RGB = 'rgb(155, 162, 174)';
+
+/** What each Card paints over itself or past its own edges, one line per clash (empty when
+ *  clean): its short name, art or "need N" under the hotkey, or its name, hotkey or "need N"
+ *  past the Card's border box. Text is measured by its painted line boxes, not its element's
+ *  box, and a part that is not painted (display: none, or visually hidden to 1px) takes no
+ *  part. Runs in the page. */
+function paintedClashes(): string[] {
+  const textBox = (el: Element): DOMRect | null => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const rs = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+    if (rs.length === 0) return null;
+    const left = Math.min(...rs.map((r) => r.left));
+    const top = Math.min(...rs.map((r) => r.top));
+    const right = Math.max(...rs.map((r) => r.right));
+    const bottom = Math.max(...rs.map((r) => r.bottom));
+    return new DOMRect(left, top, right - left, bottom - top);
+  };
+  const painted = (el: Element | null): el is HTMLElement =>
+    el !== null && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 1;
+  const overlap = (a: DOMRect, b: DOMRect): number =>
+    Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+    Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  const clashes: string[] = [];
+  document.querySelectorAll('.wy-card').forEach((card, i) => {
+    const cr = card.getBoundingClientRect();
+    const part = (sel: string, text: boolean): DOMRect | null => {
+      const el = card.querySelector(sel);
+      if (!painted(el)) return null;
+      return text ? textBox(el) : el.getBoundingClientRect();
+    };
+    const hotkey = part('.wy-card-hotkey', true);
+    const name = part('.wy-card-label', true);
+    const art = part('.wy-card-swatch', false);
+    const need = part('.wy-card-need', false);
+    for (const [what, box] of [
+      ['name', name],
+      ['art', art],
+      ['"need N"', need],
+    ] as const) {
+      if (hotkey !== null && box !== null && overlap(hotkey, box) > 0.5) {
+        clashes.push(`Card ${i + 1}: its hotkey paints over its ${what}`);
+      }
+    }
+    for (const [what, box] of [
+      ['name', name],
+      ['hotkey', hotkey],
+      ['"need N"', need],
+    ] as const) {
+      if (box !== null && (box.left < cr.left - 0.5 || box.right > cr.right + 0.5)) {
+        clashes.push(`Card ${i + 1}: its ${what} runs past the Card's edge`);
+      }
+    }
+  });
+  return clashes;
+}
+
+test.describe('#181 H3: the corner hotkey never paints over its Card', () => {
+  // The hotkey left the flow for the frame's corner, so it no longer narrows the name beside
+  // it: the name must stay clear of it at the text sizes the two-column Rail is shown at.
+  for (const [label, size, zoom] of [
+    ['1280×720', LAPTOP, 150],
+    ['1280×720', LAPTOP, 200],
+    ['1440×900', WIDE, 200],
+  ] as const) {
+    test(`${label} at ${zoom}% text: no short name runs under its hotkey or out of its Card`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      expect(await page.evaluate(paintedClashes)).toEqual([]);
+    });
+  }
+
+  // A player can rebind an arm key to one whose label is a word ("BracketLeft", "ArrowDown"),
+  // or leave one unbound ("Unbound"): the label stays the tail of the Card's name either way.
+  for (const [label, size] of [
+    ['1440×900', WIDE],
+    ['1000×720', { width: 1000, height: 720 }],
+    ['640×560', { width: 640, height: 560 }],
+  ] as const) {
+    test(`${label}: a long key label never paints over its Card, and stays in its name`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      await page.getByRole('button', { name: 'Settings' }).click();
+      for (const [action, key] of [
+        ['Arm tower 1', 'BracketLeft'],
+        ['Arm tower 3', 'ArrowDown'],
+        ['Arm tower 8', 'Digit9'], // takes 9's key, so Arm tower 9 is left unbound
+      ] as const) {
+        await page.getByRole('button', { name: `Rebind ${action}` }).click();
+        await page.keyboard.press(key);
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden();
+      const cards = page.locator('.wy-card');
+      await expect(cards.nth(0)).toHaveAccessibleName('Basic Tower Cost: 5 BracketLeft');
+      await expect(cards.nth(2)).toHaveAccessibleName('Splash Tower Cost: 12 ArrowDown');
+      await expect(cards.nth(8)).toHaveAccessibleName('Frost Splash Tower Cost: 16 Unbound');
+      expect(await page.evaluate(paintedClashes)).toEqual([]);
+    });
+  }
+});
+
+test.describe('#181 H3: the armed and the short Card, as painted', () => {
+  test('arming frames the Card in 3px — a 1px border and a 2px inset ring — and moves nothing inside it', async ({
+    page,
+  }) => {
+    await gotoAt(page, WIDE);
+    const card = page.locator('.wy-card').nth(0);
+    const artAt = () =>
+      card.locator('.wy-card-swatch').evaluate((art) => {
+        const r = art.getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height];
+      });
+    const before = await artAt();
+    await page.keyboard.press('1');
+    await expect(card).toHaveAttribute('aria-pressed', 'true');
+    expect(await artAt(), 'arming moves no part of the Card').toEqual(before);
+    const frame = (n: number) =>
+      page
+        .locator('.wy-card')
+        .nth(n)
+        .evaluate((c) => {
+          const cs = getComputedStyle(c);
+          return { border: cs.borderTopWidth, ring: cs.boxShadow };
+        });
+    expect(await frame(0), 'armed: the frame').toEqual({
+      border: '1px',
+      ring: `${ARMED_RGB} 0px 0px 0px 2px inset`,
+    });
+    expect(await frame(1), 'resting: the quiet edge alone').toEqual({
+      border: '1px',
+      ring: 'none',
+    });
+  });
+
+  test("a short Card's name steps down to the dim ink; an affordable one keeps the full ink", async ({
+    page,
+  }) => {
+    await gotoAt(page, WIDE);
+    await spendTo11(page);
+    const ink = (n: number) =>
+      page
+        .locator('.wy-card')
+        .nth(n)
+        .locator('.wy-card-label')
+        .evaluate((l) => getComputedStyle(l).color);
+    expect(await ink(2), 'Splash, short by one').toBe(FG_DIM_RGB);
+    expect(await ink(0), 'Basic, affordable').toBe(FG_RGB);
   });
 });

@@ -483,9 +483,12 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   //
   // Walked at the issue's 640x560 and at 360x640 (Standard by height, with the narrow Rail
   // that PINS an armed Panel), at 1000x720 (a wide Rail, whose armed Panel stays in flow) and
-  // on the two-column Rail, which overflows only at doubled text zoom — and since #181's
-  // shorter Cards only low in its band (doubled text fits at 1440x900), so it is walked at
-  // 1440x560.
+  // on the wide Rail of a short desktop window, which overflows only at doubled text zoom — and
+  // since #181's shorter Cards only low in its band (doubled text fits at 1440x900), so it is
+  // walked at 1440x560. That Rail is ONE column by then: the two-column grid falls back to one
+  // at heavy text (ui.css), so what this walk exercises is the single column's scroll. A
+  // two-column Rail that overflows exists only at 175% text on 1920x501 and 1920x560 (measured:
+  // 77px and 18px), and is not walked.
   //
   // Standard's Rail pays NO top inset of its own: it sits below `.wy-status`, which already
   // does. Two checks hold that. The 24px walks bound each ring from below by the larger of
@@ -498,7 +501,7 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   // narrow Rail's icon-form Cards are 68px there, where they were 189-226px against ~160px
   // of room above the Panel and nothing could be claimed.
   const STANDARD_TALL = { width: 360, height: 640 }; // portrait phone, Standard by height
-  const TWO_COLUMN = { width: 1440, height: 560 };
+  const WIDE_SHORT = { width: 1440, height: 560 };
   // The unarmed 100% walk needs a Rail that SCROLLS far enough for a Shift+Tab stop to park a
   // Card at its top bound — or the top-reserve assertion checks only Infinity. At 1000×720 it
   // did while #101's reserved hud row held the status row at 248px; since #181's one-line
@@ -530,7 +533,7 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
     { view: STANDARD_SHORT, armed: false, pinned: false, zoom: 100, insets: [0, TOP] },
     { view: STANDARD, armed: true, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD, armed: false, pinned: false, zoom: 200, insets: [0] },
-    { view: TWO_COLUMN, armed: false, pinned: false, zoom: 200, insets: [0] },
+    { view: WIDE_SHORT, armed: false, pinned: false, zoom: 200, insets: [0] },
   ];
   for (const { view, armed, pinned, zoom, insets } of WALKS) {
     for (const inset of insets) {

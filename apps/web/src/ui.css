@@ -75,8 +75,8 @@
      armed" — independent states that must stay re-colourable apart. Since #181 (H3) it
      CARRIES the armed state: the style frame's armed tile is a gold frame over a lifted
      fill, where the old one flipped the whole Card to the accent fill. So it is now paired in
-     `ui-contrast.test.ts` (non-text, 3:1) against the Rail and both Card fills, as well as
-     being a required token. */
+     `ui-contrast.test.ts` (non-text, 3:1) against the Rail and the armed fill it frames, as
+     well as being a required token. */
   --wy-armed: #ffd166;
   --wy-on-accent: #04121f;
   --wy-board-bg: #12141c;
@@ -1315,7 +1315,7 @@ a.wy-home:focus-visible {
      produces the same widths.
 
      Containment DOES make this element a containing block for absolutely-positioned
-     descendants, and this file goes on to add two of them — the condensed form's sr-only
+     descendants, and this file goes on to add two of them — the sr-only
      `.wy-stats-full` sentences, and the Upgrade description. Both are re-anchored to
      `.wy-panel-scroll` (see its `position: relative` below) rather than left to resolve
      against the Rail, so neither adds scroll extent here; an earlier draft that left them
@@ -1392,21 +1392,14 @@ a.wy-home:focus-visible {
        the corner.
      · ICON (the two narrow arms at the foot of the Panel section: a Rail content box of
        160px or less, and the Compact fork): the frame's phone card — the art and the cost
-       only, two to a row where a 44px tap target allows it, so all nine fit a 658×320 Rail
-       at rest. The name and the stats move to the Panel the arm opens. */
+       only, two to a row where a 3.5rem tile allows it (56px at 100% text, 112px at 200%), so
+       all nine fit a 658×320 Rail at rest. The name and the stats move to the Panel the arm
+       opens. */
 
 .wy-cards {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
-  /* Never a flex-squash victim (#69). The grid is a flex item of the Rail, and an
-     over-filled Rail — the nine Cards at Standard's default height, or any Rail with the
-     Panel open — would otherwise shrink it, and its rows with it: the Cards squashed toward
-     44px and the hotkey rendered outside its Card's border box (measured before the
-     playtest round, when the Cards were the Rail's own items). The Rail is a scrollport
-     (`overflow-y: auto`): it absorbs overflow by scrolling, never by squashing what it
-     holds. Pinned by `arming.spec.ts`, whose pre-arm baseline catches the no-Panel case. */
-  flex-shrink: 0;
 }
 
 .wy-card {
@@ -1438,12 +1431,21 @@ a.wy-home:focus-visible {
 
 /* Armed: the style frame's gold frame over a lifted fill. The border stays 1px and the rest
    of the frame is an inset ring, so arming moves no part of the Card by a pixel — the Card
-   under the pointer stays exactly where the press landed (`touch.spec.ts`). The ring's width
+   under the pointer stays exactly where the press landed (`rail-cards.spec.ts` and
+   `arming.spec.ts` pin the frame). The ring's width
    is a non-colour cue on top of the gold: 1px of quiet edge at rest, 3px of frame armed. */
 .wy-card[aria-pressed='true'] {
   border-color: var(--wy-armed);
   box-shadow: inset 0 0 0 2px var(--wy-armed);
   background: var(--wy-card-armed);
+}
+
+@media (forced-colors: active) {
+  /* Forced colours mark the armed Card with a 3px double border instead (the forced-colours
+     block below): its extra 2px comes out of the padding, so nothing inside moves. */
+  .wy-card[aria-pressed='true'] {
+    padding: 4px 6px;
+  }
 }
 
 /* The full name and the full cost message: the head of the Card's accessible name, never
@@ -1474,7 +1476,11 @@ a.wy-home:focus-visible {
   min-width: 0;
 }
 
-/* The painted short name. Its right margin keeps it clear of the hotkey in the corner. */
+/* The painted short name. Its right margin keeps it clear of the hotkey in the corner, and
+   only a short label is painted there: the two-column Rail falls back to one column once
+   its Cards are too narrow for a name and a digit at the current text size (the container
+   query in the two-column block), and a label longer than a digit is visually hidden (the
+   `--long` modifier). */
 .wy-card-label {
   margin-right: 0.75rem;
   font-size: 0.875rem;
@@ -1525,6 +1531,23 @@ a.wy-home:focus-visible {
   font-size: 0.75rem;
   line-height: 1.2;
   color: var(--wy-fg-dim);
+}
+
+/* A label longer than a digit — a rebound key's word ("BracketLeft", "ArrowDown") or
+   "Unbound" — would paint over the name, the art or "need N" in the corner. It is visually
+   hidden exactly as the Compact fork hides the hotkey, and stays the tail of the Card's
+   accessible name. `overlay.ts` toggles the class with the label. The body restates the
+   Compact fork's hotkey rule, for the reason `.wy-card-name` restates `.wy-sr-only`. */
+.wy-card-hotkey--long {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* CAN'T AFFORD (#181 H3): the Bounty is below the cost. The Card stays a live button — arming
@@ -1837,6 +1860,14 @@ a.wy-home:focus-visible {
     border-radius: 8px;
   }
 
+  @media (forced-colors: active) {
+    /* The armed border is 3px here (see the forced-colours block): its 2px comes out of the
+       padding, as it does in the full form. */
+    .wy-card[aria-pressed='true'] {
+      padding: 1px 0;
+    }
+  }
+
   .wy-card-swatch {
     width: 34px;
     height: 34px;
@@ -1959,8 +1990,27 @@ a.wy-home:focus-visible {
   );
 }
 
-/* The scrollport is the containing block for its own visually-hidden boxes: the condensed
-   form's `.wy-stats-full` sentences and the Upgrade description are both `position:
+/* A pinned Panel is always the condensed one. The condensed form follows the Rail's WIDTH (the
+   160px container query above), but the Compact fork pins the Panel at every text size, and
+   from 150% text its Rail's content box is wider than 160px: the wide form's head art, role
+   line and rows then crowd the armed tower's name until it is cut off (measured at 658×320 at
+   150%, and 740×360 at 200%). So the shed keys on the pin itself, `overlay.ts`'s class. At
+   100% nothing changes: every pinned Rail there is already within 160px. Same bodies as the
+   container query's, after every rule they override. */
+.wy-rail-panel-pinned .wy-panel-art,
+.wy-rail-panel-pinned .wy-panel-role,
+.wy-rail-panel-pinned .wy-panel-hint,
+.wy-rail-panel-pinned .wy-stats-rows {
+  display: none;
+}
+
+.wy-rail-panel-pinned .wy-stats-glance {
+  display: block;
+  font-size: 0.875rem;
+}
+
+/* The scrollport is the containing block for its own visually-hidden boxes: the
+   `.wy-stats-full` sentences and the Upgrade description are both `position:
    absolute`, and this is what keeps them resolving against THIS box rather than escaping to
    whatever positioned ancestor lies further up.
 
@@ -2184,16 +2234,14 @@ a.wy-home:focus-visible {
 
   /* The armed Card. Forced colours repaint its gold border in the button ink every Card
      has, and drop the inset ring (a box shadow) outright, so armed and resting would look
-     alike. The system's own selection colour marks it instead: the border, and a ring drawn
-     just inside it — which a focused Card's focus ring replaces, so the armed border alone
-     marks a Card that is both. */
+     alike. The system's own selection colour marks it instead, and the mark is the BORDER
+     itself: 3px and double, against a resting Card's 1px solid. A ring drawn as an outline
+     would be replaced by a focused Card's focus ring, leaving a focused armed Card looking
+     like a focused resting one; a border is not. The 2px the border gains is taken back from
+     the padding (beside the armed rule, and in the two icon-form arms, which restate it), so
+     arming still moves nothing inside the Card. */
   .wy-card[aria-pressed='true'] {
-    border-color: Highlight;
-  }
-
-  .wy-card[aria-pressed='true']:not(:focus-visible) {
-    outline: 2px solid Highlight;
-    outline-offset: -4px;
+    border: 3px double Highlight;
   }
 }
 
@@ -2536,11 +2584,23 @@ a.wy-home:focus-visible {
      — and the scroll fade's flex cancellation holds unchanged. (When the Rail itself was the
      grid, the fade had to be rebuilt in grid terms, and a grid track's clamp at zero left its
      row gap behind as 0.5rem of scroll extent. A flex line absorbs the negative outer size,
-     so that cost is gone.) The rows never compress: the grid is a flex item that never
-     shrinks (`.wy-cards`, #69), so its rows keep their max-content height and an over-full
-     Rail scrolls. */
+     so that cost is gone.) The rows never compress: the grid's `min-height: auto` is its
+     content height, so an over-full Rail scrolls rather than squashing the Cards. */
   .wy-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Two columns are for text at its default size. A Card's name sits beside a 56px art and
+     under a corner hotkey, so as the text grows the short name meets the digit and then runs
+     past the Card's edge (measured at 125–200% text on 1280×720 and 1440×900). Once the Rail
+     is too narrow for two Cards at the current text size, it falls back to one column. The
+     threshold mixes px and rem on purpose, so text zoom moves it: 112px is two 56px arts, and
+     12.6rem is the rem-sized rest of two Cards and the gap. `minmax(0, …)` stays: a bare `1fr`
+     gave the Rail a few px of sideways range. */
+  @container wy-rail (max-width: calc(112px + 12.6rem)) {
+    .wy-cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 }
 
@@ -2820,9 +2880,12 @@ a.wy-home:focus-visible {
      Rail and shows the player zero pixels. Short viewport, wide Rail: pinning is keyed to
      the Panel not fitting, and on Compact it never does.
 
-     The condensed form is deliberately NOT repeated here. Condensing answers WRAPPING,
-     which is a width phenomenon and correctly keyed to width alone; at a 220px content box
-     nothing wraps and there is nothing to condense. This arm answers VISIBILITY. */
+     The condensed form is NOT repeated here: it follows the pin itself
+     (`.wy-rail-panel-pinned`, beside the focus reserve). An earlier draft left a 220px
+     content box on the wide form, on the reasoning that condensing answers WRAPPING alone;
+     but the wide form's head art, role line and rows clip the armed name there at heavy
+     text (150% on 658×320, 200% on 740×360), so a pinned Panel is condensed at any width.
+     This arm answers VISIBILITY. */
   .wy-panel {
     position: sticky;
     bottom: 0;
@@ -2875,6 +2938,12 @@ a.wy-home:focus-visible {
     gap: 2px;
     padding: 3px 2px;
     border-radius: 8px;
+  }
+
+  @media (forced-colors: active) {
+    .wy-card[aria-pressed='true'] {
+      padding: 1px 0;
+    }
   }
 
   .wy-card-swatch {

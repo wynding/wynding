@@ -488,7 +488,11 @@ export function createOverlay(
       return;
     }
     const label = formatKeyLabel(keymap.codeFor(action));
-    c.hotkey.textContent = label ?? t('settings.unbound');
+    const text = label ?? t('settings.unbound');
+    c.hotkey.textContent = text;
+    // A label longer than a digit (a rebound key's word, or "Unbound") is visually hidden: it
+    // would paint over the Card's name or art. It stays in the Card's accessible name.
+    c.hotkey.classList.toggle('wy-card-hotkey--long', text.length > 2);
     if (label !== null) c.root.setAttribute('aria-keyshortcuts', label);
     else c.root.removeAttribute('aria-keyshortcuts');
   }
