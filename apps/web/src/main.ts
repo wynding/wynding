@@ -310,7 +310,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  temporal dead zone. */
   let resultsStatusSeq = 0;
   /** The finished run the open results dialog is about — captured ONCE at the terminal edge
-   *  (with the playtrace), which the survey's payload is built from. Null between runs. */
+   *  (with the playtrace), which the survey's payload is built from. Null between runs, and on
+   *  a dialog whose capture threw. */
   let terminalRun: {
     readonly replay: Replay;
     readonly snapshot: CaptureSnapshot;
@@ -352,8 +353,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       survey,
       refreshAsk: () => ask.refresh(),
       compose(idempotencyKey) {
-        // The form only exists on an open dialog, and the dialog only opens after the
-        // terminal capture below — so a null here is a wiring bug, not a state to handle.
+        // The form is only offered on a dialog whose terminal capture (below) produced a run —
+        // so a null here is a wiring bug, not a state to handle.
         if (terminalRun === null) throw new Error('survey: no finished run to describe');
         const { replay, snapshot, hud } = terminalRun;
         return buildSurveyPayload({
@@ -602,7 +603,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // second path cannot silently inherit a stale announcement.
       abandonResultsStatus();
       overlay.showResults(hud, stats);
-      surveyForm?.dialogOpened();
+      // A failed capture leaves no run for the survey to describe (`compose`), so none is offered.
+      if (terminalRun !== null) surveyForm?.dialogOpened();
       resultsShown = true;
     }
     // Every input to the wake lock's predicate except document visibility moves through this

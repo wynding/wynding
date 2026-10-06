@@ -318,8 +318,12 @@ describe('main — the results panel reads the finished run (#181 H2)', () => {
 describe('main — the terminal edge captures each run once, even when it throws (#181 H2)', () => {
   /** An undefended run whose terminal edge throws ONCE: reading the run stats, the playtrace
    *  capture itself, or — after the capture — the survey's ask refresh, which the edge reaches
-   *  once the dialog is showing. */
-  function brokenEdgeApp(step: 'runStats' | 'capture' | 'afterCapture') {
+   *  once the dialog is showing. The survey is offered where its refresh is the step that
+   *  breaks, and wherever `options.survey` asks for it. */
+  function brokenEdgeApp(
+    step: 'runStats' | 'capture' | 'afterCapture',
+    options: { readonly survey?: boolean } = {},
+  ) {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const sched = manualSchedule();
@@ -355,7 +359,7 @@ describe('main — the terminal edge captures each run once, even when it throws
         });
       },
       playtraceDelivery: { copy: async (text: string) => void copied.push(text), save: () => {} },
-      ...(step === 'afterCapture'
+      ...(step === 'afterCapture' || options.survey === true
         ? {
             gameVersion: 'fedcba9876543210fedcba9876543210fedcba98',
             surveyTransport: { send: async () => 'accepted' as const },
@@ -390,7 +394,18 @@ describe('main — the terminal edge captures each run once, even when it throws
       await vi.waitFor(() => expect(copied).toHaveLength(1));
       return (JSON.parse(copied[0]!) as { runs: unknown[] }).runs.length;
     };
-    return { root, results, runToBrokenEdge, capturedRuns, captures: (): number => captures };
+    return {
+      root,
+      results,
+      runToBrokenEdge,
+      capturedRuns,
+      captures: (): number => captures,
+      /** Give feedback's slot in the action row, and the form's below it (#181 H2). */
+      surveySlots: (): HTMLElement[] => [
+        results.querySelector<HTMLElement>('.wy-survey-opener')!,
+        results.querySelector<HTMLElement>('.wy-survey')!,
+      ],
+    };
   }
 
   it('a throw reading the run stats opens nothing; the next refresh opens the dialog with the run captured once', async () => {
@@ -412,6 +427,20 @@ describe('main — the terminal edge captures each run once, even when it throws
     dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
     expect(h.results.hidden, 'the dialog still opens').toBe(false);
     expect(h.captures(), 'the failed capture was attempted once and never again').toBe(1);
+  });
+
+  it('a capture that THROWS leaves no run for the survey to describe: Give feedback is never offered', async () => {
+    const h = brokenEdgeApp('capture', { survey: true });
+    h.runToBrokenEdge();
+    dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
+    expect(h.results.hidden, 'the dialog still opens').toBe(false);
+    // Offering the survey waits on the ask refresh a dialog opening starts, which this harness
+    // settles in a microtask: let it land before asserting nothing was offered.
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    for (const slot of h.surveySlots()) {
+      expect(slot.childElementCount, 'the survey rendered into its slots').toBeGreaterThan(0);
+      expect(slot.hidden, `${slot.className}: nothing to Send about`).toBe(true);
+    }
   });
 
   it('a throw AFTER the capture (the survey’s ask refresh) still leaves the run captured once', async () => {
