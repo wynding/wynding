@@ -324,7 +324,8 @@ function cuePlans(
  *  Since C3 the cues are drawn in PASSES over every creep, each pass over the one before
  *  (`creep-paint.ts`'s CUE-RADIUS ORDERING block derives why):
  *   1. the ink under-strokes of the rings — the slow ring, the stun jolt and flicker, the
- *      ward — `CUE_INK_PX` wider on each side, so no ink ever covers a ring's colour;
+ *      ward — `CUE_INK_PX` wider on each side, so no ring's own ink covers a ring's colour (the HP
+ *      bars and the pips' ink discs, drawn later, do lie over every ring, a neighbour's included);
  *   2. the rings in their colours: the slowed telegraph (M2-S3; its ring ALWAYS, its pulse
  *      only when motion is allowed — WCAG 2.3.3 / GAG §2), the stun telegraph (M2-S6; the
  *      jolt OUTSIDE the silhouette always, the flicker inside it with motion), the ward
@@ -333,7 +334,8 @@ function cuePlans(
  *      rather than the bar's length;
  *   4. the DoT pips (M2-S5a — an ESSENTIAL cue: HP shows damage already TAKEN, a DoT record
  *      armor-bypassing damage already SCHEDULED, which no other surface reveals), each on
- *      its own ink disc, on top of everything, then their drift when motion is allowed. No
+ *      its own ink disc, on top of everything: every pip's ink, then every pip, so no creep's
+ *      ink disc lands on a pip, then their drift when motion is allowed. No
  *      per-tick live-region announcement accompanies them (`dotTelegraphPaintOps` says why).
  *  Every cue is centred on the creep's drawn body, so cue and body cannot drift apart by the
  *  sprite's device-pixel snap. */
@@ -388,15 +390,23 @@ export function drawCreepCues(
       g.fillRect(bar.fill.x, bar.fill.y, bar.fill.w, bar.fill.h);
     }
   }
-  // 4. The DoT pips, each on its own ink disc, then their drift.
+  // 4. The DoT pips: every pip's ink disc, then every pip, then their drift, so no creep's ink
+  //    disc lands on another creep's pip. (They lie over every ring and bar, as designed.)
   for (const p of plans) {
     for (const tel of p.dot) {
       if (tel.kind !== 'pip') continue;
       g.fillStyle(ART_INK, tel.alpha);
       g.fillCircle(tel.x, tel.y, tel.r + CUE_INK_PX);
+    }
+  }
+  for (const p of plans) {
+    for (const tel of p.dot) {
+      if (tel.kind !== 'pip') continue;
       g.fillStyle(tel.colour, tel.alpha);
       g.fillCircle(tel.x, tel.y, tel.r);
     }
+  }
+  for (const p of plans) {
     for (const tel of p.dot) {
       if (tel.kind !== 'drift') continue;
       g.fillStyle(tel.colour, tel.alpha);

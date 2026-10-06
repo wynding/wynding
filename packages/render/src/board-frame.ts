@@ -17,6 +17,7 @@ import {
   drawSelection,
   type GraphicsLike,
 } from './board-draw';
+import { polygonCircles, type PathGraphics } from './circle-path';
 import { snapToDevicePx } from './device-px';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
@@ -60,6 +61,17 @@ export function createLiveLayers<G extends LayerGraphics>(
   make: (layer: LiveLayerName) => G,
 ): { readonly shells: G; readonly effects: G; readonly cues: G } {
   return { shells: make('shells'), effects: make('effects'), cues: make('cues') };
+}
+
+/** The three live layers as `createLiveLayers` makes them, with every layer's circles drawn as
+ *  polygons sized to their radius at `dpr()`, read at each call (`circle-path.ts`): the live
+ *  layers draw hundreds of circles a frame, and Phaser's own arc is 100 segments whatever its
+ *  size (ADR 0005). Here, not in `scene.ts`, so a test can see that every layer has it. */
+export function createPolygonLiveLayers<G extends LayerGraphics & PathGraphics>(
+  make: (layer: LiveLayerName) => G,
+  dpr: () => number,
+): { readonly shells: G; readonly effects: G; readonly cues: G } {
+  return createLiveLayers((layer) => polygonCircles(make(layer), dpr));
 }
 
 /** A sprite layer: shows a placement list (`sprite-pool.ts`). */

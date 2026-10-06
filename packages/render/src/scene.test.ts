@@ -50,7 +50,8 @@ import {
   PENDING_PLATE_ALPHA,
   PLATE_RECT,
 } from './tower-art';
-import { CREEP_LIFT } from './creep-art';
+import { CREEP_ART_R, CREEP_BODY, CREEP_LIFT, CREEP_WINGS, creepRadius } from './creep-art';
+import { covers } from './test-support/outline-overlap';
 import {
   placeCreeps,
   placeTowers,
@@ -1111,7 +1112,7 @@ describe('creep silhouettes and cues — the remaining shapes + the telegraphs',
     expect(dead).toHaveLength(1);
   });
 
-  it('draws in passes over EVERY creep: every ring’s ink, then every ring, then every HP bar, then every pip — so no creep’s ink or bar covers a neighbour’s cue colour', () => {
+  it('draws in passes over EVERY creep: every ring’s ink, then every ring, then every HP bar, then every pip’s ink disc, then every pip — so no ring’s ink covers a ring and no creep’s ink disc covers a pip', () => {
     const all = { slowed: true, poisoned: true, stunned: true, warded: true };
     const { bodies } = placeCreeps(
       [creep(all), creep({ ...all, x: 5 * 256 + 40, creepId: 'armored' })],
@@ -1133,9 +1134,9 @@ describe('creep silhouettes and cues — the remaining shapes + the telegraphs',
       else if (method === 'fillCircle') passes.push(fill === ART_INK ? 'pip-ink' : 'pip');
     }
     // Two creeps, each: three rings' ink (slow, jolt, ward), three rings, a bar of two rects,
-    // three pips on three ink discs.
+    // three pips on three ink discs (every pip's ink, then every pip).
     const runs = passes.filter((p, i) => p !== passes[i - 1]);
-    expect(runs).toEqual(['ink', 'ring', 'bar', ...Array(6).fill(['pip-ink', 'pip']).flat()]);
+    expect(runs).toEqual(['ink', 'ring', 'bar', 'pip-ink', 'pip']);
     expect(passes.filter((p) => p === 'ink')).toHaveLength(6);
     expect(passes.filter((p) => p === 'ring')).toHaveLength(6);
     expect(passes.filter((p) => p === 'bar')).toHaveLength(4);
@@ -1339,4 +1340,178 @@ describe('selection and aura shells at a fractional dpr — they follow the snap
       });
     });
   }
+});
+
+// ---- R4 QC (#181): inks, pips and the bar, where creeps bunch ----
+
+describe('drawCreepCues — every ink under its own cue, every pip whole, the bar opaque (R4 QC)', () => {
+  /** Each drawing call with the paint in force: the fill's colour and alpha for a fill, the
+   *  line's width, colour and alpha for a stroke. */
+  const painted = (
+    calls: readonly Call[],
+  ): { method: string; args: number[]; colour: number; alpha: number; width: number }[] => {
+    const out: { method: string; args: number[]; colour: number; alpha: number; width: number }[] =
+      [];
+    let fill = { colour: -1, alpha: 1, width: 0 };
+    let line = { colour: -1, alpha: 1, width: 0 };
+    for (const { method, args } of calls) {
+      if (method === 'fillStyle') {
+        fill = { colour: args[0] as number, alpha: (args[1] as number | undefined) ?? 1, width: 0 };
+      } else if (method === 'lineStyle') {
+        line = {
+          width: args[0] as number,
+          colour: args[1] as number,
+          alpha: (args[2] as number | undefined) ?? 1,
+        };
+      } else if (method.startsWith('stroke')) out.push({ method, args: args as number[], ...line });
+      else if (method.startsWith('fill')) out.push({ method, args: args as number[], ...fill });
+    }
+    return out;
+  };
+
+  it('no creep’s pip ink disc lands on a pip already drawn — a neighbour’s included', () => {
+    // Two poisoned creeps 2px apart, as a bunch draws them: a later creep's ink disc must not
+    // cover an earlier creep's pip, the one channel a poison has.
+    const { bodies } = placeCreeps(
+      [creep({ poisoned: true }), creep({ poisoned: true, x: 5 * 256 + 51, creepId: 'armored' })],
+      PAL,
+      PROJECTION,
+      FRAMES,
+    );
+    expect(Math.abs(bodies[1]!.cx - bodies[0]!.cx), 'the premise: two creeps 2px apart').toBe(2);
+    const g = fakeGraphics();
+    drawCreepCues(g, PAL, bodies, true, 0);
+    const discs = painted(g.calls).filter((c) => c.method === 'fillCircle');
+    const pips = discs.flatMap((d, i) => (d.colour === PAL.poisoned ? [{ d, i }] : []));
+    expect(pips).toHaveLength(6);
+    for (const { d: pip, i } of pips) {
+      for (const later of discs.slice(i + 1)) {
+        if (later.colour !== ART_INK) continue;
+        const gap = Math.hypot(later.args[0]! - pip.args[0]!, later.args[1]! - pip.args[1]!);
+        expect(gap, 'an ink disc drawn after a pip covers it').toBeGreaterThanOrEqual(
+          later.args[2]! + pip.args[2]! - 1e-9,
+        );
+      }
+    }
+  });
+
+  it('draws each guaranteed pip over its own ink disc — CUE_INK_PX larger, at the same centre — and the drift over the pips', () => {
+    const { bodies } = placeCreeps([creep({ poisoned: true })], PAL, PROJECTION, FRAMES);
+    const g = fakeGraphics();
+    drawCreepCues(g, PAL, bodies, false, 0);
+    const discs = painted(g.calls).filter((c) => c.method === 'fillCircle');
+    const inks = discs.filter((d) => d.colour === ART_INK);
+    const pips = discs.filter((d) => d.colour === PAL.poisoned && d.alpha === 1);
+    const drifts = discs.filter((d) => d.colour === PAL.poisoned && d.alpha < 1);
+    expect([inks.length, pips.length, drifts.length]).toEqual([3, 3, 3]);
+    pips.forEach((pip, i) => {
+      expect(inks[i]!.args.slice(0, 2)).toEqual(pip.args.slice(0, 2));
+      expect(inks[i]!.args[2]).toBeCloseTo(pip.args[2]! + CUE_INK_PX, 12);
+      expect(discs.indexOf(inks[i]!)).toBeLessThan(discs.indexOf(pip));
+    });
+    const lastPip = Math.max(...pips.map((p) => discs.indexOf(p)));
+    for (const d of drifts) expect(discs.indexOf(d)).toBeGreaterThan(lastPip);
+  });
+
+  it('under-strokes the flicker as it does the jolt: its own stroke, CUE_INK_PX wider each side, at the flicker’s own animated alpha', () => {
+    for (const t of [0, 225, 450]) {
+      // the flicker's trough (alpha 0.15), its middle and its crest
+      const { bodies } = placeCreeps(
+        [creep({ stunned: true, slowed: true })],
+        PAL,
+        PROJECTION,
+        FRAMES,
+      );
+      const g = fakeGraphics();
+      drawCreepCues(g, PAL, bodies, false, t);
+      const strokes = painted(g.calls).filter((c) => c.method === 'strokeCircle');
+      const inks = strokes.filter((s) => s.colour === ART_INK);
+      // Every coloured ring but the slow pulse, a motion cue drawn without an ink.
+      const rings = strokes.filter(
+        (s) => s.colour !== ART_INK && !(s.colour === PAL.slowed && s.alpha < 1),
+      );
+      expect(rings.map((s) => s.colour)).toEqual([PAL.slowed, PAL.stunned, PAL.stunned]);
+      expect(inks).toHaveLength(3);
+      rings.forEach((ring, i) => {
+        expect(inks[i]!.args, `t=${t}`).toEqual(ring.args);
+        expect(inks[i]!.width, `t=${t}`).toBe(ring.width + 2 * CUE_INK_PX);
+        expect(inks[i]!.alpha, `t=${t}`).toBe(ring.alpha);
+      });
+      if (t === 0) expect(rings[2]!.alpha, 'the premise: a faded flicker').toBeCloseTo(0.15, 12);
+    }
+  });
+
+  it('paints the HP bar’s backing and fill opaque — the colours the palette gate measures are the colours drawn', () => {
+    for (const hpFrac of [1, 0.2]) {
+      const { cues } = drawnCreep(creep({ hpFrac }));
+      const rects = painted(cues).filter((c) => c.method === 'fillRect');
+      expect(rects.map((r) => [r.colour, r.alpha])).toEqual([
+        [ART_INK, 1],
+        [hpFrac < 0.34 ? PAL.creepLowHp : PAL.creep, 1],
+      ]);
+    }
+  });
+});
+
+// ---- R4 QC (#181): a flyer's wings under its own cues ----
+
+describe('a slowed flyer’s wings under its own slow ring — MEASURED and PINNED (R4 QC)', () => {
+  // Until C4 the airborne cue was held clear of every ring (r×3.22 and out, and clear of the
+  // drift). Since C4 it is the wings, under every cue (`layers.ts`), and the slow ring — which a
+  // flyer carries in shipped content, the slow tower striking both domains — crosses them on an
+  // ink band a fixed 4px wide. At a phone's cells that band covers most of each wing. Pinned
+  // here, not passed: the share of the wings' area outside the body that the ring leaves in
+  // sight, per cell size, so a change that hides more of them fails.
+  const PINNED: Readonly<Record<number, readonly [number, number]>> = {
+    // cellPx: [flying, armored-flyer], the measured share rounded down
+    10: [0.15, 0.17],
+    13: [0.29, 0.23],
+    20: [0.49, 0.43],
+    40: [0.74, 0.72],
+  };
+
+  /** The share of a look's wings outside its body that no slow-ring stroke covers, at `r`. */
+  const visibleShare = (shape: 'triangle' | 'hexagon', r: number): number => {
+    const g = fakeGraphics();
+    const cue = { cx: 0, cy: 0, r, hue: 0, hpFrac: 1, slowed: true };
+    drawCreepCues(g, PAL, [{ ...cue, poisoned: false, stunned: false, warded: false }], true, 0);
+    // Every ring stroke as drawn: its radius and half its width, in CSS px.
+    const bands: { r: number; half: number }[] = [];
+    let width = 0;
+    for (const { method, args } of g.calls) {
+      if (method === 'lineStyle') width = args[0] as number;
+      if (method === 'strokeCircle') bands.push({ r: args[2] as number, half: width / 2 });
+    }
+    expect(bands.length, 'the premise: the ring and its ink').toBe(2);
+    const unit = r / CREEP_ART_R;
+    const body = CREEP_BODY[shape];
+    let wing = 0;
+    let seen = 0;
+    for (let x = -24; x <= 24; x += 0.1) {
+      for (let y = -12; y <= 8; y += 0.1) {
+        if (!CREEP_WINGS.some((w) => covers(w, x, y, unit)) || covers(body, x, y, unit)) continue;
+        wing++;
+        const d = Math.hypot(x, y) * unit;
+        if (bands.every((b) => Math.abs(d - b.r) > b.half)) seen++;
+      }
+    }
+    return seen / wing;
+  };
+
+  it('leaves at least the pinned share of each flyer’s wings in sight, at the narrow floor, a phone’s cells, and up', () => {
+    const report: string[] = [];
+    for (const [cell, [flying, armoredFlyer]] of Object.entries(PINNED)) {
+      const cellPx = Number(cell);
+      const shares = [
+        visibleShare('triangle', creepRadius(cellPx, 'flying')),
+        visibleShare('hexagon', creepRadius(cellPx, 'armored')),
+      ];
+      report.push(`${cellPx}px ${shares.map((s) => (s * 100).toFixed(0) + '%').join('/')}`);
+      expect(shares[0], `flying at ${cellPx}px`).toBeGreaterThanOrEqual(flying);
+      expect(shares[1], `armored-flyer at ${cellPx}px`).toBeGreaterThanOrEqual(armoredFlyer);
+    }
+    console.info(
+      `[scene.test] a slowed flyer's wings in sight past its slow ring: ${report.join(', ')}`,
+    );
+  });
 });

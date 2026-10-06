@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   createLiveLayers,
+  createPolygonLiveLayers,
   createSpriteLayers,
   drawBoardFrame,
   forEachLayerSprite,
@@ -16,6 +17,7 @@ import {
   type BoardFrameInput,
   type BoardTargets,
 } from './board-frame';
+import { circleSegments, type PathGraphics } from './circle-path';
 import { createSpritePool } from './sprite-pool';
 import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
 import { AURA_SHELL_ALPHA } from './board-draw';
@@ -673,5 +675,49 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       sprites.creeps,
       live.cues.depth,
     ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+});
+
+// ---- R4 QC (#181): every live layer's circles are polygons ----
+
+describe('createPolygonLiveLayers — every live layer draws its circles as polygons (R4 QC)', () => {
+  /** A recording live layer that can also trace paths, as a Phaser `Graphics` can. */
+  const pathLayer = (): ReturnType<typeof recordingLayer> & PathGraphics => {
+    const g = recordingLayer();
+    const record =
+      (method: string) =>
+      (...args: unknown[]): void => {
+        g.calls.push({ method, args });
+      };
+    return Object.assign(g, {
+      beginPath: record('beginPath'),
+      moveTo: record('moveTo'),
+      lineTo: record('lineTo'),
+      closePath: record('closePath'),
+      strokePath: record('strokePath'),
+      fillPath: record('fillPath'),
+    });
+  };
+
+  it('wraps the shells, the effects and the cues, at the dpr read at each call — never Phaser’s 100-sided arc', () => {
+    let dpr = 1;
+    const live = createPolygonLiveLayers(
+      () => pathLayer(),
+      () => dpr,
+    );
+    for (const name of ['shells', 'effects', 'cues'] as const) {
+      const g = live[name];
+      dpr = 1;
+      g.strokeCircle(0, 0, 30);
+      dpr = 2;
+      g.fillCircle(0, 0, 30);
+      const methods = g.calls.map((c) => c.method);
+      expect(methods, name).not.toContain('strokeCircle');
+      expect(methods, name).not.toContain('fillCircle');
+      expect(
+        methods.filter((m) => m === 'lineTo'),
+        name,
+      ).toHaveLength(circleSegments(30, 1) - 1 + circleSegments(30, 2) - 1);
+    }
   });
 });

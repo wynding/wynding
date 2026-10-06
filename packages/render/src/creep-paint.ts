@@ -591,8 +591,11 @@ export function wardPaintOps(
 // its stroke. It is what makes a cue read on every surface it lands on: its colour against
 // the dark floor and plate, its ink edge against a light tower head, a rim or another creep's
 // body (`palette.test.ts` gates both halves). Every creep's ink is drawn before any creep's
-// colour, so an ink edge never covers a cue's colour — a slowed and stunned creep at a small
-// cell keeps its slow ring where the jolt's wider ink would otherwise have buried it. The
+// colour, so no ring's ink edge covers another ring's colour — a slowed and stunned creep at a
+// small cell keeps its slow ring where the jolt's wider ink would otherwise have buried it.
+// The HP bars' opaque backings and the pips' ink discs are drawn after the rings and lie over
+// them, a neighbour's included, by design; the pips' inks go down before every pip, so none
+// covers a pip. The
 // motion cues — the pulse and the drift — carry none: they fade by design and are gated as
 // non-essential.
 //
@@ -618,8 +621,10 @@ export function wardPaintOps(
 // and drawn in the creeps' paint layer, under every cue: they reach r×2.05 out to each side
 // and r×0.75 above the body's centre, the rings cross them, and each ring's ink edge
 // separates it from the light wing under it. They differ from every ring in SHAPE — two
-// straight-edged triangles fixed to the body's sides, never a closed curve — and nothing a
-// creep draws lands a cell away from it any more.
+// straight-edged triangles fixed to the body's sides, never a closed curve. The wings no longer
+// float a cell away, but a flyer's cues centre on its lifted body, so its HP bar rides about a
+// cell above its true position (1.06-1.14 cells for the shipped armored flyer, 0.95-1.03 for
+// the flying one), over the cell to its north; its opaque backing reads on whatever is there.
 //
 // THE CO-OCCURRENCE IS A VM CONTRACT, NOT A CONTENT FACT (#126 ship-review). `poisoned`,
 // `stunned`, `slowed` and `airborne` are independent booleans on the render VM, so this
