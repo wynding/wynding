@@ -117,12 +117,19 @@ interface Head {
   seen: number;
 }
 
+/** A tower's footprint centre along one axis, fixed-point sim units, from its `col` or `row`:
+ *  where the sim's fire step starts its shots (`combat.ts`). Aiming turns a head about it, and
+ *  `tower-fire.ts` finds a shot's tower by it, so all three must meet the same point. */
+export function footprintCentreFp(cell: number): number {
+  return (cell + 1) * FP_ONE;
+}
+
 /** The bearing of `shot` from its tower's footprint centre: toward where its target is drawn,
  *  or where a blast will land. Null when its target is no longer drawn, or sits on the centre. */
 function shotBearing(shot: AimShot, creeps: AimFrame['creeps']): number | null {
   const { tower, tracer } = shot;
-  const cx = (tower.col + 1) * FP_ONE;
-  const cy = (tower.row + 1) * FP_ONE;
+  const cx = footprintCentreFp(tower.col);
+  const cy = footprintCentreFp(tower.row);
   if (tracer.kind === 'blast') return aimAngle(cx, cy, tracer.destX, tracer.destY);
   const target = creeps.get(tracer.targetId);
   return target === undefined ? null : aimAngle(cx, cy, target.x, target.y);
@@ -159,7 +166,12 @@ export function createAimTracker(): AimTracker {
         if (maxStep === 0 || t.targetId === 0) continue;
         const target = creeps.get(t.targetId);
         if (target === undefined) continue;
-        const want = aimAngle((t.col + 1) * FP_ONE, (t.row + 1) * FP_ONE, target.x, target.y);
+        const want = aimAngle(
+          footprintCentreFp(t.col),
+          footprintCentreFp(t.row),
+          target.x,
+          target.y,
+        );
         if (want !== null) head.angle = stepToward(head.angle, want, maxStep);
       }
       // Forget the towers that are gone — only looked for when some are.

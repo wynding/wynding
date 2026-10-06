@@ -46,7 +46,6 @@
 // shot's tower is looked for, and the towers that just fired are kept and pruned in place.
 
 import { MS_PER_TICK } from '@wynding/sim';
-import { FP_ONE } from '@wynding/engine';
 import { artUnit, towerAims } from './art-frames';
 import { snapToDevicePx } from './device-px';
 import { roleColour, type Palette } from './palette';
@@ -54,7 +53,7 @@ import { HEAD_AT_REST, type HeadPose } from './placement';
 import type { Projection } from './projection';
 import { isDetonation } from './scorches';
 import { ART_FLASH, FIRE_PULSE_RINGS, MUZZLE_FLASH, RECOIL_DEPTH } from './tower-art';
-import type { AimTracker } from './tower-aim';
+import { footprintCentreFp, type AimTracker } from './tower-aim';
 import { towerRoleFor } from './tower-paint';
 import type { TowerVM, TracerVM } from './types';
 
@@ -150,7 +149,7 @@ export interface FireTracker {
  *  start. Looked for only for a shot first seen, a few a frame at most. */
 function towerAt(towers: readonly TowerVM[], x: number, y: number): TowerVM | undefined {
   for (const t of towers) {
-    if ((t.col + 1) * FP_ONE === x && (t.row + 1) * FP_ONE === y) return t;
+    if (footprintCentreFp(t.col) === x && footprintCentreFp(t.row) === y) return t;
   }
   return undefined;
 }

@@ -321,14 +321,17 @@ describe('heads — one per look, role-coloured, outlined in ink', () => {
 
 describe('firing — the muzzle flash and the ring pulse (T3)', () => {
   const C = ART_BOX / 2;
-  /** How far a head's outline reaches from the footprint centre, its ink stroke included. */
+  /** How far a head's outline reaches from the footprint centre, its ink stroke included: half
+   *  the stroke's design width (1 where none is set, as `strokeWidthAt` draws it), and nothing
+   *  for an unstroked shape. No cell size here, so no `minWidthPx` floor. */
   const reachOf = (mark: TowerFootprintMark): number =>
     Math.max(
-      ...HEAD_ART[mark].shapes.flatMap((s) =>
-        shapeOutline(s).flatMap((l) =>
-          l.points.map((p) => Math.hypot(p[0] - C, p[1] - C) + (s.width ?? 0) / 2),
-        ),
-      ),
+      ...HEAD_ART[mark].shapes.flatMap((s) => {
+        const grow = s.stroke === undefined ? 0 : (s.width ?? 1) / 2;
+        return shapeOutline(s).flatMap((l) =>
+          l.points.map((p) => Math.hypot(p[0] - C, p[1] - C) + grow),
+        );
+      }),
     );
 
   it('the muzzle flash covers the tip of every head that aims, and stays inside the footprint', () => {
