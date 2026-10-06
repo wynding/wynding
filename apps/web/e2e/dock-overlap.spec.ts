@@ -559,17 +559,8 @@ interface DockCase {
    *  (#181 QC), so a layout change that moves a case across that line fails loudly instead of
    *  silently emptying the table of scrolling (or whole) cases. Each value is measured on
    *  macOS's font stack and CI's (DejaVu Sans) alike, at a size where the form is the ONLY one
-   *  the controls allow: not where both are (see the 560×560 case). A case whose form is a
-   *  font metric declares it per stack, and each run asserts its own. */
-  readonly startedScrolls: boolean | { readonly macOS: boolean; readonly dejaVu: boolean };
-}
-
-/** The started form a case declares for THIS run's font stack: macOS's locally, DejaVu Sans on
- *  CI's Linux runners — the two stacks every value in the table is measured on. */
-function declaredStartedScrolls(c: DockCase): boolean {
-  const v = c.startedScrolls;
-  if (typeof v === 'boolean') return v;
-  return process.platform === 'darwin' ? v.macOS : v.dejaVu;
+   *  the controls allow: not where both are (see the 560×560 case). */
+  readonly startedScrolls: boolean;
 }
 
 const HARDENED: readonly DockCase[] = [
@@ -580,17 +571,16 @@ const HARDENED: readonly DockCase[] = [
   { width: 800, height: 501, zoom: 150, startedScrolls: true },
   { width: 1080, height: 600, zoom: 200, startedScrolls: false },
   // The owner's worst case. Start takes the banner down, so its started phase is plain
-  // 640×560 at 200%, where the started Dock's form is a font metric (#181 QC): DejaVu Sans sets
-  // the four controls 3–13% wider, so on CI they need three rows where only two fit, and the
-  // Dock scrolls; on macOS's stack they take two, whole, in either form. One form per stack, so
-  // the case declares both.
+  // 640×560 at 200%, where the four controls take two whole rows on both stacks — macOS's
+  // fonts measured locally, CI's DejaVu Sans measured on CI (a macOS-hosted DejaVu emulation
+  // predicted three rows; CI's own rendering is the arbiter) — so the started Dock is whole.
   {
     width: 640,
     height: 560,
     zoom: 200,
     banner: true,
     coarse: true,
-    startedScrolls: { macOS: false, dejaVu: true },
+    startedScrolls: false,
   },
   // The worst case's size without the banner, at 560 rather than 640 wide (#181 QC), where the
   // started Dock scrolls on both stacks — and MUST: its controls need three rows even with the
@@ -983,7 +973,7 @@ for (const c of HARDENED) {
       await page.getByRole('button', { name: 'Start', exact: true }).click();
       await expect(page.locator('.wy-board')).toHaveAttribute('data-started', 'true');
       await settle(page);
-      const startedScrolls = declaredStartedScrolls(c);
+      const startedScrolls = c.startedScrolls;
       expect(
         await page.locator('.wy-dock').evaluate((el) => el.classList.contains('wy-dock--scroll')),
         `started: the case declares the started Dock ${startedScrolls ? 'scrolls' : 'is whole'}`,
