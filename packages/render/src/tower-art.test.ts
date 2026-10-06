@@ -488,7 +488,9 @@ describe('the plate, the boost glow and the pending rim', () => {
         if (cue?.kind === 'circle') fitted = Math.min(fitted, cue.r);
       }
     }
-    expect(fitted).toBeLessThan(inner.r);
+    // The least any frame draws — 9px cells just under dpr 19/18, as art-frames.test.ts pins
+    // it — so the shares below are checked at the true worst, not a sampled near miss.
+    expect(fitted / inner.r).toBeCloseTo(0.9144, 4);
     const N = 720;
     const shown: string[] = [];
     for (const [look, r] of TOWER_LOOKS.filter((l) => l.role !== 'support').flatMap((l) =>
