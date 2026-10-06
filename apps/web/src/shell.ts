@@ -7,8 +7,10 @@
 //   │   ├── a.wy-home              (board-mark + span.wy-wordmark — the text is Compact-hidden)
 //   │   │                           …or span.wy-home when HOSTED: identical artwork, no link
 //   │   │                           semantics at all (ADR 0012, #146 — see `createShell`)
-//   │   ├── div.wy-hud              (the five status chips; the labelled scrollport)
-//   │   └── div.wy-dock             (Pause/Speed/Settings/Start)
+//   │   ├── div.wy-hud              (the five status chips + the wave strip; the labelled
+//   │   │                            scrollport)
+//   │   └── div.wy-dock             (Pause/Speed/Settings/Start — the countdown dial drawn
+//   │                                inside Start/Call wave)
 //   ├── div.wy-banner  (the install suggestion — a RESERVED grid row, hidden by default)
 //   └── div.wy-main
 //       ├── div.wy-stage   (position: relative)
@@ -42,17 +44,23 @@
 
 import { t } from './i18n/t';
 import { REGION_ATTR } from './layout';
+import { chipIcon, countdownDial, type ChipIconKind, type CountdownDialParts } from './hud-icons';
 
 /** One status readout in the Shell (contract §4 — dual-form chips, ADR 0004-safe).
  *
  *  `full` carries the COMPLETE localized ICU message ("Lives: 10") and is the chip's
- *  accessible text in BOTH layouts — Compact merely renders it visually-hidden (`ui.css`),
- *  never truncating or sentence-splitting it. `glance` is the Compact-only presentation
- *  (icon + value), `aria-hidden` so assistive tech reads the full message exactly once. */
+ *  accessible text in BOTH layouts — rendered visually hidden (`ui.css`), never truncated or
+ *  sentence-split. `glance` is the visible presentation in both layouts since #181 (H1): an
+ *  inline-SVG icon and the value, `aria-hidden` so assistive tech reads the full message
+ *  exactly once. `value` is the glance's one rewritten leaf — the icon beside it is static, so
+ *  a refresh never replaces it (#98: only a leaf's own text is ever rewritten). For the
+ *  countdown that leaf is the NUMBER inside `.wy-chip-value`, which also holds the static unit
+ *  after a `<wbr>`: Compact's narrow column may wrap the unit under the digits, never a digit. */
 export interface ShellChip {
   readonly root: HTMLSpanElement;
   readonly full: HTMLSpanElement;
   readonly glance: HTMLSpanElement;
+  readonly value: HTMLSpanElement;
 }
 
 export interface ShellHud {
@@ -66,21 +74,12 @@ export interface ShellHud {
 /** The wave-preview surface (M2-S2, PLAN.md P3 step 17) — its OWN visible block in BOTH
  *  layouts, never chip-hosted (the Compact chip's `full` text is screen-reader-only, so
  *  entries stuffed into the wave chip would be invisible to sighted Compact users).
- *  TWO HOMES since the playtest round (`placePreview`): floating over the Stage wherever
- *  the Stage has dead space wide enough to hold a legible card (#101 —
- *  `preview-place.ts`) — click-through display in its RESTING form
- *  (`pointer-events: none`, no tab stop, read after the board in source order), flipped
- *  by `main.ts` to a labelled, focusable scroll form IN PLACE while its content exceeds
- *  its clamp, at any zoom — and inside `.wy-hud`'s focusable, keyboard-scrollable chips
- *  scrollport (contract §1) on Compact and wherever no compliant band exists (portrait
- *  phones are Standard, and land here), where the ui.css row reservation keeps the status
- *  row content-invariant and a long entry list stays keyboard-reachable by the
- *  scrollport's inheritance.
- *  `overlay.ts` owns all three nodes' content/visibility every frame; the Shell only
- *  builds the scaffolding and moves the one node between its homes. */
-/** The wave preview's two supported homes (playtest round) — see `placePreview`. */
-export type PreviewHome = 'stage' | 'hud';
-
+ *  ONE HOME since #181 (L1): it always lives inside `.wy-hud` — a one-line STRIP in the
+ *  Standard status row (`ui.css` sizes it from the row's leftover space, never from its own
+ *  content, so no wave can resize the row or move the board), and an in-flow block in the
+ *  Compact status column. That superseded #101's floating placement chain (letterbox, then
+ *  border ring, then the reserved hud row). `overlay.ts` owns all three nodes'
+ *  content/visibility every frame; the Shell only builds the scaffolding. */
 export interface ShellPreview {
   readonly root: HTMLElement;
   readonly title: HTMLElement;
@@ -96,6 +95,12 @@ export interface ShellDock {
    *  hides for the rest of the run once pressed. `overlay.ts` owns its text/visibility;
    *  this is the empty slot P1 reserved. */
   readonly primary: HTMLButtonElement;
+  /** The countdown dial inside the primary action (#181 H1, Standard only): decoration,
+   *  `aria-hidden`, absolutely positioned in the button's own inline-start padding (`ui.css`),
+   *  so it contributes nothing to the button's size or the Dock's — it can never move the Dock
+   *  or the board, shown or hidden. Drawn only where the Dock pass measured room for it beside
+   *  the label (`dock-reserve.ts`). The wave chip's glance is the readable countdown. */
+  readonly dial: CountdownDialParts;
 }
 
 /** One tower Card (PLAN.md P2, M2-S3: one per catalog tower) — a whole clickable/
@@ -147,8 +152,7 @@ export interface ShellHandle {
    *  its activation is owned by `main.ts` and is registered only for the anchor form. */
   readonly home: HTMLElement;
   readonly board: HTMLElement; // .wy-board — the scene mount point
-  /** The board's positioned wrapper (`div.wy-stage`) — the containing block the floating
-   *  wave preview anchors to on Standard (playtest round). */
+  /** The board's positioned wrapper (`div.wy-stage`) — the box the board is laid out in. */
   readonly stage: HTMLElement;
   readonly rail: HTMLElement; // aside.wy-rail
   /** The chips list — the labelled, keyboard-reachable scrollport (contract §1). */
@@ -170,16 +174,6 @@ export interface ShellHandle {
    *  be heard by assistive tech, not read on-screen alongside the Panel's own text. */
   readonly live: HTMLElement;
   /** Remove the Shell from its parent. */
-  /** Re-home the wave preview (playtest round). Its two homes: `'stage'` — floating over
-   *  the Stage, out of every layout flow, so the status row (the shell's content-sized
-   *  first grid row) never resizes with it and the board never re-projects; `'hud'` — the
-   *  bounded, keyboard-scrollable chips scrollport, used on Compact (fixed column width
-   *  already isolates the board) and — since #101 — on any Standard stage with no dead
-   *  band wide enough for a legible card (with ui.css's row reservation keeping that row
-   *  content-invariant). One node, one AT surface: reparented, never duplicated.
-   *  `main.ts` decides which home from its `COMPACT_QUERY` listener + the measured
-   *  placement (`preview-place.ts`). */
-  placePreview(home: PreviewHome): void;
   destroy(): void;
 }
 
@@ -320,9 +314,24 @@ function homeAnchor(doc: Document): HTMLAnchorElement {
   return a;
 }
 
-/** One dual-form chip slot. Both nodes always exist; `overlay.ts` writes both through its
- *  single `setChip` path, and `ui.css` decides which one is visible per layout. */
-function chip(doc: Document, slot: string): ShellChip {
+/** One dual-form chip slot. Both forms always exist; `overlay.ts` writes the full message and
+ *  the glance's `value` through its single `setChip` path, and `ui.css` decides how each
+ *  renders per layout. The glance is [icon][value] (#181 H1), with two static, localized
+ *  companions where the style frame draws one: the score's dim "Score" label BEFORE its value
+ *  (Standard shows it, Compact's narrow column drops it) and the stars' "/ 3" AFTER it. Both
+ *  are written once here, like the wordmark — they carry no live value.
+ *
+ *  A `unit` (the countdown's "s") is a third kind: part of the value as read — "25s", in the
+ *  value's own weight and colour, both layouts — yet static. It sits INSIDE `.wy-chip-value`,
+ *  after the rewritten number and a `<wbr>`, so the value reads as one word wherever it fits,
+ *  and where Compact's column is narrower than even the value (568×320 at 175–200% text, 658×320
+ *  at 200%) the unit wraps under the digits rather than running past the column's edge (#181 QC
+ *  round 2). */
+function chip(
+  doc: Document,
+  slot: ChipIconKind,
+  extras: { readonly label?: string; readonly suffix?: string; readonly unit?: string } = {},
+): ShellChip {
   const root = doc.createElement('span');
   root.className = 'wy-chip';
   root.dataset.wyChip = slot;
@@ -331,8 +340,34 @@ function chip(doc: Document, slot: string): ShellChip {
   const glance = doc.createElement('span');
   glance.className = 'wy-chip-glance';
   glance.setAttribute('aria-hidden', 'true');
+  const value = doc.createElement('span');
+  value.className = 'wy-chip-value';
+  // The leaf `setChip` rewrites: the value itself, or — with a unit — the number inside it.
+  let leaf = value;
+  if (extras.unit !== undefined) {
+    leaf = doc.createElement('span');
+    leaf.className = 'wy-chip-number';
+    const unit = doc.createElement('span');
+    unit.className = 'wy-chip-unit';
+    unit.textContent = extras.unit;
+    value.append(leaf, doc.createElement('wbr'), unit);
+  }
+  glance.append(chipIcon(doc, slot));
+  if (extras.label !== undefined) {
+    const label = doc.createElement('span');
+    label.className = 'wy-chip-label';
+    label.textContent = extras.label;
+    glance.append(label);
+  }
+  glance.append(value);
+  if (extras.suffix !== undefined) {
+    const suffix = doc.createElement('span');
+    suffix.className = 'wy-chip-suffix';
+    suffix.textContent = extras.suffix;
+    glance.append(suffix);
+  }
   root.append(full, glance);
-  return { root, full, glance };
+  return { root, full, glance, value: leaf };
 }
 
 /** What the Shell needs told rather than discovered. One field today; a named type so the
@@ -407,27 +442,29 @@ export function createShell(
   hudBox.tabIndex = 0;
   const lives = chip(doc, 'lives');
   const bounty = chip(doc, 'bounty');
-  const score = chip(doc, 'score');
-  const wave = chip(doc, 'wave');
-  const stars = chip(doc, 'stars');
+  const stars = chip(doc, 'stars', { suffix: t('hud.stars.glance.max') });
+  const score = chip(doc, 'score', { label: t('hud.score.glance.label') });
+  const wave = chip(doc, 'wave', { unit: t('hud.wave.glance.unit') });
 
-  // --- Wave preview (M2-S2; two homes since the playtest round — see the `ShellPreview`
-  // doc comment). BUILT into the `.wy-hud` slot (between the wave chip and stars, below),
-  // which stays its exact home on Compact and under heavy zoom; `placePreview` floats it
-  // over the Stage on ordinary Standard. `overlay.ts` fills in the title/list text and
-  // toggles `hidden`; empty/hidden here is the safe pre-first-render default. ---
+  // --- Wave preview (M2-S2; one home since #181 — see the `ShellPreview` doc comment). The
+  // LAST layout item in `.wy-hud`, after the countdown chip it previews: on Standard it is the
+  // row's one flexible item, so it must be the one that takes the leftover space. `overlay.ts`
+  // fills in the title/list text and toggles `hidden`; empty/hidden here is the safe
+  // pre-first-render default. ---
   const preview = doc.createElement('div');
   preview.className = 'wy-wave-preview';
-  // A declared layout region (contract §5, playtest round): the preview floats over the
-  // Stage on Standard, making it the second Stage overlay after the Dock — the relations
-  // gate (`layout-probe.ts`) budgets its grid overlap, and an undeclared overlay is
-  // exactly how a surface escapes every budget.
+  // A declared layout region (contract §5): the relations gate (`layout-probe.ts`) holds it
+  // inside the status region and off the projected grid entirely, in both layouts.
   preview.setAttribute(REGION_ATTR, 'preview');
   preview.hidden = true;
   const previewTitle = doc.createElement('p');
   previewTitle.className = 'wy-wave-preview-title';
   const previewList = doc.createElement('ul');
   previewList.className = 'wy-wave-preview-list';
+  // Explicit, not implied: WebKit drops a list's semantics once it is styled `list-style: none`
+  // and laid out as a flex row — exactly the strip's form — so VoiceOver would read the
+  // entries as loose text. The role restores "list, N items".
+  previewList.setAttribute('role', 'list');
   preview.append(previewTitle, previewList);
 
   // --- The pollable board summary (#79). A haircut taken on evidence rather than
@@ -446,7 +483,7 @@ export function createShell(
   // AT-only shrug: `.wy-hud` is the shell's content-sized status row, so a summary that
   // took a layout box would resize that row every time the last poisoned creep died —
   // re-projecting the board MID-RUN, the exact defect `stage-stability.spec.ts` exists to
-  // forbid and that #101 (this same round) is spending pixels to undo. Out of flow, it
+  // forbid. Out of flow, it
   // costs the board nothing at any zoom. Like `.wy-preview-full` it RESTATES `.wy-sr-only`'s
   // rules in its own class rather than composing that one on: `.wy-sr-only` is used as an
   // IDENTITY by `querySelector('.wy-sr-only')`, which resolves the live-region announcer.
@@ -455,7 +492,13 @@ export function createShell(
   statusSummary.setAttribute('aria-live', 'off');
   statusSummary.hidden = true; // empty board is the safe pre-first-render default
 
-  hudBox.append(lives.root, bounty.root, score.root, wave.root, preview, stars.root, statusSummary);
+  // The countdown FIRST (#181): its glance is the one readable countdown, in both layouts, so
+  // it must sit on the hud's first line — the one line its height cap always shows at rest
+  // (`max(2.5rem, …)`, taller than any one line). Third was not enough: where text is heavy
+  // and the row narrow, a line holds one chip or two (360×640 at 200%, 320×560 at 300%, the
+  // Compact column), and the third chip sat wholly outside the cap. Then lives, bounty, stars,
+  // the de-emphasised score, and the strip — the row's one flexible item — last.
+  hudBox.append(wave.root, lives.root, bounty.root, stars.root, score.root, preview, statusSummary);
 
   // --- Dock: a status child in BOTH layouts (contract §1's topology amendment) ---
   const dock = doc.createElement('div');
@@ -471,6 +514,12 @@ export function createShell(
   // the run once pressed — the empty slot P1 reserved).
   const primaryBtn = dockButton(doc, 'wy-btn wy-primary');
   primaryBtn.hidden = true; // safe default before overlay.ts's first render
+  // The countdown dial (#181 H1) — see `ShellDock.dial`: inside the button, out of its layout,
+  // hidden until `overlay.ts` has a countdown to show. Appended after the markup contract's two
+  // spans, which `dockButtonParts` finds by class, so the contract is unchanged.
+  const dial = countdownDial(doc);
+  dial.root.hidden = true;
+  primaryBtn.append(dial.root);
   // The global Sell button is removed (PLAN.md P2) — Sell lives in the Panel now; the `X`
   // hotkey still sells the current selection directly via the controller (input.ts).
   dock.append(pauseBtn, speedBtn, settingsBtn, primaryBtn);
@@ -589,21 +638,6 @@ export function createShell(
 
   shell.append(status, banner, main, live);
 
-  const placePreview = (home: PreviewHome): void => {
-    // CONDITIONAL moves, never unconditional re-appends: appending an already-last child
-    // still performs remove-then-insert, which zeroes the node's scrollTop — and the
-    // caller re-evaluates on every ResizeObserver tick, so an unconditional move would
-    // yank a reader scrolled mid-composition back to the top on any window resize.
-    // The hud home restores the exact pre-float slot: between the wave chip and the stars
-    // chip (the `hudBox.append` order above), so the chips scrollport reads identically
-    // to the pre-playtest-round layout.
-    if (home === 'hud') {
-      if (preview.parentElement !== hudBox) hudBox.insertBefore(preview, stars.root);
-    } else if (preview.parentElement !== stage) {
-      stage.append(preview);
-    }
-  };
-
   return {
     root: shell,
     status,
@@ -621,6 +655,7 @@ export function createShell(
       speed: speedBtn,
       settings: settingsBtn,
       primary: primaryBtn,
+      dial,
     },
     cards,
     panel: { root: panel },
@@ -632,7 +667,6 @@ export function createShell(
       dismissGlyph: bannerDismissGlyph,
     },
     live,
-    placePreview,
     destroy(): void {
       shell.remove();
     },

@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { HudVM, PreviewEntryVM } from '@wynding/render';
-import { compileRuleset } from '@wynding/sim';
+import {
+  COLOUR_MODES,
+  creepShapeFor,
+  resolvePalette,
+  type HudVM,
+  type PreviewEntryVM,
+} from '@wynding/render';
+import { compileRuleset, MS_PER_TICK } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { createOverlay, type UiAction, type HudView } from './overlay';
 import type { ModalOverlay } from './modal';
 import { createShell, dockButtonParts } from './shell';
+import { dialDash, hexColour } from './hud-icons';
 import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
 import { createController, type UiState } from './controller';
@@ -86,6 +93,8 @@ const fakeEnsurePaused = (): ReturnType<typeof vi.fn> => vi.fn();
 
 interface SetupOptions {
   readonly install?: InstallHandle;
+  /** A ruleset other than the shipped one — e.g. a clone with a balance value changed. */
+  readonly ruleset?: ReturnType<typeof compileRuleset>;
 }
 
 function setup(
@@ -106,7 +115,7 @@ function setup(
     settings,
     keymap,
     shell,
-    ruleset,
+    options.ruleset ?? ruleset,
     abortGesture,
     install,
   );
@@ -154,11 +163,20 @@ describe('overlay — HUD readout', () => {
     expect(text).toContain('Bounty: 80');
     expect(text).toContain('Wave in 25s');
     // Dual-form chips (Story 11 contract §4): the aria-hidden glance form carries the icon
-    // + value; the full ICU message stays the accessible text, never sentence-split.
+    // + value; the full ICU message stays the accessible text, never sentence-split. Since
+    // #181 (H1) the icon is inline SVG and carries no text, so each glance reads as its value
+    // alone — written to the value leaf, beside an icon no refresh ever replaces.
     expect(shell.hud.lives.full.textContent).toBe('Lives: 10');
-    expect(shell.hud.lives.glance.textContent).toBe('♥ 10');
-    expect(shell.hud.bounty.glance.textContent).toBe('◈ 80');
+    expect(shell.hud.lives.glance.textContent).toBe('10');
+    expect(shell.hud.bounty.glance.textContent).toBe('80');
     expect(shell.hud.wave.glance.textContent).toBe('25s');
+    expect(shell.hud.score.full.textContent).toBe('Score: 0');
+    expect(shell.hud.score.value.textContent).toBe('0');
+    expect(shell.hud.stars.full.textContent).toBe('Stars: 0 of 3');
+    expect(shell.hud.stars.value.textContent).toBe('0');
+    for (const chip of Object.values(shell.hud)) {
+      expect(chip.glance.firstElementChild!.tagName.toLowerCase()).toBe('svg');
+    }
 
     // Once every wave has launched, `countdownSeconds` is null — the chip hides entirely
     // (its own preview surface carries the last-wave marker instead — see the dedicated
@@ -202,7 +220,7 @@ describe('overlay — HUD readout', () => {
       refund: 0,
     });
     expect(shell.hud.lives.full.textContent).toBe('Lives: -1');
-    expect(shell.hud.lives.glance.textContent).toBe('♥ -1');
+    expect(shell.hud.lives.glance.textContent).toBe('-1');
   });
 
   it('reflects pause/speed state on the controls', () => {
@@ -315,12 +333,18 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     );
   });
 
-  // --- The glance form (#101) --------------------------------------------------------
+  // --- The glance form (#101, reshaped by #181 L1) ------------------------------------------
   // M2-S10 ruling 3 ("name the boring value rather than omit the slot") was NARROWED to the
   // accessible form above by owner ruling 2026-08-16: the surface is read as a threat-
-  // signature glance while a wave runs, and four clauses a row tripled the height of a card
-  // that floats over the playing field. These pin the VISIBLE half.
-  const glanceOf = (entry: PreviewEntryVM): string => {
+  // signature glance while a wave runs. Since #181 that glance is the strip's: the creep's
+  // icon and its count, plus — for a single-entry wave — its name and the deviating clause.
+  // These pin the VISIBLE half: the clause still names only what deviates from the baseline.
+  interface GlanceParts {
+    readonly count: string;
+    readonly name: string | null;
+    readonly clause: string | null;
+  }
+  const glanceOf = (entry: PreviewEntryVM): GlanceParts => {
     const { overlay, shell } = setup();
     overlay.update({
       hud: hud({ preview: { kind: 'upcoming', waveNumber: 1, waveCount: 2, entries: [entry] } }),
@@ -329,7 +353,12 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       ui: uiState(),
       refund: 0,
     });
-    return shell.preview.list.querySelector('.wy-preview-glance')!.textContent!;
+    const glance = shell.preview.list.querySelector('.wy-preview-glance')!;
+    return {
+      count: glance.querySelector('.wy-preview-count')!.textContent!,
+      name: glance.querySelector('.wy-preview-name')?.textContent ?? null,
+      clause: glance.querySelector('.wy-preview-clause')?.textContent ?? null,
+    };
   };
   const baseline: PreviewEntryVM = {
     creepId: 'normal',
@@ -341,20 +370,24 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     boss: false,
   };
 
-  it('omits every baseline-valued clause — an all-default creep glances as count × name alone', () => {
-    expect(glanceOf(baseline)).toBe('10 × Creep');
+  it('omits every baseline-valued clause — an all-default creep glances as count and name alone', () => {
+    expect(glanceOf(baseline)).toEqual({ count: '×10', name: 'Creep', clause: null });
   });
 
   it.each([
-    ['air domain', { domain: 'air' as const }, '10 × Creep — air'],
-    ['armor', { armor: 6 }, '10 × Creep — armor −6 direct'],
-    ['leak cost', { leakCost: 3 }, '10 × Creep — leak cost 3'],
-    ['immunities', { immunities: ['slow'] as const }, '10 × Creep — immune to slow'],
-    ['boss role', { boss: true }, '10 × Creep — boss'],
+    ['air domain', { domain: 'air' as const }, 'air'],
+    ['armor', { armor: 6 }, 'armor −6 direct'],
+    ['leak cost', { leakCost: 3 }, 'leak cost 3'],
+    ['immunities', { immunities: ['slow'] as const }, 'immune to slow'],
+    ['boss role', { boss: true }, 'boss'],
   ])(
     'surfaces %s when it deviates — and that clause ALONE, so the deviation is what is read',
     (_axis, over, expected) => {
-      expect(glanceOf({ ...baseline, ...over })).toBe(expected);
+      expect(glanceOf({ ...baseline, ...over })).toEqual({
+        count: '×10',
+        name: 'Creep',
+        clause: expected,
+      });
     },
   );
 
@@ -369,7 +402,11 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
         immunities: ['slow', 'stun'],
         boss: true,
       }),
-    ).toBe('1 × Boss — boss · air · armor −8 direct · leak cost 3 · immune to slow, stun');
+    ).toEqual({
+      count: '×1',
+      name: 'Boss',
+      clause: 'boss · air · armor −8 direct · leak cost 3 · immune to slow, stun',
+    });
   });
 
   // The parity contract, asserted rather than assumed: assistive tech must read the FULL
@@ -393,15 +430,21 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const row = shell.preview.list.querySelector('li')!;
     const full = row.querySelector('.wy-preview-full')!;
-    const glance = row.querySelector('.wy-preview-glance')!;
+    const glance = row.querySelector<HTMLElement>('.wy-preview-glance')!;
     expect(glance.getAttribute('aria-hidden')).toBe('true');
     expect(full.getAttribute('aria-hidden')).toBeNull();
     // The full form keeps every slot the glance drops — the guarantee that makes the diet
     // a presentation change rather than an information loss.
-    expect(full.textContent).toBe(
-      '10 × Creep — air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
-    );
-    expect(glance.textContent).toBe('10 × Creep — air · armor −4 direct');
+    const sentence =
+      '10 × Creep — air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities';
+    expect(full.textContent).toBe(sentence);
+    expect(glance.textContent).toBe('×10Creepair · armor −4 direct'); // icon, count, name, clause
+    // #181: the same sentence is the visible row's tooltip — on the aria-hidden glance, never
+    // the row, where a `title` would become an accessible name or description and have
+    // assistive tech read the sentence a second time.
+    expect(glance.title).toBe(sentence);
+    expect(row.hasAttribute('title')).toBe(false);
+    expect(full.hasAttribute('title')).toBe(false);
   });
 
   // M2-S6 P7: verify (add nothing) that `resolute`'s slow immunity actually renders
@@ -736,7 +779,7 @@ describe('overlay — player-started runs (PLAN.md P4)', () => {
     expect(shell.hud.wave.full.textContent).toBe('Wave in 25s');
     expect(shell.hud.wave.root.hidden).toBe(false);
     const visible = [...shell.hudBox.children].filter((el) => !(el as HTMLElement).hidden);
-    expect(visible).toHaveLength(5); // lives, bounty, score, wave, stars (preview is separate)
+    expect(visible).toHaveLength(5); // wave, lives, bounty, stars, score (no preview to show)
   });
 
   it('once started: Pause is visible, and the primary Dock button MORPHS to Call wave rather than hiding (M2-S2, PLAN.md P3 step 17)', () => {
@@ -2137,6 +2180,46 @@ describe('overlay — a steady-state refresh performs zero child-node replacemen
     });
   });
 
+  it('(e) a MULTI-ENTRY wave preview in view — rows whose glance is icon and count alone (#181)', () => {
+    // A multi-entry row renders less than a single entry's (no name, no clause), so the row
+    // comparison that decides a rebuild has its own branch for it; a wrong expectation there
+    // would rebuild the list on every refresh — the #98 class, and a scrolled strip snapping
+    // back to its start 20 times a second.
+    expectSteadyStateIsQuiet({
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 5,
+          waveCount: 9,
+          entries: [
+            {
+              creepId: 'normal',
+              count: 8,
+              domain: 'ground',
+              armor: 0,
+              leakCost: 1,
+              immunities: [],
+              boss: false,
+            },
+            {
+              creepId: 'fast',
+              count: 6,
+              domain: 'air',
+              armor: 2,
+              leakCost: 1,
+              immunities: [],
+              boss: false,
+            },
+          ],
+        },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+  });
+
   it('(d) a POPULATED board summary in view (#79) — the counts hold still through a wave', () => {
     // The `hud()` default is an empty board, where the summary is hidden and never
     // written at all — which would leave this whole class untested for the one HUD node
@@ -3223,5 +3306,645 @@ describe('Panel auto-reveal latch (#69)', () => {
     // unrevealed.
     overlay.update(frameFor({ selection: SELECTION, inspectSeq: 0 }));
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #181 (L1): the wave strip — the preview's one home. The sentence-level contract (what each
+// row SAYS) is pinned in the wave preview block above; these pin what the strip adds: the
+// creep icons, their palette, and the in-place overflow form.
+describe('overlay — the wave strip (#181 L1)', () => {
+  const entry = (over: Partial<PreviewEntryVM> = {}): PreviewEntryVM => ({
+    creepId: 'normal',
+    count: 10,
+    domain: 'ground',
+    armor: 0,
+    leakCost: 1,
+    immunities: [],
+    boss: false,
+    ...over,
+  });
+  const show = (
+    overlay: ReturnType<typeof setup>['overlay'],
+    entries: readonly PreviewEntryVM[],
+    waveNumber = 1,
+  ): void => {
+    overlay.update({
+      hud: hud({ preview: { kind: 'upcoming', waveNumber, waveCount: 9, entries } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+  };
+
+  it('a multi-entry wave shows each creep as icon and count alone — no name, no clause', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [
+      entry({ creepId: 'normal', count: 8 }),
+      entry({ creepId: 'fast', count: 6, armor: 2 }),
+    ]);
+    const glances = [...shell.preview.list.querySelectorAll('.wy-preview-glance')];
+    expect(glances).toHaveLength(2);
+    for (const glance of glances) {
+      expect([...glance.children].map((c) => c.getAttribute('class'))).toEqual([
+        'wy-creep-icon',
+        'wy-preview-count',
+      ]);
+    }
+    expect(glances.map((g) => g.textContent)).toEqual(['×8', '×6']);
+    // The deviation is still in each row's full sentence — the strip drops nothing for AT.
+    expect(shell.preview.list.querySelectorAll('.wy-preview-full')[1]!.textContent).toContain(
+      'armor 2',
+    );
+  });
+
+  it("the locale sentinel's glance text is exactly what the glance writes — an unchanged strip is never rebuilt, so a scrolled strip keeps its place", () => {
+    // `previewEntryGlanceText` and `buildEntryGlance` share `glanceParts`; if they drift, the
+    // memo guard sees a mismatch on every HUD refresh and rebuilds the list.
+    const shapes: ReadonlyArray<readonly [string, readonly PreviewEntryVM[], string]> = [
+      ['a single entry with notes', [entry({ armor: 2 })], '×10Creeparmor −2 direct'],
+      ['a single entry without notes', [entry()], '×10Creep'],
+      ['a multi-entry wave', [entry({ count: 8 }), entry({ creepId: 'fast', count: 6 })], '×8'],
+    ];
+    for (const [label, entries, glanceText] of shapes) {
+      const { overlay, shell } = setup();
+      show(overlay, entries);
+      const row = shell.preview.list.firstElementChild!;
+      const glance = row.querySelector('.wy-preview-glance')!;
+      expect(glance.textContent, label).toBe(glanceText);
+      show(overlay, entries);
+      expect(shell.preview.list.firstElementChild, label).toBe(row);
+    }
+  });
+
+  it("every icon executes the render package's own silhouette for its creep, with the airborne chevron only on air", () => {
+    const { overlay, shell } = setup();
+    const ids = Object.keys(ruleset.creepById);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const creepId of ids) {
+      for (const domain of ['ground', 'air'] as const) {
+        show(overlay, [entry({ creepId, domain })]);
+        const icon = shell.preview.list.querySelector<SVGSVGElement>('.wy-creep-icon')!;
+        expect(icon.dataset.wyShape, creepId).toBe(creepShapeFor(creepId));
+        expect(icon.getAttribute('aria-hidden')).toBe('true');
+        expect(icon.querySelector('.wy-creep-chevron') !== null, `${creepId}/${domain}`).toBe(
+          domain === 'air',
+        );
+      }
+    }
+  });
+
+  it('inks the icons from the ACTIVE palette, and a colour-mode change re-inks them in place', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry({ creepId: 'normal', domain: 'air' })]);
+    const row = shell.preview.list.firstElementChild!;
+    const body = (): string | null =>
+      shell.preview.list.querySelector('.wy-creep-body')!.getAttribute('fill');
+    const chevron = (): string | null =>
+      shell.preview.list.querySelector('.wy-creep-chevron')!.getAttribute('stroke');
+    expect(body()).toBe(hexColour(resolvePalette('default').creep));
+    expect(chevron()).toBe(hexColour(resolvePalette('default').airborne));
+
+    const other = COLOUR_MODES.find(
+      (m) => resolvePalette(m).creep !== resolvePalette('default').creep,
+    );
+    expect(other, 'a colour mode that inks creeps differently').toBeDefined();
+    overlay.setColourMode(other!);
+    expect(body()).toBe(hexColour(resolvePalette(other!).creep));
+    expect(chevron()).toBe(hexColour(resolvePalette(other!).airborne));
+    // Repainted, not rebuilt: a reader parked on the row keeps its node.
+    expect(shell.preview.list.firstElementChild).toBe(row);
+
+    // And a wave built AFTER the change is born in the new palette.
+    show(overlay, [entry({ creepId: 'fast' })], 2);
+    expect(body()).toBe(hexColour(resolvePalette(other!).creep));
+  });
+
+  describe('the overflow scroll form', () => {
+    /** jsdom lays nothing out and loads no stylesheet, so the strip's two widths are stubbed
+     *  per test, and the box is made to CLIP as Standard's one-line form does (`ui.css`'s
+     *  `overflow: hidden`) — the only form that has a line to make reachable. */
+    function widths(el: HTMLElement, scroll: number, client: number): void {
+      el.style.overflowX = 'hidden';
+      Object.defineProperty(el, 'scrollWidth', { configurable: true, get: () => scroll });
+      Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => client });
+    }
+    const isScrollForm = (el: HTMLElement): boolean => {
+      const on = el.classList.contains('wy-wave-preview--scroll');
+      // The four move together: the class, the tab stop, the role and the label.
+      expect(el.getAttribute('tabindex')).toBe(on ? '0' : null);
+      expect(el.getAttribute('role')).toBe(on ? 'group' : null);
+      expect(el.getAttribute('aria-label')).toBe(on ? 'Wave preview' : null);
+      return on;
+    };
+
+    /** The cue reads the scroll position too; jsdom scrolls nothing, so it is a plain value
+     *  here — writable, because a rebuilt wave resets it. */
+    function scrollAt(el: HTMLElement, at: number): void {
+      let left = at;
+      Object.defineProperty(el, 'scrollLeft', {
+        configurable: true,
+        get: () => left,
+        set: (v: number) => {
+          left = v;
+        },
+      });
+    }
+    const cue = (el: HTMLElement): { before: boolean; after: boolean } => ({
+      before: el.classList.contains('wy-wave-preview--more-before'),
+      after: el.classList.contains('wy-wave-preview--more-after'),
+    });
+
+    it('takes the scroll form, with a labelled tab stop, exactly while the line is longer than the box', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 300, 300);
+      show(overlay, [entry()]);
+      expect(isScrollForm(strip)).toBe(false);
+      widths(strip, 420, 300);
+      show(overlay, [entry(), entry({ creepId: 'fast' })], 2);
+      expect(isScrollForm(strip)).toBe(true);
+      widths(strip, 301, 300); // within the 1px sub-pixel slack: it fits
+      show(overlay, [entry({ creepId: 'swarm' })], 3);
+      expect(isScrollForm(strip)).toBe(false);
+    });
+
+    it('never takes it where the strip clips nothing — the Compact column, whose chips list scrolls instead', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      strip.style.overflowX = 'visible'; // the Compact block: no clipping, so no line to reach
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(false);
+      expect(cue(strip)).toEqual({ before: false, after: false }); // nothing hidden past an edge
+      // …and a strip that took the form on Standard gives it up when it stops clipping.
+      strip.style.overflowX = 'hidden';
+      show(overlay, [entry(), entry({ creepId: 'swarm' })], 2);
+      expect(isScrollForm(strip)).toBe(true);
+      strip.style.overflowX = 'visible';
+      show(overlay, [entry(), entry({ creepId: 'armored' })], 3);
+      expect(isScrollForm(strip)).toBe(false);
+    });
+
+    it('keeps the tab stop under a focused reader, and releases it when focus leaves', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.focus();
+      expect(document.activeElement).toBe(strip);
+      widths(strip, 300, 300);
+      show(overlay, [entry({ creepId: 'swarm' })], 2);
+      // Fits now, but revoking the stop under focus would drop the reader to <body>.
+      expect(isScrollForm(strip)).toBe(true);
+      // Focus leaving settles it — even while `activeElement` still reports the outgoing
+      // strip, as it can during `focusout` (the Rail's hazard, `syncRailAffordances`).
+      strip.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      expect(document.activeElement).toBe(strip);
+      expect(isScrollForm(strip)).toBe(false);
+    });
+
+    it('fades each edge with entries past it, and follows the scroll position', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(true);
+      // At rest the line runs on past the trailing edge only.
+      expect(cue(strip)).toEqual({ before: false, after: true });
+      strip.scrollLeft = 60;
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: true });
+      strip.scrollLeft = 120; // the end: 420 − 300
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: false });
+      strip.scrollLeft = 119.5; // within the 1px sub-pixel slack of the end
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: false });
+      // A wave whose line fits clears both, with the form.
+      widths(strip, 300, 300);
+      show(overlay, [entry({ creepId: 'swarm' })], 2);
+      expect(isScrollForm(strip)).toBe(false);
+      expect(cue(strip)).toEqual({ before: false, after: false });
+    });
+
+    it('keeps the line where the reader scrolled it through a same-wave refresh', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      const entries = [entry(), entry({ creepId: 'fast', domain: 'air' })];
+      show(overlay, entries);
+      expect(isScrollForm(strip)).toBe(true);
+      const rows = [...shell.preview.list.children];
+      strip.scrollLeft = 23;
+      strip.dispatchEvent(new Event('scroll'));
+      // Fresh, deep-equal entries — a refresh mid-countdown, not a new wave.
+      show(overlay, structuredClone(entries));
+      show(overlay, structuredClone(entries));
+      expect(strip.scrollLeft).toBe(23);
+      expect([...shell.preview.list.children]).toEqual(rows); // not rebuilt
+      expect(cue(strip)).toEqual({ before: true, after: true });
+    });
+
+    it('opens a new wave at its title, whatever the last one was scrolled to', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.scrollLeft = 120;
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: false });
+      show(overlay, [entry({ creepId: 'swarm' }), entry({ creepId: 'armored' })], 2);
+      expect(strip.scrollLeft).toBe(0);
+      expect(cue(strip)).toEqual({ before: false, after: true });
+    });
+
+    it('spends a vertical wheel turn sideways while the line can move that way, and leaves it alone at either end', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300); // a 120px range
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(true);
+      const wheel = (init: WheelEventInit): boolean => {
+        const e = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
+        strip.dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      expect(wheel({ deltaY: 40 })).toBe(true);
+      expect(strip.scrollLeft).toBe(40);
+      expect(wheel({ deltaY: -10 })).toBe(true);
+      expect(strip.scrollLeft).toBe(30);
+      // LINE and PAGE modes are converted to px: a line is 16px, a page the strip's width.
+      strip.scrollLeft = 0;
+      expect(wheel({ deltaY: 3, deltaMode: 1 })).toBe(true);
+      expect(strip.scrollLeft).toBe(48);
+      strip.scrollLeft = 0;
+      expect(wheel({ deltaY: 1, deltaMode: 2 })).toBe(true);
+      expect(strip.scrollLeft).toBe(300);
+      // At either end the turn is NOT taken: it goes on to whatever scrolls beyond the strip.
+      strip.scrollLeft = 120;
+      expect(wheel({ deltaY: 40 })).toBe(false);
+      expect(strip.scrollLeft).toBe(120);
+      strip.scrollLeft = 119.5; // within the 1px sub-pixel slack of the end
+      expect(wheel({ deltaY: 40 })).toBe(false);
+      expect(strip.scrollLeft).toBe(119.5);
+      strip.scrollLeft = 0;
+      expect(wheel({ deltaY: -40 })).toBe(false);
+      expect(strip.scrollLeft).toBe(0);
+      // …but turning back from an end is taken again.
+      strip.scrollLeft = 120;
+      expect(wheel({ deltaY: -40 })).toBe(true);
+      expect(strip.scrollLeft).toBe(80);
+      // A horizontal-dominant delta is the browser's own — a TIE too, since only a turn that is
+      // mostly vertical needs turning sideways — and ctrl+wheel is a zoom.
+      expect(wheel({ deltaX: 30, deltaY: 10 })).toBe(false);
+      expect(wheel({ deltaX: 30, deltaY: 30 })).toBe(false);
+      expect(wheel({ deltaY: 40, ctrlKey: true })).toBe(false);
+      expect(strip.scrollLeft).toBe(80);
+      // An event the browser will not let us cancel is ITS scroll (#181 QC round 2): once a
+      // wheel sequence has passed through to the hud, its later events cannot be cancelled, and
+      // moving the line as well would spend one turn twice.
+      const latched = new WheelEvent('wheel', { bubbles: true, cancelable: false, deltaY: -40 });
+      strip.dispatchEvent(latched);
+      expect(strip.scrollLeft).toBe(80);
+      overlay.destroy();
+      expect(wheel({ deltaY: -40 })).toBe(false); // no listener left
+      expect(strip.scrollLeft).toBe(80);
+    });
+
+    it('takes no wheel turn where the line overflows but the strip does not clip it (Compact)', () => {
+      // #181 QC round 2: Compact's strip lets a long line run past its edge (`overflow-x:
+      // visible`) inside the scrolling chips column, so it has a scroll RANGE and no scroll
+      // FORM. A down-wheel over it belongs to the column — taking it would leave the chips
+      // unscrollable from where the pointer rests.
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      strip.style.overflowX = 'visible';
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      expect(isScrollForm(strip)).toBe(false);
+      const e = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 });
+      strip.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+      expect(strip.scrollLeft).toBe(0);
+    });
+
+    it('takes no wheel turn while the line fits', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 300, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry()]);
+      expect(isScrollForm(strip)).toBe(false);
+      const e = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 });
+      strip.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+      expect(strip.scrollLeft).toBe(0);
+    });
+
+    it('drops the cue with the line even while a focused reader keeps the tab stop', () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.focus();
+      widths(strip, 300, 300);
+      show(overlay, [entry({ creepId: 'swarm' })], 2);
+      expect(isScrollForm(strip)).toBe(true); // retained under focus
+      expect(cue(strip)).toEqual({ before: false, after: false }); // but nothing lies past an edge
+    });
+
+    it('writes nothing on a scroll that moves no edge, and stops listening on destroy', async () => {
+      const { overlay, shell } = setup();
+      const strip = shell.preview.root;
+      widths(strip, 420, 300);
+      scrollAt(strip, 0);
+      show(overlay, [entry(), entry({ creepId: 'fast' })]);
+      strip.scrollLeft = 60;
+      strip.dispatchEvent(new Event('scroll'));
+      const records: MutationRecord[] = [];
+      const watch = new MutationObserver((r) => records.push(...r));
+      watch.observe(strip, { attributes: true });
+      strip.scrollLeft = 70; // mid-line still: both edges keep their state
+      strip.dispatchEvent(new Event('scroll'));
+      strip.dispatchEvent(new Event('scroll'));
+      await Promise.resolve();
+      expect(records).toEqual([]);
+      watch.disconnect();
+      overlay.destroy();
+      strip.scrollLeft = 120;
+      strip.dispatchEvent(new Event('scroll'));
+      expect(cue(strip)).toEqual({ before: true, after: true }); // no listener left to clear it
+    });
+
+    it('re-decides on a resize of the strip or its list, and stops observing on destroy', () => {
+      // One record PER INSTANCE (#181 QC): the Rail has an observer too, so a flag shared by
+      // every instance would pass on the Rail's teardown even if the strip's were missing.
+      interface FakeRecord {
+        readonly observed: Element[];
+        disconnected: boolean;
+        readonly callback: () => void;
+      }
+      const instances: FakeRecord[] = [];
+      class FakeResizeObserver {
+        private readonly record: FakeRecord;
+        constructor(cb: () => void) {
+          this.record = { observed: [], disconnected: false, callback: cb };
+          instances.push(this.record);
+        }
+        observe(el: Element): void {
+          this.record.observed.push(el);
+        }
+        disconnect(): void {
+          this.record.disconnected = true;
+        }
+      }
+      const original = window.ResizeObserver;
+      window.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+      try {
+        const { overlay, shell } = setup();
+        const strip = shell.preview.root;
+        const stripObservers = instances.filter((r) => r.observed.includes(strip));
+        expect(stripObservers).toHaveLength(1);
+        const own = stripObservers[0]!;
+        // EXACTLY the strip and its list: nothing else rides this observer's callback.
+        expect(own.observed).toEqual([strip, shell.preview.list]);
+        widths(strip, 300, 300);
+        show(overlay, [entry()]);
+        expect(isScrollForm(strip)).toBe(false);
+        widths(strip, 420, 300); // a window resize narrows the row; the wave did not change
+        own.callback();
+        expect(isScrollForm(strip)).toBe(true);
+        expect(own.disconnected).toBe(false);
+        overlay.destroy();
+        expect(own.disconnected).toBe(true);
+        // …and every other observer this overlay made is torn down with it.
+        expect(instances.length).toBeGreaterThan(1);
+        for (const r of instances) expect(r.disconnected).toBe(true);
+      } finally {
+        window.ResizeObserver = original;
+      }
+    });
+  });
+});
+
+// #181 (H1, QC): the countdown dial inside the Dock's primary action, and the early-call
+// note the primary carries. The dial is decoration — the wave chip is the readable and the
+// accessible countdown — so what is pinned is a truthful dial with no text of its own, that it
+// never churns the DOM on a steady refresh, and that the note claims a bounty ONLY where the
+// sim would pay one.
+describe('overlay — the countdown dial and the early-call note (#181 H1)', () => {
+  const view = (over: Partial<HudVM> = {}, ui: Partial<UiState> = {}): HudView => ({
+    hud: hud(over),
+    paused: false,
+    speed: 1,
+    ui: uiState(ui),
+    refund: 0,
+  });
+  /** A wave's full countdown in whole seconds, from the ruleset — rounded up like
+   *  `HudVM.countdownSeconds`, so a fresh countdown draws a full dial. */
+  const totalSeconds = (cursor: number): number =>
+    Math.ceil((ruleset.waves[cursor]!.countdownTicks * MS_PER_TICK) / 1000);
+  const NOTE = 'Calling now pays an early-call bonus';
+
+  it("draws the share of THIS wave's countdown left — and the seconds stay the chip's alone", () => {
+    const { overlay, shell } = setup();
+    const dial = shell.dock.dial;
+    const first = totalSeconds(0);
+    overlay.update(view({ countdownSeconds: first }));
+    expect(dial.root.hidden).toBe(false);
+    expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(1));
+    // The chip reads the seconds: its number leaf, then the static unit.
+    expect(shell.hud.wave.glance.textContent).toBe(`${first}s`);
+    expect(shell.hud.wave.value.textContent).toBe(String(first));
+    overlay.update(view({ countdownSeconds: 4 }));
+    expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(4 / first));
+    expect(shell.hud.wave.glance.textContent).toBe('4s');
+    expect(shell.hud.wave.value.textContent).toBe('4');
+    // Each wave is measured against its own countdown, not the first one's.
+    const second = totalSeconds(1);
+    overlay.update(view({ countdownSeconds: second, waveCursor: 1 }));
+    expect(dial.progress.getAttribute('stroke-dasharray')).toBe(dialDash(1));
+    // No text of its own, ever: the control's name is its label.
+    expect(dial.root.textContent).toBe('');
+    expect(dockButtonParts(shell.dock.primary).text.textContent).toBe('Call wave');
+    expect(shell.dock.primary.textContent).toBe('Call wave');
+  });
+
+  it('is down whenever there is no countdown to draw: none left, a launching call, or a resolved run', () => {
+    const { overlay, shell } = setup();
+    const dial = shell.dock.dial.root;
+    overlay.update(view());
+    expect(dial.hidden).toBe(false);
+    overlay.update(view({ launchPending: true, callable: false }));
+    expect(dial.hidden).toBe(true);
+    overlay.update(view());
+    expect(dial.hidden).toBe(false);
+    overlay.update(view({ countdownSeconds: null, waveCursor: 9, callable: false }));
+    expect(dial.hidden).toBe(true);
+    overlay.update(view({ phase: 'won', won: true, countdownSeconds: null }));
+    expect(dial.hidden).toBe(true);
+    expect(dial.getAttribute('aria-hidden')).toBe('true'); // decoration in every state
+  });
+
+  it('notes the early-call bonus over the shipped countdown exactly where every tick count the second can hold pays one', () => {
+    const { overlay, shell } = setup();
+    const primary = shell.dock.primary;
+    const divisor = ruleset.balance.earlyCallBountyDivisor;
+    expect(divisor).toBeGreaterThan(0);
+    // Independent of the gate's algebra (#181 QC round 2), as below: the HUD shows
+    // ceil(rem × MS_PER_TICK / 1000), so list every count of remaining ticks that rounds UP to
+    // the shown second and pay each the sim's way, floor(rem / divisor). The note is a promise:
+    // it shows only where every one of them pays.
+    const paysAt = (s: number): boolean => {
+      const rems: number[] = [];
+      for (let rem = 1; Math.ceil((rem * MS_PER_TICK) / 1000) <= s; rem++) {
+        if (Math.ceil((rem * MS_PER_TICK) / 1000) === s) rems.push(rem);
+      }
+      return rems.length > 0 && rems.every((rem) => Math.floor(rem / divisor) >= 1);
+    };
+    for (let s = 1; s <= totalSeconds(1); s++) {
+      overlay.update(view({ countdownSeconds: s, waveCursor: 1 }));
+      expect(primary.getAttribute('title'), `${s}s`).toBe(paysAt(s) ? NOTE : null);
+    }
+    // The boundary the accessibility checklist states for shipped content — the note falls
+    // silent from 3s — held unconditionally, so a retune of the divisor fails HERE and the
+    // checklist is re-stated, rather than the claim going stale behind a skipped assertion.
+    let firstPaying = 1;
+    while (!paysAt(firstPaying)) firstPaying++;
+    expect(
+      { divisor, msPerTick: MS_PER_TICK, firstPaying },
+      'docs/accessibility-checklist.md: "shipped content: from 3s" — re-state it on a retune',
+    ).toEqual({ divisor: 50, msPerTick: 50, firstPaying: 4 });
+  });
+
+  it('notes the bonus iff EVERY tick count the shown second can hold would pay one — enumerated, across divisors', () => {
+    // An oracle independent of the gate's algebra (#181 QC round 2): for each second the HUD
+    // can show, list every count of remaining ticks that rounds UP to it, and pay each the sim's
+    // way — floor(rem / divisor). The note is a promise, so it shows only where EVERY one of
+    // them pays. Divisors either side of each second's bounds (20/21/22, 41, 61) and between
+    // them (45, 49), where an off-by-one in the bound over- or under-claims.
+    for (const divisor of [1, 20, 21, 22, 41, 45, 49, 61]) {
+      const tuned = {
+        ...ruleset,
+        balance: { ...ruleset.balance, earlyCallBountyDivisor: divisor },
+      };
+      const { overlay, shell } = setup(undefined, undefined, { ruleset: tuned });
+      for (let s = 1; s <= 6; s++) {
+        const rems: number[] = [];
+        for (let rem = 1; rem <= 1000; rem++) {
+          if (Math.ceil((rem * MS_PER_TICK) / 1000) === s) rems.push(rem);
+        }
+        expect(rems.length, `${s}s holds some tick counts`).toBeGreaterThan(0);
+        const pays = rems.every((rem) => Math.floor(rem / divisor) >= 1);
+        overlay.update(view({ countdownSeconds: s, waveCursor: 1 }));
+        expect(shell.dock.primary.getAttribute('title'), `divisor ${divisor}, ${s}s`).toBe(
+          pays ? NOTE : null,
+        );
+      }
+      overlay.destroy();
+    }
+  });
+
+  it('never notes a bonus the press would not earn: the opening wave, Start, a launching or a refused call, a resolved run', () => {
+    const { overlay, shell } = setup();
+    const primary = shell.dock.primary;
+    const paying = view({ countdownSeconds: 25, waveCursor: 1 });
+    // Each case starts from a SHOWN note, so each proves the note is taken down — not merely
+    // never put up.
+    const cases: [string, HudView][] = [
+      ['the opening launch (sv15)', view({ countdownSeconds: 25, waveCursor: 0 })],
+      ['Start', view({ countdownSeconds: 25, waveCursor: 1 }, { started: false })],
+      [
+        'a launching call',
+        view({ countdownSeconds: 25, waveCursor: 1, launchPending: true, callable: false }),
+      ],
+      ['a refused call', view({ countdownSeconds: 25, waveCursor: 1 }, { callWaveReady: false })],
+      ['a resolved run', view({ phase: 'won', won: true, countdownSeconds: null })],
+    ];
+    for (const [name, quiet] of cases) {
+      overlay.update(paying);
+      expect(primary.getAttribute('title'), `calibration before ${name}`).toBe(NOTE);
+      overlay.update(quiet);
+      expect(primary.getAttribute('title'), name).toBeNull();
+    }
+  });
+
+  it('never notes a bonus under a ruleset whose divisor pays none', () => {
+    const noBounty = { ...ruleset, balance: { ...ruleset.balance, earlyCallBountyDivisor: 0 } };
+    const { overlay, shell } = setup(undefined, undefined, { ruleset: noBounty });
+    for (const s of [1, 4, 12, totalSeconds(1)]) {
+      overlay.update(view({ countdownSeconds: s, waveCursor: 1 }));
+      expect(shell.dock.primary.getAttribute('title'), `${s}s`).toBeNull();
+    }
+    // The dial itself does not depend on the bounty: it still draws the countdown.
+    expect(shell.dock.dial.root.hidden).toBe(false);
+  });
+
+  it('a steady refresh writes nothing to the dial or the note — no node, no attribute (#98)', () => {
+    const { overlay, shell } = setup();
+    overlay.update(view({ countdownSeconds: 7, waveCursor: 1 }));
+    expect(shell.dock.primary.getAttribute('title')).toBe(NOTE);
+    const observer = new MutationObserver(() => {});
+    observer.observe(shell.dock.primary, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+    // Positive calibration: the observer sees an attribute write on the dial.
+    const dial = shell.dock.dial.progress;
+    dial.setAttribute('stroke-dasharray', dial.getAttribute('stroke-dasharray')!);
+    expect(observer.takeRecords().length).toBeGreaterThan(0);
+    overlay.update(structuredClone(view({ countdownSeconds: 7, waveCursor: 1 })));
+    expect(observer.takeRecords()).toEqual([]);
+    // …while a real tick does write.
+    overlay.update(view({ countdownSeconds: 6, waveCursor: 1 }));
+    expect(observer.takeRecords().length).toBeGreaterThan(0);
+    observer.disconnect();
+  });
+
+  /** A steady refresh of `v` writes nothing under the primary control: calibrated first with a
+   *  same-value write, which the observer DOES record, so a quiet result means the overlay
+   *  wrote nothing — not that the observer saw nothing. */
+  function expectQuietRefresh(
+    v: HudView,
+    calibrate: (shell: ReturnType<typeof setup>['shell']) => void,
+  ): void {
+    const { overlay, shell } = setup();
+    overlay.update(v);
+    const observer = new MutationObserver(() => {});
+    observer.observe(shell.dock.primary, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+    calibrate(shell);
+    expect(observer.takeRecords().length, 'the calibration write is seen').toBeGreaterThan(0);
+    overlay.update(structuredClone(v));
+    expect(observer.takeRecords()).toEqual([]);
+    observer.disconnect();
+  }
+
+  it('a steady refresh BEFORE Start writes nothing either — not even an equal aria-disabled (#98)', () => {
+    expectQuietRefresh(view({ countdownSeconds: 25, waveCursor: 0 }, { started: false }), (sh) => {
+      expect(sh.dock.primary.getAttribute('aria-disabled')).toBe('false');
+      sh.dock.primary.setAttribute('aria-disabled', 'false');
+    });
+  });
+
+  it('a steady refresh with the dial DOWN writes nothing to it — not even an equal hidden (#98)', () => {
+    expectQuietRefresh(view({ countdownSeconds: null, waveCursor: 9, callable: false }), (sh) => {
+      expect(sh.dock.dial.root.hidden).toBe(true);
+      sh.dock.dial.root.hidden = true;
+    });
   });
 });
