@@ -595,8 +595,8 @@ export function wardPaintOps(
 // small cell keeps its slow ring where the jolt's wider ink would otherwise have buried it.
 // The HP bars' opaque backings and the pips' ink discs are drawn after the rings and lie over
 // them, a neighbour's included, by design; the pips' inks go down before every pip, so none
-// covers a pip. The motion cues — the pulse and the drift — carry none: they fade by design and are gated as
-// non-essential.
+// covers a pip. The motion cues — the pulse and the drift — carry none: they fade by design
+// and are gated as non-essential.
 //
 // THE HP BAR (C3) sits across the top of the band, as the style frame draws it, its fill
 // from r×1.75 above the centre down to `HP_BAR_HEIGHT` radii (or `HP_BAR_MIN_HEIGHT_PX`)
