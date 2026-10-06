@@ -225,8 +225,11 @@ export const CREEP_ICON_HALF = 10;
 /** Icon units per design unit for a creep icon, before its family's size step: the one scale
  *  every creep icon is drawn at, so the strip shows the board's size steps — the swarm
  *  smallest, the boss largest — and the largest at which every look on the GROUND, its
- *  outline included, fits the icon's box (the boss's flat hexagon is the widest). A flyer's
- *  wings reach past the box's sides at this scale, as the icon lets them (`ui.css`). */
+ *  outline included, fits the icon's box. The widest look is the boss DIAMOND, a `fast` id
+ *  with the boss role, which no ruleset ships: the scale is `10 / 19.82`, so the strip's icons
+ *  are about 8.5% smaller than the shipped boss (the hexagon, 18.14) needs. Fitting every
+ *  look keeps a future boss variant inside the box. A flyer's wings reach past the box's
+ *  sides at this scale, as the icon lets them (`ui.css`). */
 export const CREEP_ICON_SCALE: number = (() => {
   let extent = 0;
   for (const look of CREEP_LOOKS) {
