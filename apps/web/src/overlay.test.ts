@@ -3329,7 +3329,7 @@ describe('overlay — the results panel (#181 H2)', () => {
     ]);
   });
 
-  it('a loss: "Lost on wave {launched} of {count}", no stars, and the run as it stood', () => {
+  it('a loss: "Lost with {launched} of {count} waves launched", no stars, and the run as it stood', () => {
     const { overlay } = setup();
     overlay.showResults(
       hud({ won: false, phase: 'lost', score: 0, stars: 0 }),
@@ -3344,7 +3344,9 @@ describe('overlay — the results panel (#181 H2)', () => {
     const panel = panelOf(overlay);
     expect(panel.dataset.outcome).toBe('lost');
     expect(overlay.resultsEl.getAttribute('aria-label')).toBe('The creeps broke through.');
-    expect(panel.querySelector('.wy-results-subtitle')!.textContent).toBe('Lost on wave 9 of 10');
+    expect(panel.querySelector('.wy-results-subtitle')!.textContent).toBe(
+      'Lost with 9 of 10 waves launched',
+    );
     expect(earned(overlay)).toEqual(['false', 'false', 'false']);
     expect(panel.querySelector('.wy-results-score-value')!.textContent).toBe('0');
     expect(statText(overlay)).toEqual([

@@ -144,7 +144,7 @@ export const EN = {
   "results.stat.towersBuilt": "Towers built",
   "results.stat.wavesCleared": "Waves cleared",
   "results.stat.wavesCleared.value": "{cleared} / {count}",
-  "results.subtitle.lost": "Lost on wave {wave} of {count}",
+  "results.subtitle.lost": "Lost with {launched} of {count} waves launched",
   "results.subtitle.won": "All {count} waves cleared",
   "results.summary": "Score {score} — {stars} of 3 stars",
   "results.won": "The maze held.",
@@ -344,7 +344,7 @@ export interface MessageParams {
   "results.stat.towersBuilt": Record<never, never>;
   "results.stat.wavesCleared": Record<never, never>;
   "results.stat.wavesCleared.value": { "cleared": string | number; "count": string | number };
-  "results.subtitle.lost": { "wave": string | number; "count": string | number };
+  "results.subtitle.lost": { "launched": string | number; "count": string | number };
   "results.subtitle.won": { "count": string | number };
   "results.summary": { "score": string | number; "stars": string | number };
   "results.won": Record<never, never>;

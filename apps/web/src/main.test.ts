@@ -309,7 +309,7 @@ describe('main — the results panel reads the finished run (#181 H2)', () => {
       '0',
     ]);
     expect(results.querySelector('.wy-results-subtitle')!.textContent).toBe(
-      `Lost on wave ${String(stats.wavesLaunched)} of ${String(stats.waveCount)}`,
+      `Lost with ${String(stats.wavesLaunched)} of ${String(stats.waveCount)} waves launched`,
     );
     expect(results.querySelector('.wy-results-panel')!.getAttribute('data-outcome')).toBe('lost');
   });

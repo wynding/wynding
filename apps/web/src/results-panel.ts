@@ -357,7 +357,7 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
       title.textContent = won ? t('results.won') : t('results.lost');
       subtitle.textContent = won
         ? t('results.subtitle.won', { count: stats.waveCount })
-        : t('results.subtitle.lost', { wave: stats.wavesLaunched, count: stats.waveCount });
+        : t('results.subtitle.lost', { launched: stats.wavesLaunched, count: stats.waveCount });
       description.textContent = t('results.summary', { score: points, stars: earned });
       // Raw digits, like every HUD glance value: the number the description states, never a
       // differently grouped one beside it.

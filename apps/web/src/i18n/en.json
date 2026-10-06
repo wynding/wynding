@@ -141,7 +141,7 @@
   "results.stat.towersBuilt": "Towers built",
   "results.stat.wavesCleared": "Waves cleared",
   "results.stat.wavesCleared.value": "{cleared} / {count}",
-  "results.subtitle.lost": "Lost on wave {wave} of {count}",
+  "results.subtitle.lost": "Lost with {launched} of {count} waves launched",
   "results.subtitle.won": "All {count} waves cleared",
   "results.summary": "Score {score} — {stars} of 3 stars",
   "results.won": "The maze held.",

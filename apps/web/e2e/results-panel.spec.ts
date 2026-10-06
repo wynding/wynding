@@ -54,7 +54,7 @@ const EXPECTED: Record<
   },
   loss: {
     heading: 'The creeps broke through.',
-    subtitle: 'Lost on wave 9 of 10',
+    subtitle: 'Lost with 9 of 10 waves launched',
     stars: 0,
     tiles: [
       ['Waves cleared', '8 / 10'],
