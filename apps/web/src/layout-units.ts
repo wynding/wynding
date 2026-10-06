@@ -1,4 +1,5 @@
-// layout-units.ts — the two unit helpers Compact's layout passes share (hud-cut.ts, dock-reserve.ts).
+// layout-units.ts — the two unit helpers the HUD's layout passes share: hud-cut.ts (Compact's
+// chips column) and dock-reserve.ts (Standard's Dock).
 
 /** Rounds `v` UP to the layout engine's 1/64px unit — never past it. A bound or reserve
  *  rounded any coarser takes board height the floor was promised; one rounded down leaves a
