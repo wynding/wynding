@@ -39,7 +39,7 @@ import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import { chipIcon, dialDash, creepIcon, paintCreepIcon } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
-import { paintSwatch } from './swatch';
+import { paintSwatch, releaseSwatch } from './swatch';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome } from './controller';
 
@@ -2826,6 +2826,11 @@ export function createOverlay(
       railAffordanceObserver = null;
       stripObserver?.disconnect();
       stripObserver = null;
+      // The Panel art's box observer (#181 H3, `swatch.ts`): this overlay paints that canvas,
+      // so it releases it, as `main.ts` releases the Cards' — before the Shell removes it.
+      // Here and only here: the one canvas lives through every Panel rebuild, and so does its
+      // one observer.
+      releaseSwatch(panel.art);
       modal.destroy();
       results.remove();
       settingsDialog.remove();

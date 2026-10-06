@@ -1134,7 +1134,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       handle.destroy();
       surveyForm?.destroy();
       overlay.destroy();
-      // The Cards' swatch observers (#181): disconnected before the canvases are removed.
+      // The Cards' swatch observers (#181): disconnected before the canvases are removed. (The
+      // Panel's art is the overlay's to paint, and `overlay.destroy()` above releases it.)
       for (const c of shell.cards) releaseSwatch(c.swatch);
       shell.destroy();
       // Remove the rotate element too — overlay.destroy()/shell.destroy() only remove

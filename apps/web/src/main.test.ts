@@ -180,7 +180,28 @@ describe('main — createApp wiring & frame loop', () => {
     expect(canvases.length).toBeGreaterThan(0);
     expect(releaseSwatch).not.toHaveBeenCalled();
     app.destroy();
-    expect(vi.mocked(releaseSwatch).mock.calls.map((c) => c[0])).toEqual(canvases);
+    // Every Card's, in order. The one other canvas is the Panel's art, the overlay's to release
+    // (the next test) — a no-op here, where the Panel never opened.
+    const released = vi.mocked(releaseSwatch).mock.calls.map((c) => c[0]);
+    expect(released.filter((c) => !c.classList.contains('wy-panel-art'))).toEqual(canvases);
+  });
+
+  it('destroy() releases the docked Panel’s art too, once, while it is still in the document (#181 H3)', () => {
+    const h = homeApp();
+    h.root.querySelector<HTMLButtonElement>('.wy-card')!.click(); // armed: the Panel opens on
+    h.frame(); // the next HUD refresh, its art painted — and so, in a browser, watched
+    const art = h.root.querySelector<HTMLCanvasElement>('.wy-panel .wy-panel-art')!;
+    expect(vi.mocked(paintSwatch).mock.calls.some(([c]) => c === art)).toBe(true);
+    const connected: boolean[] = [];
+    vi.mocked(releaseSwatch).mockImplementation((c) => {
+      if (c === art) connected.push(c.isConnected);
+    });
+    try {
+      h.app.destroy();
+    } finally {
+      vi.mocked(releaseSwatch).mockReset();
+    }
+    expect(connected).toEqual([true]);
   });
 
   it('routes control buttons and reaches a results screen, verify, and play-again', () => {

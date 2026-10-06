@@ -103,8 +103,9 @@ export function paintSwatch(
 /** Stop watching `canvas` and forget it: disconnects its observer (which would otherwise keep
  *  the canvas, its backing store and the callback alive after the app's nodes are removed) and
  *  drops its record, so a later `paintSwatch` on the same canvas registers and observes it
- *  afresh. `createApp().destroy()` calls it for every Card, so a destroy/recreate in one
- *  session leaks nothing. A no-op for a canvas never painted. */
+ *  afresh. `createApp().destroy()` calls it for every Card, and `overlay.destroy()` for the
+ *  Panel's art, so a destroy/recreate in one session leaks nothing. A no-op for a canvas
+ *  never painted. */
 export function releaseSwatch(canvas: HTMLCanvasElement): void {
   swatches.get(canvas)?.observer?.disconnect();
   swatches.delete(canvas);
