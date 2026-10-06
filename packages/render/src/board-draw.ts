@@ -28,7 +28,7 @@ import {
   type WardPaintOp,
 } from './creep-paint';
 import { snapToDevicePx } from './device-px';
-import { ART_INK } from './tower-art';
+import { ART_INK } from './art-ink';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
 import type { RenderVM, RenderOverlay, TowerVM } from './types';
