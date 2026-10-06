@@ -27,7 +27,8 @@
 import { describe, it, expect } from 'vitest';
 import { COLOUR_MODES, resolvePalette, roleColour } from './palette';
 import { AURA_SHELL_ALPHA, SELECTION_ALPHA } from './board-draw';
-import { ART_INK, BOOST_RING_ALPHA, PENDING_ALPHA, PENDING_PLATE_ALPHA } from './tower-art';
+import { ART_INK } from './art-ink';
+import { BOOST_RING_ALPHA, PENDING_ALPHA, PENDING_PLATE_ALPHA } from './tower-art';
 import { TOWER_ROLES, type TowerRole } from './tower-paint';
 import type { Palette } from './palette';
 import type { ColourMode } from './types';

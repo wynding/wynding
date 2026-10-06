@@ -4,7 +4,7 @@
 // WebGL). No sim import: keyed purely on the catalog id string the render VM already
 // carries (`CreepVM.creepId`).
 
-import { ART_INK } from './tower-art';
+import { ART_INK } from './art-ink';
 
 /** The silhouette shapes the scene can draw. `'triangle'` is the pre-M2-S3 creep shape;
  *  `'diamond'` is `fast`'s visibly-distinct-at-cell-scale shape; `'square'` is `swarm`'s

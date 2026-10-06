@@ -17,6 +17,7 @@
 // fixed art inks, decorative or always drawn against colours the gate does cover.
 
 import { roleColour, type Palette } from './palette';
+import { ART_INK } from './art-ink';
 import type { ArtBox, ArtColour, ArtRect, ArtShape } from './art-ir';
 import type { TowerFootprintMark, TowerRole } from './tower-paint';
 
@@ -30,9 +31,8 @@ const C = ART_BOX / 2;
 
 // ---- Fixed art inks ----
 
-/** Outline and glyph ink: near-black, so a head's silhouette and the glyph inside it read
- *  against every role colour (`palette.test.ts` gates ink against each, ≥ 3:1). */
-export const ART_INK = 0x0b0e14;
+// `ART_INK` (outline and glyph ink) lives in the leaf `art-ink.ts`; re-exported here.
+export { ART_INK };
 /** The plate's top-edge highlight — decorative. */
 export const ART_BEVEL = 0x3d4a66;
 export const ART_SHADOW = 0x000000;
