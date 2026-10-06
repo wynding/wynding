@@ -2211,28 +2211,26 @@ export function createOverlay(
    *  its accessible name or description and have assistive tech read the sentence twice (the
    *  reason the Shell's home link carries none). */
   function buildEntryGlance(entry: PreviewEntryVM, single: boolean, full: string): HTMLElement {
+    const parts = glanceParts(entry, single);
     const glance = doc.createElement('span');
     glance.className = 'wy-preview-glance';
     glance.setAttribute('aria-hidden', 'true');
     glance.title = full;
     const count = doc.createElement('span');
     count.className = 'wy-preview-count';
-    count.textContent = t('hud.preview.count', { count: entry.count });
+    count.textContent = parts.count;
     glance.append(creepIcon(doc, entry, palette), count);
     if (single) {
       const detail = doc.createElement('span');
       detail.className = 'wy-preview-detail';
       const name = doc.createElement('span');
       name.className = 'wy-preview-name';
-      name.textContent = creepName(entry.creepId);
+      name.textContent = parts.name;
       detail.append(name);
-      const notes = previewEntryNotes(entry);
-      if (notes.length > 0) {
+      if (parts.clause !== '') {
         const clause = doc.createElement('span');
         clause.className = 'wy-preview-clause';
-        // The join separator is punctuation between already-translated fragments, not copy —
-        // the same posture the immunities list has always taken with its `', '`.
-        clause.textContent = notes.join(' · ');
+        clause.textContent = parts.clause;
         detail.append(clause);
       }
       glance.append(detail);
@@ -2240,11 +2238,28 @@ export function createOverlay(
     return glance;
   }
 
+  /** The strings one glance is written from — the single source for `buildEntryGlance` and the
+   *  locale sentinel's `previewEntryGlanceText`, so the two cannot drift (a drift makes every
+   *  HUD refresh rebuild the list and reset a scrolled strip). `name` and `clause` are empty
+   *  unless the wave has a single entry; `clause` is also empty when the entry deviates in
+   *  nothing. The join separator is punctuation between already-translated fragments, not
+   *  copy — the same posture the immunities list has always taken with its `', '`. */
+  function glanceParts(
+    entry: PreviewEntryVM,
+    single: boolean,
+  ): { readonly count: string; readonly name: string; readonly clause: string } {
+    return {
+      count: t('hud.preview.count', { count: entry.count }),
+      name: single ? creepName(entry.creepId) : '',
+      clause: single ? previewEntryNotes(entry).join(' · ') : '',
+    };
+  }
+
   /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
    *  row comparison (the icon carries no text). */
   function previewEntryGlanceText(entry: PreviewEntryVM, single: boolean): string {
-    const count = t('hud.preview.count', { count: entry.count });
-    return single ? count + creepName(entry.creepId) + previewEntryNotes(entry).join(' · ') : count;
+    const { count, name, clause } = glanceParts(entry, single);
+    return count + name + clause;
   }
 
   /** The scroll form's cue (`ui.css`): each edge with entries past it fades, because the

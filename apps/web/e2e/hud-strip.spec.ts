@@ -300,7 +300,7 @@ test('forced colors: every HUD icon and the strip’s creep icon take the user�
       facets: paint('.wy-hud .wy-icon .wy-icon-facets', 'stroke'),
       creep: paint('.wy-wave-preview .wy-creep-body', 'fill'),
       control: getComputedStyle(primary).color,
-      grayText: system('GrayText'),
+      buttonFace: system('ButtonFace'),
       wedge: style('.wy-dial-wedge').stroke,
       ring: style('.wy-dial-ring').stroke,
       crown: style('.wy-dial-crown').stroke,
@@ -325,14 +325,13 @@ test('forced colors: every HUD icon and the strip’s creep icon take the user�
   expect(inks.creep).toHaveLength(1);
   expect(inks.facets).toEqual([inks.canvas]); // drawn on the gem's body, in the colour around it
   // The dial (#181 QC round 2, a stopwatch face): the remaining-time wedge, the ring and the
-  // crown in the control's own system ink, ButtonText; the spent face in GrayText at full
-  // strength — a second system colour, where the dimmed first the default theme uses would not
-  // stay apart in a forced palette.
+  // crown in the control's own system ink, ButtonText, over a ButtonFace face — the wedge reads
+  // at the control text's own contrast (GrayText under it was 1.5:1 in the contrast themes).
   expect([inks.buttonText, inks.canvasText]).toContain(inks.control);
   for (const part of [inks.wedge, inks.ring, inks.crown]) expect(part).toBe(inks.buttonText);
-  expect(inks.face).toBe(inks.grayText);
+  expect(inks.face).toBe(inks.buttonFace);
   expect(inks.faceOpacity).toBe('1');
-  expect(inks.grayText, 'the spent face stays apart from the remaining wedge').not.toBe(
+  expect(inks.buttonFace, 'the face stays apart from the remaining wedge').not.toBe(
     inks.buttonText,
   );
   // The label paints no box of its own (#181 QC round 2: a mask that once covered the dial

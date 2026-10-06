@@ -15,6 +15,7 @@ export { resolvePalette, roleColour, COLOUR_MODES } from './palette';
 export type { Palette } from './palette';
 export { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
 export type { PositionedTracer, TracerPaintOp } from './tracers';
+export { isDetonation } from './scorches';
 export { creepShapeFor, creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
 export type { CreepShape, CreepSilhouettePaintOp, SlowTelegraphPaintOp } from './creep-paint';
 export { towerFootprintMarkFor, towerRoleFor, towerLookFor } from './tower-paint';

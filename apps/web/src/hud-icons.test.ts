@@ -423,6 +423,68 @@ describe('hud-icons — the countdown dial: a stopwatch face (#181 H1, QC round 
     expect(wedge.getAttribute('transform')).toBe(`rotate(-90 ${cx} ${cy})`);
   });
 
+  it('the ring is a stroke alone: unfilled, it never paints the SVG default black under the face', () => {
+    const { root } = countdownDial(document);
+    expect(part(root, 'wy-dial-ring').getAttribute('fill')).toBe('none');
+  });
+
+  describe('the crown, read as a path', () => {
+    const crownWalk = (): {
+      cx: number;
+      cy: number;
+      outerR: number;
+      innerR: number;
+      stems: { x: number; top: number; end: number }[];
+      bars: number[];
+    } => {
+      const { root } = countdownDial(document);
+      const crown = part(root, 'wy-dial-crown');
+      const ring = part(root, 'wy-dial-ring');
+      const cx = num(ring, 'cx');
+      const cy = num(ring, 'cy');
+      const r = num(ring, 'r');
+      const sw = num(ring, 'stroke-width');
+      const outerR = r + sw / 2;
+      const innerR = r - sw / 2;
+      const half = num(crown, 'stroke-width') / 2;
+      const tokens = crown.getAttribute('d')!.match(/[MHV]|-?\d*\.?\d+/g)!;
+      const stems: { x: number; top: number; end: number }[] = [];
+      const bars: number[] = [];
+      let at: Point = [0, 0];
+      for (let i = 0; i < tokens.length;) {
+        const cmd = tokens[i++]!;
+        if (cmd === 'M') at = [Number(tokens[i++]), Number(tokens[i++])];
+        else if (cmd === 'H') {
+          bars.push(at[1]);
+          at = [Number(tokens[i++]), at[1]];
+        } else if (cmd === 'V') {
+          const y = Number(tokens[i++]);
+          stems.push({ x: at[0], top: Math.min(at[1], y), end: Math.max(at[1], y) + half });
+          at = [at[0], y];
+        } else throw new Error(`unexpected crown command ${cmd}`);
+      }
+      return { cx, cy, outerR, innerR, stems, bars };
+    };
+
+    it('the crown stands ON the ring straight below its stem', () => {
+      const { cx, cy, outerR, innerR, stems } = crownWalk();
+      expect(stems.length).toBeGreaterThan(0);
+      for (const s of stems) {
+        const dx = s.x - cx;
+        const outer = cy - Math.sqrt(outerR ** 2 - dx ** 2);
+        const inner = cy - Math.sqrt(innerR ** 2 - dx ** 2);
+        expect(s.end, 'the stem reaches the ring below it').toBeGreaterThan(outer);
+        expect(s.end, '…without poking into the face').toBeLessThanOrEqual(inner);
+      }
+    });
+
+    it('the cap bar is the crown’s top', () => {
+      const { stems, bars } = crownWalk();
+      expect(bars.length).toBeGreaterThan(0);
+      for (const y of bars) expect(y).toBeLessThanOrEqual(Math.min(...stems.map((s) => s.top)));
+    });
+  });
+
   it('dialDash draws the remaining share of the wedge’s circumference, clamped to [0, 1]', () => {
     const wedge = part(countdownDial(document).root, 'wy-dial-wedge');
     const C = 2 * Math.PI * num(wedge, 'r');
