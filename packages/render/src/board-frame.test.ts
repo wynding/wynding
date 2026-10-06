@@ -517,7 +517,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     expect(t.scorches.syncs[3]).toEqual([]);
   });
 
-  it('feeds the tracker the frame’s impacts and towers: a mine seen standing, then gone with only its blast’s landing at its centre, leaves a scorch', () => {
+  it('feeds the tracker the frame’s impacts: a mine seen standing, then gone with only its marked blast landing at its centre, leaves a scorch', () => {
     const { t } = targets();
     const scorches = createScorchTracker();
     const mine = tower(3, 'mine', 6); // footprint centre: the corner of cells (7, 3)
@@ -536,7 +536,10 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     // Gone, with no tracer: only the blast's impact, at its footprint centre.
     drawBoardFrame(
       t,
-      frame(21, [], { ...OVERLAY, sparks: [{ x: 7 * 256, y: 3 * 256, radiusFp: 2.5 * 256 }] }),
+      frame(21, [], {
+        ...OVERLAY,
+        sparks: [{ x: 7 * 256, y: 3 * 256, radiusFp: 2.5 * 256, detonation: true }],
+      }),
     );
     expect(t.scorches.syncs[1]!.map((p) => p.frame)).toEqual([SCORCH_FRAME_KEY]);
   });

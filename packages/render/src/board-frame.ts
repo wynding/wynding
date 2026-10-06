@@ -131,7 +131,7 @@ export interface BoardFrameInput {
   /** The sparks still lit this frame (`SparkStore.live`). */
   readonly sparks: readonly LiveSpark[];
   /** Where mines went off (`scorches.ts`): state the scene keeps across frames and resets
-   *  with the run. Each frame feeds it its tracers, impacts and towers, then draws the
+   *  with the run. Each frame feeds it its tracers and impacts, then draws the
    *  scorches still fading. */
   readonly scorches: ScorchTracker;
 }
@@ -155,11 +155,10 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   effects.clear();
   cues.clear();
   // scorches — on the floor, under everything a tower draws. The tracker sees this frame's
-  // tracers, impacts and towers before the scorches still fading are placed.
+  // tracers and impacts before the scorches still fading are placed.
   input.scorches.update({
     tracers: overlay.tracers,
     sparks: overlay.sparks,
-    towers: curVm.towers,
     renderTick: renderTimeTicks,
   });
   t.scorches.sync(placeScorches(input.scorches.live(renderTimeTicks), projection, frames));
