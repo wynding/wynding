@@ -296,13 +296,22 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // `ensurePaused` returns early; that is an accident of controller state, not an ordering
   // guarantee, and it should not be what keeps a phone held in portrait from failing to boot.
   let resultsShown = false;
+  /** Whether the finished run's playtrace capture has been ATTEMPTED — set just before the
+   *  terminal edge's capture, cleared by Play again. Declared HERE, beside `resultsShown`, for
+   *  the same temporal-dead-zone reason. Separate from `resultsShown` because that one is set
+   *  only once the dialog is open: a throw between the capture and the open leaves it false, and
+   *  the next `refreshHud` walks the edge again, which must not fold the same run into the ring
+   *  twice. Set before the capture rather than after it, so a capture that throws is not retried
+   *  either: the dialog still opens on the next refresh, without that run in the ring. */
+  let runCaptured = false;
   /** The results dialog's live-region claim counter (#133 review round). Declared HERE,
    *  beside `resultsShown`, for the reason the comment above gives: `refreshHud` can be
    *  reached during construction, and a `let` declared further down would sit in its
    *  temporal dead zone. */
   let resultsStatusSeq = 0;
   /** The finished run the open results dialog is about — captured ONCE at the terminal edge
-   *  (with the playtrace), which the survey's payload is built from. Null between runs. */
+   *  (with the playtrace), which the survey's payload is built from. Null between runs, and on
+   *  a dialog whose capture threw. */
   let terminalRun: {
     readonly replay: Replay;
     readonly snapshot: CaptureSnapshot;
@@ -340,12 +349,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     const ask = deps.surveyAsk;
     const gameVersion = deps.gameVersion ?? import.meta.env.WYNDING_GAME_VERSION;
     const survey = createSurvey({ ask, transport: deps.surveyTransport, mintKey: mintSurveyId });
-    surveyForm = createSurveyForm(doc, overlay.resultsSurveySlot, {
+    surveyForm = createSurveyForm(doc, overlay.resultsSurveySlots, {
       survey,
       refreshAsk: () => ask.refresh(),
       compose(idempotencyKey) {
-        // The form only exists on an open dialog, and the dialog only opens after the
-        // terminal capture below — so a null here is a wiring bug, not a state to handle.
+        // The form is only offered on a dialog whose terminal capture (below) produced a run —
+        // so a null here is a wiring bug, not a state to handle.
         if (terminalRun === null) throw new Error('survey: no finished run to describe');
         const { replay, snapshot, hud } = terminalRun;
         return buildSurveyPayload({
@@ -375,7 +384,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       writeStatus: (message) => overlay.setResultsStatus(message),
       statusText: () => overlay.resultsStatusText(),
       setRegionHeld: (held) => overlay.setResultsWritersLocked(held),
-      focusPlayAgain: () => overlay.focusPlayAgain(),
+      focusPlayAgain: (preventScroll) => overlay.focusPlayAgain(preventScroll),
     });
   }
   const rotate = doc.createElement('div');
@@ -574,18 +583,28 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       refund: controller.refundForSelection(),
     });
     if (controller.isTerminal() && !resultsShown) {
+      // The panel's run numbers (#181 H2), read first: a read-only view of the frozen
+      // controller, so they describe the run the dialog is about, and nothing below has
+      // happened yet if reading them fails.
+      const stats = controller.runStats();
       // Capture BEFORE the dialog opens (#133). The controller is frozen at the terminal
-      // transition, so nothing can move between here and the export — and capturing on
-      // the same `!resultsShown` edge means exactly one capture per run, never one per
-      // frame the dialog is up.
-      capturePlaytrace(hud);
+      // transition, so nothing can move between here and the export. At most ONE capture
+      // attempt per run, whatever follows: if a step below throws, `resultsShown` stays false
+      // and the next `refreshHud` (an input handler's) walks this edge again, so the capture
+      // keeps its own guard rather than riding the dialog's. A capture that itself throws is
+      // not retried; the next walk opens the dialog without it.
+      if (!runCaptured) {
+        runCaptured = true;
+        capturePlaytrace(hud);
+      }
       // Opening a dialog invalidates anything still in flight for the previous one. The
       // invariant held via `resultsShown` + `playAgain` alone, but only by accident of
       // there being one re-open path; enforcing it where the dialog actually opens means a
       // second path cannot silently inherit a stale announcement.
       abandonResultsStatus();
-      overlay.showResults(hud);
-      surveyForm?.dialogOpened();
+      overlay.showResults(hud, stats);
+      // A failed capture leaves no run for the survey to describe (`compose`), so none is offered.
+      if (terminalRun !== null) surveyForm?.dialogOpened();
       resultsShown = true;
     }
     // Every input to the wake lock's predicate except document visibility moves through this
@@ -1029,6 +1048,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         // explicit focus wins regardless of what was focused beforehand.
         board.focus();
         resultsShown = false;
+        runCaptured = false; // the next run is captured at its own terminal edge
         lastHudKey = '';
         // Repaint the HUD NOW rather than waiting for the next scheduled frame (#53): the
         // fresh run is held (un-ticking) at wave 1's initial countdown, so until a frame

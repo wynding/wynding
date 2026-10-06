@@ -37,8 +37,10 @@ import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import { dialDash, creepIcon, paintCreepIcon } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
+import { createResultsPanel } from './results-panel';
 import type { InstallHandle, InstallState } from './install';
-import type { ArmedTower, UiState, PlacementOutcome } from './controller';
+import type { ArmedTower, UiState, PlacementOutcome, RunStats } from './controller';
+import type { SurveySlots } from './survey-form';
 
 /** A player intent emitted by the overlay for the app to route to the controller. */
 export type UiAction =
@@ -91,7 +93,9 @@ export interface Overlay {
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
    *  the guard; this just shows the dialog and calls `onConfirm` if the player commits. */
   showLeave(onConfirm: () => void): void;
-  showResults(hud: HudVM): void;
+  /** Open the results dialog for a finished run: `hud` carries the outcome, score and stars,
+   *  `stats` the run's numbers (`Controller.runStats`, #181 H2). */
+  showResults(hud: HudVM, stats: RunStats): void;
   hideResults(): void;
   /** Write the results dialog's ONE shared status region — the `role="status"`
    *  `aria-live="polite"` paragraph every secondary action reports through (Verify, and
@@ -100,10 +104,11 @@ export interface Overlay {
   setResultsStatus(message: string): void;
   /** What the shared status region reads now. */
   resultsStatusText(): string;
-  /** The results dialog's survey slot (ADR 0014 §1): an empty container between the
-   *  secondary actions and the status region. `survey-form.ts` fills it; the overlay only
-   *  places it, so a build with no survey carries an empty, unrendered node. */
-  readonly resultsSurveySlot: HTMLElement;
+  /** The results dialog's survey slots (ADR 0014 §1, #181 H2): an empty container in the
+   *  action row for Give feedback, and one below the row, before the status region, for the
+   *  form. `survey-form.ts` fills them; the overlay only places them, so a build with no survey
+   *  carries two empty, unrendered nodes. */
+  readonly resultsSurveySlots: SurveySlots;
   /** ADR 0014 §6's single-owner handoff, enforced by control state: while the survey holds
    *  the shared status region (a send in flight), every OTHER action that writes it —
    *  Verify, and #133's two exports — is `aria-disabled` and its press does nothing. A press
@@ -111,8 +116,10 @@ export interface Overlay {
    *  each writer claims the region, silence the outcome entirely. */
   setResultsWritersLocked(locked: boolean): void;
   /** Focus Play again — where an accepted Send sends focus, since it retires the control
-   *  the player was on (ADR 0014 §1). */
-  focusPlayAgain(): void;
+   *  the player was on (ADR 0014 §1). Without scrolling after a pointer-pressed Send
+   *  (`SurveyFormHost.focusPlayAgain`, #181 H2), and taking no Enter or Space for a moment
+   *  (`ResultsPanel.focusPlayAgain`). */
+  focusPlayAgain(preventScroll: boolean): void;
   destroy(): void;
 }
 
@@ -725,30 +732,21 @@ export function createOverlay(
   results.setAttribute('role', 'dialog');
   results.setAttribute('aria-modal', 'true');
   results.hidden = true;
-  const resultTitle = doc.createElement('h2');
-  const resultSummary = doc.createElement('p');
-  const playAgainBtn = button(doc, 'wy-btn wy-primary', t('controls.playAgain'));
-  const verifyBtn = button(doc, 'wy-btn', t('controls.verify'));
-  // ADR 0011's local export (#133), as two more NON-PRIMARY actions beside Verify. Play
-  // again keeps its primary styling and its initial focus; these simply join the dialog's
-  // tab order after it. Two buttons rather than one because the two destinations are
-  // genuinely different acts — a paste into an issue form, and a file to attach — and a
-  // single control could only ever guess which one the player meant.
-  const copyRunBtn = button(doc, 'wy-btn', t('controls.copyRun'));
-  const saveRunBtn = button(doc, 'wy-btn', t('controls.saveRun'));
-  // The results dialog's ONE shared status region. Named `.wy-verify` in the stylesheet
-  // since M1 and left that way on purpose: renaming a class costs a ui.css edit and buys
-  // nothing, and the ELEMENT's contract (one polite live region, cleared on every
-  // show/hide) is what the three actions share.
-  const resultsStatus = doc.createElement('p');
-  resultsStatus.className = 'wy-verify';
-  resultsStatus.setAttribute('role', 'status');
-  resultsStatus.setAttribute('aria-live', 'polite');
-  // ADR 0014 §1's survey, expanded IN PLACE: its slot joins the tab order after the other
-  // secondary actions and before the status region it reports through.
-  const surveySlot = doc.createElement('div');
-  surveySlot.className = 'wy-survey';
-  surveySlot.hidden = true; // until a survey renders into it — most builds never do
+  // Its content is the results PANEL (#181 H2, `results-panel.ts`): the outcome, the stars and
+  // score, the run's numbers, and the actions. Play again keeps its primary styling, and the
+  // initial focus wherever it is wholly in view as the panel opens (else the heading takes it,
+  // `resultsOverlay.show` below). Verify, Copy and Save (#133's local export) sit behind the
+  // panel's Run data disclosure, the same buttons with the same handlers below. The dialog's
+  // description is the panel's one sentence carrying the score and the stars.
+  const resultsPanel = createResultsPanel(doc, results);
+  results.setAttribute('aria-describedby', resultsPanel.description.id);
+  const {
+    playAgain: playAgainBtn,
+    verify: verifyBtn,
+    copyRun: copyRunBtn,
+    saveRun: saveRunBtn,
+    status: resultsStatus,
+  } = resultsPanel;
   // The status region's other writers, locked while the survey holds it (§6). Same
   // `aria-disabled` + click-site suppression as the Dock's primary control; unlike Send's
   // suppressed press, these stay SILENT, because the region they would announce into is
@@ -766,16 +764,6 @@ export function createOverlay(
   saveRunBtn.addEventListener('click', () => {
     if (!writerLocked(saveRunBtn)) onAction({ type: 'savePlaytrace' });
   });
-  results.append(
-    resultTitle,
-    resultSummary,
-    playAgainBtn,
-    verifyBtn,
-    copyRunBtn,
-    saveRunBtn,
-    surveySlot,
-    resultsStatus,
-  );
 
   // --- Modal owner: single authority over `.wy-shell`'s inert + focus save/restore ---
   const modal = createModalOwner(doc, shell.root, {
@@ -788,7 +776,12 @@ export function createOverlay(
   const resultsOverlay: ModalOverlay = {
     show(): void {
       results.hidden = false;
-      playAgainBtn.focus();
+      // The panel's press guard counts the dialog's arrival as the layout moving under any press
+      // made before it. Play again keeps initial focus (ADR 0014 §1) wherever it is wholly in
+      // view as the panel opens. Where it is not — a short window at heavy text zoom — focusing
+      // it would scroll the outcome out of view, so the heading takes focus instead (#181 H2,
+      // `results-panel.ts`).
+      resultsPanel.open();
     },
     hide(): void {
       results.hidden = true;
@@ -2512,17 +2505,15 @@ export function createOverlay(
       leaveConfirmHandler = onConfirm;
       modal.open(leaveOverlay, { priority: 'settings', dismissOnEscape: true });
     },
-    showResults(hud: HudVM): void {
+    showResults(hud: HudVM, stats: RunStats): void {
       // Modal-family open lifecycle (same as settings/rotate): abort any in-flight
       // placement gesture first — the input manager's inert commit-guard is the net, but
       // every opener aborts for itself so the ghost never lingers behind the dialog.
       abortGesture();
       cancelCapture?.(); // a match can end mid-rebind — drop the armed capture so the first
       // Enter activates Play Again instead of being swallowed into a rebind.
-      const heading = hud.won ? t('results.won') : t('results.lost');
-      resultTitle.textContent = heading;
-      resultSummary.textContent = t('results.summary', { score: hud.score, stars: hud.stars });
-      results.setAttribute('aria-label', heading);
+      resultsPanel.render({ won: hud.won, score: hud.score, stars: hud.stars, stats });
+      results.setAttribute('aria-label', resultsPanel.title.textContent ?? '');
       resultsStatus.textContent = '';
       // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
       modal.open(resultsOverlay, { priority: 'results', backExits: true });
@@ -2537,12 +2528,12 @@ export function createOverlay(
     resultsStatusText(): string {
       return resultsStatus.textContent ?? '';
     },
-    resultsSurveySlot: surveySlot,
+    resultsSurveySlots: resultsPanel.surveySlots,
     setResultsWritersLocked(locked: boolean): void {
       for (const btn of regionWriters) btn.setAttribute('aria-disabled', String(locked));
     },
-    focusPlayAgain(): void {
-      playAgainBtn.focus();
+    focusPlayAgain(preventScroll: boolean): void {
+      resultsPanel.focusPlayAgain(preventScroll);
     },
     setColourMode(mode: ColourMode): void {
       palette = resolvePalette(mode);
@@ -2562,6 +2553,7 @@ export function createOverlay(
       railAffordanceObserver = null;
       stripObserver?.disconnect();
       stripObserver = null;
+      resultsPanel.destroy();
       modal.destroy();
       results.remove();
       settingsDialog.remove();

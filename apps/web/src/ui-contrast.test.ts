@@ -167,6 +167,73 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
     }
   });
 
+  // #181 (H2): the results panel, gated on its own. Its two surfaces are the panel and its tiles
+  // (the Run data box wears a tile's fill); their own edges, `results-edge` and
+  // `results-tile-edge`, are decoration — neither the panel nor a tile is a control — and need
+  // only exist, so deleting one cannot fall back to `currentColor` unseen.
+  describe('the results panel (#181 H2)', () => {
+    const PANEL_TOKENS = [
+      'results-panel',
+      'results-edge',
+      'results-tile',
+      'results-tile-edge',
+      'loss',
+      'danger',
+      'fg-quiet',
+      'star-empty',
+    ];
+
+    it('declares every token it paints with', () => {
+      for (const name of PANEL_TOKENS) {
+        expect(tokens[name], `missing --wy-${name} in ui.css :root`).toBeTypeOf('number');
+      }
+    });
+
+    it('text clears 4.5:1 on the surface it is read on', () => {
+      const pairs: Array<[string, string]> = [
+        // On the panel: the heading, the score and the survey in `fg`; the subtitle and "Score"
+        // in `fg-dim`; the Run data label in `fg-quiet`.
+        ['fg', 'results-panel'],
+        ['fg-dim', 'results-panel'],
+        ['fg-quiet', 'results-panel'],
+        // On a tile: its number in `fg`, its label in `fg-dim`, a loss's Leaks in `danger`. In
+        // the Run data box: its actions in `fg`, and in `fg-dim` while the survey's send holds
+        // them (`aria-disabled`).
+        ['fg', 'results-tile'],
+        ['fg-dim', 'results-tile'],
+        ['danger', 'results-tile'],
+      ];
+      for (const [fg, bg] of pairs) {
+        const ratio = contrast(tokens[fg]!, tokens[bg]!);
+        expect(ratio, `${fg} on ${bg} = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it('non-text clears 3:1 against what it is drawn over', () => {
+      const pairs: Array<[string, string]> = [
+        // The outcome band straddles the panel's top edge: a win's (`stars`) and a loss's
+        // (`loss`) against the panel and the backdrop (`bg`, the conservative stand-in for the
+        // darker scrim; `stars` on `bg` is gated with the HUD above).
+        ['stars', 'results-panel'],
+        ['loss', 'results-panel'],
+        ['loss', 'bg'],
+        // An earned star is `stars` on the panel, outlined in `icon-ink` (gated above); an
+        // unearned star is carried by its `panel-edge` outline, so the grade reads by shape.
+        // `panel-edge` is also the Run data toggle's border, on the panel, and its box's edge.
+        ['panel-edge', 'results-panel'],
+        ['panel-edge', 'results-tile'],
+        // Give feedback's border, and the focus ring over the panel and over the box's fill.
+        ['accent', 'results-panel'],
+        ['focus', 'results-panel'],
+        ['focus', 'results-tile'],
+      ];
+      for (const [fg, bg] of pairs) {
+        const ratio = contrast(tokens[fg]!, tokens[bg]!);
+        expect(ratio, `${fg} on ${bg} = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(3.0);
+      }
+    });
+  });
+
   // #181 (QC): the countdown dial — a stopwatch face — is drawn INSIDE the primary Dock control
   // in that control's own text ink (`currentColor`): the ring, the crown and the remaining-time
   // wedge at full strength, the spent part of the face as the same ink, dimmed. Neither is a
