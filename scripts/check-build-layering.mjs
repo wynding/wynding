@@ -6,8 +6,9 @@
 // most-downstream package — AGENTS.md's Hard rules, `packages/perf/src/index.ts`'s header),
 // `@wynding/content`'s `./stress` and `./catalog` subpaths — synthetic perf ceilings
 // (1,000,000-hp creeps, 1,000,000 starting lives) deliberately absent from the registry — and
-// the e2e survey harness, `apps/web/e2e-harness/` (#158), whose entry boots the real app with a
-// FAKE survey transport that any script on the page could drive.
+// the e2e harnesses, `apps/web/e2e-harness/` (#158; #181 added two), whose pages boot the real
+// app with FAKE survey transports, or the renderer with a scene hook, that any script on the
+// page could drive.
 //
 // WHY THE SUBSTRATE IS THE ARTIFACT AND NOT THE SOURCE. The question is "does the shipped app
 // reach a forbidden module through the real module graph?", and the authority on that graph is
@@ -60,7 +61,7 @@
 //     the two specifier-matching guards, so all three pass. Anything claiming this check
 //     catches "every spelling of a reach" is overstating it: Vite resolving the specifier is
 //     necessary, not sufficient — a marker must also survive tree-shaking to be seen.
-//   - The e2e survey harness has NO upstream guard. No lint zone and no grep names
+//   - The e2e harnesses have NO upstream guard. No lint zone and no grep names
 //     `apps/web/e2e-harness/`, and `apps/web/tsconfig.json` compiles it in the same program as
 //     `src`, so apart from the structural separation `vite.e2e.config.ts` describes, this check is
 //     the harness arm's only automated defence. What it can see is narrower than "the harness":
@@ -68,12 +69,17 @@
 //     a bound marker of its own (`assertMarkerTableIntact`). Other files are not asked to. The HTML
 //     page runs only if a shipped build names it as an input; imported as data (`?raw`, `?url`) it
 //     would ship unseen, and so would any JSON or other non-script file shipped code imported —
-//     none is imported today, and data carries no behaviour, but it is a gap, not a guarantee. The
+//     none is imported today, and data carries no behaviour, but it is a gap, not a guarantee. Nor
+//     is harness support code outside the directory covered: `apps/web/src/scripted-run.ts`
+//     (test support the results harness shares with `controller.test.ts`) and
+//     `packages/content/src/showcase-builds.ts` (which that harness reaches by relative path)
+//     carry no hook and no fake transport, and nothing here would see shipped code import them. The
 //     markers are reached from the module's top-level side effects, so any graph that imports the
 //     module keeps them. A refactor that moves a marker behind a call shipped code never makes lets
 //     Rollup drop it, and the module could then ship unseen — the same limit as `stats.ts` above.
-//     `__wySurvey` is a PROPERTY name, which survives only because the build does not mangle
-//     properties; the harness's second marker is an ordinary string literal.
+//     `__wySurvey` and `__wyTurnedHeads` are PROPERTY names, which survive only because the build
+//     does not mangle properties; the survey entry's second marker and the results entry's
+//     marker are ordinary string literals.
 //
 // WHY THE MARKERS ARE VALIDATED AGAINST A FORBIDDEN BUILD. A marker check that matches
 // nothing in the thing it forbids proves nothing: rename `STRESS_RULESET_ID` and this file
@@ -81,12 +87,12 @@
 // every marker below must be found in its module's POSITIVE CONTROL — a build that reaches
 // that module on purpose. There are two: `dist-perf`, the perf-only build, whose two entry
 // points (`apps/web/perf/main-perf.ts`, `main-perf-catalog.ts`) import the three package
-// modules; and `dist-e2e`, the e2e build, whose one entry (`apps/web/e2e-harness/survey.html`)
-// loads the survey harness. A marker missing from its control fails the run just as loudly as
-// a marker found in `dist`. Presence alone is not the whole control, though: a marker must
-// also be EMITTED BY the module it is bound to, read off the control build's sourcemaps
-// (`emittedBy` in the table below, #168), or a string with a second carrier keeps leg 1 green
-// after the control has stopped reaching the module at all.
+// modules; and `dist-e2e`, the e2e build, whose three pages (`apps/web/e2e-harness/survey.html`,
+// `results.html` and `turned-heads.html`) load the harness modules. A marker missing from its
+// control fails the run just as loudly as a marker found in `dist`. Presence alone is not the whole
+// control, though: a marker must also be EMITTED BY the module it is bound to, read off the control
+// build's sourcemaps (`emittedBy` in the table below, #168), or a string with a second carrier
+// keeps leg 1 green after the control has stopped reaching the module at all.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -204,6 +210,18 @@ const MARKERS = [
     emittedBy: 'apps/web/e2e-harness/survey-entry.ts',
     why: "the survey harness entry's boot-failure message (apps/web/e2e-harness/survey-entry.ts, #158) — an ordinary string literal, independent of the hook's name, so the harness arm does not rest on one spelling",
   },
+  {
+    text: 'results harness: the scripted run did not end',
+    module: 'apps/web/e2e-harness/',
+    emittedBy: 'apps/web/e2e-harness/results-entry.ts',
+    why: "the results harness entry's failure message for a scripted run that never ends (apps/web/e2e-harness/results-entry.ts, #181 H2) — an ordinary string literal in the controller factory that the module's top-level `createApp` call passes, so any graph that imports the module keeps it",
+  },
+  {
+    text: '__wyTurnedHeads',
+    module: 'apps/web/e2e-harness/',
+    emittedBy: 'apps/web/e2e-harness/turned-heads-entry.ts',
+    why: "the window hook through which `turned-rim.spec.ts` drives the turned-heads page's scene (apps/web/e2e-harness/turned-heads-entry.ts, #181 T3) — a property name, which the build does not mangle, assigned at the module's top level",
+  },
 ];
 
 // FAILURE IS THROWN, NOT `process.exit()`-ed, and that is not style. Measured on Node
@@ -296,10 +314,10 @@ function scannableText(file) {
 // `cat-heavy`'s only other carrier is `catalog-*.js.map`, where it is the source text of
 // `oracle-catalog.ts` rather than anything emitted. Rename the creep id in the ruleset JSON, leave
 // the identifier in that source file, and the old check stayed green forever on text no build can
-// ship. All seven markers still pass with maps excluded. (The `emittedBy` binding below does open
-// the control builds' maps, but only to ATTRIBUTE an occurrence already found in emitted code — it
-// reads `mappings` and `sources`, never `sourcesContent`, so a map still cannot make a marker count
-// as present.)
+// ship. Leg 1 excludes maps on every run, and every marker passes. (The `emittedBy` binding below
+// does open the control builds' maps, but only to ATTRIBUTE an occurrence already found in emitted
+// code — it reads `mappings` and `sources`, never `sourcesContent`, so a map still cannot make a
+// marker count as present.)
 const EMITTED = (file) => !file.endsWith('.map');
 
 /** Every one of `markers` found in `dir`, with the emitted files each was found in. */
@@ -582,7 +600,7 @@ function assertMarkerTableIntact() {
         'forbidden app directory with no marker bound to it, so it could reach the shipped ' +
         'build unseen. Add a MARKERS row whose `emittedBy` is the file: a string unique to it, ' +
         "reached from the module's top-level side effects. A file that emits no code (types " +
-        'only) belongs in a .d.ts, which is exempt; a file the harness page never loads cannot ' +
+        'only) belongs in a .d.ts, which is exempt; a file no harness page loads cannot ' +
         'be found in its control and does not belong in the directory.',
     );
   }

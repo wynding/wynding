@@ -23,7 +23,7 @@ import { defineConfig, type Plugin } from 'vite';
 //
 // ONE CI CONSUMER EXISTS, and it is not a gate on these numbers. Since #129,
 // `scripts/check-build-layering.mjs` BUILDS this config in the e2e job and uses `dist-perf`
-// as the positive control for the markers of its three package arms (the survey harness's
+// as the positive control for the markers of its three package arms (the e2e harnesses'
 // `dist-e2e` is the other control): because these two entry points deliberately reach
 // `@wynding/perf`, `@wynding/content/stress` and `./catalog`, they are where the check proves
 // those markers still match something before asserting they are absent from `dist`.
