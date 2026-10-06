@@ -937,3 +937,76 @@ describe('press guard — QC round 6 (#181 H2)', () => {
     expect(h.pressed, 'a tap back at the first spot').toEqual([]);
   });
 });
+
+// Helpers of the round 7 describes below: pointer events alone, and whole mouse presses.
+const stampedAt = <E extends Event>(event: E, at: number): E => {
+  Object.defineProperty(event, 'timeStamp', { value: at });
+  return event;
+};
+const setNow = (ms: number) =>
+  vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(ms);
+/** A pointer event alone (no mouse events), of `type` pointer `id`, at x (y 100). */
+const ptr = (
+  el: Element,
+  type: 'pointerdown' | 'pointerup' | 'pointercancel',
+  at: number,
+  id: number,
+  x = 100,
+  ptype = 'touch',
+): void => {
+  const e = stampedAt(new MouseEvent(type, { bubbles: true, clientX: x, clientY: 100 }), at);
+  Object.defineProperty(e, 'pointerType', { value: ptype });
+  Object.defineProperty(e, 'pointerId', { value: id });
+  el.dispatchEvent(e);
+};
+/** A tap's mouse events, at its release. */
+const mouseTap = (el: Element, at: number, x = 100, detail = 1): void => {
+  const init = { bubbles: true, cancelable: true, clientX: x, clientY: 100, detail };
+  el.dispatchEvent(stampedAt(new MouseEvent('mousedown', init), at));
+  el.dispatchEvent(stampedAt(new MouseEvent('click', init), at));
+};
+/** A whole mouse press (pointer `id`), down and released at `at`. */
+const mouseClick = (el: Element, at: number, x = 100, id = 1, detail = 1): void => {
+  ptr(el, 'pointerdown', at, id, x, 'mouse');
+  const init = { bubbles: true, cancelable: true, clientX: x, clientY: 100, detail };
+  el.dispatchEvent(stampedAt(new MouseEvent('mousedown', init), at));
+  ptr(el, 'pointerup', at, id, x, 'mouse');
+  el.dispatchEvent(stampedAt(new MouseEvent('click', init), at));
+};
+
+describe('press guard — one pointer pressing at two spots (#181 H2)', () => {
+  it('AB1: a mouse clicks the board at A, then at B 200px away; the dialog arrives; a re-click at A is held ("every press let go under 2 s ago")', () => {
+    const h = fixture();
+    mouseClick(h.board, 0, 100); // A, where B (the button) will stand
+    mouseClick(h.board, 250, 300); // B, elsewhere: the same pointer, so its entry replaces A's
+    setNow(350);
+    h.guard.arm();
+    mouseClick(h.b, 520, 100); // back at A, 170 ms after the arrival
+    expect(h.pressed).toEqual([]);
+  });
+
+  it('AB2: the same with touches that share one pointerId (every WebKit tap here is pointerId 0)', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', 0, 0);
+    ptr(h.board, 'pointerup', 60, 0);
+    ptr(h.board, 'pointerdown', 160, 0, 300);
+    ptr(h.board, 'pointerup', 220, 0, 300);
+    setNow(350);
+    h.guard.arm();
+    ptr(h.b, 'pointerdown', 500, 0);
+    mouseTap(h.b, 560);
+    expect(h.pressed).toEqual([]);
+  });
+});
+
+describe('press guard — a mouse release that never came heals at the next press (#181 H2)', () => {
+  it('S2: a mouse release that never came: the next mouse release, 5 s after the arrival, re-opens the window at the old spot', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', 0, 1, 100, 'mouse'); // its pointerup is lost
+    setNow(1000);
+    h.guard.arm();
+    mouseClick(h.a, 6000, 400); // Run data, 5 s on, far from the old spot: passes
+    mouseClick(h.b, 6250); // a deliberate press 250 ms later, at the old spot
+    expect(h.pressed, 'a deliberate press 5.25 s after the arrival').toEqual(['A', 'B']);
+  });
+});

@@ -30,29 +30,30 @@
 // Four behaviours carry the rest:
 //   - Timed from the release. A press's effect lands at its click, so the gesture is measured
 //     from there: a press held down a long time keeps the whole window after its release.
-//   - The dialog's arrival. Presses are recorded across the whole document, each pointer's last
-//     one by pointer (`pointerdown`, since a tap's `mousedown` and `click` come only at its
+//   - The dialog's arrival. Presses are recorded across the whole document, every press
+//     (`pointerdown`, since a tap's `mousedown` and `click` come only at its
 //     release, and none come where the dialog arrived over the board meanwhile). On this board a
 //     tap gives no `mousedown` or `click` at all, so these spots are touch's only protection.
 //     `arm` notes the arrival and the spot of every press still down or let go under 2 s ago
 //     (two fingers, or taps at two places, each keep their own); a press on a panel control
 //     within the window of the arrival, inside the slop of ANY of those spots, is held: it
 //     belongs to a gesture begun before the dialog was there. Where pointers were still down as
-//     the dialog arrived, the arrival is timed from the last of their releases (`pointerup` or
-//     `pointercancel`), so a slow tap or a long touch keeps the whole window, and a press let
-//     go before the arrival is stale 2 s after its release, however long it was held. A press
-//     the OS counts as a repeat (`detail` above 1) belongs to the arrival for 2 s, as in rule 1.
-//     A press on the control the last press that passed, since the arrival, landed on is not
-//     held (a double-click on Run data after the arrival). A fourth tap of a burst passes:
-//     Chromium caps its tap count at 3.
+//     the dialog arrived, the arrival is timed from the last release among those presses
+//     (`pointerup` or `pointercancel`), so a slow tap or a long touch keeps the whole window, and
+//     a press let go before the arrival is stale 2 s after it was let go, however long it was
+//     held. A press the OS counts as a repeat (`detail` above 1) belongs to the arrival for 2 s,
+//     as in rule 1. A press on the control the last press that passed, since the arrival, landed
+//     on is not held (a double-click on Run data after the arrival). A fourth tap of a burst
+//     passes: Chromium caps its tap count at 3.
 //   - Keys at the first focus. `holdKeys(el)` gives `el` no Enter or Space for 500 ms: Play again
 //     at the dialog's first focus (a second Enter or Space on the board as the run ends), and after
 //     an accepted Send.
 //   - Keys after a keyboard activation. One (`detail` 0) that moves focus to another panel control
 //     gives that control the same hold (Space twice on Give feedback would check the first rating;
 //     Enter twice on Not now would reopen the survey). The move is checked where the click's
-//     dispatch ends, or at the next key or the next task if either comes first. The hold covers
-//     any control, a radio included, and is checked before the auto-repeat rule.
+//     dispatch ends; the next key and the next task matter only for a click stopped short of the
+//     window. The hold covers any control, a radio included, and is checked before the
+//     auto-repeat rule.
 //
 // What always passes: a keyboard activation (its click has `detail` 0, as a script's `click()`
 // does), a press on the control the last press that passed landed on (a double-click on Run data
@@ -75,8 +76,8 @@ export const PRESS_GUARD_WINDOW_MS = 500;
 
 /** How long a press the OS counts as a repeat (`detail` above 1) still belongs to the gesture of
  *  the last one, or to the dialog's arrival: past the slowest double-click setting a player is
- *  likely to choose, capped. Also how old a pointer's press may be, and not still down, for the
- *  arrival to count it. */
+ *  likely to choose, capped. Also how long ago a press may have been let go for the arrival to
+ *  count it. */
 export const PRESS_GUARD_REPEAT_MS = 2000;
 
 /** How far a press may land from the last one and still be at the same spot, for a mouse or a
@@ -148,7 +149,7 @@ interface Press {
 export interface PressGuard {
   /** The dialog has just arrived, or arrived again: a press made before now landed on whatever
    *  stood there before it, so the arrival counts as the layout moving. It also notes the time and
-   *  spot of the last pointerdown, where that is under 2 s old or its pointer is still down. */
+   *  spot of every press still down, or let go under 2 s ago. */
   arm(): void;
   /** Focus has just been moved to `el` for the player: `el` takes no Enter or Space for
    *  `PRESS_GUARD_KEY_HOLD_MS`. */
@@ -172,10 +173,10 @@ export function guardPresses(root: HTMLElement): PressGuard {
   /** A label press that passed: its label forwards a click to this control next. */
   let forwardTo: Element | null = null;
   let keyHold: { readonly el: Element; readonly until: number } | null = null;
-  /** Each pointer's last press anywhere in the document, by pointer, from its `pointerdown`: a
+  /** Each press anywhere in the document, by the order it came in, from its `pointerdown`: a
    *  tap's `mousedown` and `click` come only at its release, and none come where the dialog
-   *  arrived over the board meanwhile. Two fingers, or the Rail and then the board, each leave
-   *  their own spot. */
+   *  arrived over the board meanwhile. Two fingers, taps at two places, or the Rail and then the
+   *  board each leave their own spot, whatever pointer ids the engine gives them. */
   const downs = new Map<
     number,
     {
@@ -185,6 +186,9 @@ export function guardPresses(root: HTMLElement): PressGuard {
       readonly up: number | null;
     }
   >();
+  /** The press each pointer is making, by pointer, until its release. */
+  const pressing = new Map<number, number>();
+  let pressCount = 0;
   /** When the dialog last arrived, and the spots of the presses it arrived after. Where pointers
    *  were still down as it arrived (`during`), the arrival is timed from the last of their
    *  releases instead. */
@@ -196,8 +200,9 @@ export function guardPresses(root: HTMLElement): PressGuard {
   /** A held key press, whose release is held too. */
   let heldKey: string | null = null;
 
-  /** A keyboard activation's focus-move check, still to run: a zero-delay timer, which input
-   *  already queued behind a long task can beat. */
+  /** A keyboard activation's focus-move check, still to run. It is resolved at the click's end,
+   *  with the next key and a zero-delay timer as fallbacks for a click stopped short of the
+   *  window. */
   let focusMove: { readonly from: Element | null } | null = null;
   function resolveFocusMove(): void {
     if (focusMove === null) return;
@@ -262,7 +267,22 @@ export function guardPresses(root: HTMLElement): PressGuard {
   const onPointerDown = (event: Event): void => {
     const e = event as PointerEvent;
     pointerType = e.pointerType ?? '';
-    downs.set(e.pointerId, { x: e.clientX, y: e.clientY, up: null });
+    // Kept bounded: a press let go 2 s ago can be no later arrival's (`arm`).
+    for (const [n, down] of downs) {
+      if (down.up !== null && e.timeStamp - down.up >= PRESS_GUARD_REPEAT_MS) downs.delete(n);
+    }
+    // A pointer going down again lost its last release: that press is over, and times nothing.
+    const lost = pressing.get(e.pointerId);
+    if (lost !== undefined) {
+      downs.delete(lost);
+      if (arrival !== null && arrival.during.has(lost)) {
+        const during = new Set(arrival.during);
+        during.delete(lost);
+        arrival = { ...arrival, during };
+      }
+    }
+    pressing.set(e.pointerId, ++pressCount);
+    downs.set(pressCount, { x: e.clientX, y: e.clientY, up: null });
   };
 
   /** A pointer let go. Where the dialog arrived while it was down, the arrival is timed from
@@ -270,13 +290,14 @@ export function guardPresses(root: HTMLElement): PressGuard {
    *  where the dialog arrived over the board meanwhile. */
   const onPointerUp = (event: Event): void => {
     const e = event as PointerEvent;
-    const down = downs.get(e.pointerId);
-    if (down !== undefined && down.up === null) {
-      downs.set(e.pointerId, { ...down, up: e.timeStamp });
-    }
-    if (arrival !== null && arrival.during.has(e.pointerId)) {
+    const n = pressing.get(e.pointerId);
+    if (n === undefined) return;
+    pressing.delete(e.pointerId);
+    const down = downs.get(n);
+    if (down !== undefined) downs.set(n, { ...down, up: e.timeStamp });
+    if (arrival !== null && arrival.during.has(n)) {
       const during = new Set(arrival.during);
-      during.delete(e.pointerId);
+      during.delete(n);
       arrival = { ...arrival, at: Math.max(arrival.at, e.timeStamp), during };
     }
   };
