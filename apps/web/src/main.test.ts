@@ -434,9 +434,10 @@ describe('main — the terminal edge captures each run once, even when it throws
     h.runToBrokenEdge();
     dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
     expect(h.results.hidden, 'the dialog still opens').toBe(false);
-    // Offering the survey waits on the ask refresh a dialog opening starts, which this harness
-    // settles in a microtask: let it land before asserting nothing was offered.
-    for (let i = 0; i < 5; i++) await Promise.resolve();
+    // Offering the survey waits on the ask refresh a dialog opening starts. A macrotask boundary
+    // drains every pending microtask, however deep the offer's chain, so the assertion below
+    // cannot run before an offer would have landed.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     for (const slot of h.surveySlots()) {
       expect(slot.childElementCount, 'the survey rendered into its slots').toBeGreaterThan(0);
       expect(slot.hidden, `${slot.className}: nothing to Send about`).toBe(true);
