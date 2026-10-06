@@ -1442,9 +1442,17 @@ a.wy-home:focus-visible {
 
 @media (forced-colors: active) {
   /* Forced colours mark the armed Card with a 3px double border instead (the forced-colours
-     block below): its extra 2px comes out of the padding, so nothing inside moves. */
+     block below): its extra 2px comes out of the padding, and out of the corner hotkey's
+     offsets below, so nothing inside moves. */
   .wy-card[aria-pressed='true'] {
     padding: 4px 6px;
+  }
+
+  /* The corner hotkey is placed from the padding edge, which the border moves in by 2px: its
+     offsets give the 2px back too. */
+  .wy-card[aria-pressed='true'] .wy-card-hotkey {
+    top: 2px;
+    right: 6px;
   }
 }
 
@@ -1479,8 +1487,9 @@ a.wy-home:focus-visible {
 /* The painted short name. Its right margin keeps it clear of the hotkey in the corner, and
    only a short label is painted there: the two-column Rail falls back to one column once
    its Cards are too narrow for a name and a digit at the current text size (the container
-   query in the two-column block), and a label longer than a digit is visually hidden (the
-   `--long` modifier). */
+   query in the two-column block), and a label of more than two characters is visually
+   hidden on every Card (the `--long` modifier; any non-digit label is also hidden on the
+   icon form, the `--wide` modifier). */
 .wy-card-label {
   margin-right: 0.75rem;
   font-size: 0.875rem;
@@ -1533,7 +1542,7 @@ a.wy-home:focus-visible {
   color: var(--wy-fg-dim);
 }
 
-/* A label longer than a digit — a rebound key's word ("BracketLeft", "ArrowDown") or
+/* A label of more than two characters — a rebound key's word ("BracketLeft", "ArrowDown") or
    "Unbound" — would paint over the name, the art or "need N" in the corner. It is visually
    hidden exactly as the Compact fork hides the hotkey, and stays the tail of the Card's
    accessible name. `overlay.ts` toggles the class with the label. The body restates the
@@ -1583,8 +1592,6 @@ a.wy-home:focus-visible {
 }
 
 .wy-panel {
-  /* Same rule as `.wy-cards` (#69): Rail children scroll into reach, they never shrink. */
-  flex-shrink: 0;
   padding: 0.5rem 0.75rem;
   /* The style frame's docked Panel is a well, a step below the Rail it sits in. */
   background: var(--wy-bg);
@@ -1818,24 +1825,11 @@ a.wy-home:focus-visible {
      pin stays exactly where the measured curve put it.
 
      Since #181 (H3) the full sentences are visually hidden at every width (see the three
-     stat forms above), so what condenses here is the PAINTED form: the label-value rows give
-     way to the glance, and the docked head sheds its art and its role line — the Card the
-     player just pressed shows the art, and the glance says what the tower targets. */
-  .wy-stats-rows,
-  .wy-panel-art,
-  .wy-panel .wy-panel-role,
-  .wy-panel .wy-panel-hint {
-    display: none;
-  }
-
-  .wy-stats-glance {
-    display: block;
-    /* The `.wy-hud` Compact precedent. Measured at a 128px content box: at 1rem the
-       densest glance set (`frost-splash`) renders 173px and `slow` 169px against a 180px
-       bound — under it, but with no room for a longer translation. At 0.875rem the same
-       sets render 134px and 130px. */
-    font-size: 0.875rem;
-  }
+     stat forms above), so what condenses is the PAINTED form: the label-value rows give way
+     to the glance, and the docked head sheds its art and its role line — the Card the player
+     just pressed shows the art, and the glance says what the tower targets. Every Rail this
+     query matches pins an open Panel, so the pinned shed below (`.wy-rail-panel-pinned`) is
+     the one that sets those rules; this query keeps only the icon-form arms. */
 
   /* --- The ICON-FORM Cards (#181 L2), first arm ----------------------------------------
      The style frame's phone card — the art over the gem and the cost — in as many columns as
@@ -1865,6 +1859,16 @@ a.wy-home:focus-visible {
        padding, as it does in the full form. */
     .wy-card[aria-pressed='true'] {
       padding: 1px 0;
+    }
+
+    .wy-card[aria-pressed='true'] .wy-card-hotkey {
+      top: 0;
+      right: 2px;
+    }
+
+    .wy-card[aria-pressed='true'] .wy-card-need {
+      top: 12px;
+      max-width: 100%;
     }
   }
 
@@ -1913,6 +1917,20 @@ a.wy-home:focus-visible {
     top: 2px;
     right: 4px;
     font-size: 0.6875rem;
+  }
+
+  /* The icon form's corner fits a digit beside the 34px art and nothing wider: a letter or a
+     function key ("W", "F1") is visually hidden here, as a longer label is on every Card. */
+  .wy-card-hotkey--wide {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
@@ -1990,13 +2008,14 @@ a.wy-home:focus-visible {
   );
 }
 
-/* A pinned Panel is always the condensed one. The condensed form follows the Rail's WIDTH (the
-   160px container query above), but the Compact fork pins the Panel at every text size, and
-   from 150% text its Rail's content box is wider than 160px: the wide form's head art, role
-   line and rows then crowd the armed tower's name until it is cut off (measured at 658×320 at
-   150%, and 740×360 at 200%). So the shed keys on the pin itself, `overlay.ts`'s class. At
-   100% nothing changes: every pinned Rail there is already within 160px. Same bodies as the
-   container query's, after every rule they override. */
+/* A pinned Panel is always the condensed one, and this shed is the only one: every Rail the
+   160px container query matches pins an open Panel. The condensed form once followed the
+   Rail's WIDTH alone, but the Compact fork pins the Panel at every text size, and above 125%
+   text a Compact Rail's content box can pass 160px (658×320 from 126% to 151%; 740×360 and
+   wider through 200%): the wide form's head art, role line and rows then crowd the armed
+   tower's name until it is cut off (measured at 658×320 at 150%, and 740×360 at 200%). So the
+   shed keys on the pin itself, `overlay.ts`'s class. At 100% nothing changes: every pinned
+   Rail there is already within 160px. */
 .wy-rail-panel-pinned .wy-panel-art,
 .wy-rail-panel-pinned .wy-panel-role,
 .wy-rail-panel-pinned .wy-panel-hint,
@@ -2238,8 +2257,9 @@ a.wy-home:focus-visible {
      itself: 3px and double, against a resting Card's 1px solid. A ring drawn as an outline
      would be replaced by a focused Card's focus ring, leaving a focused armed Card looking
      like a focused resting one; a border is not. The 2px the border gains is taken back from
-     the padding (beside the armed rule, and in the two icon-form arms, which restate it), so
-     arming still moves nothing inside the Card. */
+     the padding (beside the armed rule, and in the two icon-form arms, which restate it) and
+     from the offsets of the two parts placed from the padding edge, the corner hotkey and the
+     icon form's "need N", so arming still moves nothing inside the Card. */
   .wy-card[aria-pressed='true'] {
     border: 3px double Highlight;
   }
@@ -2594,9 +2614,13 @@ a.wy-home:focus-visible {
      under a corner hotkey, so as the text grows the short name meets the digit and then runs
      past the Card's edge (measured at 125–200% text on 1280×720 and 1440×900). Once the Rail
      is too narrow for two Cards at the current text size, it falls back to one column. The
-     threshold mixes px and rem on purpose, so text zoom moves it: 112px is two 56px arts, and
-     12.6rem is the rem-sized rest of two Cards and the gap. `minmax(0, …)` stays: a bare `1fr`
-     gave the Rail a few px of sideways range. */
+     threshold mixes px and rem on purpose, so text zoom moves it. It is an empirical line, set
+     safely above the measured collision line, not derived: that line is about 147px + 8.9rem
+     (147px + 9.9rem in DejaVu Sans), because the Cards' paddings and borders are px and only
+     the art gap, the label margin, the grid gap and the short names scale with the text. The
+     line used here is 8-24px above it at 100% text and 50-82px above it at 200%. 112px is two
+     56px arts, and 12.6rem stands in for the rest. `minmax(0, …)` stays: a bare `1fr` gave the
+     Rail a few px of sideways range. */
   @container wy-rail (max-width: calc(112px + 12.6rem)) {
     .wy-cards {
       grid-template-columns: minmax(0, 1fr);
@@ -2943,6 +2967,11 @@ a.wy-home:focus-visible {
   @media (forced-colors: active) {
     .wy-card[aria-pressed='true'] {
       padding: 1px 0;
+    }
+
+    .wy-card[aria-pressed='true'] .wy-card-need {
+      top: 12px;
+      max-width: 100%;
     }
   }
 

@@ -490,9 +490,13 @@ export function createOverlay(
     const label = formatKeyLabel(keymap.codeFor(action));
     const text = label ?? t('settings.unbound');
     c.hotkey.textContent = text;
-    // A label longer than a digit (a rebound key's word, or "Unbound") is visually hidden: it
-    // would paint over the Card's name or art. It stays in the Card's accessible name.
+    // The corner was drawn for a digit. A label longer than two characters (a rebound key's
+    // word, or "Unbound") would paint over the name or the art, so it is visually hidden on
+    // every Card; any other label but a digit (a letter, "F1") fits the full form's corner but
+    // not the icon form's, beside its 34px art, so it is hidden there (`--wide`). Both stay in
+    // the Card's accessible name.
     c.hotkey.classList.toggle('wy-card-hotkey--long', text.length > 2);
+    c.hotkey.classList.toggle('wy-card-hotkey--wide', !/^\d$/.test(text));
     if (label !== null) c.root.setAttribute('aria-keyshortcuts', label);
     else c.root.removeAttribute('aria-keyshortcuts');
   }

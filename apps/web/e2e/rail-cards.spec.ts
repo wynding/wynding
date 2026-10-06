@@ -571,3 +571,136 @@ test.describe('#181 H3: the armed and the short Card, as painted', () => {
     expect(await ink(0), 'Basic, affordable').toBe(FG_RGB);
   });
 });
+
+test.describe('#181 H3: only a digit is painted in the corner', () => {
+  // The corner was drawn for a digit. A letter ("W") or a function key ("F1") is wider, and on
+  // the icon form's tile it lands on the art; every label but a digit is visually hidden, and
+  // stays the tail of the Card's name.
+  for (const [label, size, zoom] of [
+    ['640×560', { width: 640, height: 560 }, 100],
+    ['820×720', { width: 820, height: 720 }, 100],
+    ['360×640', { width: 360, height: 640 }, 200],
+  ] as const) {
+    test(`${label} at ${zoom}% text: a letter or function-key label never paints over its Card, and stays in its name`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      if (zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await page.getByRole('button', { name: 'Settings' }).click();
+      for (const [action, key] of [
+        ['Arm tower 1', 'F1'],
+        ['Arm tower 2', 'KeyW'],
+        ['Arm tower 3', 'KeyM'],
+      ] as const) {
+        await page.getByRole('button', { name: `Rebind ${action}` }).click();
+        await page.keyboard.press(key);
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden();
+      const cards = page.locator('.wy-card');
+      await expect(cards.nth(0)).toHaveAccessibleName('Basic Tower Cost: 5 F1');
+      await expect(cards.nth(1)).toHaveAccessibleName('Slow Tower Cost: 8 W');
+      await expect(cards.nth(2)).toHaveAccessibleName('Splash Tower Cost: 12 M');
+      expect(await page.evaluate(paintedClashes)).toEqual([]);
+    });
+  }
+
+  test('a letter or a function key stays painted on the full form, where it fits', async ({
+    page,
+  }) => {
+    await gotoAt(page, WIDE);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    for (const [action, key] of [
+      ['Arm tower 1', 'F1'],
+      ['Arm tower 2', 'KeyW'],
+      ['Arm tower 3', 'KeyM'],
+    ] as const) {
+      await page.getByRole('button', { name: `Rebind ${action}` }).click();
+      await page.keyboard.press(key);
+    }
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden();
+    for (const [size, zoom] of [
+      [WIDE, 100],
+      [LAPTOP, 100],
+      [WIDE, 200],
+    ] as const) {
+      await page.setViewportSize(size);
+      await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      const widths = await page
+        .locator('.wy-card-hotkey')
+        .evaluateAll((hs) => hs.slice(0, 3).map((h) => h.getBoundingClientRect().width));
+      expect(
+        widths.every((w) => w > 1),
+        `${size.width}×${size.height} at ${zoom}%: F1, W and M are painted`,
+      ).toBe(true);
+      expect(await page.evaluate(paintedClashes)).toEqual([]);
+    }
+  });
+
+  test('a key rebound to a word and back to a digit is painted again', async ({ page }) => {
+    await gotoAt(page, WIDE);
+    const hotkey = page.locator('.wy-card').nth(0).locator('.wy-card-hotkey');
+    const rebind = async (key: string): Promise<void> => {
+      await page.getByRole('button', { name: 'Settings' }).click();
+      await page.getByRole('button', { name: 'Rebind Arm tower 1' }).click();
+      await page.keyboard.press(key);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden();
+    };
+    const paintedWidth = () => hotkey.evaluate((h) => h.getBoundingClientRect().width);
+    await rebind('BracketLeft');
+    await expect(hotkey).toHaveText('BracketLeft');
+    expect(await paintedWidth(), 'a word is not painted').toBeLessThanOrEqual(1);
+    await rebind('Digit1');
+    await expect(hotkey).toHaveText('1');
+    expect(await paintedWidth(), 'the digit is painted again').toBeGreaterThan(1);
+  });
+});
+
+test.describe('#181 H3: under forced colours, arming moves nothing inside the Card', () => {
+  // The forced-colours armed mark is a 3px double border, 2px wider than the resting one. The
+  // padding gives those 2px back, but the corner hotkey and the icon form's "need N" are placed
+  // from the padding edge, so they must give them back too.
+  for (const [label, size] of [
+    ['1440×900 (full form)', WIDE],
+    ['640×560 (icon form)', { width: 640, height: 560 }],
+    ['658×320 (phone rail)', PHONE],
+  ] as const) {
+    test(`${label}: no part of a short Card moves when it is armed, the hotkey and "need N" included`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ forcedColors: 'active' });
+      await gotoAt(page, size);
+      await spendTo11(page); // Splash (Card 3) is short by one, so "need 1" paints
+      const card = page.locator('.wy-card').nth(2);
+      const parts = () =>
+        card.evaluate((c) => {
+          const cr = c.getBoundingClientRect();
+          const at = (sel: string): number[] | null => {
+            const el = c.querySelector(sel);
+            if (el === null || getComputedStyle(el).display === 'none') return null;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 1) return null; // visually hidden
+            return [r.left - cr.left, r.top - cr.top, r.width, r.height];
+          };
+          return {
+            art: at('.wy-card-swatch'),
+            name: at('.wy-card-label'),
+            cost: at('.wy-card-cost-glance'),
+            hotkey: at('.wy-card-hotkey'),
+            need: at('.wy-card-need'),
+          };
+        });
+      const before = await parts();
+      expect(before.need, '"need N" is painted').not.toBeNull();
+      await page.keyboard.press('3');
+      await expect(card).toHaveAttribute('aria-pressed', 'true');
+      expect(
+        await card.evaluate((c) => getComputedStyle(c).borderTopStyle),
+        'the premise: the forced-colours armed mark',
+      ).toBe('double');
+      expect(await parts(), 'arming moves nothing inside the Card').toEqual(before);
+    });
+  }
+});

@@ -1155,6 +1155,55 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.hasAttribute('aria-keyshortcuts')).toBe(false);
   });
 
+  // #181 H3: the corner was drawn for a digit. A label that is not one is visually hidden
+  // (`wy-card-hotkey--long`) and stays the tail of the Card's name, and a key rebound back to a
+  // digit is painted again — the class comes OFF as well as on.
+  it('hides a word label in the Card corner, and paints the digit again once the key is rebound to one (#181 H3)', () => {
+    const { overlay, card, settingsBtn } = setup();
+    settingsBtn.click();
+    const rebind = (code: string): void => {
+      overlay.settingsEl
+        .querySelector<HTMLButtonElement>('[aria-label="Rebind Arm tower 1"]')!
+        .click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { code }));
+    };
+    const hidden = (): boolean => card.hotkey.classList.contains('wy-card-hotkey--long');
+    expect(hidden(), 'the default digit is painted').toBe(false);
+    rebind('BracketLeft');
+    expect(card.hotkey.textContent).toBe('BracketLeft');
+    expect(hidden(), 'a word is visually hidden').toBe(true);
+    rebind('Digit1');
+    expect(card.hotkey.textContent).toBe('1');
+    expect(hidden(), 'the digit is painted again').toBe(false);
+  });
+
+  it('marks a letter or function-key label wide, not long: hidden on the icon form only (#181 H3)', () => {
+    const { overlay, card, settingsBtn } = setup();
+    settingsBtn.click();
+    const rebind = (code: string): void => {
+      overlay.settingsEl
+        .querySelector<HTMLButtonElement>('[aria-label="Rebind Arm tower 1"]')!
+        .click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { code }));
+    };
+    const marks = (): { long: boolean; wide: boolean } => ({
+      long: card.hotkey.classList.contains('wy-card-hotkey--long'),
+      wide: card.hotkey.classList.contains('wy-card-hotkey--wide'),
+    });
+    for (const [code, label] of [
+      ['F1', 'F1'],
+      ['KeyW', 'W'],
+    ] as const) {
+      rebind(code);
+      expect(card.hotkey.textContent).toBe(label);
+      expect(marks(), label).toEqual({ long: false, wide: true });
+    }
+    rebind('BracketLeft');
+    expect(marks(), 'a word').toEqual({ long: true, wide: true });
+    rebind('Digit1');
+    expect(marks(), 'a digit').toEqual({ long: false, wide: false });
+  });
+
   // PLAN.md P6, M2-S5a: the slot-wiring generalization. `setup()`'s bundled ruleset has
   // four catalog towers (basic/slow/splash/venom, M2-S5a's P5), so card 4 (index 3,
   // `armTower4`/Digit4) is now wired for real — not a synthetic fixture.
