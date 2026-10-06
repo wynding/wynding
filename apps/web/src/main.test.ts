@@ -2718,6 +2718,51 @@ describe('main — Compact’s chips cut wiring (#181 QC round 2)', () => {
   // the observer watches — everything that decides where the column's room ends or where an
   // item does, and NEVER the scrollport whose size the cut sets — the one-frame coalescing, and
   // a teardown that leaves no cut behind.
+  it('cuts at mount, before any frame: the first paint never shows half a chip', () => {
+    const originalRect = Element.prototype.getBoundingClientRect;
+    const rect = (top: number, height: number): DOMRect =>
+      ({
+        x: 0,
+        y: top,
+        left: 0,
+        top,
+        width: 60,
+        height,
+        right: 60,
+        bottom: top + height,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains('wy-hud')) {
+        const cut = parseFloat((this as HTMLElement).style.getPropertyValue('--wy-hud-cut'));
+        return rect(40, Number.isFinite(cut) ? cut : 100);
+      }
+      const hud = this.parentElement;
+      if (this.classList.contains('wy-chip') && hud?.classList.contains('wy-hud')) {
+        return rect(40 + 25 * [...hud.querySelectorAll(':scope > .wy-chip')].indexOf(this), 20);
+      }
+      return originalRect.call(this);
+    };
+    const originalRaf = window.requestAnimationFrame;
+    window.requestAnimationFrame = (): number => 1;
+    try {
+      const h = homeApp({
+        matchMedia: (query) => ({
+          matches: query === COMPACT_QUERY,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        }),
+      });
+      expect(
+        h.root.querySelector<HTMLElement>('.wy-hud')!.style.getPropertyValue('--wy-hud-cut'),
+      ).toBe('95px');
+      h.app.destroy();
+    } finally {
+      Element.prototype.getBoundingClientRect = originalRect;
+      window.requestAnimationFrame = originalRaf;
+    }
+  });
+
   it('observes the column, the Dock, each chip and the strip, cuts one frame later, and clears the cut on destroy', () => {
     const instances: { cb: () => void; observed: Element[]; disconnected: boolean }[] = [];
     const originalRO = (window as unknown as { ResizeObserver?: unknown }).ResizeObserver;

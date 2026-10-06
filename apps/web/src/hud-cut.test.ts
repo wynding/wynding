@@ -34,10 +34,10 @@ describe('chooseHudCut (#181 QC round 2)', () => {
     expect(chooseHudCut(100, [])).toBeNull();
   });
 
-  it('an item ending at the room’s edge is whole, to a hundredth of a px', () => {
+  it('an item ending at the room’s edge is whole, and so is one that overhangs it by under half a px', () => {
     expect(chooseHudCut(95, [20, 95, 120])).toBe(95);
-    expect(chooseHudCut(94.995, [20, 95, 120])).toBe(95);
-    expect(chooseHudCut(94.98, [20, 95, 120])).toBe(20);
+    expect(chooseHudCut(94.51, [20, 95, 120])).toBe(95);
+    expect(chooseHudCut(94.49, [20, 95, 120])).toBe(20);
   });
 
   it('reads the bottoms in any order', () => {
@@ -47,8 +47,8 @@ describe('chooseHudCut (#181 QC round 2)', () => {
   it('where no item fits whole, rests on the first item’s last whole LINE — never half a number', () => {
     expect(chooseHudCut(70, [100, 170], COUNTDOWN)).toBe(64);
     expect(chooseHudCut(40, [100, 170], COUNTDOWN)).toBe(31);
-    expect(chooseHudCut(31.005, [100, 170], COUNTDOWN)).toBe(31);
-    expect(chooseHudCut(30.98, [100, 170], COUNTDOWN)).toBeNull();
+    expect(chooseHudCut(30.51, [100, 170], COUNTDOWN)).toBe(31);
+    expect(chooseHudCut(30.49, [100, 170], COUNTDOWN)).toBeNull();
   });
 
   it('reads the lines only where no item fits whole', () => {
@@ -67,6 +67,15 @@ describe('lastWholeLine (#181 QC round 2)', () => {
     ];
     expect(lastWholeLine(33, line)).toBeNull();
     expect(lastWholeLine(34, line)).toBe(34);
+  });
+
+  it('a line that only TOUCHES the edge — it starts where the line above ends — does not run through it', () => {
+    const touching = [
+      { top: 0, bottom: 31 },
+      { top: 31, bottom: 62 },
+    ];
+    expect(lastWholeLine(40, touching)).toBe(31);
+    expect(chooseHudCut(40, [100], touching)).toBe(31);
   });
 
   it('takes the deepest whole edge within the room, in any order, and nothing from no parts', () => {
@@ -223,6 +232,54 @@ describe('syncHudCut (#181 QC round 2)', () => {
     syncHudCut(hud, true);
     expect(cut(hud)).toBe('95px');
     expect(hud.scrollTop).toBe(25);
+  });
+
+  it('where no item fits whole, the icon is a painted line too: the column rests under the clock, and never cuts through an icon', () => {
+    vi.restoreAllMocks();
+    const lines = new Map<string, DOMRect[]>();
+    vi.spyOn(document, 'createRange').mockImplementation(() => {
+      let node: Node | null = null;
+      return {
+        selectNodeContents: (n: Node) => void (node = n),
+        getClientRects: () => lines.get(node?.textContent ?? '') ?? [],
+      } as unknown as Range;
+    });
+    const countdown = (room: number, parts: [string | null, number, number][]): HTMLElement => {
+      const hud = column({ room, bottoms: [100, 170] });
+      const chip = hud.querySelector<HTMLElement>('.wy-chip')!;
+      chip.getBoundingClientRect = () => rect(TOP, 100);
+      const glance = document.createElement('span');
+      glance.className = 'wy-chip-glance';
+      for (const [text, top, height] of parts) {
+        if (text === null) {
+          const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          icon.getBoundingClientRect = () => rect(TOP + top, height);
+          glance.append(icon);
+        } else {
+          const span = document.createElement('span');
+          span.textContent = text;
+          lines.set(text, [rect(TOP + top, height)]);
+          glance.append(span);
+        }
+      }
+      chip.append(glance);
+      return hud;
+    };
+    const wrapped = countdown(98, [
+      [null, 66, 31],
+      ['14', 0, 31],
+      ['s', 33, 31],
+    ]);
+    syncHudCut(wrapped, true);
+    expect(cut(wrapped)).toBe('97px');
+    document.body.replaceChildren();
+    const oneLine = countdown(30, [
+      [null, 0, 31],
+      ['14', 2, 26],
+    ]);
+    syncHudCut(oneLine, true);
+    expect(cut(oneLine)).toBe('');
+    vi.restoreAllMocks();
   });
 
   it('a column with no layout is no evidence: the cut it has stays', () => {

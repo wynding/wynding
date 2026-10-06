@@ -527,6 +527,19 @@ describe('dialFits (#181 QC round 2)', () => {
     ).toBe(false);
   });
 
+  it('every line counts wherever it sits: a line meeting the dial or the end fails the label as the first, the last or a middle line', () => {
+    const ok = { start: 30, end: 60 };
+    for (const bad of [
+      { start: 10, end: 60 },
+      { start: 30, end: 86 },
+    ]) {
+      expect(dialFits(g, W, [bad, ok]), `first ${JSON.stringify(bad)}`).toBe(false);
+      expect(dialFits(g, W, [ok, bad]), `last ${JSON.stringify(bad)}`).toBe(false);
+      expect(dialFits(g, W, [ok, bad, ok]), `middle ${JSON.stringify(bad)}`).toBe(false);
+    }
+    expect(dialFits(g, W, [ok, ok, ok])).toBe(true);
+  });
+
   it('no ink, no box, or a shift the end padding cannot pay: no dial', () => {
     expect(dialFits(g, W, [])).toBe(false);
     expect(dialFits(g, 0, [{ start: 28, end: 68 }])).toBe(false);
@@ -596,6 +609,14 @@ describe('syncDockDial (#181 QC round 2)', () => {
     vi.spyOn(document, 'createRange').mockReturnValue(range as unknown as Range);
     return { primary, label };
   }
+
+  it('sizes the dial from the CONTROL’s own font, so it grows with the text beside it', () => {
+    const { primary } = primaryRig({ font: 32, pad: 28.8, width: 220, ink: [[60, 150]] });
+    syncDockDial(primary);
+    expect(prop(primary, DIAL_PROPS.size)).toBe('29px');
+    expect(prop(primary, DIAL_PROPS.inset)).toBe('8px');
+    expect(prop(primary, DIAL_PROPS.shift)).toBe('17px');
+  });
 
   const room = (el: HTMLElement): boolean => el.classList.contains(DIAL_ROOM_CLASS);
 

@@ -352,6 +352,9 @@ describe('layout — the countdown dial, the hud floor, and hidden text’s cont
       expect(body, selector!.trim()).not.toMatch(
         /(^|[;\s])(stroke-width|r|cx|cy|d|transform|stroke-dasharray)\s*:/,
       );
+      expect(body, selector!.trim()).not.toMatch(
+        /(^|[;\s])(rotate|scale|translate|transform-origin|transform-box|stroke-dashoffset)\s*:/,
+      );
     }
   });
 
@@ -359,7 +362,9 @@ describe('layout — the countdown dial, the hud floor, and hidden text’s cont
     // #181 QC round 2: a label "mask" (`background-color: inherit`) once covered the dial where
     // a word spilled over it, and painted accent boxes OUTSIDE the rounded control where the word
     // ran past its border. The measured room withholds the dial instead.
-    expect(uncommented).not.toMatch(/\.wy-primary\s*>\s*\.wy-btn-text\s*\{[^}]*background/);
+    expect(uncommented).not.toMatch(
+      /\.wy-primary(?![\w-]|\))[^{}]*\.wy-btn-text\s*\{[^}]*background/,
+    );
   });
 
   it('Compact keeps its button as it is: no dial in the column', () => {

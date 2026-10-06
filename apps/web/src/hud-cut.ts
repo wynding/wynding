@@ -28,6 +28,9 @@
 /** The custom property the Compact stylesheet spends as the chips column's `max-height`. */
 export const HUD_CUT_PROP = '--wy-hud-cut';
 
+// An item that runs past the room by less than half a pixel looks whole: the same allowance the e2e `runsThrough` check uses.
+const OVERHANG = 0.5;
+
 /** What the column holds, top to bottom: the chips, and the wave strip's title and lines. */
 const ITEMS =
   ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, ' +
@@ -50,7 +53,7 @@ export function chooseHudCut(
   bottoms: readonly number[],
   firstParts: readonly PaintedPart[] = [],
 ): number | null {
-  const fit = bottoms.filter((b) => b <= room + 0.01);
+  const fit = bottoms.filter((b) => b <= room + OVERHANG);
   if (fit.length === bottoms.length) return null;
   if (fit.length > 0) return Math.max(...fit);
   return lastWholeLine(room, firstParts);
@@ -61,7 +64,7 @@ export function chooseHudCut(
 export function lastWholeLine(room: number, parts: readonly PaintedPart[]): number | null {
   let best: number | null = null;
   for (const { bottom } of parts) {
-    if (bottom > room + 0.01) continue;
+    if (bottom > room + OVERHANG) continue;
     if (parts.some((p) => p.top < bottom - 0.01 && p.bottom > bottom + 0.01)) continue;
     if (best === null || bottom > best) best = bottom;
   }
@@ -133,7 +136,7 @@ export function syncHudCut(hud: HTMLElement, compact: boolean): void {
     const bottoms = items.map(({ r }) => toContent(r.bottom));
     // The first item's lines are read only where no item fits whole, which is rare.
     const first = items[0];
-    const none = first !== undefined && bottoms.every((b) => b > room + 0.01);
+    const none = first !== undefined && bottoms.every((b) => b > room + OVERHANG);
     const cut = chooseHudCut(room, bottoms, none ? paintedParts(first.el, toContent) : []);
     // The cut is the PADDING box's height; `max-height` sizes whichever box `box-sizing` names.
     const frame =

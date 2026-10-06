@@ -1851,9 +1851,10 @@ a.wy-home:focus-visible {
    meaning (heart, gem, star; a creep's silhouette and its airborne chevron), so they read in
    the one colour the user's theme draws text in. The creep icons' palette inks are
    presentation attributes, which any rule here outranks. The countdown dial is in the
-   control's own system ink, `ButtonText`, with the spent part of its face in `GrayText` at
-   full strength — a second system colour rather than a dimmed first, which a forced palette
-   would not keep apart. */
+   control's own system ink, `ButtonText`, over its face in `ButtonFace` — the control's own
+   system ground, so the remaining wedge reads at the full contrast of the control's text
+   (`GrayText` under it measured 1.5:1 in the contrast themes), and the ring and crown still
+   outline the face. */
 @media (forced-colors: active) {
   .wy-icon .wy-icon-body,
   .wy-creep-icon .wy-creep-body {
@@ -1878,7 +1879,7 @@ a.wy-home:focus-visible {
   }
 
   .wy-dial-track {
-    fill: GrayText;
+    fill: ButtonFace;
     fill-opacity: 1;
   }
 }
