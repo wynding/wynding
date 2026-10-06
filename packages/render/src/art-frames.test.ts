@@ -1021,7 +1021,7 @@ describe('the rim ends in its full colour — a whole texel on every straight ed
 });
 
 describe('the boost glow stays inside the rim as the frames draw them (QC round 2)', () => {
-  it('the plate and boosted head frames draw the plate art on the texel grid and the glow as designed, from one corner', () => {
+  it('the plate and boosted head frames draw the plate art on the texel grid and the glow as fitted, from one corner', () => {
     // What the sweep below measures, pinned against the frames themselves at every size the
     // frame tests use: the plate frame draws `alignArtToTexels(PLATE_ART)` with design-unit
     // (0, 0) — the footprint corner — on a whole texel, and the boosted head draws the glow
@@ -1041,6 +1041,54 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
       expect(plate!.x * scale, at).toBeCloseTo(Math.round(plate!.x * scale), 9);
       expect(plate!.y * scale, at).toBeCloseTo(Math.round(plate!.y * scale), 9);
     }
+  });
+
+  it('draws the glow boostArtAt fits where it is fitted — 9px cells at dpr 1.25 (the halo left out) and 0.8 (the halo shrunk)', () => {
+    for (const scale of [1.25, 0.8]) {
+      const glow = boostArtAt(artUnit(9), scale);
+      expect(glow, `fitted at ${scale}`).not.toBe(BOOST_ART);
+      const spec = towerFrameSpecs(9, scale).find((f) => f.key === headFrameKey('basic', true))!;
+      const g = recorder();
+      spec.paint(g, resolvePalette('default'));
+      const drawn = g.calls
+        .filter((c) => c.method === 'art')
+        .flatMap((c) => c.args[0] as readonly ArtShape[])
+        .filter((s) => s.stroke === 'aura');
+      expect(drawn, `at ${scale}`).toEqual(glow);
+    }
+  });
+
+  it('reaches the walk’s worst cases, pinned from both sides — the sweep’s own bounds are one-sided, so a walk that misses the jumps where they lie would pass them', () => {
+    const designRim = PLATE_ART.find((s) => s.stroke === 'rim')!;
+    const [designCue] = BOOST_ART;
+    if (designRim.kind !== 'rect' || designCue?.kind !== 'circle') throw new Error('shapes');
+    const worst = { plateFromOne: 0, plateBelowOne: 0, floorBelowOne: 0, cue: 1 };
+    for (let cellPx = 9; cellPx <= 64; cellPx++) {
+      const unit = artUnit(cellPx);
+      for (const scale of rimScales(cellPx)) {
+        const rim = drawnRim(cellPx, scale);
+        const half = strokeWidthAt(rim, unit) / 2;
+        const k = unit * scale;
+        for (const out of [
+          rim.x - designRim.x,
+          rim.y - designRim.y,
+          designRim.x + designRim.w - (rim.x + rim.w),
+          designRim.y + designRim.h - (rim.y + rim.h),
+        ]) {
+          if (scale >= 1) worst.plateFromOne = Math.max(worst.plateFromOne, (out - half) * k);
+          else {
+            worst.plateBelowOne = Math.max(worst.plateBelowOne, (out - half) * k);
+            worst.floorBelowOne = Math.max(worst.floorBelowOne, (-out - half) * k);
+          }
+        }
+        const [cue] = boostArtAt(unit, scale);
+        if (cue?.kind === 'circle') worst.cue = Math.min(worst.cue, cue.r / designCue.r);
+      }
+    }
+    expect(worst.plateFromOne, '9px, just under dpr 19/18').toBeCloseTo(7 / 64, 6);
+    expect(worst.plateBelowOne, '9px, just under dpr 5/6').toBeCloseTo(19 / 64, 6);
+    expect(worst.floorBelowOne, '15px, near dpr 0.8009').toBeCloseTo(0.0995551, 6);
+    expect(worst.cue, '9px, just under dpr 19/18').toBeCloseTo(0.9144072, 6);
   });
 
   it('keeps the plate frame’s rim inside the footprint where its floor would spill it — 11px cells at dpr 1.25', () => {

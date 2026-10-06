@@ -74,6 +74,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   let projH = -1;
   let projDpr = -1;
   let resizeObserver: ResizeObserver | null = null;
+  // Set first thing in `destroy()`: Phaser only marks its game for destruction, and READY
+  // still fires after, so a mount destroyed before READY must make no observer and arm no
+  // dpr listener there.
+  let destroyed = false;
   let projection: Projection = createProjection({
     cols: geometry.cols,
     rows: geometry.rows,
@@ -114,7 +118,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // on the canvas (Chromium, Firefox) reports it, and again whenever it changes — after a
   // move that changes it, too, which no size observer sees. Elsewhere (WebKit), past the
   // clamp, and under device-scale emulation (whose count is the screen's own pixels, not the
-  // emulated ones: `backingStoreSize` sets it aside), it is worked out from where the box
+  // emulated ones: `backingStoreSize` sets a count off the page's own scale aside, and nothing else
+  // — not the CSS size it was taken at), it is worked out from where the box
   // sits, re-read on every sync; there a move with no resize keeps the last count until the
   // next sync. The canvas is reallocated only when the count, the CSS size or the dpr
   // changes.
@@ -172,6 +177,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       : null;
 
   const syncProjection = (): void => {
+    if (destroyed) return;
     const rect = el.getBoundingClientRect();
     const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     const dpr = clampDpr(rawDpr);
@@ -287,6 +293,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // its depth in `layers.ts` — complete at READY.
   let targets: BoardTargets | null = null;
   game.events.once(Phaser.Core.Events.READY, () => {
+    if (destroyed) return;
     const scene = sceneOf();
     // Each live layer's depth comes from the name it was made under.
     const layers = createLiveLayers((layer) => scene.add.graphics().setDepth(layerDepth(layer)));
@@ -354,6 +361,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       if (targets !== null) resetBoardFrame(targets, { scorches });
     },
     destroy(): void {
+      destroyed = true;
       sparks.clear();
       resizeObserver?.disconnect();
       devicePixelObserver?.disconnect();

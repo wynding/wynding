@@ -35,17 +35,16 @@ export interface DevicePixelReport {
   readonly dpr: number;
 }
 
-/** CSS sizes this close are one layout: a real change is at least a layout unit (1/64 of a
- *  pixel), far above floating-point dust. */
-const SAME_LAYOUT = 1e-3;
-
 /**
  * The backing store a canvas needs to be shown pixel for pixel: as many pixels as the device
  * pixels the browser draws its box into. That is the browser's own answer when it has given
- * one (`reported`, from a `device-pixel-content-box` observer — Chromium and Firefox) for
- * the box as it is now — the same CSS size, at the same dpr — counting pixels at that dpr
- * (within one of the box's size × dpr, as any count of where the box snaps to is), and the
- * store is drawn at the device's own ratio (`dpr === rawDpr`). Otherwise it is worked out
+ * one (`reported`, from a `device-pixel-content-box` observer — Chromium and Firefox),
+ * counting pixels at the page's dpr (within one of the box's size × dpr, as any count of
+ * where the box snaps to is), and the store is drawn at the device's own ratio
+ * (`dpr === rawDpr`). The observer reports again whenever its count changes, and a report
+ * taken just before a resize is corrected later in the same observer loop, so the CSS size
+ * it was taken at is not compared (a layout reads two ways to a few thousandths of a pixel,
+ * and the report keeps the size of its last change). Otherwise it is worked out
  * from where the box sits (`snappedSpan`): WebKit gives no such answer, the observer has not
  * yet answered for a box just resized, Chromium's device-scale emulation counts the screen's
  * own pixels rather than the emulated ones (a box 1072 CSS px wide read 1072 at an emulated
@@ -68,8 +67,6 @@ export function backingStoreSize(
     reported !== null &&
     dpr === rawDpr &&
     reported.dpr === rawDpr &&
-    Math.abs(reported.cssWidth - box.width) < SAME_LAYOUT &&
-    Math.abs(reported.cssHeight - box.height) < SAME_LAYOUT &&
     Math.abs(reported.width - box.width * dpr) <= 1 &&
     Math.abs(reported.height - box.height * dpr) <= 1
       ? reported
