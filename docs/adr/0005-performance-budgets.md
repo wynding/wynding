@@ -1136,7 +1136,7 @@ on the stress scene a frame stroked 913 circles where it had stroked 609, and fi
 it had filled 131. So each live layer draws a circle as a closed polygon with only as many
 sides as keep its path and its fills within a quarter of a device pixel of the circle, and never
 more than Phaser's own count (`circle-path.ts` holds the numbers). The bound holds for strokes
-wider than 2 CSS px; Phaser 3.90 adds no corner joins to thinner ones, so each corner can notch
+wider than 2 CSS px; the Phaser pinned here adds no corner joins to thinner ones, so each corner can notch
 up to half the stroke's width deep, which 4x MSAA largely hides.
 
 **Measured before/after.** The record-only browser perf suite (`playwright.perf.config.ts`: the
