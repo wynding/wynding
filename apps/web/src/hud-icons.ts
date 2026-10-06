@@ -16,7 +16,8 @@
 // both because an icon has no floor under it: no ground shadow and no lift (depth cues for the
 // board's floor), and one shared scale that fits every look on the ground in the icon's box —
 // the boss the largest, so the strip keeps the board's size steps. A flyer's wings reach past
-// the box's sides, as the icon lets them (`ui.css`).
+// the box's sides, as the icon lets them; in Compact the strip's margin keeps them inside the
+// column's edge (`ui.css`).
 //
 // Colour comes from the ACTIVE palette (`creepArtColour`), so the icons follow the
 // colour-vision mode: each element carries the colour token it paints in, and

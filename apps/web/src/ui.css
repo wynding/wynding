@@ -1187,8 +1187,9 @@ a.wy-home:focus-visible {
 }
 
 /* The creep icon (`hud-icons.ts`): the board's own creep art. `overflow: visible` lets an air
-   entry's wings reach past the icon's sides into the gap beside it, rather than shrinking every
-   icon to make room. */
+   entry's wings reach past the icon's sides, rather than shrinking every icon to make room.
+   Standard leaves them the gap beside the icon; Compact's column has none on the left, so it
+   gives the icon a margin of its own (below). */
 .wy-creep-icon {
   flex: none;
   width: 1.3em;
@@ -2411,6 +2412,13 @@ a.wy-home:focus-visible {
     flex-direction: column;
     gap: 0.15rem;
     margin-top: 0.25rem;
+  }
+
+  /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
+     the widest that ships), and the column's scrollport has no gap to give them on the left:
+     this margin does. 0.15em, not the reach, for a little room. */
+  .wy-wave-preview-list .wy-creep-icon {
+    margin-inline-start: 0.15em;
   }
 
   .wy-preview-detail {

@@ -980,3 +980,127 @@ test('a colour-vision mode re-inks the strip’s creep icons in place (tritan)',
     page.locator('.wy-wave-preview .wy-creep-body[data-probe-identity="one"]'),
   ).toHaveCount(1);
 });
+
+// ---- R4 QC (#181): an air entry's wings, where the strip draws them ----
+
+/** Every air entry's wings in the strip, against everything that clips them: each wing's painted
+ *  extent — its corners, grown by half its round-joined ink outline — and the padding box of
+ *  every ancestor whose overflow is not `visible`, the icon's own `svg` included. How far each
+ *  wing reaches past that clip on the left and on the right, in CSS px (positive: cut off). */
+async function wingOverhang(page: Page): Promise<{ entry: number; left: number; right: number }[]> {
+  return page.evaluate(() => {
+    const out: { entry: number; left: number; right: number }[] = [];
+    document.querySelectorAll('.wy-wave-preview li').forEach((li, entry) => {
+      for (const wing of li.querySelectorAll<SVGPolygonElement>(
+        'svg.wy-creep-icon .wy-creep-wing',
+      )) {
+        const m = wing.getScreenCTM()!;
+        const half = (parseFloat(getComputedStyle(wing).strokeWidth) * Math.hypot(m.a, m.b)) / 2;
+        const xs = Array.from({ length: wing.points.numberOfItems }, (_, i) => {
+          const p = wing.points.getItem(i);
+          return m.a * p.x + m.c * p.y + m.e;
+        });
+        let clipLeft = -Infinity;
+        let clipRight = Infinity;
+        for (let el: Element | null = wing.ownerSVGElement; el; el = el.parentElement) {
+          if (getComputedStyle(el).overflowX === 'visible') continue;
+          const left = el.getBoundingClientRect().left + el.clientLeft;
+          clipLeft = Math.max(clipLeft, left);
+          clipRight = Math.min(clipRight, left + el.clientWidth);
+        }
+        out.push({
+          entry,
+          left: clipLeft - (Math.min(...xs) - half),
+          right: Math.max(...xs) + half - clipRight,
+        });
+      }
+    });
+    return out;
+  });
+}
+
+test('Compact: an air entry’s wings are never cut by the column — waves 6, 8 and 9, at 658×320 and 568×320 (#181 R4 QC)', async ({
+  page,
+}) => {
+  // The wings reach past the icon's box by design (`ui.css`'s `overflow: visible`), so whatever
+  // holds the icon must leave them room. In Compact the strip is a column inside the hud's
+  // scrollport, and each entry's icon starts at its edge.
+  test.setTimeout(120_000);
+  await gotoAt(page, PHONE);
+  expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  let measured = 0;
+  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+    const next = waveNumber + 1; // the wave the strip now previews
+    if (next !== 6 && next !== 8 && next !== 9) continue; // the flyer, the armored flyer, wave 9's flyer
+    for (const size of [PHONE, { width: 568, height: 320 }]) {
+      await page.setViewportSize(size);
+      await settle(page);
+      const at = `wave ${next} at ${size.width}×${size.height}`;
+      const wings = await wingOverhang(page);
+      expect(wings, `${at}: the premise, one air entry's two wings`).toHaveLength(2);
+      for (const w of wings) {
+        expect(
+          w.left,
+          `${at}: entry ${w.entry}'s wing cut ${w.left.toFixed(2)}px on the left`,
+        ).toBeLessThanOrEqual(0.05);
+        expect(
+          w.right,
+          `${at}: entry ${w.entry}'s wing cut ${w.right.toFixed(2)}px on the right`,
+        ).toBeLessThanOrEqual(0.05);
+      }
+      measured++;
+    }
+    await page.setViewportSize(PHONE);
+    await settle(page);
+  }
+  expect(measured).toBe(6);
+});
+
+test('forced colors: an air entry’s wings are outlines in the user’s text colour on the background, apart from its solid body (#181 R4 QC)', async ({
+  page,
+}) => {
+  // Wave 1 is a ground creep, so the forced-colors test above never sees a wing; wave 6 is the
+  // first flyer. The wings' palette inks are presentation attributes Chromium does not force.
+  test.setTimeout(90_000);
+  await page.emulateMedia({ forcedColors: 'active' });
+  await gotoAt(page, STANDARD);
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  for (let waveNumber = 2; waveNumber <= 5; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+  }
+  await expect(previewTitle).toHaveText('Wave 6 of 10');
+  const inks = await page.evaluate(() => {
+    const system = (value: string): string => {
+      const probe = document.createElement('span');
+      probe.style.color = value;
+      document.body.append(probe);
+      const out = getComputedStyle(probe).color;
+      probe.remove();
+      return out;
+    };
+    const paint = (sel: string): { fill: string; stroke: string }[] =>
+      [...document.querySelectorAll(sel)].map((el) => {
+        const cs = getComputedStyle(el);
+        return { fill: cs.fill, stroke: cs.stroke };
+      });
+    return {
+      canvas: system('Canvas'),
+      canvasText: system('CanvasText'),
+      wings: paint('.wy-wave-preview .wy-creep-wing'),
+      bodies: paint('.wy-wave-preview .wy-creep-body'),
+    };
+  });
+  expect(inks.canvasText).not.toBe(inks.canvas);
+  expect(inks.wings, 'the premise: the flyer’s two wings').toHaveLength(2);
+  for (const wing of inks.wings)
+    expect(wing).toEqual({ fill: inks.canvas, stroke: inks.canvasText });
+  expect(inks.bodies).toEqual([{ fill: inks.canvasText, stroke: inks.canvasText }]);
+});
