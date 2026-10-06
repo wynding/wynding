@@ -2374,7 +2374,10 @@ a.wy-home:focus-visible {
      the icon keeps the line above its value, as main's glances do, so no value loses its icon.
      Where even the value is wider than the column (the countdown at 568×320 and 175–200%, and
      658×320 at 200%), its unit wraps under the digits at its `<wbr>` (`shell.ts`), never a
-     digit. Taller chips change no rule of the cut: `hud-cut.ts` measures the real boxes. */
+     digit. The value's `white-space: normal` is what lets WebKit break there: it honours the
+     glance's `nowrap` at a `<wbr>`, while Chromium breaks at one regardless, so no e2e test can
+     see this line go and only `layout.test.ts` pins it. Taller chips change no rule of the cut:
+     `hud-cut.ts` measures the real boxes. */
   .wy-chip-glance {
     flex-wrap: wrap;
     row-gap: 0;
