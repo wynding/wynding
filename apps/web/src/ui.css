@@ -2416,9 +2416,15 @@ a.wy-home:focus-visible {
 
   /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
      the widest that ships), and the column's scrollport has no gap to give them on the left:
-     this margin does. 0.15em, not the reach, for a little room. */
+     this margin does. 0.15em, not the reach, for a little room. The glance gives the same
+     0.15em back from its gap, so every count stays where it was: at 568×320 the column has
+     under a pixel to spare for one, and the right wing still clears it. */
   .wy-wave-preview-list .wy-creep-icon {
     margin-inline-start: 0.15em;
+  }
+
+  .wy-wave-preview-list .wy-preview-glance {
+    gap: 0.15em;
   }
 
   .wy-preview-detail {

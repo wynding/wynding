@@ -1104,3 +1104,79 @@ test('forced colors: an air entry’s wings are outlines in the user’s text co
     expect(wing).toEqual({ fill: inks.canvas, stroke: inks.canvasText });
   expect(inks.bodies).toEqual([{ fill: inks.canvasText, stroke: inks.canvasText }]);
 });
+
+// ---- R4 QC round 2 (#181): the Compact margin must not push a count out of the column ----
+
+/** Every strip entry's count against everything that clips it, and an air entry's wings against
+ *  the count: how far the count's text runs past the clip on the right, and how far a wing's
+ *  painted extent (corners grown by half its outline) runs over the count's start (both positive:
+ *  a fault). */
+async function countFit(page: Page): Promise<{ text: string; cut: number; wingOver: number }[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('.wy-wave-preview li')].map((li) => {
+      const count = li.querySelector('.wy-preview-count')!;
+      const range = document.createRange();
+      range.selectNodeContents(count);
+      const box = [...range.getClientRects()].filter((r) => r.width > 0);
+      let clipRight = Infinity;
+      for (let el: Element | null = count; el; el = el.parentElement) {
+        if (getComputedStyle(el).overflowX === 'visible') continue;
+        clipRight = Math.min(
+          clipRight,
+          el.getBoundingClientRect().left + el.clientLeft + el.clientWidth,
+        );
+      }
+      let wingRight = -Infinity;
+      for (const wing of li.querySelectorAll<SVGPolygonElement>('.wy-creep-wing')) {
+        const m = wing.getScreenCTM()!;
+        const half = (parseFloat(getComputedStyle(wing).strokeWidth) * Math.hypot(m.a, m.b)) / 2;
+        for (let i = 0; i < wing.points.numberOfItems; i++) {
+          const p = wing.points.getItem(i);
+          wingRight = Math.max(wingRight, m.a * p.x + m.c * p.y + m.e + half);
+        }
+      }
+      return {
+        text: count.textContent ?? '',
+        cut: Math.max(...box.map((r) => r.right)) - clipRight,
+        wingOver: wingRight - Math.min(...box.map((r) => r.left)),
+      };
+    }),
+  );
+}
+
+test('Compact: the room the wings take never pushes a count out of the column, nor a wing onto it — every wave, at 658×320 and 568×320 (#181 R4 QC round 2)', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await gotoAt(page, PHONE);
+  expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  let measured = 0;
+  const check = async (wave: string): Promise<void> => {
+    for (const size of [PHONE, { width: 568, height: 320 }]) {
+      await page.setViewportSize(size);
+      await settle(page);
+      for (const e of await countFit(page)) {
+        const at = `${wave} at ${size.width}×${size.height}: ${e.text}`;
+        expect(
+          e.cut,
+          `${at}: the count cut ${e.cut.toFixed(2)}px on the right`,
+        ).toBeLessThanOrEqual(0.05);
+        expect(e.wingOver, `${at}: a wing over the count`).toBeLessThanOrEqual(0);
+        measured++;
+      }
+    }
+    await page.setViewportSize(PHONE);
+    await settle(page);
+  };
+  await check('wave 1');
+  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await check('wave 2');
+  for (let waveNumber = 2; waveNumber <= 9; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+    await check(`wave ${waveNumber + 1}`);
+  }
+  expect(measured, 'the premise: every entry of every preview, at both sizes').toBeGreaterThan(20);
+});
