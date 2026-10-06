@@ -135,11 +135,12 @@ const recordedDowns = (page: Page): Promise<number[]> =>
 const recordedDownsOnPlay = (page: Page): Promise<boolean[]> =>
   page.evaluate(() => (window as unknown as { __downsOnPlay: boolean[] }).__downsOnPlay);
 
-/** A keyboard activation's focus-move check (`press-guard.ts`) runs a task later, or at the next
- *  key. A scripted `focus()` made before it ran is taken for the activation's own focus move, and
- *  the control it focused takes no Enter or Space for 500 ms. No player moves focus that way (a Tab
- *  is a key, and its keydown runs the check before focus moves), so let the check run first: a
- *  zero-delay timer queued now runs after the guard's. */
+/** A keyboard activation's focus-move check (`press-guard.ts`) runs where the click's dispatch
+ *  ends, so it has already run here. This barrier is belt and braces for a click stopped short of
+ *  the window, whose check waits for the next key or a task: a scripted `focus()` made before it
+ *  ran would be taken for the activation's own focus move, and the control it focused would take
+ *  no Enter or Space for 500 ms. No player moves focus that way, so let any such check run first:
+ *  a zero-delay timer queued now runs after the guard's. */
 async function afterKeyActivation(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 }

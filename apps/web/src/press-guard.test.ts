@@ -1010,3 +1010,131 @@ describe('press guard — a mouse release that never came heals at the next pres
     expect(h.pressed, 'a deliberate press 5.25 s after the arrival').toEqual(['A', 'B']);
   });
 });
+
+describe('press guard — QC round 7 (#181 H2)', () => {
+  it('KT-MAX: a release stamped before the arrival (dispatched after it) leaves the arrival where it was', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', 0, 7);
+    setNow(500);
+    h.guard.arm();
+    ptr(h.board, 'pointerup', 400, 7); // stamped by the device before the arrival's frame
+    ptr(h.b, 'pointerdown', 860, 8);
+    mouseTap(h.b, 950); // 450 ms after the arrival
+    expect(h.pressed).toEqual([]);
+  });
+
+  it('KT-LASTREL: the window runs from the LAST release among the pointers down at the arrival', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', 0, 7); // A, on the spot
+    ptr(h.board, 'pointerdown', 50, 8, 300); // B, elsewhere
+    setNow(100);
+    h.guard.arm();
+    ptr(h.board, 'pointerup', 300, 7);
+    ptr(h.board, 'pointerup', 1000, 8, 300);
+    ptr(h.b, 'pointerdown', 1110, 9);
+    mouseTap(h.b, 1200); // at A, 200 ms after B's release, 900 ms after A's
+    expect(h.pressed).toEqual([]);
+  });
+
+  it('KT-SPOT2: a press at the SECOND of two spots is held too', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', 0, 7, 300); // first spot, elsewhere
+    ptr(h.board, 'pointerdown', 50, 8); // second spot, where B will stand
+    setNow(100);
+    h.guard.arm();
+    ptr(h.board, 'pointerup', 200, 7, 300);
+    ptr(h.board, 'pointerup', 250, 8);
+    ptr(h.b, 'pointerdown', 400, 9);
+    mouseTap(h.b, 480);
+    expect(h.pressed).toEqual([]);
+  });
+
+  it('KT-EXEMPT-ARRIVALS: the last press that passed was on B before the arrival (a touch-only run since): a tap on B at the spot is held', () => {
+    const h = fixture();
+    mouseClick(h.b, 0); // Play again, tapped to start this run: the last press with mouse events
+    ptr(h.board, 'pointerdown', 60_000, 7); // the run, by touch only; a tap as it ends
+    ptr(h.board, 'pointerup', 60_090, 7);
+    setNow(60_100);
+    h.guard.arm();
+    ptr(h.b, 'pointerdown', 60_150, 8);
+    mouseTap(h.b, 60_240);
+    expect(h.pressed).toEqual(['B']);
+  });
+
+  it('KT-EXEMPT-CONTROL: a press that passed on A since the arrival exempts no press on B', () => {
+    const h = fixture();
+    mouseClick(h.board, 0);
+    setNow(20);
+    h.guard.arm();
+    mouseClick(h.a, 100, 400, 2); // another pointer, far from the spot: passes
+    mouseClick(h.b, 200, 100, 3); // at the spot, 180 ms after the arrival
+    expect(h.pressed).toEqual(['A']);
+  });
+
+  it('KT-DURING-ONCE: a pointer down at the arrival re-times it once: its next press’s release does not', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', 0, 1, 100, 'mouse');
+    setNow(20);
+    h.guard.arm();
+    ptr(h.board, 'pointerup', 300, 1, 100, 'mouse');
+    mouseClick(h.a, 900, 400); // the same mouse, elsewhere
+    mouseClick(h.b, 1100); // back at the spot: 800 ms after the release the arrival waited for
+    expect(h.pressed).toEqual(['A', 'B']);
+  });
+
+  it('KT-FALLBACK-KEY: a keyboard activation whose dispatch is stopped before the window: the next key still runs the check', () => {
+    // Synchronous: the guard's zero-delay timer cannot have run before the key.
+    const h = fixture();
+    setNow(1000);
+    h.a.addEventListener('click', (e) => {
+      h.b.focus();
+      e.stopPropagation();
+    });
+    h.a.focus();
+    h.a.dispatchEvent(
+      stampedAt(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }), 1000),
+    );
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    h.b.dispatchEvent(space);
+    expect(space.defaultPrevented, 'Space on B before the timer: held').toBe(true);
+  });
+
+  it('KT-FALLBACK-TIMER: the same, with a task between: the timer ran the check, so a later scripted focus is not the activation’s', async () => {
+    const h = fixture();
+    setNow(1000);
+    h.a.addEventListener('click', (e) => {
+      h.b.focus();
+      e.stopPropagation();
+    });
+    h.a.focus();
+    h.a.dispatchEvent(
+      stampedAt(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }), 1000),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0)); // queued after the guard's
+    h.radio.focus(); // a script moves focus after the check ran
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    h.radio.dispatchEvent(space);
+    expect(space.defaultPrevented, 'Space on the radio').toBe(false);
+  });
+});
+
+describe('press guard — a pinned trade-off, a thumb resting across the arrival (#181 H2)', () => {
+  it('RT1 (pinned trade-off): a thumb resting elsewhere across the arrival re-opens the window for every spot when it lifts, 5 s on', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', -500, 8, 300); // a thumb resting on the board, elsewhere
+    ptr(h.board, 'pointerdown', 0, 7); // a tap where Play again will stand, as the run ends
+    ptr(h.board, 'pointerup', 90, 7);
+    setNow(100);
+    h.guard.arm();
+    ptr(h.board, 'pointerup', 5000, 8, 300); // the thumb lifts, 5 s on
+    ptr(h.b, 'pointerdown', 5210, 9);
+    mouseTap(h.b, 5300); // a deliberate tap on Play again, 300 ms after the lift
+    expect(
+      h.pressed,
+      'held: the window runs from the last release of a pointer down at the arrival',
+    ).toEqual([]);
+    ptr(h.b, 'pointerdown', 5520, 10);
+    mouseTap(h.b, 5600); // the retry, 600 ms after the lift
+    expect(h.pressed, 'the retry passes').toEqual(['B']);
+  });
+});
