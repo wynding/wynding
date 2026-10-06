@@ -376,6 +376,7 @@ test.describe('the backing store against the browser’s own count, at a real de
           baseURL,
           async (page) => {
             let last = '';
+            let fractional = false;
             await expect
               .poll(
                 async () => {
@@ -383,7 +384,7 @@ test.describe('the backing store against the browser’s own count, at a real de
                   last = JSON.stringify(r);
                   // Whole: the fake is the real count, which proves nothing.
                   if (Math.abs(r.v - Math.round(r.v)) < 1e-6) return true;
-                  tested++;
+                  fractional = true;
                   return r.store[0] === r.fakeWidth && r.store[1] === r.real[1];
                 },
                 { message: `${width}×${height} @${dsf}: the store is the report`, timeout: 5_000 },
@@ -392,6 +393,8 @@ test.describe('the backing store against the browser’s own count, at a real de
               .finally(() =>
                 console.log(`[hidpi] ${width}×${height} @${dsf}, fake count: ${last}`),
               );
+            // Once per layout, not once per poll attempt.
+            if (fractional) tested++;
           },
         );
       }
