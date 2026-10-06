@@ -115,6 +115,27 @@ async function wholeOnScreen(page: Page, selector: string | null): Promise<boole
   }, selector);
 }
 
+/** What runs out of a tile: each label or number whose box crosses its tile's content box, and by
+ *  how much. A spill stays inside the body, so the sideways checks never see it: it runs into the
+ *  tile's padding, or past its edge onto the next tile. */
+function tileSpills(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.wy-results-stat')].flatMap((tile) => {
+      const box = tile.getBoundingClientRect();
+      const style = getComputedStyle(tile);
+      const left = box.left + tile.clientLeft + parseFloat(style.paddingLeft);
+      const right = box.right - tile.clientLeft - parseFloat(style.paddingRight);
+      return [...tile.children].flatMap((part) => {
+        const r = part.getBoundingClientRect();
+        const over = Math.max(r.right - right, left - r.left);
+        return over > 0.5
+          ? [`${tile.dataset.stat ?? '?'} ${part.tagName.toLowerCase()} by ${over.toFixed(1)}px`]
+          : [];
+      });
+    }),
+  );
+}
+
 /** Where the panel stands, and what overflows: everything the fit test reads in one pass. */
 async function geometry(page: Page): Promise<{
   panel: { left: number; top: number; right: number; bottom: number };
@@ -434,11 +455,13 @@ for (const size of [
   });
 }
 
-test('at 200% text on a phone-width window neither the panel nor the dialog scrolls sideways, and every star stays inside both', async ({
+test('at 200% text on a phone-width window neither the panel nor the dialog scrolls sideways, every star stays inside both, and every tile holds its label and number', async ({
   page,
 }) => {
   // The narrow sizes QC round 1 measured overflowing (a fixed-size star row; a value that would
-  // not wrap), and a sweep across the widths where the tiles change columns.
+  // not wrap), and a sweep across the widths where the tiles change columns. In a wide font
+  // (DejaVu Sans, CI's) the loss heading's "through." outgrows the 320px panel, and "10 / 10"
+  // outgrew its tile two by two at 640px.
   for (const size of [
     { width: 360, height: 640 },
     { width: 320, height: 568 },
@@ -472,6 +495,27 @@ test('at 200% text on a phone-width window neither the panel nor the dialog scro
       expect(fit.panelOnScreen, `${at}: the panel inside the window`).toBe(true);
       expect(fit.starsInside, `${at}: every star inside the body`).toBe(true);
       expect(fit.starsOnScreen, `${at}: every star inside the window`).toBe(true);
+      expect(await tileSpills(page), `${at}: every tile holds its label and number`).toEqual([]);
+    }
+  }
+});
+
+test('at 100% text on a phone-width window every tile holds its label and number', async ({
+  page,
+}) => {
+  // The tiles stand two by two at these widths, where "10 / 10", which never wraps there, ran
+  // into its tile's padding in the platform font as well as a wide one, and past the tile's edge
+  // at 320px. A tile too narrow for a label and its number side by side puts the number on a line
+  // of its own.
+  for (const size of [
+    { width: 320, height: 568 },
+    { width: 360, height: 640 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const run of ['win', 'loss'] as const) {
+      await openResults(page, run);
+      const at = `${String(size.width)}×${String(size.height)} ${run}`;
+      expect(await tileSpills(page), `${at}: every tile holds its label and number`).toEqual([]);
     }
   }
 });

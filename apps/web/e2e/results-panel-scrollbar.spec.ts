@@ -80,6 +80,8 @@ for (const px of [15, 17] as const) {
   }) => {
     // On a narrow panel a gutter on both edges would cost the stacked tiles more width than a
     // 320px window at 200% text has ("117", Run data). There the body reserves one edge only.
+    // The walk ends on the status region's two longest words, neither of which wraps at a space:
+    // an accepted Send's reference (a UUID) and the name of the file Save wrote.
     test.setTimeout(180_000); // twelve page loads
     for (const width of [320, 340, 360]) {
       await page.setViewportSize({ width, height: 640 });
@@ -109,6 +111,15 @@ for (const px of [15, 17] as const) {
         await dialog.getByRole('button', { name: 'Give feedback' }).click();
         await expect(dialog.getByRole('button', { name: 'Send' })).toBeAttached();
         await noSideways('the survey open too');
+        await dialog.getByRole('radio', { name: '4' }).first().check();
+        await dialog.getByRole('button', { name: 'Send' }).click();
+        await expect(dialog.getByRole('status')).toContainText('Reference:');
+        await noSideways('the accepted Send’s reference shown');
+        const download = page.waitForEvent('download');
+        await dialog.getByRole('button', { name: 'Save run data' }).click();
+        await download;
+        await expect(dialog.getByRole('status')).toContainText('saved as');
+        await noSideways('the saved file’s name shown');
       }
     }
   });

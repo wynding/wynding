@@ -2105,11 +2105,14 @@ a.wy-home:focus-visible {
   text-align: center;
 }
 
+/* A word longer than the line breaks rather than scrolling the body sideways: the loss heading's
+   "through." is wider than a 320px window's panel at 200% text in a wide font (DejaVu Sans). */
 .wy-results-title {
   margin: 0;
   font-size: 1.625rem;
   font-weight: 800;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 /* The heading takes first focus where Play again is below the fold (`results-panel.ts`), so it
@@ -2182,11 +2185,18 @@ a.wy-home:focus-visible {
   margin: 1.25rem 0 0;
 }
 
+/* A label and its number share the tile's line where the label's longest word and the number fit
+   on it: the label takes the room left and wraps at its spaces, and the number stands at the
+   end. Where even that is too wide (a narrow panel at heavy text zoom: "stopped" and "117" in
+   a wide font), the number wraps to a line of its own, still at the end, rather than running
+   out of the tile. The label's zero basis is what lets it wrap at its spaces before the number
+   moves: the line break counts its longest word, not its whole text. */
 .wy-results-stat {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.125rem 0.75rem;
   box-sizing: border-box;
   min-height: 3rem;
   padding: 0.375rem 0.875rem;
@@ -2197,12 +2207,13 @@ a.wy-home:focus-visible {
 }
 
 .wy-results-stat dt {
+  flex: 1 1 0;
   font-size: 0.8125rem;
   color: var(--wy-fg-dim);
 }
 
 .wy-results-stat dd {
-  margin: 0;
+  margin: 0 0 0 auto;
   font-size: 1.0625rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -2331,6 +2342,9 @@ a.wy-home:focus-visible {
   display: none;
 }
 
+/* Its text breaks where a word is wider than the panel: the reference is a UUID, which may hold
+   no break opportunity at all, and "Something broke" beside its checkbox outgrows a 320px
+   window's panel at 200% text. */
 .wy-survey-form {
   display: flex;
   flex-direction: column;
@@ -2338,31 +2352,36 @@ a.wy-home:focus-visible {
   width: 100%;
   margin-top: 1rem;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
 /* The shared status region closes the panel. Never hidden, not even empty: a live region has
    to be in the accessibility tree BEFORE its text arrives, or the arrival goes unannounced.
    Within one dialog it never shrinks (`results-panel.ts` holds its tallest message's height as
-   a `min-height`, measured as a border box). */
+   a `min-height`, measured as a border box). Its messages break where a word is wider than the
+   panel: Save's names the file it wrote and an accepted Send's quotes the reference, neither of
+   which wraps at a space. */
 .wy-verify {
   box-sizing: border-box;
   max-width: 30rem;
   margin: 0.75rem auto 0;
   font-size: 1rem;
+  overflow-wrap: anywhere;
 }
 
 /* A narrow panel (a narrow window, heavy text zoom) stacks the tiles, so a label and its
    number never have to share less than a whole row — and where even a whole row is too narrow,
-   the number wraps at its spaces ("8 / 10") rather than overflowing the body. A stacked tile
-   also takes tighter padding: its number cannot wrap ("117"), and at 200% text on a 320px window
-   the default padding left it no room beside its label. */
+   the number takes a line of its own below the label, wrapping at its spaces ("8 / 10") only
+   where even that line is too narrow, rather than overflowing the body. A stacked tile also
+   takes tighter padding: at 200% text on a 320px window the default padding left "117" no room
+   beside its label. */
 @container wy-results (max-width: 16rem) {
   .wy-results-stats {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .wy-results-stat {
-    gap: 0.375rem;
+    column-gap: 0.375rem;
     padding-inline: 0.5rem;
   }
 
@@ -2374,13 +2393,15 @@ a.wy-home:focus-visible {
 /* On a narrow panel (18rem: the width at which its tiles stack, with the body's padding), the
    body reserves its scrollbar's gutter on that edge only, and takes tighter side padding.
    Where a scrollbar takes room (a classic 15–17px one), a gutter on both edges and the full
-   padding would cost more width than a 320px window at 200% text has: the stacked tiles'
-   "117" and the loss heading's "through." would scroll the body sideways. The centred content
-   then sits half a scrollbar off the band's centre, on a narrow panel only. */
+   padding would cost more width than a 320px window at 200% text has. The centred content then
+   sits half a scrollbar off the band's centre, on a narrow panel only. The padding is sized so
+   that at 200% text on a 320px window the loss heading's "through." stays whole, and "117"
+   beside its label, in the platform font. A wider font (DejaVu Sans) breaks the one and moves
+   the other below its label, rather than scrolling the body sideways. */
 @container wy-results-panel (max-width: 18rem) {
   .wy-results-body {
     scrollbar-gutter: stable;
-    padding-inline: 0.75rem;
+    padding-inline: 0.625rem;
   }
 }
 
