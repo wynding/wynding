@@ -590,13 +590,12 @@ export function wardPaintOps(
 // (`drawCreepCues`, `board-draw.ts`), so every band above DRAWS a pixel wider each way than
 // its stroke. It is what makes a cue read on every surface it lands on: its colour against
 // the dark floor and plate, its ink edge against a light tower head, a rim or another creep's
-// body (`palette.test.ts` gates both halves). Every creep's ink is drawn before any creep's
+// body (`palette.test.ts` gates both halves). Every ring's ink is drawn before any ring's
 // colour, so no ring's ink edge covers another ring's colour — a slowed and stunned creep at a
 // small cell keeps its slow ring where the jolt's wider ink would otherwise have buried it.
 // The HP bars' opaque backings and the pips' ink discs are drawn after the rings and lie over
 // them, a neighbour's included, by design; the pips' inks go down before every pip, so none
-// covers a pip. The
-// motion cues — the pulse and the drift — carry none: they fade by design and are gated as
+// covers a pip. The motion cues — the pulse and the drift — carry none: they fade by design and are gated as
 // non-essential.
 //
 // THE HP BAR (C3) sits across the top of the band, as the style frame draws it, its fill
@@ -623,8 +622,8 @@ export function wardPaintOps(
 // separates it from the light wing under it. They differ from every ring in SHAPE — two
 // straight-edged triangles fixed to the body's sides, never a closed curve. The wings no longer
 // float a cell away, but a flyer's cues centre on its lifted body, so its HP bar rides about a
-// cell above its true position (1.06-1.14 cells for the shipped armored flyer, 0.95-1.03 for
-// the flying one), over the cell to its north; its opaque backing reads on whatever is there.
+// cell above its true position, over the cell to its north; its opaque backing reads on
+// whatever is there.
 //
 // THE CO-OCCURRENCE IS A VM CONTRACT, NOT A CONTENT FACT (#126 ship-review). `poisoned`,
 // `stunned`, `slowed` and `airborne` are independent booleans on the render VM, so this

@@ -8,12 +8,14 @@
 // goes (ADR 0005's S10 finding), and the ink edges added half as many again.
 //
 // So a live layer draws a circle as a closed polygon with only as many sides as keep it
-// within `CIRCLE_TOLERANCE_DEVICE_PX` of the true circle on screen: 8 for a pip, 16 to 20 for
-// a status ring, 32 for a boss's ward at a 40px cell — never more than Phaser's own 100. (The
-// scene clamps dpr to 2.) The bound holds for a fill and for a path, and for a stroke wider
-// than 2 CSS px, which Phaser joins at every corner. Phaser 3.90 adds no corner join to a
-// thinner stroke, so there each corner can notch the outer edge up to half the stroke's width
-// deep, which 4x MSAA largely hides. Phaser-free: `scene.ts` hands each live layer's Graphics to `polygonCircles`.
+// within `CIRCLE_TOLERANCE_DEVICE_PX` of the true circle on screen: at a 40px cell and dpr 1,
+// 8 for a pip, 16 to 20 for a status ring and 32 for a boss's ward (10, 22 to 28 and 46 at
+// dpr 2, where the scene clamps it) — never more than Phaser's own 100. The bound holds for a
+// fill and for a path, and for a stroke wider than 2 CSS px, which Phaser joins at every
+// corner. Phaser 3.90 adds no corner join to a thinner stroke, so there each corner can notch
+// the outer edge up to half the stroke's width deep, which 4x MSAA largely hides.
+// Phaser-free: `board-frame.ts`'s `createPolygonLiveLayers` hands each live layer's Graphics
+// to `polygonCircles`, and `scene.ts` calls that.
 
 /** The most a polygon's edge may fall inside its circle, in device pixels — a quarter of
  *  one, which no anti-aliased fill or path can show. */
