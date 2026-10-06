@@ -1,7 +1,7 @@
 // scorches.ts — the scorch a mine leaves where it went off (visual pass T4, #181): which
 // detonations the board has seen, and how far each scorch has faded. Pure and Phaser-free;
-// `scene.ts` feeds it each frame and shows what `live` returns as sprites on the floor
-// layer (`placement.ts`'s `placeScorches`).
+// `scene.ts` feeds it every `draw()`, before any early return, and shows what `live` returns
+// as sprites on the floor layer (`placement.ts`'s `placeScorches`).
 //
 // DETECTION reads what the renderer is already handed, never the sim. A mine fires a blast
 // whose origin IS its destination — it detonates on its own footprint centre, never leading

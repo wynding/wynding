@@ -23,6 +23,7 @@ import { createBakeRunner, type BakedArt } from './bake-runner';
 import { createSpritePool } from './sprite-pool';
 import { createSparkStore } from './sparks';
 import { createScorchTracker } from './scorches';
+import { renderTimeOf } from './tracers';
 import {
   createLiveLayers,
   createSpriteLayers,
@@ -215,7 +216,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   const sceneOf = (): Phaser.Scene => game.scene.scenes[0] as Phaser.Scene;
 
   const sparks = createSparkStore();
-  // Where mines went off, fading (`scorches.ts`): fed by every frame, forgotten with the run.
+  // Where mines went off, fading (`scorches.ts`): fed by every `draw()`, forgotten with the run.
   const scorches = createScorchTracker();
   const now = (): number => game.getTime();
 
@@ -327,6 +328,14 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     alpha: number,
     overlay: RenderOverlay,
   ): void => {
+    // The scorch tracker sees every frame, before any early return: a mine's marked landing
+    // arrives drained, and `SparkStore.hold`/`intake` keep no `detonation` mark, so a landing
+    // that reached no tracker here would never scorch.
+    scorches.update({
+      tracers: overlay.tracers,
+      sparks: overlay.sparks,
+      renderTick: renderTimeOf(prevVm, curVm, alpha),
+    });
     // Spark points arrive drained — the controller clears them — so dropping them here would
     // lose those flashes for good. Before READY there is no game clock: hold them unstamped.
     if (targets === null) {
@@ -356,7 +365,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     draw,
     reset(): void {
       sparks.clear();
-      // (Before READY no frame has fed the scorch tracker, so there is nothing to forget.)
+      // Frames before READY feed the scorch tracker too, so it is forgotten whatever `targets` is.
+      scorches.reset();
       if (targets !== null) resetBoardFrame(targets, { scorches });
     },
     destroy(): void {
